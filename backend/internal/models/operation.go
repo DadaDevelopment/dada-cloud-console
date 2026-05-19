@@ -37,18 +37,41 @@ type CreateServiceDatabasePayload struct {
 }
 
 // CreateAppPayload is the typed payload for CreateApp operations.
+// K8s fields: Replicas, Profile. VM fields: AppServerName, EnvVars.
 type CreateAppPayload struct {
-	Name     string `json:"name"`
-	Image    string `json:"image"`
-	Port     int    `json:"port"`
-	Replicas int    `json:"replicas"`
-	Profile  string `json:"profile"`
+	Name          string            `json:"name"`
+	Image         string            `json:"image"`
+	Port          int               `json:"port"`
+	Replicas      int               `json:"replicas,omitempty"`
+	Profile       string            `json:"profile,omitempty"`
+	AppServerName string            `json:"app_server_name,omitempty"`
+	EnvVars       map[string]string `json:"env_vars,omitempty"`
 }
 
 // DeployImageVersionPayload is the typed payload for DeployImageVersion operations.
 type DeployImageVersionPayload struct {
 	AppName string `json:"app_name"`
 	Image   string `json:"image"`
+}
+
+// CreateAppServerPayload is the typed payload for CreateAppServer operations.
+type CreateAppServerPayload struct {
+	Name       string `json:"name"`
+	Flavor     string `json:"flavor"`
+	OSImage    string `json:"os_image"`
+	Region     string `json:"region"`
+	SSHKeyName string `json:"ssh_key_name"`
+}
+
+// DeleteAppServerPayload is the typed payload for DeleteAppServer operations.
+type DeleteAppServerPayload struct {
+	AppServerName string `json:"app_server_name"`
+}
+
+// UpdateAppEnvVarsPayload is the typed payload for UpdateAppEnvVars operations (VM track only).
+type UpdateAppEnvVarsPayload struct {
+	AppName string            `json:"app_name"`
+	EnvVars map[string]string `json:"env_vars"`
 }
 
 // CreatePublicApiPayload is the typed payload for CreatePublicApi operations.
