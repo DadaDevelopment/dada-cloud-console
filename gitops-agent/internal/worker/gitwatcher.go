@@ -242,6 +242,9 @@ func (w *GitWatcher) syncAppFile(ctx context.Context, mgr *git.Manager, filePath
 			log.Error().Err(err).Str("project", projectSlug).Str("env", envSlug).Msg("git-watcher: auto-create environment failed")
 			return
 		}
+		if err := db.AddPlatformAdminsToProject(ctx, w.pool, projectSlug); err != nil {
+			log.Error().Err(err).Str("project", projectSlug).Msg("git-watcher: add platform admins failed")
+		}
 		if err := w.pool.QueryRow(ctx, `
 			SELECT p.id, e.id
 			FROM projects p JOIN environments e ON e.project_id = p.id
