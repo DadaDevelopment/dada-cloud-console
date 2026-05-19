@@ -38,9 +38,12 @@ func ClaimPending(ctx context.Context, pool *pgxpool.Pool) ([]Operation, error) 
 		UPDATE operations
 		SET    status = 'Processing', updated_at = NOW()
 		WHERE  id IN (
-			SELECT id FROM operations
-			WHERE  status = 'Created'
-			ORDER  BY created_at
+			SELECT o.id FROM operations o
+			LEFT JOIN environments e ON e.id = o.environment_id
+			WHERE  o.status = 'Created'
+			  AND  o.action NOT IN ('CreateAppServer', 'DeleteAppServer')
+			  AND  (e.runtime = 'k8s' OR o.environment_id IS NULL)
+			ORDER  BY o.created_at
 			LIMIT  $1
 			FOR UPDATE SKIP LOCKED
 		)
