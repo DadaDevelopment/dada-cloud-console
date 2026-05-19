@@ -224,7 +224,7 @@ func (w *GitWatcher) syncProjectFile(ctx context.Context, mgr *git.Manager, file
 }
 
 func (w *GitWatcher) syncAppFile(ctx context.Context, mgr *git.Manager, filePath, projectSlug, envSlug, appName string, c git.Commit) {
-	// Resolve project + environment IDs.
+	// Resolve project + environment IDs, auto-creating them if absent.
 	var projectID uuid.UUID
 	var environmentID uuid.UUID
 	err := w.pool.QueryRow(ctx, `
@@ -233,8 +233,23 @@ func (w *GitWatcher) syncAppFile(ctx context.Context, mgr *git.Manager, filePath
 		WHERE p.name = $1 AND e.name = $2
 	`, projectSlug, envSlug).Scan(&projectID, &environmentID)
 	if err != nil {
-		log.Warn().Err(err).Str("project", projectSlug).Str("env", envSlug).Msg("git-watcher: project/env not found")
-		return
+		log.Info().Str("project", projectSlug).Str("env", envSlug).Msg("git-watcher: auto-creating project/env from git path")
+		if err := db.UpsertProject(ctx, w.pool, projectSlug, projectSlug, "team", envSlug, nil); err != nil {
+			log.Error().Err(err).Str("project", projectSlug).Msg("git-watcher: auto-create project failed")
+			return
+		}
+		if err := db.UpsertEnvironment(ctx, w.pool, projectSlug, envSlug, "", ""); err != nil {
+			log.Error().Err(err).Str("project", projectSlug).Str("env", envSlug).Msg("git-watcher: auto-create environment failed")
+			return
+		}
+		if err := w.pool.QueryRow(ctx, `
+			SELECT p.id, e.id
+			FROM projects p JOIN environments e ON e.project_id = p.id
+			WHERE p.name = $1 AND e.name = $2
+		`, projectSlug, envSlug).Scan(&projectID, &environmentID); err != nil {
+			log.Error().Err(err).Str("project", projectSlug).Str("env", envSlug).Msg("git-watcher: resolve after auto-create failed")
+			return
+		}
 	}
 
 	summaryJSON, _ := json.Marshal(map[string]any{
