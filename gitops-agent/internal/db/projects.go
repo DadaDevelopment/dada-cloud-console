@@ -73,3 +73,26 @@ func UpsertProject(ctx context.Context, pool *pgxpool.Pool,
 	}
 	return nil
 }
+
+// UpsertEnvironment creates or updates an environment for the given project.
+func UpsertEnvironment(ctx context.Context, pool *pgxpool.Pool, projectName, envName, namespace, envType string) error {
+	if envType == "" {
+		envType = "prod"
+	}
+	if namespace == "" {
+		namespace = projectName + "-" + envName
+	}
+	_, err := pool.Exec(ctx, `
+		INSERT INTO environments (project_id, name, namespace, type)
+		SELECT p.id, $2, $3, $4
+		FROM projects p WHERE p.name = $1
+		ON CONFLICT (project_id, name) DO UPDATE
+		SET namespace  = EXCLUDED.namespace,
+		    type       = EXCLUDED.type,
+		    updated_at = NOW()
+	`, projectName, envName, namespace, envType)
+	if err != nil {
+		return fmt.Errorf("upsert environment %s/%s: %w", projectName, envName, err)
+	}
+	return nil
+}

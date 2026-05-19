@@ -24,11 +24,18 @@ var appPathRe = regexp.MustCompile(`^clusters/[^/]+/projects/([^/]+)/environment
 // Capture group 1 is the project slug.
 var projectPathRe = regexp.MustCompile(`^clusters/[^/]+/projects/([^/]+)/project\.yaml$`)
 
+type envManifest struct {
+	Name      string `yaml:"name"`
+	Namespace string `yaml:"namespace"`
+	Type      string `yaml:"type"`
+}
+
 type projectManifest struct {
 	Project            string         `yaml:"project"`
 	DisplayName        string         `yaml:"displayName"`
 	OwnerType          string         `yaml:"ownerType"`
 	DefaultEnvironment string         `yaml:"defaultEnvironment"`
+	Environments       []envManifest  `yaml:"environments"`
 	Quotas             map[string]any `yaml:"quotas"`
 }
 
@@ -193,6 +200,17 @@ func (w *GitWatcher) syncProjectFile(ctx context.Context, mgr *git.Manager, file
 	if err := db.UpsertProject(ctx, w.pool, name, displayName, ownerType, defaultEnvironment, quotasJSON); err != nil {
 		log.Error().Err(err).Str("project", projectSlug).Str("path", filePath).Msg("git-watcher: upsert project")
 		return
+	}
+
+	// Upsert environments declared in the manifest.
+	envs := manifest.Environments
+	if len(envs) == 0 && defaultEnvironment != "" {
+		envs = []envManifest{{Name: defaultEnvironment}}
+	}
+	for _, e := range envs {
+		if err := db.UpsertEnvironment(ctx, w.pool, name, e.Name, e.Namespace, e.Type); err != nil {
+			log.Error().Err(err).Str("project", name).Str("env", e.Name).Msg("git-watcher: upsert environment")
+		}
 	}
 
 	if err := db.InsertCommit(ctx, w.pool,
