@@ -1,0 +1,39 @@
+terraform {
+  required_providers {
+    beget = {
+      source = "tf.beget.com/beget/beget"
+    }
+  }
+  backend "pg" {}
+}
+
+provider "beget" {
+  token = var.beget_token
+}
+
+resource "beget_compute_instance" "app_server" {
+  name   = var.server_name
+  region = var.region
+
+  cpu     = var.cpu
+  ram_mb  = var.ram_mb
+  disk_mb = var.disk_mb
+
+  image {
+    software {
+      id = var.software_id
+    }
+  }
+
+  access {
+    ssh_keys = [var.ssh_key_id]
+  }
+}
+
+output "vm_ip" {
+  value = beget_compute_instance.app_server.ip_address
+}
+
+output "vm_id" {
+  value = beget_compute_instance.app_server.id
+}

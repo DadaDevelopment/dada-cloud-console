@@ -1,0 +1,128 @@
+#!/usr/bin/env bash
+# Rendered by portainer-agent Go text/template, piped via SSH stdin.
+# Template vars: .ServerName .EdgeKey .EdgeID
+#                .PrometheusRemoteWriteURL .PrometheusUser .PrometheusPass
+#                .ElasticsearchURL .ElasticsearchAPIKey
+set -euo pipefail
+
+echo "[bootstrap] Starting VM setup for {{.ServerName}}"
+
+# ── Docker ───────────────────────────────────────────────────────────────────
+apt-get update -qq
+apt-get install -y -qq docker.io docker-compose-plugin curl wget
+systemctl enable docker --now
+echo "[bootstrap] Docker ready"
+
+# ── node_exporter 1.8.2 ──────────────────────────────────────────────────────
+useradd --no-create-home --shell /bin/false node_exporter 2>/dev/null || true
+NODE_VER="1.8.2"
+wget -q "https://github.com/prometheus/node_exporter/releases/download/v${NODE_VER}/node_exporter-${NODE_VER}.linux-amd64.tar.gz" -O /tmp/ne.tar.gz
+tar -xzf /tmp/ne.tar.gz -C /tmp
+mv "/tmp/node_exporter-${NODE_VER}.linux-amd64/node_exporter" /usr/local/bin/
+chown node_exporter:node_exporter /usr/local/bin/node_exporter
+rm -rf /tmp/ne.tar.gz "/tmp/node_exporter-${NODE_VER}.linux-amd64"
+
+cat > /etc/systemd/system/node_exporter.service << 'UNIT'
+[Unit]
+Description=Prometheus Node Exporter
+After=network.target
+[Service]
+User=node_exporter
+ExecStart=/usr/local/bin/node_exporter --collector.systemd --collector.processes
+Restart=always
+RestartSec=5
+[Install]
+WantedBy=multi-user.target
+UNIT
+systemctl daemon-reload && systemctl enable --now node_exporter
+echo "[bootstrap] node_exporter :9100 started"
+
+# ── cAdvisor v0.49.1 ─────────────────────────────────────────────────────────
+docker run -d \
+  --name cadvisor --restart unless-stopped \
+  -v /:/rootfs:ro -v /var/run:/var/run:ro \
+  -v /sys:/sys:ro -v /var/lib/docker/:/var/lib/docker:ro \
+  -p 8080:8080 gcr.io/cadvisor/cadvisor:v0.49.1
+echo "[bootstrap] cAdvisor :8080 started"
+
+# ── Prometheus Agent → remote_write ──────────────────────────────────────────
+mkdir -p /etc/prometheus-agent /var/lib/prometheus-agent
+cat > /etc/prometheus-agent/prometheus.yml << PROMEOF
+global:
+  scrape_interval: 30s
+  external_labels:
+    vm_name: "{{.ServerName}}"
+    runtime: "vm"
+scrape_configs:
+  - job_name: node_exporter
+    static_configs:
+      - targets: ["localhost:9100"]
+  - job_name: cadvisor
+    static_configs:
+      - targets: ["localhost:8080"]
+    metric_relabel_configs:
+      - source_labels: [container_label_dada_io_app]
+        target_label: app
+remote_write:
+  - url: "{{.PrometheusRemoteWriteURL}}"
+    basic_auth:
+      username: "{{.PrometheusUser}}"
+      password: "{{.PrometheusPass}}"
+PROMEOF
+
+docker run -d \
+  --name prometheus-agent --restart unless-stopped \
+  -v /etc/prometheus-agent/prometheus.yml:/etc/prometheus/prometheus.yml:ro \
+  -v /var/lib/prometheus-agent:/prometheus \
+  --network host \
+  prom/prometheus:v2.53.0 \
+  --config.file=/etc/prometheus/prometheus.yml \
+  --enable-feature=agent \
+  --storage.agent.path=/prometheus
+echo "[bootstrap] Prometheus Agent started (remote_write to {{.PrometheusRemoteWriteURL}})"
+
+# ── Filebeat 8.13.4 → Elasticsearch ─────────────────────────────────────────
+mkdir -p /etc/filebeat
+cat > /etc/filebeat/filebeat.yml << FBEOF
+filebeat.inputs:
+  - type: container
+    paths:
+      - /var/lib/docker/containers/*/*.log
+    stream: all
+    processors:
+      - add_docker_metadata:
+          host: "unix:///var/run/docker.sock"
+      - drop_fields:
+          fields: ["agent", "ecs"]
+          ignore_missing: true
+output.elasticsearch:
+  hosts: ["{{.ElasticsearchURL}}"]
+  api_key: "{{.ElasticsearchAPIKey}}"
+  index: "dada-vm-logs-%{[container.labels.dada_io_app]:unknown}-%{+yyyy.MM.dd}"
+setup.ilm.enabled: false
+setup.template.enabled: false
+logging.level: warning
+FBEOF
+
+docker run -d \
+  --name filebeat --restart unless-stopped --user root \
+  -v /etc/filebeat/filebeat.yml:/usr/share/filebeat/filebeat.yml:ro \
+  -v /var/lib/docker/containers:/var/lib/docker/containers:ro \
+  -v /var/run/docker.sock:/var/run/docker.sock:ro \
+  docker.elastic.co/beats/filebeat:8.13.4
+echo "[bootstrap] Filebeat started"
+
+# ── Portainer Edge Agent 2.21.0 ──────────────────────────────────────────────
+docker run -d \
+  --name portainer_edge_agent --restart=always \
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  -v /var/lib/docker/volumes:/var/lib/docker/volumes \
+  -v /:/host -v portainer_agent_data:/data \
+  -e EDGE=1 \
+  -e EDGE_ID="{{.EdgeID}}" \
+  -e EDGE_KEY="{{.EdgeKey}}" \
+  -e EDGE_INSECURE_POLL=0 \
+  portainer/agent:2.21.0
+echo "[bootstrap] Portainer Edge Agent started (EDGE_ID={{.EdgeID}})"
+
+echo "BOOTSTRAP_COMPLETE"
