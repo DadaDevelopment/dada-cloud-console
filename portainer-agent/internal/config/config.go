@@ -13,7 +13,8 @@ type Config struct {
 	PortainerURL      string
 	PortainerAPIToken string
 
-	BegetToken      string
+	BegetLogin      string
+	BegetPassword   string
 	BegetRegion     string
 	BegetSoftwareID string
 	BegetSSHKeyID   string
@@ -54,7 +55,8 @@ func Load() (*Config, error) {
 		PortainerURL:      getEnv("PORTAINER_URL", ""),
 		PortainerAPIToken: getEnv("PORTAINER_API_TOKEN", ""),
 
-		BegetToken:      getEnv("BEGET_TOKEN", ""),
+		BegetLogin:      getEnv("BEGET_LOGIN", ""),
+		BegetPassword:   getEnv("BEGET_PASSWORD", ""),
 		BegetRegion:     getEnv("BEGET_REGION", "ru1"),
 		BegetSoftwareID: getEnv("BEGET_SOFTWARE_ID", ""),
 		BegetSSHKeyID:   getEnv("BEGET_SSH_KEY_ID", ""),

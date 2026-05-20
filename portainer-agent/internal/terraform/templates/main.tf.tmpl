@@ -8,7 +8,8 @@ terraform {
 }
 
 provider "beget" {
-  token = var.beget_token
+  login    = var.beget_login
+  password = var.beget_password
 }
 
 resource "beget_compute_instance" "app_server" {

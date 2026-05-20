@@ -1,4 +1,8 @@
-variable "beget_token" {
+variable "beget_login" {
+  type = string
+}
+
+variable "beget_password" {
   type      = string
   sensitive = true
 }
