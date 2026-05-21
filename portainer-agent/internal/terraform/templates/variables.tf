@@ -1,10 +1,7 @@
-variable "beget_login" {
-  type = string
-}
-
-variable "beget_password" {
-  type      = string
-  sensitive = true
+variable "beget_token" {
+  type        = string
+  sensitive   = true
+  description = "Beget API token (generate at: Beget panel → Cloud → API tokens)"
 }
 
 variable "server_name" {
@@ -31,12 +28,13 @@ variable "disk_mb" {
   default = 20480
 }
 
-variable "software_id" {
-  type        = number
-  description = "Beget software ID for Ubuntu 22.04 (query once via data source)"
+variable "software_slug" {
+  type        = string
+  description = "Beget software slug, e.g. ubuntu-24-04"
+  default     = "ubuntu-24-04"
 }
 
-variable "ssh_key_id" {
+variable "ssh_public_key" {
   type        = string
-  description = "ID of SSH key pre-registered in Beget account"
+  description = "OpenSSH public key (ssh-rsa ...) to register and inject into the VM"
 }

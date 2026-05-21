@@ -94,12 +94,11 @@ func (w *VMWatcher) bootstrapParams(serverName, edgeKey, edgeID string) dadash.B
 // tfVars assembles Terraform variable map from config + AppServer params.
 func (w *VMWatcher) tfVars(serverName, region string) map[string]string {
 	return map[string]string{
-		"beget_login":    w.cfg.BegetLogin,
-		"beget_password": w.cfg.BegetPassword,
+		"beget_token":    w.cfg.BegetToken,
 		"server_name":    serverName,
 		"region":         region,
-		"software_id":    w.cfg.BegetSoftwareID,
-		"ssh_key_id":     w.cfg.BegetSSHKeyID,
+		"software_slug":  w.cfg.BegetSoftwareSlug,
+		"ssh_public_key": w.cfg.AgentSSHPublicKey,
 	}
 }
 

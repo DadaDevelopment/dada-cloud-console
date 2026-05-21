@@ -8,26 +8,46 @@ terraform {
 }
 
 provider "beget" {
-  login    = var.beget_login
-  password = var.beget_password
+  token = var.beget_token
+}
+
+# Resolve OS image integer ID from human-readable slug.
+data "beget_software" "os" {
+  slug = var.software_slug
+}
+
+# Register the deploy public key once per workspace.
+# prevent_destroy ensures VM deletion doesn't wipe the shared key.
+resource "beget_ssh_key" "deploy" {
+  name       = "portainer-agent-key"
+  public_key = var.ssh_public_key
+
+  lifecycle {
+    prevent_destroy = true
+    # If the key already exists under this name, ignore subsequent changes.
+    ignore_changes = [public_key]
+  }
 }
 
 resource "beget_compute_instance" "app_server" {
   name   = var.server_name
   region = var.region
 
-  cpu     = var.cpu
-  ram_mb  = var.ram_mb
-  disk_mb = var.disk_mb
+  configuration = {
+    cpu       = var.cpu
+    ram_mb    = var.ram_mb
+    disk_mb   = var.disk_mb
+    cpu_class = "normal_cpu"
+  }
 
-  image {
-    software {
-      id = var.software_id
+  image = {
+    software = {
+      id = data.beget_software.os.id
     }
   }
 
-  access {
-    ssh_keys = [var.ssh_key_id]
+  access = {
+    ssh_keys = [beget_ssh_key.deploy.id]
   }
 }
 

@@ -13,14 +13,18 @@ type Config struct {
 	PortainerURL      string
 	PortainerAPIToken string
 
-	BegetLogin      string
-	BegetPassword   string
-	BegetRegion     string
-	BegetSoftwareID string
-	BegetSSHKeyID   string
+	BegetLogin    string
+	BegetPassword string
+	BegetToken    string
+	BegetRegion   string
+	// BegetSoftwareSlug is the OS slug passed to the Beget "data.beget_software" data source,
+	// e.g. "ubuntu-24-04".
+	BegetSoftwareSlug string
 
-	// AgentSSHPrivateKey is the PEM-encoded private key matching BegetSSHKeyID public key.
+	// AgentSSHPrivateKey is the PEM-encoded private key used to SSH into provisioned VMs.
 	AgentSSHPrivateKey string
+	// AgentSSHPublicKey is the OpenSSH public key (ssh-rsa ...) registered on the VM via Terraform.
+	AgentSSHPublicKey string
 
 	TFWorkspaceBase string
 	TFStateConnStr  string
@@ -55,13 +59,14 @@ func Load() (*Config, error) {
 		PortainerURL:      getEnv("PORTAINER_URL", ""),
 		PortainerAPIToken: getEnv("PORTAINER_API_TOKEN", ""),
 
-		BegetLogin:      getEnv("BEGET_LOGIN", ""),
-		BegetPassword:   getEnv("BEGET_PASSWORD", ""),
-		BegetRegion:     getEnv("BEGET_REGION", "ru1"),
-		BegetSoftwareID: getEnv("BEGET_SOFTWARE_ID", ""),
-		BegetSSHKeyID:   getEnv("BEGET_SSH_KEY_ID", ""),
+		BegetLogin:        getEnv("BEGET_LOGIN", ""),
+		BegetPassword:     getEnv("BEGET_PASSWORD", ""),
+		BegetToken:        getEnv("BEGET_TOKEN", ""),
+		BegetRegion:       getEnv("BEGET_REGION", "ru1"),
+		BegetSoftwareSlug: getEnv("BEGET_SOFTWARE_SLUG", "ubuntu-24-04"),
 
 		AgentSSHPrivateKey: getEnv("AGENT_SSH_PRIVATE_KEY", ""),
+		AgentSSHPublicKey:  getEnv("AGENT_SSH_PUBLIC_KEY", ""),
 
 		TFWorkspaceBase: getEnv("TF_WORKSPACE_BASE", "/var/lib/tf-workspaces"),
 		TFStateConnStr:  getEnv("TF_STATE_CONN_STR", ""),
