@@ -35,16 +35,19 @@ func ClaimPending(ctx context.Context, pool *pgxpool.Pool) ([]Operation, error) 
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck
 
+	// FOR UPDATE cannot be used with LEFT JOIN; use EXISTS for the nullable side.
 	rows, err := tx.Query(ctx, `
 		UPDATE operations
 		SET    status = 'Processing', updated_at = NOW()
 		WHERE  id IN (
 			SELECT o.id FROM operations o
-			LEFT JOIN environments e ON e.id = o.environment_id
 			WHERE  o.status = 'Created'
 			  AND  (
 			    o.action IN ('CreateAppServer', 'DeleteAppServer')
-			    OR e.runtime = 'vm'
+			    OR EXISTS (
+			        SELECT 1 FROM environments e
+			        WHERE e.id = o.environment_id AND e.runtime = 'vm'
+			    )
 			  )
 			ORDER  BY o.created_at
 			LIMIT  $1
