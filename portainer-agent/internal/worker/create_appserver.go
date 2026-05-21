@@ -46,21 +46,25 @@ func (w *VMWatcher) doCreateAppServer(ctx context.Context, op db.Operation) erro
 	}
 	log.Info().Int("endpoint_id", ep.ID).Str("edge_id", ep.EdgeID).Msg("edge endpoint created")
 
-	// ── 2. Prepare Terraform workspace ──────────────────────────────────────
-	workspaceDir := w.tf.WorkspaceDir(op.ID.String())
-	if err := tf.PrepareWorkspace(workspaceDir); err != nil {
-		return fmt.Errorf("prepare workspace: %w", err)
-	}
-
-	// ── 3. Create app_servers DB row ────────────────────────────────────────
-	serverID, err := db.CreateAppServer(ctx, w.pool, op.ProjectID, p.Name, workspaceDir)
+	// ── 2. Create app_servers DB row (gives us the stable UUID for workspace path) ──
+	serverID, err := db.CreateAppServer(ctx, w.pool, op.ProjectID, p.Name, "")
 	if err != nil {
 		return fmt.Errorf("create app_server row: %w", err)
 	}
 	log.Info().Str("server_id", serverID.String()).Msg("app_servers row created")
 
-	// ── 4. Terraform init + apply ────────────────────────────────────────────
+	// ── 3. Prepare Terraform workspace (keyed by stable serverID) ────────────
 	appServerUUID := serverID.String()
+	workspaceDir := w.tf.WorkspaceDir(appServerUUID)
+	if err := tf.PrepareWorkspace(workspaceDir); err != nil {
+		_ = db.SetAppServerFailed(ctx, w.pool, serverID, err.Error())
+		return fmt.Errorf("prepare workspace: %w", err)
+	}
+	if err := db.SetAppServerWorkspace(ctx, w.pool, serverID, workspaceDir); err != nil {
+		return fmt.Errorf("set workspace path: %w", err)
+	}
+
+	// ── 4. Terraform init + apply ────────────────────────────────────────────
 	if err := w.tf.Init(ctx, appServerUUID); err != nil {
 		_ = db.SetAppServerFailed(ctx, w.pool, serverID, err.Error())
 		return fmt.Errorf("terraform init: %w", err)

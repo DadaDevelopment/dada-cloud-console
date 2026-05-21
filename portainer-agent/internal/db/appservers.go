@@ -54,6 +54,15 @@ func CreateAppServer(ctx context.Context, pool *pgxpool.Pool, projectID uuid.UUI
 	return id, err
 }
 
+// SetAppServerWorkspace persists the terraform workspace path after it has been created.
+func SetAppServerWorkspace(ctx context.Context, pool *pgxpool.Pool, id uuid.UUID, workspace string) error {
+	_, err := pool.Exec(ctx,
+		`UPDATE app_servers SET terraform_workspace=$2, updated_at=NOW() WHERE id=$1`,
+		id, workspace,
+	)
+	return err
+}
+
 // SetAppServerProvisioned updates vm_ip and vm_provider_id after terraform apply.
 func SetAppServerProvisioned(ctx context.Context, pool *pgxpool.Pool, id uuid.UUID, vmIP, vmProviderID string) error {
 	_, err := pool.Exec(ctx,
