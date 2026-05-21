@@ -68,7 +68,22 @@ func (c *Client) doJSON(ctx context.Context, method, path string, bodyObj, resul
 	return nil
 }
 
+// FindEndpointByName searches Portainer endpoints by exact name, returns nil if not found.
+func (c *Client) FindEndpointByName(ctx context.Context, name string) (*Endpoint, error) {
+	var endpoints []Endpoint
+	if err := c.doJSON(ctx, http.MethodGet, fmt.Sprintf("/api/endpoints?search=%s", url.QueryEscape(name)), nil, &endpoints); err != nil {
+		return nil, fmt.Errorf("list endpoints: %w", err)
+	}
+	for i := range endpoints {
+		if endpoints[i].Name == name {
+			return &endpoints[i], nil
+		}
+	}
+	return nil, nil
+}
+
 // CreateEdgeEndpoint registers a new edge environment in Portainer.
+// Idempotent: if an endpoint with the same name already exists (409), it is returned.
 // portainerServerURL: "https://portainer.dada.ru" (the Portainer server URL, NOT the agent URL)
 // tunnelAddr: "portainer.dada.ru:8000"
 func (c *Client) CreateEdgeEndpoint(ctx context.Context, name, portainerServerURL, tunnelAddr string) (*Endpoint, error) {
@@ -95,6 +110,19 @@ func (c *Client) CreateEdgeEndpoint(ctx context.Context, name, portainerServerUR
 		return nil, fmt.Errorf("create edge endpoint: %w", err)
 	}
 	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusConflict {
+		// Endpoint already exists — look it up by name (idempotent retry).
+		existing, findErr := c.FindEndpointByName(ctx, name)
+		if findErr != nil {
+			return nil, fmt.Errorf("create edge endpoint: name already taken, lookup failed: %w", findErr)
+		}
+		if existing != nil {
+			return existing, nil
+		}
+		return nil, fmt.Errorf("create edge endpoint: 409 conflict but endpoint '%s' not found", name)
+	}
+
 	if resp.StatusCode >= 400 {
 		b, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 		return nil, fmt.Errorf("create edge endpoint status %d: %s", resp.StatusCode, string(b))
