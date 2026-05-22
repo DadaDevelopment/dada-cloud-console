@@ -68,6 +68,31 @@ func SetupRouter(pool *pgxpool.Pool, cfg *config.Config) *gin.Engine {
 		api.GET("/projects/:projectId/operations", h.GetProjectOperations)
 		api.GET("/projects/:projectId/operations/:operationId", h.GetOperation)
 		api.POST("/projects/:projectId/operations/:operationId/retry", h.RetryOperation)
+
+		// AI Studio (v2). Routes are registered always; handlers gracefully
+		// degrade when AI_STUDIO_ENABLED is false / MLflow is not configured.
+		if cfg.AIStudioEnabled {
+			// Quotas
+			api.GET("/projects/:projectId/quotas", h.GetProjectQuotas)
+
+			// AIModel CRUD
+			api.GET("/projects/:projectId/environments/:envId/models", h.ListAIModels)
+			api.POST("/projects/:projectId/environments/:envId/models", h.CreateAIModel)
+			api.GET("/projects/:projectId/environments/:envId/models/:name", h.GetAIModel)
+			api.DELETE("/projects/:projectId/environments/:envId/models/:name", h.DeleteAIModel)
+			api.PATCH("/projects/:projectId/environments/:envId/models/:name/artifact", h.UpdateAIModelArtifact)
+			api.PATCH("/projects/:projectId/environments/:envId/models/:name/canary", h.SetCanaryTraffic)
+			api.POST("/projects/:projectId/environments/:envId/models/:name/promote", h.PromoteAIModel)
+			api.PATCH("/projects/:projectId/environments/:envId/models/:name/mlflow-pin", h.PinAIModelMlflowVersion)
+			api.GET("/projects/:projectId/environments/:envId/models/:name/api-key", h.RevealAIModelAPIKey)
+
+			// MLflow proxy (read-only)
+			api.GET("/mlflow/registered-models", h.ListMLflowRegisteredModels)
+			api.GET("/mlflow/registered-models/:name/versions", h.ListMLflowModelVersions)
+			api.GET("/mlflow/registered-models/:name/versions/:version", h.GetMLflowModelVersion)
+
+			// Inference proxy + admin approvals are added in later phases.
+		}
 	}
 
 	// Health check (unauthenticated) — /health for Helm probes, /healthz for k8s convention
