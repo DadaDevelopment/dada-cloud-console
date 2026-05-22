@@ -14,6 +14,15 @@ import type {
   DeployImageResponse,
   EndpointsResponse,
   CreateEndpointResponse,
+  AIModelsResponse,
+  AIModelDetailResponse,
+  CreateAIModelRequest,
+  OperationResponse,
+  QuotaUsageResponse,
+  MLflowModelsResponse,
+  MLflowVersionsResponse,
+  MLflowModelVersion,
+  RevealAPIKeyResponse,
 } from "./types";
 
 // Empty string → relative URLs → requests go through the ingress proxy.
@@ -149,5 +158,74 @@ export const endpointsApi = {
     apiFetch<CreateEndpointResponse>(
       `/api/v1/projects/${projectId}/environments/${envId}/apps/${appName}/endpoints`,
       { method: "POST", body: data }
+    ),
+};
+
+// AI Studio (v2). Routes only resolve when AI_STUDIO_ENABLED on the backend.
+export const aiModelsApi = {
+  list: (projectId: string, envId: string) =>
+    apiFetch<AIModelsResponse>(
+      `/api/v1/projects/${projectId}/environments/${envId}/models`
+    ),
+  get: (projectId: string, envId: string, name: string) =>
+    apiFetch<AIModelDetailResponse>(
+      `/api/v1/projects/${projectId}/environments/${envId}/models/${name}`
+    ),
+  create: (projectId: string, envId: string, data: CreateAIModelRequest) =>
+    apiFetch<OperationResponse>(
+      `/api/v1/projects/${projectId}/environments/${envId}/models`,
+      { method: "POST", body: data }
+    ),
+  delete: (projectId: string, envId: string, name: string, force = false) =>
+    apiFetch<OperationResponse>(
+      `/api/v1/projects/${projectId}/environments/${envId}/models/${name}${force ? "?force=true" : ""}`,
+      { method: "DELETE" }
+    ),
+  updateArtifact: (
+    projectId: string,
+    envId: string,
+    name: string,
+    body: { artifact_uri?: string; mlflow_name?: string; mlflow_version?: string }
+  ) =>
+    apiFetch<OperationResponse>(
+      `/api/v1/projects/${projectId}/environments/${envId}/models/${name}/artifact`,
+      { method: "PATCH", body }
+    ),
+  setCanary: (projectId: string, envId: string, name: string, trafficPercent: number) =>
+    apiFetch<OperationResponse>(
+      `/api/v1/projects/${projectId}/environments/${envId}/models/${name}/canary`,
+      { method: "PATCH", body: { traffic_percent: trafficPercent } }
+    ),
+  promote: (projectId: string, envId: string, name: string) =>
+    apiFetch<OperationResponse>(
+      `/api/v1/projects/${projectId}/environments/${envId}/models/${name}/promote`,
+      { method: "POST", body: {} }
+    ),
+  pinMlflow: (projectId: string, envId: string, name: string, mlflowName: string, mlflowVersion: string) =>
+    apiFetch<OperationResponse>(
+      `/api/v1/projects/${projectId}/environments/${envId}/models/${name}/mlflow-pin`,
+      { method: "PATCH", body: { mlflow_name: mlflowName, mlflow_version: mlflowVersion } }
+    ),
+  revealApiKey: (projectId: string, envId: string, name: string) =>
+    apiFetch<RevealAPIKeyResponse>(
+      `/api/v1/projects/${projectId}/environments/${envId}/models/${name}/api-key?reveal=true`
+    ),
+};
+
+export const quotasApi = {
+  get: (projectId: string) =>
+    apiFetch<QuotaUsageResponse>(`/api/v1/projects/${projectId}/quotas`),
+};
+
+export const mlflowApi = {
+  listRegisteredModels: (projectId: string) =>
+    apiFetch<MLflowModelsResponse>(`/api/v1/mlflow/registered-models?project=${projectId}`),
+  listVersions: (projectId: string, name: string) =>
+    apiFetch<MLflowVersionsResponse>(
+      `/api/v1/mlflow/registered-models/${encodeURIComponent(name)}/versions?project=${projectId}`
+    ),
+  getVersion: (projectId: string, name: string, version: string) =>
+    apiFetch<{ version: MLflowModelVersion }>(
+      `/api/v1/mlflow/registered-models/${encodeURIComponent(name)}/versions/${version}?project=${projectId}`
     ),
 };

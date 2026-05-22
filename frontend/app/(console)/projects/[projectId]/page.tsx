@@ -116,7 +116,7 @@ export default function ProjectOverviewPage() {
       )}
 
       {/* Quick actions */}
-      <div className="mb-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+      <div className="mb-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <Link
           href={`/projects/${projectId}/databases`}
           className="group flex items-center gap-4 rounded-xl border border-gray-200 bg-white p-5 shadow-sm hover:border-blue-200 hover:shadow-md transition-all"
@@ -144,6 +144,21 @@ export default function ProjectOverviewPage() {
           <div>
             <p className="text-sm font-semibold text-gray-900">Applications</p>
             <p className="text-xs text-gray-400">Manage app workloads</p>
+          </div>
+        </Link>
+
+        <Link
+          href={`/projects/${projectId}/models`}
+          className="group flex items-center gap-4 rounded-xl border border-gray-200 bg-white p-5 shadow-sm hover:border-blue-200 hover:shadow-md transition-all"
+        >
+          <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-indigo-100 text-indigo-600 group-hover:bg-indigo-600 group-hover:text-white transition-colors">
+            <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+            </svg>
+          </div>
+          <div>
+            <p className="text-sm font-semibold text-gray-900">AI Models</p>
+            <p className="text-xs text-gray-400">KServe inference services</p>
           </div>
         </Link>
 

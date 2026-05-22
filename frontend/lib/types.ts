@@ -132,3 +132,101 @@ export interface CreateEndpointResponse {
   operation: Operation;
   message: string;
 }
+
+// AI Studio (v2) ---------------------------------------------------------
+
+export type AIModelSource = "mlflow" | "s3" | "custom";
+export type AIModelAuthMode = "apikey" | "jwt" | "public";
+export type AIModelType =
+  | "sklearn" | "xgboost" | "lightgbm"
+  | "pytorch" | "tensorflow" | "triton"
+  | "huggingface" | "custom";
+
+export interface AIModelSummary {
+  profile: string;
+  model_type: AIModelType;
+  version: string;
+  stage: string;
+  artifact_uri?: string;
+  container_image?: string;
+  auth_mode: AIModelAuthMode;
+  attached_app?: string;
+  status: string;
+  canary_percent?: number;
+  mlflow_name?: string;
+  mlflow_version?: string;
+}
+
+export interface AIModelsResponse {
+  models: ResourceSnapshot[];
+}
+
+export interface AIModelDetailResponse {
+  model: ResourceSnapshot;
+  api_key_prefix: string | null;
+}
+
+export interface CreateAIModelRequest {
+  name: string;
+  model_type: AIModelType;
+  source: AIModelSource;
+  mlflow_name?: string;
+  mlflow_version?: string;
+  artifact_uri?: string;
+  container_image?: string;
+  profile: string;
+  auth_mode: AIModelAuthMode;
+  attached_app_name?: string;
+  version?: string;
+}
+
+export interface OperationResponse {
+  operation: Operation;
+  message: string;
+}
+
+export interface ProjectQuotas {
+  project_id: string;
+  cpu_model_max: number;
+  gpu_model_max: number;
+  monthly_inference_calls: number;
+  updated_at: string;
+}
+
+export interface QuotaUsageResponse {
+  quotas: ProjectQuotas;
+  cpu_models_in_use: number;
+  gpu_models_in_use: number;
+  inference_calls_month: number;
+}
+
+export interface MLflowModelVersion {
+  name: string;
+  version: string;
+  source: string;
+  run_id?: string;
+  current_stage?: string;
+  status?: string;
+  description?: string;
+}
+
+export interface MLflowRegisteredModel {
+  name: string;
+  description?: string;
+  last_updated_timestamp?: number;
+  latest_versions?: MLflowModelVersion[];
+}
+
+export interface MLflowModelsResponse {
+  models: MLflowRegisteredModel[];
+  warning?: string;
+}
+
+export interface MLflowVersionsResponse {
+  versions: MLflowModelVersion[];
+}
+
+export interface RevealAPIKeyResponse {
+  api_key: string;
+  expires_at: string;
+}
