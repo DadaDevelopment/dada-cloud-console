@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/json"
 	"errors"
 	"net/http"
 
@@ -161,6 +162,20 @@ func (h *Handler) approvalDecision(c *gin.Context, target models.OperationStatus
 		respondError(c, http.StatusInternalServerError, "failed to update operation")
 		return
 	}
+
+	// Immutable audit row referencing both the admin (actor_id) and the
+	// original requester (metadata.requested_by). D17 / S6 require this.
+	auditMeta, _ := json.Marshal(map[string]any{
+		"decision":     string(target),
+		"reason":       reason,
+		"requested_by": op.ActorID,
+	})
+	_, _ = h.pool.Exec(c.Request.Context(),
+		`INSERT INTO audit_events (actor_id, project_id, operation_id, action, resource_kind, resource_name, metadata)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+		claims.UserID, op.ProjectID, op.ID, "ApprovalDecision",
+		op.ResourceKind, op.ResourceName, auditMeta,
+	)
 
 	c.JSON(http.StatusOK, gin.H{"operation": updated})
 }
