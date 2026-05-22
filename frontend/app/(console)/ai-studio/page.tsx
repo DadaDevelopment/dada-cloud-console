@@ -33,6 +33,7 @@ export default function AIStudioRegistryPage() {
 
   useEffect(() => {
     if (!selectedProjectId) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- fetch-on-mount pattern; the page is a server-side wrapper for a client list, no Suspense boundary at this level yet.
     setIsLoadingModels(true);
     setError(null);
     setWarning(null);

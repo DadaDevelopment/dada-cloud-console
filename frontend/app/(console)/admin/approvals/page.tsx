@@ -69,6 +69,7 @@ export default function ApprovalsPage() {
   }
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- fetch-on-mount; load() is the page's data source and there's no Suspense boundary above this client component.
     load();
   }, []);
 

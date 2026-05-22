@@ -60,6 +60,7 @@ export default function ModelDetailPage() {
 
   useEffect(() => {
     if (!envId) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- guard for a malformed URL; we render an error rather than crashing.
       setError("Missing envId");
       setIsLoading(false);
       return;
