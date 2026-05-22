@@ -23,6 +23,7 @@ import type {
   MLflowVersionsResponse,
   MLflowModelVersion,
   RevealAPIKeyResponse,
+  PendingApprovalsResponse,
 } from "./types";
 
 // Empty string → relative URLs → requests go through the ingress proxy.
@@ -228,4 +229,19 @@ export const mlflowApi = {
     apiFetch<{ version: MLflowModelVersion }>(
       `/api/v1/mlflow/registered-models/${encodeURIComponent(name)}/versions/${version}?project=${projectId}`
     ),
+};
+
+export const adminApi = {
+  listApprovals: () =>
+    apiFetch<PendingApprovalsResponse>("/api/v1/admin/operations"),
+  approve: (opId: string, note?: string) =>
+    apiFetch<{ operation: Operation }>(`/api/v1/admin/operations/${opId}/approve`, {
+      method: "POST",
+      body: { note: note ?? "" },
+    }),
+  reject: (opId: string, reason: string) =>
+    apiFetch<{ operation: Operation }>(`/api/v1/admin/operations/${opId}/reject`, {
+      method: "POST",
+      body: { reason },
+    }),
 };

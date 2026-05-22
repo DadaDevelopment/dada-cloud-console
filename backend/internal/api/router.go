@@ -91,7 +91,12 @@ func SetupRouter(pool *pgxpool.Pool, cfg *config.Config) *gin.Engine {
 			api.GET("/mlflow/registered-models/:name/versions", h.ListMLflowModelVersions)
 			api.GET("/mlflow/registered-models/:name/versions/:version", h.GetMLflowModelVersion)
 
-			// Inference proxy + admin approvals are added in later phases.
+			// Admin approvals (generic — first consumer is the GPU gate above).
+			api.GET("/admin/operations", h.ListAdminApprovals)
+			api.POST("/admin/operations/:opId/approve", h.ApproveOperation)
+			api.POST("/admin/operations/:opId/reject", h.RejectOperation)
+
+			// Inference proxy is added in phase 6.
 		}
 	}
 

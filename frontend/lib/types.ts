@@ -230,3 +230,13 @@ export interface RevealAPIKeyResponse {
   api_key: string;
   expires_at: string;
 }
+
+export interface PendingApproval {
+  operation: Operation;
+  project_name: string;
+  requested_by: string;
+}
+
+export interface PendingApprovalsResponse {
+  approvals: PendingApproval[];
+}
