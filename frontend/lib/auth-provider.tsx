@@ -37,7 +37,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   );
 
   useEffect(() => {
-    // Initial hydration from localStorage
+    // Initial hydration from localStorage. The state-from-storage pattern
+    // is exactly what the rule's storage-event branch is for; the initial
+    // read has to live in an effect because localStorage isn't available
+    // during SSR. This is intentional, not the cascading-render footgun
+    // the rule is guarding against.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setAuth(readAuthFromStorage());
 
     const handler = () => setAuth(readAuthFromStorage());
