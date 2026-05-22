@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useState, FormEvent } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { projectsApi, aiModelsApi, quotasApi } from "@/lib/api";
 import type {
@@ -103,6 +103,7 @@ export default function ModelsPage() {
   const params = useParams<{ projectId: string }>();
   const projectId = params.projectId;
   const router = useRouter();
+  const search = useSearchParams();
 
   const [environments, setEnvironments] = useState<Environment[]>([]);
   const [selectedEnvId, setSelectedEnvId] = useState<string>("");
@@ -116,6 +117,22 @@ export default function ModelsPage() {
   const [form, setForm] = useState<CreateForm>(defaultForm);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
+
+  // Prefill from MLflow registry when arriving via "Deploy this version" link.
+  useEffect(() => {
+    const fromMlflow = search.get("fromMlflow");
+    const fromMlflowVersion = search.get("fromMlflowVersion");
+    if (fromMlflow) {
+      setForm((prev) => ({
+        ...prev,
+        source: "mlflow",
+        mlflow_name: fromMlflow,
+        mlflow_version: fromMlflowVersion ?? "",
+        name: prev.name || fromMlflow.replace(/[^a-z0-9-]/g, "-").toLowerCase(),
+      }));
+      setIsModalOpen(true);
+    }
+  }, [search]);
 
   useEffect(() => {
     Promise.all([projectsApi.get(projectId), quotasApi.get(projectId).catch(() => null)])
