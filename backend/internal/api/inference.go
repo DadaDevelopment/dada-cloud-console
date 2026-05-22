@@ -56,6 +56,7 @@ func kserveURL(modelName, namespace, modelType string) string {
 // Authorisation is the caller's session JWT (project membership). The model's
 // own API key is server-side only and not exposed to browsers (NFR-002, D8).
 func (h *Handler) ProxyInference(c *gin.Context) {
+	startedAt := time.Now()
 	claims, ok := auth.GetClaims(c)
 	if !ok {
 		respondUnauthorized(c)
@@ -186,14 +187,25 @@ func (h *Handler) ProxyInference(c *gin.Context) {
 		h.bumpInferenceCounter(c, projectID, envID, name)
 	}
 
+	// One structured line per call so operators can see traffic without a
+	// metrics pipeline. Body sizes are bytes; latency is milliseconds.
+	log.Info().
+		Str("model", name).
+		Str("project", projectName).
+		Str("env", envName).
+		Str("model_type", modelType).
+		Int("upstream_status", resp.StatusCode).
+		Int("req_bytes", len(body)).
+		Int("resp_bytes", len(respBody)).
+		Int64("latency_ms", time.Since(startedAt).Milliseconds()).
+		Msg("inference proxy: request completed")
+
 	// Pass content-type through so the browser renders the response correctly.
 	if ct := resp.Header.Get("Content-Type"); ct != "" {
 		c.Writer.Header().Set("Content-Type", ct)
 	}
 	c.Writer.WriteHeader(resp.StatusCode)
 	_, _ = c.Writer.Write(respBody)
-	_ = projectName
-	_ = envName
 }
 
 // bumpInferenceCounter is fire-and-forget — counter inaccuracy is preferable
