@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/dada-tuda/console/gitops-agent/internal/db"
+	"github.com/dada-tuda/console/gitops-agent/internal/mlflow"
 	"github.com/dada-tuda/console/gitops-agent/internal/renderer"
 	"github.com/google/uuid"
 	"golang.org/x/crypto/argon2"
@@ -372,15 +373,18 @@ func generateAPIKey() ([]byte, string, error) {
 	return plain, prefix, nil
 }
 
-// resolveMLflowArtifact is a placeholder: the agent does not yet have an
-// MLflow client. Backend phase 2 prepared the proxy; once phase 6 wires the
-// inference proxy we will reuse the same client here. Until then, MLflow-
-// sourced operations fail loudly so they can be retried after the client lands.
+// resolveMLflowArtifact resolves an MLflow <name, version> pin to its source
+// URI (typically s3://...) by querying the registry. The MLflow client is nil
+// when MLFLOW_BASE_URL is unset; in that case we fail loudly so the operation
+// row carries an actionable error instead of silently rendering an empty URI.
 func (w *DBWatcher) resolveMLflowArtifact(ctx context.Context, name, version string) (string, error) {
 	if name == "" || version == "" {
 		return "", fmt.Errorf("mlflow name+version required")
 	}
-	return "", fmt.Errorf("mlflow resolution not yet wired in agent (phase 6)")
+	if w.mlflow == nil {
+		return "", fmt.Errorf("%w: MLFLOW_BASE_URL not configured on agent", mlflow.ErrUnreachable)
+	}
+	return w.mlflow.GetModelVersionSource(ctx, name, version)
 }
 
 func asString(v any) string {

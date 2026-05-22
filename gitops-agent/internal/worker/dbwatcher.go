@@ -12,6 +12,7 @@ import (
 	"github.com/dada-tuda/console/gitops-agent/internal/crypto"
 	"github.com/dada-tuda/console/gitops-agent/internal/db"
 	"github.com/dada-tuda/console/gitops-agent/internal/git"
+	"github.com/dada-tuda/console/gitops-agent/internal/mlflow"
 	"github.com/dada-tuda/console/gitops-agent/internal/renderer"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -23,6 +24,7 @@ type DBWatcher struct {
 	pool     *pgxpool.Pool
 	cfg      *config.Config
 	managers map[string]*git.Manager // keyed by repoURL
+	mlflow   *mlflow.Client          // nil when MLFLOW_BASE_URL is unset
 }
 
 func NewDBWatcher(pool *pgxpool.Pool, cfg *config.Config) *DBWatcher {
@@ -39,6 +41,7 @@ func NewDBWatcher(pool *pgxpool.Pool, cfg *config.Config) *DBWatcher {
 		managers: map[string]*git.Manager{
 			cfg.DefaultRepoURL: defaultMgr,
 		},
+		mlflow: mlflow.New(cfg.MLflowBaseURL, cfg.MLflowAuthHeader),
 	}
 }
 

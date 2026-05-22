@@ -32,6 +32,12 @@ type Config struct {
 
 	// Load-balancer IP written into PublicApi manifests.
 	ClusterLBIP string
+
+	// MLflow registry — used to resolve <name, version> → s3:// source URI
+	// when rendering AIModel manifests pinned to MLflow. Empty disables the
+	// resolver and any MLflow-pinned op fails with an actionable error.
+	MLflowBaseURL    string
+	MLflowAuthHeader string
 }
 
 func Load() (*Config, error) {
@@ -58,6 +64,8 @@ func Load() (*Config, error) {
 		WebhookPort:     getEnv("GITOPS_WEBHOOK_PORT", ""),
 		EncryptionKey:   getEnv("GITOPS_ENCRYPTION_KEY", ""),
 		ClusterLBIP:     getEnv("CLUSTER_LB_IP", "93.189.231.60"),
+		MLflowBaseURL:    getEnv("MLFLOW_BASE_URL", ""),
+		MLflowAuthHeader: getEnv("MLFLOW_AUTH_HEADER", ""),
 	}
 
 	if cfg.DatabaseURL == "" {
