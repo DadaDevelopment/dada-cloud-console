@@ -290,6 +290,56 @@ func (m *Manager) ReadFile(relativePath string) (string, error) {
 	return string(b), nil
 }
 
+// RemoveAndPush deletes one or more files (relative paths), commits, and pushes.
+// Missing files are skipped silently. Returns the new commit SHA, or "" if
+// nothing was actually removed.
+func (m *Manager) RemoveAndPush(relativePaths []string, commitMessage, authorName, authorEmail string) (string, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if _, err := m.pull(); err != nil {
+		return "", err
+	}
+	repo, err := gogit.PlainOpen(m.path)
+	if err != nil {
+		return "", fmt.Errorf("opening repo: %w", err)
+	}
+	wt, err := repo.Worktree()
+	if err != nil {
+		return "", err
+	}
+	removed := 0
+	for _, rel := range relativePaths {
+		abs := filepath.Join(m.path, rel)
+		if _, err := os.Stat(abs); os.IsNotExist(err) {
+			continue
+		}
+		if _, err := wt.Remove(rel); err != nil {
+			return "", fmt.Errorf("git rm %s: %w", rel, err)
+		}
+		removed++
+	}
+	if removed == 0 {
+		return "", nil
+	}
+	hash, err := wt.Commit(commitMessage, &gogit.CommitOptions{
+		Author: &object.Signature{Name: authorName, Email: authorEmail, When: time.Now()},
+	})
+	if err != nil {
+		return "", fmt.Errorf("git commit (remove): %w", err)
+	}
+	if err := repo.Push(&gogit.PushOptions{
+		Auth:       m.auth(),
+		RemoteName: "origin",
+		RefSpecs: []config.RefSpec{
+			config.RefSpec(fmt.Sprintf("refs/heads/%s:refs/heads/%s", m.cfg.Branch, m.cfg.Branch)),
+		},
+	}); err != nil {
+		return "", fmt.Errorf("git push (remove): %w", err)
+	}
+	return hash.String(), nil
+}
+
 // ReadFileAtCommit returns the content of a file at a specific commit SHA.
 func (m *Manager) ReadFileAtCommit(commitSHA, relativePath string) (string, error) {
 	m.mu.Lock()

@@ -137,6 +137,18 @@ func (w *DBWatcher) dispatch(ctx context.Context, op db.Operation) error {
 		return w.doDeployImageVersion(ctx, op)
 	case "CreatePublicApi":
 		return w.doCreatePublicApi(ctx, op)
+	case "CreateAIModel":
+		return w.doCreateAIModel(ctx, op)
+	case "UpdateAIModelArtifact":
+		return w.doUpdateAIModelArtifact(ctx, op)
+	case "SetCanaryTraffic":
+		return w.doSetCanaryTraffic(ctx, op)
+	case "PromoteAIModel":
+		return w.doPromoteAIModel(ctx, op)
+	case "DeleteAIModel":
+		return w.doDeleteAIModel(ctx, op)
+	case "PinAIModelMlflowVersion":
+		return w.doPinAIModelMlflowVersion(ctx, op)
 	default:
 		return fmt.Errorf("unknown action: %s", op.Action)
 	}
