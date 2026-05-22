@@ -1,4 +1,4 @@
-def GO_VERSION   = '1.22'
+def GO_VERSION   = '1.25'
 def NODE_VERSION = '20'
 
 def GO_BUILDER_IMAGE   = "golang:${GO_VERSION}-alpine"
@@ -236,6 +236,18 @@ spec:
                     }
                 }
 
+                runStage('GitOps-agent tests') {
+                    dir('gitops-agent') {
+                        sh 'go test ./... -count=1'
+                    }
+                }
+
+                runStage('GitOps-agent build') {
+                    dir('gitops-agent') {
+                        sh 'go build -buildvcs=false -ldflags="-s -w" -o bin/gitops-agent ./cmd/gitops-agent'
+                    }
+                }
+
                 runStage('Helm lint + render') {
                     sh """
                         set -eux
@@ -264,6 +276,8 @@ spec:
                             set -eux
                             node -e "const p=require('./package.json'); process.exit(p.scripts && p.scripts.typecheck ? 0 : 1)" \
                               && npm run typecheck || echo "No typecheck script — skip"
+                            node -e "const p=require('./package.json'); process.exit(p.scripts && p.scripts.lint ? 0 : 1)" \
+                              && npm run lint || echo "No lint script — skip"
                             npm run build
                         '''
                     }
