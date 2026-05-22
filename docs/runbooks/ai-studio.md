@@ -42,6 +42,7 @@ backend:
   env:
     AI_STUDIO_ENABLED: "true"          # kill-switch; "false" hides routes
     MLFLOW_BASE_URL: "http://mlflow.mlflow.svc.cluster.local:5000"
+    INFERENCE_MAX_BODY_BYTES: "10485760"  # 10 MiB; raise for vision/audio
   secret:
     MLFLOW_AUTH_HEADER: ""             # e.g. "Bearer …" if MLflow is auth'd
 ```
@@ -50,7 +51,9 @@ The backend handles both the registry proxy and the inference proxy.
 `AI_STUDIO_ENABLED=false` is a runtime kill-switch — the routes mount
 unconditionally but return 404 when this flag is off. Reach for it if a
 production model goes haywire and you need to lock the console down
-without rolling back the build.
+without rolling back the build. `INFERENCE_MAX_BODY_BYTES` caps both
+the request and the upstream response on the playground proxy; oversize
+payloads return 413 / 502 rather than buffering in memory.
 
 ### gitops-agent
 

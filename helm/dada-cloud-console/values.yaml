@@ -26,6 +26,9 @@ backend:
     # back to "paste artifactURI" in the deploy wizard.
     AI_STUDIO_ENABLED: "true"
     MLFLOW_BASE_URL: ""
+    # Inference proxy body cap (request + upstream response). Default 10MB.
+    # Raise if a model legitimately needs larger payloads (e.g. vision).
+    INFERENCE_MAX_BODY_BYTES: "10485760"
   existingSecret: ""
   secret:
     DB_URL: "postgres://dada:change-me@postgresql:5432/dada_console?sslmode=disable"

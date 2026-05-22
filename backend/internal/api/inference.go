@@ -122,11 +122,24 @@ func (h *Handler) ProxyInference(c *gin.Context) {
 		return
 	}
 
-	// Read the body once. KServe payloads are typically small JSON; for
-	// large multipart uploads (vision/audio) the proxy is the bottleneck
-	// regardless, and explicit buffering keeps the upstream request simple.
+	// Read the body once with a hard cap so a hostile client can't OOM the
+	// backend by streaming a giant payload through the playground. The cap
+	// is configurable (INFERENCE_MAX_BODY_BYTES, default 10MB). The same
+	// cap is applied to the upstream response below — if a model returns
+	// something larger we'd rather 502 than hold it in memory.
+	maxBytes := h.cfg.InferenceMaxBodyBytes
+	if maxBytes <= 0 {
+		maxBytes = 10 * 1024 * 1024
+	}
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxBytes)
 	body, err := io.ReadAll(c.Request.Body)
 	if err != nil {
+		var maxErr *http.MaxBytesError
+		if errors.As(err, &maxErr) {
+			respondError(c, http.StatusRequestEntityTooLarge,
+				fmt.Sprintf("request body exceeds %d bytes", maxBytes))
+			return
+		}
 		respondError(c, http.StatusBadRequest, "failed to read request body")
 		return
 	}
@@ -154,9 +167,15 @@ func (h *Handler) ProxyInference(c *gin.Context) {
 	}
 	defer resp.Body.Close()
 
-	respBody, err := io.ReadAll(resp.Body)
+	// Cap the upstream response too — same reasoning as the request cap.
+	respBody, err := io.ReadAll(io.LimitReader(resp.Body, maxBytes+1))
 	if err != nil {
 		respondError(c, http.StatusBadGateway, "failed to read upstream response")
+		return
+	}
+	if int64(len(respBody)) > maxBytes {
+		respondError(c, http.StatusBadGateway,
+			fmt.Sprintf("upstream response exceeds %d bytes", maxBytes))
 		return
 	}
 
