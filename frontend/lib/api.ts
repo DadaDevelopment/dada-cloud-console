@@ -162,7 +162,8 @@ export const endpointsApi = {
     ),
 };
 
-// AI Studio (v2). Routes only resolve when AI_STUDIO_ENABLED on the backend.
+// AI Studio (v1). Routes are mounted by default; AI_STUDIO_ENABLED=false
+// on the backend hides them again as a runtime kill-switch.
 export const aiModelsApi = {
   list: (projectId: string, envId: string) =>
     apiFetch<AIModelsResponse>(

@@ -14,9 +14,10 @@ type Config struct {
 	DevMode     bool
 	ClusterLBIP string
 
-	// AI Studio (v2). MLflowBaseURL empty disables the registry browser
-	// (the wizard falls back to "paste artifactURI"). AIStudioEnabled is
-	// the master feature flag; routes are hidden when false.
+	// AI Studio (v1, declared 2026-05-22). MLflowBaseURL empty disables the
+	// registry browser (the wizard falls back to "paste artifactURI").
+	// AI_STUDIO_ENABLED remains as a runtime kill-switch — set to "false" to
+	// hide the routes again if needed; default is enabled.
 	AIStudioEnabled  bool
 	MLflowBaseURL    string
 	MLflowAuthHeader string // optional, forwarded as-is on every request
@@ -32,7 +33,7 @@ func Load() (*Config, error) {
 		LogLevel:         getEnv("LOG_LEVEL", "info"),
 		DevMode:          getEnv("DEV_MODE", "false") == "true",
 		ClusterLBIP:      getEnv("CLUSTER_LB_IP", "93.189.231.60"),
-		AIStudioEnabled:  getEnv("AI_STUDIO_ENABLED", "false") == "true",
+		AIStudioEnabled:  getEnv("AI_STUDIO_ENABLED", "true") == "true",
 		MLflowBaseURL:    getEnv("MLFLOW_BASE_URL", ""),
 		MLflowAuthHeader: getEnv("MLFLOW_AUTH_HEADER", ""),
 	}
