@@ -21,10 +21,18 @@ backend:
     APP_ENV: production
     PORT: "8080"
     ARGO_CLUSTER_NAME: ""
+    # AI Studio (v1, default on). Set to "false" to hide all AI Studio
+    # routes as a runtime kill-switch. Leave MLFLOW_BASE_URL empty to fall
+    # back to "paste artifactURI" in the deploy wizard.
+    AI_STUDIO_ENABLED: "true"
+    MLFLOW_BASE_URL: ""
   existingSecret: ""
   secret:
     DB_URL: "postgres://dada:change-me@postgresql:5432/dada_console?sslmode=disable"
     JWT_SECRET: "change-me"
+    # Optional MLflow Authorization header value, forwarded as-is on every
+    # registry call. Empty when MLflow has no auth.
+    MLFLOW_AUTH_HEADER: ""
   persistence:
     enabled: true
     size: 5Gi
