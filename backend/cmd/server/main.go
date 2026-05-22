@@ -74,6 +74,29 @@ func main() {
 		}
 	}()
 
+	// Periodic cleanup of expired AI Studio API-key reveal rows. The rows
+	// hold plaintext keys for 15 min then become unrecoverable; the reveal
+	// endpoint deletes on consume but unconsumed rows just sit there as
+	// dead plaintext. A 1-minute sweep keeps the window tight.
+	cleanupCtx, cleanupCancel := context.WithCancel(context.Background())
+	defer cleanupCancel()
+	go func() {
+		ticker := time.NewTicker(1 * time.Minute)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-cleanupCtx.Done():
+				return
+			case <-ticker.C:
+				_, err := pool.Exec(cleanupCtx,
+					`DELETE FROM aimodel_api_key_reveals WHERE expires_at < NOW()`)
+				if err != nil && !errors.Is(err, context.Canceled) {
+					log.Warn().Err(err).Msg("aimodel reveal cleanup failed")
+				}
+			}
+		}
+	}()
+
 	<-quit
 	log.Info().Msg("shutting down server")
 
