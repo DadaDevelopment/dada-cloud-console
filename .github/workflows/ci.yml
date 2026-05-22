@@ -25,8 +25,12 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version-file: backend/go.mod
-          cache-dependency-path: backend/go.sum
+          # gitops-agent requires Go 1.25; pinning to its go.mod also satisfies
+          # backend (go 1.22). Keep this in sync if either module bumps.
+          go-version-file: gitops-agent/go.mod
+          cache-dependency-path: |
+            backend/go.sum
+            gitops-agent/go.sum
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -47,6 +51,14 @@ jobs:
       - name: Backend build
         working-directory: backend
         run: go build -buildvcs=false -ldflags="-s -w" -o bin/server ./cmd/server
+
+      - name: GitOps-agent tests
+        working-directory: gitops-agent
+        run: go test ./... -count=1
+
+      - name: GitOps-agent build
+        working-directory: gitops-agent
+        run: go build -buildvcs=false -ldflags="-s -w" -o bin/gitops-agent ./cmd/gitops-agent
 
       - name: Frontend install
         working-directory: frontend
