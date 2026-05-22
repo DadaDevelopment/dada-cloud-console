@@ -6,6 +6,7 @@ import { aiModelsApi } from "@/lib/api";
 import type { ResourceSnapshot, AIModelSummary, AIModelDetailResponse } from "@/lib/types";
 import { Modal } from "@/components/ui/modal";
 import { Spinner } from "@/components/ui/spinner";
+import { Playground } from "@/components/ai/playground";
 
 function PhaseBadge({ phase }: { phase?: string }) {
   const p = phase ?? "";
@@ -234,6 +235,24 @@ export default function ModelDetailPage() {
         {detail.api_key_prefix && (
           <Row label="API key prefix" value={`${detail.api_key_prefix}…`} mono />
         )}
+      </div>
+
+      <div className="mt-6 rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
+        <div className="mb-3 flex items-center justify-between">
+          <div>
+            <h2 className="text-sm font-semibold uppercase tracking-wide text-gray-500">Playground</h2>
+            <p className="text-xs text-gray-400">
+              Routed through the backend inference proxy. Calls count toward the advisory monthly budget.
+            </p>
+          </div>
+        </div>
+        <Playground
+          projectId={projectId}
+          envId={envId}
+          name={name}
+          modelType={s.model_type}
+          ready={(model.phase ?? "").toLowerCase() === "ready"}
+        />
       </div>
 
       <Modal

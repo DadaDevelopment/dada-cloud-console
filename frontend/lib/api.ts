@@ -245,3 +245,23 @@ export const adminApi = {
       body: { reason },
     }),
 };
+
+// Inference proxy is intentionally NOT in apiFetch (which forces JSON):
+// the playground needs to send multipart and receive arbitrary content types.
+// Returns the raw Response so callers can decide how to interpret the body.
+export async function callInference(
+  projectId: string,
+  envId: string,
+  name: string,
+  body: BodyInit,
+  contentType?: string,
+): Promise<Response> {
+  const token = typeof window !== "undefined" ? localStorage.getItem("dada_token") : null;
+  const headers: Record<string, string> = {};
+  if (token) headers["Authorization"] = `Bearer ${token}`;
+  if (contentType) headers["Content-Type"] = contentType;
+  return fetch(
+    `${API_BASE_URL}/api/v1/projects/${projectId}/environments/${envId}/models/${name}/infer`,
+    { method: "POST", headers, body },
+  );
+}
