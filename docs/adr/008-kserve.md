@@ -92,3 +92,9 @@ Negative:
 
 KServe becomes the serving runtime for the unified AI inference platform, with Crossplane as the platform engine and MLflow + S3 as the model artifact and registry backbone.
 
+## Operational reference
+
+For operator-facing setup (Helm wiring, per-project storage prefix,
+GPU approval gate, kill-switch, key rotation), see
+[`docs/runbooks/ai-studio.md`](../runbooks/ai-studio.md).
+
