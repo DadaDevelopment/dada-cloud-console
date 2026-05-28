@@ -109,6 +109,11 @@ export default function ProjectOverviewPage() {
                 }`}>
                   {env.type}
                 </span>
+                <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${
+                  env.runtime === "vm" ? "bg-amber-100 text-amber-700" : "bg-slate-100 text-slate-700"
+                }`}>
+                  {env.runtime === "vm" ? "VM" : "K8s"}
+                </span>
               </div>
             ))}
           </div>
@@ -116,7 +121,7 @@ export default function ProjectOverviewPage() {
       )}
 
       {/* Quick actions */}
-      <div className="mb-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="mb-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
         <Link
           href={`/projects/${projectId}/databases`}
           className="group flex items-center gap-4 rounded-xl border border-gray-200 bg-white p-5 shadow-sm hover:border-blue-200 hover:shadow-md transition-all"
@@ -159,6 +164,21 @@ export default function ProjectOverviewPage() {
           <div>
             <p className="text-sm font-semibold text-gray-900">AI Models</p>
             <p className="text-xs text-gray-400">KServe inference services</p>
+          </div>
+        </Link>
+
+        <Link
+          href={`/projects/${projectId}/app-servers`}
+          className="group flex items-center gap-4 rounded-xl border border-gray-200 bg-white p-5 shadow-sm hover:border-blue-200 hover:shadow-md transition-all"
+        >
+          <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-amber-100 text-amber-600 group-hover:bg-amber-600 group-hover:text-white transition-colors">
+            <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 15.75V8.25A2.25 2.25 0 015.25 6h13.5A2.25 2.25 0 0121 8.25v7.5A2.25 2.25 0 0118.75 18H5.25A2.25 2.25 0 013 15.75zM7 9h10M7 12h4" />
+            </svg>
+          </div>
+          <div>
+            <p className="text-sm font-semibold text-gray-900">App Servers</p>
+            <p className="text-xs text-gray-400">Provision and manage VM hosts</p>
           </div>
         </Link>
 

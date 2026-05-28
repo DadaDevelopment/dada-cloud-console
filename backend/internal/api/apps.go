@@ -11,6 +11,10 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
+func canCreateAppsInRuntime(runtime models.EnvironmentRuntime) bool {
+	return runtime == "" || runtime == models.EnvironmentRuntimeK8s
+}
+
 // ListApps returns all App resources in a project environment.
 func (h *Handler) ListApps(c *gin.Context) {
 	claims, ok := auth.GetClaims(c)
@@ -114,6 +118,22 @@ func (h *Handler) CreateApp(c *gin.Context) {
 	}
 	if !canWrite(role) {
 		respondForbidden(c)
+		return
+	}
+
+	var runtime models.EnvironmentRuntime
+	if err := h.pool.QueryRow(c.Request.Context(),
+		`SELECT runtime FROM environments WHERE id = $1 AND project_id = $2`,
+		envID, projectID,
+	).Scan(&runtime); err == pgx.ErrNoRows {
+		respondNotFound(c)
+		return
+	} else if err != nil {
+		respondError(c, http.StatusInternalServerError, "failed to load environment runtime")
+		return
+	}
+	if !canCreateAppsInRuntime(runtime) {
+		respondError(c, http.StatusConflict, "VM application deployments are not wired in the console yet; create the AppServer first and deploy through the VM track")
 		return
 	}
 

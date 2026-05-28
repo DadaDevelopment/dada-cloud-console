@@ -281,6 +281,34 @@ func (h *Handler) assertArtifactPrefix(c *gin.Context, projectID uuid.UUID, uri 
 	return nil
 }
 
+// quotaDecision is the outcome of the quota gate.
+type quotaDecision int
+
+const (
+	quotaAllow    quotaDecision = iota // Created
+	quotaApproval                      // WaitingForApproval (GPU + non-admin over quota)
+	quotaReject                        // 409 (admin over GPU quota, or any over CPU quota)
+)
+
+// decideQuota is the pure branching of resolveCreateStatus extracted for
+// testability. GPU + non-admin + over-quota lands in approval (D12); admins
+// get a hard 409 because there's no one above them to approve.
+func decideQuota(prof profiles.Profile, role models.MemberRole, cpuMax, gpuMax, cpuInUse, gpuInUse int) quotaDecision {
+	if prof.IsGPU() {
+		if gpuInUse >= gpuMax {
+			if role == models.MemberRolePlatformAdmin {
+				return quotaReject
+			}
+			return quotaApproval
+		}
+		return quotaAllow
+	}
+	if cpuInUse >= cpuMax {
+		return quotaReject
+	}
+	return quotaAllow
+}
+
 // resolveCreateStatus enforces quota + decides Created vs WaitingForApproval.
 // Returns status and writes a response on rejection.
 func (h *Handler) resolveCreateStatus(c *gin.Context, projectID uuid.UUID, prof profiles.Profile, role models.MemberRole) (models.OperationStatus, error) {
@@ -294,22 +322,19 @@ func (h *Handler) resolveCreateStatus(c *gin.Context, projectID uuid.UUID, prof 
 		respondError(c, http.StatusInternalServerError, "failed to count existing models")
 		return "", err
 	}
-	if prof.IsGPU() {
-		if gpuInUse >= gpuMax && role != models.MemberRolePlatformAdmin {
-			// gpuMax=0 + non-admin → approval, not rejection (D12).
-			return models.OperationStatusWaitingForApproval, nil
-		}
-		if gpuInUse >= gpuMax && role == models.MemberRolePlatformAdmin {
+	switch decideQuota(prof, role, cpuMax, gpuMax, cpuInUse, gpuInUse) {
+	case quotaApproval:
+		return models.OperationStatusWaitingForApproval, nil
+	case quotaReject:
+		if prof.IsGPU() {
 			respondError(c, http.StatusConflict, fmt.Sprintf("GPU model quota exceeded (%d/%d)", gpuInUse, gpuMax))
-			return "", errors.New("quota")
+		} else {
+			respondError(c, http.StatusConflict, fmt.Sprintf("CPU model quota exceeded (%d/%d)", cpuInUse, cpuMax))
 		}
+		return "", errors.New("quota")
+	default:
 		return models.OperationStatusCreated, nil
 	}
-	if cpuInUse >= cpuMax {
-		respondError(c, http.StatusConflict, fmt.Sprintf("CPU model quota exceeded (%d/%d)", cpuInUse, cpuMax))
-		return "", errors.New("quota")
-	}
-	return models.OperationStatusCreated, nil
 }
 
 func (h *Handler) fetchQuotaLimits(ctx context.Context, projectID uuid.UUID) (int, int, error) {

@@ -130,6 +130,7 @@ export default function AppsPage() {
   }
 
   const selectedEnv = environments.find((e) => e.id === selectedEnvId);
+  const isVMEnvironment = selectedEnv?.runtime === "vm";
 
   if (isLoadingEnvs) {
     return (
@@ -156,7 +157,7 @@ export default function AppsPage() {
         </div>
         <button
           onClick={() => setIsModalOpen(true)}
-          disabled={!selectedEnvId}
+          disabled={!selectedEnvId || isVMEnvironment}
           className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50 transition-colors"
         >
           <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -185,9 +186,23 @@ export default function AppsPage() {
                   : "text-gray-500 hover:text-gray-700"
               }`}
             >
-              {env.name}
+              <span>{env.name}</span>
+              <span className={`ml-2 rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${
+                env.runtime === "vm" ? "bg-amber-100 text-amber-700" : "bg-slate-100 text-slate-600"
+              }`}>
+                {env.runtime === "vm" ? "VM" : "K8s"}
+              </span>
             </button>
           ))}
+        </div>
+      )}
+
+      {isVMEnvironment && (
+        <div className="mb-6 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+          This environment runs on the VM track. AppServer lifecycle is available now; VM app deployment is intentionally blocked until the Portainer stack worker is wired.
+          <Link href={`/projects/${projectId}/app-servers`} className="ml-1 font-medium underline">
+            Manage AppServers
+          </Link>
         </div>
       )}
 
@@ -204,9 +219,10 @@ export default function AppsPage() {
           <p className="text-sm font-medium text-gray-500">No applications in {selectedEnv?.name ?? "this environment"}</p>
           <button
             onClick={() => setIsModalOpen(true)}
+            disabled={isVMEnvironment}
             className="mt-4 text-sm text-blue-600 hover:text-blue-700"
           >
-            Create your first application →
+            {isVMEnvironment ? "VM app deployment is not enabled yet" : "Create your first application →"}
           </button>
         </div>
       ) : (

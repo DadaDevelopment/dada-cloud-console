@@ -10,6 +10,9 @@ import type {
   DatabasesResponse,
   CreateDatabaseResponse,
   AppsResponse,
+  AppServersResponse,
+  AppServerResponse,
+  CreateAppServerResponse,
   CreateAppResponse,
   DeployImageResponse,
   EndpointsResponse,
@@ -133,6 +136,32 @@ export const appsApi = {
     apiFetch<DeployImageResponse>(
       `/api/v1/projects/${projectId}/environments/${envId}/apps/${appName}/image`,
       { method: "PATCH", body: { image } }
+    ),
+};
+
+export const appServersApi = {
+  list: (projectId: string) =>
+    apiFetch<AppServersResponse>(`/api/v1/projects/${projectId}/app-servers`),
+
+  get: (projectId: string, serverName: string) =>
+    apiFetch<AppServerResponse>(`/api/v1/projects/${projectId}/app-servers/${serverName}`),
+
+  create: (projectId: string, data: {
+    name: string;
+    flavor: string;
+    os_image: string;
+    region: string;
+    ssh_key_name: string;
+  }) =>
+    apiFetch<CreateAppServerResponse>(`/api/v1/projects/${projectId}/app-servers`, {
+      method: "POST",
+      body: data,
+    }),
+
+  remove: (projectId: string, serverName: string) =>
+    apiFetch<{ operation: Operation; message: string }>(
+      `/api/v1/projects/${projectId}/app-servers/${serverName}`,
+      { method: "DELETE" }
     ),
 };
 

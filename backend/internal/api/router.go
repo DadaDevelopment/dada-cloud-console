@@ -1,7 +1,9 @@
 package api
 
 import (
+	"context"
 	"net/http"
+	"time"
 
 	"github.com/dada-tuda/console/backend/internal/auth"
 	"github.com/dada-tuda/console/backend/internal/config"
@@ -101,10 +103,25 @@ func SetupRouter(pool *pgxpool.Pool, cfg *config.Config) *gin.Engine {
 		}
 	}
 
-	// Health check (unauthenticated) — /health for Helm probes, /healthz for k8s convention
-	healthHandler := func(c *gin.Context) { c.JSON(200, gin.H{"status": "ok"}) }
-	r.GET("/health", healthHandler)
-	r.GET("/healthz", healthHandler)
+	// Liveness — process is up. Cheap, no dependencies. K8s restarts the pod
+	// only on a hard hang (server can't even answer this).
+	liveness := func(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"status": "ok"}) }
+	r.GET("/health", liveness)
+	r.GET("/healthz", liveness)
+
+	// Readiness — process is up AND can talk to Postgres. K8s removes the pod
+	// from the Service endpoints when this fails, so a pod that's lost its DB
+	// stops receiving traffic instead of returning 500s. 1s timeout keeps the
+	// probe path fast even when the DB is degraded.
+	r.GET("/ready", func(c *gin.Context) {
+		ctx, cancel := context.WithTimeout(c.Request.Context(), 1*time.Second)
+		defer cancel()
+		if err := pool.Ping(ctx); err != nil {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"status": "db_unreachable", "error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"status": "ready"})
+	})
 
 	return r
 }

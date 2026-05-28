@@ -125,6 +125,15 @@ type createAppServerRequest struct {
 	SSHKeyName string `json:"ssh_key_name"`
 }
 
+func isValidAppServerRegion(region string) bool {
+	switch region {
+	case "ru1", "ru2", "kz1", "eu1":
+		return true
+	default:
+		return false
+	}
+}
+
 // CreateAppServer enqueues a CreateAppServer operation.
 func (h *Handler) CreateAppServer(c *gin.Context) {
 	claims, ok := auth.GetClaims(c)
@@ -165,8 +174,7 @@ func (h *Handler) CreateAppServer(c *gin.Context) {
 		respondError(c, http.StatusBadRequest, err.Error())
 		return
 	}
-	validRegions := map[string]bool{"ru1": true, "ru2": true, "kz1": true, "eu1": true}
-	if req.Region != "" && !validRegions[req.Region] {
+	if req.Region != "" && !isValidAppServerRegion(req.Region) {
 		respondError(c, http.StatusBadRequest, "region must be one of: ru1, ru2, kz1, eu1")
 		return
 	}

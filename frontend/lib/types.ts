@@ -30,7 +30,31 @@ export interface Environment {
   name: string;
   namespace: string;
   type: "dev" | "prod";
+  runtime: "k8s" | "vm";
+  app_server_id?: string;
   created_at: string;
+}
+
+export type AppServerStatus =
+  | "Provisioning"
+  | "WaitingForAgent"
+  | "Ready"
+  | "Deleting"
+  | "Deleted"
+  | "Failed";
+
+export interface AppServer {
+  id: string;
+  project_id: string;
+  name: string;
+  vm_ip?: string;
+  vm_provider_id?: string;
+  terraform_workspace?: string;
+  portainer_endpoint_id?: number;
+  status: AppServerStatus;
+  error_message?: string;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface Operation {
@@ -102,6 +126,19 @@ export interface AppSummary {
 
 export interface AppsResponse {
   apps: ResourceSnapshot[];
+}
+
+export interface AppServersResponse {
+  app_servers: AppServer[];
+}
+
+export interface AppServerResponse {
+  app_server: AppServer;
+}
+
+export interface CreateAppServerResponse {
+  operation: Operation;
+  message: string;
 }
 
 export interface CreateAppResponse {

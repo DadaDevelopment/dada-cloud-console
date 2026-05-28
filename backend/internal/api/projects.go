@@ -108,7 +108,7 @@ func (h *Handler) GetProject(c *gin.Context) {
 
 	// Fetch environments
 	envRows, err := h.pool.Query(c.Request.Context(),
-		`SELECT id, project_id, name, namespace, type, created_at, updated_at
+		`SELECT id, project_id, name, namespace, type, runtime, app_server_id, created_at, updated_at
 		 FROM environments WHERE project_id = $1 ORDER BY name`,
 		projectID,
 	)
@@ -121,7 +121,9 @@ func (h *Handler) GetProject(c *gin.Context) {
 	var envs []models.Environment
 	for envRows.Next() {
 		var e models.Environment
-		if err := envRows.Scan(&e.ID, &e.ProjectID, &e.Name, &e.Namespace, &e.Type, &e.CreatedAt, &e.UpdatedAt); err != nil {
+		if err := envRows.Scan(
+			&e.ID, &e.ProjectID, &e.Name, &e.Namespace, &e.Type, &e.Runtime, &e.AppServerID, &e.CreatedAt, &e.UpdatedAt,
+		); err != nil {
 			respondError(c, http.StatusInternalServerError, "failed to scan environment")
 			return
 		}
