@@ -58,6 +58,8 @@ func TestRenderApp(t *testing.T) {
 		Replicas:    2,
 		Profile:     "medium",
 		OperationID: "op-456",
+		HelmRepoURL:        "https://github.com/DADA-TUDA/argo-infra.git",
+		HelmTargetRevision: "main",
 	}
 	got, err := renderer.RenderApp(spec)
 	if err != nil {
@@ -72,7 +74,32 @@ func TestRenderApp(t *testing.T) {
 		"dada.io/project: beta",
 		"dada.io/environment: staging",
 		"dada.io/operation: op-456",
-		"project: beta",
+		"namespace: beta-staging",
+		"helm:",
+		"repoURL: https://github.com/DADA-TUDA/argo-infra.git",
+		"path: clusters/beget-prod/projects/beta/environments/staging/apps/api-service/chart",
+		"targetRevision: main",
+		"valueFile: clusters/beget-prod/projects/beta/environments/staging/apps/api-service/values.yaml",
+	}
+	for _, want := range wantSubstrings {
+		if !strings.Contains(got, want) {
+			t.Errorf("rendered App missing %q\nFull output:\n%s", want, got)
+		}
+	}
+}
+
+func TestRenderAppValues(t *testing.T) {
+	got, err := renderer.RenderAppValues(renderer.AppSpec{
+		Image:    "ghcr.io/dada-tuda/api-service:v1.2.3",
+		Port:     8080,
+		Replicas: 2,
+		Profile:  "medium",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	wantSubstrings := []string{
 		"image: ghcr.io/dada-tuda/api-service:v1.2.3",
 		"port: 8080",
 		"replicas: 2",
@@ -80,7 +107,7 @@ func TestRenderApp(t *testing.T) {
 	}
 	for _, want := range wantSubstrings {
 		if !strings.Contains(got, want) {
-			t.Errorf("rendered App missing %q\nFull output:\n%s", want, got)
+			t.Errorf("rendered App values missing %q\nFull output:\n%s", want, got)
 		}
 	}
 }
@@ -193,6 +220,16 @@ func TestGitPaths(t *testing.T) {
 			"AppGitPath",
 			renderer.AppGitPath("alpha", "prod", "api"),
 			"clusters/beget-prod/projects/alpha/environments/prod/apps/api/app.yaml",
+		},
+		{
+			"AppHelmChartGitPath",
+			renderer.AppHelmChartGitPath("alpha", "prod", "api"),
+			"clusters/beget-prod/projects/alpha/environments/prod/apps/api/chart",
+		},
+		{
+			"AppHelmValuesGitPath",
+			renderer.AppHelmValuesGitPath("alpha", "prod", "api"),
+			"clusters/beget-prod/projects/alpha/environments/prod/apps/api/values.yaml",
 		},
 		{
 			"PublicApiGitPath",

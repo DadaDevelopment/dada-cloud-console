@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"strings"
 	"text/template"
+
+	"gopkg.in/yaml.v3"
 )
 
 // ServiceDatabaseSpec holds parameters for a ServiceDatabase manifest.
@@ -55,18 +57,25 @@ func ServiceDatabaseGitPath(projectSlug, envSlug, appRef string) string {
 
 // AppSpec holds parameters for an App manifest.
 type AppSpec struct {
-	Name        string
-	Namespace   string
-	ProjectSlug string
-	EnvSlug     string
-	Image       string
-	Port        int
-	Replicas    int
-	Profile     string
-	OperationID string
+	Name               string
+	Namespace          string
+	ProjectSlug        string
+	EnvSlug            string
+	Image              string
+	Port               int
+	Replicas           int
+	Profile            string
+	OperationID        string
+	HelmRepoURL        string
+	HelmTargetRevision string
 }
 
-var appTmpl = template.Must(template.New("app").Parse(`apiVersion: platform.dada-tuda.ru/v1alpha1
+var appFuncMap = template.FuncMap{
+	"appHelmChartGitPath":  AppHelmChartGitPath,
+	"appHelmValuesGitPath": AppHelmValuesGitPath,
+}
+
+var appTmpl = template.Must(template.New("app").Funcs(appFuncMap).Parse(`apiVersion: platform.dada-tuda.ru/v1alpha1
 kind: App
 metadata:
   name: {{ .Name }}
@@ -76,11 +85,12 @@ metadata:
     dada.io/environment: {{ .EnvSlug }}
     dada.io/operation: {{ .OperationID }}
 spec:
-  project: {{ .ProjectSlug }}
-  image: {{ .Image }}
-  port: {{ .Port }}
-  replicas: {{ .Replicas }}
-  profile: {{ .Profile }}
+  namespace: {{ .Namespace }}
+  helm:
+    repoURL: {{ .HelmRepoURL }}
+    path: {{ appHelmChartGitPath .ProjectSlug .EnvSlug .Name }}
+    targetRevision: {{ .HelmTargetRevision }}
+    valueFile: {{ appHelmValuesGitPath .ProjectSlug .EnvSlug .Name }}
 `))
 
 func RenderApp(spec AppSpec) (string, error) {
@@ -91,9 +101,42 @@ func RenderApp(spec AppSpec) (string, error) {
 	return buf.String(), nil
 }
 
-func AppGitPath(projectSlug, envSlug, appName string) string {
-	return fmt.Sprintf("clusters/beget-prod/projects/%s/environments/%s/apps/%s/app.yaml",
+type AppValuesSpec struct {
+	Image    string `yaml:"image"`
+	Port     int    `yaml:"port"`
+	Replicas int    `yaml:"replicas"`
+	Profile  string `yaml:"profile"`
+}
+
+func RenderAppValues(spec AppSpec) (string, error) {
+	values := AppValuesSpec{
+		Image:    spec.Image,
+		Port:     spec.Port,
+		Replicas: spec.Replicas,
+		Profile:  spec.Profile,
+	}
+	b, err := yaml.Marshal(values)
+	if err != nil {
+		return "", fmt.Errorf("rendering App values: %w", err)
+	}
+	return string(b), nil
+}
+
+func AppBaseGitPath(projectSlug, envSlug, appName string) string {
+	return fmt.Sprintf("clusters/beget-prod/projects/%s/environments/%s/apps/%s",
 		projectSlug, envSlug, appName)
+}
+
+func AppGitPath(projectSlug, envSlug, appName string) string {
+	return AppBaseGitPath(projectSlug, envSlug, appName) + "/app.yaml"
+}
+
+func AppHelmChartGitPath(projectSlug, envSlug, appName string) string {
+	return AppBaseGitPath(projectSlug, envSlug, appName) + "/chart"
+}
+
+func AppHelmValuesGitPath(projectSlug, envSlug, appName string) string {
+	return AppBaseGitPath(projectSlug, envSlug, appName) + "/values.yaml"
 }
 
 // PublicApiSpec holds parameters for a PublicApi manifest.

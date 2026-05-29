@@ -197,20 +197,26 @@ func (w *DBWatcher) managerFor(ctx context.Context, projectID uuid.UUID) (*git.M
 }
 
 func (w *DBWatcher) commitAndRecord(ctx context.Context, op db.Operation, mgr *git.Manager, gitPath, content, commitMsg string) error {
-	sha, err := mgr.CommitAndPush(gitPath, content, commitMsg, w.cfg.BotName, w.cfg.BotEmail)
+	return w.commitFilesAndRecord(ctx, op, mgr, gitPath, []git.FileChange{
+		{Path: gitPath, Content: content},
+	}, commitMsg)
+}
+
+func (w *DBWatcher) commitFilesAndRecord(ctx context.Context, op db.Operation, mgr *git.Manager, primaryGitPath string, files []git.FileChange, commitMsg string) error {
+	sha, err := mgr.CommitFilesAndPush(files, commitMsg, w.cfg.BotName, w.cfg.BotEmail)
 	if err != nil {
 		return fmt.Errorf("git push: %w", err)
 	}
 
 	opID := op.ID
 	if err := db.InsertCommit(ctx, w.pool,
-		sha, mgr.RepoURL(), mgr.Branch(), gitPath, commitMsg,
+		sha, mgr.RepoURL(), mgr.Branch(), primaryGitPath, commitMsg,
 		w.cfg.BotName, w.cfg.BotEmail, &opID, "agent",
 	); err != nil {
 		log.Warn().Err(err).Msg("recording git_commit row")
 	}
 
-	return db.MarkCommitted(ctx, w.pool, op.ID, sha, gitPath)
+	return db.MarkCommitted(ctx, w.pool, op.ID, sha, primaryGitPath)
 }
 
 func (w *DBWatcher) doCreateServiceDatabase(ctx context.Context, op db.Operation) error {
@@ -277,7 +283,12 @@ func (w *DBWatcher) doCreateApp(ctx context.Context, op db.Operation) error {
 		return fmt.Errorf("project/env lookup: %w", err)
 	}
 
-	yaml, err := renderer.RenderApp(renderer.AppSpec{
+	mgr, err := w.managerFor(ctx, op.ProjectID)
+	if err != nil {
+		return err
+	}
+
+	appSpec := renderer.AppSpec{
 		Name:        p.Name,
 		Namespace:   envNamespace,
 		ProjectSlug: projectName,
@@ -287,22 +298,28 @@ func (w *DBWatcher) doCreateApp(ctx context.Context, op db.Operation) error {
 		Replicas:    p.Replicas,
 		Profile:     p.Profile,
 		OperationID: op.ID.String(),
-	})
+		HelmRepoURL:        mgr.RepoURL(),
+		HelmTargetRevision: mgr.Branch(),
+	}
+	yaml, err := renderer.RenderApp(appSpec)
 	if err != nil {
 		return err
 	}
-
-	mgr, err := w.managerFor(ctx, op.ProjectID)
+	valuesYAML, err := renderer.RenderAppValues(appSpec)
 	if err != nil {
 		return err
 	}
 
 	gitPath := renderer.AppGitPath(projectName, envName, p.Name)
+	valuesPath := renderer.AppHelmValuesGitPath(projectName, envName, p.Name)
 	commitMsg := fmt.Sprintf(
 		"[DADA Console] Create App %s\n\nOperation: %s\nProject: %s\nEnvironment: %s\n",
 		p.Name, op.ID, projectName, envName,
 	)
-	if err := w.commitAndRecord(ctx, op, mgr, gitPath, yaml, commitMsg); err != nil {
+	if err := w.commitFilesAndRecord(ctx, op, mgr, gitPath, []git.FileChange{
+		{Path: gitPath, Content: yaml},
+		{Path: valuesPath, Content: valuesYAML},
+	}, commitMsg); err != nil {
 		return err
 	}
 
@@ -354,7 +371,12 @@ func (w *DBWatcher) doDeployImageVersion(ctx context.Context, op db.Operation) e
 		profileVal = "small"
 	}
 
-	yaml, err := renderer.RenderApp(renderer.AppSpec{
+	mgr, err := w.managerFor(ctx, op.ProjectID)
+	if err != nil {
+		return err
+	}
+
+	appSpec := renderer.AppSpec{
 		Name:        p.AppName,
 		Namespace:   envNamespace,
 		ProjectSlug: projectName,
@@ -364,22 +386,28 @@ func (w *DBWatcher) doDeployImageVersion(ctx context.Context, op db.Operation) e
 		Replicas:    int(replicasVal),
 		Profile:     profileVal,
 		OperationID: op.ID.String(),
-	})
+		HelmRepoURL:        mgr.RepoURL(),
+		HelmTargetRevision: mgr.Branch(),
+	}
+	yaml, err := renderer.RenderApp(appSpec)
 	if err != nil {
 		return err
 	}
-
-	mgr, err := w.managerFor(ctx, op.ProjectID)
+	valuesYAML, err := renderer.RenderAppValues(appSpec)
 	if err != nil {
 		return err
 	}
 
 	gitPath := renderer.AppGitPath(projectName, envName, p.AppName)
+	valuesPath := renderer.AppHelmValuesGitPath(projectName, envName, p.AppName)
 	commitMsg := fmt.Sprintf(
 		"[DADA Console] Deploy image %s for app %s\n\nOperation: %s\nProject: %s\nEnvironment: %s\n",
 		p.Image, p.AppName, op.ID, projectName, envName,
 	)
-	if err := w.commitAndRecord(ctx, op, mgr, gitPath, yaml, commitMsg); err != nil {
+	if err := w.commitFilesAndRecord(ctx, op, mgr, gitPath, []git.FileChange{
+		{Path: gitPath, Content: yaml},
+		{Path: valuesPath, Content: valuesYAML},
+	}, commitMsg); err != nil {
 		return err
 	}
 

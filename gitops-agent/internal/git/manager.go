@@ -120,39 +120,44 @@ func (m *Manager) pull() (string, error) {
 	return head.Hash().String(), nil
 }
 
+// FileChange is one file write in a git commit.
+type FileChange struct {
+	Path    string
+	Content string
+}
+
 // CommitAndPush writes content to relativePath, commits, and pushes.
 // On push rejection (non-fast-forward) it pulls with rebase and retries once.
 // Returns the commit SHA.
 func (m *Manager) CommitAndPush(relativePath, content, commitMessage, authorName, authorEmail string) (string, error) {
+	return m.CommitFilesAndPush([]FileChange{{Path: relativePath, Content: content}}, commitMessage, authorName, authorEmail)
+}
+
+// CommitFilesAndPush writes one or more files, commits, and pushes.
+// On push rejection (non-fast-forward) it pulls with rebase and retries once.
+// Returns the commit SHA.
+func (m *Manager) CommitFilesAndPush(files []FileChange, commitMessage, authorName, authorEmail string) (string, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	sha, err := m.writeCommitPush(relativePath, content, commitMessage, authorName, authorEmail)
+	sha, err := m.writeFilesCommitPush(files, commitMessage, authorName, authorEmail)
 	if err == nil {
 		return sha, nil
 	}
 
 	// Non-fast-forward: rebase on top of remote and retry once.
 	if isNonFastForward(err) {
-		log.Warn().Str("path", relativePath).Msg("push rejected, rebasing and retrying")
+		log.Warn().Int("files", len(files)).Msg("push rejected, rebasing and retrying")
 		if _, pullErr := m.pull(); pullErr != nil {
 			return "", fmt.Errorf("rebase pull failed: %w (original push error: %w)", pullErr, err)
 		}
-		return m.writeCommitPush(relativePath, content, commitMessage, authorName, authorEmail)
+		return m.writeFilesCommitPush(files, commitMessage, authorName, authorEmail)
 	}
 
 	return "", err
 }
 
-func (m *Manager) writeCommitPush(relativePath, content, commitMessage, authorName, authorEmail string) (string, error) {
-	absPath := filepath.Join(m.path, relativePath)
-	if err := os.MkdirAll(filepath.Dir(absPath), 0o755); err != nil {
-		return "", fmt.Errorf("mkdir: %w", err)
-	}
-	if err := os.WriteFile(absPath, []byte(content), 0o644); err != nil {
-		return "", fmt.Errorf("writing file: %w", err)
-	}
-
+func (m *Manager) writeFilesCommitPush(files []FileChange, commitMessage, authorName, authorEmail string) (string, error) {
 	repo, err := gogit.PlainOpen(m.path)
 	if err != nil {
 		return "", fmt.Errorf("opening repo: %w", err)
@@ -162,8 +167,17 @@ func (m *Manager) writeCommitPush(relativePath, content, commitMessage, authorNa
 		return "", err
 	}
 
-	if _, err := wt.Add(relativePath); err != nil {
-		return "", fmt.Errorf("git add: %w", err)
+	for _, file := range files {
+		absPath := filepath.Join(m.path, file.Path)
+		if err := os.MkdirAll(filepath.Dir(absPath), 0o755); err != nil {
+			return "", fmt.Errorf("mkdir %s: %w", file.Path, err)
+		}
+		if err := os.WriteFile(absPath, []byte(file.Content), 0o644); err != nil {
+			return "", fmt.Errorf("writing file %s: %w", file.Path, err)
+		}
+		if _, err := wt.Add(file.Path); err != nil {
+			return "", fmt.Errorf("git add %s: %w", file.Path, err)
+		}
 	}
 
 	hash, err := wt.Commit(commitMessage, &gogit.CommitOptions{

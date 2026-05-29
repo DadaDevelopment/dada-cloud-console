@@ -1,3 +1,26 @@
+# 2026-05-29 GitOps app-local Helm layout
+
+Intent: Make gitops-agent expect each app directory to own its Argo App descriptor plus Helm chart and values, instead of pointing App manifests back to top-level `helm/*`.
+
+New canonical app tree:
+
+```text
+clusters/{cluster}/projects/{project}/environments/{env}/apps/{app}/
+  app.yaml
+  chart/
+  values.yaml
+```
+
+- [x] Inspect gitops-agent render/watch paths and local argo-infra layout evidence
+- [x] Update gitops-agent renderer helpers so App manifests point at app-local chart and values paths
+- [x] Update gitops-agent write path so generated app changes commit all required app-local files
+- [x] Update tests/docs/init snippets that encode the GitOps app structure
+- [x] Run real verification gates for the touched areas
+
+## Review
+
+`renderer.go`: добавлены `AppHelmChartGitPath`/`AppHelmValuesGitPath` (возвращают `…/apps/{app}/chart` и `…/apps/{app}/values.yaml`); шаблон `appTmpl` теперь использует эти хелперы через FuncMap. `dbwatcher.go`: `doCreateApp` и `doDeployImageVersion` коммитят `app.yaml` + `values.yaml` атомарно через `commitFilesAndRecord`. `renderer_test.go`: `TestRenderApp` проверяет app-local пути, `TestGitPaths` покрывает оба новых хелпера. Все тесты (`go test ./...`) зелёные.
+
 # Gitops Agent Project Sync
 
 - [x] Inspect the repo-local gitops-agent and current state-repo bootstrap behavior
