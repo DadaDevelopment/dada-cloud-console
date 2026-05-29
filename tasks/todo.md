@@ -1,3 +1,38 @@
+# 2026-05-29 values.yaml live editor (WS)
+
+Design doc: `tasks/design-values-editor.md`
+
+## gitops-agent
+- [x] `internal/wstoken/token.go` — Sign/Verify HMAC токен (Claims: project, env, app, exp)
+- [x] `internal/server/hub.go` — реестр WS-сессий, Notify по ключу project/env/app
+- [x] `internal/server/ws_handler.go` — `/ws/values`: verify token → read file → send content → save loop → commit → InsertCommit
+- [x] `internal/server/server.go` — добавить deps (pool, mgr, hub, tokenSecret), зарегистрировать `/ws/values`
+- [x] `internal/worker/gitwatcher.go` — после обработки коммита: notify hub по изменённым values.yaml
+- [x] `cmd/gitops-agent/main.go` — передать pool, mgr, hub в Server
+- [ ] Тесты: wstoken Sign/Verify, hub Notify, ws_handler (httptest)
+
+## console backend
+- [x] `internal/wstoken/token.go` — дублировать пакет (~20 строк)
+- [x] `internal/config/config.go` — GitopsAgentTokenSecret, GitopsAgentWSURL
+- [x] `internal/api/apps_values.go` — POST .../values-token: canWrite + Sign + return {token, ws_url}
+- [x] `internal/api/router.go` — зарегистрировать новый endpoint
+
+## frontend
+- [x] `npm install codemirror @codemirror/view @codemirror/state @codemirror/lang-yaml @codemirror/theme-one-dark`
+- [x] `components/ui/yaml-editor.tsx` — CodeMirror controlled component
+- [x] `lib/api.ts` — `valuesApi.getToken(projectId, envId, appName)`
+- [x] `app/(console)/projects/[projectId]/apps/[appName]/values/page.tsx` — вкладка с WS-клиентом, редактором, Cmd+S, статус-индикатором
+- [x] Добавить ссылку на вкладку Values в навигацию страницы приложения
+
+## verification
+- [x] `go test ./...` в gitops-agent — все зелёные
+- [x] `go test ./...` в backend — все зелёные
+- [x] `npm run build` во frontend — success, все 15 роутов
+- [ ] E2E smoke: открыть вкладку → загрузился YAML → сохранить → тост committed
+
+## Review
+Три компонента реализованы и собираются без ошибок. Единственное что осталось — E2E smoke test в живом окружении и (опционально) unit-тесты wstoken/hub.
+
 # 2026-05-29 GitOps app-local Helm layout
 
 Intent: Make gitops-agent expect each app directory to own its Argo App descriptor plus Helm chart and values, instead of pointing App manifests back to top-level `helm/*`.

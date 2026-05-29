@@ -20,9 +20,18 @@ import (
 // Capture groups: 1=project, 2=env, 3=app
 var appPathRe = regexp.MustCompile(`^clusters/[^/]+/projects/([^/]+)/environments/([^/]+)/apps/([^/]+)/app\.yaml$`)
 
+// valuesPathRe matches clusters/<cluster>/projects/<project>/environments/<env>/apps/<app>/values.yaml
+// Capture groups: 1=project, 2=env, 3=app
+var valuesPathRe = regexp.MustCompile(`^clusters/[^/]+/projects/([^/]+)/environments/([^/]+)/apps/([^/]+)/values\.yaml$`)
+
 // projectPathRe matches clusters/<cluster>/projects/<project>/project.yaml.
 // Capture group 1 is the project slug.
 var projectPathRe = regexp.MustCompile(`^clusters/[^/]+/projects/([^/]+)/project\.yaml$`)
+
+// ValuesNotifier is implemented by server.Hub to push live file updates to WS clients.
+type ValuesNotifier interface {
+	Notify(project, env, app, yaml string)
+}
 
 type envManifest struct {
 	Name      string `yaml:"name"`
@@ -44,6 +53,8 @@ type GitWatcher struct {
 	pool     *pgxpool.Pool
 	cfg      *config.Config
 	managers map[string]*git.Manager
+	// notifier receives live values.yaml updates (may be nil — disabled when no WS server).
+	notifier ValuesNotifier
 }
 
 func NewGitWatcher(pool *pgxpool.Pool, cfg *config.Config, defaultMgr *git.Manager) *GitWatcher {
@@ -54,6 +65,12 @@ func NewGitWatcher(pool *pgxpool.Pool, cfg *config.Config, defaultMgr *git.Manag
 			cfg.DefaultRepoURL: defaultMgr,
 		},
 	}
+}
+
+// WithValuesNotifier attaches a hub so changes to values.yaml are pushed to
+// any open WS editor sessions after each git pull.
+func (w *GitWatcher) WithValuesNotifier(n ValuesNotifier) {
+	w.notifier = n
 }
 
 func (w *GitWatcher) Start(ctx context.Context) {
@@ -153,13 +170,29 @@ func (w *GitWatcher) processCommit(ctx context.Context, mgr *git.Manager, c git.
 			w.syncProjectFile(ctx, mgr, filePath, m[1], c)
 			continue
 		}
-		m := appPathRe.FindStringSubmatch(filePath)
-		if m == nil {
+		if m := appPathRe.FindStringSubmatch(filePath); m != nil {
+			w.syncAppFile(ctx, mgr, filePath, m[1], m[2], m[3], c)
 			continue
 		}
-		projectSlug, envSlug, appName := m[1], m[2], m[3]
-		w.syncAppFile(ctx, mgr, filePath, projectSlug, envSlug, appName, c)
+		if m := valuesPathRe.FindStringSubmatch(filePath); m != nil {
+			w.notifyValuesChange(mgr, filePath, m[1], m[2], m[3])
+		}
 	}
+}
+
+// notifyValuesChange reads the current values.yaml and pushes it to any open
+// WS editor sessions for that app. Runs best-effort; errors are logged only.
+func (w *GitWatcher) notifyValuesChange(mgr *git.Manager, filePath, project, env, app string) {
+	if w.notifier == nil {
+		return
+	}
+	content, err := mgr.ReadFile(filePath)
+	if err != nil {
+		log.Warn().Err(err).Str("path", filePath).Msg("git-watcher: read values for ws notify")
+		return
+	}
+	w.notifier.Notify(project, env, app, content)
+	log.Debug().Str("app", app).Msg("git-watcher: notified ws clients of values change")
 }
 
 func (w *GitWatcher) syncProjectFile(ctx context.Context, mgr *git.Manager, filePath, projectSlug string, c git.Commit) {

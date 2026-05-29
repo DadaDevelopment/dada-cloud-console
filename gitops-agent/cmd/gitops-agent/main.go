@@ -54,8 +54,16 @@ func main() {
 	go gitw.Start(ctx)
 
 	if cfg.WebhookPort != "" {
-		webhookSecret := ""
-		srv := server.New(":"+cfg.WebhookPort, webhookSecret, gitw)
+		hub := server.NewHub()
+		gitw.WithValuesNotifier(hub)
+
+		srv := server.New(":"+cfg.WebhookPort, "", gitw, &server.ServerOptions{
+			Pool:        pool,
+			Manager:     defaultMgr,
+			Hub:         hub,
+			TokenSecret: cfg.ValuesTokenSecret,
+			Config:      cfg,
+		})
 		go func() {
 			if err := srv.Start(ctx); err != nil {
 				log.Error().Err(err).Msg("webhook server error")

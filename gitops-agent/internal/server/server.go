@@ -12,6 +12,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/dada-tuda/console/gitops-agent/internal/config"
+	"github.com/dada-tuda/console/gitops-agent/internal/git"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rs/zerolog/log"
 )
 
@@ -20,15 +23,38 @@ type GitHookHandler interface {
 	TriggerNow(ctx context.Context)
 }
 
-// Server handles HTTP for /healthz and /webhook/github.
+// Server handles HTTP for /healthz, /webhook/github, and /ws/values.
 type Server struct {
-	addr    string
-	secret  string
-	handler GitHookHandler
+	addr        string
+	secret      string
+	handler     GitHookHandler
+	// Values editor dependencies (optional — nil disables /ws/values).
+	pool        *pgxpool.Pool
+	mgr         *git.Manager
+	hub         *Hub
+	tokenSecret string
+	cfg         *config.Config
 }
 
-func New(addr, webhookSecret string, handler GitHookHandler) *Server {
-	return &Server{addr: addr, secret: webhookSecret, handler: handler}
+// ServerOptions carries optional dependencies for the values WS editor.
+type ServerOptions struct {
+	Pool        *pgxpool.Pool
+	Manager     *git.Manager
+	Hub         *Hub
+	TokenSecret string
+	Config      *config.Config
+}
+
+func New(addr, webhookSecret string, handler GitHookHandler, opts *ServerOptions) *Server {
+	s := &Server{addr: addr, secret: webhookSecret, handler: handler}
+	if opts != nil {
+		s.pool = opts.Pool
+		s.mgr = opts.Manager
+		s.hub = opts.Hub
+		s.tokenSecret = opts.TokenSecret
+		s.cfg = opts.Config
+	}
+	return s
 }
 
 func (s *Server) Start(ctx context.Context) error {
@@ -38,6 +64,12 @@ func (s *Server) Start(ctx context.Context) error {
 		_, _ = w.Write([]byte("ok"))
 	})
 	mux.HandleFunc("/webhook/github", s.githubWebhook)
+
+	// Values editor WebSocket — only active when all deps are wired.
+	if s.mgr != nil && s.hub != nil && s.tokenSecret != "" {
+		mux.HandleFunc("/ws/values", s.handleValuesWS)
+		log.Info().Msg("ws/values endpoint enabled")
+	}
 
 	srv := &http.Server{
 		Addr:         s.addr,

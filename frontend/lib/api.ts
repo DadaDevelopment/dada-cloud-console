@@ -191,6 +191,15 @@ export const endpointsApi = {
     ),
 };
 
+// Values editor — issues a short-lived WS delegate token from the backend.
+export const valuesApi = {
+  getToken: (projectId: string, envId: string, appName: string) =>
+    apiFetch<{ token: string; ws_url: string }>(
+      `/api/v1/projects/${projectId}/environments/${envId}/apps/${appName}/values-token`,
+      { method: "POST" }
+    ),
+};
+
 // AI Studio (v1). Routes are mounted by default; AI_STUDIO_ENABLED=false
 // on the backend hides them again as a runtime kill-switch.
 export const aiModelsApi = {

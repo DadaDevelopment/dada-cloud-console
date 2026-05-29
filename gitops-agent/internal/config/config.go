@@ -38,6 +38,10 @@ type Config struct {
 	// resolver and any MLflow-pinned op fails with an actionable error.
 	MLflowBaseURL    string
 	MLflowAuthHeader string
+
+	// Values editor WebSocket. GITOPS_VALUES_TOKEN_SECRET must match the
+	// GITOPS_AGENT_TOKEN_SECRET in the console backend. Empty disables /ws/values.
+	ValuesTokenSecret string
 }
 
 func Load() (*Config, error) {
@@ -64,8 +68,9 @@ func Load() (*Config, error) {
 		WebhookPort:     getEnv("GITOPS_WEBHOOK_PORT", ""),
 		EncryptionKey:   getEnv("GITOPS_ENCRYPTION_KEY", ""),
 		ClusterLBIP:     getEnv("CLUSTER_LB_IP", "93.189.231.60"),
-		MLflowBaseURL:    getEnv("MLFLOW_BASE_URL", ""),
-		MLflowAuthHeader: getEnv("MLFLOW_AUTH_HEADER", ""),
+		MLflowBaseURL:     getEnv("MLFLOW_BASE_URL", ""),
+		MLflowAuthHeader:  getEnv("MLFLOW_AUTH_HEADER", ""),
+		ValuesTokenSecret: getEnv("GITOPS_VALUES_TOKEN_SECRET", ""),
 	}
 
 	if cfg.DatabaseURL == "" {
