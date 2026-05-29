@@ -1,0 +1,18 @@
+{{- if and .Values.gitopsAgent.enabled .Values.gitopsAgent.webhookPort }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "dada-cloud-console.fullname" . }}-gitops-agent
+  labels:
+    {{- include "dada-cloud-console.labels" . | nindent 4 }}
+    app.kubernetes.io/component: gitops-agent
+spec:
+  type: ClusterIP
+  ports:
+    - name: webhook
+      port: {{ .Values.gitopsAgent.webhookPort }}
+      targetPort: webhook
+  selector:
+    {{- include "dada-cloud-console.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: gitops-agent
+{{- end }}

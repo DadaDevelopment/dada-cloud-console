@@ -7,6 +7,10 @@ metadata:
     {{- include "dada-cloud-console.labels" . | nindent 4 }}
   annotations:
     nginx.ingress.kubernetes.io/proxy-body-size: "10m"
+    # WebSocket support for the values editor (/ws/values).
+    # Increases idle-connection timeout so long-lived WS sessions are not killed.
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
     {{- range $key, $value := .Values.ingress.annotations }}
     {{ $key }}: {{ $value | quote }}
     {{- end }}
@@ -43,6 +47,16 @@ spec:
                 name: {{ include "dada-cloud-console.fullname" . }}-backend
                 port:
                   number: {{ .Values.backend.service.port }}
+          {{- if and .Values.gitopsAgent.enabled .Values.gitopsAgent.webhookPort }}
+          # WebSocket values editor — must come before the catch-all "/" rule.
+          - path: /ws
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "dada-cloud-console.fullname" . }}-gitops-agent
+                port:
+                  number: {{ .Values.gitopsAgent.webhookPort }}
+          {{- end }}
           - path: /
             pathType: Prefix
             backend:

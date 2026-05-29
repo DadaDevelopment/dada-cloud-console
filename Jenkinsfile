@@ -256,6 +256,8 @@ spec:
                           --namespace devops-tools \
                           --set backend.image.tag=${resolvedTag} \
                           --set frontend.image.tag=${resolvedTag} \
+                          --set gitopsAgent.image.tag=${resolvedTag} \
+                          --set ingress.host=console.dada-tuda.ru \
                           > /tmp/dada-cloud-console-rendered.yaml
                         echo "Rendered \$(wc -l < /tmp/dada-cloud-console-rendered.yaml) lines"
                     """

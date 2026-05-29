@@ -11,3 +11,9 @@ data:
 {{- range $key, $value := .Values.frontend.env }}
   {{ $key }}: {{ $value | quote }}
 {{- end }}
+  {{- /* Auto-derive GITOPS_AGENT_WS_URL from ingress.host unless explicitly set */}}
+  {{- if and .Values.ingress.enabled .Values.gitopsAgent.enabled .Values.gitopsAgent.webhookPort }}
+  {{- if not (hasKey .Values.backend.env "GITOPS_AGENT_WS_URL") }}
+  GITOPS_AGENT_WS_URL: {{ printf "wss://%s" .Values.ingress.host | quote }}
+  {{- end }}
+  {{- end }}
