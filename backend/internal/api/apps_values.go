@@ -19,7 +19,7 @@ import (
 // Returns { token, ws_url } on success.
 // Returns 503 when the values editor is not configured (missing env vars).
 func (h *Handler) GetValuesToken(c *gin.Context) {
-	if h.cfg.GitopsAgentTokenSecret == "" || h.cfg.GitopsAgentWSURL == "" {
+	if h.cfg.GitopsValuesTokenSecret == "" || h.cfg.GitopsAgentWSURL == "" {
 		respondError(c, http.StatusServiceUnavailable, "values editor not configured")
 		return
 	}
@@ -73,7 +73,7 @@ func (h *Handler) GetValuesToken(c *gin.Context) {
 		return
 	}
 
-	token, err := wstoken.Sign(h.cfg.GitopsAgentTokenSecret, wstoken.Claims{
+	token, err := wstoken.Sign(h.cfg.GitopsValuesTokenSecret, wstoken.Claims{
 		Project: projectSlug,
 		Env:     envSlug,
 		App:     appName,

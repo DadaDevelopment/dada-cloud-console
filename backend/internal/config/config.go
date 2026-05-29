@@ -29,11 +29,10 @@ type Config struct {
 	// INFERENCE_MAX_BODY_BYTES if a model legitimately needs larger inputs.
 	InferenceMaxBodyBytes int64
 
-	// Values editor WebSocket. Both values must be set to enable the
-	// /values-token endpoint. GITOPS_AGENT_TOKEN_SECRET must match
-	// GITOPS_VALUES_TOKEN_SECRET in the gitops-agent.
-	GitopsAgentTokenSecret string // GITOPS_AGENT_TOKEN_SECRET
-	GitopsAgentWSURL       string // GITOPS_AGENT_WS_URL  (public WS base, e.g. wss://gitops.example.com)
+	// Values editor WebSocket. Both values must be set to enable the /values-token
+	// endpoint. Same env var name in both backend and gitops-agent: GITOPS_VALUES_TOKEN_SECRET.
+	GitopsValuesTokenSecret string // GITOPS_VALUES_TOKEN_SECRET
+	GitopsAgentWSURL        string // GITOPS_AGENT_WS_URL  (public WS base, e.g. wss://gitops.example.com)
 }
 
 // Load reads configuration from environment variables.
@@ -50,8 +49,8 @@ func Load() (*Config, error) {
 		MLflowBaseURL:         getEnv("MLFLOW_BASE_URL", ""),
 		MLflowAuthHeader:      getEnv("MLFLOW_AUTH_HEADER", ""),
 		InferenceMaxBodyBytes:  getEnvInt64("INFERENCE_MAX_BODY_BYTES", 10*1024*1024),
-		GitopsAgentTokenSecret: getEnv("GITOPS_AGENT_TOKEN_SECRET", ""),
-		GitopsAgentWSURL:       getEnv("GITOPS_AGENT_WS_URL", ""),
+		GitopsValuesTokenSecret: getEnv("GITOPS_VALUES_TOKEN_SECRET", ""),
+		GitopsAgentWSURL:        getEnv("GITOPS_AGENT_WS_URL", ""),
 	}
 
 	if cfg.DBURL == "" {
