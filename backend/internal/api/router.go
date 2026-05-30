@@ -47,6 +47,9 @@ func SetupRouter(pool *pgxpool.Pool, cfg *config.Config) *gin.Engine {
 		api.GET("/projects", h.ListProjects)
 		api.GET("/projects/:projectId", h.GetProject)
 
+		// Namespace policies (project settings — LimitRange + ResourceQuota)
+		api.PUT("/projects/:projectId/environments/:envId/namespace-policy", h.SetNamespacePolicy)
+
 		// Databases (ServiceDatabase CRD)
 		api.GET("/projects/:projectId/environments/:envId/databases", h.ListDatabases)
 		api.POST("/projects/:projectId/environments/:envId/databases", h.CreateServiceDatabase)

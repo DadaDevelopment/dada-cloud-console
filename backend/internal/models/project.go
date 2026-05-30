@@ -38,13 +38,15 @@ const (
 
 // Environment represents a deployment environment within a project (e.g. dev, prod).
 type Environment struct {
-	ID          uuid.UUID          `json:"id"                      db:"id"`
-	ProjectID   uuid.UUID          `json:"project_id"              db:"project_id"`
-	Name        string             `json:"name"                    db:"name"`      // dev, prod
-	Namespace   string             `json:"namespace"               db:"namespace"` // k8s namespace: internal-prod
-	Type        EnvironmentType    `json:"type"                    db:"type"`
-	Runtime     EnvironmentRuntime `json:"runtime"                 db:"runtime"`
-	AppServerID *uuid.UUID         `json:"app_server_id,omitempty" db:"app_server_id"`
-	CreatedAt   time.Time          `json:"created_at"              db:"created_at"`
-	UpdatedAt   time.Time          `json:"updated_at"              db:"updated_at"`
+	ID            uuid.UUID          `json:"id"                      db:"id"`
+	ProjectID     uuid.UUID          `json:"project_id"              db:"project_id"`
+	Name          string             `json:"name"                    db:"name"`      // dev, prod
+	Namespace     string             `json:"namespace"               db:"namespace"` // k8s namespace: internal-prod
+	Type          EnvironmentType    `json:"type"                    db:"type"`
+	Runtime       EnvironmentRuntime `json:"runtime"                 db:"runtime"`
+	AppServerID   *uuid.UUID         `json:"app_server_id,omitempty" db:"app_server_id"`
+	LimitRange    json.RawMessage    `json:"limit_range"             db:"limit_range"`
+	ResourceQuota json.RawMessage    `json:"resource_quota"          db:"resource_quota"`
+	CreatedAt     time.Time          `json:"created_at"              db:"created_at"`
+	UpdatedAt     time.Time          `json:"updated_at"              db:"updated_at"`
 }

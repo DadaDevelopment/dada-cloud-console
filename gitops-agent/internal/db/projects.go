@@ -95,6 +95,28 @@ func AddPlatformAdminsToProject(ctx context.Context, pool *pgxpool.Pool, project
 	return nil
 }
 
+// UpsertEnvironmentPolicy updates limit_range and resource_quota for the
+// environment identified by its k8s namespace. No-ops if namespace is unknown.
+func UpsertEnvironmentPolicy(ctx context.Context, pool *pgxpool.Pool, namespace string, limitRange, resourceQuota json.RawMessage) error {
+	if limitRange == nil {
+		limitRange = json.RawMessage(`{}`)
+	}
+	if resourceQuota == nil {
+		resourceQuota = json.RawMessage(`{}`)
+	}
+	_, err := pool.Exec(ctx, `
+		UPDATE environments
+		SET limit_range    = $2,
+		    resource_quota = $3,
+		    updated_at     = NOW()
+		WHERE namespace = $1
+	`, namespace, limitRange, resourceQuota)
+	if err != nil {
+		return fmt.Errorf("upsert environment policy for namespace %s: %w", namespace, err)
+	}
+	return nil
+}
+
 // UpsertEnvironment creates or updates an environment for the given project.
 func UpsertEnvironment(ctx context.Context, pool *pgxpool.Pool, projectName, envName, namespace, envType string) error {
 	if envType == "" {

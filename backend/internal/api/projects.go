@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/json"
 	"net/http"
 
 	"github.com/dada-tuda/console/backend/internal/auth"
@@ -108,7 +109,7 @@ func (h *Handler) GetProject(c *gin.Context) {
 
 	// Fetch environments
 	envRows, err := h.pool.Query(c.Request.Context(),
-		`SELECT id, project_id, name, namespace, type, runtime, app_server_id, created_at, updated_at
+		`SELECT id, project_id, name, namespace, type, runtime, app_server_id, limit_range, resource_quota, created_at, updated_at
 		 FROM environments WHERE project_id = $1 ORDER BY name`,
 		projectID,
 	)
@@ -122,7 +123,8 @@ func (h *Handler) GetProject(c *gin.Context) {
 	for envRows.Next() {
 		var e models.Environment
 		if err := envRows.Scan(
-			&e.ID, &e.ProjectID, &e.Name, &e.Namespace, &e.Type, &e.Runtime, &e.AppServerID, &e.CreatedAt, &e.UpdatedAt,
+			&e.ID, &e.ProjectID, &e.Name, &e.Namespace, &e.Type, &e.Runtime, &e.AppServerID,
+			&e.LimitRange, &e.ResourceQuota, &e.CreatedAt, &e.UpdatedAt,
 		); err != nil {
 			respondError(c, http.StatusInternalServerError, "failed to scan environment")
 			return
@@ -200,4 +202,64 @@ func (h *Handler) GetProjectOperations(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"operations": ops})
+}
+
+// SetNamespacePolicy creates a SetNamespacePolicy operation that instructs the
+// gitops-agent to write clusters/beget-prod/namespace-policies/<namespace>.yaml.
+func (h *Handler) SetNamespacePolicy(c *gin.Context) {
+	claims, ok := auth.GetClaims(c)
+	if !ok {
+		respondUnauthorized(c)
+		return
+	}
+
+	projectID, err := uuid.Parse(c.Param("projectId"))
+	if err != nil {
+		respondNotFound(c)
+		return
+	}
+	envID, err := uuid.Parse(c.Param("envId"))
+	if err != nil {
+		respondNotFound(c)
+		return
+	}
+
+	role, err := h.getUserProjectRole(c.Request.Context(), claims.UserID, projectID)
+	if err == pgx.ErrNoRows {
+		respondNotFound(c)
+		return
+	}
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, "failed to check project membership")
+		return
+	}
+	if role != models.MemberRolePlatformAdmin && role != models.MemberRoleClientAdmin {
+		respondForbidden(c)
+		return
+	}
+
+	var body struct {
+		LimitRange    json.RawMessage `json:"limit_range"`
+		ResourceQuota json.RawMessage `json:"resource_quota"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil {
+		respondError(c, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	payload, _ := json.Marshal(map[string]json.RawMessage{
+		"limit_range":    body.LimitRange,
+		"resource_quota": body.ResourceQuota,
+	})
+
+	opID := uuid.New()
+	if _, err := h.pool.Exec(c.Request.Context(), `
+		INSERT INTO operations (id, actor_id, project_id, environment_id, action, resource_kind, resource_name, status, payload)
+		VALUES ($1, $2, $3, $4, 'SetNamespacePolicy', 'NamespacePolicy', 'namespace-policy', 'pending', $5)
+	`, opID, claims.UserID, projectID, envID, payload); err != nil {
+		respondError(c, http.StatusInternalServerError, "failed to create operation")
+		return
+	}
+
+	c.JSON(http.StatusAccepted, gin.H{"operation_id": opID})
 }
