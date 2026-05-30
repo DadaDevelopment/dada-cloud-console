@@ -152,6 +152,8 @@ func (w *DBWatcher) dispatch(ctx context.Context, op db.Operation) error {
 		return w.doDeleteAIModel(ctx, op)
 	case "PinAIModelMlflowVersion":
 		return w.doPinAIModelMlflowVersion(ctx, op)
+	case "SetNamespacePolicy":
+		return w.doSetNamespacePolicy(ctx, op)
 	default:
 		return fmt.Errorf("unknown action: %s", op.Action)
 	}
@@ -219,6 +221,42 @@ func (w *DBWatcher) commitFilesAndRecord(ctx context.Context, op db.Operation, m
 	return db.MarkCommitted(ctx, w.pool, op.ID, sha, primaryGitPath)
 }
 
+// ensureAppExists returns the FileChanges needed to create the owning app's
+// application.yaml + values.yaml when they are not yet present in git. When the
+// app already exists — whether a bare chart-owner or a real workload — it returns
+// nil so the existing definition is left untouched. Child resources
+// (ServiceDatabase, AIModel, PublicApi) call this so that creating a resource
+// first auto-provisions the app that owns its chart.
+func (w *DBWatcher) ensureAppExists(mgr *git.Manager, projectName, envName, appName, namespace, operationID string) ([]git.FileChange, error) {
+	if err := mgr.EnsureCloned(); err != nil {
+		return nil, err
+	}
+	appPath := renderer.AppGitPath(projectName, envName, appName)
+	if _, err := mgr.ReadFile(appPath); err == nil {
+		return nil, nil
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return nil, err
+	}
+
+	appYAML, err := renderer.RenderApp(renderer.AppSpec{
+		Name:               appName,
+		Namespace:          namespace,
+		ProjectSlug:        projectName,
+		EnvSlug:            envName,
+		OperationID:        operationID,
+		HelmRepoURL:        mgr.RepoURL(),
+		HelmTargetRevision: mgr.Branch(),
+	})
+	if err != nil {
+		return nil, err
+	}
+	return []git.FileChange{
+		{Path: appPath, Content: appYAML},
+		{Path: renderer.AppHelmValuesGitPath(projectName, envName, appName), Content: renderer.RenderBareAppValues()},
+		{Path: renderer.AppChartYamlGitPath(projectName, envName, appName), Content: renderer.RenderChartYaml(appName)},
+	}, nil
+}
+
 func (w *DBWatcher) doCreateServiceDatabase(ctx context.Context, op db.Operation) error {
 	var p struct {
 		Name            string `json:"name"`
@@ -259,11 +297,18 @@ func (w *DBWatcher) doCreateServiceDatabase(ctx context.Context, op db.Operation
 	}
 
 	gitPath := renderer.ServiceDatabaseGitPath(projectName, envName, p.AppRef)
+	files := []git.FileChange{{Path: gitPath, Content: yaml}}
+	appFiles, err := w.ensureAppExists(mgr, projectName, envName, p.AppRef, envNamespace, op.ID.String())
+	if err != nil {
+		return err
+	}
+	files = append(files, appFiles...)
+
 	commitMsg := fmt.Sprintf(
 		"[DADA Console] Create ServiceDatabase %s\n\nOperation: %s\nProject: %s\nEnvironment: %s\n",
 		p.Name, op.ID, projectName, envName,
 	)
-	return w.commitAndRecord(ctx, op, mgr, gitPath, yaml, commitMsg)
+	return w.commitFilesAndRecord(ctx, op, mgr, gitPath, files, commitMsg)
 }
 
 func (w *DBWatcher) doCreateApp(ctx context.Context, op db.Operation) error {
@@ -319,6 +364,7 @@ func (w *DBWatcher) doCreateApp(ctx context.Context, op db.Operation) error {
 	if err := w.commitFilesAndRecord(ctx, op, mgr, gitPath, []git.FileChange{
 		{Path: gitPath, Content: yaml},
 		{Path: valuesPath, Content: valuesYAML},
+		{Path: renderer.AppChartYamlGitPath(projectName, envName, p.Name), Content: renderer.RenderChartYaml(p.Name)},
 	}, commitMsg); err != nil {
 		return err
 	}
@@ -483,9 +529,56 @@ func (w *DBWatcher) doCreatePublicApi(ctx context.Context, op db.Operation) erro
 	}
 
 	gitPath := renderer.PublicApiGitPath(projectName, envName, p.AppName, p.PublicApiName)
+	files := []git.FileChange{{Path: gitPath, Content: yaml}}
+	appFiles, err := w.ensureAppExists(mgr, projectName, envName, p.AppName, envNamespace, op.ID.String())
+	if err != nil {
+		return err
+	}
+	files = append(files, appFiles...)
+
 	commitMsg := fmt.Sprintf(
 		"[DADA Console] Register domain %s for app %s\n\nOperation: %s\nProject: %s\nEnvironment: %s\n",
 		p.FQDN, p.AppName, op.ID, projectName, envName,
+	)
+	return w.commitFilesAndRecord(ctx, op, mgr, gitPath, files, commitMsg)
+}
+
+func (w *DBWatcher) doSetNamespacePolicy(ctx context.Context, op db.Operation) error {
+	var p struct {
+		LimitRange    renderer.LimitRangeSpec    `json:"limit_range"`
+		ResourceQuota renderer.ResourceQuotaSpec `json:"resource_quota"`
+	}
+	if err := json.Unmarshal(op.Payload, &p); err != nil {
+		return fmt.Errorf("parse payload: %w", err)
+	}
+
+	// Look up the namespace for this environment.
+	var namespace string
+	if err := w.pool.QueryRow(ctx, `
+		SELECT e.namespace FROM environments e WHERE e.id = $1
+	`, op.EnvironmentID).Scan(&namespace); err != nil {
+		return fmt.Errorf("namespace lookup: %w", err)
+	}
+
+	spec := renderer.NamespacePolicySpec{
+		Namespace:     namespace,
+		LimitRange:    p.LimitRange,
+		ResourceQuota: p.ResourceQuota,
+	}
+	yaml, err := renderer.RenderNamespacePolicy(spec)
+	if err != nil {
+		return err
+	}
+
+	mgr, err := w.managerFor(ctx, op.ProjectID)
+	if err != nil {
+		return err
+	}
+
+	gitPath := renderer.NamespacePolicyGitPath(namespace)
+	commitMsg := fmt.Sprintf(
+		"[DADA Console] Set namespace policy for %s\n\nOperation: %s\nProject: %s\n",
+		namespace, op.ID, op.ProjectID,
 	)
 	return w.commitAndRecord(ctx, op, mgr, gitPath, yaml, commitMsg)
 }

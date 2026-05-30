@@ -3,6 +3,7 @@ package worker
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"regexp"
 	"time"
 
@@ -16,9 +17,9 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// appPathRe matches clusters/<cluster>/projects/<project>/environments/<env>/apps/<app>/app.yaml
+// appPathRe matches clusters/<cluster>/projects/<project>/environments/<env>/apps/<app>/application.yaml
 // Capture groups: 1=project, 2=env, 3=app
-var appPathRe = regexp.MustCompile(`^clusters/[^/]+/projects/([^/]+)/environments/([^/]+)/apps/([^/]+)/app\.yaml$`)
+var appPathRe = regexp.MustCompile(`^clusters/[^/]+/projects/([^/]+)/environments/([^/]+)/apps/([^/]+)/application\.yaml$`)
 
 // valuesPathRe matches clusters/<cluster>/projects/<project>/environments/<env>/apps/<app>/values.yaml
 // Capture groups: 1=project, 2=env, 3=app
@@ -28,9 +29,36 @@ var valuesPathRe = regexp.MustCompile(`^clusters/[^/]+/projects/([^/]+)/environm
 // Capture group 1 is the project slug.
 var projectPathRe = regexp.MustCompile(`^clusters/[^/]+/projects/([^/]+)/project\.yaml$`)
 
+// namespacePolicyPathRe matches clusters/<cluster>/namespace-policies/<namespace>.yaml.
+// Capture group 1 is the k8s namespace name.
+var namespacePolicyPathRe = regexp.MustCompile(`^clusters/[^/]+/namespace-policies/([^/]+)\.yaml$`)
+
+// chartResourcePathRe matches a child resource manifest committed inside an app's
+// Helm chart: clusters/<cluster>/projects/<project>/environments/<env>/apps/<app>/chart/templates/<file>.yaml
+// (ServiceDatabase, AIModel, PublicApi, ...). Capture groups: 1=project, 2=env, 3=app.
+// The Chart.yaml at chart/Chart.yaml is intentionally not matched (no templates/ segment).
+var chartResourcePathRe = regexp.MustCompile(`^clusters/[^/]+/projects/([^/]+)/environments/([^/]+)/apps/([^/]+)/chart/templates/[^/]+\.yaml$`)
+
 // ValuesNotifier is implemented by server.Hub to push live file updates to WS clients.
 type ValuesNotifier interface {
 	Notify(project, env, app, yaml string)
+}
+
+type namespacePolicyManifest struct {
+	Namespace     string         `yaml:"namespace"`
+	LimitRange    map[string]any `yaml:"limitRange"`
+	ResourceQuota map[string]any `yaml:"resourceQuota"`
+}
+
+// resourceManifest extracts the GVK name from any namespaced CR manifest so a
+// reverse-synced chart/templates resource lands in resource_snapshots under the
+// kind the read APIs expect (ServiceDatabase / AIModel / PublicApi).
+type resourceManifest struct {
+	Kind     string `yaml:"kind"`
+	Metadata struct {
+		Name string `yaml:"name"`
+	} `yaml:"metadata"`
+	Spec map[string]any `yaml:"spec"`
 }
 
 type envManifest struct {
@@ -166,12 +194,20 @@ func (w *GitWatcher) syncRepo(ctx context.Context, mgr *git.Manager) error {
 
 func (w *GitWatcher) processCommit(ctx context.Context, mgr *git.Manager, c git.Commit) {
 	for _, filePath := range c.Files {
+		if m := namespacePolicyPathRe.FindStringSubmatch(filePath); m != nil {
+			w.syncNamespacePolicyFile(ctx, mgr, filePath, m[1], c)
+			continue
+		}
 		if m := projectPathRe.FindStringSubmatch(filePath); m != nil {
 			w.syncProjectFile(ctx, mgr, filePath, m[1], c)
 			continue
 		}
 		if m := appPathRe.FindStringSubmatch(filePath); m != nil {
 			w.syncAppFile(ctx, mgr, filePath, m[1], m[2], m[3], c)
+			continue
+		}
+		if m := chartResourcePathRe.FindStringSubmatch(filePath); m != nil {
+			w.syncChartResourceFile(ctx, mgr, filePath, m[1], m[2], c)
 			continue
 		}
 		if m := valuesPathRe.FindStringSubmatch(filePath); m != nil {
@@ -256,36 +292,46 @@ func (w *GitWatcher) syncProjectFile(ctx context.Context, mgr *git.Manager, file
 	log.Info().Str("project", name).Str("path", filePath).Msg("git-watcher: synced project manifest")
 }
 
-func (w *GitWatcher) syncAppFile(ctx context.Context, mgr *git.Manager, filePath, projectSlug, envSlug, appName string, c git.Commit) {
-	// Resolve project + environment IDs, auto-creating them if absent.
-	var projectID uuid.UUID
-	var environmentID uuid.UUID
+// resolveOrCreateProjectEnv returns the project + environment IDs for the given
+// slugs, auto-creating both (and granting platform admins) when the git path
+// references a project/env not yet known to the DB. Git is the source of truth,
+// so a manually-committed manifest can introduce a new project/env.
+func (w *GitWatcher) resolveOrCreateProjectEnv(ctx context.Context, projectSlug, envSlug string) (uuid.UUID, uuid.UUID, error) {
+	var projectID, environmentID uuid.UUID
 	err := w.pool.QueryRow(ctx, `
 		SELECT p.id, e.id
 		FROM projects p JOIN environments e ON e.project_id = p.id
 		WHERE p.name = $1 AND e.name = $2
 	`, projectSlug, envSlug).Scan(&projectID, &environmentID)
+	if err == nil {
+		return projectID, environmentID, nil
+	}
+
+	log.Info().Str("project", projectSlug).Str("env", envSlug).Msg("git-watcher: auto-creating project/env from git path")
+	if err := db.UpsertProject(ctx, w.pool, projectSlug, projectSlug, "team", envSlug, nil); err != nil {
+		return uuid.Nil, uuid.Nil, fmt.Errorf("auto-create project: %w", err)
+	}
+	if err := db.UpsertEnvironment(ctx, w.pool, projectSlug, envSlug, "", ""); err != nil {
+		return uuid.Nil, uuid.Nil, fmt.Errorf("auto-create environment: %w", err)
+	}
+	if err := db.AddPlatformAdminsToProject(ctx, w.pool, projectSlug); err != nil {
+		log.Error().Err(err).Str("project", projectSlug).Msg("git-watcher: add platform admins failed")
+	}
+	if err := w.pool.QueryRow(ctx, `
+		SELECT p.id, e.id
+		FROM projects p JOIN environments e ON e.project_id = p.id
+		WHERE p.name = $1 AND e.name = $2
+	`, projectSlug, envSlug).Scan(&projectID, &environmentID); err != nil {
+		return uuid.Nil, uuid.Nil, fmt.Errorf("resolve after auto-create: %w", err)
+	}
+	return projectID, environmentID, nil
+}
+
+func (w *GitWatcher) syncAppFile(ctx context.Context, mgr *git.Manager, filePath, projectSlug, envSlug, appName string, c git.Commit) {
+	projectID, environmentID, err := w.resolveOrCreateProjectEnv(ctx, projectSlug, envSlug)
 	if err != nil {
-		log.Info().Str("project", projectSlug).Str("env", envSlug).Msg("git-watcher: auto-creating project/env from git path")
-		if err := db.UpsertProject(ctx, w.pool, projectSlug, projectSlug, "team", envSlug, nil); err != nil {
-			log.Error().Err(err).Str("project", projectSlug).Msg("git-watcher: auto-create project failed")
-			return
-		}
-		if err := db.UpsertEnvironment(ctx, w.pool, projectSlug, envSlug, "", ""); err != nil {
-			log.Error().Err(err).Str("project", projectSlug).Str("env", envSlug).Msg("git-watcher: auto-create environment failed")
-			return
-		}
-		if err := db.AddPlatformAdminsToProject(ctx, w.pool, projectSlug); err != nil {
-			log.Error().Err(err).Str("project", projectSlug).Msg("git-watcher: add platform admins failed")
-		}
-		if err := w.pool.QueryRow(ctx, `
-			SELECT p.id, e.id
-			FROM projects p JOIN environments e ON e.project_id = p.id
-			WHERE p.name = $1 AND e.name = $2
-		`, projectSlug, envSlug).Scan(&projectID, &environmentID); err != nil {
-			log.Error().Err(err).Str("project", projectSlug).Str("env", envSlug).Msg("git-watcher: resolve after auto-create failed")
-			return
-		}
+		log.Error().Err(err).Str("project", projectSlug).Str("env", envSlug).Msg("git-watcher: resolve project/env")
+		return
 	}
 
 	summaryJSON, _ := json.Marshal(map[string]any{
@@ -313,4 +359,92 @@ func (w *GitWatcher) syncAppFile(ctx context.Context, mgr *git.Manager, filePath
 	); err != nil {
 		log.Warn().Err(err).Str("sha", c.SHA).Msg("git-watcher: record commit")
 	}
+}
+
+// syncChartResourceFile reverse-syncs a child resource committed under an app's
+// chart/templates/ (ServiceDatabase, AIModel, PublicApi, ...) into
+// resource_snapshots. It reads the manifest's kind + name and upserts a snapshot
+// of that kind, so a resource introduced by a manual git commit shows up in the
+// console. The upsert is LWW on the commit time, so it never clobbers a fresher
+// snapshot already written by the API at request time.
+func (w *GitWatcher) syncChartResourceFile(ctx context.Context, mgr *git.Manager, filePath, projectSlug, envSlug string, c git.Commit) {
+	content, err := mgr.ReadFileAtCommit(c.SHA, filePath)
+	if err != nil {
+		log.Warn().Err(err).Str("path", filePath).Msg("git-watcher: read chart resource manifest")
+		return
+	}
+
+	var manifest resourceManifest
+	if err := yaml.Unmarshal([]byte(content), &manifest); err != nil {
+		log.Warn().Err(err).Str("path", filePath).Msg("git-watcher: parse chart resource manifest")
+		return
+	}
+	if manifest.Kind == "" || manifest.Metadata.Name == "" {
+		log.Warn().Str("path", filePath).Msg("git-watcher: chart resource manifest missing kind/name, skipping")
+		return
+	}
+
+	projectID, environmentID, err := w.resolveOrCreateProjectEnv(ctx, projectSlug, envSlug)
+	if err != nil {
+		log.Error().Err(err).Str("project", projectSlug).Str("env", envSlug).Msg("git-watcher: resolve project/env")
+		return
+	}
+
+	summaryJSON, _ := json.Marshal(map[string]any{
+		"git_sha":     c.SHA,
+		"git_message": c.Message,
+		"git_author":  c.Author,
+		"name":        manifest.Metadata.Name,
+		"kind":        manifest.Kind,
+		"status":      "Unknown",
+		"message":     "Synced from git",
+		"spec":        manifest.Spec,
+	})
+
+	envUUID := &environmentID
+	if err := db.UpsertSnapshot(ctx, w.pool,
+		projectID, envUUID,
+		manifest.Kind, manifest.Metadata.Name, "Unknown", summaryJSON, c.When,
+	); err != nil {
+		log.Error().Err(err).Str("kind", manifest.Kind).Str("name", manifest.Metadata.Name).Msg("git-watcher: upsert chart resource snapshot")
+		return
+	}
+
+	if err := db.InsertCommit(ctx, w.pool,
+		c.SHA, mgr.RepoURL(), mgr.Branch(), filePath, c.Message,
+		c.Author, c.Email, nil, "manual",
+	); err != nil {
+		log.Warn().Err(err).Str("sha", c.SHA).Msg("git-watcher: record chart resource commit")
+	}
+
+	log.Info().Str("kind", manifest.Kind).Str("name", manifest.Metadata.Name).Str("path", filePath).Msg("git-watcher: synced chart resource from git")
+}
+
+func (w *GitWatcher) syncNamespacePolicyFile(ctx context.Context, mgr *git.Manager, filePath, namespace string, c git.Commit) {
+	content, err := mgr.ReadFileAtCommit(c.SHA, filePath)
+	if err != nil {
+		log.Warn().Err(err).Str("namespace", namespace).Str("path", filePath).Msg("git-watcher: read namespace-policy manifest")
+		return
+	}
+
+	var manifest namespacePolicyManifest
+	if err := yaml.Unmarshal([]byte(content), &manifest); err != nil {
+		log.Warn().Err(err).Str("namespace", namespace).Str("path", filePath).Msg("git-watcher: parse namespace-policy manifest")
+		return
+	}
+
+	ns := manifest.Namespace
+	if ns == "" {
+		ns = namespace
+	}
+
+	limitRangeJSON, _ := json.Marshal(manifest.LimitRange)
+	resourceQuotaJSON, _ := json.Marshal(manifest.ResourceQuota)
+
+	if err := db.UpsertEnvironmentPolicy(ctx, w.pool, ns, limitRangeJSON, resourceQuotaJSON); err != nil {
+		log.Error().Err(err).Str("namespace", ns).Msg("git-watcher: upsert environment policy")
+		return
+	}
+
+	log.Info().Str("namespace", ns).Str("path", filePath).Msg("git-watcher: synced namespace-policy")
 }

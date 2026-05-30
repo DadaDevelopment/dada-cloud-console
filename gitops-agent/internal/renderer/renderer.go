@@ -50,9 +50,10 @@ func RenderServiceDatabase(spec ServiceDatabaseSpec) (string, error) {
 	return buf.String(), nil
 }
 
+// ServiceDatabaseGitPath places the ServiceDatabase manifest inside the owning
+// app's Helm chart (chart/templates/), so it is reconciled as part of that app.
 func ServiceDatabaseGitPath(projectSlug, envSlug, appRef string) string {
-	return fmt.Sprintf("clusters/beget-prod/projects/%s/environments/%s/apps/%s/database.yaml",
-		projectSlug, envSlug, appRef)
+	return AppChartTemplatesGitPath(projectSlug, envSlug, appRef) + "/servicedatabase.yaml"
 }
 
 // AppSpec holds parameters for an App manifest.
@@ -128,15 +129,43 @@ func AppBaseGitPath(projectSlug, envSlug, appName string) string {
 }
 
 func AppGitPath(projectSlug, envSlug, appName string) string {
-	return AppBaseGitPath(projectSlug, envSlug, appName) + "/app.yaml"
+	return AppBaseGitPath(projectSlug, envSlug, appName) + "/application.yaml"
 }
 
 func AppHelmChartGitPath(projectSlug, envSlug, appName string) string {
 	return AppBaseGitPath(projectSlug, envSlug, appName) + "/chart"
 }
 
+// AppChartTemplatesGitPath is the templates/ dir of an app's Helm chart. Child
+// resources (ServiceDatabase, AIModel, PublicApi) are committed here so they are
+// reconciled together with the app that owns them.
+func AppChartTemplatesGitPath(projectSlug, envSlug, appName string) string {
+	return AppHelmChartGitPath(projectSlug, envSlug, appName) + "/templates"
+}
+
+// AppChartYamlGitPath is the Chart.yaml at the root of an app's Helm chart.
+func AppChartYamlGitPath(projectSlug, envSlug, appName string) string {
+	return AppHelmChartGitPath(projectSlug, envSlug, appName) + "/Chart.yaml"
+}
+
+// RenderChartYaml renders a minimal valid Helm Chart.yaml so the app's chart/
+// directory is a well-formed chart that the platform controller can render,
+// even before any child resource is added under templates/.
+func RenderChartYaml(appName string) string {
+	return fmt.Sprintf("apiVersion: v2\nname: %s\ndescription: Auto-generated chart for app %s\ntype: application\nversion: 0.1.0\n",
+		appName, appName)
+}
+
 func AppHelmValuesGitPath(projectSlug, envSlug, appName string) string {
 	return AppBaseGitPath(projectSlug, envSlug, appName) + "/values.yaml"
+}
+
+// RenderBareAppValues renders a minimal values.yaml for an app that was created
+// automatically to own a child resource's chart. It declares no workload, so the
+// platform controller provisions no Deployment until a user sets an image here.
+func RenderBareAppValues() string {
+	return "# Auto-created by DADA Console to own this app's chart.\n" +
+		"# No workload is deployed until an image is configured here.\n{}\n"
 }
 
 // PublicApiSpec holds parameters for a PublicApi manifest.
@@ -199,9 +228,11 @@ func RenderPublicApi(spec PublicApiSpec) (string, error) {
 	return buf.String(), nil
 }
 
+// PublicApiGitPath places the PublicApi manifest inside the owning app's Helm
+// chart (chart/templates/), alongside the app's other resources.
 func PublicApiGitPath(projectSlug, envSlug, appName, publicApiName string) string {
-	return fmt.Sprintf("clusters/beget-prod/projects/%s/environments/%s/apps/%s/publicapi-%s.yaml",
-		projectSlug, envSlug, appName, publicApiName)
+	return AppChartTemplatesGitPath(projectSlug, envSlug, appName) +
+		fmt.Sprintf("/publicapi-%s.yaml", publicApiName)
 }
 
 func FQDNToName(fqdn string) string {

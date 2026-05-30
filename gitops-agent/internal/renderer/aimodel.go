@@ -74,19 +74,18 @@ func RenderAIModel(spec AIModelSpec) (string, error) {
 	return buf.String(), nil
 }
 
-// AIModelGitPath returns the canonical Git path for an AIModel CR.
-// Mirrors apps/<name>/{app.yaml,...} layout but at the env-level models/ dir
-// (peer of App, not child — D10).
-func AIModelGitPath(projectSlug, envSlug, modelName string) string {
-	return fmt.Sprintf("clusters/beget-prod/projects/%s/environments/%s/models/%s/aimodel.yaml",
-		projectSlug, envSlug, modelName)
+// AIModelGitPath returns the canonical Git path for an AIModel CR. The model
+// lives inside its owning app's Helm chart (chart/templates/), where ownerApp is
+// the attached app when set, otherwise the model's own name. This supersedes the
+// former env-level models/ layout (D10): every resource now belongs to an app.
+func AIModelGitPath(projectSlug, envSlug, ownerApp string) string {
+	return AppChartTemplatesGitPath(projectSlug, envSlug, ownerApp) + "/aimodel.yaml"
 }
 
-// AIModelPublicApiGitPath returns the canonical Git path for the PublicApi CR
-// emitted alongside an AIModel.
-func AIModelPublicApiGitPath(projectSlug, envSlug, modelName string) string {
-	return fmt.Sprintf("clusters/beget-prod/projects/%s/environments/%s/models/%s/publicapi.yaml",
-		projectSlug, envSlug, modelName)
+// AIModelPublicApiGitPath returns the Git path for the PublicApi CR emitted
+// alongside an AIModel, inside the same owning app's chart templates.
+func AIModelPublicApiGitPath(projectSlug, envSlug, ownerApp string) string {
+	return AppChartTemplatesGitPath(projectSlug, envSlug, ownerApp) + "/publicapi.yaml"
 }
 
 // AIModelDomain renders the canonical FQDN for a model: <name>-<project>.<envSuffix>.dada-tuda.ru.

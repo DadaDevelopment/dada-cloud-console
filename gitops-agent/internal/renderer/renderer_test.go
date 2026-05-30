@@ -214,17 +214,27 @@ func TestGitPaths(t *testing.T) {
 		{
 			"ServiceDatabaseGitPath",
 			renderer.ServiceDatabaseGitPath("alpha", "prod", "myapp"),
-			"clusters/beget-prod/projects/alpha/environments/prod/apps/myapp/database.yaml",
+			"clusters/beget-prod/projects/alpha/environments/prod/apps/myapp/chart/templates/servicedatabase.yaml",
 		},
 		{
 			"AppGitPath",
 			renderer.AppGitPath("alpha", "prod", "api"),
-			"clusters/beget-prod/projects/alpha/environments/prod/apps/api/app.yaml",
+			"clusters/beget-prod/projects/alpha/environments/prod/apps/api/application.yaml",
 		},
 		{
 			"AppHelmChartGitPath",
 			renderer.AppHelmChartGitPath("alpha", "prod", "api"),
 			"clusters/beget-prod/projects/alpha/environments/prod/apps/api/chart",
+		},
+		{
+			"AppChartTemplatesGitPath",
+			renderer.AppChartTemplatesGitPath("alpha", "prod", "api"),
+			"clusters/beget-prod/projects/alpha/environments/prod/apps/api/chart/templates",
+		},
+		{
+			"AppChartYamlGitPath",
+			renderer.AppChartYamlGitPath("alpha", "prod", "api"),
+			"clusters/beget-prod/projects/alpha/environments/prod/apps/api/chart/Chart.yaml",
 		},
 		{
 			"AppHelmValuesGitPath",
@@ -234,7 +244,7 @@ func TestGitPaths(t *testing.T) {
 		{
 			"PublicApiGitPath",
 			renderer.PublicApiGitPath("alpha", "prod", "api", "main"),
-			"clusters/beget-prod/projects/alpha/environments/prod/apps/api/publicapi-main.yaml",
+			"clusters/beget-prod/projects/alpha/environments/prod/apps/api/chart/templates/publicapi-main.yaml",
 		},
 		{
 			"ProjectGitPath",
@@ -245,6 +255,21 @@ func TestGitPaths(t *testing.T) {
 	for _, tt := range tests {
 		if tt.got != tt.want {
 			t.Errorf("%s: got %q, want %q", tt.name, tt.got, tt.want)
+		}
+	}
+}
+
+func TestRenderChartYaml(t *testing.T) {
+	got := renderer.RenderChartYaml("orders")
+	wantSubstrings := []string{
+		"apiVersion: v2",
+		"name: orders",
+		"type: application",
+		"version: 0.1.0",
+	}
+	for _, want := range wantSubstrings {
+		if !strings.Contains(got, want) {
+			t.Errorf("rendered Chart.yaml missing %q\nFull output:\n%s", want, got)
 		}
 	}
 }

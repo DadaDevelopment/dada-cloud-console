@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/dada-tuda/console/gitops-agent/internal/db"
+	"github.com/dada-tuda/console/gitops-agent/internal/git"
 	"github.com/dada-tuda/console/gitops-agent/internal/mlflow"
 	"github.com/dada-tuda/console/gitops-agent/internal/renderer"
 	"github.com/google/uuid"
@@ -109,12 +110,20 @@ func (w *DBWatcher) doCreateAIModel(ctx context.Context, op db.Operation) error 
 	if err != nil {
 		return err
 	}
-	gitPath := renderer.AIModelGitPath(projectName, envName, p.Name)
+	ownerApp := aimodelOwnerApp(p.AttachedAppName, p.Name)
+	gitPath := renderer.AIModelGitPath(projectName, envName, ownerApp)
+	files := []git.FileChange{{Path: gitPath, Content: yaml}}
+	appFiles, err := w.ensureAppExists(mgr, projectName, envName, ownerApp, envNamespace, op.ID.String())
+	if err != nil {
+		return err
+	}
+	files = append(files, appFiles...)
+
 	commitMsg := fmt.Sprintf(
 		"[DADA Console] Create AIModel %s\n\nOperation: %s\nProject: %s\nEnvironment: %s\nProfile: %s\n",
 		p.Name, op.ID, projectName, envName, p.Profile,
 	)
-	if err := w.commitAndRecord(ctx, op, mgr, gitPath, yaml, commitMsg); err != nil {
+	if err := w.commitFilesAndRecord(ctx, op, mgr, gitPath, files, commitMsg); err != nil {
 		return err
 	}
 
@@ -229,9 +238,23 @@ func (w *DBWatcher) doDeleteAIModel(ctx context.Context, op db.Operation) error 
 	if err != nil {
 		return err
 	}
+	// Resolve the owning app from the snapshot so we delete from the same chart
+	// path the model was written to (attached app, or the model's own name).
+	var attachedApp string
+	var summaryRaw []byte
+	if err := w.pool.QueryRow(ctx, `
+		SELECT summary_json FROM resource_snapshots
+		WHERE project_id=$1 AND environment_id=$2 AND kind='AIModel' AND name=$3
+	`, op.ProjectID, op.EnvironmentID, p.Name).Scan(&summaryRaw); err == nil {
+		var summary map[string]any
+		if json.Unmarshal(summaryRaw, &summary) == nil {
+			attachedApp = asString(summary["attached_app"])
+		}
+	}
+	ownerApp := aimodelOwnerApp(attachedApp, p.Name)
 	paths := []string{
-		renderer.AIModelGitPath(projectName, envName, p.Name),
-		renderer.AIModelPublicApiGitPath(projectName, envName, p.Name),
+		renderer.AIModelGitPath(projectName, envName, ownerApp),
+		renderer.AIModelPublicApiGitPath(projectName, envName, ownerApp),
 	}
 	commitMsg := fmt.Sprintf(
 		"[DADA Console] Delete AIModel %s\n\nOperation: %s\nProject: %s\nEnvironment: %s\n",
@@ -316,7 +339,8 @@ func (w *DBWatcher) rerenderAIModel(ctx context.Context, op db.Operation, name s
 	if err != nil {
 		return err
 	}
-	gitPath := renderer.AIModelGitPath(projectName, envName, name)
+	ownerApp := aimodelOwnerApp(asString(summary["attached_app"]), name)
+	gitPath := renderer.AIModelGitPath(projectName, envName, ownerApp)
 	commitMsg := fmt.Sprintf(
 		"[DADA Console] %s AIModel %s\n\nOperation: %s\nProject: %s\nEnvironment: %s\n",
 		op.Action, name, op.ID, projectName, envName,
@@ -390,4 +414,14 @@ func (w *DBWatcher) resolveMLflowArtifact(ctx context.Context, name, version str
 func asString(v any) string {
 	s, _ := v.(string)
 	return s
+}
+
+// aimodelOwnerApp resolves the app that owns a model's chart: the attached app
+// when set, otherwise the model's own name (a model with no app becomes its own
+// app — see AIModelGitPath).
+func aimodelOwnerApp(attachedAppName, modelName string) string {
+	if attachedAppName != "" {
+		return attachedAppName
+	}
+	return modelName
 }
