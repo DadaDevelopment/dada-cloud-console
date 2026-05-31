@@ -305,7 +305,7 @@ func (w *DBWatcher) doCreateServiceDatabase(ctx context.Context, op db.Operation
 	files = append(files, appFiles...)
 
 	commitMsg := fmt.Sprintf(
-		"[DADA Console] Create ServiceDatabase %s\n\nOperation: %s\nProject: %s\nEnvironment: %s\n",
+		"[DADA Console] Create ServiceDatabaseV2 %s\n\nOperation: %s\nProject: %s\nEnvironment: %s\n",
 		p.Name, op.ID, projectName, envName,
 	)
 	return w.commitFilesAndRecord(ctx, op, mgr, gitPath, files, commitMsg)

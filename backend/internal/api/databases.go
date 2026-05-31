@@ -44,7 +44,7 @@ func (h *Handler) ListDatabases(c *gin.Context) {
 	rows, err := h.pool.Query(c.Request.Context(),
 		`SELECT id, project_id, environment_id, kind, name, phase, summary_json, last_synced_at
 		 FROM resource_snapshots
-		 WHERE project_id = $1 AND environment_id = $2 AND kind = 'ServiceDatabase'
+		 WHERE project_id = $1 AND environment_id = $2 AND kind = 'ServiceDatabaseV2'
 		 ORDER BY name`,
 		projectID, envID,
 	)
@@ -152,7 +152,7 @@ func (h *Handler) CreateServiceDatabase(c *gin.Context) {
 	var existing int
 	err = h.pool.QueryRow(c.Request.Context(),
 		`SELECT COUNT(*) FROM resource_snapshots
-		 WHERE project_id = $1 AND environment_id = $2 AND kind = 'ServiceDatabase' AND name = $3`,
+		 WHERE project_id = $1 AND environment_id = $2 AND kind = 'ServiceDatabaseV2' AND name = $3`,
 		projectID, envID, req.Name,
 	).Scan(&existing)
 	if err != nil {
@@ -183,7 +183,7 @@ func (h *Handler) CreateServiceDatabase(c *gin.Context) {
 	var op models.Operation
 	row := h.pool.QueryRow(c.Request.Context(),
 		`INSERT INTO operations (actor_id, project_id, environment_id, action, resource_kind, resource_name, status, payload)
-		 VALUES ($1, $2, $3, 'CreateServiceDatabase', 'ServiceDatabase', $4, 'Created', $5)
+		 VALUES ($1, $2, $3, 'CreateServiceDatabase', 'ServiceDatabaseV2', $4, 'Created', $5)
 		 RETURNING id, actor_id, project_id, environment_id, action, resource_kind, resource_name,
 		           status, payload, validation_result, git_commit, git_path, argo_application,
 		           error_code, error_message, created_at, updated_at`,
@@ -198,7 +198,7 @@ func (h *Handler) CreateServiceDatabase(c *gin.Context) {
 	auditMeta, _ := json.Marshal(payload)
 	_, _ = h.pool.Exec(c.Request.Context(),
 		`INSERT INTO audit_events (actor_id, project_id, operation_id, action, resource_kind, resource_name, metadata)
-		 VALUES ($1, $2, $3, 'CreateServiceDatabase', 'ServiceDatabase', $4, $5)`,
+		 VALUES ($1, $2, $3, 'CreateServiceDatabase', 'ServiceDatabaseV2', $4, $5)`,
 		claims.UserID, projectID, op.ID, req.Name, auditMeta,
 	)
 

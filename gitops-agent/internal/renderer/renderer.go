@@ -24,7 +24,7 @@ type ServiceDatabaseSpec struct {
 }
 
 var serviceDatabaseTmpl = template.Must(template.New("servicedb").Parse(`apiVersion: platform.dada-tuda.ru/v1alpha1
-kind: ServiceDatabase
+kind: ServiceDatabaseV2
 metadata:
   name: {{ .Name }}
   namespace: {{ .Namespace }}

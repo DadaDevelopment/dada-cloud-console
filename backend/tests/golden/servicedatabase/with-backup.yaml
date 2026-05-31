@@ -1,5 +1,5 @@
 apiVersion: platform.dada-tuda.ru/v1alpha1
-kind: ServiceDatabase
+kind: ServiceDatabaseV2
 metadata:
   name: profi-db
   namespace: client-a-prod

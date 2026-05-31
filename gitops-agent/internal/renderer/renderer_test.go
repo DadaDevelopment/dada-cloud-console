@@ -27,7 +27,7 @@ func TestRenderServiceDatabase(t *testing.T) {
 
 	wantSubstrings := []string{
 		"apiVersion: platform.dada-tuda.ru/v1alpha1",
-		"kind: ServiceDatabase",
+		"kind: ServiceDatabaseV2",
 		"name: myapp-db",
 		"namespace: alpha-prod",
 		"dada.io/project: alpha",
