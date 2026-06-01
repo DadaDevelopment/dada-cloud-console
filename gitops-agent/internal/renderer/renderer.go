@@ -27,13 +27,13 @@ var serviceDatabaseTmpl = template.Must(template.New("servicedb").Parse(`apiVers
 kind: ServiceDatabaseV2
 metadata:
   name: {{ .Name }}
-  namespace: {{ .Namespace }}
   labels:
     dada.io/project: {{ .ProjectSlug }}
     dada.io/environment: {{ .EnvSlug }}
     dada.io/operation: {{ .OperationID }}
 spec:
   appRef: {{ .AppRef }}
+  namespace: {{ .Namespace }}
   engine: postgresql
   database: {{ .Database }}
   backup:

@@ -2,13 +2,13 @@ apiVersion: platform.dada-tuda.ru/v1alpha1
 kind: ServiceDatabaseV2
 metadata:
   name: codex-lb-db
-  namespace: internal-prod
   labels:
     dada.io/project: internal
     dada.io/environment: prod
     dada.io/operation: op-test-1234
 spec:
   appRef: codex-lb
+  namespace: internal-prod
   engine: postgresql
   database: codexlb
   backup:

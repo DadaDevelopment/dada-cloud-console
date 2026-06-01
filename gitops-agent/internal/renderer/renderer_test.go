@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/dada-tuda/console/gitops-agent/internal/renderer"
+	"gopkg.in/yaml.v3"
 )
 
 func TestRenderServiceDatabase(t *testing.T) {
@@ -29,11 +30,11 @@ func TestRenderServiceDatabase(t *testing.T) {
 		"apiVersion: platform.dada-tuda.ru/v1alpha1",
 		"kind: ServiceDatabaseV2",
 		"name: myapp-db",
-		"namespace: alpha-prod",
 		"dada.io/project: alpha",
 		"dada.io/environment: prod",
 		"dada.io/operation: op-123",
 		"appRef: myapp",
+		"namespace: alpha-prod",
 		"engine: postgresql",
 		"database: myapp_db",
 		"enabled: true",
@@ -44,6 +45,25 @@ func TestRenderServiceDatabase(t *testing.T) {
 		if !strings.Contains(got, want) {
 			t.Errorf("rendered ServiceDatabase missing %q\nFull output:\n%s", want, got)
 		}
+	}
+
+	// ServiceDatabaseV2 is cluster-scoped: namespace must appear under spec, not metadata.
+	// Parse the rendered YAML and verify the structure directly.
+	var doc map[string]interface{}
+	if err := yaml.Unmarshal([]byte(got), &doc); err != nil {
+		t.Fatalf("rendered ServiceDatabase is not valid YAML: %v", err)
+	}
+	if meta, ok := doc["metadata"].(map[string]interface{}); ok {
+		if _, hasNs := meta["namespace"]; hasNs {
+			t.Errorf("rendered ServiceDatabase must NOT have metadata.namespace (cluster-scoped XR)\nFull output:\n%s", got)
+		}
+	}
+	spec2, ok := doc["spec"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("rendered ServiceDatabase missing spec block\nFull output:\n%s", got)
+	}
+	if ns, _ := spec2["namespace"].(string); ns != "alpha-prod" {
+		t.Errorf("spec.namespace = %q, want %q\nFull output:\n%s", ns, "alpha-prod", got)
 	}
 }
 
