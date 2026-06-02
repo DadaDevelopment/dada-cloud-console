@@ -8,9 +8,10 @@ def DOCKER_DIND_IMAGE  = 'docker:29-dind'
 
 def GITHUB_REGISTRY      = 'ghcr.io'
 def GITHUB_ORG           = 'dadadevelopment'
-def BACKEND_IMAGE        = "${GITHUB_REGISTRY}/${GITHUB_ORG}/dada-cloud-console-backend"
-def FRONTEND_IMAGE       = "${GITHUB_REGISTRY}/${GITHUB_ORG}/dada-cloud-console-frontend"
-def GITOPS_AGENT_IMAGE   = "${GITHUB_REGISTRY}/${GITHUB_ORG}/dada-cloud-console-gitops-agent"
+def BACKEND_IMAGE         = "${GITHUB_REGISTRY}/${GITHUB_ORG}/dada-cloud-console-backend"
+def FRONTEND_IMAGE        = "${GITHUB_REGISTRY}/${GITHUB_ORG}/dada-cloud-console-frontend"
+def GITOPS_AGENT_IMAGE    = "${GITHUB_REGISTRY}/${GITHUB_ORG}/dada-cloud-console-gitops-agent"
+def PORTAINER_AGENT_IMAGE = "${GITHUB_REGISTRY}/${GITHUB_ORG}/dada-cloud-console-portainer-agent"
 
 def podLabel  = "kubeagent-${env.JOB_BASE_NAME ?: 'job'}-${env.BUILD_NUMBER ?: 'manual'}"
         .replaceAll('[^A-Za-z0-9-]', '-')
@@ -248,6 +249,18 @@ spec:
                     }
                 }
 
+                runStage('Portainer-agent tests') {
+                    dir('portainer-agent') {
+                        sh 'go test ./... -count=1'
+                    }
+                }
+
+                runStage('Portainer-agent build') {
+                    dir('portainer-agent') {
+                        sh 'go build -buildvcs=false -ldflags="-s -w" -o bin/portainer-agent ./cmd/portainer-agent'
+                    }
+                }
+
                 runStage('Helm lint + render') {
                     sh """
                         set -eux
@@ -257,6 +270,7 @@ spec:
                           --set backend.image.tag=${resolvedTag} \
                           --set frontend.image.tag=${resolvedTag} \
                           --set gitopsAgent.image.tag=${resolvedTag} \
+                          --set portainerAgent.image.tag=${resolvedTag} \
                           --set ingress.host=console.dada-tuda.ru \
                           > /tmp/dada-cloud-console-rendered.yaml
                         echo "Rendered \$(wc -l < /tmp/dada-cloud-console-rendered.yaml) lines"
@@ -301,6 +315,9 @@ spec:
                         docker build \\
                           -t ${GITOPS_AGENT_IMAGE}:${resolvedTag} \\
                           -f gitops-agent/Dockerfile gitops-agent
+                        docker build \\
+                          -t ${PORTAINER_AGENT_IMAGE}:${resolvedTag} \\
+                          -f portainer-agent/Dockerfile portainer-agent
                     """
                 }
 
@@ -325,13 +342,16 @@ spec:
                                 docker push ${BACKEND_IMAGE}:${resolvedTag}
                                 docker push ${FRONTEND_IMAGE}:${resolvedTag}
                                 docker push ${GITOPS_AGENT_IMAGE}:${resolvedTag}
+                                docker push ${PORTAINER_AGENT_IMAGE}:${resolvedTag}
                                 docker tag ${BACKEND_IMAGE}:${resolvedTag} ${BACKEND_IMAGE}:latest
                                 docker tag ${FRONTEND_IMAGE}:${resolvedTag} ${FRONTEND_IMAGE}:latest
                                 docker tag ${GITOPS_AGENT_IMAGE}:${resolvedTag} ${GITOPS_AGENT_IMAGE}:latest
+                                docker tag ${PORTAINER_AGENT_IMAGE}:${resolvedTag} ${PORTAINER_AGENT_IMAGE}:latest
                                 docker push ${BACKEND_IMAGE}:latest
                                 docker push ${FRONTEND_IMAGE}:latest
                                 docker push ${GITOPS_AGENT_IMAGE}:latest
-                                docker rmi ${BACKEND_IMAGE}:${resolvedTag} ${FRONTEND_IMAGE}:${resolvedTag} ${GITOPS_AGENT_IMAGE}:${resolvedTag} || true
+                                docker push ${PORTAINER_AGENT_IMAGE}:latest
+                                docker rmi ${BACKEND_IMAGE}:${resolvedTag} ${FRONTEND_IMAGE}:${resolvedTag} ${GITOPS_AGENT_IMAGE}:${resolvedTag} ${PORTAINER_AGENT_IMAGE}:${resolvedTag} || true
                             """
                         }
                     }
@@ -347,9 +367,10 @@ spec:
 
         if (currentBuild.result != 'FAILURE') {
             echo "✅ DADA Cloud Console — ${resolvedTag}"
-            echo "   Backend:      ${BACKEND_IMAGE}:${resolvedTag}"
-            echo "   Frontend:     ${FRONTEND_IMAGE}:${resolvedTag}"
-            echo "   GitOps Agent: ${GITOPS_AGENT_IMAGE}:${resolvedTag}"
+            echo "   Backend:         ${BACKEND_IMAGE}:${resolvedTag}"
+            echo "   Frontend:        ${FRONTEND_IMAGE}:${resolvedTag}"
+            echo "   GitOps Agent:    ${GITOPS_AGENT_IMAGE}:${resolvedTag}"
+            echo "   Portainer Agent: ${PORTAINER_AGENT_IMAGE}:${resolvedTag}"
         }
     }
 }

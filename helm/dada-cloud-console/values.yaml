@@ -29,6 +29,10 @@ backend:
     # Inference proxy body cap (request + upstream response). Default 10MB.
     # Raise if a model legitimately needs larger payloads (e.g. vision).
     INFERENCE_MAX_BODY_BYTES: "10485760"
+    # Live VM/app state proxy (read-only) to the in-cluster Portainer. Leave
+    # empty to disable the /state and /logs endpoints (graceful fallback to DB
+    # status). PORTAINER_API_TOKEN is set via backend.secret.
+    PORTAINER_URL: ""
   existingSecret: ""
   secret:
     DB_URL: "postgres://dada:change-me@postgresql:5432/dada_console?sslmode=disable"
@@ -39,6 +43,9 @@ backend:
     # Values editor WebSocket: same key name and value as in gitopsAgent.secret.
     # Generate once: openssl rand -hex 32
     GITOPS_VALUES_TOKEN_SECRET: "change-me"
+    # Read-only Portainer API key for the live-state proxy (same key the
+    # portainer-agent uses). Empty disables live state.
+    PORTAINER_API_TOKEN: ""
   persistence:
     enabled: true
     size: 5Gi
@@ -91,6 +98,64 @@ gitopsAgent:
     limits:
       cpu: 250m
       memory: 256Mi
+
+# portainerAgent is the control-plane worker that provisions/connects VMs,
+# SSH-installs the Portainer Edge Agent, registers edge endpoints in the
+# in-cluster Portainer, and deploys compose stacks (DeployStack) via its API.
+# It is NOT the Portainer server or Portainer's edge agent.
+portainerAgent:
+  enabled: true
+  image:
+    repository: dada-cloud-console-portainer-agent
+    tag: "latest"
+    pullPolicy: IfNotPresent
+  healthPort: 8090
+  env:
+    BEGET_REGION: "ru1"
+    BEGET_SOFTWARE_SLUG: "ubuntu-24-04"
+    TF_WORKSPACE_BASE: "/var/lib/tf-workspaces"
+    TF_BIN_PATH: "/usr/local/bin/terraform"
+    GITOPS_BRANCH: "main"
+    GITOPS_REPO_LOCAL_PATH: "/var/lib/gitops-repos"
+    GITOPS_BOT_NAME: "DADA Platform Bot"
+    GITOPS_BOT_EMAIL: "bot@dada-tuda.ru"
+    VM_POLL_INTERVAL_DB: "5s"
+    VM_POLL_INTERVAL_STATUS: "30s"
+    AGENT_CONNECT_TIMEOUT: "10m"
+    # Optional observability sinks pushed onto bootstrapped VMs (URLs only;
+    # credentials go in the secret). Empty disables them.
+    PROMETHEUS_REMOTE_WRITE_URL: ""
+    ELASTICSEARCH_URL: ""
+  existingSecret: ""
+  secret:
+    DATABASE_URL: "postgres://dada:change-me@postgresql:5432/dada_console?sslmode=disable"
+    # In-cluster Portainer the agent drives (create endpoints + stacks).
+    PORTAINER_URL: "http://portainer.portainer.svc.cluster.local:9000"
+    PORTAINER_API_TOKEN: "change-me"
+    # Beget (OpenStack) provider creds for Terraform-provisioned VMs.
+    BEGET_LOGIN: ""
+    BEGET_PASSWORD: ""
+    BEGET_TOKEN: "change-me"
+    # SSH keypair: private key used to bootstrap VMs; public key registered via Terraform.
+    AGENT_SSH_PRIVATE_KEY: "change-me"
+    AGENT_SSH_PUBLIC_KEY: "change-me"
+    # Terraform state backend (postgres connection string).
+    TF_STATE_CONN_STR: "postgres://dada:change-me@postgresql:5432/dada_console?sslmode=disable"
+    # Git repo Portainer pulls compose.yaml from (server-side clone). The repo
+    # must be reachable by the in-cluster Portainer with these creds.
+    GITOPS_REPO_URL: "https://github.com/DADA-TUDA/argo-infra.git"
+    GITOPS_USERNAME: "platform-bot"
+    GITOPS_TOKEN: "change-me"
+    PROMETHEUS_REMOTE_WRITE_USER: ""
+    PROMETHEUS_REMOTE_WRITE_PASS: ""
+    ELASTICSEARCH_API_KEY: ""
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
 
 frontend:
   enabled: true
