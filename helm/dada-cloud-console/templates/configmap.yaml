@@ -5,6 +5,8 @@ metadata:
   labels:
     {{- include "dada-cloud-console.labels" . | nindent 4 }}
 data:
+  # Shared (global.shared) → backend non-secret env.
+  PORTAINER_URL: {{ .Values.global.shared.portainerUrl | quote }}
 {{- range $key, $value := .Values.backend.env }}
   {{ $key }}: {{ $value | quote }}
 {{- end }}
