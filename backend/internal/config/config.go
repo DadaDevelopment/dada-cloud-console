@@ -33,6 +33,11 @@ type Config struct {
 	// endpoint. Same env var name in both backend and gitops-agent: GITOPS_VALUES_TOKEN_SECRET.
 	GitopsValuesTokenSecret string // GITOPS_VALUES_TOKEN_SECRET
 	GitopsAgentWSURL        string // GITOPS_AGENT_WS_URL  (public WS base, e.g. wss://gitops.example.com)
+
+	// Portainer live-state proxy (read-only). Both must be set to enable the VM
+	// /state and /logs endpoints. Same values the portainer-agent uses.
+	PortainerURL      string // PORTAINER_URL
+	PortainerAPIToken string // PORTAINER_API_TOKEN
 }
 
 // Load reads configuration from environment variables.
@@ -51,6 +56,8 @@ func Load() (*Config, error) {
 		InferenceMaxBodyBytes:  getEnvInt64("INFERENCE_MAX_BODY_BYTES", 10*1024*1024),
 		GitopsValuesTokenSecret: getEnv("GITOPS_VALUES_TOKEN_SECRET", ""),
 		GitopsAgentWSURL:        getEnv("GITOPS_AGENT_WS_URL", ""),
+		PortainerURL:            getEnv("PORTAINER_URL", ""),
+		PortainerAPIToken:       getEnv("PORTAINER_API_TOKEN", ""),
 	}
 
 	if cfg.DBURL == "" {

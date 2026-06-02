@@ -24,10 +24,11 @@ type Operation struct {
 
 const claimBatchSize = 5
 
-// ClaimPending atomically claims up to claimBatchSize Created operations for the VM track.
-// VM-track operations are:
-//   - action IN ('CreateAppServer', 'DeleteAppServer') — no environment
-//   - environment.runtime = 'vm' — all other actions on VM environments
+// ClaimPending atomically claims up to claimBatchSize Created operations the
+// portainer-agent owns. Ownership is by action only (disjoint from the
+// gitops-agent's claim set):
+//   - CreateAppServer / DeleteAppServer — VM lifecycle (no environment)
+//   - DeployStack — deploy/redeploy a compose stack onto an endpoint
 func ClaimPending(ctx context.Context, pool *pgxpool.Pool) ([]Operation, error) {
 	tx, err := pool.Begin(ctx)
 	if err != nil {
@@ -35,20 +36,13 @@ func ClaimPending(ctx context.Context, pool *pgxpool.Pool) ([]Operation, error) 
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck
 
-	// FOR UPDATE cannot be used with LEFT JOIN; use EXISTS for the nullable side.
 	rows, err := tx.Query(ctx, `
 		UPDATE operations
 		SET    status = 'Processing', updated_at = NOW()
 		WHERE  id IN (
 			SELECT o.id FROM operations o
 			WHERE  o.status = 'Created'
-			  AND  (
-			    o.action IN ('CreateAppServer', 'DeleteAppServer')
-			    OR EXISTS (
-			        SELECT 1 FROM environments e
-			        WHERE e.id = o.environment_id AND e.runtime = 'vm'
-			    )
-			  )
+			  AND  o.action IN ('CreateAppServer', 'DeleteAppServer', 'DeployStack')
 			ORDER  BY o.created_at
 			LIMIT  $1
 			FOR UPDATE SKIP LOCKED
@@ -102,4 +96,19 @@ func MarkFailed(ctx context.Context, pool *pgxpool.Pool, id uuid.UUID, code, mes
 // MarkReady sets status=Ready.
 func MarkReady(ctx context.Context, pool *pgxpool.Pool, id uuid.UUID) error {
 	return UpdateStatus(ctx, pool, id, "Ready")
+}
+
+// ScrubOperationSecret removes one-shot secret fields from an operation's JSONB
+// payload. Called once the operation reaches a terminal state so SSH private
+// keys for manual VM connect are never retained at rest.
+func ScrubOperationSecret(ctx context.Context, pool *pgxpool.Pool, id uuid.UUID, keys ...string) error {
+	if len(keys) == 0 {
+		return nil
+	}
+	// jsonb "- text[]" removes each named key from the top-level object.
+	_, err := pool.Exec(ctx,
+		`UPDATE operations SET payload = payload - $2::text[], updated_at = NOW() WHERE id = $1`,
+		id, keys,
+	)
+	return err
 }

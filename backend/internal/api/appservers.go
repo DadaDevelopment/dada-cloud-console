@@ -34,7 +34,7 @@ func (h *Handler) ListAppServers(c *gin.Context) {
 	}
 
 	rows, err := h.pool.Query(c.Request.Context(),
-		`SELECT id, project_id, name, vm_ip, vm_provider_id, terraform_workspace,
+		`SELECT id, project_id, name, source, vm_ip, vm_provider_id, terraform_workspace,
 		        portainer_endpoint_id, status, error_message, created_at, updated_at
 		 FROM app_servers
 		 WHERE project_id = $1 AND status != 'Deleted'
@@ -51,7 +51,7 @@ func (h *Handler) ListAppServers(c *gin.Context) {
 	for rows.Next() {
 		var s models.AppServer
 		if err := rows.Scan(
-			&s.ID, &s.ProjectID, &s.Name, &s.VMIP, &s.VMProviderID,
+			&s.ID, &s.ProjectID, &s.Name, &s.Source, &s.VMIP, &s.VMProviderID,
 			&s.TerraformWorkspace, &s.PortainerEndpointID,
 			&s.Status, &s.ErrorMessage, &s.CreatedAt, &s.UpdatedAt,
 		); err != nil {
@@ -96,13 +96,13 @@ func (h *Handler) GetAppServer(c *gin.Context) {
 
 	var s models.AppServer
 	err = h.pool.QueryRow(c.Request.Context(),
-		`SELECT id, project_id, name, vm_ip, vm_provider_id, terraform_workspace,
+		`SELECT id, project_id, name, source, vm_ip, vm_provider_id, terraform_workspace,
 		        portainer_endpoint_id, status, error_message, created_at, updated_at
 		 FROM app_servers
 		 WHERE project_id = $1 AND name = $2`,
 		projectID, serverName,
 	).Scan(
-		&s.ID, &s.ProjectID, &s.Name, &s.VMIP, &s.VMProviderID,
+		&s.ID, &s.ProjectID, &s.Name, &s.Source, &s.VMIP, &s.VMProviderID,
 		&s.TerraformWorkspace, &s.PortainerEndpointID,
 		&s.Status, &s.ErrorMessage, &s.CreatedAt, &s.UpdatedAt,
 	)
@@ -119,10 +119,17 @@ func (h *Handler) GetAppServer(c *gin.Context) {
 
 type createAppServerRequest struct {
 	Name       string `json:"name"`
+	Mode       string `json:"mode"` // "terraform" (default) | "manual"
 	Flavor     string `json:"flavor"`
 	OSImage    string `json:"os_image"`
 	Region     string `json:"region"`
 	SSHKeyName string `json:"ssh_key_name"`
+
+	// Manual-mode fields (connecting a pre-existing VM over SSH).
+	VMIP          string `json:"vm_ip"`
+	SSHUser       string `json:"ssh_user"`
+	SSHPort       int    `json:"ssh_port"`
+	SSHPrivateKey string `json:"ssh_private_key"`
 }
 
 func isValidAppServerRegion(region string) bool {
@@ -174,8 +181,28 @@ func (h *Handler) CreateAppServer(c *gin.Context) {
 		respondError(c, http.StatusBadRequest, err.Error())
 		return
 	}
-	if req.Region != "" && !isValidAppServerRegion(req.Region) {
-		respondError(c, http.StatusBadRequest, "region must be one of: ru1, ru2, kz1, eu1")
+
+	mode := req.Mode
+	if mode == "" {
+		mode = "terraform"
+	}
+	switch mode {
+	case "terraform":
+		if req.Region != "" && !isValidAppServerRegion(req.Region) {
+			respondError(c, http.StatusBadRequest, "region must be one of: ru1, ru2, kz1, eu1")
+			return
+		}
+	case "manual":
+		if req.VMIP == "" {
+			respondError(c, http.StatusBadRequest, "vm_ip is required for manual mode")
+			return
+		}
+		if req.SSHPrivateKey == "" {
+			respondError(c, http.StatusBadRequest, "ssh_private_key is required for manual mode")
+			return
+		}
+	default:
+		respondError(c, http.StatusBadRequest, "mode must be one of: terraform, manual")
 		return
 	}
 
@@ -194,13 +221,22 @@ func (h *Handler) CreateAppServer(c *gin.Context) {
 	}
 
 	payload := models.CreateAppServerPayload{
-		Name:       req.Name,
-		Flavor:     req.Flavor,
-		OSImage:    req.OSImage,
-		Region:     req.Region,
-		SSHKeyName: req.SSHKeyName,
+		Name:          req.Name,
+		Mode:          mode,
+		Flavor:        req.Flavor,
+		OSImage:       req.OSImage,
+		Region:        req.Region,
+		SSHKeyName:    req.SSHKeyName,
+		VMIP:          req.VMIP,
+		SSHUser:       req.SSHUser,
+		SSHPort:       req.SSHPort,
+		SSHPrivateKey: req.SSHPrivateKey,
 	}
 	payloadBytes, _ := json.Marshal(payload)
+
+	// Audit metadata must never carry the one-shot SSH private key.
+	auditPayload := payload
+	auditPayload.SSHPrivateKey = ""
 
 	var op models.Operation
 	row := h.pool.QueryRow(c.Request.Context(),
@@ -216,7 +252,7 @@ func (h *Handler) CreateAppServer(c *gin.Context) {
 		return
 	}
 
-	auditMeta, _ := json.Marshal(payload)
+	auditMeta, _ := json.Marshal(auditPayload)
 	_, _ = h.pool.Exec(c.Request.Context(),
 		`INSERT INTO audit_events (actor_id, project_id, operation_id, action, resource_kind, resource_name, metadata)
 		 VALUES ($1, $2, $3, 'CreateAppServer', 'AppServer', $4, $5)`,

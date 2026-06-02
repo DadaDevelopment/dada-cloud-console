@@ -42,6 +42,20 @@ func (h *Handler) GetValuesToken(c *gin.Context) {
 	}
 	appName := c.Param("appName")
 
+	// Which file the editor session targets. Defaults to values.yaml (Helm apps);
+	// compose apps use compose.yaml / .env.
+	file := c.Query("file")
+	if file == "" {
+		file = "values.yaml"
+	}
+	switch file {
+	case "values.yaml", "compose.yaml", ".env":
+		// allowed
+	default:
+		respondError(c, http.StatusBadRequest, "file must be one of: values.yaml, compose.yaml, .env")
+		return
+	}
+
 	role, err := h.getUserProjectRole(c.Request.Context(), claims.UserID, projectID)
 	if err == pgx.ErrNoRows {
 		respondNotFound(c)
@@ -77,6 +91,7 @@ func (h *Handler) GetValuesToken(c *gin.Context) {
 		Project: projectSlug,
 		Env:     envSlug,
 		App:     appName,
+		File:    file,
 		Exp:     time.Now().Add(90 * time.Second).Unix(),
 	})
 	if err != nil {

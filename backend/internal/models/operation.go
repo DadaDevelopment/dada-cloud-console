@@ -55,12 +55,26 @@ type DeployImageVersionPayload struct {
 }
 
 // CreateAppServerPayload is the typed payload for CreateAppServer operations.
+//
+// Mode selects the provisioning path:
+//   - "terraform" (default): we provision a VM via Terraform, then bootstrap it.
+//     Uses Flavor/OSImage/Region/SSHKeyName.
+//   - "manual": a pre-existing VM is connected over SSH. Uses VMIP/SSHUser/
+//     SSHPort/SSHPrivateKey. The private key is one-shot — the agent scrubs it
+//     from operations.payload once the operation reaches a terminal state.
 type CreateAppServerPayload struct {
 	Name       string `json:"name"`
-	Flavor     string `json:"flavor"`
-	OSImage    string `json:"os_image"`
-	Region     string `json:"region"`
-	SSHKeyName string `json:"ssh_key_name"`
+	Mode       string `json:"mode,omitempty"` // "terraform" (default) | "manual"
+	Flavor     string `json:"flavor,omitempty"`
+	OSImage    string `json:"os_image,omitempty"`
+	Region     string `json:"region,omitempty"`
+	SSHKeyName string `json:"ssh_key_name,omitempty"`
+
+	// Manual-mode fields.
+	VMIP          string `json:"vm_ip,omitempty"`
+	SSHUser       string `json:"ssh_user,omitempty"`
+	SSHPort       int    `json:"ssh_port,omitempty"`
+	SSHPrivateKey string `json:"ssh_private_key,omitempty"` // scrubbed after terminal state
 }
 
 // DeleteAppServerPayload is the typed payload for DeleteAppServer operations.

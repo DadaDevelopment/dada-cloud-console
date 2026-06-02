@@ -11,10 +11,6 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-func canCreateAppsInRuntime(runtime models.EnvironmentRuntime) bool {
-	return runtime == "" || runtime == models.EnvironmentRuntimeK8s
-}
-
 // ListApps returns all App resources in a project environment.
 func (h *Handler) ListApps(c *gin.Context) {
 	claims, ok := auth.GetClaims(c)
@@ -132,9 +128,31 @@ func (h *Handler) CreateApp(c *gin.Context) {
 		respondError(c, http.StatusInternalServerError, "failed to load environment runtime")
 		return
 	}
-	if !canCreateAppsInRuntime(runtime) {
-		respondError(c, http.StatusConflict, "VM application deployments are not wired in the console yet; create the AppServer first and deploy through the VM track")
-		return
+	isCompose := runtime == models.EnvironmentRuntimeVM
+
+	// For VM environments, the app deploys as a Docker Compose stack onto the
+	// environment's AppServer. That server must exist and be Ready.
+	var appServerName string
+	if isCompose {
+		var status string
+		err = h.pool.QueryRow(c.Request.Context(),
+			`SELECT s.name, s.status
+			 FROM environments e JOIN app_servers s ON s.id = e.app_server_id
+			 WHERE e.id = $1 AND e.project_id = $2`,
+			envID, projectID,
+		).Scan(&appServerName, &status)
+		if err == pgx.ErrNoRows {
+			respondError(c, http.StatusConflict, "this VM environment has no AppServer attached; create or attach one first")
+			return
+		}
+		if err != nil {
+			respondError(c, http.StatusInternalServerError, "failed to load environment AppServer")
+			return
+		}
+		if status != string(models.AppServerStatusReady) {
+			respondError(c, http.StatusConflict, "the environment's AppServer is not Ready yet")
+			return
+		}
 	}
 
 	var req createAppRequest
@@ -143,46 +161,48 @@ func (h *Handler) CreateApp(c *gin.Context) {
 		return
 	}
 
-	// Apply defaults
-	if req.Port == 0 {
-		req.Port = 8080
-	}
-	if req.Replicas == 0 {
-		req.Replicas = 2
-	}
-	if req.Profile == "" {
-		req.Profile = "small"
-	}
-
-	// Validate
+	// Validate name (common to both runtimes).
 	if req.Name == "" {
 		respondError(c, http.StatusBadRequest, "name is required")
-		return
-	}
-	if req.Image == "" {
-		respondError(c, http.StatusBadRequest, "image is required")
 		return
 	}
 	if err := validateKubeName(req.Name); err != nil {
 		respondError(c, http.StatusBadRequest, err.Error())
 		return
 	}
-	if err := ValidateImage(req.Image); err != nil {
-		respondError(c, http.StatusBadRequest, err.Error())
-		return
-	}
-	if req.Port < 1 || req.Port > 65535 {
-		respondError(c, http.StatusBadRequest, "port must be between 1 and 65535")
-		return
-	}
-	if req.Replicas < 1 || req.Replicas > 10 {
-		respondError(c, http.StatusBadRequest, "replicas must be between 1 and 10")
-		return
-	}
-	validProfiles := map[string]bool{"small": true, "medium": true, "large": true}
-	if !validProfiles[req.Profile] {
-		respondError(c, http.StatusBadRequest, "profile must be one of: small, medium, large")
-		return
+
+	if !isCompose {
+		// Helm app validation + defaults.
+		if req.Port == 0 {
+			req.Port = 8080
+		}
+		if req.Replicas == 0 {
+			req.Replicas = 2
+		}
+		if req.Profile == "" {
+			req.Profile = "small"
+		}
+		if req.Image == "" {
+			respondError(c, http.StatusBadRequest, "image is required")
+			return
+		}
+		if err := ValidateImage(req.Image); err != nil {
+			respondError(c, http.StatusBadRequest, err.Error())
+			return
+		}
+		if req.Port < 1 || req.Port > 65535 {
+			respondError(c, http.StatusBadRequest, "port must be between 1 and 65535")
+			return
+		}
+		if req.Replicas < 1 || req.Replicas > 10 {
+			respondError(c, http.StatusBadRequest, "replicas must be between 1 and 10")
+			return
+		}
+		validProfiles := map[string]bool{"small": true, "medium": true, "large": true}
+		if !validProfiles[req.Profile] {
+			respondError(c, http.StatusBadRequest, "profile must be one of: small, medium, large")
+			return
+		}
 	}
 
 	// Check name uniqueness
@@ -203,11 +223,12 @@ func (h *Handler) CreateApp(c *gin.Context) {
 
 	// Marshal payload
 	payload := models.CreateAppPayload{
-		Name:     req.Name,
-		Image:    req.Image,
-		Port:     req.Port,
-		Replicas: req.Replicas,
-		Profile:  req.Profile,
+		Name:          req.Name,
+		Image:         req.Image,
+		Port:          req.Port,
+		Replicas:      req.Replicas,
+		Profile:       req.Profile,
+		AppServerName: appServerName, // empty for Helm apps
 	}
 	payloadBytes, err := json.Marshal(payload)
 	if err != nil {

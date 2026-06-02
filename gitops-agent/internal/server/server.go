@@ -65,10 +65,14 @@ func (s *Server) Start(ctx context.Context) error {
 	})
 	mux.HandleFunc("/webhook/github", s.githubWebhook)
 
-	// Values editor WebSocket — only active when all deps are wired.
+	// File editor WebSocket — only active when all deps are wired.
+	// /ws/file is the generic endpoint (values.yaml, compose.yaml, .env);
+	// /ws/values is kept as a backward-compatible alias. Both resolve the target
+	// file from the (authoritative) token claims.
 	if s.mgr != nil && s.hub != nil && s.tokenSecret != "" {
-		mux.HandleFunc("/ws/values", s.handleValuesWS)
-		log.Info().Msg("ws/values endpoint enabled")
+		mux.HandleFunc("/ws/file", s.handleFileWS)
+		mux.HandleFunc("/ws/values", s.handleFileWS)
+		log.Info().Msg("ws/file editor endpoint enabled")
 	}
 
 	srv := &http.Server{

@@ -41,7 +41,7 @@ var chartResourcePathRe = regexp.MustCompile(`^clusters/[^/]+/projects/([^/]+)/e
 
 // ValuesNotifier is implemented by server.Hub to push live file updates to WS clients.
 type ValuesNotifier interface {
-	Notify(project, env, app, yaml string)
+	Notify(project, env, app, file, yaml string)
 }
 
 type namespacePolicyManifest struct {
@@ -227,7 +227,7 @@ func (w *GitWatcher) notifyValuesChange(mgr *git.Manager, filePath, project, env
 		log.Warn().Err(err).Str("path", filePath).Msg("git-watcher: read values for ws notify")
 		return
 	}
-	w.notifier.Notify(project, env, app, content)
+	w.notifier.Notify(project, env, app, "values.yaml", content)
 	log.Debug().Str("app", app).Msg("git-watcher: notified ws clients of values change")
 }
 

@@ -33,45 +33,84 @@ replicas: 1
 profile: small
 `
 
-// handleValuesWS handles GET /ws/values.
-//
-// Query params: token, project, env, app.
-// The token is a wstoken signed by the console backend; it must match the
-// project/env/app query params to prevent token reuse across apps.
-func (s *Server) handleValuesWS(w http.ResponseWriter, r *http.Request) {
-	q := r.URL.Query()
-	token := q.Get("token")
-	project := q.Get("project")
-	env := q.Get("env")
-	app := q.Get("app")
+// editFile describes one editable file kind: its git path, its default content
+// when absent, and whether its content must parse as YAML on save.
+type editFile struct {
+	path     string
+	fallback string
+	isYAML   bool
+}
 
+// resolveEditFile maps a token's File claim to its git path + validation rules.
+// Empty file defaults to values.yaml for backward compatibility.
+func resolveEditFile(file, project, env, app string) (editFile, bool) {
+	switch file {
+	case "", "values.yaml":
+		return editFile{
+			path:     renderer.AppHelmValuesGitPath(project, env, app),
+			fallback: defaultValuesTemplate,
+			isYAML:   true,
+		}, true
+	case "compose.yaml":
+		return editFile{
+			path:     renderer.AppComposeGitPath(project, env, app),
+			fallback: renderer.RenderComposeSkeleton(app),
+			isYAML:   true,
+		}, true
+	case ".env":
+		return editFile{
+			path:     renderer.AppEnvGitPath(project, env, app),
+			fallback: renderer.RenderEnvSkeleton(),
+			isYAML:   false,
+		}, true
+	default:
+		return editFile{}, false
+	}
+}
+
+// handleFileWS handles GET /ws/file (and the legacy /ws/values alias).
+//
+// Auth: the only trusted input is `token`, a wstoken signed by the console
+// backend. The token's claims (project/env/app/file) are authoritative — query
+// params are ignored — so a token cannot be repurposed across apps or files.
+func (s *Server) handleFileWS(w http.ResponseWriter, r *http.Request) {
+	token := r.URL.Query().Get("token")
 	claims, err := wstoken.Verify(s.tokenSecret, token)
-	if err != nil || claims.Project != project || claims.Env != env || claims.App != app {
+	if err != nil {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
 
+	project, env, app := claims.Project, claims.Env, claims.App
+	ef, ok := resolveEditFile(claims.File, project, env, app)
+	if !ok {
+		http.Error(w, "unsupported file", http.StatusBadRequest)
+		return
+	}
+	fileLabel := claims.File
+	if fileLabel == "" {
+		fileLabel = "values.yaml"
+	}
+
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
-		log.Warn().Err(err).Str("app", app).Msg("ws/values: upgrade failed")
+		log.Warn().Err(err).Str("app", app).Msg("ws: upgrade failed")
 		return
 	}
 	defer conn.Close()
 
-	// Load current values.yaml from the local git clone.
-	valuesPath := renderer.AppHelmValuesGitPath(project, env, app)
-	content, err := s.mgr.ReadFile(valuesPath)
+	// Load current file content from the local git clone.
+	content, err := s.mgr.ReadFile(ef.path)
 	if err != nil {
-		content = defaultValuesTemplate
+		content = ef.fallback
 	}
-
 	if err := conn.WriteJSON(wsEvent{Type: "content", YAML: content}); err != nil {
 		return
 	}
 
-	// Register in Hub so GitWatcher can push live updates.
+	// Register in Hub (keyed per file) so GitWatcher can push live updates.
 	sess := &Session{
-		key:  project + "/" + env + "/" + app,
+		key:  project + "/" + env + "/" + app + "/" + fileLabel,
 		send: make(chan wsEvent, 8),
 	}
 	s.hub.Register(sess)
@@ -83,7 +122,7 @@ func (s *Server) handleValuesWS(w http.ResponseWriter, r *http.Request) {
 		defer close(writeDone)
 		for evt := range sess.send {
 			if err := conn.WriteJSON(evt); err != nil {
-				log.Debug().Err(err).Str("app", app).Msg("ws/values: write pump stopped")
+				log.Debug().Err(err).Str("app", app).Msg("ws: write pump stopped")
 				return
 			}
 		}
@@ -99,19 +138,20 @@ func (s *Server) handleValuesWS(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 
-		// Basic YAML syntax check.
-		var tmp any
-		if err := yaml.Unmarshal([]byte(msg.YAML), &tmp); err != nil {
-			_ = conn.WriteJSON(wsEvent{Type: "error", Message: "invalid YAML: " + err.Error()})
-			continue
+		// Syntax check for YAML files only (.env is plain KEY=VALUE).
+		if ef.isYAML {
+			var tmp any
+			if err := yaml.Unmarshal([]byte(msg.YAML), &tmp); err != nil {
+				_ = conn.WriteJSON(wsEvent{Type: "error", Message: "invalid YAML: " + err.Error()})
+				continue
+			}
 		}
 
-		// Commit directly through the default git manager.
 		commitMsg := fmt.Sprintf(
-			"[DADA Console] Edit values for app %s\n\nApp: %s\nEnvironment: %s\nProject: %s\n",
-			app, app, env, project,
+			"[DADA Console] Edit %s for app %s\n\nApp: %s\nEnvironment: %s\nProject: %s\n",
+			fileLabel, app, app, env, project,
 		)
-		sha, err := s.mgr.CommitAndPush(valuesPath, msg.YAML, commitMsg, s.cfg.BotName, s.cfg.BotEmail)
+		sha, err := s.mgr.CommitAndPush(ef.path, msg.YAML, commitMsg, s.cfg.BotName, s.cfg.BotEmail)
 		if err != nil {
 			_ = conn.WriteJSON(wsEvent{Type: "error", Message: err.Error()})
 			continue
@@ -122,16 +162,25 @@ func (s *Server) handleValuesWS(w http.ResponseWriter, r *http.Request) {
 			if err := db.InsertCommit(
 				context.Background(), s.pool,
 				sha, s.mgr.RepoURL(), s.mgr.Branch(),
-				valuesPath, commitMsg,
+				ef.path, commitMsg,
 				s.cfg.BotName, s.cfg.BotEmail,
 				nil, "agent",
 			); err != nil {
-				log.Warn().Err(err).Str("sha", sha).Msg("ws/values: record commit")
+				log.Warn().Err(err).Str("sha", sha).Msg("ws: record commit")
+			}
+		}
+
+		// Editing a compose app's compose.yaml/.env must redeploy the stack.
+		if s.pool != nil && (fileLabel == "compose.yaml" || fileLabel == ".env") {
+			if opID, err := db.EnqueueDeployStackBySlug(context.Background(), s.pool, project, env, app); err != nil {
+				log.Warn().Err(err).Str("app", app).Msg("ws: enqueue redeploy")
+			} else {
+				log.Info().Str("app", app).Str("deploy_op", opID.String()).Msg("ws: redeploy enqueued after edit")
 			}
 		}
 
 		_ = conn.WriteJSON(wsEvent{Type: "committed", SHA: sha})
-		log.Info().Str("app", app).Str("sha", sha).Msg("ws/values: committed")
+		log.Info().Str("app", app).Str("file", fileLabel).Str("sha", sha).Msg("ws: committed")
 	}
 
 	close(sess.send)

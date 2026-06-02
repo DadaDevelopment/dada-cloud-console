@@ -45,11 +45,20 @@ func RenderBootstrap(p BootstrapParams) (string, error) {
 	return buf.String(), nil
 }
 
+// dialAddr normalizes a host into a "host:port" dial address.
+// "ip" → "ip:22"; "ip:port" is passed through unchanged.
+func dialAddr(host string) string {
+	if strings.Contains(host, ":") {
+		return host
+	}
+	return host + ":22"
+}
+
 // RunBootstrap SSHes into host, streams the rendered bootstrap script via stdin,
 // and waits for "BOOTSTRAP_COMPLETE" in stdout.
-// host: IP address only (port :22 is appended).
+// host: "ip" (defaults to port 22) or "ip:port" for a custom SSH port.
 // user: "root" (default on Beget Ubuntu VDS).
-// privateKeyPEM: PEM-encoded private key matching the SSH key registered in Beget.
+// privateKeyPEM: PEM-encoded private key matching the SSH key on the target VM.
 func RunBootstrap(ctx context.Context, host, user, privateKeyPEM string, params BootstrapParams) error {
 	signer, err := gossh.ParsePrivateKey([]byte(privateKeyPEM))
 	if err != nil {
@@ -64,9 +73,10 @@ func RunBootstrap(ctx context.Context, host, user, privateKeyPEM string, params 
 	}
 
 	// Retry until SSH port opens (VM may still be booting — up to 5 min).
+	addr := dialAddr(host)
 	var client *gossh.Client
 	for i := 0; i < 30; i++ {
-		client, err = gossh.Dial("tcp", host+":22", sshCfg)
+		client, err = gossh.Dial("tcp", addr, sshCfg)
 		if err == nil {
 			break
 		}

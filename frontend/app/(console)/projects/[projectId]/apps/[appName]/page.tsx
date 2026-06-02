@@ -6,6 +6,7 @@ import { appsApi, endpointsApi } from "@/lib/api";
 import type { ResourceSnapshot } from "@/lib/types";
 import { Modal } from "@/components/ui/modal";
 import { Spinner } from "@/components/ui/spinner";
+import { ComposeStatePanel } from "@/components/compose-state-panel";
 
 function PhaseBadge({ phase }: { phase?: string }) {
   const p = phase ?? "";
@@ -144,7 +145,8 @@ export default function AppDetailPage() {
     );
   }
 
-  const summary = app.summary_json as { image?: string; port?: number; replicas?: number; profile?: string };
+  const summary = app.summary_json as { image?: string; port?: number; replicas?: number; profile?: string; runtime?: string };
+  const isCompose = summary.runtime === "compose";
 
   return (
     <div>
@@ -167,40 +169,46 @@ export default function AppDetailPage() {
         </div>
         <div className="flex items-center gap-2">
           <Link
-            href={`/projects/${projectId}/apps/${appName}/values${envId ? `?envId=${envId}` : ""}`}
+            href={`/projects/${projectId}/apps/${appName}/${isCompose ? "compose" : "values"}${envId ? `?envId=${envId}` : ""}`}
             className="inline-flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:border-blue-300 hover:text-blue-600 transition-colors shadow-sm"
           >
             <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
             </svg>
-            Edit values
+            {isCompose ? "Edit compose" : "Edit values"}
           </Link>
-          <button
-            onClick={() => { setNewImage(summary.image ?? ""); setIsImageModalOpen(true); }}
-            className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 transition-colors"
-          >
-            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
-            </svg>
-            Deploy Image
-          </button>
+          {!isCompose && (
+            <button
+              onClick={() => { setNewImage(summary.image ?? ""); setIsImageModalOpen(true); }}
+              className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 transition-colors"
+            >
+              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+              </svg>
+              Deploy Image
+            </button>
+          )}
         </div>
       </div>
 
-      {/* Spec cards */}
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        {[
-          { label: "Image", value: summary.image ?? "—", mono: true },
-          { label: "Profile", value: summary.profile ?? "small" },
-          { label: "Replicas", value: String(summary.replicas ?? 2) },
-          { label: "Port", value: String(summary.port ?? 8080) },
-        ].map(({ label, value, mono }) => (
-          <div key={label} className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
-            <p className="text-xs font-semibold uppercase tracking-wide text-gray-400">{label}</p>
-            <p className={`mt-1 text-sm font-medium text-gray-900 truncate ${mono ? "font-mono" : ""}`}>{value}</p>
-          </div>
-        ))}
-      </div>
+      {/* Spec cards (Helm) or live state panel (compose) */}
+      {isCompose ? (
+        <ComposeStatePanel projectId={projectId} envId={envId} appName={appName} />
+      ) : (
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          {[
+            { label: "Image", value: summary.image ?? "—", mono: true },
+            { label: "Profile", value: summary.profile ?? "small" },
+            { label: "Replicas", value: String(summary.replicas ?? 2) },
+            { label: "Port", value: String(summary.port ?? 8080) },
+          ].map(({ label, value, mono }) => (
+            <div key={label} className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
+              <p className="text-xs font-semibold uppercase tracking-wide text-gray-400">{label}</p>
+              <p className={`mt-1 text-sm font-medium text-gray-900 truncate ${mono ? "font-mono" : ""}`}>{value}</p>
+            </div>
+          ))}
+        </div>
+      )}
 
       {/* Domains section */}
       <div className="mt-10">

@@ -43,10 +43,46 @@ export type AppServerStatus =
   | "Deleted"
   | "Failed";
 
+export type AppServerSource = "terraform" | "manual";
+
+// Live state (Portainer proxy) ----------------------------------------------
+export interface PortainerContainer {
+  Id: string;
+  Names: string[];
+  Image?: string;
+  State: string;  // "running" | "exited" | ...
+  Status: string; // "Up 3 minutes" | ...
+  Labels?: Record<string, string>;
+}
+
+export interface AppServerState {
+  status: string;
+  source?: AppServerSource;
+  online: boolean;
+  last_checkin?: number;
+  containers?: PortainerContainer[];
+  live_error?: string;
+}
+
+export interface PortainerStack {
+  Id: number;
+  Name: string;
+  EndpointId: number;
+  Status: number; // 1 active, 2 inactive
+}
+
+export interface AppState {
+  online: boolean;
+  stack?: PortainerStack;
+  containers?: PortainerContainer[];
+  live_error?: string;
+}
+
 export interface AppServer {
   id: string;
   project_id: string;
   name: string;
+  source: AppServerSource;
   vm_ip?: string;
   vm_provider_id?: string;
   terraform_workspace?: string;

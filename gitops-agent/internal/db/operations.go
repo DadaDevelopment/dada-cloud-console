@@ -34,21 +34,17 @@ func ClaimPending(ctx context.Context, pool *pgxpool.Pool) ([]Operation, error) 
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck
 
-	// FOR UPDATE cannot be used with LEFT JOIN (nullable side); use EXISTS for k8s filter.
+	// gitops-agent owns git rendering for ALL runtimes (k8s Helm apps and VM
+	// compose apps alike). The portainer-agent owns VM/endpoint lifecycle and
+	// stack deploys, so those actions are excluded here. The split is purely by
+	// action, making the two claim sets disjoint regardless of env.runtime.
 	rows, err := tx.Query(ctx, `
 		UPDATE operations
 		SET    status = 'Processing', updated_at = NOW()
 		WHERE  id IN (
 			SELECT o.id FROM operations o
 			WHERE  o.status = 'Created'
-			  AND  o.action NOT IN ('CreateAppServer', 'DeleteAppServer')
-			  AND  (
-			    o.environment_id IS NULL
-			    OR EXISTS (
-			        SELECT 1 FROM environments e
-			        WHERE e.id = o.environment_id AND e.runtime = 'k8s'
-			    )
-			  )
+			  AND  o.action NOT IN ('CreateAppServer', 'DeleteAppServer', 'DeployStack')
 			ORDER  BY o.created_at
 			LIMIT  $1
 			FOR UPDATE SKIP LOCKED
@@ -100,4 +96,42 @@ func MarkFailed(ctx context.Context, pool *pgxpool.Pool, id uuid.UUID, code, mes
 		WHERE  id = $1
 	`, id, code, message)
 	return err
+}
+
+// EnqueueDeployStack creates a follow-up DeployStack operation for a compose
+// app, copying actor/project/environment from the parent (render) operation.
+// The portainer-agent claims and executes it (CreateStackFromGit / RedeployStack).
+func EnqueueDeployStack(ctx context.Context, pool *pgxpool.Pool, parentOpID uuid.UUID, appName string) (uuid.UUID, error) {
+	var id uuid.UUID
+	err := pool.QueryRow(ctx, `
+		INSERT INTO operations (actor_id, project_id, environment_id, action, resource_kind, resource_name, status, payload)
+		SELECT actor_id, project_id, environment_id, 'DeployStack', 'App', $2, 'Created',
+		       jsonb_build_object('app_name', $2::text)
+		FROM operations WHERE id = $1
+		RETURNING id`,
+		parentOpID, appName,
+	).Scan(&id)
+	return id, err
+}
+
+// systemActorID is the fixed-UUID non-loginable user (migration 010) used as the
+// actor for agent-initiated operations that have no originating user request.
+const systemActorID = "00000000-0000-0000-0000-000000000000"
+
+// EnqueueDeployStackBySlug creates a DeployStack operation for a compose app
+// identified by project/env slugs, attributed to the system actor. Used by the
+// editor save path (which has no originating user/operation). Returns
+// pgx.ErrNoRows if the project/env slugs don't resolve.
+func EnqueueDeployStackBySlug(ctx context.Context, pool *pgxpool.Pool, projectSlug, envSlug, appName string) (uuid.UUID, error) {
+	var id uuid.UUID
+	err := pool.QueryRow(ctx, `
+		INSERT INTO operations (actor_id, project_id, environment_id, action, resource_kind, resource_name, status, payload)
+		SELECT $4::uuid, p.id, e.id, 'DeployStack', 'App', $3, 'Created',
+		       jsonb_build_object('app_name', $3::text)
+		FROM projects p JOIN environments e ON e.project_id = p.id
+		WHERE p.name = $1 AND e.name = $2
+		RETURNING id`,
+		projectSlug, envSlug, appName, systemActorID,
+	).Scan(&id)
+	return id, err
 }
