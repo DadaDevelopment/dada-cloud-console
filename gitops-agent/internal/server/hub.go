@@ -42,10 +42,10 @@ func (h *Hub) Unregister(s *Session) {
 	}
 }
 
-// Notify pushes a file-update event to all Sessions watching project/env/app.
-// Non-blocking: slow clients are skipped (their buffer is full).
-func (h *Hub) Notify(project, env, app, yaml string) {
-	key := project + "/" + env + "/" + app
+// Notify pushes a file-update event to all Sessions watching
+// project/env/app/file. Non-blocking: slow clients are skipped (buffer full).
+func (h *Hub) Notify(project, env, app, file, yaml string) {
+	key := project + "/" + env + "/" + app + "/" + file
 	h.mu.RLock()
 	sessions := make([]*Session, len(h.sessions[key]))
 	copy(sessions, h.sessions[key])

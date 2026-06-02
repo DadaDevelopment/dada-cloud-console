@@ -27,6 +27,8 @@ import type {
   MLflowModelVersion,
   RevealAPIKeyResponse,
   PendingApprovalsResponse,
+  AppState,
+  AppServerState,
 } from "./types";
 
 // Empty string → relative URLs → requests go through the ingress proxy.
@@ -137,6 +139,19 @@ export const appsApi = {
       `/api/v1/projects/${projectId}/environments/${envId}/apps/${appName}/image`,
       { method: "PATCH", body: { image } }
     ),
+
+  // Live compose state (Portainer proxy).
+  getState: (projectId: string, envId: string, appName: string) =>
+    apiFetch<AppState>(
+      `/api/v1/projects/${projectId}/environments/${envId}/apps/${appName}/state`
+    ),
+
+  getLogs: (projectId: string, envId: string, appName: string, container: string, tail = 200) =>
+    apiFetch<{ logs: string }>(
+      `/api/v1/projects/${projectId}/environments/${envId}/apps/${appName}/logs?container=${encodeURIComponent(
+        container
+      )}&tail=${tail}`
+    ),
 };
 
 export const appServersApi = {
@@ -146,12 +161,22 @@ export const appServersApi = {
   get: (projectId: string, serverName: string) =>
     apiFetch<AppServerResponse>(`/api/v1/projects/${projectId}/app-servers/${serverName}`),
 
+  getState: (projectId: string, serverName: string) =>
+    apiFetch<AppServerState>(`/api/v1/projects/${projectId}/app-servers/${serverName}/state`),
+
   create: (projectId: string, data: {
     name: string;
-    flavor: string;
-    os_image: string;
-    region: string;
-    ssh_key_name: string;
+    mode?: "terraform" | "manual";
+    // terraform mode
+    flavor?: string;
+    os_image?: string;
+    region?: string;
+    ssh_key_name?: string;
+    // manual mode (connecting a pre-existing VM over SSH)
+    vm_ip?: string;
+    ssh_user?: string;
+    ssh_port?: number;
+    ssh_private_key?: string;
   }) =>
     apiFetch<CreateAppServerResponse>(`/api/v1/projects/${projectId}/app-servers`, {
       method: "POST",
@@ -193,9 +218,13 @@ export const endpointsApi = {
 
 // Values editor — issues a short-lived WS delegate token from the backend.
 export const valuesApi = {
-  getToken: (projectId: string, envId: string, appName: string) =>
+  // file selects which editable file the session targets:
+  // "values.yaml" (default, Helm apps), "compose.yaml" or ".env" (compose apps).
+  getToken: (projectId: string, envId: string, appName: string, file?: string) =>
     apiFetch<{ token: string; ws_url: string }>(
-      `/api/v1/projects/${projectId}/environments/${envId}/apps/${appName}/values-token`,
+      `/api/v1/projects/${projectId}/environments/${envId}/apps/${appName}/values-token${
+        file ? `?file=${encodeURIComponent(file)}` : ""
+      }`,
       { method: "POST" }
     ),
 };

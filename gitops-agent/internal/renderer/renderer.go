@@ -160,6 +160,41 @@ func AppHelmValuesGitPath(projectSlug, envSlug, appName string) string {
 	return AppBaseGitPath(projectSlug, envSlug, appName) + "/values.yaml"
 }
 
+// ── Compose apps (VM runtime) ────────────────────────────────────────────────
+// Compose apps live in the same app tree as Helm apps but are deployed to a
+// Portainer endpoint (the environment's AppServer) rather than the K8s cluster.
+// Portainer pulls compose.yaml from git; a sibling .env is auto-loaded by
+// docker compose from the same directory.
+
+// AppComposeGitPath is the docker-compose file for a compose app.
+func AppComposeGitPath(projectSlug, envSlug, appName string) string {
+	return AppBaseGitPath(projectSlug, envSlug, appName) + "/compose.yaml"
+}
+
+// AppEnvGitPath is the .env file deployed alongside compose.yaml.
+func AppEnvGitPath(projectSlug, envSlug, appName string) string {
+	return AppBaseGitPath(projectSlug, envSlug, appName) + "/.env"
+}
+
+// RenderComposeSkeleton returns a minimal, valid docker-compose file used when a
+// compose app is first created. The user edits it via the two-pane editor.
+func RenderComposeSkeleton(appName string) string {
+	return fmt.Sprintf(`# Auto-created by DADA Console for app %q.
+# Edit this file and save to redeploy. A sibling .env is loaded automatically.
+services:
+  app:
+    image: nginx:alpine
+    restart: unless-stopped
+    ports:
+      - "8080:80"
+`, appName)
+}
+
+// RenderEnvSkeleton returns a minimal .env placeholder for a compose app.
+func RenderEnvSkeleton() string {
+	return "# Environment variables for this compose app (KEY=VALUE per line).\n"
+}
+
 // RenderBareAppValues renders a minimal values.yaml for an app that was created
 // automatically to own a child resource's chart. It declares no workload, so the
 // platform controller provisions no Deployment until a user sets an image here.

@@ -262,6 +262,16 @@ func TestGitPaths(t *testing.T) {
 			"clusters/beget-prod/projects/alpha/environments/prod/apps/api/values.yaml",
 		},
 		{
+			"AppComposeGitPath",
+			renderer.AppComposeGitPath("alpha", "prod", "api"),
+			"clusters/beget-prod/projects/alpha/environments/prod/apps/api/compose.yaml",
+		},
+		{
+			"AppEnvGitPath",
+			renderer.AppEnvGitPath("alpha", "prod", "api"),
+			"clusters/beget-prod/projects/alpha/environments/prod/apps/api/.env",
+		},
+		{
 			"PublicApiGitPath",
 			renderer.PublicApiGitPath("alpha", "prod", "api", "main"),
 			"clusters/beget-prod/projects/alpha/environments/prod/apps/api/chart/templates/publicapi-main.yaml",

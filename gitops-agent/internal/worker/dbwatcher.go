@@ -339,14 +339,21 @@ func (w *DBWatcher) doCreateServiceDatabase(ctx context.Context, op db.Operation
 
 func (w *DBWatcher) doCreateApp(ctx context.Context, op db.Operation) error {
 	var p struct {
-		Name     string `json:"name"`
-		Image    string `json:"image"`
-		Port     int    `json:"port"`
-		Replicas int    `json:"replicas"`
-		Profile  string `json:"profile"`
+		Name          string `json:"name"`
+		Image         string `json:"image"`
+		Port          int    `json:"port"`
+		Replicas      int    `json:"replicas"`
+		Profile       string `json:"profile"`
+		AppServerName string `json:"app_server_name"`
 	}
 	if err := json.Unmarshal(op.Payload, &p); err != nil {
 		return fmt.Errorf("parse payload: %w", err)
+	}
+
+	// VM environments deploy as a Docker Compose stack (signalled by an AppServer
+	// binding) rather than a Helm App.
+	if p.AppServerName != "" {
+		return w.doCreateComposeApp(ctx, op, p.Name)
 	}
 
 	projectName, envName, envNamespace, err := w.projectEnv(ctx, op.ProjectID, op.EnvironmentID)
@@ -404,6 +411,51 @@ func (w *DBWatcher) doCreateApp(ctx context.Context, op db.Operation) error {
 		op.ProjectID, op.EnvironmentID,
 		"App", p.Name, "Pending", summaryJSON, time.Now(),
 	)
+}
+
+// doCreateComposeApp renders a skeleton compose.yaml + .env into the app's git
+// tree, records a snapshot, and enqueues a DeployStack op for the portainer-agent
+// to deploy onto the environment's AppServer endpoint.
+func (w *DBWatcher) doCreateComposeApp(ctx context.Context, op db.Operation, appName string) error {
+	projectName, envName, _, err := w.projectEnv(ctx, op.ProjectID, op.EnvironmentID)
+	if err != nil {
+		return fmt.Errorf("project/env lookup: %w", err)
+	}
+
+	mgr, err := w.managerFor(ctx, op.ProjectID)
+	if err != nil {
+		return err
+	}
+
+	composePath := renderer.AppComposeGitPath(projectName, envName, appName)
+	envPath := renderer.AppEnvGitPath(projectName, envName, appName)
+	commitMsg := fmt.Sprintf(
+		"[DADA Console] Create compose app %s\n\nOperation: %s\nProject: %s\nEnvironment: %s\n",
+		appName, op.ID, projectName, envName,
+	)
+	if err := w.commitFilesAndRecord(ctx, op, mgr, composePath, []git.FileChange{
+		{Path: composePath, Content: renderer.RenderComposeSkeleton(appName)},
+		{Path: envPath, Content: renderer.RenderEnvSkeleton()},
+	}, commitMsg); err != nil {
+		return err
+	}
+
+	summaryJSON, _ := json.Marshal(map[string]any{
+		"runtime": "compose", "status": "Pending",
+	})
+	if err := db.UpsertSnapshot(ctx, w.pool,
+		op.ProjectID, op.EnvironmentID,
+		"App", appName, "Pending", summaryJSON, time.Now(),
+	); err != nil {
+		return err
+	}
+
+	deployID, err := db.EnqueueDeployStack(ctx, w.pool, op.ID, appName)
+	if err != nil {
+		return fmt.Errorf("enqueue deploy stack: %w", err)
+	}
+	log.Info().Str("app", appName).Str("deploy_op", deployID.String()).Msg("compose app rendered; deploy enqueued")
+	return nil
 }
 
 func (w *DBWatcher) doDeployImageVersion(ctx context.Context, op db.Operation) error {

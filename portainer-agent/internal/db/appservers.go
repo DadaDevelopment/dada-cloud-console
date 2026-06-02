@@ -38,18 +38,30 @@ func GetAppServerByName(ctx context.Context, pool *pgxpool.Pool, projectID uuid.
 	return &s, nil
 }
 
-// CreateAppServer inserts a new app_server row in Provisioning status and returns its UUID.
+// CreateAppServer inserts a new terraform-provisioned app_server row in
+// Provisioning status and returns its UUID.
 func CreateAppServer(ctx context.Context, pool *pgxpool.Pool, projectID uuid.UUID, name, workspace string) (uuid.UUID, error) {
+	return createAppServer(ctx, pool, projectID, name, workspace, "terraform")
+}
+
+// CreateManualAppServer inserts a new manually-connected app_server row (no
+// terraform workspace) in Provisioning status and returns its UUID.
+func CreateManualAppServer(ctx context.Context, pool *pgxpool.Pool, projectID uuid.UUID, name string) (uuid.UUID, error) {
+	return createAppServer(ctx, pool, projectID, name, "", "manual")
+}
+
+func createAppServer(ctx context.Context, pool *pgxpool.Pool, projectID uuid.UUID, name, workspace, source string) (uuid.UUID, error) {
 	var id uuid.UUID
 	err := pool.QueryRow(ctx,
-		`INSERT INTO app_servers (project_id, name, terraform_workspace, status)
-		 VALUES ($1, $2, $3, 'Provisioning')
+		`INSERT INTO app_servers (project_id, name, terraform_workspace, source, status)
+		 VALUES ($1, $2, $3, $4, 'Provisioning')
 		 ON CONFLICT (project_id, name) DO UPDATE
 		   SET terraform_workspace = EXCLUDED.terraform_workspace,
+		       source = EXCLUDED.source,
 		       status = 'Provisioning',
 		       updated_at = NOW()
 		 RETURNING id`,
-		projectID, name, workspace,
+		projectID, name, workspace, source,
 	).Scan(&id)
 	return id, err
 }
@@ -106,6 +118,46 @@ func SetAppServerDeleted(ctx context.Context, pool *pgxpool.Pool, id uuid.UUID) 
 		id, time.Now(),
 	)
 	return err
+}
+
+// ComposeDeployTarget identifies where a compose stack must be deployed: the
+// project/env slugs (to build the git path) and the Portainer endpoint id.
+type ComposeDeployTarget struct {
+	ProjectSlug string
+	EnvSlug     string
+	EndpointID  int
+}
+
+// GetComposeDeployTarget resolves the deploy target for a compose app from the
+// operation's project + environment. It requires the environment's AppServer to
+// be Ready with a registered Portainer endpoint.
+func GetComposeDeployTarget(ctx context.Context, pool *pgxpool.Pool, projectID uuid.UUID, environmentID *uuid.UUID) (*ComposeDeployTarget, error) {
+	if environmentID == nil {
+		return nil, fmt.Errorf("compose deploy requires an environment")
+	}
+	var (
+		t        ComposeDeployTarget
+		status   string
+		endpoint *int
+	)
+	err := pool.QueryRow(ctx, `
+		SELECT p.name, e.name, s.status, s.portainer_endpoint_id
+		FROM projects p
+		JOIN environments e ON e.project_id = p.id
+		JOIN app_servers s ON s.id = e.app_server_id
+		WHERE p.id = $1 AND e.id = $2
+	`, projectID, *environmentID).Scan(&t.ProjectSlug, &t.EnvSlug, &status, &endpoint)
+	if err != nil {
+		return nil, err
+	}
+	if status != "Ready" {
+		return nil, fmt.Errorf("app server not Ready (status=%s)", status)
+	}
+	if endpoint == nil {
+		return nil, fmt.Errorf("app server has no portainer endpoint")
+	}
+	t.EndpointID = *endpoint
+	return &t, nil
 }
 
 // ListReadyAppServers returns all app_servers with status=Ready.

@@ -1,3 +1,85 @@
+# 2026-06-02 Compose Apps + Manual VM Connect + Live State
+
+Design: `docs/architecture/compose-and-manual-vm-design.md`
+Build order: ① Manual VM → ② Compose → ③ Live State. Each phase independently shippable.
+
+## Phase 0 — Schema & shared groundwork
+- [x] Migration `009_appserver_source.sql`: `app_servers.source` TEXT NOT NULL DEFAULT 'terraform' (`terraform`|`manual`), idempotent/privilege-tolerant
+- [~] `apps` `runtime`/`app_server_id` — deferred to Phase 2 (compose), unused until then
+- [x] `models/appserver.go`: add `Source` field (+ `AppServerSource` consts); updated List/Get scans
+- [x] Migration runner auto-discovers `migrations/*.sql` (`backend/cmd/server/main.go` → `db.RunMigrations`)
+
+## Phase 1 — Manual VM Connect
+- [x] backend `CreateAppServer`: accept `mode` (`terraform`|`manual`); validate `{vm_ip, ssh_private_key}` for manual; SSH key kept out of audit metadata
+- [x] backend: enqueue operation with mode + fields in payload (`models.CreateAppServerPayload` extended)
+- [x] portainer-agent `worker`: `doCreateAppServer` branches on `mode=="manual"` → new `doCreateManualAppServer`
+  - [x] `CreateEdgeEndpoint` → `CreateManualAppServer(source=manual)` → `SetAppServerProvisioned(ip,"manual")`
+  - [x] `ssh.RunBootstrap(host, ssh_user, payload.ssh_private_key, bootstrapParams)` (reused; `dialAddr` supports custom port)
+  - [x] `waitForAgent` → `SetAppServerReady` → `MarkReady`
+- [x] portainer-agent: scrub `ssh_private_key` from `operations.payload` on terminal state via `db.ScrubOperationSecret` (deferred, both success+fail)
+- [x] frontend: source toggle (Provision / Connect existing VM) + manual fields (IP, port, user, key textarea + "never stored" warning) + `manual` tag in list
+- [x] Unit test: `dialAddr` (bare IP / explicit port / host)
+- [ ] VERIFY (live): connect throwaway VM end-to-end → Ready; confirm `ssh_private_key` scrubbed in DB row
+
+### Phase 0+1 Review
+Implemented Manual VM connect reusing the existing edge-agent bootstrap path.
+- **backend:** `appservers.go` validates `mode`; `operation.go` payload carries one-shot manual fields; audit metadata strips the key.
+- **portainer-agent:** `doCreateManualAppServer` mirrors the Terraform flow minus provisioning; `CreateManualAppServer`/`ScrubOperationSecret` DB helpers; `dialAddr` enables custom SSH port without breaking the bare-IP caller.
+- **frontend:** mode-aware create modal; `source` surfaced in types/API/list.
+- **Verification:** `go build`+`go test` green in backend & portainer-agent; new `dialAddr` test passes; frontend `tsc` clean + `next build` success (15 routes). Only outstanding item is a live end-to-end VM connect (needs a real VM + Portainer).
+- **Note:** one pre-existing eslint error in `apps/[appName]/values/page.tsx` (untouched by this work).
+
+## Phase 2 — Compose App + two-pane editor  ✅
+Decision refinement: compose = an App in a **VM-runtime environment** (env.runtime='vm' + env.app_server_id), not a new app column — the codebase already models this. Operation ownership split **by action** (gitops renders all; portainer owns CreateAppServer/DeleteAppServer/DeployStack), making the two claim sets disjoint and runtime-independent.
+- [x] gitops `renderer`: `AppComposeGitPath`, `AppEnvGitPath`, `RenderComposeSkeleton`, `RenderEnvSkeleton`
+- [x] gitops `DBWatcher.doCreateApp`: branches to `doCreateComposeApp` (AppServerName set) → commit compose.yaml + .env, snapshot runtime=compose, `EnqueueDeployStack`
+- [x] portainer-agent `doDeployStack`: resolve endpoint via env→app_server (Ready+endpoint), `RedeployStack` if exists else `CreateStackFromGit`; dispatch case added
+- [x] claim split: gitops `action NOT IN (CreateAppServer,DeleteAppServer,DeployStack)`; portainer `action IN (those three)`
+- [x] backend `CreateApp`: VM runtime allowed; resolves env's AppServer, requires `Ready` (R2); image/port/profile validation helm-only; payload carries AppServerName
+- [x] wstoken: `File` claim added (backend + gitops copies); **token authoritative** (handler ignores query params — fixes latent values-editor auth bug)
+- [x] gitops `handleValuesWS` → `handleFileWS`: file resolved from claim, YAML check only for `*.yaml`, compose.yaml/.env save → `EnqueueDeployStackBySlug` (redeploy); `/ws/file` route + `/ws/values` alias
+- [x] migration `010_system_user.sql`: fixed-UUID non-loginable actor for agent-initiated DeployStack ops
+- [x] backend `GetValuesToken`: `file` query param (allow-list values.yaml|compose.yaml|.env), signed into claim
+- [x] frontend: two-pane compose editor (`apps/[appName]/compose`), one WS per file; `valuesApi.getToken(file)`; app page routes compose apps to compose editor + hides helm-only Deploy Image
+- [x] tests: wstoken File round-trip/tamper/expiry (backend); renderer compose/env paths; `resolveEditFile` (gitops); `composeGitPath` cross-agent contract (portainer)
+- [ ] VERIFY R4 (live): Portainer reaches git repo with creds; create compose app → stack deploys; edit→save→redeploy. Needs live Portainer+VM+repo.
+
+### Phase 2 Review
+Compose apps now flow end-to-end as a GitOps two-phase pipeline: **gitops-agent renders** compose.yaml/.env into the app's git tree and enqueues a **DeployStack** op; **portainer-agent deploys** it onto the environment's AppServer endpoint via the existing Portainer stack API (create or git-redeploy). The editor was generalized to any file via a signed `File` claim (token is now authoritative, fixing a latent auth gap), with compose/.env saves auto-triggering redeploy. Frontend ships a two-pane compose editor.
+- **Verification:** all three Go modules `go build` + `go test` PASS; frontend `tsc` clean, `eslint` clean on changed files, `next build` success (compose route present).
+- **Scope notes / follow-ups:** (a) creating a compose app from the UI in a VM environment is supported by the backend but the apps create-modal UX for VM envs is minimal — image-optional form polish is a follow-up; (b) external-git-change live "update" push still only fires for values.yaml (gitwatcher regex), compose/.env editors load+save fine; (c) live R4 verification needs real infra.
+
+## Phase 3 — Live State (read-only)  ✅
+- [x] backend `internal/portainer`: lean read-only client (GetEndpoint, ListStacks, ListContainers, GetContainerLogs w/ docker stream de-mux); `New` returns nil when unconfigured (feature auto-disables)
+- [x] backend config: `PORTAINER_URL`, `PORTAINER_API_TOKEN`; client wired into Handler
+- [x] backend endpoints: `GET app-servers/:name/state` (endpoint heartbeat + containers, DB-status fallback), `GET .../apps/:name/state` (stack + compose containers), `GET .../apps/:name/logs?container=&tail=` (de-muxed, capped, non-follow)
+- [x] frontend: `ComposeStatePanel` on compose app page (online dot, container list, per-container logs viewer, 10s auto-refresh); live online dot on app-servers list (best-effort per Ready VM)
+- [x] tests: docker stream de-mux (multiplexed + raw/TTY passthrough), `New` disabled-when-unconfigured
+- [ ] VERIFY (live): state matches Portainer UI; logs render. Needs real Portainer+VM.
+
+### Phase 3 Review
+Console now proxies live Portainer state read-only. A lean read-only client lives in `backend/internal/portainer` (separate from the agent's read-write client, since they're separate Go modules). Three endpoints expose VM heartbeat+containers, compose stack+containers, and container logs (Docker 8-byte stream headers stripped server-side). The feature self-disables when `PORTAINER_URL`/`PORTAINER_API_TOKEN` are unset (client is nil → 503 / DB-status fallback). Frontend shows a `ComposeStatePanel` (containers + logs, auto-refresh) on compose apps and a live online dot per Ready VM.
+- **Verification:** backend `go vet` + `go test` PASS (incl. new de-mux + config tests); frontend `tsc` clean, `eslint` clean on changed files, `next build` success.
+- **Follow-ups:** logs are tail-snapshot (not streaming/follow) in v1; VM detail page (containers for a specific server) not yet surfaced beyond the online dot — endpoint exists.
+
+---
+
+## Overall status (Phases 0–3)
+All three features implemented + unit-verified; only **live end-to-end on real infra** remains across phases:
+1. Manual VM connect — SSH-push edge agent, one-shot key scrubbed.
+2. Compose apps — GitOps render → DeployStack → Portainer; two-pane compose.yaml/.env editor with redeploy-on-save.
+3. Live state — read-only Portainer proxy (VM + app + logs).
+New config to set in deploy: backend `PORTAINER_URL`, `PORTAINER_API_TOKEN`; portainer-agent already has `GITOPS_REPO_URL/BRANCH/USERNAME/TOKEN`. Migrations `009` (app_servers.source) + `010` (system user) run automatically on boot.
+
+## Cross-cutting
+- [ ] Tests per phase (Go unit + integration); separate authoring vs review pass before each merge
+- [ ] Run real config after each fix (per global rules)
+
+## Review (filled in as phases complete)
+- _pending_
+
+---
+
 # 2026-05-29 values.yaml live editor (WS)
 
 Design doc: `tasks/design-values-editor.md`

@@ -1,0 +1,71 @@
+{{- if .Values.portainerAgent.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "dada-cloud-console.fullname" . }}-portainer-agent
+  labels:
+    {{- include "dada-cloud-console.labels" . | nindent 4 }}
+    app.kubernetes.io/component: portainer-agent
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "dada-cloud-console.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: portainer-agent
+  template:
+    metadata:
+      labels:
+        {{- include "dada-cloud-console.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: portainer-agent
+    spec:
+      serviceAccountName: {{ include "dada-cloud-console.fullname" . }}
+      {{- with .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: portainer-agent
+          image: "{{ .Values.global.imageRegistry }}/{{ .Values.portainerAgent.image.repository }}:{{ .Values.portainerAgent.image.tag }}"
+          imagePullPolicy: {{ .Values.portainerAgent.image.pullPolicy }}
+          ports:
+            - name: health
+              containerPort: {{ default 8090 .Values.portainerAgent.healthPort }}
+          envFrom:
+            - secretRef:
+                name: {{ default (printf "%s-portainer-agent" (include "dada-cloud-console.fullname" .)) .Values.portainerAgent.existingSecret }}
+          env:
+            {{- range $key, $value := .Values.portainerAgent.env }}
+            - name: {{ $key }}
+              value: {{ $value | quote }}
+            {{- end }}
+          volumeMounts:
+            - name: tf-workspaces
+              mountPath: {{ default "/var/lib/tf-workspaces" (index .Values.portainerAgent.env "TF_WORKSPACE_BASE") }}
+            - name: repos
+              mountPath: {{ default "/var/lib/gitops-repos" (index .Values.portainerAgent.env "GITOPS_REPO_LOCAL_PATH") }}
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: {{ default 8090 .Values.portainerAgent.healthPort }}
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: {{ default 8090 .Values.portainerAgent.healthPort }}
+            initialDelaySeconds: 30
+            periodSeconds: 20
+          resources:
+            {{- toYaml .Values.portainerAgent.resources | nindent 12 }}
+      volumes:
+        # Terraform workspaces + git clones are reconstructable; state lives in
+        # TF_STATE_CONN_STR (external postgres), so ephemeral dirs are fine.
+        - name: tf-workspaces
+          emptyDir:
+            sizeLimit: 1Gi
+        - name: repos
+          emptyDir:
+            sizeLimit: 1Gi
+{{- end }}

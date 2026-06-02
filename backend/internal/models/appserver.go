@@ -18,11 +18,20 @@ const (
 	AppServerStatusFailed          AppServerStatus = "Failed"
 )
 
+// AppServerSource records how the VM was attached to the platform.
+type AppServerSource string
+
+const (
+	AppServerSourceTerraform AppServerSource = "terraform" // provisioned by us via Terraform
+	AppServerSourceManual    AppServerSource = "manual"    // pre-existing VM, connected over SSH
+)
+
 // AppServer represents a customer-provisioned VDS running Docker + Portainer Edge Agent.
 type AppServer struct {
 	ID                  uuid.UUID       `json:"id"                              db:"id"`
 	ProjectID           uuid.UUID       `json:"project_id"                      db:"project_id"`
 	Name                string          `json:"name"                            db:"name"`
+	Source              AppServerSource `json:"source"                          db:"source"`
 	VMIP                *string         `json:"vm_ip,omitempty"                 db:"vm_ip"`
 	VMProviderID        *string         `json:"vm_provider_id,omitempty"        db:"vm_provider_id"`
 	TerraformWorkspace  *string         `json:"terraform_workspace,omitempty"   db:"terraform_workspace"`

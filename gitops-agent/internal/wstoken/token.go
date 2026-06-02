@@ -15,10 +15,16 @@ import (
 )
 
 // Claims are the payload embedded in a delegate token.
+//
+// File selects which editable file the token grants access to (e.g.
+// "values.yaml", "compose.yaml", ".env"). Empty is treated as "values.yaml"
+// for backward compatibility. The token is authoritative — the agent resolves
+// the target file from this claim, not from request query params.
 type Claims struct {
 	Project string `json:"project"`
 	Env     string `json:"env"`
 	App     string `json:"app"`
+	File    string `json:"file,omitempty"`
 	Exp     int64  `json:"exp"` // Unix timestamp
 }
 

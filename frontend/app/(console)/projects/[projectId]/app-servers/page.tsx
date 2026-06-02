@@ -8,13 +8,35 @@ import { Badge } from "@/components/ui/badge";
 import { Modal } from "@/components/ui/modal";
 import { Spinner } from "@/components/ui/spinner";
 
+type AppServerMode = "terraform" | "manual";
+
 interface CreateAppServerForm {
   name: string;
+  mode: AppServerMode;
+  // terraform
   flavor: string;
   os_image: string;
   region: string;
   ssh_key_name: string;
+  // manual
+  vm_ip: string;
+  ssh_user: string;
+  ssh_port: string;
+  ssh_private_key: string;
 }
+
+const emptyForm: CreateAppServerForm = {
+  name: "",
+  mode: "terraform",
+  flavor: "small",
+  os_image: "ubuntu-22.04",
+  region: "ru1",
+  ssh_key_name: "dada-agent",
+  vm_ip: "",
+  ssh_user: "root",
+  ssh_port: "22",
+  ssh_private_key: "",
+};
 
 const statusTone: Record<AppServerStatus, string> = {
   Provisioning: "bg-blue-100 text-blue-800",
@@ -54,19 +76,26 @@ export default function AppServersPage() {
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [deletingName, setDeletingName] = useState<string | null>(null);
-  const [form, setForm] = useState<CreateAppServerForm>({
-    name: "",
-    flavor: "small",
-    os_image: "ubuntu-22.04",
-    region: "ru1",
-    ssh_key_name: "dada-agent",
-  });
+  const [online, setOnline] = useState<Record<string, boolean>>({});
+  const [form, setForm] = useState<CreateAppServerForm>(emptyForm);
 
   async function loadServers() {
     setError(null);
     try {
       const data = await appServersApi.list(projectId);
-      setServers(data.app_servers ?? []);
+      const list = data.app_servers ?? [];
+      setServers(list);
+      // Best-effort live online state (Portainer heartbeat) per Ready server.
+      void Promise.all(
+        list
+          .filter((s) => s.status === "Ready")
+          .map((s) =>
+            appServersApi
+              .getState(projectId, s.name)
+              .then((st) => [s.name, st.online] as const)
+              .catch(() => [s.name, false] as const)
+          )
+      ).then((pairs) => setOnline(Object.fromEntries(pairs)));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load app servers");
     } finally {
@@ -80,7 +109,7 @@ export default function AppServersPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- loadServers closes over stable projectId for this fetch-on-mount pattern.
   }, [projectId]);
 
-  function handleFormChange(field: keyof CreateAppServerForm, value: string) {
+  function handleFormChange(field: Exclude<keyof CreateAppServerForm, "mode">, value: string) {
     setForm((prev) => ({ ...prev, [field]: value }));
   }
 
@@ -89,9 +118,27 @@ export default function AppServersPage() {
     setSubmitError(null);
     setIsSubmitting(true);
     try {
-      const result = await appServersApi.create(projectId, form);
+      const payload =
+        form.mode === "manual"
+          ? {
+              name: form.name,
+              mode: "manual" as const,
+              vm_ip: form.vm_ip.trim(),
+              ssh_user: form.ssh_user.trim() || "root",
+              ssh_port: Number(form.ssh_port) || 22,
+              ssh_private_key: form.ssh_private_key,
+            }
+          : {
+              name: form.name,
+              mode: "terraform" as const,
+              flavor: form.flavor,
+              os_image: form.os_image,
+              region: form.region,
+              ssh_key_name: form.ssh_key_name,
+            };
+      const result = await appServersApi.create(projectId, payload);
       setIsModalOpen(false);
-      setForm({ name: "", flavor: "small", os_image: "ubuntu-22.04", region: "ru1", ssh_key_name: "dada-agent" });
+      setForm(emptyForm);
       const opId = result.operation?.id;
       router.push(`/projects/${projectId}/operations${opId ? `?highlight=${opId}` : ""}`);
     } catch (err) {
@@ -176,11 +223,28 @@ export default function AppServersPage() {
           {servers.map((server) => (
             <div key={server.id} className="grid grid-cols-[1.2fr_1fr_1fr_1fr_auto] items-center gap-4 border-b border-gray-100 px-5 py-4 last:border-0">
               <div className="min-w-0">
-                <p className="font-mono text-sm font-semibold text-gray-900">{server.name}</p>
+                <div className="flex items-center gap-2">
+                  <p className="font-mono text-sm font-semibold text-gray-900">{server.name}</p>
+                  {server.source === "manual" && (
+                    <span className="rounded bg-gray-100 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-gray-500">
+                      manual
+                    </span>
+                  )}
+                </div>
                 <p className="mt-0.5 text-xs text-gray-400">Updated {timeAgo(server.updated_at)}</p>
                 {server.error_message && <p className="mt-1 text-xs text-red-600">{server.error_message}</p>}
               </div>
-              <AppServerStatusBadge status={server.status} />
+              <div className="flex items-center gap-2">
+                <AppServerStatusBadge status={server.status} />
+                {server.status === "Ready" && (
+                  <span
+                    title={online[server.name] ? "Online (Portainer heartbeat)" : "No heartbeat"}
+                    className={`inline-block h-2 w-2 rounded-full ${
+                      online[server.name] ? "bg-green-400" : "bg-gray-300"
+                    }`}
+                  />
+                )}
+              </div>
               <span className="font-mono text-sm text-gray-600">{server.vm_ip ?? "—"}</span>
               <span className="font-mono text-sm text-gray-600">{server.portainer_endpoint_id ?? "—"}</span>
               <button
@@ -217,6 +281,31 @@ export default function AppServersPage() {
             <p className="mt-1 text-xs text-gray-400">Lowercase DNS-style name used for the VM and Portainer endpoint.</p>
           </div>
 
+          <div>
+            <label className="block text-sm font-medium text-gray-700">Source</label>
+            <div className="mt-1 inline-flex rounded-lg border border-gray-300 p-0.5">
+              {(["terraform", "manual"] as AppServerMode[]).map((m) => (
+                <button
+                  key={m}
+                  type="button"
+                  onClick={() => setForm((prev) => ({ ...prev, mode: m }))}
+                  className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
+                    form.mode === m ? "bg-amber-600 text-white" : "text-gray-600 hover:bg-gray-100"
+                  }`}
+                >
+                  {m === "terraform" ? "Provision (Terraform)" : "Connect existing VM"}
+                </button>
+              ))}
+            </div>
+            <p className="mt-1 text-xs text-gray-400">
+              {form.mode === "terraform"
+                ? "We create and bootstrap a new VM for you."
+                : "Connect a VM you already own. We SSH in once to install Docker + the edge agent."}
+            </p>
+          </div>
+
+          {form.mode === "terraform" && (
+          <>
           <div className="grid gap-4 sm:grid-cols-2">
             <div>
               <label className="block text-sm font-medium text-gray-700">Flavor</label>
@@ -265,6 +354,62 @@ export default function AppServersPage() {
               />
             </div>
           </div>
+          </>
+          )}
+
+          {form.mode === "manual" && (
+          <>
+          <div className="grid gap-4 sm:grid-cols-[2fr_1fr]">
+            <div>
+              <label className="block text-sm font-medium text-gray-700">VM IP address</label>
+              <input
+                type="text"
+                required
+                value={form.vm_ip}
+                onChange={(e) => handleFormChange("vm_ip", e.target.value)}
+                placeholder="203.0.113.10"
+                className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-amber-500 focus:outline-none focus:ring-1 focus:ring-amber-500"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700">SSH port</label>
+              <input
+                type="number"
+                value={form.ssh_port}
+                onChange={(e) => handleFormChange("ssh_port", e.target.value)}
+                placeholder="22"
+                className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-amber-500 focus:outline-none focus:ring-1 focus:ring-amber-500"
+              />
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700">SSH user</label>
+            <input
+              type="text"
+              value={form.ssh_user}
+              onChange={(e) => handleFormChange("ssh_user", e.target.value)}
+              placeholder="root"
+              className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-amber-500 focus:outline-none focus:ring-1 focus:ring-amber-500"
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700">SSH private key</label>
+            <textarea
+              required
+              value={form.ssh_private_key}
+              onChange={(e) => handleFormChange("ssh_private_key", e.target.value)}
+              placeholder={"-----BEGIN OPENSSH PRIVATE KEY-----\n..."}
+              rows={6}
+              className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 font-mono text-xs focus:border-amber-500 focus:outline-none focus:ring-1 focus:ring-amber-500"
+            />
+            <p className="mt-1 text-xs text-amber-700">
+              Used once to install the edge agent, then discarded — never stored.
+            </p>
+          </div>
+          </>
+          )}
 
           {submitError && (
             <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">

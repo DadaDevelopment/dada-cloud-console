@@ -8,6 +8,25 @@ global:
   # Use "local-path" for local development or set to your cluster's default
   storageClassName: "local-path"
 
+  # Shared credentials/config consumed by more than one service. Defined ONCE
+  # here; each service's Secret/ConfigMap template maps these to its own env var
+  # names (which differ per service). Do NOT also put these keys in a service's
+  # per-service `secret`/`env` block — that would duplicate them.
+  shared:
+    # Postgres connection string (backend → DB_URL; agents → DATABASE_URL).
+    databaseUrl: "postgres://dada:change-me@postgresql:5432/dada_console?sslmode=disable"
+    # GitOps state repo (gitops-agent → GITOPS_DEFAULT_*; portainer-agent → GITOPS_*;
+    # the latter is also what in-cluster Portainer uses to clone compose stacks).
+    gitRepoUrl: "https://github.com/DADA-TUDA/argo-infra.git"
+    gitUsername: "platform-bot"
+    gitToken: "change-me"
+    # File-editor WebSocket HMAC secret: backend signs, gitops-agent verifies.
+    # Generate once: openssl rand -hex 32
+    valuesTokenSecret: "change-me"
+    # In-cluster Portainer: backend live-state proxy (read-only) + portainer-agent control.
+    portainerUrl: "http://portainer.portainer.svc.cluster.local:9000"
+    portainerApiToken: "change-me"
+
 backend:
   enabled: true
   replicaCount: 1
@@ -29,16 +48,15 @@ backend:
     # Inference proxy body cap (request + upstream response). Default 10MB.
     # Raise if a model legitimately needs larger payloads (e.g. vision).
     INFERENCE_MAX_BODY_BYTES: "10485760"
+    # Note: PORTAINER_URL (live state) is injected from global.shared.portainerUrl.
   existingSecret: ""
+  # Service-unique secrets only. Shared keys (DB_URL, GITOPS_VALUES_TOKEN_SECRET,
+  # PORTAINER_API_TOKEN) come from global.shared via the Secret template.
   secret:
-    DB_URL: "postgres://dada:change-me@postgresql:5432/dada_console?sslmode=disable"
     JWT_SECRET: "change-me"
     # Optional MLflow Authorization header value, forwarded as-is on every
     # registry call. Empty when MLflow has no auth.
     MLFLOW_AUTH_HEADER: ""
-    # Values editor WebSocket: same key name and value as in gitopsAgent.secret.
-    # Generate once: openssl rand -hex 32
-    GITOPS_VALUES_TOKEN_SECRET: "change-me"
   persistence:
     enabled: true
     size: 5Gi
@@ -70,17 +88,12 @@ gitopsAgent:
     # Empty disables MLflow-pinned operations (they fail with a clear error).
     MLFLOW_BASE_URL: ""
   existingSecret: ""
+  # Service-unique secrets only. Shared keys (DATABASE_URL, GITOPS_DEFAULT_REPO_URL/
+  # USERNAME/TOKEN, GITOPS_VALUES_TOKEN_SECRET) come from global.shared.
   secret:
-    DATABASE_URL: "postgres://dada:change-me@postgresql:5432/dada_console?sslmode=disable"
-    GITOPS_DEFAULT_REPO_URL: "https://github.com/DADA-TUDA/argo-infra.git"
-    GITOPS_DEFAULT_USERNAME: "platform-bot"
-    GITOPS_DEFAULT_TOKEN: "change-me"
     GITOPS_ENCRYPTION_KEY: "change-me-32-byte-hex-encoded-key"
     # Forwarded as-is on every MLflow registry call. Empty when MLflow has no auth.
     MLFLOW_AUTH_HEADER: ""
-    # Values editor WebSocket: must match GITOPS_AGENT_TOKEN_SECRET in backend.secret.
-    # Generate once: openssl rand -hex 32   (same value in both secrets)
-    GITOPS_VALUES_TOKEN_SECRET: "change-me"
   persistence:
     enabled: true
     size: 10Gi
@@ -91,6 +104,62 @@ gitopsAgent:
     limits:
       cpu: 250m
       memory: 256Mi
+
+# portainerAgent is the control-plane worker that provisions/connects VMs,
+# SSH-installs the Portainer Edge Agent, registers edge endpoints in the
+# in-cluster Portainer, and deploys compose stacks (DeployStack) via its API.
+# It is NOT the Portainer server or Portainer's edge agent.
+#
+# DISABLED BY DEFAULT: in the beget-prod install this worker is deployed by a
+# dedicated argo-infra app (.../apps/portainer-agent) with its own chart/image,
+# so enabling it here would create a duplicate that double-claims operations.
+# Enable only for a fresh, self-contained install that has no separate agent.
+portainerAgent:
+  enabled: false
+  image:
+    repository: dada-cloud-console-portainer-agent
+    tag: "latest"
+    pullPolicy: IfNotPresent
+  healthPort: 8090
+  env:
+    BEGET_REGION: "ru1"
+    BEGET_SOFTWARE_SLUG: "ubuntu-24-04"
+    TF_WORKSPACE_BASE: "/var/lib/tf-workspaces"
+    TF_BIN_PATH: "/usr/local/bin/terraform"
+    GITOPS_BRANCH: "main"
+    GITOPS_REPO_LOCAL_PATH: "/var/lib/gitops-repos"
+    GITOPS_BOT_NAME: "DADA Platform Bot"
+    GITOPS_BOT_EMAIL: "bot@dada-tuda.ru"
+    VM_POLL_INTERVAL_DB: "5s"
+    VM_POLL_INTERVAL_STATUS: "30s"
+    AGENT_CONNECT_TIMEOUT: "10m"
+    # Optional observability sinks pushed onto bootstrapped VMs (URLs only;
+    # credentials go in the secret). Empty disables them.
+    PROMETHEUS_REMOTE_WRITE_URL: ""
+    ELASTICSEARCH_URL: ""
+  existingSecret: ""
+  # Service-unique secrets only. Shared keys (DATABASE_URL, PORTAINER_URL,
+  # PORTAINER_API_TOKEN, GITOPS_REPO_URL/USERNAME/TOKEN) come from global.shared.
+  secret:
+    # Beget (OpenStack) provider creds for Terraform-provisioned VMs.
+    BEGET_LOGIN: ""
+    BEGET_PASSWORD: ""
+    BEGET_TOKEN: "change-me"
+    # SSH keypair: private key used to bootstrap VMs; public key registered via Terraform.
+    AGENT_SSH_PRIVATE_KEY: "change-me"
+    AGENT_SSH_PUBLIC_KEY: "change-me"
+    # Terraform state backend (postgres connection string).
+    TF_STATE_CONN_STR: "postgres://dada:change-me@postgresql:5432/dada_console?sslmode=disable"
+    PROMETHEUS_REMOTE_WRITE_USER: ""
+    PROMETHEUS_REMOTE_WRITE_PASS: ""
+    ELASTICSEARCH_API_KEY: ""
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
 
 frontend:
   enabled: true
