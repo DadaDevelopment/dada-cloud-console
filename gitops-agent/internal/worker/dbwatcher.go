@@ -308,7 +308,33 @@ func (w *DBWatcher) doCreateServiceDatabase(ctx context.Context, op db.Operation
 		"[DADA Console] Create ServiceDatabaseV2 %s\n\nOperation: %s\nProject: %s\nEnvironment: %s\n",
 		p.Name, op.ID, projectName, envName,
 	)
-	return w.commitFilesAndRecord(ctx, op, mgr, gitPath, files, commitMsg)
+	if err := w.commitFilesAndRecord(ctx, op, mgr, gitPath, files, commitMsg); err != nil {
+		return err
+	}
+
+	// Upsert snapshot immediately so the database appears in the console UI without
+	// waiting for the next gitwatcher poll cycle.
+	summaryJSON, _ := json.Marshal(map[string]any{
+		"name":     p.Name,
+		"kind":     "ServiceDatabaseV2",
+		"app_ref":  p.AppRef,
+		"database": p.Database,
+		"status":   "Pending",
+		"spec": map[string]any{
+			"appRef":   p.AppRef,
+			"namespace": envNamespace,
+			"database": p.Database,
+			"backup": map[string]any{
+				"enabled":   p.BackupEnabled,
+				"frequency": p.BackupSchedule,
+				"retention": p.BackupRetention,
+			},
+		},
+	})
+	return db.UpsertSnapshot(ctx, w.pool,
+		op.ProjectID, op.EnvironmentID,
+		"ServiceDatabaseV2", p.Name, "Pending", summaryJSON, time.Now(),
+	)
 }
 
 func (w *DBWatcher) doCreateApp(ctx context.Context, op db.Operation) error {
