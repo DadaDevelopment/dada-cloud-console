@@ -109,8 +109,13 @@ gitopsAgent:
 # SSH-installs the Portainer Edge Agent, registers edge endpoints in the
 # in-cluster Portainer, and deploys compose stacks (DeployStack) via its API.
 # It is NOT the Portainer server or Portainer's edge agent.
+#
+# DISABLED BY DEFAULT: in the beget-prod install this worker is deployed by a
+# dedicated argo-infra app (.../apps/portainer-agent) with its own chart/image,
+# so enabling it here would create a duplicate that double-claims operations.
+# Enable only for a fresh, self-contained install that has no separate agent.
 portainerAgent:
-  enabled: true
+  enabled: false
   image:
     repository: dada-cloud-console-portainer-agent
     tag: "latest"
