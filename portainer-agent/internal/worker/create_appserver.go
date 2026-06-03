@@ -49,8 +49,8 @@ func (w *VMWatcher) doCreateAppServer(ctx context.Context, op db.Operation) erro
 
 	ep, err := w.portainer.CreateEdgeEndpoint(
 		ctx, p.Name,
-		w.cfg.PortainerURL,
-		portainerTunnelAddr(w.cfg.PortainerURL),
+		w.cfg.PortainerEdgeURL,
+		portainerTunnelAddr(w.cfg.PortainerEdgeURL),
 	)
 	if err != nil {
 		return fmt.Errorf("create edge endpoint: %w", err)
@@ -160,8 +160,8 @@ func (w *VMWatcher) doCreateManualAppServer(ctx context.Context, op db.Operation
 
 	ep, err := w.portainer.CreateEdgeEndpoint(
 		ctx, p.Name,
-		w.cfg.PortainerURL,
-		portainerTunnelAddr(w.cfg.PortainerURL),
+		w.cfg.PortainerEdgeURL,
+		portainerTunnelAddr(w.cfg.PortainerEdgeURL),
 	)
 	if err != nil {
 		return fmt.Errorf("create edge endpoint: %w", err)

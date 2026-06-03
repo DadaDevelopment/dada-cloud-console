@@ -8,10 +8,23 @@ set -euo pipefail
 echo "[bootstrap] Starting VM setup for {{.ServerName}}"
 
 # ── Docker ───────────────────────────────────────────────────────────────────
-apt-get update -qq
-apt-get install -y -qq docker.io docker-compose-plugin curl wget
-systemctl enable docker --now
+# Idempotent: only install if Docker is absent. On pre-provisioned VMs that
+# already run docker-ce, `apt-get install docker.io` aborts with a package
+# conflict ("pkgProblemResolver generated breaks"), which previously killed the
+# whole bootstrap (set -e) before the edge agent could deploy.
+if command -v docker >/dev/null 2>&1; then
+  echo "[bootstrap] Docker already present ($(docker --version 2>/dev/null)) — skipping install"
+else
+  apt-get update -qq
+  apt-get install -y -qq docker.io docker-compose-plugin curl wget
+fi
+systemctl enable docker --now 2>/dev/null || true
 echo "[bootstrap] Docker ready"
+
+# Observability stack below is best-effort: on pre-provisioned VMs a port clash
+# (e.g. :8080 already taken) or a download hiccup must NOT prevent the Portainer
+# Edge Agent (the thing that makes the AppServer reach Ready) from deploying.
+set +e
 
 # ── node_exporter 1.8.2 ──────────────────────────────────────────────────────
 useradd --no-create-home --shell /bin/false node_exporter 2>/dev/null || true
@@ -113,6 +126,9 @@ docker run -d \
 echo "[bootstrap] Filebeat started"
 
 # ── Portainer Edge Agent 2.21.0 ──────────────────────────────────────────────
+# Critical path: restore strict mode and ensure a clean (re)deploy.
+set -e
+docker rm -f portainer_edge_agent 2>/dev/null || true
 docker run -d \
   --name portainer_edge_agent --restart=always \
   -v /var/run/docker.sock:/var/run/docker.sock \

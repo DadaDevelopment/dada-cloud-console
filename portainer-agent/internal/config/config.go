@@ -12,6 +12,12 @@ type Config struct {
 
 	PortainerURL      string
 	PortainerAPIToken string
+	// PortainerEdgeURL is the PUBLIC Portainer URL advertised to edge agents on
+	// external VMs (e.g. https://portainer.dada-tuda.ru). The tunnel address is
+	// derived from it (host:8000). Must be externally resolvable — the in-cluster
+	// PortainerURL (…svc.cluster.local) is NOT reachable from VMs. Falls back to
+	// PortainerURL when unset.
+	PortainerEdgeURL string
 
 	BegetLogin    string
 	BegetPassword string
@@ -58,6 +64,7 @@ func Load() (*Config, error) {
 		DatabaseURL:       getEnv("DATABASE_URL", ""),
 		PortainerURL:      getEnv("PORTAINER_URL", ""),
 		PortainerAPIToken: getEnv("PORTAINER_API_TOKEN", ""),
+		PortainerEdgeURL:  getEnv("PORTAINER_EDGE_URL", ""),
 
 		BegetLogin:        getEnv("BEGET_LOGIN", ""),
 		BegetPassword:     getEnv("BEGET_PASSWORD", ""),
@@ -88,6 +95,13 @@ func Load() (*Config, error) {
 		ElasticsearchAPIKey: getEnv("ELASTICSEARCH_API_KEY", ""),
 
 		DevMode: getEnv("DEV_MODE", "") == "true",
+	}
+
+	// Edge endpoints must advertise a PUBLIC, externally-resolvable Portainer
+	// address. Fall back to the in-cluster PortainerURL only if not set (works
+	// for in-cluster edge agents, NOT external VMs).
+	if c.PortainerEdgeURL == "" {
+		c.PortainerEdgeURL = c.PortainerURL
 	}
 
 	var err error
