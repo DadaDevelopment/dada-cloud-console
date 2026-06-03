@@ -148,11 +148,12 @@ func (h *Handler) RetryOperation(c *gin.Context) {
 		return
 	}
 
-	// Reset to Queued
+	// Reset to Created — the status both agents claim (gitops + portainer).
+	// 'Queued' was a dead status nothing claimed, so retries never re-ran.
 	var op models.Operation
 	retryRow := h.pool.QueryRow(c.Request.Context(),
 		`UPDATE operations
-		 SET status = 'Queued', updated_at = NOW()
+		 SET status = 'Created', error_code = NULL, error_message = NULL, updated_at = NOW()
 		 WHERE id = $1 AND project_id = $2
 		 RETURNING id, actor_id, project_id, environment_id, action, resource_kind, resource_name,
 		           status, payload, validation_result, git_commit, git_path, argo_application,
