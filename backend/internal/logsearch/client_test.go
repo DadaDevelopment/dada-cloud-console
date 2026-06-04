@@ -20,6 +20,20 @@ func TestNew_DisabledWhenUnconfigured(t *testing.T) {
 	}
 }
 
+func TestEncodeAPIKey(t *testing.T) {
+	// "id:key" form (what filebeat config + our Secret store) → base64.
+	if got := encodeAPIKey("abc:def"); got != "YWJjOmRlZg==" {
+		t.Errorf("encodeAPIKey(id:key) = %q, want base64", got)
+	}
+	// already-encoded (no colon) → pass through.
+	if got := encodeAPIKey("YWJjOmRlZg=="); got != "YWJjOmRlZg==" {
+		t.Errorf("encodeAPIKey(encoded) = %q, want unchanged", got)
+	}
+	if got := encodeAPIKey(""); got != "" {
+		t.Errorf("encodeAPIKey(empty) = %q", got)
+	}
+}
+
 func TestSearch_BuildsQueryAndParsesHits(t *testing.T) {
 	const body = `{"hits":{"total":{"value":2},"hits":[
 		{"_source":{"@timestamp":"2026-06-04T00:00:00Z","message":"hello","vm_name":"vm-1","stream":"stdout"}},

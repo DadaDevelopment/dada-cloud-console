@@ -15,6 +15,7 @@ package logsearch
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -45,9 +46,22 @@ func New(baseURL, apiKey, index string) *Client {
 	return &Client{
 		baseURL:    strings.TrimRight(baseURL, "/"),
 		index:      index,
-		apiKey:     apiKey,
+		apiKey:     encodeAPIKey(apiKey),
 		httpClient: &http.Client{Timeout: 15 * time.Second},
 	}
+}
+
+// encodeAPIKey normalizes an Elasticsearch API key for the
+// `Authorization: ApiKey <value>` header. ES expects base64(id:api_key); the
+// raw "id:api_key" form (what filebeat config and our Secret store, since
+// filebeat base64-encodes it itself) must be encoded here. A value without a
+// colon is assumed already base64-encoded and passed through. Verified live:
+// raw key → 401, base64(raw) → 200.
+func encodeAPIKey(k string) string {
+	if k == "" || !strings.Contains(k, ":") {
+		return k
+	}
+	return base64.StdEncoding.EncodeToString([]byte(k))
 }
 
 // SearchOpts bounds an aggregated log search. At least one of VMName/App should
@@ -105,9 +119,16 @@ func (c *Client) buildQuery(opts SearchOpts) map[string]any {
 		})
 	}
 	if opts.App != "" {
+		// The app/stack name surfaces under the docker-compose project label
+		// (same one GetAppState and the metrics queries use). dada_io_app is the
+		// bootstrap's intended label but is empty on real VMs, so match the
+		// compose-project label too. Try keyword + text variants defensively.
 		filters = append(filters, map[string]any{
 			"bool": map[string]any{
 				"should": []map[string]any{
+					{"term": map[string]any{"container.labels.com_docker_compose_project": opts.App}},
+					{"term": map[string]any{"container.labels.com_docker_compose_project.keyword": opts.App}},
+					{"match": map[string]any{"container.labels.com_docker_compose_project": opts.App}},
 					{"term": map[string]any{"app": opts.App}},
 					{"match": map[string]any{"container.labels.dada_io_app": opts.App}},
 				},
