@@ -15,8 +15,8 @@ func TestNew_DisabledWhenUnconfigured(t *testing.T) {
 		t.Fatal("expected nil client when baseURL is empty")
 	}
 	c := New("https://es.example.com", "k", "")
-	if c == nil || c.index != "filebeat-*" {
-		t.Fatalf("expected default index filebeat-*, got %+v", c)
+	if c == nil || c.index != "dada-vm-logs-*" {
+		t.Fatalf("expected default index dada-vm-logs-*, got %+v", c)
 	}
 }
 

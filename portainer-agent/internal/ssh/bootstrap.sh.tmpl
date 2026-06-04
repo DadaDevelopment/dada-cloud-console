@@ -131,6 +131,13 @@ filebeat.inputs:
     paths:
       - /var/lib/docker/containers/*/*.log
     stream: all
+    # Tag every doc with the AppServer name (root field) so the console can
+    # filter logs per VM. filebeat's host.name is the OS hostname, not the
+    # AppServer name, and prometheus' vm_name external_label does not exist in
+    # log docs — so we set vm_name here, mirroring the prometheus external_label.
+    fields_under_root: true
+    fields:
+      vm_name: "{{.ServerName}}"
     processors:
       - add_docker_metadata:
           host: "unix:///var/run/docker.sock"

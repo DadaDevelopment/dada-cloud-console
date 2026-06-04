@@ -32,13 +32,15 @@ type Client struct {
 }
 
 // New creates a read-only ES client. Returns nil when baseURL is empty so
-// callers can treat log search as disabled. index defaults to "filebeat-*".
+// callers can treat log search as disabled. index defaults to "dada-vm-logs-*"
+// (the index the VM filebeat bootstrap writes to:
+// dada-vm-logs-<app|unknown>-<date>).
 func New(baseURL, apiKey, index string) *Client {
 	if baseURL == "" {
 		return nil
 	}
 	if index == "" {
-		index = "filebeat-*"
+		index = "dada-vm-logs-*"
 	}
 	return &Client{
 		baseURL:    strings.TrimRight(baseURL, "/"),
