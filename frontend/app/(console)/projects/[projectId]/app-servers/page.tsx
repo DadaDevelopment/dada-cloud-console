@@ -224,7 +224,12 @@ export default function AppServersPage() {
             <div key={server.id} className="grid grid-cols-[1.2fr_1fr_1fr_1fr_auto] items-center gap-4 border-b border-gray-100 px-5 py-4 last:border-0">
               <div className="min-w-0">
                 <div className="flex items-center gap-2">
-                  <p className="font-mono text-sm font-semibold text-gray-900">{server.name}</p>
+                  <Link
+                    href={`/projects/${projectId}/app-servers/${server.name}`}
+                    className="font-mono text-sm font-semibold text-gray-900 hover:text-amber-700 hover:underline"
+                  >
+                    {server.name}
+                  </Link>
                   {server.source === "manual" && (
                     <span className="rounded bg-gray-100 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-gray-500">
                       manual

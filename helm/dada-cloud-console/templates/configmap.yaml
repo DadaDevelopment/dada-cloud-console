@@ -7,6 +7,8 @@ metadata:
 data:
   # Shared (global.shared) → backend non-secret env.
   PORTAINER_URL: {{ .Values.global.shared.portainerUrl | quote }}
+  PROMETHEUS_QUERY_URL: {{ .Values.global.shared.prometheusQueryUrl | default "" | quote }}
+  ELASTICSEARCH_URL: {{ .Values.global.shared.elasticsearchUrl | default "" | quote }}
 {{- range $key, $value := .Values.backend.env }}
   {{ $key }}: {{ $value | quote }}
 {{- end }}

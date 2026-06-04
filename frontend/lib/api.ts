@@ -29,6 +29,8 @@ import type {
   PendingApprovalsResponse,
   AppState,
   AppServerState,
+  MetricsResponse,
+  LogSearchResponse,
 } from "./types";
 
 // Empty string → relative URLs → requests go through the ingress proxy.
@@ -152,6 +154,12 @@ export const appsApi = {
         container
       )}&tail=${tail}`
     ),
+
+  // Container resource metrics (central Prometheus proxy, cAdvisor).
+  getMetrics: (projectId: string, envId: string, appName: string, range = "1h") =>
+    apiFetch<MetricsResponse>(
+      `/api/v1/projects/${projectId}/environments/${envId}/apps/${appName}/metrics?range=${range}`
+    ),
 };
 
 export const appServersApi = {
@@ -188,6 +196,29 @@ export const appServersApi = {
       `/api/v1/projects/${projectId}/app-servers/${serverName}`,
       { method: "DELETE" }
     ),
+
+  // VM resource metrics (central Prometheus proxy, node_exporter).
+  getMetrics: (projectId: string, serverName: string, range = "1h") =>
+    apiFetch<MetricsResponse>(
+      `/api/v1/projects/${projectId}/app-servers/${serverName}/metrics?range=${range}`
+    ),
+};
+
+// Aggregated log search (Elasticsearch/filebeat proxy). At least one of vm/app
+// is required and must belong to the project (enforced server-side).
+export const logsApi = {
+  search: (
+    projectId: string,
+    params: { vm?: string; app?: string; q?: string; since?: string; size?: number }
+  ) => {
+    const qs = new URLSearchParams();
+    if (params.vm) qs.set("vm", params.vm);
+    if (params.app) qs.set("app", params.app);
+    if (params.q) qs.set("q", params.q);
+    if (params.since) qs.set("since", params.since);
+    if (params.size) qs.set("size", String(params.size));
+    return apiFetch<LogSearchResponse>(`/api/v1/projects/${projectId}/logs?${qs.toString()}`);
+  },
 };
 
 export const endpointsApi = {

@@ -38,26 +38,48 @@ type Config struct {
 	// /state and /logs endpoints. Same values the portainer-agent uses.
 	PortainerURL      string // PORTAINER_URL
 	PortainerAPIToken string // PORTAINER_API_TOKEN
+
+	// Prometheus query proxy (read-only). The portainer-agent installs
+	// node_exporter/cAdvisor sidecars on VMs that remote_write to a central
+	// Prometheus; this is the *read* side that lets the console query it back.
+	// Empty PrometheusQueryURL disables all /metrics endpoints. Same host/creds
+	// as the agent's remote_write target. Base URL only (no /api/v1/... suffix).
+	PrometheusQueryURL  string // PROMETHEUS_QUERY_URL
+	PrometheusQueryUser string // PROMETHEUS_QUERY_USER
+	PrometheusQueryPass string // PROMETHEUS_QUERY_PASS
+
+	// Elasticsearch log search (read-only). VMs ship container logs via filebeat;
+	// this is the read side for aggregated log search. Empty ElasticsearchURL
+	// disables the /logs search endpoint.
+	ElasticsearchURL    string // ELASTICSEARCH_URL
+	ElasticsearchAPIKey string // ELASTICSEARCH_API_KEY
+	ElasticsearchIndex  string // ELASTICSEARCH_LOG_INDEX (default "filebeat-*")
 }
 
 // Load reads configuration from environment variables.
 // Returns an error if any required variable is missing.
 func Load() (*Config, error) {
 	cfg := &Config{
-		DBURL:                 getEnv("DB_URL", getEnv("DATABASE_URL", "")),
-		JWTSecret:             getEnv("JWT_SECRET", ""),
-		Port:                  getEnv("PORT", getEnv("HTTP_PORT", "8080")),
-		LogLevel:              getEnv("LOG_LEVEL", "info"),
-		DevMode:               getEnv("DEV_MODE", "false") == "true",
-		ClusterLBIP:           getEnv("CLUSTER_LB_IP", "93.189.231.60"),
-		AIStudioEnabled:       getEnv("AI_STUDIO_ENABLED", "true") == "true",
-		MLflowBaseURL:         getEnv("MLFLOW_BASE_URL", ""),
-		MLflowAuthHeader:      getEnv("MLFLOW_AUTH_HEADER", ""),
-		InferenceMaxBodyBytes:  getEnvInt64("INFERENCE_MAX_BODY_BYTES", 10*1024*1024),
+		DBURL:                   getEnv("DB_URL", getEnv("DATABASE_URL", "")),
+		JWTSecret:               getEnv("JWT_SECRET", ""),
+		Port:                    getEnv("PORT", getEnv("HTTP_PORT", "8080")),
+		LogLevel:                getEnv("LOG_LEVEL", "info"),
+		DevMode:                 getEnv("DEV_MODE", "false") == "true",
+		ClusterLBIP:             getEnv("CLUSTER_LB_IP", "93.189.231.60"),
+		AIStudioEnabled:         getEnv("AI_STUDIO_ENABLED", "true") == "true",
+		MLflowBaseURL:           getEnv("MLFLOW_BASE_URL", ""),
+		MLflowAuthHeader:        getEnv("MLFLOW_AUTH_HEADER", ""),
+		InferenceMaxBodyBytes:   getEnvInt64("INFERENCE_MAX_BODY_BYTES", 10*1024*1024),
 		GitopsValuesTokenSecret: getEnv("GITOPS_VALUES_TOKEN_SECRET", ""),
 		GitopsAgentWSURL:        getEnv("GITOPS_AGENT_WS_URL", ""),
 		PortainerURL:            getEnv("PORTAINER_URL", ""),
 		PortainerAPIToken:       getEnv("PORTAINER_API_TOKEN", ""),
+		PrometheusQueryURL:      getEnv("PROMETHEUS_QUERY_URL", ""),
+		PrometheusQueryUser:     getEnv("PROMETHEUS_QUERY_USER", ""),
+		PrometheusQueryPass:     getEnv("PROMETHEUS_QUERY_PASS", ""),
+		ElasticsearchURL:        getEnv("ELASTICSEARCH_URL", ""),
+		ElasticsearchAPIKey:     getEnv("ELASTICSEARCH_API_KEY", ""),
+		ElasticsearchIndex:      getEnv("ELASTICSEARCH_LOG_INDEX", "filebeat-*"),
 	}
 
 	if cfg.DBURL == "" {

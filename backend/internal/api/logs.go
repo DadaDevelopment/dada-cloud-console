@@ -1,0 +1,106 @@
+package api
+
+import (
+	"net/http"
+	"strconv"
+	"time"
+
+	"github.com/dada-tuda/console/backend/internal/logsearch"
+	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
+)
+
+// SearchLogs runs an aggregated Elasticsearch log search scoped to the caller's
+// project. At least one of ?vm / ?app is required and must belong to the
+// project — this prevents reading another tenant's logs by guessing labels.
+// GET /projects/:projectId/logs?vm=<server>&app=<app>&q=<text>&since=1h&size=200
+func (h *Handler) SearchLogs(c *gin.Context) {
+	projectID, err := uuid.Parse(c.Param("projectId"))
+	if err != nil {
+		respondNotFound(c)
+		return
+	}
+	if !h.requireProjectMember(c, projectID) {
+		return
+	}
+
+	if h.logsearch == nil {
+		respondError(c, http.StatusServiceUnavailable, "log search not configured")
+		return
+	}
+
+	vm := c.Query("vm")
+	app := c.Query("app")
+	if vm == "" && app == "" {
+		respondError(c, http.StatusBadRequest, "at least one of vm or app query param is required")
+		return
+	}
+
+	// Authorization scoping: every requested label must belong to this project.
+	if vm != "" {
+		var ok bool
+		if err := h.pool.QueryRow(c.Request.Context(),
+			`SELECT EXISTS(SELECT 1 FROM app_servers WHERE project_id = $1 AND name = $2)`,
+			projectID, vm,
+		).Scan(&ok); err != nil {
+			respondError(c, http.StatusInternalServerError, "failed to verify app server")
+			return
+		}
+		if !ok {
+			respondError(c, http.StatusForbidden, "app server not in project")
+			return
+		}
+	}
+	if app != "" {
+		var ok bool
+		if err := h.pool.QueryRow(c.Request.Context(),
+			`SELECT EXISTS(SELECT 1 FROM resource_snapshots
+			 WHERE project_id = $1 AND kind = 'App' AND name = $2)`,
+			projectID, app,
+		).Scan(&ok); err != nil {
+			respondError(c, http.StatusInternalServerError, "failed to verify app")
+			return
+		}
+		if !ok {
+			respondError(c, http.StatusForbidden, "app not in project")
+			return
+		}
+	}
+
+	since := time.Hour
+	switch c.Query("since") {
+	case "15m":
+		since = 15 * time.Minute
+	case "1h", "":
+		since = time.Hour
+	case "6h":
+		since = 6 * time.Hour
+	case "24h":
+		since = 24 * time.Hour
+	case "7d":
+		since = 7 * 24 * time.Hour
+	}
+
+	size := 200
+	if s := c.Query("size"); s != "" {
+		if n, err := strconv.Atoi(s); err == nil && n > 0 && n <= 1000 {
+			size = n
+		}
+	}
+
+	result, err := h.logsearch.Search(c.Request.Context(), logsearch.SearchOpts{
+		VMName: vm,
+		App:    app,
+		Query:  c.Query("q"),
+		Since:  time.Now().Add(-since),
+		Size:   size,
+	})
+	if err != nil {
+		respondError(c, http.StatusBadGateway, "log search failed: "+err.Error())
+		return
+	}
+	if result.Entries == nil {
+		result.Entries = []logsearch.LogEntry{}
+	}
+	c.JSON(http.StatusOK, result)
+}

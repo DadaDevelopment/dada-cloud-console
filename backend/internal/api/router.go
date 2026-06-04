@@ -59,6 +59,7 @@ func SetupRouter(pool *pgxpool.Pool, cfg *config.Config) *gin.Engine {
 		api.POST("/projects/:projectId/app-servers", h.CreateAppServer)
 		api.GET("/projects/:projectId/app-servers/:serverName", h.GetAppServer)
 		api.GET("/projects/:projectId/app-servers/:serverName/state", h.GetAppServerState)
+		api.GET("/projects/:projectId/app-servers/:serverName/metrics", h.GetAppServerMetrics)
 		api.DELETE("/projects/:projectId/app-servers/:serverName", h.DeleteAppServer)
 
 		// Apps
@@ -68,6 +69,10 @@ func SetupRouter(pool *pgxpool.Pool, cfg *config.Config) *gin.Engine {
 		api.POST("/projects/:projectId/environments/:envId/apps/:appName/values-token", h.GetValuesToken)
 		api.GET("/projects/:projectId/environments/:envId/apps/:appName/state", h.GetAppState)
 		api.GET("/projects/:projectId/environments/:envId/apps/:appName/logs", h.GetAppLogs)
+		api.GET("/projects/:projectId/environments/:envId/apps/:appName/metrics", h.GetAppMetrics)
+
+		// Aggregated log search (Elasticsearch/filebeat proxy, read-only).
+		api.GET("/projects/:projectId/logs", h.SearchLogs)
 
 		// Endpoints (PublicApi CRD)
 		api.GET("/projects/:projectId/environments/:envId/apps/:appName/endpoints", h.ListEndpoints)

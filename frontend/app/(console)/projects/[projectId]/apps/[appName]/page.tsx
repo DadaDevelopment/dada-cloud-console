@@ -7,6 +7,8 @@ import type { ResourceSnapshot } from "@/lib/types";
 import { Modal } from "@/components/ui/modal";
 import { Spinner } from "@/components/ui/spinner";
 import { ComposeStatePanel } from "@/components/compose-state-panel";
+import { MetricsPanel } from "@/components/metrics-panel";
+import { LogsViewer } from "@/components/logs-viewer";
 
 function PhaseBadge({ phase }: { phase?: string }) {
   const p = phase ?? "";
@@ -193,7 +195,11 @@ export default function AppDetailPage() {
 
       {/* Spec cards (Helm) or live state panel (compose) */}
       {isCompose ? (
-        <ComposeStatePanel projectId={projectId} envId={envId} appName={appName} />
+        <div className="space-y-6">
+          <ComposeStatePanel projectId={projectId} envId={envId} appName={appName} />
+          <MetricsPanel kind="app" projectId={projectId} envId={envId} appName={appName} />
+          <LogsViewer projectId={projectId} app={appName} />
+        </div>
       ) : (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           {[

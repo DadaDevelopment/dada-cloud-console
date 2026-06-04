@@ -1,0 +1,196 @@
+package api
+
+import (
+	"context"
+	"fmt"
+	"net/http"
+	"time"
+
+	"github.com/dada-tuda/console/backend/internal/prometheus"
+	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
+)
+
+// metricSpec describes one chart's PromQL. %s is replaced by the escaped label
+// value (vm_name for VM metrics, the dada_io_app label for container metrics).
+// Keeping every query in one block makes label/PromQL tuning a one-place change
+// (the cAdvisor label name and root-fs assumptions are the main uncertainties).
+type metricSpec struct {
+	key  string
+	unit string
+	expr string // contains exactly one %s for the escaped label value
+}
+
+var vmMetricSpecs = []metricSpec{
+	{"cpu_pct", "%", `100 - (avg by (vm_name) (rate(node_cpu_seconds_total{vm_name="%s",mode="idle"}[5m])) * 100)`},
+	{"mem_pct", "%", `(1 - (node_memory_MemAvailable_bytes{vm_name="%s"} / node_memory_MemTotal_bytes{vm_name="%s"})) * 100`},
+	{"disk_pct", "%", `(1 - (node_filesystem_avail_bytes{vm_name="%s",mountpoint="/",fstype!~"tmpfs|overlay|squashfs"} / node_filesystem_size_bytes{vm_name="%s",mountpoint="/",fstype!~"tmpfs|overlay|squashfs"})) * 100`},
+	{"net_rx", "B/s", `sum by (vm_name) (rate(node_network_receive_bytes_total{vm_name="%s",device!~"lo|veth.*|docker.*|br-.*"}[5m]))`},
+	{"net_tx", "B/s", `sum by (vm_name) (rate(node_network_transmit_bytes_total{vm_name="%s",device!~"lo|veth.*|docker.*|br-.*"}[5m]))`},
+}
+
+// Container metrics are keyed by the docker-compose project label, which equals
+// the app/stack name (same label GetAppState filters containers by:
+// com.docker.compose.project). Verified live: the `dada_io_app` label the
+// bootstrap relabel expected is empty on real VMs, whereas
+// container_label_com_docker_compose_project carries the stack name.
+var containerMetricSpecs = []metricSpec{
+	{"cpu_cores", "cores", `sum by (container_label_com_docker_compose_project) (rate(container_cpu_usage_seconds_total{container_label_com_docker_compose_project="%s"}[5m]))`},
+	{"mem_bytes", "B", `sum by (container_label_com_docker_compose_project) (container_memory_working_set_bytes{container_label_com_docker_compose_project="%s"})`},
+}
+
+// countPlaceholders returns how many %s the expr expects so we can supply the
+// label value the right number of times.
+func fillExpr(expr, label string) string {
+	n := 0
+	for i := 0; i+1 < len(expr); i++ {
+		if expr[i] == '%' && expr[i+1] == 's' {
+			n++
+		}
+	}
+	args := make([]any, n)
+	for i := range args {
+		args[i] = label
+	}
+	return fmt.Sprintf(expr, args...)
+}
+
+// parseRange resolves the ?range / ?step query params into a time window.
+func parseRange(c *gin.Context) (start, end time.Time, step time.Duration) {
+	end = time.Now()
+	dur := time.Hour
+	switch c.Query("range") {
+	case "15m":
+		dur = 15 * time.Minute
+	case "1h", "":
+		dur = time.Hour
+	case "6h":
+		dur = 6 * time.Hour
+	case "24h":
+		dur = 24 * time.Hour
+	}
+	step = 60 * time.Second
+	if dur >= 6*time.Hour {
+		step = 5 * time.Minute
+	}
+	if dur >= 24*time.Hour {
+		step = 15 * time.Minute
+	}
+	return end.Add(-dur), end, step
+}
+
+// runMetricSpecs executes the given specs for one label value and assembles the
+// response payload, recording the first query error in live_error (partial
+// results still return, mirroring GetAppState).
+func (h *Handler) runMetricSpecs(ctx context.Context, specs []metricSpec, label string, start, end time.Time, step time.Duration) gin.H {
+	escaped := prometheus.EscapeLabelValue(label)
+	metrics := gin.H{}
+	var liveErr string
+	for _, s := range specs {
+		series, err := h.prometheus.QueryRange(ctx, fillExpr(s.expr, escaped), start, end, step)
+		if err != nil {
+			if liveErr == "" {
+				liveErr = err.Error()
+			}
+			metrics[s.key] = gin.H{"unit": s.unit, "series": []prometheus.Point{}}
+			continue
+		}
+		points := []prometheus.Point{}
+		if len(series) > 0 {
+			points = series[0].Points // single aggregated series per spec
+		}
+		metrics[s.key] = gin.H{"unit": s.unit, "series": points}
+	}
+	resp := gin.H{
+		"range":   end.Sub(start).String(),
+		"step":    step.String(),
+		"metrics": metrics,
+	}
+	if liveErr != "" {
+		resp["live_error"] = liveErr
+	}
+	return resp
+}
+
+// GetAppServerMetrics returns VM resource metrics (CPU/RAM/disk/network) from
+// the central Prometheus, keyed by the app server's name (== vm_name label).
+// GET /projects/:projectId/app-servers/:serverName/metrics?range=1h
+func (h *Handler) GetAppServerMetrics(c *gin.Context) {
+	projectID, err := uuid.Parse(c.Param("projectId"))
+	if err != nil {
+		respondNotFound(c)
+		return
+	}
+	if !h.requireProjectMember(c, projectID) {
+		return
+	}
+	serverName := c.Param("serverName")
+
+	// Verify the server belongs to this project (scopes the vm_name label).
+	var exists bool
+	err = h.pool.QueryRow(c.Request.Context(),
+		`SELECT EXISTS(SELECT 1 FROM app_servers WHERE project_id = $1 AND name = $2)`,
+		projectID, serverName,
+	).Scan(&exists)
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, "failed to load app server")
+		return
+	}
+	if !exists {
+		respondNotFound(c)
+		return
+	}
+
+	if h.prometheus == nil {
+		respondError(c, http.StatusServiceUnavailable, "metrics not configured")
+		return
+	}
+
+	start, end, step := parseRange(c)
+	c.JSON(http.StatusOK, h.runMetricSpecs(c.Request.Context(), vmMetricSpecs, serverName, start, end, step))
+}
+
+// GetAppMetrics returns container resource metrics (CPU/RAM) for a compose app
+// from the central Prometheus, keyed by the dada_io_app container label.
+// GET /projects/:projectId/environments/:envId/apps/:appName/metrics?range=1h
+func (h *Handler) GetAppMetrics(c *gin.Context) {
+	projectID, err := uuid.Parse(c.Param("projectId"))
+	if err != nil {
+		respondNotFound(c)
+		return
+	}
+	envID, err := uuid.Parse(c.Param("envId"))
+	if err != nil {
+		respondNotFound(c)
+		return
+	}
+	if !h.requireProjectMember(c, projectID) {
+		return
+	}
+	appName := c.Param("appName")
+
+	// Verify the app exists in this project/environment (scopes the app label).
+	var exists bool
+	err = h.pool.QueryRow(c.Request.Context(),
+		`SELECT EXISTS(SELECT 1 FROM resource_snapshots
+		 WHERE project_id = $1 AND environment_id = $2 AND kind = 'App' AND name = $3)`,
+		projectID, envID, appName,
+	).Scan(&exists)
+	if err != nil && err != pgx.ErrNoRows {
+		respondError(c, http.StatusInternalServerError, "failed to load app")
+		return
+	}
+	if !exists {
+		respondNotFound(c)
+		return
+	}
+
+	if h.prometheus == nil {
+		respondError(c, http.StatusServiceUnavailable, "metrics not configured")
+		return
+	}
+
+	start, end, step := parseRange(c)
+	c.JSON(http.StatusOK, h.runMetricSpecs(c.Request.Context(), containerMetricSpecs, appName, start, end, step))
+}

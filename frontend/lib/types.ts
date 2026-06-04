@@ -78,6 +78,38 @@ export interface AppState {
   live_error?: string;
 }
 
+// Metrics (central Prometheus proxy) -----------------------------------------
+export interface MetricPoint {
+  t: number; // unix seconds
+  v: number;
+}
+
+export interface MetricSeries {
+  unit: string;
+  series: MetricPoint[];
+}
+
+export interface MetricsResponse {
+  range: string;
+  step: string;
+  metrics: Record<string, MetricSeries>;
+  live_error?: string;
+}
+
+// Aggregated logs (Elasticsearch/filebeat proxy) -----------------------------
+export interface LogEntry {
+  timestamp: string;
+  message: string;
+  vm_name?: string;
+  app?: string;
+  stream?: string;
+}
+
+export interface LogSearchResponse {
+  total: number;
+  entries: LogEntry[];
+}
+
 export interface AppServer {
   id: string;
   project_id: string;
