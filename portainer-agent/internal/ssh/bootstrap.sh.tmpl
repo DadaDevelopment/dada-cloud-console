@@ -36,6 +36,26 @@ set +e
 # edge-endpoint in-cluster-URL bug fixed in commit c39d3b7). An empty URL here
 # means "skip this sidecar" rather than "deploy with an unreachable target".
 {{if .PrometheusRemoteWriteURL}}
+# ── Free-port selection ──────────────────────────────────────────────────────
+# VMs differ — common ports (9100, 8080) may already be taken by the workload.
+# Pick the first FREE port from a list of uncommon candidates and feed the SAME
+# value into both the exporter and Prometheus' scrape target, so the agent always
+# knows where to scrape. Avoids the "port already allocated" crash seen on loaded
+# VMs (e.g. :8080 used by an existing app).
+pick_port() {
+  for _p in "$@"; do
+    if command -v ss >/dev/null 2>&1; then
+      ss -ltn 2>/dev/null | grep -q ":${_p} " || { echo "$_p"; return; }
+    else
+      (exec 3<>/dev/tcp/127.0.0.1/${_p}) 2>/dev/null && exec 3>&- || { echo "$_p"; return; }
+    fi
+  done
+  echo "$1"
+}
+NODE_EXPORTER_PORT=$(pick_port 19100 39100 49100 9100)
+CADVISOR_PORT=$(pick_port 18080 38080 48080 8080)
+echo "[bootstrap] observability ports: node_exporter=${NODE_EXPORTER_PORT} cadvisor=${CADVISOR_PORT}"
+
 # ── node_exporter 1.8.2 ──────────────────────────────────────────────────────
 useradd --no-create-home --shell /bin/false node_exporter 2>/dev/null || true
 NODE_VER="1.8.2"
@@ -45,29 +65,35 @@ mv "/tmp/node_exporter-${NODE_VER}.linux-amd64/node_exporter" /usr/local/bin/
 chown node_exporter:node_exporter /usr/local/bin/node_exporter
 rm -rf /tmp/ne.tar.gz "/tmp/node_exporter-${NODE_VER}.linux-amd64"
 
-cat > /etc/systemd/system/node_exporter.service << 'UNIT'
+cat > /etc/systemd/system/node_exporter.service << UNIT
 [Unit]
 Description=Prometheus Node Exporter
 After=network.target
 [Service]
 User=node_exporter
-ExecStart=/usr/local/bin/node_exporter --collector.systemd --collector.processes
+ExecStart=/usr/local/bin/node_exporter --collector.systemd --collector.processes --web.listen-address=:${NODE_EXPORTER_PORT}
 Restart=always
 RestartSec=5
 [Install]
 WantedBy=multi-user.target
 UNIT
-systemctl daemon-reload && systemctl enable --now node_exporter
-echo "[bootstrap] node_exporter :9100 started"
+systemctl daemon-reload && systemctl enable node_exporter 2>/dev/null
+# restart (not just enable --now) so a previously-running instance picks up the
+# new --web.listen-address port.
+systemctl restart node_exporter
+echo "[bootstrap] node_exporter :${NODE_EXPORTER_PORT} started"
 
 # ── cAdvisor v0.49.1 ─────────────────────────────────────────────────────────
+# cAdvisor has many bind mounts and is slow to remove; wait for the name to free
+# before recreating, else "name already in use / Removal In Progress".
 docker rm -f cadvisor 2>/dev/null || true
+_i=0; while docker inspect cadvisor >/dev/null 2>&1 && [ $_i -lt 45 ]; do sleep 2; _i=$((_i+1)); done
 docker run -d \
   --name cadvisor --restart unless-stopped \
   -v /:/rootfs:ro -v /var/run:/var/run:ro \
   -v /sys:/sys:ro -v /var/lib/docker/:/var/lib/docker:ro \
-  -p 8080:8080 gcr.io/cadvisor/cadvisor:v0.49.1
-echo "[bootstrap] cAdvisor :8080 started"
+  -p ${CADVISOR_PORT}:8080 gcr.io/cadvisor/cadvisor:v0.49.1
+echo "[bootstrap] cAdvisor :${CADVISOR_PORT} started"
 
 # ── Prometheus Agent → remote_write ──────────────────────────────────────────
 mkdir -p /etc/prometheus-agent /var/lib/prometheus-agent
@@ -80,10 +106,10 @@ global:
 scrape_configs:
   - job_name: node_exporter
     static_configs:
-      - targets: ["localhost:9100"]
+      - targets: ["localhost:${NODE_EXPORTER_PORT}"]
   - job_name: cadvisor
     static_configs:
-      - targets: ["localhost:8080"]
+      - targets: ["localhost:${CADVISOR_PORT}"]
     metric_relabel_configs:
       - source_labels: [container_label_dada_io_app]
         target_label: app
