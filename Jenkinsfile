@@ -233,7 +233,7 @@ spec:
 
                 runStage('Backend build') {
                     dir('backend') {
-                        sh 'go build -buildvcs=false -ldflags="-s -w" -o bin/server ./cmd/server'
+                        sh 'CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -buildvcs=false -ldflags="-s -w" -o bin/server ./cmd/server'
                     }
                 }
 
@@ -245,7 +245,7 @@ spec:
 
                 runStage('GitOps-agent build') {
                     dir('gitops-agent') {
-                        sh 'go build -buildvcs=false -ldflags="-s -w" -o bin/gitops-agent ./cmd/gitops-agent'
+                        sh 'CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -buildvcs=false -ldflags="-s -w" -o bin/gitops-agent ./cmd/gitops-agent'
                     }
                 }
 
@@ -257,7 +257,7 @@ spec:
 
                 runStage('Portainer-agent build') {
                     dir('portainer-agent') {
-                        sh 'go build -buildvcs=false -ldflags="-s -w" -o bin/portainer-agent ./cmd/portainer-agent'
+                        sh 'CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -buildvcs=false -ldflags="-s -w" -o bin/portainer-agent ./cmd/portainer-agent'
                     }
                 }
 
