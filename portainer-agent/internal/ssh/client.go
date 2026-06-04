@@ -28,8 +28,32 @@ type BootstrapParams struct {
 	ElasticsearchAPIKey      string
 }
 
+// isClusterInternal reports whether a URL points at an in-cluster Kubernetes
+// Service address (…svc.cluster.local). Manual-connect / external VMs run
+// outside the cluster network and cannot resolve cluster DNS, so observability
+// sidecars pointed at such hosts crash-loop. Treating these as "unconfigured"
+// makes the template skip the sidecar — same root-cause class as the
+// edge-endpoint in-cluster-URL bug fixed in commit c39d3b7.
+func isClusterInternal(rawURL string) bool {
+	return strings.Contains(rawURL, ".svc.cluster.local") ||
+		strings.Contains(rawURL, ".svc:") ||
+		strings.Contains(rawURL, ".svc/") ||
+		strings.HasSuffix(rawURL, ".svc")
+}
+
 // RenderBootstrap renders bootstrap.sh.tmpl with the given params.
+//
+// Observability endpoint URLs that resolve only inside the cluster are blanked
+// before rendering; an empty endpoint URL makes the template skip that sidecar
+// entirely (opt-in observability) rather than deploy it against an unreachable
+// target. The Portainer Edge Agent — the critical path to Ready — always renders.
 func RenderBootstrap(p BootstrapParams) (string, error) {
+	if isClusterInternal(p.PrometheusRemoteWriteURL) {
+		p.PrometheusRemoteWriteURL = ""
+	}
+	if isClusterInternal(p.ElasticsearchURL) {
+		p.ElasticsearchURL = ""
+	}
 	tmplBytes, err := bootstrapFS.ReadFile("bootstrap.sh.tmpl")
 	if err != nil {
 		return "", fmt.Errorf("read template: %w", err)

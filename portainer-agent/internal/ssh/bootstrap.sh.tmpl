@@ -3,6 +3,8 @@
 # Template vars: .ServerName .EdgeKey .EdgeID
 #                .PrometheusRemoteWriteURL .PrometheusUser .PrometheusPass
 #                .ElasticsearchURL .ElasticsearchAPIKey
+# Observability sidecars (prometheus-agent, filebeat) render only when their
+# endpoint URL is non-empty AND public; see RenderBootstrap / the set +e block.
 set -euo pipefail
 
 echo "[bootstrap] Starting VM setup for {{.ServerName}}"
@@ -26,6 +28,14 @@ echo "[bootstrap] Docker ready"
 # Edge Agent (the thing that makes the AppServer reach Ready) from deploying.
 set +e
 
+# Observability sidecars are OPT-IN and emitted only when a PUBLIC, externally
+# resolvable monitoring endpoint is configured. RenderBootstrap blanks any
+# in-cluster (…svc.cluster.local) URL before rendering, because external
+# manual-connect VMs cannot resolve cluster DNS — pointing prometheus-agent /
+# filebeat at such hosts makes them crash-loop (same root-cause class as the
+# edge-endpoint in-cluster-URL bug fixed in commit c39d3b7). An empty URL here
+# means "skip this sidecar" rather than "deploy with an unreachable target".
+{{if .PrometheusRemoteWriteURL}}
 # ── node_exporter 1.8.2 ──────────────────────────────────────────────────────
 useradd --no-create-home --shell /bin/false node_exporter 2>/dev/null || true
 NODE_VER="1.8.2"
@@ -98,7 +108,10 @@ docker run -d \
   --enable-feature=agent \
   --storage.agent.path=/prometheus
 echo "[bootstrap] Prometheus Agent started (remote_write to {{.PrometheusRemoteWriteURL}})"
-
+{{else}}
+echo "[bootstrap] No public Prometheus remote_write endpoint configured — skipping node_exporter/cAdvisor/prometheus-agent"
+{{end}}
+{{if .ElasticsearchURL}}
 # ── Filebeat 8.13.4 → Elasticsearch ─────────────────────────────────────────
 mkdir -p /etc/filebeat
 cat > /etc/filebeat/filebeat.yml << FBEOF
@@ -130,6 +143,9 @@ docker run -d \
   -v /var/run/docker.sock:/var/run/docker.sock:ro \
   docker.elastic.co/beats/filebeat:8.13.4
 echo "[bootstrap] Filebeat started"
+{{else}}
+echo "[bootstrap] No public Elasticsearch endpoint configured — skipping filebeat"
+{{end}}
 
 # ── Portainer Edge Agent 2.21.0 ──────────────────────────────────────────────
 # Critical path: restore strict mode and ensure a clean (re)deploy.
