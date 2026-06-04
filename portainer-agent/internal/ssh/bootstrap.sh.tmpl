@@ -56,31 +56,16 @@ NODE_EXPORTER_PORT=$(pick_port 19100 39100 49100 9100)
 CADVISOR_PORT=$(pick_port 18080 38080 48080 8080)
 echo "[bootstrap] observability ports: node_exporter=${NODE_EXPORTER_PORT} cadvisor=${CADVISOR_PORT}"
 
-# ── node_exporter 1.8.2 ──────────────────────────────────────────────────────
-useradd --no-create-home --shell /bin/false node_exporter 2>/dev/null || true
-NODE_VER="1.8.2"
-wget -q "https://github.com/prometheus/node_exporter/releases/download/v${NODE_VER}/node_exporter-${NODE_VER}.linux-amd64.tar.gz" -O /tmp/ne.tar.gz
-tar -xzf /tmp/ne.tar.gz -C /tmp
-mv "/tmp/node_exporter-${NODE_VER}.linux-amd64/node_exporter" /usr/local/bin/
-chown node_exporter:node_exporter /usr/local/bin/node_exporter
-rm -rf /tmp/ne.tar.gz "/tmp/node_exporter-${NODE_VER}.linux-amd64"
-
-cat > /etc/systemd/system/node_exporter.service << UNIT
-[Unit]
-Description=Prometheus Node Exporter
-After=network.target
-[Service]
-User=node_exporter
-ExecStart=/usr/local/bin/node_exporter --collector.systemd --collector.processes --web.listen-address=:${NODE_EXPORTER_PORT}
-Restart=always
-RestartSec=5
-[Install]
-WantedBy=multi-user.target
-UNIT
-systemctl daemon-reload && systemctl enable node_exporter 2>/dev/null
-# restart (not just enable --now) so a previously-running instance picks up the
-# new --web.listen-address port.
-systemctl restart node_exporter
+# ── node_exporter 1.8.2 (container — consistent with the rest, no systemd) ────
+docker rm -f node_exporter 2>/dev/null || true
+_i=0; while docker inspect node_exporter >/dev/null 2>&1 && [ $_i -lt 30 ]; do sleep 2; _i=$((_i+1)); done
+docker run -d \
+  --name node_exporter --restart unless-stopped \
+  --net host --pid host \
+  -v /:/host:ro,rslave \
+  quay.io/prometheus/node-exporter:v1.8.2 \
+  --path.rootfs=/host \
+  --web.listen-address=:${NODE_EXPORTER_PORT}
 echo "[bootstrap] node_exporter :${NODE_EXPORTER_PORT} started"
 
 # ── cAdvisor v0.49.1 ─────────────────────────────────────────────────────────
