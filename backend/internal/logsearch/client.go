@@ -106,13 +106,17 @@ type sourceDoc struct {
 func (c *Client) buildQuery(opts SearchOpts) map[string]any {
 	filters := []map[string]any{}
 	if opts.VMName != "" {
-		// vm_name is the prometheus-agent external label; host.name is filebeat's
-		// default. Match either so we don't depend on one mapping choice.
+		// vm_name is the field the filebeat bootstrap sets (= AppServer name);
+		// host.name is filebeat's default (a container id, not the server name).
+		// filebeat dynamic-maps strings as text + a .keyword subfield, so exact
+		// match needs .keyword (a `term` on the analyzed text field matches
+		// nothing — verified live: term vm_name=0, term vm_name.keyword=68).
 		filters = append(filters, map[string]any{
 			"bool": map[string]any{
 				"should": []map[string]any{
+					{"term": map[string]any{"vm_name.keyword": opts.VMName}},
 					{"term": map[string]any{"vm_name": opts.VMName}},
-					{"term": map[string]any{"host.name": opts.VMName}},
+					{"term": map[string]any{"host.name.keyword": opts.VMName}},
 				},
 				"minimum_should_match": 1,
 			},
