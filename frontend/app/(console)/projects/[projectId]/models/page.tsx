@@ -2,9 +2,8 @@
 import { useEffect, useState, FormEvent } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
-import { projectsApi, aiModelsApi, quotasApi } from "@/lib/api";
+import { aiModelsApi, quotasApi } from "@/lib/api";
 import type {
-  Environment,
   ResourceSnapshot,
   AIModelSummary,
   AIModelType,
@@ -15,6 +14,11 @@ import type {
 } from "@/lib/types";
 import { Modal } from "@/components/ui/modal";
 import { Spinner } from "@/components/ui/spinner";
+import { Breadcrumb } from "@/components/ui/breadcrumb";
+import { useProjectContext } from "@/lib/project-context";
+import { canMutate } from "@/lib/rbac";
+import { timeAgo } from "@/lib/format";
+import { PhaseBadge } from "@/components/ui/phase-badge";
 
 const MODEL_TYPES: AIModelType[] = [
   "sklearn", "xgboost", "lightgbm",
@@ -28,48 +32,6 @@ const PROFILES = [
   { name: "gpu-t4", label: "gpu-t4 (4 CPU, 16Gi, 1×T4)", gpu: true },
   { name: "gpu-a100", label: "gpu-a100 (8 CPU, 32Gi, 1×A100)", gpu: true },
 ];
-
-function timeAgo(dateStr: string): string {
-  const diffSecs = Math.floor((Date.now() - new Date(dateStr).getTime()) / 1000);
-  if (diffSecs < 60) return `${diffSecs}s ago`;
-  const diffMins = Math.floor(diffSecs / 60);
-  if (diffMins < 60) return `${diffMins}m ago`;
-  const diffHours = Math.floor(diffMins / 60);
-  if (diffHours < 24) return `${diffHours}h ago`;
-  return `${Math.floor(diffHours / 24)}d ago`;
-}
-
-function PhaseBadge({ phase }: { phase?: string }) {
-  const p = phase ?? "";
-  const lower = p.toLowerCase();
-  const tone = lower === "ready"
-    ? "bg-green-100 text-green-700"
-    : lower === "failed"
-      ? "bg-red-100 text-red-700"
-      : lower === "waitingforapproval"
-        ? "bg-amber-100 text-amber-700"
-        : "bg-yellow-100 text-yellow-700";
-  return (
-    <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${tone}`}>
-      {p || "Unknown"}
-    </span>
-  );
-}
-
-function CanaryBar({ percent }: { percent: number }) {
-  const pct = Math.max(0, Math.min(100, percent));
-  return (
-    <div className="mt-2">
-      <div className="flex items-center justify-between text-xs text-gray-500">
-        <span>canary</span>
-        <span className="font-mono">{pct}%</span>
-      </div>
-      <div className="mt-1 h-1.5 w-full overflow-hidden rounded-full bg-gray-100">
-        <div className="h-full bg-purple-500" style={{ width: `${pct}%` }} />
-      </div>
-    </div>
-  );
-}
 
 interface CreateForm {
   name: string;
@@ -105,11 +67,10 @@ export default function ModelsPage() {
   const router = useRouter();
   const search = useSearchParams();
 
-  const [environments, setEnvironments] = useState<Environment[]>([]);
-  const [selectedEnvId, setSelectedEnvId] = useState<string>("");
+  const { project, selectedEnv, role, loading: isLoadingEnvs } = useProjectContext();
+  const selectedEnvId = selectedEnv?.id ?? "";
   const [models, setModels] = useState<ResourceSnapshot[]>([]);
   const [quotas, setQuotas] = useState<QuotaUsageResponse | null>(null);
-  const [isLoadingEnvs, setIsLoadingEnvs] = useState(true);
   const [isLoadingModels, setIsLoadingModels] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -133,35 +94,24 @@ export default function ModelsPage() {
   const [submitError, setSubmitError] = useState<string | null>(null);
 
   useEffect(() => {
-    Promise.all([projectsApi.get(projectId), quotasApi.get(projectId).catch(() => null)])
-      .then(([detail, q]) => {
-        const envs = detail.environments ?? [];
-        setEnvironments(envs);
-        setQuotas(q);
-        if (envs.length > 0) setSelectedEnvId(envs[0].id);
-        else setIsLoadingModels(false);
-      })
-      .catch((err) => {
-        setError(err instanceof Error ? err.message : "Failed to load project");
-        setIsLoadingModels(false);
-      })
-      .finally(() => setIsLoadingEnvs(false));
+    quotasApi.get(projectId).then(setQuotas).catch(() => setQuotas(null));
   }, [projectId]);
 
   useEffect(() => {
-    if (!selectedEnvId) return;
+    /* eslint-disable react-hooks/set-state-in-effect */
+    if (!selectedEnvId) {
+      if (!isLoadingEnvs) setIsLoadingModels(false);
+      return;
+    }
+    setIsLoadingModels(true);
+    setError(null);
+    /* eslint-enable react-hooks/set-state-in-effect */
     aiModelsApi
       .list(projectId, selectedEnvId)
       .then((data) => setModels(data.models ?? []))
       .catch((err) => setError(err instanceof Error ? err.message : "Failed to load models"))
       .finally(() => setIsLoadingModels(false));
-  }, [projectId, selectedEnvId]);
-
-  function handleEnvironmentChange(envId: string) {
-    setIsLoadingModels(true);
-    setError(null);
-    setSelectedEnvId(envId);
-  }
+  }, [projectId, selectedEnvId, isLoadingEnvs]);
 
   function update<K extends keyof CreateForm>(k: K, v: CreateForm[K]) {
     setForm((prev) => ({ ...prev, [k]: v }));
@@ -193,10 +143,9 @@ export default function ModelsPage() {
       const result = await aiModelsApi.create(projectId, selectedEnvId, body);
       setIsModalOpen(false);
       setForm(defaultForm);
+      // Redirect immediately to the live-updating, highlighted operation.
       const opId = result.operation?.id;
-      setTimeout(() => {
-        router.push(`/projects/${projectId}/operations${opId ? `?highlight=${opId}` : ""}`);
-      }, 1500);
+      router.push(`/projects/${projectId}/operations${opId ? `?highlight=${opId}` : ""}`);
     } catch (err) {
       setSubmitError(err instanceof Error ? err.message : "Failed to create model");
     } finally {
@@ -204,7 +153,7 @@ export default function ModelsPage() {
     }
   }
 
-  const selectedEnv = environments.find((e) => e.id === selectedEnvId);
+  const canDeploy = canMutate(role);
   const selectedProfile = PROFILES.find((p) => p.name === form.profile);
   const gpuRequiresApproval = !!selectedProfile?.gpu && (quotas?.quotas?.gpu_model_max ?? 0) === 0;
 
@@ -216,16 +165,17 @@ export default function ModelsPage() {
     <div>
       <div className="mb-8 flex items-start justify-between">
         <div>
-          <div className="flex items-center gap-2 text-sm text-gray-500">
-            <Link href="/projects" className="hover:text-gray-700">Projects</Link>
-            <span>/</span>
-            <Link href={`/projects/${projectId}`} className="hover:text-gray-700">Overview</Link>
-            <span>/</span>
-            <span className="text-gray-900">AI Models</span>
-          </div>
+          <Breadcrumb
+            items={[
+              { label: "Projects", href: "/projects" },
+              { label: project?.display_name ?? "Overview", href: `/projects/${projectId}` },
+              { label: "AI Models" },
+            ]}
+          />
           <h1 className="mt-2 text-2xl font-bold text-gray-900">AI Models</h1>
           <p className="mt-0.5 text-sm text-gray-500">KServe-backed inference services</p>
         </div>
+        {canDeploy && (
         <button
           onClick={() => setIsModalOpen(true)}
           disabled={!selectedEnvId}
@@ -236,6 +186,7 @@ export default function ModelsPage() {
           </svg>
           Deploy Model
         </button>
+        )}
       </div>
 
       {quotas && (
@@ -254,24 +205,6 @@ export default function ModelsPage() {
       {error && (
         <div className="mb-6 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
           {error}
-        </div>
-      )}
-
-      {environments.length > 0 && (
-        <div className="mb-6 flex w-fit gap-1 rounded-lg border border-gray-200 bg-gray-50 p-1">
-          {environments.map((env) => (
-            <button
-              key={env.id}
-              onClick={() => handleEnvironmentChange(env.id)}
-              className={`rounded-md px-4 py-1.5 text-sm font-medium transition-colors ${
-                selectedEnvId === env.id
-                  ? "bg-white text-gray-900 shadow-sm"
-                  : "text-gray-500 hover:text-gray-700"
-              }`}
-            >
-              {env.name}
-            </button>
-          ))}
         </div>
       )}
 
@@ -307,14 +240,15 @@ export default function ModelsPage() {
                   </div>
                   <PhaseBadge phase={m.phase} />
                 </div>
+                {/* Scannable card: type + GPU only. Profile/auth/canary live on
+                    the detail page to keep the grid low-density. */}
                 <div className="flex flex-wrap items-center gap-2">
                   <Pill color="indigo">{s.model_type}</Pill>
-                  <Pill color={s.profile?.startsWith("gpu") ? "purple" : "gray"}>{s.profile}</Pill>
-                  <Pill color={s.auth_mode === "public" ? "amber" : "gray"}>{s.auth_mode}</Pill>
+                  {s.profile?.startsWith("gpu") && <Pill color="purple">GPU</Pill>}
+                  {typeof s.canary_percent === "number" && s.canary_percent > 0 && (
+                    <Pill color="gray">canary {s.canary_percent}%</Pill>
+                  )}
                 </div>
-                {typeof s.canary_percent === "number" && s.canary_percent > 0 && (
-                  <CanaryBar percent={s.canary_percent} />
-                )}
                 <p className="mt-3 text-xs text-gray-400">Synced {timeAgo(m.last_synced_at)}</p>
               </Link>
             );
@@ -468,7 +402,7 @@ export default function ModelsPage() {
           </div>
 
           {submitError && (
-            <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+            <div role="alert" className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
               {submitError}
             </div>
           )}

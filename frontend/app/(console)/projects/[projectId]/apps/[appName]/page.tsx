@@ -6,21 +6,14 @@ import { appsApi, endpointsApi } from "@/lib/api";
 import type { ResourceSnapshot } from "@/lib/types";
 import { Modal } from "@/components/ui/modal";
 import { Spinner } from "@/components/ui/spinner";
+import { Breadcrumb } from "@/components/ui/breadcrumb";
+import { Tooltip } from "@/components/ui/tooltip";
+import { useProjectContext } from "@/lib/project-context";
+import { canEditYaml, canMutate, canSeeTechnical } from "@/lib/rbac";
 import { ComposeStatePanel } from "@/components/compose-state-panel";
 import { MetricsPanel } from "@/components/metrics-panel";
 import { LogsViewer } from "@/components/logs-viewer";
-
-function PhaseBadge({ phase }: { phase?: string }) {
-  const p = phase ?? "";
-  const isReady = p.toLowerCase() === "ready";
-  return (
-    <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${
-      isReady ? "bg-green-100 text-green-700" : "bg-yellow-100 text-yellow-700"
-    }`}>
-      {p || "Unknown"}
-    </span>
-  );
-}
+import { PhaseBadge } from "@/components/ui/phase-badge";
 
 interface DomainForm {
   fqdn: string;
@@ -45,7 +38,10 @@ export default function AppDetailPage() {
   const searchParams = useSearchParams();
   const router = useRouter();
   const { projectId, appName } = params;
-  const envId = searchParams.get("envId") ?? "";
+  const { role, selectedEnv } = useProjectContext();
+  // Prefer the explicit deep-link param, fall back to the shared env context
+  // so the page stays stable when navigated to without ?envId=.
+  const envId = searchParams.get("envId") || selectedEnv?.id || "";
 
   const [app, setApp] = useState<ResourceSnapshot | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -95,9 +91,7 @@ export default function AppDetailPage() {
       setIsImageModalOpen(false);
       setNewImage("");
       const opId = result.operation?.id;
-      setTimeout(() => {
-        router.push(`/projects/${projectId}/operations${opId ? `?highlight=${opId}` : ""}`);
-      }, 1500);
+      router.push(`/projects/${projectId}/operations${opId ? `?highlight=${opId}` : ""}`);
     } catch (err) {
       setImageSubmitError(err instanceof Error ? err.message : "Failed to update image");
     } finally {
@@ -126,9 +120,7 @@ export default function AppDetailPage() {
       setIsDomainModalOpen(false);
       setDomainForm(defaultDomainForm(appName));
       const opId = result.operation?.id;
-      setTimeout(() => {
-        router.push(`/projects/${projectId}/operations${opId ? `?highlight=${opId}` : ""}`);
-      }, 1500);
+      router.push(`/projects/${projectId}/operations${opId ? `?highlight=${opId}` : ""}`);
     } catch (err) {
       setDomainSubmitError(err instanceof Error ? err.message : "Failed to register domain");
     } finally {
@@ -155,21 +147,21 @@ export default function AppDetailPage() {
       {/* Header */}
       <div className="mb-8 flex items-start justify-between">
         <div>
-          <div className="flex items-center gap-2 text-sm text-gray-500">
-            <Link href="/projects" className="hover:text-gray-700">Projects</Link>
-            <span>/</span>
-            <Link href={`/projects/${projectId}`} className="hover:text-gray-700">Overview</Link>
-            <span>/</span>
-            <Link href={`/projects/${projectId}/apps`} className="hover:text-gray-700">Applications</Link>
-            <span>/</span>
-            <span className="text-gray-900 font-mono">{appName}</span>
-          </div>
+          <Breadcrumb
+            items={[
+              { label: "Projects", href: "/projects" },
+              { label: "Overview", href: `/projects/${projectId}` },
+              { label: "Applications", href: `/projects/${projectId}/apps` },
+              { label: appName },
+            ]}
+          />
           <div className="mt-2 flex items-center gap-3">
             <h1 className="text-2xl font-bold text-gray-900 font-mono">{appName}</h1>
             <PhaseBadge phase={app.phase} />
           </div>
         </div>
         <div className="flex items-center gap-2">
+          {canEditYaml(role) && (
           <Link
             href={`/projects/${projectId}/apps/${appName}/${isCompose ? "compose" : "values"}${envId ? `?envId=${envId}` : ""}`}
             className="inline-flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:border-blue-300 hover:text-blue-600 transition-colors shadow-sm"
@@ -179,7 +171,8 @@ export default function AppDetailPage() {
             </svg>
             {isCompose ? "Edit compose" : "Edit values"}
           </Link>
-          {!isCompose && (
+          )}
+          {!isCompose && canMutate(role) && (
             <button
               onClick={() => { setNewImage(summary.image ?? ""); setIsImageModalOpen(true); }}
               className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 transition-colors"
@@ -203,14 +196,22 @@ export default function AppDetailPage() {
       ) : (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           {[
-            { label: "Image", value: summary.image ?? "—", mono: true },
+            // Image digest is a technical detail — hidden from client roles per
+            // the PRD ("the console sells simplicity").
+            ...(canSeeTechnical(role) ? [{ label: "Image", value: summary.image ?? "—", mono: true, tip: summary.image }] : []),
             { label: "Profile", value: summary.profile ?? "small" },
             { label: "Replicas", value: String(summary.replicas ?? 2) },
             { label: "Port", value: String(summary.port ?? 8080) },
-          ].map(({ label, value, mono }) => (
+          ].map(({ label, value, mono, tip }: { label: string; value: string; mono?: boolean; tip?: string }) => (
             <div key={label} className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
               <p className="text-xs font-semibold uppercase tracking-wide text-gray-400">{label}</p>
-              <p className={`mt-1 text-sm font-medium text-gray-900 truncate ${mono ? "font-mono" : ""}`}>{value}</p>
+              {tip && tip.length > 0 ? (
+                <Tooltip label={tip} className="mt-1 max-w-full">
+                  <span className={`block truncate text-sm font-medium text-gray-900 ${mono ? "font-mono" : ""}`}>{value}</span>
+                </Tooltip>
+              ) : (
+                <p className={`mt-1 text-sm font-medium text-gray-900 truncate ${mono ? "font-mono" : ""}`}>{value}</p>
+              )}
             </div>
           ))}
         </div>
@@ -223,6 +224,7 @@ export default function AppDetailPage() {
             <h2 className="text-lg font-semibold text-gray-900">Domains</h2>
             <p className="text-sm text-gray-400">Public endpoints via gateway + DNS</p>
           </div>
+          {canMutate(role) && (
           <button
             onClick={() => { setDomainForm(defaultDomainForm(appName)); setIsDomainModalOpen(true); }}
             className="inline-flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 hover:border-blue-300 hover:text-blue-600 transition-colors shadow-sm"
@@ -232,6 +234,7 @@ export default function AppDetailPage() {
             </svg>
             Add Domain
           </button>
+          )}
         </div>
 
         {isLoadingEndpoints ? (

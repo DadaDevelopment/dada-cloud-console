@@ -2,36 +2,15 @@
 import { useEffect, useState, FormEvent } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
-import { projectsApi, databasesApi } from "@/lib/api";
-import type { Environment, ResourceSnapshot } from "@/lib/types";
+import { databasesApi } from "@/lib/api";
+import type { ResourceSnapshot } from "@/lib/types";
 import { Modal } from "@/components/ui/modal";
 import { Spinner } from "@/components/ui/spinner";
-
-function timeAgo(dateStr: string): string {
-  const date = new Date(dateStr);
-  const now = new Date();
-  const diffMs = now.getTime() - date.getTime();
-  const diffSecs = Math.floor(diffMs / 1000);
-  if (diffSecs < 60) return `${diffSecs}s ago`;
-  const diffMins = Math.floor(diffSecs / 60);
-  if (diffMins < 60) return `${diffMins}m ago`;
-  const diffHours = Math.floor(diffMins / 60);
-  if (diffHours < 24) return `${diffHours}h ago`;
-  const diffDays = Math.floor(diffHours / 24);
-  return `${diffDays}d ago`;
-}
-
-function PhaseBadge({ phase }: { phase?: string }) {
-  const p = phase ?? "";
-  const isReady = p.toLowerCase() === "ready";
-  return (
-    <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${
-      isReady ? "bg-green-100 text-green-700" : "bg-yellow-100 text-yellow-700"
-    }`}>
-      {p || "Unknown"}
-    </span>
-  );
-}
+import { Breadcrumb } from "@/components/ui/breadcrumb";
+import { useProjectContext } from "@/lib/project-context";
+import { canMutate } from "@/lib/rbac";
+import { timeAgo } from "@/lib/format";
+import { PhaseBadge } from "@/components/ui/phase-badge";
 
 interface CreateDbForm {
   name: string;
@@ -47,10 +26,9 @@ export default function DatabasesPage() {
   const projectId = params.projectId;
   const router = useRouter();
 
-  const [environments, setEnvironments] = useState<Environment[]>([]);
-  const [selectedEnvId, setSelectedEnvId] = useState<string>("");
+  const { project, selectedEnv, role, loading: isLoadingEnvs } = useProjectContext();
+  const selectedEnvId = selectedEnv?.id ?? "";
   const [databases, setDatabases] = useState<ResourceSnapshot[]>([]);
-  const [isLoadingEnvs, setIsLoadingEnvs] = useState(true);
   const [isLoadingDbs, setIsLoadingDbs] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -66,44 +44,25 @@ export default function DatabasesPage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
 
-  // Load environments
+  // Load databases when the selected environment (from shared context) changes.
   useEffect(() => {
-    projectsApi
-      .get(projectId)
-      .then((data) => {
-        const envs = data.environments ?? [];
-        setEnvironments(envs);
-        if (envs.length > 0) {
-          setSelectedEnvId(envs[0].id);
-        } else {
-          setIsLoadingDbs(false);
-        }
-      })
-      .catch((err) => {
-        setError(err instanceof Error ? err.message : "Failed to load project");
-        setIsLoadingDbs(false);
-      })
-      .finally(() => setIsLoadingEnvs(false));
-  }, [projectId]);
-
-  // Load databases when env changes
-  useEffect(() => {
-    if (!selectedEnvId) return;
+    /* eslint-disable react-hooks/set-state-in-effect */
+    if (!selectedEnvId) {
+      if (!isLoadingEnvs) setIsLoadingDbs(false);
+      return;
+    }
+    setIsLoadingDbs(true);
+    setError(null);
+    /* eslint-enable react-hooks/set-state-in-effect */
     databasesApi
       .list(projectId, selectedEnvId)
       .then((data) => setDatabases(data.databases ?? []))
       .catch((err) => setError(err instanceof Error ? err.message : "Failed to load databases"))
       .finally(() => setIsLoadingDbs(false));
-  }, [projectId, selectedEnvId]);
+  }, [projectId, selectedEnvId, isLoadingEnvs]);
 
   function handleFormChange(field: keyof CreateDbForm, value: string | boolean) {
     setForm((prev) => ({ ...prev, [field]: value }));
-  }
-
-  function handleEnvironmentChange(envId: string) {
-    setIsLoadingDbs(true);
-    setError(null);
-    setSelectedEnvId(envId);
   }
 
   async function handleSubmit(e: FormEvent<HTMLFormElement>) {
@@ -121,11 +80,9 @@ export default function DatabasesPage() {
       });
       setIsModalOpen(false);
       setForm({ name: "", database: "", app_ref: "", backup_enabled: true, backup_schedule: "daily", backup_retention: "7d" });
-      // Show operation ID briefly then redirect
+      // Redirect immediately to the live-updating, highlighted operation.
       const opId = result.operation?.id;
-      setTimeout(() => {
-        router.push(`/projects/${projectId}/operations${opId ? `?highlight=${opId}` : ""}`);
-      }, 2000);
+      router.push(`/projects/${projectId}/operations${opId ? `?highlight=${opId}` : ""}`);
     } catch (err) {
       setSubmitError(err instanceof Error ? err.message : "Failed to create database");
     } finally {
@@ -133,7 +90,7 @@ export default function DatabasesPage() {
     }
   }
 
-  const selectedEnv = environments.find((e) => e.id === selectedEnvId);
+  const canCreate = canMutate(role);
 
   if (isLoadingEnvs) {
     return (
@@ -148,16 +105,17 @@ export default function DatabasesPage() {
       {/* Header */}
       <div className="mb-8 flex items-start justify-between">
         <div>
-          <div className="flex items-center gap-2 text-sm text-gray-500">
-            <Link href="/projects" className="hover:text-gray-700">Projects</Link>
-            <span>/</span>
-            <Link href={`/projects/${projectId}`} className="hover:text-gray-700">Overview</Link>
-            <span>/</span>
-            <span className="text-gray-900">Databases</span>
-          </div>
+          <Breadcrumb
+            items={[
+              { label: "Projects", href: "/projects" },
+              { label: project?.display_name ?? "Overview", href: `/projects/${projectId}` },
+              { label: "Databases" },
+            ]}
+          />
           <h1 className="mt-2 text-2xl font-bold text-gray-900">Databases</h1>
           <p className="mt-0.5 text-sm text-gray-500">PostgreSQL database instances</p>
         </div>
+        {canCreate && (
         <button
           onClick={() => setIsModalOpen(true)}
           disabled={!selectedEnvId}
@@ -168,30 +126,12 @@ export default function DatabasesPage() {
           </svg>
           Create Database
         </button>
+        )}
       </div>
 
       {error && (
         <div className="mb-6 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
           {error}
-        </div>
-      )}
-
-      {/* Environment tabs */}
-      {environments.length > 0 && (
-        <div className="mb-6 flex gap-1 rounded-lg border border-gray-200 bg-gray-50 p-1 w-fit">
-          {environments.map((env) => (
-            <button
-              key={env.id}
-              onClick={() => handleEnvironmentChange(env.id)}
-              className={`rounded-md px-4 py-1.5 text-sm font-medium transition-colors ${
-                selectedEnvId === env.id
-                  ? "bg-white text-gray-900 shadow-sm"
-                  : "text-gray-500 hover:text-gray-700"
-              }`}
-            >
-              {env.name}
-            </button>
-          ))}
         </div>
       )}
 
@@ -216,9 +156,10 @@ export default function DatabasesPage() {
       ) : (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {databases.map((db) => (
-            <div
+            <Link
               key={db.id}
-              className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm"
+              href={`/projects/${projectId}/databases/${db.name}${selectedEnvId ? `?envId=${selectedEnvId}` : ""}`}
+              className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm transition-all hover:border-blue-200 hover:shadow-md"
             >
               <div className="mb-3 flex items-start justify-between">
                 <div>
@@ -230,7 +171,7 @@ export default function DatabasesPage() {
               <p className="text-xs text-gray-400">
                 Synced {timeAgo(db.last_synced_at)}
               </p>
-            </div>
+            </Link>
           ))}
         </div>
       )}
@@ -341,7 +282,7 @@ export default function DatabasesPage() {
           )}
 
           {submitError && (
-            <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+            <div role="alert" className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
               {submitError}
             </div>
           )}
