@@ -130,11 +130,11 @@ func TestRenderAIModel_AttachedAppLabel(t *testing.T) {
 
 func TestAIModelGitPaths(t *testing.T) {
 	if got := renderer.AIModelGitPath("internal", "prod", "iris"); got !=
-		"clusters/beget-prod/projects/internal/environments/prod/apps/iris/chart/templates/aimodel.yaml" {
+		"clusters/beget-prod/projects/internal/environments/prod/apps/iris/resources/templates/aimodel.yaml" {
 		t.Errorf("AIModelGitPath: %s", got)
 	}
 	if got := renderer.AIModelPublicApiGitPath("internal", "prod", "iris"); got !=
-		"clusters/beget-prod/projects/internal/environments/prod/apps/iris/chart/templates/publicapi.yaml" {
+		"clusters/beget-prod/projects/internal/environments/prod/apps/iris/resources/templates/publicapi.yaml" {
 		t.Errorf("AIModelPublicApiGitPath: %s", got)
 	}
 }
