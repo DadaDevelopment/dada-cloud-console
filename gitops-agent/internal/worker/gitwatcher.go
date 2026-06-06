@@ -33,11 +33,12 @@ var projectPathRe = regexp.MustCompile(`^clusters/[^/]+/projects/([^/]+)/project
 // Capture group 1 is the k8s namespace name.
 var namespacePolicyPathRe = regexp.MustCompile(`^clusters/[^/]+/namespace-policies/([^/]+)\.yaml$`)
 
-// chartResourcePathRe matches a child resource manifest committed inside an app's
-// Helm chart: clusters/<cluster>/projects/<project>/environments/<env>/apps/<app>/chart/templates/<file>.yaml
+// resourceTemplatePathRe matches a child resource manifest committed inside an
+// app's resources chart:
+// clusters/<cluster>/projects/<project>/environments/<env>/apps/<app>/resources/templates/<file>.yaml
 // (ServiceDatabase, AIModel, PublicApi, ...). Capture groups: 1=project, 2=env, 3=app.
-// The Chart.yaml at chart/Chart.yaml is intentionally not matched (no templates/ segment).
-var chartResourcePathRe = regexp.MustCompile(`^clusters/[^/]+/projects/([^/]+)/environments/([^/]+)/apps/([^/]+)/chart/templates/[^/]+\.yaml$`)
+// The Chart.yaml at resources/Chart.yaml is intentionally not matched (no templates/ segment).
+var resourceTemplatePathRe = regexp.MustCompile(`^clusters/[^/]+/projects/([^/]+)/environments/([^/]+)/apps/([^/]+)/resources/templates/[^/]+\.yaml$`)
 
 // ValuesNotifier is implemented by server.Hub to push live file updates to WS clients.
 type ValuesNotifier interface {
@@ -51,8 +52,8 @@ type namespacePolicyManifest struct {
 }
 
 // resourceManifest extracts the GVK name from any namespaced CR manifest so a
-// reverse-synced chart/templates resource lands in resource_snapshots under the
-// kind the read APIs expect (ServiceDatabase / AIModel / PublicApi).
+// reverse-synced resources/templates manifest lands in resource_snapshots under
+// the kind the read APIs expect (ServiceDatabase / AIModel / PublicApi).
 type resourceManifest struct {
 	Kind     string `yaml:"kind"`
 	Metadata struct {
@@ -206,8 +207,8 @@ func (w *GitWatcher) processCommit(ctx context.Context, mgr *git.Manager, c git.
 			w.syncAppFile(ctx, mgr, filePath, m[1], m[2], m[3], c)
 			continue
 		}
-		if m := chartResourcePathRe.FindStringSubmatch(filePath); m != nil {
-			w.syncChartResourceFile(ctx, mgr, filePath, m[1], m[2], c)
+		if m := resourceTemplatePathRe.FindStringSubmatch(filePath); m != nil {
+			w.syncResourceTemplateFile(ctx, mgr, filePath, m[1], m[2], c)
 			continue
 		}
 		if m := valuesPathRe.FindStringSubmatch(filePath); m != nil {
@@ -361,26 +362,26 @@ func (w *GitWatcher) syncAppFile(ctx context.Context, mgr *git.Manager, filePath
 	}
 }
 
-// syncChartResourceFile reverse-syncs a child resource committed under an app's
-// chart/templates/ (ServiceDatabase, AIModel, PublicApi, ...) into
+// syncResourceTemplateFile reverse-syncs a child resource committed under an
+// app's resources/templates/ (ServiceDatabase, AIModel, PublicApi, ...) into
 // resource_snapshots. It reads the manifest's kind + name and upserts a snapshot
 // of that kind, so a resource introduced by a manual git commit shows up in the
 // console. The upsert is LWW on the commit time, so it never clobbers a fresher
 // snapshot already written by the API at request time.
-func (w *GitWatcher) syncChartResourceFile(ctx context.Context, mgr *git.Manager, filePath, projectSlug, envSlug string, c git.Commit) {
+func (w *GitWatcher) syncResourceTemplateFile(ctx context.Context, mgr *git.Manager, filePath, projectSlug, envSlug string, c git.Commit) {
 	content, err := mgr.ReadFileAtCommit(c.SHA, filePath)
 	if err != nil {
-		log.Warn().Err(err).Str("path", filePath).Msg("git-watcher: read chart resource manifest")
+		log.Warn().Err(err).Str("path", filePath).Msg("git-watcher: read resource manifest")
 		return
 	}
 
 	var manifest resourceManifest
 	if err := yaml.Unmarshal([]byte(content), &manifest); err != nil {
-		log.Warn().Err(err).Str("path", filePath).Msg("git-watcher: parse chart resource manifest")
+		log.Warn().Err(err).Str("path", filePath).Msg("git-watcher: parse resource manifest")
 		return
 	}
 	if manifest.Kind == "" || manifest.Metadata.Name == "" {
-		log.Warn().Str("path", filePath).Msg("git-watcher: chart resource manifest missing kind/name, skipping")
+		log.Warn().Str("path", filePath).Msg("git-watcher: resource manifest missing kind/name, skipping")
 		return
 	}
 
@@ -406,7 +407,7 @@ func (w *GitWatcher) syncChartResourceFile(ctx context.Context, mgr *git.Manager
 		projectID, envUUID,
 		manifest.Kind, manifest.Metadata.Name, "Unknown", summaryJSON, c.When,
 	); err != nil {
-		log.Error().Err(err).Str("kind", manifest.Kind).Str("name", manifest.Metadata.Name).Msg("git-watcher: upsert chart resource snapshot")
+		log.Error().Err(err).Str("kind", manifest.Kind).Str("name", manifest.Metadata.Name).Msg("git-watcher: upsert resource snapshot")
 		return
 	}
 
@@ -414,10 +415,10 @@ func (w *GitWatcher) syncChartResourceFile(ctx context.Context, mgr *git.Manager
 		c.SHA, mgr.RepoURL(), mgr.Branch(), filePath, c.Message,
 		c.Author, c.Email, nil, "manual",
 	); err != nil {
-		log.Warn().Err(err).Str("sha", c.SHA).Msg("git-watcher: record chart resource commit")
+		log.Warn().Err(err).Str("sha", c.SHA).Msg("git-watcher: record resource commit")
 	}
 
-	log.Info().Str("kind", manifest.Kind).Str("name", manifest.Metadata.Name).Str("path", filePath).Msg("git-watcher: synced chart resource from git")
+	log.Info().Str("kind", manifest.Kind).Str("name", manifest.Metadata.Name).Str("path", filePath).Msg("git-watcher: synced resource from git")
 }
 
 func (w *GitWatcher) syncNamespacePolicyFile(ctx context.Context, mgr *git.Manager, filePath, namespace string, c git.Commit) {

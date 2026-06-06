@@ -51,9 +51,10 @@ func RenderServiceDatabase(spec ServiceDatabaseSpec) (string, error) {
 }
 
 // ServiceDatabaseGitPath places the ServiceDatabase manifest inside the owning
-// app's Helm chart (chart/templates/), so it is reconciled as part of that app.
+// app's resources chart (resources/templates/), so it is reconciled as part of
+// that app alongside its (possibly external) workload chart.
 func ServiceDatabaseGitPath(projectSlug, envSlug, appRef string) string {
-	return AppChartTemplatesGitPath(projectSlug, envSlug, appRef) + "/servicedatabase.yaml"
+	return AppResourcesTemplatesGitPath(projectSlug, envSlug, appRef) + "/servicedatabase.yaml"
 }
 
 // AppSpec holds parameters for an App manifest.
@@ -72,7 +73,7 @@ type AppSpec struct {
 }
 
 var appFuncMap = template.FuncMap{
-	"appHelmChartGitPath":  AppHelmChartGitPath,
+	"appResourcesGitPath":  AppResourcesGitPath,
 	"appHelmValuesGitPath": AppHelmValuesGitPath,
 }
 
@@ -89,7 +90,7 @@ spec:
   namespace: {{ .Namespace }}
   helm:
     repoURL: {{ .HelmRepoURL }}
-    path: {{ appHelmChartGitPath .ProjectSlug .EnvSlug .Name }}
+    path: {{ appResourcesGitPath .ProjectSlug .EnvSlug .Name }}
     targetRevision: {{ .HelmTargetRevision }}
     valueFile: {{ appHelmValuesGitPath .ProjectSlug .EnvSlug .Name }}
 `))
@@ -132,20 +133,24 @@ func AppGitPath(projectSlug, envSlug, appName string) string {
 	return AppBaseGitPath(projectSlug, envSlug, appName) + "/application.yaml"
 }
 
-func AppHelmChartGitPath(projectSlug, envSlug, appName string) string {
-	return AppBaseGitPath(projectSlug, envSlug, appName) + "/chart"
+// AppResourcesGitPath is the resources/ directory the App CR points its
+// helm.path at. It is a self-contained Helm chart (Chart.yaml + templates/)
+// holding our platform CRDs, kept separate from any external workload chart the
+// user may configure. ArgoCD renders this directory directly.
+func AppResourcesGitPath(projectSlug, envSlug, appName string) string {
+	return AppBaseGitPath(projectSlug, envSlug, appName) + "/resources"
 }
 
-// AppChartTemplatesGitPath is the templates/ dir of an app's Helm chart. Child
-// resources (ServiceDatabase, AIModel, PublicApi) are committed here so they are
-// reconciled together with the app that owns them.
-func AppChartTemplatesGitPath(projectSlug, envSlug, appName string) string {
-	return AppHelmChartGitPath(projectSlug, envSlug, appName) + "/templates"
+// AppResourcesTemplatesGitPath is the templates/ dir of an app's resources
+// chart. Child resources (ServiceDatabase, AIModel, PublicApi) are committed
+// here so they are reconciled together with the app that owns them.
+func AppResourcesTemplatesGitPath(projectSlug, envSlug, appName string) string {
+	return AppResourcesGitPath(projectSlug, envSlug, appName) + "/templates"
 }
 
-// AppChartYamlGitPath is the Chart.yaml at the root of an app's Helm chart.
-func AppChartYamlGitPath(projectSlug, envSlug, appName string) string {
-	return AppHelmChartGitPath(projectSlug, envSlug, appName) + "/Chart.yaml"
+// AppResourcesChartYamlGitPath is the Chart.yaml at the root of the resources chart.
+func AppResourcesChartYamlGitPath(projectSlug, envSlug, appName string) string {
+	return AppResourcesGitPath(projectSlug, envSlug, appName) + "/Chart.yaml"
 }
 
 // RenderChartYaml renders a minimal valid Helm Chart.yaml so the app's chart/
@@ -263,10 +268,10 @@ func RenderPublicApi(spec PublicApiSpec) (string, error) {
 	return buf.String(), nil
 }
 
-// PublicApiGitPath places the PublicApi manifest inside the owning app's Helm
-// chart (chart/templates/), alongside the app's other resources.
+// PublicApiGitPath places the PublicApi manifest inside the owning app's
+// resources chart (resources/templates/), alongside the app's other resources.
 func PublicApiGitPath(projectSlug, envSlug, appName, publicApiName string) string {
-	return AppChartTemplatesGitPath(projectSlug, envSlug, appName) +
+	return AppResourcesTemplatesGitPath(projectSlug, envSlug, appName) +
 		fmt.Sprintf("/publicapi-%s.yaml", publicApiName)
 }
 

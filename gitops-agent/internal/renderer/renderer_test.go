@@ -97,7 +97,7 @@ func TestRenderApp(t *testing.T) {
 		"namespace: beta-staging",
 		"helm:",
 		"repoURL: https://github.com/DADA-TUDA/argo-infra.git",
-		"path: clusters/beget-prod/projects/beta/environments/staging/apps/api-service/chart",
+		"path: clusters/beget-prod/projects/beta/environments/staging/apps/api-service/resources",
 		"targetRevision: main",
 		"valueFile: clusters/beget-prod/projects/beta/environments/staging/apps/api-service/values.yaml",
 	}
@@ -234,7 +234,7 @@ func TestGitPaths(t *testing.T) {
 		{
 			"ServiceDatabaseGitPath",
 			renderer.ServiceDatabaseGitPath("alpha", "prod", "myapp"),
-			"clusters/beget-prod/projects/alpha/environments/prod/apps/myapp/chart/templates/servicedatabase.yaml",
+			"clusters/beget-prod/projects/alpha/environments/prod/apps/myapp/resources/templates/servicedatabase.yaml",
 		},
 		{
 			"AppGitPath",
@@ -242,19 +242,19 @@ func TestGitPaths(t *testing.T) {
 			"clusters/beget-prod/projects/alpha/environments/prod/apps/api/application.yaml",
 		},
 		{
-			"AppHelmChartGitPath",
-			renderer.AppHelmChartGitPath("alpha", "prod", "api"),
-			"clusters/beget-prod/projects/alpha/environments/prod/apps/api/chart",
+			"AppResourcesGitPath",
+			renderer.AppResourcesGitPath("alpha", "prod", "api"),
+			"clusters/beget-prod/projects/alpha/environments/prod/apps/api/resources",
 		},
 		{
-			"AppChartTemplatesGitPath",
-			renderer.AppChartTemplatesGitPath("alpha", "prod", "api"),
-			"clusters/beget-prod/projects/alpha/environments/prod/apps/api/chart/templates",
+			"AppResourcesTemplatesGitPath",
+			renderer.AppResourcesTemplatesGitPath("alpha", "prod", "api"),
+			"clusters/beget-prod/projects/alpha/environments/prod/apps/api/resources/templates",
 		},
 		{
-			"AppChartYamlGitPath",
-			renderer.AppChartYamlGitPath("alpha", "prod", "api"),
-			"clusters/beget-prod/projects/alpha/environments/prod/apps/api/chart/Chart.yaml",
+			"AppResourcesChartYamlGitPath",
+			renderer.AppResourcesChartYamlGitPath("alpha", "prod", "api"),
+			"clusters/beget-prod/projects/alpha/environments/prod/apps/api/resources/Chart.yaml",
 		},
 		{
 			"AppHelmValuesGitPath",
@@ -274,7 +274,7 @@ func TestGitPaths(t *testing.T) {
 		{
 			"PublicApiGitPath",
 			renderer.PublicApiGitPath("alpha", "prod", "api", "main"),
-			"clusters/beget-prod/projects/alpha/environments/prod/apps/api/chart/templates/publicapi-main.yaml",
+			"clusters/beget-prod/projects/alpha/environments/prod/apps/api/resources/templates/publicapi-main.yaml",
 		},
 		{
 			"ProjectGitPath",

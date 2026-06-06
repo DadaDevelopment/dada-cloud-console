@@ -253,7 +253,7 @@ func (w *DBWatcher) ensureAppExists(mgr *git.Manager, projectName, envName, appN
 	return []git.FileChange{
 		{Path: appPath, Content: appYAML},
 		{Path: renderer.AppHelmValuesGitPath(projectName, envName, appName), Content: renderer.RenderBareAppValues()},
-		{Path: renderer.AppChartYamlGitPath(projectName, envName, appName), Content: renderer.RenderChartYaml(appName)},
+		{Path: renderer.AppResourcesChartYamlGitPath(projectName, envName, appName), Content: renderer.RenderChartYaml(appName)},
 	}, nil
 }
 
@@ -397,7 +397,7 @@ func (w *DBWatcher) doCreateApp(ctx context.Context, op db.Operation) error {
 	if err := w.commitFilesAndRecord(ctx, op, mgr, gitPath, []git.FileChange{
 		{Path: gitPath, Content: yaml},
 		{Path: valuesPath, Content: valuesYAML},
-		{Path: renderer.AppChartYamlGitPath(projectName, envName, p.Name), Content: renderer.RenderChartYaml(p.Name)},
+		{Path: renderer.AppResourcesChartYamlGitPath(projectName, envName, p.Name), Content: renderer.RenderChartYaml(p.Name)},
 	}, commitMsg); err != nil {
 		return err
 	}
