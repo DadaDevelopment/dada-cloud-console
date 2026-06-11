@@ -1,0 +1,57 @@
+{
+  "swagger": "2.0",
+  "basePath": "/api/v1",
+  "info": { "title": "fixture", "version": "1.0" },
+  "paths": {
+    "/projects/{projectId}/operations": {
+      "get": {
+        "operationId": "listOperations",
+        "summary": "List recent operations",
+        "description": "Read-only list of async operations.",
+        "parameters": [
+          { "name": "projectId", "in": "path", "required": true, "type": "string", "description": "Project UUID" },
+          { "name": "limit", "in": "query", "required": false, "type": "integer", "description": "Max rows" }
+        ],
+        "responses": { "200": { "description": "ok" } }
+      }
+    },
+    "/projects/{projectId}/environments/{envId}/databases": {
+      "post": {
+        "operationId": "createDatabase",
+        "summary": "Order a managed PostgreSQL database",
+        "description": "Asynchronous. DESTRUCTIVE: no. Returns 202.",
+        "consumes": ["application/json"],
+        "parameters": [
+          { "name": "projectId", "in": "path", "required": true, "type": "string" },
+          { "name": "envId", "in": "path", "required": true, "type": "string" },
+          { "name": "body", "in": "body", "required": true, "schema": { "$ref": "#/definitions/createDatabaseRequest" } }
+        ],
+        "responses": { "202": { "description": "accepted" } }
+      }
+    },
+    "/projects/{projectId}/environments/{envId}/models/{name}": {
+      "delete": {
+        "operationId": "deleteModel",
+        "summary": "Delete a model",
+        "description": "DESTRUCTIVE: permanently removes the model.",
+        "parameters": [
+          { "name": "projectId", "in": "path", "required": true, "type": "string" },
+          { "name": "envId", "in": "path", "required": true, "type": "string" },
+          { "name": "name", "in": "path", "required": true, "type": "string" }
+        ],
+        "responses": { "202": { "description": "accepted" } }
+      }
+    }
+  },
+  "definitions": {
+    "createDatabaseRequest": {
+      "type": "object",
+      "required": ["appName", "plan"],
+      "properties": {
+        "appName": { "type": "string", "description": "Owning app" },
+        "plan": { "type": "string", "enum": ["small", "medium", "large"] },
+        "replicas": { "type": "integer", "description": "Replica count" }
+      }
+    }
+  }
+}
