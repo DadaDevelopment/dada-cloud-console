@@ -44,7 +44,7 @@ func (h *Handler) ListDatabases(c *gin.Context) {
 	}
 
 	// Verify membership
-	_, err = h.getUserProjectRole(c.Request.Context(), claims.UserID, projectID)
+	_, err = h.getUserProjectRole(c.Request.Context(), claims.UserID, projectID, claims.Groups)
 	if err == pgx.ErrNoRows {
 		respondNotFound(c)
 		return
@@ -135,7 +135,7 @@ func (h *Handler) CreateServiceDatabase(c *gin.Context) {
 	}
 
 	// Check write permission
-	role, err := h.getUserProjectRole(c.Request.Context(), claims.UserID, projectID)
+	role, err := h.getUserProjectRole(c.Request.Context(), claims.UserID, projectID, claims.Groups)
 	if err == pgx.ErrNoRows {
 		respondNotFound(c)
 		return

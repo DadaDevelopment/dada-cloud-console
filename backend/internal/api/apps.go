@@ -43,7 +43,7 @@ func (h *Handler) ListApps(c *gin.Context) {
 		return
 	}
 
-	_, err = h.getUserProjectRole(c.Request.Context(), claims.UserID, projectID)
+	_, err = h.getUserProjectRole(c.Request.Context(), claims.UserID, projectID, claims.Groups)
 	if err == pgx.ErrNoRows {
 		respondNotFound(c)
 		return
@@ -133,7 +133,7 @@ func (h *Handler) CreateApp(c *gin.Context) {
 		return
 	}
 
-	role, err := h.getUserProjectRole(c.Request.Context(), claims.UserID, projectID)
+	role, err := h.getUserProjectRole(c.Request.Context(), claims.UserID, projectID, claims.Groups)
 	if err == pgx.ErrNoRows {
 		respondNotFound(c)
 		return
@@ -336,7 +336,7 @@ func (h *Handler) UpdateAppImage(c *gin.Context) {
 	}
 	appName := c.Param("appName")
 
-	role, err := h.getUserProjectRole(c.Request.Context(), claims.UserID, projectID)
+	role, err := h.getUserProjectRole(c.Request.Context(), claims.UserID, projectID, claims.Groups)
 	if err == pgx.ErrNoRows {
 		respondNotFound(c)
 		return

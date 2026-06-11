@@ -103,7 +103,7 @@ func (h *Handler) GetProject(c *gin.Context) {
 	}
 
 	// Check membership (return 404 to avoid enumeration)
-	role, err := h.getUserProjectRole(c.Request.Context(), claims.UserID, projectID)
+	role, err := h.getUserProjectRole(c.Request.Context(), claims.UserID, projectID, claims.Groups)
 	if err == pgx.ErrNoRows {
 		respondNotFound(c)
 		return
@@ -195,7 +195,7 @@ func (h *Handler) GetProjectOperations(c *gin.Context) {
 	}
 
 	// Verify membership
-	_, err = h.getUserProjectRole(c.Request.Context(), claims.UserID, projectID)
+	_, err = h.getUserProjectRole(c.Request.Context(), claims.UserID, projectID, claims.Groups)
 	if err == pgx.ErrNoRows {
 		respondNotFound(c)
 		return
@@ -274,7 +274,7 @@ func (h *Handler) SetNamespacePolicy(c *gin.Context) {
 		return
 	}
 
-	role, err := h.getUserProjectRole(c.Request.Context(), claims.UserID, projectID)
+	role, err := h.getUserProjectRole(c.Request.Context(), claims.UserID, projectID, claims.Groups)
 	if err == pgx.ErrNoRows {
 		respondNotFound(c)
 		return

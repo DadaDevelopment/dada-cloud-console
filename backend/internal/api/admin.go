@@ -135,7 +135,7 @@ func (h *Handler) approvalDecision(c *gin.Context, target models.OperationStatus
 		return
 	}
 
-	role, err := h.getUserProjectRole(c.Request.Context(), claims.UserID, op.ProjectID)
+	role, err := h.getUserProjectRole(c.Request.Context(), claims.UserID, op.ProjectID, claims.Groups)
 	if errors.Is(err, pgx.ErrNoRows) || role != models.MemberRolePlatformAdmin {
 		respondForbidden(c)
 		return

@@ -78,7 +78,7 @@ func (h *Handler) GetOperation(c *gin.Context) {
 	}
 
 	// Verify project membership (404 to avoid enumeration)
-	_, err = h.getUserProjectRole(c.Request.Context(), claims.UserID, projectID)
+	_, err = h.getUserProjectRole(c.Request.Context(), claims.UserID, projectID, claims.Groups)
 	if err == pgx.ErrNoRows {
 		respondNotFound(c)
 		return
@@ -142,7 +142,7 @@ func (h *Handler) RetryOperation(c *gin.Context) {
 	}
 
 	// Verify project membership
-	role, err := h.getUserProjectRole(c.Request.Context(), claims.UserID, projectID)
+	role, err := h.getUserProjectRole(c.Request.Context(), claims.UserID, projectID, claims.Groups)
 	if err == pgx.ErrNoRows {
 		respondNotFound(c)
 		return
