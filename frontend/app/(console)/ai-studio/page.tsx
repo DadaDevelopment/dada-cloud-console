@@ -152,7 +152,7 @@ function registryColumns(projectId: string): Column<MLflowRegisteredModel>[] {
         const latest = m.latest_versions?.[0];
         return (
           <Link
-            href={`/projects/${projectId}/models?fromMlflow=${encodeURIComponent(m.name)}${latest ? `&fromMlflowVersion=${encodeURIComponent(latest.version)}` : ""}`}
+            href={`/projects/${encodeURIComponent(projectId)}/models?fromMlflow=${encodeURIComponent(m.name)}${latest ? `&fromMlflowVersion=${encodeURIComponent(latest.version)}` : ""}`}
             className="inline-flex items-center gap-1 rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700 transition-colors"
           >
             Deploy v{latest?.version ?? "?"} →
