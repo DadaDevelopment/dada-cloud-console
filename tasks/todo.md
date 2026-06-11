@@ -24,11 +24,12 @@ Design: `tasks/mcp-server-design.md`. Shippable milestones, lowest-risk first.
 ## M3 — Keycloak auth (high-risk, coupled, CROSS-REPO; no live verify from here)
 Design: `tasks/keycloak-group-topology.md`. Decided: nested `/projects/<slug>/<role>` groups; full-path `groups` claim; provisioning = Crossplane Group CRs via gitops-agent (decision C); phased dual-write migration off `project_members`; keep `users` row (FK anchor) auto-provisioned by `keycloak_sub`.
 
-### M3a — Backend OIDC identity + Principal (code-verifiable now, flag-gated)
-- [ ] Config `AUTH_MODE=local|keycloak` (default local → reversible). Keycloak env: issuer `https://id.dada-tuda.ru/realms/master`, JWKS, VERIFY_AUD=false.
-- [ ] `internal/auth` Keycloak validator (go-oidc/JWKS, RS256, iss+exp), Principal{sub,email,groups,roles}.
-- [ ] Auto-provision/link `users` row by `keycloak_sub` (new column); populate existing Claims.UserID=users.id so all 50+ handlers stay unchanged.
-- [ ] Mock-JWKS unit tests (valid/iss/aud/exp/rotated-key). go build/vet/test.
+### M3a — Backend OIDC identity + Principal ✅ (flag-gated, default local = reversible)
+- [x] Config `AUTH_MODE=local|keycloak` (default local); KEYCLOAK_ISSUER/VERIFY_AUD/AUDIENCE/ROLES_CLIENT. JWT_SECRET required only in local mode.
+- [x] `internal/auth/oidc.go` KeycloakVerifier (JWKS RS256, iss+exp, aud optional), KeycloakClaims (sub/email/groups/realm+resource roles).
+- [x] migration 011: users.keycloak_sub (unique nullable). `ResolveUser` upserts/links users row by sub → Claims.UserID=users.id; all 50+ handlers untouched. Claims gains Groups/Roles.
+- [x] KeycloakMiddleware + router selector by AuthMode; /auth/login → 410 in keycloak mode. Mock-JWKS hermetic tests (14) pass. go build/vet/test green.
+- NOTE: ResolveUser live-DB path not exercised (no DB test harness) — verify on integration. SetupRouter panics on bad issuer in keycloak mode (fail-loud, intentional).
 
 ### M3b — Backend authz dual-read (phased)
 - [ ] `getUserProjectRole` reads token groups `/projects/<slug>/<role>` when present, else project_members (dual-read). platform-admin from `/platform-admins`.

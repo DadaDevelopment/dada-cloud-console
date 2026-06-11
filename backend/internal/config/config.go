@@ -15,6 +15,16 @@ type Config struct {
 	DevMode     bool
 	ClusterLBIP string
 
+	// Identity provider selection. AuthMode defaults to "local" → the existing
+	// HS256 local-JWT path (POST /auth/login + GinMiddleware). Set AUTH_MODE
+	// to "keycloak" to validate Keycloak RS256 access tokens via JWKS instead;
+	// in that mode JWTSecret is no longer required and /auth/login is disabled.
+	AuthMode            string // AUTH_MODE: "local" (default) | "keycloak"
+	KeycloakIssuer      string // KEYCLOAK_ISSUER (e.g. https://id.dada-tuda.ru/realms/master)
+	KeycloakVerifyAud   bool   // KEYCLOAK_VERIFY_AUD: default false (Keycloak access-token aud is often "account")
+	KeycloakAudience    string // KEYCLOAK_AUDIENCE: expected aud when KeycloakVerifyAud is true
+	KeycloakRolesClient string // KEYCLOAK_ROLES_CLIENT: resource_access client whose roles are extracted
+
 	// AI Studio (v1, declared 2026-05-22). MLflowBaseURL empty disables the
 	// registry browser (the wizard falls back to "paste artifactURI").
 	// AI_STUDIO_ENABLED remains as a runtime kill-switch — set to "false" to
@@ -66,6 +76,11 @@ func Load() (*Config, error) {
 		LogLevel:                getEnv("LOG_LEVEL", "info"),
 		DevMode:                 getEnv("DEV_MODE", "false") == "true",
 		ClusterLBIP:             getEnv("CLUSTER_LB_IP", "93.189.231.60"),
+		AuthMode:                getEnv("AUTH_MODE", "local"),
+		KeycloakIssuer:          getEnv("KEYCLOAK_ISSUER", "https://id.dada-tuda.ru/realms/master"),
+		KeycloakVerifyAud:       getEnv("KEYCLOAK_VERIFY_AUD", "false") == "true",
+		KeycloakAudience:        getEnv("KEYCLOAK_AUDIENCE", "account"),
+		KeycloakRolesClient:     getEnv("KEYCLOAK_ROLES_CLIENT", "service-client"),
 		AIStudioEnabled:         getEnv("AI_STUDIO_ENABLED", "true") == "true",
 		MLflowBaseURL:           getEnv("MLFLOW_BASE_URL", ""),
 		MLflowAuthHeader:        getEnv("MLFLOW_AUTH_HEADER", ""),
@@ -85,7 +100,10 @@ func Load() (*Config, error) {
 	if cfg.DBURL == "" {
 		return nil, fmt.Errorf("DB_URL is required")
 	}
-	if cfg.JWTSecret == "" {
+	// JWT_SECRET is only required in local auth mode (it signs/validates the
+	// HS256 tokens). In keycloak mode validation is done via JWKS, so the secret
+	// is irrelevant and need not be set.
+	if cfg.AuthMode != "keycloak" && cfg.JWTSecret == "" {
 		return nil, fmt.Errorf("JWT_SECRET is required")
 	}
 
