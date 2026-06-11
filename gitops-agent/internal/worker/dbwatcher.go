@@ -61,10 +61,20 @@ func (w *DBWatcher) Start(ctx context.Context) {
 
 // BootstrapProjects mirrors DB projects into git before the steady-state watcher starts.
 // Git remains authoritative if a project.yaml already exists.
+// Also bootstraps Keycloak Group CRs into the keycloak-config chart (idempotent).
 func (w *DBWatcher) BootstrapProjects(ctx context.Context) error {
 	projects, err := db.ListProjects(ctx, w.pool)
 	if err != nil {
 		return err
+	}
+
+	// Default manager writes to argo-infra; used for KC group CRs.
+	defaultMgr, ok := w.managers[w.cfg.DefaultRepoURL]
+	if ok {
+		if err := defaultMgr.EnsureCloned(); err != nil {
+			log.Warn().Err(err).Msg("db-watcher: failed to clone default repo for KC group bootstrap")
+			defaultMgr = nil
+		}
 	}
 
 	for _, project := range projects {
@@ -76,41 +86,76 @@ func (w *DBWatcher) BootstrapProjects(ctx context.Context) error {
 			return err
 		}
 
+		// Bootstrap project.yaml (idempotent — skip if already in git).
 		gitPath := renderer.ProjectGitPath(project.Name)
-		if _, err := mgr.ReadFile(gitPath); err == nil {
+		if _, err := mgr.ReadFile(gitPath); errors.Is(err, os.ErrNotExist) {
+			yaml, err := renderer.RenderProject(renderer.ProjectSpec{
+				Project:            project.Name,
+				DisplayName:        project.DisplayName,
+				OwnerType:          project.OwnerType,
+				DefaultEnvironment: project.DefaultEnvironment,
+				Quotas:             map[string]any{},
+			})
+			if err != nil {
+				return err
+			}
+			commitMsg := fmt.Sprintf(
+				"[DADA Console] Bootstrap project %s\n\nProject: %s\n",
+				project.DisplayName, project.Name,
+			)
+			sha, err := mgr.CommitAndPush(gitPath, yaml, commitMsg, w.cfg.BotName, w.cfg.BotEmail)
+			if err != nil {
+				return err
+			}
+			if err := db.InsertCommit(ctx, w.pool,
+				sha, mgr.RepoURL(), mgr.Branch(), gitPath, commitMsg,
+				w.cfg.BotName, w.cfg.BotEmail, nil, "agent",
+			); err != nil {
+				log.Warn().Err(err).Str("project", project.Name).Msg("db-watcher: record bootstrap commit")
+			}
+			log.Info().Str("project", project.Name).Str("path", gitPath).Str("sha", sha).Msg("db-watcher: bootstrapped project manifest")
+		} else if err != nil {
+			return err
+		} else {
 			log.Debug().Str("project", project.Name).Str("path", gitPath).Msg("db-watcher: project already present in git")
+		}
+
+		// Bootstrap Keycloak Group CRs (idempotent — skip if already in git).
+		// Requires default manager (argo-infra); skip gracefully if unavailable.
+		if defaultMgr == nil {
 			continue
-		} else if !errors.Is(err, os.ErrNotExist) {
-			return err
 		}
-
-		yaml, err := renderer.RenderProject(renderer.ProjectSpec{
-			Project:            project.Name,
-			DisplayName:        project.DisplayName,
-			OwnerType:          project.OwnerType,
-			DefaultEnvironment: project.DefaultEnvironment,
-			Quotas:             map[string]any{},
-		})
-		if err != nil {
-			return err
+		kcPath := renderer.ProjectGroupsGitPath(project.Name)
+		if _, err := defaultMgr.ReadFile(kcPath); errors.Is(err, os.ErrNotExist) {
+			members, err := db.ListProjectMembers(ctx, w.pool, project.Name)
+			if err != nil {
+				log.Warn().Err(err).Str("project", project.Name).Msg("db-watcher: list members for KC bootstrap")
+				continue
+			}
+			memberMap := make(map[string]string, len(members))
+			for _, m := range members {
+				memberMap[m.Username] = m.Role
+			}
+			kcYAML, err := renderer.RenderProjectGroups(renderer.ProjectGroupSpec{
+				ProjectSlug: project.Name,
+				Members:     memberMap,
+			})
+			if err != nil {
+				log.Warn().Err(err).Str("project", project.Name).Msg("db-watcher: render KC groups")
+				continue
+			}
+			commitMsg := fmt.Sprintf("[DADA Console] Bootstrap KC groups for project %s\n", project.Name)
+			sha, err := defaultMgr.CommitAndPush(kcPath, kcYAML, commitMsg, w.cfg.BotName, w.cfg.BotEmail)
+			if err != nil {
+				log.Warn().Err(err).Str("project", project.Name).Msg("db-watcher: commit KC groups")
+				continue
+			}
+			log.Info().Str("project", project.Name).Str("path", kcPath).Str("sha", sha).Msg("db-watcher: bootstrapped KC group CRs")
+		} else if err != nil {
+			log.Warn().Err(err).Str("project", project.Name).Msg("db-watcher: check KC group file")
+		} else {
+			log.Debug().Str("project", project.Name).Str("path", kcPath).Msg("db-watcher: KC groups already in git")
 		}
-
-		commitMsg := fmt.Sprintf(
-			"[DADA Console] Bootstrap project %s\n\nProject: %s\n",
-			project.DisplayName, project.Name,
-		)
-		sha, err := mgr.CommitAndPush(gitPath, yaml, commitMsg, w.cfg.BotName, w.cfg.BotEmail)
-		if err != nil {
-			return err
-		}
-		if err := db.InsertCommit(ctx, w.pool,
-			sha, mgr.RepoURL(), mgr.Branch(), gitPath, commitMsg,
-			w.cfg.BotName, w.cfg.BotEmail, nil, "agent",
-		); err != nil {
-			log.Warn().Err(err).Str("project", project.Name).Msg("db-watcher: record bootstrap commit")
-		}
-
-		log.Info().Str("project", project.Name).Str("path", gitPath).Str("sha", sha).Msg("db-watcher: bootstrapped project manifest")
 	}
 
 	return nil
