@@ -116,6 +116,21 @@ func (h *Handler) runMetricSpecs(ctx context.Context, specs []metricSpec, label 
 // GetAppServerMetrics returns VM resource metrics (CPU/RAM/disk/network) from
 // the central Prometheus, keyed by the app server's name (== vm_name label).
 // GET /projects/:projectId/app-servers/:serverName/metrics?range=1h
+//
+// @ID          getAppServerMetrics
+// @Summary     Get VM resource metrics for an app server
+// @Description Returns time-series CPU, memory, disk and network metrics for an app server (VM) from the central Prometheus. Read-only. The range query param selects the window (15m, 1h, 6h, 24h; default 1h).
+// @Tags        appserver
+// @Produce     json
+// @Security    BearerAuth
+// @Param       projectId  path     string true  "Project UUID"
+// @Param       serverName path     string true  "App server name"
+// @Param       range      query    string false "Time window: 15m, 1h, 6h or 24h (default 1h)"
+// @Success     200        {object} map[string]interface{} "object with range, step and metrics series"
+// @Failure     401        {object} map[string]string
+// @Failure     404        {object} map[string]string
+// @Failure     503        {object} map[string]string
+// @Router      /projects/{projectId}/app-servers/{serverName}/metrics [get]
 func (h *Handler) GetAppServerMetrics(c *gin.Context) {
 	projectID, err := uuid.Parse(c.Param("projectId"))
 	if err != nil {
@@ -154,6 +169,22 @@ func (h *Handler) GetAppServerMetrics(c *gin.Context) {
 // GetAppMetrics returns container resource metrics (CPU/RAM) for a compose app
 // from the central Prometheus, keyed by the dada_io_app container label.
 // GET /projects/:projectId/environments/:envId/apps/:appName/metrics?range=1h
+//
+// @ID          getAppMetrics
+// @Summary     Get container resource metrics for an app
+// @Description Returns time-series CPU and memory metrics for a compose app's containers from the central Prometheus. Read-only. The range query param selects the window (15m, 1h, 6h, 24h; default 1h).
+// @Tags        app
+// @Produce     json
+// @Security    BearerAuth
+// @Param       projectId path     string true  "Project UUID"
+// @Param       envId     path     string true  "Environment UUID"
+// @Param       appName   path     string true  "App name"
+// @Param       range     query    string false "Time window: 15m, 1h, 6h or 24h (default 1h)"
+// @Success     200       {object} map[string]interface{} "object with range, step and metrics series"
+// @Failure     401       {object} map[string]string
+// @Failure     404       {object} map[string]string
+// @Failure     503       {object} map[string]string
+// @Router      /projects/{projectId}/environments/{envId}/apps/{appName}/metrics [get]
 func (h *Handler) GetAppMetrics(c *gin.Context) {
 	projectID, err := uuid.Parse(c.Param("projectId"))
 	if err != nil {

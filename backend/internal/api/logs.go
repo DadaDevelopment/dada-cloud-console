@@ -14,6 +14,26 @@ import (
 // project. At least one of ?vm / ?app is required and must belong to the
 // project — this prevents reading another tenant's logs by guessing labels.
 // GET /projects/:projectId/logs?vm=<server>&app=<app>&q=<text>&since=1h&size=200
+//
+// @ID          searchLogs
+// @Summary     Search aggregated logs in a project
+// @Description Runs an aggregated Elasticsearch log search scoped to the project. Read-only. At least one of vm or app is required and must belong to the project (prevents reading another tenant's logs). q is a free-text filter; since selects the window (15m, 1h, 6h, 24h, 7d; default 1h); size caps results (1-1000, default 200).
+// @Tags        observability
+// @Produce     json
+// @Security    BearerAuth
+// @Param       projectId path     string true  "Project UUID"
+// @Param       vm        query    string false "App server (VM) name to scope logs to"
+// @Param       app       query    string false "App name to scope logs to"
+// @Param       q         query    string false "Free-text search query"
+// @Param       since     query    string false "Time window: 15m, 1h, 6h, 24h or 7d (default 1h)"
+// @Param       size      query    int    false "Max log entries to return (1-1000, default 200)"
+// @Success     200       {object} map[string]interface{} "object with a log entries array"
+// @Failure     400       {object} map[string]string
+// @Failure     401       {object} map[string]string
+// @Failure     403       {object} map[string]string
+// @Failure     502       {object} map[string]string
+// @Failure     503       {object} map[string]string
+// @Router      /projects/{projectId}/logs [get]
 func (h *Handler) SearchLogs(c *gin.Context) {
 	projectID, err := uuid.Parse(c.Param("projectId"))
 	if err != nil {

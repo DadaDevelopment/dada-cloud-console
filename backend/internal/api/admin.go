@@ -15,6 +15,16 @@ import (
 // ListAdminApprovals returns operations in WaitingForApproval scoped to projects
 // where the caller holds platform-admin. AI Studio's GPU gate is the first
 // consumer; v2 dangerous-action features inherit the same UI.
+//
+// @ID          listAdminApprovals
+// @Summary     List operations awaiting admin approval
+// @Description Returns operations in the WaitingForApproval state across all projects where the caller is a platform-admin, each with the project name and requester. Read-only. The GPU-model creation gate is the first consumer.
+// @Tags        admin
+// @Produce     json
+// @Security    BearerAuth
+// @Success     200 {object} map[string]interface{} "object with an approvals array"
+// @Failure     401 {object} map[string]string
+// @Router      /admin/operations [get]
 func (h *Handler) ListAdminApprovals(c *gin.Context) {
 	claims, ok := auth.GetClaims(c)
 	if !ok {
@@ -182,6 +192,22 @@ func (h *Handler) approvalDecision(c *gin.Context, target models.OperationStatus
 
 // ApproveOperation transitions a WaitingForApproval operation to Created so the
 // gitops-agent dispatcher picks it up on the next poll.
+//
+// @ID          approveOperation
+// @Summary     Approve an operation awaiting approval
+// @Description Approves a WaitingForApproval operation, transitioning it to Created so the dispatcher executes it. Platform-admin only. An optional note is recorded in the audit trail.
+// @Tags        admin
+// @Accept      json
+// @Produce     json
+// @Security    BearerAuth
+// @Param       opId path     string                 true  "Operation UUID"
+// @Param       body body     map[string]interface{} false "Optional object with a note string"
+// @Success     200  {object} map[string]interface{} "object with the updated operation"
+// @Failure     401  {object} map[string]string
+// @Failure     403  {object} map[string]string
+// @Failure     404  {object} map[string]string
+// @Failure     409  {object} map[string]string
+// @Router      /admin/operations/{opId}/approve [post]
 func (h *Handler) ApproveOperation(c *gin.Context) {
 	var body struct {
 		Note string `json:"note"`
@@ -193,6 +219,23 @@ func (h *Handler) ApproveOperation(c *gin.Context) {
 // RejectOperation transitions a WaitingForApproval operation to Cancelled with
 // the supplied reason. The reason is required so the requester gets a useful
 // error message in the operations timeline.
+//
+// @ID          rejectOperation
+// @Summary     Reject an operation awaiting approval
+// @Description Rejects a WaitingForApproval operation, transitioning it to Cancelled. Platform-admin only. A reason is required and surfaced to the requester in the operations timeline.
+// @Tags        admin
+// @Accept      json
+// @Produce     json
+// @Security    BearerAuth
+// @Param       opId path     string                 true "Operation UUID"
+// @Param       body body     map[string]interface{} true "Object with a required reason string"
+// @Success     200  {object} map[string]interface{} "object with the updated operation"
+// @Failure     400  {object} map[string]string
+// @Failure     401  {object} map[string]string
+// @Failure     403  {object} map[string]string
+// @Failure     404  {object} map[string]string
+// @Failure     409  {object} map[string]string
+// @Router      /admin/operations/{opId}/reject [post]
 func (h *Handler) RejectOperation(c *gin.Context) {
 	var body struct {
 		Reason string `json:"reason"`

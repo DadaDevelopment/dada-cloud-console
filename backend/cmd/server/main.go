@@ -19,6 +19,14 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
+// @title                      DADA Cloud Console API
+// @version                    1.0
+// @description                Platform API to order and manage cloud resources — managed databases, apps, VMs (app servers), AI models, and public API endpoints — on the DADA Cloud platform.
+// @description                Mutations are asynchronous: create/update/delete enqueue an operation and return 202 Accepted with an operation object; poll GET /projects/{projectId}/operations/{operationId} until the operation reaches a terminal status (Ready or Failed).
+// @BasePath                   /api/v1
+// @securityDefinitions.apikey BearerAuth
+// @in                         header
+// @name                       Authorization
 func main() {
 	// Load .env if present (dev mode)
 	_ = godotenv.Load()

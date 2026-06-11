@@ -25,6 +25,19 @@ var validModelTypes = map[string]bool{
 }
 
 // ListAIModels returns all AIModel resources in a project environment.
+//
+// @ID          listModels
+// @Summary     List AI models in an environment
+// @Description Returns all AIModel resources in a project environment, with their live phase/status. Read-only.
+// @Tags        model
+// @Produce     json
+// @Security    BearerAuth
+// @Param       projectId path     string true "Project UUID"
+// @Param       envId     path     string true "Environment UUID"
+// @Success     200       {object} map[string]interface{} "object with a models array of ResourceSnapshot"
+// @Failure     401       {object} map[string]string
+// @Failure     404       {object} map[string]string
+// @Router      /projects/{projectId}/environments/{envId}/models [get]
 func (h *Handler) ListAIModels(c *gin.Context) {
 	claims, ok := auth.GetClaims(c)
 	if !ok {
@@ -66,6 +79,20 @@ func (h *Handler) ListAIModels(c *gin.Context) {
 }
 
 // GetAIModel returns a single AIModel snapshot plus its API key prefix (no plaintext).
+//
+// @ID          getModel
+// @Summary     Get an AI model by name
+// @Description Returns one AIModel snapshot plus its API key prefix (never the plaintext key). Read-only.
+// @Tags        model
+// @Produce     json
+// @Security    BearerAuth
+// @Param       projectId path     string true "Project UUID"
+// @Param       envId     path     string true "Environment UUID"
+// @Param       name      path     string true "Model name"
+// @Success     200       {object} map[string]interface{} "object with the model and api_key_prefix"
+// @Failure     401       {object} map[string]string
+// @Failure     404       {object} map[string]string
+// @Router      /projects/{projectId}/environments/{envId}/models/{name} [get]
 func (h *Handler) GetAIModel(c *gin.Context) {
 	claims, ok := auth.GetClaims(c)
 	if !ok {
@@ -128,6 +155,22 @@ type createAIModelRequest struct {
 // CreateAIModel queues a CreateAIModel operation. GPU profiles land in
 // WaitingForApproval when the project's gpu_model_max is 0; otherwise the
 // caller must already be platform-admin to use a GPU profile.
+//
+// @ID          createModel
+// @Summary     Deploy a new AI model
+// @Description Provisions a new AIModel from an MLflow registered version, an S3 artifact URI, or a custom container image. GPU profiles land in WaitingForApproval when the project's GPU quota is 0 (non-admins) or are rejected when over quota. Asynchronous: returns 202 with an operation; poll the operation until terminal.
+// @Tags        model
+// @Accept      json
+// @Produce     json
+// @Security    BearerAuth
+// @Param       projectId path     string               true "Project UUID"
+// @Param       envId     path     string               true "Environment UUID"
+// @Param       body      body     createAIModelRequest true "Model specification"
+// @Success     202       {object} map[string]interface{} "object with the accepted operation"
+// @Failure     400       {object} map[string]string
+// @Failure     403       {object} map[string]string
+// @Failure     409       {object} map[string]string
+// @Router      /projects/{projectId}/environments/{envId}/models [post]
 func (h *Handler) CreateAIModel(c *gin.Context) {
 	claims, ok := auth.GetClaims(c)
 	if !ok {
@@ -382,6 +425,23 @@ func (h *Handler) countAIModelsByKind(ctx context.Context, projectID uuid.UUID) 
 }
 
 // UpdateAIModelArtifact queues a new artifactURI for an existing AIModel.
+//
+// @ID          updateModelArtifact
+// @Summary     Update an AI model's artifact
+// @Description Points an existing AIModel at a new artifact, either by a direct artifact_uri or by an mlflow_name + mlflow_version pin. Asynchronous: returns 202 with an operation; poll the operation until terminal.
+// @Tags        model
+// @Accept      json
+// @Produce     json
+// @Security    BearerAuth
+// @Param       projectId path     string                 true "Project UUID"
+// @Param       envId     path     string                 true "Environment UUID"
+// @Param       name      path     string                 true "Model name"
+// @Param       body      body     map[string]interface{} true "Object with artifact_uri, or mlflow_name + mlflow_version"
+// @Success     202       {object} map[string]interface{} "object with the accepted operation"
+// @Failure     400       {object} map[string]string
+// @Failure     403       {object} map[string]string
+// @Failure     404       {object} map[string]string
+// @Router      /projects/{projectId}/environments/{envId}/models/{name}/artifact [patch]
 func (h *Handler) UpdateAIModelArtifact(c *gin.Context) {
 	claims, ok := auth.GetClaims(c)
 	if !ok {
@@ -431,6 +491,23 @@ func (h *Handler) UpdateAIModelArtifact(c *gin.Context) {
 }
 
 // SetCanaryTraffic queues a canary.trafficPercent change.
+//
+// @ID          setModelCanaryTraffic
+// @Summary     Set canary traffic percentage for an AI model
+// @Description Sets the percentage of traffic routed to the model's canary (latest) revision (0-100). Asynchronous: returns 202 with an operation; poll the operation until terminal.
+// @Tags        model
+// @Accept      json
+// @Produce     json
+// @Security    BearerAuth
+// @Param       projectId path     string                 true "Project UUID"
+// @Param       envId     path     string                 true "Environment UUID"
+// @Param       name      path     string                 true "Model name"
+// @Param       body      body     map[string]interface{} true "Object with traffic_percent (0-100)"
+// @Success     202       {object} map[string]interface{} "object with the accepted operation"
+// @Failure     400       {object} map[string]string
+// @Failure     403       {object} map[string]string
+// @Failure     404       {object} map[string]string
+// @Router      /projects/{projectId}/environments/{envId}/models/{name}/canary [patch]
 func (h *Handler) SetCanaryTraffic(c *gin.Context) {
 	claims, ok := auth.GetClaims(c)
 	if !ok {
@@ -470,6 +547,20 @@ func (h *Handler) SetCanaryTraffic(c *gin.Context) {
 }
 
 // PromoteAIModel clears the canary (sets traffic to 100% of latest revision).
+//
+// @ID          promoteModel
+// @Summary     Promote an AI model's canary to 100%
+// @Description Promotes the model's canary (latest) revision to 100% of traffic, clearing the canary split. Asynchronous: returns 202 with an operation; poll the operation until terminal.
+// @Tags        model
+// @Produce     json
+// @Security    BearerAuth
+// @Param       projectId path     string true "Project UUID"
+// @Param       envId     path     string true "Environment UUID"
+// @Param       name      path     string true "Model name"
+// @Success     202       {object} map[string]interface{} "object with the accepted operation"
+// @Failure     403       {object} map[string]string
+// @Failure     404       {object} map[string]string
+// @Router      /projects/{projectId}/environments/{envId}/models/{name}/promote [post]
 func (h *Handler) PromoteAIModel(c *gin.Context) {
 	claims, ok := auth.GetClaims(c)
 	if !ok {
@@ -498,6 +589,21 @@ func (h *Handler) PromoteAIModel(c *gin.Context) {
 
 // DeleteAIModel removes an AIModel. force=true bypasses the attached-app guard
 // (admin-only).
+//
+// @ID          deleteModel
+// @Summary     Delete an AI model
+// @Description Destructive: removes an AIModel. By default the deletion is blocked while an app is attached; force=true bypasses that guard and is platform-admin only. Asynchronous: returns 202 with an operation; poll the operation until terminal.
+// @Tags        model
+// @Produce     json
+// @Security    BearerAuth
+// @Param       projectId path     string true  "Project UUID"
+// @Param       envId     path     string true  "Environment UUID"
+// @Param       name      path     string true  "Model name"
+// @Param       force     query    bool   false "Force delete even if an app is attached (platform-admin only)"
+// @Success     202       {object} map[string]interface{} "object with the accepted operation"
+// @Failure     403       {object} map[string]string
+// @Failure     404       {object} map[string]string
+// @Router      /projects/{projectId}/environments/{envId}/models/{name} [delete]
 func (h *Handler) DeleteAIModel(c *gin.Context) {
 	claims, ok := auth.GetClaims(c)
 	if !ok {
@@ -531,6 +637,23 @@ func (h *Handler) DeleteAIModel(c *gin.Context) {
 }
 
 // PinAIModelMlflowVersion pins to an MLflow registered model + version.
+//
+// @ID          pinModelMlflowVersion
+// @Summary     Pin an AI model to an MLflow version
+// @Description Pins an existing AIModel to a specific MLflow registered model + version. Asynchronous: returns 202 with an operation; poll the operation until terminal.
+// @Tags        model
+// @Accept      json
+// @Produce     json
+// @Security    BearerAuth
+// @Param       projectId path     string                 true "Project UUID"
+// @Param       envId     path     string                 true "Environment UUID"
+// @Param       name      path     string                 true "Model name"
+// @Param       body      body     map[string]interface{} true "Object with mlflow_name and mlflow_version"
+// @Success     202       {object} map[string]interface{} "object with the accepted operation"
+// @Failure     400       {object} map[string]string
+// @Failure     403       {object} map[string]string
+// @Failure     404       {object} map[string]string
+// @Router      /projects/{projectId}/environments/{envId}/models/{name}/mlflow-pin [patch]
 func (h *Handler) PinAIModelMlflowVersion(c *gin.Context) {
 	claims, ok := auth.GetClaims(c)
 	if !ok {
@@ -571,6 +694,23 @@ func (h *Handler) PinAIModelMlflowVersion(c *gin.Context) {
 
 // RevealAIModelAPIKey consumes the one-shot reveal row created by the worker
 // at CreateAIModel time. Returns 410 once the row has been consumed or expired.
+//
+// @ID          revealModelApiKey
+// @Summary     Reveal an AI model's API key (one-shot)
+// @Description One-shot reveal of an AI model's plaintext API key, created when the model was deployed. The reveal window is short-lived and single-use; returns 410 once consumed or expired. Requires reveal=true and write access. Only the original requester or a platform-admin may consume it.
+// @Tags        model
+// @Produce     json
+// @Security    BearerAuth
+// @Param       projectId path     string true "Project UUID"
+// @Param       envId     path     string true "Environment UUID"
+// @Param       name      path     string true "Model name"
+// @Param       reveal    query    bool   true "Must be true to consume the reveal"
+// @Success     200       {object} map[string]interface{} "object with the plaintext api_key"
+// @Failure     400       {object} map[string]string
+// @Failure     403       {object} map[string]string
+// @Failure     404       {object} map[string]string
+// @Failure     410       {object} map[string]string
+// @Router      /projects/{projectId}/environments/{envId}/models/{name}/api-key [get]
 func (h *Handler) RevealAIModelAPIKey(c *gin.Context) {
 	claims, ok := auth.GetClaims(c)
 	if !ok {

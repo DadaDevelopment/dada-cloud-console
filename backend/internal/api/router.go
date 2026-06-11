@@ -37,6 +37,9 @@ func SetupRouter(pool *pgxpool.Pool, cfg *config.Config) *gin.Engine {
 	// Public routes
 	r.POST("/api/v1/auth/login", h.Login)
 
+	// Embedded OpenAPI spec (public — feeds the reflective MCP server).
+	r.GET("/openapi.json", ServeOpenAPISpec)
+
 	// Authenticated routes
 	api := r.Group("/api/v1", auth.GinMiddleware(cfg.JWTSecret))
 	{

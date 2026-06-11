@@ -17,6 +17,18 @@ type loginRequest struct {
 }
 
 // Login authenticates a user with username/email + password and returns a JWT token.
+//
+// @ID          login
+// @Summary     Log in and obtain a bearer token
+// @Description Authenticates a user by username or email plus password and returns a JWT bearer token. Public endpoint — no authentication required. Use the returned token as the Authorization: Bearer header for every other endpoint.
+// @Tags        auth
+// @Accept      json
+// @Produce     json
+// @Param       body body     loginRequest true "Login credentials (username or email, plus password)"
+// @Success     200  {object} map[string]interface{} "object with the JWT token and the authenticated user"
+// @Failure     400  {object} map[string]string
+// @Failure     401  {object} map[string]string
+// @Router      /auth/login [post]
 func (h *Handler) Login(c *gin.Context) {
 	var req loginRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -71,6 +83,16 @@ func (h *Handler) Login(c *gin.Context) {
 }
 
 // Me returns the currently authenticated user's info from JWT claims.
+//
+// @ID          getCurrentUser
+// @Summary     Get the current authenticated user
+// @Description Returns the identity (id, username, email, display name) of the user owning the bearer token. Read-only. Useful to confirm who the token belongs to before taking actions.
+// @Tags        auth
+// @Produce     json
+// @Security    BearerAuth
+// @Success     200 {object} map[string]interface{} "object with the authenticated user"
+// @Failure     401 {object} map[string]string
+// @Router      /auth/me [get]
 func (h *Handler) Me(c *gin.Context) {
 	claims, ok := auth.GetClaims(c)
 	if !ok {

@@ -55,6 +55,25 @@ func kserveURL(modelName, namespace, modelType string) string {
 // this model and increments the advisory monthly call counter on success.
 // Authorisation is the caller's session JWT (project membership). The model's
 // own API key is server-side only and not exposed to browsers (NFR-002, D8).
+//
+// @ID          inferModel
+// @Summary     Run inference against a deployed model (playground)
+// @Description Proxies an inference request to the in-cluster KServe predictor for a deployed AI model and returns the prediction. The request and response bodies are passed through transparently (KServe v1 or v2 protocol depending on model type). Playground use only — production traffic should go through the model's public endpoint. The model must be Ready (otherwise 503).
+// @Tags        model
+// @Accept      json
+// @Produce     json
+// @Security    BearerAuth
+// @Param       projectId path     string                 true "Project UUID"
+// @Param       envId     path     string                 true "Environment UUID"
+// @Param       name      path     string                 true "Model name"
+// @Param       body      body     map[string]interface{} true "Inference payload (KServe v1/v2 predict request, passed through verbatim)"
+// @Success     200       {object} map[string]interface{} "the upstream predictor response, passed through verbatim"
+// @Failure     401       {object} map[string]string
+// @Failure     404       {object} map[string]string
+// @Failure     413       {object} map[string]string
+// @Failure     502       {object} map[string]string
+// @Failure     503       {object} map[string]string
+// @Router      /projects/{projectId}/environments/{envId}/models/{name}/infer [post]
 func (h *Handler) ProxyInference(c *gin.Context) {
 	startedAt := time.Now()
 	claims, ok := auth.GetClaims(c)

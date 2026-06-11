@@ -14,6 +14,18 @@ import (
 
 // GetProjectQuotas returns quota limits + current usage + advisory monthly counter.
 // Reads-only; safe for any project member.
+//
+// @ID          getProjectQuotas
+// @Summary     Get a project's quotas and usage
+// @Description Returns the project's CPU/GPU model quota limits, the number of models currently in use, and the advisory monthly inference-call counter. Read-only.
+// @Tags        quota
+// @Produce     json
+// @Security    BearerAuth
+// @Param       projectId path     string true "Project UUID"
+// @Success     200       {object} map[string]interface{} "object with quota limits and current usage"
+// @Failure     401       {object} map[string]string
+// @Failure     404       {object} map[string]string
+// @Router      /projects/{projectId}/quotas [get]
 func (h *Handler) GetProjectQuotas(c *gin.Context) {
 	claims, ok := auth.GetClaims(c)
 	if !ok {
