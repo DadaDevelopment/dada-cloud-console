@@ -12,6 +12,18 @@ import (
 )
 
 // ListAppServers returns all AppServers for a project (excluding Deleted).
+//
+// @ID          listAppServers
+// @Summary     List app servers (VMs) in a project
+// @Description Returns all app servers (provisioned or connected VMs) in a project, excluding deleted ones, newest first. Read-only.
+// @Tags        appserver
+// @Produce     json
+// @Security    BearerAuth
+// @Param       projectId path     string true "Project UUID"
+// @Success     200       {object} map[string]interface{} "object with an app_servers array"
+// @Failure     401       {object} map[string]string
+// @Failure     404       {object} map[string]string
+// @Router      /projects/{projectId}/app-servers [get]
 func (h *Handler) ListAppServers(c *gin.Context) {
 	claims, ok := auth.GetClaims(c)
 	if !ok {
@@ -71,6 +83,19 @@ func (h *Handler) ListAppServers(c *gin.Context) {
 }
 
 // GetAppServer returns a single AppServer by name.
+//
+// @ID          getAppServer
+// @Summary     Get an app server (VM) by name
+// @Description Returns one app server's record (status, VM IP, provider, Portainer endpoint) by name. Read-only.
+// @Tags        appserver
+// @Produce     json
+// @Security    BearerAuth
+// @Param       projectId  path     string true "Project UUID"
+// @Param       serverName path     string true "App server name"
+// @Success     200        {object} map[string]interface{} "object with the app_server"
+// @Failure     401        {object} map[string]string
+// @Failure     404        {object} map[string]string
+// @Router      /projects/{projectId}/app-servers/{serverName} [get]
 func (h *Handler) GetAppServer(c *gin.Context) {
 	claims, ok := auth.GetClaims(c)
 	if !ok {
@@ -142,6 +167,21 @@ func isValidAppServerRegion(region string) bool {
 }
 
 // CreateAppServer enqueues a CreateAppServer operation.
+//
+// @ID          createAppServer
+// @Summary     Provision or connect an app server (VM)
+// @Description Creates an app server either by provisioning a new VM via Terraform (mode=terraform, the default) or by connecting an existing VM over SSH (mode=manual, requires vm_ip and ssh_private_key). Asynchronous: returns 202 with an operation; poll the operation until terminal.
+// @Tags        appserver
+// @Accept      json
+// @Produce     json
+// @Security    BearerAuth
+// @Param       projectId path     string                 true "Project UUID"
+// @Param       body      body     createAppServerRequest true "App server specification"
+// @Success     202       {object} map[string]interface{} "object with the accepted operation"
+// @Failure     400       {object} map[string]string
+// @Failure     403       {object} map[string]string
+// @Failure     409       {object} map[string]string
+// @Router      /projects/{projectId}/app-servers [post]
 func (h *Handler) CreateAppServer(c *gin.Context) {
 	claims, ok := auth.GetClaims(c)
 	if !ok {
@@ -263,6 +303,20 @@ func (h *Handler) CreateAppServer(c *gin.Context) {
 }
 
 // DeleteAppServer enqueues a DeleteAppServer operation.
+//
+// @ID          deleteAppServer
+// @Summary     Delete an app server (VM)
+// @Description Destructive: tears down the app server. For Terraform-provisioned servers this destroys the underlying VM and is irreversible. Asynchronous: returns 202 with an operation; poll the operation until terminal.
+// @Tags        appserver
+// @Produce     json
+// @Security    BearerAuth
+// @Param       projectId  path     string true "Project UUID"
+// @Param       serverName path     string true "App server name"
+// @Success     202        {object} map[string]interface{} "object with the accepted operation"
+// @Failure     401        {object} map[string]string
+// @Failure     403        {object} map[string]string
+// @Failure     404        {object} map[string]string
+// @Router      /projects/{projectId}/app-servers/{serverName} [delete]
 func (h *Handler) DeleteAppServer(c *gin.Context) {
 	claims, ok := auth.GetClaims(c)
 	if !ok {

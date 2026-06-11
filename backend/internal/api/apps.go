@@ -12,6 +12,19 @@ import (
 )
 
 // ListApps returns all App resources in a project environment.
+//
+// @ID          listApps
+// @Summary     List apps in an environment
+// @Description Returns all App resources (Helm or compose) in a project environment, with their live phase/status. Read-only.
+// @Tags        app
+// @Produce     json
+// @Security    BearerAuth
+// @Param       projectId path     string true "Project UUID"
+// @Param       envId     path     string true "Environment UUID"
+// @Success     200       {object} map[string]interface{} "object with an apps array of ResourceSnapshot"
+// @Failure     401       {object} map[string]string
+// @Failure     404       {object} map[string]string
+// @Router      /projects/{projectId}/environments/{envId}/apps [get]
 func (h *Handler) ListApps(c *gin.Context) {
 	claims, ok := auth.GetClaims(c)
 	if !ok {
@@ -85,6 +98,23 @@ type createAppRequest struct {
 }
 
 // CreateApp enqueues an operation to provision a new App CRD.
+//
+// @ID          createApp
+// @Summary     Deploy a new app
+// @Description Provisions a new app in an environment. For Kubernetes (Helm) environments image is required and port/replicas/profile apply; for VM (compose) environments the app deploys as a Docker Compose stack onto the environment's app server, which must already be Ready. Asynchronous: returns 202 with an operation; poll the operation until terminal.
+// @Tags        app
+// @Accept      json
+// @Produce     json
+// @Security    BearerAuth
+// @Param       projectId path     string           true "Project UUID"
+// @Param       envId     path     string           true "Environment UUID"
+// @Param       body      body     createAppRequest true "App specification"
+// @Success     202       {object} map[string]interface{} "object with the accepted operation"
+// @Failure     400       {object} map[string]string
+// @Failure     403       {object} map[string]string
+// @Failure     404       {object} map[string]string
+// @Failure     409       {object} map[string]string
+// @Router      /projects/{projectId}/environments/{envId}/apps [post]
 func (h *Handler) CreateApp(c *gin.Context) {
 	claims, ok := auth.GetClaims(c)
 	if !ok {
@@ -270,6 +300,23 @@ type updateAppImageRequest struct {
 }
 
 // UpdateAppImage enqueues an operation to deploy a new image version for an App.
+//
+// @ID          updateAppImage
+// @Summary     Deploy a new image version for an app
+// @Description Rolls an existing app to a new container image. Asynchronous: returns 202 with an operation; poll the operation until terminal.
+// @Tags        app
+// @Accept      json
+// @Produce     json
+// @Security    BearerAuth
+// @Param       projectId path     string                true "Project UUID"
+// @Param       envId     path     string                true "Environment UUID"
+// @Param       appName   path     string                true "App name"
+// @Param       body      body     updateAppImageRequest true "New image reference"
+// @Success     202       {object} map[string]interface{} "object with the accepted operation"
+// @Failure     400       {object} map[string]string
+// @Failure     403       {object} map[string]string
+// @Failure     404       {object} map[string]string
+// @Router      /projects/{projectId}/environments/{envId}/apps/{appName}/image [patch]
 func (h *Handler) UpdateAppImage(c *gin.Context) {
 	claims, ok := auth.GetClaims(c)
 	if !ok {

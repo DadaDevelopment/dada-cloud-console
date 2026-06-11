@@ -46,6 +46,19 @@ func scanOperation(scanner interface {
 }
 
 // GetOperation returns the current state of an async platform operation.
+//
+// @ID          getOperation
+// @Summary     Get the state of an async operation
+// @Description Returns the current state (status, error, git/argo metadata) of a single async operation. Read-only. Poll this after any create/update/delete call until the operation reaches a terminal status (Ready or Failed).
+// @Tags        operation
+// @Produce     json
+// @Security    BearerAuth
+// @Param       projectId   path     string true "Project UUID"
+// @Param       operationId path     string true "Operation UUID"
+// @Success     200         {object} map[string]interface{} "object with the operation"
+// @Failure     401         {object} map[string]string
+// @Failure     404         {object} map[string]string
+// @Router      /projects/{projectId}/operations/{operationId} [get]
 func (h *Handler) GetOperation(c *gin.Context) {
 	claims, ok := auth.GetClaims(c)
 	if !ok {
@@ -95,6 +108,21 @@ func (h *Handler) GetOperation(c *gin.Context) {
 }
 
 // RetryOperation re-queues a failed operation for another processing attempt.
+//
+// @ID          retryOperation
+// @Summary     Retry a failed operation
+// @Description Re-queues a failed operation for another processing attempt (resets it to Created and clears the prior error). Only operations in the Failed state can be retried. Asynchronous: returns 202 with the re-queued operation; poll it until terminal.
+// @Tags        operation
+// @Produce     json
+// @Security    BearerAuth
+// @Param       projectId   path     string true "Project UUID"
+// @Param       operationId path     string true "Operation UUID"
+// @Success     202         {object} map[string]interface{} "object with the re-queued operation"
+// @Failure     401         {object} map[string]string
+// @Failure     403         {object} map[string]string
+// @Failure     404         {object} map[string]string
+// @Failure     409         {object} map[string]string
+// @Router      /projects/{projectId}/operations/{operationId}/retry [post]
 func (h *Handler) RetryOperation(c *gin.Context) {
 	claims, ok := auth.GetClaims(c)
 	if !ok {

@@ -13,6 +13,21 @@ import (
 
 // ListMLflowRegisteredModels returns the registered models visible to the
 // caller's project (filtered by ai_storage_prefix).
+//
+// @ID          listMlflowModels
+// @Summary     List MLflow registered models for a project
+// @Description Returns the MLflow registered models visible to a project, filtered by the project's AI storage prefix. Read-only. The project query param (project UUID) is required.
+// @Tags        mlflow
+// @Produce     json
+// @Security    BearerAuth
+// @Param       project query    string true "Project UUID"
+// @Success     200     {object} map[string]interface{} "object with a models array"
+// @Failure     400     {object} map[string]string
+// @Failure     401     {object} map[string]string
+// @Failure     404     {object} map[string]string
+// @Failure     502     {object} map[string]string
+// @Failure     503     {object} map[string]string
+// @Router      /mlflow/registered-models [get]
 func (h *Handler) ListMLflowRegisteredModels(c *gin.Context) {
 	claims, ok := auth.GetClaims(c)
 	if !ok {
@@ -54,6 +69,22 @@ func (h *Handler) ListMLflowRegisteredModels(c *gin.Context) {
 
 // ListMLflowModelVersions returns all versions of a registered model, filtered
 // by storage prefix.
+//
+// @ID          listMlflowModelVersions
+// @Summary     List versions of an MLflow registered model
+// @Description Returns all versions of one MLflow registered model, filtered by the project's AI storage prefix. Read-only. The project query param (project UUID) is required.
+// @Tags        mlflow
+// @Produce     json
+// @Security    BearerAuth
+// @Param       name    path     string true "MLflow registered model name"
+// @Param       project query    string true "Project UUID"
+// @Success     200     {object} map[string]interface{} "object with a versions array"
+// @Failure     400     {object} map[string]string
+// @Failure     401     {object} map[string]string
+// @Failure     404     {object} map[string]string
+// @Failure     502     {object} map[string]string
+// @Failure     503     {object} map[string]string
+// @Router      /mlflow/registered-models/{name}/versions [get]
 func (h *Handler) ListMLflowModelVersions(c *gin.Context) {
 	claims, ok := auth.GetClaims(c)
 	if !ok {
@@ -101,6 +132,23 @@ func (h *Handler) ListMLflowModelVersions(c *gin.Context) {
 
 // GetMLflowModelVersion returns one specific MLflow version. Used by the
 // wizard to resolve the artifactURI before showing the review screen.
+//
+// @ID          getMlflowModelVersion
+// @Summary     Get one MLflow model version
+// @Description Returns a single MLflow registered-model version, including its artifact source URI, scoped to the project's AI storage prefix. Read-only. The project query param (project UUID) is required.
+// @Tags        mlflow
+// @Produce     json
+// @Security    BearerAuth
+// @Param       name    path     string true "MLflow registered model name"
+// @Param       version path     string true "Model version"
+// @Param       project query    string true "Project UUID"
+// @Success     200     {object} map[string]interface{} "object with the version"
+// @Failure     400     {object} map[string]string
+// @Failure     401     {object} map[string]string
+// @Failure     404     {object} map[string]string
+// @Failure     502     {object} map[string]string
+// @Failure     503     {object} map[string]string
+// @Router      /mlflow/registered-models/{name}/versions/{version} [get]
 func (h *Handler) GetMLflowModelVersion(c *gin.Context) {
 	claims, ok := auth.GetClaims(c)
 	if !ok {

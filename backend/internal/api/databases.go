@@ -12,6 +12,19 @@ import (
 )
 
 // ListDatabases returns all ServiceDatabase resources in a project environment.
+//
+// @ID          listDatabases
+// @Summary     List databases in an environment
+// @Description Returns all managed PostgreSQL (ServiceDatabaseV2) resources in the given project environment, with their live phase/status.
+// @Tags        database
+// @Produce     json
+// @Security    BearerAuth
+// @Param       projectId path     string true "Project UUID"
+// @Param       envId     path     string true "Environment UUID"
+// @Success     200       {object} map[string]interface{} "object with a databases array of ResourceSnapshot"
+// @Failure     401       {object} map[string]string
+// @Failure     404       {object} map[string]string
+// @Router      /projects/{projectId}/environments/{envId}/databases [get]
 func (h *Handler) ListDatabases(c *gin.Context) {
 	claims, ok := auth.GetClaims(c)
 	if !ok {
@@ -87,6 +100,22 @@ type createServiceDatabaseRequest struct {
 }
 
 // CreateServiceDatabase enqueues an operation to provision a new ServiceDatabase CRD.
+//
+// @ID          createDatabase
+// @Summary     Order a managed PostgreSQL database
+// @Description Provisions a new managed PostgreSQL database (ServiceDatabaseV2) attached to an app. Asynchronous: returns 202 with an operation; poll the operation until it reaches a terminal status. NOTE: the ServiceDatabaseV2 composition is currently blocked upstream, so reconcile may fail until that is fixed.
+// @Tags        database
+// @Accept      json
+// @Produce     json
+// @Security    BearerAuth
+// @Param       projectId path     string                        true "Project UUID"
+// @Param       envId     path     string                        true "Environment UUID"
+// @Param       body      body     createServiceDatabaseRequest  true "Database specification"
+// @Success     202       {object} map[string]interface{} "object with the accepted operation"
+// @Failure     400       {object} map[string]string
+// @Failure     403       {object} map[string]string
+// @Failure     409       {object} map[string]string
+// @Router      /projects/{projectId}/environments/{envId}/databases [post]
 func (h *Handler) CreateServiceDatabase(c *gin.Context) {
 	claims, ok := auth.GetClaims(c)
 	if !ok {

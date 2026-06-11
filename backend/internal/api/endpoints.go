@@ -13,6 +13,20 @@ import (
 )
 
 // ListEndpoints returns all PublicApi resources for an app in a project environment.
+//
+// @ID          listEndpoints
+// @Summary     List public endpoints of an app
+// @Description Returns all public API endpoints (PublicApi resources / domains) registered for an app in an environment, with their live phase/status. Read-only.
+// @Tags        endpoint
+// @Produce     json
+// @Security    BearerAuth
+// @Param       projectId path     string true "Project UUID"
+// @Param       envId     path     string true "Environment UUID"
+// @Param       appName   path     string true "App name"
+// @Success     200       {object} map[string]interface{} "object with an endpoints array of ResourceSnapshot"
+// @Failure     401       {object} map[string]string
+// @Failure     404       {object} map[string]string
+// @Router      /projects/{projectId}/environments/{envId}/apps/{appName}/endpoints [get]
 func (h *Handler) ListEndpoints(c *gin.Context) {
 	claims, ok := auth.GetClaims(c)
 	if !ok {
@@ -85,6 +99,24 @@ type createEndpointRequest struct {
 }
 
 // CreateEndpoint enqueues a CreatePublicApi operation.
+//
+// @ID          createEndpoint
+// @Summary     Register a public endpoint (domain) for an app
+// @Description Registers a public API endpoint (PublicApi resource) exposing an app at a given FQDN, with optional auth (none, platform-jwt, api-key, internal) and Swagger publishing. Asynchronous: returns 202 with an operation; poll the operation until terminal.
+// @Tags        endpoint
+// @Accept      json
+// @Produce     json
+// @Security    BearerAuth
+// @Param       projectId path     string                true "Project UUID"
+// @Param       envId     path     string                true "Environment UUID"
+// @Param       appName   path     string                true "App name"
+// @Param       body      body     createEndpointRequest true "Endpoint specification (FQDN, auth, swagger)"
+// @Success     202       {object} map[string]interface{} "object with the accepted operation"
+// @Failure     400       {object} map[string]string
+// @Failure     403       {object} map[string]string
+// @Failure     404       {object} map[string]string
+// @Failure     409       {object} map[string]string
+// @Router      /projects/{projectId}/environments/{envId}/apps/{appName}/endpoints [post]
 func (h *Handler) CreateEndpoint(c *gin.Context) {
 	claims, ok := auth.GetClaims(c)
 	if !ok {

@@ -33,6 +33,19 @@ func (h *Handler) requireProjectMember(c *gin.Context, projectID uuid.UUID) bool
 // GetAppServerState returns live VM state from Portainer (endpoint heartbeat +
 // containers), falling back to the DB status when no endpoint/Portainer exists.
 // GET /projects/:projectId/app-servers/:serverName/state
+//
+// @ID          getAppServerState
+// @Summary     Get live state of an app server (VM)
+// @Description Returns the live state of an app server: online/heartbeat from Portainer plus the running containers, falling back to the stored DB status when no live endpoint exists. Read-only.
+// @Tags        appserver
+// @Produce     json
+// @Security    BearerAuth
+// @Param       projectId  path     string true "Project UUID"
+// @Param       serverName path     string true "App server name"
+// @Success     200        {object} map[string]interface{} "object with status, online flag and containers"
+// @Failure     401        {object} map[string]string
+// @Failure     404        {object} map[string]string
+// @Router      /projects/{projectId}/app-servers/{serverName}/state [get]
 func (h *Handler) GetAppServerState(c *gin.Context) {
 	projectID, err := uuid.Parse(c.Param("projectId"))
 	if err != nil {
@@ -113,6 +126,22 @@ func (h *Handler) resolveEnvEndpoint(c *gin.Context, projectID, envID uuid.UUID)
 
 // GetAppState returns live compose-stack + container state for a compose app.
 // GET /projects/:projectId/environments/:envId/apps/:appName/state
+//
+// @ID          getAppState
+// @Summary     Get live state of a compose app
+// @Description Returns the live Docker Compose stack + container state for a VM (compose) app, queried from Portainer. Read-only. Returns 503 when live state is not configured.
+// @Tags        app
+// @Produce     json
+// @Security    BearerAuth
+// @Param       projectId path     string true "Project UUID"
+// @Param       envId     path     string true "Environment UUID"
+// @Param       appName   path     string true "App name"
+// @Success     200       {object} map[string]interface{} "object with stack, online flag and containers"
+// @Failure     401       {object} map[string]string
+// @Failure     404       {object} map[string]string
+// @Failure     409       {object} map[string]string
+// @Failure     503       {object} map[string]string
+// @Router      /projects/{projectId}/environments/{envId}/apps/{appName}/state [get]
 func (h *Handler) GetAppState(c *gin.Context) {
 	projectID, err := uuid.Parse(c.Param("projectId"))
 	if err != nil {
@@ -161,6 +190,25 @@ func (h *Handler) GetAppState(c *gin.Context) {
 
 // GetAppLogs proxies the last N lines of a container's logs (read-only).
 // GET /projects/:projectId/environments/:envId/apps/:appName/logs?container=<id>&tail=N
+//
+// @ID          getAppLogs
+// @Summary     Get recent logs of a compose app container
+// @Description Returns the last N lines of a single container's logs for a VM (compose) app, proxied from Portainer. Read-only. The container query param (container id) is required; tail defaults to 200 (max 5000).
+// @Tags        app
+// @Produce     json
+// @Security    BearerAuth
+// @Param       projectId path     string true  "Project UUID"
+// @Param       envId     path     string true  "Environment UUID"
+// @Param       appName   path     string true  "App name"
+// @Param       container query    string true  "Container id to read logs from"
+// @Param       tail      query    int    false "Number of log lines to return (1-5000, default 200)"
+// @Success     200       {object} map[string]interface{} "object with a logs string"
+// @Failure     400       {object} map[string]string
+// @Failure     401       {object} map[string]string
+// @Failure     404       {object} map[string]string
+// @Failure     502       {object} map[string]string
+// @Failure     503       {object} map[string]string
+// @Router      /projects/{projectId}/environments/{envId}/apps/{appName}/logs [get]
 func (h *Handler) GetAppLogs(c *gin.Context) {
 	projectID, err := uuid.Parse(c.Param("projectId"))
 	if err != nil {

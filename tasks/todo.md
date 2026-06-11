@@ -1,3 +1,42 @@
+# 2026-06-11 Reflective MCP Server
+
+Design: `tasks/mcp-server-design.md`. Shippable milestones, lowest-risk first.
+
+## M0 — De-risk spike ✅
+- [x] R5: `modelcontextprotocol/go-sdk` v1.6.1 GA — Streamable HTTP via `mcp.NewStreamableHTTPHandler`. Auth DIY: `coreos/go-oidc` (Keycloak OIDC) + `oauthex.ProtectedResourceMetadata` for `/.well-known/oauth-protected-resource`. OpenAPI parse: `getkin/kin-openapi` (DIY mapper ~100 lines). Fallback `mark3labs/mcp-go` if needed.
+
+## M1 — Backend OpenAPI (pure-additive, no behavior change) ✅
+- [x] swaggo wired; `swag init -g cmd/server/main.go --parseInternal --parseDependency` → `internal/api/docs/swagger.json`.
+- [x] 43 handlers annotated, clean operationIds + per-resource tags (admin/app/appserver/auth/database/endpoint/mlflow/model/observability/operation/project/quota).
+- [x] Golden coverage test `openapi_coverage_test.go` — asserts every /api/v1 route present in spec. PASS.
+- [x] `go:embed internal/api/docs/swagger.json` + public `GET /openapi.json`.
+- [x] Verified: go build, go vet, go test green.
+- NOTE follow-up: 7 endpoints bind anonymous request structs → typed `map[string]interface{}` (loose inputSchema). Extract named structs later for better tool schemas.
+
+## M2 — Reflection engine + MCP skeleton (testable vs current backend)
+- [ ] New module `mcp-server/`; kin-openapi parse.
+- [ ] toolgen: operation → MCP tool (name, inputSchema = path+query+body merge, read/destructive hints).
+- [ ] proxy handler: tool args → /api/v1, forward bearer; 202 → op-id + poll hint.
+- [ ] `overrides.yaml` loader (rename/hide/group/annotate).
+- [ ] Streamable HTTP transport (SDK from M0).
+- [ ] Tests: fixture spec → golden tool set; proxy httptest. Dev proof: list tools, order DB, get_operation terminal.
+
+## M3 — Keycloak auth (high-risk, coupled cutover)
+- [ ] Go `principal` pkg mirroring dada.sso contract.
+- [ ] Backend `auto` mode (proxy headers + bearer JWKS); replace local-JWT middleware.
+- [ ] MCP bearer mode + `/.well-known/oauth-protected-resource`.
+- [ ] Frontend adopts `@dada/react-sso`.
+- [ ] Authz Keycloak groups/roles — PHASE: hybrid first (global role KC + project_members), then deprecate (R1).
+- [ ] Keycloak clients via argo-infra (document config).
+
+## M4 — Deploy
+- [ ] Helm: MCP Deployment+Service+Ingress (`mcp.dada-tuda.ru`); spec via configmap/backend image.
+
+## Review (per milestone)
+- _pending_
+
+---
+
 # 2026-06-02 Compose Apps + Manual VM Connect + Live State
 
 Design: `docs/architecture/compose-and-manual-vm-design.md`

@@ -18,6 +18,16 @@ type projectWithRole struct {
 }
 
 // ListProjects returns all projects the authenticated user has access to.
+//
+// @ID          listProjects
+// @Summary     List projects the caller can access
+// @Description Returns every project the authenticated user is a member of, each annotated with the caller's role in that project. Read-only. Start here to discover project IDs for other calls.
+// @Tags        project
+// @Produce     json
+// @Security    BearerAuth
+// @Success     200 {object} map[string]interface{} "object with a projects array"
+// @Failure     401 {object} map[string]string
+// @Router      /projects [get]
 func (h *Handler) ListProjects(c *gin.Context) {
 	claims, ok := auth.GetClaims(c)
 	if !ok {
@@ -67,6 +77,18 @@ func (h *Handler) ListProjects(c *gin.Context) {
 }
 
 // GetProject returns a single project by ID, including environments and user role.
+//
+// @ID          getProject
+// @Summary     Get a project with its environments
+// @Description Returns one project, the caller's role, and the project's environments (each with id, name, namespace, runtime). Read-only. Use the returned environment IDs for app/database/model calls.
+// @Tags        project
+// @Produce     json
+// @Security    BearerAuth
+// @Param       projectId path     string true "Project UUID"
+// @Success     200       {object} map[string]interface{} "object with project, role and environments"
+// @Failure     401       {object} map[string]string
+// @Failure     404       {object} map[string]string
+// @Router      /projects/{projectId} [get]
 func (h *Handler) GetProject(c *gin.Context) {
 	claims, ok := auth.GetClaims(c)
 	if !ok {
@@ -147,6 +169,18 @@ func (h *Handler) GetProject(c *gin.Context) {
 }
 
 // GetProjectOperations returns paginated operations for a project.
+//
+// @ID          listOperations
+// @Summary     List recent operations in a project
+// @Description Returns the 50 most recent async operations for a project (newest first), with their current status. Read-only. Use this to track the outcome of create/update/delete calls.
+// @Tags        operation
+// @Produce     json
+// @Security    BearerAuth
+// @Param       projectId path     string true "Project UUID"
+// @Success     200       {object} map[string]interface{} "object with an operations array"
+// @Failure     401       {object} map[string]string
+// @Failure     404       {object} map[string]string
+// @Router      /projects/{projectId}/operations [get]
 func (h *Handler) GetProjectOperations(c *gin.Context) {
 	claims, ok := auth.GetClaims(c)
 	if !ok {
@@ -206,6 +240,22 @@ func (h *Handler) GetProjectOperations(c *gin.Context) {
 
 // SetNamespacePolicy creates a SetNamespacePolicy operation that instructs the
 // gitops-agent to write clusters/beget-prod/namespace-policies/<namespace>.yaml.
+//
+// @ID          setNamespacePolicy
+// @Summary     Set an environment's namespace LimitRange + ResourceQuota
+// @Description Updates the Kubernetes LimitRange and ResourceQuota for an environment's namespace. Admin-only (platform-admin or client-admin). Asynchronous: returns 202 with an operation id; poll the operation endpoint until terminal.
+// @Tags        project
+// @Accept      json
+// @Produce     json
+// @Security    BearerAuth
+// @Param       projectId path     string                 true "Project UUID"
+// @Param       envId     path     string                 true "Environment UUID"
+// @Param       body      body     map[string]interface{} true "Object with limit_range and resource_quota JSON specs"
+// @Success     202       {object} map[string]interface{} "object with the accepted operation id"
+// @Failure     400       {object} map[string]string
+// @Failure     403       {object} map[string]string
+// @Failure     404       {object} map[string]string
+// @Router      /projects/{projectId}/environments/{envId}/namespace-policy [put]
 func (h *Handler) SetNamespacePolicy(c *gin.Context) {
 	claims, ok := auth.GetClaims(c)
 	if !ok {
