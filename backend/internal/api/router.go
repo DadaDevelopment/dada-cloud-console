@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"time"
 
@@ -10,6 +11,48 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
+
+// authMiddleware selects the request-auth middleware by cfg.AuthMode. Default
+// ("local" or unset) returns the existing HS256 GinMiddleware so behavior is
+// unchanged. "keycloak" builds a JWKS verifier from KEYCLOAK_ISSUER and resolves
+// each token to a local users.id via auth.ResolveUser, populating the same
+// *auth.Claims the handlers already read.
+func authMiddleware(pool *pgxpool.Pool, cfg *config.Config) gin.HandlerFunc {
+	if cfg.AuthMode != "keycloak" {
+		return auth.GinMiddleware(cfg.JWTSecret)
+	}
+
+	verifier, err := auth.NewKeycloakVerifier(
+		context.Background(),
+		cfg.KeycloakIssuer,
+		cfg.KeycloakVerifyAud,
+		cfg.KeycloakAudience,
+		cfg.KeycloakRolesClient,
+	)
+	if err != nil {
+		// AUTH_MODE=keycloak is an explicit operator choice; a misconfigured
+		// issuer must fail loudly at startup rather than silently fall back to a
+		// path that can't validate any token.
+		panic(fmt.Sprintf("auth: build keycloak verifier: %v", err))
+	}
+
+	resolver := func(c *gin.Context, kc *auth.KeycloakClaims) (*auth.Claims, error) {
+		id, err := auth.ResolveUser(c.Request.Context(), pool, kc)
+		if err != nil {
+			return nil, err
+		}
+		return &auth.Claims{
+			UserID:      id,
+			Username:    kc.PreferredUsername,
+			Email:       kc.Email,
+			DisplayName: kc.Name,
+			Groups:      kc.Groups,
+			Roles:       kc.Roles,
+		}, nil
+	}
+
+	return auth.KeycloakMiddleware(verifier, resolver)
+}
 
 // SetupRouter configures and returns the Gin engine with all API routes registered.
 func SetupRouter(pool *pgxpool.Pool, cfg *config.Config) *gin.Engine {
@@ -34,14 +77,24 @@ func SetupRouter(pool *pgxpool.Pool, cfg *config.Config) *gin.Engine {
 
 	h := NewHandler(pool, cfg)
 
-	// Public routes
-	r.POST("/api/v1/auth/login", h.Login)
+	keycloakMode := cfg.AuthMode == "keycloak"
+
+	// Public routes. In keycloak mode local login is disabled (auth is via
+	// Keycloak); the route stays registered but returns 410 Gone so the OpenAPI
+	// coverage gate and clients still see a defined endpoint.
+	if keycloakMode {
+		r.POST("/api/v1/auth/login", func(c *gin.Context) {
+			c.JSON(http.StatusGone, gin.H{"error": "local login disabled; authenticate via Keycloak"})
+		})
+	} else {
+		r.POST("/api/v1/auth/login", h.Login)
+	}
 
 	// Embedded OpenAPI spec (public — feeds the reflective MCP server).
 	r.GET("/openapi.json", ServeOpenAPISpec)
 
-	// Authenticated routes
-	api := r.Group("/api/v1", auth.GinMiddleware(cfg.JWTSecret))
+	// Authenticated routes — pick the auth middleware by configured mode.
+	api := r.Group("/api/v1", authMiddleware(pool, cfg))
 	{
 		// Auth
 		api.GET("/auth/me", h.Me)

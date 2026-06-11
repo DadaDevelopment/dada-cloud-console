@@ -14,6 +14,12 @@ type Claims struct {
 	Username    string    `json:"username"`
 	Email       string    `json:"email"`
 	DisplayName string    `json:"display_name"`
+	// Groups and Roles are populated only in keycloak auth mode (full group
+	// paths from the Keycloak Group Membership mapper, and realm/resource roles).
+	// They are consumed by M3b authz / the MCP server; in local mode they are
+	// left empty and harmless. Not signed into local HS256 tokens.
+	Groups []string `json:"groups,omitempty"`
+	Roles  []string `json:"roles,omitempty"`
 	jwt.RegisteredClaims
 }
 
