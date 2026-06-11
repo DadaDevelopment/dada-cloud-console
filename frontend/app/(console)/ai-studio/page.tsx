@@ -4,6 +4,8 @@ import Link from "next/link";
 import { projectsApi, mlflowApi } from "@/lib/api";
 import type { Project, MLflowRegisteredModel } from "@/lib/types";
 import { Spinner } from "@/components/ui/spinner";
+import { Breadcrumb } from "@/components/ui/breadcrumb";
+import { DataTable, type Column } from "@/components/ui/data-table";
 
 function fmtTimestamp(ms?: number): string {
   if (!ms) return "—";
@@ -58,13 +60,13 @@ export default function AIStudioRegistryPage() {
   return (
     <div>
       <div className="mb-8">
-        <div className="flex items-center gap-2 text-sm text-gray-500">
-          <Link href="/projects" className="hover:text-gray-700">Console</Link>
-          <span>/</span>
-          <span className="text-gray-900">AI Studio</span>
-          <span>/</span>
-          <span className="text-gray-900">Registry</span>
-        </div>
+        <Breadcrumb
+          items={[
+            { label: "Console", href: "/projects" },
+            { label: "AI Studio" },
+            { label: "Registry" },
+          ]}
+        />
         <h1 className="mt-2 text-2xl font-bold text-gray-900">MLflow registry</h1>
         <p className="mt-0.5 text-sm text-gray-500">
           Browse registered models filtered by your project&apos;s storage prefix. Click any row to deploy that version.
@@ -97,64 +99,71 @@ export default function AIStudioRegistryPage() {
         </div>
       )}
 
-      {isLoadingModels ? (
-        <div className="flex h-40 items-center justify-center"><Spinner /></div>
-      ) : models.length === 0 ? (
-        <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-gray-300 bg-gray-50 py-16">
-          <p className="text-sm font-medium text-gray-500">No registered models match this project&apos;s storage prefix</p>
-          <p className="mt-1 text-xs text-gray-400">
-            Register a model in MLflow whose source URI starts with <span className="font-mono">{getProjectPrefixHint(projects, selectedProjectId)}</span>
-          </p>
-        </div>
-      ) : (
-        <div className="overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm">
-          <table className="min-w-full divide-y divide-gray-200">
-            <thead className="bg-gray-50">
-              <tr>
-                <Th>Name</Th>
-                <Th>Latest version</Th>
-                <Th>Stage</Th>
-                <Th>Last updated</Th>
-                <Th right>Action</Th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-100">
-              {models.map((m) => {
-                const latest = m.latest_versions?.[0];
-                return (
-                  <tr key={m.name} className="hover:bg-gray-50">
-                    <td className="px-5 py-3 font-mono text-sm text-gray-900">{m.name}</td>
-                    <td className="px-5 py-3 font-mono text-sm text-gray-700">v{latest?.version ?? "—"}</td>
-                    <td className="px-5 py-3 text-sm text-gray-600">{latest?.current_stage ?? "—"}</td>
-                    <td className="px-5 py-3 text-xs text-gray-400">{fmtTimestamp(m.last_updated_timestamp)}</td>
-                    <td className="px-5 py-3 text-right">
-                      <Link
-                        href={`/projects/${selectedProjectId}/models?fromMlflow=${encodeURIComponent(m.name)}${latest ? `&fromMlflowVersion=${encodeURIComponent(latest.version)}` : ""}`}
-                        className="inline-flex items-center gap-1 rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700 transition-colors"
-                      >
-                        Deploy v{latest?.version ?? "?"} →
-                      </Link>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      )}
+      <DataTable<MLflowRegisteredModel>
+        loading={isLoadingModels}
+        rows={models}
+        getRowKey={(m) => m.name}
+        searchText={(m) => `${m.name} ${m.latest_versions?.[0]?.current_stage ?? ""}`}
+        searchPlaceholder="Search models…"
+        columns={registryColumns(selectedProjectId)}
+        emptyState={
+          <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-gray-300 bg-gray-50 py-16">
+            <p className="text-sm font-medium text-gray-500">No registered models match this project&apos;s storage prefix</p>
+            <p className="mt-1 text-xs text-gray-400">
+              Register a model in MLflow whose source URI starts with <span className="font-mono">{getProjectPrefixHint(projects, selectedProjectId)}</span>
+            </p>
+          </div>
+        }
+      />
     </div>
   );
+}
+
+function registryColumns(projectId: string): Column<MLflowRegisteredModel>[] {
+  return [
+    {
+      key: "name",
+      header: "Name",
+      sortValue: (m) => m.name,
+      render: (m) => <span className="font-mono text-gray-900">{m.name}</span>,
+    },
+    {
+      key: "version",
+      header: "Latest version",
+      render: (m) => <span className="font-mono">v{m.latest_versions?.[0]?.version ?? "—"}</span>,
+    },
+    {
+      key: "stage",
+      header: "Stage",
+      sortValue: (m) => m.latest_versions?.[0]?.current_stage ?? "",
+      render: (m) => m.latest_versions?.[0]?.current_stage ?? "—",
+    },
+    {
+      key: "updated",
+      header: "Last updated",
+      sortValue: (m) => m.last_updated_timestamp ?? 0,
+      render: (m) => <span className="text-xs text-gray-400">{fmtTimestamp(m.last_updated_timestamp)}</span>,
+    },
+    {
+      key: "action",
+      header: "Action",
+      align: "right",
+      render: (m) => {
+        const latest = m.latest_versions?.[0];
+        return (
+          <Link
+            href={`/projects/${encodeURIComponent(projectId)}/models?fromMlflow=${encodeURIComponent(m.name)}${latest ? `&fromMlflowVersion=${encodeURIComponent(latest.version)}` : ""}`}
+            className="inline-flex items-center gap-1 rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700 transition-colors"
+          >
+            Deploy v{latest?.version ?? "?"} →
+          </Link>
+        );
+      },
+    },
+  ];
 }
 
 function getProjectPrefixHint(projects: Project[], id: string): string {
   const p = projects.find((x) => x.id === id);
   return p ? `s3://platform-models/${p.name}/...` : "your project's prefix";
-}
-
-function Th({ children, right }: { children: React.ReactNode; right?: boolean }) {
-  return (
-    <th className={`px-5 py-3 text-xs font-semibold uppercase tracking-wide text-gray-500 ${right ? "text-right" : "text-left"}`}>
-      {children}
-    </th>
-  );
 }

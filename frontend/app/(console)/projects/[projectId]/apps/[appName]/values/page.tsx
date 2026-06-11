@@ -1,10 +1,12 @@
 "use client";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useParams, useSearchParams } from "next/navigation";
-import Link from "next/link";
 import { valuesApi } from "@/lib/api";
 import { YamlEditor } from "@/components/ui/yaml-editor";
 import { Spinner } from "@/components/ui/spinner";
+import { Breadcrumb } from "@/components/ui/breadcrumb";
+import { useProjectContext } from "@/lib/project-context";
+import { canEditYaml } from "@/lib/rbac";
 
 // ─── WebSocket message shapes ────────────────────────────────────────────────
 
@@ -68,8 +70,10 @@ function useToasts() {
 export default function ValuesPage() {
   const params = useParams<{ projectId: string; appName: string }>();
   const searchParams = useSearchParams();
+  const { role, loading: roleLoading, selectedEnv } = useProjectContext();
+  const allowed = canEditYaml(role);
   const { projectId, appName } = params;
-  const envId = searchParams.get("envId") ?? "";
+  const envId = searchParams.get("envId") || selectedEnv?.id || "";
 
   const [yaml, setYaml] = useState("");
   const [dirty, setDirty] = useState(false);
@@ -179,27 +183,38 @@ export default function ValuesPage() {
   }
 
   // ── Render ───────────────────────────────────────────────────────────────────
+  if (!roleLoading && !allowed) {
+    return (
+      <div>
+        <Breadcrumb
+          items={[
+            { label: "Projects", href: "/projects" },
+            { label: "Applications", href: `/projects/${projectId}/apps` },
+            { label: appName, href: `/projects/${projectId}/apps/${appName}${envId ? `?envId=${envId}` : ""}` },
+            { label: "values.yaml" },
+          ]}
+        />
+        <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+          You don&apos;t have permission to edit raw configuration. This is available to platform admins only.
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div>
       {/* Header */}
       <div className="mb-6 flex items-start justify-between">
         <div>
-          <div className="flex items-center gap-2 text-sm text-gray-500">
-            <Link href="/projects" className="hover:text-gray-700">Projects</Link>
-            <span>/</span>
-            <Link href={`/projects/${projectId}`} className="hover:text-gray-700">Overview</Link>
-            <span>/</span>
-            <Link href={`/projects/${projectId}/apps`} className="hover:text-gray-700">Applications</Link>
-            <span>/</span>
-            <Link
-              href={`/projects/${projectId}/apps/${appName}${envId ? `?envId=${envId}` : ""}`}
-              className="hover:text-gray-700 font-mono"
-            >
-              {appName}
-            </Link>
-            <span>/</span>
-            <span className="text-gray-900">values.yaml</span>
-          </div>
+          <Breadcrumb
+            items={[
+              { label: "Projects", href: "/projects" },
+              { label: "Overview", href: `/projects/${projectId}` },
+              { label: "Applications", href: `/projects/${projectId}/apps` },
+              { label: appName, href: `/projects/${projectId}/apps/${appName}${envId ? `?envId=${envId}` : ""}` },
+              { label: "values.yaml" },
+            ]}
+          />
           <div className="mt-2 flex items-center gap-3">
             <h1 className="text-2xl font-bold text-gray-900">
               <span className="font-mono">{appName}</span>
@@ -249,7 +264,7 @@ export default function ValuesPage() {
       )}
 
       {/* Toasts */}
-      <div className="fixed bottom-6 right-6 z-50 flex flex-col gap-2">
+      <div role="status" aria-live="polite" className="fixed bottom-6 right-6 z-50 flex flex-col gap-2">
         {toasts.map((t) => (
           <div
             key={t.id}

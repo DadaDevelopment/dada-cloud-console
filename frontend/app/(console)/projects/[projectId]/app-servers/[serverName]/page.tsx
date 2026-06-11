@@ -1,17 +1,22 @@
 "use client";
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
-import Link from "next/link";
 import { appServersApi } from "@/lib/api";
 import type { AppServer, AppServerState } from "@/lib/types";
 import { Badge } from "@/components/ui/badge";
 import { Spinner } from "@/components/ui/spinner";
+import { Breadcrumb } from "@/components/ui/breadcrumb";
+import { CopyButton } from "@/components/ui/copy-button";
 import { MetricsPanel } from "@/components/metrics-panel";
 import { LogsViewer } from "@/components/logs-viewer";
+import { useProjectContext } from "@/lib/project-context";
+import { canSeeTechnical } from "@/lib/rbac";
 
 export default function AppServerDetailPage() {
   const params = useParams<{ projectId: string; serverName: string }>();
   const { projectId, serverName } = params;
+  const { role } = useProjectContext();
+  const showTech = canSeeTechnical(role);
 
   const [server, setServer] = useState<AppServer | null>(null);
   const [state, setState] = useState<AppServerState | null>(null);
@@ -43,24 +48,28 @@ export default function AppServerDetailPage() {
 
   const cards = [
     { label: "Status", value: server.status },
-    { label: "VM IP", value: server.vm_ip ?? "—", mono: true },
-    { label: "Portainer", value: server.portainer_endpoint_id != null ? String(server.portainer_endpoint_id) : "—", mono: true },
     { label: "Heartbeat", value: state?.online ? "online" : "offline" },
+    // VM IP and Portainer endpoint are infrastructure details — internal only.
+    ...(showTech
+      ? [
+          { label: "VM IP", value: server.vm_ip ?? "—", mono: true, copy: server.vm_ip ?? undefined },
+          { label: "Portainer", value: server.portainer_endpoint_id != null ? String(server.portainer_endpoint_id) : "—", mono: true },
+        ]
+      : []),
   ];
 
   return (
     <div>
       {/* Header */}
       <div className="mb-8">
-        <div className="flex items-center gap-2 text-sm text-gray-500">
-          <Link href="/projects" className="hover:text-gray-700">Projects</Link>
-          <span>/</span>
-          <Link href={`/projects/${projectId}`} className="hover:text-gray-700">Overview</Link>
-          <span>/</span>
-          <Link href={`/projects/${projectId}/app-servers`} className="hover:text-gray-700">App Servers</Link>
-          <span>/</span>
-          <span className="font-mono text-gray-900">{serverName}</span>
-        </div>
+        <Breadcrumb
+          items={[
+            { label: "Projects", href: "/projects" },
+            { label: "Overview", href: `/projects/${projectId}` },
+            { label: "App Servers", href: `/projects/${projectId}/app-servers` },
+            { label: serverName },
+          ]}
+        />
         <div className="mt-2 flex items-center gap-3">
           <h1 className="font-mono text-2xl font-bold text-gray-900">{serverName}</h1>
           <Badge className="bg-gray-100 text-gray-700">{server.source}</Badge>
@@ -76,10 +85,13 @@ export default function AppServerDetailPage() {
 
       {/* Info cards */}
       <div className="mb-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        {cards.map(({ label, value, mono }) => (
+        {cards.map(({ label, value, mono, copy }: { label: string; value: string; mono?: boolean; copy?: string }) => (
           <div key={label} className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
             <p className="text-xs font-semibold uppercase tracking-wide text-gray-400">{label}</p>
-            <p className={`mt-1 text-sm font-medium text-gray-900 truncate ${mono ? "font-mono" : ""}`}>{value}</p>
+            <div className="mt-1 flex items-center justify-between gap-2">
+              <p className={`text-sm font-medium text-gray-900 truncate ${mono ? "font-mono" : ""}`}>{value}</p>
+              {copy && <CopyButton value={copy} className="shrink-0" />}
+            </div>
           </div>
         ))}
       </div>

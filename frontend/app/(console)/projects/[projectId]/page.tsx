@@ -6,20 +6,8 @@ import { projectsApi } from "@/lib/api";
 import type { Project, Environment, Operation } from "@/lib/types";
 import { Badge } from "@/components/ui/badge";
 import { Spinner } from "@/components/ui/spinner";
-
-function timeAgo(dateStr: string): string {
-  const date = new Date(dateStr);
-  const now = new Date();
-  const diffMs = now.getTime() - date.getTime();
-  const diffSecs = Math.floor(diffMs / 1000);
-  if (diffSecs < 60) return `${diffSecs}s ago`;
-  const diffMins = Math.floor(diffSecs / 60);
-  if (diffMins < 60) return `${diffMins}m ago`;
-  const diffHours = Math.floor(diffMins / 60);
-  if (diffHours < 24) return `${diffHours}h ago`;
-  const diffDays = Math.floor(diffHours / 24);
-  return `${diffDays}d ago`;
-}
+import { Breadcrumb } from "@/components/ui/breadcrumb";
+import { timeAgo } from "@/lib/format";
 
 export default function ProjectOverviewPage() {
   const params = useParams<{ projectId: string }>();
@@ -73,11 +61,7 @@ export default function ProjectOverviewPage() {
       {/* Header */}
       <div className="mb-8 flex items-start justify-between">
         <div>
-          <div className="flex items-center gap-2 text-sm text-gray-500">
-            <Link href="/projects" className="hover:text-gray-700">Projects</Link>
-            <span>/</span>
-            <span className="text-gray-900">{project.display_name}</span>
-          </div>
+          <Breadcrumb items={[{ label: "Projects", href: "/projects" }, { label: project.display_name }]} />
           <h1 className="mt-2 text-2xl font-bold text-gray-900">{project.display_name}</h1>
           <p className="mt-0.5 font-mono text-sm text-gray-400">{project.name}</p>
         </div>

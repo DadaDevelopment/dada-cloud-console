@@ -1,20 +1,13 @@
 "use client";
 import { useEffect, useState, FormEvent } from "react";
-import Link from "next/link";
 import { adminApi } from "@/lib/api";
 import type { PendingApproval } from "@/lib/types";
 import { Modal } from "@/components/ui/modal";
 import { Spinner } from "@/components/ui/spinner";
-
-function timeAgo(dateStr: string): string {
-  const diffSecs = Math.floor((Date.now() - new Date(dateStr).getTime()) / 1000);
-  if (diffSecs < 60) return `${diffSecs}s ago`;
-  const diffMins = Math.floor(diffSecs / 60);
-  if (diffMins < 60) return `${diffMins}m ago`;
-  const diffHours = Math.floor(diffMins / 60);
-  if (diffHours < 24) return `${diffHours}h ago`;
-  return `${Math.floor(diffHours / 24)}d ago`;
-}
+import { Breadcrumb } from "@/components/ui/breadcrumb";
+import { DataTable, type Column } from "@/components/ui/data-table";
+import { useProjectContext } from "@/lib/project-context";
+import { timeAgo } from "@/lib/format";
 
 function ResourcePill({ kind }: { kind: string }) {
   const tone = kind === "AIModel"
@@ -43,6 +36,11 @@ function summarisePayload(action: string, payload: Record<string, unknown> | und
 }
 
 export default function ApprovalsPage() {
+  // Approvals is a global, platform-admin-only surface. The nav link is already
+  // gated, but guard the page itself so a direct deep-link can't reach it.
+  const { projects, projectsLoading } = useProjectContext();
+  const isAdminAnywhere = projects.some((p) => p.role === "platform-admin");
+
   const [approvals, setApprovals] = useState<PendingApproval[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -103,21 +101,86 @@ export default function ApprovalsPage() {
     }
   }
 
-  if (isLoading) {
-    return <div className="flex h-64 items-center justify-center"><Spinner size="lg" /></div>;
+  const columns: Column<PendingApproval>[] = [
+    {
+      key: "project",
+      header: "Project",
+      sortValue: (r) => r.project_name,
+      render: (r) => <span className="font-mono text-gray-900">{r.project_name}</span>,
+    },
+    {
+      key: "resource",
+      header: "Resource",
+      render: (r) => (
+        <div className="flex items-center gap-2">
+          <ResourcePill kind={r.operation.resource_kind} />
+          <span className="font-mono text-gray-700">{r.operation.resource_name}</span>
+        </div>
+      ),
+    },
+    { key: "action", header: "Action", sortValue: (r) => r.operation.action, render: (r) => r.operation.action },
+    { key: "by", header: "Requested by", render: (r) => <span className="text-gray-600">{r.requested_by || "—"}</span> },
+    {
+      key: "age",
+      header: "Age",
+      sortValue: (r) => new Date(r.operation.created_at).getTime(),
+      render: (r) => <span className="text-xs text-gray-400">{timeAgo(r.operation.created_at)}</span>,
+    },
+    {
+      key: "summary",
+      header: "Summary",
+      render: (r) => <span className="text-xs text-gray-500">{summarisePayload(r.operation.action, r.operation.payload) || "—"}</span>,
+    },
+    {
+      key: "decision",
+      header: "Decision",
+      align: "right",
+      render: (r) => {
+        const busy = busyOpId === r.operation.id;
+        return (
+          <div className="flex items-center justify-end gap-2">
+            <button
+              onClick={() => approve(r.operation.id)}
+              disabled={busy}
+              className="inline-flex items-center gap-1 rounded-lg bg-green-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-green-700 disabled:opacity-50 transition-colors"
+            >
+              {busy ? <Spinner size="sm" /> : "Approve"}
+            </button>
+            <button
+              onClick={() => { setRejectingOp(r); setRejectReason(""); }}
+              disabled={busy}
+              className="inline-flex items-center gap-1 rounded-lg border border-red-200 bg-white px-3 py-1.5 text-xs font-medium text-red-600 hover:bg-red-50 disabled:opacity-50 transition-colors"
+            >
+              Reject
+            </button>
+          </div>
+        );
+      },
+    },
+  ];
+
+  if (!projectsLoading && !isAdminAnywhere) {
+    return (
+      <div>
+        <Breadcrumb items={[{ label: "Console", href: "/projects" }, { label: "Admin" }, { label: "Approvals" }]} />
+        <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+          Approvals are available to platform admins only.
+        </div>
+      </div>
+    );
   }
 
   return (
     <div>
       <div className="mb-8 flex items-start justify-between">
         <div>
-          <div className="flex items-center gap-2 text-sm text-gray-500">
-            <Link href="/projects" className="hover:text-gray-700">Console</Link>
-            <span>/</span>
-            <span className="text-gray-900">Admin</span>
-            <span>/</span>
-            <span className="text-gray-900">Approvals</span>
-          </div>
+          <Breadcrumb
+            items={[
+              { label: "Console", href: "/projects" },
+              { label: "Admin" },
+              { label: "Approvals" },
+            ]}
+          />
           <h1 className="mt-2 text-2xl font-bold text-gray-900">Pending approvals</h1>
           <p className="mt-0.5 text-sm text-gray-500">
             Operations parked in <span className="font-mono">WaitingForApproval</span>. First consumer is the AI Studio GPU gate.
@@ -141,71 +204,24 @@ export default function ApprovalsPage() {
         <div className="mb-6 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{actionError}</div>
       )}
 
-      {approvals.length === 0 ? (
-        <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-gray-300 bg-gray-50 py-16">
-          <svg className="mb-3 h-12 w-12 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
-          </svg>
-          <p className="text-sm font-medium text-gray-500">No pending approvals</p>
-          <p className="mt-1 text-xs text-gray-400">GPU model requests and other privileged operations will appear here.</p>
-        </div>
-      ) : (
-        <div className="overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm">
-          <table className="min-w-full divide-y divide-gray-200">
-            <thead className="bg-gray-50">
-              <tr>
-                <Th>Project</Th>
-                <Th>Resource</Th>
-                <Th>Action</Th>
-                <Th>Requested by</Th>
-                <Th>Age</Th>
-                <Th>Summary</Th>
-                <Th right>Decision</Th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-100">
-              {approvals.map((row) => {
-                const op = row.operation;
-                const summary = summarisePayload(op.action, op.payload);
-                const busy = busyOpId === op.id;
-                return (
-                  <tr key={op.id} className="hover:bg-gray-50">
-                    <td className="px-5 py-3 font-mono text-sm text-gray-900">{row.project_name}</td>
-                    <td className="px-5 py-3 text-sm">
-                      <div className="flex items-center gap-2">
-                        <ResourcePill kind={op.resource_kind} />
-                        <span className="font-mono text-gray-700">{op.resource_name}</span>
-                      </div>
-                    </td>
-                    <td className="px-5 py-3 text-sm text-gray-700">{op.action}</td>
-                    <td className="px-5 py-3 text-sm text-gray-600">{row.requested_by || "—"}</td>
-                    <td className="px-5 py-3 text-xs text-gray-400">{timeAgo(op.created_at)}</td>
-                    <td className="px-5 py-3 text-xs text-gray-500">{summary || "—"}</td>
-                    <td className="px-5 py-3">
-                      <div className="flex items-center justify-end gap-2">
-                        <button
-                          onClick={() => approve(op.id)}
-                          disabled={busy}
-                          className="inline-flex items-center gap-1 rounded-lg bg-green-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-green-700 disabled:opacity-50 transition-colors"
-                        >
-                          {busy ? <Spinner size="sm" /> : "Approve"}
-                        </button>
-                        <button
-                          onClick={() => { setRejectingOp(row); setRejectReason(""); }}
-                          disabled={busy}
-                          className="inline-flex items-center gap-1 rounded-lg border border-red-200 bg-white px-3 py-1.5 text-xs font-medium text-red-600 hover:bg-red-50 disabled:opacity-50 transition-colors"
-                        >
-                          Reject
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      )}
+      <DataTable<PendingApproval>
+        loading={isLoading}
+        rows={approvals}
+        getRowKey={(r) => r.operation.id}
+        searchText={(r) => `${r.project_name} ${r.operation.resource_name} ${r.operation.action} ${r.requested_by ?? ""}`}
+        searchPlaceholder="Search approvals…"
+        pageSize={15}
+        columns={columns}
+        emptyState={
+          <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-gray-300 bg-gray-50 py-16">
+            <svg className="mb-3 h-12 w-12 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
+            </svg>
+            <p className="text-sm font-medium text-gray-500">No pending approvals</p>
+            <p className="mt-1 text-xs text-gray-400">GPU model requests and other privileged operations will appear here.</p>
+          </div>
+        }
+      />
 
       <Modal
         isOpen={!!rejectingOp}
@@ -244,13 +260,5 @@ export default function ApprovalsPage() {
         </form>
       </Modal>
     </div>
-  );
-}
-
-function Th({ children, right }: { children: React.ReactNode; right?: boolean }) {
-  return (
-    <th className={`px-5 py-3 text-xs font-semibold uppercase tracking-wide text-gray-500 ${right ? "text-right" : "text-left"}`}>
-      {children}
-    </th>
   );
 }

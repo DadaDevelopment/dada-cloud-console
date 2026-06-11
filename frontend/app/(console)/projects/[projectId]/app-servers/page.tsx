@@ -6,7 +6,11 @@ import { appServersApi } from "@/lib/api";
 import type { AppServer, AppServerStatus } from "@/lib/types";
 import { Badge } from "@/components/ui/badge";
 import { Modal } from "@/components/ui/modal";
-import { Spinner } from "@/components/ui/spinner";
+import { Breadcrumb } from "@/components/ui/breadcrumb";
+import { DataTable, type Column } from "@/components/ui/data-table";
+import { useProjectContext } from "@/lib/project-context";
+import { canMutate } from "@/lib/rbac";
+import { timeAgo } from "@/lib/format";
 
 type AppServerMode = "terraform" | "manual";
 
@@ -47,19 +51,6 @@ const statusTone: Record<AppServerStatus, string> = {
   Failed: "bg-red-100 text-red-800",
 };
 
-function timeAgo(dateStr: string): string {
-  const date = new Date(dateStr);
-  const now = new Date();
-  const diffMs = now.getTime() - date.getTime();
-  const diffSecs = Math.floor(diffMs / 1000);
-  if (diffSecs < 60) return `${diffSecs}s ago`;
-  const diffMins = Math.floor(diffSecs / 60);
-  if (diffMins < 60) return `${diffMins}m ago`;
-  const diffHours = Math.floor(diffMins / 60);
-  if (diffHours < 24) return `${diffHours}h ago`;
-  return `${Math.floor(diffHours / 24)}d ago`;
-}
-
 function AppServerStatusBadge({ status }: { status: AppServerStatus }) {
   return <Badge className={statusTone[status] ?? "bg-gray-100 text-gray-800"}>{status}</Badge>;
 }
@@ -68,6 +59,8 @@ export default function AppServersPage() {
   const params = useParams<{ projectId: string }>();
   const projectId = params.projectId;
   const router = useRouter();
+  const { project, role } = useProjectContext();
+  const canManage = canMutate(role);
 
   const [servers, setServers] = useState<AppServer[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -162,28 +155,80 @@ export default function AppServersPage() {
     }
   }
 
-  if (isLoading) {
-    return (
-      <div className="flex h-64 items-center justify-center">
-        <Spinner size="lg" />
-      </div>
-    );
-  }
+  const columns: Column<AppServer>[] = [
+    {
+      key: "name",
+      header: "Name",
+      sortValue: (s) => s.name,
+      render: (s) => (
+        <div className="min-w-0">
+          <div className="flex items-center gap-2">
+            <Link
+              href={`/projects/${projectId}/app-servers/${s.name}`}
+              className="font-mono text-sm font-semibold text-gray-900 hover:text-amber-700 hover:underline"
+            >
+              {s.name}
+            </Link>
+            {s.source === "manual" && (
+              <span className="rounded bg-gray-100 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-gray-500">manual</span>
+            )}
+          </div>
+          <p className="mt-0.5 text-xs text-gray-400">Updated {timeAgo(s.updated_at)}</p>
+          {s.error_message && <p className="mt-1 text-xs text-red-600">{s.error_message}</p>}
+        </div>
+      ),
+    },
+    {
+      key: "status",
+      header: "Status",
+      sortValue: (s) => s.status,
+      render: (s) => (
+        <div className="flex items-center gap-2">
+          <AppServerStatusBadge status={s.status} />
+          {s.status === "Ready" && (
+            <span
+              title={online[s.name] ? "Online (Portainer heartbeat)" : "No heartbeat"}
+              className={`inline-block h-2 w-2 rounded-full ${online[s.name] ? "bg-green-400" : "bg-gray-300"}`}
+            />
+          )}
+        </div>
+      ),
+    },
+    { key: "ip", header: "VM IP", render: (s) => <span className="font-mono text-gray-600">{s.vm_ip ?? "—"}</span> },
+    { key: "portainer", header: "Portainer", render: (s) => <span className="font-mono text-gray-600">{s.portainer_endpoint_id ?? "—"}</span> },
+    ...(canManage
+      ? [{
+          key: "actions",
+          header: "Actions",
+          align: "right" as const,
+          render: (s: AppServer) => (
+            <button
+              onClick={() => void handleDelete(s.name)}
+              disabled={deletingName === s.name || s.status === "Deleting"}
+              className="rounded-lg border border-red-200 px-3 py-1.5 text-sm font-medium text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {deletingName === s.name ? "Deleting..." : "Delete"}
+            </button>
+          ),
+        }]
+      : []),
+  ];
 
   return (
     <div>
       <div className="mb-8 flex items-start justify-between">
         <div>
-          <div className="flex items-center gap-2 text-sm text-gray-500">
-            <Link href="/projects" className="hover:text-gray-700">Projects</Link>
-            <span>/</span>
-            <Link href={`/projects/${projectId}`} className="hover:text-gray-700">Overview</Link>
-            <span>/</span>
-            <span className="text-gray-900">App Servers</span>
-          </div>
+          <Breadcrumb
+            items={[
+              { label: "Projects", href: "/projects" },
+              { label: project?.display_name ?? "Overview", href: `/projects/${projectId}` },
+              { label: "App Servers" },
+            ]}
+          />
           <h1 className="mt-2 text-2xl font-bold text-gray-900">App Servers</h1>
           <p className="mt-0.5 text-sm text-gray-500">Dedicated VM hosts for Docker Compose workloads.</p>
         </div>
+        {canManage && (
         <button
           onClick={() => setIsModalOpen(true)}
           className="inline-flex items-center gap-2 rounded-lg bg-amber-600 px-4 py-2 text-sm font-medium text-white hover:bg-amber-700 transition-colors"
@@ -193,6 +238,7 @@ export default function AppServersPage() {
           </svg>
           Create AppServer
         </button>
+        )}
       </div>
 
       {error && (
@@ -201,68 +247,27 @@ export default function AppServersPage() {
         </div>
       )}
 
-      {servers.length === 0 ? (
-        <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-gray-300 bg-gray-50 py-16">
-          <svg className="mb-3 h-12 w-12 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M3 15.75V8.25A2.25 2.25 0 015.25 6h13.5A2.25 2.25 0 0121 8.25v7.5A2.25 2.25 0 0118.75 18H5.25A2.25 2.25 0 013 15.75zM7 9h10M7 12h4" />
-          </svg>
-          <p className="text-sm font-medium text-gray-500">No AppServers yet</p>
-          <button onClick={() => setIsModalOpen(true)} className="mt-4 text-sm text-amber-700 hover:text-amber-800">
-            Provision the first VM host →
-          </button>
-        </div>
-      ) : (
-        <div className="overflow-hidden rounded-xl border border-gray-200 bg-white">
-          <div className="grid grid-cols-[1.2fr_1fr_1fr_1fr_auto] gap-4 border-b border-gray-100 bg-gray-50 px-5 py-3 text-xs font-semibold uppercase tracking-wide text-gray-500">
-            <span>Name</span>
-            <span>Status</span>
-            <span>VM IP</span>
-            <span>Portainer</span>
-            <span className="text-right">Actions</span>
-          </div>
-          {servers.map((server) => (
-            <div key={server.id} className="grid grid-cols-[1.2fr_1fr_1fr_1fr_auto] items-center gap-4 border-b border-gray-100 px-5 py-4 last:border-0">
-              <div className="min-w-0">
-                <div className="flex items-center gap-2">
-                  <Link
-                    href={`/projects/${projectId}/app-servers/${server.name}`}
-                    className="font-mono text-sm font-semibold text-gray-900 hover:text-amber-700 hover:underline"
-                  >
-                    {server.name}
-                  </Link>
-                  {server.source === "manual" && (
-                    <span className="rounded bg-gray-100 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-gray-500">
-                      manual
-                    </span>
-                  )}
-                </div>
-                <p className="mt-0.5 text-xs text-gray-400">Updated {timeAgo(server.updated_at)}</p>
-                {server.error_message && <p className="mt-1 text-xs text-red-600">{server.error_message}</p>}
-              </div>
-              <div className="flex items-center gap-2">
-                <AppServerStatusBadge status={server.status} />
-                {server.status === "Ready" && (
-                  <span
-                    title={online[server.name] ? "Online (Portainer heartbeat)" : "No heartbeat"}
-                    className={`inline-block h-2 w-2 rounded-full ${
-                      online[server.name] ? "bg-green-400" : "bg-gray-300"
-                    }`}
-                  />
-                )}
-              </div>
-              <span className="font-mono text-sm text-gray-600">{server.vm_ip ?? "—"}</span>
-              <span className="font-mono text-sm text-gray-600">{server.portainer_endpoint_id ?? "—"}</span>
-              <button
-                onClick={() => void handleDelete(server.name)}
-                disabled={deletingName === server.name || server.status === "Deleting"}
-                className="rounded-lg border border-red-200 px-3 py-1.5 text-sm font-medium text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                {deletingName === server.name ? "Deleting..." : "Delete"}
+      <DataTable<AppServer>
+        loading={isLoading}
+        rows={servers}
+        getRowKey={(s) => s.id}
+        searchText={(s) => `${s.name} ${s.vm_ip ?? ""} ${s.status}`}
+        searchPlaceholder="Search app servers…"
+        columns={columns}
+        emptyState={
+          <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-gray-300 bg-gray-50 py-16">
+            <svg className="mb-3 h-12 w-12 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M3 15.75V8.25A2.25 2.25 0 015.25 6h13.5A2.25 2.25 0 0121 8.25v7.5A2.25 2.25 0 0118.75 18H5.25A2.25 2.25 0 013 15.75zM7 9h10M7 12h4" />
+            </svg>
+            <p className="text-sm font-medium text-gray-500">No AppServers yet</p>
+            {canManage && (
+              <button onClick={() => setIsModalOpen(true)} className="mt-4 text-sm text-amber-700 hover:text-amber-800">
+                Provision the first VM host →
               </button>
-            </div>
-          ))}
-        </div>
-      )}
+            )}
+          </div>
+        }
+      />
 
       <Modal
         isOpen={isModalOpen}
@@ -417,7 +422,7 @@ export default function AppServersPage() {
           )}
 
           {submitError && (
-            <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+            <div role="alert" className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
               {submitError}
             </div>
           )}

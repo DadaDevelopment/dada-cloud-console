@@ -1,10 +1,11 @@
 "use client";
 import { useEffect, useState } from "react";
 import { useParams, useSearchParams } from "next/navigation";
-import Link from "next/link";
 import { projectsApi } from "@/lib/api";
 import type { Operation, OperationStatus } from "@/lib/types";
 import { Spinner } from "@/components/ui/spinner";
+import { Breadcrumb } from "@/components/ui/breadcrumb";
+import { timeAgo } from "@/lib/format";
 
 const IN_PROGRESS_STATUSES = new Set<OperationStatus>([
   "Created", "Validated", "Queued", "Rendering",
@@ -30,20 +31,6 @@ function statusDot(status: OperationStatus): string {
   if (status === "Cancelled") return "bg-gray-400";
   if (status === "WaitingForApproval") return "bg-yellow-500";
   return "bg-blue-500";
-}
-
-function timeAgo(dateStr: string): string {
-  const date = new Date(dateStr);
-  const now = new Date();
-  const diffMs = now.getTime() - date.getTime();
-  const diffSecs = Math.floor(diffMs / 1000);
-  if (diffSecs < 60) return `${diffSecs}s ago`;
-  const diffMins = Math.floor(diffSecs / 60);
-  if (diffMins < 60) return `${diffMins}m ago`;
-  const diffHours = Math.floor(diffMins / 60);
-  if (diffHours < 24) return `${diffHours}h ago`;
-  const diffDays = Math.floor(diffHours / 24);
-  return `${diffDays}d ago`;
 }
 
 function StatusIcon({ status }: { status: OperationStatus }) {
@@ -94,6 +81,8 @@ export default function OperationsPage() {
   const [loadedProjectId, setLoadedProjectId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(highlightId);
+  const [query, setQuery] = useState("");
+  const [statusFilter, setStatusFilter] = useState<"all" | "in-progress" | "Ready" | "Failed" | "WaitingForApproval">("all");
 
   useEffect(() => {
     let cancelled = false;
@@ -141,17 +130,29 @@ export default function OperationsPage() {
 
   const hasInProgress = operations.some((op) => isInProgress(op.status));
 
+  const q = query.trim().toLowerCase();
+  const filtered = operations.filter((op) => {
+    if (statusFilter === "in-progress" && !isInProgress(op.status)) return false;
+    if (statusFilter !== "all" && statusFilter !== "in-progress" && op.status !== statusFilter) return false;
+    if (!q) return true;
+    return (
+      op.action.toLowerCase().includes(q) ||
+      op.resource_name.toLowerCase().includes(q) ||
+      (op.resource_kind ?? "").toLowerCase().includes(q)
+    );
+  });
+
   return (
     <div>
       {/* Header */}
       <div className="mb-8">
-        <div className="flex items-center gap-2 text-sm text-gray-500">
-          <Link href="/projects" className="hover:text-gray-700">Projects</Link>
-          <span>/</span>
-          <Link href={`/projects/${projectId}`} className="hover:text-gray-700">Overview</Link>
-          <span>/</span>
-          <span className="text-gray-900">Operations</span>
-        </div>
+        <Breadcrumb
+          items={[
+            { label: "Projects", href: "/projects" },
+            { label: "Overview", href: `/projects/${projectId}` },
+            { label: "Operations" },
+          ]}
+        />
         <div className="mt-2 flex items-center gap-3">
           <h1 className="text-2xl font-bold text-gray-900">Operations</h1>
           {hasInProgress && (
@@ -179,14 +180,49 @@ export default function OperationsPage() {
           <p className="mt-1 text-xs text-gray-400">Operations appear here when you create or modify resources.</p>
         </div>
       ) : (
-        <div className="overflow-hidden rounded-xl border border-gray-200 bg-white">
-          {operations.map((op, idx) => {
-            const isExpanded = expandedId === op.id;
-            const isHighlighted = highlightId === op.id;
-            return (
+        <>
+          {/* Toolbar: search + status filter */}
+          <div className="mb-4 flex flex-wrap items-center gap-3">
+            <div className="relative flex-1 min-w-[16rem]">
+              <svg className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" />
+              </svg>
+              <input
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="Search by action, resource, or kind…"
+                aria-label="Search operations"
+                className="w-full rounded-lg border border-gray-300 py-2 pl-9 pr-3 text-sm text-gray-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              />
+            </div>
+            <select
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value as typeof statusFilter)}
+              aria-label="Filter by status"
+              className="rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+            >
+              <option value="all">All statuses</option>
+              <option value="in-progress">In progress</option>
+              <option value="Ready">Ready</option>
+              <option value="Failed">Failed</option>
+              <option value="WaitingForApproval">Waiting for approval</option>
+            </select>
+            <span className="text-xs text-gray-400">{filtered.length} of {operations.length}</span>
+          </div>
+
+          {filtered.length === 0 ? (
+            <div className="rounded-xl border border-dashed border-gray-300 bg-gray-50 py-12 text-center text-sm text-gray-400">
+              No operations match your filters.
+            </div>
+          ) : (
+          <div className="overflow-hidden rounded-xl border border-gray-200 bg-white">
+            {filtered.map((op, idx) => {
+              const isExpanded = expandedId === op.id;
+              const isHighlighted = highlightId === op.id;
+              return (
               <div
                 key={op.id}
-                className={`${idx < operations.length - 1 ? "border-b border-gray-100" : ""} ${
+                className={`${idx < filtered.length - 1 ? "border-b border-gray-100" : ""} ${
                   isHighlighted ? "bg-blue-50/50" : ""
                 }`}
               >
@@ -287,9 +323,11 @@ export default function OperationsPage() {
                   </div>
                 )}
               </div>
-            );
-          })}
-        </div>
+              );
+            })}
+          </div>
+          )}
+        </>
       )}
     </div>
   );

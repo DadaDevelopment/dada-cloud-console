@@ -9,32 +9,18 @@ import type {
 import { Modal } from "@/components/ui/modal";
 import { Spinner } from "@/components/ui/spinner";
 import { Playground } from "@/components/ai/playground";
+import { useProjectContext } from "@/lib/project-context";
+import { PhaseBadge } from "@/components/ui/phase-badge";
 
 type Tab = "overview" | "versions" | "access" | "playground" | "operations" | "manifests";
-
-function PhaseBadge({ phase }: { phase?: string }) {
-  const p = phase ?? "";
-  const lower = p.toLowerCase();
-  const tone = lower === "ready"
-    ? "bg-green-100 text-green-700"
-    : lower === "failed"
-      ? "bg-red-100 text-red-700"
-      : lower === "waitingforapproval"
-        ? "bg-amber-100 text-amber-700"
-        : "bg-yellow-100 text-yellow-700";
-  return (
-    <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${tone}`}>
-      {p || "Unknown"}
-    </span>
-  );
-}
 
 export default function ModelDetailPage() {
   const params = useParams<{ projectId: string; name: string }>();
   const search = useSearchParams();
   const router = useRouter();
   const { projectId, name } = params;
-  const envId = search.get("envId") ?? "";
+  const { selectedEnv } = useProjectContext();
+  const envId = search.get("envId") || selectedEnv?.id || "";
   const initialTab = (search.get("tab") as Tab) ?? "overview";
 
   const [tab, setTab] = useState<Tab>(initialTab);

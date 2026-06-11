@@ -2,36 +2,15 @@
 import { useEffect, useState, FormEvent } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
-import { projectsApi, appsApi } from "@/lib/api";
-import type { Environment, ResourceSnapshot, AppSummary } from "@/lib/types";
+import { appsApi } from "@/lib/api";
+import type { ResourceSnapshot, AppSummary } from "@/lib/types";
 import { Modal } from "@/components/ui/modal";
 import { Spinner } from "@/components/ui/spinner";
-
-function timeAgo(dateStr: string): string {
-  const date = new Date(dateStr);
-  const now = new Date();
-  const diffMs = now.getTime() - date.getTime();
-  const diffSecs = Math.floor(diffMs / 1000);
-  if (diffSecs < 60) return `${diffSecs}s ago`;
-  const diffMins = Math.floor(diffSecs / 60);
-  if (diffMins < 60) return `${diffMins}m ago`;
-  const diffHours = Math.floor(diffMins / 60);
-  if (diffHours < 24) return `${diffHours}h ago`;
-  const diffDays = Math.floor(diffHours / 24);
-  return `${diffDays}d ago`;
-}
-
-function PhaseBadge({ phase }: { phase?: string }) {
-  const p = phase ?? "";
-  const isReady = p.toLowerCase() === "ready";
-  return (
-    <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${
-      isReady ? "bg-green-100 text-green-700" : "bg-yellow-100 text-yellow-700"
-    }`}>
-      {p || "Unknown"}
-    </span>
-  );
-}
+import { Breadcrumb } from "@/components/ui/breadcrumb";
+import { useProjectContext } from "@/lib/project-context";
+import { canMutate } from "@/lib/rbac";
+import { timeAgo } from "@/lib/format";
+import { PhaseBadge } from "@/components/ui/phase-badge";
 
 interface CreateAppForm {
   name: string;
@@ -46,10 +25,9 @@ export default function AppsPage() {
   const projectId = params.projectId;
   const router = useRouter();
 
-  const [environments, setEnvironments] = useState<Environment[]>([]);
-  const [selectedEnvId, setSelectedEnvId] = useState<string>("");
+  const { project, selectedEnv, role, loading: isLoadingEnvs } = useProjectContext();
+  const selectedEnvId = selectedEnv?.id ?? "";
   const [apps, setApps] = useState<ResourceSnapshot[]>([]);
-  const [isLoadingEnvs, setIsLoadingEnvs] = useState(true);
   const [isLoadingApps, setIsLoadingApps] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -64,44 +42,25 @@ export default function AppsPage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
 
-  // Load environments
+  // Load apps when the selected environment (from shared context) changes.
   useEffect(() => {
-    projectsApi
-      .get(projectId)
-      .then((data) => {
-        const envs = data.environments ?? [];
-        setEnvironments(envs);
-        if (envs.length > 0) {
-          setSelectedEnvId(envs[0].id);
-        } else {
-          setIsLoadingApps(false);
-        }
-      })
-      .catch((err) => {
-        setError(err instanceof Error ? err.message : "Failed to load project");
-        setIsLoadingApps(false);
-      })
-      .finally(() => setIsLoadingEnvs(false));
-  }, [projectId]);
-
-  // Load apps when env changes
-  useEffect(() => {
-    if (!selectedEnvId) return;
+    /* eslint-disable react-hooks/set-state-in-effect */
+    if (!selectedEnvId) {
+      if (!isLoadingEnvs) setIsLoadingApps(false);
+      return;
+    }
+    setIsLoadingApps(true);
+    setError(null);
+    /* eslint-enable react-hooks/set-state-in-effect */
     appsApi
       .list(projectId, selectedEnvId)
       .then((data) => setApps(data.apps ?? []))
       .catch((err) => setError(err instanceof Error ? err.message : "Failed to load applications"))
       .finally(() => setIsLoadingApps(false));
-  }, [projectId, selectedEnvId]);
+  }, [projectId, selectedEnvId, isLoadingEnvs]);
 
   function handleFormChange(field: keyof CreateAppForm, value: string | number) {
     setForm((prev) => ({ ...prev, [field]: value }));
-  }
-
-  function handleEnvironmentChange(envId: string) {
-    setIsLoadingApps(true);
-    setError(null);
-    setSelectedEnvId(envId);
   }
 
   async function handleSubmit(e: FormEvent<HTMLFormElement>) {
@@ -118,10 +77,10 @@ export default function AppsPage() {
       });
       setIsModalOpen(false);
       setForm({ name: "", image: "", port: 8080, replicas: 2, profile: "small" });
+      // Redirect immediately to the live-updating, highlighted operation
+      // rather than blocking on a blind timeout that feels like nothing happened.
       const opId = result.operation?.id;
-      setTimeout(() => {
-        router.push(`/projects/${projectId}/operations${opId ? `?highlight=${opId}` : ""}`);
-      }, 2000);
+      router.push(`/projects/${projectId}/operations${opId ? `?highlight=${opId}` : ""}`);
     } catch (err) {
       setSubmitError(err instanceof Error ? err.message : "Failed to create application");
     } finally {
@@ -129,8 +88,8 @@ export default function AppsPage() {
     }
   }
 
-  const selectedEnv = environments.find((e) => e.id === selectedEnvId);
   const isVMEnvironment = selectedEnv?.runtime === "vm";
+  const canCreate = canMutate(role);
 
   if (isLoadingEnvs) {
     return (
@@ -145,16 +104,17 @@ export default function AppsPage() {
       {/* Header */}
       <div className="mb-8 flex items-start justify-between">
         <div>
-          <div className="flex items-center gap-2 text-sm text-gray-500">
-            <Link href="/projects" className="hover:text-gray-700">Projects</Link>
-            <span>/</span>
-            <Link href={`/projects/${projectId}`} className="hover:text-gray-700">Overview</Link>
-            <span>/</span>
-            <span className="text-gray-900">Applications</span>
-          </div>
+          <Breadcrumb
+            items={[
+              { label: "Projects", href: "/projects" },
+              { label: project?.display_name ?? "Overview", href: `/projects/${projectId}` },
+              { label: "Applications" },
+            ]}
+          />
           <h1 className="mt-2 text-2xl font-bold text-gray-900">Applications</h1>
           <p className="mt-0.5 text-sm text-gray-500">Managed application workloads</p>
         </div>
+        {canCreate && (
         <button
           onClick={() => setIsModalOpen(true)}
           disabled={!selectedEnvId || isVMEnvironment}
@@ -165,35 +125,12 @@ export default function AppsPage() {
           </svg>
           Create App
         </button>
+        )}
       </div>
 
       {error && (
         <div className="mb-6 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
           {error}
-        </div>
-      )}
-
-      {/* Environment tabs */}
-      {environments.length > 0 && (
-        <div className="mb-6 flex gap-1 rounded-lg border border-gray-200 bg-gray-50 p-1 w-fit">
-          {environments.map((env) => (
-            <button
-              key={env.id}
-              onClick={() => handleEnvironmentChange(env.id)}
-              className={`rounded-md px-4 py-1.5 text-sm font-medium transition-colors ${
-                selectedEnvId === env.id
-                  ? "bg-white text-gray-900 shadow-sm"
-                  : "text-gray-500 hover:text-gray-700"
-              }`}
-            >
-              <span>{env.name}</span>
-              <span className={`ml-2 rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${
-                env.runtime === "vm" ? "bg-amber-100 text-amber-700" : "bg-slate-100 text-slate-600"
-              }`}>
-                {env.runtime === "vm" ? "VM" : "K8s"}
-              </span>
-            </button>
-          ))}
         </div>
       )}
 
@@ -335,7 +272,7 @@ export default function AppsPage() {
           </div>
 
           {submitError && (
-            <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+            <div role="alert" className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
               {submitError}
             </div>
           )}
