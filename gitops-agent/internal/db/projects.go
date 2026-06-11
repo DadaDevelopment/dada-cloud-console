@@ -48,6 +48,38 @@ func ListProjects(ctx context.Context, pool *pgxpool.Pool) ([]Project, error) {
 	return result, rows.Err()
 }
 
+// ProjectMember links a username to a role within a project.
+type ProjectMember struct {
+	Username string
+	Role     string
+}
+
+// ListProjectMembers returns all members of a project with their roles.
+func ListProjectMembers(ctx context.Context, pool *pgxpool.Pool, projectName string) ([]ProjectMember, error) {
+	rows, err := pool.Query(ctx, `
+		SELECT u.username, pm.role
+		FROM project_members pm
+		JOIN users u ON u.id = pm.user_id
+		JOIN projects p ON p.id = pm.project_id
+		WHERE p.name = $1
+		ORDER BY u.username
+	`, projectName)
+	if err != nil {
+		return nil, fmt.Errorf("query project members for %s: %w", projectName, err)
+	}
+	defer rows.Close()
+
+	var result []ProjectMember
+	for rows.Next() {
+		var m ProjectMember
+		if err := rows.Scan(&m.Username, &m.Role); err != nil {
+			return nil, fmt.Errorf("scan member: %w", err)
+		}
+		result = append(result, m)
+	}
+	return result, rows.Err()
+}
+
 // UpsertProject stores a project catalog row, preferring values from git.
 func UpsertProject(ctx context.Context, pool *pgxpool.Pool,
 	name, displayName, ownerType, defaultEnvironment string,
