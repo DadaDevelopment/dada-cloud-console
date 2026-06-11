@@ -21,13 +21,31 @@ Design: `tasks/mcp-server-design.md`. Shippable milestones, lowest-risk first.
 - [x] Streamable HTTP transport (go-sdk v1.6.1 `NewStreamableHTTPHandler`). Bearer passthrough via SDK `req.GetExtra().Header` (request ctx NOT propagated — found + handled).
 - [x] Tests: fixture-spec golden toolgen, proxy httptest (method/path/body/bearer/202/4xx/net), overrides, e2e vs REAL backend spec (39 tools). All pass. go build/vet green.
 
-## M3 — Keycloak auth (high-risk, coupled cutover)
-- [ ] Go `principal` pkg mirroring dada.sso contract.
-- [ ] Backend `auto` mode (proxy headers + bearer JWKS); replace local-JWT middleware.
-- [ ] MCP bearer mode + `/.well-known/oauth-protected-resource`.
-- [ ] Frontend adopts `@dada/react-sso`.
-- [ ] Authz Keycloak groups/roles — PHASE: hybrid first (global role KC + project_members), then deprecate (R1).
-- [ ] Keycloak clients via argo-infra (document config).
+## M3 — Keycloak auth (high-risk, coupled, CROSS-REPO; no live verify from here)
+Design: `tasks/keycloak-group-topology.md`. Decided: nested `/projects/<slug>/<role>` groups; full-path `groups` claim; provisioning = Crossplane Group CRs via gitops-agent (decision C); phased dual-write migration off `project_members`; keep `users` row (FK anchor) auto-provisioned by `keycloak_sub`.
+
+### M3a — Backend OIDC identity + Principal (code-verifiable now, flag-gated)
+- [ ] Config `AUTH_MODE=local|keycloak` (default local → reversible). Keycloak env: issuer `https://id.dada-tuda.ru/realms/master`, JWKS, VERIFY_AUD=false.
+- [ ] `internal/auth` Keycloak validator (go-oidc/JWKS, RS256, iss+exp), Principal{sub,email,groups,roles}.
+- [ ] Auto-provision/link `users` row by `keycloak_sub` (new column); populate existing Claims.UserID=users.id so all 50+ handlers stay unchanged.
+- [ ] Mock-JWKS unit tests (valid/iss/aud/exp/rotated-key). go build/vet/test.
+
+### M3b — Backend authz dual-read (phased)
+- [ ] `getUserProjectRole` reads token groups `/projects/<slug>/<role>` when present, else project_members (dual-read). platform-admin from `/platform-admins`.
+
+### M3c — gitops-agent KC Group CR rendering
+- [ ] On project create/delete + member change → render Keycloak Group/Membership CRs into state repo (provider-keycloak). Backfill script from project_members.
+
+### M3d — argo-infra manifests (author here, ArgoCD applies)
+- [ ] Clients `dada-console` (PKCE, console redirects) + `dada-mcp`; Group Membership mapper full.path=true; parent groups `platform-admins`,`projects`.
+
+### M3e — MCP Keycloak validation
+- [ ] MCP validates Keycloak bearer (shared validator) + serves `/.well-known/oauth-protected-resource`.
+
+### M3f — Frontend @dada/react-sso (oidc mode)
+- [ ] SsoProvider oidc mode, `/callback` page, silent-renew, swap api.ts to getAccessToken(). Remove local login.
+
+> Live verification (running Keycloak + cluster + ArgoCD) NOT possible from this environment. Code + manifests are unit-testable/lint-only here; end-to-end needs the cluster.
 
 ## M4 — Deploy
 - [ ] Helm: MCP Deployment+Service+Ingress (`mcp.dada-tuda.ru`); spec via configmap/backend image.
