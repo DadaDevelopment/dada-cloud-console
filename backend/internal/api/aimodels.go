@@ -754,7 +754,7 @@ func (h *Handler) RevealAIModelAPIKey(c *gin.Context) {
 	}
 	// Only the original requester (or platform-admin) can consume the reveal.
 	if actorID != claims.UserID {
-		role, _ := h.getUserProjectRole(c.Request.Context(), claims.UserID, projectID)
+		role, _ := h.getUserProjectRole(c.Request.Context(), claims.UserID, projectID, claims.Groups)
 		if role != models.MemberRolePlatformAdmin {
 			respondForbidden(c)
 			return
@@ -789,7 +789,11 @@ func (h *Handler) parseProjectEnv(c *gin.Context) (uuid.UUID, uuid.UUID, bool) {
 }
 
 func (h *Handler) requireMember(c *gin.Context, userID, projectID uuid.UUID) (models.MemberRole, error) {
-	role, err := h.getUserProjectRole(c.Request.Context(), userID, projectID)
+	var groups []string
+	if cl, ok := auth.GetClaims(c); ok {
+		groups = cl.Groups
+	}
+	role, err := h.getUserProjectRole(c.Request.Context(), userID, projectID, groups)
 	if errors.Is(err, pgx.ErrNoRows) {
 		respondNotFound(c)
 		return "", err

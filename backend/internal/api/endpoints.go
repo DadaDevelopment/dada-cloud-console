@@ -46,7 +46,7 @@ func (h *Handler) ListEndpoints(c *gin.Context) {
 	}
 	appName := c.Param("appName")
 
-	_, err = h.getUserProjectRole(c.Request.Context(), claims.UserID, projectID)
+	_, err = h.getUserProjectRole(c.Request.Context(), claims.UserID, projectID, claims.Groups)
 	if err == pgx.ErrNoRows {
 		respondNotFound(c)
 		return
@@ -136,7 +136,7 @@ func (h *Handler) CreateEndpoint(c *gin.Context) {
 	}
 	appName := c.Param("appName")
 
-	role, err := h.getUserProjectRole(c.Request.Context(), claims.UserID, projectID)
+	role, err := h.getUserProjectRole(c.Request.Context(), claims.UserID, projectID, claims.Groups)
 	if err == pgx.ErrNoRows {
 		respondNotFound(c)
 		return

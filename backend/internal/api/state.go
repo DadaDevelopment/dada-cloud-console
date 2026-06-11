@@ -18,7 +18,7 @@ func (h *Handler) requireProjectMember(c *gin.Context, projectID uuid.UUID) bool
 		respondUnauthorized(c)
 		return false
 	}
-	_, err := h.getUserProjectRole(c.Request.Context(), claims.UserID, projectID)
+	_, err := h.getUserProjectRole(c.Request.Context(), claims.UserID, projectID, claims.Groups)
 	if err == pgx.ErrNoRows {
 		respondNotFound(c)
 		return false

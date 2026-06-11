@@ -2,8 +2,9 @@
 // spec, reflects one MCP tool per operation, applies overrides.yaml, and serves
 // the tools over Streamable HTTP, proxying calls to the backend REST API.
 //
-// M2: bearer passthrough only (no validation). The inbound Authorization header
-// is forwarded verbatim to the backend. M3 will add Keycloak/JWKS validation.
+// M3: serves /.well-known/oauth-protected-resource (RFC 9728) so OAuth 2.0
+// clients can discover Keycloak as the authorization server. Token validation
+// is deferred to the backend; the MCP server forwards the bearer verbatim.
 package main
 
 import (
@@ -11,6 +12,9 @@ import (
 	"log"
 	"net/http"
 	"os"
+
+	sdkauth "github.com/modelcontextprotocol/go-sdk/auth"
+	"github.com/modelcontextprotocol/go-sdk/oauthex"
 
 	"github.com/dada-tuda/console/mcp-server/internal/auth"
 	"github.com/dada-tuda/console/mcp-server/internal/overrides"
@@ -20,7 +24,7 @@ import (
 
 const (
 	serverName    = "dada-cloud-mcp"
-	serverVersion = "0.2.0" // M2
+	serverVersion = "0.3.0" // M3
 )
 
 func main() {
@@ -55,11 +59,20 @@ func main() {
 
 	handler := mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return srv }, nil)
 
+	// OAuth 2.0 Protected Resource Metadata (RFC 9728 / MCP 2025-03-26 spec).
+	// Tells OAuth clients which authorization server issues tokens for this resource.
+	resourceMeta := &oauthex.ProtectedResourceMetadata{
+		Resource:               cfg.resourceURL,
+		AuthorizationServers:   []string{cfg.keycloakIssuer},
+		BearerMethodsSupported: []string{"header"},
+	}
+
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok"))
 	})
+	mux.Handle("/.well-known/oauth-protected-resource", sdkauth.ProtectedResourceMetadataHandler(resourceMeta))
 	// Bearer middleware stashes Authorization in request ctx (passthrough).
 	mux.Handle("/", auth.Middleware(handler))
 
@@ -117,18 +130,22 @@ func newTool(g reflect.GeneratedTool) *mcp.Tool {
 }
 
 type config struct {
-	port          string
-	backendURL    string
-	openAPIPath   string
-	overridesPath string
+	port           string
+	backendURL     string
+	openAPIPath    string
+	overridesPath  string
+	resourceURL    string
+	keycloakIssuer string
 }
 
 func loadConfig() config {
 	return config{
-		port:          envOr("MCP_PORT", "8090"),
-		backendURL:    os.Getenv("BACKEND_URL"),
-		openAPIPath:   os.Getenv("MCP_OPENAPI_PATH"),
-		overridesPath: envOr("MCP_OVERRIDES_PATH", "overrides.yaml"),
+		port:           envOr("MCP_PORT", "8090"),
+		backendURL:     os.Getenv("BACKEND_URL"),
+		openAPIPath:    os.Getenv("MCP_OPENAPI_PATH"),
+		overridesPath:  envOr("MCP_OVERRIDES_PATH", "overrides.yaml"),
+		resourceURL:    envOr("MCP_RESOURCE_URL", "https://mcp.dada-tuda.ru"),
+		keycloakIssuer: envOr("KEYCLOAK_ISSUER", "https://id.dada-tuda.ru/realms/master"),
 	}
 }
 
