@@ -1,0 +1,24 @@
+# overrides.yaml — thin curation layer over the auto-reflected tool set.
+#
+# The MCP server generates one tool per backend OpenAPI operation. This file
+# tunes that set for agent ergonomics WITHOUT touching the backend spec:
+#   rename:   map an operationId to a friendlier tool name
+#   hide:     drop tools that are noise for an agent (high-volume reads, etc.)
+#   annotate: replace a tool's description (agent-facing wording)
+#   group:    optional label, metadata only (no behavioural effect in M2)
+#
+# A missing file is a no-op. Edits take effect on server restart.
+
+# Hide high-volume read endpoints that are not useful as agent tools.
+# State endpoints (getAppState, getAppServerState) are kept on purpose.
+hide:
+  - getAppLogs
+  - getAppMetrics
+  - getAppServerMetrics
+  - searchLogs
+
+rename: {}
+
+annotate: {}
+
+group: {}

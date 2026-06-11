@@ -13,13 +13,13 @@ Design: `tasks/mcp-server-design.md`. Shippable milestones, lowest-risk first.
 - [x] Verified: go build, go vet, go test green.
 - NOTE follow-up: 7 endpoints bind anonymous request structs → typed `map[string]interface{}` (loose inputSchema). Extract named structs later for better tool schemas.
 
-## M2 — Reflection engine + MCP skeleton (testable vs current backend)
-- [ ] New module `mcp-server/`; kin-openapi parse.
-- [ ] toolgen: operation → MCP tool (name, inputSchema = path+query+body merge, read/destructive hints).
-- [ ] proxy handler: tool args → /api/v1, forward bearer; 202 → op-id + poll hint.
-- [ ] `overrides.yaml` loader (rename/hide/group/annotate).
-- [ ] Streamable HTTP transport (SDK from M0).
-- [ ] Tests: fixture spec → golden tool set; proxy httptest. Dev proof: list tools, order DB, get_operation terminal.
+## M2 — Reflection engine + MCP skeleton ✅
+- [x] Module `mcp-server/` (`github.com/dada-tuda/console/mcp-server`). Spec load file/HTTP, Swagger2→v3 via kin-openapi `openapi2conv.ToV3`.
+- [x] toolgen: operation → MCP tool (name=operationId, inputSchema = path+query+flattened-body merge, ReadOnly/Destructive hints).
+- [x] proxy handler: tool args → /api/v1, bearer from ctx; 202 → poll-getOperation hint; 4xx → IsError passthrough; 5xx/net → transient IsError.
+- [x] `overrides.yaml` loader (rename/hide/annotate/group); hides logs/metrics noise.
+- [x] Streamable HTTP transport (go-sdk v1.6.1 `NewStreamableHTTPHandler`). Bearer passthrough via SDK `req.GetExtra().Header` (request ctx NOT propagated — found + handled).
+- [x] Tests: fixture-spec golden toolgen, proxy httptest (method/path/body/bearer/202/4xx/net), overrides, e2e vs REAL backend spec (39 tools). All pass. go build/vet green.
 
 ## M3 — Keycloak auth (high-risk, coupled cutover)
 - [ ] Go `principal` pkg mirroring dada.sso contract.
