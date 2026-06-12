@@ -2,7 +2,6 @@
 
 # dependencies
 /node_modules
-/vendor/*/node_modules
 /.pnp
 .pnp.*
 .yarn/*

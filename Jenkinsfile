@@ -288,7 +288,19 @@ spec:
             container('node-builder') {
                 runStage('Frontend install') {
                     dir('frontend') {
-                        sh 'npm ci'
+                        // @dada/* deps resolve from internal Nexus npm (.npmrc).
+                        // NEXUS_NPM_AUTH = base64("user:pass"); .npmrc expands it.
+                        withCredentials([usernamePassword(
+                                credentialsId: 'docker-nexus-admin-psws',
+                                usernameVariable: 'NEXUS_USER',
+                                passwordVariable: 'NEXUS_PASS'
+                        )]) {
+                            sh '''
+                                set -eu
+                                export NEXUS_NPM_AUTH=$(printf '%s:%s' "$NEXUS_USER" "$NEXUS_PASS" | base64 | tr -d '\\n')
+                                npm ci
+                            '''
+                        }
                     }
                 }
 
@@ -322,18 +334,33 @@ spec:
                           -t ${BACKEND_IMAGE}:${resolvedTag} \\
                           -f backend/Dockerfile backend
                         docker build \\
-                          --build-arg NEXT_PUBLIC_AUTH_MODE=${NEXT_PUBLIC_AUTH_MODE} \\
-                          --build-arg NEXT_PUBLIC_KEYCLOAK_ISSUER=${NEXT_PUBLIC_KEYCLOAK_ISSUER} \\
-                          --build-arg NEXT_PUBLIC_OIDC_CLIENT_ID=${NEXT_PUBLIC_OIDC_CLIENT_ID} \\
-                          -t ${FRONTEND_IMAGE}:${resolvedTag} \\
-                          -f frontend/Dockerfile frontend
-                        docker build \\
                           -t ${GITOPS_AGENT_IMAGE}:${resolvedTag} \\
                           -f gitops-agent/Dockerfile gitops-agent
                         docker build \\
                           -t ${PORTAINER_AGENT_IMAGE}:${resolvedTag} \\
                           -f portainer-agent/Dockerfile portainer-agent
                     """
+                    // Frontend image: npm ci inside the build pulls @dada/* from
+                    // Nexus. Auth is passed as a BuildKit secret (never baked into
+                    // a layer). NEXT_PUBLIC_* are build args (baked — they are public).
+                    withCredentials([usernamePassword(
+                            credentialsId: 'docker-nexus-admin-psws',
+                            usernameVariable: 'NEXUS_USER',
+                            passwordVariable: 'NEXUS_PASS'
+                    )]) {
+                        sh """
+                            set -eu
+                            printf '%s:%s' "\${NEXUS_USER}" "\${NEXUS_PASS}" | base64 | tr -d '\\n' > /tmp/nexus_npm_auth
+                            DOCKER_BUILDKIT=1 docker build \\
+                              --secret id=nexus_npm_auth,src=/tmp/nexus_npm_auth \\
+                              --build-arg NEXT_PUBLIC_AUTH_MODE=${NEXT_PUBLIC_AUTH_MODE} \\
+                              --build-arg NEXT_PUBLIC_KEYCLOAK_ISSUER=${NEXT_PUBLIC_KEYCLOAK_ISSUER} \\
+                              --build-arg NEXT_PUBLIC_OIDC_CLIENT_ID=${NEXT_PUBLIC_OIDC_CLIENT_ID} \\
+                              -t ${FRONTEND_IMAGE}:${resolvedTag} \\
+                              -f frontend/Dockerfile frontend
+                            rm -f /tmp/nexus_npm_auth
+                        """
+                    }
                 }
 
                 // Push only on integration branches, not PRs

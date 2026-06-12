@@ -18,8 +18,12 @@ ENV NEXT_PUBLIC_KEYCLOAK_ISSUER=$NEXT_PUBLIC_KEYCLOAK_ISSUER
 ENV NEXT_PUBLIC_OIDC_CLIENT_ID=$NEXT_PUBLIC_OIDC_CLIENT_ID
 ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
 
-COPY package*.json ./
-RUN npm ci --prefer-offline
+# @dada/* deps come from internal Nexus npm (see .npmrc). Auth is provided as a
+# BuildKit secret so it never lands in an image layer:
+#   DOCKER_BUILDKIT=1 docker build --secret id=nexus_npm_auth,src=<file-with-base64-user:pass> ...
+COPY package*.json .npmrc ./
+RUN --mount=type=secret,id=nexus_npm_auth \
+    NEXUS_NPM_AUTH="$(cat /run/secrets/nexus_npm_auth 2>/dev/null)" npm ci --prefer-offline
 COPY . .
 RUN npm run build
 
