@@ -101,6 +101,7 @@ async function loadOidcProvider(): Promise<React.ComponentType<{ children: React
       if (sso.status === "authenticated") {
         sso.getAccessToken().then(setToken);
       } else {
+        // eslint-disable-next-line react-hooks/set-state-in-effect
         setToken(null);
       }
     }, [sso, sso.status]);
