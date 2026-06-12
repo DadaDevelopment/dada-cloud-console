@@ -37,7 +37,15 @@ import type {
 // Override with NEXT_PUBLIC_API_URL at build time only for non-prod targets.
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? "";
 
-function getToken(): string | null {
+type TokenGetter = () => Promise<string | null>;
+let _tokenGetter: TokenGetter | null = null;
+
+export function setTokenGetter(fn: TokenGetter | null): void {
+  _tokenGetter = fn;
+}
+
+async function getToken(): Promise<string | null> {
+  if (_tokenGetter) return _tokenGetter();
   if (typeof window === "undefined") return null;
   return localStorage.getItem("dada_token");
 }
@@ -54,7 +62,7 @@ export async function apiFetch<T>(
 ): Promise<T> {
   const { method = "GET", body, token } = options;
 
-  const bearerToken = token ?? getToken();
+  const bearerToken = token ?? await getToken();
 
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
@@ -355,7 +363,7 @@ export async function callInference(
   body: BodyInit,
   contentType?: string,
 ): Promise<Response> {
-  const token = typeof window !== "undefined" ? localStorage.getItem("dada_token") : null;
+  const token = typeof window !== "undefined" ? await getToken() : null;
   const headers: Record<string, string> = {};
   if (token) headers["Authorization"] = `Bearer ${token}`;
   if (contentType) headers["Content-Type"] = contentType;
