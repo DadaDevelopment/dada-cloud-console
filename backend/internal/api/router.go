@@ -3,11 +3,13 @@ package api
 import (
 	"context"
 	"fmt"
+	"log"
 	"net/http"
 	"time"
 
 	"github.com/dada-tuda/console/backend/internal/auth"
 	"github.com/dada-tuda/console/backend/internal/config"
+	internalmcp "github.com/dada-tuda/console/backend/internal/mcp"
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -92,6 +94,28 @@ func SetupRouter(pool *pgxpool.Pool, cfg *config.Config) *gin.Engine {
 
 	// Embedded OpenAPI spec (public — feeds the reflective MCP server).
 	r.GET("/openapi.json", ServeOpenAPISpec)
+
+	// Embedded MCP server at /mcp (Streamable HTTP transport).
+	// Each tool call self-proxies to cfg.MCPSelfURL/api/v1/... so auth and all
+	// middleware apply unchanged. Disabled via MCP_ENABLED=false.
+	if cfg.MCPEnabled {
+		selfURL := cfg.MCPSelfURL
+		if selfURL == "" {
+			selfURL = "http://127.0.0.1:" + cfg.Port
+		}
+		mcpHandler, err := internalmcp.NewHandler(EmbeddedSpec(), internalmcp.Config{
+			BackendURL:     selfURL,
+			OverridesPath:  cfg.MCPOverridesPath,
+			ResourceURL:    cfg.MCPResourceURL,
+			KeycloakIssuer: cfg.KeycloakIssuer,
+		})
+		if err != nil {
+			log.Fatalf("mcp: failed to initialize: %v", err)
+		}
+		r.Any("/mcp", gin.WrapH(http.StripPrefix("/mcp", mcpHandler)))
+		r.Any("/mcp/*path", gin.WrapH(http.StripPrefix("/mcp", mcpHandler)))
+		log.Printf("mcp: serving at /mcp (self-proxy -> %s)", selfURL)
+	}
 
 	// Authenticated routes — pick the auth middleware by configured mode.
 	api := r.Group("/api/v1", authMiddleware(pool, cfg))

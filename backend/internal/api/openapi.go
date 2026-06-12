@@ -26,3 +26,7 @@ var openapiSpec []byte
 func ServeOpenAPISpec(c *gin.Context) {
 	c.Data(http.StatusOK, "application/json; charset=utf-8", openapiSpec)
 }
+
+// EmbeddedSpec returns the raw embedded swagger.json bytes. Used by the
+// embedded MCP server to reflect tools at startup without an HTTP round-trip.
+func EmbeddedSpec() []byte { return openapiSpec }

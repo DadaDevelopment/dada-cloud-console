@@ -1,0 +1,151 @@
+package mcp
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"net/url"
+	"strings"
+	"time"
+
+	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
+)
+
+// ToolHandler matches the SDK's AddTool handler signature.
+type ToolHandler func(context.Context, *sdkmcp.CallToolRequest) (*sdkmcp.CallToolResult, error)
+
+var proxyClient = &http.Client{Timeout: 60 * time.Second}
+
+// bearerKey is a context key for the inbound bearer token.
+type bearerKey struct{}
+
+// WithBearer stashes the raw Authorization header value in ctx.
+func WithBearer(ctx context.Context, bearer string) context.Context {
+	return context.WithValue(ctx, bearerKey{}, bearer)
+}
+
+// BearerFromContext retrieves the bearer stored by WithBearer.
+func BearerFromContext(ctx context.Context) string {
+	v, _ := ctx.Value(bearerKey{}).(string)
+	return v
+}
+
+// MakeHandler builds the proxy handler for a generated tool. Each tool call:
+//   - parses args (flat JSON object)
+//   - substitutes path params
+//   - appends query params
+//   - JSON-encodes remaining props as body
+//   - forwards Authorization from ctx to the backend request
+//   - maps the response to a CallToolResult
+//
+// backendURL is the base URL for self-proxy (e.g. "http://127.0.0.1:8080").
+func MakeHandler(g GeneratedTool, backendURL, basePath string) ToolHandler {
+	backendURL = strings.TrimRight(backendURL, "/")
+	basePath = strings.TrimRight(basePath, "/")
+
+	pathSet := toSet(g.PathParams)
+	querySet := toSet(g.QueryParams)
+
+	return func(ctx context.Context, req *sdkmcp.CallToolRequest) (*sdkmcp.CallToolResult, error) {
+		args := map[string]any{}
+		if raw := req.Params.Arguments; len(raw) > 0 {
+			if err := json.Unmarshal(raw, &args); err != nil {
+				return errResult(fmt.Sprintf("invalid arguments: %v", err)), nil
+			}
+		}
+
+		filledPath := g.PathTemplate
+		for _, name := range g.PathParams {
+			val, ok := args[name]
+			if !ok {
+				return errResult(fmt.Sprintf("missing required path parameter %q", name)), nil
+			}
+			filledPath = strings.ReplaceAll(filledPath, "{"+name+"}", url.PathEscape(fmt.Sprint(val)))
+		}
+
+		q := url.Values{}
+		for _, name := range g.QueryParams {
+			if val, ok := args[name]; ok {
+				q.Set(name, fmt.Sprint(val))
+			}
+		}
+
+		var bodyReader io.Reader
+		if g.Method != http.MethodGet {
+			body := map[string]any{}
+			for k, v := range args {
+				if pathSet[k] || querySet[k] {
+					continue
+				}
+				body[k] = v
+			}
+			if len(body) > 0 {
+				b, err := json.Marshal(body)
+				if err != nil {
+					return errResult(fmt.Sprintf("encode body: %v", err)), nil
+				}
+				bodyReader = bytes.NewReader(b)
+			}
+		}
+
+		fullURL := backendURL + basePath + filledPath
+		if enc := q.Encode(); enc != "" {
+			fullURL += "?" + enc
+		}
+
+		httpReq, err := http.NewRequestWithContext(ctx, g.Method, fullURL, bodyReader)
+		if err != nil {
+			return errResult(fmt.Sprintf("build request: %v", err)), nil
+		}
+		httpReq.Header.Set("Content-Type", "application/json")
+		if bearer := BearerFromContext(ctx); bearer != "" {
+			httpReq.Header.Set("Authorization", bearer)
+		}
+
+		resp, err := proxyClient.Do(httpReq)
+		if err != nil {
+			return errResult(fmt.Sprintf("backend error (transient), retry: %v", err)), nil
+		}
+		defer resp.Body.Close()
+
+		respBody, _ := io.ReadAll(resp.Body)
+		return mapResponse(resp.StatusCode, respBody), nil
+	}
+}
+
+func mapResponse(status int, body []byte) *sdkmcp.CallToolResult {
+	switch {
+	case status >= 200 && status < 300:
+		text := string(body)
+		if status == http.StatusAccepted {
+			text = "Operation queued — poll the getOperation tool with the returned operation id to track it to a terminal status.\n\n" + text
+		}
+		return textResult(text, false)
+	case status >= 400 && status < 500:
+		return textResult(string(body), true)
+	default:
+		return textResult(fmt.Sprintf("backend error (transient), retry: status %d\n%s", status, string(body)), true)
+	}
+}
+
+func textResult(text string, isError bool) *sdkmcp.CallToolResult {
+	return &sdkmcp.CallToolResult{
+		IsError: isError,
+		Content: []sdkmcp.Content{&sdkmcp.TextContent{Text: text}},
+	}
+}
+
+func errResult(msg string) *sdkmcp.CallToolResult {
+	return textResult(msg, true)
+}
+
+func toSet(s []string) map[string]bool {
+	m := make(map[string]bool, len(s))
+	for _, v := range s {
+		m[v] = true
+	}
+	return m
+}

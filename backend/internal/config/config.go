@@ -64,6 +64,17 @@ type Config struct {
 	ElasticsearchURL    string // ELASTICSEARCH_URL
 	ElasticsearchAPIKey string // ELASTICSEARCH_API_KEY
 	ElasticsearchIndex  string // ELASTICSEARCH_LOG_INDEX (default "filebeat-*")
+
+	// Embedded MCP server. Served at /mcp (Streamable HTTP transport).
+	// MCPEnabled defaults to true. Set MCP_ENABLED=false to disable.
+	// MCPSelfURL is the loopback URL the MCP proxy uses to call backend
+	// handlers (default: http://127.0.0.1:<PORT>/api/v1).
+	// MCPOverridesPath is optional path to overrides.yaml for tool curation.
+	// MCPResourceURL is the OAuth resource identifier for RFC 9728 metadata.
+	MCPEnabled       bool   // MCP_ENABLED (default true)
+	MCPSelfURL       string // MCP_SELF_URL (default derived from PORT)
+	MCPOverridesPath string // MCP_OVERRIDES_PATH (default "overrides.yaml")
+	MCPResourceURL   string // MCP_RESOURCE_URL (default "https://console.dada-tuda.ru/mcp")
 }
 
 // Load reads configuration from environment variables.
@@ -95,6 +106,10 @@ func Load() (*Config, error) {
 		ElasticsearchURL:        getEnv("ELASTICSEARCH_URL", ""),
 		ElasticsearchAPIKey:     getEnv("ELASTICSEARCH_API_KEY", ""),
 		ElasticsearchIndex:      getEnv("ELASTICSEARCH_LOG_INDEX", "filebeat-*"),
+		MCPEnabled:              getEnv("MCP_ENABLED", "true") == "true",
+		MCPSelfURL:              getEnv("MCP_SELF_URL", ""),
+		MCPOverridesPath:        getEnv("MCP_OVERRIDES_PATH", "overrides.yaml"),
+		MCPResourceURL:          getEnv("MCP_RESOURCE_URL", "https://console.dada-tuda.ru/mcp"),
 	}
 
 	if cfg.DBURL == "" {
