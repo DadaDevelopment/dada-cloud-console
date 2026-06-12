@@ -35,38 +35,97 @@ func (h *Handler) ListProjects(c *gin.Context) {
 		return
 	}
 
-	rows, err := h.pool.Query(c.Request.Context(),
-		`SELECT p.id, p.name, p.display_name, p.owner_type, p.owner_id,
-		        p.default_environment, p.quotas, p.created_at, p.updated_at,
-		        pm.role
-		 FROM projects p
-		 JOIN project_members pm ON pm.project_id = p.id
-		 WHERE pm.user_id = $1
-		 ORDER BY p.name`,
-		claims.UserID,
-	)
-	if err != nil {
-		respondError(c, http.StatusInternalServerError, "failed to query projects")
-		return
-	}
-	defer rows.Close()
-
 	var projects []projectWithRole
-	for rows.Next() {
-		var p projectWithRole
-		if err := rows.Scan(
-			&p.ID, &p.Name, &p.DisplayName, &p.OwnerType, &p.OwnerID,
-			&p.DefaultEnvironment, &p.Quotas, &p.CreatedAt, &p.UpdatedAt,
-			&p.Role,
-		); err != nil {
-			respondError(c, http.StatusInternalServerError, "failed to scan project")
+
+	if len(claims.Groups) > 0 {
+		// Keycloak mode: derive project list from bearer token groups.
+		slugRoles, isPlatformAdmin := slugRolesFromGroups(claims.Groups)
+
+		const projectCols = `SELECT id, name, display_name, owner_type, owner_id,
+		        default_environment, quotas, created_at, updated_at FROM projects`
+
+		var rows interface {
+			Next() bool
+			Scan(...any) error
+			Err() error
+			Close()
+		}
+		var queryErr error
+
+		if isPlatformAdmin {
+			rows, queryErr = h.pool.Query(c.Request.Context(),
+				projectCols+` ORDER BY name`)
+		} else if len(slugRoles) > 0 {
+			slugs := make([]string, 0, len(slugRoles))
+			for s := range slugRoles {
+				slugs = append(slugs, s)
+			}
+			rows, queryErr = h.pool.Query(c.Request.Context(),
+				projectCols+` WHERE name = ANY($1) ORDER BY name`, slugs)
+		}
+
+		if queryErr != nil {
+			respondError(c, http.StatusInternalServerError, "failed to query projects")
 			return
 		}
-		projects = append(projects, p)
-	}
-	if err := rows.Err(); err != nil {
-		respondError(c, http.StatusInternalServerError, "error reading projects")
-		return
+
+		if rows != nil {
+			defer rows.Close()
+			for rows.Next() {
+				var p projectWithRole
+				if err := rows.Scan(
+					&p.ID, &p.Name, &p.DisplayName, &p.OwnerType, &p.OwnerID,
+					&p.DefaultEnvironment, &p.Quotas, &p.CreatedAt, &p.UpdatedAt,
+				); err != nil {
+					respondError(c, http.StatusInternalServerError, "failed to scan project")
+					return
+				}
+				if isPlatformAdmin {
+					p.Role = models.MemberRolePlatformAdmin
+				} else {
+					p.Role = slugRoles[p.Name]
+				}
+				projects = append(projects, p)
+			}
+			if err := rows.Err(); err != nil {
+				respondError(c, http.StatusInternalServerError, "error reading projects")
+				return
+			}
+		}
+	} else {
+		// Local mode: project_members JOIN.
+		rows, err := h.pool.Query(c.Request.Context(),
+			`SELECT p.id, p.name, p.display_name, p.owner_type, p.owner_id,
+			        p.default_environment, p.quotas, p.created_at, p.updated_at,
+			        pm.role
+			 FROM projects p
+			 JOIN project_members pm ON pm.project_id = p.id
+			 WHERE pm.user_id = $1
+			 ORDER BY p.name`,
+			claims.UserID,
+		)
+		if err != nil {
+			respondError(c, http.StatusInternalServerError, "failed to query projects")
+			return
+		}
+		defer rows.Close()
+
+		for rows.Next() {
+			var p projectWithRole
+			if err := rows.Scan(
+				&p.ID, &p.Name, &p.DisplayName, &p.OwnerType, &p.OwnerID,
+				&p.DefaultEnvironment, &p.Quotas, &p.CreatedAt, &p.UpdatedAt,
+				&p.Role,
+			); err != nil {
+				respondError(c, http.StatusInternalServerError, "failed to scan project")
+				return
+			}
+			projects = append(projects, p)
+		}
+		if err := rows.Err(); err != nil {
+			respondError(c, http.StatusInternalServerError, "error reading projects")
+			return
+		}
 	}
 
 	if projects == nil {

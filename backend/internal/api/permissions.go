@@ -35,6 +35,54 @@ func roleFromGroups(groups []string, projectSlug string) models.MemberRole {
 	return ""
 }
 
+// slugRolesFromGroups parses KC group paths and returns a map of projectSlug → role.
+// The boolean return is true when the user is a platform-admin (all projects).
+func slugRolesFromGroups(groups []string) (slugRoles map[string]models.MemberRole, isPlatformAdmin bool) {
+	slugRoles = make(map[string]models.MemberRole)
+	for _, g := range groups {
+		if g == "/platform-admins" {
+			return nil, true
+		}
+	}
+	for _, g := range groups {
+		if !strings.HasPrefix(g, "/projects/") {
+			continue
+		}
+		rest := strings.TrimPrefix(g, "/projects/")
+		idx := strings.LastIndex(rest, "/")
+		if idx < 0 {
+			continue
+		}
+		slug := rest[:idx]
+		role := models.MemberRole(rest[idx+1:])
+		switch role {
+		case models.MemberRolePlatformAdmin, models.MemberRoleDeveloper,
+			models.MemberRoleClientAdmin, models.MemberRoleClientViewer:
+		default:
+			continue
+		}
+		// Keep highest-privilege role if the user appears in multiple subgroups.
+		if existing, ok := slugRoles[slug]; !ok || rolePriority(role) > rolePriority(existing) {
+			slugRoles[slug] = role
+		}
+	}
+	return slugRoles, false
+}
+
+func rolePriority(r models.MemberRole) int {
+	switch r {
+	case models.MemberRolePlatformAdmin:
+		return 4
+	case models.MemberRoleClientAdmin:
+		return 3
+	case models.MemberRoleDeveloper:
+		return 2
+	case models.MemberRoleClientViewer:
+		return 1
+	}
+	return 0
+}
+
 // getUserProjectRole returns the user's role in a project, or pgx.ErrNoRows if not a member.
 //
 // Dual-read: when groups is non-empty (Keycloak mode) the role is derived from

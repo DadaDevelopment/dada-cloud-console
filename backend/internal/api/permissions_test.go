@@ -77,3 +77,59 @@ func TestRoleFromGroups(t *testing.T) {
 		})
 	}
 }
+
+func TestSlugRolesFromGroups(t *testing.T) {
+	t.Run("platform-admins returns isPlatformAdmin=true", func(t *testing.T) {
+		_, isAdmin := slugRolesFromGroups([]string{"/platform-admins", "/projects/x/developer"})
+		if !isAdmin {
+			t.Fatal("expected isPlatformAdmin=true")
+		}
+	})
+
+	t.Run("extracts multiple slugs", func(t *testing.T) {
+		m, isAdmin := slugRolesFromGroups([]string{
+			"/projects/acme/developer",
+			"/projects/beta/client-admin",
+			"/unrelated",
+		})
+		if isAdmin {
+			t.Fatal("unexpected isPlatformAdmin")
+		}
+		if m["acme"] != models.MemberRoleDeveloper {
+			t.Errorf("acme role = %q, want developer", m["acme"])
+		}
+		if m["beta"] != models.MemberRoleClientAdmin {
+			t.Errorf("beta role = %q, want client-admin", m["beta"])
+		}
+		if _, ok := m["unrelated"]; ok {
+			t.Error("unrelated group should not appear")
+		}
+	})
+
+	t.Run("highest-priority role wins for same slug", func(t *testing.T) {
+		m, _ := slugRolesFromGroups([]string{
+			"/projects/acme/client-viewer",
+			"/projects/acme/developer",
+		})
+		if m["acme"] != models.MemberRoleDeveloper {
+			t.Errorf("acme role = %q, want developer", m["acme"])
+		}
+	})
+
+	t.Run("unknown role is skipped", func(t *testing.T) {
+		m, _ := slugRolesFromGroups([]string{"/projects/acme/superuser"})
+		if _, ok := m["acme"]; ok {
+			t.Error("superuser should be rejected")
+		}
+	})
+
+	t.Run("empty groups returns empty map", func(t *testing.T) {
+		m, isAdmin := slugRolesFromGroups(nil)
+		if isAdmin {
+			t.Fatal("unexpected isPlatformAdmin")
+		}
+		if len(m) != 0 {
+			t.Errorf("expected empty map, got %v", m)
+		}
+	})
+}
