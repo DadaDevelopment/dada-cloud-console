@@ -54,6 +54,19 @@ backend:
     APP_ENV: production
     PORT: "8080"
     ARGO_CLUSTER_NAME: ""
+    # Identity provider. "local" = HS256 JWT (dev default). "keycloak" = JWKS validation;
+    # JWT_SECRET is not required in keycloak mode.
+    AUTH_MODE: "local"
+    KEYCLOAK_ISSUER: "https://id.dada-tuda.ru/realms/master"
+    # KEYCLOAK_VERIFY_AUD: "false" — KC access tokens often have aud="account".
+    # Set to "true" and KEYCLOAK_AUDIENCE if your realm issues a specific audience.
+    KEYCLOAK_VERIFY_AUD: "false"
+    KEYCLOAK_AUDIENCE: "account"
+    # Client whose resource_access roles are extracted; usually the M2M service client.
+    KEYCLOAK_ROLES_CLIENT: "service-client"
+    # Embedded MCP server (served at /mcp). Disable via MCP_ENABLED=false.
+    MCP_ENABLED: "true"
+    MCP_RESOURCE_URL: "https://console.dada-tuda.ru/mcp"
     # AI Studio (v1, default on). Set to "false" to hide all AI Studio
     # routes as a runtime kill-switch. Leave MLFLOW_BASE_URL empty to fall
     # back to "paste artifactURI" in the deploy wizard.
@@ -71,6 +84,8 @@ backend:
   # Service-unique secrets only. Shared keys (DB_URL, GITOPS_VALUES_TOKEN_SECRET,
   # PORTAINER_API_TOKEN) come from global.shared via the Secret template.
   secret:
+    # Required in local auth mode. Not used when AUTH_MODE=keycloak; set to ""
+    # or any placeholder to satisfy the Secret template.
     JWT_SECRET: "change-me"
     # Optional MLflow Authorization header value, forwarded as-is on every
     # registry call. Empty when MLflow has no auth.
@@ -191,6 +206,13 @@ frontend:
   env:
     NODE_ENV: production
     NEXT_PUBLIC_API_URL: ""
+    # NOTE: NEXT_PUBLIC_* vars are baked into the JS bundle at build time.
+    # These values here are purely documentation; to take effect they must be
+    # passed as --build-arg to `docker build` when building the frontend image.
+    # See frontend/Dockerfile ARG declarations.
+    NEXT_PUBLIC_AUTH_MODE: "local"
+    NEXT_PUBLIC_KEYCLOAK_ISSUER: "https://id.dada-tuda.ru/realms/master"
+    NEXT_PUBLIC_OIDC_CLIENT_ID: "dada-console"
   resources:
     requests:
       cpu: 100m
