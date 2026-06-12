@@ -13,6 +13,12 @@ def FRONTEND_IMAGE        = "${GITHUB_REGISTRY}/${GITHUB_ORG}/dada-cloud-console
 def GITOPS_AGENT_IMAGE    = "${GITHUB_REGISTRY}/${GITHUB_ORG}/dada-cloud-console-gitops-agent"
 def PORTAINER_AGENT_IMAGE = "${GITHUB_REGISTRY}/${GITHUB_ORG}/dada-cloud-console-portainer-agent"
 
+// Frontend OIDC build-time constants. NEXT_PUBLIC_* vars are baked into the
+// JS bundle — must be set during both `npm run build` and `docker build`.
+def NEXT_PUBLIC_AUTH_MODE       = 'oidc'
+def NEXT_PUBLIC_KEYCLOAK_ISSUER = 'https://id.dada-tuda.ru/realms/master'
+def NEXT_PUBLIC_OIDC_CLIENT_ID  = 'dada-console'
+
 def podLabel  = "kubeagent-${env.JOB_BASE_NAME ?: 'job'}-${env.BUILD_NUMBER ?: 'manual'}"
         .replaceAll('[^A-Za-z0-9-]', '-')
         .toLowerCase()
@@ -288,14 +294,20 @@ spec:
 
                 runStage('Frontend typecheck + build') {
                     dir('frontend') {
-                        sh '''
-                            set -eux
-                            node -e "const p=require('./package.json'); process.exit(p.scripts && p.scripts.typecheck ? 0 : 1)" \
-                              && npm run typecheck || echo "No typecheck script — skip"
-                            node -e "const p=require('./package.json'); process.exit(p.scripts && p.scripts.lint ? 0 : 1)" \
-                              && npm run lint || echo "No lint script — skip"
-                            npm run build
-                        '''
+                        withEnv([
+                            "NEXT_PUBLIC_AUTH_MODE=${NEXT_PUBLIC_AUTH_MODE}",
+                            "NEXT_PUBLIC_KEYCLOAK_ISSUER=${NEXT_PUBLIC_KEYCLOAK_ISSUER}",
+                            "NEXT_PUBLIC_OIDC_CLIENT_ID=${NEXT_PUBLIC_OIDC_CLIENT_ID}",
+                        ]) {
+                            sh '''
+                                set -eux
+                                node -e "const p=require('./package.json'); process.exit(p.scripts && p.scripts.typecheck ? 0 : 1)" \
+                                  && npm run typecheck || echo "No typecheck script — skip"
+                                node -e "const p=require('./package.json'); process.exit(p.scripts && p.scripts.lint ? 0 : 1)" \
+                                  && npm run lint || echo "No lint script — skip"
+                                npm run build
+                            '''
+                        }
                     }
                 }
             }
@@ -310,6 +322,9 @@ spec:
                           -t ${BACKEND_IMAGE}:${resolvedTag} \\
                           -f backend/Dockerfile backend
                         docker build \\
+                          --build-arg NEXT_PUBLIC_AUTH_MODE=${NEXT_PUBLIC_AUTH_MODE} \\
+                          --build-arg NEXT_PUBLIC_KEYCLOAK_ISSUER=${NEXT_PUBLIC_KEYCLOAK_ISSUER} \\
+                          --build-arg NEXT_PUBLIC_OIDC_CLIENT_ID=${NEXT_PUBLIC_OIDC_CLIENT_ID} \\
                           -t ${FRONTEND_IMAGE}:${resolvedTag} \\
                           -f frontend/Dockerfile frontend
                         docker build \\

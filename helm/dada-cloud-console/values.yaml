@@ -56,7 +56,7 @@ backend:
     ARGO_CLUSTER_NAME: ""
     # Identity provider. "local" = HS256 JWT (dev default). "keycloak" = JWKS validation;
     # JWT_SECRET is not required in keycloak mode.
-    AUTH_MODE: "local"
+    AUTH_MODE: "keycloak"
     KEYCLOAK_ISSUER: "https://id.dada-tuda.ru/realms/master"
     # KEYCLOAK_VERIFY_AUD: "false" — KC access tokens often have aud="account".
     # Set to "true" and KEYCLOAK_AUDIENCE if your realm issues a specific audience.
@@ -84,9 +84,8 @@ backend:
   # Service-unique secrets only. Shared keys (DB_URL, GITOPS_VALUES_TOKEN_SECRET,
   # PORTAINER_API_TOKEN) come from global.shared via the Secret template.
   secret:
-    # Required in local auth mode. Not used when AUTH_MODE=keycloak; set to ""
-    # or any placeholder to satisfy the Secret template.
-    JWT_SECRET: "change-me"
+    # Required in local auth mode. Not used when AUTH_MODE=keycloak.
+    JWT_SECRET: ""
     # Optional MLflow Authorization header value, forwarded as-is on every
     # registry call. Empty when MLflow has no auth.
     MLFLOW_AUTH_HEADER: ""
@@ -210,7 +209,7 @@ frontend:
     # These values here are purely documentation; to take effect they must be
     # passed as --build-arg to `docker build` when building the frontend image.
     # See frontend/Dockerfile ARG declarations.
-    NEXT_PUBLIC_AUTH_MODE: "local"
+    NEXT_PUBLIC_AUTH_MODE: "oidc"
     NEXT_PUBLIC_KEYCLOAK_ISSUER: "https://id.dada-tuda.ru/realms/master"
     NEXT_PUBLIC_OIDC_CLIENT_ID: "dada-console"
   resources:
