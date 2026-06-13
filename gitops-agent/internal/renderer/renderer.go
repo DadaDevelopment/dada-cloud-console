@@ -50,11 +50,34 @@ func RenderServiceDatabase(spec ServiceDatabaseSpec) (string, error) {
 	return buf.String(), nil
 }
 
-// ServiceDatabaseGitPath places the ServiceDatabase manifest inside the owning
-// app's resources chart (resources/templates/), so it is reconciled as part of
-// that app alongside its (possibly external) workload chart.
-func ServiceDatabaseGitPath(projectSlug, envSlug, appRef string) string {
-	return AppResourcesTemplatesGitPath(projectSlug, envSlug, appRef) + "/servicedatabase.yaml"
+// StandaloneOwnerApp builds the per-project chart that owns standalone
+// (environment-level) resources of one type, e.g. "service-databases-acme".
+//
+// Why the project slug is baked in: the tenant-apps ApplicationSet names every
+// generated ArgoCD Application "<app>-<env>" — the project is NOT part of the
+// name. A bare "storage" / "models" chart would therefore collide across any
+// two projects sharing an environment (both → "storage-prod"). Embedding the
+// project makes "<type>-<project>-<env>" globally unique.
+func StandaloneOwnerApp(resourceType, projectSlug string) string {
+	return resourceType + "-" + projectSlug
+}
+
+// ServiceDatabaseOwnerApp returns the app whose chart owns a database: the
+// bound app (appRef) when set, otherwise the per-project standalone
+// "service-databases-<project>" chart.
+func ServiceDatabaseOwnerApp(appRef, projectSlug string) string {
+	if appRef == "" {
+		return StandaloneOwnerApp("service-databases", projectSlug)
+	}
+	return appRef
+}
+
+// ServiceDatabaseResourcesValuesGitPath returns the resources.values.yaml of the
+// app that owns the database — the bound app (appRef) or, when standalone, the
+// shared per-project "service-databases-<project>" app. The CR itself is now an
+// entry in that file's manifests: list (keyed by kind+name), not a standalone file.
+func ServiceDatabaseResourcesValuesGitPath(projectSlug, envSlug, appRef string) string {
+	return AppResourcesValuesGitPath(projectSlug, envSlug, ServiceDatabaseOwnerApp(appRef, projectSlug))
 }
 
 // AppSpec holds parameters for an App manifest.
@@ -77,6 +100,11 @@ var appFuncMap = template.FuncMap{
 	"appHelmValuesGitPath": AppHelmValuesGitPath,
 }
 
+// NOTE: spec.helm.path still points at the resources/ directory and
+// spec.resources: true wires the shared app-resources chart (ADR 0005). The
+// per-app chart no longer lives on disk; the ApplicationSet renders the stable
+// shared helm/app-resources chart fed by resources.values.yaml
+// (ignoreMissingValueFiles: true). The App CR shape here is UNCHANGED.
 var appTmpl = template.Must(template.New("app").Funcs(appFuncMap).Parse(`apiVersion: platform.dada-tuda.ru/v1alpha1
 kind: App
 metadata:
@@ -130,35 +158,25 @@ func AppBaseGitPath(projectSlug, envSlug, appName string) string {
 }
 
 func AppGitPath(projectSlug, envSlug, appName string) string {
-	return AppBaseGitPath(projectSlug, envSlug, appName) + "/application.yaml"
+	return AppBaseGitPath(projectSlug, envSlug, appName) + "/app.yaml"
 }
 
-// AppResourcesGitPath is the resources/ directory the App CR points its
-// helm.path at. It is a self-contained Helm chart (Chart.yaml + templates/)
-// holding our platform CRDs, kept separate from any external workload chart the
-// user may configure. ArgoCD renders this directory directly.
+// AppResourcesGitPath is the resources/ value the App CR points its helm.path
+// at (kept for the App CR template). Under ADR 0005 the platform controller no
+// longer renders a per-app chart from this directory; instead spec.resources
+// wires the shared helm/app-resources chart fed by resources.values.yaml. The
+// path string is preserved so the App CR shape is unchanged.
 func AppResourcesGitPath(projectSlug, envSlug, appName string) string {
 	return AppBaseGitPath(projectSlug, envSlug, appName) + "/resources"
 }
 
-// AppResourcesTemplatesGitPath is the templates/ dir of an app's resources
-// chart. Child resources (ServiceDatabase, AIModel, PublicApi) are committed
-// here so they are reconciled together with the app that owns them.
-func AppResourcesTemplatesGitPath(projectSlug, envSlug, appName string) string {
-	return AppResourcesGitPath(projectSlug, envSlug, appName) + "/templates"
-}
-
-// AppResourcesChartYamlGitPath is the Chart.yaml at the root of the resources chart.
-func AppResourcesChartYamlGitPath(projectSlug, envSlug, appName string) string {
-	return AppResourcesGitPath(projectSlug, envSlug, appName) + "/Chart.yaml"
-}
-
-// RenderChartYaml renders a minimal valid Helm Chart.yaml so the app's chart/
-// directory is a well-formed chart that the platform controller can render,
-// even before any child resource is added under templates/.
-func RenderChartYaml(appName string) string {
-	return fmt.Sprintf("apiVersion: v2\nname: %s\ndescription: Auto-generated chart for app %s\ntype: application\nversion: 0.1.0\n",
-		appName, appName)
+// AppResourcesValuesGitPath is the single resources artifact per app under ADR
+// 0005: resources.values.yaml with one top-level "manifests:" list, each entry a
+// full platform CR. Replaces the former per-app resources/ Helm chart
+// (Chart.yaml + templates/<kind>.yaml). The shared helm/app-resources chart
+// renders this file (ignoreMissingValueFiles: true), so an absent file is safe.
+func AppResourcesValuesGitPath(projectSlug, envSlug, appName string) string {
+	return AppBaseGitPath(projectSlug, envSlug, appName) + "/resources.values.yaml"
 }
 
 func AppHelmValuesGitPath(projectSlug, envSlug, appName string) string {
@@ -268,13 +286,68 @@ func RenderPublicApi(spec PublicApiSpec) (string, error) {
 	return buf.String(), nil
 }
 
-// PublicApiGitPath places the PublicApi manifest inside the owning app's
-// resources chart (resources/templates/), alongside the app's other resources.
-func PublicApiGitPath(projectSlug, envSlug, appName, publicApiName string) string {
-	return AppResourcesTemplatesGitPath(projectSlug, envSlug, appName) +
-		fmt.Sprintf("/publicapi-%s.yaml", publicApiName)
+// PublicApiResourcesValuesGitPath returns the resources.values.yaml of the app
+// that owns the PublicApi. The CR is an entry in that file's manifests: list
+// (keyed by kind+name).
+func PublicApiResourcesValuesGitPath(projectSlug, envSlug, appName string) string {
+	return AppResourcesValuesGitPath(projectSlug, envSlug, appName)
 }
 
 func FQDNToName(fqdn string) string {
 	return strings.ReplaceAll(fqdn, ".", "-")
+}
+
+// S3BucketSpec holds parameters for an S3Bucket manifest.
+type S3BucketSpec struct {
+	Name          string
+	BucketName    string
+	Region        string
+	Description   string
+	Public        bool
+	FtpSftpEnable bool
+	ProjectSlug   string
+	EnvSlug       string
+	OperationID   string
+}
+
+var s3BucketTmpl = template.Must(template.New("s3bucket").Parse(`apiVersion: platform.dada-tuda.ru/v1alpha1
+kind: S3Bucket
+metadata:
+  name: {{ .Name }}
+  labels:
+    dada.io/project: {{ .ProjectSlug }}
+    dada.io/environment: {{ .EnvSlug }}
+    dada.io/operation: {{ .OperationID }}
+spec:
+  bucketName: {{ .BucketName }}
+  region: {{ .Region }}
+  description: {{ .Description | printf "%q" }}
+  public: {{ .Public }}
+  ftpSftpEnable: {{ .FtpSftpEnable }}
+`))
+
+func RenderS3Bucket(spec S3BucketSpec) (string, error) {
+	var buf bytes.Buffer
+	if err := s3BucketTmpl.Execute(&buf, spec); err != nil {
+		return "", fmt.Errorf("rendering S3Bucket: %w", err)
+	}
+	return buf.String(), nil
+}
+
+// S3BucketOwnerApp returns the app whose chart owns a bucket: the bound app
+// (appRef) when set, otherwise the per-project standalone "s3-buckets-<project>"
+// chart — buckets created as first-class environment resources, not tied to any
+// single app. Apps reference them by endpoint/secret.
+func S3BucketOwnerApp(appRef, projectSlug string) string {
+	if appRef == "" {
+		return StandaloneOwnerApp("s3-buckets", projectSlug)
+	}
+	return appRef
+}
+
+// S3BucketResourcesValuesGitPath returns the resources.values.yaml of the app
+// that owns the bucket — the bound app (appRef) or the per-project standalone
+// "s3-buckets-<project>" app. The CR is an entry in that file's manifests: list.
+func S3BucketResourcesValuesGitPath(projectSlug, envSlug, appRef string) string {
+	return AppResourcesValuesGitPath(projectSlug, envSlug, S3BucketOwnerApp(appRef, projectSlug))
 }

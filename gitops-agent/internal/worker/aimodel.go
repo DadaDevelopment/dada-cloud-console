@@ -110,20 +110,23 @@ func (w *DBWatcher) doCreateAIModel(ctx context.Context, op db.Operation) error 
 	if err != nil {
 		return err
 	}
-	ownerApp := aimodelOwnerApp(p.AttachedAppName, p.Name)
-	gitPath := renderer.AIModelGitPath(projectName, envName, ownerApp)
-	files := []git.FileChange{{Path: gitPath, Content: yaml}}
+	ownerApp := renderer.AIModelOwnerApp(p.AttachedAppName, projectName)
 	appFiles, err := w.ensureAppExists(mgr, projectName, envName, ownerApp, envNamespace, op.ID.String())
 	if err != nil {
 		return err
 	}
-	files = append(files, appFiles...)
+	valuesPath := renderer.AIModelResourcesValuesGitPath(projectName, envName, p.AttachedAppName)
+	manifestFile, err := upsertManifestFile(mgr, valuesPath, yaml)
+	if err != nil {
+		return err
+	}
+	files := append(appFiles, manifestFile)
 
 	commitMsg := fmt.Sprintf(
 		"[DADA Console] Create AIModel %s\n\nOperation: %s\nProject: %s\nEnvironment: %s\nProfile: %s\n",
 		p.Name, op.ID, projectName, envName, p.Profile,
 	)
-	if err := w.commitFilesAndRecord(ctx, op, mgr, gitPath, files, commitMsg); err != nil {
+	if err := w.commitFilesAndRecord(ctx, op, mgr, valuesPath, files, commitMsg); err != nil {
 		return err
 	}
 
@@ -238,8 +241,12 @@ func (w *DBWatcher) doDeleteAIModel(ctx context.Context, op db.Operation) error 
 	if err != nil {
 		return err
 	}
-	// Resolve the owning app from the snapshot so we delete from the same chart
-	// path the model was written to (attached app, or the model's own name).
+	if err := mgr.EnsureCloned(); err != nil {
+		return err
+	}
+	// Resolve the owning app from the snapshot so we remove the entries from the
+	// same resources.values.yaml the model was written to (attached app, or the
+	// shared per-project "models-<project>" app).
 	var attachedApp string
 	var summaryRaw []byte
 	if err := w.pool.QueryRow(ctx, `
@@ -251,25 +258,31 @@ func (w *DBWatcher) doDeleteAIModel(ctx context.Context, op db.Operation) error 
 			attachedApp = asString(summary["attached_app"])
 		}
 	}
-	ownerApp := aimodelOwnerApp(attachedApp, p.Name)
-	paths := []string{
-		renderer.AIModelGitPath(projectName, envName, ownerApp),
-		renderer.AIModelPublicApiGitPath(projectName, envName, ownerApp),
+	// Drop the AIModel CR and its companion PublicApi (if present) from the
+	// owner's manifests list, then commit the single values file.
+	valuesPath := renderer.AIModelResourcesValuesGitPath(projectName, envName, attachedApp)
+	manifestFile, changed, err := removeManifestsFile(mgr, valuesPath, [][2]string{
+		{"AIModel", p.Name},
+		{"PublicApi", p.Name},
+	})
+	if err != nil {
+		return fmt.Errorf("remove manifests: %w", err)
 	}
 	commitMsg := fmt.Sprintf(
 		"[DADA Console] Delete AIModel %s\n\nOperation: %s\nProject: %s\nEnvironment: %s\n",
 		p.Name, op.ID, projectName, envName,
 	)
-	sha, err := mgr.RemoveAndPush(paths, commitMsg, w.cfg.BotName, w.cfg.BotEmail)
-	if err != nil {
-		return fmt.Errorf("git remove: %w", err)
-	}
-	if sha != "" {
+	var sha string
+	if changed {
+		sha, err = mgr.CommitFilesAndPush([]git.FileChange{manifestFile}, commitMsg, w.cfg.BotName, w.cfg.BotEmail)
+		if err != nil {
+			return fmt.Errorf("git push (remove manifests): %w", err)
+		}
 		opID := op.ID
 		_ = db.InsertCommit(ctx, w.pool, sha, mgr.RepoURL(), mgr.Branch(),
-			paths[0], commitMsg, w.cfg.BotName, w.cfg.BotEmail, &opID, "agent")
+			valuesPath, commitMsg, w.cfg.BotName, w.cfg.BotEmail, &opID, "agent")
 	}
-	if err := db.MarkCommitted(ctx, w.pool, op.ID, sha, paths[0]); err != nil {
+	if err := db.MarkCommitted(ctx, w.pool, op.ID, sha, valuesPath); err != nil {
 		return err
 	}
 	// Revoke active API key (D17).
@@ -339,13 +352,19 @@ func (w *DBWatcher) rerenderAIModel(ctx context.Context, op db.Operation, name s
 	if err != nil {
 		return err
 	}
-	ownerApp := aimodelOwnerApp(asString(summary["attached_app"]), name)
-	gitPath := renderer.AIModelGitPath(projectName, envName, ownerApp)
+	if err := mgr.EnsureCloned(); err != nil {
+		return err
+	}
+	valuesPath := renderer.AIModelResourcesValuesGitPath(projectName, envName, asString(summary["attached_app"]))
+	manifestFile, err := upsertManifestFile(mgr, valuesPath, yaml)
+	if err != nil {
+		return err
+	}
 	commitMsg := fmt.Sprintf(
 		"[DADA Console] %s AIModel %s\n\nOperation: %s\nProject: %s\nEnvironment: %s\n",
 		op.Action, name, op.ID, projectName, envName,
 	)
-	if err := w.commitAndRecord(ctx, op, mgr, gitPath, yaml, commitMsg); err != nil {
+	if err := w.commitFilesAndRecord(ctx, op, mgr, valuesPath, []git.FileChange{manifestFile}, commitMsg); err != nil {
 		return err
 	}
 	updated, _ := json.Marshal(summary)
@@ -416,12 +435,3 @@ func asString(v any) string {
 	return s
 }
 
-// aimodelOwnerApp resolves the app that owns a model's chart: the attached app
-// when set, otherwise the model's own name (a model with no app becomes its own
-// app — see AIModelGitPath).
-func aimodelOwnerApp(attachedAppName, modelName string) string {
-	if attachedAppName != "" {
-		return attachedAppName
-	}
-	return modelName
-}

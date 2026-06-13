@@ -181,6 +181,8 @@ func (w *DBWatcher) dispatch(ctx context.Context, op db.Operation) error {
 		return w.doCreateServiceDatabase(ctx, op)
 	case "CreateApp":
 		return w.doCreateApp(ctx, op)
+	case "DeleteApp":
+		return w.doDeleteApp(ctx, op)
 	case "DeployImageVersion":
 		return w.doDeployImageVersion(ctx, op)
 	case "CreatePublicApi":
@@ -199,6 +201,8 @@ func (w *DBWatcher) dispatch(ctx context.Context, op db.Operation) error {
 		return w.doPinAIModelMlflowVersion(ctx, op)
 	case "SetNamespacePolicy":
 		return w.doSetNamespacePolicy(ctx, op)
+	case "CreateS3Bucket":
+		return w.doCreateS3Bucket(ctx, op)
 	default:
 		return fmt.Errorf("unknown action: %s", op.Action)
 	}
@@ -267,7 +271,7 @@ func (w *DBWatcher) commitFilesAndRecord(ctx context.Context, op db.Operation, m
 }
 
 // ensureAppExists returns the FileChanges needed to create the owning app's
-// application.yaml + values.yaml when they are not yet present in git. When the
+// app.yaml + values.yaml when they are not yet present in git. When the
 // app already exists — whether a bare chart-owner or a real workload — it returns
 // nil so the existing definition is left untouched. Child resources
 // (ServiceDatabase, AIModel, PublicApi) call this so that creating a resource
@@ -295,10 +299,13 @@ func (w *DBWatcher) ensureAppExists(mgr *git.Manager, projectName, envName, appN
 	if err != nil {
 		return nil, err
 	}
+	// No per-app resources/ chart is seeded anymore (ADR 0005). app.yaml sets
+	// spec.resources: true; the shared helm/app-resources chart renders the app's
+	// resources.values.yaml, which is created lazily on the first Upsert and is
+	// safely absent until then (ignoreMissingValueFiles: true).
 	return []git.FileChange{
 		{Path: appPath, Content: appYAML},
 		{Path: renderer.AppHelmValuesGitPath(projectName, envName, appName), Content: renderer.RenderBareAppValues()},
-		{Path: renderer.AppResourcesChartYamlGitPath(projectName, envName, appName), Content: renderer.RenderChartYaml(appName)},
 	}, nil
 }
 
@@ -341,19 +348,28 @@ func (w *DBWatcher) doCreateServiceDatabase(ctx context.Context, op db.Operation
 		return err
 	}
 
-	gitPath := renderer.ServiceDatabaseGitPath(projectName, envName, p.AppRef)
-	files := []git.FileChange{{Path: gitPath, Content: yaml}}
-	appFiles, err := w.ensureAppExists(mgr, projectName, envName, p.AppRef, envNamespace, op.ID.String())
+	// Owner app: the bound app (app_ref) or — when standalone — the shared
+	// per-project "service-databases-<project>" chart.
+	ownerApp := renderer.ServiceDatabaseOwnerApp(p.AppRef, projectName)
+
+	// Ensure the owning app exists, then upsert the CR into its
+	// resources.values.yaml (keyed by kind+name).
+	appFiles, err := w.ensureAppExists(mgr, projectName, envName, ownerApp, envNamespace, op.ID.String())
 	if err != nil {
 		return err
 	}
-	files = append(files, appFiles...)
+	valuesPath := renderer.ServiceDatabaseResourcesValuesGitPath(projectName, envName, p.AppRef)
+	manifestFile, err := upsertManifestFile(mgr, valuesPath, yaml)
+	if err != nil {
+		return err
+	}
+	files := append(appFiles, manifestFile)
 
 	commitMsg := fmt.Sprintf(
 		"[DADA Console] Create ServiceDatabaseV2 %s\n\nOperation: %s\nProject: %s\nEnvironment: %s\n",
 		p.Name, op.ID, projectName, envName,
 	)
-	if err := w.commitFilesAndRecord(ctx, op, mgr, gitPath, files, commitMsg); err != nil {
+	if err := w.commitFilesAndRecord(ctx, op, mgr, valuesPath, files, commitMsg); err != nil {
 		return err
 	}
 
@@ -442,7 +458,6 @@ func (w *DBWatcher) doCreateApp(ctx context.Context, op db.Operation) error {
 	if err := w.commitFilesAndRecord(ctx, op, mgr, gitPath, []git.FileChange{
 		{Path: gitPath, Content: yaml},
 		{Path: valuesPath, Content: valuesYAML},
-		{Path: renderer.AppResourcesChartYamlGitPath(projectName, envName, p.Name), Content: renderer.RenderChartYaml(p.Name)},
 	}, commitMsg); err != nil {
 		return err
 	}
@@ -456,6 +471,96 @@ func (w *DBWatcher) doCreateApp(ctx context.Context, op db.Operation) error {
 		op.ProjectID, op.EnvironmentID,
 		"App", p.Name, "Pending", summaryJSON, time.Now(),
 	)
+}
+
+// doDeleteApp removes an app's entire git folder in one commit: app.yaml,
+// values.yaml, and resources.values.yaml. This is safe under ADR 0005 because
+// resources is now a values file (ignoreMissingValueFiles), not a path source,
+// so ArgoCD prunes cleanly with no wedge. Missing files are skipped silently by
+// RemoveAndPush. Also clears the app's own snapshot AND every child resource
+// snapshot bound to it (ServiceDatabaseV2 / PublicApi / S3Bucket / AIModel), and
+// revokes any AIModel API keys bound to the app, so quota/read APIs reflect the
+// deletion immediately.
+func (w *DBWatcher) doDeleteApp(ctx context.Context, op db.Operation) error {
+	var p struct {
+		Name string `json:"name"`
+	}
+	if err := json.Unmarshal(op.Payload, &p); err != nil {
+		return fmt.Errorf("parse payload: %w", err)
+	}
+
+	projectName, envName, _, err := w.projectEnv(ctx, op.ProjectID, op.EnvironmentID)
+	if err != nil {
+		return fmt.Errorf("project/env lookup: %w", err)
+	}
+
+	mgr, err := w.managerFor(ctx, op.ProjectID)
+	if err != nil {
+		return err
+	}
+	if err := mgr.EnsureCloned(); err != nil {
+		return err
+	}
+
+	paths := []string{
+		renderer.AppGitPath(projectName, envName, p.Name),
+		renderer.AppHelmValuesGitPath(projectName, envName, p.Name),
+		renderer.AppResourcesValuesGitPath(projectName, envName, p.Name),
+		renderer.AppComposeGitPath(projectName, envName, p.Name),
+		renderer.AppEnvGitPath(projectName, envName, p.Name),
+	}
+	commitMsg := fmt.Sprintf(
+		"[DADA Console] Delete App %s\n\nOperation: %s\nProject: %s\nEnvironment: %s\n",
+		p.Name, op.ID, projectName, envName,
+	)
+	sha, err := mgr.RemoveAndPush(paths, commitMsg, w.cfg.BotName, w.cfg.BotEmail)
+	if err != nil {
+		return fmt.Errorf("git remove: %w", err)
+	}
+	if sha != "" {
+		opID := op.ID
+		_ = db.InsertCommit(ctx, w.pool, sha, mgr.RepoURL(), mgr.Branch(),
+			paths[0], commitMsg, w.cfg.BotName, w.cfg.BotEmail, &opID, "agent")
+	}
+	if err := db.MarkCommitted(ctx, w.pool, op.ID, sha, paths[0]); err != nil {
+		return err
+	}
+
+	// Revoke any active AIModel API keys bound to this app (attached models).
+	_, _ = w.pool.Exec(ctx,
+		`UPDATE aimodel_api_keys k SET revoked_at = NOW()
+		 FROM resource_snapshots s
+		 WHERE k.project_id = $1 AND k.environment_id = $2 AND k.revoked_at IS NULL
+		   AND s.project_id = k.project_id AND s.environment_id = k.environment_id
+		   AND s.kind = 'AIModel' AND s.name = k.aimodel_name
+		   AND s.summary_json->>'attached_app' = $3`,
+		op.ProjectID, op.EnvironmentID, p.Name,
+	)
+	// Drop every child resource snapshot bound to this app (ServiceDatabaseV2,
+	// PublicApi, S3Bucket, AIModel) so quota/UI state reflects the cascade. The
+	// owning-app link lives under different summary keys depending on the writer:
+	// API writers stamp a top-level app_ref/attached_app; the gitwatcher
+	// reverse-sync stamps the CR spec (spec.appRef / spec.attachedApp /
+	// spec.serviceName). Match any of them, scoped to this project+env.
+	_, _ = w.pool.Exec(ctx,
+		`DELETE FROM resource_snapshots
+		 WHERE project_id = $1 AND environment_id = $2 AND kind <> 'App'
+		   AND (
+		        summary_json->>'app_ref'            = $3
+		     OR summary_json->>'attached_app'       = $3
+		     OR summary_json->'spec'->>'appRef'     = $3
+		     OR summary_json->'spec'->>'attachedApp' = $3
+		     OR summary_json->'spec'->>'serviceName' = $3
+		   )`,
+		op.ProjectID, op.EnvironmentID, p.Name,
+	)
+	// Drop the App snapshot so quota recalculation reflects deletion.
+	_, _ = w.pool.Exec(ctx,
+		`DELETE FROM resource_snapshots
+		 WHERE project_id = $1 AND environment_id = $2 AND kind = 'App' AND name = $3`,
+		op.ProjectID, op.EnvironmentID, p.Name,
+	)
+	return nil
 }
 
 // doCreateComposeApp renders a skeleton compose.yaml + .env into the app's git
@@ -651,19 +756,22 @@ func (w *DBWatcher) doCreatePublicApi(ctx context.Context, op db.Operation) erro
 		return err
 	}
 
-	gitPath := renderer.PublicApiGitPath(projectName, envName, p.AppName, p.PublicApiName)
-	files := []git.FileChange{{Path: gitPath, Content: yaml}}
 	appFiles, err := w.ensureAppExists(mgr, projectName, envName, p.AppName, envNamespace, op.ID.String())
 	if err != nil {
 		return err
 	}
-	files = append(files, appFiles...)
+	valuesPath := renderer.PublicApiResourcesValuesGitPath(projectName, envName, p.AppName)
+	manifestFile, err := upsertManifestFile(mgr, valuesPath, yaml)
+	if err != nil {
+		return err
+	}
+	files := append(appFiles, manifestFile)
 
 	commitMsg := fmt.Sprintf(
 		"[DADA Console] Register domain %s for app %s\n\nOperation: %s\nProject: %s\nEnvironment: %s\n",
 		p.FQDN, p.AppName, op.ID, projectName, envName,
 	)
-	return w.commitFilesAndRecord(ctx, op, mgr, gitPath, files, commitMsg)
+	return w.commitFilesAndRecord(ctx, op, mgr, valuesPath, files, commitMsg)
 }
 
 func (w *DBWatcher) doSetNamespacePolicy(ctx context.Context, op db.Operation) error {
@@ -704,6 +812,87 @@ func (w *DBWatcher) doSetNamespacePolicy(ctx context.Context, op db.Operation) e
 		namespace, op.ID, op.ProjectID,
 	)
 	return w.commitAndRecord(ctx, op, mgr, gitPath, yaml, commitMsg)
+}
+
+func (w *DBWatcher) doCreateS3Bucket(ctx context.Context, op db.Operation) error {
+	var p struct {
+		Name          string `json:"name"`
+		BucketName    string `json:"bucket_name"`
+		Region        string `json:"region"`
+		Description   string `json:"description"`
+		Public        bool   `json:"public"`
+		FtpSftpEnable bool   `json:"ftp_sftp_enable"`
+		AppRef        string `json:"app_ref"`
+	}
+	if err := json.Unmarshal(op.Payload, &p); err != nil {
+		return fmt.Errorf("parse payload: %w", err)
+	}
+
+	projectName, envName, envNamespace, err := w.projectEnv(ctx, op.ProjectID, op.EnvironmentID)
+	if err != nil {
+		return fmt.Errorf("project/env lookup: %w", err)
+	}
+
+	yaml, err := renderer.RenderS3Bucket(renderer.S3BucketSpec{
+		Name:          p.Name,
+		BucketName:    p.BucketName,
+		Region:        defaultIfEmpty(p.Region, "ru1"),
+		Description:   p.Description,
+		Public:        p.Public,
+		FtpSftpEnable: p.FtpSftpEnable,
+		ProjectSlug:   projectName,
+		EnvSlug:       envName,
+		OperationID:   op.ID.String(),
+	})
+	if err != nil {
+		return err
+	}
+
+	mgr, err := w.managerFor(ctx, op.ProjectID)
+	if err != nil {
+		return err
+	}
+
+	// Owner app: the bound app (app_ref) or the per-project standalone
+	// "s3-buckets-<project>" chart.
+	ownerApp := renderer.S3BucketOwnerApp(p.AppRef, projectName)
+
+	// Auto-provision the owning app if it doesn't exist yet. For an explicit
+	// app_ref this is a no-op when the app already exists; for the standalone
+	// "s3-buckets-<project>" app it bootstraps a bare app. Then upsert the CR
+	// into the owner's resources.values.yaml (keyed by kind+name).
+	ownerFiles, err := w.ensureAppExists(mgr, projectName, envName, ownerApp, envNamespace, op.ID.String())
+	if err != nil {
+		return err
+	}
+	valuesPath := renderer.S3BucketResourcesValuesGitPath(projectName, envName, p.AppRef)
+	manifestFile, err := upsertManifestFile(mgr, valuesPath, yaml)
+	if err != nil {
+		return err
+	}
+	files := append(ownerFiles, manifestFile)
+
+	commitMsg := fmt.Sprintf(
+		"[DADA Console] Create S3Bucket %s\n\nOperation: %s\nProject: %s\nEnvironment: %s\nOwner: %s\n",
+		p.Name, op.ID, projectName, envName, ownerApp,
+	)
+	if err := w.commitFilesAndRecord(ctx, op, mgr, valuesPath, files, commitMsg); err != nil {
+		return err
+	}
+
+	summaryJSON, _ := json.Marshal(map[string]any{
+		"name":        p.Name,
+		"kind":        "S3Bucket",
+		"bucket_name": p.BucketName,
+		"region":      p.Region,
+		"public":      p.Public,
+		"app_ref":     p.AppRef,
+		"status":      "Pending",
+	})
+	return db.UpsertSnapshot(ctx, w.pool,
+		op.ProjectID, op.EnvironmentID,
+		"S3Bucket", p.Name, "Pending", summaryJSON, time.Now(),
+	)
 }
 
 func defaultIfEmpty(s, def string) string {

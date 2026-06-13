@@ -17,9 +17,9 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// appPathRe matches clusters/<cluster>/projects/<project>/environments/<env>/apps/<app>/application.yaml
+// appPathRe matches clusters/<cluster>/projects/<project>/environments/<env>/apps/<app>/app.yaml
 // Capture groups: 1=project, 2=env, 3=app
-var appPathRe = regexp.MustCompile(`^clusters/[^/]+/projects/([^/]+)/environments/([^/]+)/apps/([^/]+)/application\.yaml$`)
+var appPathRe = regexp.MustCompile(`^clusters/[^/]+/projects/([^/]+)/environments/([^/]+)/apps/([^/]+)/app\.yaml$`)
 
 // valuesPathRe matches clusters/<cluster>/projects/<project>/environments/<env>/apps/<app>/values.yaml
 // Capture groups: 1=project, 2=env, 3=app
@@ -33,12 +33,13 @@ var projectPathRe = regexp.MustCompile(`^clusters/[^/]+/projects/([^/]+)/project
 // Capture group 1 is the k8s namespace name.
 var namespacePolicyPathRe = regexp.MustCompile(`^clusters/[^/]+/namespace-policies/([^/]+)\.yaml$`)
 
-// resourceTemplatePathRe matches a child resource manifest committed inside an
-// app's resources chart:
-// clusters/<cluster>/projects/<project>/environments/<env>/apps/<app>/resources/templates/<file>.yaml
-// (ServiceDatabase, AIModel, PublicApi, ...). Capture groups: 1=project, 2=env, 3=app.
-// The Chart.yaml at resources/Chart.yaml is intentionally not matched (no templates/ segment).
-var resourceTemplatePathRe = regexp.MustCompile(`^clusters/[^/]+/projects/([^/]+)/environments/([^/]+)/apps/([^/]+)/resources/templates/[^/]+\.yaml$`)
+// resourcesValuesPathRe matches an app's resources.values.yaml (ADR 0005):
+// clusters/<cluster>/projects/<project>/environments/<env>/apps/<app>/resources.values.yaml
+// This single file holds every child CR (ServiceDatabase, AIModel, PublicApi,
+// S3Bucket, ...) as entries in a top-level manifests: list. Capture groups:
+// 1=project, 2=env, 3=app. Supersedes the former resources/templates/<kind>.yaml
+// layout.
+var resourcesValuesPathRe = regexp.MustCompile(`^clusters/[^/]+/projects/([^/]+)/environments/([^/]+)/apps/([^/]+)/resources\.values\.yaml$`)
 
 // ValuesNotifier is implemented by server.Hub to push live file updates to WS clients.
 type ValuesNotifier interface {
@@ -207,8 +208,8 @@ func (w *GitWatcher) processCommit(ctx context.Context, mgr *git.Manager, c git.
 			w.syncAppFile(ctx, mgr, filePath, m[1], m[2], m[3], c)
 			continue
 		}
-		if m := resourceTemplatePathRe.FindStringSubmatch(filePath); m != nil {
-			w.syncResourceTemplateFile(ctx, mgr, filePath, m[1], m[2], c)
+		if m := resourcesValuesPathRe.FindStringSubmatch(filePath); m != nil {
+			w.syncResourcesValuesFile(ctx, mgr, filePath, m[1], m[2], c)
 			continue
 		}
 		if m := valuesPathRe.FindStringSubmatch(filePath); m != nil {
@@ -362,26 +363,29 @@ func (w *GitWatcher) syncAppFile(ctx context.Context, mgr *git.Manager, filePath
 	}
 }
 
-// syncResourceTemplateFile reverse-syncs a child resource committed under an
-// app's resources/templates/ (ServiceDatabase, AIModel, PublicApi, ...) into
-// resource_snapshots. It reads the manifest's kind + name and upserts a snapshot
-// of that kind, so a resource introduced by a manual git commit shows up in the
-// console. The upsert is LWW on the commit time, so it never clobbers a fresher
-// snapshot already written by the API at request time.
-func (w *GitWatcher) syncResourceTemplateFile(ctx context.Context, mgr *git.Manager, filePath, projectSlug, envSlug string, c git.Commit) {
+// resourcesValuesManifest models an app's resources.values.yaml: a top-level
+// manifests: list, each entry a full CR. Used to reverse-sync every child CR
+// into resource_snapshots when the file is committed (ADR 0005).
+type resourcesValuesManifest struct {
+	Manifests []resourceManifest `yaml:"manifests"`
+}
+
+// syncResourcesValuesFile reverse-syncs every CR in an app's resources.values.yaml
+// (ServiceDatabase, AIModel, PublicApi, S3Bucket, ...) into resource_snapshots,
+// so resources introduced or edited by a manual git commit show up in the
+// console. Each entry is upserted by its (kind, name); the upsert is LWW on the
+// commit time, so it never clobbers a fresher snapshot already written by the
+// API at request time. Supersedes the per-file resources/templates sync.
+func (w *GitWatcher) syncResourcesValuesFile(ctx context.Context, mgr *git.Manager, filePath, projectSlug, envSlug string, c git.Commit) {
 	content, err := mgr.ReadFileAtCommit(c.SHA, filePath)
 	if err != nil {
-		log.Warn().Err(err).Str("path", filePath).Msg("git-watcher: read resource manifest")
+		log.Warn().Err(err).Str("path", filePath).Msg("git-watcher: read resources.values.yaml")
 		return
 	}
 
-	var manifest resourceManifest
-	if err := yaml.Unmarshal([]byte(content), &manifest); err != nil {
-		log.Warn().Err(err).Str("path", filePath).Msg("git-watcher: parse resource manifest")
-		return
-	}
-	if manifest.Kind == "" || manifest.Metadata.Name == "" {
-		log.Warn().Str("path", filePath).Msg("git-watcher: resource manifest missing kind/name, skipping")
+	var doc resourcesValuesManifest
+	if err := yaml.Unmarshal([]byte(content), &doc); err != nil {
+		log.Warn().Err(err).Str("path", filePath).Msg("git-watcher: parse resources.values.yaml")
 		return
 	}
 
@@ -390,25 +394,32 @@ func (w *GitWatcher) syncResourceTemplateFile(ctx context.Context, mgr *git.Mana
 		log.Error().Err(err).Str("project", projectSlug).Str("env", envSlug).Msg("git-watcher: resolve project/env")
 		return
 	}
-
-	summaryJSON, _ := json.Marshal(map[string]any{
-		"git_sha":     c.SHA,
-		"git_message": c.Message,
-		"git_author":  c.Author,
-		"name":        manifest.Metadata.Name,
-		"kind":        manifest.Kind,
-		"status":      "Unknown",
-		"message":     "Synced from git",
-		"spec":        manifest.Spec,
-	})
-
 	envUUID := &environmentID
-	if err := db.UpsertSnapshot(ctx, w.pool,
-		projectID, envUUID,
-		manifest.Kind, manifest.Metadata.Name, "Unknown", summaryJSON, c.When,
-	); err != nil {
-		log.Error().Err(err).Str("kind", manifest.Kind).Str("name", manifest.Metadata.Name).Msg("git-watcher: upsert resource snapshot")
-		return
+
+	synced := 0
+	for _, manifest := range doc.Manifests {
+		if manifest.Kind == "" || manifest.Metadata.Name == "" {
+			log.Warn().Str("path", filePath).Msg("git-watcher: manifest entry missing kind/name, skipping")
+			continue
+		}
+		summaryJSON, _ := json.Marshal(map[string]any{
+			"git_sha":     c.SHA,
+			"git_message": c.Message,
+			"git_author":  c.Author,
+			"name":        manifest.Metadata.Name,
+			"kind":        manifest.Kind,
+			"status":      "Unknown",
+			"message":     "Synced from git",
+			"spec":        manifest.Spec,
+		})
+		if err := db.UpsertSnapshot(ctx, w.pool,
+			projectID, envUUID,
+			manifest.Kind, manifest.Metadata.Name, "Unknown", summaryJSON, c.When,
+		); err != nil {
+			log.Error().Err(err).Str("kind", manifest.Kind).Str("name", manifest.Metadata.Name).Msg("git-watcher: upsert resource snapshot")
+			continue
+		}
+		synced++
 	}
 
 	if err := db.InsertCommit(ctx, w.pool,
@@ -418,7 +429,7 @@ func (w *GitWatcher) syncResourceTemplateFile(ctx context.Context, mgr *git.Mana
 		log.Warn().Err(err).Str("sha", c.SHA).Msg("git-watcher: record resource commit")
 	}
 
-	log.Info().Str("kind", manifest.Kind).Str("name", manifest.Metadata.Name).Str("path", filePath).Msg("git-watcher: synced resource from git")
+	log.Info().Int("count", synced).Str("path", filePath).Msg("git-watcher: synced resources from git")
 }
 
 func (w *GitWatcher) syncNamespacePolicyFile(ctx context.Context, mgr *git.Manager, filePath, namespace string, c git.Commit) {

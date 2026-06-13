@@ -74,19 +74,24 @@ func RenderAIModel(spec AIModelSpec) (string, error) {
 	return buf.String(), nil
 }
 
-// AIModelGitPath returns the canonical Git path for an AIModel CR. The model
-// lives inside its owning app's resources chart (resources/templates/), where
-// ownerApp is the attached app when set, otherwise the model's own name. This
-// supersedes the former env-level models/ layout (D10): every resource now
-// belongs to an app.
-func AIModelGitPath(projectSlug, envSlug, ownerApp string) string {
-	return AppResourcesTemplatesGitPath(projectSlug, envSlug, ownerApp) + "/aimodel.yaml"
+// AIModelOwnerApp returns the app whose chart owns a model: the attached app
+// when set, otherwise the per-project standalone "models-<project>" chart.
+// (Supersedes the former model-owns-its-own-name layout, which collided across
+// projects sharing an env — see StandaloneOwnerApp.)
+func AIModelOwnerApp(attachedApp, projectSlug string) string {
+	if attachedApp != "" {
+		return attachedApp
+	}
+	return StandaloneOwnerApp("models", projectSlug)
 }
 
-// AIModelPublicApiGitPath returns the Git path for the PublicApi CR emitted
-// alongside an AIModel, inside the same owning app's resources templates.
-func AIModelPublicApiGitPath(projectSlug, envSlug, ownerApp string) string {
-	return AppResourcesTemplatesGitPath(projectSlug, envSlug, ownerApp) + "/publicapi.yaml"
+// AIModelResourcesValuesGitPath returns the resources.values.yaml of the app
+// that owns a model: the attached app, or the shared per-project
+// "models-<project>" app when standalone. Both the AIModel CR and its companion
+// PublicApi are entries in that file's manifests: list (keyed by kind+name), so
+// one path now covers what used to be aimodel.yaml + publicapi.yaml.
+func AIModelResourcesValuesGitPath(projectSlug, envSlug, attachedApp string) string {
+	return AppResourcesValuesGitPath(projectSlug, envSlug, AIModelOwnerApp(attachedApp, projectSlug))
 }
 
 // AIModelDomain renders the canonical FQDN for a model: <name>-<project>.<envSuffix>.dada-tuda.ru.

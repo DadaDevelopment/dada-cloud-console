@@ -232,14 +232,19 @@ func TestGitPaths(t *testing.T) {
 		want string
 	}{
 		{
-			"ServiceDatabaseGitPath",
-			renderer.ServiceDatabaseGitPath("alpha", "prod", "myapp"),
-			"clusters/beget-prod/projects/alpha/environments/prod/apps/myapp/resources/templates/servicedatabase.yaml",
+			"ServiceDatabaseResourcesValuesGitPath/bound",
+			renderer.ServiceDatabaseResourcesValuesGitPath("alpha", "prod", "myapp"),
+			"clusters/beget-prod/projects/alpha/environments/prod/apps/myapp/resources.values.yaml",
+		},
+		{
+			"ServiceDatabaseResourcesValuesGitPath/standalone",
+			renderer.ServiceDatabaseResourcesValuesGitPath("alpha", "prod", ""),
+			"clusters/beget-prod/projects/alpha/environments/prod/apps/service-databases-alpha/resources.values.yaml",
 		},
 		{
 			"AppGitPath",
 			renderer.AppGitPath("alpha", "prod", "api"),
-			"clusters/beget-prod/projects/alpha/environments/prod/apps/api/application.yaml",
+			"clusters/beget-prod/projects/alpha/environments/prod/apps/api/app.yaml",
 		},
 		{
 			"AppResourcesGitPath",
@@ -247,14 +252,9 @@ func TestGitPaths(t *testing.T) {
 			"clusters/beget-prod/projects/alpha/environments/prod/apps/api/resources",
 		},
 		{
-			"AppResourcesTemplatesGitPath",
-			renderer.AppResourcesTemplatesGitPath("alpha", "prod", "api"),
-			"clusters/beget-prod/projects/alpha/environments/prod/apps/api/resources/templates",
-		},
-		{
-			"AppResourcesChartYamlGitPath",
-			renderer.AppResourcesChartYamlGitPath("alpha", "prod", "api"),
-			"clusters/beget-prod/projects/alpha/environments/prod/apps/api/resources/Chart.yaml",
+			"AppResourcesValuesGitPath",
+			renderer.AppResourcesValuesGitPath("alpha", "prod", "api"),
+			"clusters/beget-prod/projects/alpha/environments/prod/apps/api/resources.values.yaml",
 		},
 		{
 			"AppHelmValuesGitPath",
@@ -272,9 +272,19 @@ func TestGitPaths(t *testing.T) {
 			"clusters/beget-prod/projects/alpha/environments/prod/apps/api/.env",
 		},
 		{
-			"PublicApiGitPath",
-			renderer.PublicApiGitPath("alpha", "prod", "api", "main"),
-			"clusters/beget-prod/projects/alpha/environments/prod/apps/api/resources/templates/publicapi-main.yaml",
+			"PublicApiResourcesValuesGitPath",
+			renderer.PublicApiResourcesValuesGitPath("alpha", "prod", "api"),
+			"clusters/beget-prod/projects/alpha/environments/prod/apps/api/resources.values.yaml",
+		},
+		{
+			"S3BucketResourcesValuesGitPath/bound",
+			renderer.S3BucketResourcesValuesGitPath("alpha", "prod", "api"),
+			"clusters/beget-prod/projects/alpha/environments/prod/apps/api/resources.values.yaml",
+		},
+		{
+			"S3BucketResourcesValuesGitPath/standalone",
+			renderer.S3BucketResourcesValuesGitPath("alpha", "prod", ""),
+			"clusters/beget-prod/projects/alpha/environments/prod/apps/s3-buckets-alpha/resources.values.yaml",
 		},
 		{
 			"ProjectGitPath",
@@ -285,21 +295,6 @@ func TestGitPaths(t *testing.T) {
 	for _, tt := range tests {
 		if tt.got != tt.want {
 			t.Errorf("%s: got %q, want %q", tt.name, tt.got, tt.want)
-		}
-	}
-}
-
-func TestRenderChartYaml(t *testing.T) {
-	got := renderer.RenderChartYaml("orders")
-	wantSubstrings := []string{
-		"apiVersion: v2",
-		"name: orders",
-		"type: application",
-		"version: 0.1.0",
-	}
-	for _, want := range wantSubstrings {
-		if !strings.Contains(got, want) {
-			t.Errorf("rendered Chart.yaml missing %q\nFull output:\n%s", want, got)
 		}
 	}
 }

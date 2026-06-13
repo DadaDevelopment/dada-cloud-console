@@ -128,13 +128,16 @@ func TestRenderAIModel_AttachedAppLabel(t *testing.T) {
 	}
 }
 
-func TestAIModelGitPaths(t *testing.T) {
-	if got := renderer.AIModelGitPath("internal", "prod", "iris"); got !=
-		"clusters/beget-prod/projects/internal/environments/prod/apps/iris/resources/templates/aimodel.yaml" {
-		t.Errorf("AIModelGitPath: %s", got)
+func TestAIModelResourcesValuesGitPath(t *testing.T) {
+	// Attached to an app: the model + its PublicApi are entries in that app's
+	// resources.values.yaml (ADR 0005 — one values file, no per-app chart).
+	if got := renderer.AIModelResourcesValuesGitPath("internal", "prod", "myapp"); got !=
+		"clusters/beget-prod/projects/internal/environments/prod/apps/myapp/resources.values.yaml" {
+		t.Errorf("AIModelResourcesValuesGitPath attached: %s", got)
 	}
-	if got := renderer.AIModelPublicApiGitPath("internal", "prod", "iris"); got !=
-		"clusters/beget-prod/projects/internal/environments/prod/apps/iris/resources/templates/publicapi.yaml" {
-		t.Errorf("AIModelPublicApiGitPath: %s", got)
+	// Standalone (no attached app): shared per-project "models-<project>" app.
+	if got := renderer.AIModelResourcesValuesGitPath("internal", "prod", ""); got !=
+		"clusters/beget-prod/projects/internal/environments/prod/apps/models-internal/resources.values.yaml" {
+		t.Errorf("AIModelResourcesValuesGitPath standalone: %s", got)
 	}
 }
