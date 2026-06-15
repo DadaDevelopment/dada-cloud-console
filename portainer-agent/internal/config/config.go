@@ -27,6 +27,12 @@ type Config struct {
 	// e.g. "ubuntu-24-04".
 	BegetSoftwareSlug string
 
+	// Beget reader (reverse-sync): discover VMs created outside the console and
+	// adopt them into Terraform state.
+	BegetAPIBaseURL    string // e.g. https://api.beget.com
+	BegetReaderEnabled bool
+	BegetReaderProject string // console project slug imported VMs land in (e.g. "internal")
+
 	// AgentSSHPrivateKey is the PEM-encoded private key used to SSH into provisioned VMs.
 	AgentSSHPrivateKey string
 	// AgentSSHPublicKey is the OpenSSH public key (ssh-rsa ...) registered on the VM via Terraform.
@@ -54,6 +60,10 @@ type Config struct {
 	PollIntervalDB      time.Duration
 	PollIntervalStatus  time.Duration
 	AgentConnectTimeout time.Duration
+	// PollIntervalReader is how often the beget-reader scans Beget for new VMs.
+	PollIntervalReader time.Duration
+	// BegetReaderGrace skips VMs younger than this (race guard vs in-flight console creates).
+	BegetReaderGrace time.Duration
 
 	DevMode bool
 }
@@ -71,6 +81,10 @@ func Load() (*Config, error) {
 		BegetToken:        getEnv("BEGET_TOKEN", ""),
 		BegetRegion:       getEnv("BEGET_REGION", "ru1"),
 		BegetSoftwareSlug: getEnv("BEGET_SOFTWARE_SLUG", "ubuntu-24-04"),
+
+		BegetAPIBaseURL:    getEnv("BEGET_API_BASE_URL", "https://api.beget.com"),
+		BegetReaderEnabled: getEnv("BEGET_READER_ENABLED", "") == "true",
+		BegetReaderProject: getEnv("BEGET_READER_PROJECT", "internal"),
 
 		AgentSSHPrivateKey: getEnv("AGENT_SSH_PRIVATE_KEY", ""),
 		AgentSSHPublicKey:  getEnv("AGENT_SSH_PUBLIC_KEY", ""),
@@ -114,6 +128,14 @@ func Load() (*Config, error) {
 		return nil, err
 	}
 	c.AgentConnectTimeout, err = parseDuration("AGENT_CONNECT_TIMEOUT", "10m")
+	if err != nil {
+		return nil, err
+	}
+	c.PollIntervalReader, err = parseDuration("BEGET_READER_INTERVAL", "1h")
+	if err != nil {
+		return nil, err
+	}
+	c.BegetReaderGrace, err = parseDuration("BEGET_READER_GRACE", "15m")
 	if err != nil {
 		return nil, err
 	}

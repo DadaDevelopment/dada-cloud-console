@@ -16,14 +16,18 @@ const (
 	AppServerStatusDeleting        AppServerStatus = "Deleting"
 	AppServerStatusDeleted         AppServerStatus = "Deleted"
 	AppServerStatusFailed          AppServerStatus = "Failed"
+	// AppServerStatusImported is a VM discovered in Beget and adopted into
+	// Terraform state by the beget-reader (no Portainer endpoint / bootstrap).
+	AppServerStatusImported AppServerStatus = "Imported"
 )
 
 // AppServerSource records how the VM was attached to the platform.
 type AppServerSource string
 
 const (
-	AppServerSourceTerraform AppServerSource = "terraform" // provisioned by us via Terraform
-	AppServerSourceManual    AppServerSource = "manual"    // pre-existing VM, connected over SSH
+	AppServerSourceTerraform   AppServerSource = "terraform"    // provisioned by us via Terraform
+	AppServerSourceManual      AppServerSource = "manual"       // pre-existing VM, connected over SSH
+	AppServerSourceBegetImport AppServerSource = "beget-import" // discovered in Beget and adopted (reverse-sync)
 )
 
 // AppServer represents a customer-provisioned VDS running Docker + Portainer Edge Agent.

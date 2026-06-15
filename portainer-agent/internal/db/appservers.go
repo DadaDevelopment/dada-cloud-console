@@ -120,6 +120,85 @@ func SetAppServerDeleted(ctx context.Context, pool *pgxpool.Pool, id uuid.UUID) 
 	return err
 }
 
+// GetProjectIDByName resolves a project UUID by its slug/name (e.g. "internal").
+func GetProjectIDByName(ctx context.Context, pool *pgxpool.Pool, name string) (uuid.UUID, error) {
+	var id uuid.UUID
+	err := pool.QueryRow(ctx, `SELECT id FROM projects WHERE name = $1`, name).Scan(&id)
+	return id, err
+}
+
+// ListKnownVMProviderIDs returns the set of Beget provider ids already tracked by
+// any non-Deleted app_server. The reverse-sync reader uses it to skip VMs the
+// console already owns (created or previously adopted) — the hard dedup rule.
+func ListKnownVMProviderIDs(ctx context.Context, pool *pgxpool.Pool) (map[string]struct{}, error) {
+	rows, err := pool.Query(ctx,
+		`SELECT vm_provider_id FROM app_servers
+		 WHERE vm_provider_id IS NOT NULL AND vm_provider_id <> '' AND status <> 'Deleted'`)
+	if err != nil {
+		return nil, fmt.Errorf("query provider ids: %w", err)
+	}
+	defer rows.Close()
+	set := make(map[string]struct{})
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		set[id] = struct{}{}
+	}
+	return set, rows.Err()
+}
+
+// ListActiveAppServerNames returns names of non-Deleted app_servers. Used as a
+// race guard: an in-flight console create may not have its provider id recorded
+// yet, but its name already exists, so the reader skips a same-named Beget VM.
+func ListActiveAppServerNames(ctx context.Context, pool *pgxpool.Pool) (map[string]struct{}, error) {
+	rows, err := pool.Query(ctx,
+		`SELECT name FROM app_servers WHERE status <> 'Deleted'`)
+	if err != nil {
+		return nil, fmt.Errorf("query names: %w", err)
+	}
+	defer rows.Close()
+	set := make(map[string]struct{})
+	for rows.Next() {
+		var n string
+		if err := rows.Scan(&n); err != nil {
+			return nil, err
+		}
+		set[n] = struct{}{}
+	}
+	return set, rows.Err()
+}
+
+// CreateImportedAppServer inserts (or revives) a beget-import app_server row for
+// an adopted VM and returns its UUID. Status starts at Imported.
+func CreateImportedAppServer(ctx context.Context, pool *pgxpool.Pool, projectID uuid.UUID, name, vmProviderID, vmIP string) (uuid.UUID, error) {
+	var id uuid.UUID
+	err := pool.QueryRow(ctx,
+		`INSERT INTO app_servers (project_id, name, vm_ip, vm_provider_id, source, status)
+		 VALUES ($1, $2, $3, $4, 'beget-import', 'Imported')
+		 ON CONFLICT (project_id, name) DO UPDATE
+		   SET vm_ip = EXCLUDED.vm_ip,
+		       vm_provider_id = EXCLUDED.vm_provider_id,
+		       source = 'beget-import',
+		       status = 'Imported',
+		       updated_at = NOW()
+		 RETURNING id`,
+		projectID, name, vmIP, vmProviderID,
+	).Scan(&id)
+	return id, err
+}
+
+// SetAppServerImported finalises an adopted VM after terraform import: records
+// vm_ip / vm_provider_id and sets status=Imported.
+func SetAppServerImported(ctx context.Context, pool *pgxpool.Pool, id uuid.UUID, vmIP, vmProviderID string) error {
+	_, err := pool.Exec(ctx,
+		`UPDATE app_servers SET vm_ip=$2, vm_provider_id=$3, status='Imported', updated_at=NOW() WHERE id=$1`,
+		id, vmIP, vmProviderID,
+	)
+	return err
+}
+
 // ComposeDeployTarget identifies where a compose stack must be deployed: the
 // project/env slugs (to build the git path) and the Portainer endpoint id.
 type ComposeDeployTarget struct {

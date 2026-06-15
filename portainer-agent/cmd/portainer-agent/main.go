@@ -39,6 +39,14 @@ func main() {
 	defer srv.Shutdown(ctx) //nolint:errcheck
 
 	log.Info().Msg("portainer-agent starting")
+	// Reverse-sync reader: discover + adopt Beget VMs created outside the console.
+	if cfg.BegetReaderEnabled {
+		reader := worker.NewBegetReader(pool, cfg)
+		go reader.Start(ctx)
+	} else {
+		log.Info().Msg("beget-reader disabled (set BEGET_READER_ENABLED=true to enable)")
+	}
+
 	w := worker.NewVMWatcher(pool, cfg)
 	w.Start(ctx)
 
