@@ -189,9 +189,11 @@ spec:
           memory: "512Mi"
         limits:
           cpu: "1500m"
-          # 4Gi, not 1536Mi — dind buildkit burns memory exporting layers
-          # across 4 sequential image builds; 1.5Gi OOMs on export.
-          memory: "4Gi"
+          # 1536Mi: with docker:24 (no buildkit-healthcheck crash) this is
+          # enough for layer export. 4Gi over-commits the 12Gi node — summed
+          # pod limits (~7.9Gi) trip kubelet memory-pressure eviction during
+          # the next-build spike. Root cause was docker:29, not dind memory.
+          memory: "1536Mi"
       volumeMounts:
         - name: docker-graph-storage
           mountPath: /var/lib/docker
