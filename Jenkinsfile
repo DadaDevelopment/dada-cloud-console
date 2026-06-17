@@ -203,6 +203,14 @@ spec:
           mountPath: /home/jenkins/agent
 """
 ) {
+    // SURVIVE managed-control-plane / node-pressure flaps: the in-cluster JNLP4
+    // channel drops mid-build (ClosedChannelException, pod "removed or offline")
+    // when the Beget-managed apiserver flaps or the node evicts under memory
+    // pressure (observed builds #136/#138). Retry ONLY on agent/channel loss —
+    // a fresh pod is provisioned and the body reruns. Real failures
+    // (compile/test/push) don't match agent() and still fail fast. Mirrors
+    // jenkins-pipelines kubePodTemplate.
+    retry(count: 3, conditions: [agent()]) {
     node(podLabel) {
         cleanWs()
 
@@ -422,5 +430,6 @@ spec:
             echo "   GitOps Agent:    ${GITOPS_AGENT_IMAGE}:${resolvedTag}"
             echo "   Portainer Agent: ${PORTAINER_AGENT_IMAGE}:${resolvedTag}"
         }
+    }
     }
 }
