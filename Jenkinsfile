@@ -143,7 +143,12 @@ spec:
       resources:
         requests:
           cpu: "100m"
-          memory: "256Mi"
+          # request == limit: next build spikes to ~2Gi. With request 256Mi the
+          # container sits far over request during the build and is the kubelet's
+          # first eviction victim under node MemoryPressure (pod evicted, dind
+          # SIGTERM-exit-0, others 137 — builds #136/#139). Reserving the full 2Gi
+          # protects it from node-pressure eviction.
+          memory: "2Gi"
         limits:
           cpu: "1500m"
           memory: "2Gi"
@@ -191,13 +196,14 @@ spec:
       resources:
         requests:
           cpu: "250m"
-          memory: "512Mi"
+          # request == limit (1536Mi): dind burns memory building/exporting the
+          # 4 images. With request 512Mi it runs over request and is evicted
+          # under node MemoryPressure (#138/#141 die in the docker stage).
+          # 1536Mi reserved protects it; 4Gi over-commits the node (caused the
+          # next-build eviction in #136). Root crash was docker:29, now pinned 24.
+          memory: "1536Mi"
         limits:
           cpu: "1500m"
-          # 1536Mi: with docker:24 (no buildkit-healthcheck crash) this is
-          # enough for layer export. 4Gi over-commits the 12Gi node — summed
-          # pod limits (~7.9Gi) trip kubelet memory-pressure eviction during
-          # the next-build spike. Root cause was docker:29, not dind memory.
           memory: "1536Mi"
       volumeMounts:
         - name: docker-graph-storage
@@ -215,7 +221,7 @@ spec:
     // a fresh pod is provisioned and the body reruns. Real failures
     // (compile/test/push) don't match agent() and still fail fast. Mirrors
     // jenkins-pipelines kubePodTemplate.
-    retry(count: 3, conditions: [agent()]) {
+    retry(count: 5, conditions: [agent()]) {
     node(podLabel) {
         cleanWs()
 
