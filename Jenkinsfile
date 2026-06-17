@@ -3,8 +3,12 @@ def NODE_VERSION = '20'
 
 def GO_BUILDER_IMAGE   = "golang:${GO_VERSION}-alpine"
 def NODE_BUILDER_IMAGE = "node:${NODE_VERSION}-bookworm"
-def DOCKER_CLI_IMAGE   = 'docker:29-cli'
-def DOCKER_DIND_IMAGE  = 'docker:29-dind'
+// docker:24, not docker:29 — docker:29-dind's embedded BuildKit "session"
+// healthcheck fatally kills dockerd on heavy builds ("only one connection
+// allowed" → dind SIGTERM → pod OOM/abort). docker:24 is the in-repo-proven-good
+// dind (see jenkins-pipelines kubePodTemplate commit 01d47ea).
+def DOCKER_CLI_IMAGE   = 'docker:24-cli'
+def DOCKER_DIND_IMAGE  = 'docker:24-dind'
 
 def GITHUB_REGISTRY      = 'ghcr.io'
 def GITHUB_ORG           = 'dadadevelopment'
@@ -185,7 +189,9 @@ spec:
           memory: "512Mi"
         limits:
           cpu: "1500m"
-          memory: "1536Mi"
+          # 4Gi, not 1536Mi — dind buildkit burns memory exporting layers
+          # across 4 sequential image builds; 1.5Gi OOMs on export.
+          memory: "4Gi"
       volumeMounts:
         - name: docker-graph-storage
           mountPath: /var/lib/docker
