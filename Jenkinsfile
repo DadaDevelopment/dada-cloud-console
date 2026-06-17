@@ -72,7 +72,12 @@ spec:
       emptyDir: {}
   containers:
     - name: jnlp
-      image: jenkins/inbound-agent:latest
+      # Digest-pinned (was floating :latest). A floating tag silently changes the
+      # remoting version, which mid-build mismatches the 2.559-jdk21 controller and
+      # drops the JNLP4 channel (ChannelClosedException, "removed or offline" —
+      # observed #138/#139). This exact image handshakes cleanly against the
+      # controller. Bump deliberately. Matches jenkins-pipelines kubePodTemplate.
+      image: jenkins/inbound-agent@sha256:65b16b388a32be41d95134a5be7ce58e20fbc4d862e12f021ae64bf83bd5fe7d
       tty: true
       workingDir: /home/jenkins/agent
       resources:
