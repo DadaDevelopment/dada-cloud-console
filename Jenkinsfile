@@ -82,11 +82,17 @@ spec:
       workingDir: /home/jenkins/agent
       resources:
         requests:
-          cpu: "50m"
-          memory: "128Mi"
-        limits:
-          cpu: "300m"
+          # cpu 500m (was 50m): the JNLP4 channel drops deterministically during
+          # the CPU-heavy 2nd-image go build (#143/#144: gitops-agent build ->
+          # ChannelClosedException -> pod fails). go-builder+dind peg the node;
+          # at a 300m cap the agent is starved and misses its heartbeat, so the
+          # controller declares it offline. Reserving real CPU keeps the agent
+          # responsive enough to heartbeat through the build.
+          cpu: "500m"
           memory: "256Mi"
+        limits:
+          cpu: "2000m"
+          memory: "512Mi"
       volumeMounts:
         - name: workspace-volume
           mountPath: /home/jenkins/agent
