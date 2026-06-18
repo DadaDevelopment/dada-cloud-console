@@ -202,9 +202,17 @@ spec:
           # 1536Mi reserved protects it; 4Gi over-commits the node (caused the
           # next-build eviction in #136). Root crash was docker:29, now pinned 24.
           memory: "1536Mi"
+          # ephemeral-storage: every build dies the moment dind extracts the 2nd
+          # image's base layers (#143: golang:1.25-alpine extract -> channel drop).
+          # The docker-graph-storage emptyDir counts as pod ephemeral storage; with
+          # NO request, any usage is "over request" => this pod is the kubelet's #1
+          # DiskPressure eviction victim (dind SIGTERM exit-0, others 137). Reserve
+          # it so the build survives layer extraction.
+          ephemeral-storage: "4Gi"
         limits:
           cpu: "1500m"
           memory: "1536Mi"
+          ephemeral-storage: "8Gi"
       volumeMounts:
         - name: docker-graph-storage
           mountPath: /var/lib/docker
