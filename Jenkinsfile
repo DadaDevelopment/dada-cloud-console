@@ -55,6 +55,13 @@ metadata:
     app.kubernetes.io/part-of: dada-cloud-console
     app.kubernetes.io/managed-by: jenkins
 spec:
+  # Override the namespace default activeDeadlineSeconds. devops-tools caps pod
+  # lifetime at ~360s: EVERY agent pod was killed exactly ~360s after creation
+  # (#146 pods 359s/360s apart; #148 pod 362s), which looked like a periodic
+  # external pruner but is a per-pod deadline. The build needs longer than 6 min
+  # (tests + frontend build + 4 image builds + push), so it never finished.
+  # 1 hour is plenty and well under any sane runaway cap.
+  activeDeadlineSeconds: 3600
   priorityClassName: critical
   securityContext:
     fsGroup: 1000
