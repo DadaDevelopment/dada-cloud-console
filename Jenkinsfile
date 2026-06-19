@@ -40,12 +40,16 @@ apiVersion: v1
 kind: Pod
 metadata:
   name: ${agentName}
-  # NO argocd.argoproj.io/tracking-id here. It made ArgoCD (app jenkins-beget,
-  # syncPolicy.automated.prune+selfHeal=true) claim this ephemeral CI pod as a
-  # managed resource absent from git, then PRUNE it ~every sync (~5 min). That
-  # killed every build mid-run (channel drop, "Pod just failed") once builds ran
-  # longer than the prune interval — including during docker push (#146). The
-  # agent pod must stay invisible to ArgoCD.
+  annotations:
+    # ArgoCD (app jenkins-beget, syncPolicy.automated.prune+selfHeal=true) prunes
+    # this ephemeral agent pod on its ~180s reconcile tick — every build pod was
+    # deleted mid-run at the :42s reconcile phase (#146/#147 "Pod just failed",
+    # ChannelClosedException), regardless of build stage. Dropping the
+    # tracking-id alone did NOT stop it (ArgoCD still prunes extraneous resources
+    # in the managed namespace). These opt-outs tell ArgoCD to ignore the pod and
+    # never prune it.
+    argocd.argoproj.io/compare-options: IgnoreExtraneous
+    argocd.argoproj.io/sync-options: Prune=false
   labels:
     app.kubernetes.io/name: jenkins-agent
     app.kubernetes.io/part-of: dada-cloud-console
