@@ -17,6 +17,15 @@ def FRONTEND_IMAGE        = "${GITHUB_REGISTRY}/${GITHUB_ORG}/dada-cloud-console
 def GITOPS_AGENT_IMAGE    = "${GITHUB_REGISTRY}/${GITHUB_ORG}/dada-cloud-console-gitops-agent"
 def PORTAINER_AGENT_IMAGE = "${GITHUB_REGISTRY}/${GITHUB_ORG}/dada-cloud-console-portainer-agent"
 
+// GitOps write-back: after a successful push, pin the just-built tag into the
+// ArgoCD source so prod actually rolls (there is NO image-updater; the tag is
+// the deploy trigger). Argo's prod app tracks the console-migration branch of
+// argo-infra; only the 4 console component tags are touched (migrationJob is
+// left alone).
+def ARGO_REPO        = 'github.com/DadaDevelopment/argo-infra.git'
+def ARGO_BRANCH      = 'console-migration'
+def ARGO_VALUES_PATH = 'clusters/beget-prod/projects/platform/environments/prod/apps/cloud-console/values.yaml'
+
 // Frontend OIDC build-time constants. NEXT_PUBLIC_* vars are baked into the
 // JS bundle — must be set during both `npm run build` and `docker build`.
 def NEXT_PUBLIC_AUTH_MODE       = 'oidc'
@@ -450,6 +459,38 @@ spec:
                                 docker push ${GITOPS_AGENT_IMAGE}:latest
                                 docker push ${PORTAINER_AGENT_IMAGE}:latest
                                 docker rmi ${BACKEND_IMAGE}:${resolvedTag} ${FRONTEND_IMAGE}:${resolvedTag} ${GITOPS_AGENT_IMAGE}:${resolvedTag} ${PORTAINER_AGENT_IMAGE}:${resolvedTag} || true
+                            """
+                        }
+                    }
+
+                    // GitOps write-back: pin the built tag into the ArgoCD source
+                    // so prod rolls. No image-updater exists — this commit IS the
+                    // deploy trigger. Uses the same gh-token PAT as the registry push.
+                    runStage('GitOps write-back') {
+                        withCredentials([usernamePassword(
+                                credentialsId: 'gh-token',
+                                usernameVariable: 'GIT_USERNAME',
+                                passwordVariable: 'GIT_TOKEN'
+                        )]) {
+                            sh """
+                                set -eu
+                                apk add --no-cache git yq >/dev/null 2>&1 || true
+                                rm -rf /tmp/argo-infra
+                                git clone --depth 1 --branch ${ARGO_BRANCH} \
+                                  https://\${GIT_USERNAME}:\${GIT_TOKEN}@${ARGO_REPO} /tmp/argo-infra
+                                cd /tmp/argo-infra
+                                export TAG='${resolvedTag}'
+                                yq -i '(.backend.image.tag, .frontend.image.tag, .gitopsAgent.image.tag, .portainerAgent.image.tag) = strenv(TAG) | (.backend.image.tag, .frontend.image.tag, .gitopsAgent.image.tag, .portainerAgent.image.tag) style="double"' ${ARGO_VALUES_PATH}
+                                git config user.email 'platform-bot@dada-tuda.ru'
+                                git config user.name  'DADA Platform Bot'
+                                if git diff --quiet -- ${ARGO_VALUES_PATH}; then
+                                    echo "Tag already ${resolvedTag} — nothing to write back"
+                                else
+                                    git add ${ARGO_VALUES_PATH}
+                                    git commit -m "deploy(cloud-console): pin to ${resolvedTag} (build #${env.BUILD_NUMBER})"
+                                    git push origin ${ARGO_BRANCH}
+                                    echo "Wrote ${resolvedTag} -> ${ARGO_VALUES_PATH} on ${ARGO_BRANCH}"
+                                fi
                             """
                         }
                     }
