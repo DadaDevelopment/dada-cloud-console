@@ -235,6 +235,19 @@ func AppEnvSecretName(appName string) string {
 	return appName + "-env"
 }
 
+// AppServiceName returns the in-cluster Service name the common app subchart
+// generates for an app: always "<app>-service". Native manifests (e.g. a
+// custom-domain Ingress) must target this — unlike the PublicApi CR, whose
+// composition derives the service name itself from the bare app name.
+func AppServiceName(appName string) string {
+	return appName + "-service"
+}
+
+// DefaultAppServicePortName is the name the common app subchart gives the
+// Service's single port. Referencing the port by name keeps the Ingress correct
+// regardless of the numeric port (5173, 8080, …), which varies per app.
+const DefaultAppServicePortName = "http"
+
 func AppBaseGitPath(projectSlug, envSlug, appName string) string {
 	return fmt.Sprintf("clusters/beget-prod/projects/%s/environments/%s/apps/%s",
 		projectSlug, envSlug, appName)
@@ -410,14 +423,14 @@ func FQDNToName(fqdn string) string {
 // cert-manager (letsencrypt-prod, HTTP-01) per-host TLS cert. No DNS is managed
 // by the platform — the user owns their zone.
 type CustomIngressSpec struct {
-	Name        string // FQDNToName(hostname), the manifest name + TLS secret base
-	Namespace   string
-	ProjectSlug string
-	EnvSlug     string
-	Hostname    string
-	ServiceName string
-	ServicePort int
-	OperationID string
+	Name            string // FQDNToName(hostname), the manifest name + TLS secret base
+	Namespace       string
+	ProjectSlug     string
+	EnvSlug         string
+	Hostname        string
+	ServiceName     string
+	ServicePortName string // the Service's named port; the common subchart always uses "http"
+	OperationID     string
 }
 
 var customIngressTmpl = template.Must(template.New("customingress").Parse(`apiVersion: networking.k8s.io/v1
@@ -447,7 +460,7 @@ spec:
               service:
                 name: {{ .ServiceName }}
                 port:
-                  number: {{ .ServicePort }}
+                  name: {{ .ServicePortName }}
 `))
 
 // RenderCustomIngress renders a native k8s Ingress (one manifest) for an

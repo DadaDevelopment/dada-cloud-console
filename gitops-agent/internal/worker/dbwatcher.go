@@ -847,36 +847,26 @@ func (w *DBWatcher) doAttachCustomHostname(ctx context.Context, op db.Operation)
 		return fmt.Errorf("project/env lookup: %w", err)
 	}
 
-	// Read app port from snapshot (same pattern as PublicApi).
-	var summaryRaw []byte
-	if err := w.pool.QueryRow(ctx, `
-		SELECT summary_json FROM resource_snapshots
-		WHERE project_id=$1 AND environment_id=$2 AND kind='App' AND name=$3
-	`, op.ProjectID, op.EnvironmentID, p.AppName).Scan(&summaryRaw); err != nil {
-		return fmt.Errorf("loading app snapshot: %w", err)
-	}
-	var appSpec map[string]any
-	_ = json.Unmarshal(summaryRaw, &appSpec)
-	portVal, _ := appSpec["port"].(float64)
-	if portVal == 0 {
-		portVal = 8080
-	}
-
-	yaml, err := renderer.RenderCustomIngress(renderer.CustomIngressSpec{
-		Name:        renderer.FQDNToName(p.Hostname),
-		Namespace:   envNamespace,
-		ProjectSlug: projectName,
-		EnvSlug:     envName,
-		Hostname:    p.Hostname,
-		ServiceName: p.AppName,
-		ServicePort: int(portVal),
-		OperationID: op.ID.String(),
-	})
+	mgr, err := w.managerFor(ctx, op.ProjectID)
 	if err != nil {
 		return err
 	}
 
-	mgr, err := w.managerFor(ctx, op.ProjectID)
+	// The native Ingress must target the app's real Service. The common subchart
+	// names it "<app>-service" with a single port named "http" (the numeric port
+	// varies per app, so reference it by name). The PublicApi path passes the bare
+	// app name because its composition adds the suffix itself — a native Ingress
+	// has no composition, so resolve the service name + port name here.
+	yaml, err := renderer.RenderCustomIngress(renderer.CustomIngressSpec{
+		Name:            renderer.FQDNToName(p.Hostname),
+		Namespace:       envNamespace,
+		ProjectSlug:     projectName,
+		EnvSlug:         envName,
+		Hostname:        p.Hostname,
+		ServiceName:     renderer.AppServiceName(p.AppName),
+		ServicePortName: renderer.DefaultAppServicePortName,
+		OperationID:     op.ID.String(),
+	})
 	if err != nil {
 		return err
 	}

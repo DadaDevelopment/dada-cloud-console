@@ -69,15 +69,15 @@ func TestRenderServiceDatabase(t *testing.T) {
 
 func TestRenderApp(t *testing.T) {
 	spec := renderer.AppSpec{
-		Name:        "api-service",
-		Namespace:   "beta-staging",
-		ProjectSlug: "beta",
-		EnvSlug:     "staging",
-		Image:       "ghcr.io/dada-tuda/api-service:v1.2.3",
-		Port:        8080,
-		Replicas:    2,
-		Profile:     "medium",
-		OperationID: "op-456",
+		Name:               "api-service",
+		Namespace:          "beta-staging",
+		ProjectSlug:        "beta",
+		EnvSlug:            "staging",
+		Image:              "ghcr.io/dada-tuda/api-service:v1.2.3",
+		Port:               8080,
+		Replicas:           2,
+		Profile:            "medium",
+		OperationID:        "op-456",
 		HelmRepoURL:        "https://github.com/DADA-TUDA/argo-infra.git",
 		HelmTargetRevision: "main",
 	}
@@ -201,14 +201,14 @@ func TestRenderPublicApi_NoAuth(t *testing.T) {
 
 func TestRenderCustomIngress(t *testing.T) {
 	spec := renderer.CustomIngressSpec{
-		Name:        "shop-acme-com",
-		Namespace:   "delta-prod",
-		ProjectSlug: "delta",
-		EnvSlug:     "prod",
-		Hostname:    "shop.acme.com",
-		ServiceName: "web",
-		ServicePort: 3000,
-		OperationID: "op-ci",
+		Name:            "shop-acme-com",
+		Namespace:       "delta-prod",
+		ProjectSlug:     "delta",
+		EnvSlug:         "prod",
+		Hostname:        "shop.acme.com",
+		ServiceName:     "web-service",
+		ServicePortName: "http",
+		OperationID:     "op-ci",
 	}
 	got, err := renderer.RenderCustomIngress(spec)
 	if err != nil {
@@ -222,8 +222,8 @@ func TestRenderCustomIngress(t *testing.T) {
 		"ingressClassName: nginx",
 		"secretName: shop-acme-com-tls",
 		"host: shop.acme.com",
-		"name: web",
-		"number: 3000",
+		"name: web-service",
+		"name: http",
 	}
 	for _, want := range wantSubstrings {
 		if !strings.Contains(got, want) {
