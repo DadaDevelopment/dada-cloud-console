@@ -91,6 +91,13 @@ async function loadOidcProvider(): Promise<React.ComponentType<{ children: React
   function OidcBridge({ children }: { children: React.ReactNode }) {
     const sso = useSso();
     const [token, setToken] = useState<string | null>(null);
+    // Tracks whether the access-token fetch has settled for the current status.
+    // The token is fetched asynchronously AFTER sso.status flips to
+    // "authenticated", so without this there is a render where
+    // status==="authenticated", isLoading===false, but token===null — and the
+    // console route guard reads that as logged-out and bounces to /login on
+    // every page refresh.
+    const [tokenReady, setTokenReady] = useState(false);
 
     useEffect(() => {
       setTokenGetter(() => sso.getAccessToken());
@@ -98,12 +105,22 @@ async function loadOidcProvider(): Promise<React.ComponentType<{ children: React
     }, [sso]);
 
     useEffect(() => {
+      let active = true;
       if (sso.status === "authenticated") {
-        sso.getAccessToken().then(setToken);
+        sso.getAccessToken().then((t) => {
+          if (!active) return;
+          setToken(t);
+          setTokenReady(true);
+        });
       } else {
         // eslint-disable-next-line react-hooks/set-state-in-effect
         setToken(null);
+        // "loading" is still pending; only unauthenticated/error are settled.
+        setTokenReady(sso.status !== "loading");
       }
+      return () => {
+        active = false;
+      };
     }, [sso, sso.status]);
 
     const user: User | null = sso.principal
@@ -118,7 +135,7 @@ async function loadOidcProvider(): Promise<React.ComponentType<{ children: React
     const value: AuthContextValue = {
       user,
       token,
-      isLoading: sso.status === "loading",
+      isLoading: sso.status === "loading" || (sso.status === "authenticated" && !tokenReady),
       login: () => void sso.login(),
       logout: () => void sso.logout(),
     };
