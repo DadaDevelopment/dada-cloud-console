@@ -134,6 +134,10 @@ func SetupRouter(pool *pgxpool.Pool, cfg *config.Config) *gin.Engine {
 		api.GET("/projects/:projectId/environments/:envId/databases", h.ListDatabases)
 		api.POST("/projects/:projectId/environments/:envId/databases", h.CreateServiceDatabase)
 
+		// Object Storage (S3Bucket XR)
+		api.GET("/projects/:projectId/environments/:envId/s3buckets", h.ListS3Buckets)
+		api.POST("/projects/:projectId/environments/:envId/s3buckets", h.CreateS3Bucket)
+
 		// AppServers (VM track)
 		api.GET("/projects/:projectId/app-servers", h.ListAppServers)
 		api.POST("/projects/:projectId/app-servers", h.CreateAppServer)
@@ -157,6 +161,42 @@ func SetupRouter(pool *pgxpool.Pool, cfg *config.Config) *gin.Engine {
 		// Endpoints (PublicApi CRD)
 		api.GET("/projects/:projectId/environments/:envId/apps/:appName/endpoints", h.ListEndpoints)
 		api.POST("/projects/:projectId/environments/:envId/apps/:appName/endpoints", h.CreateEndpoint)
+
+		// Custom domains (user-owned domains + auto TLS, Vercel-style two-level model).
+		// Level 1: apex authorization (project-scoped). Level 2: hostname attachment (app-scoped).
+		api.GET("/projects/:projectId/domain-authorizations", h.ListDomainAuthorizations)
+		api.POST("/projects/:projectId/domain-authorizations", h.AddDomainAuthorization)
+		api.POST("/projects/:projectId/domain-authorizations/:id/verify", h.VerifyDomainAuthorization)
+		api.DELETE("/projects/:projectId/domain-authorizations/:id", h.DeleteDomainAuthorization)
+		api.GET("/projects/:projectId/environments/:envId/apps/:appName/hostnames", h.ListHostnames)
+		api.POST("/projects/:projectId/environments/:envId/apps/:appName/hostnames", h.AttachHostname)
+		api.DELETE("/projects/:projectId/environments/:envId/apps/:appName/hostnames/:id", h.DetachHostname)
+
+		// Vercel-flow: git repos, builds, deployments, env vars.
+		// Git provider installations + remote repo listing (build-agent proxy).
+		api.GET("/projects/:projectId/git/installations", h.ListGitInstallations)
+		api.GET("/projects/:projectId/git/install-url", h.GetGitInstallURL)
+		api.GET("/projects/:projectId/git/installations/:installationId/repos", h.ListInstallationRepos)
+		api.GET("/projects/:projectId/git/installations/:installationId/detect", h.DetectFramework)
+		// Git repos linked per environment.
+		api.GET("/projects/:projectId/environments/:envId/repos", h.ListGitRepos)
+		api.POST("/projects/:projectId/environments/:envId/repos", h.ConnectGitRepo)
+		api.DELETE("/projects/:projectId/environments/:envId/repos/:repoId", h.DisconnectGitRepo)
+		// Builds (imperative — no operations).
+		api.GET("/projects/:projectId/environments/:envId/apps/:appName/builds", h.ListBuilds)
+		api.POST("/projects/:projectId/environments/:envId/apps/:appName/builds", h.TriggerBuild)
+		api.GET("/projects/:projectId/builds/:buildId", h.GetBuild)
+		api.POST("/projects/:projectId/builds/:buildId/cancel", h.CancelBuild)
+		api.POST("/projects/:projectId/builds/:buildId/logs-token", h.GetBuildLogsToken)
+		// Deployments (rollback/promote enqueue DeployImageVersion operations).
+		api.GET("/projects/:projectId/environments/:envId/apps/:appName/deployments", h.ListDeployments)
+		api.POST("/projects/:projectId/deployments/:deploymentId/rollback", h.RollbackDeployment)
+		api.POST("/projects/:projectId/deployments/:deploymentId/promote", h.PromoteDeployment)
+		// Env vars (always encrypted at rest; reveal is write-gated).
+		api.GET("/projects/:projectId/environments/:envId/apps/:appName/env", h.ListEnvVars)
+		api.PUT("/projects/:projectId/environments/:envId/apps/:appName/env/:key", h.SetEnvVar)
+		api.GET("/projects/:projectId/environments/:envId/apps/:appName/env/:key", h.RevealEnvVar)
+		api.DELETE("/projects/:projectId/environments/:envId/apps/:appName/env/:key", h.DeleteEnvVar)
 
 		// Operations
 		api.GET("/projects/:projectId/operations", h.GetProjectOperations)

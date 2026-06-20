@@ -179,6 +179,15 @@ export interface CreateDatabaseResponse {
   message: string;
 }
 
+export interface S3BucketsResponse {
+  buckets: ResourceSnapshot[];
+}
+
+export interface CreateS3BucketResponse {
+  operation: Operation;
+  message: string;
+}
+
 export interface OperationsResponse {
   operations: Operation[];
 }
@@ -234,6 +243,75 @@ export interface EndpointsResponse {
 }
 
 export interface CreateEndpointResponse {
+  operation: Operation;
+  message: string;
+}
+
+// Custom domains (Vercel-style two-level model).
+// Level 1: a project proves ownership of an apex domain via a TXT challenge.
+// Level 2: a hostname (apex or subdomain) under a verified apex is attached to an app.
+export interface DomainChallenge {
+  type: string; // "TXT"
+  host: string; // _dada-verify.acme.com
+  value: string; // dada-domain-verify=<token>
+}
+
+export interface DomainAuthorization {
+  id: string;
+  project_id: string;
+  apex_domain: string;
+  verification_token: string;
+  status: "pending" | "verified" | "failed";
+  verified_at?: string;
+  last_checked_at?: string;
+  error_message?: string;
+  created_by: string;
+  created_at: string;
+  updated_at: string;
+  // Convenience challenge attached by list/create/verify responses.
+  challenge?: DomainChallenge;
+}
+
+export interface DomainHostname {
+  id: string;
+  authorization_id: string;
+  environment_id: string;
+  app_name: string;
+  hostname: string;
+  record_type: "A" | "CNAME";
+  status: "pending" | "active" | "failed";
+  cert_status: string;
+  operation_id?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface DomainAuthorizationsResponse {
+  authorizations: DomainAuthorization[];
+}
+
+export interface AddDomainAuthorizationResponse {
+  authorization: DomainAuthorization;
+  challenge: DomainChallenge;
+}
+
+export interface VerifyDomainAuthorizationResponse {
+  authorization: DomainAuthorization;
+  challenge: DomainChallenge;
+}
+
+export interface HostnamesResponse {
+  hostnames: DomainHostname[];
+}
+
+export interface AttachHostnameResponse {
+  operation: Operation;
+  hostname: DomainHostname;
+  dns_record: { type: string; host: string; target: string };
+  message: string;
+}
+
+export interface DetachHostnameResponse {
   operation: Operation;
   message: string;
 }
@@ -344,4 +422,157 @@ export interface PendingApproval {
 
 export interface PendingApprovalsResponse {
   approvals: PendingApproval[];
+}
+
+// Vercel-flow — Git / Build / Deploy / Env / Domain types --------------------
+
+export type BuildStatus =
+  | "queued"
+  | "detecting"
+  | "building"
+  | "pushing"
+  | "success"
+  | "failed"
+  | "canceled";
+
+export type DeployTrigger =
+  | "push"
+  | "pr"
+  | "manual"
+  | "rollback"
+  | "promote";
+
+export type GitProvider = "github" | "gitlab";
+
+export interface GitInstallation {
+  id: string;
+  project_id: string;
+  provider: GitProvider;
+  installation_id: string;
+  account_login: string;
+  account_avatar_url?: string;
+  created_at: string;
+}
+
+export interface GitRemoteRepo {
+  full_name: string;
+  clone_url: string;
+  default_branch: string;
+  private: boolean;
+  description?: string;
+  updated_at: string;
+}
+
+export interface GitRepo {
+  id: string;
+  project_id: string;
+  environment_id: string;
+  app_name: string;
+  provider: GitProvider;
+  installation_id?: string;
+  repo_full_name: string;
+  production_branch: string;
+  root_dir: string;
+  framework_override?: string;
+  auto_deploy: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface FrameworkDetection {
+  framework: string | null;
+  build_command: string | null;
+  install_command: string | null;
+  output_dir: string | null;
+}
+
+export interface Build {
+  id: string;
+  git_repo_id: string;
+  environment_id: string;
+  app_name: string;
+  status: BuildStatus;
+  trigger: DeployTrigger;
+  commit_sha: string;
+  commit_message?: string;
+  branch: string;
+  pr_number?: number;
+  image_uri?: string;
+  logs_ref?: string;
+  started_at?: string;
+  finished_at?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface BuildLogFrame {
+  type: "log" | "status" | "error";
+  payload: string;
+  ts: string;
+}
+
+export interface Deployment {
+  id: string;
+  environment_id: string;
+  app_name: string;
+  build_id?: string;
+  operation_id?: string;
+  image_uri: string;
+  trigger: DeployTrigger;
+  is_current: boolean;
+  commit_sha?: string;
+  branch?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface EnvVar {
+  id: string;
+  environment_id: string;
+  app_name: string;
+  key: string;
+  value?: string; // only present after reveal
+  is_secret: boolean;
+  scope: "build" | "runtime" | "both";
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AppDomain {
+  id: string;
+  environment_id: string;
+  app_name: string;
+  fqdn: string;
+  is_auto: boolean;
+  cert_status: "pending" | "issued" | "error";
+  created_at: string;
+}
+
+// Response wrappers
+export interface GitReposResponse {
+  repos: GitRepo[];
+}
+
+export interface BuildsResponse {
+  builds: Build[];
+}
+
+export interface DeploymentsResponse {
+  deployments: Deployment[];
+}
+
+export interface InstallationsResponse {
+  installations: GitInstallation[];
+}
+
+export interface RemoteReposResponse {
+  repos: GitRemoteRepo[];
+}
+
+export interface EnvVarsResponse {
+  env_vars: EnvVar[];
+}
+
+export interface DomainsResponse {
+  domains: AppDomain[];
 }

@@ -1,0 +1,115 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1180 760" font-family="-apple-system,Segoe UI,Roboto,sans-serif">
+  <defs>
+    <marker id="arr" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L8,3 L0,6 z" fill="#475569"/>
+    </marker>
+    <style>
+      .new   { fill:#fff7ed; stroke:#ea580c; stroke-width:2; }
+      .reuse { fill:#eff6ff; stroke:#2563eb; stroke-width:2; }
+      .infra { fill:#f0fdf4; stroke:#16a34a; stroke-width:2; }
+      .ext   { fill:#f5f3ff; stroke:#7c3aed; stroke-width:2; }
+      .lbl   { font-size:14px; font-weight:600; fill:#0f172a; }
+      .sub   { font-size:11px; fill:#475569; }
+      .flow  { stroke:#475569; stroke-width:2; fill:none; marker-end:url(#arr); }
+      .note  { font-size:11px; fill:#64748b; }
+      .title { font-size:20px; font-weight:700; fill:#0f172a; }
+      .sect  { font-size:12px; font-weight:700; fill:#94a3b8; letter-spacing:1px; }
+    </style>
+  </defs>
+
+  <text x="40" y="40" class="title">Vercel-style git→build→deploy on dada-cloud</text>
+  <text x="40" y="62" class="note">orange = NEW · blue = REUSED rail · green = new infra · purple = external</text>
+
+  <!-- legend boxes -->
+  <rect x="760" y="28" width="18" height="14" class="new"/><text x="784" y="40" class="note">new</text>
+  <rect x="830" y="28" width="18" height="14" class="reuse"/><text x="854" y="40" class="note">reused</text>
+  <rect x="910" y="28" width="18" height="14" class="infra"/><text x="934" y="40" class="note">new infra</text>
+  <rect x="1000" y="28" width="18" height="14" class="ext"/><text x="1024" y="40" class="note">external</text>
+
+  <text x="40" y="100" class="sect">SOURCE</text>
+  <!-- GitHub -->
+  <rect x="40" y="110" width="200" height="64" rx="8" class="ext"/>
+  <text x="60" y="138" class="lbl">GitHub App</text>
+  <text x="60" y="158" class="sub">push / PR → webhook</text>
+
+  <text x="300" y="100" class="sect">BUILD (new subsystem — NOT gitops)</text>
+  <!-- build-agent -->
+  <rect x="300" y="110" width="240" height="120" rx="8" class="new"/>
+  <text x="320" y="138" class="lbl">build-agent (Go worker)</text>
+  <text x="320" y="160" class="sub">1. Build row (sha, branch)</text>
+  <text x="320" y="178" class="sub">2. Nixpacks detect framework</text>
+  <text x="320" y="196" class="sub">3. spawn k8s Job (BuildKit)</text>
+  <text x="320" y="214" class="sub">4. stream logs → WS hub</text>
+
+  <!-- BuildKit job -->
+  <rect x="300" y="270" width="240" height="74" rx="8" class="infra"/>
+  <text x="320" y="298" class="lbl">BuildKit Job (rootless)</text>
+  <text x="320" y="318" class="sub">clone → build OCI → push</text>
+  <text x="320" y="335" class="sub">isolated ns · no cluster creds</text>
+
+  <!-- Harbor -->
+  <rect x="600" y="270" width="220" height="74" rx="8" class="infra"/>
+  <text x="620" y="298" class="lbl">Harbor registry</text>
+  <text x="620" y="318" class="sub">img:&lt;gitsha&gt; (immutable)</text>
+  <text x="620" y="335" class="sub">quota · RBAC · scan</text>
+
+  <text x="600" y="100" class="sect">DEPLOY (reused rails — unchanged)</text>
+  <!-- UpdateAppImage Operation -->
+  <rect x="600" y="110" width="240" height="64" rx="8" class="reuse"/>
+  <text x="620" y="138" class="lbl">Operation: UpdateAppImage</text>
+  <text x="620" y="158" class="sub">existing async state machine</text>
+
+  <!-- gitops-agent -->
+  <rect x="900" y="110" width="240" height="64" rx="8" class="reuse"/>
+  <text x="920" y="138" class="lbl">gitops-agent</text>
+  <text x="920" y="158" class="sub">render → commit argo-infra</text>
+
+  <!-- ArgoCD -->
+  <rect x="900" y="270" width="240" height="64" rx="8" class="reuse"/>
+  <text x="920" y="298" class="lbl">ArgoCD</text>
+  <text x="920" y="318" class="sub">sync App → pod live</text>
+
+  <text x="600" y="400" class="sect">EXPOSE (reused — already automatic SSL)</text>
+  <!-- PublicApi -->
+  <rect x="600" y="412" width="240" height="74" rx="8" class="reuse"/>
+  <text x="620" y="440" class="lbl">PublicApi CRD</text>
+  <text x="620" y="460" class="sub">fqdn &lt;app&gt;-&lt;sha8&gt;</text>
+  <text x="620" y="477" class="sub">.apps.dada-tuda.ru</text>
+
+  <!-- ingress + cert -->
+  <rect x="900" y="412" width="240" height="74" rx="8" class="reuse"/>
+  <text x="920" y="440" class="lbl">ingress-nginx-pub + cert-manager</text>
+  <text x="920" y="460" class="sub">Let's Encrypt cert (auto)</text>
+  <text x="920" y="477" class="sub">temp domain live, https ✓</text>
+
+  <!-- parallel track -->
+  <rect x="300" y="412" width="240" height="74" rx="8" class="new" stroke-dasharray="6 4"/>
+  <text x="320" y="440" class="lbl">Custom domain + SSL</text>
+  <text x="320" y="460" class="sub">PARALLEL TRACK (deferred)</text>
+  <text x="320" y="477" class="sub">DNS verify → cert-manager (done)</text>
+
+  <!-- flows -->
+  <path class="flow" d="M240,142 L300,150"/>
+  <path class="flow" d="M420,230 L420,270"/>
+  <path class="flow" d="M540,307 L600,307"/>
+  <!-- harbor up to operation -->
+  <path class="flow" d="M710,270 L710,200 L720,200 L720,174"/>
+  <text x="724" y="250" class="note">image tag</text>
+  <path class="flow" d="M840,142 L900,142"/>
+  <path class="flow" d="M1020,174 L1020,270"/>
+  <path class="flow" d="M900,302 L720,302 L720,412"/>
+  <text x="724" y="392" class="note">PublicApi auto-created</text>
+  <path class="flow" d="M840,449 L900,449"/>
+
+  <!-- bottom note -->
+  <text x="40" y="560" class="sect">WHY THIS IS ELEGANT</text>
+  <text x="40" y="584" class="note">build-agent never touches Argo/Helm/k8s workloads. On success it just calls the EXISTING UpdateAppImage API.</text>
+  <text x="40" y="602" class="note">Build (imperative, ephemeral, untrusted code) stays out of the declarative gitops machine. Only the immutable image tag re-enters.</text>
+
+  <text x="40" y="650" class="sect">NEW vs REUSED</text>
+  <text x="40" y="674" class="note">NEW: build-agent · GitHub App · Harbor · BuildKit · build isolation · git_repos/builds/deployments tables · build UI</text>
+  <text x="40" y="692" class="note">REUSED unchanged: Operation machine · gitops-agent · ArgoCD · Crossplane App · PublicApi · cert-manager · ingress-nginx-pub · Keycloak · WS hub</text>
+
+  <text x="40" y="730" class="sect">HARD PART</text>
+  <text x="40" y="752" class="note">Multi-tenant build isolation: gVisor/Kata or dedicated node pool · deny-all egress except git+registry · no SA token in build Jobs · per-build ephemeral ns + quotas.</text>
+</svg>

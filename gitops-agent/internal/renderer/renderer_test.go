@@ -199,6 +199,39 @@ func TestRenderPublicApi_NoAuth(t *testing.T) {
 	}
 }
 
+func TestRenderCustomIngress(t *testing.T) {
+	spec := renderer.CustomIngressSpec{
+		Name:        "shop-acme-com",
+		Namespace:   "delta-prod",
+		ProjectSlug: "delta",
+		EnvSlug:     "prod",
+		Hostname:    "shop.acme.com",
+		ServiceName: "web",
+		ServicePort: 3000,
+		OperationID: "op-ci",
+	}
+	got, err := renderer.RenderCustomIngress(spec)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	wantSubstrings := []string{
+		"kind: Ingress",
+		"name: shop-acme-com",
+		"namespace: delta-prod",
+		"cert-manager.io/cluster-issuer: letsencrypt-prod",
+		"ingressClassName: nginx",
+		"secretName: shop-acme-com-tls",
+		"host: shop.acme.com",
+		"name: web",
+		"number: 3000",
+	}
+	for _, want := range wantSubstrings {
+		if !strings.Contains(got, want) {
+			t.Errorf("rendered custom Ingress missing %q\nFull output:\n%s", want, got)
+		}
+	}
+}
+
 func TestRenderProject(t *testing.T) {
 	spec := renderer.ProjectSpec{
 		Project:            "client-a",

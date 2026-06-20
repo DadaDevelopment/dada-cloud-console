@@ -1,0 +1,65 @@
+# Ingress migration snapshot  (generated pre-cutover)
+## OLD LB IP
+159.194.204.57
+
+## All Ingress hosts (ns/name: hosts)
+argocd-beget/codex-lb-responses: codex-proxy.dada-tuda.ru 
+argocd-beget/codex-lb: codex-proxy.dada-tuda.ru 
+argocd-master/pgadmin-ingress: pgadmin-dada-prod.dada-tuda.ru 
+argocd-prod/dada-cloud-console: console.dada-tuda.ru 
+argocd-prod/keycloak: auth.dada-tuda.ru 
+argocd-prod/rabbitmq-service: rabbitmq-dada-prod.dada-tuda.ru 
+databases/k10-databases-ingress: k10.dada-tuda.ru 
+elastic-stack/kibana-infra: kibana.dada-tuda.ru 
+example-project-prod/cm-acme-http-solver-rzm7q: parser.dada-tuda.ru 
+example-project-prod/dada-lending-server-ingress: dada-tuda.ru 
+example-project-prod/n8n: n8n.dada-tuda.ru 
+example-project-prod/parser-ingress: parser.dada-tuda.ru 
+example-project-prod/reels-tracker-ingress: reels-tracker.dada-tuda.ru 
+fin-core-prod/profi-backend-ingress: profi-backend.dada-tuda.ru 
+fin-core-prod/profi-ingress: profi.dada-tuda.ru 
+jira/jira-jira-software: jira.dada-tuda.ru 
+longhorn-system/longhorn-frontend-ingress: storage-dada-prod.dada-tuda.ru 
+ml-prod/ocr: ocr-ml-prod.example.com ocr-predictor-ml-prod.example.com 
+ml-prod/whisper: whisper-ml-prod.example.com whisper-predictor-ml-prod.example.com 
+mlflow/mlflow: mlflow.dada-tuda.ru 
+monitoring/kube-prometheus-stack-monitoring-grafana: grafana.dada-tuda.ru 
+monitoring/monitoring-stack-alertmanager: alertmanager-dada-b1.dada-tuda.ru 
+monitoring/monitoring-stack-prometheus: prometheus-dada-prod.dada-tuda.ru 
+portainer/portainer: portainer.dada-tuda.ru 
+
+## Live PublicApi CRs
+NAME                         FQDN                                      UPSTREAM             PORT   TARGET
+ai-bot-service               ai-bot.dada-tuda.ru                       ai-bot-service       8080   159.194.204.57
+dada-agent-service           agent.dada-tuda.ru                        dada-agent-service   8080   159.194.204.57
+event-service                event-dada-prod.dada-tuda.ru              event-service        8080   159.194.204.57
+feedback-service-feedback    feedback-service-dada-prod.dada-tuda.ru   feedback-service     8080   159.194.204.57
+feedback-service-shortlist   feedback-service-dada-prod.dada-tuda.ru   feedback-service     8080   159.194.204.57
+jira                         jira.dada-tuda.ru                         jira-jira-software   8080   159.194.204.57
+n8n                          n8n.dada-tuda.ru                          n8n                  5678   159.194.204.57
+payments                     payments.dada-tuda.ru                     gateway              8080   159.194.204.57
+portainer                    portainer.dada-tuda.ru                    portainer            9443   159.194.204.57
+user-service                 user-service-dada-prod.dada-tuda.ru       user-service         8080   159.194.204.57
+video-service                video-service-dada-prod.dada-tuda.ru      video-service        8080   159.194.204.57
+
+## DNS A-records NOW (all unique hosts)
+alertmanager-dada-b1.dada-tuda.ru             159.194.204.57 
+auth.dada-tuda.ru                             159.194.204.57 
+codex-proxy.dada-tuda.ru                      159.194.204.57 
+console.dada-tuda.ru                          159.194.204.57 
+dada-tuda.ru                                  159.194.204.57 
+grafana.dada-tuda.ru                          159.194.204.57 
+jira.dada-tuda.ru                             159.194.204.57 
+k10.dada-tuda.ru                              159.194.204.57 
+kibana.dada-tuda.ru                           159.194.204.57 
+mlflow.dada-tuda.ru                           159.194.204.57 
+n8n.dada-tuda.ru                              159.194.204.57 
+parser.dada-tuda.ru                           
+pgadmin-dada-prod.dada-tuda.ru                159.194.204.57 
+portainer.dada-tuda.ru                        159.194.204.57 
+profi-backend.dada-tuda.ru                    159.194.204.57 
+profi.dada-tuda.ru                            159.194.204.57 
+prometheus-dada-prod.dada-tuda.ru             159.194.204.57 
+rabbitmq-dada-prod.dada-tuda.ru               159.194.204.57 
+reels-tracker.dada-tuda.ru                    159.194.204.57 
+storage-dada-prod.dada-tuda.ru                159.194.204.57 

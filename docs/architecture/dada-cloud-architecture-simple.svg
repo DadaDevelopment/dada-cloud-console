@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="80 -70 638 750" width="638" height="750" font-family="Inter, Segoe UI, system-ui, sans-serif">
+<defs>
+<marker id="m7789" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#1e1e1e"/></marker>
+</defs>
+<rect x="80" y="-70" width="638" height="750" fill="#ffffff"/>
+<polyline points="350.0,136.0 350.0,204.0" fill="none" stroke="#1e1e1e" stroke-width="2.5" marker-end="url(#m7789)" stroke-linejoin="round" stroke-linecap="round"/>
+<polyline points="350.0,306.0 350.0,374.0" fill="none" stroke="#1e1e1e" stroke-width="2.5" marker-end="url(#m7789)" stroke-linejoin="round" stroke-linecap="round"/>
+<polyline points="350.0,476.0 350.0,544.0" fill="none" stroke="#1e1e1e" stroke-width="2.5" marker-end="url(#m7789)" stroke-linejoin="round" stroke-linecap="round"/>
+<rect x="160" y="40" width="380" height="90" rx="14" fill="#a5d8ff" stroke="#1971c2" stroke-width="2.5"/>
+<text x="350" y="80" fill="#1971c2" font-size="19" font-weight="600" text-anchor="middle">1.  UI — одна кнопка</text>
+<text x="350" y="104" fill="#1971c2" font-size="19" font-weight="600" text-anchor="middle">ввёл имя базы → Create</text>
+<rect x="160" y="210" width="380" height="90" rx="14" fill="#b2f2bb" stroke="#2f9e44" stroke-width="2.5"/>
+<text x="350" y="250" fill="#2f9e44" font-size="18" font-weight="600" text-anchor="middle">2.  GitOps</text>
+<text x="350" y="273" fill="#2f9e44" font-size="18" font-weight="600" text-anchor="middle">ресурс описан в Git, Argo CD применяет</text>
+<rect x="160" y="380" width="380" height="90" rx="14" fill="#d0bfff" stroke="#6741d9" stroke-width="2.5"/>
+<text x="350" y="420" fill="#6741d9" font-size="18" font-weight="600" text-anchor="middle">3.  Crossplane</text>
+<text x="350" y="443" fill="#6741d9" font-size="18" font-weight="600" text-anchor="middle">контроллеры сами создают ресурсы</text>
+<rect x="160" y="550" width="380" height="90" rx="14" fill="#ffd8a8" stroke="#e8590c" stroke-width="2.5"/>
+<text x="350" y="590" fill="#e8590c" font-size="18" font-weight="600" text-anchor="middle">4.  PostgreSQL + бэкапы</text>
+<text x="350" y="613" fill="#e8590c" font-size="18" font-weight="600" text-anchor="middle">готово — без YAML и kubectl</text>
+<text x="120" y="-4" fill="#1e1e1e" font-size="26" text-anchor="start">Как работает кнопка «Create Database»</text>
+<text x="564" y="94" fill="#1971c2" font-size="14" text-anchor="start">что видит</text>
+<text x="564" y="112" fill="#1971c2" font-size="14" text-anchor="start">разработчик</text>
+<text x="564" y="434" fill="#6741d9" font-size="14" text-anchor="start">что происходит</text>
+<text x="564" y="452" fill="#6741d9" font-size="14" text-anchor="start">под капотом</text>
+</svg>

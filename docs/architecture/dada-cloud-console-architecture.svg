@@ -1,0 +1,76 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 -86 1430 1016" width="1430" height="1016" font-family="Inter, Segoe UI, system-ui, sans-serif">
+<defs>
+<marker id="m25053" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#1971c2"/></marker>
+<marker id="m7932" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#1e1e1e"/></marker>
+<marker id="m75034" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#2f9e44"/></marker>
+<marker id="m81839" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#6741d9"/></marker>
+<marker id="m80001" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#e8590c"/></marker>
+</defs>
+<rect x="0" y="-86" width="1430" height="1016" fill="#ffffff"/>
+<polyline points="180.0,116.0 195.0,209.0" fill="none" stroke="#1e1e1e" stroke-width="2.5" marker-end="url(#m7932)" stroke-linejoin="round" stroke-linecap="round"/>
+<polyline points="310.0,257.0 370.0,257.0" fill="none" stroke="#1971c2" stroke-width="2.5" marker-end="url(#m25053)" marker-start="url(#m25053)" stroke-linejoin="round" stroke-linecap="round"/>
+<polyline points="410.0,299.0 410.0,393.0 310.0,393.0" fill="none" stroke="#1971c2" stroke-width="2.5" marker-end="url(#m25053)" marker-start="url(#m25053)" stroke-linejoin="round" stroke-linecap="round"/>
+<polyline points="485.0,305.0 485.0,339.0" fill="none" stroke="#1e1e1e" stroke-width="2.5" marker-end="url(#m7932)" stroke-linejoin="round" stroke-linecap="round"/>
+<polyline points="370.0,407.0 310.0,407.0" fill="none" stroke="#1971c2" stroke-width="2.5" marker-end="url(#m25053)" marker-start="url(#m25053)" stroke-linejoin="round" stroke-linecap="round"/>
+<polyline points="485.0,435.0 485.0,474.0" fill="none" stroke="#1e1e1e" stroke-width="2.5" marker-end="url(#m7932)" stroke-linejoin="round" stroke-linecap="round"/>
+<polyline points="430.0,564.0 430.0,775.0" fill="none" stroke="#2f9e44" stroke-width="2.5" marker-end="url(#m75034)" stroke-linejoin="round" stroke-linecap="round"/>
+<polyline points="740.0,285.0 660.0,285.0 660.0,821.0 570.0,821.0" fill="none" stroke="#2f9e44" stroke-width="2.5" marker-end="url(#m75034)" stroke-linejoin="round" stroke-linecap="round"/>
+<polyline points="990.0,267.0 1060.0,268.0" fill="none" stroke="#6741d9" stroke-width="2.5" marker-end="url(#m81839)" stroke-linejoin="round" stroke-linecap="round"/>
+<polyline points="1205.0,322.0 1205.0,394.0" fill="none" stroke="#1e1e1e" stroke-width="2.5" marker-end="url(#m7932)" stroke-linejoin="round" stroke-linecap="round"/>
+<polyline points="1120.0,496.0 1120.0,580.0 945.0,580.0 945.0,620.0" fill="none" stroke="#e8590c" stroke-width="2.5" marker-end="url(#m80001)" stroke-linejoin="round" stroke-linecap="round"/>
+<polyline points="1290.0,496.0 1230.0,620.0" fill="none" stroke="#e8590c" stroke-width="2.5" marker-end="url(#m80001)" stroke-linejoin="round" stroke-linecap="round"/>
+<polyline points="740.0,249.0 662.0,249.0 662.0,409.0 600.0,409.0" fill="none" stroke="#e8590c" stroke-width="2.5" stroke-dasharray="8 6" marker-end="url(#m80001)" stroke-linejoin="round" stroke-linecap="round"/>
+<rect x="40" y="150" width="580" height="580" rx="14" fill="#f8f9fa" stroke="#adb5bd" stroke-width="2.5" stroke-dasharray="10 7"/>
+<rect x="40" y="150" width="580" height="580" rx="14" fill="transparent" stroke="#adb5bd" stroke-width="2.5"/>
+<text x="56" y="180" fill="#adb5bd" font-size="16" font-weight="700" text-anchor="start">DADA Cloud Console  ·  приложение</text>
+<rect x="700" y="150" width="690" height="740" rx="14" fill="#f8f9fa" stroke="#4dabf7" stroke-width="2.5" stroke-dasharray="10 7"/>
+<rect x="700" y="150" width="690" height="740" rx="14" fill="transparent" stroke="#4dabf7" stroke-width="2.5"/>
+<text x="716" y="180" fill="#4dabf7" font-size="16" font-weight="700" text-anchor="start">Kubernetes cluster  ·  beget-prod</text>
+<rect x="80" y="40" width="200" height="70" rx="14" fill="#e9ecef" stroke="#343a40" stroke-width="2.5"/>
+<text x="180" y="70" fill="#343a40" font-size="16" font-weight="700" text-anchor="middle">Developer</text>
+<text x="180" y="91" fill="#343a40" font-size="16" font-weight="700" text-anchor="middle">(браузер)</text>
+<rect x="80" y="215" width="230" height="84" rx="14" fill="#a5d8ff" stroke="#1971c2" stroke-width="2.5"/>
+<text x="195" y="252" fill="#1971c2" font-size="17" font-weight="700" text-anchor="middle">Frontend</text>
+<text x="195" y="274" fill="#1971c2" font-size="17" font-weight="700" text-anchor="middle">Next.js / React</text>
+<rect x="370" y="215" width="230" height="84" rx="14" fill="#d0ebff" stroke="#1971c2" stroke-width="2.5"/>
+<text x="485" y="252" fill="#1971c2" font-size="17" font-weight="700" text-anchor="middle">Backend API</text>
+<text x="485" y="274" fill="#1971c2" font-size="17" font-weight="700" text-anchor="middle">Go · REST</text>
+<rect x="80" y="345" width="230" height="96" rx="14" fill="#d0ebff" stroke="#1971c2" stroke-width="2.5"/>
+<text x="195" y="380" fill="#1971c2" font-size="14" font-weight="700" text-anchor="middle">Console DB</text>
+<text x="195" y="398" fill="#1971c2" font-size="14" font-weight="700" text-anchor="middle">Postgres</text>
+<text x="195" y="416" fill="#1971c2" font-size="14" font-weight="700" text-anchor="middle">операции + статус</text>
+<rect x="370" y="345" width="230" height="84" rx="14" fill="#d0ebff" stroke="#1971c2" stroke-width="2.5"/>
+<text x="485" y="382" fill="#1971c2" font-size="16" font-weight="700" text-anchor="middle">Worker</text>
+<text x="485" y="403" fill="#1971c2" font-size="16" font-weight="700" text-anchor="middle">Go · async-операции</text>
+<rect x="370" y="480" width="230" height="84" rx="14" fill="#99e9f2" stroke="#0c8599" stroke-width="2.5"/>
+<text x="485" y="517" fill="#0c8599" font-size="16" font-weight="700" text-anchor="middle">gitwriter</text>
+<text x="485" y="538" fill="#0c8599" font-size="16" font-weight="700" text-anchor="middle">рендер CRD (YAML)</text>
+<rect x="150" y="775" width="420" height="92" rx="14" fill="#b2f2bb" stroke="#2f9e44" stroke-width="2.5"/>
+<text x="360" y="816" fill="#2f9e44" font-size="16" font-weight="700" text-anchor="middle">Git — GitOps desired state</text>
+<text x="360" y="837" fill="#2f9e44" font-size="16" font-weight="700" text-anchor="middle">clusters/beget-prod/.../db.yaml</text>
+<rect x="740" y="225" width="250" height="84" rx="14" fill="#b2f2bb" stroke="#2f9e44" stroke-width="2.5"/>
+<text x="865" y="262" fill="#2f9e44" font-size="17" font-weight="700" text-anchor="middle">Argo CD</text>
+<text x="865" y="284" fill="#2f9e44" font-size="17" font-weight="700" text-anchor="middle">auto-sync</text>
+<rect x="1060" y="220" width="290" height="96" rx="14" fill="#d0bfff" stroke="#6741d9" stroke-width="2.5"/>
+<text x="1205" y="263" fill="#6741d9" font-size="16" font-weight="700" text-anchor="middle">K8s CRD</text>
+<text x="1205" y="284" fill="#6741d9" font-size="16" font-weight="700" text-anchor="middle">ServiceDatabase · App</text>
+<rect x="1060" y="400" width="290" height="96" rx="14" fill="#d0bfff" stroke="#6741d9" stroke-width="2.5"/>
+<text x="1205" y="444" fill="#6741d9" font-size="15" font-weight="700" text-anchor="middle">Controllers / Crossplane</text>
+<text x="1205" y="463" fill="#6741d9" font-size="15" font-weight="700" text-anchor="middle">reconcile desired → real</text>
+<rect x="820" y="620" width="250" height="96" rx="14" fill="#ffd8a8" stroke="#e8590c" stroke-width="2.5"/>
+<text x="945" y="663" fill="#e8590c" font-size="16" font-weight="700" text-anchor="middle">PostgreSQL</text>
+<text x="945" y="684" fill="#e8590c" font-size="16" font-weight="700" text-anchor="middle">(Bitnami Helm)</text>
+<rect x="1110" y="620" width="240" height="96" rx="14" fill="#ffd8a8" stroke="#e8590c" stroke-width="2.5"/>
+<text x="1230" y="663" fill="#e8590c" font-size="16" font-weight="700" text-anchor="middle">Scheduled</text>
+<text x="1230" y="684" fill="#e8590c" font-size="16" font-weight="700" text-anchor="middle">Backups</text>
+<text x="40" y="-16" fill="#1e1e1e" font-size="30" text-anchor="start">DADA Cloud Console — Architecture</text>
+<text x="40" y="10" fill="#495057" font-size="16" text-anchor="start">Компоненты и связи: self-service UI поверх GitOps + Kubernetes</text>
+<text x="322" y="250" fill="#1971c2" font-size="12" text-anchor="start">REST</text>
+<text x="445" y="588" fill="#2f9e44" font-size="13" text-anchor="start">git commit</text>
+<text x="600" y="703" fill="#2f9e44" font-size="13" text-anchor="start">pull / sync</text>
+<text x="1000" y="217" fill="#6741d9" font-size="12" text-anchor="start">apply</text>
+<text x="1355" y="357" fill="#6741d9" font-size="12" text-anchor="start">watch</text>
+<text x="905" y="573" fill="#e8590c" font-size="13" text-anchor="start">provision</text>
+<text x="648" y="467" fill="#e8590c" font-size="12" text-anchor="start">status</text>
+<text x="648" y="483" fill="#e8590c" font-size="12" text-anchor="start">(polls)</text>
+</svg>

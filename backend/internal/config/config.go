@@ -15,6 +15,16 @@ type Config struct {
 	DevMode     bool
 	ClusterLBIP string
 
+	// Custom domains (user-owned domains + auto TLS). The verify poller resolves a
+	// TXT challenge to prove ownership before creating the PublicApi. These targets
+	// are what the console tells users to put in their own DNS.
+	//   CustomDomainATarget     — A-record target for apex domains (defaults to the LB IP)
+	//   CustomDomainCNAMETarget — CNAME target for subdomains (a stable hostname → LB)
+	//   CustomDomainVerifyLabel — TXT challenge host prefix (record: <label>.<fqdn>)
+	CustomDomainATarget     string // CUSTOM_DOMAIN_A_TARGET
+	CustomDomainCNAMETarget string // CUSTOM_DOMAIN_CNAME_TARGET
+	CustomDomainVerifyLabel string // CUSTOM_DOMAIN_VERIFY_LABEL
+
 	// Identity provider selection. AuthMode defaults to "local" → the existing
 	// HS256 local-JWT path (POST /auth/login + GinMiddleware). Set AUTH_MODE
 	// to "keycloak" to validate Keycloak RS256 access tokens via JWKS instead;
@@ -39,10 +49,23 @@ type Config struct {
 	// INFERENCE_MAX_BODY_BYTES if a model legitimately needs larger inputs.
 	InferenceMaxBodyBytes int64
 
+	// Shared AES-256 encryption key used for token/secret storage (env_vars, git_repos, etc.).
+	// Same secret value as gitops-agent. Hex-encoded 32 bytes.
+	GitopsEncryptionKey string // GITOPS_ENCRYPTION_KEY
+
 	// Values editor WebSocket. Both values must be set to enable the /values-token
 	// endpoint. Same env var name in both backend and gitops-agent: GITOPS_VALUES_TOKEN_SECRET.
 	GitopsValuesTokenSecret string // GITOPS_VALUES_TOKEN_SECRET
 	GitopsAgentWSURL        string // GITOPS_AGENT_WS_URL  (public WS base, e.g. wss://gitops.example.com)
+
+	// build-agent (Vercel-flow). Optional — when unset the git-install/repo-listing
+	// proxy and build log-stream token endpoints return 503.
+	//   BuildAgentURL          — base HTTP URL of the build-agent (proxied for github repo listing)
+	//   BuildAgentWSURL        — public WS base for the build log stream (e.g. wss://build.example.com)
+	//   BuildAgentTokenSecret  — HMAC secret the build-agent uses to verify wstoken log-stream tokens
+	BuildAgentURL         string // BUILD_AGENT_URL
+	BuildAgentWSURL       string // BUILD_AGENT_WS_URL
+	BuildAgentTokenSecret string // BUILD_AGENT_TOKEN_SECRET
 
 	// Portainer live-state proxy (read-only). Both must be set to enable the VM
 	// /state and /logs endpoints. Same values the portainer-agent uses.
@@ -87,6 +110,9 @@ func Load() (*Config, error) {
 		LogLevel:                getEnv("LOG_LEVEL", "info"),
 		DevMode:                 getEnv("DEV_MODE", "false") == "true",
 		ClusterLBIP:             getEnv("CLUSTER_LB_IP", "93.189.231.60"),
+		CustomDomainATarget:     getEnv("CUSTOM_DOMAIN_A_TARGET", getEnv("CLUSTER_LB_IP", "93.189.231.60")),
+		CustomDomainCNAMETarget: getEnv("CUSTOM_DOMAIN_CNAME_TARGET", "ingress.dada-tuda.ru"),
+		CustomDomainVerifyLabel: getEnv("CUSTOM_DOMAIN_VERIFY_LABEL", "_dada-verify"),
 		AuthMode:                getEnv("AUTH_MODE", "local"),
 		KeycloakIssuer:          getEnv("KEYCLOAK_ISSUER", "https://id.dada-tuda.ru/realms/master"),
 		KeycloakVerifyAud:       getEnv("KEYCLOAK_VERIFY_AUD", "false") == "true",
@@ -96,8 +122,12 @@ func Load() (*Config, error) {
 		MLflowBaseURL:           getEnv("MLFLOW_BASE_URL", ""),
 		MLflowAuthHeader:        getEnv("MLFLOW_AUTH_HEADER", ""),
 		InferenceMaxBodyBytes:   getEnvInt64("INFERENCE_MAX_BODY_BYTES", 10*1024*1024),
+		GitopsEncryptionKey:     getEnv("GITOPS_ENCRYPTION_KEY", ""),
 		GitopsValuesTokenSecret: getEnv("GITOPS_VALUES_TOKEN_SECRET", ""),
 		GitopsAgentWSURL:        getEnv("GITOPS_AGENT_WS_URL", ""),
+		BuildAgentURL:           getEnv("BUILD_AGENT_URL", ""),
+		BuildAgentWSURL:         getEnv("BUILD_AGENT_WS_URL", ""),
+		BuildAgentTokenSecret:   getEnv("BUILD_AGENT_TOKEN_SECRET", ""),
 		PortainerURL:            getEnv("PORTAINER_URL", ""),
 		PortainerAPIToken:       getEnv("PORTAINER_API_TOKEN", ""),
 		PrometheusQueryURL:      getEnv("PROMETHEUS_QUERY_URL", ""),

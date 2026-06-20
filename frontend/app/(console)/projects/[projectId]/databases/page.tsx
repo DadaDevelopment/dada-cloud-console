@@ -218,16 +218,20 @@ export default function DatabasesPage() {
 
           <div>
             <label className="block text-sm font-medium text-gray-700">
-              App Reference
+              App Reference <span className="text-gray-400 font-normal">(optional — leave empty for an environment-level database)</span>
             </label>
             <input
               type="text"
-              required
               value={form.app_ref}
               onChange={(e) => handleFormChange("app_ref", e.target.value)}
               placeholder="my-app"
+              pattern="[a-z0-9-]*"
+              title="Lowercase letters, numbers, and hyphens only"
               className="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
             />
+            <p className="mt-1 text-xs text-gray-400">
+              Bind to an app&apos;s chart, or leave empty to provision a standalone database your apps can reference.
+            </p>
           </div>
 
           {/* Backup toggle */}

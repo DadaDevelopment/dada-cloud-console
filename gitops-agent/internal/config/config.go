@@ -42,6 +42,10 @@ type Config struct {
 	// Values editor WebSocket. GITOPS_VALUES_TOKEN_SECRET must match the
 	// GITOPS_AGENT_TOKEN_SECRET in the console backend. Empty disables /ws/values.
 	ValuesTokenSecret string
+
+	// PreviewEnvTTL is how long a preview (ephemeral) environment lives before the
+	// reaper enqueues its teardown. Written to environments.expires_at on creation.
+	PreviewEnvTTL time.Duration
 }
 
 func Load() (*Config, error) {
@@ -53,24 +57,29 @@ func Load() (*Config, error) {
 	if err != nil {
 		return nil, fmt.Errorf("GITOPS_POLL_INTERVAL_GIT: %w", err)
 	}
+	previewTTL, err := time.ParseDuration(getEnv("GITOPS_PREVIEW_ENV_TTL", "168h"))
+	if err != nil {
+		return nil, fmt.Errorf("GITOPS_PREVIEW_ENV_TTL: %w", err)
+	}
 
 	cfg := &Config{
-		DatabaseURL:     getEnv("DATABASE_URL", getEnv("DB_URL", "")),
-		DefaultRepoURL:  getEnv("GITOPS_DEFAULT_REPO_URL", ""),
-		DefaultBranch:   getEnv("GITOPS_DEFAULT_BRANCH", "main"),
-		DefaultUsername: getEnv("GITOPS_DEFAULT_USERNAME", getEnv("GIT_USERNAME", "")),
-		DefaultToken:    getEnv("GITOPS_DEFAULT_TOKEN", getEnv("GIT_TOKEN", "")),
-		RepoLocalPath:   getEnv("GITOPS_REPO_LOCAL_PATH", "/var/lib/gitops-repos"),
-		BotName:         getEnv("GITOPS_BOT_NAME", "DADA Platform Bot"),
-		BotEmail:        getEnv("GITOPS_BOT_EMAIL", "bot@dada-tuda.ru"),
-		PollIntervalDB:  dbInterval,
-		PollIntervalGit: gitInterval,
-		WebhookPort:     getEnv("GITOPS_WEBHOOK_PORT", ""),
-		EncryptionKey:   getEnv("GITOPS_ENCRYPTION_KEY", ""),
-		ClusterLBIP:     getEnv("CLUSTER_LB_IP", "93.189.231.60"),
+		DatabaseURL:       getEnv("DATABASE_URL", getEnv("DB_URL", "")),
+		DefaultRepoURL:    getEnv("GITOPS_DEFAULT_REPO_URL", ""),
+		DefaultBranch:     getEnv("GITOPS_DEFAULT_BRANCH", "main"),
+		DefaultUsername:   getEnv("GITOPS_DEFAULT_USERNAME", getEnv("GIT_USERNAME", "")),
+		DefaultToken:      getEnv("GITOPS_DEFAULT_TOKEN", getEnv("GIT_TOKEN", "")),
+		RepoLocalPath:     getEnv("GITOPS_REPO_LOCAL_PATH", "/var/lib/gitops-repos"),
+		BotName:           getEnv("GITOPS_BOT_NAME", "DADA Platform Bot"),
+		BotEmail:          getEnv("GITOPS_BOT_EMAIL", "bot@dada-tuda.ru"),
+		PollIntervalDB:    dbInterval,
+		PollIntervalGit:   gitInterval,
+		WebhookPort:       getEnv("GITOPS_WEBHOOK_PORT", ""),
+		EncryptionKey:     getEnv("GITOPS_ENCRYPTION_KEY", ""),
+		ClusterLBIP:       getEnv("CLUSTER_LB_IP", "93.189.231.60"),
 		MLflowBaseURL:     getEnv("MLFLOW_BASE_URL", ""),
 		MLflowAuthHeader:  getEnv("MLFLOW_AUTH_HEADER", ""),
 		ValuesTokenSecret: getEnv("GITOPS_VALUES_TOKEN_SECRET", ""),
+		PreviewEnvTTL:     previewTTL,
 	}
 
 	if cfg.DatabaseURL == "" {

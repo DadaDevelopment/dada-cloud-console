@@ -1,0 +1,474 @@
+"use client";
+import { useCallback, useEffect, useState, FormEvent } from "react";
+import { useParams, useSearchParams, useRouter } from "next/navigation";
+import Link from "next/link";
+import { appsApi, gitApi } from "@/lib/api";
+import type { GitInstallation, GitRemoteRepo, FrameworkDetection, ResourceSnapshot } from "@/lib/types";
+import { Spinner } from "@/components/ui/spinner";
+import { Breadcrumb } from "@/components/ui/breadcrumb";
+import { useProjectContext } from "@/lib/project-context";
+import { canMutate } from "@/lib/rbac";
+
+type Step = 1 | 2 | 3;
+
+export default function GitImportPage() {
+  const params = useParams<{ projectId: string }>();
+  const projectId = params.projectId;
+  const searchParams = useSearchParams();
+  const router = useRouter();
+
+  const { project, selectedEnv, role, loading: isLoadingEnvs } = useProjectContext();
+  const envId = searchParams.get("envId") || selectedEnv?.id || "";
+
+  const [step, setStep] = useState<Step>(1);
+
+  // Step 1 — installations
+  const [installations, setInstallations] = useState<GitInstallation[]>([]);
+  const [loadingInstalls, setLoadingInstalls] = useState(true);
+  const [installError, setInstallError] = useState<string | null>(null);
+  const [selectedInstall, setSelectedInstall] = useState<GitInstallation | null>(null);
+
+  // Step 2 — remote repos
+  const [remoteRepos, setRemoteRepos] = useState<GitRemoteRepo[]>([]);
+  const [loadingRepos, setLoadingRepos] = useState(false);
+  const [repoError, setRepoError] = useState<string | null>(null);
+  const [reposUnavailable, setReposUnavailable] = useState(false);
+  const [selectedRepo, setSelectedRepo] = useState<GitRemoteRepo | null>(null);
+
+  // Step 3 — configure
+  const [apps, setApps] = useState<ResourceSnapshot[]>([]);
+  const [appName, setAppName] = useState("");
+  const [branch, setBranch] = useState("");
+  const [rootDir, setRootDir] = useState(".");
+  const [autoDeploy, setAutoDeploy] = useState(true);
+  const [detection, setDetection] = useState<FrameworkDetection | null>(null);
+  const [frameworkOverride, setFrameworkOverride] = useState("");
+  const [detecting, setDetecting] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
+
+  const allowed = canMutate(role);
+
+  // Load installations on mount.
+  useEffect(() => {
+    /* eslint-disable react-hooks/set-state-in-effect */
+    if (!envId) {
+      if (!isLoadingEnvs) setLoadingInstalls(false);
+      return;
+    }
+    setLoadingInstalls(true);
+    /* eslint-enable react-hooks/set-state-in-effect */
+    gitApi
+      .installations(projectId)
+      .then((d) => setInstallations(d.installations ?? []))
+      .catch((err) => setInstallError(err instanceof Error ? err.message : "Failed to load installations"))
+      .finally(() => setLoadingInstalls(false));
+  }, [projectId, envId, isLoadingEnvs]);
+
+  async function handleConnectProvider(provider: "github" | "gitlab") {
+    setInstallError(null);
+    try {
+      const { url } = await gitApi.installUrl(projectId, provider);
+      window.location.href = url;
+    } catch (err) {
+      setInstallError(err instanceof Error ? err.message : "Failed to start install");
+    }
+  }
+
+  const loadRepos = useCallback(
+    async (install: GitInstallation) => {
+      setLoadingRepos(true);
+      setRepoError(null);
+      setReposUnavailable(false);
+      try {
+        const d = await gitApi.remoteRepos(projectId, install.installation_id);
+        setRemoteRepos(d.repos ?? []);
+      } catch (err) {
+        // 503 → build-agent not configured. Disabled state, not a crash.
+        const msg = err instanceof Error ? err.message : "Failed to load repositories";
+        if (/503|unavailable|not configured/i.test(msg)) setReposUnavailable(true);
+        else setRepoError(msg);
+      } finally {
+        setLoadingRepos(false);
+      }
+    },
+    [projectId]
+  );
+
+  function pickInstall(install: GitInstallation) {
+    setSelectedInstall(install);
+    setStep(2);
+    void loadRepos(install);
+  }
+
+  const runDetect = useCallback(
+    async (repo: GitRemoteRepo, root: string) => {
+      if (!selectedInstall) return;
+      setDetecting(true);
+      setDetection(null);
+      try {
+        const d = await gitApi.detect(projectId, selectedInstall.installation_id, repo.full_name, root || ".");
+        setDetection(d);
+      } catch {
+        // Detection is best-effort; the user can still pick a framework manually.
+        setDetection({ framework: null, build_command: null, install_command: null, output_dir: null });
+      } finally {
+        setDetecting(false);
+      }
+    },
+    [projectId, selectedInstall]
+  );
+
+  function pickRepo(repo: GitRemoteRepo) {
+    setSelectedRepo(repo);
+    setBranch(repo.default_branch || "main");
+    setRootDir(".");
+    setStep(3);
+    // Load apps to bind the repo to + kick off framework detection.
+    appsApi
+      .list(projectId, envId)
+      .then((d) => {
+        const list = d.apps ?? [];
+        setApps(list);
+        if (list.length === 1) setAppName(list[0].name);
+      })
+      .catch(() => setApps([]));
+    void runDetect(repo, ".");
+  }
+
+  async function handleSubmit(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    if (!selectedInstall || !selectedRepo) return;
+    setSubmitError(null);
+    setSubmitting(true);
+    try {
+      await gitApi.linkRepo(projectId, envId, {
+        installation_id: selectedInstall.installation_id,
+        repo_full_name: selectedRepo.full_name,
+        app_name: appName,
+        production_branch: branch,
+        root_dir: rootDir || ".",
+        framework_override: frameworkOverride || undefined,
+        auto_deploy: autoDeploy,
+      });
+      router.push(`/projects/${projectId}/git${envId ? `?envId=${envId}` : ""}`);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Failed to connect repository";
+      // 409 → repo already connected for this app/env.
+      setSubmitError(/409|already/i.test(msg) ? "This repository is already connected to an app in this environment." : msg);
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  if (isLoadingEnvs) {
+    return (
+      <div className="flex h-64 items-center justify-center">
+        <Spinner size="lg" />
+      </div>
+    );
+  }
+
+  if (!allowed) {
+    return (
+      <div>
+        <Breadcrumb
+          items={[
+            { label: "Projects", href: "/projects" },
+            { label: project?.display_name ?? "Overview", href: `/projects/${projectId}` },
+            { label: "Git & Builds", href: `/projects/${projectId}/git` },
+            { label: "Import" },
+          ]}
+        />
+        <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+          You don&apos;t have permission to connect repositories.
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="max-w-2xl">
+      <Breadcrumb
+        items={[
+          { label: "Projects", href: "/projects" },
+          { label: project?.display_name ?? "Overview", href: `/projects/${projectId}` },
+          { label: "Git & Builds", href: `/projects/${projectId}/git${envId ? `?envId=${envId}` : ""}` },
+          { label: "Import" },
+        ]}
+      />
+      <h1 className="mt-2 text-2xl font-bold text-gray-900">Import repository</h1>
+
+      {/* Stepper */}
+      <ol className="mb-8 mt-4 flex items-center gap-2 text-sm">
+        {(["Account", "Repository", "Configure"] as const).map((lbl, i) => {
+          const n = (i + 1) as Step;
+          const active = step === n;
+          const done = step > n;
+          return (
+            <li key={lbl} className="flex items-center gap-2">
+              <span
+                className={`flex h-6 w-6 items-center justify-center rounded-full text-xs font-semibold ${
+                  active ? "bg-blue-600 text-white" : done ? "bg-green-500 text-white" : "bg-gray-200 text-gray-500"
+                }`}
+              >
+                {done ? "✓" : n}
+              </span>
+              <span className={active ? "font-medium text-gray-900" : "text-gray-400"}>{lbl}</span>
+              {n < 3 && <span className="mx-1 text-gray-300">→</span>}
+            </li>
+          );
+        })}
+      </ol>
+
+      {/* ── Step 1: installations ── */}
+      {step === 1 && (
+        <div>
+          {installError && (
+            <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{installError}</div>
+          )}
+          {loadingInstalls ? (
+            <div className="flex h-32 items-center justify-center">
+              <Spinner />
+            </div>
+          ) : installations.length === 0 ? (
+            <div className="rounded-xl border border-dashed border-gray-300 bg-gray-50 p-8 text-center">
+              <p className="text-sm font-medium text-gray-600">No git accounts connected yet</p>
+              <p className="mt-1 text-xs text-gray-400">Authorize a provider to grant access to your repositories.</p>
+              <div className="mt-4 flex justify-center gap-3">
+                <button onClick={() => handleConnectProvider("github")} className="rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50">
+                  Connect GitHub
+                </button>
+                <button onClick={() => handleConnectProvider("gitlab")} className="rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50">
+                  Connect GitLab
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {installations.map((inst) => (
+                <button
+                  key={inst.id}
+                  onClick={() => pickInstall(inst)}
+                  className="flex w-full items-center justify-between rounded-xl border border-gray-200 bg-white px-5 py-4 text-left shadow-sm transition-all hover:border-blue-300 hover:shadow-md"
+                >
+                  <div className="flex items-center gap-3">
+                    {inst.account_avatar_url && (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img src={inst.account_avatar_url} alt="" className="h-8 w-8 rounded-full" />
+                    )}
+                    <div>
+                      <p className="text-sm font-semibold text-gray-900">{inst.account_login}</p>
+                      <p className="text-xs text-gray-400">{inst.provider}</p>
+                    </div>
+                  </div>
+                  <span className="text-sm text-blue-600">Select →</span>
+                </button>
+              ))}
+              <div className="flex gap-3 pt-2 text-xs">
+                <button onClick={() => handleConnectProvider("github")} className="text-blue-600 hover:text-blue-700">
+                  + Connect another GitHub account
+                </button>
+                <button onClick={() => handleConnectProvider("gitlab")} className="text-blue-600 hover:text-blue-700">
+                  + GitLab
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── Step 2: repositories ── */}
+      {step === 2 && selectedInstall && (
+        <div>
+          <button onClick={() => setStep(1)} className="mb-3 text-xs text-gray-400 hover:text-gray-600">
+            ← Back to accounts
+          </button>
+          {repoError && (
+            <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{repoError}</div>
+          )}
+          {reposUnavailable ? (
+            <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+              The build subsystem is not configured in this environment yet, so repositories can&apos;t be listed.
+              Try again once the build-agent is deployed.
+            </div>
+          ) : loadingRepos ? (
+            <div className="flex h-32 items-center justify-center">
+              <Spinner />
+            </div>
+          ) : remoteRepos.length === 0 ? (
+            <p className="rounded-xl border border-dashed border-gray-300 bg-gray-50 p-8 text-center text-sm text-gray-500">
+              No repositories available on this account.
+            </p>
+          ) : (
+            <div className="max-h-[480px] space-y-2 overflow-y-auto">
+              {remoteRepos.map((repo) => (
+                <button
+                  key={repo.full_name}
+                  onClick={() => pickRepo(repo)}
+                  className="flex w-full items-center justify-between rounded-lg border border-gray-200 bg-white px-4 py-3 text-left shadow-sm transition-all hover:border-blue-300"
+                >
+                  <div className="min-w-0">
+                    <p className="truncate font-mono text-sm font-medium text-gray-900">{repo.full_name}</p>
+                    {repo.description && <p className="truncate text-xs text-gray-400">{repo.description}</p>}
+                  </div>
+                  <div className="flex shrink-0 items-center gap-2 pl-3">
+                    {repo.private && <span className="text-xs text-gray-400">private</span>}
+                    <span className="text-sm text-blue-600">Import →</span>
+                  </div>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── Step 3: configure ── */}
+      {step === 3 && selectedRepo && (
+        <form onSubmit={handleSubmit} className="space-y-5">
+          <button type="button" onClick={() => setStep(2)} className="text-xs text-gray-400 hover:text-gray-600">
+            ← Back to repositories
+          </button>
+
+          <div className="rounded-lg border border-gray-200 bg-gray-50 px-4 py-3">
+            <p className="font-mono text-sm font-medium text-gray-900">{selectedRepo.full_name}</p>
+          </div>
+
+          {/* Framework detection */}
+          <div className="rounded-lg border border-gray-200 bg-white px-4 py-3">
+            <p className="text-xs font-semibold uppercase tracking-wide text-gray-400">Detected framework</p>
+            {detecting ? (
+              <div className="mt-2 flex items-center gap-2 text-sm text-gray-500">
+                <Spinner size="sm" /> Detecting…
+              </div>
+            ) : detection ? (
+              <div className="mt-2 space-y-1 text-sm">
+                <p className="font-medium text-gray-900">{detection.framework ?? "Unknown — pick one below"}</p>
+                {detection.build_command && (
+                  <p className="text-xs text-gray-500">build: <span className="font-mono">{detection.build_command}</span></p>
+                )}
+                {detection.install_command && (
+                  <p className="text-xs text-gray-500">install: <span className="font-mono">{detection.install_command}</span></p>
+                )}
+                {detection.output_dir && (
+                  <p className="text-xs text-gray-500">output: <span className="font-mono">{detection.output_dir}</span></p>
+                )}
+              </div>
+            ) : null}
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700">Target application</label>
+            {apps.length === 0 ? (
+              <p className="mt-1 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                No apps in this environment.{" "}
+                <Link href={`/projects/${projectId}/apps`} className="font-medium underline">
+                  Create one first
+                </Link>{" "}
+                — the repo&apos;s builds deploy into an existing app.
+              </p>
+            ) : (
+              <select
+                required
+                value={appName}
+                onChange={(e) => setAppName(e.target.value)}
+                className="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              >
+                <option value="">Select an app…</option>
+                {apps.map((a) => (
+                  <option key={a.id} value={a.name}>
+                    {a.name}
+                  </option>
+                ))}
+              </select>
+            )}
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-sm font-medium text-gray-700">Production branch</label>
+              <input
+                type="text"
+                required
+                value={branch}
+                onChange={(e) => setBranch(e.target.value)}
+                placeholder="main"
+                className="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm font-mono text-gray-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700">Root directory</label>
+              <input
+                type="text"
+                value={rootDir}
+                onChange={(e) => setRootDir(e.target.value)}
+                onBlur={() => selectedRepo && runDetect(selectedRepo, rootDir)}
+                placeholder="."
+                className="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm font-mono text-gray-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              />
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700">
+              Framework override <span className="font-normal text-gray-400">(optional)</span>
+            </label>
+            <input
+              type="text"
+              value={frameworkOverride}
+              onChange={(e) => setFrameworkOverride(e.target.value)}
+              placeholder={detection?.framework ?? "auto"}
+              className="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm font-mono text-gray-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+            />
+          </div>
+
+          <div className="flex items-center justify-between rounded-lg border border-gray-200 px-4 py-3">
+            <div>
+              <p className="text-sm font-medium text-gray-700">Auto-deploy</p>
+              <p className="text-xs text-gray-400">Build &amp; deploy automatically on every push to the production branch</p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setAutoDeploy((v) => !v)}
+              className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 ${
+                autoDeploy ? "bg-blue-600" : "bg-gray-200"
+              }`}
+              role="switch"
+              aria-checked={autoDeploy}
+            >
+              <span className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${autoDeploy ? "translate-x-6" : "translate-x-1"}`} />
+            </button>
+          </div>
+
+          {submitError && (
+            <div role="alert" className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+              {submitError}
+            </div>
+          )}
+
+          <div className="flex justify-end gap-3 pt-1">
+            <Link
+              href={`/projects/${projectId}/git${envId ? `?envId=${envId}` : ""}`}
+              className="rounded-lg px-4 py-2 text-sm font-medium text-gray-600 hover:bg-gray-100 transition-colors"
+            >
+              Cancel
+            </Link>
+            <button
+              type="submit"
+              disabled={submitting || !appName}
+              className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50 transition-colors"
+            >
+              {submitting ? (
+                <>
+                  <Spinner size="sm" /> Connecting…
+                </>
+              ) : (
+                "Connect repository"
+              )}
+            </button>
+          </div>
+        </form>
+      )}
+    </div>
+  );
+}

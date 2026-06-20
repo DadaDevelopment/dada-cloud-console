@@ -25,7 +25,8 @@ type Claims struct {
 	Env     string `json:"env"`
 	App     string `json:"app"`
 	File    string `json:"file,omitempty"`
-	Exp     int64  `json:"exp"` // Unix timestamp
+	Build   string `json:"build,omitempty"` // build UUID — grants access to that build's log stream
+	Exp     int64  `json:"exp"`             // Unix timestamp
 }
 
 // Sign encodes claims as base64(json) + "." + base64(hmac-sha256).

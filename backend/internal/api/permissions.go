@@ -112,6 +112,19 @@ func (h *Handler) getUserProjectRole(ctx context.Context, userID, projectID uuid
 	return role, err
 }
 
+// envBelongsToProject reports whether an environment belongs to a project. Used
+// to close cross-tenant IDOR on env-scoped routes: membership is checked against
+// the URL projectId, but the envId is attacker-supplied and otherwise unvalidated,
+// so a member of project A could target an env of project B without this guard.
+func (h *Handler) envBelongsToProject(ctx context.Context, envID, projectID uuid.UUID) (bool, error) {
+	var exists bool
+	err := h.pool.QueryRow(ctx,
+		`SELECT EXISTS(SELECT 1 FROM environments WHERE id = $1 AND project_id = $2)`,
+		envID, projectID,
+	).Scan(&exists)
+	return exists, err
+}
+
 // canWrite returns true for roles that can create/modify resources.
 func canWrite(role models.MemberRole) bool {
 	return role == models.MemberRolePlatformAdmin ||

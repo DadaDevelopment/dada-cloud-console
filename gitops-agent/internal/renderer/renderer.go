@@ -3,6 +3,7 @@ package renderer
 import (
 	"bytes"
 	"fmt"
+	"sort"
 	"strings"
 	"text/template"
 
@@ -93,6 +94,16 @@ type AppSpec struct {
 	OperationID        string
 	HelmRepoURL        string
 	HelmTargetRevision string
+
+	// Env is the resolved non-sensitive runtime environment (env_vars rows with
+	// scope runtime|both and is_secret=false). Emitted verbatim into values.yaml's
+	// env: block — safe to commit to git.
+	Env map[string]string
+	// SecretEnvName, when non-empty, is the name of the per-app k8s Secret holding
+	// the sensitive runtime env (is_secret=true). The app-resources chart envFrom's
+	// it. The Secret manifest itself is rendered separately (RenderAppEnvSecret)
+	// into the app's resources.values.yaml.
+	SecretEnvName string
 }
 
 var appFuncMap = template.FuncMap{
@@ -136,20 +147,92 @@ type AppValuesSpec struct {
 	Port     int    `yaml:"port"`
 	Replicas int    `yaml:"replicas"`
 	Profile  string `yaml:"profile"`
+	// Env is the non-sensitive runtime environment injected into the workload
+	// container (app-resources chart emits `env:` from this map). Omitted when
+	// empty to keep diffs minimal for apps with no env vars.
+	Env map[string]string `yaml:"env,omitempty"`
+	// SecretEnvName references a per-app k8s Secret (rendered into
+	// resources.values.yaml) carrying the sensitive runtime env. The chart wires
+	// `envFrom: - secretRef: { name: <SecretEnvName> }`. Omitted when there are no
+	// sensitive vars.
+	SecretEnvName string `yaml:"secretEnvName,omitempty"`
 }
 
 func RenderAppValues(spec AppSpec) (string, error) {
 	values := AppValuesSpec{
-		Image:    spec.Image,
-		Port:     spec.Port,
-		Replicas: spec.Replicas,
-		Profile:  spec.Profile,
+		Image:         spec.Image,
+		Port:          spec.Port,
+		Replicas:      spec.Replicas,
+		Profile:       spec.Profile,
+		Env:           spec.Env,
+		SecretEnvName: spec.SecretEnvName,
 	}
 	b, err := yaml.Marshal(values)
 	if err != nil {
 		return "", fmt.Errorf("rendering App values: %w", err)
 	}
 	return string(b), nil
+}
+
+// AppEnvSecretSpec holds the parameters for a per-app sensitive-env k8s Secret.
+type AppEnvSecretSpec struct {
+	Name        string
+	Namespace   string
+	ProjectSlug string
+	EnvSlug     string
+	OperationID string
+	// Data is the plaintext sensitive runtime env (is_secret=true). Rendered into
+	// stringData. SECURITY: this commits secret PLAINTEXT to git (the argo-infra
+	// repo) because gitops-agent has no kube/SealedSecret channel — see
+	// AppEnvSecretName / the renderer package docs. Treat the argo-infra repo as a
+	// secret store (restricted access, audit). Replace with SealedSecrets/SOPS or a
+	// direct kube-apply when such a channel exists.
+	Data map[string]string
+}
+
+// RenderAppEnvSecret renders an Opaque k8s Secret CR carrying the app's sensitive
+// runtime env. It is upserted into the owning app's resources.values.yaml so
+// ArgoCD applies it to the env namespace; the app-resources chart envFrom's it via
+// values.secretEnvName.
+//
+// SECURITY (plaintext-in-git): values land in stringData IN CLEARTEXT in the
+// gitops repo. gitops-agent is git-only (no kube client, no SealedSecret CRD in
+// cluster), so this is the only available delivery channel today. The argo-infra
+// repo MUST be treated as a secret store. The proper fix is SealedSecrets/SOPS.
+func RenderAppEnvSecret(spec AppEnvSecretSpec) (string, error) {
+	type secretManifest struct {
+		APIVersion string            `yaml:"apiVersion"`
+		Kind       string            `yaml:"kind"`
+		Metadata   map[string]any    `yaml:"metadata"`
+		Type       string            `yaml:"type"`
+		StringData map[string]string `yaml:"stringData"`
+	}
+	m := secretManifest{
+		APIVersion: "v1",
+		Kind:       "Secret",
+		Metadata: map[string]any{
+			"name":      spec.Name,
+			"namespace": spec.Namespace,
+			"labels": map[string]string{
+				"dada.io/project":     spec.ProjectSlug,
+				"dada.io/environment": spec.EnvSlug,
+				"dada.io/operation":   spec.OperationID,
+			},
+		},
+		Type:       "Opaque",
+		StringData: spec.Data,
+	}
+	b, err := yaml.Marshal(m)
+	if err != nil {
+		return "", fmt.Errorf("rendering app env Secret: %w", err)
+	}
+	return string(b), nil
+}
+
+// AppEnvSecretName returns the deterministic name of an app's sensitive-env
+// Secret. Stable across deploys so envFrom keeps resolving.
+func AppEnvSecretName(appName string) string {
+	return appName + "-env"
 }
 
 func AppBaseGitPath(projectSlug, envSlug, appName string) string {
@@ -216,6 +299,30 @@ services:
 // RenderEnvSkeleton returns a minimal .env placeholder for a compose app.
 func RenderEnvSkeleton() string {
 	return "# Environment variables for this compose app (KEY=VALUE per line).\n"
+}
+
+// RenderEnvFile renders a docker-compose .env file from resolved env vars
+// (scope runtime|both). Keys are emitted in sorted order for deterministic
+// diffs. Both sensitive and non-sensitive values are written here — docker
+// compose has no out-of-band secret channel, so the .env IS the delivery
+// mechanism. SECURITY: sensitive values land in cleartext in the gitops repo;
+// the same plaintext-in-git caveat as RenderAppEnvSecret applies (treat the repo
+// as a secret store). When env is empty the skeleton placeholder is returned.
+func RenderEnvFile(env map[string]string) string {
+	if len(env) == 0 {
+		return RenderEnvSkeleton()
+	}
+	keys := make([]string, 0, len(env))
+	for k := range env {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	var b strings.Builder
+	b.WriteString("# Managed by DADA Console — do not edit (regenerated on deploy).\n")
+	for _, k := range keys {
+		fmt.Fprintf(&b, "%s=%s\n", k, env[k])
+	}
+	return b.String()
 }
 
 // RenderBareAppValues renders a minimal values.yaml for an app that was created
@@ -295,6 +402,63 @@ func PublicApiResourcesValuesGitPath(projectSlug, envSlug, appName string) strin
 
 func FQDNToName(fqdn string) string {
 	return strings.ReplaceAll(fqdn, ".", "-")
+}
+
+// CustomIngressSpec holds parameters for a user-owned custom-domain Ingress.
+// Unlike PublicApi (Beget DNS only), this is a plain k8s Ingress that routes a
+// hostname the user points at our ingress-nginx-pub LB themselves, with a
+// cert-manager (letsencrypt-prod, HTTP-01) per-host TLS cert. No DNS is managed
+// by the platform — the user owns their zone.
+type CustomIngressSpec struct {
+	Name        string // FQDNToName(hostname), the manifest name + TLS secret base
+	Namespace   string
+	ProjectSlug string
+	EnvSlug     string
+	Hostname    string
+	ServiceName string
+	ServicePort int
+	OperationID string
+}
+
+var customIngressTmpl = template.Must(template.New("customingress").Parse(`apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ .Name }}
+  namespace: {{ .Namespace }}
+  labels:
+    dada.io/project: {{ .ProjectSlug }}
+    dada.io/environment: {{ .EnvSlug }}
+    dada.io/operation: {{ .OperationID }}
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - {{ .Hostname }}
+      secretName: {{ .Name }}-tls
+  rules:
+    - host: {{ .Hostname }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ .ServiceName }}
+                port:
+                  number: {{ .ServicePort }}
+`))
+
+// RenderCustomIngress renders a native k8s Ingress (one manifest) for an
+// attached custom hostname. It is upserted into the owning app's
+// resources.values.yaml manifests list (keyed Ingress/<Name>).
+func RenderCustomIngress(spec CustomIngressSpec) (string, error) {
+	var buf bytes.Buffer
+	if err := customIngressTmpl.Execute(&buf, spec); err != nil {
+		return "", fmt.Errorf("rendering custom Ingress: %w", err)
+	}
+	return buf.String(), nil
 }
 
 // S3BucketSpec holds parameters for an S3Bucket manifest.

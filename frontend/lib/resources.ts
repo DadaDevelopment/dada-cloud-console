@@ -19,7 +19,10 @@ export type IconName =
   | "approvals"
   | "redis"
   | "queue"
-  | "storage";
+  | "storage"
+  | "git"
+  | "deployments"
+  | "domains";
 
 export interface ResourceNavItem {
   key: string;
@@ -45,7 +48,10 @@ export const PROJECT_NAV: ResourceNavItem[] = [
   // --- roadmap placeholders (v2–v4): visible, disabled-with-tooltip ---
   { key: "redis", label: "Redis", icon: "redis", segment: "/redis", group: "resources", comingSoon: true },
   { key: "queues", label: "Message Queues", icon: "queue", segment: "/queues", group: "resources", comingSoon: true },
-  { key: "storage", label: "Object Storage", icon: "storage", segment: "/storage", group: "resources", comingSoon: true },
+  { key: "storage", label: "Object Storage", icon: "storage", segment: "/storage", group: "resources" },
+  { key: "deployments", label: "Deployments", icon: "deployments", segment: "/deployments", group: "resources" },
+  { key: "git", label: "Git & Builds", icon: "git", segment: "/git", group: "resources" },
+  { key: "domains", label: "Domains", icon: "domains", segment: "/domains", group: "resources" },
   // --- admin group (global, cross-project) ---
   { key: "approvals", label: "Approvals", icon: "approvals", segment: "", absoluteHref: "/admin/approvals", group: "admin", visible: canApprove },
 ];

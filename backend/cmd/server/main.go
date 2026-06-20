@@ -105,6 +105,26 @@ func main() {
 		}
 	}()
 
+	// Custom-domain DNS verification poller. Re-checks the TXT challenge for every
+	// not-yet-verified apex authorization so ownership flips to verified without the
+	// user hitting the manual verify endpoint.
+	dnsCtx, dnsCancel := context.WithCancel(context.Background())
+	defer dnsCancel()
+	go func() {
+		ticker := time.NewTicker(1 * time.Minute)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-dnsCtx.Done():
+				return
+			case <-ticker.C:
+				if err := api.VerifyPendingDomains(dnsCtx, pool, cfg); err != nil && !errors.Is(err, context.Canceled) {
+					log.Warn().Err(err).Msg("custom-domain DNS verification failed")
+				}
+			}
+		}
+	}()
+
 	<-quit
 	log.Info().Msg("shutting down server")
 

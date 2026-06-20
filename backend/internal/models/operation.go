@@ -36,6 +36,19 @@ type CreateServiceDatabasePayload struct {
 	BackupRetention string `json:"backup_retention"`
 }
 
+// CreateS3BucketPayload is the typed payload for CreateS3Bucket operations.
+// AppRef is optional: when set, the bucket is owned by that app's chart; when
+// empty, it lands in the per-project standalone "s3-buckets-<project>" chart.
+type CreateS3BucketPayload struct {
+	Name          string `json:"name"`
+	BucketName    string `json:"bucket_name"`
+	Region        string `json:"region"`
+	Description   string `json:"description"`
+	Public        bool   `json:"public"`
+	FtpSftpEnable bool   `json:"ftp_sftp_enable"`
+	AppRef        string `json:"app_ref,omitempty"`
+}
+
 // CreateAppPayload is the typed payload for CreateApp operations.
 // K8s fields: Replicas, Profile. VM fields: AppServerName, EnvVars.
 type CreateAppPayload struct {
@@ -99,6 +112,77 @@ type CreatePublicApiPayload struct {
 	SwaggerEnabled bool     `json:"swagger_enabled"`
 	SwaggerPath    string   `json:"swagger_path"`
 	SwaggerTitle   string   `json:"swagger_title"`
+}
+
+// CreatePreviewEnvPayload is the typed payload for CreatePreviewEnv operations.
+// JSON tags are a hard contract with gitops-agent's doCreatePreviewEnv worker —
+// do NOT rename them.
+type CreatePreviewEnvPayload struct {
+	EnvName     string `json:"env_name"`
+	Namespace   string `json:"namespace"`
+	GitRepoID   string `json:"git_repo_id"`
+	PRNumber    int    `json:"pr_number"`
+	HeadBranch  string `json:"head_branch"`
+	ParentEnvID string `json:"parent_env_id"`
+}
+
+// DeletePreviewEnvPayload is the typed payload for DeletePreviewEnv operations.
+// JSON tags are a hard contract with gitops-agent's doDeletePreviewEnv worker —
+// do NOT rename them.
+type DeletePreviewEnvPayload struct {
+	EnvironmentID string `json:"environment_id"`
+	Namespace     string `json:"namespace"`
+}
+
+// DomainAuthorization is Level 1 of the custom-domain model: a project's proven
+// ownership of an apex domain via a TXT challenge. Once Status=verified, the
+// project may attach the apex and any subdomain to its deployments. Mirrors the
+// domain_authorizations table.
+type DomainAuthorization struct {
+	ID                uuid.UUID  `json:"id"                        db:"id"`
+	ProjectID         uuid.UUID  `json:"project_id"                db:"project_id"`
+	ApexDomain        string     `json:"apex_domain"               db:"apex_domain"`
+	VerificationToken string     `json:"verification_token"        db:"verification_token"`
+	Status            string     `json:"status"                    db:"status"`
+	VerifiedAt        *time.Time `json:"verified_at,omitempty"     db:"verified_at"`
+	LastCheckedAt     *time.Time `json:"last_checked_at,omitempty" db:"last_checked_at"`
+	ErrorMessage      string     `json:"error_message,omitempty"   db:"error_message"`
+	CreatedBy         uuid.UUID  `json:"created_by"                db:"created_by"`
+	CreatedAt         time.Time  `json:"created_at"                db:"created_at"`
+	UpdatedAt         time.Time  `json:"updated_at"                db:"updated_at"`
+}
+
+// DomainHostname is Level 2: a specific hostname (apex or subdomain) attached to
+// one app/environment, routed by a native Ingress + cert-manager cert. Mirrors
+// the domain_hostnames table.
+type DomainHostname struct {
+	ID              uuid.UUID  `json:"id"                     db:"id"`
+	AuthorizationID uuid.UUID  `json:"authorization_id"       db:"authorization_id"`
+	EnvironmentID   uuid.UUID  `json:"environment_id"         db:"environment_id"`
+	AppName         string     `json:"app_name"               db:"app_name"`
+	Hostname        string     `json:"hostname"               db:"hostname"`
+	RecordType      string     `json:"record_type"            db:"record_type"`
+	Status          string     `json:"status"                 db:"status"`
+	CertStatus      string     `json:"cert_status"            db:"cert_status"`
+	OperationID     *uuid.UUID `json:"operation_id,omitempty" db:"operation_id"`
+	CreatedAt       time.Time  `json:"created_at"             db:"created_at"`
+	UpdatedAt       time.Time  `json:"updated_at"             db:"updated_at"`
+}
+
+// AttachCustomHostnamePayload is the typed payload for AttachCustomHostname
+// operations. JSON tags are a hard contract with gitops-agent's
+// doAttachCustomHostname worker — do NOT rename them.
+type AttachCustomHostnamePayload struct {
+	AppName  string `json:"app_name"`
+	Hostname string `json:"hostname"`
+}
+
+// DetachCustomHostnamePayload is the typed payload for DetachCustomHostname
+// operations. It removes the {Ingress, <host-as-name>} entry from the owning
+// app's resources.values.yaml manifests list.
+type DetachCustomHostnamePayload struct {
+	AppName  string `json:"app_name"`
+	Hostname string `json:"hostname"`
 }
 
 // Operation represents an async, GitOps-backed platform operation.

@@ -154,7 +154,7 @@ export default function ValuesPage() {
   }, [projectId, envId, appName]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
-    const cleanup = connect();
+    const cleanup = connect(); // eslint-disable-line react-hooks/set-state-in-effect
     return () => {
       cleanup?.then((fn) => fn?.());
       wsRef.current?.close();

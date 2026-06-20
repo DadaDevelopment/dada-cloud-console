@@ -9,6 +9,8 @@ import type {
   Operation,
   DatabasesResponse,
   CreateDatabaseResponse,
+  S3BucketsResponse,
+  CreateS3BucketResponse,
   AppsResponse,
   AppServersResponse,
   AppServerResponse,
@@ -17,6 +19,12 @@ import type {
   DeployImageResponse,
   EndpointsResponse,
   CreateEndpointResponse,
+  DomainAuthorizationsResponse,
+  AddDomainAuthorizationResponse,
+  VerifyDomainAuthorizationResponse,
+  HostnamesResponse,
+  AttachHostnameResponse,
+  DetachHostnameResponse,
   AIModelsResponse,
   AIModelDetailResponse,
   CreateAIModelRequest,
@@ -31,6 +39,16 @@ import type {
   AppServerState,
   MetricsResponse,
   LogSearchResponse,
+  // Vercel-flow
+  GitReposResponse,
+  BuildsResponse,
+  DeploymentsResponse,
+  InstallationsResponse,
+  RemoteReposResponse,
+  EnvVarsResponse,
+  DomainsResponse,
+  Build,
+  FrameworkDetection,
 } from "./types";
 
 // Empty string → relative URLs → requests go through the ingress proxy.
@@ -114,6 +132,19 @@ export const projectsApi = {
   operations: (projectId: string) => apiFetch<OperationsResponse>(`/api/v1/projects/${projectId}/operations`),
   getOperation: (projectId: string, opId: string) =>
     apiFetch<{ operation: Operation }>(`/api/v1/projects/${projectId}/operations/${opId}`),
+};
+
+export const s3bucketsApi = {
+  list: (projectId: string, envId: string) =>
+    apiFetch<S3BucketsResponse>(`/api/v1/projects/${projectId}/environments/${envId}/s3buckets`),
+  create: (projectId: string, envId: string, data: {
+    name: string; bucket_name: string; region: string;
+    description: string; public: boolean; ftp_sftp_enable: boolean;
+    app_ref?: string;
+  }) =>
+    apiFetch<CreateS3BucketResponse>(`/api/v1/projects/${projectId}/environments/${envId}/s3buckets`, {
+      method: "POST", body: data,
+    }),
 };
 
 export const databasesApi = {
@@ -255,6 +286,50 @@ export const endpointsApi = {
     ),
 };
 
+// Custom domains (user-owned domains + auto TLS). Level 1 = apex authorizations
+// (project-scoped), Level 2 = hostname attachments (app-scoped).
+export const customDomainsApi = {
+  listAuthorizations: (projectId: string) =>
+    apiFetch<DomainAuthorizationsResponse>(
+      `/api/v1/projects/${projectId}/domain-authorizations`
+    ),
+
+  addAuthorization: (projectId: string, apexDomain: string) =>
+    apiFetch<AddDomainAuthorizationResponse>(
+      `/api/v1/projects/${projectId}/domain-authorizations`,
+      { method: "POST", body: { apex_domain: apexDomain } }
+    ),
+
+  verifyAuthorization: (projectId: string, id: string) =>
+    apiFetch<VerifyDomainAuthorizationResponse>(
+      `/api/v1/projects/${projectId}/domain-authorizations/${id}/verify`,
+      { method: "POST" }
+    ),
+
+  deleteAuthorization: (projectId: string, id: string) =>
+    apiFetch<void>(
+      `/api/v1/projects/${projectId}/domain-authorizations/${id}`,
+      { method: "DELETE" }
+    ),
+
+  listHostnames: (projectId: string, envId: string, appName: string) =>
+    apiFetch<HostnamesResponse>(
+      `/api/v1/projects/${projectId}/environments/${envId}/apps/${appName}/hostnames`
+    ),
+
+  attachHostname: (projectId: string, envId: string, appName: string, hostname: string) =>
+    apiFetch<AttachHostnameResponse>(
+      `/api/v1/projects/${projectId}/environments/${envId}/apps/${appName}/hostnames`,
+      { method: "POST", body: { hostname } }
+    ),
+
+  detachHostname: (projectId: string, envId: string, appName: string, id: string) =>
+    apiFetch<DetachHostnameResponse>(
+      `/api/v1/projects/${projectId}/environments/${envId}/apps/${appName}/hostnames/${id}`,
+      { method: "DELETE" }
+    ),
+};
+
 // Values editor — issues a short-lived WS delegate token from the backend.
 export const valuesApi = {
   // file selects which editable file the session targets:
@@ -351,6 +426,147 @@ export const adminApi = {
       method: "POST",
       body: { reason },
     }),
+};
+
+// Vercel-flow API clients -------------------------------------------------------
+
+export const gitApi = {
+  installations: (projectId: string) =>
+    apiFetch<InstallationsResponse>(`/api/v1/projects/${projectId}/git/installations`),
+
+  installUrl: (projectId: string, provider: string) =>
+    apiFetch<{ url: string }>(`/api/v1/projects/${projectId}/git/install-url?provider=${encodeURIComponent(provider)}`),
+
+  remoteRepos: (projectId: string, installationId: string) =>
+    apiFetch<RemoteReposResponse>(
+      `/api/v1/projects/${projectId}/git/installations/${installationId}/repos`
+    ),
+
+  detect: (projectId: string, installationId: string, repoFullName: string, rootDir = ".") =>
+    apiFetch<FrameworkDetection>(
+      `/api/v1/projects/${projectId}/git/installations/${installationId}/detect?repo=${encodeURIComponent(repoFullName)}&root_dir=${encodeURIComponent(rootDir)}`
+    ),
+
+  linkRepo: (
+    projectId: string,
+    envId: string,
+    data: {
+      installation_id: string;
+      repo_full_name: string;
+      app_name: string;
+      production_branch: string;
+      root_dir: string;
+      framework_override?: string;
+      auto_deploy: boolean;
+    }
+  ) =>
+    apiFetch<GitReposResponse>(
+      `/api/v1/projects/${projectId}/environments/${envId}/repos`,
+      { method: "POST", body: data }
+    ),
+
+  listRepos: (projectId: string, envId: string) =>
+    apiFetch<GitReposResponse>(`/api/v1/projects/${projectId}/environments/${envId}/repos`),
+
+  updateRepo: (
+    projectId: string,
+    envId: string,
+    repoId: string,
+    data: {
+      production_branch?: string;
+      root_dir?: string;
+      framework_override?: string;
+      auto_deploy?: boolean;
+    }
+  ) =>
+    apiFetch<{ repo: GitReposResponse["repos"][0] }>(
+      `/api/v1/projects/${projectId}/environments/${envId}/repos/${repoId}`,
+      { method: "PATCH", body: data }
+    ),
+};
+
+export const buildsApi = {
+  list: (projectId: string, envId: string, appName: string) =>
+    apiFetch<BuildsResponse>(
+      `/api/v1/projects/${projectId}/environments/${envId}/apps/${appName}/builds`
+    ),
+
+  get: (projectId: string, buildId: string) =>
+    apiFetch<{ build: Build }>(`/api/v1/projects/${projectId}/builds/${buildId}`),
+
+  trigger: (projectId: string, envId: string, appName: string) =>
+    apiFetch<{ build: Build }>(
+      `/api/v1/projects/${projectId}/environments/${envId}/apps/${appName}/builds`,
+      { method: "POST", body: {} }
+    ),
+
+  cancel: (projectId: string, buildId: string) =>
+    apiFetch<{ build: Build }>(
+      `/api/v1/projects/${projectId}/builds/${buildId}/cancel`,
+      { method: "POST", body: {} }
+    ),
+
+  logsToken: (projectId: string, buildId: string) =>
+    apiFetch<{ token: string; ws_url: string }>(
+      `/api/v1/projects/${projectId}/builds/${buildId}/logs-token`,
+      { method: "POST", body: {} }
+    ),
+};
+
+export const deploymentsApi = {
+  list: (projectId: string, envId: string, appName: string) =>
+    apiFetch<DeploymentsResponse>(
+      `/api/v1/projects/${projectId}/environments/${envId}/apps/${appName}/deployments`
+    ),
+
+  promote: (projectId: string, deploymentId: string) =>
+    apiFetch<OperationResponse>(
+      `/api/v1/projects/${projectId}/deployments/${deploymentId}/promote`,
+      { method: "POST", body: {} }
+    ),
+
+  rollback: (projectId: string, deploymentId: string) =>
+    apiFetch<OperationResponse>(
+      `/api/v1/projects/${projectId}/deployments/${deploymentId}/rollback`,
+      { method: "POST", body: {} }
+    ),
+};
+
+export const envVarsApi = {
+  list: (projectId: string, envId: string, appName: string) =>
+    apiFetch<EnvVarsResponse>(
+      `/api/v1/projects/${projectId}/environments/${envId}/apps/${appName}/env`
+    ),
+
+  upsert: (
+    projectId: string,
+    envId: string,
+    appName: string,
+    key: string,
+    data: { value: string; is_secret: boolean; scope: "build" | "runtime" | "both" }
+  ) =>
+    apiFetch<OperationResponse>(
+      `/api/v1/projects/${projectId}/environments/${envId}/apps/${appName}/env/${encodeURIComponent(key)}`,
+      { method: "PUT", body: data }
+    ),
+
+  reveal: (projectId: string, envId: string, appName: string, key: string) =>
+    apiFetch<{ value: string }>(
+      `/api/v1/projects/${projectId}/environments/${envId}/apps/${appName}/env/${encodeURIComponent(key)}?reveal=true`
+    ),
+
+  remove: (projectId: string, envId: string, appName: string, key: string) =>
+    apiFetch<OperationResponse>(
+      `/api/v1/projects/${projectId}/environments/${envId}/apps/${appName}/env/${encodeURIComponent(key)}`,
+      { method: "DELETE" }
+    ),
+};
+
+export const appDomainsApi = {
+  list: (projectId: string, envId: string, appName: string) =>
+    apiFetch<DomainsResponse>(
+      `/api/v1/projects/${projectId}/environments/${envId}/apps/${appName}/domains`
+    ),
 };
 
 // Inference proxy is intentionally NOT in apiFetch (which forces JSON):

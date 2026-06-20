@@ -103,7 +103,7 @@ type createServiceDatabaseRequest struct {
 //
 // @ID          createDatabase
 // @Summary     Order a managed PostgreSQL database
-// @Description Provisions a new managed PostgreSQL database (ServiceDatabaseV2) attached to an app. Asynchronous: returns 202 with an operation; poll the operation until it reaches a terminal status. NOTE: the ServiceDatabaseV2 composition is currently blocked upstream, so reconcile may fail until that is fixed.
+// @Description Provisions a new managed PostgreSQL database (ServiceDatabaseV2). app_ref is optional: omit it for a standalone, environment-level database, or set it to bind the database to an app's chart. Asynchronous: returns 202 with an operation; poll the operation until it reaches a terminal status. NOTE: the ServiceDatabaseV2 composition is currently blocked upstream, so reconcile may fail until that is fixed.
 // @Tags        database
 // @Accept      json
 // @Produce     json
@@ -164,10 +164,8 @@ func (h *Handler) CreateServiceDatabase(c *gin.Context) {
 		respondError(c, http.StatusBadRequest, "database is required")
 		return
 	}
-	if req.AppRef == "" {
-		respondError(c, http.StatusBadRequest, "app_ref is required")
-		return
-	}
+	// app_ref is optional: empty = standalone, environment-level database that
+	// owns its own chart. When set, the database is bound to that app's chart.
 	if err := validateKubeName(req.Name); err != nil {
 		respondError(c, http.StatusBadRequest, err.Error())
 		return

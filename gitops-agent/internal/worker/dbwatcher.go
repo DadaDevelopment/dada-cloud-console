@@ -187,6 +187,10 @@ func (w *DBWatcher) dispatch(ctx context.Context, op db.Operation) error {
 		return w.doDeployImageVersion(ctx, op)
 	case "CreatePublicApi":
 		return w.doCreatePublicApi(ctx, op)
+	case "AttachCustomHostname":
+		return w.doAttachCustomHostname(ctx, op)
+	case "DetachCustomHostname":
+		return w.doDetachCustomHostname(ctx, op)
 	case "CreateAIModel":
 		return w.doCreateAIModel(ctx, op)
 	case "UpdateAIModelArtifact":
@@ -203,6 +207,10 @@ func (w *DBWatcher) dispatch(ctx context.Context, op db.Operation) error {
 		return w.doSetNamespacePolicy(ctx, op)
 	case "CreateS3Bucket":
 		return w.doCreateS3Bucket(ctx, op)
+	case "CreatePreviewEnv":
+		return w.doCreatePreviewEnv(ctx, op)
+	case "DeletePreviewEnv":
+		return w.doDeletePreviewEnv(ctx, op)
 	default:
 		return fmt.Errorf("unknown action: %s", op.Action)
 	}
@@ -382,9 +390,9 @@ func (w *DBWatcher) doCreateServiceDatabase(ctx context.Context, op db.Operation
 		"database": p.Database,
 		"status":   "Pending",
 		"spec": map[string]any{
-			"appRef":   p.AppRef,
+			"appRef":    p.AppRef,
 			"namespace": envNamespace,
-			"database": p.Database,
+			"database":  p.Database,
 			"backup": map[string]any{
 				"enabled":   p.BackupEnabled,
 				"frequency": p.BackupSchedule,
@@ -427,18 +435,30 @@ func (w *DBWatcher) doCreateApp(ctx context.Context, op db.Operation) error {
 		return err
 	}
 
+	// Resolve runtime env at render time (decrypted from env_vars; NEVER from the
+	// plaintext operations.payload). Non-sensitive → values.yaml env:; sensitive →
+	// a per-app k8s Secret CR upserted into resources.values.yaml (chart envFrom's it).
+	env, err := w.resolveRuntimeEnv(ctx, op.EnvironmentID, p.Name)
+	if err != nil {
+		return err
+	}
+
 	appSpec := renderer.AppSpec{
-		Name:        p.Name,
-		Namespace:   envNamespace,
-		ProjectSlug: projectName,
-		EnvSlug:     envName,
-		Image:       p.Image,
-		Port:        p.Port,
-		Replicas:    p.Replicas,
-		Profile:     p.Profile,
-		OperationID: op.ID.String(),
+		Name:               p.Name,
+		Namespace:          envNamespace,
+		ProjectSlug:        projectName,
+		EnvSlug:            envName,
+		Image:              p.Image,
+		Port:               p.Port,
+		Replicas:           p.Replicas,
+		Profile:            p.Profile,
+		OperationID:        op.ID.String(),
 		HelmRepoURL:        mgr.RepoURL(),
 		HelmTargetRevision: mgr.Branch(),
+		Env:                env.Plain,
+	}
+	if env.hasSecret() {
+		appSpec.SecretEnvName = renderer.AppEnvSecretName(p.Name)
 	}
 	yaml, err := renderer.RenderApp(appSpec)
 	if err != nil {
@@ -451,14 +471,22 @@ func (w *DBWatcher) doCreateApp(ctx context.Context, op db.Operation) error {
 
 	gitPath := renderer.AppGitPath(projectName, envName, p.Name)
 	valuesPath := renderer.AppHelmValuesGitPath(projectName, envName, p.Name)
+	files := []git.FileChange{
+		{Path: gitPath, Content: yaml},
+		{Path: valuesPath, Content: valuesYAML},
+	}
+	secretFile, err := w.renderEnvSecretFile(mgr, projectName, envName, envNamespace, p.Name, op.ID.String(), env)
+	if err != nil {
+		return err
+	}
+	if secretFile != nil {
+		files = append(files, *secretFile)
+	}
 	commitMsg := fmt.Sprintf(
 		"[DADA Console] Create App %s\n\nOperation: %s\nProject: %s\nEnvironment: %s\n",
 		p.Name, op.ID, projectName, envName,
 	)
-	if err := w.commitFilesAndRecord(ctx, op, mgr, gitPath, []git.FileChange{
-		{Path: gitPath, Content: yaml},
-		{Path: valuesPath, Content: valuesYAML},
-	}, commitMsg); err != nil {
+	if err := w.commitFilesAndRecord(ctx, op, mgr, gitPath, files, commitMsg); err != nil {
 		return err
 	}
 
@@ -577,6 +605,14 @@ func (w *DBWatcher) doCreateComposeApp(ctx context.Context, op db.Operation, app
 		return err
 	}
 
+	// Resolve runtime env for the compose .env. Compose has no out-of-band secret
+	// channel, so sensitive + non-sensitive are merged into the .env (which is
+	// committed to git — same plaintext-in-git caveat as the k8s Secret path).
+	env, err := w.resolveRuntimeEnv(ctx, op.EnvironmentID, appName)
+	if err != nil {
+		return err
+	}
+
 	composePath := renderer.AppComposeGitPath(projectName, envName, appName)
 	envPath := renderer.AppEnvGitPath(projectName, envName, appName)
 	commitMsg := fmt.Sprintf(
@@ -585,7 +621,7 @@ func (w *DBWatcher) doCreateComposeApp(ctx context.Context, op db.Operation, app
 	)
 	if err := w.commitFilesAndRecord(ctx, op, mgr, composePath, []git.FileChange{
 		{Path: composePath, Content: renderer.RenderComposeSkeleton(appName)},
-		{Path: envPath, Content: renderer.RenderEnvSkeleton()},
+		{Path: envPath, Content: renderer.RenderEnvFile(env.merged())},
 	}, commitMsg); err != nil {
 		return err
 	}
@@ -650,18 +686,29 @@ func (w *DBWatcher) doDeployImageVersion(ctx context.Context, op db.Operation) e
 		return err
 	}
 
+	// Re-resolve runtime env on every deploy so env-var edits take effect on the
+	// next deploy. Decrypted at render time; never sourced from operations.payload.
+	env, err := w.resolveRuntimeEnv(ctx, op.EnvironmentID, p.AppName)
+	if err != nil {
+		return err
+	}
+
 	appSpec := renderer.AppSpec{
-		Name:        p.AppName,
-		Namespace:   envNamespace,
-		ProjectSlug: projectName,
-		EnvSlug:     envName,
-		Image:       p.Image,
-		Port:        int(portVal),
-		Replicas:    int(replicasVal),
-		Profile:     profileVal,
-		OperationID: op.ID.String(),
+		Name:               p.AppName,
+		Namespace:          envNamespace,
+		ProjectSlug:        projectName,
+		EnvSlug:            envName,
+		Image:              p.Image,
+		Port:               int(portVal),
+		Replicas:           int(replicasVal),
+		Profile:            profileVal,
+		OperationID:        op.ID.String(),
 		HelmRepoURL:        mgr.RepoURL(),
 		HelmTargetRevision: mgr.Branch(),
+		Env:                env.Plain,
+	}
+	if env.hasSecret() {
+		appSpec.SecretEnvName = renderer.AppEnvSecretName(p.AppName)
 	}
 	yaml, err := renderer.RenderApp(appSpec)
 	if err != nil {
@@ -674,14 +721,22 @@ func (w *DBWatcher) doDeployImageVersion(ctx context.Context, op db.Operation) e
 
 	gitPath := renderer.AppGitPath(projectName, envName, p.AppName)
 	valuesPath := renderer.AppHelmValuesGitPath(projectName, envName, p.AppName)
+	files := []git.FileChange{
+		{Path: gitPath, Content: yaml},
+		{Path: valuesPath, Content: valuesYAML},
+	}
+	secretFile, err := w.renderEnvSecretFile(mgr, projectName, envName, envNamespace, p.AppName, op.ID.String(), env)
+	if err != nil {
+		return err
+	}
+	if secretFile != nil {
+		files = append(files, *secretFile)
+	}
 	commitMsg := fmt.Sprintf(
 		"[DADA Console] Deploy image %s for app %s\n\nOperation: %s\nProject: %s\nEnvironment: %s\n",
 		p.Image, p.AppName, op.ID, projectName, envName,
 	)
-	if err := w.commitFilesAndRecord(ctx, op, mgr, gitPath, []git.FileChange{
-		{Path: gitPath, Content: yaml},
-		{Path: valuesPath, Content: valuesYAML},
-	}, commitMsg); err != nil {
+	if err := w.commitFilesAndRecord(ctx, op, mgr, gitPath, files, commitMsg); err != nil {
 		return err
 	}
 
@@ -772,6 +827,125 @@ func (w *DBWatcher) doCreatePublicApi(ctx context.Context, op db.Operation) erro
 		p.FQDN, p.AppName, op.ID, projectName, envName,
 	)
 	return w.commitFilesAndRecord(ctx, op, mgr, valuesPath, files, commitMsg)
+}
+
+// doAttachCustomHostname renders a native Ingress (cert-manager letsencrypt-prod,
+// HTTP-01) for a user-owned hostname and upserts it into the owning app's
+// resources.values.yaml manifests list. No Beget/PublicApi — the user owns their
+// DNS and points the hostname at our ingress-nginx-pub LB.
+func (w *DBWatcher) doAttachCustomHostname(ctx context.Context, op db.Operation) error {
+	var p struct {
+		AppName  string `json:"app_name"`
+		Hostname string `json:"hostname"`
+	}
+	if err := json.Unmarshal(op.Payload, &p); err != nil {
+		return fmt.Errorf("parse payload: %w", err)
+	}
+
+	projectName, envName, envNamespace, err := w.projectEnv(ctx, op.ProjectID, op.EnvironmentID)
+	if err != nil {
+		return fmt.Errorf("project/env lookup: %w", err)
+	}
+
+	// Read app port from snapshot (same pattern as PublicApi).
+	var summaryRaw []byte
+	if err := w.pool.QueryRow(ctx, `
+		SELECT summary_json FROM resource_snapshots
+		WHERE project_id=$1 AND environment_id=$2 AND kind='App' AND name=$3
+	`, op.ProjectID, op.EnvironmentID, p.AppName).Scan(&summaryRaw); err != nil {
+		return fmt.Errorf("loading app snapshot: %w", err)
+	}
+	var appSpec map[string]any
+	_ = json.Unmarshal(summaryRaw, &appSpec)
+	portVal, _ := appSpec["port"].(float64)
+	if portVal == 0 {
+		portVal = 8080
+	}
+
+	yaml, err := renderer.RenderCustomIngress(renderer.CustomIngressSpec{
+		Name:        renderer.FQDNToName(p.Hostname),
+		Namespace:   envNamespace,
+		ProjectSlug: projectName,
+		EnvSlug:     envName,
+		Hostname:    p.Hostname,
+		ServiceName: p.AppName,
+		ServicePort: int(portVal),
+		OperationID: op.ID.String(),
+	})
+	if err != nil {
+		return err
+	}
+
+	mgr, err := w.managerFor(ctx, op.ProjectID)
+	if err != nil {
+		return err
+	}
+
+	appFiles, err := w.ensureAppExists(mgr, projectName, envName, p.AppName, envNamespace, op.ID.String())
+	if err != nil {
+		return err
+	}
+	valuesPath := renderer.AppResourcesValuesGitPath(projectName, envName, p.AppName)
+	manifestFile, err := upsertManifestFile(mgr, valuesPath, yaml)
+	if err != nil {
+		return err
+	}
+	files := append(appFiles, manifestFile)
+
+	commitMsg := fmt.Sprintf(
+		"[DADA Console] Attach custom domain %s to app %s\n\nOperation: %s\nProject: %s\nEnvironment: %s\n",
+		p.Hostname, p.AppName, op.ID, projectName, envName,
+	)
+	return w.commitFilesAndRecord(ctx, op, mgr, valuesPath, files, commitMsg)
+}
+
+// doDetachCustomHostname removes the {Ingress, <host-as-name>} entry from the
+// owning app's resources.values.yaml manifests list. cert-manager then GCs the
+// Certificate/secret once the Ingress is pruned.
+func (w *DBWatcher) doDetachCustomHostname(ctx context.Context, op db.Operation) error {
+	var p struct {
+		AppName  string `json:"app_name"`
+		Hostname string `json:"hostname"`
+	}
+	if err := json.Unmarshal(op.Payload, &p); err != nil {
+		return fmt.Errorf("parse payload: %w", err)
+	}
+
+	projectName, envName, _, err := w.projectEnv(ctx, op.ProjectID, op.EnvironmentID)
+	if err != nil {
+		return fmt.Errorf("project/env lookup: %w", err)
+	}
+
+	mgr, err := w.managerFor(ctx, op.ProjectID)
+	if err != nil {
+		return err
+	}
+	if err := mgr.EnsureCloned(); err != nil {
+		return err
+	}
+
+	valuesPath := renderer.AppResourcesValuesGitPath(projectName, envName, p.AppName)
+	manifestFile, changed, err := removeManifestsFile(mgr, valuesPath, [][2]string{
+		{"Ingress", renderer.FQDNToName(p.Hostname)},
+	})
+	if err != nil {
+		return fmt.Errorf("remove manifests: %w", err)
+	}
+	commitMsg := fmt.Sprintf(
+		"[DADA Console] Detach custom domain %s from app %s\n\nOperation: %s\nProject: %s\nEnvironment: %s\n",
+		p.Hostname, p.AppName, op.ID, projectName, envName,
+	)
+	var sha string
+	if changed {
+		sha, err = mgr.CommitFilesAndPush([]git.FileChange{manifestFile}, commitMsg, w.cfg.BotName, w.cfg.BotEmail)
+		if err != nil {
+			return fmt.Errorf("git push (remove manifests): %w", err)
+		}
+		opID := op.ID
+		_ = db.InsertCommit(ctx, w.pool, sha, mgr.RepoURL(), mgr.Branch(),
+			valuesPath, commitMsg, w.cfg.BotName, w.cfg.BotEmail, &opID, "agent")
+	}
+	return db.MarkCommitted(ctx, w.pool, op.ID, sha, valuesPath)
 }
 
 func (w *DBWatcher) doSetNamespacePolicy(ctx context.Context, op db.Operation) error {
