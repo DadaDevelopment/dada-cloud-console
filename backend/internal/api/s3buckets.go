@@ -43,7 +43,7 @@ func (h *Handler) ListS3Buckets(c *gin.Context) {
 		return
 	}
 
-	_, err = h.getUserProjectRole(c.Request.Context(), claims.UserID, projectID, claims.Groups)
+	_, err = h.effectiveRole(c.Request.Context(), claims, projectID)
 	if err == pgx.ErrNoRows {
 		respondNotFound(c)
 		return
@@ -135,7 +135,7 @@ func (h *Handler) CreateS3Bucket(c *gin.Context) {
 		return
 	}
 
-	role, err := h.getUserProjectRole(c.Request.Context(), claims.UserID, projectID, claims.Groups)
+	role, err := h.effectiveRole(c.Request.Context(), claims, projectID)
 	if err == pgx.ErrNoRows {
 		respondNotFound(c)
 		return

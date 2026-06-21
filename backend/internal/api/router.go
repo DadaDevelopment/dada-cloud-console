@@ -10,6 +10,7 @@ import (
 	"github.com/dada-tuda/console/backend/internal/auth"
 	"github.com/dada-tuda/console/backend/internal/config"
 	internalmcp "github.com/dada-tuda/console/backend/internal/mcp"
+	"github.com/dada-tuda/console/backend/internal/models"
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -43,6 +44,16 @@ func authMiddleware(pool *pgxpool.Pool, cfg *config.Config) gin.HandlerFunc {
 		if err != nil {
 			return nil, err
 		}
+		orgRole := kc.OrgRole
+		// Internal staff god-mode: the hidden /platform-admins group grants Owner
+		// everywhere (ADR-009). It lives outside the customer role enum and is
+		// never surfaced in UI.
+		for _, g := range kc.Groups {
+			if g == "/platform-admins" {
+				orgRole = string(models.MemberRoleOwner)
+				break
+			}
+		}
 		return &auth.Claims{
 			UserID:      id,
 			Username:    kc.PreferredUsername,
@@ -50,6 +61,10 @@ func authMiddleware(pool *pgxpool.Pool, cfg *config.Config) gin.HandlerFunc {
 			DisplayName: kc.Name,
 			Groups:      kc.Groups,
 			Roles:       kc.Roles,
+			OrgID:       kc.OrgID,
+			OrgRole:     orgRole,
+			Projects:    kc.Projects,
+			Scopes:      kc.Scopes,
 		}, nil
 	}
 
@@ -117,6 +132,15 @@ func SetupRouter(pool *pgxpool.Pool, cfg *config.Config) *gin.Engine {
 		log.Printf("mcp: serving at /mcp (self-proxy -> %s)", selfURL)
 	}
 
+	// Internal server-to-server API (ADR-009). user-service calls this when it
+	// mints a project. Guarded by a shared secret, NOT the user JWT middleware.
+	// Disabled when INTERNAL_AUTH_TOKEN is unset.
+	if cfg.InternalAuthToken != "" {
+		internal := r.Group("/internal", requireInternalToken(cfg.InternalAuthToken))
+		internal.POST("/projects", h.ProvisionProject)
+		log.Printf("internal: provisioning API enabled at /internal")
+	}
+
 	// Authenticated routes — pick the auth middleware by configured mode.
 	api := r.Group("/api/v1", authMiddleware(pool, cfg))
 	{
@@ -182,16 +206,16 @@ func SetupRouter(pool *pgxpool.Pool, cfg *config.Config) *gin.Engine {
 		api.GET("/projects/:projectId/environments/:envId/repos", h.ListGitRepos)
 		api.POST("/projects/:projectId/environments/:envId/repos", h.ConnectGitRepo)
 		api.DELETE("/projects/:projectId/environments/:envId/repos/:repoId", h.DisconnectGitRepo)
-		// Builds (imperative — no operations).
-		api.GET("/projects/:projectId/environments/:envId/apps/:appName/builds", h.ListBuilds)
-		api.POST("/projects/:projectId/environments/:envId/apps/:appName/builds", h.TriggerBuild)
-		api.GET("/projects/:projectId/builds/:buildId", h.GetBuild)
-		api.POST("/projects/:projectId/builds/:buildId/cancel", h.CancelBuild)
-		api.POST("/projects/:projectId/builds/:buildId/logs-token", h.GetBuildLogsToken)
+		// Builds (imperative — no operations). Scope-gated per ADR-009 vocabulary.
+		api.GET("/projects/:projectId/environments/:envId/apps/:appName/builds", auth.RequireScope("builds:read"), h.ListBuilds)
+		api.POST("/projects/:projectId/environments/:envId/apps/:appName/builds", auth.RequireScope("builds:write"), h.TriggerBuild)
+		api.GET("/projects/:projectId/builds/:buildId", auth.RequireScope("builds:read"), h.GetBuild)
+		api.POST("/projects/:projectId/builds/:buildId/cancel", auth.RequireScope("builds:write"), h.CancelBuild)
+		api.POST("/projects/:projectId/builds/:buildId/logs-token", auth.RequireScope("builds:read"), h.GetBuildLogsToken)
 		// Deployments (rollback/promote enqueue DeployImageVersion operations).
 		api.GET("/projects/:projectId/environments/:envId/apps/:appName/deployments", h.ListDeployments)
-		api.POST("/projects/:projectId/deployments/:deploymentId/rollback", h.RollbackDeployment)
-		api.POST("/projects/:projectId/deployments/:deploymentId/promote", h.PromoteDeployment)
+		api.POST("/projects/:projectId/deployments/:deploymentId/rollback", auth.RequireScope("deploy:write"), h.RollbackDeployment)
+		api.POST("/projects/:projectId/deployments/:deploymentId/promote", auth.RequireScope("deploy:write"), h.PromoteDeployment)
 		// Env vars (always encrypted at rest; reveal is write-gated).
 		api.GET("/projects/:projectId/environments/:envId/apps/:appName/env", h.ListEnvVars)
 		api.PUT("/projects/:projectId/environments/:envId/apps/:appName/env/:key", h.SetEnvVar)

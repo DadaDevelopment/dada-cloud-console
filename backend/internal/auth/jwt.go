@@ -14,22 +14,44 @@ type Claims struct {
 	Username    string    `json:"username"`
 	Email       string    `json:"email"`
 	DisplayName string    `json:"display_name"`
-	// Groups and Roles are populated only in keycloak auth mode (full group
-	// paths from the Keycloak Group Membership mapper, and realm/resource roles).
-	// They are consumed by M3b authz / the MCP server; in local mode they are
-	// left empty and harmless. Not signed into local HS256 tokens.
+	// Fat IAM claims (ADR-009). dada-cloud authorizes purely from these: OrgRole
+	// is the caller's role in OrgID; Projects maps project_id → role for
+	// project-level grants; Scopes gates write surfaces via RequireScope.
+	// Minted by user-service in keycloak mode, dev-god in local mode.
+	OrgID    string            `json:"org_id,omitempty"`
+	OrgRole  string            `json:"org_role,omitempty"`
+	Projects map[string]string `json:"projects,omitempty"`
+	Scopes   []string          `json:"scopes,omitempty"`
+
+	// Groups carries Keycloak full-path groups; the only one still consumed for
+	// authz is "/platform-admins" (internal staff god-mode, outside the enum).
 	Groups []string `json:"groups,omitempty"`
-	Roles  []string `json:"roles,omitempty"`
+	// Roles carries Keycloak realm/resource roles (MCP server / diagnostics);
+	// no longer used for project authorization.
+	Roles []string `json:"roles,omitempty"`
 	jwt.RegisteredClaims
 }
 
-// GenerateToken creates a signed JWT token for the given user.
+// AllScopes is the full scope vocabulary (PRD-IAM). Local dev-god tokens carry
+// the whole set; user-service mints a narrower set for real keys.
+var AllScopes = []string{
+	"read", "metrics:write", "logs:write", "deploy:write",
+	"builds:read", "builds:write", "admin",
+}
+
+// GenerateToken creates a signed JWT for local (HS256) auth mode. There is no
+// Keycloak/user-service to mint fat claims locally, so the token grants dev-god
+// access: Owner of a dev org with every scope. Keeps local dev/tests working
+// while dada-cloud carries zero role-resolution logic (ADR-009).
 func GenerateToken(userID uuid.UUID, username, email, displayName, secret string) (string, error) {
 	claims := Claims{
 		UserID:      userID,
 		Username:    username,
 		Email:       email,
 		DisplayName: displayName,
+		OrgID:       "local-dev",
+		OrgRole:     "Owner",
+		Scopes:      AllScopes,
 		RegisteredClaims: jwt.RegisteredClaims{
 			ExpiresAt: jwt.NewNumericDate(time.Now().Add(24 * time.Hour)),
 			IssuedAt:  jwt.NewNumericDate(time.Now()),

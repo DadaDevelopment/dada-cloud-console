@@ -1,4 +1,7 @@
-export type MemberRole = "platform-admin" | "developer" | "client-admin" | "client-viewer";
+// Uniform 4-role model (ADR-009). Effective project role = max(org_role,
+// projects[id]). Roles are no longer client-vs-internal personas; they are a
+// single ordered ladder: Owner > Admin > Developer > ReadOnly.
+export type MemberRole = "Owner" | "Admin" | "Developer" | "ReadOnly";
 
 export type OperationStatus =
   | "Created" | "Validated" | "Queued" | "Rendering"
@@ -22,6 +25,35 @@ export interface Project {
   created_at: string;
   updated_at: string;
   role?: MemberRole;
+}
+
+// ── IAM (user-service owned, ADR-009) ──────────────────────────────────────
+// These mirror the user-service API surface in PRD-IAM. dada-cloud does not own
+// any of this data; the console reads/writes it directly against user-service
+// (see lib/userService.ts).
+
+export interface Org {
+  id: string;
+  slug: string;
+  display_name: string;
+  role: MemberRole; // caller's role in this org
+}
+
+// A member is a principal (user OR service account) with a role in an org/project.
+export interface Member {
+  principal_id: string;
+  principal_type: "user" | "service_account";
+  email: string;
+  display_name: string;
+  role: MemberRole;
+}
+
+export interface Invitation {
+  id: string;
+  email: string;
+  role: MemberRole;
+  status: "pending" | "accepted" | "expired";
+  created_at: string;
 }
 
 export interface Environment {

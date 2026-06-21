@@ -88,7 +88,7 @@ func (h *Handler) AddDomainAuthorization(c *gin.Context) {
 		respondNotFound(c)
 		return
 	}
-	role, err := h.getUserProjectRole(c.Request.Context(), claims.UserID, projectID, claims.Groups)
+	role, err := h.effectiveRole(c.Request.Context(), claims, projectID)
 	if err == pgx.ErrNoRows {
 		respondNotFound(c)
 		return
@@ -168,7 +168,7 @@ func (h *Handler) ListDomainAuthorizations(c *gin.Context) {
 		respondNotFound(c)
 		return
 	}
-	if _, err := h.getUserProjectRole(c.Request.Context(), claims.UserID, projectID, claims.Groups); err == pgx.ErrNoRows {
+	if _, err := h.effectiveRole(c.Request.Context(), claims, projectID); err == pgx.ErrNoRows {
 		respondNotFound(c)
 		return
 	} else if err != nil {
@@ -237,7 +237,7 @@ func (h *Handler) VerifyDomainAuthorization(c *gin.Context) {
 		respondNotFound(c)
 		return
 	}
-	role, err := h.getUserProjectRole(c.Request.Context(), claims.UserID, projectID, claims.Groups)
+	role, err := h.effectiveRole(c.Request.Context(), claims, projectID)
 	if err == pgx.ErrNoRows {
 		respondNotFound(c)
 		return
@@ -309,7 +309,7 @@ func (h *Handler) DeleteDomainAuthorization(c *gin.Context) {
 		respondNotFound(c)
 		return
 	}
-	role, err := h.getUserProjectRole(c.Request.Context(), claims.UserID, projectID, claims.Groups)
+	role, err := h.effectiveRole(c.Request.Context(), claims, projectID)
 	if err == pgx.ErrNoRows {
 		respondNotFound(c)
 		return
@@ -394,7 +394,7 @@ func (h *Handler) AttachHostname(c *gin.Context) {
 	}
 	appName := c.Param("appName")
 
-	role, err := h.getUserProjectRole(c.Request.Context(), claims.UserID, projectID, claims.Groups)
+	role, err := h.effectiveRole(c.Request.Context(), claims, projectID)
 	if err == pgx.ErrNoRows {
 		respondNotFound(c)
 		return
@@ -565,7 +565,7 @@ func (h *Handler) ListHostnames(c *gin.Context) {
 	}
 	appName := c.Param("appName")
 
-	if _, err := h.getUserProjectRole(c.Request.Context(), claims.UserID, projectID, claims.Groups); err == pgx.ErrNoRows {
+	if _, err := h.effectiveRole(c.Request.Context(), claims, projectID); err == pgx.ErrNoRows {
 		respondNotFound(c)
 		return
 	} else if err != nil {
@@ -649,7 +649,7 @@ func (h *Handler) DetachHostname(c *gin.Context) {
 		return
 	}
 
-	role, err := h.getUserProjectRole(c.Request.Context(), claims.UserID, projectID, claims.Groups)
+	role, err := h.effectiveRole(c.Request.Context(), claims, projectID)
 	if err == pgx.ErrNoRows {
 		respondNotFound(c)
 		return

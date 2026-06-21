@@ -218,7 +218,7 @@ func (h *Handler) CreateAIModel(c *gin.Context) {
 		respondError(c, http.StatusBadRequest, "auth_mode must be apikey, jwt, or public")
 		return
 	}
-	if req.AuthMode == models.AIModelAuthPublic && role != models.MemberRolePlatformAdmin {
+	if req.AuthMode == models.AIModelAuthPublic && !isOrgAdmin(role) {
 		respondError(c, http.StatusForbidden, "auth_mode=public requires platform-admin")
 		return
 	}
@@ -339,7 +339,10 @@ const (
 func decideQuota(prof profiles.Profile, role models.MemberRole, cpuMax, gpuMax, cpuInUse, gpuInUse int) quotaDecision {
 	if prof.IsGPU() {
 		if gpuInUse >= gpuMax {
-			if role == models.MemberRolePlatformAdmin {
+			// Owner sits at the top of the approval chain — there is no one above
+			// to approve, so over-quota is a hard reject. Everyone else (incl.
+			// Admin) routes to the approval gate.
+			if role == models.MemberRoleOwner {
 				return quotaReject
 			}
 			return quotaApproval
@@ -620,7 +623,7 @@ func (h *Handler) DeleteAIModel(c *gin.Context) {
 	}
 	name := c.Param("name")
 	force := c.Query("force") == "true"
-	if force && role != models.MemberRolePlatformAdmin {
+	if force && !isOrgAdmin(role) {
 		respondError(c, http.StatusForbidden, "force=true requires platform-admin")
 		return
 	}
@@ -752,10 +755,10 @@ func (h *Handler) RevealAIModelAPIKey(c *gin.Context) {
 		respondError(c, http.StatusInternalServerError, "failed to fetch reveal")
 		return
 	}
-	// Only the original requester (or platform-admin) can consume the reveal.
+	// Only the original requester (or an org Owner/Admin) can consume the reveal.
 	if actorID != claims.UserID {
-		role, _ := h.getUserProjectRole(c.Request.Context(), claims.UserID, projectID, claims.Groups)
-		if role != models.MemberRolePlatformAdmin {
+		role, _ := h.effectiveRole(c.Request.Context(), claims, projectID)
+		if !isOrgAdmin(role) {
 			respondForbidden(c)
 			return
 		}
@@ -789,11 +792,8 @@ func (h *Handler) parseProjectEnv(c *gin.Context) (uuid.UUID, uuid.UUID, bool) {
 }
 
 func (h *Handler) requireMember(c *gin.Context, userID, projectID uuid.UUID) (models.MemberRole, error) {
-	var groups []string
-	if cl, ok := auth.GetClaims(c); ok {
-		groups = cl.Groups
-	}
-	role, err := h.getUserProjectRole(c.Request.Context(), userID, projectID, groups)
+	claims, _ := auth.GetClaims(c)
+	role, err := h.effectiveRole(c.Request.Context(), claims, projectID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		respondNotFound(c)
 		return "", err

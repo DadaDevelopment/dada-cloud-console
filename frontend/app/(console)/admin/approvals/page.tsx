@@ -7,6 +7,7 @@ import { Spinner } from "@/components/ui/spinner";
 import { Breadcrumb } from "@/components/ui/breadcrumb";
 import { DataTable, type Column } from "@/components/ui/data-table";
 import { useProjectContext } from "@/lib/project-context";
+import { canApprove } from "@/lib/rbac";
 import { timeAgo } from "@/lib/format";
 
 function ResourcePill({ kind }: { kind: string }) {
@@ -36,10 +37,10 @@ function summarisePayload(action: string, payload: Record<string, unknown> | und
 }
 
 export default function ApprovalsPage() {
-  // Approvals is a global, platform-admin-only surface. The nav link is already
-  // gated, but guard the page itself so a direct deep-link can't reach it.
+  // Approvals is an org-admin-only surface (Owner|Admin). The nav link is
+  // already gated, but guard the page itself so a direct deep-link can't reach it.
   const { projects, projectsLoading } = useProjectContext();
-  const isAdminAnywhere = projects.some((p) => p.role === "platform-admin");
+  const isAdminAnywhere = projects.some((p) => canApprove(p.role));
 
   const [approvals, setApprovals] = useState<PendingApproval[]>([]);
   const [isLoading, setIsLoading] = useState(true);

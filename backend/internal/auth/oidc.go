@@ -25,16 +25,26 @@ type KeycloakClaims struct {
 	Name              string
 	Groups            []string
 	Roles             []string
+
+	// Fat IAM claims (ADR-009) injected by user-service into the Keycloak token.
+	OrgID    string
+	OrgRole  string
+	Projects map[string]string
+	Scopes   []string
 }
 
 // rawKeycloakClaims mirrors the JSON shape of a Keycloak access token. Only the
 // fields we consume are declared.
 type rawKeycloakClaims struct {
 	jwt.RegisteredClaims
-	PreferredUsername string   `json:"preferred_username"`
-	Email             string   `json:"email"`
-	Name              string   `json:"name"`
-	Groups            []string `json:"groups"`
+	PreferredUsername string            `json:"preferred_username"`
+	Email             string            `json:"email"`
+	Name              string            `json:"name"`
+	Groups            []string          `json:"groups"`
+	OrgID             string            `json:"org_id"`
+	OrgRole           string            `json:"org_role"`
+	Projects          map[string]string `json:"projects"`
+	Scopes            []string          `json:"scopes"`
 	RealmAccess       struct {
 		Roles []string `json:"roles"`
 	} `json:"realm_access"`
@@ -169,6 +179,10 @@ func (v *KeycloakVerifier) Verify(ctx context.Context, rawToken string) (*Keyclo
 		Name:              rc.Name,
 		Groups:            rc.Groups,
 		Roles:             roles,
+		OrgID:             rc.OrgID,
+		OrgRole:           rc.OrgRole,
+		Projects:          rc.Projects,
+		Scopes:            rc.Scopes,
 	}, nil
 }
 

@@ -18,8 +18,10 @@ type Config struct {
 	// Custom domains (user-owned domains + auto TLS). The verify poller resolves a
 	// TXT challenge to prove ownership before creating the PublicApi. These targets
 	// are what the console tells users to put in their own DNS.
-	//   CustomDomainATarget     — A-record target for apex domains (defaults to the LB IP)
-	//   CustomDomainCNAMETarget — CNAME target for subdomains (a stable hostname → LB)
+	//   CustomDomainATarget     — A-record target for apex domains (the public ingress LB IP)
+	//   CustomDomainCNAMETarget — CNAME target for subdomains; must be a hostname that
+	//     itself resolves to the public ingress LB (e.g. an A record ingress.dada-tuda.ru
+	//     → 155.212.223.198). Override via CUSTOM_DOMAIN_CNAME_TARGET.
 	//   CustomDomainVerifyLabel — TXT challenge host prefix (record: <label>.<fqdn>)
 	CustomDomainATarget     string // CUSTOM_DOMAIN_A_TARGET
 	CustomDomainCNAMETarget string // CUSTOM_DOMAIN_CNAME_TARGET
@@ -52,6 +54,11 @@ type Config struct {
 	// Shared AES-256 encryption key used for token/secret storage (env_vars, git_repos, etc.).
 	// Same secret value as gitops-agent. Hex-encoded 32 bytes.
 	GitopsEncryptionKey string // GITOPS_ENCRYPTION_KEY
+
+	// InternalAuthToken guards the internal provisioning API (POST /internal/*),
+	// called server-to-server by user-service when it mints a project (ADR-009).
+	// When unset, the /internal routes are not registered.
+	InternalAuthToken string // INTERNAL_AUTH_TOKEN
 
 	// Values editor WebSocket. Both values must be set to enable the /values-token
 	// endpoint. Same env var name in both backend and gitops-agent: GITOPS_VALUES_TOKEN_SECRET.
@@ -110,7 +117,7 @@ func Load() (*Config, error) {
 		LogLevel:                getEnv("LOG_LEVEL", "info"),
 		DevMode:                 getEnv("DEV_MODE", "false") == "true",
 		ClusterLBIP:             getEnv("CLUSTER_LB_IP", "93.189.231.60"),
-		CustomDomainATarget:     getEnv("CUSTOM_DOMAIN_A_TARGET", getEnv("CLUSTER_LB_IP", "93.189.231.60")),
+		CustomDomainATarget:     getEnv("CUSTOM_DOMAIN_A_TARGET", "155.212.223.198"),
 		CustomDomainCNAMETarget: getEnv("CUSTOM_DOMAIN_CNAME_TARGET", "ingress.dada-tuda.ru"),
 		CustomDomainVerifyLabel: getEnv("CUSTOM_DOMAIN_VERIFY_LABEL", "_dada-verify"),
 		AuthMode:                getEnv("AUTH_MODE", "local"),
@@ -123,6 +130,7 @@ func Load() (*Config, error) {
 		MLflowAuthHeader:        getEnv("MLFLOW_AUTH_HEADER", ""),
 		InferenceMaxBodyBytes:   getEnvInt64("INFERENCE_MAX_BODY_BYTES", 10*1024*1024),
 		GitopsEncryptionKey:     getEnv("GITOPS_ENCRYPTION_KEY", ""),
+		InternalAuthToken:       getEnv("INTERNAL_AUTH_TOKEN", ""),
 		GitopsValuesTokenSecret: getEnv("GITOPS_VALUES_TOKEN_SECRET", ""),
 		GitopsAgentWSURL:        getEnv("GITOPS_AGENT_WS_URL", ""),
 		BuildAgentURL:           getEnv("BUILD_AGENT_URL", ""),

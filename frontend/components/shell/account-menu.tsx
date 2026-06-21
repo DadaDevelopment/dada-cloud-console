@@ -16,8 +16,8 @@ export function AccountMenu() {
   const { user, logout } = useAuth();
   const { role, projects } = useProjectContext();
   // Role is project-scoped; outside a project fall back to "admin anywhere"
-  // so platform admins can still reach global approvals from the projects list.
-  const showApprovals = canApprove(role) || projects.some((p) => p.role === "platform-admin");
+  // so org admins can still reach global approvals from the projects list.
+  const showApprovals = canApprove(role) || projects.some((p) => canApprove(p.role));
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 

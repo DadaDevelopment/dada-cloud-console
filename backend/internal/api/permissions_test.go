@@ -3,133 +3,107 @@ package api
 import (
 	"testing"
 
+	"github.com/dada-tuda/console/backend/internal/auth"
 	"github.com/dada-tuda/console/backend/internal/models"
+	"github.com/google/uuid"
 )
 
-func TestRoleFromGroups(t *testing.T) {
+// effectiveRole resolves authz purely from fat claims (ADR-009). These cases pin
+// the max(org_role, projects[id]) rule and the god overrides. The org-cascade
+// branch hits the DB (projectInOrg), so it is not exercised here — only the
+// claim-only paths that need no pool.
+func TestEffectiveRole_ClaimOnly(t *testing.T) {
+	pid := uuid.New()
+	other := uuid.New()
+	h := &Handler{} // pool unused on the claim-only paths below
+
 	cases := []struct {
-		name   string
-		groups []string
-		slug   string
-		want   models.MemberRole
+		name    string
+		claims  *auth.Claims
+		project uuid.UUID
+		want    models.MemberRole
+		wantOK  bool
 	}{
 		{
-			name:   "platform-admin group grants global admin",
-			groups: []string{"/platform-admins", "/dada-tuda-users"},
-			slug:   "any-project",
-			want:   models.MemberRolePlatformAdmin,
+			name:    "local dev-god is Owner everywhere",
+			claims:  &auth.Claims{OrgID: "local-dev", OrgRole: "Owner"},
+			project: pid,
+			want:    models.MemberRoleOwner,
+			wantOK:  true,
 		},
 		{
-			name:   "developer role for matching project",
-			groups: []string{"/projects/acme/developer", "/dada-tuda-users"},
-			slug:   "acme",
-			want:   models.MemberRoleDeveloper,
+			name:    "platform-admins group is Owner everywhere",
+			claims:  &auth.Claims{Groups: []string{"/platform-admins"}, OrgRole: "ReadOnly"},
+			project: pid,
+			want:    models.MemberRoleOwner,
+			wantOK:  true,
 		},
 		{
-			name:   "client-admin role",
-			groups: []string{"/projects/acme/client-admin"},
-			slug:   "acme",
-			want:   models.MemberRoleClientAdmin,
+			name:    "explicit project role beats lower org role",
+			claims:  &auth.Claims{OrgID: "o1", OrgRole: "ReadOnly", Projects: map[string]string{pid.String(): "Admin"}},
+			project: pid,
+			want:    models.MemberRoleAdmin,
+			wantOK:  true,
 		},
 		{
-			name:   "client-viewer role",
-			groups: []string{"/projects/acme/client-viewer"},
-			slug:   "acme",
-			want:   models.MemberRoleClientViewer,
+			name:    "org role beats lower explicit project role",
+			claims:  &auth.Claims{OrgID: "o1", OrgRole: "Developer", Projects: map[string]string{pid.String(): "ReadOnly"}},
+			project: pid,
+			want:    models.MemberRoleDeveloper,
+			wantOK:  true,
 		},
 		{
-			name:   "member of different project returns empty",
-			groups: []string{"/projects/other/developer"},
-			slug:   "acme",
-			want:   "",
+			name:    "developer org role does not cascade to unlisted project",
+			claims:  &auth.Claims{OrgID: "o1", OrgRole: "Developer", Projects: map[string]string{other.String(): "Developer"}},
+			project: pid,
+			want:    "",
+			wantOK:  false,
 		},
 		{
-			name:   "unknown role suffix is rejected",
-			groups: []string{"/projects/acme/superuser"},
-			slug:   "acme",
-			want:   "",
-		},
-		{
-			name:   "partial prefix does not match",
-			groups: []string{"/projects/acme-extra/developer"},
-			slug:   "acme",
-			want:   "",
-		},
-		{
-			name:   "no groups returns empty",
-			groups: nil,
-			slug:   "acme",
-			want:   "",
-		},
-		{
-			name:   "platform-admins takes priority over project role",
-			groups: []string{"/platform-admins", "/projects/acme/client-viewer"},
-			slug:   "acme",
-			want:   models.MemberRolePlatformAdmin,
+			name:    "nil claims denied",
+			claims:  nil,
+			project: pid,
+			want:    "",
+			wantOK:  false,
 		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := roleFromGroups(tc.groups, tc.slug)
-			if got != tc.want {
-				t.Errorf("roleFromGroups(%v, %q) = %q, want %q", tc.groups, tc.slug, got, tc.want)
+			got, err := h.effectiveRole(nil, tc.claims, tc.project)
+			ok := err == nil
+			if ok != tc.wantOK || got != tc.want {
+				t.Errorf("effectiveRole = (%q, ok=%v), want (%q, ok=%v)", got, ok, tc.want, tc.wantOK)
 			}
 		})
 	}
 }
 
-func TestSlugRolesFromGroups(t *testing.T) {
-	t.Run("platform-admins returns isPlatformAdmin=true", func(t *testing.T) {
-		_, isAdmin := slugRolesFromGroups([]string{"/platform-admins", "/projects/x/developer"})
-		if !isAdmin {
-			t.Fatal("expected isPlatformAdmin=true")
+func TestMaxRole(t *testing.T) {
+	cases := []struct {
+		a, b, want models.MemberRole
+	}{
+		{models.MemberRoleOwner, models.MemberRoleReadOnly, models.MemberRoleOwner},
+		{models.MemberRoleReadOnly, models.MemberRoleAdmin, models.MemberRoleAdmin},
+		{models.MemberRoleDeveloper, models.MemberRoleDeveloper, models.MemberRoleDeveloper},
+		{"", models.MemberRoleReadOnly, models.MemberRoleReadOnly},
+	}
+	for _, c := range cases {
+		if got := models.MaxRole(c.a, c.b); got != c.want {
+			t.Errorf("MaxRole(%q,%q) = %q, want %q", c.a, c.b, got, c.want)
 		}
-	})
+	}
+}
 
-	t.Run("extracts multiple slugs", func(t *testing.T) {
-		m, isAdmin := slugRolesFromGroups([]string{
-			"/projects/acme/developer",
-			"/projects/beta/client-admin",
-			"/unrelated",
-		})
-		if isAdmin {
-			t.Fatal("unexpected isPlatformAdmin")
+func TestIsOrgAdmin(t *testing.T) {
+	for r, want := range map[models.MemberRole]bool{
+		models.MemberRoleOwner:     true,
+		models.MemberRoleAdmin:     true,
+		models.MemberRoleDeveloper: false,
+		models.MemberRoleReadOnly:  false,
+		"":                         false,
+	} {
+		if got := isOrgAdmin(r); got != want {
+			t.Errorf("isOrgAdmin(%q) = %v, want %v", r, got, want)
 		}
-		if m["acme"] != models.MemberRoleDeveloper {
-			t.Errorf("acme role = %q, want developer", m["acme"])
-		}
-		if m["beta"] != models.MemberRoleClientAdmin {
-			t.Errorf("beta role = %q, want client-admin", m["beta"])
-		}
-		if _, ok := m["unrelated"]; ok {
-			t.Error("unrelated group should not appear")
-		}
-	})
-
-	t.Run("highest-priority role wins for same slug", func(t *testing.T) {
-		m, _ := slugRolesFromGroups([]string{
-			"/projects/acme/client-viewer",
-			"/projects/acme/developer",
-		})
-		if m["acme"] != models.MemberRoleDeveloper {
-			t.Errorf("acme role = %q, want developer", m["acme"])
-		}
-	})
-
-	t.Run("unknown role is skipped", func(t *testing.T) {
-		m, _ := slugRolesFromGroups([]string{"/projects/acme/superuser"})
-		if _, ok := m["acme"]; ok {
-			t.Error("superuser should be rejected")
-		}
-	})
-
-	t.Run("empty groups returns empty map", func(t *testing.T) {
-		m, isAdmin := slugRolesFromGroups(nil)
-		if isAdmin {
-			t.Fatal("unexpected isPlatformAdmin")
-		}
-		if len(m) != 0 {
-			t.Errorf("expected empty map, got %v", m)
-		}
-	})
+	}
 }

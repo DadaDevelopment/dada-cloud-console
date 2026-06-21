@@ -2,21 +2,8 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { projectsApi } from "@/lib/api";
-import type { Project } from "@/lib/types";
-
-const roleLabels: Record<string, string> = {
-  "platform-admin": "Platform Admin",
-  "developer": "Developer",
-  "client-admin": "Admin",
-  "client-viewer": "Viewer",
-};
-
-const roleColors: Record<string, string> = {
-  "platform-admin": "bg-purple-100 text-purple-700",
-  "developer": "bg-blue-100 text-blue-700",
-  "client-admin": "bg-green-100 text-green-700",
-  "client-viewer": "bg-gray-100 text-gray-600",
-};
+import type { MemberRole, Project } from "@/lib/types";
+import { roleColors, roleLabels } from "@/lib/rbac";
 
 function SkeletonCard() {
   return (
@@ -74,9 +61,9 @@ export default function ProjectsPage() {
       ) : (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {projects.map((project) => {
-            const roleKey = project.role ?? "";
-            const roleLabel = roleLabels[roleKey] ?? roleKey;
-            const roleColor = roleColors[roleKey] ?? "bg-gray-100 text-gray-600";
+            const roleKey = project.role as MemberRole | undefined;
+            const roleLabel = roleKey ? roleLabels[roleKey] ?? roleKey : "";
+            const roleColor = roleKey ? roleColors[roleKey] ?? "bg-gray-100 text-gray-600" : "bg-gray-100 text-gray-600";
             return (
               <div
                 key={project.id}

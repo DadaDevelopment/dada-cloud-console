@@ -37,95 +37,60 @@ func (h *Handler) ListProjects(c *gin.Context) {
 
 	var projects []projectWithRole
 
-	if len(claims.Groups) > 0 {
-		// Keycloak mode: derive project list from bearer token groups.
-		slugRoles, isPlatformAdmin := slugRolesFromGroups(claims.Groups)
+	// Project visibility is derived purely from fat claims (ADR-009): the
+	// projects in the caller's claims map, plus the whole org when the caller is
+	// an org Owner/Admin. God (local dev / platform-admins) sees every project.
+	god := isGod(claims)
+	org := models.MemberRole(claims.OrgRole)
+	orgWide := isOrgAdmin(org)
 
-		const projectCols = `SELECT id, name, display_name, owner_type, owner_id,
-		        default_environment, quotas, created_at, updated_at FROM projects`
-
-		var rows interface {
-			Next() bool
-			Scan(...any) error
-			Err() error
-			Close()
+	explicitIDs := make([]uuid.UUID, 0, len(claims.Projects))
+	for pid := range claims.Projects {
+		if id, perr := uuid.Parse(pid); perr == nil {
+			explicitIDs = append(explicitIDs, id)
 		}
-		var queryErr error
+	}
 
-		if isPlatformAdmin {
-			rows, queryErr = h.pool.Query(c.Request.Context(),
-				projectCols+` ORDER BY name`)
-		} else if len(slugRoles) > 0 {
-			slugs := make([]string, 0, len(slugRoles))
-			for s := range slugRoles {
-				slugs = append(slugs, s)
-			}
-			rows, queryErr = h.pool.Query(c.Request.Context(),
-				projectCols+` WHERE name = ANY($1) ORDER BY name`, slugs)
-		}
+	rows, err := h.pool.Query(c.Request.Context(),
+		`SELECT id, name, display_name, owner_type, owner_id,
+		        default_environment, quotas, created_at, updated_at
+		 FROM projects
+		 WHERE $1
+		    OR id = ANY($2)
+		    OR ($3 AND $4 <> '' AND org_id = $4)
+		 ORDER BY name`,
+		god, explicitIDs, orgWide, claims.OrgID,
+	)
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, "failed to query projects")
+		return
+	}
+	defer rows.Close()
 
-		if queryErr != nil {
-			respondError(c, http.StatusInternalServerError, "failed to query projects")
+	for rows.Next() {
+		var p projectWithRole
+		if err := rows.Scan(
+			&p.ID, &p.Name, &p.DisplayName, &p.OwnerType, &p.OwnerID,
+			&p.DefaultEnvironment, &p.Quotas, &p.CreatedAt, &p.UpdatedAt,
+		); err != nil {
+			respondError(c, http.StatusInternalServerError, "failed to scan project")
 			return
 		}
-
-		if rows != nil {
-			defer rows.Close()
-			for rows.Next() {
-				var p projectWithRole
-				if err := rows.Scan(
-					&p.ID, &p.Name, &p.DisplayName, &p.OwnerType, &p.OwnerID,
-					&p.DefaultEnvironment, &p.Quotas, &p.CreatedAt, &p.UpdatedAt,
-				); err != nil {
-					respondError(c, http.StatusInternalServerError, "failed to scan project")
-					return
-				}
-				if isPlatformAdmin {
-					p.Role = models.MemberRolePlatformAdmin
-				} else {
-					p.Role = slugRoles[p.Name]
-				}
-				projects = append(projects, p)
-			}
-			if err := rows.Err(); err != nil {
-				respondError(c, http.StatusInternalServerError, "error reading projects")
-				return
+		switch {
+		case god:
+			p.Role = models.MemberRoleOwner
+		default:
+			if pr, ok := claims.Projects[p.ID.String()]; ok {
+				p.Role = models.MaxRole(org, models.MemberRole(pr))
+			} else {
+				p.Role = org // visible via org-role cascade
 			}
 		}
-	} else {
-		// Local mode: project_members JOIN.
-		rows, err := h.pool.Query(c.Request.Context(),
-			`SELECT p.id, p.name, p.display_name, p.owner_type, p.owner_id,
-			        p.default_environment, p.quotas, p.created_at, p.updated_at,
-			        pm.role
-			 FROM projects p
-			 JOIN project_members pm ON pm.project_id = p.id
-			 WHERE pm.user_id = $1
-			 ORDER BY p.name`,
-			claims.UserID,
-		)
-		if err != nil {
-			respondError(c, http.StatusInternalServerError, "failed to query projects")
-			return
-		}
-		defer rows.Close()
-
-		for rows.Next() {
-			var p projectWithRole
-			if err := rows.Scan(
-				&p.ID, &p.Name, &p.DisplayName, &p.OwnerType, &p.OwnerID,
-				&p.DefaultEnvironment, &p.Quotas, &p.CreatedAt, &p.UpdatedAt,
-				&p.Role,
-			); err != nil {
-				respondError(c, http.StatusInternalServerError, "failed to scan project")
-				return
-			}
-			projects = append(projects, p)
-		}
-		if err := rows.Err(); err != nil {
-			respondError(c, http.StatusInternalServerError, "error reading projects")
-			return
-		}
+		projects = append(projects, p)
+	}
+	if err := rows.Err(); err != nil {
+		respondError(c, http.StatusInternalServerError, "error reading projects")
+		return
 	}
 
 	if projects == nil {
@@ -162,7 +127,7 @@ func (h *Handler) GetProject(c *gin.Context) {
 	}
 
 	// Check membership (return 404 to avoid enumeration)
-	role, err := h.getUserProjectRole(c.Request.Context(), claims.UserID, projectID, claims.Groups)
+	role, err := h.effectiveRole(c.Request.Context(), claims, projectID)
 	if err == pgx.ErrNoRows {
 		respondNotFound(c)
 		return
@@ -254,7 +219,7 @@ func (h *Handler) GetProjectOperations(c *gin.Context) {
 	}
 
 	// Verify membership
-	_, err = h.getUserProjectRole(c.Request.Context(), claims.UserID, projectID, claims.Groups)
+	_, err = h.effectiveRole(c.Request.Context(), claims, projectID)
 	if err == pgx.ErrNoRows {
 		respondNotFound(c)
 		return
@@ -333,7 +298,7 @@ func (h *Handler) SetNamespacePolicy(c *gin.Context) {
 		return
 	}
 
-	role, err := h.getUserProjectRole(c.Request.Context(), claims.UserID, projectID, claims.Groups)
+	role, err := h.effectiveRole(c.Request.Context(), claims, projectID)
 	if err == pgx.ErrNoRows {
 		respondNotFound(c)
 		return
@@ -342,7 +307,7 @@ func (h *Handler) SetNamespacePolicy(c *gin.Context) {
 		respondError(c, http.StatusInternalServerError, "failed to check project membership")
 		return
 	}
-	if role != models.MemberRolePlatformAdmin && role != models.MemberRoleClientAdmin {
+	if !isOrgAdmin(role) {
 		respondForbidden(c)
 		return
 	}

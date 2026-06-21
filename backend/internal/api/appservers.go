@@ -35,7 +35,7 @@ func (h *Handler) ListAppServers(c *gin.Context) {
 		respondNotFound(c)
 		return
 	}
-	_, err = h.getUserProjectRole(c.Request.Context(), claims.UserID, projectID, claims.Groups)
+	_, err = h.effectiveRole(c.Request.Context(), claims, projectID)
 	if err == pgx.ErrNoRows {
 		respondNotFound(c)
 		return
@@ -109,7 +109,7 @@ func (h *Handler) GetAppServer(c *gin.Context) {
 	}
 	serverName := c.Param("serverName")
 
-	_, err = h.getUserProjectRole(c.Request.Context(), claims.UserID, projectID, claims.Groups)
+	_, err = h.effectiveRole(c.Request.Context(), claims, projectID)
 	if err == pgx.ErrNoRows {
 		respondNotFound(c)
 		return
@@ -194,7 +194,7 @@ func (h *Handler) CreateAppServer(c *gin.Context) {
 		return
 	}
 
-	role, err := h.getUserProjectRole(c.Request.Context(), claims.UserID, projectID, claims.Groups)
+	role, err := h.effectiveRole(c.Request.Context(), claims, projectID)
 	if err == pgx.ErrNoRows {
 		respondNotFound(c)
 		return
@@ -330,7 +330,7 @@ func (h *Handler) DeleteAppServer(c *gin.Context) {
 	}
 	serverName := c.Param("serverName")
 
-	role, err := h.getUserProjectRole(c.Request.Context(), claims.UserID, projectID, claims.Groups)
+	role, err := h.effectiveRole(c.Request.Context(), claims, projectID)
 	if err == pgx.ErrNoRows {
 		respondNotFound(c)
 		return

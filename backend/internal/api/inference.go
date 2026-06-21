@@ -92,7 +92,7 @@ func (h *Handler) ProxyInference(c *gin.Context) {
 		return
 	}
 
-	role, err := h.getUserProjectRole(c.Request.Context(), claims.UserID, projectID, claims.Groups)
+	role, err := h.effectiveRole(c.Request.Context(), claims, projectID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		respondNotFound(c)
 		return

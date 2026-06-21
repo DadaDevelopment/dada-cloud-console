@@ -135,7 +135,7 @@ export default function ModelDetailPage() {
   const s = model.summary_json as unknown as AIModelSummary;
   const canaryPct = typeof s.canary_percent === "number" ? s.canary_percent : 0;
   const canaryActive = canaryPct > 0;
-  const isAdmin = role === "platform-admin";
+  const isAdmin = role === "Owner" || role === "Admin";
 
   const tabs: { key: Tab; label: string; admin?: boolean }[] = [
     { key: "overview", label: "Overview" },

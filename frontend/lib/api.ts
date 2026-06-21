@@ -72,13 +72,16 @@ type RequestOptions = {
   method?: string;
   body?: unknown;
   token?: string;
+  // Override the base URL. user-service endpoints (orgs/members/invitations)
+  // sit at the gateway root, not under dada-cloud's /api/v1 — see lib/userService.ts.
+  baseUrl?: string;
 };
 
 export async function apiFetch<T>(
   path: string,
   options: RequestOptions = {}
 ): Promise<T> {
-  const { method = "GET", body, token } = options;
+  const { method = "GET", body, token, baseUrl } = options;
 
   const bearerToken = token ?? await getToken();
 
@@ -90,7 +93,7 @@ export async function apiFetch<T>(
     headers["Authorization"] = `Bearer ${bearerToken}`;
   }
 
-  const res = await fetch(`${API_BASE_URL}${path}`, {
+  const res = await fetch(`${baseUrl ?? API_BASE_URL}${path}`, {
     method,
     headers,
     body: body !== undefined ? JSON.stringify(body) : undefined,
@@ -99,6 +102,11 @@ export async function apiFetch<T>(
   if (!res.ok) {
     const err = await res.json().catch(() => ({ error: res.statusText }));
     throw new Error((err as { error: string }).error ?? "API error");
+  }
+
+  // 204 / empty body (e.g. DELETE) → nothing to parse.
+  if (res.status === 204 || res.headers.get("content-length") === "0") {
+    return undefined as T;
   }
 
   return res.json() as Promise<T>;

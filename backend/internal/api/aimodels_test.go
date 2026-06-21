@@ -15,10 +15,10 @@ func TestCanWrite(t *testing.T) {
 		role models.MemberRole
 		want bool
 	}{
-		{models.MemberRolePlatformAdmin, true},
+		{models.MemberRoleOwner, true},
 		{models.MemberRoleDeveloper, true},
-		{models.MemberRoleClientAdmin, true},
-		{models.MemberRoleClientViewer, false},
+		{models.MemberRoleAdmin, true},
+		{models.MemberRoleReadOnly, false},
 		{"", false},
 		{"unknown-role", false},
 	}
@@ -74,15 +74,15 @@ func TestDecideQuota(t *testing.T) {
 	}{
 		{"CPU under quota → allow", cpu, models.MemberRoleDeveloper, 5, 0, 2, 0, quotaAllow},
 		{"CPU at quota → reject", cpu, models.MemberRoleDeveloper, 5, 0, 5, 0, quotaReject},
-		{"CPU over quota → reject (admin)", cpu, models.MemberRolePlatformAdmin, 5, 0, 7, 0, quotaReject},
-		{"CPU over quota → reject (client-admin)", cpu, models.MemberRoleClientAdmin, 5, 0, 5, 0, quotaReject},
-		{"GPU under quota → allow (admin)", gpu, models.MemberRolePlatformAdmin, 5, 2, 0, 1, quotaAllow},
+		{"CPU over quota → reject (admin)", cpu, models.MemberRoleOwner, 5, 0, 7, 0, quotaReject},
+		{"CPU over quota → reject (client-admin)", cpu, models.MemberRoleAdmin, 5, 0, 5, 0, quotaReject},
+		{"GPU under quota → allow (admin)", gpu, models.MemberRoleOwner, 5, 2, 0, 1, quotaAllow},
 		{"GPU under quota → allow (developer)", gpu, models.MemberRoleDeveloper, 5, 2, 0, 0, quotaAllow},
 		{"GPU at quota gpuMax=0 → approval (developer)", gpu, models.MemberRoleDeveloper, 5, 0, 0, 0, quotaApproval},
-		{"GPU at quota gpuMax=0 → approval (client-admin)", gpu, models.MemberRoleClientAdmin, 5, 0, 0, 0, quotaApproval},
+		{"GPU at quota gpuMax=0 → approval (client-admin)", gpu, models.MemberRoleAdmin, 5, 0, 0, 0, quotaApproval},
 		{"GPU over quota → approval (developer)", gpu, models.MemberRoleDeveloper, 5, 2, 0, 2, quotaApproval},
-		{"GPU at quota gpuMax=0 → reject (admin)", gpu, models.MemberRolePlatformAdmin, 5, 0, 0, 0, quotaReject},
-		{"GPU over quota → reject (admin)", gpu, models.MemberRolePlatformAdmin, 5, 2, 0, 2, quotaReject},
+		{"GPU at quota gpuMax=0 → reject (admin)", gpu, models.MemberRoleOwner, 5, 0, 0, 0, quotaReject},
+		{"GPU over quota → reject (admin)", gpu, models.MemberRoleOwner, 5, 2, 0, 2, quotaReject},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

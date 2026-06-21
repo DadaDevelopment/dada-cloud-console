@@ -32,20 +32,34 @@ func (h *Handler) ListAdminApprovals(c *gin.Context) {
 		return
 	}
 
+	// Scope is derived purely from fat claims (ADR-009): the projects where the
+	// caller is Owner/Admin, plus the whole org when the caller is an org
+	// Owner/Admin. God (local dev / platform-admins) sees every project.
+	god := isGod(claims)
+	orgWide := isOrgAdmin(models.MemberRole(claims.OrgRole))
+	var adminProjectIDs []uuid.UUID
+	for pid, role := range claims.Projects {
+		if isOrgAdmin(models.MemberRole(role)) {
+			if id, perr := uuid.Parse(pid); perr == nil {
+				adminProjectIDs = append(adminProjectIDs, id)
+			}
+		}
+	}
+
 	rows, err := h.pool.Query(c.Request.Context(), `
 		SELECT o.id, o.actor_id, o.project_id, o.environment_id, o.action, o.resource_kind, o.resource_name,
 		       o.status, o.payload, o.validation_result, o.git_commit, o.git_path, o.argo_application,
 		       o.error_code, o.error_message, o.created_at, o.updated_at,
 		       p.name, COALESCE(u.display_name, u.username)
 		FROM operations o
-		JOIN project_members pm ON pm.project_id = o.project_id
-		JOIN projects p          ON p.id = o.project_id
-		LEFT JOIN users u        ON u.id = o.actor_id
+		JOIN projects p   ON p.id = o.project_id
+		LEFT JOIN users u ON u.id = o.actor_id
 		WHERE o.status = $1
-		  AND pm.user_id = $2
-		  AND pm.role = $3
+		  AND ( $2
+		        OR p.id = ANY($3)
+		        OR ($4 AND $5 <> '' AND p.org_id = $5) )
 		ORDER BY o.created_at ASC`,
-		models.OperationStatusWaitingForApproval, claims.UserID, models.MemberRolePlatformAdmin,
+		models.OperationStatusWaitingForApproval, god, adminProjectIDs, orgWide, claims.OrgID,
 	)
 	if err != nil {
 		respondError(c, http.StatusInternalServerError, "failed to list approvals")
@@ -135,8 +149,8 @@ func (h *Handler) approvalDecision(c *gin.Context, target models.OperationStatus
 		return
 	}
 
-	role, err := h.getUserProjectRole(c.Request.Context(), claims.UserID, op.ProjectID, claims.Groups)
-	if errors.Is(err, pgx.ErrNoRows) || role != models.MemberRolePlatformAdmin {
+	role, err := h.effectiveRole(c.Request.Context(), claims, op.ProjectID)
+	if errors.Is(err, pgx.ErrNoRows) || !isOrgAdmin(role) {
 		respondForbidden(c)
 		return
 	}

@@ -59,7 +59,7 @@ func (h *Handler) ListEnvVars(c *gin.Context) {
 	}
 	appName := c.Param("appName")
 
-	_, err = h.getUserProjectRole(c.Request.Context(), claims.UserID, projectID, claims.Groups)
+	_, err = h.effectiveRole(c.Request.Context(), claims, projectID)
 	if err == pgx.ErrNoRows {
 		respondNotFound(c)
 		return
@@ -162,7 +162,7 @@ func (h *Handler) SetEnvVar(c *gin.Context) {
 	appName := c.Param("appName")
 	key := c.Param("key")
 
-	role, err := h.getUserProjectRole(c.Request.Context(), claims.UserID, projectID, claims.Groups)
+	role, err := h.effectiveRole(c.Request.Context(), claims, projectID)
 	if err == pgx.ErrNoRows {
 		respondNotFound(c)
 		return
@@ -284,7 +284,7 @@ func (h *Handler) RevealEnvVar(c *gin.Context) {
 		return
 	}
 
-	role, err := h.getUserProjectRole(c.Request.Context(), claims.UserID, projectID, claims.Groups)
+	role, err := h.effectiveRole(c.Request.Context(), claims, projectID)
 	if err == pgx.ErrNoRows {
 		respondNotFound(c)
 		return
@@ -366,7 +366,7 @@ func (h *Handler) DeleteEnvVar(c *gin.Context) {
 	appName := c.Param("appName")
 	key := c.Param("key")
 
-	role, err := h.getUserProjectRole(c.Request.Context(), claims.UserID, projectID, claims.Groups)
+	role, err := h.effectiveRole(c.Request.Context(), claims, projectID)
 	if err == pgx.ErrNoRows {
 		respondNotFound(c)
 		return

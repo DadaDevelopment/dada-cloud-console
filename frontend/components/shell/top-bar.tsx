@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import { ProjectSwitcher } from "./project-switcher";
+import { OrgSwitcher } from "./org-switcher";
 import { EnvSelector } from "./env-selector";
 import { AccountMenu } from "./account-menu";
 
@@ -35,6 +36,7 @@ export function TopBar({ onOpenPalette }: { onOpenPalette: () => void }) {
         <span className="hidden text-sm font-semibold text-white sm:inline">DADA Console</span>
       </div>
 
+      <OrgSwitcher />
       <span className="text-slate-600">/</span>
       <ProjectSwitcher />
 

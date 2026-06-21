@@ -7,7 +7,7 @@
 // with a tooltip rather than being silently hidden.
 
 import type { MemberRole } from "./types";
-import { canApprove } from "./rbac";
+import { canApprove, isAdmin } from "./rbac";
 
 export type IconName =
   | "overview"
@@ -22,7 +22,8 @@ export type IconName =
   | "storage"
   | "git"
   | "deployments"
-  | "domains";
+  | "domains"
+  | "members";
 
 export interface ResourceNavItem {
   key: string;
@@ -53,6 +54,7 @@ export const PROJECT_NAV: ResourceNavItem[] = [
   { key: "git", label: "Git & Builds", icon: "git", segment: "/git", group: "resources" },
   { key: "domains", label: "Domains", icon: "domains", segment: "/domains", group: "resources" },
   // --- admin group (global, cross-project) ---
+  { key: "members", label: "Members", icon: "members", segment: "/members", group: "admin", visible: isAdmin },
   { key: "approvals", label: "Approvals", icon: "approvals", segment: "", absoluteHref: "/admin/approvals", group: "admin", visible: canApprove },
 ];
 
