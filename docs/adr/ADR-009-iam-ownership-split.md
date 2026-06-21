@@ -1,112 +1,109 @@
-# ADR-009: IAM Ownership Split — user-service as Single Authority, Fat JWT Claims
+# ADR-009: IAM on Keycloak — Native RBAC as System of Record, Group-Encoded Org/Project Roles
 
 ## Status
 
-Proposed — 2026-06-21
+Accepted — 2026-06-21
+
+Supersedes the earlier draft of this ADR (user-service-as-authority + fat-claims + a custom Keycloak protocol-mapper SPI that fetched claims from user-service at token mint). That design was rejected: enriching the token via an HTTP call to user-service on every mint couples login availability to user-service, adds latency to the hot path, and reimplements — in custom code — RBAC that Keycloak provides natively. See **Rejected alternatives**.
 
 Related: [PRD-IAM](../prd/PRD-IAM.md)
 
 ## Context
 
-DADA Cloud needs orgs, project membership, project-scoped roles, scoped API keys, and service accounts. Identity is already partly built and **scattered across two services**:
+DADA Cloud needs orgs, project membership, project-scoped roles, scoped API keys, and service accounts. Identity already partly exists:
 
-- **`user-service`** (Java/Spring): owns users, API keys (SHA-256, `sk-dada-` prefix, `scopes` field present but unenforced), and Keycloak provisioning. Gateway exchanges API-key→JWT via `impersonatedLogin` (Caffeine-cached 5 min). No orgs, projects, members, roles, or service accounts. JWT carries only `sub` + `realm_access.roles`.
-- **`dada-cloud`** (Go): already owns `projects`, `project_members`, `environments` tables and resolves project roles itself (`getUserProjectRole`), plus group-path RBAC for Keycloak mode. AI-model API keys only; no generic keys or service accounts.
+- **Keycloak** (shared `master` realm, `auth.dada-tuda.ru`): authentication, users, the hidden `/platform-admins` staff group. Already the signer of every token.
+- **`user-service`** (Java/Spring): users, API keys (SHA-256, `sk-dada-` prefix), key→JWT exchange via `impersonatedLogin` (Caffeine-cached 5 min).
+- **`dada-cloud`** (Go): `projects`, `project_members`, `environments` and its own role resolution (`getUserProjectRole`) + group-path RBAC for Keycloak mode.
 
-The hard constraint from the product owner: **IAM must be based on Keycloak + user-service, not a new dada-cloud implementation.** The classic young-platform mistake is writing your own IAM before the first ten customers — Keycloak already solves 90%.
-
-Tension: project membership and roles physically live in dada-cloud today, but the directive says identity belongs to user-service. And we want dada-cloud to be "dumb" about authorization.
+Hard constraint from the product owner: **IAM is built on Keycloak, not a new implementation.** The corollary the owner pushed: **the token must be filled by Keycloak from data Keycloak owns — no extra request at mint, no custom enrichment shim.** Keycloak already has groups, roles, role-bearing group memberships, and client scopes. Org membership, project membership, and scoped roles map directly onto them. So we model the IAM domain *in Keycloak* and let stock mappers project it into the token.
 
 ## Decision
 
-### 1. user-service is the single authority for identity and membership
+### 1. Keycloak is the system of record for identity + authorization
 
-`user-service` owns: users, **organizations**, **all membership (org + project)**, **roles**, **API keys**, **service accounts**, Keycloak provisioning. It **mints projects**.
+Orgs, membership, roles, and scopes live **in Keycloak** (groups + realm roles + client scopes), in the single shared realm. There is exactly one copy of authorization data — no sync, no pull, no dual-write.
 
-`dada-cloud` is demoted to a **resource plane**: it owns project/environment **resource** rows (k8s, deploys, apps, monitoring) keyed by `project_id`, and authorizes purely from JWT claims. `getUserProjectRole` and local-mode role logic are deleted. `project_members` ownership moves to user-service.
+- **`user-service`** shrinks to: API keys, service accounts, key→JWT exchange, and **Keycloak Admin-API orchestration** (create org = create groups + role-mappings; add member = join a role-bearing subgroup). Its `organizations` / `org_members` / `projects` / `project_members` tables are **not built** (the in-flight draft of them is dropped).
+- **`dada-cloud`** is a **resource plane**: it owns project/environment **resource** rows (k8s, deploys, apps, monitoring) keyed by `project_id`, plus org-keyed billing/quota. It authorizes by **decoding native Keycloak claims** (group paths + roles + scopes). `getUserProjectRole` and local-mode role logic are deleted.
+- **Keycloak** signs the token and fills the authz claims via stock mappers.
 
-### 2. Fat JWT claims
+### 2. Native RBAC model — group-encoded scoped roles
 
-The token carries everything dada-cloud needs — no hot-path RPC, no DB role lookup:
+Four **realm roles**, uniform at both scopes: `Owner`, `Admin`, `Developer`, `ReadOnly`.
 
-```json
-{
-  "sub": "<principal_id>",
-  "org_id": "<org>",
-  "org_role": "Owner|Admin|Developer|ReadOnly",
-  "projects": { "<project_id>": "<role>" },
-  "scopes": ["read","metrics:write","logs:write","deploy:write","builds:read","builds:write","admin"]
-}
+Scope (which org / which project) + role is encoded in **role-bearing groups**. Keycloak group role-mappings are per-group, so "role within a scope" is a subgroup whose only job is to carry one realm role:
+
+```
+/orgs/{orgId}/{Role}                        → org-level role (e.g. /orgs/acme/Admin)
+/orgs/{orgId}/projects/{projectId}/{Role}   → project-level role
 ```
 
-Effective project role = `max(org_role, projects[project_id])`. user-service builds these claims at login / key exchange.
+Membership = authorization. Adding a user to `/orgs/acme/Admin` makes them org-Admin of `acme`; adding them to `/orgs/acme/projects/p1/Developer` makes them Developer on `p1`. A user can belong to many orgs and many projects simultaneously — multi-tenancy without realm sprawl.
 
-#### Claim injection mechanism (DECIDED 2026-06-21)
+**Org = group, NOT realm.** Realm-per-org is rejected (see alternatives): realms are heavyweight, do not scale to thousands of tenants, and shatter single-user-multi-org + cross-org SSO. Data isolation between orgs is enforced in dada-cloud by `org_id`, not by a Keycloak boundary.
 
-The token is minted and **signed by Keycloak** (token-exchange / impersonatedLogin); user-service cannot sign claims into it directly. Separate the three jobs:
+### 3. Claims are emitted by stock Keycloak mappers — zero custom code in Keycloak
 
-- **Data authority** (who is in what org/project, role, scopes) = **user-service** Postgres. Unchanged.
-- **Signing** = **Keycloak** (only it can).
-- **Projection** (data → claim in the signed token) = **Keycloak**, via a **custom protocol-mapper SPI**.
+No custom provider JAR. No HTTP at token mint. Three built-in mappers on the client/scope:
 
-**Decision:** a Keycloak protocol-mapper SPI (deployed provider JAR) calls user-service `GET /internal/principals/{principal_id}/claims` at token-mint time and injects `org_id, org_role, projects{}, scopes[]` into the signed JWT. No Keycloak user-attribute writes — reading live avoids the concurrent-exchange race and staleness. user-service stays the data authority and exposes the internal claims endpoint; Keycloak owns projection + signing; gateway stays a dumb router.
+- **Group Membership mapper** → `groups: ["/orgs/acme/Admin", "/orgs/acme/projects/p1/Developer", ...]` (full paths, all memberships).
+- **Realm Role mapper** → `realm_access.roles`.
+- **Client scopes** tied to realm roles → native `scope` claim. Role→scope mapping: `Owner/Admin` → all scopes incl. `admin`; `Developer` → `read, metrics:write, logs:write, deploy:write, builds:read, builds:write`; `ReadOnly` → `read, builds:read`.
 
-`GET /internal/principals/{principal_id}/claims` → `{ org_id, org_role, projects: {project_id: role}, scopes: [...] }` (the FatClaims object).
+### 4. dada-cloud decodes group paths
 
-**Rejected — user-attributes + built-in mapper:** writing claims as Keycloak user attributes before exchange is mutable global per-user state → races on concurrent exchange, goes stale, needs out-of-repo realm config.
+dada-cloud parses the `groups[]` claim with a deterministic decoder:
 
-**Fallback (only if operating a Keycloak provider is refused):** user-service returns the FatClaims object in the `/v1/apikeys/exchange` response and gateway attaches it as a trusted internal header (stripping any client-supplied copy). Bends this ADR — claims no longer ride in the signed JWT; downstream trusts a gateway header instead of the signature.
+- `/orgs/{org}/{Role}` → org role for `{org}`.
+- `/orgs/{org}/projects/{proj}/{Role}` → project role for `{proj}`.
+- `/platform-admins` → internal staff god-mode (outside the enum).
 
-**Constraint:** the SPI deploys into the shared **master** realm (auth.dada-tuda.ru) — affects all realm consumers; coordinate the rollout.
+Effective project role = `max(orgRole(projectOrg), projectRole)`; org Owner/Admin cascade into every project in that org. dada-cloud already owns the resource row keyed by `project_id`/`org_id`, so it knows each project's org locally — no lookup. This is ~tens of lines of pure string decode: dada-cloud stays dumb about role *resolution* (Keycloak assigned it), it only decodes Keycloak's own path encoding. Scopes read from the native `scope` claim.
 
-### 3. Uniform 4-role model
+### 5. user-service orchestrates Keycloak via Admin API
 
-`Owner, Admin, Developer, ReadOnly` at both org and project scope. The legacy set (`platform-admin, developer, client-admin, client-viewer`) is removed everywhere. The hidden Keycloak group `/platform-admins` is kept as internal staff god-mode — never a customer role, never in UI.
+Membership/role/project mutations are Admin-API calls, done at **write time** (rare), not mint time (constant):
 
-### 4. First-class service accounts
+- Create org → create `/orgs/{orgId}` + the four role subgroups, map each to its realm role.
+- Add member with role → join `/orgs/{orgId}/{Role}`. Change role → move subgroups.
+- Create project → create `/orgs/{orgId}/projects/{projectId}/{Role}` subgroups; creator joins `Owner`. Then `POST /internal/projects` to dada-cloud to provision the resource row + default env.
+- Service account = a Keycloak service-account principal in the right subgroup; `api_keys.principal_id` points at it (zero key-schema change). Jenkins = SA `jenkins-ci` in `/orgs/{org}/projects/{p}/Developer`.
 
-`service_accounts` is a non-human principal (`id, org_id, name, role`). `api_keys.principal_id` already points at a principal, so SAs reuse the key table with zero schema change. Jenkins = SA `jenkins-ci`, role Developer, scoped key.
+### 6. API-key → JWT exchange unchanged in shape
 
-### 5. Scope enforcement downstream
+Gateway still exchanges `sk-dada-…` → JWT via user-service `impersonatedLogin` (Caffeine-cached). The minted token carries the SA principal's group/role/scope claims through the same stock mappers — the key path and the human-login path produce identically-shaped tokens. Gateway stays a dumb router; no header injection, no fallback shim.
 
-Scopes ride in fat claims. Each service guards its own routes (`requireScope(...)`). Gateway stays a dumb router. Vocabulary: `read, metrics:write, logs:write, deploy:write, builds:read, builds:write, admin`.
-
-### 6. user-service mints projects
-
-`POST /orgs/{org}/projects` → user-service generates `project_id` + Owner membership → calls dada-cloud `POST /internal/projects` to provision the resource row + default env. Membership exists at mint time, so fat claims work immediately.
-
-## Alternatives considered
+## Rejected alternatives
 
 | Decision point | Options | Chosen | Why not the others |
 |----------------|---------|--------|--------------------|
-| Org layer | real table / fake via Keycloak groups | **real table** | Billing/quotas/keys/SAs need a real parent; groups leave them homeless |
-| Where membership lives | dada-cloud / split / user-service | **user-service (all)** | Fat claims need roles at exchange time; split forces a sync (push/pull) that loses instant role changes |
-| Claims | fat / thin+dada-cloud resolves / thin+RPC | **fat** | Owner wanted dada-cloud dumb; no hot-path RPC, no DB role logic in Go |
-| Project minting | user-service / dada-cloud | **user-service** | project_id is identity; must exist before membership/claims |
-| Service accounts | first-class principal / labeled key | **first-class** | Stable identity across key rotation; clean audit; reuses `principal_id` |
-| Scope enforcement | downstream / gateway central | **downstream** | Gateway shouldn't know every service's routes |
-
-### Trade-off accepted
-
-Fat claims + moving `project_members` to user-service means: (a) a JWT bloats with many projects, and (b) role changes take effect only after token refresh (≤ ~4h expiry + 5 min gateway cache). Accepted: simpler dada-cloud, no sync machinery, no RPC on the hot path. Mitigate bloat later with a compact encoding if needed.
+| Where authz data lives | user-service Postgres / **Keycloak native** / synced copy in both | **Keycloak native** | One copy; stock mappers; no sync machinery; no enrichment call. user-service Postgres-as-authority forces either a mint-time RPC or a write-time sync — both avoidable. |
+| Token enrichment | **stock mappers** / custom protocol-mapper SPI pulling user-service / user-attribute write-before-exchange / gateway header injection | **stock mappers** | SPI-pull couples login to user-service uptime + adds hot-path latency + custom JAR doing network I/O inside Keycloak. Attribute-write races on concurrent exchange. Header injection moves trust off the signature. All are crutches for data that should just live in Keycloak. |
+| Org boundary | **group** / realm-per-org | **group** | Realms are heavyweight, don't scale to many tenants, break one-user-many-orgs and cross-org SSO, and force dada-cloud to trust N issuers. Group = one realm, one user record, isolation via `org_id` downstream. |
+| Scoped role encoding | **role-bearing subgroups** / per-user group role-mappings / user attributes | **role-bearing subgroups** | Keycloak role-mappings are per-group; subgroups are the native idiom for "role within a scope." Attributes would need a custom reshape mapper and lose native RBAC. |
+| Claim shape consumed by dada-cloud | **decode native group paths in Go** / thin custom reshape mapper emitting `org_id/projects{}` | **decode in Go** | Keeps Keycloak 100% stock (no custom JAR at all); the decode is trivial and deterministic. A reshape mapper would re-introduce custom Keycloak code to avoid ~30 lines of Go. |
+| Scope enforcement | **downstream per-service** / gateway central | **downstream** | Gateway shouldn't know every service's routes; scopes ride in the signed token. |
 
 ## Consequences
 
 **Positive**
-- dada-cloud carries zero authorization DB logic — pure claim reads. `getUserProjectRole` and local-mode role code deleted.
-- One authority for identity; honors the "don't build your own IAM" directive.
-- Jenkins/agents get stable non-human identities.
-- Scopes finally enforced.
+- Zero custom code in Keycloak; zero HTTP at token mint; login does not depend on user-service being up.
+- One copy of authz data — no sync, no staleness window beyond token lifetime, no dual-write reconciliation.
+- dada-cloud carries no authorization DB logic — pure claim decode. `getUserProjectRole` + local-mode role code deleted.
+- Honors "build on Keycloak" maximally: orgs→groups, roles→realm roles, scopes→client scopes, multi-tenancy→group tree.
+- Jenkins/agents get stable non-human identities; scopes finally enforced.
 
 **Negative / risks**
-- Migration: `project_members` moves Go→Java; member CRUD rebuilt in Spring; existing rows backfilled into a default org per current owner.
-- New cross-service call: user-service → dada-cloud `POST /internal/projects` on project create (failure handling + idempotency required).
-- Role-change latency bounded by token lifetime.
-- Two-service deploy coordination for any membership/claims change.
+- **Inverts the earlier authority decision.** user-service no longer owns membership; the in-flight `organizations/org_members/projects/project_members` entities + `/internal/principals/{id}/claims` endpoint (Chip 1) are dropped — roughly half that work is rebuilt as an Admin-API orchestration layer. dada-cloud claim parsing (Chip 3) changes from reading `org_role/projects` claims to decoding `groups[]` paths.
+- Admin-API orchestration must be idempotent and handle partial failure (group created, role-mapping not) — reconcile/retry required.
+- Group-tree growth: many orgs × projects × 4 roles = many (mostly empty) subgroups. Keycloak handles this, but create/cleanup must be lifecycle-managed (delete subgroups on project/org delete).
+- Role/membership changes take effect on next token refresh (≤ token lifetime + 5 min gateway cache) — same bound as before, acceptable.
+- `groups[]` claim grows with membership; a user in many projects ships a long path list. Mitigate later with a compact encoding or per-request org scoping if it bloats.
 
 ## Migration notes
 
-1. Add `organizations`, `org_members`, `projects` (identity), `project_members`, `service_accounts`, `invitations` to user-service; backfill one org per existing project owner.
-2. Extend key exchange to build fat claims (org_id, org_role, project map, scopes) via Keycloak protocol mapper or impersonatedLogin attributes.
-3. dada-cloud: delete `getUserProjectRole`/local-mode roles; read all roles/scopes from claims; add `POST /internal/projects` provisioner.
-4. Rewrite role enum + `project_members.role` values to the new 4; update `permissions.go`, `models/user.go`, `rbac.ts`.
+1. **Keycloak realm config**: define the four realm roles; create client scopes mapping roles → scope sets; add Group Membership + Realm Role + scope mappers to the dada-cloud client (and the SA exchange client). Backfill one `/orgs/{orgId}` group per existing project owner; move existing members into role subgroups.
+2. **user-service**: drop the org/member/project entity work; build the Admin-API orchestration (org/project/member CRUD → group + role-mapping calls); keep api-keys + service-accounts; keep key→JWT exchange (now just rides the stock mappers).
+3. **dada-cloud**: delete `getUserProjectRole`/local-mode roles; add the `groups[]` path decoder + native `scope` reader; keep `POST /internal/projects` provisioner; update `permissions.go`, `models/user.go`, `rbac.ts` to the 4-role enum decoded from paths. Local dev mode mints a dev-god token (Owner of a dev org, all scopes) since there's no Keycloak locally.
+4. **Roles**: remove the legacy set (`platform-admin, developer, client-admin, client-viewer`) everywhere; keep `/platform-admins` as out-of-enum staff god-mode.
