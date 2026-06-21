@@ -14,6 +14,7 @@ type Project struct {
 	DisplayName        string          `json:"display_name"         db:"display_name"`
 	OwnerType          string          `json:"owner_type"           db:"owner_type"` // team | client
 	OwnerID            *uuid.UUID      `json:"owner_id,omitempty"   db:"owner_id"`
+	OrgID              string          `json:"org_id,omitempty"     db:"org_id"` // IAM org that owns the project (ADR-009)
 	DefaultEnvironment string          `json:"default_environment"  db:"default_environment"`
 	Quotas             json.RawMessage `json:"quotas"               db:"quotas"`
 	CreatedAt          time.Time       `json:"created_at"           db:"created_at"`

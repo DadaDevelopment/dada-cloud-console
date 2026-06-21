@@ -497,11 +497,7 @@ func (h *Handler) CreateAlertRule(c *gin.Context) {
 	}
 
 	ctx := c.Request.Context()
-	claims, _ := auth.GetClaims(c)
-	orgID := ""
-	if claims != nil {
-		orgID = claims.OrgID
-	}
+	orgID := h.monitoringOrgLabel(ctx, projectID)
 
 	// Resolve + validate the channel (must belong to this project).
 	var contactPoint string

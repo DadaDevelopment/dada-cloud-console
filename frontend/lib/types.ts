@@ -21,6 +21,7 @@ export interface Project {
   name: string;
   display_name: string;
   owner_type: string;
+  org_id?: string; // IAM org that owns the project (ADR-009); source for org-scoped actions
   default_environment: string;
   created_at: string;
   updated_at: string;

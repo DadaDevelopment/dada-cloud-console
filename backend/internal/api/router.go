@@ -10,7 +10,6 @@ import (
 	"github.com/dada-tuda/console/backend/internal/auth"
 	"github.com/dada-tuda/console/backend/internal/config"
 	internalmcp "github.com/dada-tuda/console/backend/internal/mcp"
-	"github.com/dada-tuda/console/backend/internal/models"
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -44,16 +43,9 @@ func authMiddleware(pool *pgxpool.Pool, cfg *config.Config) gin.HandlerFunc {
 		if err != nil {
 			return nil, err
 		}
-		orgRole := kc.OrgRole
-		// Internal staff god-mode: the hidden /platform-admins group grants Owner
-		// everywhere (ADR-009). It lives outside the customer role enum and is
-		// never surfaced in UI.
-		for _, g := range kc.Groups {
-			if g == "/platform-admins" {
-				orgRole = string(models.MemberRoleOwner)
-				break
-			}
-		}
+		// Authorization is decoded from the native Keycloak claims (group paths +
+		// scope). The /platform-admins staff god-mode is handled inside the claim
+		// decode, not here (ADR-009 §4).
 		return &auth.Claims{
 			UserID:      id,
 			Username:    kc.PreferredUsername,
@@ -61,10 +53,7 @@ func authMiddleware(pool *pgxpool.Pool, cfg *config.Config) gin.HandlerFunc {
 			DisplayName: kc.Name,
 			Groups:      kc.Groups,
 			Roles:       kc.Roles,
-			OrgID:       kc.OrgID,
-			OrgRole:     orgRole,
-			Projects:    kc.Projects,
-			Scopes:      kc.Scopes,
+			Scope:       kc.Scope,
 		}, nil
 	}
 

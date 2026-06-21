@@ -9,35 +9,53 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// hasGroup reports whether the full-path group list contains want.
-func hasGroup(groups []string, want string) bool {
-	for _, g := range groups {
-		if g == want {
-			return true
-		}
-	}
-	return false
-}
-
 // isGod reports whether the caller has unconditional Owner access to every
-// project: the local dev-god token (AUTH_MODE=local) or the internal staff
-// /platform-admins Keycloak group (ADR-009). Neither is a customer role.
+// project: the hidden /platform-admins staff group (and the local dev-god token,
+// which carries that group). Decoded from native group paths (ADR-009 §4). Not a
+// customer role.
 func isGod(claims *auth.Claims) bool {
-	return claims != nil &&
-		(claims.OrgID == "local-dev" || hasGroup(claims.Groups, "/platform-admins"))
+	return claims != nil && claims.IsPlatformAdmin()
 }
 
-// effectiveRole resolves the caller's role in a project purely from fat JWT
-// claims (ADR-009) — no project_members lookup, no group-path parsing.
+// resolveRole computes the caller's effective role on a project from the decoded
+// native claims, given the project's owning org (looked up locally — dada-cloud
+// owns the resource row keyed by project_id/org_id, ADR-009 §4).
 //
-// Effective project role = max(org_role, projects[project_id]):
-//   - god (local dev / platform-admins) → Owner, everywhere.
-//   - explicit project membership in claims → max(org_role, project role).
-//   - otherwise org Owner/Admin cascade into every project within their org
-//     (a single tenant-isolation read of projects.org_id, not a role lookup).
+// Effective project role = max(orgRole(projectOrg), projectRole):
+//   - god (/platform-admins) → Owner, everywhere.
+//   - explicit project membership → max(orgRole, projectRole); any org role
+//     boosts the explicit grant (e.g. org Admin + project ReadOnly → Admin).
+//   - no explicit project membership → only an Owner/Admin org role cascades in;
+//     org Developer/ReadOnly do NOT grant blanket project access ("see own
+//     projects", PRD-IAM role table).
 //
-// Returns pgx.ErrNoRows when the caller has no access — preserving the contract
-// the handlers already branch on.
+// Returns ok=false when the caller has no access. Pure (no DB) so it is unit
+// tested directly; effectiveRole wraps it with the org lookup.
+func resolveRole(claims *auth.Claims, projectOrg, projectID string) (models.MemberRole, bool) {
+	if claims == nil {
+		return "", false
+	}
+	if isGod(claims) {
+		return models.MemberRoleOwner, true
+	}
+	org := models.MemberRole(claims.OrgRole(projectOrg))
+	proj := models.MemberRole(claims.ProjectRole(projectID))
+
+	if proj != "" {
+		return models.MaxRole(org, proj), true
+	}
+	if org == models.MemberRoleOwner || org == models.MemberRoleAdmin {
+		return org, true
+	}
+	return "", false
+}
+
+// effectiveRole resolves the caller's role in a project from native JWT claims
+// (ADR-009). It looks up the project's owning org locally (one cheap read, also
+// the tenant-isolation check) and applies resolveRole.
+//
+// Returns pgx.ErrNoRows when the caller has no access or the project does not
+// exist — preserving the contract the handlers already branch on.
 func (h *Handler) effectiveRole(ctx context.Context, claims *auth.Claims, projectID uuid.UUID) (models.MemberRole, error) {
 	if claims == nil {
 		return "", pgx.ErrNoRows
@@ -46,38 +64,61 @@ func (h *Handler) effectiveRole(ctx context.Context, claims *auth.Claims, projec
 		return models.MemberRoleOwner, nil
 	}
 
-	org := models.MemberRole(claims.OrgRole)
-
-	if pr, ok := claims.Projects[projectID.String()]; ok {
-		return models.MaxRole(org, models.MemberRole(pr)), nil
+	org, err := h.projectOrg(ctx, projectID)
+	if err != nil {
+		return "", err // pgx.ErrNoRows when the project row is absent
 	}
 
-	if org == models.MemberRoleOwner || org == models.MemberRoleAdmin {
-		inOrg, err := h.projectInOrg(ctx, projectID, claims.OrgID)
-		if err != nil {
-			return "", err
-		}
-		if inOrg {
-			return org, nil
-		}
+	role, ok := resolveRole(claims, org, projectID.String())
+	if !ok {
+		return "", pgx.ErrNoRows
 	}
-
-	return "", pgx.ErrNoRows
+	return role, nil
 }
 
-// projectInOrg reports whether the project resource row belongs to org. Enforces
-// tenant isolation for the org-role cascade (PRD-IAM "Security": org_id from the
-// claim must match the resource owner).
-func (h *Handler) projectInOrg(ctx context.Context, projectID uuid.UUID, orgID string) (bool, error) {
-	if orgID == "" {
-		return false, nil
+// projectOrg returns the org_id that owns a project resource row. Returns
+// pgx.ErrNoRows when the project does not exist.
+func (h *Handler) projectOrg(ctx context.Context, projectID uuid.UUID) (string, error) {
+	var orgID *string
+	if err := h.pool.QueryRow(ctx,
+		`SELECT org_id FROM projects WHERE id = $1`, projectID,
+	).Scan(&orgID); err != nil {
+		return "", err
 	}
-	var exists bool
-	err := h.pool.QueryRow(ctx,
-		`SELECT EXISTS(SELECT 1 FROM projects WHERE id = $1 AND org_id = $2)`,
-		projectID, orgID,
-	).Scan(&exists)
-	return exists, err
+	if orgID == nil {
+		return "", nil
+	}
+	return *orgID, nil
+}
+
+// adminOrgIDs returns the orgs where the caller holds an Owner/Admin role — the
+// orgs whose projects they see and administer via the org-role cascade.
+func adminOrgIDs(claims *auth.Claims) []string {
+	if claims == nil {
+		return nil
+	}
+	var ids []string
+	for org, role := range claims.OrgRoles() {
+		if isOrgAdmin(models.MemberRole(role)) {
+			ids = append(ids, org)
+		}
+	}
+	return ids
+}
+
+// claimProjectIDs returns the project UUIDs the caller has an explicit role on
+// (the keys of the decoded project-role map that parse as UUIDs).
+func claimProjectIDs(claims *auth.Claims) []uuid.UUID {
+	if claims == nil {
+		return nil
+	}
+	ids := make([]uuid.UUID, 0, len(claims.ProjectRoles()))
+	for pid := range claims.ProjectRoles() {
+		if id, err := uuid.Parse(pid); err == nil {
+			ids = append(ids, id)
+		}
+	}
+	return ids
 }
 
 // envBelongsToProject reports whether an environment belongs to a project. Used

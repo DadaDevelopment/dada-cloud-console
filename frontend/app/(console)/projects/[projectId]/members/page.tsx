@@ -34,7 +34,10 @@ export default function MembersPage() {
   const projectId = params.projectId;
   const { project, role } = useProjectContext();
   const claims = useClaims();
-  const orgId = claims?.org_id;
+  // The invite is org-scoped. The project's owning org is authoritative (ADR-009
+  // multi-org: there is no single "active org" in the token); fall back to the
+  // token's project→org decode when the project row hasn't loaded yet.
+  const orgId = project?.org_id || claims?.projectOrg[projectId];
 
   const [members, setMembers] = useState<Member[]>([]);
   const [loading, setLoading] = useState(true);

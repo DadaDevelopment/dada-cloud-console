@@ -8,7 +8,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/dada-tuda/console/backend/internal/auth"
 	"github.com/dada-tuda/console/backend/internal/logsearch"
 	"github.com/dada-tuda/console/backend/internal/models"
 	"github.com/dada-tuda/console/backend/internal/prometheus"
@@ -36,6 +35,22 @@ func monitoringLabels(orgID string, app *models.MonitoringApp) map[string]string
 		"project_id":     app.ProjectID.String(),
 		"monitoring_app": app.ID.String(),
 	}
+}
+
+// monitoringOrgLabel returns the org_id label value used to scope a project's
+// metrics/logs on read. It MUST match what the ingest path writes
+// (loadIngestTarget labels series with the project's owner_id), so reads and
+// writes select the same series. Returns "" when unknown — callers fall back to
+// project_id via monitoringLabels. Replaces the old per-request claims.OrgID,
+// which no longer exists under native multi-org claims (ADR-009).
+func (h *Handler) monitoringOrgLabel(ctx context.Context, projectID uuid.UUID) string {
+	var owner *uuid.UUID
+	if err := h.pool.QueryRow(ctx,
+		`SELECT owner_id FROM projects WHERE id = $1`, projectID,
+	).Scan(&owner); err != nil || owner == nil {
+		return ""
+	}
+	return owner.String()
 }
 
 // promSelector renders the labels as a PromQL stream selector `{k="v",...}` with
@@ -162,11 +177,7 @@ func (h *Handler) GetMonitoringHealth(c *gin.Context) {
 	if app == nil {
 		return
 	}
-	claims, _ := auth.GetClaims(c)
-	orgID := ""
-	if claims != nil {
-		orgID = claims.OrgID
-	}
+	orgID := h.monitoringOrgLabel(c.Request.Context(), app.ProjectID)
 	cfg := h.loadHealthConfig(c.Request.Context(), app.ID)
 	status := h.computeHealth(c.Request.Context(), app, orgID, cfg)
 	c.JSON(http.StatusOK, status)
@@ -319,14 +330,10 @@ func (h *Handler) GetMonitoringMetrics(c *gin.Context) {
 		respondError(c, http.StatusServiceUnavailable, "metrics not configured")
 		return
 	}
-	claims, _ := auth.GetClaims(c)
-	orgID := ""
-	if claims != nil {
-		orgID = claims.OrgID
-	}
+	ctx := c.Request.Context()
+	orgID := h.monitoringOrgLabel(ctx, app.ProjectID)
 	labels := monitoringLabels(orgID, app)
 	sel := promSelector(labels)
-	ctx := c.Request.Context()
 
 	// Discover metric names present for this resource.
 	names := []string{}
@@ -392,11 +399,7 @@ func (h *Handler) GetMonitoringLogs(c *gin.Context) {
 		respondError(c, http.StatusServiceUnavailable, "log search not configured")
 		return
 	}
-	claims, _ := auth.GetClaims(c)
-	orgID := ""
-	if claims != nil {
-		orgID = claims.OrgID
-	}
+	orgID := h.monitoringOrgLabel(c.Request.Context(), app.ProjectID)
 	labels := monitoringLabels(orgID, app)
 
 	since := time.Hour
@@ -455,11 +458,7 @@ func (h *Handler) GetMonitoringGrafanaLink(c *gin.Context) {
 		respondError(c, http.StatusServiceUnavailable, "grafana not configured")
 		return
 	}
-	claims, _ := auth.GetClaims(c)
-	orgID := ""
-	if claims != nil {
-		orgID = claims.OrgID
-	}
+	orgID := h.monitoringOrgLabel(c.Request.Context(), projectID)
 	if err := h.ensureGrafanaResource(c.Request.Context(), app, projectID, orgID); err != nil {
 		respondError(c, http.StatusBadGateway, "grafana provisioning failed: "+err.Error())
 		return

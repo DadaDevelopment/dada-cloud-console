@@ -2,6 +2,7 @@ package auth
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -9,26 +10,36 @@ import (
 )
 
 // Claims represents the JWT claims payload.
+//
+// Authorization is decoded from NATIVE Keycloak RBAC claims (ADR-009 §2-4):
+// Keycloak is the system of record and emits stock claims; dada-cloud only
+// decodes them. There is no pre-shaped org_role/projects claim anymore.
+//
+//   - Groups carries the full-path group memberships from the Group Membership
+//     mapper: "/orgs/{org}/{Role}", "/orgs/{org}/projects/{proj}/{Role}", and the
+//     hidden "/platform-admins" staff group.
+//   - Scope is the native space-delimited OIDC scope string.
+//   - Roles is realm_access.roles (diagnostics only; authz comes from Groups).
+//
+// The decoded view (orgRoles/projectRoles/scopeSet/platformAdmin) is built lazily
+// from Groups+Scope on first access and is never serialized.
 type Claims struct {
 	UserID      uuid.UUID `json:"user_id"`
 	Username    string    `json:"username"`
 	Email       string    `json:"email"`
 	DisplayName string    `json:"display_name"`
-	// Fat IAM claims (ADR-009). dada-cloud authorizes purely from these: OrgRole
-	// is the caller's role in OrgID; Projects maps project_id → role for
-	// project-level grants; Scopes gates write surfaces via RequireScope.
-	// Minted by user-service in keycloak mode, dev-god in local mode.
-	OrgID    string            `json:"org_id,omitempty"`
-	OrgRole  string            `json:"org_role,omitempty"`
-	Projects map[string]string `json:"projects,omitempty"`
-	Scopes   []string          `json:"scopes,omitempty"`
 
-	// Groups carries Keycloak full-path groups; the only one still consumed for
-	// authz is "/platform-admins" (internal staff god-mode, outside the enum).
 	Groups []string `json:"groups,omitempty"`
-	// Roles carries Keycloak realm/resource roles (MCP server / diagnostics);
-	// no longer used for project authorization.
-	Roles []string `json:"roles,omitempty"`
+	Roles  []string `json:"roles,omitempty"`
+	Scope  string   `json:"scope,omitempty"`
+
+	// decoded view (not serialized).
+	decoded       bool
+	orgRoles      map[string]string
+	projectRoles  map[string]string
+	scopeSet      map[string]struct{}
+	platformAdmin bool
+
 	jwt.RegisteredClaims
 }
 
@@ -39,19 +50,118 @@ var AllScopes = []string{
 	"builds:read", "builds:write", "admin",
 }
 
+// roleRank ranks the four roles for decode-time max-merging when a single scope
+// carries more than one role membership. Mirrors models.RolePriority but kept
+// local so the auth package stays free of a models dependency. Unknown → 0.
+func roleRank(role string) int {
+	switch role {
+	case "Owner":
+		return 4
+	case "Admin":
+		return 3
+	case "Developer":
+		return 2
+	case "ReadOnly":
+		return 1
+	}
+	return 0
+}
+
+// decode parses Groups + Scope into the lookup maps. Idempotent and lazy: every
+// accessor calls it, so Claims built by hand (tests, the keycloak resolver) decode
+// without an explicit step.
+func (c *Claims) decode() {
+	if c.decoded {
+		return
+	}
+	c.decoded = true
+	c.orgRoles = map[string]string{}
+	c.projectRoles = map[string]string{}
+	c.scopeSet = map[string]struct{}{}
+
+	for _, g := range c.Groups {
+		if g == "/platform-admins" {
+			c.platformAdmin = true
+			continue
+		}
+		// "/orgs/{org}/{Role}"                      → org role
+		// "/orgs/{org}/projects/{proj}/{Role}"      → project role
+		parts := strings.Split(strings.Trim(g, "/"), "/")
+		if len(parts) < 3 || parts[0] != "orgs" {
+			continue
+		}
+		switch {
+		case len(parts) == 3:
+			org, role := parts[1], parts[2]
+			if roleRank(role) > roleRank(c.orgRoles[org]) {
+				c.orgRoles[org] = role
+			}
+		case len(parts) == 5 && parts[2] == "projects":
+			proj, role := parts[3], parts[4]
+			if roleRank(role) > roleRank(c.projectRoles[proj]) {
+				c.projectRoles[proj] = role
+			}
+		}
+	}
+
+	for _, s := range strings.Fields(c.Scope) {
+		c.scopeSet[s] = struct{}{}
+	}
+}
+
+// OrgRole returns the caller's role in org (empty if none).
+func (c *Claims) OrgRole(orgID string) string {
+	c.decode()
+	return c.orgRoles[orgID]
+}
+
+// ProjectRole returns the caller's explicit role on project (empty if none). It
+// does NOT apply the org-role cascade — callers that need the effective role
+// combine this with OrgRole(projectOrg) once they know the project's org.
+func (c *Claims) ProjectRole(projectID string) string {
+	c.decode()
+	return c.projectRoles[projectID]
+}
+
+// OrgRoles returns the decoded org→role map (read-only; do not mutate).
+func (c *Claims) OrgRoles() map[string]string {
+	c.decode()
+	return c.orgRoles
+}
+
+// ProjectRoles returns the decoded project→role map (read-only; do not mutate).
+func (c *Claims) ProjectRoles() map[string]string {
+	c.decode()
+	return c.projectRoles
+}
+
+// IsPlatformAdmin reports staff god-mode (the hidden /platform-admins group,
+// ADR-009). Outside the customer role enum; never surfaced in UI.
+func (c *Claims) IsPlatformAdmin() bool {
+	c.decode()
+	return c.platformAdmin
+}
+
+// HasScope reports whether the native scope set contains want.
+func (c *Claims) HasScope(want string) bool {
+	c.decode()
+	_, ok := c.scopeSet[want]
+	return ok
+}
+
 // GenerateToken creates a signed JWT for local (HS256) auth mode. There is no
-// Keycloak/user-service to mint fat claims locally, so the token grants dev-god
-// access: Owner of a dev org with every scope. Keeps local dev/tests working
-// while dada-cloud carries zero role-resolution logic (ADR-009).
+// Keycloak locally to emit native claims, so the token is a dev-god: the
+// /platform-admins staff group (Owner everywhere) plus the full native scope
+// string. Keeps local dev/tests working while dada-cloud carries zero
+// role-resolution logic (ADR-009).
 func GenerateToken(userID uuid.UUID, username, email, displayName, secret string) (string, error) {
 	claims := Claims{
 		UserID:      userID,
 		Username:    username,
 		Email:       email,
 		DisplayName: displayName,
-		OrgID:       "local-dev",
-		OrgRole:     "Owner",
-		Scopes:      AllScopes,
+		Groups:      []string{"/orgs/local-dev/Owner", "/platform-admins"},
+		Scope:       strings.Join(AllScopes, " "),
 		RegisteredClaims: jwt.RegisteredClaims{
 			ExpiresAt: jwt.NewNumericDate(time.Now().Add(24 * time.Hour)),
 			IssuedAt:  jwt.NewNumericDate(time.Now()),

@@ -9,7 +9,7 @@ import (
 )
 
 func TestHasScope(t *testing.T) {
-	c := &Claims{Scopes: []string{"metrics:write", "logs:write"}}
+	c := &Claims{Scope: "metrics:write logs:write"}
 	if !HasScope(c, "metrics:write") {
 		t.Error("expected metrics:write present")
 	}
@@ -25,13 +25,13 @@ func TestRequireScope(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	cases := []struct {
-		name     string
-		claims   *Claims // nil = no claims set
-		want     int
+		name   string
+		claims *Claims // nil = no claims set
+		want   int
 	}{
 		{"no claims -> 401", nil, http.StatusUnauthorized},
-		{"wrong scope -> 403", &Claims{Scopes: []string{"logs:write"}}, http.StatusForbidden},
-		{"right scope -> 200", &Claims{Scopes: []string{"metrics:write"}}, http.StatusOK},
+		{"wrong scope -> 403", &Claims{Scope: "logs:write"}, http.StatusForbidden},
+		{"right scope -> 200", &Claims{Scope: "metrics:write"}, http.StatusOK},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

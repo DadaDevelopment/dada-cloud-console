@@ -6,18 +6,13 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// HasScope reports whether the claims carry the given scope. Scopes come from
-// fat claims minted by the IAM gateway when it exchanges an API key.
+// HasScope reports whether the claims carry the given scope. Scopes are decoded
+// from the native space-delimited OIDC `scope` claim (ADR-009).
 func HasScope(claims *Claims, want string) bool {
 	if claims == nil {
 		return false
 	}
-	for _, s := range claims.Scopes {
-		if s == want {
-			return true
-		}
-	}
-	return false
+	return claims.HasScope(want)
 }
 
 // RequireScope returns a Gin middleware that aborts with 403 unless the request

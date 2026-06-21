@@ -1,13 +1,12 @@
 "use client";
 // Org switcher (PRD-IAM "Org switcher, top nav").
 //
-// SCOPE NOTE: the fat JWT carries exactly ONE active org (org_id/org_role), and
-// PRD-IAM exposes GET /orgs/{id} but no "list my orgs" endpoint. So this renders
-// the ACTIVE org only (read-only chip). True multi-org switching is blocked on:
-//   1. a user-service "list orgs for principal" endpoint, and
-//   2. a token re-mint flow (switching org changes the fat claims), owned by the
-//      gateway/auth chip.
-// TODO(iam): turn this into a dropdown once those two land.
+// SCOPE NOTE: under native RBAC (ADR-009) the token carries MANY org memberships
+// (decoded from group paths), not one active org. PRD-IAM exposes GET /orgs/{id}
+// but no "list my orgs" endpoint yet, and there is no per-org token re-mint. So
+// this renders the FIRST decoded org as a read-only chip.
+// TODO(iam): turn this into a dropdown over claims.orgRoles once a
+// "list orgs for principal" endpoint lands.
 
 import { useEffect, useState } from "react";
 import { useClaims } from "@/lib/claims";
@@ -17,7 +16,11 @@ import type { Org } from "@/lib/types";
 
 export function OrgSwitcher() {
   const claims = useClaims();
-  const orgId = claims?.org_id;
+  // Multi-org token: show the first decoded org membership (sorted for a stable
+  // pick) until a real switcher/list-orgs endpoint exists.
+  const orgEntries = claims ? Object.entries(claims.orgRoles).sort(([a], [b]) => a.localeCompare(b)) : [];
+  const orgId = orgEntries[0]?.[0];
+  const role = orgEntries[0]?.[1];
   const [org, setOrg] = useState<Org | null>(null);
 
   useEffect(() => {
@@ -33,7 +36,6 @@ export function OrgSwitcher() {
   if (!orgId) return null;
 
   const label = org?.display_name ?? org?.slug ?? orgId;
-  const role = claims?.org_role;
 
   return (
     <div

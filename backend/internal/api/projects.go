@@ -37,29 +37,24 @@ func (h *Handler) ListProjects(c *gin.Context) {
 
 	var projects []projectWithRole
 
-	// Project visibility is derived purely from fat claims (ADR-009): the
-	// projects in the caller's claims map, plus the whole org when the caller is
-	// an org Owner/Admin. God (local dev / platform-admins) sees every project.
+	// Project visibility is derived purely from native claims (ADR-009): the
+	// projects the caller has an explicit role on, plus every project owned by an
+	// org where the caller is org Owner/Admin (cascade). God (/platform-admins)
+	// sees every project. Multi-org: explicit grants and admin orgs both span
+	// multiple tenants.
 	god := isGod(claims)
-	org := models.MemberRole(claims.OrgRole)
-	orgWide := isOrgAdmin(org)
-
-	explicitIDs := make([]uuid.UUID, 0, len(claims.Projects))
-	for pid := range claims.Projects {
-		if id, perr := uuid.Parse(pid); perr == nil {
-			explicitIDs = append(explicitIDs, id)
-		}
-	}
+	explicitIDs := claimProjectIDs(claims)
+	adminOrgs := adminOrgIDs(claims)
 
 	rows, err := h.pool.Query(c.Request.Context(),
-		`SELECT id, name, display_name, owner_type, owner_id,
+		`SELECT id, name, display_name, owner_type, owner_id, COALESCE(org_id, ''),
 		        default_environment, quotas, created_at, updated_at
 		 FROM projects
 		 WHERE $1
 		    OR id = ANY($2)
-		    OR ($3 AND $4 <> '' AND org_id = $4)
+		    OR org_id = ANY($3)
 		 ORDER BY name`,
-		god, explicitIDs, orgWide, claims.OrgID,
+		god, explicitIDs, adminOrgs,
 	)
 	if err != nil {
 		respondError(c, http.StatusInternalServerError, "failed to query projects")
@@ -70,7 +65,7 @@ func (h *Handler) ListProjects(c *gin.Context) {
 	for rows.Next() {
 		var p projectWithRole
 		if err := rows.Scan(
-			&p.ID, &p.Name, &p.DisplayName, &p.OwnerType, &p.OwnerID,
+			&p.ID, &p.Name, &p.DisplayName, &p.OwnerType, &p.OwnerID, &p.OrgID,
 			&p.DefaultEnvironment, &p.Quotas, &p.CreatedAt, &p.UpdatedAt,
 		); err != nil {
 			respondError(c, http.StatusInternalServerError, "failed to scan project")
@@ -80,10 +75,12 @@ func (h *Handler) ListProjects(c *gin.Context) {
 		case god:
 			p.Role = models.MemberRoleOwner
 		default:
-			if pr, ok := claims.Projects[p.ID.String()]; ok {
+			// Effective role per project: max(orgRole(project.org), projectRole).
+			org := models.MemberRole(claims.OrgRole(p.OrgID))
+			if pr := claims.ProjectRole(p.ID.String()); pr != "" {
 				p.Role = models.MaxRole(org, models.MemberRole(pr))
 			} else {
-				p.Role = org // visible via org-role cascade
+				p.Role = org // visible via org Owner/Admin cascade
 			}
 		}
 		projects = append(projects, p)
@@ -139,10 +136,10 @@ func (h *Handler) GetProject(c *gin.Context) {
 
 	var p models.Project
 	err = h.pool.QueryRow(c.Request.Context(),
-		`SELECT id, name, display_name, owner_type, owner_id, default_environment, quotas, created_at, updated_at
+		`SELECT id, name, display_name, owner_type, owner_id, COALESCE(org_id, ''), default_environment, quotas, created_at, updated_at
 		 FROM projects WHERE id = $1`,
 		projectID,
-	).Scan(&p.ID, &p.Name, &p.DisplayName, &p.OwnerType, &p.OwnerID,
+	).Scan(&p.ID, &p.Name, &p.DisplayName, &p.OwnerType, &p.OwnerID, &p.OrgID,
 		&p.DefaultEnvironment, &p.Quotas, &p.CreatedAt, &p.UpdatedAt)
 	if err == pgx.ErrNoRows {
 		respondNotFound(c)
