@@ -23,20 +23,20 @@ type Config struct {
 	BuildTimeout  time.Duration
 	MaxRetries    int
 
-	// k8s Job isolation knobs.
-	RuntimeClass   string
-	NodePoolLabel  string
-	CPULimit       string
-	MemLimit       string
-	GitEgressCIDRs string
+	// Jenkins controller (control-plane trigger + poll + progressiveText).
+	// One parameterized pipeline job; the framework param (web|android|auto)
+	// selects the branch inside jenkins-lib. No per-repo Jenkinsfile.
+	JenkinsURL   string
+	JenkinsUser  string
+	JenkinsToken string
+	JenkinsJob   string // parameterized job full name (e.g. "dada-build")
 
-	// Harbor registry.
-	HarborURL         string
-	HarborAdminUser   string
-	HarborAdminSecret string
-
-	// Builder image baked with git+nixpacks+buildctl.
-	BuilderImage string
+	// Nexus registry (Docker images + raw APK/AAB). Push is owned by Jenkins;
+	// the control plane only reads to confirm artifacts.
+	NexusDockerHost string // host[:port] for image refs + /v2 API
+	NexusRawURL     string // base URL of the raw-hosted repo (download proxy)
+	NexusUser       string
+	NexusToken      string
 
 	// GitHub App.
 	GitHubAppID         string
@@ -73,19 +73,19 @@ func Load() (*Config, error) {
 		DatabaseURL:    getEnv("DATABASE_URL", getEnv("DB_URL", "")),
 		WebhookPort:    getEnv("BUILD_WEBHOOK_PORT", "8091"),
 		PollInterval:   pollInterval,
-		MaxConcurrent:  getEnvInt("BUILD_MAX_CONCURRENT", 4),
-		BuildTimeout:   buildTimeout,
-		MaxRetries:     getEnvInt("BUILD_MAX_RETRIES", 2),
-		RuntimeClass:   getEnv("BUILD_RUNTIME_CLASS", "gvisor"),
-		NodePoolLabel:  getEnv("BUILD_NODE_POOL_LABEL", ""),
-		CPULimit:       getEnv("BUILD_CPU_LIMIT", "2"),
-		MemLimit:       getEnv("BUILD_MEM_LIMIT", "4Gi"),
-		GitEgressCIDRs: getEnv("BUILD_GIT_EGRESS_CIDRS", ""),
+		MaxConcurrent: getEnvInt("BUILD_MAX_CONCURRENT", 4),
+		BuildTimeout:  buildTimeout,
+		MaxRetries:    getEnvInt("BUILD_MAX_RETRIES", 2),
 
-		HarborURL:         getEnv("HARBOR_URL", ""),
-		HarborAdminUser:   getEnv("HARBOR_ADMIN_USER", ""),
-		HarborAdminSecret: getEnv("HARBOR_ADMIN_SECRET", ""),
-		BuilderImage:      getEnv("BUILDER_IMAGE", ""),
+		JenkinsURL:   getEnv("JENKINS_URL", ""),
+		JenkinsUser:  getEnv("JENKINS_USER", ""),
+		JenkinsToken: getEnv("JENKINS_TOKEN", ""),
+		JenkinsJob:   getEnv("JENKINS_JOB", "dada-build"),
+
+		NexusDockerHost: getEnv("NEXUS_DOCKER_HOST", ""),
+		NexusRawURL:     getEnv("NEXUS_RAW_URL", ""),
+		NexusUser:       getEnv("NEXUS_USER", ""),
+		NexusToken:      getEnv("NEXUS_TOKEN", ""),
 
 		GitHubAppID:         getEnv("BUILD_GITHUB_APP_ID", ""),
 		GitHubAppKey:        getEnv("BUILD_GITHUB_APP_KEY", ""),

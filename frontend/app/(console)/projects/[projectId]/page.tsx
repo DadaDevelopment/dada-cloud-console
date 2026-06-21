@@ -105,7 +105,7 @@ export default function ProjectOverviewPage() {
       )}
 
       {/* Quick actions */}
-      <div className="mb-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
+      <div className="mb-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         <Link
           href={`/projects/${projectId}/databases`}
           className="group flex items-center gap-4 rounded-xl border border-gray-200 bg-white p-5 shadow-sm hover:border-blue-200 hover:shadow-md transition-all"
@@ -178,6 +178,21 @@ export default function ProjectOverviewPage() {
           <div>
             <p className="text-sm font-semibold text-gray-900">Operations</p>
             <p className="text-xs text-gray-400">View deployment history</p>
+          </div>
+        </Link>
+
+        <Link
+          href={`/projects/${projectId}/monitoring`}
+          className="group flex items-center gap-4 rounded-xl border border-gray-200 bg-white p-5 shadow-sm hover:border-blue-200 hover:shadow-md transition-all"
+        >
+          <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-orange-100 text-orange-600 group-hover:bg-orange-600 group-hover:text-white transition-colors">
+            <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14.857 17.082a23.848 23.848 0 005.454-1.31A8.967 8.967 0 0118 9.75v-.7V9A6 6 0 006 9v.75a8.967 8.967 0 01-2.312 6.022c1.733.64 3.56 1.085 5.455 1.31m5.714 0a24.255 24.255 0 01-5.714 0m5.714 0a3 3 0 11-5.714 0" />
+            </svg>
+          </div>
+          <div>
+            <p className="text-sm font-semibold text-gray-900">Monitoring</p>
+            <p className="text-xs text-gray-400">Grafana observability apps</p>
           </div>
         </Link>
       </div>

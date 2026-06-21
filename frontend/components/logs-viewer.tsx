@@ -1,6 +1,6 @@
 "use client";
 import { FormEvent, useCallback, useEffect, useState } from "react";
-import { logsApi } from "@/lib/api";
+import { logsApi, monitoringApi } from "@/lib/api";
 import type { LogEntry } from "@/lib/types";
 import { Spinner } from "@/components/ui/spinner";
 
@@ -10,14 +10,17 @@ type Since = (typeof SINCE)[number];
 // LogsViewer searches aggregated container logs (Elasticsearch/filebeat) scoped
 // to a single VM or app. Distinct from the per-container Portainer tail modal:
 // this searches the shipped index with free text + a time window.
+// When `monitoring` prop is set, fetches via monitoringApi.getLogs instead.
 export function LogsViewer({
   projectId,
   vm,
   app,
+  monitoring,
 }: {
   projectId: string;
   vm?: string;
   app?: string;
+  monitoring?: { projectId: string; envId: string; appId: string };
 }) {
   const [query, setQuery] = useState("");
   const [since, setSince] = useState<Since>("1h");
@@ -30,7 +33,16 @@ export function LogsViewer({
     async (q: string) => {
       setLoading(true);
       try {
-        const r = await logsApi.search(projectId, { vm, app, q, since, size: 300 });
+        let r;
+        if (monitoring) {
+          r = await monitoringApi.getLogs(monitoring.projectId, monitoring.envId, monitoring.appId, {
+            q,
+            since,
+            size: 300,
+          });
+        } else {
+          r = await logsApi.search(projectId, { vm, app, q, since, size: 300 });
+        }
         setEntries(r.entries);
         setTotal(r.total);
         setError(null);
@@ -40,7 +52,8 @@ export function LogsViewer({
         setLoading(false);
       }
     },
-    [projectId, vm, app, since]
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [projectId, vm, app, since, monitoring?.projectId, monitoring?.envId, monitoring?.appId]
   );
 
   useEffect(() => {

@@ -10,6 +10,11 @@ frontend/node_modules/
 frontend/.next/
 frontend/out/
 frontend/.env*.local
+# vendored local pkg install dir — node_modules, not source
+frontend/vendor/
+
+# compiled agent binaries
+gitops-agent/bin/
 
 # Environment files
 .env

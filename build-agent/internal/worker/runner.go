@@ -4,16 +4,15 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
-	"github.com/dada-tuda/console/build-agent/internal/builder"
 	"github.com/dada-tuda/console/build-agent/internal/config"
 	"github.com/dada-tuda/console/build-agent/internal/db"
 	"github.com/dada-tuda/console/build-agent/internal/detect"
 	"github.com/dada-tuda/console/build-agent/internal/github"
-	"github.com/dada-tuda/console/build-agent/internal/isolation"
-	"github.com/dada-tuda/console/build-agent/internal/kube"
+	"github.com/dada-tuda/console/build-agent/internal/jenkins"
 	"github.com/dada-tuda/console/build-agent/internal/metrics"
 	"github.com/dada-tuda/console/build-agent/internal/queue"
 	"github.com/dada-tuda/console/build-agent/internal/registry"
@@ -23,48 +22,57 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
-// Runner drives one build through the state machine and owns the queue draining
-// loop. It composes the builder/registry/github/isolation packages.
+// logPoll is how often the control plane pulls new console text + build status
+// from Jenkins while a build runs.
+const logPoll = 2 * time.Second
+
+// errBuildAborted is the sentinel for a Jenkins ABORTED result; it maps to the
+// existing canceled state instead of failed.
+var errBuildAborted = errors.New("jenkins build aborted")
+
+// Runner drives one build through the state machine by orchestrating Jenkins
+// (trigger → poll → log-bridge) and confirming outputs against Nexus. It owns
+// the queue draining loop. Jenkins owns the actual build + push; this is the
+// pure-pull control plane (ADR-010).
 type Runner struct {
 	pool       *pgxpool.Pool
 	cfg        *config.Config
 	scheduler  *queue.Scheduler
-	builder    builder.Builder
+	jenkins    *jenkins.Client
 	registry   registry.Registry
-	isolation  isolation.Manager
 	github     github.App
-	harbor     *registry.Harbor // concrete, for ImageTag/CacheRef/Host helpers
 	publishLog func(buildID, line string)
 }
 
-// NewRunner wires a Runner with production dependencies. When the in-cluster
-// Kubernetes API is unavailable (local dev without a cluster) builder/isolation
-// are left nil and a build will fail fast in its building phase — the agent
-// still serves webhooks, metrics, and the queue.
-func NewRunner(pool *pgxpool.Pool, cfg *config.Config, publishLog func(buildID, line string)) *Runner {
-	harbor := registry.NewHarbor(cfg.HarborURL, cfg.HarborAdminUser, cfg.HarborAdminSecret)
+// capturedArtifact is one Android output parsed from a console marker.
+type capturedArtifact struct {
+	typ         string // apk | aab
+	nexusURL    string
+	size        int64
+	sha256      string
+	versionCode int
+}
 
-	r := &Runner{
+// buildOutcome is what the log bridge parsed out of the Jenkins console. The
+// presence of imageURI vs artifacts (not the requested framework — which may be
+// "auto") decides the web-deploy vs android-artifact path.
+type buildOutcome struct {
+	imageURI  string             // web: ==> image: <host>/<proj>/<app>@sha256:<digest>
+	artifacts []capturedArtifact // android: ==> artifact: <type> <url> <size> <sha256> <versionCode>
+}
+
+// NewRunner wires a Runner with production dependencies: a Jenkins REST client
+// and a read-only Nexus client. No Kubernetes — Jenkins runs the build.
+func NewRunner(pool *pgxpool.Pool, cfg *config.Config, publishLog func(buildID, line string)) *Runner {
+	return &Runner{
 		pool:       pool,
 		cfg:        cfg,
 		scheduler:  queue.New(cfg.MaxConcurrent),
-		registry:   harbor,
-		harbor:     harbor,
+		jenkins:    jenkins.New(cfg.JenkinsURL, cfg.JenkinsUser, cfg.JenkinsToken),
+		registry:   registry.NewNexus(cfg.NexusDockerHost, cfg.NexusUser, cfg.NexusToken),
 		github:     github.New(cfg.GitHubAppID, cfg.GitHubAppKey),
 		publishLog: publishLog,
 	}
-
-	cs, err := kube.NewClientset()
-	if err != nil {
-		log.Warn().Err(err).Msg("kube clientset unavailable; builds will fail in building phase")
-		return r
-	}
-	r.builder = builder.NewK8sBuilder(cs)
-	r.isolation = isolation.NewK8sManager(cs, isolation.Quotas{
-		CPULimit: cfg.CPULimit,
-		MemLimit: cfg.MemLimit,
-	}, "")
-	return r
 }
 
 // OnPush implements the webhook nudge: drain the queue right away.
@@ -130,12 +138,16 @@ func (r *Runner) run(ctx context.Context, b *db.Build) {
 
 	r.postStatus(ctx, repo, b, "pending", "build started")
 
-	imageURI, err := r.execute(ctx, b, repo, &llog)
+	out, err := r.execute(ctx, b, repo, &llog)
 	if err != nil {
-		if errors.Is(err, context.Canceled) {
+		if errors.Is(err, context.Canceled) || errors.Is(err, errBuildAborted) {
 			llog.Info().Msg("build canceled")
 			r.emit(ctx, b.ID, "build canceled")
-			return // status already set to canceled by supersede
+			// supersede already set canceled; if aborted from Jenkins, set it now.
+			if errors.Is(err, errBuildAborted) {
+				_, _ = db.MarkCanceled(ctx, r.pool, b.ID)
+			}
+			return
 		}
 		r.failFromCurrent(ctx, b, err)
 		r.postStatus(ctx, repo, b, "failure", "build failed")
@@ -143,131 +155,268 @@ func (r *Runner) run(ctx context.Context, b *db.Build) {
 		return
 	}
 
-	// pushing → success (pins image_uri + finished_at).
-	if ok, ferr := db.FinishSuccess(ctx, r.pool, b.ID, imageURI); ferr != nil || !ok {
+	// pushing → success (pins image_uri + finished_at). Android has no image.
+	if ok, ferr := db.FinishSuccess(ctx, r.pool, b.ID, out.imageURI); ferr != nil || !ok {
 		r.fail(ctx, b, db.StatusPushing, fmt.Errorf("finalize success: %w", ferr))
 		return
 	}
 
-	// Deploy handoff — the ONLY re-entry into the declarative path (invariant 2).
-	opID, err := db.HandoffDeploy(ctx, r.pool, b, repo.ProjectID, imageURI)
-	if err != nil {
-		llog.Error().Err(err).Msg("deploy handoff failed (build succeeded, deploy not enqueued)")
-		// Build is already success; surface but do not flip it back.
+	if out.imageURI != "" {
+		// Web → deploy handoff (the ONLY re-entry into the declarative path).
+		opID, herr := db.HandoffDeploy(ctx, r.pool, b, repo.ProjectID, out.imageURI)
+		if herr != nil {
+			llog.Error().Err(herr).Msg("deploy handoff failed (build succeeded, deploy not enqueued)")
+		} else {
+			llog.Info().Str("operation", opID.String()).Msg("DeployImageVersion enqueued")
+		}
 	} else {
-		llog.Info().Str("operation", opID.String()).Msg("DeployImageVersion enqueued")
+		// Android → record artifacts; no deploy.
+		for _, a := range out.artifacts {
+			if aerr := db.InsertArtifact(ctx, r.pool, db.BuildArtifact{
+				BuildID:     b.ID,
+				Type:        a.typ,
+				NexusURL:    a.nexusURL,
+				Size:        a.size,
+				VersionCode: a.versionCode,
+				SHA256:      a.sha256,
+			}); aerr != nil {
+				llog.Error().Err(aerr).Str("type", a.typ).Msg("record artifact failed")
+			}
+		}
 	}
 
 	r.postStatus(ctx, repo, b, "success", "build succeeded")
 	metrics.BuildTotal.WithLabelValues("success").Inc()
 	metrics.BuildDuration.WithLabelValues("total").Observe(time.Since(start).Seconds())
-	llog.Info().Str("image", imageURI).Msg("build succeeded")
+	llog.Info().Str("image", out.imageURI).Int("artifacts", len(out.artifacts)).Msg("build succeeded")
 }
 
-// execute runs detecting→building→pushing and returns the pinned image URI.
-func (r *Runner) execute(ctx context.Context, b *db.Build, repo *db.Repo, llog *zerologLogger) (string, error) {
-	if r.builder == nil || r.isolation == nil {
-		return "", fmt.Errorf("kubernetes API unavailable; cannot run build job")
-	}
+// execute drives the Jenkins job: detecting (resolve framework + git creds) →
+// building (trigger + resolve number + log bridge) → pushing (confirm Nexus).
+// It returns what the build produced.
+func (r *Runner) execute(ctx context.Context, b *db.Build, repo *db.Repo, llog *zerologLogger) (buildOutcome, error) {
+	ctx, cancel := context.WithTimeout(ctx, r.cfg.BuildTimeout)
+	defer cancel()
 
-	// --- detecting: resolve framework + Harbor project + creds ---
-	det := detect.Resolve(repo.FrameworkOverride, repo.RootDir)
+	// --- detecting: framework param + authenticated clone URL ---
+	framework := detect.Resolve(repo.FrameworkOverride)
 
-	if err := r.registry.EnsureProject(ctx, repo.ProjectSlug); err != nil {
-		return "", fmt.Errorf("ensure harbor project: %w", err)
-	}
-	robot, err := r.harbor.MintRobot(ctx, repo.ProjectSlug, "build")
+	_, cloneURL, err := r.gitCreds(ctx, repo, b)
 	if err != nil {
-		return "", fmt.Errorf("mint harbor robot: %w", err)
-	}
-
-	gitToken, cloneURL, err := r.gitCreds(ctx, repo, b)
-	if err != nil {
-		return "", fmt.Errorf("git creds: %w", err)
+		return buildOutcome{}, fmt.Errorf("git creds: %w", err)
 	}
 
 	// detecting → building
 	if ok, err := db.Transition(ctx, r.pool, b.ID, db.StatusDetecting, db.StatusBuilding); err != nil || !ok {
-		return "", fmt.Errorf("transition detecting→building: %w", err)
+		return buildOutcome{}, fmt.Errorf("transition detecting→building: %w", err)
 	}
 
-	// --- building: provision isolation, run the Job, stream logs ---
-	ns, err := r.isolation.EnsureNamespace(ctx, b.ID.String())
+	// --- building: trigger the job, resolve its build number ---
+	params := map[string]string{
+		"repo":      cloneURL,
+		"branch":    b.Branch,
+		"framework": string(framework),
+		"buildType": "debug",
+		"env":       b.EnvironmentID.String(),
+	}
+	queueID, err := r.jenkins.TriggerBuild(ctx, r.cfg.JenkinsJob, params)
 	if err != nil {
-		return "", fmt.Errorf("ensure namespace: %w", err)
+		return buildOutcome{}, fmt.Errorf("trigger jenkins build: %w", err)
 	}
-	defer func() {
-		// best-effort teardown; ignore ctx cancellation timing
-		tctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		defer cancel()
-		if terr := r.isolation.Teardown(tctx, ns); terr != nil {
-			llog.Warn().Err(terr).Str("ns", ns).Msg("namespace teardown")
-		}
-	}()
+	r.emit(ctx, b.ID, fmt.Sprintf("queued in jenkins (item %d)", queueID))
 
-	if err := r.isolation.ApplyNetworkPolicy(ctx, ns, r.cfg.GitEgressCIDRs); err != nil {
-		return "", fmt.Errorf("apply network policy: %w", err)
-	}
-
-	const (
-		gitSecret      = "build-git"
-		registrySecret = "build-registry"
-	)
-	var gitSecretName string
-	if gitToken != "" && !b.ForkUnsafe {
-		askpass := "#!/bin/sh\necho " + shellQuote(gitToken) + "\n"
-		if err := r.isolation.CreateSecret(ctx, ns, gitSecret, map[string][]byte{
-			"askpass.sh": []byte(askpass),
-			"token":      []byte(gitToken),
-		}); err != nil {
-			return "", fmt.Errorf("create git secret: %w", err)
-		}
-		gitSecretName = gitSecret
-	}
-	if err := r.isolation.CreateDockerConfigSecret(ctx, ns, registrySecret, r.harbor.Host(), robot.Name, robot.Secret); err != nil {
-		return "", fmt.Errorf("create registry secret: %w", err)
-	}
-
-	params := builder.JobParams{
-		BuildID:            b.ID.String(),
-		Namespace:          ns,
-		BuilderImage:       r.cfg.BuilderImage,
-		RuntimeClass:       r.cfg.RuntimeClass,
-		NodePoolLabel:      r.cfg.NodePoolLabel,
-		CPULimit:           r.cfg.CPULimit,
-		MemLimit:           r.cfg.MemLimit,
-		GitURL:             cloneURL,
-		GitBranch:          b.Branch,
-		GitSHA:             b.CommitSHA,
-		RootDir:            det.RootDir,
-		Framework:          string(det.Framework),
-		ImageName:          r.harbor.ImageTag(repo.ProjectSlug, repo.AppName, shortSHA(b.CommitSHA)),
-		ImageTag:           r.harbor.ImageTag(repo.ProjectSlug, repo.AppName, "latest"),
-		CacheRef:           r.harbor.CacheRef(repo.ProjectSlug, repo.AppName),
-		TimeoutSeconds:     int(r.cfg.BuildTimeout.Seconds()),
-		GitSecretName:      gitSecretName,
-		RegistrySecretName: registrySecret,
-	}
-
-	res, err := r.builder.Build(ctx, params, func(line string) {
-		r.emit(ctx, b.ID, line)
-	})
+	number, err := r.waitForBuildNumber(ctx, queueID)
 	if err != nil {
-		return "", fmt.Errorf("build job: %w", err)
+		return buildOutcome{}, err
+	}
+	r.emit(ctx, b.ID, fmt.Sprintf("jenkins build #%d started", number))
+
+	// --- log bridge: stream console + parse markers until the build ends ---
+	out, result, err := r.bridge(ctx, b, number)
+	if err != nil {
+		return buildOutcome{}, err
+	}
+	switch result {
+	case "SUCCESS":
+	case "ABORTED":
+		return buildOutcome{}, errBuildAborted
+	default: // FAILURE or anything non-success
+		return buildOutcome{}, fmt.Errorf("jenkins build #%d result %s", number, result)
 	}
 
-	// building → pushing (the Job already pushed; this marks the phase boundary).
+	// building → pushing (Jenkins already pushed; this marks the boundary).
 	if ok, err := db.Transition(ctx, r.pool, b.ID, db.StatusBuilding, db.StatusPushing); err != nil || !ok {
-		return "", fmt.Errorf("transition building→pushing: %w", err)
+		return buildOutcome{}, fmt.Errorf("transition building→pushing: %w", err)
 	}
 
-	// Immutable digest-pinned URI is the source of truth for the deploy.
-	imageURI := r.harbor.ImageURI(repo.ProjectSlug, repo.AppName, res.Digest)
-	return imageURI, nil
+	// --- confirm what the markers claimed actually exists in Nexus ---
+	if err := r.confirm(ctx, repo, &out); err != nil {
+		return buildOutcome{}, err
+	}
+	return out, nil
+}
+
+// waitForBuildNumber polls the queue item until Jenkins assigns an executor.
+func (r *Runner) waitForBuildNumber(ctx context.Context, queueID int64) (int, error) {
+	for {
+		number, started, err := r.jenkins.ResolveBuildNumber(ctx, queueID)
+		if err != nil {
+			return 0, fmt.Errorf("resolve build number: %w", err)
+		}
+		if started {
+			return number, nil
+		}
+		select {
+		case <-ctx.Done():
+			return 0, ctx.Err()
+		case <-time.After(logPoll):
+		}
+	}
+}
+
+// bridge streams the console (progressiveText, incremental offset) into the WS
+// hub + builds_logs and parses output markers, until the build is no longer
+// building. Returns the parsed outcome and the final Jenkins result string.
+func (r *Runner) bridge(ctx context.Context, b *db.Build, number int) (buildOutcome, string, error) {
+	var (
+		out     buildOutcome
+		offset  int64
+		pending string
+	)
+	for {
+		text, next, _, err := r.jenkins.ProgressiveText(ctx, r.cfg.JenkinsJob, number, offset)
+		if err != nil {
+			return out, "", fmt.Errorf("stream console: %w", err)
+		}
+		if next != offset {
+			offset = next
+			pending += text
+			pending = r.flushLines(ctx, b, pending, &out, false)
+		}
+
+		bi, err := r.jenkins.GetBuild(ctx, r.cfg.JenkinsJob, number)
+		if err != nil {
+			return out, "", fmt.Errorf("poll build: %w", err)
+		}
+		if !bi.Building {
+			// Drain any final bytes the build wrote after it stopped building.
+			text, next, _, err := r.jenkins.ProgressiveText(ctx, r.cfg.JenkinsJob, number, offset)
+			if err == nil && next != offset {
+				pending += text
+			}
+			r.flushLines(ctx, b, pending, &out, true)
+			return out, bi.Result, nil
+		}
+
+		select {
+		case <-ctx.Done():
+			return out, "", ctx.Err()
+		case <-time.After(logPoll):
+		}
+	}
+}
+
+// flushLines splits pending console text on newlines, emits each complete line
+// (WS + builds_logs) and parses markers. When final is true the trailing
+// fragment is emitted too. Returns the unflushed remainder (empty when final).
+func (r *Runner) flushLines(ctx context.Context, b *db.Build, pending string, out *buildOutcome, final bool) string {
+	for {
+		i := strings.IndexByte(pending, '\n')
+		if i < 0 {
+			break
+		}
+		line := strings.TrimRight(pending[:i], "\r")
+		pending = pending[i+1:]
+		r.emit(ctx, b.ID, line)
+		parseMarker(line, out)
+	}
+	if final && pending != "" {
+		line := strings.TrimRight(pending, "\r")
+		r.emit(ctx, b.ID, line)
+		parseMarker(line, out)
+		return ""
+	}
+	return pending
+}
+
+// parseMarker extracts the structured output markers the jenkins-lib pipeline
+// emits (the integration contract):
+//
+//	==> image: <host>/<proj>/<app>@sha256:<digest>
+//	==> artifact: <apk|aab> <nexus-raw-url> <size_bytes> <sha256> <versionCode>
+func parseMarker(line string, out *buildOutcome) {
+	s := strings.TrimSpace(line)
+	const imgP = "==> image:"
+	const artP = "==> artifact:"
+	switch {
+	case strings.HasPrefix(s, imgP):
+		out.imageURI = strings.TrimSpace(s[len(imgP):])
+	case strings.HasPrefix(s, artP):
+		f := strings.Fields(strings.TrimSpace(s[len(artP):]))
+		if len(f) < 5 {
+			return
+		}
+		size, _ := strconv.ParseInt(f[2], 10, 64)
+		vc, _ := strconv.Atoi(f[4])
+		out.artifacts = append(out.artifacts, capturedArtifact{
+			typ:         f[0],
+			nexusURL:    f[1],
+			size:        size,
+			sha256:      f[3],
+			versionCode: vc,
+		})
+	}
+}
+
+// confirm verifies that what the console claimed really exists in Nexus before
+// the control plane records it. Web: Docker v2 manifest by digest. Android: raw
+// HEAD per artifact (and trust-but-verify the size from Content-Length).
+func (r *Runner) confirm(ctx context.Context, repo *db.Repo, out *buildOutcome) error {
+	switch {
+	case out.imageURI != "":
+		digest := imageDigest(out.imageURI)
+		if digest == "" {
+			return fmt.Errorf("image marker has no digest: %q", out.imageURI)
+		}
+		ok, err := r.registry.VerifyImageDigest(ctx, repo.ProjectSlug, repo.AppName, digest)
+		if err != nil {
+			return fmt.Errorf("verify image in nexus: %w", err)
+		}
+		if !ok {
+			return fmt.Errorf("image %s not found in nexus", out.imageURI)
+		}
+		return nil
+	case len(out.artifacts) > 0:
+		for i := range out.artifacts {
+			a := &out.artifacts[i]
+			size, ok, err := r.registry.HeadRawArtifact(ctx, a.nexusURL)
+			if err != nil {
+				return fmt.Errorf("head artifact %s: %w", a.nexusURL, err)
+			}
+			if !ok {
+				return fmt.Errorf("artifact %s not found in nexus", a.nexusURL)
+			}
+			if size > 0 {
+				a.size = size
+			}
+		}
+		return nil
+	default:
+		return fmt.Errorf("build produced no image or artifact markers")
+	}
+}
+
+// imageDigest returns the sha256:... portion of an image reference, or "".
+func imageDigest(uri string) string {
+	if i := strings.LastIndex(uri, "@"); i >= 0 {
+		return uri[i+1:]
+	}
+	return ""
 }
 
 // gitCreds returns a clone token and the authenticated clone URL. GitHub uses a
-// per-build App installation token; GitLab uses the decrypted stored PAT.
+// per-build App installation token; GitLab uses the decrypted stored PAT. For a
+// fork-unsafe build no token is injected (the clone stays anonymous).
 func (r *Runner) gitCreds(ctx context.Context, repo *db.Repo, b *db.Build) (token, cloneURL string, err error) {
 	switch repo.Provider {
 	case "github":
@@ -278,6 +427,9 @@ func (r *Runner) gitCreds(ctx context.Context, repo *db.Repo, b *db.Build) (toke
 		if terr != nil {
 			return "", "", terr
 		}
+		if b.ForkUnsafe {
+			return tok, repo.CloneURL, nil
+		}
 		return tok, injectToken(repo.CloneURL, "x-access-token", tok), nil
 	case "gitlab":
 		if len(repo.TokenEncrypted) == 0 {
@@ -286,6 +438,9 @@ func (r *Runner) gitCreds(ctx context.Context, repo *db.Repo, b *db.Build) (toke
 		tok, derr := db.DecryptToken(r.cfg.EncryptionKey, repo.TokenEncrypted)
 		if derr != nil {
 			return "", "", fmt.Errorf("decrypt gitlab token: %w", derr)
+		}
+		if b.ForkUnsafe {
+			return tok, repo.CloneURL, nil
 		}
 		return tok, injectToken(repo.CloneURL, "oauth2", tok), nil
 	default:
@@ -348,13 +503,6 @@ func (r *Runner) Supersede(buildID uuid.UUID) { r.scheduler.Cancel(buildID) }
 
 // --- small helpers ---
 
-func shortSHA(sha string) string {
-	if len(sha) >= 8 {
-		return sha[:8]
-	}
-	return sha
-}
-
 // injectToken rewrites an https clone URL to embed credentials:
 // https://github.com/org/repo.git → https://<user>:<token>@github.com/org/repo.git
 func injectToken(cloneURL, user, token string) string {
@@ -364,10 +512,6 @@ func injectToken(cloneURL, user, token string) string {
 	}
 	rest := strings.TrimPrefix(cloneURL, httpsPrefix)
 	return httpsPrefix + user + ":" + token + "@" + rest
-}
-
-func shellQuote(s string) string {
-	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
 
 // zerologLogger aliases the zerolog Logger so the run/execute signatures stay

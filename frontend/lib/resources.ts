@@ -23,6 +23,7 @@ export type IconName =
   | "git"
   | "deployments"
   | "domains"
+  | "monitoring"
   | "members";
 
 export interface ResourceNavItem {
@@ -53,6 +54,7 @@ export const PROJECT_NAV: ResourceNavItem[] = [
   { key: "deployments", label: "Deployments", icon: "deployments", segment: "/deployments", group: "resources" },
   { key: "git", label: "Git & Builds", icon: "git", segment: "/git", group: "resources" },
   { key: "domains", label: "Domains", icon: "domains", segment: "/domains", group: "resources" },
+  { key: "monitoring", label: "Monitoring", icon: "monitoring", segment: "/monitoring", group: "resources" },
   // --- admin group (global, cross-project) ---
   { key: "members", label: "Members", icon: "members", segment: "/members", group: "admin", visible: isAdmin },
   { key: "approvals", label: "Approvals", icon: "approvals", segment: "", absoluteHref: "/admin/approvals", group: "admin", visible: canApprove },

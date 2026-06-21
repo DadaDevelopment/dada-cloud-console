@@ -212,6 +212,9 @@ func SetupRouter(pool *pgxpool.Pool, cfg *config.Config) *gin.Engine {
 		api.GET("/projects/:projectId/builds/:buildId", auth.RequireScope("builds:read"), h.GetBuild)
 		api.POST("/projects/:projectId/builds/:buildId/cancel", auth.RequireScope("builds:write"), h.CancelBuild)
 		api.POST("/projects/:projectId/builds/:buildId/logs-token", auth.RequireScope("builds:read"), h.GetBuildLogsToken)
+		// Mobile artifacts (APK/AAB) — list + scope-gated proxied download (ADR-010).
+		api.GET("/projects/:projectId/builds/:buildId/artifacts", auth.RequireScope("builds:read"), h.ListBuildArtifacts)
+		api.GET("/projects/:projectId/builds/:buildId/artifacts/:artifactId/download", auth.RequireScope("builds:read"), h.DownloadBuildArtifact)
 		// Deployments (rollback/promote enqueue DeployImageVersion operations).
 		api.GET("/projects/:projectId/environments/:envId/apps/:appName/deployments", h.ListDeployments)
 		api.POST("/projects/:projectId/deployments/:deploymentId/rollback", auth.RequireScope("deploy:write"), h.RollbackDeployment)
@@ -221,6 +224,32 @@ func SetupRouter(pool *pgxpool.Pool, cfg *config.Config) *gin.Engine {
 		api.PUT("/projects/:projectId/environments/:envId/apps/:appName/env/:key", h.SetEnvVar)
 		api.GET("/projects/:projectId/environments/:envId/apps/:appName/env/:key", h.RevealEnvVar)
 		api.DELETE("/projects/:projectId/environments/:envId/apps/:appName/env/:key", h.DeleteEnvVar)
+
+		// Monitoring write path (PRD-monitoring / ADR-011).
+		// Management (user-authenticated): list + create monitoring resources.
+		api.GET("/projects/:projectId/monitoring", h.ListMonitoringApps)
+		api.POST("/projects/:projectId/environments/:envId/monitoring", h.CreateMonitoringApp)
+		// Device-facing ingest (scoped API key → fat claims): no envId in the path,
+		// matches the PRD contract POST /projects/{projectId}/monitoring/{appId}/{metrics,logs}.
+		api.POST("/projects/:projectId/monitoring/:appId/metrics", auth.RequireScope("metrics:write"), h.IngestMetrics)
+		api.POST("/projects/:projectId/monitoring/:appId/logs", auth.RequireScope("logs:write"), h.IngestLogs)
+
+		// Monitoring read/alert/health layer (ADR-011): read-back, health,
+		// dashboards, channels, alert rules and resource teardown. Handlers
+		// gracefully 503 when Grafana/Prometheus/ES are unconfigured.
+		mon := "/projects/:projectId/environments/:envId/monitoring"
+		api.GET(mon+"/channels", h.ListChannels)
+		api.POST(mon+"/channels", h.CreateChannel)
+		api.DELETE(mon+"/channels/:id", h.DeleteChannel)
+		api.GET(mon+"/:appId", h.GetMonitoringApp)
+		api.DELETE(mon+"/:appId", h.DeleteMonitoringApp)
+		api.GET(mon+"/:appId/health", h.GetMonitoringHealth)
+		api.GET(mon+"/:appId/metrics", h.GetMonitoringMetrics)
+		api.GET(mon+"/:appId/logs", h.GetMonitoringLogs)
+		api.GET(mon+"/:appId/grafana-link", h.GetMonitoringGrafanaLink)
+		api.GET(mon+"/:appId/alert-rules", h.ListAlertRules)
+		api.POST(mon+"/:appId/alert-rules", h.CreateAlertRule)
+		api.DELETE(mon+"/:appId/alert-rules/:ruleId", h.DeleteAlertRule)
 
 		// Operations
 		api.GET("/projects/:projectId/operations", h.GetProjectOperations)

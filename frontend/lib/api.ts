@@ -49,6 +49,11 @@ import type {
   DomainsResponse,
   Build,
   FrameworkDetection,
+  // Monitoring
+  MonitoringApp,
+  HealthStatus,
+  AlertRule,
+  Channel,
 } from "./types";
 
 // Empty string → relative URLs → requests go through the ingress proxy.
@@ -574,6 +579,117 @@ export const appDomainsApi = {
   list: (projectId: string, envId: string, appName: string) =>
     apiFetch<DomainsResponse>(
       `/api/v1/projects/${projectId}/environments/${envId}/apps/${appName}/domains`
+    ),
+};
+
+export const monitoringApi = {
+  base: (projectId: string, envId: string) =>
+    `/api/v1/projects/${projectId}/environments/${envId}/monitoring`,
+
+  list: (projectId: string, envId: string) =>
+    apiFetch<{ apps: MonitoringApp[] }>(
+      `/api/v1/projects/${projectId}/environments/${envId}/monitoring`
+    ),
+
+  create: (projectId: string, envId: string, name: string) =>
+    apiFetch<{ app: MonitoringApp; api_key: string }>(
+      `/api/v1/projects/${projectId}/environments/${envId}/monitoring`,
+      { method: "POST", body: { name } }
+    ),
+
+  get: (projectId: string, envId: string, appId: string) =>
+    apiFetch<{ app: MonitoringApp }>(
+      `/api/v1/projects/${projectId}/environments/${envId}/monitoring/${appId}`
+    ),
+
+  delete: (projectId: string, envId: string, appId: string) =>
+    apiFetch<void>(
+      `/api/v1/projects/${projectId}/environments/${envId}/monitoring/${appId}`,
+      { method: "DELETE" }
+    ),
+
+  getHealth: (projectId: string, envId: string, appId: string) =>
+    apiFetch<HealthStatus>(
+      `/api/v1/projects/${projectId}/environments/${envId}/monitoring/${appId}/health`
+    ),
+
+  getMetrics: (projectId: string, envId: string, appId: string, range = "1h") =>
+    apiFetch<MetricsResponse>(
+      `/api/v1/projects/${projectId}/environments/${envId}/monitoring/${appId}/metrics?range=${range}`
+    ),
+
+  getLogs: (
+    projectId: string,
+    envId: string,
+    appId: string,
+    params: { q?: string; since?: string; size?: number }
+  ) => {
+    const qs = new URLSearchParams();
+    if (params.q) qs.set("q", params.q);
+    if (params.since) qs.set("since", params.since);
+    if (params.size) qs.set("size", String(params.size));
+    return apiFetch<LogSearchResponse>(
+      `/api/v1/projects/${projectId}/environments/${envId}/monitoring/${appId}/logs?${qs.toString()}`
+    );
+  },
+
+  getGrafanaLink: (projectId: string, envId: string, appId: string) =>
+    apiFetch<{ url: string }>(
+      `/api/v1/projects/${projectId}/environments/${envId}/monitoring/${appId}/grafana-link`
+    ),
+
+  listAlertRules: (projectId: string, envId: string, appId: string) =>
+    apiFetch<{ rules: AlertRule[] }>(
+      `/api/v1/projects/${projectId}/environments/${envId}/monitoring/${appId}/alert-rules`
+    ),
+
+  createAlertRule: (
+    projectId: string,
+    envId: string,
+    appId: string,
+    data: {
+      name: string;
+      metric: string;
+      condition: string;
+      threshold: number;
+      duration: string;
+      channel_id?: string;
+    }
+  ) =>
+    apiFetch<{ rule: AlertRule }>(
+      `/api/v1/projects/${projectId}/environments/${envId}/monitoring/${appId}/alert-rules`,
+      { method: "POST", body: data }
+    ),
+
+  deleteAlertRule: (projectId: string, envId: string, appId: string, ruleId: string) =>
+    apiFetch<void>(
+      `/api/v1/projects/${projectId}/environments/${envId}/monitoring/${appId}/alert-rules/${ruleId}`,
+      { method: "DELETE" }
+    ),
+
+  listChannels: (projectId: string, envId: string) =>
+    apiFetch<{ channels: Channel[] }>(
+      `/api/v1/projects/${projectId}/environments/${envId}/monitoring/channels`
+    ),
+
+  createChannel: (
+    projectId: string,
+    envId: string,
+    data: {
+      name: string;
+      type: "telegram" | "email" | "webhook";
+      settings: Record<string, string>;
+    }
+  ) =>
+    apiFetch<{ channel: Channel }>(
+      `/api/v1/projects/${projectId}/environments/${envId}/monitoring/channels`,
+      { method: "POST", body: data }
+    ),
+
+  deleteChannel: (projectId: string, envId: string, id: string) =>
+    apiFetch<void>(
+      `/api/v1/projects/${projectId}/environments/${envId}/monitoring/channels/${id}`,
+      { method: "DELETE" }
     ),
 };
 

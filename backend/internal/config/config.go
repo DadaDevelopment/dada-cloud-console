@@ -18,10 +18,8 @@ type Config struct {
 	// Custom domains (user-owned domains + auto TLS). The verify poller resolves a
 	// TXT challenge to prove ownership before creating the PublicApi. These targets
 	// are what the console tells users to put in their own DNS.
-	//   CustomDomainATarget     — A-record target for apex domains (the public ingress LB IP)
-	//   CustomDomainCNAMETarget — CNAME target for subdomains; must be a hostname that
-	//     itself resolves to the public ingress LB (e.g. an A record ingress.dada-tuda.ru
-	//     → 155.212.223.198). Override via CUSTOM_DOMAIN_CNAME_TARGET.
+	//   CustomDomainATarget     — A-record target for apex domains (defaults to the LB IP)
+	//   CustomDomainCNAMETarget — CNAME target for subdomains (a stable hostname → LB)
 	//   CustomDomainVerifyLabel — TXT challenge host prefix (record: <label>.<fqdn>)
 	CustomDomainATarget     string // CUSTOM_DOMAIN_A_TARGET
 	CustomDomainCNAMETarget string // CUSTOM_DOMAIN_CNAME_TARGET
@@ -74,6 +72,13 @@ type Config struct {
 	BuildAgentWSURL       string // BUILD_AGENT_WS_URL
 	BuildAgentTokenSecret string // BUILD_AGENT_TOKEN_SECRET
 
+	// Nexus raw repo (mobile artifacts). Used by the artifact-download proxy to
+	// stream APK/AAB bytes with server-side creds. Empty NexusRawURL disables
+	// downloads (404). Same Nexus the build-agent confirms against (ADR-010).
+	NexusRawURL string // NEXUS_RAW_URL  (base of the raw-hosted repo)
+	NexusUser   string // NEXUS_USER
+	NexusToken  string // NEXUS_TOKEN
+
 	// Portainer live-state proxy (read-only). Both must be set to enable the VM
 	// /state and /logs endpoints. Same values the portainer-agent uses.
 	PortainerURL      string // PORTAINER_URL
@@ -94,6 +99,45 @@ type Config struct {
 	ElasticsearchURL    string // ELASTICSEARCH_URL
 	ElasticsearchAPIKey string // ELASTICSEARCH_API_KEY
 	ElasticsearchIndex  string // ELASTICSEARCH_LOG_INDEX (default "filebeat-*")
+
+	// Monitoring (ADR-011). Grafana is the source of truth for alert rules,
+	// contact points and the rich per-resource dashboards; this is the API client
+	// the console uses to provision them and to pull firing-alert state for the
+	// health badge. Empty GrafanaBaseURL/GrafanaAPIToken disables all alerting +
+	// dashboard provisioning (handlers respond 503).
+	//   GrafanaBaseURL          — API base (e.g. http://grafana.monitoring.svc:3000)
+	//   GrafanaPublicURL        — browser-facing base for deep links (defaults to base)
+	//   GrafanaAPIToken         — service-account token (admin: needs folder/alert write)
+	//   GrafanaPromDatasourceUID— UID of the Prometheus datasource alert rules query
+	GrafanaBaseURL           string // GRAFANA_BASE_URL
+	GrafanaPublicURL         string // GRAFANA_PUBLIC_URL
+	GrafanaAPIToken          string // GRAFANA_API_TOKEN
+	GrafanaPromDatasourceUID string // GRAFANA_PROM_DATASOURCE_UID
+
+	// App-log index for monitoring resources (separate from the VM filebeat
+	// index). Reuses the same Elasticsearch host/key as ElasticsearchURL.
+	MonitoringLogIndex string // MONITORING_LOG_INDEX (default "dada-app-logs-*")
+
+	// Monitoring ingestion (write path — PRD-monitoring / ADR-011).
+	// PrometheusRemoteWriteURL is the receiver root (Prometheus started with
+	// --web.enable-remote-write-receiver). Empty falls back to PrometheusQueryURL
+	// (one Prometheus serves both query + remote-write); user/pass default to the
+	// query creds. Empty resolved URL disables the /metrics ingest endpoint.
+	// RateLimit/MaxLabels are the per-key abuse guards required by the ADR
+	// (cardinality discipline + per-key rate limiting at ingest).
+	PrometheusRemoteWriteURL  string // PROMETHEUS_REMOTE_WRITE_URL
+	PrometheusRemoteWriteUser string // PROMETHEUS_REMOTE_WRITE_USER
+	PrometheusRemoteWritePass string // PROMETHEUS_REMOTE_WRITE_PASS
+	MonitoringRateLimitPerMin int    // MONITORING_RATE_LIMIT_PER_MIN (default 120)
+	MonitoringMaxLabels       int    // MONITORING_MAX_LABELS (default 30) — metrics per request cap
+
+	// SMTP for the Email contact point (shared with IAM invitations). Wired into
+	// Grafana's email contact point settings at provision time.
+	SMTPHost string // SMTP_HOST
+	SMTPPort int    // SMTP_PORT (default 587)
+	SMTPUser string // SMTP_USER
+	SMTPPass string // SMTP_PASS
+	SMTPFrom string // SMTP_FROM
 
 	// Embedded MCP server. Served at /mcp (Streamable HTTP transport).
 	// MCPEnabled defaults to true. Set MCP_ENABLED=false to disable.
@@ -117,7 +161,7 @@ func Load() (*Config, error) {
 		LogLevel:                getEnv("LOG_LEVEL", "info"),
 		DevMode:                 getEnv("DEV_MODE", "false") == "true",
 		ClusterLBIP:             getEnv("CLUSTER_LB_IP", "93.189.231.60"),
-		CustomDomainATarget:     getEnv("CUSTOM_DOMAIN_A_TARGET", "155.212.223.198"),
+		CustomDomainATarget:     getEnv("CUSTOM_DOMAIN_A_TARGET", getEnv("CLUSTER_LB_IP", "93.189.231.60")),
 		CustomDomainCNAMETarget: getEnv("CUSTOM_DOMAIN_CNAME_TARGET", "ingress.dada-tuda.ru"),
 		CustomDomainVerifyLabel: getEnv("CUSTOM_DOMAIN_VERIFY_LABEL", "_dada-verify"),
 		AuthMode:                getEnv("AUTH_MODE", "local"),
@@ -136,6 +180,9 @@ func Load() (*Config, error) {
 		BuildAgentURL:           getEnv("BUILD_AGENT_URL", ""),
 		BuildAgentWSURL:         getEnv("BUILD_AGENT_WS_URL", ""),
 		BuildAgentTokenSecret:   getEnv("BUILD_AGENT_TOKEN_SECRET", ""),
+		NexusRawURL:             getEnv("NEXUS_RAW_URL", ""),
+		NexusUser:               getEnv("NEXUS_USER", ""),
+		NexusToken:              getEnv("NEXUS_TOKEN", ""),
 		PortainerURL:            getEnv("PORTAINER_URL", ""),
 		PortainerAPIToken:       getEnv("PORTAINER_API_TOKEN", ""),
 		PrometheusQueryURL:      getEnv("PROMETHEUS_QUERY_URL", ""),
@@ -144,10 +191,20 @@ func Load() (*Config, error) {
 		ElasticsearchURL:        getEnv("ELASTICSEARCH_URL", ""),
 		ElasticsearchAPIKey:     getEnv("ELASTICSEARCH_API_KEY", ""),
 		ElasticsearchIndex:      getEnv("ELASTICSEARCH_LOG_INDEX", "filebeat-*"),
-		MCPEnabled:              getEnv("MCP_ENABLED", "true") == "true",
-		MCPSelfURL:              getEnv("MCP_SELF_URL", ""),
-		MCPOverridesPath:        getEnv("MCP_OVERRIDES_PATH", "overrides.yaml"),
-		MCPResourceURL:          getEnv("MCP_RESOURCE_URL", "https://console.dada-tuda.ru/mcp"),
+		GrafanaBaseURL:           getEnv("GRAFANA_BASE_URL", ""),
+		GrafanaPublicURL:         getEnv("GRAFANA_PUBLIC_URL", ""),
+		GrafanaAPIToken:          getEnv("GRAFANA_API_TOKEN", ""),
+		GrafanaPromDatasourceUID: getEnv("GRAFANA_PROM_DATASOURCE_UID", ""),
+		MonitoringLogIndex:       getEnv("MONITORING_LOG_INDEX", "dada-app-logs-*"),
+		SMTPHost:                 getEnv("SMTP_HOST", ""),
+		SMTPPort:                 int(getEnvInt64("SMTP_PORT", 587)),
+		SMTPUser:                 getEnv("SMTP_USER", ""),
+		SMTPPass:                 getEnv("SMTP_PASS", ""),
+		SMTPFrom:                 getEnv("SMTP_FROM", ""),
+		MCPEnabled:               getEnv("MCP_ENABLED", "true") == "true",
+		MCPSelfURL:               getEnv("MCP_SELF_URL", ""),
+		MCPOverridesPath:         getEnv("MCP_OVERRIDES_PATH", "overrides.yaml"),
+		MCPResourceURL:           getEnv("MCP_RESOURCE_URL", "https://console.dada-tuda.ru/mcp"),
 	}
 
 	if cfg.DBURL == "" {

@@ -73,6 +73,28 @@ type SearchOpts struct {
 	Since  time.Time
 	Until  time.Time
 	Size   int // default 200, cap 1000
+
+	// Monitoring app-log scoping (dada-app-logs-* index). These match the labels
+	// the ingest path tags app logs with; set together with a monitoring-scoped
+	// index (see Handler.appLogsearch). Level filters by log level (e.g. ERROR).
+	ProjectID     string
+	MonitoringApp string
+	Source        string
+	Level         string
+}
+
+// termOneOf builds a bool/should over keyword + text variants of a field so a
+// single value matches regardless of how ES dynamic-mapped it.
+func termOneOf(field, value string) map[string]any {
+	return map[string]any{
+		"bool": map[string]any{
+			"should": []map[string]any{
+				{"term": map[string]any{field + ".keyword": value}},
+				{"term": map[string]any{field: value}},
+			},
+			"minimum_should_match": 1,
+		},
+	}
 }
 
 // LogEntry is one normalized log line.
@@ -140,6 +162,20 @@ func (c *Client) buildQuery(opts SearchOpts) map[string]any {
 			},
 		})
 	}
+	// Monitoring app-log label scoping (dada-app-logs-* index).
+	if opts.ProjectID != "" {
+		filters = append(filters, termOneOf("project_id", opts.ProjectID))
+	}
+	if opts.MonitoringApp != "" {
+		filters = append(filters, termOneOf("monitoring_app", opts.MonitoringApp))
+	}
+	if opts.Source != "" {
+		filters = append(filters, termOneOf("source", opts.Source))
+	}
+	if opts.Level != "" {
+		filters = append(filters, termOneOf("level", opts.Level))
+	}
+
 	rng := map[string]any{}
 	if !opts.Since.IsZero() {
 		rng["gte"] = opts.Since.UTC().Format(time.RFC3339)

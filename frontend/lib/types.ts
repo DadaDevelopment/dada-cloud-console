@@ -608,3 +608,48 @@ export interface EnvVarsResponse {
 export interface DomainsResponse {
   domains: AppDomain[];
 }
+
+// Monitoring (Grafana-backed observability apps) -----------------------------
+
+export interface MonitoringApp {
+  id: string;
+  project_id: string;
+  environment_id: string;
+  name: string;
+  grafana_dashboard_uid?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export type HealthState = "healthy" | "degraded" | "down" | "unknown";
+
+export interface HealthStatus {
+  state: HealthState;
+  critical: boolean;
+  last_seen: string | null;
+  error_rate_15m: number;
+  firing_alerts: number;
+  reasons: string[];
+}
+
+export interface AlertRule {
+  id: string;
+  monitoring_app_id: string;
+  name: string;
+  metric: string;
+  condition: string;
+  threshold: number;
+  duration: string;
+  channel_id?: string;
+  channel_name?: string;
+  enabled: boolean;
+  grafana_rule_uid?: string;
+  created_at: string;
+}
+
+export interface Channel {
+  id: string;
+  name: string;
+  type: "telegram" | "email" | "webhook";
+  created_at: string;
+}

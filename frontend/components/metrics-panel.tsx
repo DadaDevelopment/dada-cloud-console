@@ -1,6 +1,6 @@
 "use client";
 import { useCallback, useEffect, useState } from "react";
-import { appServersApi, appsApi } from "@/lib/api";
+import { appServersApi, appsApi, monitoringApi } from "@/lib/api";
 import type { MetricsResponse } from "@/lib/types";
 import { MetricChart } from "@/components/metric-chart";
 import { Spinner } from "@/components/ui/spinner";
@@ -21,11 +21,17 @@ const APP_KEYS: { key: string; title: string; color?: string }[] = [
   { key: "cpu_cores", title: "CPU (cores)" },
   { key: "mem_bytes", title: "Memory", color: "#7c3aed" },
 ];
+const MONITORING_KEYS: { key: string; title: string; color?: string }[] = [
+  { key: "cpu", title: "CPU" },
+  { key: "memory", title: "Memory", color: "#7c3aed" },
+  { key: "temperature", title: "Temp", color: "#ea580c" },
+];
 
 export function MetricsPanel(
   props:
     | { kind: "vm"; projectId: string; serverName: string }
     | { kind: "app"; projectId: string; envId: string; appName: string }
+    | { kind: "monitoring"; projectId: string; envId: string; appId: string }
 ) {
   const [range, setRange] = useState<Range>("1h");
   const [data, setData] = useState<MetricsResponse | null>(null);
@@ -36,14 +42,20 @@ export function MetricsPanel(
   const targetKey =
     props.kind === "vm"
       ? `vm:${props.projectId}:${props.serverName}`
+      : props.kind === "monitoring"
+      ? `monitoring:${props.projectId}:${props.envId}:${props.appId}`
       : `app:${props.projectId}:${props.envId}:${props.appName}`;
 
   const load = useCallback(async () => {
     try {
-      const d =
-        props.kind === "vm"
-          ? await appServersApi.getMetrics(props.projectId, props.serverName, range)
-          : await appsApi.getMetrics(props.projectId, props.envId, props.appName, range);
+      let d: MetricsResponse;
+      if (props.kind === "vm") {
+        d = await appServersApi.getMetrics(props.projectId, props.serverName, range);
+      } else if (props.kind === "monitoring") {
+        d = await monitoringApi.getMetrics(props.projectId, props.envId, props.appId, range);
+      } else {
+        d = await appsApi.getMetrics(props.projectId, props.envId, props.appName, range);
+      }
       setData(d);
       setError(null);
     } catch (e) {
@@ -51,7 +63,7 @@ export function MetricsPanel(
     } finally {
       setLoading(false);
     }
-    // targetKey captures projectId/serverName/envId/appName for this union.
+    // targetKey captures projectId/serverName/envId/appName/appId for this union.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [range, targetKey]);
 
@@ -62,7 +74,17 @@ export function MetricsPanel(
     return () => clearInterval(id);
   }, [load]);
 
-  const specs = props.kind === "vm" ? VM_KEYS : APP_KEYS;
+  // Build specs: for monitoring, start with known keys then append dynamic ones.
+  let specs: { key: string; title: string; color?: string }[];
+  if (props.kind === "monitoring") {
+    const knownKeys = new Set(MONITORING_KEYS.map((k) => k.key));
+    const dynamicKeys = data
+      ? Object.keys(data.metrics).filter((k) => !knownKeys.has(k)).map((k) => ({ key: k, title: k }))
+      : [];
+    specs = [...MONITORING_KEYS, ...dynamicKeys];
+  } else {
+    specs = props.kind === "vm" ? VM_KEYS : APP_KEYS;
+  }
 
   return (
     <div className="rounded-xl border border-gray-200 bg-white">
