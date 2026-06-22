@@ -108,6 +108,17 @@ func (c *Claims) decode() {
 	for _, s := range strings.Fields(c.Scope) {
 		c.scopeSet[s] = struct{}{}
 	}
+
+	// Default per-user org (ADR-009 follow-up): every authenticated user is
+	// implicitly Owner of a personal org whose id equals their username. This is
+	// NOT backed by a Keycloak group — registration/login is Keycloak-native and
+	// we do not provision a group per user. Personal projects carry
+	// org_id = <username>; the org-role cascade then makes them visible/ownable to
+	// exactly that user (and /platform-admins). max-merge so an explicit Keycloak
+	// /orgs/<username>/<Role> grant, if one ever exists, is never downgraded.
+	if c.Username != "" && roleRank("Owner") > roleRank(c.orgRoles[c.Username]) {
+		c.orgRoles[c.Username] = "Owner"
+	}
 }
 
 // OrgRole returns the caller's role in org (empty if none).
