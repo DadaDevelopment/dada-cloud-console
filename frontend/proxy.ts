@@ -10,8 +10,20 @@ import type { NextRequest } from "next/server";
 // Empty in local dev so the landing is reachable at "/".
 const MARKETING_HOST = process.env.MARKETING_HOST ?? "";
 
+// The real public host is in the proxy headers, NOT request.nextUrl.hostname:
+// in the standalone server Next binds to (and reports) the pod hostname, so
+// nextUrl.hostname is the pod name — never the external host. nginx ingress
+// forwards the client's host as X-Forwarded-Host (and preserves Host), so read
+// that. Strip any port. Fall back to nextUrl.hostname for local dev.
+function publicHost(request: NextRequest): string {
+  const header =
+    request.headers.get("x-forwarded-host") ?? request.headers.get("host") ?? "";
+  const host = header.split(",")[0].trim().split(":")[0];
+  return host || request.nextUrl.hostname;
+}
+
 export function proxy(request: NextRequest) {
-  const host = request.nextUrl.hostname;
+  const host = publicHost(request);
   const isMarketingHost = MARKETING_HOST === "" || host === MARKETING_HOST;
   if (!isMarketingHost) {
     return NextResponse.redirect(new URL("/projects", request.url));
