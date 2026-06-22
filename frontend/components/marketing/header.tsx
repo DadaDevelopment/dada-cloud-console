@@ -5,6 +5,7 @@ import Link from "next/link";
 import { Cloud, Menu, X } from "lucide-react";
 import { useLang } from "@/lib/i18n/context";
 import { useAuth } from "@/lib/auth";
+import { consoleHref } from "@/lib/site";
 import { LangToggle } from "./lang-toggle";
 import { clsx } from "clsx";
 
@@ -48,18 +49,18 @@ export function MarketingHeader() {
           <LangToggle />
           {token ? (
             <Link
-              href="/projects"
+              href={consoleHref("/projects")}
               className="rounded-md bg-blue-600 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-blue-700"
             >
               {t.nav.console}
             </Link>
           ) : (
             <>
-              <Link href="/login" className="px-3 py-2 text-sm font-medium text-white/80 hover:text-white">
+              <Link href={consoleHref("/login")} className="px-3 py-2 text-sm font-medium text-white/80 hover:text-white">
                 {t.nav.login}
               </Link>
               <Link
-                href="/login"
+                href={consoleHref("/login")}
                 className="rounded-md bg-blue-600 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-blue-700"
               >
                 {t.nav.register}
@@ -93,7 +94,7 @@ export function MarketingHeader() {
           <div className="flex items-center justify-between gap-3 pt-3">
             <LangToggle />
             <Link
-              href={token ? "/projects" : "/login"}
+              href={consoleHref(token ? "/projects" : "/login")}
               onClick={() => setOpen(false)}
               className="flex-1 rounded-md bg-blue-600 px-4 py-2 text-center text-sm font-semibold text-white"
             >

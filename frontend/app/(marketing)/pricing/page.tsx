@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { Check } from "lucide-react";
 import { useLang } from "@/lib/i18n/context";
+import { consoleHref } from "@/lib/site";
 import { ProductHero, CtaBand } from "@/components/marketing/sections";
 import { clsx } from "clsx";
 
@@ -44,7 +45,7 @@ export default function PricingPage() {
                   ))}
                 </ul>
                 <Link
-                  href="/login"
+                  href={consoleHref("/login")}
                   className={clsx(
                     "mt-8 rounded-md px-6 py-3 text-center text-sm font-semibold transition-colors",
                     p.highlight

@@ -12,11 +12,15 @@ ARG NEXT_PUBLIC_AUTH_MODE=local
 ARG NEXT_PUBLIC_KEYCLOAK_ISSUER=
 ARG NEXT_PUBLIC_OIDC_CLIENT_ID=dada-console
 ARG NEXT_PUBLIC_API_URL=
+# Auth/console links on the marketing landing target the console host (so OIDC
+# login uses the whitelisted redirect). Empty → relative links (local dev).
+ARG NEXT_PUBLIC_CONSOLE_URL=
 
 ENV NEXT_PUBLIC_AUTH_MODE=$NEXT_PUBLIC_AUTH_MODE
 ENV NEXT_PUBLIC_KEYCLOAK_ISSUER=$NEXT_PUBLIC_KEYCLOAK_ISSUER
 ENV NEXT_PUBLIC_OIDC_CLIENT_ID=$NEXT_PUBLIC_OIDC_CLIENT_ID
 ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
+ENV NEXT_PUBLIC_CONSOLE_URL=$NEXT_PUBLIC_CONSOLE_URL
 
 # @dada/* deps come from internal Nexus npm (see .npmrc). Auth is provided as a
 # BuildKit secret so it never lands in an image layer:

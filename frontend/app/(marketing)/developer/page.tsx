@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useLang } from "@/lib/i18n/context";
+import { consoleHref } from "@/lib/site";
 import { ProductHero, CtaBand } from "@/components/marketing/sections";
 
 export default function DeveloperPage() {
@@ -38,7 +39,7 @@ export default function DeveloperPage() {
   https://api.dada.cloud/api/v1/projects`}
             </pre>
           </div>
-          <Link href="/projects" className="rounded-xl border border-slate-200 bg-white p-7 transition-shadow hover:shadow-md">
+          <Link href={consoleHref("/projects")} className="rounded-xl border border-slate-200 bg-white p-7 transition-shadow hover:shadow-md">
             <h3 className="text-lg font-semibold text-slate-900">{copy.consoleTitle}</h3>
             <p className="mt-2 text-sm text-slate-600">{copy.consoleDesc}</p>
           </Link>

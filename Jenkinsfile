@@ -31,6 +31,10 @@ def ARGO_VALUES_PATH = 'clusters/beget-prod/projects/platform/environments/prod/
 def NEXT_PUBLIC_AUTH_MODE       = 'oidc'
 def NEXT_PUBLIC_KEYCLOAK_ISSUER = 'https://id.dada-tuda.ru/realms/master'
 def NEXT_PUBLIC_OIDC_CLIENT_ID  = 'dada-console'
+// Marketing landing (cloud.dada-tuda.ru) auth/console links point at the console
+// host so OIDC login uses the whitelisted redirect URI. The same image serves
+// both hosts — on the console host this is simply same-origin.
+def NEXT_PUBLIC_CONSOLE_URL     = 'https://console.dada-tuda.ru'
 
 def podLabel  = "kubeagent-${env.JOB_BASE_NAME ?: 'job'}-${env.BUILD_NUMBER ?: 'manual'}"
         .replaceAll('[^A-Za-z0-9-]', '-')
@@ -375,6 +379,7 @@ spec:
                             "NEXT_PUBLIC_AUTH_MODE=${NEXT_PUBLIC_AUTH_MODE}",
                             "NEXT_PUBLIC_KEYCLOAK_ISSUER=${NEXT_PUBLIC_KEYCLOAK_ISSUER}",
                             "NEXT_PUBLIC_OIDC_CLIENT_ID=${NEXT_PUBLIC_OIDC_CLIENT_ID}",
+                            "NEXT_PUBLIC_CONSOLE_URL=${NEXT_PUBLIC_CONSOLE_URL}",
                         ]) {
                             sh '''
                                 set -eux
@@ -421,6 +426,7 @@ spec:
                               --build-arg NEXT_PUBLIC_AUTH_MODE=${NEXT_PUBLIC_AUTH_MODE} \\
                               --build-arg NEXT_PUBLIC_KEYCLOAK_ISSUER=${NEXT_PUBLIC_KEYCLOAK_ISSUER} \\
                               --build-arg NEXT_PUBLIC_OIDC_CLIENT_ID=${NEXT_PUBLIC_OIDC_CLIENT_ID} \\
+                              --build-arg NEXT_PUBLIC_CONSOLE_URL=${NEXT_PUBLIC_CONSOLE_URL} \\
                               -t ${FRONTEND_IMAGE}:${resolvedTag} \\
                               -f frontend/Dockerfile frontend
                             rm -f /tmp/nexus_npm_auth

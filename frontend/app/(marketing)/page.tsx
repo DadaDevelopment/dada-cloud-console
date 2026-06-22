@@ -15,6 +15,7 @@ import {
   Check,
 } from "lucide-react";
 import { useLang } from "@/lib/i18n/context";
+import { consoleHref } from "@/lib/site";
 import { CtaBand } from "@/components/marketing/sections";
 
 const SERVICE_ICONS: Record<string, React.ComponentType<{ className?: string }>> = {
@@ -47,7 +48,7 @@ export default function HomePage() {
             <p className="mt-6 max-w-2xl text-lg text-white/70 sm:text-xl">{t.home.heroSubtitle}</p>
             <div className="mt-9 flex flex-wrap gap-3">
               <Link
-                href="/login"
+                href={consoleHref("/login")}
                 className="inline-flex items-center gap-2 rounded-md bg-blue-600 px-7 py-3 text-sm font-semibold text-white transition-colors hover:bg-blue-700"
               >
                 {t.home.heroPrimary}
@@ -140,7 +141,7 @@ export default function HomePage() {
               ))}
             </ul>
             <Link
-              href="/login"
+              href={consoleHref("/login")}
               className="mt-8 inline-flex items-center gap-2 rounded-md bg-blue-600 px-6 py-3 text-sm font-semibold text-white transition-colors hover:bg-blue-700"
             >
               {t.common.getStarted}
