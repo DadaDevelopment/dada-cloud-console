@@ -61,6 +61,18 @@ dada-cloud parses the `groups[]` claim with a deterministic decoder:
 
 Effective project role = `max(orgRole(projectOrg), projectRole)`; org Owner/Admin cascade into every project in that org. dada-cloud already owns the resource row keyed by `project_id`/`org_id`, so it knows each project's org locally — no lookup. This is ~tens of lines of pure string decode: dada-cloud stays dumb about role *resolution* (Keycloak assigned it), it only decodes Keycloak's own path encoding. Scopes read from the native `scope` claim.
 
+### 4a. Producer of the group tree: gitops-agent (Option A, prod cutover decision 2026-06-22)
+
+The model above says "user-service orchestrates the group tree via the Keycloak Admin API" (§5). At prod cutover this collided with reality: **gitops-agent already produces the Keycloak group tree declaratively** — it reads dada-cloud `project_members`, renders crossplane `Group`/`Roles`/`Memberships` CRs into the `keycloak-config` chart, and ArgoCD reconciles them. user-service's imperative Admin-API path (built but undeployed) would be a *second* producer mutating the same shared realm.
+
+**Decision: gitops-agent stays the single producer** (Option A). It is the GitOps-native path — declarative CRs, reviewable in argo, reconciled, no imperative writes to the shared realm. user-service's group-orchestration is **not deployed**; its api-key + service-account work stands. `project_members` **stays in dada-cloud** as the membership source (contradicting §1's "dada-cloud owns no membership" — accepted: the working declarative machine wins over the doc).
+
+Concretely:
+- gitops-agent's `keycloak_group.go` renders the native topology: `/orgs/{slug}` (parent `orgs-container`) + four role subgroups `/orgs/{slug}/{Owner,Admin,Developer,ReadOnly}`, each with a group `Roles` CR mapping it to the same-named realm role (`iam-role-*`). Each dada-cloud project **is** an org; `projects.org_id` is backfilled to `projects.name` (migration 021) so the org-role cascade resolves.
+- Legacy per-project groups (`projects-container/project-X/{legacy-role}`) and the legacy 4-role vocabulary are retired; `project_members.role` was rewritten to the uniform set in migration 019.
+- Staff god-mode stays the hidden `/platform-admins` group (decoded directly); `AddPlatformAdminsToProject` is now a no-op.
+- **Rejected — Option B (user-service owns groups via Admin API):** matches §5/§1 literally but replaces a working declarative producer with an imperative one on the shared `master` realm, and forces migrating `project_members` Go→Java. Higher risk, no upside over A.
+
 ### 5. user-service orchestrates Keycloak via Admin API
 
 Membership/role/project mutations are Admin-API calls, done at **write time** (rare), not mint time (constant):

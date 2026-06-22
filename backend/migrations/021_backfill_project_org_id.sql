@@ -1,0 +1,12 @@
+-- 021_backfill_project_org_id.sql
+-- ADR-009 native RBAC (Option A: gitops-agent is the Keycloak group producer).
+--
+-- Migration 019 added projects.org_id (TEXT, nullable) but did NOT populate it,
+-- so the org-role cascade in permissions.go (effectiveRole → projectOrg) resolves
+-- to "" for every existing project and no /orgs/{org}/{Role} claim grants access.
+--
+-- Each existing dada-cloud project IS its own org (decision: project = org). The
+-- gitops-agent group renderer emits /orgs/{projects.name}/{Role}, so the org id a
+-- claim carries is the project's name (slug). Backfill org_id = name to make the
+-- cascade resolve. Idempotent: only fills rows still NULL.
+UPDATE projects SET org_id = name WHERE org_id IS NULL;

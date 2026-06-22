@@ -106,24 +106,15 @@ func UpsertProject(ctx context.Context, pool *pgxpool.Pool,
 	return nil
 }
 
-// AddPlatformAdminsToProject grants platform-admin membership to every user
-// who already holds the platform-admin role in at least one other project.
+// AddPlatformAdminsToProject is a no-op since ADR-009 (native RBAC).
+//
+// Staff god-mode is no longer propagated as a per-project membership row. It is
+// the hidden Keycloak group /platform-admins, decoded directly from the JWT
+// groups[] claim (dada-cloud auth.Claims.IsPlatformAdmin → Owner everywhere).
+// Writing a legacy 'platform-admin' member row here would (a) use a role outside
+// the uniform Owner/Admin/Developer/ReadOnly vocabulary and (b) be ignored by the
+// new group renderer. Kept as a no-op so callers need not change.
 func AddPlatformAdminsToProject(ctx context.Context, pool *pgxpool.Pool, projectName string) error {
-	_, err := pool.Exec(ctx, `
-		INSERT INTO project_members (project_id, user_id, role)
-		SELECT p.id, admins.user_id, 'platform-admin'
-		FROM projects p
-		JOIN (
-			SELECT DISTINCT user_id
-			FROM project_members
-			WHERE role = 'platform-admin'
-		) admins ON true
-		WHERE p.name = $1
-		ON CONFLICT (project_id, user_id) DO NOTHING
-	`, projectName)
-	if err != nil {
-		return fmt.Errorf("add platform admins to project %s: %w", projectName, err)
-	}
 	return nil
 }
 
