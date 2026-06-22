@@ -3,6 +3,8 @@ package api
 import (
 	"encoding/json"
 	"net/http"
+	"regexp"
+	"strings"
 
 	"github.com/dada-tuda/console/backend/internal/auth"
 	"github.com/dada-tuda/console/backend/internal/models"
@@ -10,6 +12,12 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 )
+
+// projectSlugRe constrains a project slug to a DNS-1123-label-safe shape: it is
+// used verbatim as the project name and as the namespace prefix (<slug>-<env>),
+// so it must start with a letter, end alphanumeric, and stay short enough that
+// the derived namespace fits in 63 chars.
+var projectSlugRe = regexp.MustCompile(`^[a-z][a-z0-9-]{1,38}[a-z0-9]$`)
 
 // projectWithRole extends Project with the requesting user's role.
 type projectWithRole struct {
@@ -95,6 +103,133 @@ func (h *Handler) ListProjects(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"projects": projects})
+}
+
+// createProjectRequest is the body a console user sends to create a project.
+type createProjectRequest struct {
+	// Slug is the project name (DNS-1123-label-safe). Unique platform-wide.
+	Slug string `json:"slug" binding:"required"`
+	// DisplayName is the human label; defaults to Slug when empty.
+	DisplayName string `json:"display_name"`
+	// OrgID is the owning org. Empty → the caller's personal org (their username).
+	// A non-empty value requires the caller to be Owner/Admin of that org.
+	OrgID string `json:"org_id"`
+	// DefaultEnvironment names the first environment; defaults to "prod".
+	DefaultEnvironment string `json:"default_environment"`
+}
+
+// CreateProject creates a project owned by the caller. Self-service: by default
+// the project lands in the caller's personal org (org_id = username), where the
+// caller is implicitly Owner (ADR-009 follow-up). To create under a shared org
+// the caller must be Owner/Admin of it. The gitops-agent db-watcher picks the new
+// row up and bootstraps its git manifest.
+//
+// @ID          createProject
+// @Summary     Create a project
+// @Description Creates a project plus its default environment. Without org_id the project goes into your personal org (you are Owner). With org_id you must be Owner/Admin of that org. The slug must be DNS-1123-label-safe and is unique platform-wide.
+// @Tags        project
+// @Accept      json
+// @Produce     json
+// @Security    BearerAuth
+// @Param       body body     createProjectRequest true "Project to create"
+// @Success     201  {object} map[string]interface{} "object with project_id, default_environment_id, org_id and role"
+// @Failure     400  {object} map[string]string
+// @Failure     401  {object} map[string]string
+// @Failure     403  {object} map[string]string
+// @Failure     409  {object} map[string]string "slug already taken"
+// @Router      /projects [post]
+func (h *Handler) CreateProject(c *gin.Context) {
+	claims, ok := auth.GetClaims(c)
+	if !ok {
+		respondUnauthorized(c)
+		return
+	}
+
+	var req createProjectRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		respondError(c, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	slug := strings.ToLower(strings.TrimSpace(req.Slug))
+	if !projectSlugRe.MatchString(slug) {
+		respondError(c, http.StatusBadRequest, "invalid slug: use 3-40 chars, lowercase letters/digits/dashes, starting with a letter")
+		return
+	}
+
+	// Resolve the owning org. Empty → personal org (the caller's username), where
+	// the caller is implicitly Owner. Non-empty → must be Owner/Admin of that org.
+	org := strings.TrimSpace(req.OrgID)
+	if org == "" {
+		org = claims.Username
+		if org == "" {
+			respondError(c, http.StatusBadRequest, "no username in token; cannot derive a personal org")
+			return
+		}
+	} else if !isGod(claims) && !isOrgAdmin(models.MemberRole(claims.OrgRole(org))) {
+		respondForbidden(c)
+		return
+	}
+
+	displayName := strings.TrimSpace(req.DisplayName)
+	if displayName == "" {
+		displayName = slug
+	}
+	defaultEnv := strings.TrimSpace(req.DefaultEnvironment)
+	if defaultEnv == "" {
+		defaultEnv = "prod"
+	}
+	envType := "prod"
+	if defaultEnv == "dev" {
+		envType = "dev"
+	}
+
+	ctx := c.Request.Context()
+	tx, err := h.pool.Begin(ctx)
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, "failed to begin tx")
+		return
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck // rollback after commit is a no-op
+
+	projectID := uuid.New()
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO projects (id, name, display_name, org_id, owner_type, owner_id, default_environment)
+		VALUES ($1, $2, $3, $4, 'team', $5, $6)
+	`, projectID, slug, displayName, org, claims.UserID, defaultEnv); err != nil {
+		if isUniqueViolation(err) {
+			respondError(c, http.StatusConflict, "a project with this slug already exists")
+			return
+		}
+		respondError(c, http.StatusInternalServerError, "failed to create project")
+		return
+	}
+
+	var envID uuid.UUID
+	if err := tx.QueryRow(ctx, `
+		INSERT INTO environments (project_id, name, namespace, type)
+		VALUES ($1, $2, $3, $4)
+		RETURNING id
+	`, projectID, defaultEnv, slug+"-"+defaultEnv, envType).Scan(&envID); err != nil {
+		respondError(c, http.StatusInternalServerError, "failed to create default environment")
+		return
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		respondError(c, http.StatusInternalServerError, "failed to commit")
+		return
+	}
+
+	role := models.MemberRole(claims.OrgRole(org))
+	if isGod(claims) || role == "" {
+		role = models.MemberRoleOwner
+	}
+	c.JSON(http.StatusCreated, gin.H{
+		"project_id":             projectID,
+		"default_environment_id": envID,
+		"org_id":                 org,
+		"role":                   role,
+	})
 }
 
 // GetProject returns a single project by ID, including environments and user role.

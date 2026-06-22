@@ -610,6 +610,81 @@
                         }
                     }
                 }
+            },
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Creates a project plus its default environment. Without org_id the project goes into your personal org (you are Owner). With org_id you must be Owner/Admin of that org. The slug must be DNS-1123-label-safe and is unique platform-wide.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "project"
+                ],
+                "summary": "Create a project",
+                "operationId": "createProject",
+                "parameters": [
+                    {
+                        "description": "Project to create",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/api.createProjectRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "object with project_id, default_environment_id, org_id and role",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "409": {
+                        "description": "slug already taken",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
             }
         },
         "/projects/{projectId}": {
@@ -6933,6 +7008,30 @@
             "type": "object",
             "properties": {
                 "name": {
+                    "type": "string"
+                }
+            }
+        },
+        "api.createProjectRequest": {
+            "type": "object",
+            "required": [
+                "slug"
+            ],
+            "properties": {
+                "default_environment": {
+                    "description": "DefaultEnvironment names the first environment; defaults to \"prod\".",
+                    "type": "string"
+                },
+                "display_name": {
+                    "description": "DisplayName is the human label; defaults to Slug when empty.",
+                    "type": "string"
+                },
+                "org_id": {
+                    "description": "OrgID is the owning org. Empty → the caller's personal org (their username).\nA non-empty value requires the caller to be Owner/Admin of that org.",
+                    "type": "string"
+                },
+                "slug": {
+                    "description": "Slug is the project name (DNS-1123-label-safe). Unique platform-wide.",
                     "type": "string"
                 }
             }
