@@ -1,0 +1,13 @@
+-- 022_single_org_dada.sql
+-- Collapse the per-project orgs (021 set org_id = name, "project = org") into a
+-- single shared org "dada" that owns every existing project. All current human
+-- users are seeded into /orgs/dada/Admin in Keycloak (argo-infra keycloak-config
+-- org-groups-dada.yaml), so the org-role cascade in permissions.go grants them
+-- visibility of every dada project.
+--
+-- New users that self-register at id.dada-tuda.ru get their OWN personal org
+-- instead of joining "dada" — that provisioning is owned by user-service (it is
+-- the only component with a Keycloak admin client), tracked separately.
+--
+-- Idempotent: only rewrites rows not already on "dada".
+UPDATE projects SET org_id = 'dada' WHERE org_id IS DISTINCT FROM 'dada';
