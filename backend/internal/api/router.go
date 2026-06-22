@@ -131,7 +131,10 @@ func SetupRouter(pool *pgxpool.Pool, cfg *config.Config) *gin.Engine {
 	}
 
 	// Authenticated routes — pick the auth middleware by configured mode.
-	api := r.Group("/api/v1", authMiddleware(pool, cfg))
+	// Built once and shared: the monitoring ingest group reuses it as its JWT
+	// fallback, so we don't construct a second Keycloak verifier/JWKS client.
+	authMW := authMiddleware(pool, cfg)
+	api := r.Group("/api/v1", authMW)
 	{
 		// Auth
 		api.GET("/auth/me", h.Me)
@@ -218,10 +221,10 @@ func SetupRouter(pool *pgxpool.Pool, cfg *config.Config) *gin.Engine {
 		// Management (user-authenticated): list + create monitoring resources.
 		api.GET("/projects/:projectId/monitoring", h.ListMonitoringApps)
 		api.POST("/projects/:projectId/environments/:envId/monitoring", h.CreateMonitoringApp)
-		// Device-facing ingest (scoped API key → fat claims): no envId in the path,
-		// matches the PRD contract POST /projects/{projectId}/monitoring/{appId}/{metrics,logs}.
-		api.POST("/projects/:projectId/monitoring/:appId/metrics", auth.RequireScope("metrics:write"), h.IngestMetrics)
-		api.POST("/projects/:projectId/monitoring/:appId/logs", auth.RequireScope("logs:write"), h.IngestLogs)
+		// Device-facing ingest routes are registered on a separate group below
+		// (h.IngestAuthMiddleware) so a scoped dmon_ key authenticates directly,
+		// bypassing the JWT-only group middleware. See PRD-monitoring contract
+		// POST /projects/{projectId}/monitoring/{appId}/{metrics,logs}.
 
 		// Monitoring read/alert/health layer (ADR-011): read-back, health,
 		// dashboards, channels, alert rules and resource teardown. Handlers
@@ -275,6 +278,16 @@ func SetupRouter(pool *pgxpool.Pool, cfg *config.Config) *gin.Engine {
 			// Inference proxy (playground only — production traffic goes via PublicApi ingress).
 			api.POST("/projects/:projectId/environments/:envId/models/:name/infer", h.ProxyInference)
 		}
+	}
+
+	// Device-facing monitoring ingest. Separate group so a scoped dmon_ key
+	// authenticates directly (IngestAuthMiddleware), with the standard JWT/
+	// Keycloak middleware as fallback for console/testing callers. RequireScope
+	// still gates metrics:write / logs:write from the synthesized claims.
+	ingest := r.Group("/api/v1", h.IngestAuthMiddleware(authMW))
+	{
+		ingest.POST("/projects/:projectId/monitoring/:appId/metrics", auth.RequireScope("metrics:write"), h.IngestMetrics)
+		ingest.POST("/projects/:projectId/monitoring/:appId/logs", auth.RequireScope("logs:write"), h.IngestLogs)
 	}
 
 	// Liveness — process is up. Cheap, no dependencies. K8s restarts the pod

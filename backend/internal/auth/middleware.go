@@ -82,6 +82,13 @@ func KeycloakMiddleware(
 	}
 }
 
+// SetClaims stores resolved claims in the Gin context under the same key
+// GetClaims reads. Used by alternative authenticators (e.g. the monitoring
+// scoped-key ingest middleware) that resolve identity outside the JWT path.
+func SetClaims(c *gin.Context, claims *Claims) {
+	c.Set(claimsKey, claims)
+}
+
 // GetClaims retrieves JWT claims stored in the Gin context.
 func GetClaims(c *gin.Context) (*Claims, bool) {
 	val, exists := c.Get(claimsKey)
