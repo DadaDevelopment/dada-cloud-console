@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { projectsApi } from "@/lib/api";
@@ -38,7 +38,7 @@ function CreateProjectModal({
 
   const slugValid = SLUG_RE.test(slug);
 
-  async function submit(e: React.FormEvent) {
+  async function submit(e: FormEvent) {
     e.preventDefault();
     if (!slugValid || submitting) return;
     setSubmitting(true);
