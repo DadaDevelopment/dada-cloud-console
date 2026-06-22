@@ -310,5 +310,9 @@ func SetupRouter(pool *pgxpool.Pool, cfg *config.Config) *gin.Engine {
 		c.JSON(http.StatusOK, gin.H{"status": "ready"})
 	})
 
+	// Self-heal Grafana-provisioned alert rules after a Grafana restart wipes
+	// them (shared Grafana runs on emptyDir). No-op when Grafana is unconfigured.
+	h.StartGrafanaReconciler(context.Background(), defaultReconcileInterval)
+
 	return r
 }

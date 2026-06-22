@@ -20,17 +20,18 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 )
 
 // Client talks to one Grafana instance with a service-account / admin API token.
 type Client struct {
-	baseURL       string // API base, no trailing slash
-	publicURL     string // browser-facing base for deep links (may differ from baseURL)
-	apiToken      string
-	promDSUID     string // Prometheus datasource UID alert rules query against
-	httpClient    *http.Client
+	baseURL    string // API base, no trailing slash
+	publicURL  string // browser-facing base for deep links (may differ from baseURL)
+	apiToken   string
+	promDSUID  string // Prometheus datasource UID alert rules query against
+	httpClient *http.Client
 }
 
 // New returns a Grafana client, or nil when unconfigured so callers can treat
@@ -195,6 +196,40 @@ func (c *Client) CreateAlertRule(ctx context.Context, rule map[string]any) (stri
 		return "", err
 	}
 	return out.UID, nil
+}
+
+// AlertRuleExists reports whether an alert rule with this uid is present in
+// Grafana. Used by the reconcile loop to detect rules wiped by a Grafana
+// restart (emptyDir-backed shared Grafana) so they can be re-provisioned.
+func (c *Client) AlertRuleExists(ctx context.Context, uid string) (bool, error) {
+	if uid == "" {
+		return false, nil
+	}
+	status, err := c.do(ctx, http.MethodGet, "/api/v1/provisioning/alert-rules/"+uid, nil, nil, false)
+	if err == nil {
+		return true, nil
+	}
+	if status == http.StatusNotFound {
+		return false, nil
+	}
+	return false, err
+}
+
+// ContactPointExists reports whether a contact point with this name exists. The
+// reconcile loop uses it to decide whether an alert rule can still route to its
+// channel — channel secrets (bot tokens, addresses) are not persisted backend
+// side, so a wiped contact point cannot be re-created, only routed around.
+func (c *Client) ContactPointExists(ctx context.Context, name string) (bool, error) {
+	if name == "" {
+		return false, nil
+	}
+	var out []ContactPoint
+	if _, err := c.do(ctx, http.MethodGet,
+		"/api/v1/provisioning/contact-points?name="+url.QueryEscape(name),
+		nil, &out, false); err != nil {
+		return false, err
+	}
+	return len(out) > 0, nil
 }
 
 // DeleteAlertRule removes an alert rule by uid. Missing is not an error.
