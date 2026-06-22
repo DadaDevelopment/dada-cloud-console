@@ -28,7 +28,9 @@ type Claims struct {
 	Username    string    `json:"username"`
 	Email       string    `json:"email"`
 	DisplayName string    `json:"display_name"`
-
+	// Groups/Roles/Scope come straight from Keycloak in OIDC mode (Group
+	// Membership mapper paths, realm/resource roles, native OIDC scope). In local
+	// HS256 mode the dev-god token still synthesizes Groups+Scope so authz works.
 	Groups []string `json:"groups,omitempty"`
 	Roles  []string `json:"roles,omitempty"`
 	Scope  string   `json:"scope,omitempty"`
@@ -39,7 +41,6 @@ type Claims struct {
 	projectRoles  map[string]string
 	scopeSet      map[string]struct{}
 	platformAdmin bool
-
 	jwt.RegisteredClaims
 }
 
