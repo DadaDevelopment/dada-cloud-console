@@ -89,15 +89,20 @@ func UpsertProject(ctx context.Context, pool *pgxpool.Pool,
 		quotas = json.RawMessage(`{}`)
 	}
 
+	// Git-origin projects (no console creator) belong to the shared org "dada"
+	// (decision: project created via git = dada org). On conflict we keep any
+	// existing org_id so a console-created project's personal org is never
+	// downgraded; COALESCE also heals legacy rows still NULL.
 	_, err := pool.Exec(ctx, `
 		INSERT INTO projects
-			(name, display_name, owner_type, default_environment, quotas)
-		VALUES ($1, $2, $3, $4, $5)
+			(name, display_name, owner_type, default_environment, quotas, org_id)
+		VALUES ($1, $2, $3, $4, $5, 'dada')
 		ON CONFLICT (name) DO UPDATE
 		SET display_name         = EXCLUDED.display_name,
 		    owner_type           = EXCLUDED.owner_type,
 		    default_environment   = EXCLUDED.default_environment,
 		    quotas                = EXCLUDED.quotas,
+		    org_id                = COALESCE(projects.org_id, EXCLUDED.org_id),
 		    updated_at            = NOW()
 	`, name, displayName, ownerType, defaultEnvironment, quotas)
 	if err != nil {
