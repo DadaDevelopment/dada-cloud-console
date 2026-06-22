@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+# Ban feat/* and feature/* branches in this repo (trunk-based: everything on main).
+#
+# Rejects any push that would create/update a remote branch whose name matches
+# feat/* or feature/*. Stdin lines (git pre-push protocol):
+#   <local ref> <local sha> <remote ref> <remote sha>
+set -euo pipefail
+
+banned_re='^refs/heads/(feat|feature)/'
+zero='0000000000000000000000000000000000000000'
+violation=0
+
+while read -r local_ref local_sha remote_ref remote_sha; do
+  # Skip deletes (local sha all-zero) — removing a feat/* branch is allowed.
+  [ "$local_sha" = "$zero" ] && continue
+  if [[ "$remote_ref" =~ $banned_re ]]; then
+    echo "✖ blocked: '$remote_ref' — feat/* and feature/* branches are banned in this repo." >&2
+    echo "  Work on main (trunk-based). See AGENTS.md / docs." >&2
+    violation=1
+  fi
+done
+
+exit $violation

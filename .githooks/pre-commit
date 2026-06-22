@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+# Ban committing on a feat/* or feature/* branch (trunk-based: commit on main).
+# Catches the branch early, before work piles up on a banned ref.
+set -euo pipefail
+
+branch="$(git symbolic-ref --short -q HEAD || true)"
+case "$branch" in
+  feat/*|feature/*)
+    echo "✖ blocked: branch '$branch' — feat/* and feature/* are banned in this repo." >&2
+    echo "  Trunk-based: commit on main. Rename with: git branch -m main" >&2
+    exit 1
+    ;;
+esac
+exit 0
