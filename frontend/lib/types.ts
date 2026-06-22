@@ -203,6 +203,13 @@ export interface ProjectDetailResponse {
   role: MemberRole;
 }
 
+export interface CreateProjectResponse {
+  project_id: string;
+  default_environment_id: string;
+  org_id: string;
+  role: MemberRole;
+}
+
 export interface DatabasesResponse {
   databases: ResourceSnapshot[];
 }

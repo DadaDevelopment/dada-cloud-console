@@ -5,6 +5,7 @@ import type {
   User,
   ProjectsResponse,
   ProjectDetailResponse,
+  CreateProjectResponse,
   OperationsResponse,
   Operation,
   DatabasesResponse,
@@ -141,6 +142,10 @@ export const authApi = {
 
 export const projectsApi = {
   list: () => apiFetch<ProjectsResponse>("/api/v1/projects"),
+  // Create a project. Omit org_id to land it in your personal org (you become
+  // Owner); pass org_id only for a shared org you administer.
+  create: (data: { slug: string; display_name?: string; org_id?: string; default_environment?: string }) =>
+    apiFetch<CreateProjectResponse>("/api/v1/projects", { method: "POST", body: data }),
   get: (id: string) => apiFetch<ProjectDetailResponse>(`/api/v1/projects/${id}`),
   operations: (projectId: string) => apiFetch<OperationsResponse>(`/api/v1/projects/${projectId}/operations`),
   getOperation: (projectId: string, opId: string) =>
