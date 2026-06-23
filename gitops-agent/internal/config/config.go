@@ -21,8 +21,15 @@ type Config struct {
 	BotName  string
 	BotEmail string
 
-	PollIntervalDB  time.Duration
-	PollIntervalGit time.Duration
+	PollIntervalDB     time.Duration
+	PollIntervalGit    time.Duration
+	PollIntervalStatus time.Duration
+
+	// StatusReconcile enables the k8s live-state reconciler: it reads Deployment
+	// status from each k8s environment's namespace and writes phase + image +
+	// replicas back into resource_snapshots. Disabled automatically when no
+	// in-cluster config is available (e.g. local runs).
+	StatusReconcileEnabled bool
 
 	// Webhook server — only started when port is non-empty.
 	WebhookPort string
@@ -61,6 +68,10 @@ func Load() (*Config, error) {
 	if err != nil {
 		return nil, fmt.Errorf("GITOPS_PREVIEW_ENV_TTL: %w", err)
 	}
+	statusInterval, err := time.ParseDuration(getEnv("GITOPS_POLL_INTERVAL_STATUS", "30s"))
+	if err != nil {
+		return nil, fmt.Errorf("GITOPS_POLL_INTERVAL_STATUS: %w", err)
+	}
 
 	cfg := &Config{
 		DatabaseURL:       getEnv("DATABASE_URL", getEnv("DB_URL", "")),
@@ -71,8 +82,11 @@ func Load() (*Config, error) {
 		RepoLocalPath:     getEnv("GITOPS_REPO_LOCAL_PATH", "/var/lib/gitops-repos"),
 		BotName:           getEnv("GITOPS_BOT_NAME", "DADA Platform Bot"),
 		BotEmail:          getEnv("GITOPS_BOT_EMAIL", "bot@dada-tuda.ru"),
-		PollIntervalDB:    dbInterval,
-		PollIntervalGit:   gitInterval,
+		PollIntervalDB:     dbInterval,
+		PollIntervalGit:    gitInterval,
+		PollIntervalStatus: statusInterval,
+
+		StatusReconcileEnabled: getEnv("GITOPS_STATUS_RECONCILE_ENABLED", "true") == "true",
 		WebhookPort:       getEnv("GITOPS_WEBHOOK_PORT", ""),
 		EncryptionKey:     getEnv("GITOPS_ENCRYPTION_KEY", ""),
 		ClusterLBIP:       getEnv("CLUSTER_LB_IP", "93.189.231.60"),

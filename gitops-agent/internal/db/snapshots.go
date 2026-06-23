@@ -33,3 +33,24 @@ func UpsertSnapshot(ctx context.Context, pool *pgxpool.Pool,
 	}
 	return nil
 }
+
+// UpdateAppLiveStatus mirrors live k8s Deployment state onto an existing App
+// snapshot: it sets phase and merges the given fields into summary_json (jsonb
+// concat preserves git_sha/message etc.). It only touches rows that already
+// exist (kind='App'), so it never resurrects an app the git/db sync removed.
+// Returns the number of rows updated (0 = no matching snapshot).
+func UpdateAppLiveStatus(ctx context.Context, pool *pgxpool.Pool,
+	environmentID uuid.UUID, name, phase string, summaryPatch json.RawMessage,
+) (int64, error) {
+	tag, err := pool.Exec(ctx, `
+		UPDATE resource_snapshots
+		SET phase          = $1,
+		    summary_json   = COALESCE(summary_json, '{}'::jsonb) || $2::jsonb,
+		    last_synced_at = now()
+		WHERE environment_id = $3 AND kind = 'App' AND name = $4
+	`, phase, summaryPatch, environmentID, name)
+	if err != nil {
+		return 0, fmt.Errorf("update app live status: %w", err)
+	}
+	return tag.RowsAffected(), nil
+}

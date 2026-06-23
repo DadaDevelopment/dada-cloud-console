@@ -9,6 +9,7 @@ import (
 	"github.com/dada-tuda/console/gitops-agent/internal/config"
 	"github.com/dada-tuda/console/gitops-agent/internal/db"
 	"github.com/dada-tuda/console/gitops-agent/internal/git"
+	"github.com/dada-tuda/console/gitops-agent/internal/k8s"
 	"github.com/dada-tuda/console/gitops-agent/internal/server"
 	"github.com/dada-tuda/console/gitops-agent/internal/worker"
 	"github.com/rs/zerolog"
@@ -52,6 +53,17 @@ func main() {
 
 	go dbw.Start(ctx)
 	go gitw.Start(ctx)
+
+	// Live-state reconciler: mirror k8s Deployment status onto App snapshots so
+	// the console shows real phase/image/replicas instead of git's "Unknown".
+	// Disabled gracefully when there's no in-cluster config (e.g. local dev).
+	if cfg.StatusReconcileEnabled {
+		if client, err := k8s.NewInClusterClient(); err != nil {
+			log.Warn().Err(err).Msg("status-reconciler disabled: no in-cluster k8s config")
+		} else {
+			go worker.NewStatusReconciler(pool, cfg, client).Start(ctx)
+		}
+	}
 
 	if cfg.WebhookPort != "" {
 		hub := server.NewHub()

@@ -23,6 +23,13 @@ rules:
       - events
       - namespaces
     verbs: ["get", "list", "watch"]
+  # Live-state reconciler reads workload status (replicas/readiness/image) from
+  # each environment namespace to mirror it onto App snapshots.
+  - apiGroups: ["apps"]
+    resources:
+      - deployments
+      - statefulsets
+    verbs: ["get", "list", "watch"]
   {{- with .Values.rbac.extraRules }}
   {{- toYaml . | nindent 2 }}
   {{- end }}
