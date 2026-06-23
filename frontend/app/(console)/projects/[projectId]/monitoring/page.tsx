@@ -40,8 +40,8 @@ export default function MonitoringPage() {
     setError(null);
     /* eslint-enable react-hooks/set-state-in-effect */
     monitoringApi
-      .list(projectId, selectedEnvId)
-      .then((data) => setApps(data.apps ?? []))
+      .list(projectId)
+      .then((data) => setApps(data.monitoring_apps ?? []))
       .catch((err) => setError(err instanceof Error ? err.message : "Failed to load monitoring apps"))
       .finally(() => setIsLoadingApps(false));
   }, [projectId, selectedEnvId, isLoadingEnvs]);
@@ -52,7 +52,7 @@ export default function MonitoringPage() {
     setIsSubmitting(true);
     try {
       const result = await monitoringApi.create(projectId, selectedEnvId, name);
-      setApps((prev) => [...prev, result.app]);
+      setApps((prev) => [...prev, result.monitoring_app]);
       setIsModalOpen(false);
       setName("");
       setNewApiKey(result.api_key);
