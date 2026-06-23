@@ -16,6 +16,7 @@ def BACKEND_IMAGE         = "${GITHUB_REGISTRY}/${GITHUB_ORG}/dada-cloud-console
 def FRONTEND_IMAGE        = "${GITHUB_REGISTRY}/${GITHUB_ORG}/dada-cloud-console-frontend"
 def GITOPS_AGENT_IMAGE    = "${GITHUB_REGISTRY}/${GITHUB_ORG}/dada-cloud-console-gitops-agent"
 def PORTAINER_AGENT_IMAGE = "${GITHUB_REGISTRY}/${GITHUB_ORG}/dada-cloud-console-portainer-agent"
+def BUILD_AGENT_IMAGE     = "${GITHUB_REGISTRY}/${GITHUB_ORG}/dada-cloud-console-build-agent"
 
 // GitOps write-back: after a successful push, pin the just-built tag into the
 // ArgoCD source so prod actually rolls (there is NO image-updater; the tag is
@@ -324,6 +325,18 @@ spec:
                     }
                 }
 
+                runStage('Build-agent tests') {
+                    dir('build-agent') {
+                        sh 'go test ./... -count=1'
+                    }
+                }
+
+                runStage('Build-agent build') {
+                    dir('build-agent') {
+                        sh 'CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -buildvcs=false -ldflags="-s -w" -o bin/build-agent ./cmd/build-agent'
+                    }
+                }
+
                 runStage('Portainer-agent tests') {
                     dir('portainer-agent') {
                         sh 'go test ./... -count=1'
@@ -346,6 +359,7 @@ spec:
                           --set frontend.image.tag=${resolvedTag} \
                           --set gitopsAgent.image.tag=${resolvedTag} \
                           --set portainerAgent.image.tag=${resolvedTag} \
+                          --set buildAgent.image.tag=${resolvedTag} \
                           --set ingress.host=console.dada-tuda.ru \
                           > /tmp/dada-cloud-console-rendered.yaml
                         echo "Rendered \$(wc -l < /tmp/dada-cloud-console-rendered.yaml) lines"
@@ -409,6 +423,9 @@ spec:
                         docker build \\
                           -t ${PORTAINER_AGENT_IMAGE}:${resolvedTag} \\
                           -f portainer-agent/Dockerfile portainer-agent
+                        docker build \\
+                          -t ${BUILD_AGENT_IMAGE}:${resolvedTag} \\
+                          -f build-agent/Dockerfile build-agent
                     """
                     // Frontend image: npm ci inside the build pulls @dada/* from
                     // Nexus. Auth is passed as a BuildKit secret (never baked into
@@ -456,15 +473,18 @@ spec:
                                 docker push ${FRONTEND_IMAGE}:${resolvedTag}
                                 docker push ${GITOPS_AGENT_IMAGE}:${resolvedTag}
                                 docker push ${PORTAINER_AGENT_IMAGE}:${resolvedTag}
+                                docker push ${BUILD_AGENT_IMAGE}:${resolvedTag}
                                 docker tag ${BACKEND_IMAGE}:${resolvedTag} ${BACKEND_IMAGE}:latest
                                 docker tag ${FRONTEND_IMAGE}:${resolvedTag} ${FRONTEND_IMAGE}:latest
                                 docker tag ${GITOPS_AGENT_IMAGE}:${resolvedTag} ${GITOPS_AGENT_IMAGE}:latest
                                 docker tag ${PORTAINER_AGENT_IMAGE}:${resolvedTag} ${PORTAINER_AGENT_IMAGE}:latest
+                                docker tag ${BUILD_AGENT_IMAGE}:${resolvedTag} ${BUILD_AGENT_IMAGE}:latest
                                 docker push ${BACKEND_IMAGE}:latest
                                 docker push ${FRONTEND_IMAGE}:latest
                                 docker push ${GITOPS_AGENT_IMAGE}:latest
                                 docker push ${PORTAINER_AGENT_IMAGE}:latest
-                                docker rmi ${BACKEND_IMAGE}:${resolvedTag} ${FRONTEND_IMAGE}:${resolvedTag} ${GITOPS_AGENT_IMAGE}:${resolvedTag} ${PORTAINER_AGENT_IMAGE}:${resolvedTag} || true
+                                docker push ${BUILD_AGENT_IMAGE}:latest
+                                docker rmi ${BACKEND_IMAGE}:${resolvedTag} ${FRONTEND_IMAGE}:${resolvedTag} ${GITOPS_AGENT_IMAGE}:${resolvedTag} ${PORTAINER_AGENT_IMAGE}:${resolvedTag} ${BUILD_AGENT_IMAGE}:${resolvedTag} || true
                             """
                         }
                     }
@@ -486,7 +506,7 @@ spec:
                                   https://\${GIT_USERNAME}:\${GIT_TOKEN}@${ARGO_REPO} /tmp/argo-infra
                                 cd /tmp/argo-infra
                                 export TAG='${resolvedTag}'
-                                yq -i '(.backend.image.tag, .frontend.image.tag, .gitopsAgent.image.tag, .portainerAgent.image.tag) = strenv(TAG) | (.backend.image.tag, .frontend.image.tag, .gitopsAgent.image.tag, .portainerAgent.image.tag) style="double"' ${ARGO_VALUES_PATH}
+                                yq -i '(.backend.image.tag, .frontend.image.tag, .gitopsAgent.image.tag, .portainerAgent.image.tag, .buildAgent.image.tag) = strenv(TAG) | (.backend.image.tag, .frontend.image.tag, .gitopsAgent.image.tag, .portainerAgent.image.tag, .buildAgent.image.tag) style="double"' ${ARGO_VALUES_PATH}
                                 git config user.email 'platform-bot@dada-tuda.ru'
                                 git config user.name  'DADA Platform Bot'
                                 if git diff --quiet -- ${ARGO_VALUES_PATH}; then
@@ -516,6 +536,7 @@ spec:
             echo "   Frontend:        ${FRONTEND_IMAGE}:${resolvedTag}"
             echo "   GitOps Agent:    ${GITOPS_AGENT_IMAGE}:${resolvedTag}"
             echo "   Portainer Agent: ${PORTAINER_AGENT_IMAGE}:${resolvedTag}"
+            echo "   Build Agent:     ${BUILD_AGENT_IMAGE}:${resolvedTag}"
         }
     }
     }
