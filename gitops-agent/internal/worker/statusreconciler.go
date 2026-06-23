@@ -3,6 +3,7 @@ package worker
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"time"
 
 	"github.com/dada-tuda/console/gitops-agent/internal/config"
@@ -67,9 +68,10 @@ func (r *StatusReconciler) reconcile(ctx context.Context) {
 
 	updated := 0
 	for _, env := range envs {
-		deps, err := r.client.AppsV1().Deployments(env.Namespace).List(ctx, metav1.ListOptions{
-			LabelSelector: appLabel,
-		})
+		// List every Deployment, not just dada.io/app-labelled ones: some charts
+		// (e.g. n8n) omit the label, so we fall back to the deployment name
+		// (minus the "-deploy" suffix) as the app key. Labelled wins when present.
+		deps, err := r.client.AppsV1().Deployments(env.Namespace).List(ctx, metav1.ListOptions{})
 		if err != nil {
 			// Namespace may not exist yet, or RBAC gap — log once per env and move on.
 			log.Warn().Err(err).Str("namespace", env.Namespace).Msg("status-reconciler: list deployments")
@@ -79,7 +81,7 @@ func (r *StatusReconciler) reconcile(ctx context.Context) {
 		apps := map[string]*liveApp{}
 		for i := range deps.Items {
 			d := &deps.Items[i]
-			name := d.Labels[appLabel]
+			name := appKey(d)
 			if name == "" {
 				continue
 			}
@@ -116,6 +118,17 @@ func (r *StatusReconciler) reconcile(ctx context.Context) {
 	if updated > 0 {
 		log.Debug().Int("updated", updated).Msg("status-reconciler: synced app statuses")
 	}
+}
+
+// appKey maps a Deployment to its App snapshot name: the dada.io/app label when
+// present, else the deployment name with a trailing "-deploy" stripped (the
+// chart convention, e.g. profi-deploy → profi). Unmatched keys simply find no
+// snapshot row and no-op, so a wrong guess is harmless.
+func appKey(d *appsv1.Deployment) string {
+	if v := d.Labels[appLabel]; v != "" {
+		return v
+	}
+	return strings.TrimSuffix(d.Name, "-deploy")
 }
 
 func desiredReplicas(d *appsv1.Deployment) int32 {

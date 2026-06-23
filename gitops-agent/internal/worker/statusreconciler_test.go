@@ -33,6 +33,28 @@ func TestLivePhase(t *testing.T) {
 	}
 }
 
+func TestAppKey(t *testing.T) {
+	cases := []struct {
+		name   string
+		labels map[string]string
+		dep    string
+		want   string
+	}{
+		{"label wins", map[string]string{"dada.io/app": "profi"}, "profi-deploy", "profi"},
+		{"strip -deploy", nil, "profi-deploy", "profi"},
+		{"no suffix (n8n)", nil, "n8n", "n8n"},
+		{"unrelated worker", nil, "n8n-worker", "n8n-worker"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			d := &appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: c.dep, Labels: c.labels}}
+			if got := appKey(d); got != c.want {
+				t.Fatalf("appKey(%q,%v) = %q, want %q", c.dep, c.labels, got, c.want)
+			}
+		})
+	}
+}
+
 func TestDesiredReplicas(t *testing.T) {
 	if got := desiredReplicas(&appsv1.Deployment{Spec: appsv1.DeploymentSpec{Replicas: ptr32(3)}}); got != 3 {
 		t.Fatalf("explicit replicas = %d, want 3", got)
