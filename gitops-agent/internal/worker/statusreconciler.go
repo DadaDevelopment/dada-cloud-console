@@ -12,6 +12,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rs/zerolog/log"
 )
@@ -59,61 +60,85 @@ type liveApp struct {
 	image   string
 }
 
+// snapKey identifies one App snapshot to update: its environment + app name.
+type snapKey struct {
+	env uuid.UUID
+	app string
+}
+
 func (r *StatusReconciler) reconcile(ctx context.Context) {
 	envs, err := db.ListK8sEnvironments(ctx, r.pool)
 	if err != nil {
 		log.Error().Err(err).Msg("status-reconciler: list environments")
 		return
 	}
+	envByNs := make(map[string]uuid.UUID, len(envs))
+	for _, e := range envs {
+		envByNs[e.Namespace] = e.EnvID
+	}
 
-	updated := 0
-	for _, env := range envs {
-		// List every Deployment, not just dada.io/app-labelled ones: some charts
-		// (e.g. n8n) omit the label, so we fall back to the deployment name
-		// (minus the "-deploy" suffix) as the app key. Labelled wins when present.
-		deps, err := r.client.AppsV1().Deployments(env.Namespace).List(ctx, metav1.ListOptions{})
-		if err != nil {
-			// Namespace may not exist yet, or RBAC gap — log once per env and move on.
-			log.Warn().Err(err).Str("namespace", env.Namespace).Msg("status-reconciler: list deployments")
+	// appEnvs resolves namespace-override apps (App spec.namespace ≠ env
+	// namespace): a Deployment found in a non-env namespace is attributed to its
+	// env only when its name maps to exactly one App snapshot.
+	appEnvs, err := db.AppSnapshotEnvs(ctx, r.pool)
+	if err != nil {
+		log.Error().Err(err).Msg("status-reconciler: list app snapshot envs")
+		return
+	}
+
+	// One cluster-wide list: covers both env namespaces and override namespaces
+	// (e.g. dada-agent in argocd-prod). Unlabelled deployments fall back to name.
+	deps, err := r.client.AppsV1().Deployments("").List(ctx, metav1.ListOptions{})
+	if err != nil {
+		log.Warn().Err(err).Msg("status-reconciler: list deployments")
+		return
+	}
+
+	agg := map[snapKey]*liveApp{}
+	for i := range deps.Items {
+		d := &deps.Items[i]
+		app := appKey(d)
+		if app == "" {
 			continue
 		}
-
-		apps := map[string]*liveApp{}
-		for i := range deps.Items {
-			d := &deps.Items[i]
-			name := appKey(d)
-			if name == "" {
-				continue
-			}
-			la := apps[name]
-			if la == nil {
-				la = &liveApp{}
-				apps[name] = la
-			}
-			la.desired += desiredReplicas(d)
-			la.ready += d.Status.ReadyReplicas
-			if la.image == "" {
-				la.image = primaryImage(d)
-			}
+		var envID uuid.UUID
+		if id, ok := envByNs[d.Namespace]; ok {
+			envID = id // deployment sits in its env's namespace (normal case)
+		} else if ids := appEnvs[app]; len(ids) == 1 {
+			envID = ids[0] // namespace override, unambiguous app name
+		} else {
+			continue // not an app namespace, and name absent/ambiguous → skip
 		}
-
-		for name, la := range apps {
-			phase := livePhase(la)
-			patch, _ := json.Marshal(map[string]any{
-				"status":      phase,
-				"image":       la.image,
-				"replicas":    la.desired,
-				"ready":       la.ready,
-				"live_source": "k8s",
-				"live_at":     time.Now().UTC().Format(time.RFC3339),
-			})
-			n, err := db.UpdateAppLiveStatus(ctx, r.pool, env.EnvID, name, phase, patch)
-			if err != nil {
-				log.Error().Err(err).Str("app", name).Str("namespace", env.Namespace).Msg("status-reconciler: update snapshot")
-				continue
-			}
-			updated += int(n)
+		k := snapKey{envID, app}
+		la := agg[k]
+		if la == nil {
+			la = &liveApp{}
+			agg[k] = la
 		}
+		la.desired += desiredReplicas(d)
+		la.ready += d.Status.ReadyReplicas
+		if la.image == "" {
+			la.image = primaryImage(d)
+		}
+	}
+
+	updated := 0
+	for k, la := range agg {
+		phase := livePhase(la)
+		patch, _ := json.Marshal(map[string]any{
+			"status":      phase,
+			"image":       la.image,
+			"replicas":    la.desired,
+			"ready":       la.ready,
+			"live_source": "k8s",
+			"live_at":     time.Now().UTC().Format(time.RFC3339),
+		})
+		n, err := db.UpdateAppLiveStatus(ctx, r.pool, k.env, k.app, phase, patch)
+		if err != nil {
+			log.Error().Err(err).Str("app", k.app).Msg("status-reconciler: update snapshot")
+			continue
+		}
+		updated += int(n)
 	}
 	if updated > 0 {
 		log.Debug().Int("updated", updated).Msg("status-reconciler: synced app statuses")
