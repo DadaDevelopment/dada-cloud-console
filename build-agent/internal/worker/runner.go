@@ -163,11 +163,13 @@ func (r *Runner) run(ctx context.Context, b *db.Build) {
 
 	if out.imageURI != "" {
 		// Web → deploy handoff (the ONLY re-entry into the declarative path).
-		opID, herr := db.HandoffDeploy(ctx, r.pool, b, repo.ProjectID, out.imageURI)
+		// First build of a not-yet-existing app enqueues CreateApp; later builds
+		// enqueue DeployImageVersion. No placeholder image is ever deployed.
+		opID, herr := db.HandoffDeploy(ctx, r.pool, b, repo, out.imageURI)
 		if herr != nil {
 			llog.Error().Err(herr).Msg("deploy handoff failed (build succeeded, deploy not enqueued)")
 		} else {
-			llog.Info().Str("operation", opID.String()).Msg("DeployImageVersion enqueued")
+			llog.Info().Str("operation", opID.String()).Msg("deploy operation enqueued")
 		}
 	} else {
 		// Android → record artifacts; no deploy.

@@ -1,0 +1,21 @@
+{{- if .Values.buildAgent.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "dada-cloud-console.fullname" . }}-build-agent
+  labels:
+    {{- include "dada-cloud-console.labels" . | nindent 4 }}
+    app.kubernetes.io/component: build-agent
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "dada-cloud-console.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: build-agent
+  ports:
+    # Serves /healthz, /metrics, /webhook/github (push nudge) and /ws/build
+    # (log stream). The backend reaches the agent here via BUILD_AGENT_URL; the
+    # public webhook is routed in through the ingress (see runbook).
+    - name: webhook
+      port: {{ .Values.buildAgent.webhookPort }}
+      targetPort: webhook
+{{- end }}

@@ -1,3 +1,44 @@
+# 2026-06-23 Git as the primary app-create path (repo → Application)
+
+Reposition GitHub integration: not a buried "Git & Builds" tab but the primary way
+to create an Application (repo → build → image → cluster, under the hood).
+User constraint: **no temporary/placeholder images; do not create the App until a
+real image exists** — the App is materialized by its FIRST successful build.
+
+- [x] Backend: `HandoffDeploy` branches — App absent → `CreateApp` (real image +
+      stored port/replicas/profile); App exists → `DeployImageVersion`. No placeholder.
+- [x] Migration 023: `git_repos` += port/replicas/profile (intended app spec, applied
+      by the first build). build-agent `Repo`/`repoSelect`/`scanRepo` carry them.
+- [x] Backend `ConnectGitRepo`: accept+validate+store port/replicas/profile; a repo
+      can be linked before any App exists (it already had no FK to apps).
+- [x] Frontend wizard (`git/import`): dropped the "pick existing app" requirement and
+      the placeholder path — now app-name (defaulted from repo) + port + profile, with
+      "created on first successful build" copy.
+- [x] Frontend reposition: Applications page leads with **Deploy from Git** (primary),
+      manual image is secondary; empty-state + git overview copy updated; nav
+      "Git & Builds" → "Builds" (management surface, not the entry point).
+- [x] Enablement: build-agent Helm chart (Deployment/Service/Secret), `buildAgent`
+      values block (disabled by default), backend auto-wiring of `BUILD_AGENT_URL` /
+      `BUILD_AGENT_WS_URL` / shared `BUILD_AGENT_TOKEN_SECRET`.
+- [x] Runbook `docs/runbooks/build-agent-enable.md` — exact go-live steps + the honest
+      gap (agent's `/github/install|installations/:id/{repos,detect}` HTTP endpoints
+      are not implemented yet; only webhook→build→deploy is wired).
+
+## Review
+The product change is complete and verified at the code level. "Connecting a repo"
+no longer requires or creates an app up-front and never deploys a placeholder; the
+first successful build creates the app (`CreateApp`) with the real image, later
+builds roll it (`DeployImageVersion`) — reusing the existing gitops/Argo rails
+unchanged. UI now presents git as the primary Add-Application path.
+- **Verification:** build-agent + backend `go build`/`go vet`/`go test` green;
+  frontend `tsc` clean, `eslint` clean (node20), `next build` success; `helm lint`
+  clean + `helm template` renders correctly with buildAgent on and off.
+- **Not done (needs infra/decision):** live end-to-end (needs GitHub App + Jenkins +
+  Nexus) and the build-agent connect-repo HTTP endpoints (install/list/detect) —
+  documented in the runbook as the next build-agent task.
+
+---
+
 # 2026-06-11 Reflective MCP Server
 
 Design: `tasks/mcp-server-design.md`. Shippable milestones, lowest-risk first.

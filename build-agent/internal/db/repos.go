@@ -29,6 +29,12 @@ type Repo struct {
 	FrameworkOverride string
 	AutoDeploy        bool
 
+	// Intended app spec, applied when the FIRST successful build creates the app
+	// (CreateApp). Ignored once the app exists (deploys then use DeployImageVersion).
+	Port     int
+	Replicas int
+	Profile  string
+
 	// GitHub App installation (numeric id from git_app_installations).
 	InstallationID int64
 }
@@ -38,6 +44,7 @@ const repoSelect = `
 	       r.provider, r.repo_full_name, r.clone_url, r.token_encrypted,
 	       COALESCE(r.webhook_secret, ''), r.production_branch, r.root_dir,
 	       COALESCE(r.framework_override, ''), r.auto_deploy,
+	       r.port, r.replicas, r.profile,
 	       COALESCE(i.installation_id, 0)
 	FROM   git_repos r
 	JOIN   projects p     ON p.id = r.project_id
@@ -51,7 +58,8 @@ func scanRepo(row pgx.Row) (*Repo, error) {
 		&rp.ID, &rp.ProjectID, &rp.ProjectSlug, &rp.EnvironmentID, &rp.Namespace, &rp.AppName,
 		&rp.Provider, &rp.RepoFullName, &rp.CloneURL, &rp.TokenEncrypted,
 		&rp.WebhookSecret, &rp.ProductionBranch, &rp.RootDir,
-		&rp.FrameworkOverride, &rp.AutoDeploy, &rp.InstallationID,
+		&rp.FrameworkOverride, &rp.AutoDeploy,
+		&rp.Port, &rp.Replicas, &rp.Profile, &rp.InstallationID,
 	); err != nil {
 		return nil, err
 	}

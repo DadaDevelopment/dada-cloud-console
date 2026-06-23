@@ -21,3 +21,13 @@ data:
   GITOPS_AGENT_WS_URL: {{ printf "wss://%s" .Values.ingress.host | quote }}
   {{- end }}
   {{- end }}
+  {{- /* Wire the backend to the build-agent. Empty BUILD_AGENT_URL → backend
+         returns 503 "git integration not configured" on every git endpoint. */}}
+  {{- if .Values.buildAgent.enabled }}
+  {{- if not (hasKey .Values.backend.env "BUILD_AGENT_URL") }}
+  BUILD_AGENT_URL: {{ printf "http://%s-build-agent:%v" (include "dada-cloud-console.fullname" .) .Values.buildAgent.webhookPort | quote }}
+  {{- end }}
+  {{- if and .Values.ingress.enabled (not (hasKey .Values.backend.env "BUILD_AGENT_WS_URL")) }}
+  BUILD_AGENT_WS_URL: {{ printf "wss://%s" .Values.ingress.host | quote }}
+  {{- end }}
+  {{- end }}

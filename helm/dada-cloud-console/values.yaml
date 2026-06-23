@@ -23,6 +23,9 @@ global:
     # File-editor WebSocket HMAC secret: backend signs, gitops-agent verifies.
     # Generate once: openssl rand -hex 32
     valuesTokenSecret: "change-me"
+    # Build-log WebSocket HMAC secret: backend mints log-stream tokens, build-agent
+    # verifies. Must be identical on both. Generate once: openssl rand -hex 32
+    buildAgentTokenSecret: "change-me"
     # In-cluster Portainer: backend live-state proxy (read-only) + portainer-agent control.
     portainerUrl: "http://portainer.portainer.svc.cluster.local:9000"
     portainerApiToken: "change-me"
@@ -136,6 +139,58 @@ gitopsAgent:
     limits:
       cpu: 250m
       memory: 256Mi
+
+# buildAgent turns a git push into a running app: webhook → build (Jenkins) →
+# image (Nexus) → DeployImageVersion/CreateApp handoff → existing gitops rails.
+# It is the engine behind the "Deploy from Git" flow in the console.
+#
+# DISABLED BY DEFAULT. Enabling the Deployment is necessary but NOT sufficient —
+# the connect-repo flow also needs (see docs/runbooks/build-agent-enable.md):
+#   1. A registered GitHub App (BUILD_GITHUB_APP_ID/KEY/WEBHOOK_SECRET).
+#   2. A reachable Jenkins job + Nexus registry creds.
+#   3. The agent's /github/install + /github/installations/:id/{repos,detect}
+#      HTTP endpoints (install/list/detect are NOT implemented yet — only the
+#      webhook→build→deploy path is). Until then the wizard's repo-listing steps
+#      will fail even with the agent deployed.
+# GITOPS_ENCRYPTION_KEY MUST equal gitopsAgent.secret.GITOPS_ENCRYPTION_KEY.
+buildAgent:
+  enabled: false
+  image:
+    repository: dada-cloud-console-build-agent
+    tag: "latest"
+    pullPolicy: IfNotPresent
+  # HTTP port: /healthz, /metrics, /webhook/github, /ws/build.
+  webhookPort: 8091
+  env:
+    BUILD_POLL_INTERVAL: "5s"
+    BUILD_TIMEOUT: "20m"
+    BUILD_MAX_CONCURRENT: "4"
+    BUILD_LOG_DB_RETENTION: "168h"
+    JENKINS_JOB: "dada-build"
+  existingSecret: ""
+  # Service-unique secrets. DATABASE_URL + BUILD_AGENT_TOKEN_SECRET come from
+  # global.shared via the build-agent Secret template.
+  secret:
+    JENKINS_URL: ""
+    JENKINS_USER: ""
+    JENKINS_TOKEN: "change-me"
+    NEXUS_DOCKER_HOST: ""
+    NEXUS_RAW_URL: ""
+    NEXUS_USER: ""
+    NEXUS_TOKEN: "change-me"
+    # GitHub App (register once; see runbook). APP_KEY is the PEM private key.
+    BUILD_GITHUB_APP_ID: ""
+    BUILD_GITHUB_APP_KEY: ""
+    BUILD_GITHUB_WEBHOOK_SECRET: "change-me"
+    # Shared AES-GCM key — must equal gitopsAgent.secret.GITOPS_ENCRYPTION_KEY.
+    GITOPS_ENCRYPTION_KEY: "change-me-32-byte-hex-encoded-key"
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
 
 # portainerAgent is the control-plane worker that provisions/connects VMs,
 # SSH-installs the Portainer Edge Agent, registers edge endpoints in the

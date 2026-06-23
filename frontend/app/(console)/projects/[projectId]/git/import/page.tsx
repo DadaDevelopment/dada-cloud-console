@@ -2,14 +2,25 @@
 import { useCallback, useEffect, useState, FormEvent } from "react";
 import { useParams, useSearchParams, useRouter } from "next/navigation";
 import Link from "next/link";
-import { appsApi, gitApi } from "@/lib/api";
-import type { GitInstallation, GitRemoteRepo, FrameworkDetection, ResourceSnapshot } from "@/lib/types";
+import { gitApi } from "@/lib/api";
+import type { GitInstallation, GitRemoteRepo, FrameworkDetection } from "@/lib/types";
 import { Spinner } from "@/components/ui/spinner";
 import { Breadcrumb } from "@/components/ui/breadcrumb";
 import { useProjectContext } from "@/lib/project-context";
 import { canMutate } from "@/lib/rbac";
 
 type Step = 1 | 2 | 3;
+
+// toKubeName coerces a repo name into a valid k8s resource name: lowercase,
+// non-alnum → '-', collapsed, trimmed of leading/trailing '-'.
+function toKubeName(s: string): string {
+  return s
+    .toLowerCase()
+    .replace(/[^a-z0-9-]+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "")
+    .slice(0, 63);
+}
 
 export default function GitImportPage() {
   const params = useParams<{ projectId: string }>();
@@ -35,9 +46,11 @@ export default function GitImportPage() {
   const [reposUnavailable, setReposUnavailable] = useState(false);
   const [selectedRepo, setSelectedRepo] = useState<GitRemoteRepo | null>(null);
 
-  // Step 3 — configure
-  const [apps, setApps] = useState<ResourceSnapshot[]>([]);
+  // Step 3 — configure. The app is NOT created here — it is materialized by the
+  // first successful build. We only capture its name + intended spec.
   const [appName, setAppName] = useState("");
+  const [port, setPort] = useState(8080);
+  const [profile, setProfile] = useState("small");
   const [branch, setBranch] = useState("");
   const [rootDir, setRootDir] = useState(".");
   const [autoDeploy, setAutoDeploy] = useState(true);
@@ -71,7 +84,14 @@ export default function GitImportPage() {
       const { url } = await gitApi.installUrl(projectId, provider);
       window.location.href = url;
     } catch (err) {
-      setInstallError(err instanceof Error ? err.message : "Failed to start install");
+      // 503 → build-agent not deployed. Friendly copy instead of the raw
+      // "git integration not configured".
+      const msg = err instanceof Error ? err.message : "Failed to start install";
+      setInstallError(
+        /503|unavailable|not configured/i.test(msg)
+          ? "Git integration isn't available yet — the build subsystem (build-agent) is not deployed in this environment."
+          : msg
+      );
     }
   }
 
@@ -123,16 +143,10 @@ export default function GitImportPage() {
     setSelectedRepo(repo);
     setBranch(repo.default_branch || "main");
     setRootDir(".");
+    // Default the app name from the repo name (kube-sanitized). The app itself is
+    // created by the first successful build, not now.
+    setAppName(toKubeName(repo.full_name.split("/").pop() || ""));
     setStep(3);
-    // Load apps to bind the repo to + kick off framework detection.
-    appsApi
-      .list(projectId, envId)
-      .then((d) => {
-        const list = d.apps ?? [];
-        setApps(list);
-        if (list.length === 1) setAppName(list[0].name);
-      })
-      .catch(() => setApps([]));
     void runDetect(repo, ".");
   }
 
@@ -150,6 +164,8 @@ export default function GitImportPage() {
         root_dir: rootDir || ".",
         framework_override: frameworkOverride || undefined,
         auto_deploy: autoDeploy,
+        port,
+        profile,
       });
       router.push(`/projects/${projectId}/git${envId ? `?envId=${envId}` : ""}`);
     } catch (err) {
@@ -176,7 +192,7 @@ export default function GitImportPage() {
           items={[
             { label: "Projects", href: "/projects" },
             { label: project?.display_name ?? "Overview", href: `/projects/${projectId}` },
-            { label: "Git & Builds", href: `/projects/${projectId}/git` },
+            { label: "Builds", href: `/projects/${projectId}/git` },
             { label: "Import" },
           ]}
         />
@@ -193,7 +209,7 @@ export default function GitImportPage() {
         items={[
           { label: "Projects", href: "/projects" },
           { label: project?.display_name ?? "Overview", href: `/projects/${projectId}` },
-          { label: "Git & Builds", href: `/projects/${projectId}/git${envId ? `?envId=${envId}` : ""}` },
+          { label: "Builds", href: `/projects/${projectId}/git${envId ? `?envId=${envId}` : ""}` },
           { label: "Import" },
         ]}
       />
@@ -358,30 +374,48 @@ export default function GitImportPage() {
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700">Target application</label>
-            {apps.length === 0 ? (
-              <p className="mt-1 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-                No apps in this environment.{" "}
-                <Link href={`/projects/${projectId}/apps`} className="font-medium underline">
-                  Create one first
-                </Link>{" "}
-                — the repo&apos;s builds deploy into an existing app.
-              </p>
-            ) : (
-              <select
+            <label className="block text-sm font-medium text-gray-700">
+              Application name <span className="font-normal text-gray-400">(Kubernetes resource name)</span>
+            </label>
+            <input
+              type="text"
+              required
+              value={appName}
+              onChange={(e) => setAppName(toKubeName(e.target.value))}
+              placeholder="my-service"
+              pattern="[a-z0-9-]+"
+              className="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm font-mono text-gray-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+            />
+            <p className="mt-1 text-xs text-gray-400">
+              The app is created automatically by the first successful build — no placeholder is deployed.
+            </p>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-sm font-medium text-gray-700">Port</label>
+              <input
+                type="number"
                 required
-                value={appName}
-                onChange={(e) => setAppName(e.target.value)}
+                min={1}
+                max={65535}
+                value={port}
+                onChange={(e) => setPort(parseInt(e.target.value, 10) || 8080)}
+                className="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700">Profile</label>
+              <select
+                value={profile}
+                onChange={(e) => setProfile(e.target.value)}
                 className="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
               >
-                <option value="">Select an app…</option>
-                {apps.map((a) => (
-                  <option key={a.id} value={a.name}>
-                    {a.name}
-                  </option>
-                ))}
+                <option value="small">small</option>
+                <option value="medium">medium</option>
+                <option value="large">large</option>
               </select>
-            )}
+            </div>
           </div>
 
           <div className="grid grid-cols-2 gap-3">

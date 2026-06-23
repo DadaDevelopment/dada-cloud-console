@@ -22,18 +22,38 @@ type deployImageVersionPayload struct {
 	Image   string `json:"image"`
 }
 
+// createAppPayload mirrors backend models.CreateAppPayload (k8s fields only — git
+// builds target Helm environments). Used when a git-linked app does not exist yet
+// and its first successful build must materialize it.
+type createAppPayload struct {
+	Name     string `json:"name"`
+	Image    string `json:"image"`
+	Port     int    `json:"port"`
+	Replicas int    `json:"replicas,omitempty"`
+	Profile  string `json:"profile,omitempty"`
+}
+
 // HandoffDeploy is the success-path deploy handoff (plan §4, invariant 2). It is
 // the ONLY way build-agent re-enters the declarative path: it writes a
-// deployments row + a DeployImageVersion operation, then links them. It NEVER
-// touches Argo/Helm/k8s workloads — the existing gitops rails take it from here.
+// deployments row + an operation, then links them. It NEVER touches
+// Argo/Helm/k8s workloads — the existing gitops rails take it from here.
+//
+// The app is materialized by its FIRST successful build: if no App snapshot
+// exists for (env, app_name) yet, enqueue CreateApp with the real image + the
+// repo's intended spec (port/replicas/profile). Once the app exists, enqueue
+// DeployImageVersion. No placeholder image is ever deployed.
+//
+// Supersession (runner.supersede) cancels older in-flight builds on the same
+// repo+branch, so two concurrent first-builds racing to CreateApp the same name
+// is not a practical concern.
 //
 // Steps (single tx so a crash never leaves a dangling deployment):
 //  1. INSERT deployments (not yet current — the op-Ready watcher flips is_current).
-//  2. INSERT operations (DeployImageVersion, status=Created, actor=system).
+//  2. INSERT operations (CreateApp or DeployImageVersion, status=Created, actor=system).
 //  3. UPDATE deployments.operation_id = <op id>.
 //
 // Returns the new operation id.
-func HandoffDeploy(ctx context.Context, pool *pgxpool.Pool, b *Build, projectID uuid.UUID, imageURI string) (uuid.UUID, error) {
+func HandoffDeploy(ctx context.Context, pool *pgxpool.Pool, b *Build, repo *Repo, imageURI string) (uuid.UUID, error) {
 	tx, err := pool.Begin(ctx)
 	if err != nil {
 		return uuid.Nil, fmt.Errorf("begin deploy tx: %w", err)
@@ -56,17 +76,42 @@ func HandoffDeploy(ctx context.Context, pool *pgxpool.Pool, b *Build, projectID 
 		return uuid.Nil, fmt.Errorf("insert deployment: %w", err)
 	}
 
-	payload, err := json.Marshal(deployImageVersionPayload{AppName: b.AppName, Image: imageURI})
+	// Does the app already exist in this environment?
+	var appExists bool
+	if err := tx.QueryRow(ctx, `
+		SELECT EXISTS(
+			SELECT 1 FROM resource_snapshots
+			WHERE environment_id = $1 AND kind = 'App' AND name = $2
+		)
+	`, b.EnvironmentID, b.AppName).Scan(&appExists); err != nil {
+		return uuid.Nil, fmt.Errorf("check app existence: %w", err)
+	}
+
+	var action string
+	var payload []byte
+	if appExists {
+		action = "DeployImageVersion"
+		payload, err = json.Marshal(deployImageVersionPayload{AppName: b.AppName, Image: imageURI})
+	} else {
+		action = "CreateApp"
+		payload, err = json.Marshal(createAppPayload{
+			Name:     b.AppName,
+			Image:    imageURI,
+			Port:     repo.Port,
+			Replicas: repo.Replicas,
+			Profile:  repo.Profile,
+		})
+	}
 	if err != nil {
-		return uuid.Nil, fmt.Errorf("marshal deploy payload: %w", err)
+		return uuid.Nil, fmt.Errorf("marshal %s payload: %w", action, err)
 	}
 
 	var opID uuid.UUID
 	if err := tx.QueryRow(ctx, `
 		INSERT INTO operations (actor_id, project_id, environment_id, action, resource_kind, resource_name, status, payload)
-		VALUES ($1, $2, $3, 'DeployImageVersion', 'App', $4, 'Created', $5)
+		VALUES ($1, $2, $3, $4, 'App', $5, 'Created', $6)
 		RETURNING id
-	`, SystemUserID, projectID, b.EnvironmentID, b.AppName, payload).Scan(&opID); err != nil {
+	`, SystemUserID, repo.ProjectID, b.EnvironmentID, action, b.AppName, payload).Scan(&opID); err != nil {
 		return uuid.Nil, fmt.Errorf("insert operation: %w", err)
 	}
 
@@ -75,11 +120,10 @@ func HandoffDeploy(ctx context.Context, pool *pgxpool.Pool, b *Build, projectID 
 	}
 
 	// Best-effort audit (matches backend deployments.go).
-	auditMeta, _ := json.Marshal(deployImageVersionPayload{AppName: b.AppName, Image: imageURI})
 	_, _ = tx.Exec(ctx, `
 		INSERT INTO audit_events (actor_id, project_id, operation_id, action, resource_kind, resource_name, metadata)
-		VALUES ($1, $2, $3, 'DeployImageVersion', 'App', $4, $5)
-	`, SystemUserID, projectID, opID, b.AppName, auditMeta)
+		VALUES ($1, $2, $3, $4, 'App', $5, $6)
+	`, SystemUserID, repo.ProjectID, opID, action, b.AppName, payload)
 
 	if err := tx.Commit(ctx); err != nil {
 		return uuid.Nil, fmt.Errorf("commit deploy: %w", err)

@@ -1,0 +1,59 @@
+{{- if .Values.buildAgent.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "dada-cloud-console.fullname" . }}-build-agent
+  labels:
+    {{- include "dada-cloud-console.labels" . | nindent 4 }}
+    app.kubernetes.io/component: build-agent
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "dada-cloud-console.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: build-agent
+  template:
+    metadata:
+      labels:
+        {{- include "dada-cloud-console.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: build-agent
+    spec:
+      serviceAccountName: {{ include "dada-cloud-console.fullname" . }}
+      {{- with .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: build-agent
+          image: "{{ .Values.global.imageRegistry }}/{{ .Values.buildAgent.image.repository }}:{{ .Values.buildAgent.image.tag }}"
+          imagePullPolicy: {{ .Values.buildAgent.image.pullPolicy }}
+          ports:
+            - name: webhook
+              containerPort: {{ .Values.buildAgent.webhookPort }}
+          envFrom:
+            - secretRef:
+                name: {{ default (printf "%s-build-agent" (include "dada-cloud-console.fullname" .)) .Values.buildAgent.existingSecret }}
+          env:
+            - name: BUILD_WEBHOOK_PORT
+              value: {{ .Values.buildAgent.webhookPort | quote }}
+            {{- range $key, $value := .Values.buildAgent.env }}
+            - name: {{ $key }}
+              value: {{ $value | quote }}
+            {{- end }}
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: {{ .Values.buildAgent.webhookPort }}
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: {{ .Values.buildAgent.webhookPort }}
+            initialDelaySeconds: 30
+            periodSeconds: 20
+          resources:
+            {{- toYaml .Values.buildAgent.resources | nindent 12 }}
+{{- end }}

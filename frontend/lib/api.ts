@@ -476,6 +476,9 @@ export const gitApi = {
       root_dir: string;
       framework_override?: string;
       auto_deploy: boolean;
+      port?: number;
+      replicas?: number;
+      profile?: string;
     }
   ) =>
     apiFetch<GitReposResponse>(
@@ -591,13 +594,16 @@ export const monitoringApi = {
   base: (projectId: string, envId: string) =>
     `/api/v1/projects/${projectId}/environments/${envId}/monitoring`,
 
-  list: (projectId: string, envId: string) =>
-    apiFetch<{ apps: MonitoringApp[] }>(
-      `/api/v1/projects/${projectId}/environments/${envId}/monitoring`
+  // List is project-wide (all envs). Backend route has NO envId segment and
+  // returns { monitoring_apps }. See backend router.go:223 + monitoring.go:283.
+  list: (projectId: string) =>
+    apiFetch<{ monitoring_apps: MonitoringApp[] }>(
+      `/api/v1/projects/${projectId}/monitoring`
     ),
 
+  // Create is env-scoped; backend returns { monitoring_app, api_key }.
   create: (projectId: string, envId: string, name: string) =>
-    apiFetch<{ app: MonitoringApp; api_key: string }>(
+    apiFetch<{ monitoring_app: MonitoringApp; api_key: string }>(
       `/api/v1/projects/${projectId}/environments/${envId}/monitoring`,
       { method: "POST", body: { name } }
     ),

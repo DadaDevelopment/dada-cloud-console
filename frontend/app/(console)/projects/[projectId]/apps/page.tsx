@@ -116,16 +116,31 @@ export default function AppsPage() {
           <p className="mt-0.5 text-sm text-gray-500">Managed application workloads</p>
         </div>
         {canCreate && (
-        <button
-          onClick={() => setIsModalOpen(true)}
-          disabled={!selectedEnvId || isVMEnvironment}
-          className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50 transition-colors"
-        >
-          <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-          </svg>
-          Create App
-        </button>
+        <div className="flex items-center gap-2">
+          {/* Primary path: repo → build → app. Git deploys target Helm (k8s) envs. */}
+          <Link
+            href={`/projects/${projectId}/git/import${selectedEnvId ? `?envId=${selectedEnvId}` : ""}`}
+            aria-disabled={!selectedEnvId || isVMEnvironment}
+            className={`inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-colors ${
+              !selectedEnvId || isVMEnvironment
+                ? "pointer-events-none cursor-not-allowed opacity-50"
+                : "hover:bg-blue-700"
+            }`}
+          >
+            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.568 3H5.25A2.25 2.25 0 003 5.25v4.318c0 .597.237 1.17.659 1.591l9.581 9.581c.699.699 1.78.872 2.607.33a18.095 18.095 0 005.223-5.223c.542-.827.369-1.908-.33-2.607L11.16 3.66A2.25 2.25 0 009.568 3z" />
+            </svg>
+            Deploy from Git
+          </Link>
+          {/* Secondary path: deploy a prebuilt image directly. */}
+          <button
+            onClick={() => setIsModalOpen(true)}
+            disabled={!selectedEnvId || isVMEnvironment}
+            className="inline-flex items-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 transition-colors"
+          >
+            Deploy image
+          </button>
+        </div>
         )}
       </div>
 
@@ -155,13 +170,22 @@ export default function AppsPage() {
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M5 12h14M12 5l7 7-7 7" />
           </svg>
           <p className="text-sm font-medium text-gray-500">No applications in {selectedEnv?.name ?? "this environment"}</p>
-          <button
-            onClick={() => setIsModalOpen(true)}
-            disabled={isVMEnvironment}
-            className="mt-4 text-sm text-blue-600 hover:text-blue-700"
-          >
-            {isVMEnvironment ? "VM app deployment is not enabled yet" : "Create your first application →"}
-          </button>
+          {isVMEnvironment ? (
+            <p className="mt-4 text-sm text-gray-400">VM app deployment is not enabled yet</p>
+          ) : (
+            <div className="mt-4 flex items-center gap-3 text-sm">
+              <Link
+                href={`/projects/${projectId}/git/import${selectedEnvId ? `?envId=${selectedEnvId}` : ""}`}
+                className="font-medium text-blue-600 hover:text-blue-700"
+              >
+                Deploy from a Git repo →
+              </Link>
+              <span className="text-gray-300">·</span>
+              <button onClick={() => setIsModalOpen(true)} className="text-gray-500 hover:text-gray-700">
+                or deploy an image
+              </button>
+            </div>
+          )}
         </div>
       ) : (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">

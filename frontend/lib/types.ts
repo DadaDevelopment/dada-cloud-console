@@ -515,6 +515,9 @@ export interface GitRepo {
   root_dir: string;
   framework_override?: string;
   auto_deploy: boolean;
+  port: number;
+  replicas: number;
+  profile: string;
   created_at: string;
   updated_at: string;
 }

@@ -2,7 +2,7 @@
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
-import { appsApi, gitApi } from "@/lib/api";
+import { gitApi } from "@/lib/api";
 import type { GitRepo } from "@/lib/types";
 import { Spinner } from "@/components/ui/spinner";
 import { Breadcrumb } from "@/components/ui/breadcrumb";
@@ -18,7 +18,6 @@ export default function GitPage() {
   const selectedEnvId = selectedEnv?.id ?? "";
 
   const [repos, setRepos] = useState<GitRepo[]>([]);
-  const [appCount, setAppCount] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -31,14 +30,9 @@ export default function GitPage() {
     setIsLoading(true);
     setError(null);
     /* eslint-enable react-hooks/set-state-in-effect */
-    Promise.all([
-      gitApi.listRepos(projectId, selectedEnvId).then((d) => d.repos ?? []).catch(() => [] as GitRepo[]),
-      appsApi.list(projectId, selectedEnvId).then((d) => (d.apps ?? []).length).catch(() => 0),
-    ])
-      .then(([r, count]) => {
-        setRepos(r);
-        setAppCount(count);
-      })
+    gitApi
+      .listRepos(projectId, selectedEnvId)
+      .then((d) => setRepos(d.repos ?? []))
       .catch((err) => setError(err instanceof Error ? err.message : "Failed to load repos"))
       .finally(() => setIsLoading(false));
   }, [projectId, selectedEnvId, isLoadingEnvs]);
@@ -61,11 +55,11 @@ export default function GitPage() {
             items={[
               { label: "Projects", href: "/projects" },
               { label: project?.display_name ?? "Overview", href: `/projects/${projectId}` },
-              { label: "Git & Builds" },
+              { label: "Builds" },
             ]}
           />
-          <h1 className="mt-2 text-2xl font-bold text-gray-900">Git &amp; Builds</h1>
-          <p className="mt-0.5 text-sm text-gray-500">Connect a repository to build &amp; deploy an app from source</p>
+          <h1 className="mt-2 text-2xl font-bold text-gray-900">Builds</h1>
+          <p className="mt-0.5 text-sm text-gray-500">Repositories that build &amp; deploy apps from source on every push</p>
         </div>
         {canConnect && (
           <Link
@@ -94,19 +88,17 @@ export default function GitPage() {
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9.568 3H5.25A2.25 2.25 0 003 5.25v4.318c0 .597.237 1.17.659 1.591l9.581 9.581c.699.699 1.78.872 2.607.33a18.095 18.095 0 005.223-5.223c.542-.827.369-1.908-.33-2.607L11.16 3.66A2.25 2.25 0 009.568 3z" />
           </svg>
           <p className="text-sm font-medium text-gray-500">No repositories connected in {selectedEnv?.name ?? "this environment"}</p>
-          {canConnect && appCount > 0 && (
+          {canConnect && (
             <Link
               href={`/projects/${projectId}/git/import${selectedEnvId ? `?envId=${selectedEnvId}` : ""}`}
               className="mt-4 text-sm text-blue-600 hover:text-blue-700"
             >
-              Import your first repository →
+              Connect your first repository →
             </Link>
           )}
-          {appCount === 0 && (
-            <p className="mt-3 max-w-sm text-center text-xs text-gray-400">
-              Create an application first — a repo is connected to an existing app so its builds can deploy.
-            </p>
-          )}
+          <p className="mt-3 max-w-sm text-center text-xs text-gray-400">
+            Connect a repo and the app is created automatically by its first successful build.
+          </p>
         </div>
       ) : (
         <div className="space-y-3">
