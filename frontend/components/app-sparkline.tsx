@@ -73,21 +73,21 @@ export function AppSparkline({
   const hasData = cpu.length > 0 || mem.length > 0;
 
   const W = 220;
-  const H = 36;
-  const PAD = 3;
+  const H = 20;
+  const PAD = 2;
+
+  if (data && !hasData) return null; // no metrics → no clutter on the card
 
   return (
-    <div className="mt-3 border-t border-gray-100 pt-2">
+    <div className="mt-2 flex items-center gap-2 border-t border-gray-100 pt-1.5">
       {!data ? (
-        <div className="h-[36px] animate-pulse rounded bg-gray-50" />
-      ) : !hasData ? (
-        <p className="text-[11px] text-gray-300">No metrics</p>
+        <div className="h-5 w-full animate-pulse rounded bg-gray-50" />
       ) : (
         <>
           <svg
             viewBox={`0 0 ${W} ${H}`}
             preserveAspectRatio="none"
-            className="h-9 w-full"
+            className="h-5 min-w-0 flex-1"
             aria-label="CPU and memory, last hour (normalized)"
           >
             {mem.length > 0 && (
@@ -95,7 +95,7 @@ export function AppSparkline({
                 points={path(mem, W, H, PAD)}
                 fill="none"
                 stroke={MEM_COLOR}
-                strokeWidth={1.5}
+                strokeWidth={1.25}
                 vectorEffect="non-scaling-stroke"
               />
             )}
@@ -104,20 +104,14 @@ export function AppSparkline({
                 points={path(cpu, W, H, PAD)}
                 fill="none"
                 stroke={CPU_COLOR}
-                strokeWidth={1.5}
+                strokeWidth={1.25}
                 vectorEffect="non-scaling-stroke"
               />
             )}
           </svg>
-          <div className="mt-1 flex items-center gap-3 text-[11px]">
-            <span className="flex items-center gap-1 text-gray-500">
-              <span className="inline-block h-2 w-2 rounded-full" style={{ background: CPU_COLOR }} />
-              CPU {fmtCores(last(cpu))}
-            </span>
-            <span className="flex items-center gap-1 text-gray-500">
-              <span className="inline-block h-2 w-2 rounded-full" style={{ background: MEM_COLOR }} />
-              RAM {fmtBytes(last(mem))}
-            </span>
+          <div className="flex shrink-0 flex-col text-[10px] leading-tight text-gray-400">
+            <span style={{ color: CPU_COLOR }}>{fmtCores(last(cpu))}</span>
+            <span style={{ color: MEM_COLOR }}>{fmtBytes(last(mem))}</span>
           </div>
         </>
       )}
