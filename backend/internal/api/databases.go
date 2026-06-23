@@ -1,8 +1,10 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
+	"time"
 
 	"github.com/dada-tuda/console/backend/internal/auth"
 	"github.com/dada-tuda/console/backend/internal/models"
@@ -87,7 +89,49 @@ func (h *Handler) ListDatabases(c *gin.Context) {
 		databases = []models.ResourceSnapshot{}
 	}
 
+	enrichDatabaseSizes(c.Request.Context(), h, databases)
+
 	c.JSON(http.StatusOK, gin.H{"databases": databases})
+}
+
+// enrichDatabaseSizes injects the live on-disk size of each database (Postgres
+// `pg_database_size_bytes`, keyed by the CR's spec.database == datname) into the
+// snapshot summary as size_bytes. Best-effort: one batched query, silent on any
+// error so the list still renders without sizes.
+func enrichDatabaseSizes(ctx context.Context, h *Handler, dbs []models.ResourceSnapshot) {
+	if h.prometheus == nil || len(dbs) == 0 {
+		return
+	}
+	samples, err := h.prometheus.QueryInstant(ctx, "pg_database_size_bytes", time.Time{})
+	if err != nil {
+		return
+	}
+	sizeByDatname := make(map[string]float64, len(samples))
+	for _, s := range samples {
+		if dn := s.Metric["datname"]; dn != "" {
+			sizeByDatname[dn] = s.Point.V
+		}
+	}
+	for i := range dbs {
+		var summary map[string]any
+		if err := json.Unmarshal(dbs[i].SummaryJSON, &summary); err != nil || summary == nil {
+			continue
+		}
+		spec, ok := summary["spec"].(map[string]any)
+		if !ok {
+			continue
+		}
+		datname, _ := spec["database"].(string)
+		if datname == "" {
+			continue
+		}
+		if size, ok := sizeByDatname[datname]; ok {
+			summary["size_bytes"] = int64(size)
+			if patched, err := json.Marshal(summary); err == nil {
+				dbs[i].SummaryJSON = patched
+			}
+		}
+	}
 }
 
 type createServiceDatabaseRequest struct {

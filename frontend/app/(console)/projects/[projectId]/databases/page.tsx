@@ -21,6 +21,13 @@ interface CreateDbForm {
   backup_retention: string;
 }
 
+function fmtBytes(v: number): string {
+  if (v >= 1 << 30) return `${(v / (1 << 30)).toFixed(1)} GB`;
+  if (v >= 1 << 20) return `${(v / (1 << 20)).toFixed(0)} MB`;
+  if (v >= 1 << 10) return `${(v / (1 << 10)).toFixed(0)} KB`;
+  return `${v} B`;
+}
+
 export default function DatabasesPage() {
   const params = useParams<{ projectId: string }>();
   const projectId = params.projectId;
@@ -155,24 +162,38 @@ export default function DatabasesPage() {
         </div>
       ) : (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {databases.map((db) => (
-            <Link
-              key={db.id}
-              href={`/projects/${projectId}/databases/${db.name}${selectedEnvId ? `?envId=${selectedEnvId}` : ""}`}
-              className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm transition-all hover:border-blue-200 hover:shadow-md"
-            >
-              <div className="mb-3 flex items-start justify-between">
-                <div>
-                  <p className="font-mono text-sm font-semibold text-gray-900">{db.name}</p>
-                  <p className="mt-0.5 text-xs text-gray-400">{db.kind}</p>
+          {databases.map((db) => {
+            const s = (db.summary_json ?? {}) as {
+              size_bytes?: number;
+              backup_last_at?: string;
+              backup_count?: number;
+            };
+            return (
+              <Link
+                key={db.id}
+                href={`/projects/${projectId}/databases/${db.name}${selectedEnvId ? `?envId=${selectedEnvId}` : ""}`}
+                className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm transition-all hover:border-blue-200 hover:shadow-md"
+              >
+                <div className="mb-3 flex items-start justify-between">
+                  <div>
+                    <p className="font-mono text-sm font-semibold text-gray-900">{db.name}</p>
+                    <p className="mt-0.5 text-xs text-gray-400">{db.kind}</p>
+                  </div>
+                  <PhaseBadge phase={db.phase} />
                 </div>
-                <PhaseBadge phase={db.phase} />
-              </div>
-              <p className="text-xs text-gray-400">
-                Synced {timeAgo(db.last_synced_at)}
-              </p>
-            </Link>
-          ))}
+                <div className="flex items-center gap-3 text-xs text-gray-500">
+                  <span>{typeof s.size_bytes === "number" ? fmtBytes(s.size_bytes) : "— size"}</span>
+                  <span className="text-gray-300">·</span>
+                  <span title={s.backup_last_at ?? ""}>
+                    {s.backup_last_at ? `backup ${timeAgo(s.backup_last_at)}` : "no backup"}
+                  </span>
+                </div>
+                <p className="mt-2 text-xs text-gray-400">
+                  Synced {timeAgo(db.last_synced_at)}
+                </p>
+              </Link>
+            );
+          })}
         </div>
       )}
 

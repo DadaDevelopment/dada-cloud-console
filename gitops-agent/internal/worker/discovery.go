@@ -29,6 +29,37 @@ func pgvr(resource string) schema.GroupVersionResource {
 	return schema.GroupVersionResource{Group: "platform.dada-tuda.ru", Version: "v1alpha1", Resource: resource}
 }
 
+// restorePointGVR is the K10 (Kasten) RestorePoint — a completed backup. The
+// shared Postgres lives in the `databases` namespace, so every managed DB shares
+// its backup schedule; the latest restore point is the last successful backup.
+var restorePointGVR = schema.GroupVersionResource{Group: "apps.kio.kasten.io", Version: "v1alpha1", Resource: "restorepoints"}
+
+const databasesNamespace = "databases"
+
+// backupInfo is the shared-instance backup summary attached to every
+// ServiceDatabaseV2 snapshot.
+type backupInfo struct {
+	lastAt string
+	count  int
+}
+
+// latestBackup returns the most recent K10 RestorePoint in the databases
+// namespace and the total count. Best-effort: zero value when K10 is absent.
+func (r *StatusReconciler) latestBackup(ctx context.Context) backupInfo {
+	list, err := r.clients.Dynamic.Resource(restorePointGVR).Namespace(databasesNamespace).List(ctx, metav1.ListOptions{})
+	if err != nil {
+		log.Debug().Err(err).Msg("discovery: list restorepoints (skipped)")
+		return backupInfo{}
+	}
+	info := backupInfo{count: len(list.Items)}
+	for i := range list.Items {
+		if ts := list.Items[i].GetCreationTimestamp(); info.lastAt == "" || ts.Time.Format(time.RFC3339) > info.lastAt {
+			info.lastAt = ts.Time.UTC().Format(time.RFC3339)
+		}
+	}
+	return info
+}
+
 // discoveryKinds are the custom CRDs mirrored into the console. Apps are
 // intentionally excluded — App snapshots are Deployment/git-backed (the apps CR
 // has no instances here). AIModel readiness is additionally refined from the
@@ -66,6 +97,7 @@ func (r *StatusReconciler) discover(ctx context.Context) {
 		return
 	}
 	platform, hasPlatform, _ := db.PlatformTarget(ctx, r.pool)
+	backup := r.latestBackup(ctx) // shared across all managed DBs
 
 	upserted := 0
 	for _, spec := range discoveryKinds {
@@ -90,7 +122,7 @@ func (r *StatusReconciler) discover(ctx context.Context) {
 				continue // unmappable and no platform fallback — skip rather than orphan
 			}
 			phase := crPhase(o)
-			summary, _ := json.Marshal(map[string]any{
+			fields := map[string]any{
 				"status":      phase,
 				"kind":        spec.kind,
 				"name":        name,
@@ -98,7 +130,12 @@ func (r *StatusReconciler) discover(ctx context.Context) {
 				"conditions":  crConditions(o),
 				"live_source": "crd",
 				"live_at":     time.Now().UTC().Format(time.RFC3339),
-			})
+			}
+			if spec.kind == "ServiceDatabaseV2" {
+				fields["backup_last_at"] = backup.lastAt
+				fields["backup_count"] = backup.count
+			}
+			summary, _ := json.Marshal(fields)
 			env := target.EnvID
 			if err := db.UpsertSnapshot(ctx, r.pool, target.ProjectID, &env, spec.kind, name, phase, summary, time.Now()); err != nil {
 				log.Error().Err(err).Str("kind", spec.kind).Str("name", name).Msg("discovery: upsert")

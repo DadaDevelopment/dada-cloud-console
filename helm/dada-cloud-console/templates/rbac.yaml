@@ -32,6 +32,11 @@ rules:
     resources:
       - inferenceservices
     verbs: ["get", "list", "watch"]
+  # Database backup status comes from K10 (Kasten) RestorePoints.
+  - apiGroups: ["apps.kio.kasten.io"]
+    resources:
+      - restorepoints
+    verbs: ["get", "list", "watch"]
   {{- with .Values.rbac.extraRules }}
   {{- toYaml . | nindent 2 }}
   {{- end }}
