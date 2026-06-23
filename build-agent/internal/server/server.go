@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -33,6 +34,7 @@ type Server struct {
 	nudger      PushNudger
 	tokenSecret string
 	cfg         *config.Config
+	gh          github.App
 }
 
 // Options carries server dependencies.
@@ -42,6 +44,7 @@ type Options struct {
 	Nudger      PushNudger
 	TokenSecret string
 	Config      *config.Config
+	GitHub      github.App
 }
 
 // New constructs a Server.
@@ -53,6 +56,7 @@ func New(addr string, opts *Options) *Server {
 		s.nudger = opts.Nudger
 		s.tokenSecret = opts.TokenSecret
 		s.cfg = opts.Config
+		s.gh = opts.GitHub
 	}
 	return s
 }
@@ -66,6 +70,16 @@ func (s *Server) Start(ctx context.Context) error {
 	})
 	mux.Handle("/metrics", metrics.Handler())
 	mux.HandleFunc("/webhook/github", s.githubWebhook)
+
+	// Connect-repo flow (called server-to-server by the console backend, which
+	// resolves the installation UUID → numeric id and proxies here).
+	if s.gh != nil {
+		mux.HandleFunc("GET /github/installations/{id}/repos", s.handleInstallationRepos)
+	}
+	// Framework detection is best-effort here (no clone in the agent process — a
+	// clone-based Nixpacks detect belongs in the build Job). Always 200 so the
+	// wizard falls back to manual framework selection rather than erroring.
+	mux.HandleFunc("GET /github/installations/{id}/detect", s.handleDetect)
 
 	if s.hub != nil && s.tokenSecret != "" {
 		mux.HandleFunc("/ws/build", s.handleBuildWS)
@@ -170,6 +184,46 @@ func (s *Server) githubWebhook(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.WriteHeader(http.StatusOK)
+}
+
+// handleInstallationRepos lists the repos visible to a GitHub App installation.
+// GET /github/installations/{id}/repos → {"repos": [...]}.
+func (s *Server) handleInstallationRepos(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil {
+		http.Error(w, "bad installation id", http.StatusBadRequest)
+		return
+	}
+	repos, err := s.gh.ListRepos(r.Context(), id)
+	if err != nil {
+		log.Error().Err(err).Int64("installation", id).Msg("list installation repos")
+		http.Error(w, "failed to list repositories", http.StatusBadGateway)
+		return
+	}
+	if repos == nil {
+		repos = []github.RemoteRepo{}
+	}
+	writeJSON(w, map[string]any{"repos": repos})
+}
+
+// frameworkDetection mirrors the backend/frontend FrameworkDetection shape.
+type frameworkDetection struct {
+	Framework      *string `json:"framework"`
+	BuildCommand   *string `json:"build_command"`
+	InstallCommand *string `json:"install_command"`
+	OutputDir      *string `json:"output_dir"`
+}
+
+// handleDetect returns a best-effort framework detection. Real Nixpacks
+// detection requires cloning the repo, which is deferred to the build Job; here
+// we return an all-null result so the wizard prompts for manual selection.
+func (s *Server) handleDetect(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, frameworkDetection{})
+}
+
+func writeJSON(w http.ResponseWriter, v any) {
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(v)
 }
 
 // verifyWebhook checks the HMAC against the per-repo secret when set, falling

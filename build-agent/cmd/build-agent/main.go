@@ -8,6 +8,7 @@ import (
 
 	"github.com/dada-tuda/console/build-agent/internal/config"
 	"github.com/dada-tuda/console/build-agent/internal/db"
+	"github.com/dada-tuda/console/build-agent/internal/github"
 	"github.com/dada-tuda/console/build-agent/internal/server"
 	"github.com/dada-tuda/console/build-agent/internal/worker"
 	"github.com/rs/zerolog"
@@ -48,6 +49,7 @@ func main() {
 			Nudger:      runner,
 			TokenSecret: cfg.TokenSecret,
 			Config:      cfg,
+			GitHub:      github.New(cfg.GitHubAppID, cfg.GitHubAppKey),
 		})
 		go func() {
 			if err := srv.Start(ctx); err != nil {

@@ -53,22 +53,36 @@ The runner (`build-agent/internal/worker/runner.go`) drives a Jenkins job
 image by digest. The Jenkins pipeline must emit the contract marker
 `==> image: <host>/<proj>/<app>@sha256:<digest>`.
 
-## KNOWN GAP — connect-repo HTTP endpoints are not implemented yet
+## Connect-repo HTTP endpoints — partial
 
-The build-agent HTTP server (`build-agent/internal/server/server.go`) currently
-serves only `/healthz`, `/metrics`, `/webhook/github`, `/ws/build`.
+`build-agent/internal/server/server.go` now serves the two server-to-server
+endpoints the console backend calls during the wizard:
+- `GET /github/installations/{id}/repos` → `github.App.ListRepos` (real listing).
+- `GET /github/installations/{id}/detect` → best-effort, returns an all-null
+  `FrameworkDetection` (real Nixpacks detection needs a clone and belongs in the
+  build Job; the wizard falls back to manual framework selection).
 
-The backend's connect-repo flow calls endpoints the agent does **not** yet serve:
-- `GET /github/install` (install landing/redirect) — backend `gitrepos.go:GetGitInstallURL`
-- `GET /github/installations/:id/repos` — `buildagent.ListInstallationRepos`
-- `GET /github/installations/:id/detect` — `buildagent.DetectFramework`
+So once a `git_app_installations` row exists, the wizard's pick-repo step works.
 
-So with the agent deployed, the **webhook → build → deploy** path works, but the
-**connect a repo in the UI** path (list accounts/repos, framework detect) will fail
-until those handlers are added (the building blocks exist: `github/app.go` has
-`ListRepos`/`InstallToken`, and the `detect` package exists — they just aren't wired
-to HTTP routes, and the OAuth install callback that populates
-`git_app_installations` is not implemented). Track as the next build-agent task.
+### STILL MISSING — installing an account (populating git_app_installations)
+- `GetGitInstallURL` (backend) returns `BUILD_AGENT_URL + /github/install?state=`,
+  but `BUILD_AGENT_URL` is the **internal** cluster address — a browser cannot reach
+  it. The install URL must be browser-reachable: either return the GitHub public
+  `https://github.com/apps/<slug>/installations/new?state=<projectId:nonce>` directly
+  (needs the app slug in config), or expose an agent `/github/install` redirect via
+  public ingress.
+- No **install callback** exists to write `git_app_installations` (project_id,
+  provider, installation_id, account_login, account_type) after the user installs the
+  App. GitHub redirects the browser to the App's configured Setup URL with
+  `installation_id` + `state`; that endpoint (public) must persist the row. Deciding
+  where it lives (backend has the DB + is public; build-agent has the App private key
+  to resolve account login via `GET /app/installations/{id}`) is the open design call.
+- Public ingress: GitHub → `/webhook/github` and the install callback both need a
+  public path to the agent (or backend). Add to `ingress.yaml` when wiring go-live.
+
+Until the install/callback path lands, accounts can't be connected from the UI, so
+the repo list has nothing to list. The webhook → build → CreateApp/DeployImageVersion
+path is complete and works once a `git_repos` row exists.
 
 ## Verify after enabling
 - `kubectl get deploy <release>-build-agent` Ready; `/healthz` 200.
