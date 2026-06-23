@@ -2,7 +2,6 @@
 import { useEffect, useState } from "react";
 import { ProjectSwitcher } from "./project-switcher";
 import { OrgSwitcher } from "./org-switcher";
-import { EnvSelector } from "./env-selector";
 import { AccountMenu } from "./account-menu";
 
 /** Detects platform for the ⌘ / Ctrl hint without breaking SSR. */
@@ -54,7 +53,6 @@ export function TopBar({ onOpenPalette }: { onOpenPalette: () => void }) {
       </button>
 
       <div className="ml-auto flex items-center gap-3">
-        <EnvSelector />
         <AccountMenu />
       </div>
     </header>
