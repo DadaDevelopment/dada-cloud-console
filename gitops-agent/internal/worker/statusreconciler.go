@@ -8,14 +8,25 @@ import (
 
 	"github.com/dada-tuda/console/gitops-agent/internal/config"
 	"github.com/dada-tuda/console/gitops-agent/internal/db"
+	dadak8s "github.com/dada-tuda/console/gitops-agent/internal/k8s"
 	appsv1 "k8s.io/api/apps/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/kubernetes"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rs/zerolog/log"
 )
+
+// inferenceServiceGVR is the KServe InferenceService resource — how AIModels run
+// (serverless predictors, often in a dedicated ml-* namespace).
+var inferenceServiceGVR = schema.GroupVersionResource{
+	Group:    "serving.kserve.io",
+	Version:  "v1beta1",
+	Resource: "inferenceservices",
+}
 
 // appLabel is the label every console-managed workload carries; its value is
 // the App snapshot name (e.g. dada.io/app=profi). It's how a live Deployment is
@@ -27,18 +38,19 @@ const appLabel = "dada.io/app"
 // matching App snapshot. Without it, git-synced apps are stuck at phase
 // "Unknown" with no live image/replica data. Read-only against the cluster.
 type StatusReconciler struct {
-	pool   *pgxpool.Pool
-	cfg    *config.Config
-	client kubernetes.Interface
+	pool    *pgxpool.Pool
+	cfg     *config.Config
+	client  kubernetes.Interface
+	clients *dadak8s.Clients
 }
 
-func NewStatusReconciler(pool *pgxpool.Pool, cfg *config.Config, client kubernetes.Interface) *StatusReconciler {
-	return &StatusReconciler{pool: pool, cfg: cfg, client: client}
+func NewStatusReconciler(pool *pgxpool.Pool, cfg *config.Config, clients *dadak8s.Clients) *StatusReconciler {
+	return &StatusReconciler{pool: pool, cfg: cfg, client: clients.Typed, clients: clients}
 }
 
 func (r *StatusReconciler) Start(ctx context.Context) {
 	log.Info().Dur("interval", r.cfg.PollIntervalStatus).Msg("status-reconciler started")
-	r.reconcile(ctx)
+	r.tick(ctx)
 	ticker := time.NewTicker(r.cfg.PollIntervalStatus)
 	defer ticker.Stop()
 	for {
@@ -46,9 +58,91 @@ func (r *StatusReconciler) Start(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			r.reconcile(ctx)
+			r.tick(ctx)
 		}
 	}
+}
+
+func (r *StatusReconciler) tick(ctx context.Context) {
+	r.reconcile(ctx)
+	r.reconcileModels(ctx)
+}
+
+// reconcileModels mirrors KServe InferenceService readiness onto AIModel
+// snapshots. Predictors usually live in a dedicated namespace (ml-prod), not the
+// env namespace, so each is matched to its env by unambiguous snapshot name.
+func (r *StatusReconciler) reconcileModels(ctx context.Context) {
+	modelEnvs, err := db.SnapshotEnvsByKind(ctx, r.pool, "AIModel")
+	if err != nil {
+		log.Error().Err(err).Msg("status-reconciler: list aimodel envs")
+		return
+	}
+	if len(modelEnvs) == 0 {
+		return
+	}
+
+	list, err := r.clients.Dynamic.Resource(inferenceServiceGVR).Namespace("").List(ctx, metav1.ListOptions{})
+	if err != nil {
+		log.Warn().Err(err).Msg("status-reconciler: list inferenceservices")
+		return
+	}
+
+	updated := 0
+	for i := range list.Items {
+		isvc := &list.Items[i]
+		name := isvc.GetName()
+		ids := modelEnvs[name]
+		if len(ids) != 1 {
+			continue // no AIModel snapshot for this name, or ambiguous
+		}
+		phase := isvcPhase(isvc)
+		patch, _ := json.Marshal(map[string]any{
+			"status":      phase,
+			"url":         isvcURL(isvc),
+			"live_source": "kserve",
+			"live_at":     time.Now().UTC().Format(time.RFC3339),
+		})
+		n, err := db.UpdateLiveStatus(ctx, r.pool, ids[0], "AIModel", name, phase, patch)
+		if err != nil {
+			log.Error().Err(err).Str("model", name).Msg("status-reconciler: update aimodel")
+			continue
+		}
+		updated += int(n)
+	}
+	if updated > 0 {
+		log.Debug().Int("updated", updated).Msg("status-reconciler: synced model statuses")
+	}
+}
+
+// isvcPhase reads the InferenceService Ready condition. Serverless models sit at
+// zero replicas yet report Ready=True when their route is provisioned.
+func isvcPhase(o *unstructured.Unstructured) string {
+	conds, found, _ := unstructured.NestedSlice(o.Object, "status", "conditions")
+	if !found {
+		return "Pending"
+	}
+	for _, c := range conds {
+		m, ok := c.(map[string]any)
+		if !ok {
+			continue
+		}
+		if m["type"] == "Ready" {
+			switch m["status"] {
+			case "True":
+				return "Ready"
+			case "False":
+				return "Failed"
+			default:
+				return "Pending"
+			}
+		}
+	}
+	return "Pending"
+}
+
+func isvcURL(o *unstructured.Unstructured) string {
+	url, _, _ := unstructured.NestedString(o.Object, "status", "url")
+	return url
 }
 
 // liveApp aggregates the workload state for one app within a namespace. An app
@@ -133,7 +227,7 @@ func (r *StatusReconciler) reconcile(ctx context.Context) {
 			"live_source": "k8s",
 			"live_at":     time.Now().UTC().Format(time.RFC3339),
 		})
-		n, err := db.UpdateAppLiveStatus(ctx, r.pool, k.env, k.app, phase, patch)
+		n, err := db.UpdateLiveStatus(ctx, r.pool, k.env, "App", k.app, phase, patch)
 		if err != nil {
 			log.Error().Err(err).Str("app", k.app).Msg("status-reconciler: update snapshot")
 			continue

@@ -42,19 +42,24 @@ func ListK8sEnvironments(ctx context.Context, pool *pgxpool.Pool) ([]K8sEnvironm
 	return envs, rows.Err()
 }
 
-// AppSnapshotEnvs maps an App snapshot name to the environment IDs that have a
-// snapshot with that name. Used by the status reconciler to resolve a Deployment
-// living in a namespace-override namespace (App spec.namespace differs from the
-// env namespace, e.g. dada-agent in argocd-prod) back to its owning environment
-// — but only when the name is unambiguous (exactly one env).
+// AppSnapshotEnvs is SnapshotEnvsByKind for kind='App'.
 func AppSnapshotEnvs(ctx context.Context, pool *pgxpool.Pool) (map[string][]uuid.UUID, error) {
+	return SnapshotEnvsByKind(ctx, pool, "App")
+}
+
+// SnapshotEnvsByKind maps a snapshot name (of the given kind) to the environment
+// IDs that have a snapshot with that name. Used by the status reconciler to
+// resolve a workload living in a namespace that isn't its env namespace (e.g.
+// AIModel InferenceServices in ml-prod, or App spec.namespace overrides) back to
+// its owning environment — but only when the name is unambiguous (one env).
+func SnapshotEnvsByKind(ctx context.Context, pool *pgxpool.Pool, kind string) (map[string][]uuid.UUID, error) {
 	rows, err := pool.Query(ctx, `
 		SELECT name, environment_id
 		FROM resource_snapshots
-		WHERE kind = 'App' AND environment_id IS NOT NULL
-	`)
+		WHERE kind = $1 AND environment_id IS NOT NULL
+	`, kind)
 	if err != nil {
-		return nil, fmt.Errorf("list app snapshot envs: %w", err)
+		return nil, fmt.Errorf("list snapshot envs: %w", err)
 	}
 	defer rows.Close()
 

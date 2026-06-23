@@ -30,6 +30,11 @@ rules:
       - deployments
       - statefulsets
     verbs: ["get", "list", "watch"]
+  # AIModel live status comes from KServe InferenceService readiness.
+  - apiGroups: ["serving.kserve.io"]
+    resources:
+      - inferenceservices
+    verbs: ["get", "list", "watch"]
   {{- with .Values.rbac.extraRules }}
   {{- toYaml . | nindent 2 }}
   {{- end }}

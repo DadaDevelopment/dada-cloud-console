@@ -6,21 +6,34 @@ package k8s
 import (
 	"fmt"
 
+	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 )
 
-// NewInClusterClient builds a clientset from the pod's mounted service-account
-// credentials. Returns an error when not running inside a cluster (e.g. local
-// dev), so callers can disable the reconciler gracefully instead of crashing.
-func NewInClusterClient() (*kubernetes.Clientset, error) {
+// Clients bundles the typed (core/apps) and dynamic (CRDs like KServe
+// InferenceService) clients the status reconciler needs.
+type Clients struct {
+	Typed   kubernetes.Interface
+	Dynamic dynamic.Interface
+}
+
+// NewInClusterClients builds typed + dynamic clients from the pod's mounted
+// service-account credentials. Returns an error when not running inside a
+// cluster (e.g. local dev), so callers can disable the reconciler gracefully
+// instead of crashing.
+func NewInClusterClients() (*Clients, error) {
 	cfg, err := rest.InClusterConfig()
 	if err != nil {
 		return nil, fmt.Errorf("in-cluster config: %w", err)
 	}
-	clientset, err := kubernetes.NewForConfig(cfg)
+	typed, err := kubernetes.NewForConfig(cfg)
 	if err != nil {
 		return nil, fmt.Errorf("build clientset: %w", err)
 	}
-	return clientset, nil
+	dyn, err := dynamic.NewForConfig(cfg)
+	if err != nil {
+		return nil, fmt.Errorf("build dynamic client: %w", err)
+	}
+	return &Clients{Typed: typed, Dynamic: dyn}, nil
 }

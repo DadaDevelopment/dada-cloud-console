@@ -58,10 +58,10 @@ func main() {
 	// the console shows real phase/image/replicas instead of git's "Unknown".
 	// Disabled gracefully when there's no in-cluster config (e.g. local dev).
 	if cfg.StatusReconcileEnabled {
-		if client, err := k8s.NewInClusterClient(); err != nil {
+		if clients, err := k8s.NewInClusterClients(); err != nil {
 			log.Warn().Err(err).Msg("status-reconciler disabled: no in-cluster k8s config")
 		} else {
-			go worker.NewStatusReconciler(pool, cfg, client).Start(ctx)
+			go worker.NewStatusReconciler(pool, cfg, clients).Start(ctx)
 		}
 	}
 
