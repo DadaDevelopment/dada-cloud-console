@@ -72,22 +72,22 @@ export function AppSparkline({
   const mem = data?.metrics?.mem_bytes?.series ?? [];
   const hasData = cpu.length > 0 || mem.length > 0;
 
-  const W = 220;
-  const H = 20;
-  const PAD = 2;
+  const W = 64;
+  const H = 40;
+  const PAD = 3;
 
   if (data && !hasData) return null; // no metrics → no clutter on the card
 
   return (
     <div className="mt-2 flex items-center gap-2 border-t border-gray-100 pt-1.5">
       {!data ? (
-        <div className="h-5 w-full animate-pulse rounded bg-gray-50" />
+        <div className="h-10 w-16 animate-pulse rounded bg-gray-50" />
       ) : (
         <>
           <svg
             viewBox={`0 0 ${W} ${H}`}
             preserveAspectRatio="none"
-            className="h-5 min-w-0 flex-1"
+            className="h-10 w-16 shrink-0 rounded bg-gray-50/60"
             aria-label="CPU and memory, last hour (normalized)"
           >
             {mem.length > 0 && (
