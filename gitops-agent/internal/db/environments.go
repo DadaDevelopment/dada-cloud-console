@@ -15,13 +15,14 @@ type K8sEnvironment struct {
 	ProjectID uuid.UUID
 	EnvID     uuid.UUID
 	Namespace string
+	Name      string
 }
 
 // ListK8sEnvironments returns every k8s-runtime environment with a namespace.
 // VM-runtime envs are excluded — their app state is owned by the portainer-agent.
 func ListK8sEnvironments(ctx context.Context, pool *pgxpool.Pool) ([]K8sEnvironment, error) {
 	rows, err := pool.Query(ctx, `
-		SELECT project_id, id, namespace
+		SELECT project_id, id, namespace, name
 		FROM environments
 		WHERE runtime = 'k8s' AND namespace <> ''
 		ORDER BY namespace
@@ -34,7 +35,7 @@ func ListK8sEnvironments(ctx context.Context, pool *pgxpool.Pool) ([]K8sEnvironm
 	var envs []K8sEnvironment
 	for rows.Next() {
 		var e K8sEnvironment
-		if err := rows.Scan(&e.ProjectID, &e.EnvID, &e.Namespace); err != nil {
+		if err := rows.Scan(&e.ProjectID, &e.EnvID, &e.Namespace, &e.Name); err != nil {
 			return nil, fmt.Errorf("scan environment: %w", err)
 		}
 		envs = append(envs, e)

@@ -34,13 +34,17 @@ func TestLivePhase(t *testing.T) {
 }
 
 func TestAppKey(t *testing.T) {
+	envNames := map[string]bool{"prod": true, "staging": true, "dev": true}
 	cases := []struct {
 		name   string
 		labels map[string]string
 		dep    string
 		want   string
 	}{
-		{"label wins", map[string]string{"dada.io/app": "profi"}, "profi-deploy", "profi"},
+		{"label wins", map[string]string{"dada.io/app": "profi", "argocd.argoproj.io/instance": "profi-prod"}, "profi-deploy", "profi"},
+		{"argocd instance strip env", map[string]string{"argocd.argoproj.io/instance": "cloud-console-prod"}, "dada-cloud-console-backend", "cloud-console"},
+		{"argocd instance helm name", map[string]string{"argocd.argoproj.io/instance": "jira-prod"}, "jira-jira-software", "jira"},
+		{"argocd non-env suffix kept", map[string]string{"argocd.argoproj.io/instance": "storage-class-longhorn-beget-beget"}, "x", "storage-class-longhorn-beget-beget"},
 		{"strip -deploy", nil, "profi-deploy", "profi"},
 		{"no suffix (n8n)", nil, "n8n", "n8n"},
 		{"unrelated worker", nil, "n8n-worker", "n8n-worker"},
@@ -48,7 +52,7 @@ func TestAppKey(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			d := &appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: c.dep, Labels: c.labels}}
-			if got := appKey(d); got != c.want {
+			if got := appKey(d, envNames); got != c.want {
 				t.Fatalf("appKey(%q,%v) = %q, want %q", c.dep, c.labels, got, c.want)
 			}
 		})

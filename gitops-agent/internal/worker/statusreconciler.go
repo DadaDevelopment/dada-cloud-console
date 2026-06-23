@@ -168,8 +168,10 @@ func (r *StatusReconciler) reconcile(ctx context.Context) {
 		return
 	}
 	envByNs := make(map[string]uuid.UUID, len(envs))
+	envNames := make(map[string]bool, len(envs))
 	for _, e := range envs {
 		envByNs[e.Namespace] = e.EnvID
+		envNames[e.Name] = true
 	}
 
 	// appEnvs resolves namespace-override apps (App spec.namespace ≠ env
@@ -192,7 +194,7 @@ func (r *StatusReconciler) reconcile(ctx context.Context) {
 	agg := map[snapKey]*liveApp{}
 	for i := range deps.Items {
 		d := &deps.Items[i]
-		app := appKey(d)
+		app := appKey(d, envNames)
 		if app == "" {
 			continue
 		}
@@ -240,15 +242,35 @@ func (r *StatusReconciler) reconcile(ctx context.Context) {
 	}
 }
 
-// appKey maps a Deployment to its App snapshot name: the dada.io/app label when
-// present, else the deployment name with a trailing "-deploy" stripped (the
-// chart convention, e.g. profi-deploy → profi). Unmatched keys simply find no
-// snapshot row and no-op, so a wrong guess is harmless.
-func appKey(d *appsv1.Deployment) string {
+// appKey maps a Deployment to its App snapshot name, in priority order:
+//  1. dada.io/app label (explicit).
+//  2. argocd.argoproj.io/instance label minus its "-<env>" suffix — this groups
+//     every child workload of an ArgoCD/Helm app (e.g. jira-software StatefulSet
+//     carries instance=jira-prod → app "jira"; cloud-console-prod → "cloud-console").
+//  3. deployment name minus a trailing "-deploy" (the chart convention).
+//
+// Unmatched keys simply find no snapshot row and no-op, so a wrong guess is harmless.
+func appKey(d *appsv1.Deployment, envNames map[string]bool) string {
 	if v := d.Labels[appLabel]; v != "" {
 		return v
 	}
+	if inst := d.Labels["argocd.argoproj.io/instance"]; inst != "" {
+		if app := stripEnvSuffix(inst, envNames); app != "" {
+			return app
+		}
+	}
 	return strings.TrimSuffix(d.Name, "-deploy")
+}
+
+// stripEnvSuffix turns "cloud-console-prod" → "cloud-console" when the trailing
+// token is a known environment name; otherwise returns the input unchanged.
+func stripEnvSuffix(instance string, envNames map[string]bool) string {
+	if i := strings.LastIndex(instance, "-"); i > 0 {
+		if envNames[instance[i+1:]] {
+			return instance[:i]
+		}
+	}
+	return instance
 }
 
 func desiredReplicas(d *appsv1.Deployment) int32 {
