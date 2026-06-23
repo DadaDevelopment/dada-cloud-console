@@ -42,6 +42,51 @@ func ListK8sEnvironments(ctx context.Context, pool *pgxpool.Pool) ([]K8sEnvironm
 	return envs, rows.Err()
 }
 
+// EnvProject identifies an environment and its owning project.
+type EnvProject struct {
+	ProjectID uuid.UUID
+	EnvID     uuid.UUID
+}
+
+// EnvProjects maps every environment id to its project id (all runtimes). Used to
+// resolve a snapshot's existing environment back to its project during cluster
+// discovery.
+func EnvProjects(ctx context.Context, pool *pgxpool.Pool) (map[uuid.UUID]uuid.UUID, error) {
+	rows, err := pool.Query(ctx, `SELECT id, project_id FROM environments`)
+	if err != nil {
+		return nil, fmt.Errorf("env projects: %w", err)
+	}
+	defer rows.Close()
+	out := map[uuid.UUID]uuid.UUID{}
+	for rows.Next() {
+		var env, proj uuid.UUID
+		if err := rows.Scan(&env, &proj); err != nil {
+			return nil, fmt.Errorf("scan env project: %w", err)
+		}
+		out[env] = proj
+	}
+	return out, rows.Err()
+}
+
+// PlatformTarget returns the project + an environment to attach cluster-only
+// resources that can't be mapped to a normal project env (infra PublicApis,
+// shared databases, etc). Prefers project "platform" and its prod env. ok=false
+// when no such project/env exists.
+func PlatformTarget(ctx context.Context, pool *pgxpool.Pool) (EnvProject, bool, error) {
+	var ep EnvProject
+	err := pool.QueryRow(ctx, `
+		SELECT p.id, e.id
+		FROM projects p JOIN environments e ON e.project_id = p.id
+		WHERE p.name = 'platform'
+		ORDER BY (e.name = 'prod') DESC, e.name
+		LIMIT 1
+	`).Scan(&ep.ProjectID, &ep.EnvID)
+	if err != nil {
+		return EnvProject{}, false, nil //nolint:nilerr // absence is not an error
+	}
+	return ep, true, nil
+}
+
 // AppSnapshotEnvs is SnapshotEnvsByKind for kind='App'.
 func AppSnapshotEnvs(ctx context.Context, pool *pgxpool.Pool) (map[string][]uuid.UUID, error) {
 	return SnapshotEnvsByKind(ctx, pool, "App")

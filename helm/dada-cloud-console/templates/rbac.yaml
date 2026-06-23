@@ -6,13 +6,10 @@ metadata:
   labels:
     {{- include "dada-cloud-console.labels" . | nindent 4 }}
 rules:
+  # Read every custom platform CR so the console can discover and mirror them all
+  # (ServiceDatabaseV2, PublicApi, AIModel, YandexMetrikaCounter, S3Bucket, ...).
   - apiGroups: ["platform.dada-tuda.ru"]
-    resources:
-      - apps
-      - servicedatabases
-      - serviceendpoints
-      - servicebackups
-      - servicerestores
+    resources: ["*"]
     verbs: ["get", "list", "watch"]
   - apiGroups: ["argoproj.io"]
     resources:
