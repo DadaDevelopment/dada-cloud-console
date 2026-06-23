@@ -40,6 +40,45 @@ var containerMetricSpecs = []metricSpec{
 	{"mem_bytes", "B", `sum by (container_label_com_docker_compose_project) (container_memory_working_set_bytes{container_label_com_docker_compose_project="%s"})`},
 }
 
+// k8sContainerMetricSpecs key container metrics by namespace + the exact image
+// the status reconciler recorded on the App snapshot. Image is unique per app
+// (profi vs profi-backend differ), so it isolates one app's pods without relying
+// on pod/container naming conventions or pod-label joins (kube_pod_labels does
+// not carry dada.io/app here). Each expr takes (namespace, image).
+var k8sContainerMetricSpecs = []metricSpec{
+	{"cpu_cores", "cores", `sum(rate(container_cpu_usage_seconds_total{namespace="%s",image="%s",container!=""}[5m]))`},
+	{"mem_bytes", "B", `sum(container_memory_working_set_bytes{namespace="%s",image="%s",container!=""})`},
+}
+
+// runK8sContainerMetrics runs the namespace+image-scoped container queries and
+// assembles the same response shape as runMetricSpecs (partial results on error).
+func (h *Handler) runK8sContainerMetrics(ctx context.Context, namespace, image string, start, end time.Time, step time.Duration) gin.H {
+	ns := prometheus.EscapeLabelValue(namespace)
+	img := prometheus.EscapeLabelValue(image)
+	metrics := gin.H{}
+	var liveErr string
+	for _, s := range k8sContainerMetricSpecs {
+		series, err := h.prometheus.QueryRange(ctx, fmt.Sprintf(s.expr, ns, img), start, end, step)
+		if err != nil {
+			if liveErr == "" {
+				liveErr = err.Error()
+			}
+			metrics[s.key] = gin.H{"unit": s.unit, "series": []prometheus.Point{}}
+			continue
+		}
+		points := []prometheus.Point{}
+		if len(series) > 0 {
+			points = series[0].Points
+		}
+		metrics[s.key] = gin.H{"unit": s.unit, "series": points}
+	}
+	resp := gin.H{"range": end.Sub(start).String(), "step": step.String(), "metrics": metrics}
+	if liveErr != "" {
+		resp["live_error"] = liveErr
+	}
+	return resp
+}
+
 // countPlaceholders returns how many %s the expr expects so we can supply the
 // label value the right number of times.
 func fillExpr(expr, label string) string {
@@ -201,19 +240,23 @@ func (h *Handler) GetAppMetrics(c *gin.Context) {
 	}
 	appName := c.Param("appName")
 
-	// Verify the app exists in this project/environment (scopes the app label).
-	var exists bool
+	// Load the app's runtime + namespace + reconciler-recorded image. The JOIN
+	// also proves the App exists in this project/environment (404 otherwise).
+	var runtime, namespace, image string
 	err = h.pool.QueryRow(c.Request.Context(),
-		`SELECT EXISTS(SELECT 1 FROM resource_snapshots
-		 WHERE project_id = $1 AND environment_id = $2 AND kind = 'App' AND name = $3)`,
+		`SELECT e.runtime, e.namespace, COALESCE(rs.summary_json->>'image', '')
+		 FROM environments e
+		 JOIN resource_snapshots rs
+		   ON rs.environment_id = e.id AND rs.kind = 'App' AND rs.name = $3
+		 WHERE e.id = $2 AND rs.project_id = $1`,
 		projectID, envID, appName,
-	).Scan(&exists)
-	if err != nil && err != pgx.ErrNoRows {
-		respondError(c, http.StatusInternalServerError, "failed to load app")
+	).Scan(&runtime, &namespace, &image)
+	if err == pgx.ErrNoRows {
+		respondNotFound(c)
 		return
 	}
-	if !exists {
-		respondNotFound(c)
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, "failed to load app")
 		return
 	}
 
@@ -223,5 +266,11 @@ func (h *Handler) GetAppMetrics(c *gin.Context) {
 	}
 
 	start, end, step := parseRange(c)
+	// k8s apps: scope by namespace + image (cAdvisor labels). Compose/VM apps:
+	// fall back to the docker-compose project label.
+	if runtime == "k8s" && namespace != "" && image != "" {
+		c.JSON(http.StatusOK, h.runK8sContainerMetrics(c.Request.Context(), namespace, image, start, end, step))
+		return
+	}
 	c.JSON(http.StatusOK, h.runMetricSpecs(c.Request.Context(), containerMetricSpecs, appName, start, end, step))
 }

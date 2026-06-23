@@ -11,6 +11,7 @@ import { useProjectContext } from "@/lib/project-context";
 import { canMutate } from "@/lib/rbac";
 import { timeAgo } from "@/lib/format";
 import { PhaseBadge } from "@/components/ui/phase-badge";
+import { AppSparkline } from "@/components/app-sparkline";
 
 interface CreateAppForm {
   name: string;
@@ -187,6 +188,7 @@ export default function AppsPage() {
                 <p className="mt-2 text-xs text-gray-400">
                   Synced {timeAgo(app.last_synced_at)}
                 </p>
+                <AppSparkline projectId={projectId} envId={selectedEnvId} appName={app.name} />
               </Link>
             );
           })}
