@@ -21,7 +21,6 @@ export type IconName =
   | "queue"
   | "storage"
   | "git"
-  | "deployments"
   | "domains"
   | "monitoring"
   | "members";
