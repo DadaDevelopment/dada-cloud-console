@@ -11,6 +11,7 @@ import { useProjectContext } from "@/lib/project-context";
 import { canMutate } from "@/lib/rbac";
 import { timeAgo } from "@/lib/format";
 import { PhaseBadge } from "@/components/ui/phase-badge";
+import { EmptyState } from "@/components/ui/empty-state";
 
 interface CreateDbForm {
   name: string;
@@ -148,17 +149,22 @@ export default function DatabasesPage() {
           <Spinner />
         </div>
       ) : databases.length === 0 ? (
-        <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-gray-300 bg-gray-50 py-16">
-          <svg className="mb-3 h-12 w-12 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4" />
-          </svg>
-          <p className="text-sm font-medium text-gray-500">No databases in {selectedEnv?.name ?? "this environment"}</p>
-          <button
-            onClick={() => setIsModalOpen(true)}
-            className="mt-4 text-sm text-blue-600 hover:text-blue-700"
-          >
-            Create your first database →
-          </button>
+        <div className="space-y-4">
+          <EmptyState
+            title="Пока нет баз данных"
+            description="Создайте PostgreSQL-инстанс и подключите его к приложению — строка подключения появится в переменных окружения автоматически."
+          />
+          {canCreate && (
+            <div className="flex justify-center">
+              <button
+                onClick={() => setIsModalOpen(true)}
+                disabled={!selectedEnvId}
+                className="text-sm font-medium text-blue-600 hover:text-blue-700 disabled:opacity-50"
+              >
+                Создать первую базу данных →
+              </button>
+            </div>
+          )}
         </div>
       ) : (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">

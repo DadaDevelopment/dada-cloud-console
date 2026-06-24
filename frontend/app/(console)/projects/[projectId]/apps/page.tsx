@@ -12,6 +12,7 @@ import { canMutate } from "@/lib/rbac";
 import { timeAgo } from "@/lib/format";
 import { PhaseBadge } from "@/components/ui/phase-badge";
 import { AppSparkline } from "@/components/app-sparkline";
+import { EmptyState } from "@/components/ui/empty-state";
 
 interface CreateAppForm {
   name: string;
@@ -165,28 +166,21 @@ export default function AppsPage() {
           <Spinner />
         </div>
       ) : apps.length === 0 ? (
-        <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-gray-300 bg-gray-50 py-16">
-          <svg className="mb-3 h-12 w-12 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M5 12h14M12 5l7 7-7 7" />
-          </svg>
-          <p className="text-sm font-medium text-gray-500">No applications in {selectedEnv?.name ?? "this environment"}</p>
-          {isVMEnvironment ? (
-            <p className="mt-4 text-sm text-gray-400">VM app deployment is not enabled yet</p>
-          ) : (
-            <div className="mt-4 flex items-center gap-3 text-sm">
-              <Link
-                href={`/projects/${projectId}/git/import${selectedEnvId ? `?envId=${selectedEnvId}` : ""}`}
-                className="font-medium text-blue-600 hover:text-blue-700"
-              >
-                Deploy from a Git repo →
-              </Link>
-              <span className="text-gray-300">·</span>
-              <button onClick={() => setIsModalOpen(true)} className="text-gray-500 hover:text-gray-700">
-                or deploy an image
-              </button>
-            </div>
-          )}
-        </div>
+        isVMEnvironment ? (
+          <EmptyState
+            title="Пока нет приложений"
+            description="VM-окружение не поддерживает деплой приложений через этот интерфейс. Используйте AppServers."
+          />
+        ) : (
+          <EmptyState
+            title="Пока нет приложений"
+            description="Задеплойте бэкенд из GitHub — подключите репозиторий, и платформа сама соберёт и запустит образ."
+            action={{
+              label: "Деплой из Git",
+              href: `/projects/${projectId}/git/import${selectedEnvId ? `?envId=${selectedEnvId}` : ""}`,
+            }}
+          />
+        )
       ) : (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {apps.map((app) => {

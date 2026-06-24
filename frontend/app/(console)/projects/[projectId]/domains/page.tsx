@@ -9,19 +9,27 @@ import { Breadcrumb } from "@/components/ui/breadcrumb";
 import { useProjectContext } from "@/lib/project-context";
 import { canMutate } from "@/lib/rbac";
 import { timeAgo } from "@/lib/format";
+import { EmptyState } from "@/components/ui/empty-state";
+import { StateChip } from "@/components/ui/state-chip";
+import type { ChipTone } from "@/components/ui/state-chip";
 
 // Level 1 of the Vercel-style model: prove ownership of an apex domain.
 // Once an apex is "verified", that project may attach the apex + any of its
 // subdomains to apps (Level 2 lives on the app settings "Domains" tab).
 
-function statusStyle(status: DomainAuthorization["status"]): string {
+function domainStatusTone(status: DomainAuthorization["status"]): ChipTone {
   switch (status) {
-    case "verified":
-      return "bg-green-50 text-green-700 border-green-200";
-    case "failed":
-      return "bg-red-50 text-red-700 border-red-200";
-    default:
-      return "bg-amber-50 text-amber-700 border-amber-200";
+    case "verified": return "ready";
+    case "failed": return "error";
+    default: return "needs-action";
+  }
+}
+
+function domainStatusLabel(status: DomainAuthorization["status"]): string {
+  switch (status) {
+    case "verified": return "Подтверждён";
+    case "failed": return "Ошибка";
+    default: return "Ожидает";
   }
 }
 
@@ -190,18 +198,20 @@ export default function ProjectDomainsPage() {
           <Spinner />
         </div>
       ) : auths.length === 0 ? (
-        <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-gray-300 bg-gray-50 py-16">
-          <svg className="mb-3 h-12 w-12 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0zM3.6 9h16.8M3.6 15h16.8M12 3a15 15 0 010 18M12 3a15 15 0 000 18" />
-          </svg>
-          <p className="text-sm font-medium text-gray-500">No authorized domains yet</p>
+        <div className="space-y-4">
+          <EmptyState
+            title="Пока нет доменов"
+            description="Подключите собственный домен и получите автоматический HTTPS — подтвердите владение через TXT-запись в DNS."
+          />
           {canEdit && (
-            <button
-              onClick={() => setIsModalOpen(true)}
-              className="mt-4 text-sm text-blue-600 hover:text-blue-700"
-            >
-              Authorize your first domain →
-            </button>
+            <div className="flex justify-center">
+              <button
+                onClick={() => setIsModalOpen(true)}
+                className="text-sm font-medium text-blue-600 hover:text-blue-700"
+              >
+                Добавить первый домен →
+              </button>
+            </div>
           )}
         </div>
       ) : (
@@ -212,9 +222,9 @@ export default function ProjectDomainsPage() {
                 <div>
                   <div className="flex items-center gap-3">
                     <p className="font-mono text-base font-semibold text-gray-900">{a.apex_domain}</p>
-                    <span className={`rounded-full border px-2 py-0.5 text-xs font-medium capitalize ${statusStyle(a.status)}`}>
-                      {a.status}
-                    </span>
+                    <StateChip tone={domainStatusTone(a.status)} dot>
+                      {domainStatusLabel(a.status)}
+                    </StateChip>
                   </div>
                   <p className="mt-1 text-xs text-gray-400">
                     {a.status === "verified" && a.verified_at

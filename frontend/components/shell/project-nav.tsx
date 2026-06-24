@@ -27,6 +27,7 @@ export function ProjectNav() {
 
   const items = visibleNavItems(role);
   const resources = items.filter((i) => i.group === "resources");
+  const infra = items.filter((i) => i.group === "infra");
   const admin = items.filter((i) => i.group === "admin");
 
   function renderItem(item: ResourceNavItem) {
@@ -61,6 +62,12 @@ export function ProjectNav() {
   return (
     <nav className="flex-1 space-y-1 overflow-y-auto px-3 py-4">
       {resources.map(renderItem)}
+      {infra.length > 0 && (
+        <>
+          <div className="px-3 pb-1 pt-4 text-[10px] font-semibold uppercase tracking-wider text-slate-500">Advanced</div>
+          {infra.map(renderItem)}
+        </>
+      )}
       {admin.length > 0 && (
         <>
           <div className="px-3 pb-1 pt-4 text-[10px] font-semibold uppercase tracking-wider text-slate-500">Admin</div>

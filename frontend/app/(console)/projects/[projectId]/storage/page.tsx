@@ -10,6 +10,7 @@ import { useProjectContext } from "@/lib/project-context";
 import { canMutate } from "@/lib/rbac";
 import { timeAgo } from "@/lib/format";
 import { PhaseBadge } from "@/components/ui/phase-badge";
+import { EmptyState } from "@/components/ui/empty-state";
 
 interface CreateBucketForm {
   name: string;
@@ -141,17 +142,22 @@ export default function StoragePage() {
           <Spinner />
         </div>
       ) : buckets.length === 0 ? (
-        <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-gray-300 bg-gray-50 py-16">
-          <svg className="mb-3 h-12 w-12 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4" />
-          </svg>
-          <p className="text-sm font-medium text-gray-500">No buckets in {selectedEnv?.name ?? "this environment"}</p>
-          <button
-            onClick={() => setIsModalOpen(true)}
-            className="mt-4 text-sm text-blue-600 hover:text-blue-700"
-          >
-            Create your first bucket →
-          </button>
+        <div className="space-y-4">
+          <EmptyState
+            title="Пока нет бакетов"
+            description="Создайте S3-совместимый бакет для хранения файлов, медиа и статики — доступ через S3 API, FTP и SFTP."
+          />
+          {canCreate && (
+            <div className="flex justify-center">
+              <button
+                onClick={() => setIsModalOpen(true)}
+                disabled={!selectedEnvId}
+                className="text-sm font-medium text-blue-600 hover:text-blue-700 disabled:opacity-50"
+              >
+                Создать первый бакет →
+              </button>
+            </div>
+          )}
         </div>
       ) : (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
