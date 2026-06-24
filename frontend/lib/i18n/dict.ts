@@ -25,6 +25,7 @@ export interface Dict {
     storage: string;
     pricing: string;
     docs: string;
+    how: string;
     login: string;
     register: string;
     console: string;
@@ -120,6 +121,7 @@ const ru: Dict = {
     storage: "Хранилище",
     pricing: "Цены",
     docs: "Документация",
+    how: "Как это работает",
     login: "Вход",
     register: "Регистрация",
     console: "Консоль",
@@ -319,6 +321,7 @@ const en: Dict = {
     storage: "Storage",
     pricing: "Pricing",
     docs: "Docs",
+    how: "How it works",
     login: "Log in",
     register: "Sign up",
     console: "Console",

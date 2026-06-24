@@ -15,11 +15,10 @@ export function MarketingHeader() {
   const [open, setOpen] = useState(false);
 
   const links = [
-    { href: "/cloud-servers", label: t.nav.servers },
-    { href: "/kubernetes", label: t.nav.kubernetes },
+    { href: "/#how", label: t.nav.how },
     { href: "/databases", label: t.nav.databases },
-    { href: "/storage", label: t.nav.storage },
     { href: "/pricing", label: t.nav.pricing },
+    { href: "/developer", label: t.nav.docs },
   ];
 
   return (
