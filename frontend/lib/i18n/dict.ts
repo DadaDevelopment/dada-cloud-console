@@ -11,6 +11,10 @@ type Service = { key: string; title: string; desc: string; href: string; badge?:
 type Feature = { title: string; desc: string };
 type Faq = { q: string; a: string };
 type Plan = { key: string; name: string; price: string; period: string; tagline: string; features: string[]; cta: string; highlight?: boolean };
+type Step = { num: string; title: string; desc: string };
+type Scenario = { tag: string; title: string; desc: string };
+type Proof = { quote: string; author: string };
+type PricingTeaser = { name: string; price: string; tagline: string; bullets: string[]; highlight?: boolean };
 
 export interface Dict {
   nav: {
@@ -36,21 +40,30 @@ export interface Dict {
     soon: string;
   };
   home: {
+    heroBadge: string;
     heroTitle: string;
     heroSubtitle: string;
     heroPrimary: string;
     heroSecondary: string;
-    servicesTitle: string;
-    servicesSubtitle: string;
-    services: Service[];
-    whyTitle: string;
-    whySubtitle: string;
-    why: Feature[];
-    panelTitle: string;
-    panelSubtitle: string;
-    panelBullets: string[];
-    stats: { value: string; label: string }[];
-    statsNote: string;
+    heroTertiary: string;
+    stepsTitle: string;
+    stepsSubtitle: string;
+    steps: Step[];
+    valueTitle: string;
+    valueSubtitle: string;
+    value: Feature[];
+    scenariosTitle: string;
+    scenariosSubtitle: string;
+    scenarios: Scenario[];
+    proofTitle: string;
+    proofSubtitle: string;
+    proof: Proof[];
+    pricingTitle: string;
+    pricingSubtitle: string;
+    pricingTiers: PricingTeaser[];
+    pricingNote: string;
+    faqTitle: string;
+    faq: Faq[];
     ctaTitle: string;
     ctaSubtitle: string;
   };
@@ -122,45 +135,57 @@ const ru: Dict = {
     soon: "Скоро",
   },
   home: {
-    heroTitle: "Облачная платформа для ваших проектов",
+    heroBadge: "Backend-облако · деплой из GitHub",
+    heroTitle: "Запустите backend из GitHub за несколько минут",
     heroSubtitle:
-      "Виртуальные серверы, Kubernetes, управляемые базы данных и объектное хранилище — единая GitOps-консоль для инфраструктуры любого масштаба.",
-    heroPrimary: "Создать аккаунт",
-    heroSecondary: "Документация",
-    servicesTitle: "Всё, что нужно для запуска",
-    servicesSubtitle: "Собственная панель управления. Запуск сервиса в пару кликов.",
-    services: [
-      { key: "vps", title: "Облачные серверы", desc: "VPS/VDS на NVMe с почасовой оплатой и снапшотами.", href: "/cloud-servers" },
-      { key: "k8s", title: "Kubernetes", desc: "Управляемые кластеры: ноды, аддоны, мониторинг из коробки.", href: "/kubernetes", badge: "Beta" },
-      { key: "db", title: "Облачные базы данных", desc: "PostgreSQL, MySQL, Redis. Бэкапы и failover на нас.", href: "/databases" },
-      { key: "s3", title: "Объектное хранилище", desc: "S3-совместимое хранилище для бэкапов, медиа и статики.", href: "/storage" },
-      { key: "cdn", title: "CDN", desc: "Раздача статики с пограничных узлов и кэширование.", href: "/storage" },
-      { key: "monitoring", title: "Мониторинг", desc: "Метрики, логи и алерты по всем ресурсам проекта.", href: "/cloud-servers" },
+      "Подключите репозиторий, добавьте Postgres и домен — получайте стабильные деплои, логи и откат. Без отдельной DevOps-команды.",
+    heroPrimary: "Подключить GitHub",
+    heroSecondary: "Как это работает",
+    heroTertiary: "Запросить пилот / миграцию",
+    stepsTitle: "От репозитория до продакшена — три шага",
+    stepsSubtitle: "Без ручного CI/CD и SSH-релизов.",
+    steps: [
+      { num: "01", title: "Подключите GitHub", desc: "Выберите репозиторий. Сборка и деплой настраиваются автоматически — из Dockerfile или прямо из исходников." },
+      { num: "02", title: "Добавьте Postgres и домен", desc: "База данных, собственный домен и HTTPS поднимаются в том же потоке. Без отдельных тикетов в инфраструктуру." },
+      { num: "03", title: "Деплойте и откатывайте", desc: "Каждый push — новый деплой. Логи в реальном времени, откат на прошлую версию в один клик." },
     ],
-    whyTitle: "Почему DADA Cloud",
-    whySubtitle: "Инфраструктура как код — без боли.",
-    why: [
-      { title: "GitOps по умолчанию", desc: "Каждое изменение — это коммит. Полный аудит, откат в один клик, воспроизводимые окружения." },
-      { title: "SLA и отказоустойчивость", desc: "Гео-распределённые узлы, защита от DDoS и резервное копирование без простоя." },
-      { title: "Безопасность", desc: "Изоляция по namespace, RBAC, политики ресурсов и SSO через Keycloak." },
+    valueTitle: "Что вы получаете",
+    valueSubtitle: "Язык результата, а не конфигов.",
+    value: [
+      { title: "GitHub → production без ручного CI/CD", desc: "Push в ветку — и сервис собран, задеплоен и доступен по HTTPS. Пайплайны руками не нужны." },
+      { title: "База и домен в одном потоке", desc: "Postgres, домен и SSL подключаются там же, где деплой. Один проект — вся backend-обвязка." },
+      { title: "Логи, откат и понятные лимиты", desc: "Видно, что происходит и почему упало. Откат в клик, hard-лимиты и оценка цены до деплоя." },
     ],
-    panelTitle: "Удовольствие в каждом клике",
-    panelSubtitle: "Управляйте всей инфраструктурой из одной панели.",
-    panelBullets: [
-      "Проекты и окружения в едином дереве",
-      "Деплой из Git с автоматической сборкой",
-      "Метрики и логи в реальном времени",
-      "Командный доступ с гибкими ролями",
+    scenariosTitle: "Под ваш сценарий",
+    scenariosSubtitle: "От пет-проекта до растущей команды.",
+    scenarios: [
+      { tag: "Solo / founder", title: "Запуск сервиса за минуты", desc: "Перенесите backend с VPS + Compose в один проект. Без ручных SSH-релизов и самописных скриптов деплоя." },
+      { tag: "Стартап 2–10", title: "Команда без DevOps", desc: "Деплой из GitHub, общий доступ с ролями, единые логи и откаты. Инженеры катят сами, без выделенного ops." },
+      { tag: "Агентство", title: "Клиенты в одном месте", desc: "Домены, базы и доступы клиентов централизованы. Новый проект — за минуты, а не за день настройки." },
     ],
-    stats: [
-      { value: "99.9%", label: "целевой uptime SLA" },
-      { value: "10+", label: "облачных сервисов" },
-      { value: "24/7", label: "поддержка" },
-      { value: "GitOps", label: "в основе платформы" },
+    proofTitle: "Истории команд",
+    proofSubtitle: "Скоро здесь появятся реальные кейсы.",
+    proof: [
+      { quote: "Перевели backend с VPS + Compose в один проект — без ручных SSH-релизов.", author: "Кейс команды · скоро" },
+      { quote: "Запуск нового сервиса сократился с часов до минут.", author: "Кейс стартапа · скоро" },
+      { quote: "Централизовали домены, базы и доступы клиентов в одной панели.", author: "Кейс агентства · скоро" },
     ],
-    statsNote: "Целевые показатели платформы на этапе запуска.",
-    ctaTitle: "Запустите первый сервис сегодня",
-    ctaSubtitle: "Регистрация занимает минуту. Платите только за используемые ресурсы.",
+    pricingTitle: "Прозрачные планы",
+    pricingSubtitle: "Без сюрпризов по счёту. Hard-лимит и оценка цены до деплоя.",
+    pricingTiers: [
+      { name: "Sandbox", price: "0 ₽", tagline: "Попробовать и пет-проекты", bullets: ["1 проект", "Деплой из GitHub", "Postgres для теста", "Базовые логи"] },
+      { name: "Solo", price: "от 1 490 ₽", tagline: "Один разработчик в продакшене", bullets: ["Несколько сервисов", "Managed Postgres", "Домен + HTTPS", "Логи и откаты"], highlight: true },
+      { name: "Startup-team", price: "Индивидуально", tagline: "Растущая команда 2–10", bullets: ["Командные роли", "Гибкие квоты", "Приоритетная поддержка", "Помощь с миграцией"] },
+    ],
+    pricingNote: "Цены ориентировочные на этапе запуска. Полная таблица — на странице цен.",
+    faqTitle: "Частые возражения",
+    faq: [
+      { q: "У меня уже есть VPS", a: "VPS вы обслуживаете сами: обновления, бэкапы, деплой-скрипты, SSH. Здесь деплой, база, домен и откаты работают из коробки — VPS можно мигрировать в один проект." },
+      { q: "У нас есть GitHub Actions", a: "Actions собирают артефакт, но дальше нужно куда-то катить, держать базу, домен и откаты. Мы закрываем путь от push до работающего сервиса с HTTPS — без своего CD-пайплайна." },
+      { q: "Мы ещё маленькие", a: "Поэтому и подходит: один проект вместо ручной инфраструктуры. Sandbox бесплатный, hard-лимиты не дадут счёту улететь, расти можно без переезда." },
+    ],
+    ctaTitle: "Запустите backend из GitHub сегодня",
+    ctaSubtitle: "Подключите репозиторий за минуту. Платите только за используемые ресурсы.",
   },
   servers: {
     heroTitle: "Облачные серверы VPS/VDS",
@@ -309,45 +334,57 @@ const en: Dict = {
     soon: "Soon",
   },
   home: {
-    heroTitle: "A cloud platform for your projects",
+    heroBadge: "Backend cloud · deploy from GitHub",
+    heroTitle: "Ship your backend from GitHub in minutes",
     heroSubtitle:
-      "Virtual servers, Kubernetes, managed databases and object storage — one GitOps console for infrastructure at any scale.",
-    heroPrimary: "Create account",
-    heroSecondary: "Documentation",
-    servicesTitle: "Everything you need to ship",
-    servicesSubtitle: "Our own control panel. Launch a service in a couple of clicks.",
-    services: [
-      { key: "vps", title: "Cloud servers", desc: "NVMe-backed VPS/VDS with hourly billing and snapshots.", href: "/cloud-servers" },
-      { key: "k8s", title: "Kubernetes", desc: "Managed clusters: nodes, addons and monitoring out of the box.", href: "/kubernetes", badge: "Beta" },
-      { key: "db", title: "Cloud databases", desc: "PostgreSQL, MySQL, Redis. Backups and failover handled for you.", href: "/databases" },
-      { key: "s3", title: "Object storage", desc: "S3-compatible storage for backups, media and static assets.", href: "/storage" },
-      { key: "cdn", title: "CDN", desc: "Serve static content from edge nodes with caching.", href: "/storage" },
-      { key: "monitoring", title: "Monitoring", desc: "Metrics, logs and alerts across every project resource.", href: "/cloud-servers" },
+      "Connect a repo, add Postgres and a domain — get stable deploys, logs and rollback. No separate DevOps team.",
+    heroPrimary: "Connect GitHub",
+    heroSecondary: "How it works",
+    heroTertiary: "Request a pilot / migration",
+    stepsTitle: "From repo to production in three steps",
+    stepsSubtitle: "No manual CI/CD, no SSH releases.",
+    steps: [
+      { num: "01", title: "Connect GitHub", desc: "Pick a repository. Build and deploy are wired up automatically — from a Dockerfile or straight from source." },
+      { num: "02", title: "Add Postgres and a domain", desc: "Database, custom domain and HTTPS come up in the same flow. No separate infrastructure tickets." },
+      { num: "03", title: "Deploy and roll back", desc: "Every push is a new deploy. Real-time logs, one-click rollback to the previous version." },
     ],
-    whyTitle: "Why DADA Cloud",
-    whySubtitle: "Infrastructure as code — without the pain.",
-    why: [
-      { title: "GitOps by default", desc: "Every change is a commit. Full audit trail, one-click rollback, reproducible environments." },
-      { title: "SLA & resilience", desc: "Geo-distributed nodes, DDoS protection and zero-downtime backups." },
-      { title: "Security", desc: "Namespace isolation, RBAC, resource policies and SSO via Keycloak." },
+    valueTitle: "What you get",
+    valueSubtitle: "Outcomes, not config files.",
+    value: [
+      { title: "GitHub → production without manual CI/CD", desc: "Push to a branch and the service is built, deployed and live over HTTPS. No pipelines by hand." },
+      { title: "Database and domain in one flow", desc: "Postgres, domain and SSL connect where you deploy. One project — the whole backend stack." },
+      { title: "Logs, rollback and clear limits", desc: "See what's happening and why it broke. One-click rollback, hard limits and a price estimate before deploy." },
     ],
-    panelTitle: "Delightful in every click",
-    panelSubtitle: "Manage your whole infrastructure from a single panel.",
-    panelBullets: [
-      "Projects and environments in one tree",
-      "Deploy from Git with automated builds",
-      "Real-time metrics and logs",
-      "Team access with flexible roles",
+    scenariosTitle: "Built for your case",
+    scenariosSubtitle: "From a pet project to a growing team.",
+    scenarios: [
+      { tag: "Solo / founder", title: "Launch a service in minutes", desc: "Move a backend off VPS + Compose into one project. No manual SSH releases or homegrown deploy scripts." },
+      { tag: "Startup 2–10", title: "A team without DevOps", desc: "Deploy from GitHub, shared role-based access, unified logs and rollbacks. Engineers ship themselves, no dedicated ops." },
+      { tag: "Agency", title: "Clients in one place", desc: "Client domains, databases and access centralized. A new project in minutes, not a day of setup." },
     ],
-    stats: [
-      { value: "99.9%", label: "target SLA uptime" },
-      { value: "10+", label: "cloud services" },
-      { value: "24/7", label: "support" },
-      { value: "GitOps", label: "at the core" },
+    proofTitle: "Team stories",
+    proofSubtitle: "Real case studies coming soon.",
+    proof: [
+      { quote: "Moved our backend off VPS + Compose into one project — no manual SSH releases.", author: "Team case · soon" },
+      { quote: "Cut the launch of a new service from hours to minutes.", author: "Startup case · soon" },
+      { quote: "Centralized client domains, databases and access in one panel.", author: "Agency case · soon" },
     ],
-    statsNote: "Target platform figures at launch.",
-    ctaTitle: "Launch your first service today",
-    ctaSubtitle: "Sign up in a minute. Pay only for the resources you use.",
+    pricingTitle: "Transparent plans",
+    pricingSubtitle: "No billing surprises. Hard limit and a price estimate before deploy.",
+    pricingTiers: [
+      { name: "Sandbox", price: "$0", tagline: "Trials and pet projects", bullets: ["1 project", "Deploy from GitHub", "Postgres for testing", "Basic logs"] },
+      { name: "Solo", price: "from $19", tagline: "One developer in production", bullets: ["Multiple services", "Managed Postgres", "Domain + HTTPS", "Logs and rollbacks"], highlight: true },
+      { name: "Startup-team", price: "Custom", tagline: "Growing team of 2–10", bullets: ["Team roles", "Flexible quotas", "Priority support", "Migration help"] },
+    ],
+    pricingNote: "Indicative pricing at launch. Full table on the pricing page.",
+    faqTitle: "Common objections",
+    faq: [
+      { q: "I already have a VPS", a: "A VPS you maintain yourself: updates, backups, deploy scripts, SSH. Here deploy, database, domain and rollbacks work out of the box — and a VPS can be migrated into one project." },
+      { q: "We have GitHub Actions", a: "Actions build an artifact, but you still need somewhere to ship it, a database, a domain and rollbacks. We cover the path from push to a live HTTPS service — no CD pipeline of your own." },
+      { q: "We're still small", a: "That's exactly why it fits: one project instead of manual infrastructure. Sandbox is free, hard limits keep the bill in check, and you can grow without migrating." },
+    ],
+    ctaTitle: "Ship your backend from GitHub today",
+    ctaSubtitle: "Connect a repo in a minute. Pay only for the resources you use.",
   },
   servers: {
     heroTitle: "Cloud servers VPS/VDS",

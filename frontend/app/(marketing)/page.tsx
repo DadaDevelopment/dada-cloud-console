@@ -2,32 +2,21 @@
 
 import Link from "next/link";
 import {
-  Server,
-  Boxes,
-  Database,
-  HardDrive,
-  Globe,
-  LineChart,
   GitBranch,
-  ShieldCheck,
-  Activity,
+  Database,
+  Globe,
+  RotateCcw,
+  ScrollText,
   ArrowRight,
   Check,
 } from "lucide-react";
 import { useLang } from "@/lib/i18n/context";
 import { consoleHref } from "@/lib/site";
-import { CtaBand } from "@/components/marketing/sections";
+import { CtaBand, FaqList } from "@/components/marketing/sections";
+import { clsx } from "clsx";
 
-const SERVICE_ICONS: Record<string, React.ComponentType<{ className?: string }>> = {
-  vps: Server,
-  k8s: Boxes,
-  db: Database,
-  s3: HardDrive,
-  cdn: Globe,
-  monitoring: LineChart,
-};
-
-const WHY_ICONS = [GitBranch, ShieldCheck, Activity];
+const STEP_ICONS = [GitBranch, Database, RotateCcw];
+const VALUE_ICONS = [GitBranch, Globe, ScrollText];
 
 export default function HomePage() {
   const { t } = useLang();
@@ -40,7 +29,7 @@ export default function HomePage() {
           <div className="mx-auto max-w-7xl px-4 py-24 sm:px-6 lg:px-8 lg:py-32">
             <span className="mb-5 inline-flex items-center gap-2 rounded-full border border-blue-400/30 bg-blue-500/10 px-3 py-1 text-xs font-semibold text-blue-300">
               <span className="h-1.5 w-1.5 rounded-full bg-blue-400" />
-              GitOps Cloud Platform
+              {t.home.heroBadge}
             </span>
             <h1 className="max-w-4xl text-4xl font-bold leading-tight tracking-tight text-white sm:text-5xl lg:text-6xl">
               {t.home.heroTitle}
@@ -51,67 +40,63 @@ export default function HomePage() {
                 href={consoleHref("/login")}
                 className="inline-flex items-center gap-2 rounded-md bg-blue-600 px-7 py-3 text-sm font-semibold text-white transition-colors hover:bg-blue-700"
               >
+                <GitBranch className="h-4 w-4" />
                 {t.home.heroPrimary}
-                <ArrowRight className="h-4 w-4" />
               </Link>
               <Link
-                href="/developer"
+                href="#how"
                 className="rounded-md border border-white/20 px-7 py-3 text-sm font-semibold text-white transition-colors hover:bg-white/5"
               >
                 {t.home.heroSecondary}
+              </Link>
+              <Link
+                href="/pricing"
+                className="rounded-md px-7 py-3 text-sm font-semibold text-white/70 transition-colors hover:text-white"
+              >
+                {t.home.heroTertiary}
               </Link>
             </div>
           </div>
         </div>
       </section>
 
-      {/* Services */}
-      <section className="bg-white py-20">
+      {/* How it works */}
+      <section id="how" className="scroll-mt-20 bg-white py-20">
         <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
           <div className="mb-12 max-w-2xl">
-            <h2 className="text-3xl font-bold tracking-tight text-slate-900">{t.home.servicesTitle}</h2>
-            <p className="mt-3 text-lg text-slate-600">{t.home.servicesSubtitle}</p>
+            <h2 className="text-3xl font-bold tracking-tight text-slate-900">{t.home.stepsTitle}</h2>
+            <p className="mt-3 text-lg text-slate-600">{t.home.stepsSubtitle}</p>
           </div>
-          <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
-            {t.home.services.map((s) => {
-              const Icon = SERVICE_ICONS[s.key] ?? Server;
+          <div className="grid gap-6 md:grid-cols-3">
+            {t.home.steps.map((s, i) => {
+              const Icon = STEP_ICONS[i] ?? GitBranch;
               return (
-                <Link
-                  key={s.key}
-                  href={s.href}
-                  className="group relative flex flex-col rounded-xl border border-slate-200 bg-white p-6 transition-all hover:border-blue-300 hover:shadow-lg"
-                >
-                  {s.badge && (
-                    <span className="absolute right-5 top-5 rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-700">
-                      {s.badge}
-                    </span>
-                  )}
-                  <div className="mb-4 flex h-11 w-11 items-center justify-center rounded-lg bg-blue-600 text-white">
+                <div key={s.num} className="relative rounded-xl border border-slate-200 bg-white p-7">
+                  <span className="absolute right-6 top-6 text-4xl font-bold text-slate-100">
+                    {s.num}
+                  </span>
+                  <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-xl bg-blue-600 text-white">
                     <Icon className="h-6 w-6" />
                   </div>
                   <h3 className="text-lg font-semibold text-slate-900">{s.title}</h3>
-                  <p className="mt-2 flex-1 text-sm text-slate-600">{s.desc}</p>
-                  <span className="mt-4 inline-flex items-center gap-1 text-sm font-medium text-blue-600">
-                    {t.common.learnMore}
-                    <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-1" />
-                  </span>
-                </Link>
+                  <p className="mt-2 text-sm text-slate-600">{s.desc}</p>
+                </div>
               );
             })}
           </div>
         </div>
       </section>
 
-      {/* Why */}
+      {/* Value props */}
       <section className="bg-slate-50 py-20">
         <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
           <div className="mb-12 max-w-2xl">
-            <h2 className="text-3xl font-bold tracking-tight text-slate-900">{t.home.whyTitle}</h2>
-            <p className="mt-3 text-lg text-slate-600">{t.home.whySubtitle}</p>
+            <h2 className="text-3xl font-bold tracking-tight text-slate-900">{t.home.valueTitle}</h2>
+            <p className="mt-3 text-lg text-slate-600">{t.home.valueSubtitle}</p>
           </div>
           <div className="grid gap-6 md:grid-cols-3">
-            {t.home.why.map((f, i) => {
-              const Icon = WHY_ICONS[i] ?? GitBranch;
+            {t.home.value.map((f, i) => {
+              const Icon = VALUE_ICONS[i] ?? Check;
               return (
                 <div key={f.title} className="rounded-xl border border-slate-200 bg-white p-7">
                   <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-xl bg-blue-50 text-blue-600">
@@ -126,69 +111,109 @@ export default function HomePage() {
         </div>
       </section>
 
-      {/* Control panel showcase */}
+      {/* Scenarios */}
       <section className="bg-white py-20">
-        <div className="mx-auto grid max-w-7xl items-center gap-12 px-4 sm:px-6 lg:grid-cols-2 lg:px-8">
-          <div>
-            <h2 className="text-3xl font-bold tracking-tight text-slate-900">{t.home.panelTitle}</h2>
-            <p className="mt-3 text-lg text-slate-600">{t.home.panelSubtitle}</p>
-            <ul className="mt-6 space-y-3">
-              {t.home.panelBullets.map((b) => (
-                <li key={b} className="flex items-start gap-3 text-slate-700">
-                  <Check className="mt-0.5 h-5 w-5 shrink-0 text-blue-600" />
-                  <span>{b}</span>
-                </li>
-              ))}
-            </ul>
-            <Link
-              href={consoleHref("/login")}
-              className="mt-8 inline-flex items-center gap-2 rounded-md bg-blue-600 px-6 py-3 text-sm font-semibold text-white transition-colors hover:bg-blue-700"
-            >
-              {t.common.getStarted}
-              <ArrowRight className="h-4 w-4" />
-            </Link>
+        <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+          <div className="mb-12 max-w-2xl">
+            <h2 className="text-3xl font-bold tracking-tight text-slate-900">
+              {t.home.scenariosTitle}
+            </h2>
+            <p className="mt-3 text-lg text-slate-600">{t.home.scenariosSubtitle}</p>
           </div>
-          {/* Stylized panel mock */}
-          <div className="rounded-2xl border border-slate-200 bg-slate-900 p-2 shadow-2xl">
-            <div className="flex items-center gap-1.5 px-3 py-2">
-              <span className="h-3 w-3 rounded-full bg-red-400" />
-              <span className="h-3 w-3 rounded-full bg-amber-400" />
-              <span className="h-3 w-3 rounded-full bg-green-400" />
-            </div>
-            <div className="rounded-xl bg-slate-950 p-5">
-              <div className="flex items-center justify-between">
-                <span className="text-sm font-semibold text-white">Prod k8s</span>
-                <span className="rounded-full bg-green-500/20 px-2 py-0.5 text-xs text-green-400">
-                  ● Started
+          <div className="grid gap-6 md:grid-cols-3">
+            {t.home.scenarios.map((s) => (
+              <div
+                key={s.tag}
+                className="flex flex-col rounded-xl border border-slate-200 bg-white p-7 transition-shadow hover:shadow-md"
+              >
+                <span className="mb-4 inline-flex w-fit rounded-full bg-blue-50 px-3 py-1 text-xs font-semibold text-blue-700">
+                  {s.tag}
                 </span>
+                <h3 className="text-lg font-semibold text-slate-900">{s.title}</h3>
+                <p className="mt-2 text-sm text-slate-600">{s.desc}</p>
               </div>
-              <div className="mt-4 grid grid-cols-2 gap-3">
-                {["CPU 112%", "Memory 64%", "Nodes 3/3", "Uptime 99.9%"].map((m) => (
-                  <div key={m} className="rounded-lg bg-white/5 px-3 py-3 text-xs text-white/70">
-                    {m}
-                  </div>
-                ))}
-              </div>
-              <div className="mt-3 h-24 rounded-lg bg-gradient-to-t from-blue-600/30 to-transparent" />
-            </div>
+            ))}
           </div>
         </div>
       </section>
 
-      {/* Stats */}
-      <section className="bg-slate-50 py-16">
+      {/* Social proof */}
+      <section className="bg-slate-50 py-20">
         <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-          <div className="grid grid-cols-2 gap-8 md:grid-cols-4">
-            {t.home.stats.map((s) => (
-              <div key={s.label} className="text-center">
-                <div className="text-4xl font-bold text-slate-900">{s.value}</div>
-                <div className="mt-1 text-sm text-slate-600">{s.label}</div>
+          <div className="mb-12 max-w-2xl">
+            <h2 className="text-3xl font-bold tracking-tight text-slate-900">{t.home.proofTitle}</h2>
+            <p className="mt-3 text-lg text-slate-600">{t.home.proofSubtitle}</p>
+          </div>
+          <div className="grid gap-6 md:grid-cols-3">
+            {t.home.proof.map((p) => (
+              <figure
+                key={p.author}
+                className="flex flex-col justify-between rounded-xl border border-slate-200 bg-white p-7"
+              >
+                <blockquote className="text-base text-slate-800">“{p.quote}”</blockquote>
+                <figcaption className="mt-5 text-sm font-medium text-slate-400">
+                  {p.author}
+                </figcaption>
+              </figure>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* Pricing teaser */}
+      <section className="bg-white py-20">
+        <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+          <div className="mb-12 max-w-2xl">
+            <h2 className="text-3xl font-bold tracking-tight text-slate-900">
+              {t.home.pricingTitle}
+            </h2>
+            <p className="mt-3 text-lg text-slate-600">{t.home.pricingSubtitle}</p>
+          </div>
+          <div className="grid gap-6 md:grid-cols-3">
+            {t.home.pricingTiers.map((tier) => (
+              <div
+                key={tier.name}
+                className={clsx(
+                  "flex flex-col rounded-xl border bg-white p-7",
+                  tier.highlight ? "border-blue-500 shadow-lg" : "border-slate-200",
+                )}
+              >
+                <div className="flex items-center justify-between">
+                  <h3 className="text-lg font-semibold text-slate-900">{tier.name}</h3>
+                  {tier.highlight && (
+                    <span className="rounded-full bg-blue-600 px-2 py-0.5 text-xs font-semibold text-white">
+                      {t.common.getStarted}
+                    </span>
+                  )}
+                </div>
+                <div className="mt-3 text-2xl font-bold text-slate-900">{tier.price}</div>
+                <p className="mt-1 text-sm text-slate-600">{tier.tagline}</p>
+                <ul className="mt-5 space-y-2">
+                  {tier.bullets.map((b) => (
+                    <li key={b} className="flex items-start gap-2 text-sm text-slate-700">
+                      <Check className="mt-0.5 h-4 w-4 shrink-0 text-blue-600" />
+                      <span>{b}</span>
+                    </li>
+                  ))}
+                </ul>
               </div>
             ))}
           </div>
-          <p className="mt-6 text-center text-xs text-slate-400">{t.home.statsNote}</p>
+          <div className="mt-8 flex flex-wrap items-center gap-4">
+            <Link
+              href="/pricing"
+              className="inline-flex items-center gap-2 rounded-md bg-blue-600 px-6 py-3 text-sm font-semibold text-white transition-colors hover:bg-blue-700"
+            >
+              {t.common.learnMore}
+              <ArrowRight className="h-4 w-4" />
+            </Link>
+            <p className="text-xs text-slate-400">{t.home.pricingNote}</p>
+          </div>
         </div>
       </section>
+
+      {/* FAQ objections */}
+      <FaqList title={t.home.faqTitle} items={t.home.faq} />
 
       <CtaBand />
     </>
