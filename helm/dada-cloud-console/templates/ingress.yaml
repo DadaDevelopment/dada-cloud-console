@@ -57,6 +57,25 @@ spec:
                 port:
                   number: {{ .Values.gitopsAgent.webhookPort }}
           {{- end }}
+          {{- if and .Values.buildAgent.enabled .Values.buildAgent.webhookPort }}
+          # GitHub push webhooks ( /webhook/github ) and the build-log WebSocket
+          # ( /ws/build ) — public so GitHub and the browser reach the build-agent.
+          # Must precede the catch-all "/" rule.
+          - path: /webhook
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "dada-cloud-console.fullname" . }}-build-agent
+                port:
+                  number: {{ .Values.buildAgent.webhookPort }}
+          - path: /ws/build
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "dada-cloud-console.fullname" . }}-build-agent
+                port:
+                  number: {{ .Values.buildAgent.webhookPort }}
+          {{- end }}
           - path: /
             pathType: Prefix
             backend:

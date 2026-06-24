@@ -15,12 +15,18 @@ type fakeApp struct {
 	repos   []github.RemoteRepo
 	gotID   int64
 	listErr error
+	acct    *github.InstallationAccount
+	acctErr error
 }
 
 func (f *fakeApp) InstallToken(_ context.Context, _ int64) (string, error) { return "t", nil }
 func (f *fakeApp) ListRepos(_ context.Context, id int64) ([]github.RemoteRepo, error) {
 	f.gotID = id
 	return f.repos, f.listErr
+}
+func (f *fakeApp) GetInstallation(_ context.Context, id int64) (*github.InstallationAccount, error) {
+	f.gotID = id
+	return f.acct, f.acctErr
 }
 func (f *fakeApp) PostStatus(_ context.Context, _ int64, _, _, _, _, _ string) error { return nil }
 
@@ -29,6 +35,7 @@ func newTestServer(gh github.App) http.Handler {
 	mux := http.NewServeMux()
 	if s.gh != nil {
 		mux.HandleFunc("GET /github/installations/{id}/repos", s.handleInstallationRepos)
+		mux.HandleFunc("GET /github/installations/{id}/account", s.handleInstallationAccount)
 	}
 	mux.HandleFunc("GET /github/installations/{id}/detect", s.handleDetect)
 	return mux
@@ -66,7 +73,50 @@ func TestHandleInstallationRepos(t *testing.T) {
 func TestHandleInstallationReposBadID(t *testing.T) {
 	srv := httptest.NewServer(newTestServer(&fakeApp{}))
 	defer srv.Close()
-	resp, _ := http.Get(srv.URL + "/github/installations/not-a-number/repos")
+	resp, err := http.Get(srv.URL + "/github/installations/not-a-number/repos")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+}
+
+func TestHandleInstallationAccount(t *testing.T) {
+	fa := &fakeApp{acct: &github.InstallationAccount{
+		InstallationID: 4242, AccountLogin: "acme", AccountType: "Organization",
+	}}
+	srv := httptest.NewServer(newTestServer(fa))
+	defer srv.Close()
+
+	resp, err := http.Get(srv.URL + "/github/installations/4242/account")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var out github.InstallationAccount
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		t.Fatal(err)
+	}
+	if fa.gotID != 4242 {
+		t.Errorf("installation id = %d, want 4242", fa.gotID)
+	}
+	if out.AccountLogin != "acme" || out.AccountType != "Organization" {
+		t.Errorf("account = %+v, want acme/Organization", out)
+	}
+}
+
+func TestHandleInstallationAccountBadID(t *testing.T) {
+	srv := httptest.NewServer(newTestServer(&fakeApp{}))
+	defer srv.Close()
+	resp, err := http.Get(srv.URL + "/github/installations/nope/account")
+	if err != nil {
+		t.Fatal(err)
+	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400", resp.StatusCode)

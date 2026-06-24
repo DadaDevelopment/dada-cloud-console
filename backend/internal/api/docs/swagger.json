@@ -243,7 +243,7 @@
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.loginRequest"
+                            "$ref": "#/definitions/internal_api.loginRequest"
                         }
                     }
                 ],
@@ -308,6 +308,37 @@
                                 "type": "string"
                             }
                         }
+                    }
+                }
+            }
+        },
+        "/git/install/callback": {
+            "get": {
+                "description": "Public endpoint GitHub redirects to after App install. Verifies the signed state, persists the installation, redirects to the import wizard.",
+                "tags": [
+                    "git"
+                ],
+                "summary": "GitHub App install callback (Setup URL)",
+                "operationId": "gitInstallCallback",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "GitHub installation id",
+                        "name": "installation_id",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Signed install state",
+                        "name": "state",
+                        "in": "query",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "302": {
+                        "description": "Found"
                     }
                 }
             }
@@ -636,7 +667,7 @@
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.createProjectRequest"
+                            "$ref": "#/definitions/internal_api.createProjectRequest"
                         }
                     }
                 ],
@@ -826,7 +857,7 @@
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.createAppServerRequest"
+                            "$ref": "#/definitions/internal_api.createAppServerRequest"
                         }
                     }
                 ],
@@ -1678,7 +1709,7 @@
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.addDomainAuthorizationRequest"
+                            "$ref": "#/definitions/internal_api.addDomainAuthorizationRequest"
                         }
                     }
                 ],
@@ -1950,7 +1981,7 @@
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.createAppRequest"
+                            "$ref": "#/definitions/internal_api.createAppRequest"
                         }
                     }
                 ],
@@ -2325,7 +2356,7 @@
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.createEndpointRequest"
+                            "$ref": "#/definitions/internal_api.createEndpointRequest"
                         }
                     }
                 ],
@@ -2589,7 +2620,7 @@
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.setEnvVarRequest"
+                            "$ref": "#/definitions/internal_api.setEnvVarRequest"
                         }
                     }
                 ],
@@ -2812,7 +2843,7 @@
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.attachHostnameRequest"
+                            "$ref": "#/definitions/internal_api.attachHostnameRequest"
                         }
                     }
                 ],
@@ -2993,7 +3024,7 @@
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.updateAppImageRequest"
+                            "$ref": "#/definitions/internal_api.updateAppImageRequest"
                         }
                     }
                 ],
@@ -3470,7 +3501,7 @@
                         "BearerAuth": []
                     }
                 ],
-                "description": "Provisions a new managed PostgreSQL database (ServiceDatabaseV2). app_ref is optional: omit it for a standalone, environment-level database, or set it to bind the database to an app's chart. Asynchronous: returns 202 with an operation; poll the operation until it reaches a terminal status. NOTE: the ServiceDatabaseV2 composition is currently blocked upstream, so reconcile may fail until that is fixed.",
+                "description": "Provisions a new managed PostgreSQL database (ServiceDatabaseV2). app_ref is optional: omit it for a standalone, environment-level database, or set it to bind the database to an app's chart. Asynchronous: returns 202 with an operation; poll the operation until it reaches a terminal status.",
                 "consumes": [
                     "application/json"
                 ],
@@ -3503,7 +3534,7 @@
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.createServiceDatabaseRequest"
+                            "$ref": "#/definitions/internal_api.createServiceDatabaseRequest"
                         }
                     }
                 ],
@@ -3644,7 +3675,7 @@
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.createAIModelRequest"
+                            "$ref": "#/definitions/internal_api.createAIModelRequest"
                         }
                     }
                 ],
@@ -4405,7 +4436,7 @@
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.createMonitoringRequest"
+                            "$ref": "#/definitions/internal_api.createMonitoringRequest"
                         }
                     }
                 ],
@@ -5632,7 +5663,7 @@
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.connectGitRepoRequest"
+                            "$ref": "#/definitions/internal_api.connectGitRepoRequest"
                         }
                     }
                 ],
@@ -5846,7 +5877,7 @@
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.createS3BucketRequest"
+                            "$ref": "#/definitions/internal_api.createS3BucketRequest"
                         }
                     }
                 ],
@@ -6381,7 +6412,7 @@
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.ingestLogsRequest"
+                            "$ref": "#/definitions/internal_api.ingestLogsRequest"
                         }
                     }
                 ],
@@ -6499,7 +6530,7 @@
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.ingestMetricsRequest"
+                            "$ref": "#/definitions/internal_api.ingestMetricsRequest"
                         }
                     }
                 ],
@@ -6827,7 +6858,33 @@
         }
     },
     "definitions": {
-        "api.addDomainAuthorizationRequest": {
+        "github_com_dada-tuda_console_backend_internal_models.AIModelAuthMode": {
+            "type": "string",
+            "enum": [
+                "apikey",
+                "jwt",
+                "public"
+            ],
+            "x-enum-varnames": [
+                "AIModelAuthAPIKey",
+                "AIModelAuthJWT",
+                "AIModelAuthPublic"
+            ]
+        },
+        "github_com_dada-tuda_console_backend_internal_models.AIModelSource": {
+            "type": "string",
+            "enum": [
+                "mlflow",
+                "s3",
+                "custom"
+            ],
+            "x-enum-varnames": [
+                "AIModelSourceMLflow",
+                "AIModelSourceS3",
+                "AIModelSourceCustom"
+            ]
+        },
+        "internal_api.addDomainAuthorizationRequest": {
             "type": "object",
             "properties": {
                 "apex_domain": {
@@ -6835,7 +6892,7 @@
                 }
             }
         },
-        "api.attachHostnameRequest": {
+        "internal_api.attachHostnameRequest": {
             "type": "object",
             "properties": {
                 "hostname": {
@@ -6843,7 +6900,7 @@
                 }
             }
         },
-        "api.connectGitRepoRequest": {
+        "internal_api.connectGitRepoRequest": {
             "type": "object",
             "properties": {
                 "app_name": {
@@ -6861,12 +6918,22 @@
                 "installation_id": {
                     "type": "string"
                 },
+                "port": {
+                    "description": "Intended app spec, applied by the first successful build when it creates the\napp. Defaulted server-side when omitted (8080 / 2 / small).",
+                    "type": "integer"
+                },
                 "production_branch": {
+                    "type": "string"
+                },
+                "profile": {
                     "type": "string"
                 },
                 "provider": {
                     "description": "Provider defaults to github when an installation_id is supplied.",
                     "type": "string"
+                },
+                "replicas": {
+                    "type": "integer"
                 },
                 "repo_full_name": {
                     "type": "string"
@@ -6880,7 +6947,7 @@
                 }
             }
         },
-        "api.createAIModelRequest": {
+        "internal_api.createAIModelRequest": {
             "type": "object",
             "properties": {
                 "artifact_uri": {
@@ -6890,7 +6957,7 @@
                     "type": "string"
                 },
                 "auth_mode": {
-                    "$ref": "#/definitions/models.AIModelAuthMode"
+                    "$ref": "#/definitions/github_com_dada-tuda_console_backend_internal_models.AIModelAuthMode"
                 },
                 "container_image": {
                     "type": "string"
@@ -6911,14 +6978,14 @@
                     "type": "string"
                 },
                 "source": {
-                    "$ref": "#/definitions/models.AIModelSource"
+                    "$ref": "#/definitions/github_com_dada-tuda_console_backend_internal_models.AIModelSource"
                 },
                 "version": {
                     "type": "string"
                 }
             }
         },
-        "api.createAppRequest": {
+        "internal_api.createAppRequest": {
             "type": "object",
             "properties": {
                 "image": {
@@ -6938,7 +7005,7 @@
                 }
             }
         },
-        "api.createAppServerRequest": {
+        "internal_api.createAppServerRequest": {
             "type": "object",
             "properties": {
                 "flavor": {
@@ -6975,7 +7042,7 @@
                 }
             }
         },
-        "api.createEndpointRequest": {
+        "internal_api.createEndpointRequest": {
             "type": "object",
             "properties": {
                 "auth_enabled": {
@@ -7004,7 +7071,7 @@
                 }
             }
         },
-        "api.createMonitoringRequest": {
+        "internal_api.createMonitoringRequest": {
             "type": "object",
             "properties": {
                 "name": {
@@ -7012,7 +7079,7 @@
                 }
             }
         },
-        "api.createProjectRequest": {
+        "internal_api.createProjectRequest": {
             "type": "object",
             "required": [
                 "slug"
@@ -7036,7 +7103,7 @@
                 }
             }
         },
-        "api.createS3BucketRequest": {
+        "internal_api.createS3BucketRequest": {
             "type": "object",
             "properties": {
                 "app_ref": {
@@ -7063,7 +7130,7 @@
                 }
             }
         },
-        "api.createServiceDatabaseRequest": {
+        "internal_api.createServiceDatabaseRequest": {
             "type": "object",
             "properties": {
                 "app_ref": {
@@ -7086,7 +7153,7 @@
                 }
             }
         },
-        "api.ingestLogsRequest": {
+        "internal_api.ingestLogsRequest": {
             "type": "object",
             "properties": {
                 "level": {
@@ -7100,7 +7167,7 @@
                 }
             }
         },
-        "api.ingestMetricsRequest": {
+        "internal_api.ingestMetricsRequest": {
             "type": "object",
             "properties": {
                 "metrics": {
@@ -7118,7 +7185,7 @@
                 }
             }
         },
-        "api.loginRequest": {
+        "internal_api.loginRequest": {
             "type": "object",
             "required": [
                 "password"
@@ -7135,7 +7202,7 @@
                 }
             }
         },
-        "api.setEnvVarRequest": {
+        "internal_api.setEnvVarRequest": {
             "type": "object",
             "properties": {
                 "is_secret": {
@@ -7149,39 +7216,13 @@
                 }
             }
         },
-        "api.updateAppImageRequest": {
+        "internal_api.updateAppImageRequest": {
             "type": "object",
             "properties": {
                 "image": {
                     "type": "string"
                 }
             }
-        },
-        "models.AIModelAuthMode": {
-            "type": "string",
-            "enum": [
-                "apikey",
-                "jwt",
-                "public"
-            ],
-            "x-enum-varnames": [
-                "AIModelAuthAPIKey",
-                "AIModelAuthJWT",
-                "AIModelAuthPublic"
-            ]
-        },
-        "models.AIModelSource": {
-            "type": "string",
-            "enum": [
-                "mlflow",
-                "s3",
-                "custom"
-            ],
-            "x-enum-varnames": [
-                "AIModelSourceMLflow",
-                "AIModelSourceS3",
-                "AIModelSourceCustom"
-            ]
         }
     },
     "securityDefinitions": {

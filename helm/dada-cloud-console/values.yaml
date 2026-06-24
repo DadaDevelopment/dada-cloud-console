@@ -161,6 +161,10 @@ buildAgent:
     pullPolicy: IfNotPresent
   # HTTP port: /healthz, /metrics, /webhook/github, /ws/build.
   webhookPort: 8091
+  # GitHub App slug — the public name in github.com/apps/<slug>. Wired to the
+  # backend as GIT_APP_SLUG so the install-url endpoint can send the browser to
+  # the public App install page. Empty → connect flow returns 503.
+  gitAppSlug: ""
   env:
     BUILD_POLL_INTERVAL: "5s"
     BUILD_TIMEOUT: "20m"

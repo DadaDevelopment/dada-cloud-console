@@ -43,9 +43,11 @@ and both the backend Secret and the build-agent Secret get the same
 ### 2. Register a GitHub App (external, one-time)
 Least-privilege permissions: Contents R, Metadata R, Commit statuses R/W, Checks R/W,
 Pull requests R, Webhooks. Events: `push`, `pull_request`. Webhook URL →
-`https://<ingress.host>/api/v1/webhooks/github` (proxied to the agent's
-`/webhook/github`). Fill `BUILD_GITHUB_APP_ID`, `BUILD_GITHUB_APP_KEY` (PEM),
-`BUILD_GITHUB_WEBHOOK_SECRET`.
+`https://<ingress.host>/webhook/github` (the agent's `/webhook/github`, routed by
+the ingress). **Setup URL** (post-install redirect) → `https://<ingress.host>/api/v1/git/install/callback`
+with "Redirect on update" enabled. Fill `BUILD_GITHUB_APP_ID`, `BUILD_GITHUB_APP_KEY`
+(PEM), `BUILD_GITHUB_WEBHOOK_SECRET`. Set `buildAgent.gitAppSlug` to the App's public
+slug (the `<slug>` in `github.com/apps/<slug>`) — wired to the backend as `GIT_APP_SLUG`.
 
 ### 3. Build backend (Jenkins) + registry (Nexus)
 The runner (`build-agent/internal/worker/runner.go`) drives a Jenkins job
@@ -64,25 +66,30 @@ endpoints the console backend calls during the wizard:
 
 So once a `git_app_installations` row exists, the wizard's pick-repo step works.
 
-### STILL MISSING — installing an account (populating git_app_installations)
-- `GetGitInstallURL` (backend) returns `BUILD_AGENT_URL + /github/install?state=`,
-  but `BUILD_AGENT_URL` is the **internal** cluster address — a browser cannot reach
-  it. The install URL must be browser-reachable: either return the GitHub public
-  `https://github.com/apps/<slug>/installations/new?state=<projectId:nonce>` directly
-  (needs the app slug in config), or expose an agent `/github/install` redirect via
-  public ingress.
-- No **install callback** exists to write `git_app_installations` (project_id,
-  provider, installation_id, account_login, account_type) after the user installs the
-  App. GitHub redirects the browser to the App's configured Setup URL with
-  `installation_id` + `state`; that endpoint (public) must persist the row. Deciding
-  where it lives (backend has the DB + is public; build-agent has the App private key
-  to resolve account login via `GET /app/installations/{id}`) is the open design call.
-- Public ingress: GitHub → `/webhook/github` and the install callback both need a
-  public path to the agent (or backend). Add to `ingress.yaml` when wiring go-live.
+## Connect an account (install flow) — DONE
 
-Until the install/callback path lands, accounts can't be connected from the UI, so
-the repo list has nothing to list. The webhook → build → CreateApp/DeployImageVersion
-path is complete and works once a `git_repos` row exists.
+The full install flow now lands a `git_app_installations` row from the UI:
+
+1. **Install URL** — `GET …/git/install-url?provider=github` returns the public
+   `https://github.com/apps/<slug>/installations/new?state=<projectId>.<nonce>.<hmac>`.
+   The slug comes from `GIT_APP_SLUG`; the `state` is HMAC-signed (key = the build-agent
+   token secret, falling back to the JWT secret) so the callback trusts the project
+   binding without a server-side nonce table. Returns 503 if `GIT_APP_SLUG` is unset.
+2. **Install callback** — `GET /api/v1/git/install/callback?installation_id=&state=`
+   (public, no bearer; trust is the signed state). It verifies the HMAC, resolves the
+   org/user via the build-agent (`GET /github/installations/{id}/account` →
+   `github.App.GetInstallation`, the only place with the App key), upserts
+   `git_app_installations`, then 302-redirects the browser to
+   `/projects/<id>/git/import?connected=1`. The callback is served by the backend, which
+   the ingress already exposes at `/api`.
+3. **Public ingress** — `ingress.yaml` routes `/webhook/github` and `/ws/build` to the
+   build-agent service (gated on `buildAgent.enabled`). The callback rides the existing
+   `/api` → backend rule.
+
+The webhook → build → CreateApp/DeployImageVersion path is complete and works once a
+`git_repos` row exists (created by the wizard's link-repo step after pick-repo).
+
+GitLab connect is not implemented — `git/install-url?provider=gitlab` returns 503.
 
 ## Verify after enabling
 - `kubectl get deploy <release>-build-agent` Ready; `/healthz` 200.

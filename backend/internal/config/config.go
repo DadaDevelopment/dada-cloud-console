@@ -72,6 +72,12 @@ type Config struct {
 	BuildAgentWSURL       string // BUILD_AGENT_WS_URL
 	BuildAgentTokenSecret string // BUILD_AGENT_TOKEN_SECRET
 
+	// GitHub App slug (the public name in github.com/apps/<slug>). Required for
+	// the connect flow: the install-url endpoint sends the browser to
+	// github.com/apps/<slug>/installations/new and GitHub redirects back to our
+	// install-callback. Empty disables the install-url (503).
+	GitAppSlug string // GIT_APP_SLUG
+
 	// Nexus raw repo (mobile artifacts). Used by the artifact-download proxy to
 	// stream APK/AAB bytes with server-side creds. Empty NexusRawURL disables
 	// downloads (404). Same Nexus the build-agent confirms against (ADR-010).
@@ -180,6 +186,7 @@ func Load() (*Config, error) {
 		BuildAgentURL:           getEnv("BUILD_AGENT_URL", ""),
 		BuildAgentWSURL:         getEnv("BUILD_AGENT_WS_URL", ""),
 		BuildAgentTokenSecret:   getEnv("BUILD_AGENT_TOKEN_SECRET", ""),
+		GitAppSlug:              getEnv("GIT_APP_SLUG", ""),
 		NexusRawURL:             getEnv("NEXUS_RAW_URL", ""),
 		NexusUser:               getEnv("NEXUS_USER", ""),
 		NexusToken:              getEnv("NEXUS_TOKEN", ""),

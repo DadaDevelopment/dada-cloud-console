@@ -78,6 +78,24 @@ func (c *Client) ListInstallationRepos(ctx context.Context, installationID int64
 	return out.Repos, nil
 }
 
+// InstallationAccount mirrors the agent's account-resolve shape.
+type InstallationAccount struct {
+	InstallationID int64  `json:"installation_id"`
+	AccountLogin   string `json:"account_login"`
+	AccountType    string `json:"account_type"`
+}
+
+// GetInstallationAccount proxies GET /github/installations/:id/account on the
+// agent (the agent holds the App key; the backend only has the DB).
+func (c *Client) GetInstallationAccount(ctx context.Context, installationID int64) (*InstallationAccount, error) {
+	path := fmt.Sprintf("/github/installations/%d/account", installationID)
+	var out InstallationAccount
+	if err := c.getJSON(ctx, path, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
 // FrameworkDetection mirrors the frontend FrameworkDetection shape.
 type FrameworkDetection struct {
 	Framework      *string `json:"framework"`

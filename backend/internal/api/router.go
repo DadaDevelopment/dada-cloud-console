@@ -99,6 +99,11 @@ func SetupRouter(pool *pgxpool.Pool, cfg *config.Config) *gin.Engine {
 	// Embedded OpenAPI spec (public — feeds the reflective MCP server).
 	r.GET("/openapi.json", ServeOpenAPISpec)
 
+	// GitHub App install callback (Setup URL). Public — GitHub redirects an
+	// anonymous browser here after install; trust is the HMAC-signed state, not
+	// a session. Lives outside the JWT group on purpose.
+	r.GET("/api/v1/git/install/callback", h.GitInstallCallback)
+
 	// Embedded MCP server at /mcp (Streamable HTTP transport).
 	// Each tool call self-proxies to cfg.MCPSelfURL/api/v1/... so auth and all
 	// middleware apply unchanged. Disabled via MCP_ENABLED=false.

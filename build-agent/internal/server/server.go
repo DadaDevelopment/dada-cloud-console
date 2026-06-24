@@ -75,6 +75,9 @@ func (s *Server) Start(ctx context.Context) error {
 	// resolves the installation UUID → numeric id and proxies here).
 	if s.gh != nil {
 		mux.HandleFunc("GET /github/installations/{id}/repos", s.handleInstallationRepos)
+		// account resolve — the backend's install-callback has the DB but no App
+		// key, so it asks the agent who an installation belongs to.
+		mux.HandleFunc("GET /github/installations/{id}/account", s.handleInstallationAccount)
 	}
 	// Framework detection is best-effort here (no clone in the agent process — a
 	// clone-based Nixpacks detect belongs in the build Job). Always 200 so the
@@ -204,6 +207,23 @@ func (s *Server) handleInstallationRepos(w http.ResponseWriter, r *http.Request)
 		repos = []github.RemoteRepo{}
 	}
 	writeJSON(w, map[string]any{"repos": repos})
+}
+
+// handleInstallationAccount resolves the org/user behind an installation.
+// GET /github/installations/{id}/account → {"installation_id","account_login","account_type"}.
+func (s *Server) handleInstallationAccount(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil {
+		http.Error(w, "bad installation id", http.StatusBadRequest)
+		return
+	}
+	acct, err := s.gh.GetInstallation(r.Context(), id)
+	if err != nil {
+		log.Error().Err(err).Int64("installation", id).Msg("resolve installation account")
+		http.Error(w, "failed to resolve installation", http.StatusBadGateway)
+		return
+	}
+	writeJSON(w, acct)
 }
 
 // frameworkDetection mirrors the backend/frontend FrameworkDetection shape.

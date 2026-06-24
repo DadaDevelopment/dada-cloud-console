@@ -1,11 +1,15 @@
 package api
 
 import (
+	"crypto/hmac"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"net/http"
+	"net/url"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/dada-tuda/console/backend/internal/auth"
@@ -181,14 +185,140 @@ func (h *Handler) GetGitInstallURL(c *gin.Context) {
 		respondError(c, http.StatusBadRequest, "provider must be github or gitlab")
 		return
 	}
+	if provider == "gitlab" {
+		respondError(c, http.StatusServiceUnavailable, "gitlab connect not implemented")
+		return
+	}
 
-	// The build-agent owns the App slug; the backend constructs the state and
-	// returns the agent's configured install URL base. We pass the project id +
-	// a random CSRF nonce as state for the callback to bind the installation.
-	state := projectID.String() + ":" + randomHex(16)
-	c.JSON(http.StatusOK, gin.H{
-		"url": h.cfg.BuildAgentURL + "/github/install?state=" + state,
-	})
+	if h.cfg.GitAppSlug == "" {
+		respondError(c, http.StatusServiceUnavailable, "git app slug not configured")
+		return
+	}
+	secret := h.stateSecret()
+	if secret == "" {
+		respondError(c, http.StatusServiceUnavailable, "git integration not configured")
+		return
+	}
+
+	// Public GitHub App install URL. GitHub redirects the browser back to the
+	// App's Setup URL (our /api/v1/git/install/callback) with installation_id +
+	// this state. The state is HMAC-signed so the callback can trust the project
+	// binding without a server-side nonce table.
+	state := signInstallState(secret, projectID)
+	u := "https://github.com/apps/" + url.PathEscape(h.cfg.GitAppSlug) +
+		"/installations/new?state=" + url.QueryEscape(state)
+	c.JSON(http.StatusOK, gin.H{"url": u})
+}
+
+// stateSecret picks the HMAC key for signing the install-callback state. The
+// connect flow already requires the build-agent, so its token secret is the
+// natural choice; fall back to the JWT secret.
+func (h *Handler) stateSecret() string {
+	if h.cfg.BuildAgentTokenSecret != "" {
+		return h.cfg.BuildAgentTokenSecret
+	}
+	return h.cfg.JWTSecret
+}
+
+// signInstallState returns "<projectID>.<nonce>.<hmacHex>" binding the install
+// callback to a project. The nonce defeats replay/guessing; the HMAC defeats
+// forgery (only the server can mint a state for an arbitrary project).
+func signInstallState(secret string, projectID uuid.UUID) string {
+	payload := projectID.String() + "." + randomHex(16)
+	mac := hmac.New(sha256.New, []byte(secret))
+	mac.Write([]byte(payload))
+	return payload + "." + hex.EncodeToString(mac.Sum(nil))
+}
+
+// verifyInstallState validates a signed state and returns the bound project id.
+func verifyInstallState(secret, state string) (uuid.UUID, bool) {
+	parts := strings.Split(state, ".")
+	if len(parts) != 3 {
+		return uuid.Nil, false
+	}
+	payload := parts[0] + "." + parts[1]
+	mac := hmac.New(sha256.New, []byte(secret))
+	mac.Write([]byte(payload))
+	want := hex.EncodeToString(mac.Sum(nil))
+	if !hmac.Equal([]byte(want), []byte(parts[2])) {
+		return uuid.Nil, false
+	}
+	pid, err := uuid.Parse(parts[0])
+	if err != nil {
+		return uuid.Nil, false
+	}
+	return pid, true
+}
+
+// GitInstallCallback is the public GitHub App Setup URL. After a user installs
+// the App, GitHub redirects the browser here with installation_id + the signed
+// state we issued. We verify the state, resolve the installation's account via
+// the build-agent (it holds the App key), upsert git_app_installations, then
+// redirect the browser back to the import wizard.
+//
+// Public (no bearer): the caller is an anonymous browser redirect. Trust is the
+// HMAC-signed state, not a session.
+//
+// @ID          gitInstallCallback
+// @Summary     GitHub App install callback (Setup URL)
+// @Description Public endpoint GitHub redirects to after App install. Verifies the signed state, persists the installation, redirects to the import wizard.
+// @Tags        git
+// @Param       installation_id query string true "GitHub installation id"
+// @Param       state           query string true "Signed install state"
+// @Success     302
+// @Router      /git/install/callback [get]
+func (h *Handler) GitInstallCallback(c *gin.Context) {
+	if h.buildagent == nil {
+		respondError(c, http.StatusServiceUnavailable, "git integration not configured")
+		return
+	}
+	secret := h.stateSecret()
+	if secret == "" {
+		respondError(c, http.StatusServiceUnavailable, "git integration not configured")
+		return
+	}
+
+	state := c.Query("state")
+	projectID, ok := verifyInstallState(secret, state)
+	if !ok {
+		respondError(c, http.StatusBadRequest, "invalid install state")
+		return
+	}
+
+	installIDStr := c.Query("installation_id")
+	installID, err := strconv.ParseInt(installIDStr, 10, 64)
+	if err != nil {
+		respondError(c, http.StatusBadRequest, "missing installation_id")
+		return
+	}
+
+	// Resolve the org/user behind the installation (build-agent has the App key).
+	acct, err := h.buildagent.GetInstallationAccount(c.Request.Context(), installID)
+	if err != nil {
+		respondError(c, http.StatusBadGateway, "failed to resolve installation")
+		return
+	}
+
+	// Upsert: re-installing the same App for the same project is idempotent.
+	_, err = h.pool.Exec(c.Request.Context(),
+		`INSERT INTO git_app_installations
+		   (project_id, provider, installation_id, account_login, account_type)
+		 VALUES ($1, 'github', $2, $3, $4)
+		 ON CONFLICT (project_id, provider, installation_id)
+		 DO UPDATE SET account_login = EXCLUDED.account_login,
+		               account_type  = EXCLUDED.account_type,
+		               updated_at    = NOW()`,
+		projectID, installID, acct.AccountLogin, acct.AccountType,
+	)
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, "failed to save installation")
+		return
+	}
+
+	// Relative redirect → same host as the console (backend is served behind the
+	// console domain), no extra config needed.
+	c.Redirect(http.StatusFound,
+		"/projects/"+projectID.String()+"/git/import?connected=1")
 }
 
 // ListInstallationRepos proxies the repository listing for an installation to the build-agent.

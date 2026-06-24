@@ -26,9 +26,20 @@ type App interface {
 	// ListRepos returns the repositories accessible to an installation (used by
 	// the import wizard).
 	ListRepos(ctx context.Context, installationID int64) ([]RemoteRepo, error)
+	// GetInstallation resolves the org/user an installation belongs to (used by
+	// the install-callback to persist git_app_installations).
+	GetInstallation(ctx context.Context, installationID int64) (*InstallationAccount, error)
 	// PostStatus reports a commit status back to GitHub on each build-state
 	// transition, with a details URL → console build page.
 	PostStatus(ctx context.Context, installationID int64, repoFullName, sha, state, detailsURL, description string) error
+}
+
+// InstallationAccount identifies the org/user a GitHub App installation belongs
+// to. Returned by the install-callback resolve step (the backend has no App key).
+type InstallationAccount struct {
+	InstallationID int64  `json:"installation_id"`
+	AccountLogin   string `json:"account_login"` // GitHub org/user slug
+	AccountType    string `json:"account_type"`  // "Organization" | "User"
 }
 
 // RemoteRepo is a repository accessible to an installation.
@@ -179,6 +190,48 @@ func (c *Client) ListRepos(ctx context.Context, installationID int64) ([]RemoteR
 		}
 	}
 	return repos, nil
+}
+
+// GetInstallation resolves the account (org/user) behind an installation via the
+// App JWT (GET /app/installations/{id}). No install token needed.
+func (c *Client) GetInstallation(ctx context.Context, installationID int64) (*InstallationAccount, error) {
+	appJWT, err := c.signedAppJWT()
+	if err != nil {
+		return nil, err
+	}
+
+	url := fmt.Sprintf("%s/app/installations/%d", apiBase, installationID)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", "Bearer "+appJWT)
+	req.Header.Set("Accept", "application/vnd.github+json")
+	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
+
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("get installation: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("get installation: %s", readErr(resp))
+	}
+
+	var out struct {
+		Account struct {
+			Login string `json:"login"`
+			Type  string `json:"type"`
+		} `json:"account"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return nil, fmt.Errorf("decode installation: %w", err)
+	}
+	return &InstallationAccount{
+		InstallationID: installationID,
+		AccountLogin:   out.Account.Login,
+		AccountType:    out.Account.Type,
+	}, nil
 }
 
 // PostStatus posts a commit status. state ∈ {pending, success, failure, error}.

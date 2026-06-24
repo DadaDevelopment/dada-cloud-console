@@ -30,4 +30,9 @@ data:
   {{- if and .Values.ingress.enabled (not (hasKey .Values.backend.env "BUILD_AGENT_WS_URL")) }}
   BUILD_AGENT_WS_URL: {{ printf "wss://%s" .Values.ingress.host | quote }}
   {{- end }}
+  {{- /* GitHub App slug → public install URL ( github.com/apps/<slug>/installations/new ).
+         Without it the install-url endpoint returns 503 and no account can be connected. */}}
+  {{- if and .Values.buildAgent.gitAppSlug (not (hasKey .Values.backend.env "GIT_APP_SLUG")) }}
+  GIT_APP_SLUG: {{ .Values.buildAgent.gitAppSlug | quote }}
+  {{- end }}
   {{- end }}
