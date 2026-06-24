@@ -17,6 +17,7 @@ type fakeApp struct {
 	listErr error
 	acct    *github.InstallationAccount
 	acctErr error
+	insts   []github.InstallationAccount
 }
 
 func (f *fakeApp) InstallToken(_ context.Context, _ int64) (string, error) { return "t", nil }
@@ -28,6 +29,9 @@ func (f *fakeApp) GetInstallation(_ context.Context, id int64) (*github.Installa
 	f.gotID = id
 	return f.acct, f.acctErr
 }
+func (f *fakeApp) ListInstallations(_ context.Context) ([]github.InstallationAccount, error) {
+	return f.insts, nil
+}
 func (f *fakeApp) PostStatus(_ context.Context, _ int64, _, _, _, _, _ string) error { return nil }
 
 func newTestServer(gh github.App) http.Handler {
@@ -36,6 +40,7 @@ func newTestServer(gh github.App) http.Handler {
 	if s.gh != nil {
 		mux.HandleFunc("GET /github/installations/{id}/repos", s.handleInstallationRepos)
 		mux.HandleFunc("GET /github/installations/{id}/account", s.handleInstallationAccount)
+		mux.HandleFunc("GET /github/app/installations", s.handleAppInstallations)
 	}
 	mux.HandleFunc("GET /github/installations/{id}/detect", s.handleDetect)
 	return mux
@@ -107,6 +112,33 @@ func TestHandleInstallationAccount(t *testing.T) {
 	}
 	if out.AccountLogin != "acme" || out.AccountType != "Organization" {
 		t.Errorf("account = %+v, want acme/Organization", out)
+	}
+}
+
+func TestHandleAppInstallations(t *testing.T) {
+	fa := &fakeApp{insts: []github.InstallationAccount{
+		{InstallationID: 1, AccountLogin: "acme", AccountType: "Organization"},
+		{InstallationID: 2, AccountLogin: "bob", AccountType: "User"},
+	}}
+	srv := httptest.NewServer(newTestServer(fa))
+	defer srv.Close()
+
+	resp, err := http.Get(srv.URL + "/github/app/installations")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var out struct {
+		Installations []github.InstallationAccount `json:"installations"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		t.Fatal(err)
+	}
+	if len(out.Installations) != 2 || out.Installations[0].AccountLogin != "acme" {
+		t.Errorf("installations = %+v, want acme+bob", out.Installations)
 	}
 }
 

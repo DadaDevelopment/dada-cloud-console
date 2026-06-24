@@ -321,6 +321,187 @@ func (h *Handler) GitInstallCallback(c *gin.Context) {
 		"/projects/"+projectID.String()+"/git/import?connected=1")
 }
 
+// availableInstallation is one App installation the wizard can bind to a project.
+type availableInstallation struct {
+	InstallationID string `json:"installation_id"` // numeric, as string
+	AccountLogin   string `json:"account_login"`
+	AccountType    string `json:"account_type"`
+	Bound          bool   `json:"bound"` // already linked to this project
+}
+
+// ListAvailableInstallations lists every App installation the build-agent can
+// see, flagging which are already bound to this project. The connect wizard uses
+// it to attach an already-installed org/user without a reinstall round-trip
+// (the only path that works once the App is installed org-wide).
+//
+// @ID          listAvailableInstallations
+// @Summary     List bindable git App installations
+// @Description Lists all GitHub App installations visible to the build-agent, flagging which are already bound to the project. Requires write access. 503 when the build-agent is unconfigured.
+// @Tags        git
+// @Produce     json
+// @Security    BearerAuth
+// @Param       projectId path     string true "Project UUID"
+// @Success     200       {object} map[string]interface{} "object with an installations array"
+// @Failure     403       {object} map[string]string
+// @Failure     503       {object} map[string]string
+// @Router      /projects/{projectId}/git/installations/available [get]
+func (h *Handler) ListAvailableInstallations(c *gin.Context) {
+	if h.buildagent == nil {
+		respondError(c, http.StatusServiceUnavailable, "git integration not configured")
+		return
+	}
+	claims, ok := auth.GetClaims(c)
+	if !ok {
+		respondUnauthorized(c)
+		return
+	}
+	projectID, err := uuid.Parse(c.Param("projectId"))
+	if err != nil {
+		respondNotFound(c)
+		return
+	}
+	role, err := h.effectiveRole(c.Request.Context(), claims, projectID)
+	if err == pgx.ErrNoRows {
+		respondNotFound(c)
+		return
+	}
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, "failed to check project membership")
+		return
+	}
+	if !canWrite(role) {
+		respondForbidden(c)
+		return
+	}
+
+	insts, err := h.buildagent.ListAppInstallations(c.Request.Context())
+	if err != nil {
+		respondError(c, http.StatusBadGateway, "failed to list installations")
+		return
+	}
+
+	// Which numeric installation ids are already bound to this project?
+	bound := map[int64]bool{}
+	rows, err := h.pool.Query(c.Request.Context(),
+		`SELECT installation_id FROM git_app_installations WHERE project_id = $1`, projectID)
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, "failed to query installations")
+		return
+	}
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			respondError(c, http.StatusInternalServerError, "failed to scan installation")
+			return
+		}
+		bound[id] = true
+	}
+	rows.Close()
+
+	out := []availableInstallation{}
+	for _, in := range insts {
+		out = append(out, availableInstallation{
+			InstallationID: strconv.FormatInt(in.InstallationID, 10),
+			AccountLogin:   in.AccountLogin,
+			AccountType:    in.AccountType,
+			Bound:          bound[in.InstallationID],
+		})
+	}
+	c.JSON(http.StatusOK, gin.H{"installations": out})
+}
+
+// bindInstallationRequest is the body of POST …/git/installations.
+type bindInstallationRequest struct {
+	InstallationID string `json:"installation_id"` // numeric GitHub installation id
+}
+
+// BindInstallation attaches an existing App installation to the project. It
+// resolves the account via the build-agent, then upserts git_app_installations.
+// This is the connect path for an already-installed App (no GitHub redirect).
+//
+// @ID          bindInstallation
+// @Summary     Bind an existing git App installation to a project
+// @Description Attaches an already-installed GitHub App installation to the project (resolves the account via the build-agent, upserts git_app_installations). Requires write access.
+// @Tags        git
+// @Accept      json
+// @Produce     json
+// @Security    BearerAuth
+// @Param       projectId path     string                  true "Project UUID"
+// @Param       body      body     bindInstallationRequest true "Installation id"
+// @Success     201       {object} gitInstallation
+// @Failure     400       {object} map[string]string
+// @Failure     403       {object} map[string]string
+// @Failure     503       {object} map[string]string
+// @Router      /projects/{projectId}/git/installations [post]
+func (h *Handler) BindInstallation(c *gin.Context) {
+	if h.buildagent == nil {
+		respondError(c, http.StatusServiceUnavailable, "git integration not configured")
+		return
+	}
+	claims, ok := auth.GetClaims(c)
+	if !ok {
+		respondUnauthorized(c)
+		return
+	}
+	projectID, err := uuid.Parse(c.Param("projectId"))
+	if err != nil {
+		respondNotFound(c)
+		return
+	}
+	role, err := h.effectiveRole(c.Request.Context(), claims, projectID)
+	if err == pgx.ErrNoRows {
+		respondNotFound(c)
+		return
+	}
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, "failed to check project membership")
+		return
+	}
+	if !canWrite(role) {
+		respondForbidden(c)
+		return
+	}
+
+	var req bindInstallationRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		respondError(c, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	installID, err := strconv.ParseInt(req.InstallationID, 10, 64)
+	if err != nil {
+		respondError(c, http.StatusBadRequest, "installation_id must be numeric")
+		return
+	}
+
+	acct, err := h.buildagent.GetInstallationAccount(c.Request.Context(), installID)
+	if err != nil {
+		respondError(c, http.StatusBadGateway, "failed to resolve installation")
+		return
+	}
+
+	var inst gitInstallation
+	var scanID int64
+	err = h.pool.QueryRow(c.Request.Context(),
+		`INSERT INTO git_app_installations
+		   (project_id, provider, installation_id, account_login, account_type)
+		 VALUES ($1, 'github', $2, $3, $4)
+		 ON CONFLICT (project_id, provider, installation_id)
+		 DO UPDATE SET account_login = EXCLUDED.account_login,
+		               account_type  = EXCLUDED.account_type,
+		               updated_at    = NOW()
+		 RETURNING id, project_id, provider, installation_id, account_login, account_type, created_at`,
+		projectID, installID, acct.AccountLogin, acct.AccountType,
+	).Scan(&inst.ID, &inst.ProjectID, &inst.Provider, &scanID,
+		&inst.AccountLogin, &inst.AccountType, &inst.CreatedAt)
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, "failed to save installation")
+		return
+	}
+	inst.InstallationID = strconv.FormatInt(scanID, 10)
+	c.JSON(http.StatusCreated, inst)
+}
+
 // ListInstallationRepos proxies the repository listing for an installation to the build-agent.
 //
 // @ID          listInstallationRepos

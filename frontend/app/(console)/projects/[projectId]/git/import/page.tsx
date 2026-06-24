@@ -81,6 +81,22 @@ export default function GitImportPage() {
   async function handleConnectProvider(provider: "github" | "gitlab") {
     setInstallError(null);
     try {
+      if (provider === "github") {
+        // The App is installed org-wide, so a fresh /installations/new redirect
+        // no-ops (GitHub just bounces to the manage page, no callback). Instead
+        // bind the existing installation(s) directly — the only path that works
+        // once the App is already installed.
+        const { installations: avail } = await gitApi.availableInstallations(projectId);
+        const list = avail ?? [];
+        const toBind = list.filter((a) => !a.bound);
+        if (list.length) {
+          await Promise.all(toBind.map((a) => gitApi.bindInstallation(projectId, a.installation_id)));
+          const d = await gitApi.installations(projectId);
+          setInstallations(d.installations ?? []);
+          return;
+        }
+        // Nothing installed yet → fall through to the real install redirect.
+      }
       const { url } = await gitApi.installUrl(projectId, provider);
       window.location.href = url;
     } catch (err) {

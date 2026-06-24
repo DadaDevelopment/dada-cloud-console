@@ -45,6 +45,8 @@ import type {
   BuildsResponse,
   DeploymentsResponse,
   InstallationsResponse,
+  GitInstallation,
+  AvailableInstallation,
   RemoteReposResponse,
   EnvVarsResponse,
   DomainsResponse,
@@ -454,6 +456,19 @@ export const gitApi = {
 
   installUrl: (projectId: string, provider: string) =>
     apiFetch<{ url: string }>(`/api/v1/projects/${projectId}/git/install-url?provider=${encodeURIComponent(provider)}`),
+
+  // Existing App installations the project can bind without a reinstall.
+  availableInstallations: (projectId: string) =>
+    apiFetch<{ installations: AvailableInstallation[] }>(
+      `/api/v1/projects/${projectId}/git/installations/available`
+    ),
+
+  // Attach an existing installation (numeric id) to the project.
+  bindInstallation: (projectId: string, installationId: string) =>
+    apiFetch<GitInstallation>(`/api/v1/projects/${projectId}/git/installations`, {
+      method: "POST",
+      body: { installation_id: installationId },
+    }),
 
   remoteRepos: (projectId: string, installationId: string) =>
     apiFetch<RemoteReposResponse>(

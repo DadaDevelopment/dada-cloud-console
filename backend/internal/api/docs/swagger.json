@@ -6043,6 +6043,132 @@
                         }
                     }
                 }
+            },
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Attaches an already-installed GitHub App installation to the project (resolves the account via the build-agent, upserts git_app_installations). Requires write access.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "git"
+                ],
+                "summary": "Bind an existing git App installation to a project",
+                "operationId": "bindInstallation",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Project UUID",
+                        "name": "projectId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Installation id",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.bindInstallationRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.gitInstallation"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/projects/{projectId}/git/installations/available": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Lists all GitHub App installations visible to the build-agent, flagging which are already bound to the project. Requires write access. 503 when the build-agent is unconfigured.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "git"
+                ],
+                "summary": "List bindable git App installations",
+                "operationId": "listAvailableInstallations",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Project UUID",
+                        "name": "projectId",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "object with an installations array",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
             }
         },
         "/projects/{projectId}/git/installations/{installationId}/detect": {
@@ -6900,6 +7026,15 @@
                 }
             }
         },
+        "internal_api.bindInstallationRequest": {
+            "type": "object",
+            "properties": {
+                "installation_id": {
+                    "description": "numeric GitHub installation id",
+                    "type": "string"
+                }
+            }
+        },
         "internal_api.connectGitRepoRequest": {
             "type": "object",
             "properties": {
@@ -7149,6 +7284,33 @@
                     "type": "string"
                 },
                 "name": {
+                    "type": "string"
+                }
+            }
+        },
+        "internal_api.gitInstallation": {
+            "type": "object",
+            "properties": {
+                "account_login": {
+                    "type": "string"
+                },
+                "account_type": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "installation_id": {
+                    "description": "BIGINT rendered as string",
+                    "type": "string"
+                },
+                "project_id": {
+                    "type": "string"
+                },
+                "provider": {
                     "type": "string"
                 }
             }

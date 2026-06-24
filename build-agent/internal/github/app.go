@@ -29,6 +29,9 @@ type App interface {
 	// GetInstallation resolves the org/user an installation belongs to (used by
 	// the install-callback to persist git_app_installations).
 	GetInstallation(ctx context.Context, installationID int64) (*InstallationAccount, error)
+	// ListInstallations returns every installation of this App (used by the
+	// connect wizard to bind an already-installed org without a reinstall).
+	ListInstallations(ctx context.Context) ([]InstallationAccount, error)
 	// PostStatus reports a commit status back to GitHub on each build-state
 	// transition, with a details URL → console build page.
 	PostStatus(ctx context.Context, installationID int64, repoFullName, sha, state, detailsURL, description string) error
@@ -232,6 +235,59 @@ func (c *Client) GetInstallation(ctx context.Context, installationID int64) (*In
 		AccountLogin:   out.Account.Login,
 		AccountType:    out.Account.Type,
 	}, nil
+}
+
+// ListInstallations returns every installation of this App via the App JWT
+// (GET /app/installations, paginated).
+func (c *Client) ListInstallations(ctx context.Context) ([]InstallationAccount, error) {
+	appJWT, err := c.signedAppJWT()
+	if err != nil {
+		return nil, err
+	}
+
+	var out []InstallationAccount
+	for page := 1; ; page++ {
+		url := fmt.Sprintf("%s/app/installations?per_page=100&page=%d", apiBase, page)
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+		if err != nil {
+			return nil, err
+		}
+		req.Header.Set("Authorization", "Bearer "+appJWT)
+		req.Header.Set("Accept", "application/vnd.github+json")
+		req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
+
+		resp, err := c.http.Do(req)
+		if err != nil {
+			return nil, fmt.Errorf("list installations: %w", err)
+		}
+		if resp.StatusCode != http.StatusOK {
+			msg := readErr(resp)
+			return nil, fmt.Errorf("list installations: %s", msg)
+		}
+		var batch []struct {
+			ID      int64 `json:"id"`
+			Account struct {
+				Login string `json:"login"`
+				Type  string `json:"type"`
+			} `json:"account"`
+		}
+		err = json.NewDecoder(resp.Body).Decode(&batch)
+		_ = resp.Body.Close()
+		if err != nil {
+			return nil, fmt.Errorf("decode installations: %w", err)
+		}
+		for _, b := range batch {
+			out = append(out, InstallationAccount{
+				InstallationID: b.ID,
+				AccountLogin:   b.Account.Login,
+				AccountType:    b.Account.Type,
+			})
+		}
+		if len(batch) < 100 {
+			break
+		}
+	}
+	return out, nil
 }
 
 // PostStatus posts a commit status. state ∈ {pending, success, failure, error}.

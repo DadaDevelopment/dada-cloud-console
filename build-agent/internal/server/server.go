@@ -78,6 +78,9 @@ func (s *Server) Start(ctx context.Context) error {
 		// account resolve — the backend's install-callback has the DB but no App
 		// key, so it asks the agent who an installation belongs to.
 		mux.HandleFunc("GET /github/installations/{id}/account", s.handleInstallationAccount)
+		// list all App installations — the connect wizard binds an existing
+		// (already-installed) org instead of forcing a reinstall.
+		mux.HandleFunc("GET /github/app/installations", s.handleAppInstallations)
 	}
 	// Framework detection is best-effort here (no clone in the agent process — a
 	// clone-based Nixpacks detect belongs in the build Job). Always 200 so the
@@ -224,6 +227,21 @@ func (s *Server) handleInstallationAccount(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	writeJSON(w, acct)
+}
+
+// handleAppInstallations lists every installation of the App.
+// GET /github/app/installations → {"installations":[{installation_id,account_login,account_type}]}.
+func (s *Server) handleAppInstallations(w http.ResponseWriter, r *http.Request) {
+	insts, err := s.gh.ListInstallations(r.Context())
+	if err != nil {
+		log.Error().Err(err).Msg("list app installations")
+		http.Error(w, "failed to list installations", http.StatusBadGateway)
+		return
+	}
+	if insts == nil {
+		insts = []github.InstallationAccount{}
+	}
+	writeJSON(w, map[string]any{"installations": insts})
 }
 
 // frameworkDetection mirrors the backend/frontend FrameworkDetection shape.

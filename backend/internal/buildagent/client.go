@@ -85,6 +85,18 @@ type InstallationAccount struct {
 	AccountType    string `json:"account_type"`
 }
 
+// ListAppInstallations proxies GET /github/app/installations on the agent —
+// every installation of the App, used to bind an already-installed org.
+func (c *Client) ListAppInstallations(ctx context.Context) ([]InstallationAccount, error) {
+	var out struct {
+		Installations []InstallationAccount `json:"installations"`
+	}
+	if err := c.getJSON(ctx, "/github/app/installations", &out); err != nil {
+		return nil, err
+	}
+	return out.Installations, nil
+}
+
 // GetInstallationAccount proxies GET /github/installations/:id/account on the
 // agent (the agent holds the App key; the backend only has the DB).
 func (c *Client) GetInstallationAccount(ctx context.Context, installationID int64) (*InstallationAccount, error) {

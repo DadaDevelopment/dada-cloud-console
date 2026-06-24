@@ -494,6 +494,14 @@ export interface GitInstallation {
   created_at: string;
 }
 
+// An App installation the project can bind without a reinstall (connect wizard).
+export interface AvailableInstallation {
+  installation_id: string;
+  account_login: string;
+  account_type: string;
+  bound: boolean;
+}
+
 export interface GitRemoteRepo {
   full_name: string;
   clone_url: string;

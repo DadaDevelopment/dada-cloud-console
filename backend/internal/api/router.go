@@ -197,6 +197,8 @@ func SetupRouter(pool *pgxpool.Pool, cfg *config.Config) *gin.Engine {
 		// Vercel-flow: git repos, builds, deployments, env vars.
 		// Git provider installations + remote repo listing (build-agent proxy).
 		api.GET("/projects/:projectId/git/installations", h.ListGitInstallations)
+		api.GET("/projects/:projectId/git/installations/available", h.ListAvailableInstallations)
+		api.POST("/projects/:projectId/git/installations", h.BindInstallation)
 		api.GET("/projects/:projectId/git/install-url", h.GetGitInstallURL)
 		api.GET("/projects/:projectId/git/installations/:installationId/repos", h.ListInstallationRepos)
 		api.GET("/projects/:projectId/git/installations/:installationId/detect", h.DetectFramework)
