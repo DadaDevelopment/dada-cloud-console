@@ -6,6 +6,7 @@ import { AuthProvider } from "@/lib/auth";
 const geist = Geist({ subsets: ["latin"], variable: "--font-geist" });
 
 export const metadata: Metadata = {
+  metadataBase: new URL("https://cloud.dada-tuda.ru"),
   title: "DADA Cloud Console",
   description: "GitOps-backed self-service cloud console",
 };

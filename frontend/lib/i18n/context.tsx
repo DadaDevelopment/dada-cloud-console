@@ -19,9 +19,16 @@ export function LangProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     const stored = (typeof window !== "undefined" && localStorage.getItem(STORAGE_KEY)) as Locale | null;
+    const active = stored === "ru" || stored === "en" ? stored : DEFAULT_LOCALE;
     if (stored === "ru" || stored === "en") {
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setLocaleState(stored);
+    }
+    // Root layout renders <html lang="en"> (shared with the console). On the
+    // RU-default marketing host, correct the document language so crawlers and
+    // assistive tech see the locale actually being rendered.
+    if (typeof document !== "undefined") {
+      document.documentElement.lang = active;
     }
   }, []);
 

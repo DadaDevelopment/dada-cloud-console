@@ -13,6 +13,7 @@ import {
 import { useLang } from "@/lib/i18n/context";
 import { consoleHref } from "@/lib/site";
 import { CtaBand, FaqList } from "@/components/marketing/sections";
+import { HomeJsonLd } from "@/components/marketing/home-jsonld";
 import { clsx } from "clsx";
 
 const STEP_ICONS = [GitBranch, Database, RotateCcw];
@@ -23,6 +24,7 @@ export default function HomePage() {
 
   return (
     <>
+      <HomeJsonLd />
       {/* Hero */}
       <section className="mkt-hero-gradient">
         <div className="mkt-grid-bg">
