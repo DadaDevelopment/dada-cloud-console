@@ -1,105 +1,42 @@
 package api
 
 import (
-	"crypto/rand"
-	"encoding/base64"
 	"errors"
 	"net/http"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/dada-tuda/console/backend/internal/auth"
 	"github.com/dada-tuda/console/backend/internal/logsearch"
 	"github.com/dada-tuda/console/backend/internal/models"
 	"github.com/dada-tuda/console/backend/internal/prometheus"
+	"github.com/dada-tuda/console/backend/internal/telemetry"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	"golang.org/x/crypto/argon2"
-	"golang.org/x/time/rate"
 )
 
-// ---- per-app ingest rate limiter ----
+// Ingest primitives (rate limiter, key generation, metric-name sanitization)
+// live in internal/telemetry so the console and the gateway share one
+// implementation (ADR-012, no fork/drift). The thin aliases below keep the
+// existing call sites and tests in this package readable.
 
-// ingestLimiter is a per-monitoring-app token bucket. The ADR requires per-key
-// rate limiting at ingest to bound cardinality/abuse; this is the in-process
-// guard (one limiter per app id, perMin requests with a perMin burst).
-type ingestLimiter struct {
-	mu      sync.Mutex
-	perMin  int
-	buckets map[uuid.UUID]*rate.Limiter
-}
+// ingestLimiter is the shared per-app token bucket.
+type ingestLimiter = telemetry.IngestLimiter
 
-func newIngestLimiter(perMin int) *ingestLimiter {
-	if perMin <= 0 {
-		perMin = 120
-	}
-	return &ingestLimiter{perMin: perMin, buckets: make(map[uuid.UUID]*rate.Limiter)}
-}
-
-func (l *ingestLimiter) allow(app uuid.UUID) bool {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	lim := l.buckets[app]
-	if lim == nil {
-		lim = rate.NewLimiter(rate.Limit(float64(l.perMin)/60.0), l.perMin)
-		l.buckets[app] = lim
-	}
-	return lim.Allow()
-}
-
-// ---- API key generation ----
+func newIngestLimiter(perMin int) *ingestLimiter { return telemetry.NewIngestLimiter(perMin) }
 
 // generateMonitoringKey mints a plaintext key shown once, plus a displayable
 // prefix and an argon2id hash (salt(16)||digest(32)). The plaintext is never
-// persisted. The gateway verifies the key out-of-band when it exchanges it for
-// fat claims; the hash is kept for local verification / future rotation. This is
-// the local issuance seam — a user-service IAM mint would replace this body.
+// persisted. This is the local issuance seam — a user-service IAM mint would
+// replace it.
 func generateMonitoringKey() (full, prefix string, hash []byte, err error) {
-	raw := make([]byte, 24)
-	if _, err = rand.Read(raw); err != nil {
-		return
-	}
-	full = "dmon_" + base64.RawURLEncoding.EncodeToString(raw)
-	if len(full) >= 13 {
-		prefix = full[:13]
-	} else {
-		prefix = full
-	}
-	salt := make([]byte, 16)
-	if _, err = rand.Read(salt); err != nil {
-		return
-	}
-	digest := argon2.IDKey([]byte(full), salt, 1, 64*1024, 4, 32)
-	hash = append(salt, digest...)
-	return
+	return telemetry.GenerateKey()
 }
 
 // sanitizeMetricName coerces an arbitrary metric key into a valid Prometheus
-// metric name ([a-zA-Z_][a-zA-Z0-9_]*). Prevents remote-write rejection and
-// label injection from custom metric names.
-func sanitizeMetricName(s string) string {
-	var b strings.Builder
-	for i, r := range s {
-		switch {
-		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r == '_':
-			b.WriteRune(r)
-		case r >= '0' && r <= '9':
-			if i == 0 {
-				b.WriteByte('_')
-			}
-			b.WriteRune(r)
-		default:
-			b.WriteByte('_')
-		}
-	}
-	out := b.String()
-	if out == "" {
-		out = "_"
-	}
-	return out
-}
+// metric name ([a-zA-Z_][a-zA-Z0-9_]*).
+func sanitizeMetricName(s string) string { return telemetry.SanitizeMetricName(s) }
 
 // ---- request/response shapes ----
 
@@ -355,7 +292,7 @@ func (h *Handler) IngestMetrics(c *gin.Context) {
 	if !ok {
 		return
 	}
-	if !h.ingestLimiter.allow(appID) {
+	if !h.ingestLimiter.Allow(appID) {
 		respondError(c, http.StatusTooManyRequests, "rate limit exceeded")
 		return
 	}
@@ -445,7 +382,7 @@ func (h *Handler) IngestLogs(c *gin.Context) {
 	if !ok {
 		return
 	}
-	if !h.ingestLimiter.allow(appID) {
+	if !h.ingestLimiter.Allow(appID) {
 		respondError(c, http.StatusTooManyRequests, "rate limit exceeded")
 		return
 	}

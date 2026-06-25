@@ -136,6 +136,13 @@ type Config struct {
 	PrometheusRemoteWritePass string // PROMETHEUS_REMOTE_WRITE_PASS
 	MonitoringRateLimitPerMin int    // MONITORING_RATE_LIMIT_PER_MIN (default 120)
 	MonitoringMaxLabels       int    // MONITORING_MAX_LABELS (default 30) — metrics per request cap
+	MonitoringMaxSeriesPerReq int    // MONITORING_MAX_SERIES_PER_REQUEST (default 2000) — gateway OTLP series/log cap
+
+	// Telemetry Gateway (ADR-012) — standalone write-plane service.
+	// GatewayDBURL is its read-only Postgres role (key verify + tenant resolve);
+	// empty falls back to DBURL. GatewayPort is the gateway's listen port.
+	GatewayDBURL string // GATEWAY_DB_URL
+	GatewayPort  string // GATEWAY_PORT (default 8081)
 
 	// SMTP for the Email contact point (shared with IAM invitations). Wired into
 	// Grafana's email contact point settings at provision time.
@@ -203,6 +210,14 @@ func Load() (*Config, error) {
 		GrafanaAPIToken:          getEnv("GRAFANA_API_TOKEN", ""),
 		GrafanaPromDatasourceUID: getEnv("GRAFANA_PROM_DATASOURCE_UID", ""),
 		MonitoringLogIndex:       getEnv("MONITORING_LOG_INDEX", "dada-app-logs-*"),
+		PrometheusRemoteWriteURL:  getEnv("PROMETHEUS_REMOTE_WRITE_URL", ""),
+		PrometheusRemoteWriteUser: getEnv("PROMETHEUS_REMOTE_WRITE_USER", ""),
+		PrometheusRemoteWritePass: getEnv("PROMETHEUS_REMOTE_WRITE_PASS", ""),
+		MonitoringRateLimitPerMin: int(getEnvInt64("MONITORING_RATE_LIMIT_PER_MIN", 120)),
+		MonitoringMaxLabels:       int(getEnvInt64("MONITORING_MAX_LABELS", 30)),
+		MonitoringMaxSeriesPerReq: int(getEnvInt64("MONITORING_MAX_SERIES_PER_REQUEST", 2000)),
+		GatewayDBURL:              getEnv("GATEWAY_DB_URL", ""),
+		GatewayPort:               getEnv("GATEWAY_PORT", "8081"),
 		SMTPHost:                 getEnv("SMTP_HOST", ""),
 		SMTPPort:                 int(getEnvInt64("SMTP_PORT", 587)),
 		SMTPUser:                 getEnv("SMTP_USER", ""),

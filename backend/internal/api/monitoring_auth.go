@@ -1,45 +1,32 @@
 package api
 
 import (
-	"crypto/subtle"
 	"net/http"
 	"strings"
 
 	"github.com/dada-tuda/console/backend/internal/auth"
+	"github.com/dada-tuda/console/backend/internal/telemetry"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
-	"golang.org/x/crypto/argon2"
 )
 
 // monitoringKeyPrefix is the recognizable prefix every monitoring ingest key
-// carries (see generateMonitoringKey). A presented token starting with it is
-// treated as a scoped device key rather than a JWT.
-const monitoringKeyPrefix = "dmon_"
+// carries. A presented token starting with it is treated as a scoped device key
+// rather than a JWT. Single source of truth: telemetry.KeyPrefix.
+const monitoringKeyPrefix = telemetry.KeyPrefix
 
 // ingestKeyFromRequest extracts a presented monitoring ingest key from either
 // the X-API-Key header or an "Authorization: Bearer <key>" header. Returns ""
 // when no dmon_ key is present so the caller can fall back to JWT auth.
+// Delegates to telemetry so the console and gateway share one parser.
 func ingestKeyFromRequest(c *gin.Context) string {
-	if k := strings.TrimSpace(c.GetHeader("X-API-Key")); strings.HasPrefix(k, monitoringKeyPrefix) {
-		return k
-	}
-	parts := strings.SplitN(c.GetHeader("Authorization"), " ", 2)
-	if len(parts) == 2 && strings.EqualFold(parts[0], "bearer") && strings.HasPrefix(parts[1], monitoringKeyPrefix) {
-		return parts[1]
-	}
-	return ""
+	return telemetry.KeyFromHeaders(c.GetHeader("X-API-Key"), c.GetHeader("Authorization"))
 }
 
 // verifyMonitoringKeyHash checks a presented key against the stored
-// salt(16)||digest(32) argon2id hash (the layout generateMonitoringKey writes),
-// in constant time. Parameters must match generateMonitoringKey exactly.
+// salt(16)||digest(32) argon2id hash, in constant time. Delegates to telemetry.
 func verifyMonitoringKeyHash(full string, stored []byte) bool {
-	if len(stored) != 48 {
-		return false
-	}
-	salt, want := stored[:16], stored[16:]
-	got := argon2.IDKey([]byte(full), salt, 1, 64*1024, 4, 32)
-	return subtle.ConstantTimeCompare(got, want) == 1
+	return telemetry.VerifyKeyHash(full, stored)
 }
 
 // IngestAuthMiddleware authenticates the device-facing monitoring ingest

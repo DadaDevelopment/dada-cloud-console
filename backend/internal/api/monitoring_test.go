@@ -77,25 +77,18 @@ func TestIngestLimiter(t *testing.T) {
 	app := uuid.New()
 	allowed := 0
 	for i := 0; i < 60; i++ {
-		if l.allow(app) {
+		if l.Allow(app) {
 			allowed++
 		}
 	}
 	if allowed != 60 {
 		t.Errorf("expected 60 allowed in burst, got %d", allowed)
 	}
-	if l.allow(app) {
+	if l.Allow(app) {
 		t.Error("61st request should be rate-limited")
 	}
 	// a different app has its own bucket
-	if !l.allow(uuid.New()) {
+	if !l.Allow(uuid.New()) {
 		t.Error("separate app should have its own bucket")
-	}
-}
-
-func TestNewIngestLimiterDefault(t *testing.T) {
-	l := newIngestLimiter(0)
-	if l.perMin != 120 {
-		t.Errorf("default perMin = %d, want 120", l.perMin)
 	}
 }
