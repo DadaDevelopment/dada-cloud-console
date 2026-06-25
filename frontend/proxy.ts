@@ -24,13 +24,29 @@ function publicHost(request: NextRequest): string {
 
 export function proxy(request: NextRequest) {
   const host = publicHost(request);
+  const path = request.nextUrl.pathname;
   const isMarketingHost = MARKETING_HOST === "" || host === MARKETING_HOST;
+
   if (!isMarketingHost) {
-    return NextResponse.redirect(new URL("/projects", request.url));
+    // Console host: only the root used to redirect into the app. Keep that and
+    // leave every other console route alone (redirecting all paths would loop
+    // /projects → /projects).
+    if (path === "/") {
+      return NextResponse.redirect(new URL("/projects", request.url));
+    }
+    return NextResponse.next();
   }
-  return NextResponse.next();
+
+  // Marketing host: expose the URL-derived locale to server components (root
+  // layout reads it to set <html lang> on SSR). "/en" + "/en/..." is English,
+  // everything else is the RU default.
+  const locale = path === "/en" || path.startsWith("/en/") ? "en" : "ru";
+  const headers = new Headers(request.headers);
+  headers.set("x-dada-locale", locale);
+  return NextResponse.next({ request: { headers } });
 }
 
 export const config = {
-  matcher: "/",
+  // Run on real pages, skip Next internals and static assets.
+  matcher: ["/((?!_next/static|_next/image|favicon.ico|.*\\..*).*)"],
 };
