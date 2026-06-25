@@ -5,27 +5,27 @@ import Link from "next/link";
 import { Cloud, Menu, X } from "lucide-react";
 import { useLang } from "@/lib/i18n/context";
 import { useAuth } from "@/lib/auth";
-import { consoleHref } from "@/lib/site";
+import { consoleHref, localeHref } from "@/lib/site";
 import { LangToggle } from "./lang-toggle";
 import { clsx } from "clsx";
 
 export function MarketingHeader() {
-  const { t } = useLang();
+  const { t, locale } = useLang();
   const { token } = useAuth();
   const [open, setOpen] = useState(false);
 
   const links = [
-    { href: "/#how", label: t.nav.how },
-    { href: "/databases", label: t.nav.databases },
-    { href: "/pricing", label: t.nav.pricing },
-    { href: "/developer", label: t.nav.docs },
+    { href: localeHref("/#how", locale), label: t.nav.how },
+    { href: localeHref("/databases", locale), label: t.nav.databases },
+    { href: localeHref("/pricing", locale), label: t.nav.pricing },
+    { href: localeHref("/developer", locale), label: t.nav.docs },
   ];
 
   return (
     <header className="sticky top-0 z-50 border-b border-white/10 bg-[#0b1220]/90 backdrop-blur">
       <div className="mx-auto flex h-16 max-w-7xl items-center justify-between px-4 sm:px-6 lg:px-8">
         <div className="flex items-center gap-8">
-          <Link href="/" className="flex items-center gap-2 text-white">
+          <Link href={localeHref("/", locale)} className="flex items-center gap-2 text-white">
             <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-blue-600">
               <Cloud className="h-5 w-5" />
             </span>

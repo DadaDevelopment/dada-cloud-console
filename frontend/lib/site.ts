@@ -11,3 +11,16 @@ export function consoleHref(path: string): string {
   if (!CONSOLE_URL) return path;
   return `${CONSOLE_URL}${path}`;
 }
+
+// Marketing locale routing: RU is served at the root ("/", "/pricing"), EN at
+// the "/en" prefix ("/en", "/en/pricing"). Keep internal marketing links inside
+// the active locale so navigation doesn't bounce the user back to RU.
+// Pass a root-relative path ("/", "/pricing", "/#how"); console/external links
+// must keep using consoleHref instead.
+export function localeHref(path: string, locale: "ru" | "en"): string {
+  if (locale !== "en") return path;
+  if (path === "/") return "/en";
+  if (path.startsWith("/#")) return `/en${path.slice(1)}`; // "/#how" -> "/en#how"
+  if (path.startsWith("/")) return `/en${path}`;
+  return path; // anchors, external, already-prefixed
+}

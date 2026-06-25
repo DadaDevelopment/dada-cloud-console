@@ -17,9 +17,14 @@ export const metadata: Metadata = {
   description: DESCRIPTION,
   applicationName: "DADA Cloud",
   alternates: {
-    // Locale is a client-side toggle (localStorage), there is no /en route,
-    // so the canonical is self-referencing to the single marketing URL.
-    canonical: "/",
+    // No blanket canonical here: this layout wraps every marketing route, so a
+    // hardcoded "/" would wrongly canonicalize /pricing etc. to the home page.
+    // Each URL self-canonicalizes; the /en subtree sets its own canonical.
+    languages: {
+      "ru-RU": "/",
+      "en-US": "/en",
+      "x-default": "/",
+    },
   },
   openGraph: {
     type: "website",

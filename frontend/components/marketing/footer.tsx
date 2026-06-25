@@ -3,9 +3,23 @@
 import Link from "next/link";
 import { Cloud } from "lucide-react";
 import { useLang } from "@/lib/i18n/context";
+import { localeHref } from "@/lib/site";
+
+// Marketing routes that have a localized "/en" mirror. Console links
+// ("/projects", "/login") must NOT be locale-prefixed.
+const MARKETING_PATHS = new Set([
+  "/",
+  "/cloud-servers",
+  "/kubernetes",
+  "/databases",
+  "/storage",
+  "/pricing",
+  "/developer",
+]);
 
 export function MarketingFooter() {
-  const { t } = useLang();
+  const { t, locale } = useLang();
+  const href = (path: string) => (MARKETING_PATHS.has(path) ? localeHref(path, locale) : path);
   const cols = [
     { title: t.footer.productsTitle, links: t.footer.products },
     { title: t.footer.companyTitle, links: t.footer.company },
@@ -17,7 +31,7 @@ export function MarketingFooter() {
       <div className="mx-auto max-w-7xl px-4 py-12 sm:px-6 lg:px-8">
         <div className="grid grid-cols-2 gap-8 md:grid-cols-4">
           <div className="col-span-2 md:col-span-1">
-            <Link href="/" className="flex items-center gap-2 text-white">
+            <Link href={localeHref("/", locale)} className="flex items-center gap-2 text-white">
               <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-blue-600">
                 <Cloud className="h-5 w-5" />
               </span>
@@ -31,7 +45,7 @@ export function MarketingFooter() {
               <ul className="mt-3 space-y-2 text-sm">
                 {col.links.map((l) => (
                   <li key={l.label + l.href}>
-                    <Link href={l.href} className="transition-colors hover:text-white">
+                    <Link href={href(l.href)} className="transition-colors hover:text-white">
                       {l.label}
                     </Link>
                   </li>

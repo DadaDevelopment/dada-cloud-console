@@ -11,7 +11,7 @@ import {
   Check,
 } from "lucide-react";
 import { useLang } from "@/lib/i18n/context";
-import { consoleHref } from "@/lib/site";
+import { consoleHref, localeHref } from "@/lib/site";
 import { CtaBand, FaqList } from "@/components/marketing/sections";
 import { HomeJsonLd } from "@/components/marketing/home-jsonld";
 import { clsx } from "clsx";
@@ -20,7 +20,7 @@ const STEP_ICONS = [GitBranch, Database, RotateCcw];
 const VALUE_ICONS = [GitBranch, Globe, ScrollText];
 
 export default function HomePage() {
-  const { t } = useLang();
+  const { t, locale } = useLang();
 
   return (
     <>
@@ -52,7 +52,7 @@ export default function HomePage() {
                 {t.home.heroSecondary}
               </Link>
               <Link
-                href="/pricing"
+                href={localeHref("/pricing", locale)}
                 className="rounded-md px-7 py-3 text-sm font-semibold text-white/70 transition-colors hover:text-white"
               >
                 {t.home.heroTertiary}
@@ -203,7 +203,7 @@ export default function HomePage() {
           </div>
           <div className="mt-8 flex flex-wrap items-center gap-4">
             <Link
-              href="/pricing"
+              href={localeHref("/pricing", locale)}
               className="inline-flex items-center gap-2 rounded-md bg-blue-600 px-6 py-3 text-sm font-semibold text-white transition-colors hover:bg-blue-700"
             >
               {t.common.learnMore}

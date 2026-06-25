@@ -1,51 +1,39 @@
 "use client";
 
-import { createContext, useContext, useEffect, useState, useCallback } from "react";
+import { createContext, useContext, useEffect } from "react";
+import { usePathname } from "next/navigation";
 import { dictionaries, DEFAULT_LOCALE, type Locale, type Dict } from "./dict";
-
-const STORAGE_KEY = "dada_lang";
 
 interface LangContextValue {
   locale: Locale;
-  setLocale: (l: Locale) => void;
-  toggle: () => void;
   t: Dict;
 }
 
 const LangContext = createContext<LangContextValue | null>(null);
 
+// The URL is the single source of truth for the marketing locale: "/en" (and
+// "/en/...") renders English, everything else renders the default (RU). This
+// makes each language a real, crawlable URL that also renders correctly on the
+// server, instead of a client-only localStorage toggle.
+export function localeFromPath(pathname: string | null | undefined): Locale {
+  if (pathname === "/en" || (pathname?.startsWith("/en/") ?? false)) return "en";
+  return DEFAULT_LOCALE;
+}
+
 export function LangProvider({ children }: { children: React.ReactNode }) {
-  const [locale, setLocaleState] = useState<Locale>(DEFAULT_LOCALE);
+  const pathname = usePathname();
+  const locale = localeFromPath(pathname);
 
   useEffect(() => {
-    const stored = (typeof window !== "undefined" && localStorage.getItem(STORAGE_KEY)) as Locale | null;
-    const active = stored === "ru" || stored === "en" ? stored : DEFAULT_LOCALE;
-    if (stored === "ru" || stored === "en") {
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      setLocaleState(stored);
-    }
-    // Root layout renders <html lang="en"> (shared with the console). On the
-    // RU-default marketing host, correct the document language so crawlers and
-    // assistive tech see the locale actually being rendered.
+    // Root layout renders <html lang="en"> (shared with the console). Correct it
+    // to the locale this URL actually renders so crawlers and assistive tech agree.
     if (typeof document !== "undefined") {
-      document.documentElement.lang = active;
+      document.documentElement.lang = locale;
     }
-  }, []);
-
-  const setLocale = useCallback((l: Locale) => {
-    setLocaleState(l);
-    if (typeof window !== "undefined") {
-      localStorage.setItem(STORAGE_KEY, l);
-      document.documentElement.lang = l;
-    }
-  }, []);
-
-  const toggle = useCallback(() => {
-    setLocale(locale === "ru" ? "en" : "ru");
-  }, [locale, setLocale]);
+  }, [locale]);
 
   return (
-    <LangContext.Provider value={{ locale, setLocale, toggle, t: dictionaries[locale] }}>
+    <LangContext.Provider value={{ locale, t: dictionaries[locale] }}>
       {children}
     </LangContext.Provider>
   );

@@ -4,7 +4,7 @@ import Link from "next/link";
 import { Check, ChevronDown } from "lucide-react";
 import { useState } from "react";
 import { useLang } from "@/lib/i18n/context";
-import { consoleHref } from "@/lib/site";
+import { consoleHref, localeHref } from "@/lib/site";
 import { clsx } from "clsx";
 
 export function ProductHero({
@@ -16,7 +16,7 @@ export function ProductHero({
   subtitle: string;
   badge?: string;
 }) {
-  const { t } = useLang();
+  const { t, locale } = useLang();
   return (
     <section className="mkt-hero-gradient">
       <div className="mkt-grid-bg">
@@ -38,7 +38,7 @@ export function ProductHero({
               {t.common.createAccount}
             </Link>
             <Link
-              href="/pricing"
+              href={localeHref("/pricing", locale)}
               className="rounded-md border border-white/20 px-6 py-3 text-sm font-semibold text-white transition-colors hover:bg-white/5"
             >
               {t.common.learnMore}
