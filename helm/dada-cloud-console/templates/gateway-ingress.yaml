@@ -1,0 +1,53 @@
+{{- if and .Values.gateway.enabled .Values.gateway.ingress.enabled }}
+# Public device-ingest ingress (ADR-012): a SEPARATE host (default
+# ingest.dada-tuda.ru) routing OTLP/HTTP (/v1/*) and bespoke JSON (/api/v1/*)
+# straight to the gateway service — kept off the console host so spiky,
+# untrusted device traffic never shares the console's blast radius. Uses the
+# public ingress class by default.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "dada-cloud-console.fullname" . }}-gateway
+  labels:
+    {{- include "dada-cloud-console.labels" . | nindent 4 }}
+    app.kubernetes.io/component: gateway
+  annotations:
+    # OTLP batches + log bodies; allow a generous request size.
+    nginx.ingress.kubernetes.io/proxy-body-size: "16m"
+    {{- range $key, $value := .Values.gateway.ingress.annotations }}
+    {{ $key }}: {{ $value | quote }}
+    {{- end }}
+spec:
+  ingressClassName: {{ .Values.gateway.ingress.className }}
+  {{- if .Values.gateway.ingress.tls.enabled }}
+  tls:
+    - hosts:
+        - {{ .Values.gateway.ingress.host }}
+      secretName: {{ .Values.gateway.ingress.tls.secretName }}
+  {{- end }}
+  rules:
+    - host: {{ .Values.gateway.ingress.host }}
+      http:
+        paths:
+          - path: /v1
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "dada-cloud-console.fullname" . }}-gateway
+                port:
+                  number: {{ .Values.gateway.service.port }}
+          - path: /api/v1
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "dada-cloud-console.fullname" . }}-gateway
+                port:
+                  number: {{ .Values.gateway.service.port }}
+          - path: /healthz
+            pathType: Exact
+            backend:
+              service:
+                name: {{ include "dada-cloud-console.fullname" . }}-gateway
+                port:
+                  number: {{ .Values.gateway.service.port }}
+{{- end }}

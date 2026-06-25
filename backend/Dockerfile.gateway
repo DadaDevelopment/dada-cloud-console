@@ -1,0 +1,9 @@
+# Telemetry Gateway (ADR-012) — standalone write-plane ingest service.
+# Built from the backend module (cmd/gateway). No migrations: the gateway holds
+# only a read-only DB role and never alters schema (the console runs migrations).
+FROM alpine:3.19
+RUN apk add --no-cache ca-certificates
+WORKDIR /app
+COPY bin/gateway ./gateway
+EXPOSE 8081
+ENTRYPOINT ["./gateway"]

@@ -1,4 +1,4 @@
-.PHONY: help dev dev-db dev-backend dev-frontend dev-init stop clean build-backend build-frontend test-backend test helm-lint helm-render
+.PHONY: help dev dev-db dev-backend dev-frontend dev-init stop clean build-backend build-gateway build-frontend test-backend test helm-lint helm-render
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}'
@@ -28,6 +28,9 @@ clean: ## Remove docker volumes (wipes database!)
 
 build-backend: ## Build backend binary
 	@cd backend && go build -o bin/server ./cmd/server
+
+build-gateway: ## Build telemetry gateway binary
+	@cd backend && go build -o bin/gateway ./cmd/gateway
 
 build-frontend: ## Build frontend for production
 	@cd frontend && npm run build

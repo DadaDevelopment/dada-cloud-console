@@ -103,6 +103,41 @@ backend:
       cpu: 500m
       memory: 512Mi
 
+# Telemetry Gateway (ADR-012): standalone OTLP/HTTP + bespoke-JSON device-ingest
+# write plane. Scaled independently of the console backend. Shares the same
+# Prometheus + Elasticsearch (wired via the shared ConfigMap/Secret). Set
+# gateway.databaseUrl to a READ-ONLY Postgres role (key verify + tenant resolve
+# only); empty falls back to the shared DB_URL.
+gateway:
+  enabled: true
+  replicaCount: 2
+  image:
+    repository: dada-cloud-console-gateway
+    tag: "latest"
+    pullPolicy: IfNotPresent
+  service:
+    port: 8081
+  # Read-only DB DSN. Recommended: a Postgres role with SELECT on monitoring_apps
+  # + its joined tables only. Empty -> reuse the shared DB_URL (not least-privilege).
+  databaseUrl: ""
+  ingress:
+    enabled: true
+    # Public device-ingest host. Devices point OTEL_EXPORTER_OTLP_ENDPOINT here.
+    host: ingest.dada-tuda.ru
+    # Public ingress class (separate LB from the console). See ingress migration.
+    className: ingress-nginx-pub
+    annotations: {}
+    tls:
+      enabled: false
+      secretName: gateway-tls
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: "1"
+      memory: 256Mi
+
 gitopsAgent:
   enabled: true
   image:

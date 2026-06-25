@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState, FormEvent } from "react";
+import { useEffect, useState, useRef, FormEvent } from "react";
 import { useParams, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { monitoringApi } from "@/lib/api";
@@ -17,9 +17,10 @@ import { LogsViewer } from "@/components/logs-viewer";
 import { useProjectContext } from "@/lib/project-context";
 import { canMutate } from "@/lib/rbac";
 
-type Tab = "overview" | "metrics" | "logs" | "alerts";
+type Tab = "overview" | "dashboard" | "metrics" | "logs" | "alerts";
 
-// HealthBadge maps state → color classes
+// ── Helpers ────────────────────────────────────────────────────────────────────
+
 function HealthBadge({ state, critical }: { state: HealthState; critical: boolean }) {
   const colors: Record<HealthState, string> = {
     healthy: "bg-green-100 text-green-800",
@@ -97,6 +98,129 @@ function ModalFooter({
   );
 }
 
+// ── Embedded Grafana dashboard tab ─────────────────────────────────────────────
+//
+// Auth strategy: we iframe the URL returned by GET .../grafana-link, which points
+// at the public Grafana base (GRAFANA_PUBLIC_URL from backend config). Full
+// embedding (allow_embedding=true, X-Frame-Options: ALLOW-FROM) must be
+// configured on the Grafana server — that is a deploy-time config concern, not a
+// frontend one. For authenticated embedding (auth-proxy with X-WEBAUTH-USER, or
+// per-org service-account signed embed), the backend grafana-link endpoint should
+// already embed auth params in the URL it returns. We display a graceful fallback
+// "Open in Grafana" link if the iframe is blocked (e.g. X-Frame-Options denies).
+
+function GrafanaDashboardTab({
+  projectId,
+  envId,
+  appId,
+}: {
+  projectId: string;
+  envId: string;
+  appId: string;
+}) {
+  const [url, setUrl] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [fetchError, setFetchError] = useState<string | null>(null);
+  // iframeBlocked is set to true if the iframe fires an error event (e.g.
+  // X-Frame-Options or CSP blocks it). Note: browsers don't reliably surface
+  // these as JS errors; we rely on onError + a load-timeout heuristic.
+  const [iframeBlocked, setIframeBlocked] = useState(false);
+  const [iframeLoaded, setIframeLoaded] = useState(false);
+  const loadTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    if (!envId) return;
+    /* eslint-disable react-hooks/set-state-in-effect */
+    setIsLoading(true);
+    /* eslint-enable react-hooks/set-state-in-effect */
+    monitoringApi
+      .getGrafanaLink(projectId, envId, appId)
+      .then((r) => setUrl(r.url))
+      .catch((err) => setFetchError(err instanceof Error ? err.message : "Failed to get Grafana link"))
+      .finally(() => setIsLoading(false));
+  }, [projectId, envId, appId]);
+
+  // Start a 10 s timeout once the URL is known. If iframe hasn't fired onLoad by
+  // then we assume it was blocked (frame-busted) and show the fallback link.
+  useEffect(() => {
+    if (!url) return;
+    loadTimeoutRef.current = setTimeout(() => {
+      if (!iframeLoaded) setIframeBlocked(true);
+    }, 10_000);
+    return () => {
+      if (loadTimeoutRef.current) clearTimeout(loadTimeoutRef.current);
+    };
+  }, [url, iframeLoaded]);
+
+  if (isLoading) {
+    return (
+      <div className="flex h-64 items-center justify-center">
+        <Spinner />
+      </div>
+    );
+  }
+
+  if (fetchError || !url) {
+    return (
+      <div className="space-y-4">
+        <ErrorBox text={fetchError ?? "Grafana link unavailable"} />
+        <p className="text-sm text-gray-500">
+          The Grafana dashboard may not have been provisioned yet. Check that the monitoring app has a{" "}
+          <span className="font-mono text-gray-700">grafana_dashboard_uid</span> set.
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-3">
+      {/* Fallback / open-in-new link always shown above the frame */}
+      <div className="flex items-center justify-between">
+        <p className="text-xs text-gray-400">
+          {iframeBlocked
+            ? "Dashboard blocked by browser security policy — open it directly."
+            : "Live Grafana dashboard. If the panel is blank, Grafana embedding may need to be enabled on the server."}
+        </p>
+        <a
+          href={url}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 hover:border-orange-300 hover:text-orange-600 transition-colors shadow-sm"
+        >
+          <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+          </svg>
+          Open in Grafana
+        </a>
+      </div>
+
+      {!iframeBlocked && (
+        <div className="relative overflow-hidden rounded-xl border border-gray-200 bg-gray-50" style={{ height: "680px" }}>
+          {!iframeLoaded && (
+            <div className="absolute inset-0 flex items-center justify-center">
+              <Spinner size="lg" />
+            </div>
+          )}
+          <iframe
+            src={url}
+            title={`Grafana dashboard`}
+            className="h-full w-full border-0"
+            // allow popups for Grafana panel links, block camera/mic
+            allow="clipboard-write"
+            onLoad={() => {
+              setIframeLoaded(true);
+              if (loadTimeoutRef.current) clearTimeout(loadTimeoutRef.current);
+            }}
+            onError={() => setIframeBlocked(true)}
+          />
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Main page ──────────────────────────────────────────────────────────────────
+
 export default function MonitoringDetailPage() {
   const params = useParams<{ projectId: string; appId: string }>();
   const search = useSearchParams();
@@ -139,7 +263,7 @@ export default function MonitoringDetailPage() {
       const r = await monitoringApi.getGrafanaLink(projectId, envId, appId);
       window.open(r.url, "_blank", "noopener,noreferrer");
     } catch {
-      // ignore — could show a toast
+      // ignore — Dashboard tab shows error inline
     } finally {
       setIsGrafanaLoading(false);
     }
@@ -162,6 +286,7 @@ export default function MonitoringDetailPage() {
 
   const tabs: { key: Tab; label: string }[] = [
     { key: "overview", label: "Overview" },
+    { key: "dashboard", label: "Dashboard" },
     { key: "metrics", label: "Metrics" },
     { key: "logs", label: "Logs" },
     { key: "alerts", label: "Alerts" },
@@ -231,6 +356,13 @@ export default function MonitoringDetailPage() {
           appId={appId}
         />
       )}
+      {tab === "dashboard" && (
+        <GrafanaDashboardTab
+          projectId={projectId}
+          envId={envId}
+          appId={appId}
+        />
+      )}
       {tab === "metrics" && (
         <MetricsPanel kind="monitoring" projectId={projectId} envId={envId} appId={appId} />
       )}
@@ -251,6 +383,8 @@ export default function MonitoringDetailPage() {
     </div>
   );
 }
+
+// ── Overview tab ───────────────────────────────────────────────────────────────
 
 function OverviewTab({
   app,
@@ -302,6 +436,7 @@ function OverviewTab({
         )}
       </div>
 
+      {/* Native SVG sparkline — kept for at-a-glance health only; rich view is the Dashboard tab */}
       <MetricsPanel kind="monitoring" projectId={projectId} envId={envId} appId={appId} />
 
       <LogsViewer
@@ -311,6 +446,8 @@ function OverviewTab({
     </div>
   );
 }
+
+// ── Alerts tab (unchanged from original) ──────────────────────────────────────
 
 function AlertsTab({
   projectId,
@@ -328,7 +465,6 @@ function AlertsTab({
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Create rule modal
   const [isRuleModalOpen, setIsRuleModalOpen] = useState(false);
   const [ruleForm, setRuleForm] = useState({
     name: "",
@@ -342,7 +478,6 @@ function AlertsTab({
   const [isRuleSubmitting, setIsRuleSubmitting] = useState(false);
   const [ruleError, setRuleError] = useState<string | null>(null);
 
-  // Create channel modal
   const [isChannelModalOpen, setIsChannelModalOpen] = useState(false);
   const [channelForm, setChannelForm] = useState({
     name: "",

@@ -1,0 +1,69 @@
+{{- if .Values.gateway.enabled }}
+# Telemetry Gateway (ADR-012): standalone, stateless write-plane ingest. Scaled
+# independently of the console backend. Reuses the shared ConfigMap + backend
+# Secret for Prometheus/Elasticsearch wiring; a read-only DB role is injected via
+# GATEWAY_DB_URL when gateway.databaseUrl is set (falls back to the shared DB_URL).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "dada-cloud-console.fullname" . }}-gateway
+  labels:
+    {{- include "dada-cloud-console.labels" . | nindent 4 }}
+    app.kubernetes.io/component: gateway
+spec:
+  replicas: {{ .Values.gateway.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "dada-cloud-console.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: gateway
+  template:
+    metadata:
+      labels:
+        {{- include "dada-cloud-console.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: gateway
+    spec:
+      serviceAccountName: {{ include "dada-cloud-console.fullname" . }}
+      {{- with .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: gateway
+          image: "{{ .Values.global.imageRegistry }}/{{ .Values.gateway.image.repository }}:{{ .Values.gateway.image.tag }}"
+          imagePullPolicy: {{ .Values.gateway.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.gateway.service.port }}
+          env:
+            - name: GATEWAY_PORT
+              value: {{ .Values.gateway.service.port | quote }}
+            {{- if .Values.gateway.databaseUrl }}
+            - name: GATEWAY_DB_URL
+              value: {{ .Values.gateway.databaseUrl | quote }}
+            {{- end }}
+          envFrom:
+            # Shared, non-secret config (PROMETHEUS_QUERY_URL, ELASTICSEARCH_URL, …).
+            - configMapRef:
+                name: {{ include "dada-cloud-console.fullname" . }}-config
+            # Shared secrets (DB_URL, PROMETHEUS_QUERY_USER/PASS, ELASTICSEARCH_API_KEY).
+            - secretRef:
+                name: {{ default (printf "%s-backend" (include "dada-cloud-console.fullname" .)) .Values.backend.existingSecret }}
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 2
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 20
+            timeoutSeconds: 2
+            failureThreshold: 3
+          resources:
+            {{- toYaml .Values.gateway.resources | nindent 12 }}
+{{- end }}
