@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { LangProvider } from "@/lib/i18n/context";
 import { MarketingHeader } from "@/components/marketing/header";
 import { MarketingFooter } from "@/components/marketing/footer";
+import { BreadcrumbJsonLd } from "@/components/marketing/breadcrumb-jsonld";
 
 const SITE_URL = "https://cloud.dada-tuda.ru";
 const TITLE = "DADA Cloud — бэкенд-облако: задеплой бэкенд из GitHub за минуты";
@@ -62,6 +63,7 @@ export default function MarketingLayout({ children }: { children: React.ReactNod
   return (
     <LangProvider>
       <div className="flex min-h-screen flex-col bg-white">
+        <BreadcrumbJsonLd />
         <MarketingHeader />
         <main className="flex-1">{children}</main>
         <MarketingFooter />

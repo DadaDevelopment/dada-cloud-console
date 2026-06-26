@@ -114,6 +114,16 @@ export function HomeJsonLd() {
     ],
   };
 
+  const website = {
+    "@context": "https://schema.org",
+    "@type": "WebSite",
+    "@id": `${SITE_URL}/#website`,
+    name: "DADA Cloud",
+    url: SITE_URL,
+    inLanguage: locale,
+    publisher: { "@id": `${SITE_URL}/#organization` },
+  };
+
   const softwareApplication = {
     "@context": "https://schema.org",
     "@type": "SoftwareApplication",
@@ -149,7 +159,7 @@ export function HomeJsonLd() {
     })),
   };
 
-  const graphs = [organization, softwareApplication, faqPage];
+  const graphs = [organization, website, softwareApplication, faqPage];
 
   return (
     <>
