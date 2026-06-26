@@ -5,7 +5,7 @@ import Script from "next/script";
  * build time and falls back to the shared DADA counter. Set a dedicated counter
  * per domain (NEXT_PUBLIC_YM_ID) for clean analytics segmentation.
  */
-const YM_ID = process.env.NEXT_PUBLIC_YM_ID ?? "109705971";
+const YM_ID = process.env.NEXT_PUBLIC_YM_ID ?? "110158915";
 
 export function YandexMetrika() {
   return (
