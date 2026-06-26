@@ -99,6 +99,19 @@ export function HomeJsonLd() {
     url: SITE_URL,
     logo: `${SITE_URL}/og.png`,
     description: c.orgDesc,
+    // Product of DADA Development — link the entity graph back to the parent
+    // company so search engines consolidate the brand across all three domains.
+    parentOrganization: {
+      "@type": "Organization",
+      "@id": "https://development.dada-tuda.ru/#organization",
+      name: "DADA Development",
+      url: "https://development.dada-tuda.ru/",
+    },
+    sameAs: [
+      "https://development.dada-tuda.ru/",
+      "https://a2a-hub.pro/",
+      "https://github.com/DadaDevelopment/dada-cloud-console",
+    ],
   };
 
   const softwareApplication = {
@@ -110,6 +123,12 @@ export function HomeJsonLd() {
     applicationCategory: "DeveloperApplication",
     operatingSystem: "Web",
     description: c.appDesc,
+    author: {
+      "@type": "Organization",
+      "@id": "https://development.dada-tuda.ru/#organization",
+      name: "DADA Development",
+      url: "https://development.dada-tuda.ru/",
+    },
     publisher: { "@id": `${SITE_URL}/#organization` },
     offers: {
       "@type": "Offer",

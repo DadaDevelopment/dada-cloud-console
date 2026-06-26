@@ -300,6 +300,8 @@ const ru: Dict = {
       { label: "О платформе", href: "/" },
       { label: "Консоль", href: "/projects" },
       { label: "Вход", href: "/login" },
+      { label: "DADA Development", href: "https://development.dada-tuda.ru/" },
+      { label: "AgentSync Hub", href: "https://a2a-hub.pro/" },
     ],
     resourcesTitle: "Ресурсы",
     resources: [
@@ -500,6 +502,8 @@ const en: Dict = {
       { label: "About", href: "/" },
       { label: "Console", href: "/projects" },
       { label: "Log in", href: "/login" },
+      { label: "DADA Development", href: "https://development.dada-tuda.ru/" },
+      { label: "AgentSync Hub", href: "https://a2a-hub.pro/" },
     ],
     resourcesTitle: "Resources",
     resources: [

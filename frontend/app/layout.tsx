@@ -3,6 +3,7 @@ import { Geist } from "next/font/google";
 import { headers } from "next/headers";
 import "./globals.css";
 import { AuthProvider } from "@/lib/auth";
+import { YandexMetrika } from "@/components/yandex-metrika";
 
 const geist = Geist({ subsets: ["latin"], variable: "--font-geist" });
 
@@ -19,6 +20,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   return (
     <html lang={lang} className={`${geist.variable} h-full`}>
       <body className="h-full bg-gray-50 antialiased">
+        <YandexMetrika />
         <AuthProvider>{children}</AuthProvider>
       </body>
     </html>
