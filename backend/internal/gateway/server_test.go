@@ -3,6 +3,7 @@ package gateway
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -25,9 +26,15 @@ import (
 
 // ---- fakes ----
 
-type fakeKeyStore struct{ rows map[string][]keyRow }
+type fakeKeyStore struct {
+	rows map[string][]keyRow
+	err  error // when set, candidatesByPrefix fails (simulates DB outage)
+}
 
 func (f fakeKeyStore) candidatesByPrefix(_ context.Context, prefix string) ([]keyRow, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
 	return f.rows[prefix], nil
 }
 
@@ -358,6 +365,57 @@ func TestOTLPLogsForward(t *testing.T) {
 	if d["org_id"] != org.String() || d["project_id"] != proj.String() || d["monitoring_app"] != "loggy" {
 		t.Errorf("tenancy wrong: %+v", d)
 	}
+}
+
+// A DB outage during key resolution must surface as 503, not 401 — a flood of
+// 401s would mask the real failure and mislead clients into rotating keys.
+func TestDBErrorReturns503(t *testing.T) {
+	key, _ := mintKey(t, uuid.New(), uuid.New(), "prod", "x", []string{"metrics:write"})
+	store := fakeKeyStore{err: errors.New("connection refused")}
+	h := newTestServer(store, nil, nil, Config{})
+	if rr := postOTLP(t, h, "/v1/metrics", key, "application/x-protobuf", otlpGauge("x", 1)); rr.Code != 503 {
+		t.Errorf("status = %d, want 503 on DB error", rr.Code)
+	}
+}
+
+// /readyz gates on a forward target AND DB reachability.
+func TestReadyz(t *testing.T) {
+	store := fakeKeyStore{}
+	prom := newPromStub(t, &capturedSeries{})
+
+	// no forward targets -> 503
+	if rr := getPath(t, newTestServer(store, nil, nil, Config{}), "/readyz"); rr.Code != 503 {
+		t.Errorf("no targets: status = %d, want 503", rr.Code)
+	}
+	// target present, no pinger -> 200
+	if rr := getPath(t, NewServer(store, prom, nil, Config{}).Handler(), "/readyz"); rr.Code != 200 {
+		t.Errorf("no pinger: status = %d, want 200", rr.Code)
+	}
+	// pinger fails -> 503
+	srvDown := NewServer(store, prom, nil, Config{})
+	srvDown.SetDBPinger(func(context.Context) error { return errors.New("db down") })
+	if rr := getPath(t, srvDown.Handler(), "/readyz"); rr.Code != 503 {
+		t.Errorf("ping fail: status = %d, want 503", rr.Code)
+	}
+	// pinger ok -> 200
+	srvUp := NewServer(store, prom, nil, Config{})
+	srvUp.SetDBPinger(func(context.Context) error { return nil })
+	if rr := getPath(t, srvUp.Handler(), "/readyz"); rr.Code != 200 {
+		t.Errorf("ping ok: status = %d, want 200", rr.Code)
+	}
+}
+
+func TestHealthz(t *testing.T) {
+	if rr := getPath(t, newTestServer(fakeKeyStore{}, nil, nil, Config{}), "/healthz"); rr.Code != 200 {
+		t.Errorf("healthz status = %d, want 200", rr.Code)
+	}
+}
+
+func getPath(t *testing.T, h http.Handler, path string) *httptest.ResponseRecorder {
+	t.Helper()
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, path, nil))
+	return rr
 }
 
 func otlpLog(msg, sev string) []byte {

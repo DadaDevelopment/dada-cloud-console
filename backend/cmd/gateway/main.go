@@ -78,6 +78,7 @@ func main() {
 		RateLimitPerMin: cfg.MonitoringRateLimitPerMin,
 		MaxMessageBytes: 32 * 1024,
 	})
+	srv.SetDBPinger(pool.Ping)
 
 	port := cfg.GatewayPort
 	if port == "" {
@@ -87,6 +88,9 @@ func main() {
 		Addr:              ":" + port,
 		Handler:           srv.Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		WriteTimeout:      30 * time.Second,
+		IdleTimeout:       120 * time.Second,
 	}
 
 	quit := make(chan os.Signal, 1)

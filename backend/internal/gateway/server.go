@@ -1,7 +1,9 @@
 package gateway
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"strings"
@@ -22,10 +24,10 @@ const (
 
 // Config carries the gateway's tunables, wired from internal/config in main.
 type Config struct {
-	MaxLabels        int // client attribute-labels merged per series (cardinality guard)
-	MaxSeriesPerReq  int // total series accepted in one request (413 above this)
-	RateLimitPerMin  int // per-app token bucket
-	MaxMessageBytes  int // per-log message cap
+	MaxLabels       int // client attribute-labels merged per series (cardinality guard)
+	MaxSeriesPerReq int // total series accepted in one request (413 above this)
+	RateLimitPerMin int // per-app token bucket
+	MaxMessageBytes int // per-log message cap
 }
 
 // Server is the stateless ingest HTTP handler set.
@@ -35,7 +37,13 @@ type Server struct {
 	eswrite   *logsearch.WriteClient  // nil when ES unconfigured -> 503
 	limiter   *telemetry.IngestLimiter
 	cfg       Config
+	ping      func(context.Context) error // optional DB liveness probe for /readyz
 }
+
+// SetDBPinger wires a database liveness check used by /readyz. Postgres is the
+// gateway's only hard dependency (key verify + tenant resolve); without it every
+// ingest request 503s, so readiness must reflect it. main passes pool.Ping.
+func (s *Server) SetDBPinger(fn func(context.Context) error) { s.ping = fn }
 
 // NewServer builds the gateway handler set. promwrite/eswrite may be nil; the
 // corresponding ingest path then returns 503 (mirrors the console).
@@ -71,18 +79,61 @@ func (s *Server) Handler() http.Handler {
 	// Bespoke DADA JSON (back-compat), appId from key.
 	mux.HandleFunc("/api/v1/metrics", s.handleJSONMetrics)
 	mux.HandleFunc("/api/v1/logs", s.handleJSONLogs)
-	return mux
+	return recoverAndLog(mux)
+}
+
+// statusRecorder captures the response status for access logging.
+type statusRecorder struct {
+	http.ResponseWriter
+	status int
+}
+
+func (r *statusRecorder) WriteHeader(code int) {
+	r.status = code
+	r.ResponseWriter.WriteHeader(code)
+}
+
+// recoverAndLog wraps the mux: it recovers panics into a 500 (a panic on the
+// public write plane must never take the process down) and emits one structured
+// access line per request. Health probes are not logged (noise).
+func recoverAndLog(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		start := time.Now()
+		rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
+		defer func() {
+			if v := recover(); v != nil {
+				log.Error().Interface("panic", v).Str("path", r.URL.Path).Msg("gateway handler panic")
+				if rec.status == http.StatusOK {
+					writeJSON(rec, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+				}
+			}
+			if r.URL.Path != "/healthz" && r.URL.Path != "/readyz" {
+				log.Info().Str("method", r.Method).Str("path", r.URL.Path).
+					Int("status", rec.status).Dur("dur", time.Since(start)).Msg("ingest")
+			}
+		}()
+		next.ServeHTTP(rec, r)
+	})
 }
 
 func (s *Server) handleHealthz(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
-// handleReadyz reports ready only when at least one forward target is wired.
-func (s *Server) handleReadyz(w http.ResponseWriter, _ *http.Request) {
+// handleReadyz reports ready only when a forward target is wired AND Postgres is
+// reachable (the auth dependency). Used as the k8s readiness gate.
+func (s *Server) handleReadyz(w http.ResponseWriter, r *http.Request) {
 	if s.promwrite == nil && s.eswrite == nil {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"status": "no forward targets configured"})
 		return
+	}
+	if s.ping != nil {
+		ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
+		defer cancel()
+		if err := s.ping(ctx); err != nil {
+			writeJSON(w, http.StatusServiceUnavailable, map[string]string{"status": "database unreachable"})
+			return
+		}
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ready"})
 }
@@ -98,7 +149,15 @@ func (s *Server) authn(w http.ResponseWriter, r *http.Request, scope string) (re
 	key := telemetry.KeyFromHeaders(r.Header.Get("X-API-Key"), r.Header.Get("Authorization"))
 	res, err := resolveKey(r.Context(), s.store, key, s.cfg.MaxLabels)
 	if err != nil {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "invalid api key"})
+		if errors.Is(err, errKeyUnknown) {
+			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "invalid api key"})
+			return resolved{}, false
+		}
+		// DB outage or query error — not the client's fault. 503, and log it so
+		// an auth-path Postgres failure is visible (it would otherwise look like a
+		// flood of 401s).
+		log.Error().Err(err).Msg("gateway key resolution failed")
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "auth backend unavailable"})
 		return resolved{}, false
 	}
 	if !res.hasScope(scope) {
@@ -155,11 +214,11 @@ func (s *Server) handleOTLPMetrics(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := s.promwrite.Write(r.Context(), series); err != nil {
+		log.Error().Err(err).Str("app", res.appID.String()).Msg("prometheus remote-write failed")
 		writeJSON(w, http.StatusBadGateway, map[string]string{"error": "remote-write failed: " + err.Error()})
 		return
 	}
-	// OTLP/HTTP success: 200 with an (empty) ExportMetricsServiceResponse.
-	writeJSON(w, http.StatusOK, struct{}{})
+	otlpSuccess(w, r.Header.Get("Content-Type"))
 }
 
 // handleOTLPLogs decodes an OTLP/HTTP logs export and forwards it to ES.
@@ -191,11 +250,12 @@ func (s *Server) handleOTLPLogs(w http.ResponseWriter, r *http.Request) {
 			docs[i].Message = docs[i].Message[:s.cfg.MaxMessageBytes]
 		}
 		if err := s.eswrite.Index(r.Context(), docs[i]); err != nil {
+			log.Error().Err(err).Str("app", res.appID.String()).Msg("elasticsearch log index failed")
 			writeJSON(w, http.StatusBadGateway, map[string]string{"error": "log write failed: " + err.Error()})
 			return
 		}
 	}
-	writeJSON(w, http.StatusOK, map[string]int{"ingested": len(docs)})
+	otlpSuccess(w, r.Header.Get("Content-Type"))
 }
 
 // ---- bespoke DADA JSON (back-compat), appId resolved from key ----
@@ -322,4 +382,20 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(v)
+}
+
+// otlpSuccess writes the OTLP/HTTP success response: 200 with an empty
+// Export*ServiceResponse, encoded to match the request (the OTLP/HTTP spec wants
+// the response Content-Type to mirror the request). An empty response message is
+// valid (no partial_success) — zero bytes for protobuf, "{}" for json — and the
+// stock OTel exporters accept it.
+func otlpSuccess(w http.ResponseWriter, reqContentType string) {
+	if strings.Contains(strings.ToLower(reqContentType), "application/json") {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("{}"))
+		return
+	}
+	w.Header().Set("Content-Type", "application/x-protobuf")
+	w.WriteHeader(http.StatusOK)
 }
