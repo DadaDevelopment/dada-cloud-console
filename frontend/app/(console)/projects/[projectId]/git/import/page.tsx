@@ -8,11 +8,10 @@ import { Spinner } from "@/components/ui/spinner";
 import { Breadcrumb } from "@/components/ui/breadcrumb";
 import { useProjectContext } from "@/lib/project-context";
 import { canMutate } from "@/lib/rbac";
+import { useT } from "@/lib/i18n/console/context";
 
 type Step = 1 | 2 | 3;
 
-// toKubeName coerces a repo name into a valid k8s resource name: lowercase,
-// non-alnum → '-', collapsed, trimmed of leading/trailing '-'.
 function toKubeName(s: string): string {
   return s
     .toLowerCase()
@@ -23,6 +22,7 @@ function toKubeName(s: string): string {
 }
 
 export default function GitImportPage() {
+  const { t } = useT();
   const params = useParams<{ projectId: string }>();
   const projectId = params.projectId;
   const searchParams = useSearchParams();
@@ -33,21 +33,17 @@ export default function GitImportPage() {
 
   const [step, setStep] = useState<Step>(1);
 
-  // Step 1 — installations
   const [installations, setInstallations] = useState<GitInstallation[]>([]);
   const [loadingInstalls, setLoadingInstalls] = useState(true);
   const [installError, setInstallError] = useState<string | null>(null);
   const [selectedInstall, setSelectedInstall] = useState<GitInstallation | null>(null);
 
-  // Step 2 — remote repos
   const [remoteRepos, setRemoteRepos] = useState<GitRemoteRepo[]>([]);
   const [loadingRepos, setLoadingRepos] = useState(false);
   const [repoError, setRepoError] = useState<string | null>(null);
   const [reposUnavailable, setReposUnavailable] = useState(false);
   const [selectedRepo, setSelectedRepo] = useState<GitRemoteRepo | null>(null);
 
-  // Step 3 — configure. The app is NOT created here — it is materialized by the
-  // first successful build. We only capture its name + intended spec.
   const [appName, setAppName] = useState("");
   const [port, setPort] = useState(8080);
   const [profile, setProfile] = useState("small");
@@ -62,7 +58,6 @@ export default function GitImportPage() {
 
   const allowed = canMutate(role);
 
-  // Load installations on mount.
   useEffect(() => {
     /* eslint-disable react-hooks/set-state-in-effect */
     if (!envId) {
@@ -74,18 +69,15 @@ export default function GitImportPage() {
     gitApi
       .installations(projectId)
       .then((d) => setInstallations(d.installations ?? []))
-      .catch((err) => setInstallError(err instanceof Error ? err.message : "Failed to load installations"))
+      .catch((err) => setInstallError(err instanceof Error ? err.message : t("git.import.error.loadInstalls")))
       .finally(() => setLoadingInstalls(false));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId, envId, isLoadingEnvs]);
 
   async function handleConnectProvider(provider: "github" | "gitlab") {
     setInstallError(null);
     try {
       if (provider === "github") {
-        // The App is installed org-wide, so a fresh /installations/new redirect
-        // no-ops (GitHub just bounces to the manage page, no callback). Instead
-        // bind the existing installation(s) directly — the only path that works
-        // once the App is already installed.
         const { installations: avail } = await gitApi.availableInstallations(projectId);
         const list = avail ?? [];
         const toBind = list.filter((a) => !a.bound);
@@ -95,17 +87,14 @@ export default function GitImportPage() {
           setInstallations(d.installations ?? []);
           return;
         }
-        // Nothing installed yet → fall through to the real install redirect.
       }
       const { url } = await gitApi.installUrl(projectId, provider);
       window.location.href = url;
     } catch (err) {
-      // 503 → build-agent not deployed. Friendly copy instead of the raw
-      // "git integration not configured".
-      const msg = err instanceof Error ? err.message : "Failed to start install";
+      const msg = err instanceof Error ? err.message : t("git.import.error.startInstall");
       setInstallError(
         /503|unavailable|not configured/i.test(msg)
-          ? "Git integration isn't available yet — the build subsystem (build-agent) is not deployed in this environment."
+          ? t("git.import.unavailable")
           : msg
       );
     }
@@ -120,14 +109,14 @@ export default function GitImportPage() {
         const d = await gitApi.remoteRepos(projectId, install.id);
         setRemoteRepos(d.repos ?? []);
       } catch (err) {
-        // 503 → build-agent not configured. Disabled state, not a crash.
-        const msg = err instanceof Error ? err.message : "Failed to load repositories";
+        const msg = err instanceof Error ? err.message : t("git.import.error.loadRepos");
         if (/503|unavailable|not configured/i.test(msg)) setReposUnavailable(true);
         else setRepoError(msg);
       } finally {
         setLoadingRepos(false);
       }
     },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [projectId]
   );
 
@@ -146,7 +135,6 @@ export default function GitImportPage() {
         const d = await gitApi.detect(projectId, selectedInstall.id, repo.full_name, root || ".");
         setDetection(d);
       } catch {
-        // Detection is best-effort; the user can still pick a framework manually.
         setDetection({ framework: null, build_command: null, install_command: null, output_dir: null });
       } finally {
         setDetecting(false);
@@ -159,8 +147,6 @@ export default function GitImportPage() {
     setSelectedRepo(repo);
     setBranch(repo.default_branch || "main");
     setRootDir(".");
-    // Default the app name from the repo name (kube-sanitized). The app itself is
-    // created by the first successful build, not now.
     setAppName(toKubeName(repo.full_name.split("/").pop() || ""));
     setStep(3);
     void runDetect(repo, ".");
@@ -185,9 +171,8 @@ export default function GitImportPage() {
       });
       router.push(`/projects/${projectId}/git${envId ? `?envId=${envId}` : ""}`);
     } catch (err) {
-      const msg = err instanceof Error ? err.message : "Failed to connect repository";
-      // 409 → repo already connected for this app/env.
-      setSubmitError(/409|already/i.test(msg) ? "This repository is already connected to an app in this environment." : msg);
+      const msg = err instanceof Error ? err.message : t("git.import.error.connect");
+      setSubmitError(/409|already/i.test(msg) ? t("git.import.alreadyConnected") : msg);
     } finally {
       setSubmitting(false);
     }
@@ -206,14 +191,14 @@ export default function GitImportPage() {
       <div>
         <Breadcrumb
           items={[
-            { label: "Projects", href: "/projects" },
-            { label: project?.display_name ?? "Overview", href: `/projects/${projectId}` },
-            { label: "Builds", href: `/projects/${projectId}/git` },
-            { label: "Import" },
+            { label: t("common.crumb.projects"), href: "/projects" },
+            { label: project?.display_name ?? t("common.crumb.overview"), href: `/projects/${projectId}` },
+            { label: t("nav.git"), href: `/projects/${projectId}/git` },
+            { label: t("git.import.title") },
           ]}
         />
         <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-          You don&apos;t have permission to connect repositories.
+          {t("git.import.noPermission")}
         </div>
       </div>
     );
@@ -223,17 +208,16 @@ export default function GitImportPage() {
     <div className="max-w-2xl">
       <Breadcrumb
         items={[
-          { label: "Projects", href: "/projects" },
-          { label: project?.display_name ?? "Overview", href: `/projects/${projectId}` },
-          { label: "Builds", href: `/projects/${projectId}/git${envId ? `?envId=${envId}` : ""}` },
-          { label: "Import" },
+          { label: t("common.crumb.projects"), href: "/projects" },
+          { label: project?.display_name ?? t("common.crumb.overview"), href: `/projects/${projectId}` },
+          { label: t("nav.git"), href: `/projects/${projectId}/git${envId ? `?envId=${envId}` : ""}` },
+          { label: t("git.import.title") },
         ]}
       />
-      <h1 className="mt-2 text-2xl font-bold text-gray-900">Import repository</h1>
+      <h1 className="mt-2 text-2xl font-bold text-gray-900">{t("git.import.title")}</h1>
 
-      {/* Stepper */}
       <ol className="mb-8 mt-4 flex items-center gap-2 text-sm">
-        {(["Account", "Repository", "Configure"] as const).map((lbl, i) => {
+        {([t("git.import.step.account"), t("git.import.step.repository"), t("git.import.step.configure")] as const).map((lbl, i) => {
           const n = (i + 1) as Step;
           const active = step === n;
           const done = step > n;
@@ -253,7 +237,6 @@ export default function GitImportPage() {
         })}
       </ol>
 
-      {/* ── Step 1: installations ── */}
       {step === 1 && (
         <div>
           {installError && (
@@ -265,14 +248,14 @@ export default function GitImportPage() {
             </div>
           ) : installations.length === 0 ? (
             <div className="rounded-xl border border-dashed border-gray-300 bg-gray-50 p-8 text-center">
-              <p className="text-sm font-medium text-gray-600">No git accounts connected yet</p>
-              <p className="mt-1 text-xs text-gray-400">Authorize a provider to grant access to your repositories.</p>
+              <p className="text-sm font-medium text-gray-600">{t("git.import.noAccounts.title")}</p>
+              <p className="mt-1 text-xs text-gray-400">{t("git.import.noAccounts.hint")}</p>
               <div className="mt-4 flex justify-center gap-3">
                 <button onClick={() => handleConnectProvider("github")} className="rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50">
-                  Connect GitHub
+                  {t("git.import.connectGitHub")}
                 </button>
                 <button onClick={() => handleConnectProvider("gitlab")} className="rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50">
-                  Connect GitLab
+                  {t("git.import.connectGitLab")}
                 </button>
               </div>
             </div>
@@ -294,15 +277,15 @@ export default function GitImportPage() {
                       <p className="text-xs text-gray-400">{inst.provider}</p>
                     </div>
                   </div>
-                  <span className="text-sm text-blue-600">Select →</span>
+                  <span className="text-sm text-blue-600">{t("git.import.select")}</span>
                 </button>
               ))}
               <div className="flex gap-3 pt-2 text-xs">
                 <button onClick={() => handleConnectProvider("github")} className="text-blue-600 hover:text-blue-700">
-                  + Connect another GitHub account
+                  {t("git.import.connectAnotherGitHub")}
                 </button>
                 <button onClick={() => handleConnectProvider("gitlab")} className="text-blue-600 hover:text-blue-700">
-                  + GitLab
+                  {t("git.import.connectAnotherGitLab")}
                 </button>
               </div>
             </div>
@@ -310,17 +293,14 @@ export default function GitImportPage() {
         </div>
       )}
 
-      {/* ── Step 2: repositories ── */}
       {step === 2 && selectedInstall && (
         <div>
           <button onClick={() => setStep(1)} className="mb-3 text-xs text-gray-400 hover:text-gray-600">
-            ← Back to accounts
+            {t("git.import.backToAccounts")}
           </button>
 
-          {/* Org / account selector — switch which installation's repos are listed
-              without stepping back. Each GitHub installation maps to one org/user. */}
           <div className="mb-4">
-            <label className="block text-xs font-medium text-gray-500">GitHub account / organization</label>
+            <label className="block text-xs font-medium text-gray-500">{t("git.import.accountOrg.label")}</label>
             <select
               value={selectedInstall.id}
               onChange={(e) => {
@@ -344,8 +324,7 @@ export default function GitImportPage() {
           )}
           {reposUnavailable ? (
             <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-              The build subsystem is not configured in this environment yet, so repositories can&apos;t be listed.
-              Try again once the build-agent is deployed.
+              {t("git.import.reposUnavailable")}
             </div>
           ) : loadingRepos ? (
             <div className="flex h-32 items-center justify-center">
@@ -353,7 +332,7 @@ export default function GitImportPage() {
             </div>
           ) : remoteRepos.length === 0 ? (
             <p className="rounded-xl border border-dashed border-gray-300 bg-gray-50 p-8 text-center text-sm text-gray-500">
-              No repositories available on this account.
+              {t("git.import.noRepos")}
             </p>
           ) : (
             <div className="max-h-[480px] space-y-2 overflow-y-auto">
@@ -368,8 +347,8 @@ export default function GitImportPage() {
                     {repo.description && <p className="truncate text-xs text-gray-400">{repo.description}</p>}
                   </div>
                   <div className="flex shrink-0 items-center gap-2 pl-3">
-                    {repo.private && <span className="text-xs text-gray-400">private</span>}
-                    <span className="text-sm text-blue-600">Import →</span>
+                    {repo.private && <span className="text-xs text-gray-400">{t("git.import.private")}</span>}
+                    <span className="text-sm text-blue-600">{t("git.import.importArrow")}</span>
                   </div>
                 </button>
               ))}
@@ -378,27 +357,25 @@ export default function GitImportPage() {
         </div>
       )}
 
-      {/* ── Step 3: configure ── */}
       {step === 3 && selectedRepo && (
         <form onSubmit={handleSubmit} className="space-y-5">
           <button type="button" onClick={() => setStep(2)} className="text-xs text-gray-400 hover:text-gray-600">
-            ← Back to repositories
+            {t("git.import.backToRepos")}
           </button>
 
           <div className="rounded-lg border border-gray-200 bg-gray-50 px-4 py-3">
             <p className="font-mono text-sm font-medium text-gray-900">{selectedRepo.full_name}</p>
           </div>
 
-          {/* Framework detection */}
           <div className="rounded-lg border border-gray-200 bg-white px-4 py-3">
-            <p className="text-xs font-semibold uppercase tracking-wide text-gray-400">Detected framework</p>
+            <p className="text-xs font-semibold uppercase tracking-wide text-gray-400">{t("git.import.detectedFramework")}</p>
             {detecting ? (
               <div className="mt-2 flex items-center gap-2 text-sm text-gray-500">
-                <Spinner size="sm" /> Detecting…
+                <Spinner size="sm" /> {t("git.import.detecting")}
               </div>
             ) : detection ? (
               <div className="mt-2 space-y-1 text-sm">
-                <p className="font-medium text-gray-900">{detection.framework ?? "Unknown — pick one below"}</p>
+                <p className="font-medium text-gray-900">{detection.framework ?? t("git.import.unknownFramework")}</p>
                 {detection.build_command && (
                   <p className="text-xs text-gray-500">build: <span className="font-mono">{detection.build_command}</span></p>
                 )}
@@ -414,25 +391,25 @@ export default function GitImportPage() {
 
           <div>
             <label className="block text-sm font-medium text-gray-700">
-              Application name <span className="font-normal text-gray-400">(Kubernetes resource name)</span>
+              {t("git.import.appName.label")} <span className="font-normal text-gray-400">{t("git.import.appName.hint")}</span>
             </label>
             <input
               type="text"
               required
               value={appName}
               onChange={(e) => setAppName(toKubeName(e.target.value))}
-              placeholder="my-service"
+              placeholder={t("git.import.appName.placeholder")}
               pattern="[a-z0-9-]+"
               className="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm font-mono text-gray-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
             />
             <p className="mt-1 text-xs text-gray-400">
-              The app is created automatically by the first successful build — no placeholder is deployed.
+              {t("git.import.appName.help")}
             </p>
           </div>
 
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="block text-sm font-medium text-gray-700">Port</label>
+              <label className="block text-sm font-medium text-gray-700">{t("git.import.port.label")}</label>
               <input
                 type="number"
                 required
@@ -444,7 +421,7 @@ export default function GitImportPage() {
               />
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700">Profile</label>
+              <label className="block text-sm font-medium text-gray-700">{t("git.import.profile.label")}</label>
               <select
                 value={profile}
                 onChange={(e) => setProfile(e.target.value)}
@@ -459,7 +436,7 @@ export default function GitImportPage() {
 
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="block text-sm font-medium text-gray-700">Production branch</label>
+              <label className="block text-sm font-medium text-gray-700">{t("git.import.branch.label")}</label>
               <input
                 type="text"
                 required
@@ -470,7 +447,7 @@ export default function GitImportPage() {
               />
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700">Root directory</label>
+              <label className="block text-sm font-medium text-gray-700">{t("git.import.rootDir.label")}</label>
               <input
                 type="text"
                 value={rootDir}
@@ -484,7 +461,7 @@ export default function GitImportPage() {
 
           <div>
             <label className="block text-sm font-medium text-gray-700">
-              Framework override <span className="font-normal text-gray-400">(optional)</span>
+              {t("git.import.frameworkOverride.label")} <span className="font-normal text-gray-400">{t("common.optional")}</span>
             </label>
             <input
               type="text"
@@ -497,8 +474,8 @@ export default function GitImportPage() {
 
           <div className="flex items-center justify-between rounded-lg border border-gray-200 px-4 py-3">
             <div>
-              <p className="text-sm font-medium text-gray-700">Auto-deploy</p>
-              <p className="text-xs text-gray-400">Build &amp; deploy automatically on every push to the production branch</p>
+              <p className="text-sm font-medium text-gray-700">{t("git.import.autoDeploy.label")}</p>
+              <p className="text-xs text-gray-400">{t("git.import.autoDeploy.hint")}</p>
             </div>
             <button
               type="button"
@@ -524,7 +501,7 @@ export default function GitImportPage() {
               href={`/projects/${projectId}/git${envId ? `?envId=${envId}` : ""}`}
               className="rounded-lg px-4 py-2 text-sm font-medium text-gray-600 hover:bg-gray-100 transition-colors"
             >
-              Cancel
+              {t("common.cancel")}
             </Link>
             <button
               type="submit"
@@ -533,10 +510,10 @@ export default function GitImportPage() {
             >
               {submitting ? (
                 <>
-                  <Spinner size="sm" /> Connecting…
+                  <Spinner size="sm" /> {t("git.import.connecting")}
                 </>
               ) : (
-                "Connect repository"
+                t("git.import.connect")
               )}
             </button>
           </div>

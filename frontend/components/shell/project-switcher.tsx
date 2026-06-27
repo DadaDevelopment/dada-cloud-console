@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { useProjectContext } from "@/lib/project-context";
+import { useT } from "@/lib/i18n/console/context";
 
 function ChevronUpDown({ className }: { className?: string }) {
   return (
@@ -19,6 +20,7 @@ function ChevronUpDown({ className }: { className?: string }) {
  */
 export function ProjectSwitcher() {
   const router = useRouter();
+  const { t } = useT();
   const { projects, project, projectId } = useProjectContext();
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -39,7 +41,7 @@ export function ProjectSwitcher() {
     };
   }, [open]);
 
-  const label = project?.display_name ?? (projectId ? "…" : "Select project");
+  const label = project?.display_name ?? (projectId ? "…" : t("shell.project.select"));
 
   return (
     <div ref={ref} className="relative">
@@ -61,7 +63,7 @@ export function ProjectSwitcher() {
         >
           <div className="max-h-80 overflow-y-auto py-1">
             {projects.length === 0 ? (
-              <div className="px-3 py-2 text-sm text-gray-400">No projects</div>
+              <div className="px-3 py-2 text-sm text-gray-400">{t("shell.project.none")}</div>
             ) : (
               projects.map((p) => {
                 const active = p.id === projectId;
@@ -97,7 +99,7 @@ export function ProjectSwitcher() {
             onClick={() => setOpen(false)}
             className="block border-t border-gray-100 px-3 py-2.5 text-sm font-medium text-blue-600 hover:bg-gray-50"
           >
-            View all projects →
+            {t("shell.project.viewAll")}
           </Link>
         </div>
       )}

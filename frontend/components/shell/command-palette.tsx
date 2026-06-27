@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { useProjectContext } from "@/lib/project-context";
 import { visibleNavItems, projectHref, type IconName } from "@/lib/resources";
+import { useT } from "@/lib/i18n/console/context";
 import { ResourceIcon } from "./icons";
 
 interface Command {
@@ -21,6 +22,7 @@ interface Command {
  */
 export function CommandPalette({ initialOpen = false }: { initialOpen?: boolean }) {
   const router = useRouter();
+  const { t } = useT();
   const { projects, projectId, role } = useProjectContext();
   const [open, setOpen] = useState(initialOpen);
   const [query, setQuery] = useState("");
@@ -51,8 +53,8 @@ export function CommandPalette({ initialOpen = false }: { initialOpen?: boolean 
         if (item.comingSoon) continue;
         cmds.push({
           id: `nav-${item.key}`,
-          label: item.label,
-          hint: "Go to",
+          label: t(`nav.${item.key}`),
+          hint: t("shell.palette.goTo"),
           icon: item.icon,
           run: () => router.push(projectHref(projectId, item)),
         });
@@ -62,12 +64,12 @@ export function CommandPalette({ initialOpen = false }: { initialOpen?: boolean 
       cmds.push({
         id: `proj-${p.id}`,
         label: p.display_name,
-        hint: "Project",
+        hint: t("shell.palette.project"),
         run: () => router.push(`/projects/${p.id}`),
       });
     }
     return cmds;
-  }, [projectId, role, projects, router]);
+  }, [projectId, role, projects, router, t]);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -86,7 +88,7 @@ export function CommandPalette({ initialOpen = false }: { initialOpen?: boolean 
   }
 
   return (
-    <div className="fixed inset-0 z-[100] flex items-start justify-center pt-[15vh]" role="dialog" aria-modal="true" aria-label="Command palette">
+    <div className="fixed inset-0 z-[100] flex items-start justify-center pt-[15vh]" role="dialog" aria-modal="true" aria-label={t("shell.palette.label")}>
       <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={close} aria-hidden="true" />
       <div className="relative z-10 mx-4 w-full max-w-lg overflow-hidden rounded-xl bg-white shadow-2xl">
         <input
@@ -108,13 +110,13 @@ export function CommandPalette({ initialOpen = false }: { initialOpen?: boolean 
               runAt(active);
             }
           }}
-          placeholder="Search projects and resources…"
+          placeholder={t("shell.palette.placeholder")}
           className="w-full border-b border-gray-100 px-4 py-3.5 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none"
-          aria-label="Search"
+          aria-label={t("shell.search")}
         />
         <ul className="max-h-80 overflow-y-auto py-1">
           {filtered.length === 0 ? (
-            <li className="px-4 py-6 text-center text-sm text-gray-400">No matches</li>
+            <li className="px-4 py-6 text-center text-sm text-gray-400">{t("shell.palette.noMatches")}</li>
           ) : (
             filtered.map((c, idx) => (
               <li key={c.id}>
@@ -136,9 +138,9 @@ export function CommandPalette({ initialOpen = false }: { initialOpen?: boolean 
           )}
         </ul>
         <div className="flex items-center gap-3 border-t border-gray-100 px-4 py-2 text-xs text-gray-400">
-          <span><kbd className="rounded border border-gray-200 px-1">↑↓</kbd> navigate</span>
-          <span><kbd className="rounded border border-gray-200 px-1">↵</kbd> open</span>
-          <span><kbd className="rounded border border-gray-200 px-1">esc</kbd> close</span>
+          <span><kbd className="rounded border border-gray-200 px-1">↑↓</kbd> {t("shell.palette.navigate")}</span>
+          <span><kbd className="rounded border border-gray-200 px-1">↵</kbd> {t("shell.palette.open")}</span>
+          <span><kbd className="rounded border border-gray-200 px-1">esc</kbd> {t("shell.palette.close")}</span>
         </div>
       </div>
     </div>

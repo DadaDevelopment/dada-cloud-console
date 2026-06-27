@@ -34,7 +34,14 @@ export function proxy(request: NextRequest) {
     if (path === "/") {
       return NextResponse.redirect(new URL("/projects", request.url));
     }
-    return NextResponse.next();
+    // Console language is a cookie preference (no URL prefix). Surface it as the
+    // same x-dada-locale header the root layout already reads for <html lang>,
+    // so SSR emits the right language. Default RU when unset.
+    const cookieLocale = request.cookies.get("dada_console_lang")?.value;
+    const locale = cookieLocale === "en" ? "en" : "ru";
+    const headers = new Headers(request.headers);
+    headers.set("x-dada-locale", locale);
+    return NextResponse.next({ request: { headers } });
   }
 
   // Marketing host: expose the URL-derived locale to server components (root

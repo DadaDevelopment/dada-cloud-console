@@ -6,6 +6,7 @@ import type { Operation, OperationStatus } from "@/lib/types";
 import { Spinner } from "@/components/ui/spinner";
 import { Breadcrumb } from "@/components/ui/breadcrumb";
 import { timeAgo } from "@/lib/format";
+import { useT } from "@/lib/i18n/console/context";
 
 const IN_PROGRESS_STATUSES = new Set<OperationStatus>([
   "Created", "Validated", "Queued", "Rendering",
@@ -62,7 +63,6 @@ function StatusIcon({ status }: { status: OperationStatus }) {
       </svg>
     );
   }
-  // In-progress: spinning dots
   return (
     <svg className="h-4 w-4 animate-spin text-blue-500" viewBox="0 0 24 24" fill="none">
       <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
@@ -76,6 +76,7 @@ export default function OperationsPage() {
   const searchParams = useSearchParams();
   const projectId = params.projectId;
   const highlightId = searchParams.get("highlight");
+  const { t } = useT();
 
   const [operations, setOperations] = useState<Operation[]>([]);
   const [loadedProjectId, setLoadedProjectId] = useState<string | null>(null);
@@ -95,7 +96,7 @@ export default function OperationsPage() {
       })
       .catch((err) => {
         if (cancelled) return;
-        setError(err instanceof Error ? err.message : "Failed to load operations");
+        setError(err instanceof Error ? err.message : t("operations.error.load"));
       })
       .finally(() => {
         if (!cancelled) {
@@ -105,9 +106,9 @@ export default function OperationsPage() {
     return () => {
       cancelled = true;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId]);
 
-  // Auto-refresh if any operation is in-progress
   useEffect(() => {
     const hasInProgress = operations.some((op) => isInProgress(op.status));
     if (!hasInProgress) return;
@@ -144,25 +145,24 @@ export default function OperationsPage() {
 
   return (
     <div>
-      {/* Header */}
       <div className="mb-8">
         <Breadcrumb
           items={[
-            { label: "Projects", href: "/projects" },
-            { label: "Overview", href: `/projects/${projectId}` },
-            { label: "Operations" },
+            { label: t("common.crumb.projects"), href: "/projects" },
+            { label: t("common.crumb.overview"), href: `/projects/${projectId}` },
+            { label: t("nav.operations") },
           ]}
         />
         <div className="mt-2 flex items-center gap-3">
-          <h1 className="text-2xl font-bold text-gray-900">Operations</h1>
+          <h1 className="text-2xl font-bold text-gray-900">{t("operations.title")}</h1>
           {hasInProgress && (
             <span className="inline-flex items-center gap-1.5 rounded-full bg-blue-50 px-2.5 py-1 text-xs font-medium text-blue-600">
               <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-blue-600" />
-              Live
+              {t("operations.live")}
             </span>
           )}
         </div>
-        <p className="mt-0.5 text-sm text-gray-500">Deployment and provisioning history</p>
+        <p className="mt-0.5 text-sm text-gray-500">{t("operations.subtitle")}</p>
       </div>
 
       {error && (
@@ -176,12 +176,11 @@ export default function OperationsPage() {
           <svg className="mb-3 h-12 w-12 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
           </svg>
-          <p className="text-sm font-medium text-gray-500">No operations yet</p>
-          <p className="mt-1 text-xs text-gray-400">Operations appear here when you create or modify resources.</p>
+          <p className="text-sm font-medium text-gray-500">{t("operations.empty.title")}</p>
+          <p className="mt-1 text-xs text-gray-400">{t("operations.empty.subtitle")}</p>
         </div>
       ) : (
         <>
-          {/* Toolbar: search + status filter */}
           <div className="mb-4 flex flex-wrap items-center gap-3">
             <div className="relative flex-1 min-w-[16rem]">
               <svg className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
@@ -190,29 +189,31 @@ export default function OperationsPage() {
               <input
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
-                placeholder="Search by action, resource, or kind…"
-                aria-label="Search operations"
+                placeholder={t("operations.search.placeholder")}
+                aria-label={t("operations.search.placeholder")}
                 className="w-full rounded-lg border border-gray-300 py-2 pl-9 pr-3 text-sm text-gray-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
               />
             </div>
             <select
               value={statusFilter}
               onChange={(e) => setStatusFilter(e.target.value as typeof statusFilter)}
-              aria-label="Filter by status"
+              aria-label={t("common.status.status")}
               className="rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
             >
-              <option value="all">All statuses</option>
-              <option value="in-progress">In progress</option>
-              <option value="Ready">Ready</option>
-              <option value="Failed">Failed</option>
-              <option value="WaitingForApproval">Waiting for approval</option>
+              <option value="all">{t("operations.filter.all")}</option>
+              <option value="in-progress">{t("operations.filter.inProgress")}</option>
+              <option value="Ready">{t("operations.filter.ready")}</option>
+              <option value="Failed">{t("operations.filter.failed")}</option>
+              <option value="WaitingForApproval">{t("operations.filter.waitingForApproval")}</option>
             </select>
-            <span className="text-xs text-gray-400">{filtered.length} of {operations.length}</span>
+            <span className="text-xs text-gray-400">
+              {t("operations.countOf", { count: filtered.length, total: operations.length })}
+            </span>
           </div>
 
           {filtered.length === 0 ? (
             <div className="rounded-xl border border-dashed border-gray-300 bg-gray-50 py-12 text-center text-sm text-gray-400">
-              No operations match your filters.
+              {t("operations.noMatch")}
             </div>
           ) : (
           <div className="overflow-hidden rounded-xl border border-gray-200 bg-white">
@@ -226,18 +227,15 @@ export default function OperationsPage() {
                   isHighlighted ? "bg-blue-50/50" : ""
                 }`}
               >
-                {/* Row */}
                 <button
                   onClick={() => setExpandedId(isExpanded ? null : op.id)}
                   className="w-full px-5 py-4 text-left hover:bg-gray-50 transition-colors"
                 >
                   <div className="flex items-center gap-4">
-                    {/* Status icon */}
                     <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-gray-100 bg-white shadow-sm">
                       <StatusIcon status={op.status} />
                     </div>
 
-                    {/* Main info */}
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2 flex-wrap">
                         <span className="text-sm font-medium text-gray-900">{op.action}</span>
@@ -259,7 +257,6 @@ export default function OperationsPage() {
                       </div>
                     </div>
 
-                    {/* Status badge */}
                     <div className="flex items-center gap-2">
                       <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-medium ${statusColor(op.status)}`}>
                         <span className={`h-1.5 w-1.5 rounded-full ${statusDot(op.status)}`} />
@@ -277,46 +274,45 @@ export default function OperationsPage() {
                   </div>
                 </button>
 
-                {/* Expanded detail */}
                 {isExpanded && (
                   <div className="border-t border-gray-100 bg-gray-50 px-5 py-4">
                     <dl className="grid grid-cols-2 gap-x-6 gap-y-3 text-sm sm:grid-cols-3">
                       <div>
-                        <dt className="text-xs font-medium uppercase tracking-wide text-gray-400">Operation ID</dt>
+                        <dt className="text-xs font-medium uppercase tracking-wide text-gray-400">{t("operations.detail.operationId")}</dt>
                         <dd className="mt-1 font-mono text-xs text-gray-700">{op.id}</dd>
                       </div>
                       <div>
-                        <dt className="text-xs font-medium uppercase tracking-wide text-gray-400">Action</dt>
+                        <dt className="text-xs font-medium uppercase tracking-wide text-gray-400">{t("operations.detail.action")}</dt>
                         <dd className="mt-1 text-xs text-gray-700">{op.action}</dd>
                       </div>
                       <div>
-                        <dt className="text-xs font-medium uppercase tracking-wide text-gray-400">Resource</dt>
+                        <dt className="text-xs font-medium uppercase tracking-wide text-gray-400">{t("operations.detail.resource")}</dt>
                         <dd className="mt-1 font-mono text-xs text-gray-700">{op.resource_name}</dd>
                       </div>
                       {op.git_commit && (
                         <div>
-                          <dt className="text-xs font-medium uppercase tracking-wide text-gray-400">Git Commit</dt>
+                          <dt className="text-xs font-medium uppercase tracking-wide text-gray-400">{t("operations.detail.gitCommit")}</dt>
                           <dd className="mt-1 font-mono text-xs text-gray-700">{op.git_commit}</dd>
                         </div>
                       )}
                       {op.git_path && (
                         <div>
-                          <dt className="text-xs font-medium uppercase tracking-wide text-gray-400">Git Path</dt>
+                          <dt className="text-xs font-medium uppercase tracking-wide text-gray-400">{t("operations.detail.gitPath")}</dt>
                           <dd className="mt-1 font-mono text-xs text-gray-700 break-all">{op.git_path}</dd>
                         </div>
                       )}
                       <div>
-                        <dt className="text-xs font-medium uppercase tracking-wide text-gray-400">Created</dt>
+                        <dt className="text-xs font-medium uppercase tracking-wide text-gray-400">{t("operations.detail.created")}</dt>
                         <dd className="mt-1 text-xs text-gray-700">{new Date(op.created_at).toLocaleString()}</dd>
                       </div>
                       <div>
-                        <dt className="text-xs font-medium uppercase tracking-wide text-gray-400">Updated</dt>
+                        <dt className="text-xs font-medium uppercase tracking-wide text-gray-400">{t("operations.detail.updated")}</dt>
                         <dd className="mt-1 text-xs text-gray-700">{new Date(op.updated_at).toLocaleString()}</dd>
                       </div>
                     </dl>
                     {op.error_message && (
                       <div className="mt-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2">
-                        <p className="text-xs font-medium text-red-700">Error</p>
+                        <p className="text-xs font-medium text-red-700">{t("operations.detail.error")}</p>
                         <p className="mt-0.5 font-mono text-xs text-red-600">{op.error_message}</p>
                       </div>
                     )}

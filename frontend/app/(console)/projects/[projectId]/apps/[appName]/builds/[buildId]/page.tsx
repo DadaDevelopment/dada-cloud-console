@@ -10,6 +10,7 @@ import { canMutate } from "@/lib/rbac";
 import { timeAgo } from "@/lib/format";
 import { BuildStatusBadge, isBuildActive } from "@/components/deploy/build-status-badge";
 import { BuildLogViewer } from "@/components/deploy/build-log-viewer";
+import { useT } from "@/lib/i18n/console/context";
 
 export default function BuildDetailPage() {
   const params = useParams<{ projectId: string; appName: string; buildId: string }>();
@@ -17,6 +18,7 @@ export default function BuildDetailPage() {
   const searchParams = useSearchParams();
   const { selectedEnv, role } = useProjectContext();
   const envId = searchParams.get("envId") || selectedEnv?.id || "";
+  const { t } = useT();
 
   const [build, setBuild] = useState<Build | null>(null);
   const [loading, setLoading] = useState(true);
@@ -33,7 +35,7 @@ export default function BuildDetailPage() {
         setBuild(b);
         setError(null);
       } catch (err) {
-        setError(err instanceof Error ? err.message : "Failed to load build");
+        setError(err instanceof Error ? err.message : t("apps.builds.error.load"));
       } finally {
         if (!silent) setLoading(false);
       }
@@ -58,8 +60,8 @@ export default function BuildDetailPage() {
       await buildsApi.cancel(projectId, buildId);
       await load(true);
     } catch (err) {
-      const msg = err instanceof Error ? err.message : "Failed to cancel";
-      setError(/409|not cancellable/i.test(msg) ? "This build can no longer be canceled." : msg);
+      const msg = err instanceof Error ? err.message : t("apps.builds.error.cancel");
+      setError(/409|not cancellable/i.test(msg) ? t("apps.builds.error.notCancelable") : msg);
     } finally {
       setCanceling(false);
     }
@@ -69,12 +71,12 @@ export default function BuildDetailPage() {
     <div>
       <Breadcrumb
         items={[
-          { label: "Projects", href: "/projects" },
-          { label: "Overview", href: `/projects/${projectId}` },
-          { label: "Applications", href: `/projects/${projectId}/apps` },
+          { label: t("common.crumb.projects"), href: "/projects" },
+          { label: t("common.crumb.overview"), href: `/projects/${projectId}` },
+          { label: t("nav.apps"), href: `/projects/${projectId}/apps` },
           { label: appName, href: `/projects/${projectId}/apps/${appName}${envId ? `?envId=${envId}` : ""}` },
-          { label: "Deployments", href: `/projects/${projectId}/apps/${appName}/deployments${envId ? `?envId=${envId}` : ""}` },
-          { label: `Build ${buildId.slice(0, 7)}` },
+          { label: t("apps.builds.crumb.deployments"), href: `/projects/${projectId}/apps/${appName}/deployments${envId ? `?envId=${envId}` : ""}` },
+          { label: t("apps.builds.crumb.build", { id: buildId.slice(0, 7) }) },
         ]}
       />
 
@@ -89,11 +91,11 @@ export default function BuildDetailPage() {
           <div className="mb-6 mt-2 flex items-start justify-between">
             <div>
               <div className="flex items-center gap-3">
-                <h1 className="text-2xl font-bold text-gray-900">Build</h1>
+                <h1 className="text-2xl font-bold text-gray-900">{t("apps.builds.heading")}</h1>
                 <BuildStatusBadge status={build.status} />
               </div>
               <p className="mt-1 text-sm text-gray-500">
-                <span className="font-mono">{build.commit_sha?.slice(0, 7) ?? "—"}</span> on{" "}
+                <span className="font-mono">{build.commit_sha?.slice(0, 7) ?? "—"}</span> {t("apps.builds.meta.on")}{" "}
                 <span className="font-mono">{build.branch}</span> · {build.trigger} · {timeAgo(build.created_at)}
               </p>
               {build.commit_message && <p className="mt-1 text-sm text-gray-700">{build.commit_message}</p>}
@@ -107,7 +109,7 @@ export default function BuildDetailPage() {
                 disabled={canceling}
                 className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 transition-colors"
               >
-                {canceling ? "Canceling…" : "Cancel build"}
+                {canceling ? t("apps.builds.canceling") : t("apps.builds.cancel")}
               </button>
             )}
           </div>

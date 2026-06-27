@@ -1,0 +1,203 @@
+import type { Messages } from "./common";
+
+/**
+ * Apps list page, app detail page, and LogsViewer component.
+ * Namespace prefix: "apps."
+ */
+export const apps: Messages = {
+  "apps.title": { ru: "Приложения", en: "Applications" },
+  "apps.subtitle": { ru: "Управляемые рабочие нагрузки", en: "Managed application workloads" },
+
+  "apps.deployFromGit": { ru: "Деплой из Git", en: "Deploy from Git" },
+  "apps.deployImage": { ru: "Деплой образа", en: "Deploy image" },
+
+  "apps.vmWarning": {
+    ru: "Это окружение работает на VM-треке. Lifecycle AppServer доступен сейчас; деплой VM-приложений намеренно заблокирован до подключения воркера Portainer stack.",
+    en: "This environment runs on the VM track. AppServer lifecycle is available now; VM app deployment is intentionally blocked until the Portainer stack worker is wired.",
+  },
+  "apps.vmWarning.manageAppServers": { ru: "Управление AppServers", en: "Manage AppServers" },
+
+  "apps.error.load": { ru: "Не удалось загрузить приложения", en: "Failed to load applications" },
+
+  "apps.empty.title": { ru: "Пока нет приложений", en: "No applications yet" },
+  "apps.empty.vm.description": {
+    ru: "VM-окружение не поддерживает деплой приложений через этот интерфейс. Используйте AppServers.",
+    en: "VM environments do not support app deployment via this interface. Use AppServers instead.",
+  },
+  "apps.empty.k8s.description": {
+    ru: "Задеплойте бэкенд из GitHub — подключите репозиторий, и платформа сама соберёт и запустит образ.",
+    en: "Deploy a backend from GitHub — connect a repository and the platform will build and run the image.",
+  },
+  "apps.empty.k8s.action": { ru: "Деплой из Git", en: "Deploy from Git" },
+
+  "apps.card.replicas": { ru: "{count} реплик", en: "{count} replicas" },
+  "apps.card.synced": { ru: "Синхронизировано {ago}", en: "Synced {ago}" },
+
+  "apps.modal.create.title": { ru: "Создать приложение", en: "Create Application" },
+  "apps.modal.create.name.label": { ru: "Имя (имя ресурса Kubernetes)", en: "Name (Kubernetes resource name)" },
+  "apps.modal.create.name.title": {
+    ru: "Только строчные буквы, цифры и дефисы",
+    en: "Lowercase letters, numbers, and hyphens only",
+  },
+  "apps.modal.create.image.label": { ru: "Образ", en: "Image" },
+  "apps.modal.create.port.label": { ru: "Порт", en: "Port" },
+  "apps.modal.create.replicas.label": { ru: "Реплики", en: "Replicas" },
+  "apps.modal.create.profile.label": { ru: "Профиль", en: "Profile" },
+  "apps.modal.create.submit": { ru: "Создать приложение", en: "Create App" },
+  "apps.modal.create.submitting": { ru: "Создание…", en: "Creating…" },
+  "apps.error.create": { ru: "Не удалось создать приложение", en: "Failed to create application" },
+
+  "apps.detail.deployments": { ru: "Деплои", en: "Deployments" },
+  "apps.detail.settings": { ru: "Настройки", en: "Settings" },
+  "apps.detail.editCompose": { ru: "Редактировать compose", en: "Edit compose" },
+  "apps.detail.editValues": { ru: "Редактировать values", en: "Edit values" },
+  "apps.detail.deployImage": { ru: "Деплой образа", en: "Deploy Image" },
+
+  "apps.detail.spec.image": { ru: "Образ", en: "Image" },
+  "apps.detail.spec.profile": { ru: "Профиль", en: "Profile" },
+  "apps.detail.spec.replicas": { ru: "Реплики", en: "Replicas" },
+  "apps.detail.spec.port": { ru: "Порт", en: "Port" },
+
+  "apps.detail.error.notFound": { ru: "Приложение не найдено", en: "App not found" },
+  "apps.detail.error.load": { ru: "Не удалось загрузить приложение", en: "Failed to load app" },
+
+  "apps.domains.title": { ru: "Домены", en: "Domains" },
+  "apps.domains.subtitle": { ru: "Публичные эндпоинты через gateway + DNS", en: "Public endpoints via gateway + DNS" },
+  "apps.domains.add": { ru: "Добавить домен", en: "Add Domain" },
+  "apps.domains.empty": { ru: "Доменов пока нет", en: "No domains yet" },
+  "apps.domains.addFirst": { ru: "Добавить первый домен →", en: "Add first domain →" },
+  "apps.domains.auth": { ru: "auth: {scheme}", en: "auth: {scheme}" },
+  "apps.domains.swagger": { ru: " · swagger", en: " · swagger" },
+
+  "apps.modal.image.title": { ru: "Деплой нового образа", en: "Deploy New Image" },
+  "apps.modal.image.label": { ru: "Новый тег образа", en: "New Image Tag" },
+  "apps.modal.image.current": { ru: "Текущий: ", en: "Current: " },
+  "apps.modal.image.submit": { ru: "Деплой", en: "Deploy" },
+  "apps.modal.image.submitting": { ru: "Деплой…", en: "Deploying…" },
+  "apps.error.updateImage": { ru: "Не удалось обновить образ", en: "Failed to update image" },
+
+  "apps.modal.domain.title": { ru: "Добавить домен", en: "Add Domain" },
+  "apps.modal.domain.fqdn.label": { ru: "FQDN", en: "FQDN" },
+  "apps.modal.domain.authScheme.label": { ru: "Схема аутентификации", en: "Auth Scheme" },
+  "apps.modal.domain.authScheme.none": { ru: "none — публичный доступ", en: "none — public access" },
+  "apps.modal.domain.scopes.label": { ru: "Области доступа", en: "Scopes" },
+  "apps.modal.domain.scopes.hint": { ru: "(через запятую)", en: "(comma-separated)" },
+  "apps.modal.domain.swagger.label": { ru: "Включить Swagger / OpenAPI", en: "Enable Swagger / OpenAPI" },
+  "apps.modal.domain.apiDocsPath.label": { ru: "Путь к документации API", en: "API Docs Path" },
+  "apps.modal.domain.apiTitle.label": { ru: "Заголовок API", en: "API Title" },
+  "apps.modal.domain.submit": { ru: "Добавить домен", en: "Add Domain" },
+  "apps.modal.domain.submitting": { ru: "Регистрация…", en: "Registering…" },
+  "apps.error.createDomain": { ru: "Не удалось зарегистрировать домен", en: "Failed to register domain" },
+
+  "apps.logs.title": { ru: "Логи", en: "Logs" },
+  "apps.logs.live": { ru: "Live", en: "Live" },
+  "apps.logs.stop": { ru: "Стоп", en: "Stop" },
+  "apps.logs.matches": { ru: "{total} совпадений", en: "{total} matches" },
+  "apps.logs.liveStatus": {
+    ru: "последние {since} · обновляется каждые {interval}с",
+    en: "last {since} · refreshes every {interval}s",
+  },
+  "apps.logs.search.placeholder": {
+    ru: "Поиск по тексту (синтаксис Lucene)…",
+    en: "Search message text (Lucene syntax)…",
+  },
+  "apps.logs.search.button": { ru: "Найти", en: "Search" },
+  "apps.logs.empty": { ru: "Нет строк лога в этом окне.", en: "No log lines in this window." },
+  "apps.logs.error": { ru: "Не удалось загрузить логи", en: "Failed to search logs" },
+
+  "apps.builds.crumb.deployments": { ru: "Деплои", en: "Deployments" },
+  "apps.builds.crumb.build": { ru: "Сборка {id}", en: "Build {id}" },
+  "apps.builds.heading": { ru: "Сборка", en: "Build" },
+  "apps.builds.meta.on": { ru: "на", en: "on" },
+  "apps.builds.cancel": { ru: "Отменить сборку", en: "Cancel build" },
+  "apps.builds.canceling": { ru: "Отмена…", en: "Canceling…" },
+  "apps.builds.error.load": { ru: "Не удалось загрузить сборку", en: "Failed to load build" },
+  "apps.builds.error.cancel": { ru: "Не удалось отменить", en: "Failed to cancel" },
+  "apps.builds.error.notCancelable": { ru: "Эту сборку больше нельзя отменить.", en: "This build can no longer be canceled." },
+
+  "apps.compose.crumb": { ru: "compose", en: "compose" },
+  "apps.compose.heading.suffix": { ru: "/ compose", en: "/ compose" },
+  "apps.compose.subtitle": {
+    ru: "Отредактируйте определение Docker Compose и окружение. Сохранение коммитит в git и передеплоивает стек на VM.",
+    en: "Edit the Docker Compose definition and its environment. Saving commits to git and redeploys the stack onto the VM.",
+  },
+  "apps.compose.error.noPermission": {
+    ru: "У вас нет прав на редактирование конфигурации. Доступно только администраторам платформы.",
+    en: "You don't have permission to edit raw configuration. This is available to platform admins only.",
+  },
+  "apps.compose.error.noEnv": {
+    ru: "Отсутствует контекст окружения. Откройте редактор со страницы приложения.",
+    en: "Missing environment context. Open this editor from the application page.",
+  },
+  "apps.compose.pane.unsaved": { ru: "• не сохранено", en: "• unsaved" },
+  "apps.compose.pane.save": { ru: "Сохранить и передеплоить", en: "Save & redeploy" },
+  "apps.compose.pane.saving": { ru: "Сохранение…", en: "Saving…" },
+
+  "apps.deployments.crumb": { ru: "Деплои", en: "Deployments" },
+  "apps.deployments.heading.suffix": { ru: "/ deployments", en: "/ deployments" },
+  "apps.deployments.trigger": { ru: "Запустить сборку", en: "Trigger build" },
+  "apps.deployments.queuing": { ru: "В очереди…", en: "Queuing…" },
+  "apps.deployments.notice.queued": { ru: "Сборка в очереди · {sha}", en: "Build queued · {sha}" },
+  "apps.deployments.error.load": { ru: "Не удалось загрузить деплои", en: "Failed to load deployments" },
+  "apps.deployments.error.cancel": { ru: "Не удалось отменить сборку", en: "Failed to cancel build" },
+  "apps.deployments.error.noRepo": {
+    ru: "К этому приложению ещё не подключён репозиторий.",
+    en: "No repository is connected to this app yet.",
+  },
+  "apps.deployments.unavailable": {
+    ru: "Подсистема сборки и деплоя не настроена в этом окружении. Подключите репозиторий и задеплойте build-agent для включения сборок из исходников.",
+    en: "The build & deploy subsystem is not configured in this environment yet. Connect a repository and deploy the build-agent to enable source builds.",
+  },
+  "apps.deployments.unavailable.link": { ru: "Управление Git и сборками", en: "Manage Git & Builds" },
+  "apps.deployments.section.deployments": { ru: "Деплои", en: "Deployments" },
+  "apps.deployments.section.builds": { ru: "Сборки", en: "Builds" },
+  "apps.deployments.empty.deployments": { ru: "Деплоев пока нет.", en: "No deployments yet." },
+  "apps.deployments.empty.builds": {
+    ru: "Сборок пока нет. Подключите репозиторий и запустите сборку.",
+    en: "No builds yet. Connect a repository and trigger a build.",
+  },
+  "apps.deployments.badge.current": { ru: "Текущий", en: "Current" },
+  "apps.deployments.promote": { ru: "Продвинуть в prod", en: "Promote to prod" },
+  "apps.deployments.promoting": { ru: "Продвижение…", en: "Promoting…" },
+  "apps.deployments.rollback": { ru: "Откатить на эту версию", en: "Rollback to this" },
+  "apps.deployments.rollingBack": { ru: "Откат…", en: "Rolling back…" },
+  "apps.deployments.cancelBuild": { ru: "Отменить", en: "Cancel" },
+  "apps.deployments.cancelingBuild": { ru: "Отмена…", en: "Canceling…" },
+  "apps.deployments.logs": { ru: "Логи →", en: "Logs →" },
+
+  "apps.settings.crumb": { ru: "Настройки", en: "Settings" },
+  "apps.settings.heading.suffix": { ru: "/ settings", en: "/ settings" },
+  "apps.settings.tab.env": { ru: "Переменные окружения", en: "Environment variables" },
+  "apps.settings.tab.git": { ru: "Git", en: "Git" },
+  "apps.settings.tab.domains": { ru: "Домены", en: "Domains" },
+  "apps.settings.git.title": { ru: "Исходный репозиторий", en: "Source repository" },
+  "apps.settings.git.subtitle": {
+    ru: "Подключите Git-репозиторий, чтобы пуши автоматически собирали и деплоили приложение.",
+    en: "Connect a Git repository so pushes build & deploy this app automatically.",
+  },
+  "apps.settings.git.manageRepos": { ru: "Управление репозиториями", en: "Manage repositories" },
+  "apps.settings.git.viewDeployments": { ru: "Просмотр деплоев", en: "View deployments" },
+
+  "apps.values.crumb": { ru: "values.yaml", en: "values.yaml" },
+  "apps.values.heading.suffix": { ru: "/ values.yaml", en: "/ values.yaml" },
+  "apps.values.status.connecting": { ru: "Подключение…", en: "Connecting…" },
+  "apps.values.status.open": { ru: "Подключено", en: "Connected" },
+  "apps.values.status.closed": { ru: "Отключено", en: "Disconnected" },
+  "apps.values.status.error": { ru: "Ошибка", en: "Error" },
+  "apps.values.reconnect": { ru: "Переподключиться", en: "Reconnect" },
+  "apps.values.save": { ru: "Сохранить в git", en: "Save to git" },
+  "apps.values.saving": { ru: "Сохранение…", en: "Saving…" },
+  "apps.values.unsaved": { ru: "Несохранённые изменения ·", en: "Unsaved changes ·" },
+  "apps.values.error.noPermission": {
+    ru: "У вас нет прав на редактирование конфигурации. Доступно только администраторам платформы.",
+    en: "You don't have permission to edit raw configuration. This is available to platform admins only.",
+  },
+  "apps.values.error.token": { ru: "Не удалось получить токен", en: "Failed to get token" },
+  "apps.values.error.ws": { ru: "Ошибка WebSocket", en: "WebSocket error" },
+  "apps.values.error.unknown": { ru: "Неизвестная ошибка", en: "Unknown error" },
+  "apps.values.toast.updated": {
+    ru: "Файл обновлён в git — ваши несохранённые изменения сохранены",
+    en: "File was updated in git — your unsaved changes are still here",
+  },
+  "apps.values.toast.committed": { ru: "Закоммичено · {sha}", en: "Committed · {sha}" },
+};

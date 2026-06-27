@@ -10,6 +10,7 @@ import { useProjectContext } from "@/lib/project-context";
 import { canMutate } from "@/lib/rbac";
 import { timeAgo } from "@/lib/format";
 import { BuildStatusBadge, isBuildActive } from "@/components/deploy/build-status-badge";
+import { useT } from "@/lib/i18n/console/context";
 
 export default function AppDeploymentsPage() {
   const params = useParams<{ projectId: string; appName: string }>();
@@ -27,6 +28,7 @@ export default function AppDeploymentsPage() {
   const [triggering, setTriggering] = useState(false);
   const [actionId, setActionId] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const { t } = useT();
 
   const canDeploy = canMutate(role);
 
@@ -44,7 +46,7 @@ export default function AppDeploymentsPage() {
         setError(null);
         setUnavailable(false);
       } catch (err) {
-        const msg = err instanceof Error ? err.message : "Failed to load deployments";
+        const msg = err instanceof Error ? err.message : t("apps.deployments.error.load");
         if (/503|unavailable|not configured/i.test(msg)) setUnavailable(true);
         else setError(msg);
       } finally {
@@ -71,11 +73,11 @@ export default function AppDeploymentsPage() {
     setNotice(null);
     try {
       const { build } = await buildsApi.trigger(projectId, envId, appName);
-      setNotice(`Build queued · ${build.commit_sha?.slice(0, 7) ?? build.id.slice(0, 7)}`);
+      setNotice(t("apps.deployments.notice.queued", { sha: build.commit_sha?.slice(0, 7) ?? build.id.slice(0, 7) }));
       await load(true);
     } catch (err) {
-      const msg = err instanceof Error ? err.message : "Failed to trigger build";
-      setError(/409|not connected/i.test(msg) ? "No repository is connected to this app yet." : msg);
+      const msg = err instanceof Error ? err.message : t("apps.deployments.error.load");
+      setError(/409|not connected/i.test(msg) ? t("apps.deployments.error.noRepo") : msg);
     } finally {
       setTriggering(false);
     }
@@ -87,7 +89,7 @@ export default function AppDeploymentsPage() {
       await buildsApi.cancel(projectId, buildId);
       await load(true);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to cancel build");
+      setError(err instanceof Error ? err.message : t("apps.deployments.error.cancel"));
     } finally {
       setActionId(null);
     }
@@ -104,7 +106,7 @@ export default function AppDeploymentsPage() {
       const opId = res.operation?.id;
       router.push(`/projects/${projectId}/operations${opId ? `?highlight=${opId}` : ""}`);
     } catch (err) {
-      setError(err instanceof Error ? err.message : `Failed to ${kind}`);
+      setError(err instanceof Error ? err.message : t(kind === "rollback" ? "apps.deployments.rollingBack" : "apps.deployments.promoting"));
       setActionId(null);
     }
   }
@@ -115,16 +117,16 @@ export default function AppDeploymentsPage() {
         <div>
           <Breadcrumb
             items={[
-              { label: "Projects", href: "/projects" },
-              { label: "Overview", href: `/projects/${projectId}` },
-              { label: "Applications", href: `/projects/${projectId}/apps` },
+              { label: t("common.crumb.projects"), href: "/projects" },
+              { label: t("common.crumb.overview"), href: `/projects/${projectId}` },
+              { label: t("nav.apps"), href: `/projects/${projectId}/apps` },
               { label: appName, href: `/projects/${projectId}/apps/${appName}${envId ? `?envId=${envId}` : ""}` },
-              { label: "Deployments" },
+              { label: t("apps.deployments.crumb") },
             ]}
           />
           <h1 className="mt-2 text-2xl font-bold text-gray-900">
             <span className="font-mono">{appName}</span>
-            <span className="ml-2 text-lg font-normal text-gray-400">/ deployments</span>
+            <span className="ml-2 text-lg font-normal text-gray-400">{t("apps.deployments.heading.suffix")}</span>
           </h1>
         </div>
         {canDeploy && !unavailable && (
@@ -133,7 +135,7 @@ export default function AppDeploymentsPage() {
             disabled={triggering}
             className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50 transition-colors"
           >
-            {triggering ? <><Spinner size="sm" /> Queuing…</> : "Trigger build"}
+            {triggering ? <><Spinner size="sm" /> {t("apps.deployments.queuing")}</> : t("apps.deployments.trigger")}
           </button>
         )}
       </div>
@@ -151,20 +153,18 @@ export default function AppDeploymentsPage() {
         </div>
       ) : unavailable ? (
         <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-          The build &amp; deploy subsystem is not configured in this environment yet. Connect a repository and deploy the
-          build-agent to enable source builds.
+          {t("apps.deployments.unavailable")}
           <Link href={`/projects/${projectId}/git${envId ? `?envId=${envId}` : ""}`} className="ml-1 font-medium underline">
-            Manage Git &amp; Builds
+            {t("apps.deployments.unavailable.link")}
           </Link>
         </div>
       ) : (
         <div className="space-y-10">
-          {/* Deployments */}
           <section>
-            <h2 className="mb-3 text-lg font-semibold text-gray-900">Deployments</h2>
+            <h2 className="mb-3 text-lg font-semibold text-gray-900">{t("apps.deployments.section.deployments")}</h2>
             {deployments.length === 0 ? (
               <p className="rounded-xl border border-dashed border-gray-300 bg-gray-50 px-5 py-8 text-center text-sm text-gray-500">
-                No deployments yet.
+                {t("apps.deployments.empty.deployments")}
               </p>
             ) : (
               <div className="space-y-3">
@@ -179,7 +179,7 @@ export default function AppDeploymentsPage() {
                       <div className="flex items-center gap-2">
                         {dep.is_current && (
                           <span className="inline-flex items-center rounded-full bg-green-100 px-2 py-0.5 text-xs font-semibold text-green-700">
-                            Current
+                            {t("apps.deployments.badge.current")}
                           </span>
                         )}
                         <span className="inline-flex items-center rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600">
@@ -199,7 +199,7 @@ export default function AppDeploymentsPage() {
                             disabled={actionId === dep.id}
                             className="rounded-lg border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
                           >
-                            {actionId === dep.id ? "Promoting…" : "Promote to prod"}
+                            {actionId === dep.id ? t("apps.deployments.promoting") : t("apps.deployments.promote")}
                           </button>
                         ) : (
                           <button
@@ -207,7 +207,7 @@ export default function AppDeploymentsPage() {
                             disabled={actionId === dep.id}
                             className="rounded-lg border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
                           >
-                            {actionId === dep.id ? "Rolling back…" : "Rollback to this"}
+                            {actionId === dep.id ? t("apps.deployments.rollingBack") : t("apps.deployments.rollback")}
                           </button>
                         )}
                       </div>
@@ -218,12 +218,11 @@ export default function AppDeploymentsPage() {
             )}
           </section>
 
-          {/* Builds */}
           <section>
-            <h2 className="mb-3 text-lg font-semibold text-gray-900">Builds</h2>
+            <h2 className="mb-3 text-lg font-semibold text-gray-900">{t("apps.deployments.section.builds")}</h2>
             {builds.length === 0 ? (
               <p className="rounded-xl border border-dashed border-gray-300 bg-gray-50 px-5 py-8 text-center text-sm text-gray-500">
-                No builds yet. Connect a repository and trigger a build.
+                {t("apps.deployments.empty.builds")}
               </p>
             ) : (
               <div className="space-y-3">
@@ -248,14 +247,14 @@ export default function AppDeploymentsPage() {
                           disabled={actionId === b.id}
                           className="rounded-lg border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
                         >
-                          {actionId === b.id ? "Canceling…" : "Cancel"}
+                          {actionId === b.id ? t("apps.deployments.cancelingBuild") : t("apps.deployments.cancelBuild")}
                         </button>
                       )}
                       <Link
                         href={`/projects/${projectId}/apps/${appName}/builds/${b.id}${envId ? `?envId=${envId}` : ""}`}
                         className="text-sm font-medium text-blue-600 hover:text-blue-700"
                       >
-                        Logs →
+                        {t("apps.deployments.logs")}
                       </Link>
                     </div>
                   </div>

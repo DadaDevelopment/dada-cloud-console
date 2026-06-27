@@ -7,6 +7,7 @@ import { Spinner } from "@/components/ui/spinner";
 import { Breadcrumb } from "@/components/ui/breadcrumb";
 import { useProjectContext } from "@/lib/project-context";
 import { canEditYaml } from "@/lib/rbac";
+import { useT } from "@/lib/i18n/console/context";
 
 // ─── WebSocket message shapes ────────────────────────────────────────────────
 
@@ -24,6 +25,7 @@ type WsOutgoing =
 type ConnStatus = "connecting" | "open" | "closed" | "error";
 
 function StatusDot({ status }: { status: ConnStatus }) {
+  const { t } = useT();
   const colors: Record<ConnStatus, string> = {
     connecting: "bg-yellow-400",
     open:       "bg-green-400",
@@ -31,10 +33,10 @@ function StatusDot({ status }: { status: ConnStatus }) {
     error:      "bg-red-400",
   };
   const labels: Record<ConnStatus, string> = {
-    connecting: "Connecting…",
-    open:       "Connected",
-    closed:     "Disconnected",
-    error:      "Error",
+    connecting: t("apps.values.status.connecting"),
+    open:       t("apps.values.status.open"),
+    closed:     t("apps.values.status.closed"),
+    error:      t("apps.values.status.error"),
   };
   return (
     <span className="inline-flex items-center gap-1.5 text-xs text-gray-500">
@@ -74,6 +76,7 @@ export default function ValuesPage() {
   const allowed = canEditYaml(role);
   const { projectId, appName } = params;
   const envId = searchParams.get("envId") || selectedEnv?.id || "";
+  const { t } = useT();
 
   const [yaml, setYaml] = useState("");
   const [dirty, setDirty] = useState(false);
@@ -96,7 +99,7 @@ export default function ValuesPage() {
       tokenData = await valuesApi.getToken(projectId, envId, appName);
     } catch (e) {
       setStatus("error");
-      push("error", e instanceof Error ? e.message : "Failed to get token");
+      push("error", e instanceof Error ? e.message : t("apps.values.error.token"));
       return;
     }
 
@@ -120,7 +123,7 @@ export default function ValuesPage() {
 
     ws.onopen = () => setStatus("open");
     ws.onclose = () => setStatus("closed");
-    ws.onerror = () => { setStatus("error"); push("error", "WebSocket error"); };
+    ws.onerror = () => { setStatus("error"); push("error", t("apps.values.error.ws")); };
 
     ws.onmessage = (ev) => {
       try {
@@ -131,16 +134,16 @@ export default function ValuesPage() {
         } else if (msg.type === "update") {
           // Remote change arrived; if the user has unsaved edits, warn them.
           if (dirty) {
-            push("info", "File was updated in git — your unsaved changes are still here");
+            push("info", t("apps.values.toast.updated"));
           } else {
             setYaml(msg.yaml);
           }
         } else if (msg.type === "committed") {
-          push("success", `Committed · ${msg.sha.slice(0, 7)}`);
+          push("success", t("apps.values.toast.committed", { sha: msg.sha.slice(0, 7) }));
           setSaving(false);
           setDirty(false);
         } else if (msg.type === "error") {
-          push("error", msg.message ?? "Unknown error");
+          push("error", msg.message ?? t("apps.values.error.unknown"));
           setSaving(false);
         }
       } catch {
@@ -188,14 +191,14 @@ export default function ValuesPage() {
       <div>
         <Breadcrumb
           items={[
-            { label: "Projects", href: "/projects" },
-            { label: "Applications", href: `/projects/${projectId}/apps` },
+            { label: t("common.crumb.projects"), href: "/projects" },
+            { label: t("nav.apps"), href: `/projects/${projectId}/apps` },
             { label: appName, href: `/projects/${projectId}/apps/${appName}${envId ? `?envId=${envId}` : ""}` },
-            { label: "values.yaml" },
+            { label: t("apps.values.crumb") },
           ]}
         />
         <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-          You don&apos;t have permission to edit raw configuration. This is available to platform admins only.
+          {t("apps.values.error.noPermission")}
         </div>
       </div>
     );
@@ -208,17 +211,17 @@ export default function ValuesPage() {
         <div>
           <Breadcrumb
             items={[
-              { label: "Projects", href: "/projects" },
-              { label: "Overview", href: `/projects/${projectId}` },
-              { label: "Applications", href: `/projects/${projectId}/apps` },
+              { label: t("common.crumb.projects"), href: "/projects" },
+              { label: t("common.crumb.overview"), href: `/projects/${projectId}` },
+              { label: t("nav.apps"), href: `/projects/${projectId}/apps` },
               { label: appName, href: `/projects/${projectId}/apps/${appName}${envId ? `?envId=${envId}` : ""}` },
-              { label: "values.yaml" },
+              { label: t("apps.values.crumb") },
             ]}
           />
           <div className="mt-2 flex items-center gap-3">
             <h1 className="text-2xl font-bold text-gray-900">
               <span className="font-mono">{appName}</span>
-              <span className="ml-2 text-gray-400 font-normal text-lg">/ values.yaml</span>
+              <span className="ml-2 text-gray-400 font-normal text-lg">{t("apps.values.heading.suffix")}</span>
             </h1>
             <StatusDot status={status} />
           </div>
@@ -230,7 +233,7 @@ export default function ValuesPage() {
               onClick={connect}
               className="rounded-lg border border-gray-300 px-3 py-1.5 text-sm font-medium text-gray-600 hover:bg-gray-50 transition-colors"
             >
-              Reconnect
+              {t("apps.values.reconnect")}
             </button>
           ) : null}
           <button
@@ -238,7 +241,7 @@ export default function ValuesPage() {
             disabled={!dirty || saving || status !== "open"}
             className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-40 transition-colors"
           >
-            {saving ? <><Spinner size="sm" />Saving…</> : <>Save to git</>}
+            {saving ? <><Spinner size="sm" />{t("apps.values.saving")}</> : <>{t("apps.values.save")}</>}
           </button>
         </div>
       </div>
@@ -246,7 +249,7 @@ export default function ValuesPage() {
       {/* Dirty indicator */}
       {dirty && !saving && (
         <p className="mb-3 text-xs text-yellow-600">
-          Unsaved changes · <kbd className="rounded bg-yellow-100 px-1 py-0.5 font-mono text-yellow-700">Cmd+S</kbd> to save
+          {t("apps.values.unsaved")} <kbd className="rounded bg-yellow-100 px-1 py-0.5 font-mono text-yellow-700">Cmd+S</kbd> to save
         </p>
       )}
 

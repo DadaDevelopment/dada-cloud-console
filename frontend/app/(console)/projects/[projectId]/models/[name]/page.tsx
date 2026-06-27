@@ -11,6 +11,7 @@ import { Spinner } from "@/components/ui/spinner";
 import { Playground } from "@/components/ai/playground";
 import { useProjectContext } from "@/lib/project-context";
 import { PhaseBadge } from "@/components/ui/phase-badge";
+import { useT } from "@/lib/i18n/console/context";
 
 type Tab = "overview" | "versions" | "access" | "playground" | "operations" | "manifests";
 
@@ -18,6 +19,7 @@ export default function ModelDetailPage() {
   const params = useParams<{ projectId: string; name: string }>();
   const search = useSearchParams();
   const router = useRouter();
+  const { t } = useT();
   const { projectId, name } = params;
   const { selectedEnv } = useProjectContext();
   const envId = search.get("envId") || selectedEnv?.id || "";
@@ -65,8 +67,9 @@ export default function ModelDetailPage() {
           )
         );
       })
-      .catch((err) => setError(err instanceof Error ? err.message : "Failed to load model"))
+      .catch((err) => setError(err instanceof Error ? err.message : t("models.detail.error.load")))
       .finally(() => setIsLoading(false));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId, envId, name]);
 
   function gotoOp(opId?: string) {
@@ -84,7 +87,7 @@ export default function ModelDetailPage() {
       setIsCanaryOpen(false);
       gotoOp(r.operation?.id);
     } catch (err) {
-      setCanaryError(err instanceof Error ? err.message : "Failed to set canary");
+      setCanaryError(err instanceof Error ? err.message : t("models.canary.error"));
     } finally {
       setIsCanarySubmitting(false);
     }
@@ -99,7 +102,7 @@ export default function ModelDetailPage() {
       setIsPromoteOpen(false);
       gotoOp(r.operation?.id);
     } catch (err) {
-      setPromoteError(err instanceof Error ? err.message : "Failed to promote");
+      setPromoteError(err instanceof Error ? err.message : t("models.promote.error"));
     } finally {
       setIsPromoteSubmitting(false);
     }
@@ -114,7 +117,7 @@ export default function ModelDetailPage() {
       setIsDeleteOpen(false);
       gotoOp(r.operation?.id);
     } catch (err) {
-      setDeleteError(err instanceof Error ? err.message : "Failed to delete");
+      setDeleteError(err instanceof Error ? err.message : t("models.delete.error"));
     } finally {
       setIsDeleteSubmitting(false);
     }
@@ -126,7 +129,7 @@ export default function ModelDetailPage() {
   if (error || !detail) {
     return (
       <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-        {error ?? "Model not found"}
+        {error ?? t("models.detail.notFound")}
       </div>
     );
   }
@@ -138,12 +141,12 @@ export default function ModelDetailPage() {
   const isAdmin = role === "Owner" || role === "Admin";
 
   const tabs: { key: Tab; label: string; admin?: boolean }[] = [
-    { key: "overview", label: "Overview" },
-    { key: "versions", label: "Versions" },
-    { key: "access", label: "Access" },
-    { key: "playground", label: "Playground" },
-    { key: "operations", label: "Operations" },
-    { key: "manifests", label: "Manifests", admin: true },
+    { key: "overview", label: t("models.tab.overview") },
+    { key: "versions", label: t("models.tab.versions") },
+    { key: "access", label: t("models.tab.access") },
+    { key: "playground", label: t("models.tab.playground") },
+    { key: "operations", label: t("models.tab.operations") },
+    { key: "manifests", label: t("models.tab.manifests"), admin: true },
   ];
 
   return (
@@ -151,11 +154,11 @@ export default function ModelDetailPage() {
       <div className="mb-6 flex items-start justify-between">
         <div>
           <div className="flex items-center gap-2 text-sm text-gray-500">
-            <Link href="/projects" className="hover:text-gray-700">Projects</Link>
+            <Link href="/projects" className="hover:text-gray-700">{t("common.crumb.projects")}</Link>
             <span>/</span>
-            <Link href={`/projects/${projectId}`} className="hover:text-gray-700">Overview</Link>
+            <Link href={`/projects/${projectId}`} className="hover:text-gray-700">{t("common.crumb.overview")}</Link>
             <span>/</span>
-            <Link href={`/projects/${projectId}/models`} className="hover:text-gray-700">AI Models</Link>
+            <Link href={`/projects/${projectId}/models`} className="hover:text-gray-700">{t("nav.models")}</Link>
             <span>/</span>
             <span className="font-mono text-gray-900">{name}</span>
           </div>
@@ -172,21 +175,21 @@ export default function ModelDetailPage() {
             onClick={() => { setCanaryPercent(canaryPct); setIsCanaryOpen(true); }}
             className="inline-flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 hover:border-purple-300 hover:text-purple-600 transition-colors shadow-sm"
           >
-            Set canary
+            {t("models.detail.setCanary")}
           </button>
           {canaryActive && (
             <button
               onClick={() => setIsPromoteOpen(true)}
               className="inline-flex items-center gap-2 rounded-lg bg-purple-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-purple-700 transition-colors"
             >
-              Promote
+              {t("models.detail.promote")}
             </button>
           )}
           <button
             onClick={() => { setDeleteForce(false); setIsDeleteOpen(true); }}
             className="inline-flex items-center gap-2 rounded-lg border border-red-200 bg-white px-3 py-1.5 text-sm font-medium text-red-600 hover:bg-red-50 transition-colors shadow-sm"
           >
-            Delete
+            {t("common.delete")}
           </button>
         </div>
       </div>
@@ -235,12 +238,12 @@ export default function ModelDetailPage() {
       <Modal
         isOpen={isCanaryOpen}
         onClose={() => { setIsCanaryOpen(false); setCanaryError(null); }}
-        title="Set canary traffic"
+        title={t("models.canary.modal.title")}
       >
         <form onSubmit={submitCanary} className="space-y-4">
           <div>
             <label className="block text-sm font-medium text-gray-700">
-              Canary traffic percent <span className="font-mono text-purple-700">{canaryPercent}%</span>
+              {t("models.canary.label", { pct: String(canaryPercent) })}
             </label>
             <input
               type="range" min={0} max={100} step={5}
@@ -249,37 +252,36 @@ export default function ModelDetailPage() {
               className="mt-2 w-full"
             />
             <p className="mt-1 text-xs text-gray-400">
-              0% rolls back to stable. 100% is equivalent to <em>Promote</em>.
+              {t("models.canary.help")}
             </p>
           </div>
           {canaryError && <ErrorBox text={canaryError} />}
-          <ModalFooter onCancel={() => setIsCanaryOpen(false)} submitting={isCanarySubmitting} submitLabel="Apply" />
+          <ModalFooter onCancel={() => setIsCanaryOpen(false)} submitting={isCanarySubmitting} submitLabel={t("common.apply")} />
         </form>
       </Modal>
 
       <Modal
         isOpen={isPromoteOpen}
         onClose={() => { setIsPromoteOpen(false); setPromoteError(null); }}
-        title="Promote canary"
+        title={t("models.promote.modal.title")}
       >
         <form onSubmit={submitPromote} className="space-y-4">
           <p className="text-sm text-gray-600">
-            Promotes the canary revision to 100% stable traffic. The previous stable revision becomes inactive.
+            {t("models.promote.body")}
           </p>
           {promoteError && <ErrorBox text={promoteError} />}
-          <ModalFooter onCancel={() => setIsPromoteOpen(false)} submitting={isPromoteSubmitting} submitLabel="Promote" tone="purple" />
+          <ModalFooter onCancel={() => setIsPromoteOpen(false)} submitting={isPromoteSubmitting} submitLabel={t("models.promote.submit")} tone="purple" />
         </form>
       </Modal>
 
       <Modal
         isOpen={isDeleteOpen}
         onClose={() => { setIsDeleteOpen(false); setDeleteError(null); }}
-        title="Delete model"
+        title={t("models.delete.modal.title")}
       >
         <form onSubmit={submitDelete} className="space-y-4">
           <p className="text-sm text-gray-600">
-            This removes the AIModel manifest from Git. KServe will deprovision the InferenceService on the next Argo sync.
-            Any attached App will need to be detached unless <em>force</em> is set.
+            {t("models.delete.body")}
           </p>
           <label className="flex items-center gap-2">
             <input
@@ -289,11 +291,11 @@ export default function ModelDetailPage() {
               className="h-4 w-4 rounded border-gray-300 text-red-600 focus:ring-red-500"
             />
             <span className="text-sm text-gray-700">
-              Force — delete even if attached to an App (audited).
+              {t("models.delete.force")}
             </span>
           </label>
           {deleteError && <ErrorBox text={deleteError} />}
-          <ModalFooter onCancel={() => setIsDeleteOpen(false)} submitting={isDeleteSubmitting} submitLabel="Delete" tone="red" />
+          <ModalFooter onCancel={() => setIsDeleteOpen(false)} submitting={isDeleteSubmitting} submitLabel={t("common.delete")} tone="red" />
         </form>
       </Modal>
     </div>
@@ -306,51 +308,52 @@ function OverviewTab({
   summary: AIModelSummary; model: ResourceSnapshot; apiKeyPrefix: string | null;
   canaryPct: number; canaryActive: boolean;
 }) {
+  const { t } = useT();
   return (
     <div>
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <SpecCard label="Model type" value={s.model_type ?? "—"} />
-        <SpecCard label="Profile" value={s.profile ?? "—"} />
-        <SpecCard label="Auth mode" value={s.auth_mode ?? "—"} />
-        <SpecCard label="Stage" value={s.stage ?? "—"} />
+        <SpecCard label={t("models.overview.specCard.modelType")} value={s.model_type ?? "—"} />
+        <SpecCard label={t("models.overview.specCard.profile")} value={s.profile ?? "—"} />
+        <SpecCard label={t("models.overview.specCard.authMode")} value={s.auth_mode ?? "—"} />
+        <SpecCard label={t("models.overview.specCard.stage")} value={s.stage ?? "—"} />
       </div>
 
       <div className="mt-6 grid gap-6 lg:grid-cols-2">
         <div className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
-          <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-gray-500">Source</h2>
-          {s.artifact_uri && <Row label="Artifact URI" value={s.artifact_uri} mono />}
-          {s.container_image && <Row label="Container image" value={s.container_image} mono />}
-          {s.mlflow_name && <Row label="MLflow" value={`${s.mlflow_name} @ v${s.mlflow_version ?? "?"}`} mono />}
-          {s.attached_app && <Row label="Attached app" value={s.attached_app} mono />}
+          <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-gray-500">{t("models.overview.source")}</h2>
+          {s.artifact_uri && <Row label={t("models.overview.row.artifactUri")} value={s.artifact_uri} mono />}
+          {s.container_image && <Row label={t("models.overview.row.containerImage")} value={s.container_image} mono />}
+          {s.mlflow_name && <Row label={t("models.overview.row.mlflow")} value={`${s.mlflow_name} @ v${s.mlflow_version ?? "?"}`} mono />}
+          {s.attached_app && <Row label={t("models.overview.row.attachedApp")} value={s.attached_app} mono />}
         </div>
 
         <div className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
-          <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-gray-500">Traffic</h2>
+          <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-gray-500">{t("models.overview.traffic")}</h2>
           {canaryActive ? (
             <>
               <div className="flex items-center justify-between text-sm text-gray-600">
-                <span>canary → new revision</span>
+                <span>{t("models.overview.traffic.canary")}</span>
                 <span className="font-mono font-semibold text-purple-700">{canaryPct}%</span>
               </div>
               <div className="mt-2 h-2 w-full overflow-hidden rounded-full bg-gray-100">
                 <div className="h-full bg-purple-500" style={{ width: `${canaryPct}%` }} />
               </div>
               <p className="mt-3 text-xs text-gray-400">
-                <em>Promote</em> shifts 100% to canary; <em>Set canary</em> updates the split or rolls back to 0%.
+                {t("models.overview.traffic.canaryHelp")}
               </p>
             </>
           ) : (
-            <p className="text-sm text-gray-500">100% stable — no canary active.</p>
+            <p className="text-sm text-gray-500">{t("models.overview.traffic.stable")}</p>
           )}
         </div>
       </div>
 
       <div className="mt-6 rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
-        <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-gray-500">Status</h2>
-        <Row label="Phase" value={model.phase ?? "Unknown"} />
-        <Row label="Last synced" value={new Date(model.last_synced_at).toLocaleString()} />
-        {s.status && <Row label="Status" value={s.status} />}
-        {apiKeyPrefix && <Row label="API key prefix" value={`${apiKeyPrefix}…`} mono />}
+        <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-gray-500">{t("models.overview.status")}</h2>
+        <Row label={t("models.overview.row.phase")} value={model.phase ?? "Unknown"} />
+        <Row label={t("models.overview.row.lastSynced")} value={new Date(model.last_synced_at).toLocaleString()} />
+        {s.status && <Row label={t("models.overview.row.status")} value={s.status} />}
+        {apiKeyPrefix && <Row label={t("models.overview.row.apiKeyPrefix")} value={`${apiKeyPrefix}…`} mono />}
       </div>
     </div>
   );
@@ -362,6 +365,7 @@ function VersionsTab({
   projectId: string; envId: string; name: string;
   summary: AIModelSummary; operations: Operation[]; onOp: (id?: string) => void;
 }) {
+  const { t } = useT();
   const [mode, setMode] = useState<"artifact" | "mlflow">(s.mlflow_name ? "mlflow" : "artifact");
   const [artifactURI, setArtifactURI] = useState(s.artifact_uri ?? "");
   const [mlflowName, setMlflowName] = useState(s.mlflow_name ?? "");
@@ -382,7 +386,7 @@ function VersionsTab({
         onOp(r.operation?.id);
       }
     } catch (e2) {
-      setErr(e2 instanceof Error ? e2.message : "Failed to update");
+      setErr(e2 instanceof Error ? e2.message : t("models.versions.error"));
     } finally {
       setSubmitting(false);
     }
@@ -395,7 +399,7 @@ function VersionsTab({
   return (
     <div className="space-y-6">
       <div className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
-        <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-gray-500">Update artifact</h2>
+        <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-gray-500">{t("models.versions.updateArtifact")}</h2>
         <form onSubmit={submit} className="space-y-4">
           <div className="flex gap-1 rounded-lg border border-gray-200 bg-gray-50 p-1 w-fit">
             {(["artifact", "mlflow"] as const).map((m) => (
@@ -413,19 +417,19 @@ function VersionsTab({
           </div>
           {mode === "artifact" ? (
             <div>
-              <label className="block text-sm font-medium text-gray-700">New artifact URI</label>
+              <label className="block text-sm font-medium text-gray-700">{t("models.versions.artifactUri.label")}</label>
               <input
                 type="text" required value={artifactURI}
                 onChange={(e) => setArtifactURI(e.target.value)}
                 placeholder="s3://platform-models/<project>/<name>/v2"
                 className="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm font-mono text-gray-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
               />
-              <p className="mt-1 text-xs text-gray-400">Must start with this project&apos;s storage prefix.</p>
+              <p className="mt-1 text-xs text-gray-400">{t("models.versions.artifactUri.help")}</p>
             </div>
           ) : (
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="block text-sm font-medium text-gray-700">MLflow name</label>
+                <label className="block text-sm font-medium text-gray-700">{t("models.versions.mlflowName.label")}</label>
                 <input
                   type="text" required value={mlflowName}
                   onChange={(e) => setMlflowName(e.target.value)}
@@ -433,7 +437,7 @@ function VersionsTab({
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700">Version</label>
+                <label className="block text-sm font-medium text-gray-700">{t("models.versions.mlflowVersion.label")}</label>
                 <input
                   type="text" required value={mlflowVersion}
                   onChange={(e) => setMlflowVersion(e.target.value)}
@@ -448,16 +452,16 @@ function VersionsTab({
               type="submit" disabled={submitting}
               className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50 transition-colors"
             >
-              {submitting ? <><Spinner size="sm" /> Updating...</> : "Update artifact"}
+              {submitting ? <><Spinner size="sm" /> {t("models.versions.updating")}</> : t("models.versions.updateBtn")}
             </button>
           </div>
         </form>
       </div>
 
       <div className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
-        <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-gray-500">Version history</h2>
+        <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-gray-500">{t("models.versions.history")}</h2>
         {versionOps.length === 0 ? (
-          <p className="text-sm text-gray-500">No version-changing operations recorded yet.</p>
+          <p className="text-sm text-gray-500">{t("models.versions.noHistory")}</p>
         ) : (
           <ul className="divide-y divide-gray-100">
             {versionOps.map((op) => (
@@ -479,6 +483,7 @@ function AccessTab({
   projectId: string; envId: string; name: string;
   summary: AIModelSummary; apiKeyPrefix: string | null;
 }) {
+  const { t } = useT();
   const [revealed, setRevealed] = useState<string | null>(null);
   const [revealing, setRevealing] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -490,7 +495,7 @@ function AccessTab({
       const r = await aiModelsApi.revealApiKey(projectId, envId, name);
       setRevealed(r.api_key);
     } catch (e) {
-      setErr(e instanceof Error ? e.message : "Reveal failed (window may have expired)");
+      setErr(e instanceof Error ? e.message : t("models.access.reveal.error"));
     } finally {
       setRevealing(false);
     }
@@ -499,28 +504,27 @@ function AccessTab({
   return (
     <div className="space-y-6">
       <div className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
-        <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-gray-500">Auth</h2>
-        <Row label="Auth mode" value={s.auth_mode ?? "—"} />
+        <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-gray-500">{t("models.access.auth")}</h2>
+        <Row label={t("models.overview.specCard.authMode")} value={s.auth_mode ?? "—"} />
         {apiKeyPrefix ? (
-          <Row label="API key prefix" value={`${apiKeyPrefix}…`} mono />
+          <Row label={t("models.overview.row.apiKeyPrefix")} value={`${apiKeyPrefix}…`} mono />
         ) : (
-          <p className="mt-2 text-sm text-gray-500">No API key issued (auth_mode is not <span className="font-mono">apikey</span>).</p>
+          <p className="mt-2 text-sm text-gray-500">{t("models.access.noApiKey")}</p>
         )}
       </div>
 
       {s.auth_mode === "apikey" && (
         <div className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
-          <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-gray-500">Reveal API key (one-shot)</h2>
+          <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-gray-500">{t("models.access.reveal.title")}</h2>
           <p className="text-sm text-gray-600">
-            The plaintext key is parked in a 15-minute Postgres row keyed on the create operation.
-            Click <em>Reveal</em> to consume the row — the key cannot be recovered after that. Rotate to issue a new one.
+            {t("models.access.reveal.body")}
           </p>
           {revealed ? (
             <div className="mt-3">
               <pre className="overflow-x-auto rounded-lg border border-amber-200 bg-amber-50 p-3 font-mono text-sm text-amber-900">
                 {revealed}
               </pre>
-              <p className="mt-2 text-xs text-amber-700">Save this now — it will not be shown again.</p>
+              <p className="mt-2 text-xs text-amber-700">{t("models.access.reveal.save")}</p>
             </div>
           ) : (
             <button
@@ -528,7 +532,7 @@ function AccessTab({
               disabled={revealing}
               className="mt-3 inline-flex items-center gap-2 rounded-lg bg-amber-600 px-4 py-2 text-sm font-medium text-white hover:bg-amber-700 disabled:opacity-50 transition-colors"
             >
-              {revealing ? <><Spinner size="sm" /> Revealing...</> : "Reveal API key"}
+              {revealing ? <><Spinner size="sm" /> {t("models.access.reveal.revealing")}</> : t("models.access.reveal.btn")}
             </button>
           )}
           {err && <div className="mt-3"><ErrorBox text={err} /></div>}
@@ -539,10 +543,11 @@ function AccessTab({
 }
 
 function OperationsTab({ operations, projectId }: { operations: Operation[]; projectId: string }) {
+  const { t } = useT();
   if (operations.length === 0) {
     return (
       <div className="rounded-xl border border-dashed border-gray-300 bg-gray-50 py-12 text-center">
-        <p className="text-sm text-gray-500">No operations recorded for this model yet.</p>
+        <p className="text-sm text-gray-500">{t("models.ops.empty")}</p>
       </div>
     );
   }
@@ -551,10 +556,10 @@ function OperationsTab({ operations, projectId }: { operations: Operation[]; pro
       <table className="min-w-full divide-y divide-gray-200">
         <thead className="bg-gray-50">
           <tr>
-            <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">Action</th>
-            <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">Status</th>
-            <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">When</th>
-            <th className="px-5 py-3 text-right text-xs font-semibold uppercase tracking-wide text-gray-500">Link</th>
+            <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">{t("models.ops.col.action")}</th>
+            <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">{t("models.ops.col.status")}</th>
+            <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">{t("models.ops.col.when")}</th>
+            <th className="px-5 py-3 text-right text-xs font-semibold uppercase tracking-wide text-gray-500">{t("models.ops.col.link")}</th>
           </tr>
         </thead>
         <tbody className="divide-y divide-gray-100">
@@ -572,7 +577,7 @@ function OperationsTab({ operations, projectId }: { operations: Operation[]; pro
                   href={`/projects/${projectId}/operations?highlight=${op.id}`}
                   className="text-xs text-blue-600 hover:text-blue-700"
                 >
-                  Details →
+                  {t("models.ops.details")}
                 </Link>
               </td>
             </tr>
@@ -588,19 +593,20 @@ function ManifestsTab({
 }: {
   summary: AIModelSummary; model: ResourceSnapshot; operations: Operation[];
 }) {
+  const { t } = useT();
   const lastOp = operations[0];
   return (
     <div className="space-y-6">
       <div className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
-        <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-gray-500">GitOps</h2>
-        {lastOp?.git_path && <Row label="Git path" value={lastOp.git_path} mono />}
-        {lastOp?.git_commit && <Row label="Last commit" value={lastOp.git_commit.slice(0, 12)} mono />}
-        {lastOp?.argo_application && <Row label="Argo application" value={lastOp.argo_application} mono />}
-        <Row label="Crossplane composite" value={`aimodel-${model.name}`} mono />
+        <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-gray-500">{t("models.manifests.gitops")}</h2>
+        {lastOp?.git_path && <Row label={t("models.manifests.row.gitPath")} value={lastOp.git_path} mono />}
+        {lastOp?.git_commit && <Row label={t("models.manifests.row.lastCommit")} value={lastOp.git_commit.slice(0, 12)} mono />}
+        {lastOp?.argo_application && <Row label={t("models.manifests.row.argoApp")} value={lastOp.argo_application} mono />}
+        <Row label={t("models.manifests.row.crossplane")} value={`aimodel-${model.name}`} mono />
       </div>
 
       <div className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
-        <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-gray-500">Resolved spec</h2>
+        <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-gray-500">{t("models.manifests.resolvedSpec")}</h2>
         <pre className="max-h-96 overflow-auto rounded-lg border border-gray-200 bg-gray-50 p-3 font-mono text-xs text-gray-900">
 {JSON.stringify(s, null, 2)}
         </pre>
@@ -639,6 +645,7 @@ function ModalFooter({
   onCancel: () => void; submitting: boolean; submitLabel: string;
   tone?: "blue" | "red" | "purple";
 }) {
+  const { t } = useT();
   const tones = {
     blue: "bg-blue-600 hover:bg-blue-700",
     red: "bg-red-600 hover:bg-red-700",
@@ -650,13 +657,13 @@ function ModalFooter({
         type="button" onClick={onCancel}
         className="rounded-lg px-4 py-2 text-sm font-medium text-gray-600 hover:bg-gray-100 transition-colors"
       >
-        Cancel
+        {t("common.cancel")}
       </button>
       <button
         type="submit" disabled={submitting}
         className={`inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium text-white ${tones[tone]} disabled:cursor-not-allowed disabled:opacity-50 transition-colors`}
       >
-        {submitting ? <><Spinner size="sm" /> Working...</> : submitLabel}
+        {submitting ? <><Spinner size="sm" /> {t("models.working")}</> : submitLabel}
       </button>
     </div>
   );

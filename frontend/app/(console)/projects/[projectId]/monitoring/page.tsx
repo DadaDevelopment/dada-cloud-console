@@ -11,14 +11,10 @@ import { StateChip } from "@/components/ui/state-chip";
 import { Breadcrumb } from "@/components/ui/breadcrumb";
 import { useProjectContext } from "@/lib/project-context";
 import { canMutate } from "@/lib/rbac";
+import { useT } from "@/lib/i18n/console/context";
 
-// Ingest base URL for code snippets. The gateway service will be at this host.
-// Change this constant (or wire it from an env var) when the gateway is deployed.
 const INGEST_BASE = "https://ingest.dada-tuda.ru";
 
-// ── Live telemetry status badge ────────────────────────────────────────────────
-// Polls health every POLL_INTERVAL_MS while waiting for first data point.
-// Stops polling once last_seen is non-null (receiving).
 const POLL_INTERVAL_MS = 4_000;
 
 function useTelemetryStatus(
@@ -39,7 +35,6 @@ function useTelemetryStatus(
         if (timerRef.current) clearInterval(timerRef.current);
       }
     } catch {
-      // health endpoint may not exist yet; stay in "waiting" state
     } finally {
       setLoading(false);
     }
@@ -47,7 +42,6 @@ function useTelemetryStatus(
 
   useEffect(() => {
     if (!enabled || !envId) return;
-    // immediate first check
     /* eslint-disable react-hooks/set-state-in-effect */
     poll();
     /* eslint-enable react-hooks/set-state-in-effect */
@@ -59,8 +53,6 @@ function useTelemetryStatus(
 
   return { receiving, loading };
 }
-
-// ── Code snippets ──────────────────────────────────────────────────────────────
 
 type SnippetTab = "nodejs" | "python" | "env" | "curl";
 
@@ -138,32 +130,31 @@ curl -X POST '${metricsUrl}' \\
 }
 
 function CodeSnippets({ apiKey }: { apiKey: string }) {
+  const { t } = useT();
   const [activeTab, setActiveTab] = useState<SnippetTab>("nodejs");
   const snippet = buildSnippet(activeTab, apiKey);
 
   return (
     <div>
-      {/* Tab bar */}
       <div className="flex gap-1 border-b border-gray-200 mb-0">
-        {SNIPPET_TABS.map((t) => (
+        {SNIPPET_TABS.map((tab) => (
           <button
-            key={t.key}
+            key={tab.key}
             type="button"
-            onClick={() => setActiveTab(t.key)}
+            onClick={() => setActiveTab(tab.key)}
             className={`px-3 py-1.5 text-xs font-medium rounded-t-md border-b-2 transition-colors ${
-              activeTab === t.key
+              activeTab === tab.key
                 ? "border-blue-600 text-blue-600 bg-white"
                 : "border-transparent text-gray-500 hover:text-gray-700 hover:bg-gray-50"
             }`}
           >
-            {t.label}
+            {tab.label}
           </button>
         ))}
       </div>
-      {/* Code block */}
       <div className="relative rounded-b-lg rounded-tr-lg bg-gray-900 border border-t-0 border-gray-200">
         <div className="absolute top-2 right-2 z-10">
-          <CopyButton value={snippet} label="Copy" className="bg-gray-700 border-gray-600 text-gray-300 hover:bg-gray-600" />
+          <CopyButton value={snippet} label={t("common.copy")} className="bg-gray-700 border-gray-600 text-gray-300 hover:bg-gray-600" />
         </div>
         <pre className="overflow-x-auto px-4 py-4 text-xs leading-relaxed text-gray-200 font-mono pr-16">
           {snippet}
@@ -172,8 +163,6 @@ function CodeSnippets({ apiKey }: { apiKey: string }) {
     </div>
   );
 }
-
-// ── Onboarding card (shown inline when a resource was just created) ─────────────
 
 function OnboardingCard({
   app,
@@ -186,74 +175,70 @@ function OnboardingCard({
   envId: string;
   projectId: string;
 }) {
+  const { t } = useT();
   const { receiving, loading } = useTelemetryStatus(
     projectId,
     envId,
     app.id,
-    // only poll when we have an env
     !!envId
   );
 
   return (
     <div className="rounded-xl border border-blue-100 bg-white shadow-sm overflow-hidden">
-      {/* Status bar at top */}
       <div className="flex items-center justify-between px-5 py-3 border-b border-gray-100 bg-gray-50">
         <div className="flex items-center gap-2">
           <span className="font-mono text-sm font-semibold text-gray-900">{app.name}</span>
-          <span className="text-xs text-gray-400">ready to receive telemetry</span>
+          <span className="text-xs text-gray-400">{t("monitoring.status.readyToReceive")}</span>
         </div>
         {loading ? (
-          <StateChip tone="neutral" dot>Checking...</StateChip>
+          <StateChip tone="neutral" dot>{t("monitoring.status.checking")}</StateChip>
         ) : receiving ? (
-          <StateChip tone="ready" dot>Receiving</StateChip>
+          <StateChip tone="ready" dot>{t("monitoring.status.receiving")}</StateChip>
         ) : (
-          <StateChip tone="needs-action" dot>Waiting for first telemetry</StateChip>
+          <StateChip tone="needs-action" dot>{t("monitoring.status.waiting")}</StateChip>
         )}
       </div>
 
       <div className="px-5 py-5 space-y-7">
-        {/* Step 1 — done (resource created) */}
-        <Step number={1} title="Create monitoring resource" done>
+        <Step number={1} title={t("monitoring.step1.title")} done>
           <p className="text-sm text-gray-500">
-            Resource <span className="font-mono text-gray-700">{app.name}</span> created.
+            {t("monitoring.step1.body", { name: app.name })}
           </p>
         </Step>
 
-        {/* Step 2 — API key */}
-        <Step number={2} title="Copy your API key" done={!apiKey}>
+        <Step number={2} title={t("monitoring.step2.title")} done={!apiKey}>
           {apiKey ? (
             <div className="space-y-2">
               <div className="flex items-start gap-2">
                 <pre className="flex-1 overflow-x-auto rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5 font-mono text-sm text-amber-900 break-all whitespace-pre-wrap">
                   {apiKey}
                 </pre>
-                <CopyButton value={apiKey} label="Copy key" />
+                <CopyButton value={apiKey} label={t("common.copy")} />
               </div>
               <p className="text-xs text-amber-700 flex items-center gap-1.5">
                 <svg className="h-3.5 w-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
                 </svg>
-                Store this key now — it will not be shown again.
+                {t("monitoring.step2.warning")}
               </p>
               <p className="text-xs text-gray-400">
-                Need to rotate?{" "}
+                {t("monitoring.step2.needRotate")}{" "}
                 <Link
                   href={`/projects/${projectId}/monitoring/${app.id}`}
                   className="text-blue-600 hover:text-blue-700"
                 >
-                  Manage keys →
+                  {t("monitoring.step2.manageKeys")}
                 </Link>
               </p>
             </div>
           ) : (
-            <p className="text-sm text-gray-400">Key was already stored.</p>
+            <p className="text-sm text-gray-400">{t("monitoring.step2.keyStored")}</p>
           )}
         </Step>
 
-        {/* Step 3 — Connect your device */}
-        <Step number={3} title="Connect your device">
+        <Step number={3} title={t("monitoring.step3.title")}>
           <p className="mb-3 text-sm text-gray-500">
-            Use the OTel SDK with the endpoint and key below, or set env vars for zero-code instrumentation.
+            {t("monitoring.step3.body")}
           </p>
           <CodeSnippets apiKey={apiKey ?? "dmon_<your-key>"} />
         </Step>
@@ -275,7 +260,6 @@ function Step({
 }) {
   return (
     <div className="flex gap-4">
-      {/* Circle number */}
       <div className="flex-none flex flex-col items-center">
         <div
           className={`h-7 w-7 rounded-full flex items-center justify-center text-xs font-bold ${
@@ -301,11 +285,10 @@ function Step({
   );
 }
 
-// ── Main page ──────────────────────────────────────────────────────────────────
-
 export default function MonitoringPage() {
   const params = useParams<{ projectId: string }>();
   const projectId = params.projectId;
+  const { t } = useT();
 
   const { project, selectedEnv, role, loading: isLoadingEnvs } = useProjectContext();
   const selectedEnvId = selectedEnv?.id ?? "";
@@ -319,8 +302,6 @@ export default function MonitoringPage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
 
-  // After create: keep the new app + plaintext key in state so the onboarding
-  // card can be rendered inline (without a modal interrupt).
   const [onboardingApp, setOnboardingApp] = useState<MonitoringApp | null>(null);
   const [onboardingKey, setOnboardingKey] = useState<string | null>(null);
 
@@ -336,8 +317,9 @@ export default function MonitoringPage() {
     monitoringApi
       .list(projectId)
       .then((data) => setApps(data.monitoring_apps ?? []))
-      .catch((err) => setError(err instanceof Error ? err.message : "Failed to load monitoring apps"))
+      .catch((err) => setError(err instanceof Error ? err.message : t("monitoring.error.load")))
       .finally(() => setIsLoadingApps(false));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId, selectedEnvId, isLoadingEnvs]);
 
   async function handleSubmit(e: FormEvent<HTMLFormElement>) {
@@ -349,11 +331,10 @@ export default function MonitoringPage() {
       setApps((prev) => [...prev, result.monitoring_app]);
       setIsModalOpen(false);
       setName("");
-      // Show the onboarding card inline instead of a popup modal.
       setOnboardingApp(result.monitoring_app);
       setOnboardingKey(result.api_key);
     } catch (err) {
-      setSubmitError(err instanceof Error ? err.message : "Failed to create monitoring app");
+      setSubmitError(err instanceof Error ? err.message : t("monitoring.error.create"));
     } finally {
       setIsSubmitting(false);
     }
@@ -371,18 +352,17 @@ export default function MonitoringPage() {
 
   return (
     <div>
-      {/* Header */}
       <div className="mb-8 flex items-start justify-between">
         <div>
           <Breadcrumb
             items={[
-              { label: "Projects", href: "/projects" },
-              { label: project?.display_name ?? "Overview", href: `/projects/${projectId}` },
-              { label: "Monitoring" },
+              { label: t("common.crumb.projects"), href: "/projects" },
+              { label: project?.display_name ?? t("common.crumb.overview"), href: `/projects/${projectId}` },
+              { label: t("nav.monitoring") },
             ]}
           />
-          <h1 className="mt-2 text-2xl font-bold text-gray-900">Monitoring</h1>
-          <p className="mt-0.5 text-sm text-gray-500">Push telemetry from any device via OpenTelemetry — dashboards and alerts included.</p>
+          <h1 className="mt-2 text-2xl font-bold text-gray-900">{t("monitoring.title")}</h1>
+          <p className="mt-0.5 text-sm text-gray-500">{t("monitoring.subtitle")}</p>
         </div>
         {canCreate && apps.length > 0 && (
           <button
@@ -393,7 +373,7 @@ export default function MonitoringPage() {
             <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
             </svg>
-            Create Monitoring
+            {t("monitoring.create")}
           </button>
         )}
       </div>
@@ -409,7 +389,6 @@ export default function MonitoringPage() {
           <Spinner />
         </div>
       ) : apps.length === 0 && !onboardingApp ? (
-        /* ── Zero state: guided onboarding first step ── */
         <ZeroState
           canCreate={canCreate}
           hasEnv={!!selectedEnvId}
@@ -417,19 +396,18 @@ export default function MonitoringPage() {
         />
       ) : (
         <div className="space-y-6">
-          {/* Inline onboarding card for the most recently created app */}
           {onboardingApp && (
             <div>
               <div className="mb-3 flex items-center justify-between">
                 <p className="text-xs font-semibold uppercase tracking-wide text-blue-600">
-                  Getting started
+                  {t("monitoring.onboarding.label")}
                 </p>
                 <button
                   type="button"
                   onClick={() => { setOnboardingApp(null); setOnboardingKey(null); }}
                   className="text-xs text-gray-400 hover:text-gray-600 transition-colors"
                 >
-                  Dismiss
+                  {t("monitoring.dismiss")}
                 </button>
               </div>
               <OnboardingCard
@@ -441,7 +419,6 @@ export default function MonitoringPage() {
             </div>
           )}
 
-          {/* App cards grid */}
           {apps.length > 0 && (
             <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
               {apps.map((app) => (
@@ -453,11 +430,11 @@ export default function MonitoringPage() {
                   <div className="mb-3 flex items-start justify-between">
                     <div>
                       <p className="font-mono text-sm font-semibold text-gray-900">{app.name}</p>
-                      <p className="mt-0.5 text-xs text-gray-400">monitoring app</p>
+                      <p className="mt-0.5 text-xs text-gray-400">{t("monitoring.card.monitoringApp")}</p>
                     </div>
                   </div>
                   <p className="text-xs text-gray-400">
-                    Created {new Date(app.created_at).toLocaleDateString()}
+                    {t("monitoring.card.createdAt", { date: new Date(app.created_at).toLocaleDateString() })}
                   </p>
                 </Link>
               ))}
@@ -466,7 +443,6 @@ export default function MonitoringPage() {
         </div>
       )}
 
-      {/* Create Monitoring Modal */}
       <Modal
         isOpen={isModalOpen}
         onClose={() => {
@@ -474,19 +450,19 @@ export default function MonitoringPage() {
           setSubmitError(null);
           setName("");
         }}
-        title="Create Monitoring App"
+        title={t("monitoring.modal.title")}
       >
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <label className="block text-sm font-medium text-gray-700">Name</label>
+            <label className="block text-sm font-medium text-gray-700">{t("monitoring.modal.name.label")}</label>
             <input
               type="text"
               required
               value={name}
               onChange={(e) => setName(e.target.value)}
-              placeholder="my-service-monitor"
+              placeholder={t("monitoring.modal.name.placeholder")}
               pattern="[a-z0-9-]+"
-              title="Lowercase letters, numbers, and hyphens only"
+              title={t("monitoring.modal.name.validation")}
               className="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
             />
           </div>
@@ -507,7 +483,7 @@ export default function MonitoringPage() {
               }}
               className="rounded-lg px-4 py-2 text-sm font-medium text-gray-600 hover:bg-gray-100 transition-colors"
             >
-              Cancel
+              {t("common.cancel")}
             </button>
             <button
               type="submit"
@@ -517,10 +493,10 @@ export default function MonitoringPage() {
               {isSubmitting ? (
                 <>
                   <Spinner size="sm" />
-                  Creating...
+                  {t("common.creating")}
                 </>
               ) : (
-                "Create"
+                t("common.create")
               )}
             </button>
           </div>
@@ -529,8 +505,6 @@ export default function MonitoringPage() {
     </div>
   );
 }
-
-// ── Zero state ─────────────────────────────────────────────────────────────────
 
 function ZeroState({
   canCreate,
@@ -541,18 +515,19 @@ function ZeroState({
   hasEnv: boolean;
   onCreateClick: () => void;
 }) {
+  const { t } = useT();
+
   return (
     <div className="rounded-xl border border-dashed border-gray-300 bg-gray-50 px-6 py-12">
       <div className="mx-auto max-w-md text-center">
-        {/* Icon */}
         <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-blue-50 border border-blue-100">
           <svg className="h-7 w-7 text-blue-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M3 13.125C3 12.504 3.504 12 4.125 12h2.25c.621 0 1.125.504 1.125 1.125v6.75C7.5 20.496 6.996 21 6.375 21h-2.25A1.125 1.125 0 013 19.875v-6.75zM9.75 8.625c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125v11.25c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V8.625zM16.5 4.125c0-.621.504-1.125 1.125-1.125h2.25C20.496 3 21 3.504 21 4.125v15.75c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V4.125z" />
           </svg>
         </div>
-        <h2 className="text-base font-semibold text-gray-900">Start receiving telemetry</h2>
+        <h2 className="text-base font-semibold text-gray-900">{t("monitoring.zero.title")}</h2>
         <p className="mt-1 text-sm text-gray-500">
-          Create a monitoring resource, copy your API key, and push metrics or logs from any device using the stock OpenTelemetry SDK.
+          {t("monitoring.zero.body")}
         </p>
         {canCreate && (
           <button
@@ -564,21 +539,20 @@ function ZeroState({
             <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
             </svg>
-            Create Monitoring App
+            {t("monitoring.zero.createBtn")}
           </button>
         )}
-        {/* Step preview */}
         <div className="mt-8 text-left space-y-3">
           {[
-            { n: 1, text: "Create a monitoring resource — gets a scoped API key." },
-            { n: 2, text: "Copy the key (shown once) and store it securely." },
-            { n: 3, text: "Point your OTel SDK at the ingest endpoint — live dashboard in seconds." },
-          ].map(({ n, text }) => (
+            { n: 1, key: "monitoring.zero.step1" },
+            { n: 2, key: "monitoring.zero.step2" },
+            { n: 3, key: "monitoring.zero.step3" },
+          ].map(({ n, key }) => (
             <div key={n} className="flex items-start gap-3">
               <span className="flex-none flex h-5 w-5 items-center justify-center rounded-full bg-gray-200 text-xs font-bold text-gray-600">
                 {n}
               </span>
-              <p className="text-sm text-gray-600">{text}</p>
+              <p className="text-sm text-gray-600">{t(key)}</p>
             </div>
           ))}
         </div>

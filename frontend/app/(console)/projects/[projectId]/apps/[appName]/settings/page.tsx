@@ -7,6 +7,7 @@ import { useProjectContext } from "@/lib/project-context";
 import { canMutate } from "@/lib/rbac";
 import { EnvVarsEditor } from "@/components/deploy/env-vars-editor";
 import { HostnamesManager } from "@/components/deploy/hostnames-manager";
+import { useT } from "@/lib/i18n/console/context";
 
 type Tab = "env" | "git" | "domains";
 
@@ -16,30 +17,31 @@ export default function AppSettingsPage() {
   const searchParams = useSearchParams();
   const { selectedEnv, role } = useProjectContext();
   const envId = searchParams.get("envId") || selectedEnv?.id || "";
+  const { t } = useT();
 
   const [tab, setTab] = useState<Tab>("env");
   const canEdit = canMutate(role);
 
   const tabs: { key: Tab; label: string }[] = [
-    { key: "env", label: "Environment variables" },
-    { key: "git", label: "Git" },
-    { key: "domains", label: "Domains" },
+    { key: "env", label: t("apps.settings.tab.env") },
+    { key: "git", label: t("apps.settings.tab.git") },
+    { key: "domains", label: t("apps.settings.tab.domains") },
   ];
 
   return (
     <div>
       <Breadcrumb
         items={[
-          { label: "Projects", href: "/projects" },
-          { label: "Overview", href: `/projects/${projectId}` },
-          { label: "Applications", href: `/projects/${projectId}/apps` },
+          { label: t("common.crumb.projects"), href: "/projects" },
+          { label: t("common.crumb.overview"), href: `/projects/${projectId}` },
+          { label: t("nav.apps"), href: `/projects/${projectId}/apps` },
           { label: appName, href: `/projects/${projectId}/apps/${appName}${envId ? `?envId=${envId}` : ""}` },
-          { label: "Settings" },
+          { label: t("apps.settings.crumb") },
         ]}
       />
       <h1 className="mt-2 text-2xl font-bold text-gray-900">
         <span className="font-mono">{appName}</span>
-        <span className="ml-2 text-lg font-normal text-gray-400">/ settings</span>
+        <span className="ml-2 text-lg font-normal text-gray-400">{t("apps.settings.heading.suffix")}</span>
       </h1>
 
       {/* Tabs */}
@@ -67,22 +69,22 @@ export default function AppSettingsPage() {
 
       {tab === "git" && (
         <div className="rounded-xl border border-gray-200 bg-white px-5 py-6">
-          <h2 className="text-lg font-semibold text-gray-900">Source repository</h2>
+          <h2 className="text-lg font-semibold text-gray-900">{t("apps.settings.git.title")}</h2>
           <p className="mt-1 text-sm text-gray-500">
-            Connect a Git repository so pushes build &amp; deploy this app automatically.
+            {t("apps.settings.git.subtitle")}
           </p>
           <div className="mt-4 flex gap-3">
             <Link
               href={`/projects/${projectId}/git${envId ? `?envId=${envId}` : ""}`}
               className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
             >
-              Manage repositories
+              {t("apps.settings.git.manageRepos")}
             </Link>
             <Link
               href={`/projects/${projectId}/apps/${appName}/deployments${envId ? `?envId=${envId}` : ""}`}
               className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
             >
-              View deployments
+              {t("apps.settings.git.viewDeployments")}
             </Link>
           </div>
         </div>

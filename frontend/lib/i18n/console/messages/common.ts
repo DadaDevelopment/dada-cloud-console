@@ -1,0 +1,34 @@
+import type { ConsoleLocale } from "../locale";
+
+export type Messages = Record<string, Record<ConsoleLocale, string>>;
+
+/**
+ * Strings shared across many console screens (buttons, breadcrumbs, generic
+ * status words). Page fragments should reuse these `common.*` keys instead of
+ * redefining "Cancel"/"Create" so the wording stays consistent everywhere.
+ */
+export const common: Messages = {
+  "common.cancel": { ru: "Отмена", en: "Cancel" },
+  "common.create": { ru: "Создать", en: "Create" },
+  "common.creating": { ru: "Создание…", en: "Creating…" },
+  "common.delete": { ru: "Удалить", en: "Delete" },
+  "common.deleting": { ru: "Удаление…", en: "Deleting…" },
+  "common.remove": { ru: "Удалить", en: "Remove" },
+  "common.removing": { ru: "Удаление…", en: "Removing…" },
+  "common.add": { ru: "Добавить", en: "Add" },
+  "common.save": { ru: "Сохранить", en: "Save" },
+  "common.apply": { ru: "Применить", en: "Apply" },
+  "common.refresh": { ru: "Обновить", en: "Refresh" },
+  "common.copy": { ru: "Копировать", en: "Copy" },
+  "common.copied": { ru: "Скопировано", en: "Copied" },
+  "common.optional": { ru: "(необязательно)", en: "(optional)" },
+
+  "common.crumb.projects": { ru: "Проекты", en: "Projects" },
+  "common.crumb.overview": { ru: "Обзор", en: "Overview" },
+  "common.crumb.console": { ru: "Консоль", en: "Console" },
+
+  "common.status.name": { ru: "Название", en: "Name" },
+  "common.status.status": { ru: "Статус", en: "Status" },
+  "common.status.action": { ru: "Действие", en: "Action" },
+  "common.status.synced": { ru: "Синхронизировано {ago}", en: "Synced {ago}" },
+};

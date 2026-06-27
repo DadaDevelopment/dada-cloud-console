@@ -16,10 +16,9 @@ import { MetricsPanel } from "@/components/metrics-panel";
 import { LogsViewer } from "@/components/logs-viewer";
 import { useProjectContext } from "@/lib/project-context";
 import { canMutate } from "@/lib/rbac";
+import { useT } from "@/lib/i18n/console/context";
 
 type Tab = "overview" | "dashboard" | "metrics" | "logs" | "alerts";
-
-// ── Helpers ────────────────────────────────────────────────────────────────────
 
 function HealthBadge({ state, critical }: { state: HealthState; critical: boolean }) {
   const colors: Record<HealthState, string> = {
@@ -68,6 +67,7 @@ function ModalFooter({
   submitLabel: string;
   tone?: "blue" | "red";
 }) {
+  const { t } = useT();
   const tones = {
     blue: "bg-blue-600 hover:bg-blue-700",
     red: "bg-red-600 hover:bg-red-700",
@@ -79,7 +79,7 @@ function ModalFooter({
         onClick={onCancel}
         className="rounded-lg px-4 py-2 text-sm font-medium text-gray-600 hover:bg-gray-100 transition-colors"
       >
-        Cancel
+        {t("common.cancel")}
       </button>
       <button
         type="submit"
@@ -88,7 +88,7 @@ function ModalFooter({
       >
         {submitting ? (
           <>
-            <Spinner size="sm" /> Working...
+            <Spinner size="sm" /> {t("monitoring.detail.modal.rule.working")}
           </>
         ) : (
           submitLabel
@@ -97,17 +97,6 @@ function ModalFooter({
     </div>
   );
 }
-
-// ── Embedded Grafana dashboard tab ─────────────────────────────────────────────
-//
-// Auth strategy: we iframe the URL returned by GET .../grafana-link, which points
-// at the public Grafana base (GRAFANA_PUBLIC_URL from backend config). Full
-// embedding (allow_embedding=true, X-Frame-Options: ALLOW-FROM) must be
-// configured on the Grafana server — that is a deploy-time config concern, not a
-// frontend one. For authenticated embedding (auth-proxy with X-WEBAUTH-USER, or
-// per-org service-account signed embed), the backend grafana-link endpoint should
-// already embed auth params in the URL it returns. We display a graceful fallback
-// "Open in Grafana" link if the iframe is blocked (e.g. X-Frame-Options denies).
 
 function GrafanaDashboardTab({
   projectId,
@@ -118,12 +107,10 @@ function GrafanaDashboardTab({
   envId: string;
   appId: string;
 }) {
+  const { t } = useT();
   const [url, setUrl] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [fetchError, setFetchError] = useState<string | null>(null);
-  // iframeBlocked is set to true if the iframe fires an error event (e.g.
-  // X-Frame-Options or CSP blocks it). Note: browsers don't reliably surface
-  // these as JS errors; we rely on onError + a load-timeout heuristic.
   const [iframeBlocked, setIframeBlocked] = useState(false);
   const [iframeLoaded, setIframeLoaded] = useState(false);
   const loadTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -136,12 +123,11 @@ function GrafanaDashboardTab({
     monitoringApi
       .getGrafanaLink(projectId, envId, appId)
       .then((r) => setUrl(r.url))
-      .catch((err) => setFetchError(err instanceof Error ? err.message : "Failed to get Grafana link"))
+      .catch((err) => setFetchError(err instanceof Error ? err.message : t("monitoring.detail.grafana.error.load")))
       .finally(() => setIsLoading(false));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId, envId, appId]);
 
-  // Start a 10 s timeout once the URL is known. If iframe hasn't fired onLoad by
-  // then we assume it was blocked (frame-busted) and show the fallback link.
   useEffect(() => {
     if (!url) return;
     loadTimeoutRef.current = setTimeout(() => {
@@ -163,9 +149,9 @@ function GrafanaDashboardTab({
   if (fetchError || !url) {
     return (
       <div className="space-y-4">
-        <ErrorBox text={fetchError ?? "Grafana link unavailable"} />
+        <ErrorBox text={fetchError ?? t("monitoring.detail.grafana.unavailable")} />
         <p className="text-sm text-gray-500">
-          The Grafana dashboard may not have been provisioned yet. Check that the monitoring app has a{" "}
+          {t("monitoring.detail.grafana.notProvisioned")}{" "}
           <span className="font-mono text-gray-700">grafana_dashboard_uid</span> set.
         </p>
       </div>
@@ -174,12 +160,11 @@ function GrafanaDashboardTab({
 
   return (
     <div className="space-y-3">
-      {/* Fallback / open-in-new link always shown above the frame */}
       <div className="flex items-center justify-between">
         <p className="text-xs text-gray-400">
           {iframeBlocked
-            ? "Dashboard blocked by browser security policy — open it directly."
-            : "Live Grafana dashboard. If the panel is blank, Grafana embedding may need to be enabled on the server."}
+            ? t("monitoring.detail.grafana.blocked")
+            : t("monitoring.detail.grafana.hint")}
         </p>
         <a
           href={url}
@@ -190,7 +175,7 @@ function GrafanaDashboardTab({
           <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
           </svg>
-          Open in Grafana
+          {t("monitoring.detail.openInGrafana")}
         </a>
       </div>
 
@@ -203,9 +188,8 @@ function GrafanaDashboardTab({
           )}
           <iframe
             src={url}
-            title={`Grafana dashboard`}
+            title={t("monitoring.detail.tab.dashboard")}
             className="h-full w-full border-0"
-            // allow popups for Grafana panel links, block camera/mic
             allow="clipboard-write"
             onLoad={() => {
               setIframeLoaded(true);
@@ -219,9 +203,8 @@ function GrafanaDashboardTab({
   );
 }
 
-// ── Main page ──────────────────────────────────────────────────────────────────
-
 export default function MonitoringDetailPage() {
+  const { t } = useT();
   const params = useParams<{ projectId: string; appId: string }>();
   const search = useSearchParams();
   const { projectId, appId } = params;
@@ -241,7 +224,7 @@ export default function MonitoringDetailPage() {
   useEffect(() => {
     if (!envId) {
       // eslint-disable-next-line react-hooks/set-state-in-effect
-      setError("Missing envId");
+      setError(t("monitoring.detail.missingEnv"));
       setIsLoading(false);
       return;
     }
@@ -253,8 +236,9 @@ export default function MonitoringDetailPage() {
         setApp(d.app);
         setHealth(h);
       })
-      .catch((err) => setError(err instanceof Error ? err.message : "Failed to load monitoring app"))
+      .catch((err) => setError(err instanceof Error ? err.message : t("monitoring.detail.error.loadApp")))
       .finally(() => setIsLoading(false));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId, envId, appId]);
 
   async function openGrafana() {
@@ -263,7 +247,6 @@ export default function MonitoringDetailPage() {
       const r = await monitoringApi.getGrafanaLink(projectId, envId, appId);
       window.open(r.url, "_blank", "noopener,noreferrer");
     } catch {
-      // ignore — Dashboard tab shows error inline
     } finally {
       setIsGrafanaLoading(false);
     }
@@ -279,30 +262,29 @@ export default function MonitoringDetailPage() {
   if (error || !app) {
     return (
       <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-        {error ?? "Monitoring app not found"}
+        {error ?? t("monitoring.detail.notFound")}
       </div>
     );
   }
 
   const tabs: { key: Tab; label: string }[] = [
-    { key: "overview", label: "Overview" },
-    { key: "dashboard", label: "Dashboard" },
-    { key: "metrics", label: "Metrics" },
-    { key: "logs", label: "Logs" },
-    { key: "alerts", label: "Alerts" },
+    { key: "overview", label: t("monitoring.detail.tab.overview") },
+    { key: "dashboard", label: t("monitoring.detail.tab.dashboard") },
+    { key: "metrics", label: t("monitoring.detail.tab.metrics") },
+    { key: "logs", label: t("monitoring.detail.tab.logs") },
+    { key: "alerts", label: t("monitoring.detail.tab.alerts") },
   ];
 
   return (
     <div>
-      {/* Breadcrumb + header */}
       <div className="mb-6 flex items-start justify-between">
         <div>
           <div className="flex items-center gap-2 text-sm text-gray-500">
-            <Link href="/projects" className="hover:text-gray-700">Projects</Link>
+            <Link href="/projects" className="hover:text-gray-700">{t("common.crumb.projects")}</Link>
             <span>/</span>
-            <Link href={`/projects/${projectId}`} className="hover:text-gray-700">Overview</Link>
+            <Link href={`/projects/${projectId}`} className="hover:text-gray-700">{t("common.crumb.overview")}</Link>
             <span>/</span>
-            <Link href={`/projects/${projectId}/monitoring`} className="hover:text-gray-700">Monitoring</Link>
+            <Link href={`/projects/${projectId}/monitoring`} className="hover:text-gray-700">{t("nav.monitoring")}</Link>
             <span>/</span>
             <span className="font-mono text-gray-900">{app.name}</span>
           </div>
@@ -321,26 +303,25 @@ export default function MonitoringDetailPage() {
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
             </svg>
           )}
-          Open in Grafana
+          {t("monitoring.detail.openInGrafana")}
         </button>
       </div>
 
-      {/* Tabs */}
       <div className="mb-6 border-b border-gray-200">
         <nav className="-mb-px flex gap-6">
-          {tabs.map((t) => {
-            const active = tab === t.key;
+          {tabs.map((tabItem) => {
+            const active = tab === tabItem.key;
             return (
               <button
-                key={t.key}
-                onClick={() => setTab(t.key)}
+                key={tabItem.key}
+                onClick={() => setTab(tabItem.key)}
                 className={`border-b-2 px-1 py-3 text-sm font-medium transition-colors ${
                   active
                     ? "border-blue-600 text-blue-600"
                     : "border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700"
                 }`}
               >
-                {t.label}
+                {tabItem.label}
               </button>
             );
           })}
@@ -384,8 +365,6 @@ export default function MonitoringDetailPage() {
   );
 }
 
-// ── Overview tab ───────────────────────────────────────────────────────────────
-
 function OverviewTab({
   app,
   health,
@@ -399,20 +378,21 @@ function OverviewTab({
   envId: string;
   appId: string;
 }) {
+  const { t } = useT();
   return (
     <div className="space-y-6">
       {health && (
         <div className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
-          <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-gray-500">Health</h2>
+          <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-gray-500">{t("monitoring.detail.health.title")}</h2>
           <div className="space-y-1">
-            <Row label="State" value={health.state} />
-            <Row label="Last seen" value={health.last_seen ? new Date(health.last_seen).toLocaleString() : "—"} />
-            <Row label="Error rate (15m)" value={`${(health.error_rate_15m * 100).toFixed(2)}%`} />
-            <Row label="Firing alerts" value={String(health.firing_alerts)} />
+            <Row label={t("monitoring.detail.health.state")} value={health.state} />
+            <Row label={t("monitoring.detail.health.lastSeen")} value={health.last_seen ? new Date(health.last_seen).toLocaleString() : "—"} />
+            <Row label={t("monitoring.detail.health.errorRate")} value={`${(health.error_rate_15m * 100).toFixed(2)}%`} />
+            <Row label={t("monitoring.detail.health.firingAlerts")} value={String(health.firing_alerts)} />
           </div>
           {health.reasons.length > 0 && (
             <div className="mt-3">
-              <p className="text-xs font-medium uppercase tracking-wide text-gray-400 mb-1">Reasons</p>
+              <p className="text-xs font-medium uppercase tracking-wide text-gray-400 mb-1">{t("monitoring.detail.health.reasons")}</p>
               <ul className="space-y-1">
                 {health.reasons.map((r, i) => (
                   <li key={i} className="text-sm text-gray-700 flex items-start gap-2">
@@ -427,16 +407,15 @@ function OverviewTab({
       )}
 
       <div className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
-        <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-gray-500">Info</h2>
-        <Row label="ID" value={app.id} mono />
-        <Row label="Created" value={new Date(app.created_at).toLocaleString()} />
-        <Row label="Updated" value={new Date(app.updated_at).toLocaleString()} />
+        <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-gray-500">{t("monitoring.detail.info.title")}</h2>
+        <Row label={t("monitoring.detail.info.id")} value={app.id} mono />
+        <Row label={t("monitoring.detail.info.created")} value={new Date(app.created_at).toLocaleString()} />
+        <Row label={t("monitoring.detail.info.updated")} value={new Date(app.updated_at).toLocaleString()} />
         {app.grafana_dashboard_uid && (
-          <Row label="Grafana dashboard UID" value={app.grafana_dashboard_uid} mono />
+          <Row label={t("monitoring.detail.info.grafanaUid")} value={app.grafana_dashboard_uid} mono />
         )}
       </div>
 
-      {/* Native SVG sparkline — kept for at-a-glance health only; rich view is the Dashboard tab */}
       <MetricsPanel kind="monitoring" projectId={projectId} envId={envId} appId={appId} />
 
       <LogsViewer
@@ -446,8 +425,6 @@ function OverviewTab({
     </div>
   );
 }
-
-// ── Alerts tab (unchanged from original) ──────────────────────────────────────
 
 function AlertsTab({
   projectId,
@@ -460,6 +437,7 @@ function AlertsTab({
   appId: string;
   role: import("@/lib/types").MemberRole | undefined;
 }) {
+  const { t } = useT();
   const [rules, setRules] = useState<AlertRule[]>([]);
   const [channels, setChannels] = useState<Channel[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -501,8 +479,9 @@ function AlertsTab({
         setRules(r.rules ?? []);
         setChannels(c.channels ?? []);
       })
-      .catch((err) => setError(err instanceof Error ? err.message : "Failed to load alerts"))
+      .catch((err) => setError(err instanceof Error ? err.message : t("monitoring.detail.modal.rule.error.load")))
       .finally(() => setIsLoading(false));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId, envId, appId]);
 
   async function deleteRule(ruleId: string) {
@@ -510,7 +489,6 @@ function AlertsTab({
       await monitoringApi.deleteAlertRule(projectId, envId, appId, ruleId);
       setRules((prev) => prev.filter((r) => r.id !== ruleId));
     } catch {
-      // ignore
     }
   }
 
@@ -519,7 +497,6 @@ function AlertsTab({
       await monitoringApi.deleteChannel(projectId, envId, id);
       setChannels((prev) => prev.filter((c) => c.id !== id));
     } catch {
-      // ignore
     }
   }
 
@@ -542,7 +519,7 @@ function AlertsTab({
       setIsRuleModalOpen(false);
       setRuleForm({ name: "", metric: "cpu", metricCustom: "", condition: ">", threshold: 80, duration: "5m", channel_id: "" });
     } catch (err) {
-      setRuleError(err instanceof Error ? err.message : "Failed to create rule");
+      setRuleError(err instanceof Error ? err.message : t("monitoring.detail.modal.rule.error"));
     } finally {
       setIsRuleSubmitting(false);
     }
@@ -570,7 +547,7 @@ function AlertsTab({
       setIsChannelModalOpen(false);
       setChannelForm({ name: "", type: "telegram", bot_token: "", chat_id: "", addresses: "", url: "" });
     } catch (err) {
-      setChannelError(err instanceof Error ? err.message : "Failed to create channel");
+      setChannelError(err instanceof Error ? err.message : t("monitoring.detail.modal.channel.error"));
     } finally {
       setIsChannelSubmitting(false);
     }
@@ -590,10 +567,9 @@ function AlertsTab({
 
   return (
     <div className="space-y-8">
-      {/* Alert Rules */}
       <div>
         <div className="mb-4 flex items-center justify-between">
-          <h2 className="text-sm font-semibold uppercase tracking-wide text-gray-500">Alert Rules</h2>
+          <h2 className="text-sm font-semibold uppercase tracking-wide text-gray-500">{t("monitoring.detail.alerts.section")}</h2>
           {canWrite && (
             <button
               onClick={() => setIsRuleModalOpen(true)}
@@ -602,25 +578,25 @@ function AlertsTab({
               <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
               </svg>
-              Create Rule
+              {t("monitoring.detail.alerts.createRule")}
             </button>
           )}
         </div>
 
         {rules.length === 0 ? (
           <div className="rounded-xl border border-dashed border-gray-300 bg-gray-50 py-10 text-center">
-            <p className="text-sm text-gray-400">No alert rules configured.</p>
+            <p className="text-sm text-gray-400">{t("monitoring.detail.alerts.empty")}</p>
           </div>
         ) : (
           <div className="overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm">
             <table className="min-w-full divide-y divide-gray-200">
               <thead className="bg-gray-50">
                 <tr>
-                  <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">Name</th>
-                  <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">Metric</th>
-                  <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">Condition</th>
-                  <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">Duration</th>
-                  <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">Channel</th>
+                  <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">{t("monitoring.detail.alerts.col.name")}</th>
+                  <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">{t("monitoring.detail.alerts.col.metric")}</th>
+                  <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">{t("monitoring.detail.alerts.col.condition")}</th>
+                  <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">{t("monitoring.detail.alerts.col.duration")}</th>
+                  <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">{t("monitoring.detail.alerts.col.channel")}</th>
                   {canWrite && <th className="px-5 py-3" />}
                 </tr>
               </thead>
@@ -640,7 +616,7 @@ function AlertsTab({
                           onClick={() => deleteRule(rule.id)}
                           className="text-xs text-red-500 hover:text-red-700 transition-colors"
                         >
-                          Delete
+                          {t("monitoring.detail.alerts.deleteRule")}
                         </button>
                       </td>
                     )}
@@ -652,10 +628,9 @@ function AlertsTab({
         )}
       </div>
 
-      {/* Channels */}
       <div>
         <div className="mb-4 flex items-center justify-between">
-          <h2 className="text-sm font-semibold uppercase tracking-wide text-gray-500">Channels</h2>
+          <h2 className="text-sm font-semibold uppercase tracking-wide text-gray-500">{t("monitoring.detail.channels.section")}</h2>
           {canWrite && (
             <button
               onClick={() => setIsChannelModalOpen(true)}
@@ -664,23 +639,23 @@ function AlertsTab({
               <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
               </svg>
-              Add Channel
+              {t("monitoring.detail.channels.add")}
             </button>
           )}
         </div>
 
         {channels.length === 0 ? (
           <div className="rounded-xl border border-dashed border-gray-300 bg-gray-50 py-10 text-center">
-            <p className="text-sm text-gray-400">No notification channels configured.</p>
+            <p className="text-sm text-gray-400">{t("monitoring.detail.channels.empty")}</p>
           </div>
         ) : (
           <div className="overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm">
             <table className="min-w-full divide-y divide-gray-200">
               <thead className="bg-gray-50">
                 <tr>
-                  <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">Name</th>
-                  <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">Type</th>
-                  <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">Created</th>
+                  <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">{t("monitoring.detail.channels.col.name")}</th>
+                  <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">{t("monitoring.detail.channels.col.type")}</th>
+                  <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">{t("monitoring.detail.channels.col.created")}</th>
                   {canWrite && <th className="px-5 py-3" />}
                 </tr>
               </thead>
@@ -702,7 +677,7 @@ function AlertsTab({
                           onClick={() => deleteChannel(ch.id)}
                           className="text-xs text-red-500 hover:text-red-700 transition-colors"
                         >
-                          Delete
+                          {t("monitoring.detail.channels.delete")}
                         </button>
                       </td>
                     )}
@@ -714,18 +689,17 @@ function AlertsTab({
         )}
       </div>
 
-      {/* Create Rule Modal */}
       <Modal
         isOpen={isRuleModalOpen}
         onClose={() => {
           setIsRuleModalOpen(false);
           setRuleError(null);
         }}
-        title="Create Alert Rule"
+        title={t("monitoring.detail.modal.createRule.title")}
       >
         <form onSubmit={submitRule} className="space-y-4">
           <div>
-            <label className="block text-sm font-medium text-gray-700">Name</label>
+            <label className="block text-sm font-medium text-gray-700">{t("monitoring.detail.modal.rule.name")}</label>
             <input
               type="text"
               required
@@ -738,7 +712,7 @@ function AlertsTab({
 
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="block text-sm font-medium text-gray-700">Metric</label>
+              <label className="block text-sm font-medium text-gray-700">{t("monitoring.detail.modal.rule.metric")}</label>
               <select
                 value={ruleForm.metric}
                 onChange={(e) => setRuleForm((p) => ({ ...p, metric: e.target.value }))}
@@ -751,7 +725,7 @@ function AlertsTab({
               </select>
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700">Condition</label>
+              <label className="block text-sm font-medium text-gray-700">{t("monitoring.detail.modal.rule.condition")}</label>
               <select
                 value={ruleForm.condition}
                 onChange={(e) => setRuleForm((p) => ({ ...p, condition: e.target.value }))}
@@ -767,7 +741,7 @@ function AlertsTab({
 
           {ruleForm.metric === "custom" && (
             <div>
-              <label className="block text-sm font-medium text-gray-700">Custom metric name</label>
+              <label className="block text-sm font-medium text-gray-700">{t("monitoring.detail.modal.rule.metricCustom")}</label>
               <input
                 type="text"
                 required
@@ -781,7 +755,7 @@ function AlertsTab({
 
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="block text-sm font-medium text-gray-700">Threshold</label>
+              <label className="block text-sm font-medium text-gray-700">{t("monitoring.detail.modal.rule.threshold")}</label>
               <input
                 type="number"
                 required
@@ -791,7 +765,7 @@ function AlertsTab({
               />
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700">Duration</label>
+              <label className="block text-sm font-medium text-gray-700">{t("monitoring.detail.modal.rule.duration")}</label>
               <select
                 value={ruleForm.duration}
                 onChange={(e) => setRuleForm((p) => ({ ...p, duration: e.target.value }))}
@@ -807,14 +781,14 @@ function AlertsTab({
 
           <div>
             <label className="block text-sm font-medium text-gray-700">
-              Channel <span className="text-gray-400 font-normal">(optional)</span>
+              {t("monitoring.detail.modal.rule.channel")} <span className="text-gray-400 font-normal">{t("common.optional")}</span>
             </label>
             <select
               value={ruleForm.channel_id}
               onChange={(e) => setRuleForm((p) => ({ ...p, channel_id: e.target.value }))}
               className="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
             >
-              <option value="">— none —</option>
+              <option value="">{t("monitoring.detail.modal.rule.channelNone")}</option>
               {channels.map((ch) => (
                 <option key={ch.id} value={ch.id}>
                   {ch.name} ({ch.type})
@@ -830,23 +804,22 @@ function AlertsTab({
               setRuleError(null);
             }}
             submitting={isRuleSubmitting}
-            submitLabel="Create Rule"
+            submitLabel={t("monitoring.detail.modal.rule.submitLabel")}
           />
         </form>
       </Modal>
 
-      {/* Add Channel Modal */}
       <Modal
         isOpen={isChannelModalOpen}
         onClose={() => {
           setIsChannelModalOpen(false);
           setChannelError(null);
         }}
-        title="Add Channel"
+        title={t("monitoring.detail.modal.addChannel.title")}
       >
         <form onSubmit={submitChannel} className="space-y-4">
           <div>
-            <label className="block text-sm font-medium text-gray-700">Name</label>
+            <label className="block text-sm font-medium text-gray-700">{t("monitoring.detail.modal.channel.name")}</label>
             <input
               type="text"
               required
@@ -858,7 +831,7 @@ function AlertsTab({
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700">Type</label>
+            <label className="block text-sm font-medium text-gray-700">{t("monitoring.detail.modal.channel.type")}</label>
             <select
               value={channelForm.type}
               onChange={(e) =>
@@ -878,7 +851,7 @@ function AlertsTab({
           {channelForm.type === "telegram" && (
             <>
               <div>
-                <label className="block text-sm font-medium text-gray-700">Bot Token</label>
+                <label className="block text-sm font-medium text-gray-700">{t("monitoring.detail.modal.channel.botToken")}</label>
                 <input
                   type="text"
                   required
@@ -889,7 +862,7 @@ function AlertsTab({
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700">Chat ID</label>
+                <label className="block text-sm font-medium text-gray-700">{t("monitoring.detail.modal.channel.chatId")}</label>
                 <input
                   type="text"
                   required
@@ -905,7 +878,7 @@ function AlertsTab({
           {channelForm.type === "email" && (
             <div>
               <label className="block text-sm font-medium text-gray-700">
-                Email addresses <span className="text-gray-400 font-normal">(comma-separated)</span>
+                {t("monitoring.detail.modal.channel.emailAddresses")} <span className="text-gray-400 font-normal">{t("monitoring.detail.modal.channel.emailHint")}</span>
               </label>
               <input
                 type="text"
@@ -920,7 +893,7 @@ function AlertsTab({
 
           {channelForm.type === "webhook" && (
             <div>
-              <label className="block text-sm font-medium text-gray-700">Webhook URL</label>
+              <label className="block text-sm font-medium text-gray-700">{t("monitoring.detail.modal.channel.webhookUrl")}</label>
               <input
                 type="url"
                 required
@@ -939,7 +912,7 @@ function AlertsTab({
               setChannelError(null);
             }}
             submitting={isChannelSubmitting}
-            submitLabel="Add Channel"
+            submitLabel={t("monitoring.detail.modal.channel.submitLabel")}
           />
         </form>
       </Modal>

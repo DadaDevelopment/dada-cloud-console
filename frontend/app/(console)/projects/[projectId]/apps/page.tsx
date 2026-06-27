@@ -13,6 +13,7 @@ import { timeAgo } from "@/lib/format";
 import { PhaseBadge } from "@/components/ui/phase-badge";
 import { AppSparkline } from "@/components/app-sparkline";
 import { EmptyState } from "@/components/ui/empty-state";
+import { useT } from "@/lib/i18n/console/context";
 
 interface CreateAppForm {
   name: string;
@@ -26,6 +27,7 @@ export default function AppsPage() {
   const params = useParams<{ projectId: string }>();
   const projectId = params.projectId;
   const router = useRouter();
+  const { t } = useT();
 
   const { project, selectedEnv, role, loading: isLoadingEnvs } = useProjectContext();
   const selectedEnvId = selectedEnv?.id ?? "";
@@ -44,21 +46,19 @@ export default function AppsPage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
 
-  // Load apps when the selected environment (from shared context) changes.
   useEffect(() => {
-    /* eslint-disable react-hooks/set-state-in-effect */
     if (!selectedEnvId) {
       if (!isLoadingEnvs) setIsLoadingApps(false);
       return;
     }
     setIsLoadingApps(true);
     setError(null);
-    /* eslint-enable react-hooks/set-state-in-effect */
     appsApi
       .list(projectId, selectedEnvId)
       .then((data) => setApps(data.apps ?? []))
-      .catch((err) => setError(err instanceof Error ? err.message : "Failed to load applications"))
+      .catch((err) => setError(err instanceof Error ? err.message : t("apps.error.load")))
       .finally(() => setIsLoadingApps(false));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId, selectedEnvId, isLoadingEnvs]);
 
   function handleFormChange(field: keyof CreateAppForm, value: string | number) {
@@ -79,12 +79,10 @@ export default function AppsPage() {
       });
       setIsModalOpen(false);
       setForm({ name: "", image: "", port: 8080, replicas: 2, profile: "small" });
-      // Redirect immediately to the live-updating, highlighted operation
-      // rather than blocking on a blind timeout that feels like nothing happened.
       const opId = result.operation?.id;
       router.push(`/projects/${projectId}/operations${opId ? `?highlight=${opId}` : ""}`);
     } catch (err) {
-      setSubmitError(err instanceof Error ? err.message : "Failed to create application");
+      setSubmitError(err instanceof Error ? err.message : t("apps.error.create"));
     } finally {
       setIsSubmitting(false);
     }
@@ -103,22 +101,20 @@ export default function AppsPage() {
 
   return (
     <div>
-      {/* Header */}
       <div className="mb-8 flex items-start justify-between">
         <div>
           <Breadcrumb
             items={[
-              { label: "Projects", href: "/projects" },
-              { label: project?.display_name ?? "Overview", href: `/projects/${projectId}` },
-              { label: "Applications" },
+              { label: t("common.crumb.projects"), href: "/projects" },
+              { label: project?.display_name ?? t("common.crumb.overview"), href: `/projects/${projectId}` },
+              { label: t("nav.apps") },
             ]}
           />
-          <h1 className="mt-2 text-2xl font-bold text-gray-900">Applications</h1>
-          <p className="mt-0.5 text-sm text-gray-500">Managed application workloads</p>
+          <h1 className="mt-2 text-2xl font-bold text-gray-900">{t("apps.title")}</h1>
+          <p className="mt-0.5 text-sm text-gray-500">{t("apps.subtitle")}</p>
         </div>
         {canCreate && (
         <div className="flex items-center gap-2">
-          {/* Primary path: repo → build → app. Git deploys target Helm (k8s) envs. */}
           <Link
             href={`/projects/${projectId}/git/import${selectedEnvId ? `?envId=${selectedEnvId}` : ""}`}
             aria-disabled={!selectedEnvId || isVMEnvironment}
@@ -131,15 +127,14 @@ export default function AppsPage() {
             <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.568 3H5.25A2.25 2.25 0 003 5.25v4.318c0 .597.237 1.17.659 1.591l9.581 9.581c.699.699 1.78.872 2.607.33a18.095 18.095 0 005.223-5.223c.542-.827.369-1.908-.33-2.607L11.16 3.66A2.25 2.25 0 009.568 3z" />
             </svg>
-            Deploy from Git
+            {t("apps.deployFromGit")}
           </Link>
-          {/* Secondary path: deploy a prebuilt image directly. */}
           <button
             onClick={() => setIsModalOpen(true)}
             disabled={!selectedEnvId || isVMEnvironment}
             className="inline-flex items-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 transition-colors"
           >
-            Deploy image
+            {t("apps.deployImage")}
           </button>
         </div>
         )}
@@ -153,14 +148,13 @@ export default function AppsPage() {
 
       {isVMEnvironment && (
         <div className="mb-6 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-          This environment runs on the VM track. AppServer lifecycle is available now; VM app deployment is intentionally blocked until the Portainer stack worker is wired.
+          {t("apps.vmWarning")}
           <Link href={`/projects/${projectId}/app-servers`} className="ml-1 font-medium underline">
-            Manage AppServers
+            {t("apps.vmWarning.manageAppServers")}
           </Link>
         </div>
       )}
 
-      {/* Apps list */}
       {isLoadingApps ? (
         <div className="flex h-40 items-center justify-center">
           <Spinner />
@@ -168,15 +162,15 @@ export default function AppsPage() {
       ) : apps.length === 0 ? (
         isVMEnvironment ? (
           <EmptyState
-            title="Пока нет приложений"
-            description="VM-окружение не поддерживает деплой приложений через этот интерфейс. Используйте AppServers."
+            title={t("apps.empty.title")}
+            description={t("apps.empty.vm.description")}
           />
         ) : (
           <EmptyState
-            title="Пока нет приложений"
-            description="Задеплойте бэкенд из GitHub — подключите репозиторий, и платформа сама соберёт и запустит образ."
+            title={t("apps.empty.title")}
+            description={t("apps.empty.k8s.description")}
             action={{
-              label: "Деплой из Git",
+              label: t("apps.empty.k8s.action"),
               href: `/projects/${projectId}/git/import${selectedEnvId ? `?envId=${selectedEnvId}` : ""}`,
             }}
           />
@@ -201,10 +195,10 @@ export default function AppsPage() {
                 <div className="flex items-center gap-3 text-xs text-gray-400">
                   <span>{summary.profile ?? "small"}</span>
                   <span>·</span>
-                  <span>{summary.replicas ?? 2} replicas</span>
+                  <span>{t("apps.card.replicas", { count: String(summary.replicas ?? 2) })}</span>
                 </div>
                 <p className="mt-2 text-xs text-gray-400">
-                  Synced {timeAgo(app.last_synced_at)}
+                  {t("apps.card.synced", { ago: timeAgo(app.last_synced_at) })}
                 </p>
                 <AppSparkline projectId={projectId} envId={selectedEnvId} appName={app.name} />
               </Link>
@@ -213,19 +207,18 @@ export default function AppsPage() {
         </div>
       )}
 
-      {/* Create App Modal */}
       <Modal
         isOpen={isModalOpen}
         onClose={() => {
           setIsModalOpen(false);
           setSubmitError(null);
         }}
-        title="Create Application"
+        title={t("apps.modal.create.title")}
       >
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
             <label className="block text-sm font-medium text-gray-700">
-              Name <span className="text-gray-400 font-normal">(Kubernetes resource name)</span>
+              {t("apps.modal.create.name.label")}
             </label>
             <input
               type="text"
@@ -234,13 +227,13 @@ export default function AppsPage() {
               onChange={(e) => handleFormChange("name", e.target.value)}
               placeholder="my-service"
               pattern="[a-z0-9-]+"
-              title="Lowercase letters, numbers, and hyphens only"
+              title={t("apps.modal.create.name.title")}
               className="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
             />
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700">Image</label>
+            <label className="block text-sm font-medium text-gray-700">{t("apps.modal.create.image.label")}</label>
             <input
               type="text"
               required
@@ -253,7 +246,7 @@ export default function AppsPage() {
 
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="block text-sm font-medium text-gray-700">Port</label>
+              <label className="block text-sm font-medium text-gray-700">{t("apps.modal.create.port.label")}</label>
               <input
                 type="number"
                 required
@@ -265,7 +258,7 @@ export default function AppsPage() {
               />
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700">Replicas</label>
+              <label className="block text-sm font-medium text-gray-700">{t("apps.modal.create.replicas.label")}</label>
               <input
                 type="number"
                 required
@@ -279,7 +272,7 @@ export default function AppsPage() {
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700">Profile</label>
+            <label className="block text-sm font-medium text-gray-700">{t("apps.modal.create.profile.label")}</label>
             <select
               value={form.profile}
               onChange={(e) => handleFormChange("profile", e.target.value)}
@@ -306,7 +299,7 @@ export default function AppsPage() {
               }}
               className="rounded-lg px-4 py-2 text-sm font-medium text-gray-600 hover:bg-gray-100 transition-colors"
             >
-              Cancel
+              {t("common.cancel")}
             </button>
             <button
               type="submit"
@@ -316,10 +309,10 @@ export default function AppsPage() {
               {isSubmitting ? (
                 <>
                   <Spinner size="sm" />
-                  Creating...
+                  {t("apps.modal.create.submitting")}
                 </>
               ) : (
-                "Create App"
+                t("apps.modal.create.submit")
               )}
             </button>
           </div>

@@ -4,7 +4,8 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { useAuth } from "@/lib/auth";
 import { useProjectContext } from "@/lib/project-context";
-import { canApprove, roleLabels, roleColors } from "@/lib/rbac";
+import { canApprove, roleColors } from "@/lib/rbac";
+import { useT } from "@/lib/i18n/console/context";
 
 /**
  * Top-right account menu. Consolidates identity, the project role badge, global
@@ -13,6 +14,7 @@ import { canApprove, roleLabels, roleColors } from "@/lib/rbac";
  */
 export function AccountMenu() {
   const router = useRouter();
+  const { t } = useT();
   const { user, logout } = useAuth();
   const { role, projects } = useProjectContext();
   // Role is project-scoped; outside a project fall back to "admin anywhere"
@@ -37,7 +39,7 @@ export function AccountMenu() {
     };
   }, [open]);
 
-  const name = user?.display_name || user?.username || "Account";
+  const name = user?.display_name || user?.username || t("shell.account.fallbackName");
   const initial = name.charAt(0).toUpperCase();
 
   function handleLogout() {
@@ -52,7 +54,7 @@ export function AccountMenu() {
         onClick={() => setOpen((o) => !o)}
         aria-haspopup="menu"
         aria-expanded={open}
-        aria-label="Account menu"
+        aria-label={t("shell.account.label")}
         className="flex h-9 w-9 items-center justify-center rounded-full bg-blue-600 text-sm font-semibold text-white transition-colors hover:bg-blue-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-900"
       >
         {initial}
@@ -65,7 +67,7 @@ export function AccountMenu() {
             {user?.email && <p className="truncate text-xs text-gray-400">{user.email}</p>}
             {role && (
               <span className={`mt-2 inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${roleColors[role]}`}>
-                {roleLabels[role]}
+                {t(`roles.${role}`)}
               </span>
             )}
           </div>
@@ -75,7 +77,7 @@ export function AccountMenu() {
             </Link>
             {showApprovals && (
               <Link role="menuitem" href="/admin/approvals" onClick={() => setOpen(false)} className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">
-                Approvals
+                {t("shell.account.approvals")}
               </Link>
             )}
           </div>
@@ -85,7 +87,7 @@ export function AccountMenu() {
               onClick={handleLogout}
               className="block w-full px-4 py-2 text-left text-sm text-red-600 hover:bg-red-50"
             >
-              Sign out
+              {t("shell.account.signOut")}
             </button>
           </div>
         </div>

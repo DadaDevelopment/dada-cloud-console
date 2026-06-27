@@ -19,6 +19,7 @@ import { useProjectContext } from "@/lib/project-context";
 import { canMutate } from "@/lib/rbac";
 import { timeAgo } from "@/lib/format";
 import { PhaseBadge } from "@/components/ui/phase-badge";
+import { useT } from "@/lib/i18n/console/context";
 
 const MODEL_TYPES: AIModelType[] = [
   "sklearn", "xgboost", "lightgbm",
@@ -66,6 +67,7 @@ export default function ModelsPage() {
   const projectId = params.projectId;
   const router = useRouter();
   const search = useSearchParams();
+  const { t } = useT();
 
   const { project, selectedEnv, role, loading: isLoadingEnvs } = useProjectContext();
   const selectedEnvId = selectedEnv?.id ?? "";
@@ -109,8 +111,9 @@ export default function ModelsPage() {
     aiModelsApi
       .list(projectId, selectedEnvId)
       .then((data) => setModels(data.models ?? []))
-      .catch((err) => setError(err instanceof Error ? err.message : "Failed to load models"))
+      .catch((err) => setError(err instanceof Error ? err.message : t("models.error.load")))
       .finally(() => setIsLoadingModels(false));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId, selectedEnvId, isLoadingEnvs]);
 
   function update<K extends keyof CreateForm>(k: K, v: CreateForm[K]) {
@@ -147,7 +150,7 @@ export default function ModelsPage() {
       const opId = result.operation?.id;
       router.push(`/projects/${projectId}/operations${opId ? `?highlight=${opId}` : ""}`);
     } catch (err) {
-      setSubmitError(err instanceof Error ? err.message : "Failed to create model");
+      setSubmitError(err instanceof Error ? err.message : t("models.error.create"));
     } finally {
       setIsSubmitting(false);
     }
@@ -167,13 +170,13 @@ export default function ModelsPage() {
         <div>
           <Breadcrumb
             items={[
-              { label: "Projects", href: "/projects" },
-              { label: project?.display_name ?? "Overview", href: `/projects/${projectId}` },
-              { label: "AI Models" },
+              { label: t("common.crumb.projects"), href: "/projects" },
+              { label: project?.display_name ?? t("common.crumb.overview"), href: `/projects/${projectId}` },
+              { label: t("nav.models") },
             ]}
           />
-          <h1 className="mt-2 text-2xl font-bold text-gray-900">AI Models</h1>
-          <p className="mt-0.5 text-sm text-gray-500">KServe-backed inference services</p>
+          <h1 className="mt-2 text-2xl font-bold text-gray-900">{t("models.title")}</h1>
+          <p className="mt-0.5 text-sm text-gray-500">{t("models.subtitle")}</p>
         </div>
         {canDeploy && (
         <button
@@ -184,17 +187,17 @@ export default function ModelsPage() {
           <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
           </svg>
-          Deploy Model
+          {t("models.deploy")}
         </button>
         )}
       </div>
 
       {quotas && (
         <div className="mb-6 grid gap-3 sm:grid-cols-3">
-          <QuotaCard label="CPU models" used={quotas.cpu_models_in_use} max={quotas.quotas.cpu_model_max} />
-          <QuotaCard label="GPU models" used={quotas.gpu_models_in_use} max={quotas.quotas.gpu_model_max} />
+          <QuotaCard label={t("models.quota.cpuModels")} used={quotas.cpu_models_in_use} max={quotas.quotas.cpu_model_max} />
+          <QuotaCard label={t("models.quota.gpuModels")} used={quotas.gpu_models_in_use} max={quotas.quotas.gpu_model_max} />
           <QuotaCard
-            label="Inference calls / month"
+            label={t("models.quota.inferenceCalls")}
             used={quotas.inference_calls_month}
             max={quotas.quotas.monthly_inference_calls}
             advisory
@@ -215,12 +218,12 @@ export default function ModelsPage() {
           <svg className="mb-3 h-12 w-12 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
           </svg>
-          <p className="text-sm font-medium text-gray-500">No models in {selectedEnv?.name ?? "this environment"}</p>
+          <p className="text-sm font-medium text-gray-500">{t("models.empty.title", { env: selectedEnv?.name ?? "" })}</p>
           <button
             onClick={() => setIsModalOpen(true)}
             className="mt-4 text-sm text-blue-600 hover:text-blue-700"
           >
-            Deploy your first model →
+            {t("models.empty.deploy")}
           </button>
         </div>
       ) : (
@@ -249,7 +252,7 @@ export default function ModelsPage() {
                     <Pill color="gray">canary {s.canary_percent}%</Pill>
                   )}
                 </div>
-                <p className="mt-3 text-xs text-gray-400">Synced {timeAgo(m.last_synced_at)}</p>
+                <p className="mt-3 text-xs text-gray-400">{t("models.card.synced", { ago: timeAgo(m.last_synced_at) })}</p>
               </Link>
             );
           })}
@@ -259,12 +262,12 @@ export default function ModelsPage() {
       <Modal
         isOpen={isModalOpen}
         onClose={() => { setIsModalOpen(false); setSubmitError(null); }}
-        title="Deploy AI Model"
+        title={t("models.modal.title")}
       >
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
             <label className="block text-sm font-medium text-gray-700">
-              Name <span className="font-normal text-gray-400">(k8s resource name)</span>
+              {t("models.form.name.label")}
             </label>
             <input
               type="text" required value={form.name}
@@ -276,7 +279,7 @@ export default function ModelsPage() {
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700">Model type</label>
+            <label className="block text-sm font-medium text-gray-700">{t("models.form.modelType.label")}</label>
             <select
               value={form.model_type}
               onChange={(e) => update("model_type", e.target.value as AIModelType)}
@@ -287,35 +290,35 @@ export default function ModelsPage() {
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700">Source</label>
+            <label className="block text-sm font-medium text-gray-700">{t("models.form.source.label")}</label>
             <select
               value={form.source}
               onChange={(e) => update("source", e.target.value as AIModelSource)}
               className="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
             >
-              <option value="s3">S3 artifact URI</option>
-              <option value="mlflow">MLflow registered model</option>
-              <option value="custom">Custom container image</option>
+              <option value="s3">{t("models.form.source.s3")}</option>
+              <option value="mlflow">{t("models.form.source.mlflow")}</option>
+              <option value="custom">{t("models.form.source.custom")}</option>
             </select>
           </div>
 
           {form.source === "s3" && (
             <div>
-              <label className="block text-sm font-medium text-gray-700">Artifact URI</label>
+              <label className="block text-sm font-medium text-gray-700">{t("models.form.artifactUri.label")}</label>
               <input
                 type="text" required value={form.artifact_uri}
                 onChange={(e) => update("artifact_uri", e.target.value)}
                 placeholder="s3://platform-models/<project>/iris/v1"
                 className="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm font-mono text-gray-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
               />
-              <p className="mt-1 text-xs text-gray-400">Must start with this project&apos;s storage prefix.</p>
+              <p className="mt-1 text-xs text-gray-400">{t("models.form.artifactUri.help")}</p>
             </div>
           )}
 
           {form.source === "mlflow" && (
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="block text-sm font-medium text-gray-700">Registered name</label>
+                <label className="block text-sm font-medium text-gray-700">{t("models.form.mlflowName.label")}</label>
                 <input
                   type="text" required value={form.mlflow_name}
                   onChange={(e) => update("mlflow_name", e.target.value)}
@@ -324,7 +327,7 @@ export default function ModelsPage() {
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700">Version</label>
+                <label className="block text-sm font-medium text-gray-700">{t("models.form.mlflowVersion.label")}</label>
                 <input
                   type="text" required value={form.mlflow_version}
                   onChange={(e) => update("mlflow_version", e.target.value)}
@@ -337,7 +340,7 @@ export default function ModelsPage() {
 
           {form.source === "custom" && (
             <div>
-              <label className="block text-sm font-medium text-gray-700">Container image</label>
+              <label className="block text-sm font-medium text-gray-700">{t("models.form.containerImage.label")}</label>
               <input
                 type="text" required value={form.container_image}
                 onChange={(e) => update("container_image", e.target.value)}
@@ -348,7 +351,7 @@ export default function ModelsPage() {
           )}
 
           <div>
-            <label className="block text-sm font-medium text-gray-700">Compute profile</label>
+            <label className="block text-sm font-medium text-gray-700">{t("models.form.profile.label")}</label>
             <select
               value={form.profile}
               onChange={(e) => update("profile", e.target.value)}
@@ -358,28 +361,28 @@ export default function ModelsPage() {
             </select>
             {gpuRequiresApproval && (
               <p className="mt-1 text-xs text-amber-700">
-                ⓘ GPU profile requires admin approval — this op will be parked in <span className="font-mono">WaitingForApproval</span>.
+                {t("models.form.profile.gpuApproval")}
               </p>
             )}
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700">Auth mode</label>
+            <label className="block text-sm font-medium text-gray-700">{t("models.form.authMode.label")}</label>
             <select
               value={form.auth_mode}
               onChange={(e) => update("auth_mode", e.target.value as AIModelAuthMode)}
               className="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
             >
-              <option value="apikey">api-key (default)</option>
-              <option value="jwt">platform-jwt</option>
-              <option value="public">public (admin only)</option>
+              <option value="apikey">{t("models.form.authMode.apikey")}</option>
+              <option value="jwt">{t("models.form.authMode.jwt")}</option>
+              <option value="public">{t("models.form.authMode.public")}</option>
             </select>
           </div>
 
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="block text-sm font-medium text-gray-700">
-                Attached app <span className="font-normal text-gray-400">(optional)</span>
+                {t("models.form.attachedApp.label")} <span className="font-normal text-gray-400">{t("common.optional")}</span>
               </label>
               <input
                 type="text" value={form.attached_app_name}
@@ -390,7 +393,7 @@ export default function ModelsPage() {
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700">
-                Version label <span className="font-normal text-gray-400">(optional)</span>
+                {t("models.form.versionLabel.label")} <span className="font-normal text-gray-400">{t("common.optional")}</span>
               </label>
               <input
                 type="text" value={form.version}
@@ -413,13 +416,13 @@ export default function ModelsPage() {
               onClick={() => { setIsModalOpen(false); setSubmitError(null); }}
               className="rounded-lg px-4 py-2 text-sm font-medium text-gray-600 hover:bg-gray-100 transition-colors"
             >
-              Cancel
+              {t("common.cancel")}
             </button>
             <button
               type="submit" disabled={isSubmitting}
               className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50 transition-colors"
             >
-              {isSubmitting ? <><Spinner size="sm" /> Deploying...</> : "Deploy"}
+              {isSubmitting ? <><Spinner size="sm" /> {t("models.form.deploying")}</> : t("models.form.deploy")}
             </button>
           </div>
         </form>
@@ -431,6 +434,7 @@ export default function ModelsPage() {
 function QuotaCard({
   label, used, max, advisory,
 }: { label: string; used: number; max: number; advisory?: boolean }) {
+  const { t } = useT();
   const pct = max > 0 ? Math.min(100, (used / max) * 100) : 0;
   const over = max > 0 && used > max;
   const barColor = over ? "bg-red-500" : pct > 80 ? "bg-amber-500" : "bg-blue-500";
@@ -439,7 +443,7 @@ function QuotaCard({
       <div className="flex items-center justify-between">
         <p className="text-xs font-semibold uppercase tracking-wide text-gray-400">
           {label}
-          {advisory && <span className="ml-1 normal-case text-amber-600">(advisory)</span>}
+          {advisory && <span className="ml-1 normal-case text-amber-600">{t("models.quota.advisory")}</span>}
         </p>
         <p className="text-sm font-semibold text-gray-900 font-mono">
           {used.toLocaleString()} / {max.toLocaleString()}

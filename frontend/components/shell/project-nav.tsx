@@ -3,6 +3,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useProjectContext } from "@/lib/project-context";
 import { visibleNavItems, projectHref, type ResourceNavItem } from "@/lib/resources";
+import { useT } from "@/lib/i18n/console/context";
 import { ResourceIcon } from "./icons";
 
 function isActive(pathname: string, projectId: string, item: ResourceNavItem): boolean {
@@ -22,6 +23,7 @@ function isActive(pathname: string, projectId: string, item: ResourceNavItem): b
  */
 export function ProjectNav() {
   const pathname = usePathname();
+  const { t } = useT();
   const { projectId, role } = useProjectContext();
   if (!projectId) return null;
 
@@ -40,13 +42,13 @@ export function ProjectNav() {
       return (
         <div
           key={item.key}
-          title="Coming soon"
+          title={t("shell.nav.comingSoon")}
           aria-disabled="true"
           className="flex cursor-default items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium text-slate-500"
         >
           <ResourceIcon name={item.icon} className="h-4 w-4 shrink-0" />
-          <span className="flex-1">{item.label}</span>
-          <span className="rounded bg-slate-800 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-slate-400">Soon</span>
+          <span className="flex-1">{t(`nav.${item.key}`)}</span>
+          <span className="rounded bg-slate-800 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-slate-400">{t("shell.nav.soon")}</span>
         </div>
       );
     }
@@ -54,7 +56,7 @@ export function ProjectNav() {
     return (
       <Link key={item.key} href={projectHref(projectId!, item)} className={cls} aria-current={active ? "page" : undefined}>
         <ResourceIcon name={item.icon} className="h-4 w-4 shrink-0" />
-        {item.label}
+        {t(`nav.${item.key}`)}
       </Link>
     );
   }
@@ -64,13 +66,13 @@ export function ProjectNav() {
       {resources.map(renderItem)}
       {infra.length > 0 && (
         <>
-          <div className="px-3 pb-1 pt-4 text-[10px] font-semibold uppercase tracking-wider text-slate-500">Advanced</div>
+          <div className="px-3 pb-1 pt-4 text-[10px] font-semibold uppercase tracking-wider text-slate-500">{t("shell.nav.advanced")}</div>
           {infra.map(renderItem)}
         </>
       )}
       {admin.length > 0 && (
         <>
-          <div className="px-3 pb-1 pt-4 text-[10px] font-semibold uppercase tracking-wider text-slate-500">Admin</div>
+          <div className="px-3 pb-1 pt-4 text-[10px] font-semibold uppercase tracking-wider text-slate-500">{t("shell.nav.admin")}</div>
           {admin.map(renderItem)}
         </>
       )}

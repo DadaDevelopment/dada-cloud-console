@@ -11,6 +11,7 @@ import { canMutate } from "@/lib/rbac";
 import { timeAgo } from "@/lib/format";
 import { PhaseBadge } from "@/components/ui/phase-badge";
 import { EmptyState } from "@/components/ui/empty-state";
+import { useT } from "@/lib/i18n/console/context";
 
 interface CreateBucketForm {
   name: string;
@@ -36,6 +37,7 @@ export default function StoragePage() {
   const params = useParams<{ projectId: string }>();
   const projectId = params.projectId;
   const router = useRouter();
+  const { t } = useT();
 
   const { project, selectedEnv, role, loading: isLoadingEnvs } = useProjectContext();
   const selectedEnvId = selectedEnv?.id ?? "";
@@ -60,8 +62,9 @@ export default function StoragePage() {
     s3bucketsApi
       .list(projectId, selectedEnvId)
       .then((data) => setBuckets(data.buckets ?? []))
-      .catch((err) => setError(err instanceof Error ? err.message : "Failed to load buckets"))
+      .catch((err) => setError(err instanceof Error ? err.message : t("storage.error.load")))
       .finally(() => setIsLoadingBuckets(false));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId, selectedEnvId, isLoadingEnvs]);
 
   function handleFormChange(field: keyof CreateBucketForm, value: string | boolean) {
@@ -87,7 +90,7 @@ export default function StoragePage() {
       const opId = result.operation?.id;
       router.push(`/projects/${projectId}/operations${opId ? `?highlight=${opId}` : ""}`);
     } catch (err) {
-      setSubmitError(err instanceof Error ? err.message : "Failed to create bucket");
+      setSubmitError(err instanceof Error ? err.message : t("storage.error.create"));
     } finally {
       setIsSubmitting(false);
     }
@@ -109,13 +112,13 @@ export default function StoragePage() {
         <div>
           <Breadcrumb
             items={[
-              { label: "Projects", href: "/projects" },
-              { label: project?.display_name ?? "Overview", href: `/projects/${projectId}` },
-              { label: "Object Storage" },
+              { label: t("common.crumb.projects"), href: "/projects" },
+              { label: project?.display_name ?? t("common.crumb.overview"), href: `/projects/${projectId}` },
+              { label: t("nav.storage") },
             ]}
           />
-          <h1 className="mt-2 text-2xl font-bold text-gray-900">Object Storage</h1>
-          <p className="mt-0.5 text-sm text-gray-500">Beget S3-compatible storage buckets</p>
+          <h1 className="mt-2 text-2xl font-bold text-gray-900">{t("storage.title")}</h1>
+          <p className="mt-0.5 text-sm text-gray-500">{t("storage.subtitle")}</p>
         </div>
         {canCreate && (
           <button
@@ -126,7 +129,7 @@ export default function StoragePage() {
             <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
             </svg>
-            Create Bucket
+            {t("storage.createBucket")}
           </button>
         )}
       </div>
@@ -144,8 +147,8 @@ export default function StoragePage() {
       ) : buckets.length === 0 ? (
         <div className="space-y-4">
           <EmptyState
-            title="Пока нет бакетов"
-            description="Создайте S3-совместимый бакет для хранения файлов, медиа и статики — доступ через S3 API, FTP и SFTP."
+            title={t("storage.empty.title")}
+            description={t("storage.empty.description")}
           />
           {canCreate && (
             <div className="flex justify-center">
@@ -154,7 +157,7 @@ export default function StoragePage() {
                 disabled={!selectedEnvId}
                 className="text-sm font-medium text-blue-600 hover:text-blue-700 disabled:opacity-50"
               >
-                Создать первый бакет →
+                {t("storage.empty.cta")}
               </button>
             </div>
           )}
@@ -180,14 +183,18 @@ export default function StoragePage() {
                 <div className="flex flex-wrap gap-1.5">
                   {Boolean(summary.public) && (
                     <span className="inline-flex items-center rounded-full bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-700 ring-1 ring-amber-600/20">
-                      Public
+                      {t("storage.badge.public")}
                     </span>
                   )}
                   <span className="inline-flex items-center rounded-full bg-slate-50 px-2 py-0.5 text-xs font-medium text-slate-600 ring-1 ring-slate-500/20">
-                    {summary.app_ref ? `app: ${String(summary.app_ref)}` : "environment-level"}
+                    {summary.app_ref
+                      ? t("storage.badge.appRef", { name: String(summary.app_ref) })
+                      : t("storage.badge.envLevel")}
                   </span>
                 </div>
-                <p className="mt-2 text-xs text-gray-400">Synced {timeAgo(b.last_synced_at)}</p>
+                <p className="mt-2 text-xs text-gray-400">
+                  {t("common.status.synced", { ago: timeAgo(b.last_synced_at) })}
+                </p>
               </div>
             );
           })}
@@ -197,12 +204,12 @@ export default function StoragePage() {
       <Modal
         isOpen={isModalOpen}
         onClose={() => { setIsModalOpen(false); setSubmitError(null); }}
-        title="Create S3 Bucket"
+        title={t("storage.modal.title")}
       >
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
             <label className="block text-sm font-medium text-gray-700">
-              Resource Name <span className="text-gray-400 font-normal">(Kubernetes name)</span>
+              {t("storage.modal.resourceName")} <span className="text-gray-400 font-normal">{t("storage.modal.resourceNameSub")}</span>
             </label>
             <input
               type="text"
@@ -211,13 +218,13 @@ export default function StoragePage() {
               onChange={(e) => handleFormChange("name", e.target.value)}
               placeholder="my-bucket"
               pattern="[a-z0-9-]+"
-              title="Lowercase letters, numbers, and hyphens only"
+              title={t("storage.modal.resourceNameTitle")}
               className="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
             />
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700">Bucket Name</label>
+            <label className="block text-sm font-medium text-gray-700">{t("storage.modal.bucketName")}</label>
             <input
               type="text"
               required
@@ -230,7 +237,7 @@ export default function StoragePage() {
 
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="block text-sm font-medium text-gray-700">Region</label>
+              <label className="block text-sm font-medium text-gray-700">{t("storage.modal.region")}</label>
               <select
                 value={form.region}
                 onChange={(e) => handleFormChange("region", e.target.value)}
@@ -240,12 +247,12 @@ export default function StoragePage() {
               </select>
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700">Description</label>
+              <label className="block text-sm font-medium text-gray-700">{t("storage.modal.description")}</label>
               <input
                 type="text"
                 value={form.description}
                 onChange={(e) => handleFormChange("description", e.target.value)}
-                placeholder="Optional"
+                placeholder={t("storage.modal.descriptionPlaceholder")}
                 className="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
               />
             </div>
@@ -253,7 +260,7 @@ export default function StoragePage() {
 
           <div>
             <label className="block text-sm font-medium text-gray-700">
-              App Reference <span className="text-gray-400 font-normal">(optional — leave empty for an environment-level bucket)</span>
+              {t("storage.modal.appRef")} <span className="text-gray-400 font-normal">{t("storage.modal.appRefSub")}</span>
             </label>
             <input
               type="text"
@@ -261,24 +268,24 @@ export default function StoragePage() {
               onChange={(e) => handleFormChange("app_ref", e.target.value)}
               placeholder="my-app"
               pattern="[a-z0-9-]*"
-              title="Lowercase letters, numbers, and hyphens only"
+              title={t("storage.modal.appRefTitle")}
               className="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
             />
             <p className="mt-1 text-xs text-gray-400">
-              Bind the bucket to an app&apos;s chart so it&apos;s reconciled and torn down with that app.
+              {t("storage.modal.appRefHelp")}
             </p>
           </div>
 
           <div className="space-y-2">
             <Toggle
-              label="Public Access"
-              description="Objects reachable via unsigned URLs"
+              label={t("storage.toggle.public.label")}
+              description={t("storage.toggle.public.description")}
               checked={form.public}
               onChange={(v) => handleFormChange("public", v)}
             />
             <Toggle
-              label="FTP/SFTP Access"
-              description="Enable FTP and SFTP protocols"
+              label={t("storage.toggle.ftp.label")}
+              description={t("storage.toggle.ftp.description")}
               checked={form.ftp_sftp_enable}
               onChange={(v) => handleFormChange("ftp_sftp_enable", v)}
             />
@@ -296,14 +303,14 @@ export default function StoragePage() {
               onClick={() => { setIsModalOpen(false); setSubmitError(null); }}
               className="rounded-lg px-4 py-2 text-sm font-medium text-gray-600 hover:bg-gray-100 transition-colors"
             >
-              Cancel
+              {t("common.cancel")}
             </button>
             <button
               type="submit"
               disabled={isSubmitting}
               className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50 transition-colors"
             >
-              {isSubmitting ? <><Spinner size="sm" />Creating...</> : "Create Bucket"}
+              {isSubmitting ? <><Spinner size="sm" />{t("common.creating")}</> : t("storage.createBucket")}
             </button>
           </div>
         </form>

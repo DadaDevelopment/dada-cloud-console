@@ -12,6 +12,7 @@ import { canMutate } from "@/lib/rbac";
 import { timeAgo } from "@/lib/format";
 import { PhaseBadge } from "@/components/ui/phase-badge";
 import { EmptyState } from "@/components/ui/empty-state";
+import { useT } from "@/lib/i18n/console/context";
 
 interface CreateDbForm {
   name: string;
@@ -33,6 +34,7 @@ export default function DatabasesPage() {
   const params = useParams<{ projectId: string }>();
   const projectId = params.projectId;
   const router = useRouter();
+  const { t } = useT();
 
   const { project, selectedEnv, role, loading: isLoadingEnvs } = useProjectContext();
   const selectedEnvId = selectedEnv?.id ?? "";
@@ -52,7 +54,6 @@ export default function DatabasesPage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
 
-  // Load databases when the selected environment (from shared context) changes.
   useEffect(() => {
     /* eslint-disable react-hooks/set-state-in-effect */
     if (!selectedEnvId) {
@@ -65,8 +66,9 @@ export default function DatabasesPage() {
     databasesApi
       .list(projectId, selectedEnvId)
       .then((data) => setDatabases(data.databases ?? []))
-      .catch((err) => setError(err instanceof Error ? err.message : "Failed to load databases"))
+      .catch((err) => setError(err instanceof Error ? err.message : t("databases.error.load")))
       .finally(() => setIsLoadingDbs(false));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId, selectedEnvId, isLoadingEnvs]);
 
   function handleFormChange(field: keyof CreateDbForm, value: string | boolean) {
@@ -88,11 +90,10 @@ export default function DatabasesPage() {
       });
       setIsModalOpen(false);
       setForm({ name: "", database: "", app_ref: "", backup_enabled: true, backup_schedule: "daily", backup_retention: "7d" });
-      // Redirect immediately to the live-updating, highlighted operation.
       const opId = result.operation?.id;
       router.push(`/projects/${projectId}/operations${opId ? `?highlight=${opId}` : ""}`);
     } catch (err) {
-      setSubmitError(err instanceof Error ? err.message : "Failed to create database");
+      setSubmitError(err instanceof Error ? err.message : t("databases.error.create"));
     } finally {
       setIsSubmitting(false);
     }
@@ -110,18 +111,17 @@ export default function DatabasesPage() {
 
   return (
     <div>
-      {/* Header */}
       <div className="mb-8 flex items-start justify-between">
         <div>
           <Breadcrumb
             items={[
-              { label: "Projects", href: "/projects" },
-              { label: project?.display_name ?? "Overview", href: `/projects/${projectId}` },
-              { label: "Databases" },
+              { label: t("common.crumb.projects"), href: "/projects" },
+              { label: project?.display_name ?? t("common.crumb.overview"), href: `/projects/${projectId}` },
+              { label: t("nav.databases") },
             ]}
           />
-          <h1 className="mt-2 text-2xl font-bold text-gray-900">Databases</h1>
-          <p className="mt-0.5 text-sm text-gray-500">PostgreSQL database instances</p>
+          <h1 className="mt-2 text-2xl font-bold text-gray-900">{t("databases.title")}</h1>
+          <p className="mt-0.5 text-sm text-gray-500">{t("databases.subtitle")}</p>
         </div>
         {canCreate && (
         <button
@@ -132,7 +132,7 @@ export default function DatabasesPage() {
           <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
           </svg>
-          Create Database
+          {t("databases.createButton")}
         </button>
         )}
       </div>
@@ -143,7 +143,6 @@ export default function DatabasesPage() {
         </div>
       )}
 
-      {/* Database list */}
       {isLoadingDbs ? (
         <div className="flex h-40 items-center justify-center">
           <Spinner />
@@ -151,8 +150,8 @@ export default function DatabasesPage() {
       ) : databases.length === 0 ? (
         <div className="space-y-4">
           <EmptyState
-            title="Пока нет баз данных"
-            description="Создайте PostgreSQL-инстанс и подключите его к приложению — строка подключения появится в переменных окружения автоматически."
+            title={t("databases.empty.title")}
+            description={t("databases.empty.description")}
           />
           {canCreate && (
             <div className="flex justify-center">
@@ -161,7 +160,7 @@ export default function DatabasesPage() {
                 disabled={!selectedEnvId}
                 className="text-sm font-medium text-blue-600 hover:text-blue-700 disabled:opacity-50"
               >
-                Создать первую базу данных →
+                {t("databases.empty.createFirst")}
               </button>
             </div>
           )}
@@ -188,14 +187,16 @@ export default function DatabasesPage() {
                   <PhaseBadge phase={db.phase} />
                 </div>
                 <div className="flex items-center gap-3 text-xs text-gray-500">
-                  <span>{typeof s.size_bytes === "number" ? fmtBytes(s.size_bytes) : "— size"}</span>
+                  <span>{typeof s.size_bytes === "number" ? fmtBytes(s.size_bytes) : t("databases.card.size")}</span>
                   <span className="text-gray-300">·</span>
                   <span title={s.backup_last_at ?? ""}>
-                    {s.backup_last_at ? `backup ${timeAgo(s.backup_last_at)}` : "no backup"}
+                    {s.backup_last_at
+                      ? t("databases.card.backup", { ago: timeAgo(s.backup_last_at) })
+                      : t("databases.card.noBackup")}
                   </span>
                 </div>
                 <p className="mt-2 text-xs text-gray-400">
-                  Synced {timeAgo(db.last_synced_at)}
+                  {t("databases.card.synced", { ago: timeAgo(db.last_synced_at) })}
                 </p>
               </Link>
             );
@@ -203,19 +204,19 @@ export default function DatabasesPage() {
         </div>
       )}
 
-      {/* Create Database Modal */}
       <Modal
         isOpen={isModalOpen}
         onClose={() => {
           setIsModalOpen(false);
           setSubmitError(null);
         }}
-        title="Create Database"
+        title={t("databases.modal.title")}
       >
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
             <label className="block text-sm font-medium text-gray-700">
-              Database Name <span className="text-gray-400 font-normal">(Kubernetes resource name)</span>
+              {t("databases.modal.name.label")}{" "}
+              <span className="text-gray-400 font-normal">({t("databases.modal.name.hint")})</span>
             </label>
             <input
               type="text"
@@ -224,14 +225,14 @@ export default function DatabasesPage() {
               onChange={(e) => handleFormChange("name", e.target.value)}
               placeholder="my-app-db"
               pattern="[a-z0-9-]+"
-              title="Lowercase letters, numbers, and hyphens only"
+              title={t("databases.modal.name.validation")}
               className="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
             />
           </div>
 
           <div>
             <label className="block text-sm font-medium text-gray-700">
-              PostgreSQL DB Name
+              {t("databases.modal.pgName.label")}
             </label>
             <input
               type="text"
@@ -245,7 +246,8 @@ export default function DatabasesPage() {
 
           <div>
             <label className="block text-sm font-medium text-gray-700">
-              App Reference <span className="text-gray-400 font-normal">(optional — leave empty for an environment-level database)</span>
+              {t("databases.modal.appRef.label")}{" "}
+              <span className="text-gray-400 font-normal">({t("databases.modal.appRef.hint")})</span>
             </label>
             <input
               type="text"
@@ -253,19 +255,18 @@ export default function DatabasesPage() {
               onChange={(e) => handleFormChange("app_ref", e.target.value)}
               placeholder="my-app"
               pattern="[a-z0-9-]*"
-              title="Lowercase letters, numbers, and hyphens only"
+              title={t("databases.modal.name.validation")}
               className="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
             />
             <p className="mt-1 text-xs text-gray-400">
-              Bind to an app&apos;s chart, or leave empty to provision a standalone database your apps can reference.
+              {t("databases.modal.appRef.help")}
             </p>
           </div>
 
-          {/* Backup toggle */}
           <div className="flex items-center justify-between rounded-lg border border-gray-200 px-4 py-3">
             <div>
-              <p className="text-sm font-medium text-gray-700">Enable Backups</p>
-              <p className="text-xs text-gray-400">Automatic scheduled backups</p>
+              <p className="text-sm font-medium text-gray-700">{t("databases.modal.backups.title")}</p>
+              <p className="text-xs text-gray-400">{t("databases.modal.backups.subtitle")}</p>
             </div>
             <button
               type="button"
@@ -287,26 +288,26 @@ export default function DatabasesPage() {
           {form.backup_enabled && (
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="block text-sm font-medium text-gray-700">Backup Schedule</label>
+                <label className="block text-sm font-medium text-gray-700">{t("databases.modal.schedule.label")}</label>
                 <select
                   value={form.backup_schedule}
                   onChange={(e) => handleFormChange("backup_schedule", e.target.value)}
                   className="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
                 >
-                  <option value="hourly">Hourly</option>
-                  <option value="daily">Daily</option>
+                  <option value="hourly">{t("databases.modal.schedule.hourly")}</option>
+                  <option value="daily">{t("databases.modal.schedule.daily")}</option>
                 </select>
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700">Retention</label>
+                <label className="block text-sm font-medium text-gray-700">{t("databases.modal.retention.label")}</label>
                 <select
                   value={form.backup_retention}
                   onChange={(e) => handleFormChange("backup_retention", e.target.value)}
                   className="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
                 >
-                  <option value="7d">7 days</option>
-                  <option value="14d">14 days</option>
-                  <option value="30d">30 days</option>
+                  <option value="7d">{t("databases.modal.retention.7d")}</option>
+                  <option value="14d">{t("databases.modal.retention.14d")}</option>
+                  <option value="30d">{t("databases.modal.retention.30d")}</option>
                 </select>
               </div>
             </div>
@@ -327,7 +328,7 @@ export default function DatabasesPage() {
               }}
               className="rounded-lg px-4 py-2 text-sm font-medium text-gray-600 hover:bg-gray-100 transition-colors"
             >
-              Cancel
+              {t("common.cancel")}
             </button>
             <button
               type="submit"
@@ -337,10 +338,10 @@ export default function DatabasesPage() {
               {isSubmitting ? (
                 <>
                   <Spinner size="sm" />
-                  Creating...
+                  {t("common.creating")}
                 </>
               ) : (
-                "Create Database"
+                t("databases.modal.submit")
               )}
             </button>
           </div>

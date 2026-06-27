@@ -9,10 +9,12 @@ import { Breadcrumb } from "@/components/ui/breadcrumb";
 import { useProjectContext } from "@/lib/project-context";
 import { canMutate } from "@/lib/rbac";
 import { timeAgo } from "@/lib/format";
+import { useT } from "@/lib/i18n/console/context";
 
 export default function GitPage() {
   const params = useParams<{ projectId: string }>();
   const projectId = params.projectId;
+  const { t } = useT();
 
   const { project, selectedEnv, role, loading: isLoadingEnvs } = useProjectContext();
   const selectedEnvId = selectedEnv?.id ?? "";
@@ -33,8 +35,9 @@ export default function GitPage() {
     gitApi
       .listRepos(projectId, selectedEnvId)
       .then((d) => setRepos(d.repos ?? []))
-      .catch((err) => setError(err instanceof Error ? err.message : "Failed to load repos"))
+      .catch((err) => setError(err instanceof Error ? err.message : t("git.error.load")))
       .finally(() => setIsLoading(false));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId, selectedEnvId, isLoadingEnvs]);
 
   const canConnect = canMutate(role);
@@ -53,13 +56,13 @@ export default function GitPage() {
         <div>
           <Breadcrumb
             items={[
-              { label: "Projects", href: "/projects" },
-              { label: project?.display_name ?? "Overview", href: `/projects/${projectId}` },
-              { label: "Builds" },
+              { label: t("common.crumb.projects"), href: "/projects" },
+              { label: project?.display_name ?? t("common.crumb.overview"), href: `/projects/${projectId}` },
+              { label: t("nav.git") },
             ]}
           />
-          <h1 className="mt-2 text-2xl font-bold text-gray-900">Builds</h1>
-          <p className="mt-0.5 text-sm text-gray-500">Repositories that build &amp; deploy apps from source on every push</p>
+          <h1 className="mt-2 text-2xl font-bold text-gray-900">{t("git.title")}</h1>
+          <p className="mt-0.5 text-sm text-gray-500">{t("git.subtitle")}</p>
         </div>
         {canConnect && (
           <Link
@@ -69,7 +72,7 @@ export default function GitPage() {
             <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
             </svg>
-            Import repository
+            {t("git.importRepo")}
           </Link>
         )}
       </div>
@@ -87,17 +90,19 @@ export default function GitPage() {
           <svg className="mb-3 h-12 w-12 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9.568 3H5.25A2.25 2.25 0 003 5.25v4.318c0 .597.237 1.17.659 1.591l9.581 9.581c.699.699 1.78.872 2.607.33a18.095 18.095 0 005.223-5.223c.542-.827.369-1.908-.33-2.607L11.16 3.66A2.25 2.25 0 009.568 3z" />
           </svg>
-          <p className="text-sm font-medium text-gray-500">No repositories connected in {selectedEnv?.name ?? "this environment"}</p>
+          <p className="text-sm font-medium text-gray-500">
+            {t("git.empty.title", { env: selectedEnv?.name ?? "this environment" })}
+          </p>
           {canConnect && (
             <Link
               href={`/projects/${projectId}/git/import${selectedEnvId ? `?envId=${selectedEnvId}` : ""}`}
               className="mt-4 text-sm text-blue-600 hover:text-blue-700"
             >
-              Connect your first repository →
+              {t("git.empty.connect")}
             </Link>
           )}
           <p className="mt-3 max-w-sm text-center text-xs text-gray-400">
-            Connect a repo and the app is created automatically by its first successful build.
+            {t("git.empty.hint")}
           </p>
         </div>
       ) : (
@@ -112,10 +117,9 @@ export default function GitPage() {
                   <p className="truncate font-mono text-sm font-semibold text-gray-900">{repo.repo_full_name}</p>
                 </div>
                 <p className="mt-1 text-xs text-gray-400">
-                  app <span className="font-mono text-gray-500">{repo.app_name}</span> · branch{" "}
-                  <span className="font-mono text-gray-500">{repo.production_branch}</span>
+                  {t("git.repo.app", { name: repo.app_name })} · {t("git.repo.branch", { name: repo.production_branch })}
                   {repo.root_dir && repo.root_dir !== "." && (
-                    <> · root <span className="font-mono text-gray-500">{repo.root_dir}</span></>
+                    <> · {t("git.repo.root", { path: repo.root_dir })}</>
                   )}
                   {repo.framework_override && <> · {repo.framework_override}</>}
                 </p>
@@ -123,19 +127,21 @@ export default function GitPage() {
               <div className="flex items-center gap-4">
                 {repo.auto_deploy && (
                   <span className="inline-flex items-center rounded-full bg-green-50 px-2 py-0.5 text-xs font-medium text-green-700 ring-1 ring-green-600/20">
-                    auto-deploy
+                    {t("git.repo.autoDeploy")}
                   </span>
                 )}
                 <Link
                   href={`/projects/${projectId}/apps/${repo.app_name}/deployments${selectedEnvId ? `?envId=${selectedEnvId}` : ""}`}
                   className="text-sm font-medium text-blue-600 hover:text-blue-700"
                 >
-                  View builds →
+                  {t("git.repo.viewBuilds")}
                 </Link>
               </div>
             </div>
           ))}
-          <p className="pt-1 text-xs text-gray-400">Connected {repos.length > 0 ? timeAgo(repos[0].updated_at) : ""}</p>
+          <p className="pt-1 text-xs text-gray-400">
+            {repos.length > 0 ? t("git.repo.connected", { ago: timeAgo(repos[0].updated_at) }) : ""}
+          </p>
         </div>
       )}
     </div>

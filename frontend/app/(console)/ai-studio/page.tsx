@@ -6,6 +6,7 @@ import type { Project, MLflowRegisteredModel } from "@/lib/types";
 import { Spinner } from "@/components/ui/spinner";
 import { Breadcrumb } from "@/components/ui/breadcrumb";
 import { DataTable, type Column } from "@/components/ui/data-table";
+import { useT } from "@/lib/i18n/console/context";
 
 function fmtTimestamp(ms?: number): string {
   if (!ms) return "—";
@@ -13,6 +14,7 @@ function fmtTimestamp(ms?: number): string {
 }
 
 export default function AIStudioRegistryPage() {
+  const { t } = useT();
   const [projects, setProjects] = useState<Project[]>([]);
   const [selectedProjectId, setSelectedProjectId] = useState<string>("");
   const [models, setModels] = useState<MLflowRegisteredModel[]>([]);
@@ -29,8 +31,9 @@ export default function AIStudioRegistryPage() {
         setProjects(list);
         if (list.length > 0) setSelectedProjectId(list[0].id);
       })
-      .catch((err) => setError(err instanceof Error ? err.message : "Failed to load projects"))
+      .catch((err) => setError(err instanceof Error ? err.message : t("aiStudio.error.projects")))
       .finally(() => setIsLoadingProjects(false));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -45,7 +48,7 @@ export default function AIStudioRegistryPage() {
         setModels(data.models ?? []);
         setWarning(data.warning ?? null);
       })
-      .catch((err) => setError(err instanceof Error ? err.message : "MLflow registry unreachable"))
+      .catch((err) => setError(err instanceof Error ? err.message : t("aiStudio.error.mlflow")))
       .finally(() => setIsLoadingModels(false));
   }, [selectedProjectId]);
 
@@ -62,20 +65,18 @@ export default function AIStudioRegistryPage() {
       <div className="mb-8">
         <Breadcrumb
           items={[
-            { label: "Console", href: "/projects" },
-            { label: "AI Studio" },
-            { label: "Registry" },
+            { label: t("common.crumb.console"), href: "/projects" },
+            { label: t("aiStudio.crumb.aiStudio") },
+            { label: t("aiStudio.crumb.registry") },
           ]}
         />
-        <h1 className="mt-2 text-2xl font-bold text-gray-900">MLflow registry</h1>
-        <p className="mt-0.5 text-sm text-gray-500">
-          Browse registered models filtered by your project&apos;s storage prefix. Click any row to deploy that version.
-        </p>
+        <h1 className="mt-2 text-2xl font-bold text-gray-900">{t("aiStudio.title")}</h1>
+        <p className="mt-0.5 text-sm text-gray-500">{t("aiStudio.subtitle")}</p>
       </div>
 
       {projects.length > 1 && (
         <div className="mb-4 flex items-center gap-3">
-          <label className="text-sm font-medium text-gray-700">Project:</label>
+          <label className="text-sm font-medium text-gray-700">{t("aiStudio.project.label")}</label>
           <select
             value={selectedProjectId}
             onChange={(e) => handleProjectChange(e.target.value)}
@@ -104,13 +105,13 @@ export default function AIStudioRegistryPage() {
         rows={models}
         getRowKey={(m) => m.name}
         searchText={(m) => `${m.name} ${m.latest_versions?.[0]?.current_stage ?? ""}`}
-        searchPlaceholder="Search models…"
-        columns={registryColumns(selectedProjectId)}
+        searchPlaceholder={t("aiStudio.search.placeholder")}
+        columns={registryColumns(selectedProjectId, t)}
         emptyState={
           <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-gray-300 bg-gray-50 py-16">
-            <p className="text-sm font-medium text-gray-500">No registered models match this project&apos;s storage prefix</p>
+            <p className="text-sm font-medium text-gray-500">{t("aiStudio.empty.title")}</p>
             <p className="mt-1 text-xs text-gray-400">
-              Register a model in MLflow whose source URI starts with <span className="font-mono">{getProjectPrefixHint(projects, selectedProjectId)}</span>
+              {t("aiStudio.empty.hint")} <span className="font-mono">{getProjectPrefixHint(projects, selectedProjectId)}</span>
             </p>
           </div>
         }
@@ -119,34 +120,34 @@ export default function AIStudioRegistryPage() {
   );
 }
 
-function registryColumns(projectId: string): Column<MLflowRegisteredModel>[] {
+function registryColumns(projectId: string, t: (key: string, vars?: Record<string, string | number>) => string): Column<MLflowRegisteredModel>[] {
   return [
     {
       key: "name",
-      header: "Name",
+      header: t("aiStudio.col.name"),
       sortValue: (m) => m.name,
       render: (m) => <span className="font-mono text-gray-900">{m.name}</span>,
     },
     {
       key: "version",
-      header: "Latest version",
+      header: t("aiStudio.col.version"),
       render: (m) => <span className="font-mono">v{m.latest_versions?.[0]?.version ?? "—"}</span>,
     },
     {
       key: "stage",
-      header: "Stage",
+      header: t("aiStudio.col.stage"),
       sortValue: (m) => m.latest_versions?.[0]?.current_stage ?? "",
       render: (m) => m.latest_versions?.[0]?.current_stage ?? "—",
     },
     {
       key: "updated",
-      header: "Last updated",
+      header: t("aiStudio.col.updated"),
       sortValue: (m) => m.last_updated_timestamp ?? 0,
       render: (m) => <span className="text-xs text-gray-400">{fmtTimestamp(m.last_updated_timestamp)}</span>,
     },
     {
       key: "action",
-      header: "Action",
+      header: t("aiStudio.col.action"),
       align: "right",
       render: (m) => {
         const latest = m.latest_versions?.[0];
@@ -155,7 +156,7 @@ function registryColumns(projectId: string): Column<MLflowRegisteredModel>[] {
             href={`/projects/${encodeURIComponent(projectId)}/models?fromMlflow=${encodeURIComponent(m.name)}${latest ? `&fromMlflowVersion=${encodeURIComponent(latest.version)}` : ""}`}
             className="inline-flex items-center gap-1 rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700 transition-colors"
           >
-            Deploy v{latest?.version ?? "?"} →
+            {t("aiStudio.deploy", { version: latest?.version ?? "?" })}
           </Link>
         );
       },

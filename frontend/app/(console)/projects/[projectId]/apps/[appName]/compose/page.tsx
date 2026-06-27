@@ -7,6 +7,7 @@ import { Spinner } from "@/components/ui/spinner";
 import { Breadcrumb } from "@/components/ui/breadcrumb";
 import { useProjectContext } from "@/lib/project-context";
 import { canEditYaml } from "@/lib/rbac";
+import { useT } from "@/lib/i18n/console/context";
 
 // ─── WebSocket message shapes (shared with the values editor) ────────────────
 type WsIncoming =
@@ -41,6 +42,7 @@ function ComposeFilePane({
   file: "compose.yaml" | ".env";
   onToast: (kind: "success" | "error" | "info", text: string) => void;
 }) {
+  const { t } = useT();
   const [content, setContent] = useState("");
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -58,7 +60,7 @@ function ComposeFilePane({
       tokenData = await valuesApi.getToken(projectId, envId, appName, file);
     } catch (e) {
       setStatus("error");
-      onToast("error", e instanceof Error ? e.message : "Failed to get token");
+      onToast("error", e instanceof Error ? e.message : t("apps.values.error.token"));
       return undefined;
     }
 
@@ -71,7 +73,7 @@ function ComposeFilePane({
     ws.onclose = () => setStatus("closed");
     ws.onerror = () => {
       setStatus("error");
-      onToast("error", `${file}: WebSocket error`);
+      onToast("error", `${file}: ${t("apps.values.error.ws")}`);
     };
     ws.onmessage = (ev) => {
       try {
@@ -81,13 +83,13 @@ function ComposeFilePane({
           setDirty(false);
         } else if (msg.type === "update") {
           if (!dirty) setContent(msg.yaml);
-          else onToast("info", `${file} changed in git — your unsaved edits are kept`);
+          else onToast("info", `${file} ${t("apps.values.toast.updated")}`);
         } else if (msg.type === "committed") {
-          onToast("success", `${file} saved · ${msg.sha.slice(0, 7)} — redeploying`);
+          onToast("success", `${file} ${t("apps.values.toast.committed", { sha: msg.sha.slice(0, 7) })}`);
           setSaving(false);
           setDirty(false);
         } else if (msg.type === "error") {
-          onToast("error", `${file}: ${msg.message ?? "error"}`);
+          onToast("error", `${file}: ${msg.message ?? t("apps.values.error.unknown")}`);
           setSaving(false);
         }
       } catch {
@@ -124,7 +126,7 @@ function ComposeFilePane({
         <div className="flex items-center gap-2">
           <StatusDot status={status} />
           <span className="font-mono text-sm font-semibold text-gray-800">{file}</span>
-          {dirty && !saving && <span className="text-xs text-yellow-600">• unsaved</span>}
+          {dirty && !saving && <span className="text-xs text-yellow-600">{t("apps.compose.pane.unsaved")}</span>}
         </div>
         <button
           onClick={save}
@@ -134,10 +136,10 @@ function ComposeFilePane({
           {saving ? (
             <>
               <Spinner size="sm" />
-              Saving…
+              {t("apps.compose.pane.saving")}
             </>
           ) : (
-            "Save & redeploy"
+            t("apps.compose.pane.save")
           )}
         </button>
       </div>
@@ -172,6 +174,7 @@ export default function ComposePage() {
   const { role, loading: roleLoading, selectedEnv } = useProjectContext();
   const envId = searchParams.get("envId") || selectedEnv?.id || "";
   const allowed = canEditYaml(role);
+  const { t } = useT();
 
   const [toasts, setToasts] = useState<Toast[]>([]);
   const counter = useRef(0);
@@ -186,29 +189,28 @@ export default function ComposePage() {
       <div className="mb-6">
         <Breadcrumb
           items={[
-            { label: "Projects", href: "/projects" },
-            { label: "Applications", href: `/projects/${projectId}/apps` },
+            { label: t("common.crumb.projects"), href: "/projects" },
+            { label: t("nav.apps"), href: `/projects/${projectId}/apps` },
             { label: appName, href: `/projects/${projectId}/apps/${appName}${envId ? `?envId=${envId}` : ""}` },
-            { label: "compose" },
+            { label: t("apps.compose.crumb") },
           ]}
         />
         <h1 className="mt-2 text-2xl font-bold text-gray-900">
           <span className="font-mono">{appName}</span>
-          <span className="ml-2 text-lg font-normal text-gray-400">/ compose</span>
+          <span className="ml-2 text-lg font-normal text-gray-400">{t("apps.compose.heading.suffix")}</span>
         </h1>
         <p className="mt-0.5 text-sm text-gray-500">
-          Edit the Docker Compose definition and its environment. Saving commits to git and redeploys
-          the stack onto the VM.
+          {t("apps.compose.subtitle")}
         </p>
       </div>
 
       {!roleLoading && !allowed ? (
         <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-          You don&apos;t have permission to edit raw configuration. This is available to platform admins only.
+          {t("apps.compose.error.noPermission")}
         </div>
       ) : !envId ? (
         <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
-          Missing environment context. Open this editor from the application page.
+          {t("apps.compose.error.noEnv")}
         </div>
       ) : (
         <div className="grid gap-5 lg:grid-cols-2">

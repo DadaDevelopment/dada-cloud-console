@@ -17,17 +17,14 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { ResourceIcon } from "@/components/shell/icons";
 import type { IconName } from "@/lib/resources";
 import { timeAgo } from "@/lib/format";
-
-// Task-oriented project overview ("action dashboard"). Instead of a catalog of
-// infra entities, the first screen drives the user toward first value:
-// deploy an app → add a database → add a domain, with an onboarding checklist
-// and at-a-glance status. See the console redesign spec.
+import { useT } from "@/lib/i18n/console/context";
 
 type Counts = { apps: number; appsReady: number; dbs: number; domainsVerified: number; domainsPending: number };
 
 export default function ProjectOverviewPage() {
   const params = useParams<{ projectId: string }>();
   const projectId = params.projectId;
+  const { t } = useT();
 
   const [project, setProject] = useState<Project | null>(null);
   const [operations, setOperations] = useState<Operation[]>([]);
@@ -50,9 +47,6 @@ export default function ProjectOverviewPage() {
         const envs: Environment[] = detail.environments ?? [];
         const prod = envs.find((e) => e.type === "prod") ?? envs[0];
 
-        // Resource counts power the status chips + onboarding checklist. Each
-        // call is best-effort: a single failing surface must not blank the
-        // whole overview, so we default to zero on error.
         const [apps, dbs, domains] = await Promise.all([
           prod ? appsApi.list(projectId, prod.id).then((r) => r.apps).catch(() => []) : Promise.resolve([]),
           prod ? databasesApi.list(projectId, prod.id).then((r) => r.databases).catch(() => []) : Promise.resolve([]),
@@ -67,7 +61,7 @@ export default function ProjectOverviewPage() {
           domainsPending: domains.filter((d) => d.status !== "verified").length,
         });
       } catch (err) {
-        if (!cancelled) setError(err instanceof Error ? err.message : "Не удалось загрузить проект");
+        if (!cancelled) setError(err instanceof Error ? err.message : t("overview.error.load"));
       } finally {
         if (!cancelled) setIsLoading(false);
       }
@@ -76,6 +70,7 @@ export default function ProjectOverviewPage() {
     return () => {
       cancelled = true;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId]);
 
   if (isLoading) {
@@ -98,19 +93,18 @@ export default function ProjectOverviewPage() {
 
   const c = counts;
   const checklist = [
-    { key: "deploy", label: "Разверните приложение из GitHub", href: `/projects/${projectId}/git/import`, done: !!c && c.apps > 0 },
-    { key: "db", label: "Добавьте базу данных Postgres", href: `/projects/${projectId}/databases`, done: !!c && c.dbs > 0 },
-    { key: "domain", label: "Подключите домен и HTTPS", href: `/projects/${projectId}/domains`, done: !!c && c.domainsVerified > 0 },
+    { key: "deploy", label: t("overview.checklist.deploy"), href: `/projects/${projectId}/git/import`, done: !!c && c.apps > 0 },
+    { key: "db", label: t("overview.checklist.db"), href: `/projects/${projectId}/databases`, done: !!c && c.dbs > 0 },
+    { key: "domain", label: t("overview.checklist.domain"), href: `/projects/${projectId}/domains`, done: !!c && c.domainsVerified > 0 },
   ];
   const checklistDone = checklist.filter((i) => i.done).length;
   const checklistComplete = checklistDone === checklist.length;
 
   return (
     <div>
-      {/* Header */}
       <div className="mb-6 flex items-start justify-between gap-4">
         <div className="min-w-0">
-          <Breadcrumb items={[{ label: "Проекты", href: "/projects" }, { label: project.display_name }]} />
+          <Breadcrumb items={[{ label: t("common.crumb.projects"), href: "/projects" }, { label: project.display_name }]} />
           <h1 className="mt-2 text-2xl font-bold text-gray-900">{project.display_name}</h1>
           <p className="mt-0.5 font-mono text-sm text-gray-400">{project.name}</p>
         </div>
@@ -121,38 +115,36 @@ export default function ProjectOverviewPage() {
           <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
           </svg>
-          Развернуть приложение
+          {t("overview.deployApp")}
         </Link>
       </div>
 
-      {/* Status chips */}
       {c && (
         <div className="mb-8 flex flex-wrap items-center gap-2">
           {c.apps > 0 ? (
             <StateChip tone={c.appsReady === c.apps ? "ready" : "needs-action"} dot>
-              prod · {c.appsReady === c.apps ? "работает" : "требует внимания"}
+              {c.appsReady === c.apps ? t("overview.chip.ready") : t("overview.chip.needsAction")}
             </StateChip>
           ) : (
-            <StateChip tone="needs-action" dot>prod · нет приложений</StateChip>
+            <StateChip tone="needs-action" dot>{t("overview.chip.noApps")}</StateChip>
           )}
-          <StateChip tone="neutral">{c.apps} прил.</StateChip>
-          <StateChip tone={c.dbs > 0 ? "backup" : "neutral"}>{c.dbs} БД</StateChip>
+          <StateChip tone="neutral">{t("overview.chip.apps", { count: c.apps })}</StateChip>
+          <StateChip tone={c.dbs > 0 ? "backup" : "neutral"}>{t("overview.chip.dbs", { count: c.dbs })}</StateChip>
           {c.domainsVerified > 0 ? (
-            <StateChip tone="ready">{c.domainsVerified} домен</StateChip>
+            <StateChip tone="ready">{t("overview.chip.domainVerified", { count: c.domainsVerified })}</StateChip>
           ) : c.domainsPending > 0 ? (
-            <StateChip tone="needs-action">домен: проверка DNS</StateChip>
+            <StateChip tone="needs-action">{t("overview.chip.domainDns")}</StateChip>
           ) : (
-            <StateChip tone="neutral">домен не подключён</StateChip>
+            <StateChip tone="neutral">{t("overview.chip.domainNone")}</StateChip>
           )}
         </div>
       )}
 
-      {/* Onboarding checklist — hidden once everything is done */}
       {!checklistComplete && (
         <div className="mb-8 rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
           <div className="mb-3 flex items-center justify-between">
-            <h2 className="text-sm font-semibold text-gray-900">Запуск проекта</h2>
-            <span className="text-xs text-gray-400">{checklistDone} из {checklist.length}</span>
+            <h2 className="text-sm font-semibold text-gray-900">{t("overview.checklist.title")}</h2>
+            <span className="text-xs text-gray-400">{t("overview.checklist.progress", { done: checklistDone, total: checklist.length })}</span>
           </div>
           <div className="mb-4 h-1.5 w-full overflow-hidden rounded-full bg-gray-100">
             <div
@@ -181,7 +173,7 @@ export default function ProjectOverviewPage() {
                   </span>
                   {!item.done && (
                     <span className="text-xs text-blue-600 opacity-0 transition-opacity group-hover:opacity-100">
-                      Перейти →
+                      {t("overview.checklist.go")}
                     </span>
                   )}
                 </Link>
@@ -191,61 +183,58 @@ export default function ProjectOverviewPage() {
         </div>
       )}
 
-      {/* Primary action cards */}
       <div className="mb-8 grid gap-4 sm:grid-cols-3">
         <ActionCard
           icon="apps"
           tone="blue"
-          title="Развернуть приложение"
-          hint="Подключите репозиторий GitHub — сборка и деплой без YAML."
-          cta="Подключить GitHub"
+          title={t("overview.card.app.title")}
+          hint={t("overview.card.app.hint")}
+          cta={t("overview.card.app.cta")}
           href={`/projects/${projectId}/git/import`}
         />
         <ActionCard
           icon="databases"
           tone="green"
-          title="Добавить базу данных"
-          hint="Создайте Postgres и подключите строку соединения к приложению."
-          cta="Создать Postgres"
+          title={t("overview.card.db.title")}
+          hint={t("overview.card.db.hint")}
+          cta={t("overview.card.db.cta")}
           href={`/projects/${projectId}/databases`}
         />
         <ActionCard
           icon="domains"
           tone="indigo"
-          title="Добавить домен"
-          hint="Свой домен с автоматическим выпуском HTTPS-сертификата."
-          cta="Добавить домен"
+          title={t("overview.card.domain.title")}
+          hint={t("overview.card.domain.hint")}
+          cta={t("overview.card.domain.cta")}
           href={`/projects/${projectId}/domains`}
         />
       </div>
 
-      {/* Secondary resources */}
       <div className="mb-8">
-        <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-gray-500">Ещё в проекте</h2>
+        <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-gray-500">{t("overview.section.more")}</h2>
         <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-          <SecondaryLink icon="monitoring" label="Мониторинг" hint="Логи и метрики" href={`/projects/${projectId}/monitoring`} />
-          <SecondaryLink icon="operations" label="Операции" hint="История деплоев" href={`/projects/${projectId}/operations`} />
-          <SecondaryLink icon="storage" label="Объектное хранилище" hint="S3-совместимые бакеты" href={`/projects/${projectId}/storage`} />
-          <SecondaryLink icon="models" label="AI-модели" hint="Инференс KServe" href={`/projects/${projectId}/models`} />
-          <SecondaryLink icon="app-servers" label="Серверы приложений" hint="VM-хосты" href={`/projects/${projectId}/app-servers`} />
-          <SecondaryLink icon="git" label="Сборки" hint="Репозитории и билды" href={`/projects/${projectId}/git`} />
+          <SecondaryLink icon="monitoring" label={t("nav.monitoring")} hint={t("overview.secondary.monitoring.hint")} href={`/projects/${projectId}/monitoring`} />
+          <SecondaryLink icon="operations" label={t("nav.operations")} hint={t("overview.secondary.operations.hint")} href={`/projects/${projectId}/operations`} />
+          <SecondaryLink icon="storage" label={t("nav.storage")} hint={t("overview.secondary.storage.hint")} href={`/projects/${projectId}/storage`} />
+          <SecondaryLink icon="models" label={t("nav.models")} hint={t("overview.secondary.models.hint")} href={`/projects/${projectId}/models`} />
+          <SecondaryLink icon="app-servers" label={t("nav.app-servers")} hint={t("overview.secondary.appServers.hint")} href={`/projects/${projectId}/app-servers`} />
+          <SecondaryLink icon="git" label={t("nav.git")} hint={t("overview.secondary.git.hint")} href={`/projects/${projectId}/git`} />
         </div>
       </div>
 
-      {/* Recent operations */}
       <div>
         <div className="mb-3 flex items-center justify-between">
-          <h2 className="text-sm font-semibold uppercase tracking-wide text-gray-500">Последние операции</h2>
+          <h2 className="text-sm font-semibold uppercase tracking-wide text-gray-500">{t("overview.section.recentOps")}</h2>
           <Link href={`/projects/${projectId}/operations`} className="text-xs text-blue-600 hover:text-blue-700">
-            Все операции →
+            {t("overview.allOps")}
           </Link>
         </div>
 
         {operations.length === 0 ? (
           <EmptyState
-            title="Пока нет операций"
-            description="Деплои, создание баз и доменов появятся здесь после первого действия."
-            action={{ label: "Развернуть приложение", href: `/projects/${projectId}/git/import` }}
+            title={t("overview.ops.empty.title")}
+            description={t("overview.ops.empty.description")}
+            action={{ label: t("overview.ops.empty.action"), href: `/projects/${projectId}/git/import` }}
           />
         ) : (
           <div className="overflow-hidden rounded-xl border border-gray-200 bg-white">

@@ -11,6 +11,7 @@ import { DataTable, type Column } from "@/components/ui/data-table";
 import { useProjectContext } from "@/lib/project-context";
 import { canMutate } from "@/lib/rbac";
 import { timeAgo } from "@/lib/format";
+import { useT } from "@/lib/i18n/console/context";
 
 type AppServerMode = "terraform" | "manual";
 
@@ -59,6 +60,7 @@ export default function AppServersPage() {
   const params = useParams<{ projectId: string }>();
   const projectId = params.projectId;
   const router = useRouter();
+  const { t } = useT();
   const { project, role } = useProjectContext();
   const canManage = canMutate(role);
 
@@ -90,7 +92,7 @@ export default function AppServersPage() {
           )
       ).then((pairs) => setOnline(Object.fromEntries(pairs)));
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load app servers");
+      setError(err instanceof Error ? err.message : t("appServers.error.load"));
     } finally {
       setIsLoading(false);
     }
@@ -135,7 +137,7 @@ export default function AppServersPage() {
       const opId = result.operation?.id;
       router.push(`/projects/${projectId}/operations${opId ? `?highlight=${opId}` : ""}`);
     } catch (err) {
-      setSubmitError(err instanceof Error ? err.message : "Failed to create app server");
+      setSubmitError(err instanceof Error ? err.message : t("appServers.error.create"));
     } finally {
       setIsSubmitting(false);
     }
@@ -149,7 +151,7 @@ export default function AppServersPage() {
       const opId = result.operation?.id;
       router.push(`/projects/${projectId}/operations${opId ? `?highlight=${opId}` : ""}`);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to delete app server");
+      setError(err instanceof Error ? err.message : t("appServers.error.delete"));
     } finally {
       setDeletingName(null);
     }
@@ -158,7 +160,7 @@ export default function AppServersPage() {
   const columns: Column<AppServer>[] = [
     {
       key: "name",
-      header: "Name",
+      header: t("appServers.col.name"),
       sortValue: (s) => s.name,
       render: (s) => (
         <div className="min-w-0">
@@ -173,33 +175,33 @@ export default function AppServersPage() {
               <span className="rounded bg-gray-100 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-gray-500">manual</span>
             )}
           </div>
-          <p className="mt-0.5 text-xs text-gray-400">Updated {timeAgo(s.updated_at)}</p>
+          <p className="mt-0.5 text-xs text-gray-400">{t("appServers.updated", { ago: timeAgo(s.updated_at) })}</p>
           {s.error_message && <p className="mt-1 text-xs text-red-600">{s.error_message}</p>}
         </div>
       ),
     },
     {
       key: "status",
-      header: "Status",
+      header: t("appServers.col.status"),
       sortValue: (s) => s.status,
       render: (s) => (
         <div className="flex items-center gap-2">
           <AppServerStatusBadge status={s.status} />
           {s.status === "Ready" && (
             <span
-              title={online[s.name] ? "Online (Portainer heartbeat)" : "No heartbeat"}
+              title={online[s.name] ? t("appServers.heartbeat.online") : t("appServers.heartbeat.none")}
               className={`inline-block h-2 w-2 rounded-full ${online[s.name] ? "bg-green-400" : "bg-gray-300"}`}
             />
           )}
         </div>
       ),
     },
-    { key: "ip", header: "VM IP", render: (s) => <span className="font-mono text-gray-600">{s.vm_ip ?? "—"}</span> },
-    { key: "portainer", header: "Portainer", render: (s) => <span className="font-mono text-gray-600">{s.portainer_endpoint_id ?? "—"}</span> },
+    { key: "ip", header: t("appServers.col.vmIp"), render: (s) => <span className="font-mono text-gray-600">{s.vm_ip ?? "—"}</span> },
+    { key: "portainer", header: t("appServers.col.portainer"), render: (s) => <span className="font-mono text-gray-600">{s.portainer_endpoint_id ?? "—"}</span> },
     ...(canManage
       ? [{
           key: "actions",
-          header: "Actions",
+          header: t("appServers.col.actions"),
           align: "right" as const,
           render: (s: AppServer) => (
             <button
@@ -207,7 +209,7 @@ export default function AppServersPage() {
               disabled={deletingName === s.name || s.status === "Deleting"}
               className="rounded-lg border border-red-200 px-3 py-1.5 text-sm font-medium text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50"
             >
-              {deletingName === s.name ? "Deleting..." : "Delete"}
+              {deletingName === s.name ? t("common.deleting") : t("common.delete")}
             </button>
           ),
         }]
@@ -220,13 +222,13 @@ export default function AppServersPage() {
         <div>
           <Breadcrumb
             items={[
-              { label: "Projects", href: "/projects" },
-              { label: project?.display_name ?? "Overview", href: `/projects/${projectId}` },
-              { label: "App Servers" },
+              { label: t("common.crumb.projects"), href: "/projects" },
+              { label: project?.display_name ?? t("common.crumb.overview"), href: `/projects/${projectId}` },
+              { label: t("nav.app-servers") },
             ]}
           />
-          <h1 className="mt-2 text-2xl font-bold text-gray-900">App Servers</h1>
-          <p className="mt-0.5 text-sm text-gray-500">Dedicated VM hosts for Docker Compose workloads.</p>
+          <h1 className="mt-2 text-2xl font-bold text-gray-900">{t("appServers.title")}</h1>
+          <p className="mt-0.5 text-sm text-gray-500">{t("appServers.subtitle")}</p>
         </div>
         {canManage && (
         <button
@@ -236,7 +238,7 @@ export default function AppServersPage() {
           <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
           </svg>
-          Create AppServer
+          {t("appServers.create")}
         </button>
         )}
       </div>
@@ -252,17 +254,17 @@ export default function AppServersPage() {
         rows={servers}
         getRowKey={(s) => s.id}
         searchText={(s) => `${s.name} ${s.vm_ip ?? ""} ${s.status}`}
-        searchPlaceholder="Search app servers…"
+        searchPlaceholder={t("appServers.search")}
         columns={columns}
         emptyState={
           <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-gray-300 bg-gray-50 py-16">
             <svg className="mb-3 h-12 w-12 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M3 15.75V8.25A2.25 2.25 0 015.25 6h13.5A2.25 2.25 0 0121 8.25v7.5A2.25 2.25 0 0118.75 18H5.25A2.25 2.25 0 013 15.75zM7 9h10M7 12h4" />
             </svg>
-            <p className="text-sm font-medium text-gray-500">No AppServers yet</p>
+            <p className="text-sm font-medium text-gray-500">{t("appServers.empty.title")}</p>
             {canManage && (
               <button onClick={() => setIsModalOpen(true)} className="mt-4 text-sm text-amber-700 hover:text-amber-800">
-                Provision the first VM host →
+                {t("appServers.empty.provision")}
               </button>
             )}
           </div>
@@ -275,11 +277,11 @@ export default function AppServersPage() {
           setIsModalOpen(false);
           setSubmitError(null);
         }}
-        title="Create AppServer"
+        title={t("appServers.modal.title")}
       >
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <label className="block text-sm font-medium text-gray-700">Name</label>
+            <label className="block text-sm font-medium text-gray-700">{t("appServers.field.name.label")}</label>
             <input
               type="text"
               required
@@ -288,11 +290,11 @@ export default function AppServersPage() {
               placeholder="client-a-prod-1"
               className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-amber-500 focus:outline-none focus:ring-1 focus:ring-amber-500"
             />
-            <p className="mt-1 text-xs text-gray-400">Lowercase DNS-style name used for the VM and Portainer endpoint.</p>
+            <p className="mt-1 text-xs text-gray-400">{t("appServers.field.name.help")}</p>
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700">Source</label>
+            <label className="block text-sm font-medium text-gray-700">{t("appServers.field.source.label")}</label>
             <div className="mt-1 inline-flex rounded-lg border border-gray-300 p-0.5">
               {(["terraform", "manual"] as AppServerMode[]).map((m) => (
                 <button
@@ -303,14 +305,14 @@ export default function AppServersPage() {
                     form.mode === m ? "bg-amber-600 text-white" : "text-gray-600 hover:bg-gray-100"
                   }`}
                 >
-                  {m === "terraform" ? "Provision (Terraform)" : "Connect existing VM"}
+                  {m === "terraform" ? t("appServers.field.source.terraform") : t("appServers.field.source.manual")}
                 </button>
               ))}
             </div>
             <p className="mt-1 text-xs text-gray-400">
               {form.mode === "terraform"
-                ? "We create and bootstrap a new VM for you."
-                : "Connect a VM you already own. We SSH in once to install Docker + the edge agent."}
+                ? t("appServers.field.source.help.terraform")
+                : t("appServers.field.source.help.manual")}
             </p>
           </div>
 
@@ -318,7 +320,7 @@ export default function AppServersPage() {
           <>
           <div className="grid gap-4 sm:grid-cols-2">
             <div>
-              <label className="block text-sm font-medium text-gray-700">Flavor</label>
+              <label className="block text-sm font-medium text-gray-700">{t("appServers.field.flavor.label")}</label>
               <select
                 value={form.flavor}
                 onChange={(e) => handleFormChange("flavor", e.target.value)}
@@ -330,7 +332,7 @@ export default function AppServersPage() {
               </select>
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700">Region</label>
+              <label className="block text-sm font-medium text-gray-700">{t("appServers.field.region.label")}</label>
               <select
                 value={form.region}
                 onChange={(e) => handleFormChange("region", e.target.value)}
@@ -346,7 +348,7 @@ export default function AppServersPage() {
 
           <div className="grid gap-4 sm:grid-cols-2">
             <div>
-              <label className="block text-sm font-medium text-gray-700">OS image</label>
+              <label className="block text-sm font-medium text-gray-700">{t("appServers.field.osImage.label")}</label>
               <input
                 type="text"
                 value={form.os_image}
@@ -355,7 +357,7 @@ export default function AppServersPage() {
               />
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700">SSH key name</label>
+              <label className="block text-sm font-medium text-gray-700">{t("appServers.field.sshKeyName.label")}</label>
               <input
                 type="text"
                 value={form.ssh_key_name}
@@ -371,7 +373,7 @@ export default function AppServersPage() {
           <>
           <div className="grid gap-4 sm:grid-cols-[2fr_1fr]">
             <div>
-              <label className="block text-sm font-medium text-gray-700">VM IP address</label>
+              <label className="block text-sm font-medium text-gray-700">{t("appServers.field.vmIp.label")}</label>
               <input
                 type="text"
                 required
@@ -382,7 +384,7 @@ export default function AppServersPage() {
               />
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700">SSH port</label>
+              <label className="block text-sm font-medium text-gray-700">{t("appServers.field.sshPort.label")}</label>
               <input
                 type="number"
                 value={form.ssh_port}
@@ -394,7 +396,7 @@ export default function AppServersPage() {
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700">SSH user</label>
+            <label className="block text-sm font-medium text-gray-700">{t("appServers.field.sshUser.label")}</label>
             <input
               type="text"
               value={form.ssh_user}
@@ -405,7 +407,7 @@ export default function AppServersPage() {
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700">SSH private key</label>
+            <label className="block text-sm font-medium text-gray-700">{t("appServers.field.sshKey.label")}</label>
             <textarea
               required
               value={form.ssh_private_key}
@@ -415,7 +417,7 @@ export default function AppServersPage() {
               className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 font-mono text-xs focus:border-amber-500 focus:outline-none focus:ring-1 focus:ring-amber-500"
             />
             <p className="mt-1 text-xs text-amber-700">
-              Used once to install the edge agent, then discarded — never stored.
+              {t("appServers.field.sshKey.warn")}
             </p>
           </div>
           </>
@@ -433,14 +435,14 @@ export default function AppServersPage() {
               onClick={() => setIsModalOpen(false)}
               className="rounded-lg px-4 py-2 text-sm font-medium text-gray-600 hover:bg-gray-100"
             >
-              Cancel
+              {t("common.cancel")}
             </button>
             <button
               type="submit"
               disabled={isSubmitting}
               className="rounded-lg bg-amber-600 px-4 py-2 text-sm font-medium text-white hover:bg-amber-700 disabled:opacity-50"
             >
-              {isSubmitting ? "Creating..." : "Create AppServer"}
+              {isSubmitting ? t("common.creating") : t("appServers.create")}
             </button>
           </div>
         </form>

@@ -4,7 +4,8 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { projectsApi } from "@/lib/api";
 import type { MemberRole, Project } from "@/lib/types";
-import { roleColors, roleLabels } from "@/lib/rbac";
+import { roleColors } from "@/lib/rbac";
+import { useT } from "@/lib/i18n/console/context";
 
 function SkeletonCard() {
   return (
@@ -30,6 +31,7 @@ function CreateProjectModal({
   onClose: () => void;
   onCreated: (projectId: string) => void;
 }) {
+  const { t } = useT();
   const [slug, setSlug] = useState("");
   const [displayName, setDisplayName] = useState("");
   const [orgId, setOrgId] = useState("");
@@ -51,7 +53,7 @@ function CreateProjectModal({
       });
       onCreated(res.project_id);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to create project");
+      setError(err instanceof Error ? err.message : t("projects.error.create"));
       setSubmitting(false);
     }
   }
@@ -59,15 +61,15 @@ function CreateProjectModal({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
       <div className="w-full max-w-md rounded-xl border border-gray-200 bg-white p-6 shadow-xl">
-        <h2 className="text-lg font-semibold text-gray-900">New project</h2>
+        <h2 className="text-lg font-semibold text-gray-900">{t("projects.modal.title")}</h2>
         <p className="mt-1 text-sm text-gray-500">
-          Leave the organization blank to create it in your personal space — you become its Owner.
+          {t("projects.modal.subtitle")}
         </p>
 
         <form onSubmit={submit} className="mt-5 space-y-4">
           <div>
             <label htmlFor="slug" className="block text-sm font-medium text-gray-700">
-              Slug
+              {t("projects.slug.label")}
             </label>
             <input
               id="slug"
@@ -78,36 +80,36 @@ function CreateProjectModal({
               className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 font-mono text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
             />
             <p className="mt-1 text-xs text-gray-400">
-              3–40 chars, lowercase letters/digits/dashes, starts with a letter. Used as the namespace prefix.
+              {t("projects.slug.help")}
             </p>
           </div>
 
           <div>
             <label htmlFor="display_name" className="block text-sm font-medium text-gray-700">
-              Display name <span className="text-gray-400">(optional)</span>
+              {t("projects.displayName.label")} <span className="text-gray-400">{t("common.optional")}</span>
             </label>
             <input
               id="display_name"
               value={displayName}
               onChange={(e) => setDisplayName(e.target.value)}
-              placeholder={slug || "My App"}
+              placeholder={slug || t("projects.displayName.placeholder")}
               className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
             />
           </div>
 
           <div>
             <label htmlFor="org_id" className="block text-sm font-medium text-gray-700">
-              Organization <span className="text-gray-400">(optional)</span>
+              {t("projects.org.label")} <span className="text-gray-400">{t("common.optional")}</span>
             </label>
             <input
               id="org_id"
               value={orgId}
               onChange={(e) => setOrgId(e.target.value)}
-              placeholder="personal"
+              placeholder={t("projects.org.placeholder")}
               className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
             />
             <p className="mt-1 text-xs text-gray-400">
-              A shared org you administer (e.g. <span className="font-mono">dada</span>). Blank = personal org.
+              {t("projects.org.helpPre")}<span className="font-mono">dada</span>{t("projects.org.helpPost")}
             </p>
           </div>
 
@@ -123,14 +125,14 @@ function CreateProjectModal({
               onClick={onClose}
               className="rounded-lg px-4 py-2 text-sm font-medium text-gray-600 hover:bg-gray-100"
             >
-              Cancel
+              {t("common.cancel")}
             </button>
             <button
               type="submit"
               disabled={!slugValid || submitting}
               className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
             >
-              {submitting ? "Creating…" : "Create project"}
+              {submitting ? t("common.creating") : t("projects.submit")}
             </button>
           </div>
         </form>
@@ -141,6 +143,7 @@ function CreateProjectModal({
 
 export default function ProjectsPage() {
   const router = useRouter();
+  const { t } = useT();
   const [projects, setProjects] = useState<Project[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -150,16 +153,17 @@ export default function ProjectsPage() {
     projectsApi
       .list()
       .then((data) => setProjects(data.projects ?? []))
-      .catch((err) => setError(err instanceof Error ? err.message : "Failed to load projects"))
+      .catch((err) => setError(err instanceof Error ? err.message : t("projects.error.load")))
       .finally(() => setIsLoading(false));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   return (
     <div>
       <div className="mb-8 flex items-start justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Projects</h1>
-          <p className="mt-1 text-sm text-gray-500">Your cloud infrastructure projects</p>
+          <h1 className="text-2xl font-bold text-gray-900">{t("projects.title")}</h1>
+          <p className="mt-1 text-sm text-gray-500">{t("projects.subtitle")}</p>
         </div>
         <button
           onClick={() => setShowCreate(true)}
@@ -168,7 +172,7 @@ export default function ProjectsPage() {
           <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
           </svg>
-          New project
+          {t("projects.new")}
         </button>
       </div>
 
@@ -189,8 +193,8 @@ export default function ProjectsPage() {
           <svg className="mb-3 h-12 w-12 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M6 6.878V6a2.25 2.25 0 012.25-2.25h7.5A2.25 2.25 0 0118 6v.878m-12 0c.235-.083.487-.128.75-.128h10.5c.263 0 .515.045.75.128m-12 0A2.25 2.25 0 004.5 9v.878m13.5-3A2.25 2.25 0 0119.5 9v.878m0 0a2.246 2.246 0 00-.75-.128H5.25c-.263 0-.515.045-.75.128m15 0A2.25 2.25 0 0121 12v6a2.25 2.25 0 01-2.25 2.25H5.25A2.25 2.25 0 013 18v-6c0-.98.626-1.813 1.5-2.122" />
           </svg>
-          <p className="text-sm font-medium text-gray-500">No projects yet</p>
-          <p className="mt-1 text-xs text-gray-400">Create your first project to get started.</p>
+          <p className="text-sm font-medium text-gray-500">{t("projects.empty.title")}</p>
+          <p className="mt-1 text-xs text-gray-400">{t("projects.empty.subtitle")}</p>
           <button
             onClick={() => setShowCreate(true)}
             className="mt-4 inline-flex items-center gap-1.5 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
@@ -198,14 +202,14 @@ export default function ProjectsPage() {
             <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
             </svg>
-            New project
+            {t("projects.new")}
           </button>
         </div>
       ) : (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {projects.map((project) => {
             const roleKey = project.role as MemberRole | undefined;
-            const roleLabel = roleKey ? roleLabels[roleKey] ?? roleKey : "";
+            const roleLabel = roleKey ? t(`roles.${roleKey}`) : "";
             const roleColor = roleKey ? roleColors[roleKey] ?? "bg-gray-100 text-gray-600" : "bg-gray-100 text-gray-600";
             return (
               <div
@@ -228,7 +232,7 @@ export default function ProjectsPage() {
                     href={`/projects/${project.id}`}
                     className="inline-flex items-center gap-1 rounded-lg bg-blue-50 px-3 py-1.5 text-xs font-medium text-blue-600 hover:bg-blue-100 transition-colors"
                   >
-                    View
+                    {t("projects.view")}
                     <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
                     </svg>

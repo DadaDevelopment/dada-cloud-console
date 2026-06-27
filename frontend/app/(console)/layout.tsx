@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth";
 import { Spinner } from "@/components/ui/spinner";
 import { ProjectProvider, useProjectContext } from "@/lib/project-context";
+import { ConsoleLangProvider } from "@/lib/i18n/console/context";
 import { TopBar } from "@/components/shell/top-bar";
 import { ProjectNav } from "@/components/shell/project-nav";
 import { CommandPalette } from "@/components/shell/command-palette";
@@ -56,9 +57,11 @@ export default function ConsoleLayout({ children }: { children: React.ReactNode 
         </div>
       }
     >
-      <ProjectProvider>
-        <ConsoleShell>{children}</ConsoleShell>
-      </ProjectProvider>
+      <ConsoleLangProvider>
+        <ProjectProvider>
+          <ConsoleShell>{children}</ConsoleShell>
+        </ProjectProvider>
+      </ConsoleLangProvider>
     </Suspense>
   );
 }
