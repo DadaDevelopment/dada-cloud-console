@@ -672,3 +672,36 @@ export interface Channel {
   type: "telegram" | "email" | "webhook";
   created_at: string;
 }
+
+export interface CloudTaskArtifact {
+  file_id: string;
+  name: string;
+  size: number;
+  kind: string;
+}
+
+export interface CloudTask {
+  id: string;
+  project_id: string;
+  environment_id: string;
+  app_name: string;
+  task_type: string;
+  intent_id?: string;
+  workflow_id?: string;
+  status: "running" | "completed" | "failed" | "canceled";
+  pr_url?: string;
+  artifacts: CloudTaskArtifact[];
+  error?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CloudTasksResponse {
+  cloud_tasks: CloudTask[];
+}
+export interface CloudTaskResponse {
+  cloud_task: CloudTask;
+}
+export interface CreateCloudTaskResponse {
+  cloud_task: CloudTask;
+}

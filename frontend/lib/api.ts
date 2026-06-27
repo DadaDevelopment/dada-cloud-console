@@ -57,6 +57,9 @@ import type {
   HealthStatus,
   AlertRule,
   Channel,
+  CloudTasksResponse,
+  CloudTaskResponse,
+  CreateCloudTaskResponse,
 } from "./types";
 
 // Empty string → relative URLs → requests go through the ingress proxy.
@@ -717,6 +720,25 @@ export const monitoringApi = {
       `/api/v1/projects/${projectId}/environments/${envId}/monitoring/channels/${id}`,
       { method: "DELETE" }
     ),
+};
+
+export const cloudTasksApi = {
+  list: (projectId: string, envId: string, appName: string) =>
+    apiFetch<CloudTasksResponse>(
+      `/api/v1/projects/${projectId}/environments/${envId}/apps/${appName}/cloud-tasks`,
+    ),
+
+  create: (projectId: string, envId: string, appName: string, taskType: string) =>
+    apiFetch<CreateCloudTaskResponse>(
+      `/api/v1/projects/${projectId}/environments/${envId}/apps/${appName}/cloud-tasks`,
+      { method: "POST", body: { task_type: taskType } },
+    ),
+
+  get: (projectId: string, taskId: string) =>
+    apiFetch<CloudTaskResponse>(`/api/v1/projects/${projectId}/cloud-tasks/${taskId}`),
+
+  artifactUrl: (projectId: string, taskId: string, fileId: string) =>
+    `/api/v1/projects/${projectId}/cloud-tasks/${taskId}/artifacts/${fileId}`,
 };
 
 // Inference proxy is intentionally NOT in apiFetch (which forces JSON):
