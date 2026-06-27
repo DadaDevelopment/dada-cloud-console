@@ -9,8 +9,18 @@ import { Breadcrumb } from "@/components/ui/breadcrumb";
 import { useProjectContext } from "@/lib/project-context";
 import { canMutate } from "@/lib/rbac";
 import { useT } from "@/lib/i18n/console/context";
+import { timeAgo } from "@/lib/format";
+import { Search, Lock, ChevronDown } from "lucide-react";
 
 type Step = 1 | 2 | 3;
+
+function GithubMark({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden className={className}>
+      <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0016 8c0-4.42-3.58-8-8-8z" />
+    </svg>
+  );
+}
 
 function toKubeName(s: string): string {
   return s
@@ -43,6 +53,7 @@ export default function GitImportPage() {
   const [repoError, setRepoError] = useState<string | null>(null);
   const [reposUnavailable, setReposUnavailable] = useState(false);
   const [selectedRepo, setSelectedRepo] = useState<GitRemoteRepo | null>(null);
+  const [repoQuery, setRepoQuery] = useState("");
 
   const [appName, setAppName] = useState("");
   const [port, setPort] = useState(8080);
@@ -299,25 +310,40 @@ export default function GitImportPage() {
             {t("git.import.backToAccounts")}
           </button>
 
-          <div className="mb-4">
-            <label className="block text-xs font-medium text-gray-500">{t("git.import.accountOrg.label")}</label>
-            <select
-              value={selectedInstall.id}
-              onChange={(e) => {
-                const next = installations.find((i) => i.id === e.target.value);
-                if (!next) return;
-                setSelectedRepo(null);
-                setSelectedInstall(next);
-                void loadRepos(next);
-              }}
-              className="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-            >
-              {installations.map((inst) => (
-                <option key={inst.id} value={inst.id}>
-                  {inst.account_login} ({inst.provider})
-                </option>
-              ))}
-            </select>
+          <label className="block text-xs font-medium text-gray-500">{t("git.import.accountOrg.label")}</label>
+          <div className="mb-4 mt-1 flex flex-col gap-2 sm:flex-row">
+            <div className="relative sm:w-64">
+              <GithubMark className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-500" />
+              <select
+                value={selectedInstall.id}
+                onChange={(e) => {
+                  const next = installations.find((i) => i.id === e.target.value);
+                  if (!next) return;
+                  setSelectedRepo(null);
+                  setRepoQuery("");
+                  setSelectedInstall(next);
+                  void loadRepos(next);
+                }}
+                className="w-full appearance-none rounded-lg border border-gray-300 bg-white py-2 pl-9 pr-9 text-sm font-medium text-gray-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              >
+                {installations.map((inst) => (
+                  <option key={inst.id} value={inst.id}>
+                    {inst.account_login}
+                  </option>
+                ))}
+              </select>
+              <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+            </div>
+            <div className="relative flex-1">
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+              <input
+                type="text"
+                value={repoQuery}
+                onChange={(e) => setRepoQuery(e.target.value)}
+                placeholder={t("git.import.searchPlaceholder")}
+                className="w-full rounded-lg border border-gray-300 bg-white py-2 pl-9 pr-3 text-sm text-gray-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              />
+            </div>
           </div>
           {repoError && (
             <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{repoError}</div>
@@ -335,24 +361,53 @@ export default function GitImportPage() {
               {t("git.import.noRepos")}
             </p>
           ) : (
-            <div className="max-h-[480px] space-y-2 overflow-y-auto">
-              {remoteRepos.map((repo) => (
-                <button
-                  key={repo.full_name}
-                  onClick={() => pickRepo(repo)}
-                  className="flex w-full items-center justify-between rounded-lg border border-gray-200 bg-white px-4 py-3 text-left shadow-sm transition-all hover:border-blue-300"
-                >
-                  <div className="min-w-0">
-                    <p className="truncate font-mono text-sm font-medium text-gray-900">{repo.full_name}</p>
-                    {repo.description && <p className="truncate text-xs text-gray-400">{repo.description}</p>}
-                  </div>
-                  <div className="flex shrink-0 items-center gap-2 pl-3">
-                    {repo.private && <span className="text-xs text-gray-400">{t("git.import.private")}</span>}
-                    <span className="text-sm text-blue-600">{t("git.import.importArrow")}</span>
-                  </div>
-                </button>
-              ))}
-            </div>
+            (() => {
+              const q = repoQuery.trim().toLowerCase();
+              const filtered = q
+                ? remoteRepos.filter((r) => r.full_name.toLowerCase().includes(q))
+                : remoteRepos;
+              if (filtered.length === 0) {
+                return (
+                  <p className="rounded-xl border border-dashed border-gray-300 bg-gray-50 p-8 text-center text-sm text-gray-500">
+                    {t("git.import.noMatch")}
+                  </p>
+                );
+              }
+              return (
+                <div className="max-h-[480px] divide-y divide-gray-100 overflow-y-auto rounded-xl border border-gray-200 bg-white shadow-sm">
+                  {filtered.map((repo) => {
+                    const shortName = repo.full_name.split("/").pop() || repo.full_name;
+                    return (
+                      <div
+                        key={repo.full_name}
+                        className="group flex items-center justify-between gap-3 px-4 py-3 transition-colors hover:bg-gray-50"
+                      >
+                        <div className="flex min-w-0 items-center gap-3">
+                          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-gray-100 text-gray-500">
+                            <GithubMark className="h-4 w-4" />
+                          </span>
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-2">
+                              <p className="truncate text-sm font-medium text-gray-900">{shortName}</p>
+                              {repo.private && <Lock className="h-3 w-3 shrink-0 text-gray-400" />}
+                            </div>
+                            <p className="truncate text-xs text-gray-400">
+                              {repo.updated_at ? timeAgo(repo.updated_at) : repo.full_name}
+                            </p>
+                          </div>
+                        </div>
+                        <button
+                          onClick={() => pickRepo(repo)}
+                          className="shrink-0 rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 shadow-sm transition-colors hover:border-blue-400 hover:text-blue-600 group-hover:border-blue-300"
+                        >
+                          {t("git.import.importButton")}
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              );
+            })()
           )}
         </div>
       )}

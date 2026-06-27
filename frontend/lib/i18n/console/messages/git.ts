@@ -70,6 +70,9 @@ export const git: Messages = {
   "git.import.backToRepos": { ru: "← Назад к репозиториям", en: "← Back to repositories" },
 
   "git.import.accountOrg.label": { ru: "GitHub аккаунт / организация", en: "GitHub account / organization" },
+  "git.import.searchPlaceholder": { ru: "Поиск репозитория…", en: "Search repository…" },
+  "git.import.noMatch": { ru: "Нет репозиториев по запросу.", en: "No repositories match your search." },
+  "git.import.importButton": { ru: "Импорт", en: "Import" },
 
   "git.import.reposUnavailable": {
     ru: "Подсистема сборки не настроена в этой среде — репозитории недоступны. Попробуйте снова после деплоя build-agent.",
