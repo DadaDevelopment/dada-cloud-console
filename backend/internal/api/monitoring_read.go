@@ -5,9 +5,12 @@ import (
 	"encoding/hex"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
+	"github.com/dada-tuda/console/backend/internal/auth"
+	"github.com/dada-tuda/console/backend/internal/grafanaembed"
 	"github.com/dada-tuda/console/backend/internal/logsearch"
 	"github.com/dada-tuda/console/backend/internal/models"
 	"github.com/dada-tuda/console/backend/internal/prometheus"
@@ -470,8 +473,50 @@ func (h *Handler) GetMonitoringGrafanaLink(c *gin.Context) {
 		respondError(c, http.StatusBadGateway, "grafana provisioning failed: "+err.Error())
 		return
 	}
-	url := fmt.Sprintf("%s/d/%s?kiosk&theme=light", h.grafana.PublicURL(), app.GrafanaDashboardUID)
-	c.JSON(http.StatusOK, gin.H{"url": url})
+	c.JSON(http.StatusOK, gin.H{"url": h.grafanaEmbedURL(c, app, projectID)})
+}
+
+// grafanaEmbedURL builds the iframe deep link. When GRAFANA_EMBED_SECRET is set,
+// the URL carries a short-lived HMAC embed token scoped to the requesting console
+// user and this dashboard; the grafana-embed-gateway (which fronts
+// grafana.dada-tuda.ru) verifies it and injects Grafana auth.proxy identity
+// headers so the iframe authenticates with NO manual Grafana login. The
+// project_id group drives Grafana team-sync → per-project folder ACL, so a user
+// can only reach folders for projects they belong to. Falls back to the plain
+// deep link (manual login) when no secret is configured.
+func (h *Handler) grafanaEmbedURL(c *gin.Context, app *models.MonitoringApp, projectID uuid.UUID) string {
+	base := fmt.Sprintf("%s/d/%s?kiosk&theme=light", h.grafana.PublicURL(), app.GrafanaDashboardUID)
+	secret := h.cfg.GrafanaEmbedSecret
+	if secret == "" {
+		return base
+	}
+	claims, ok := auth.GetClaims(c)
+	if !ok {
+		return base
+	}
+	user := claims.Username
+	if user == "" {
+		user = claims.Email
+	}
+	if user == "" {
+		user = claims.UserID.String()
+	}
+	// Grant this user View on the project folder so Grafana (OSS, per-user ACL)
+	// renders the dashboard once auth.proxy authenticates the iframe as this same
+	// login. Best-effort: a grant failure shows a blank panel but must not block
+	// the link (logged via the returned URL still working for already-granted users).
+	if app.GrafanaFolderUID != "" {
+		_ = h.grafana.EnsureUserFolderAccess(c.Request.Context(), app.GrafanaFolderUID, user, claims.Email, claims.DisplayName)
+	}
+	tok, err := grafanaembed.Sign([]byte(secret), grafanaembed.Claims{
+		User:      user,
+		Email:     claims.Email,
+		Dashboard: app.GrafanaDashboardUID,
+	}, time.Now(), 2*time.Minute)
+	if err != nil {
+		return base
+	}
+	return base + "&" + grafanaembed.QueryParam + "=" + url.QueryEscape(tok)
 }
 
 // folderUIDForProject / dashboardUIDForApp derive stable Grafana UIDs (<=40 chars)

@@ -18,6 +18,7 @@ def GITOPS_AGENT_IMAGE    = "${GITHUB_REGISTRY}/${GITHUB_ORG}/dada-cloud-console
 def PORTAINER_AGENT_IMAGE = "${GITHUB_REGISTRY}/${GITHUB_ORG}/dada-cloud-console-portainer-agent"
 def BUILD_AGENT_IMAGE     = "${GITHUB_REGISTRY}/${GITHUB_ORG}/dada-cloud-console-build-agent"
 def GATEWAY_IMAGE         = "${GITHUB_REGISTRY}/${GITHUB_ORG}/dada-cloud-console-gateway"
+def EMBED_GATEWAY_IMAGE   = "${GITHUB_REGISTRY}/${GITHUB_ORG}/dada-cloud-console-grafana-embed-gateway"
 
 // GitOps write-back: after a successful push, pin the just-built tag into the
 // ArgoCD source so prod actually rolls (there is NO image-updater; the tag is
@@ -320,6 +321,12 @@ spec:
                     }
                 }
 
+                runStage('Grafana-embed-gateway build') {
+                    dir('backend') {
+                        sh 'CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -buildvcs=false -ldflags="-s -w" -o bin/grafana-embed-gateway ./cmd/grafana-embed-gateway'
+                    }
+                }
+
                 runStage('GitOps-agent tests') {
                     dir('gitops-agent') {
                         sh 'go test ./... -count=1'
@@ -429,6 +436,9 @@ spec:
                           -t ${GATEWAY_IMAGE}:${resolvedTag} \\
                           -f backend/Dockerfile.gateway backend
                         docker build \\
+                          -t ${EMBED_GATEWAY_IMAGE}:${resolvedTag} \\
+                          -f backend/Dockerfile.grafana-embed-gateway backend
+                        docker build \\
                           -t ${GITOPS_AGENT_IMAGE}:${resolvedTag} \\
                           -f gitops-agent/Dockerfile gitops-agent
                         docker build \\
@@ -486,19 +496,22 @@ spec:
                                 docker push ${PORTAINER_AGENT_IMAGE}:${resolvedTag}
                                 docker push ${BUILD_AGENT_IMAGE}:${resolvedTag}
                                 docker push ${GATEWAY_IMAGE}:${resolvedTag}
+                                docker push ${EMBED_GATEWAY_IMAGE}:${resolvedTag}
                                 docker tag ${BACKEND_IMAGE}:${resolvedTag} ${BACKEND_IMAGE}:latest
                                 docker tag ${FRONTEND_IMAGE}:${resolvedTag} ${FRONTEND_IMAGE}:latest
                                 docker tag ${GITOPS_AGENT_IMAGE}:${resolvedTag} ${GITOPS_AGENT_IMAGE}:latest
                                 docker tag ${PORTAINER_AGENT_IMAGE}:${resolvedTag} ${PORTAINER_AGENT_IMAGE}:latest
                                 docker tag ${BUILD_AGENT_IMAGE}:${resolvedTag} ${BUILD_AGENT_IMAGE}:latest
                                 docker tag ${GATEWAY_IMAGE}:${resolvedTag} ${GATEWAY_IMAGE}:latest
+                                docker tag ${EMBED_GATEWAY_IMAGE}:${resolvedTag} ${EMBED_GATEWAY_IMAGE}:latest
                                 docker push ${BACKEND_IMAGE}:latest
                                 docker push ${FRONTEND_IMAGE}:latest
                                 docker push ${GITOPS_AGENT_IMAGE}:latest
                                 docker push ${PORTAINER_AGENT_IMAGE}:latest
                                 docker push ${BUILD_AGENT_IMAGE}:latest
                                 docker push ${GATEWAY_IMAGE}:latest
-                                docker rmi ${BACKEND_IMAGE}:${resolvedTag} ${FRONTEND_IMAGE}:${resolvedTag} ${GITOPS_AGENT_IMAGE}:${resolvedTag} ${PORTAINER_AGENT_IMAGE}:${resolvedTag} ${BUILD_AGENT_IMAGE}:${resolvedTag} ${GATEWAY_IMAGE}:${resolvedTag} || true
+                                docker push ${EMBED_GATEWAY_IMAGE}:latest
+                                docker rmi ${BACKEND_IMAGE}:${resolvedTag} ${FRONTEND_IMAGE}:${resolvedTag} ${GITOPS_AGENT_IMAGE}:${resolvedTag} ${PORTAINER_AGENT_IMAGE}:${resolvedTag} ${BUILD_AGENT_IMAGE}:${resolvedTag} ${GATEWAY_IMAGE}:${resolvedTag} ${EMBED_GATEWAY_IMAGE}:${resolvedTag} || true
                             """
                         }
                     }

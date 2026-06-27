@@ -67,4 +67,3 @@ func TestInferenceMaxBodyBytesInvalidFallsBack(t *testing.T) {
 		})
 	}
 }
-

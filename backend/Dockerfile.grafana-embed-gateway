@@ -1,0 +1,10 @@
+# Grafana Embed Gateway (ADR-012 follow-up) — auth shim that fronts
+# grafana.dada-tuda.ru so the console can iframe dashboards without a manual
+# Grafana login. Stateless; holds only the shared HMAC secret. Built from the
+# backend module (cmd/grafana-embed-gateway).
+FROM alpine:3.19
+RUN apk add --no-cache ca-certificates
+WORKDIR /app
+COPY bin/grafana-embed-gateway ./grafana-embed-gateway
+EXPOSE 8080
+ENTRYPOINT ["./grafana-embed-gateway"]

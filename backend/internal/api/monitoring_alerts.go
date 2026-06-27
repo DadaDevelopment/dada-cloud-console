@@ -114,7 +114,10 @@ func (h *Handler) ensureGrafanaResource(ctx context.Context, app *models.Monitor
 	if err := h.grafana.EnsureFolder(ctx, folderUID, "Project "+projectID.String()); err != nil {
 		return err
 	}
-	// Best-effort tenant isolation; older/Enterprise Grafana may reject.
+	// Isolation baseline: strip the inherited Editor/Viewer role grants so the
+	// folder is reachable only by users the console explicitly grants (per
+	// requester, at grafana-link time — see grafanaEmbedURL/EnsureUserFolderAccess).
+	// Best-effort; older Grafana may reject.
 	_ = h.grafana.SetFolderTenant(ctx, folderUID)
 
 	labels := monitoringLabels(orgID, app)

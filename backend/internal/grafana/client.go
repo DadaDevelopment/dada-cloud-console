@@ -16,6 +16,8 @@ package grafana
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -152,15 +154,135 @@ func (c *Client) EnsureFolder(ctx context.Context, uid, title string) error {
 	return nil
 }
 
-// SetFolderTenant best-effort removes inherited Editor/Viewer access so the
-// folder is reachable only via the backend deep link (shared-org isolation).
-// Grafana OSS accepts a permissions list of {role, permission}; passing only the
-// service account's implicit admin leaves no broad role. Errors are non-fatal
-// (older Grafana / Enterprise RBAC may reject); caller logs and continues.
+// Folder permission levels (Grafana folder/dashboard ACL ints).
+const (
+	permView  = 1
+	permEdit  = 2
+	permAdmin = 4
+)
+
+// folderPerm is one entry of a folder's ACL as returned by GET .../permissions.
+// A grant is either role-based (Role set, e.g. "Viewer"), user-based (UserID),
+// or team-based (TeamID).
+type folderPerm struct {
+	UserID     int    `json:"userId"`
+	TeamID     int    `json:"teamId"`
+	Role       string `json:"role"`
+	Permission int    `json:"permission"`
+}
+
+// SetFolderTenant strips the inherited Editor/Viewer ROLE grants from a folder
+// while preserving every explicit user/team grant, so the folder is reachable
+// only by users explicitly granted via EnsureUserFolderAccess (plus org admins) —
+// never by an arbitrary authenticated Viewer. This is the isolation baseline for
+// embed auth on Grafana OSS (which lacks Enterprise Team Sync). Errors are
+// non-fatal (older Grafana may reject); caller logs and continues.
 func (c *Client) SetFolderTenant(ctx context.Context, folderUID string) error {
-	body := map[string]any{"items": []any{}} // empty = revoke inherited role grants
+	return c.rebuildFolderPerms(ctx, folderUID, 0)
+}
+
+// EnsureUserFolderAccess makes the console user (identified by login) able to view
+// a project folder under embed auth: it ensures a matching Grafana user exists
+// (auth.proxy will authenticate the iframe request as this same login) and grants
+// that user View on the folder, leaving other users' grants intact and dropping
+// the broad role grants. Idempotent. This is what enforces cross-tenant isolation
+// on Grafana OSS: only users the console has granted (i.e. members who opened the
+// dashboard for a project they belong to) can render that project's folder.
+func (c *Client) EnsureUserFolderAccess(ctx context.Context, folderUID, login, email, name string) error {
+	uid, err := c.EnsureUser(ctx, login, email, name)
+	if err != nil {
+		return err
+	}
+	return c.rebuildFolderPerms(ctx, folderUID, uid)
+}
+
+// rebuildFolderPerms reads the current ACL, drops inherited role grants, keeps
+// every explicit user/team grant, and (when addUserID > 0) ensures that user has
+// View. The Grafana permissions API replaces the whole list on POST, so we must
+// read-merge-write to avoid clobbering other users' access.
+func (c *Client) rebuildFolderPerms(ctx context.Context, folderUID string, addUserID int) error {
+	var cur []folderPerm
+	if _, err := c.do(ctx, http.MethodGet, "/api/folders/"+folderUID+"/permissions", nil, &cur, false); err != nil {
+		return err
+	}
+	items := make([]any, 0, len(cur)+1)
+	haveUser := false
+	for _, p := range cur {
+		switch {
+		case p.Role != "":
+			// drop inherited Editor/Viewer role grants (the isolation strip)
+		case p.UserID > 0:
+			items = append(items, map[string]any{"userId": p.UserID, "permission": p.Permission})
+			if p.UserID == addUserID {
+				haveUser = true
+			}
+		case p.TeamID > 0:
+			items = append(items, map[string]any{"teamId": p.TeamID, "permission": p.Permission})
+		}
+	}
+	if addUserID > 0 && !haveUser {
+		items = append(items, map[string]any{"userId": addUserID, "permission": permView})
+	}
+	body := map[string]any{"items": items}
 	_, err := c.do(ctx, http.MethodPost, "/api/folders/"+folderUID+"/permissions", body, nil, false)
 	return err
+}
+
+// ---- Users (per console user, for embed-auth folder isolation) -------------
+
+// EnsureUser returns the Grafana user id for login, creating the user if absent
+// (idempotent). Login must equal the X-WEBAUTH-USER the embed gateway asserts, so
+// auth.proxy authenticates the iframe request as this same user. Created users get
+// a random password they never use (auth is header-based).
+func (c *Client) EnsureUser(ctx context.Context, login, email, name string) (int, error) {
+	if id, err := c.lookupUser(ctx, login); err != nil {
+		return 0, err
+	} else if id > 0 {
+		return id, nil
+	}
+	body := map[string]any{"login": login, "name": name, "password": randomPassword()}
+	if email != "" {
+		body["email"] = email
+	}
+	var out struct {
+		ID int `json:"id"`
+	}
+	status, err := c.do(ctx, http.MethodPost, "/api/admin/users", body, &out, false)
+	if err != nil {
+		// Created concurrently / login already taken → re-look it up.
+		if status == http.StatusConflict || status == http.StatusPreconditionFailed || status == http.StatusBadRequest {
+			return c.lookupUser(ctx, login)
+		}
+		return 0, err
+	}
+	return out.ID, nil
+}
+
+// lookupUser returns the user id for a login/email, or 0 when none exists.
+func (c *Client) lookupUser(ctx context.Context, login string) (int, error) {
+	var out struct {
+		ID int `json:"id"`
+	}
+	status, err := c.do(ctx, http.MethodGet, "/api/users/lookup?loginOrEmail="+url.QueryEscape(login), nil, &out, false)
+	if err != nil {
+		if status == http.StatusNotFound {
+			return 0, nil
+		}
+		return 0, err
+	}
+	return out.ID, nil
+}
+
+// randomPassword returns a 32-hex-char password for an auth.proxy-managed user
+// that never logs in with it. crypto/rand; falls back to a fixed-length filler
+// only if the RNG fails (a created user with an unknown long password is still
+// inaccessible by password since login is header-based).
+func randomPassword() string {
+	b := make([]byte, 16)
+	if _, err := rand.Read(b); err != nil {
+		return "x0x0x0x0x0x0x0x0x0x0x0x0x0x0x0x0"
+	}
+	return hex.EncodeToString(b)
 }
 
 // ---- Dashboards (per resource) ---------------------------------------------
