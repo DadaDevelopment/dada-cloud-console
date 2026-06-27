@@ -117,7 +117,7 @@ export default function GitImportPage() {
       setRepoError(null);
       setReposUnavailable(false);
       try {
-        const d = await gitApi.remoteRepos(projectId, install.installation_id);
+        const d = await gitApi.remoteRepos(projectId, install.id);
         setRemoteRepos(d.repos ?? []);
       } catch (err) {
         // 503 → build-agent not configured. Disabled state, not a crash.
@@ -143,7 +143,7 @@ export default function GitImportPage() {
       setDetecting(true);
       setDetection(null);
       try {
-        const d = await gitApi.detect(projectId, selectedInstall.installation_id, repo.full_name, root || ".");
+        const d = await gitApi.detect(projectId, selectedInstall.id, repo.full_name, root || ".");
         setDetection(d);
       } catch {
         // Detection is best-effort; the user can still pick a framework manually.
@@ -173,7 +173,7 @@ export default function GitImportPage() {
     setSubmitting(true);
     try {
       await gitApi.linkRepo(projectId, envId, {
-        installation_id: selectedInstall.installation_id,
+        installation_id: selectedInstall.id,
         repo_full_name: selectedRepo.full_name,
         app_name: appName,
         production_branch: branch,
@@ -316,6 +316,29 @@ export default function GitImportPage() {
           <button onClick={() => setStep(1)} className="mb-3 text-xs text-gray-400 hover:text-gray-600">
             ← Back to accounts
           </button>
+
+          {/* Org / account selector — switch which installation's repos are listed
+              without stepping back. Each GitHub installation maps to one org/user. */}
+          <div className="mb-4">
+            <label className="block text-xs font-medium text-gray-500">GitHub account / organization</label>
+            <select
+              value={selectedInstall.id}
+              onChange={(e) => {
+                const next = installations.find((i) => i.id === e.target.value);
+                if (!next) return;
+                setSelectedRepo(null);
+                setSelectedInstall(next);
+                void loadRepos(next);
+              }}
+              className="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+            >
+              {installations.map((inst) => (
+                <option key={inst.id} value={inst.id}>
+                  {inst.account_login} ({inst.provider})
+                </option>
+              ))}
+            </select>
+          </div>
           {repoError && (
             <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{repoError}</div>
           )}
