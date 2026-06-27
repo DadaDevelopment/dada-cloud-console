@@ -37,10 +37,26 @@ longhorn over-provisioning; NOT required for the 401 fix.
       via basic-auth, patched `GRAFANA_API_TOKEN`, rolled backend. Console healthy on token (200, no 401).
       This bridge dies on the NEXT wipe — the new image removes the need for it permanently.
 
-## Verification
-- [x] admin basic-auth works against live Grafana API (`/api/folders`, `/api/v1/provisioning/alert-rules` → 200).
-- [x] `kubectl -n monitoring delete pod <grafana>` → fresh pod, empty DB; admin basic-auth STILL returns 200
-      (`/api/folders` + `/api/serviceaccounts/search`). **Credential survives the wipe.**
-- [x] Backend restart on bridge token: logs clean (no error/warn/401); console token → `/api/folders` 200.
-- [ ] **PENDING (user):** after new image, delete grafana pod → console shows no `GET /api/folders 401`
-      with NO token re-mint (basic-auth carries it).
+## CRITICAL GOTCHA found during verification: chart admin password ROTATES
+The chart's generated `admin-password` is `randAlphaNum 40` guarded by a helm
+`lookup` that preserves it — but Argo renders with `helm template` (NO cluster
+lookup), so the random REGENERATES on every sync and the password silently
+rotates. Observed live: the chart secret password changed mid-session and broke
+basic-auth exactly like the wiped token. So basic-auth alone is NOT durable
+unless the admin password is pinned.
+
+### Durable pin (added)
+- [x] Created out-of-git Secret `grafana-admin` (ns monitoring; keys admin-user/admin-password).
+- [x] argo-infra console-migration: `grafana.admin.existingSecret: grafana-admin` (commit b411445, pushed).
+- [x] Grafana deploy now reads admin from `grafana-admin` (Argo doesn't manage it → never regenerated).
+      The chart's own secret rotation is now irrelevant.
+- [x] Backend secret `GRAFANA_ADMIN_PASSWORD` = the `grafana-admin` value (same fixed string).
+
+## Verification (all on prod)
+- [x] admin basic-auth → 200 on `/api/folders` + `/api/v1/provisioning/alert-rules`.
+- [x] `kubectl -n monitoring delete pod <grafana>` → fresh empty-DB pod; the OLD SA token returns 401
+      (proves the failure mode) while admin basic-auth STILL returns 200. **Credential survives the wipe.**
+- [x] New basic-auth image (d9fd4233) deployed via CI write-back (build #204 SUCCESS).
+- [x] Post-pin wipe: console basic-auth → 200, `grafana-admin` value == backend value (stable, no drift).
+- [x] Backend boot-reconcile against freshly-wiped Grafana: logs clean (no 401/error); folders present.
+- [ ] Stale dead bridge token still sits in `GRAFANA_API_TOKEN` (harmless — basic-auth wins in code); optional cleanup.
