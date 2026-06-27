@@ -102,6 +102,12 @@ export const git: Messages = {
   "git.import.branch.label": { ru: "Ветка для продакшна", en: "Production branch" },
   "git.import.rootDir.label": { ru: "Корневая директория", en: "Root directory" },
   "git.import.frameworkOverride.label": { ru: "Переопределить фреймворк", en: "Framework override" },
+  "git.import.framework.label": { ru: "Фреймворк", en: "Framework" },
+  "git.import.framework.auto": { ru: "Автоопределение", en: "Auto-detect" },
+  "git.import.framework.hint": {
+    ru: "Порт подставится по умолчанию для фреймворка — можно изменить ниже. Сборка всё равно автоопределяется.",
+    en: "Sets a default port for the framework — editable below. The build is still auto-detected.",
+  },
 
   "git.import.autoDeploy.label": { ru: "Авто-деплой", en: "Auto-deploy" },
   "git.import.autoDeploy.hint": {

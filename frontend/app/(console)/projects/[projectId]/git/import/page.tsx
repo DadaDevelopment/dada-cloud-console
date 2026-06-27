@@ -14,6 +14,43 @@ import { Search, Lock, ChevronDown } from "lucide-react";
 
 type Step = 1 | 2 | 3;
 
+type FrameworkPreset = { id: string; label: string; port: number };
+type PresetGroup = { group: string; items: FrameworkPreset[] };
+
+const FRAMEWORK_PRESETS: PresetGroup[] = [
+  {
+    group: "Java",
+    items: [
+      { id: "spring-maven", label: "Spring Boot (Maven)", port: 8080 },
+      { id: "spring-gradle", label: "Spring Boot (Gradle)", port: 8080 },
+    ],
+  },
+  {
+    group: "Python",
+    items: [
+      { id: "fastapi", label: "FastAPI", port: 8000 },
+      { id: "flask", label: "Flask", port: 5000 },
+      { id: "django", label: "Django", port: 8000 },
+    ],
+  },
+  {
+    group: "JavaScript / TypeScript",
+    items: [
+      { id: "nextjs", label: "Next.js", port: 3000 },
+      { id: "nestjs", label: "NestJS", port: 3000 },
+      { id: "node", label: "Node.js / Express", port: 3000 },
+      { id: "vite", label: "Vite", port: 4173 },
+      { id: "remix", label: "Remix", port: 3000 },
+    ],
+  },
+  {
+    group: "Static",
+    items: [{ id: "static", label: "Static site", port: 80 }],
+  },
+];
+
+const PRESET_BY_ID = new Map(FRAMEWORK_PRESETS.flatMap((g) => g.items).map((p) => [p.id, p]));
+
 function GithubMark({ className }: { className?: string }) {
   return (
     <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden className={className}>
@@ -462,6 +499,35 @@ export default function GitImportPage() {
             </p>
           </div>
 
+          <div>
+            <label className="block text-sm font-medium text-gray-700">{t("git.import.framework.label")}</label>
+            <div className="relative mt-1">
+              <select
+                value={frameworkOverride}
+                onChange={(e) => {
+                  const id = e.target.value;
+                  setFrameworkOverride(id);
+                  const preset = PRESET_BY_ID.get(id);
+                  if (preset) setPort(preset.port);
+                }}
+                className="block w-full appearance-none rounded-lg border border-gray-300 bg-white px-3 py-2 pr-9 text-sm text-gray-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              >
+                <option value="">{t("git.import.framework.auto")}</option>
+                {FRAMEWORK_PRESETS.map((g) => (
+                  <optgroup key={g.group} label={g.group}>
+                    {g.items.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.label}
+                      </option>
+                    ))}
+                  </optgroup>
+                ))}
+              </select>
+              <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+            </div>
+            <p className="mt-1 text-xs text-gray-400">{t("git.import.framework.hint")}</p>
+          </div>
+
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="block text-sm font-medium text-gray-700">{t("git.import.port.label")}</label>
@@ -514,18 +580,6 @@ export default function GitImportPage() {
             </div>
           </div>
 
-          <div>
-            <label className="block text-sm font-medium text-gray-700">
-              {t("git.import.frameworkOverride.label")} <span className="font-normal text-gray-400">{t("common.optional")}</span>
-            </label>
-            <input
-              type="text"
-              value={frameworkOverride}
-              onChange={(e) => setFrameworkOverride(e.target.value)}
-              placeholder={detection?.framework ?? "auto"}
-              className="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm font-mono text-gray-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-            />
-          </div>
 
           <div className="flex items-center justify-between rounded-lg border border-gray-200 px-4 py-3">
             <div>
