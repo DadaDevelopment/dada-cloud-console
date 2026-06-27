@@ -557,9 +557,9 @@ export interface Build {
 }
 
 export interface BuildLogFrame {
-  type: "log" | "status" | "error";
-  payload: string;
-  ts: string;
+  type: "log" | "status" | "error" | "done";
+  line?: string;
+  msg?: string;
 }
 
 export interface Deployment {

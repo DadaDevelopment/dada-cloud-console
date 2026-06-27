@@ -40,7 +40,7 @@ export function BuildLogViewer({ projectId, buildId }: { projectId: string; buil
       return;
     }
 
-    const url = new URL("/ws/build-logs", tokenData.ws_url.replace(/^http/, "ws"));
+    const url = new URL("/ws/build", tokenData.ws_url.replace(/^http/, "ws"));
     url.searchParams.set("token", tokenData.token);
 
     const ws = new WebSocket(url.toString());
@@ -53,7 +53,7 @@ export function BuildLogViewer({ projectId, buildId }: { projectId: string; buil
     ws.onmessage = (ev) => {
       try {
         const frame = JSON.parse(ev.data) as BuildLogFrame;
-        append(frame.type, frame.payload);
+        append(frame.type, frame.line ?? frame.msg ?? "");
       } catch {
         // ignore malformed frames
       }
