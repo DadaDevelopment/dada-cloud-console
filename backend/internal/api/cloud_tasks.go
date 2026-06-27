@@ -125,7 +125,7 @@ func (h *Handler) CreateCloudTask(c *gin.Context) {
 	in := dadagent.IntentRequest{
 		IntentID:          intentID,
 		Summary:           entry.Summary + " (" + appName + ")",
-		TaskType:          "feature",
+		TaskType:          "docs",
 		CoreLoopImpact:    "Cloud-fired task to improve " + appName + " growth instrumentation.",
 		PrimaryPillar:     "SPD",
 		VisiblePrimitives: []string{"intents"},
