@@ -51,6 +51,16 @@ export const git: Messages = {
   "git.import.step.configure": { ru: "Настройка", en: "Configure" },
   "git.import.step.deploy": { ru: "Деплой", en: "Deploy" },
 
+  "git.import.subtitle": {
+    ru: "От репозитория до задеплоенного приложения — на одном экране.",
+    en: "From repository to a deployed app — all on one screen.",
+  },
+  "git.import.section.source": { ru: "Репозиторий", en: "Repository" },
+  "git.import.section.configure": { ru: "Настройка", en: "Configure" },
+  "git.import.section.deploy": { ru: "Деплой", en: "Deploy" },
+  "git.import.changeRepo": { ru: "Изменить", en: "Change" },
+  "git.import.selectedButton": { ru: "Выбрано", en: "Selected" },
+
   "git.import.deploy.button": { ru: "Задеплоить", en: "Deploy" },
   "git.import.deploy.starting": { ru: "Запуск сборки…", en: "Starting build…" },
   "git.import.deploy.triggerFailed": { ru: "Не удалось запустить сборку", en: "Failed to start the build" },
