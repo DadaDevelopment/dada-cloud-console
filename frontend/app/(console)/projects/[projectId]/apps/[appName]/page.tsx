@@ -14,6 +14,7 @@ import { ComposeStatePanel } from "@/components/compose-state-panel";
 import { MetricsPanel } from "@/components/metrics-panel";
 import { LogsViewer } from "@/components/logs-viewer";
 import { PhaseBadge } from "@/components/ui/phase-badge";
+import { CloudTaskPanel } from "@/components/cloud-task/cloud-task-panel";
 import { useT } from "@/lib/i18n/console/context";
 
 interface DomainForm {
@@ -234,6 +235,16 @@ export default function AppDetailPage() {
           <LogsViewer projectId={projectId} app={appName} />
         </div>
       )}
+
+      <div className="mt-10">
+        <CloudTaskPanel
+          projectId={projectId}
+          envId={envId ?? ""}
+          appName={appName}
+          appKind={isCompose ? "compose" : "web"}
+          canMutate={canMutate(role)}
+        />
+      </div>
 
       <div className="mt-10">
         <div className="mb-4 flex items-center justify-between">
