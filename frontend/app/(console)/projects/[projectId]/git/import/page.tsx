@@ -1,9 +1,11 @@
 "use client";
 import { useCallback, useEffect, useState, FormEvent } from "react";
-import { useParams, useSearchParams, useRouter } from "next/navigation";
+import { useParams, useSearchParams } from "next/navigation";
 import Link from "next/link";
-import { gitApi } from "@/lib/api";
-import type { GitInstallation, GitRemoteRepo, FrameworkDetection } from "@/lib/types";
+import { gitApi, buildsApi } from "@/lib/api";
+import type { GitInstallation, GitRemoteRepo, FrameworkDetection, Build } from "@/lib/types";
+import { BuildLogViewer } from "@/components/deploy/build-log-viewer";
+import { BuildStatusBadge, isBuildActive } from "@/components/deploy/build-status-badge";
 import { Spinner } from "@/components/ui/spinner";
 import { Breadcrumb } from "@/components/ui/breadcrumb";
 import { useProjectContext } from "@/lib/project-context";
@@ -12,7 +14,7 @@ import { useT } from "@/lib/i18n/console/context";
 import { timeAgo } from "@/lib/format";
 import { Search, Lock, ChevronDown } from "lucide-react";
 
-type Step = 1 | 2 | 3;
+type Step = 1 | 2 | 3 | 4;
 
 type FrameworkPreset = { id: string; label: string; port: number };
 type PresetGroup = { group: string; items: FrameworkPreset[] };
@@ -73,7 +75,6 @@ export default function GitImportPage() {
   const params = useParams<{ projectId: string }>();
   const projectId = params.projectId;
   const searchParams = useSearchParams();
-  const router = useRouter();
 
   const { project, selectedEnv, role, loading: isLoadingEnvs } = useProjectContext();
   const envId = searchParams.get("envId") || selectedEnv?.id || "";
@@ -103,6 +104,11 @@ export default function GitImportPage() {
   const [detecting, setDetecting] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
+
+  // Step 4 — deploy. The repo link kicks off the first build; we stay on-screen
+  // and stream its logs until a terminal status, Vercel-style.
+  const [build, setBuild] = useState<Build | null>(null);
+  const [deployError, setDeployError] = useState<string | null>(null);
 
   const allowed = canMutate(role);
 
@@ -204,6 +210,7 @@ export default function GitImportPage() {
     e.preventDefault();
     if (!selectedInstall || !selectedRepo) return;
     setSubmitError(null);
+    setDeployError(null);
     setSubmitting(true);
     try {
       await gitApi.linkRepo(projectId, envId, {
@@ -217,14 +224,50 @@ export default function GitImportPage() {
         port,
         profile,
       });
-      router.push(`/projects/${projectId}/git${envId ? `?envId=${envId}` : ""}`);
     } catch (err) {
       const msg = err instanceof Error ? err.message : t("git.import.error.connect");
-      setSubmitError(/409|already/i.test(msg) ? t("git.import.alreadyConnected") : msg);
+      // 409 → repo already linked to this app; not fatal, proceed to deploy.
+      if (!/409|already/i.test(msg)) {
+        setSubmitError(msg);
+        setSubmitting(false);
+        return;
+      }
+    }
+    // Repo linked — kick off the first build and switch to the live deploy view.
+    setStep(4);
+    try {
+      const { build: b } = await buildsApi.trigger(projectId, envId, appName);
+      setBuild(b);
+    } catch (err) {
+      setDeployError(err instanceof Error ? err.message : t("git.import.deploy.triggerFailed"));
     } finally {
       setSubmitting(false);
     }
   }
+
+  const triggerDeploy = useCallback(async () => {
+    setDeployError(null);
+    setBuild(null);
+    try {
+      const { build: b } = await buildsApi.trigger(projectId, envId, appName);
+      setBuild(b);
+    } catch (err) {
+      setDeployError(err instanceof Error ? err.message : t("git.import.deploy.triggerFailed"));
+    }
+  }, [projectId, envId, appName, t]);
+
+  // Poll the build's status while it's active so the deploy view reaches a
+  // terminal state without a manual refresh.
+  useEffect(() => {
+    if (!build || !isBuildActive(build.status)) return;
+    const id = setInterval(() => {
+      buildsApi
+        .get(projectId, build.id)
+        .then(({ build: b }) => setBuild(b))
+        .catch(() => {});
+    }, 3000);
+    return () => clearInterval(id);
+  }, [projectId, build]);
 
   if (isLoadingEnvs) {
     return (
@@ -265,7 +308,7 @@ export default function GitImportPage() {
       <h1 className="mt-2 text-2xl font-bold text-gray-900">{t("git.import.title")}</h1>
 
       <ol className="mb-8 mt-4 flex items-center gap-2 text-sm">
-        {([t("git.import.step.account"), t("git.import.step.repository"), t("git.import.step.configure")] as const).map((lbl, i) => {
+        {([t("git.import.step.account"), t("git.import.step.repository"), t("git.import.step.configure"), t("git.import.step.deploy")] as const).map((lbl, i) => {
           const n = (i + 1) as Step;
           const active = step === n;
           const done = step > n;
@@ -279,7 +322,7 @@ export default function GitImportPage() {
                 {done ? "✓" : n}
               </span>
               <span className={active ? "font-medium text-gray-900" : "text-gray-400"}>{lbl}</span>
-              {n < 3 && <span className="mx-1 text-gray-300">→</span>}
+              {n < 4 && <span className="mx-1 text-gray-300">→</span>}
             </li>
           );
         })}
@@ -619,14 +662,78 @@ export default function GitImportPage() {
             >
               {submitting ? (
                 <>
-                  <Spinner size="sm" /> {t("git.import.connecting")}
+                  <Spinner size="sm" /> {t("git.import.deploy.starting")}
                 </>
               ) : (
-                t("git.import.connect")
+                t("git.import.deploy.button")
               )}
             </button>
           </div>
         </form>
+      )}
+
+      {/* ── Step 4: deploy — live build logs, stay on screen ── */}
+      {step === 4 && selectedRepo && (
+        <div className="space-y-5">
+          <div className="rounded-lg border border-gray-200 bg-gray-50 px-4 py-3">
+            <div className="flex items-center justify-between gap-3">
+              <div className="min-w-0">
+                <p className="truncate font-mono text-sm font-medium text-gray-900">{appName}</p>
+                <p className="truncate text-xs text-gray-400">{selectedRepo.full_name}</p>
+              </div>
+              {build ? (
+                <BuildStatusBadge status={build.status} />
+              ) : deployError ? null : (
+                <span className="inline-flex items-center gap-2 text-xs text-gray-500">
+                  <Spinner size="sm" /> {t("git.import.deploy.starting")}
+                </span>
+              )}
+            </div>
+          </div>
+
+          {deployError ? (
+            <div role="alert" className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+              {deployError}
+            </div>
+          ) : build ? (
+            <BuildLogViewer projectId={projectId} buildId={build.id} />
+          ) : (
+            <div className="flex h-32 items-center justify-center rounded-lg border border-gray-200 bg-white">
+              <Spinner />
+            </div>
+          )}
+
+          {build && build.status === "success" && (
+            <div className="rounded-lg border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-800">
+              {t("git.import.deploy.success")}
+            </div>
+          )}
+
+          <div className="flex flex-wrap justify-end gap-3 pt-1">
+            {(deployError || (build && (build.status === "failed" || build.status === "canceled"))) && (
+              <button
+                onClick={triggerDeploy}
+                className="rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
+              >
+                {t("git.import.deploy.retry")}
+              </button>
+            )}
+            <Link
+              href={`/projects/${projectId}/apps/${appName}/deployments${envId ? `?envId=${envId}` : ""}`}
+              className="rounded-lg px-4 py-2 text-sm font-medium text-gray-600 hover:bg-gray-100 transition-colors"
+            >
+              {t("git.import.deploy.viewDeployments")}
+            </Link>
+            {build && build.status === "success" && (
+              <Link
+                href={`/projects/${projectId}/apps/${appName}${envId ? `?envId=${envId}` : ""}`}
+                className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 transition-colors"
+              >
+                {t("git.import.deploy.openApp")}
+              </Link>
+            )}
+          </div>
+        </div>
       )}
     </div>
   );

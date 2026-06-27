@@ -49,6 +49,18 @@ export const git: Messages = {
   "git.import.step.account": { ru: "Аккаунт", en: "Account" },
   "git.import.step.repository": { ru: "Репозиторий", en: "Repository" },
   "git.import.step.configure": { ru: "Настройка", en: "Configure" },
+  "git.import.step.deploy": { ru: "Деплой", en: "Deploy" },
+
+  "git.import.deploy.button": { ru: "Задеплоить", en: "Deploy" },
+  "git.import.deploy.starting": { ru: "Запуск сборки…", en: "Starting build…" },
+  "git.import.deploy.triggerFailed": { ru: "Не удалось запустить сборку", en: "Failed to start the build" },
+  "git.import.deploy.success": {
+    ru: "Готово — приложение собрано и задеплоено.",
+    en: "Done — the app is built and deployed.",
+  },
+  "git.import.deploy.retry": { ru: "Повторить", en: "Retry" },
+  "git.import.deploy.viewDeployments": { ru: "Все деплои", en: "View deployments" },
+  "git.import.deploy.openApp": { ru: "Открыть приложение", en: "Open app" },
 
   "git.import.noPermission": {
     ru: "У вас нет прав на подключение репозиториев.",
