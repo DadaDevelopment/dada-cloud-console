@@ -96,9 +96,14 @@ func (h *Handler) CreateCloudTask(c *gin.Context) {
 		respondError(c, http.StatusBadGateway, "failed to mint install token")
 		return
 	}
+	counterID, err := h.counters.Resolve(c.Request.Context(), appName)
+	if err != nil {
+		respondError(c, http.StatusFailedDependency, err.Error())
+		return
+	}
 	params, err := entry.ResolveParams(cloudtask.ResolverCfg{
-		MetrikaOAuthToken: h.cfg.MetrikaOAuthToken,
-		SiteURL:           h.resolveSiteURL(c.Request.Context(), envID, appName),
+		CounterID:   counterID,
+		ProjectType: "front",
 	})
 	if err != nil {
 		respondError(c, http.StatusFailedDependency, err.Error())

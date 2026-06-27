@@ -3,6 +3,7 @@ package api
 import (
 	"github.com/dada-tuda/console/backend/internal/auth"
 	"github.com/dada-tuda/console/backend/internal/buildagent"
+	"github.com/dada-tuda/console/backend/internal/cloudtask"
 	"github.com/dada-tuda/console/backend/internal/config"
 	"github.com/dada-tuda/console/backend/internal/dadagent"
 	"github.com/dada-tuda/console/backend/internal/grafana"
@@ -38,6 +39,11 @@ type Handler struct {
 	// is the JWKS verifier that gates the agent webhook callback; nil disables it.
 	dadagent      *dadagent.Client
 	agentVerifier *auth.KeycloakVerifier
+
+	// counters resolves an app's Yandex Metrika counter id from its live
+	// YandexMetrikaCounter CR. Never nil: off-cluster it returns a resolver
+	// whose Resolve fails with a clear "not configured" error.
+	counters cloudtask.CounterResolver
 }
 
 // NewHandler constructs a Handler with the given dependencies.
@@ -82,5 +88,6 @@ func NewHandler(pool *pgxpool.Pool, cfg *config.Config) *Handler {
 		ts := dadagent.NewTokenSource(cfg.KeycloakTokenURL, cfg.CloudAgentClientID, cfg.CloudAgentClientSecret)
 		h.dadagent = dadagent.New(cfg.DadaAgentBaseURL, ts)
 	}
+	h.counters = cloudtask.NewCounterResolver()
 	return h
 }

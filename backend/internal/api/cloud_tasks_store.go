@@ -101,18 +101,3 @@ func (h *Handler) resolveGitRepo(ctx context.Context, projectID, envID uuid.UUID
 		projectID, envID, appName).Scan(&gitRepoID, &repoFullName, &installationID)
 	return repoFullName, installationID, gitRepoID, err
 }
-
-// resolveSiteURL returns the app's public https URL when a verified custom
-// hostname exists, else "". Best-effort: any error yields "".
-func (h *Handler) resolveSiteURL(ctx context.Context, envID uuid.UUID, appName string) string {
-	var hostname string
-	err := h.pool.QueryRow(ctx,
-		`SELECT hostname FROM domain_hostnames
-		  WHERE environment_id=$1 AND app_name=$2 AND status='active'
-		  ORDER BY created_at ASC LIMIT 1`,
-		envID, appName).Scan(&hostname)
-	if err != nil || hostname == "" {
-		return ""
-	}
-	return "https://" + hostname
-}

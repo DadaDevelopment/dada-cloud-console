@@ -1,17 +1,24 @@
 // Package cloudtask holds the curated cloud-task catalog: each entry maps a
 // task_type to an agent skill plus a server-side parameter resolver. No user
-// form in MVP — the cloud resolves params from config and live app state.
+// form in MVP — the cloud resolves params from live cluster state.
 package cloudtask
 
 import "fmt"
 
-// ResolverCfg carries the server-side inputs a task's param resolver may need.
-// MetrikaOAuthToken is a config secret. SiteURL is a best-effort live value the
-// handler fills in from the app's public domain when cheaply resolvable; empty
-// means "unknown", and the resolver omits it rather than blocking.
+// ResolverCfg carries the server-side inputs a task's param resolver needs.
+//
+// CounterID is resolved live from the project's YandexMetrikaCounter CR and is
+// the authoritative Metrika counter id; empty means "not resolved" and the
+// resolver fails rather than guessing. ProjectType is the app shape the skill
+// instruments ("front" for web apps in MVP). Archetype is an optional cheap
+// signal ("landing"/"dashboard"/"app"/"api"); empty lets the skill propose one.
+//
+// The Metrika OAuth token is intentionally absent: the metrika-instrumentor
+// skill resolves it itself from the cluster secret, so the cloud never passes it.
 type ResolverCfg struct {
-	MetrikaOAuthToken string
-	SiteURL           string
+	CounterID   string
+	ProjectType string
+	Archetype   string
 }
 
 // Entry is one curated cloud-task: which agent skill runs, where it surfaces,
@@ -27,13 +34,6 @@ type Entry struct {
 
 func isWeb(kind string) bool { return kind == "web" || kind == "App" || kind == "app" }
 
-var defaultMetrikaGoals = []map[string]string{
-	{"name": "Отправка формы", "identifier": "form_submit"},
-	{"name": "Заполнил контактные данные", "identifier": "form_start"},
-	{"name": "Клик по CTA", "identifier": "cta_contact_click"},
-	{"name": "Клик по мессенджеру или телефону", "identifier": "messenger_click"},
-}
-
 // Catalog is the curated cloud-task set. Adding a task = one Entry here plus a
 // matching cloud-task-tagged skill on the agent.
 func Catalog() []Entry {
@@ -45,15 +45,19 @@ func Catalog() []Entry {
 			Summary:   "Wire Yandex Metrika counter and conversion goals into the app, open a PR.",
 			AppliesTo: isWeb,
 			ResolveParams: func(cfg ResolverCfg) (map[string]any, error) {
-				if cfg.MetrikaOAuthToken == "" {
-					return nil, fmt.Errorf("METRIKA_OAUTH_TOKEN not configured")
+				if cfg.CounterID == "" {
+					return nil, fmt.Errorf("YandexMetrikaCounter counterId not resolved")
+				}
+				pt := cfg.ProjectType
+				if pt == "" {
+					pt = "front"
 				}
 				params := map[string]any{
-					"metrika_oauth_token": cfg.MetrikaOAuthToken,
-					"goals":               defaultMetrikaGoals,
+					"counterId":   cfg.CounterID,
+					"projectType": pt,
 				}
-				if cfg.SiteURL != "" {
-					params["site_url"] = cfg.SiteURL
+				if cfg.Archetype != "" {
+					params["archetype"] = cfg.Archetype
 				}
 				return params, nil
 			},
