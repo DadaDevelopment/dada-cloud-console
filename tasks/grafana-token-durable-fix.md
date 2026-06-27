@@ -27,11 +27,20 @@ longhorn over-provisioning; NOT required for the 401 fix.
 - [x] client unit test: basic-auth path sends `Authorization: Basic`.
 
 ### cluster (out-of-git, manual — same pattern as existing GRAFANA_API_TOKEN)
-- [ ] Patch secret `dada-cloud-console-backend` (ns argocd-prod): add `GRAFANA_ADMIN_USER`,
-      `GRAFANA_ADMIN_PASSWORD` from the grafana admin Secret. Rollout restart backend.
-- [ ] Deploy new backend image (CI + tag pin, console-migration) so the basic-auth code runs.
+- [x] Patch secret `dada-cloud-console-backend` (ns argocd-prod): add `GRAFANA_ADMIN_USER`,
+      `GRAFANA_ADMIN_PASSWORD` from the grafana admin Secret (additive; old image ignores them).
+- [ ] **PENDING (user):** Deploy new backend image (CI + tag pin, console-migration) so the
+      basic-auth code runs. Until then console runs on the bridge token below.
+
+### bridge (one-time, until new image deploys)
+- [x] After the verification wipe, re-minted admin SA `dada-console` (id 2, login sa-1-dada-console)
+      via basic-auth, patched `GRAFANA_API_TOKEN`, rolled backend. Console healthy on token (200, no 401).
+      This bridge dies on the NEXT wipe — the new image removes the need for it permanently.
 
 ## Verification
-- [x] admin basic-auth works against live Grafana API.
-- [ ] `kubectl -n monitoring delete pod <grafana>`; admin basic-auth still works on fresh pod (credential survives wipe).
-- [ ] After new image: delete grafana pod → console shows no `GET /api/folders 401`; reconciler re-asserts rules.
+- [x] admin basic-auth works against live Grafana API (`/api/folders`, `/api/v1/provisioning/alert-rules` → 200).
+- [x] `kubectl -n monitoring delete pod <grafana>` → fresh pod, empty DB; admin basic-auth STILL returns 200
+      (`/api/folders` + `/api/serviceaccounts/search`). **Credential survives the wipe.**
+- [x] Backend restart on bridge token: logs clean (no error/warn/401); console token → `/api/folders` 200.
+- [ ] **PENDING (user):** after new image, delete grafana pod → console shows no `GET /api/folders 401`
+      with NO token re-mint (basic-auth carries it).
