@@ -300,6 +300,41 @@ func Load() (*Config, error) {
 	return cfg, nil
 }
 
+// GatewayEmbedConfig is the minimal configuration the grafana-embed-gateway
+// needs. The gateway is a stateless reverse proxy: it never opens the database
+// or validates console JWTs, so unlike Load() it does NOT require DB_URL or
+// JWT_SECRET. Field names mirror the matching Config fields.
+type GatewayEmbedConfig struct {
+	LogLevel                 string
+	GrafanaEmbedSecret       string
+	GrafanaEmbedInternalURL  string
+	GrafanaEmbedUpstreamHost string
+	GrafanaEmbedCookieDomain string
+	GrafanaEmbedListenAddr   string
+}
+
+// LoadGatewayEmbed reads only the env the grafana-embed-gateway uses and
+// validates the two that are mandatory (the shared HMAC secret and the upstream
+// Grafana URL). It deliberately omits the DB_URL / JWT_SECRET requirements of
+// Load() so the gateway can run without database credentials.
+func LoadGatewayEmbed() (*GatewayEmbedConfig, error) {
+	cfg := &GatewayEmbedConfig{
+		LogLevel:                 getEnv("LOG_LEVEL", "info"),
+		GrafanaEmbedSecret:       getEnv("GRAFANA_EMBED_SECRET", ""),
+		GrafanaEmbedInternalURL:  getEnv("GRAFANA_EMBED_INTERNAL_URL", ""),
+		GrafanaEmbedUpstreamHost: getEnv("GRAFANA_EMBED_UPSTREAM_HOST", "grafana.dada-tuda.ru"),
+		GrafanaEmbedCookieDomain: getEnv("GRAFANA_EMBED_COOKIE_DOMAIN", ""),
+		GrafanaEmbedListenAddr:   getEnv("GRAFANA_EMBED_LISTEN_ADDR", ":8080"),
+	}
+	if cfg.GrafanaEmbedSecret == "" {
+		return nil, fmt.Errorf("GRAFANA_EMBED_SECRET is required")
+	}
+	if cfg.GrafanaEmbedInternalURL == "" {
+		return nil, fmt.Errorf("GRAFANA_EMBED_INTERNAL_URL is required (internal Grafana svc base URL)")
+	}
+	return cfg, nil
+}
+
 func getEnv(key, defaultVal string) string {
 	if v := os.Getenv(key); v != "" {
 		return v

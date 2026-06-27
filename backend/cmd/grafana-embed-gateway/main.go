@@ -37,20 +37,13 @@ func main() {
 	zerolog.TimeFieldFormat = zerolog.TimeFormatUnix
 	log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr})
 
-	cfg, err := config.Load()
+	cfg, err := config.LoadGatewayEmbed()
 	if err != nil {
 		log.Fatal().Err(err).Msg("failed to load config")
 	}
 	zerolog.SetGlobalLevel(zerolog.InfoLevel)
 	if cfg.LogLevel == "debug" {
 		zerolog.SetGlobalLevel(zerolog.DebugLevel)
-	}
-
-	if cfg.GrafanaEmbedSecret == "" {
-		log.Fatal().Msg("GRAFANA_EMBED_SECRET is required")
-	}
-	if cfg.GrafanaEmbedInternalURL == "" {
-		log.Fatal().Msg("GRAFANA_EMBED_INTERNAL_URL is required (internal Grafana svc base URL)")
 	}
 
 	proxy, err := grafanaembed.NewProxy(grafanaembed.Config{
