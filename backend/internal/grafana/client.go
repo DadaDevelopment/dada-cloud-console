@@ -25,22 +25,53 @@ import (
 	"time"
 )
 
-// Client talks to one Grafana instance with a service-account / admin API token.
+// Client talks to one Grafana instance, authenticating with EITHER admin
+// basic-auth (preferred) OR a service-account / admin API token.
+//
+// Auth choice matters for durability. The shared Grafana runs on emptyDir, so a
+// pod restart wipes its DB — including every service-account token (the SA token
+// lives in the DB). Admin basic-auth, by contrast, is reconstituted from the
+// chart-managed Secret (GF_SECURITY_ADMIN_USER/PASSWORD env) on every boot, so it
+// survives the wipe and the console keeps provisioning without a manual token
+// re-mint. Prefer NewBasicAuth; the token constructor (New) remains for
+// environments with persistent Grafana storage. See ADR-011.
 type Client struct {
 	baseURL    string // API base, no trailing slash
 	publicURL  string // browser-facing base for deep links (may differ from baseURL)
-	apiToken   string
+	apiToken   string // Bearer token; empty when basic-auth is used
+	user, pass string // admin basic-auth; empty when token is used
 	promDSUID  string // Prometheus datasource UID alert rules query against
 	httpClient *http.Client
 }
 
-// New returns a Grafana client, or nil when unconfigured so callers can treat
-// all alerting/dashboard provisioning as disabled (handlers respond 503).
-// publicURL falls back to baseURL when empty.
+// New returns a token-authenticated Grafana client, or nil when unconfigured so
+// callers can treat all alerting/dashboard provisioning as disabled (handlers
+// respond 503). publicURL falls back to baseURL when empty.
 func New(baseURL, apiToken, promDatasourceUID, publicURL string) *Client {
 	if baseURL == "" || apiToken == "" {
 		return nil
 	}
+	c := newClient(baseURL, promDatasourceUID, publicURL)
+	c.apiToken = apiToken
+	return c
+}
+
+// NewBasicAuth returns an admin-basic-auth Grafana client, or nil when
+// unconfigured. This is the durable auth path for emptyDir-backed Grafana: the
+// admin credential is re-provisioned from env on every Grafana boot, so it
+// outlives a DB wipe that would invalidate a service-account token.
+func NewBasicAuth(baseURL, user, pass, promDatasourceUID, publicURL string) *Client {
+	if baseURL == "" || user == "" || pass == "" {
+		return nil
+	}
+	c := newClient(baseURL, promDatasourceUID, publicURL)
+	c.user, c.pass = user, pass
+	return c
+}
+
+// newClient builds the shared parts of a Client (URLs, http client). The caller
+// sets exactly one auth mode (apiToken OR user/pass) afterwards.
+func newClient(baseURL, promDatasourceUID, publicURL string) *Client {
 	base := strings.TrimRight(baseURL, "/")
 	pub := strings.TrimRight(publicURL, "/")
 	if pub == "" {
@@ -49,7 +80,6 @@ func New(baseURL, apiToken, promDatasourceUID, publicURL string) *Client {
 	return &Client{
 		baseURL:    base,
 		publicURL:  pub,
-		apiToken:   apiToken,
 		promDSUID:  promDatasourceUID,
 		httpClient: &http.Client{Timeout: 20 * time.Second},
 	}
@@ -74,7 +104,11 @@ func (c *Client) do(ctx context.Context, method, path string, body, out any, pro
 	if err != nil {
 		return 0, err
 	}
-	req.Header.Set("Authorization", "Bearer "+c.apiToken)
+	if c.user != "" {
+		req.SetBasicAuth(c.user, c.pass)
+	} else {
+		req.Header.Set("Authorization", "Bearer "+c.apiToken)
+	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
 	if provenanceless {

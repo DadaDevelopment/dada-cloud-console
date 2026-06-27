@@ -115,9 +115,18 @@ type Config struct {
 	//   GrafanaPublicURL        — browser-facing base for deep links (defaults to base)
 	//   GrafanaAPIToken         — service-account token (admin: needs folder/alert write)
 	//   GrafanaPromDatasourceUID— UID of the Prometheus datasource alert rules query
+	//
+	// GrafanaAdminUser/GrafanaAdminPassword select admin BASIC-AUTH instead of the
+	// token. Prefer them for the shared emptyDir-backed Grafana: a pod restart wipes
+	// the Grafana DB (and every service-account token with it), but the admin
+	// credential is re-provisioned from env on every boot, so basic-auth survives
+	// the wipe and the console keeps provisioning without a manual token re-mint.
+	// When both admin vars are set they win; otherwise the token is used.
 	GrafanaBaseURL           string // GRAFANA_BASE_URL
 	GrafanaPublicURL         string // GRAFANA_PUBLIC_URL
 	GrafanaAPIToken          string // GRAFANA_API_TOKEN
+	GrafanaAdminUser         string // GRAFANA_ADMIN_USER
+	GrafanaAdminPassword     string // GRAFANA_ADMIN_PASSWORD
 	GrafanaPromDatasourceUID string // GRAFANA_PROM_DATASOURCE_UID
 
 	// App-log index for monitoring resources (separate from the VM filebeat
@@ -208,6 +217,8 @@ func Load() (*Config, error) {
 		GrafanaBaseURL:           getEnv("GRAFANA_BASE_URL", ""),
 		GrafanaPublicURL:         getEnv("GRAFANA_PUBLIC_URL", ""),
 		GrafanaAPIToken:          getEnv("GRAFANA_API_TOKEN", ""),
+		GrafanaAdminUser:         getEnv("GRAFANA_ADMIN_USER", ""),
+		GrafanaAdminPassword:     getEnv("GRAFANA_ADMIN_PASSWORD", ""),
 		GrafanaPromDatasourceUID: getEnv("GRAFANA_PROM_DATASOURCE_UID", ""),
 		MonitoringLogIndex:       getEnv("MONITORING_LOG_INDEX", "dada-app-logs-*"),
 		PrometheusRemoteWriteURL:  getEnv("PROMETHEUS_REMOTE_WRITE_URL", ""),

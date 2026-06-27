@@ -42,7 +42,13 @@ func NewHandler(pool *pgxpool.Pool, cfg *config.Config) *Handler {
 	h.prometheus = prometheus.New(cfg.PrometheusQueryURL, cfg.PrometheusQueryUser, cfg.PrometheusQueryPass)
 	h.logsearch = logsearch.New(cfg.ElasticsearchURL, cfg.ElasticsearchAPIKey, cfg.ElasticsearchIndex)
 	h.buildagent = buildagent.New(cfg.BuildAgentURL)
-	h.grafana = grafana.New(cfg.GrafanaBaseURL, cfg.GrafanaAPIToken, cfg.GrafanaPromDatasourceUID, cfg.GrafanaPublicURL)
+	// Prefer admin basic-auth (survives the emptyDir-backed Grafana's DB wipe on
+	// pod restart); fall back to the service-account token when admin creds are unset.
+	if cfg.GrafanaAdminUser != "" && cfg.GrafanaAdminPassword != "" {
+		h.grafana = grafana.NewBasicAuth(cfg.GrafanaBaseURL, cfg.GrafanaAdminUser, cfg.GrafanaAdminPassword, cfg.GrafanaPromDatasourceUID, cfg.GrafanaPublicURL)
+	} else {
+		h.grafana = grafana.New(cfg.GrafanaBaseURL, cfg.GrafanaAPIToken, cfg.GrafanaPromDatasourceUID, cfg.GrafanaPublicURL)
+	}
 	h.appLogsearch = logsearch.New(cfg.ElasticsearchURL, cfg.ElasticsearchAPIKey, cfg.MonitoringLogIndex)
 
 	// Monitoring write path. Remote-write defaults to the query Prometheus +
