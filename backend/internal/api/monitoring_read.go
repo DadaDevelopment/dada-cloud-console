@@ -23,17 +23,19 @@ import (
 // labels defined in monitoringLabels — read and write MUST agree on them.
 
 // monitoringLabels are the canonical series/log labels for a monitoring resource.
-// Values are UUIDs (rename-safe) so renaming a resource never orphans its data.
-// org_id comes from the caller's fat claims (empty in pre-IAM/local mode → the
-// project id is used as a stable fallback so isolation still holds).
+// They MUST match exactly what the ingest path stamps (gateway resolver / api
+// ingest): project_id = project UUID, monitoring_app = the resource NAME (not its
+// UUID), org_id = the project owner UUID or "" when the project has no owner.
+// promSelector drops empty values, so an empty org_id selects the same series the
+// gateway wrote (which also omits org_id when owner is nil). Using the app UUID or
+// a project_id fallback for org_id here would select zero series — the ingest path
+// never writes those values. Trade-off: monitoring_app = name means a rename
+// re-points reads at the new name; acceptable until ingest stamps a stable id.
 func monitoringLabels(orgID string, app *models.MonitoringApp) map[string]string {
-	if orgID == "" {
-		orgID = app.ProjectID.String()
-	}
 	return map[string]string{
 		"org_id":         orgID,
 		"project_id":     app.ProjectID.String(),
-		"monitoring_app": app.ID.String(),
+		"monitoring_app": app.Name,
 	}
 }
 
@@ -335,9 +337,15 @@ func (h *Handler) GetMonitoringMetrics(c *gin.Context) {
 	labels := monitoringLabels(orgID, app)
 	sel := promSelector(labels)
 
-	// Discover metric names present for this resource.
+	start, end, step := parseRange(c)
+
+	// Discover metric names present in the requested window. last_over_time keeps a
+	// metric whose newest sample is older than the instant-query staleness window
+	// (5m) but still inside the range, so sparsely-written custom metrics surface.
+	window := fmt.Sprintf("%ds", int(end.Sub(start).Seconds()))
 	names := []string{}
-	if samples, err := h.prometheus.QueryInstant(ctx, "group by (__name__) ("+sel+")", time.Now()); err == nil {
+	discover := fmt.Sprintf("group by (__name__) (last_over_time(%s[%s]))", sel, window)
+	if samples, err := h.prometheus.QueryInstant(ctx, discover, end); err == nil {
 		for _, s := range samples {
 			if n := s.Metric["__name__"]; n != "" {
 				names = append(names, n)
@@ -345,7 +353,6 @@ func (h *Handler) GetMonitoringMetrics(c *gin.Context) {
 		}
 	}
 
-	start, end, step := parseRange(c)
 	metrics := gin.H{}
 	var liveErr string
 	for _, name := range names {
@@ -463,7 +470,7 @@ func (h *Handler) GetMonitoringGrafanaLink(c *gin.Context) {
 		respondError(c, http.StatusBadGateway, "grafana provisioning failed: "+err.Error())
 		return
 	}
-	url := fmt.Sprintf("%s/d/%s", h.grafana.PublicURL(), app.GrafanaDashboardUID)
+	url := fmt.Sprintf("%s/d/%s?kiosk&theme=light", h.grafana.PublicURL(), app.GrafanaDashboardUID)
 	c.JSON(http.StatusOK, gin.H{"url": url})
 }
 

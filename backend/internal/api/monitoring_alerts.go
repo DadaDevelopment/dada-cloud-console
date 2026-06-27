@@ -144,7 +144,7 @@ func (h *Handler) discoverPanels(ctx context.Context, sel string) []grafana.Metr
 	if h.prometheus == nil {
 		return panels
 	}
-	samples, err := h.prometheus.QueryInstant(ctx, "group by (__name__) ("+sel+")", time.Now())
+	samples, err := h.prometheus.QueryInstant(ctx, "group by (__name__) (last_over_time("+sel+"[6h]))", time.Now())
 	if err != nil {
 		return panels
 	}
