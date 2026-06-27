@@ -83,6 +83,23 @@ backend:
     ELASTICSEARCH_LOG_INDEX: "dada-vm-logs-*"
     # Note: PORTAINER_URL (live state) and PROMETHEUS_QUERY_URL / ELASTICSEARCH_URL
     # (observability read path) are injected from global.shared via the ConfigMap.
+    #
+    # DadaAgent cloud-task integration (ADR-cloud-task). Non-secret half (URLs +
+    # client id) lives here in the ConfigMap; the secret half (client secret +
+    # GitHub App id/key) is in backend.secret below — in prod that half is patched
+    # out-of-git into the existing Secret (see tasks/dadagent-cloud-task-secret-runbook.md).
+    # Empty DADA_AGENT_BASE_URL/CLOUD_AGENT_CLIENT_ID disables the create handler (503).
+    #   DADA_AGENT_BASE_URL  — in-cluster DadaAgent svc (dada-agent-service:8080 → app 8001)
+    #   KEYCLOAK_TOKEN_URL   — issuer + /protocol/openid-connect/token (client-credentials)
+    #   CLOUD_AGENT_CLIENT_ID— Keycloak SA client the cloud uses to call the agent
+    #   CLOUD_TASK_CALLBACK_URL — public webhook the agent calls back (console host)
+    DADA_AGENT_BASE_URL: "http://dada-agent-service.argocd-prod.svc.cluster.local:8080"
+    KEYCLOAK_TOKEN_URL: "https://id.dada-tuda.ru/realms/master/protocol/openid-connect/token"
+    CLOUD_AGENT_CLIENT_ID: "dada-cloud-backend"
+    CLOUD_TASK_CALLBACK_URL: "https://console.dada-tuda.ru/api/v1/webhooks/dadagent"
+    # METRIKA_OAUTH_TOKEN intentionally NOT wired: the metrika-instrumentor skill
+    # resolves the Metrika OAuth token itself inside the agent workspace, so the
+    # backend resolver no longer reads it. Leave unset.
   existingSecret: ""
   # Service-unique secrets only. Shared keys (DB_URL, GITOPS_VALUES_TOKEN_SECRET,
   # PORTAINER_API_TOKEN) come from global.shared via the Secret template.
@@ -92,6 +109,18 @@ backend:
     # Optional MLflow Authorization header value, forwarded as-is on every
     # registry call. Empty when MLflow has no auth.
     MLFLOW_AUTH_HEADER: ""
+    # DadaAgent cloud-task secrets (ADR-cloud-task). In prod the backend uses
+    # existingSecret, so these defaults are NOT rendered — they are patched
+    # out-of-git into Secret dada-cloud-console-backend (kubectl patch + rollout
+    # restart). See tasks/dadagent-cloud-task-secret-runbook.md. These defaults
+    # only apply to a fresh, self-contained install. Empty GITHUB_APP_ID/KEY →
+    # firing a cloud task 502s ("failed to mint install token").
+    #   CLOUD_AGENT_CLIENT_SECRET — secret for CLOUD_AGENT_CLIENT_ID (never logged)
+    #   GITHUB_APP_ID             — numeric app id of the argocd-dada GitHub App
+    #   GITHUB_APP_PRIVATE_KEY    — argocd-dada App PEM signing key (never logged)
+    CLOUD_AGENT_CLIENT_SECRET: ""
+    GITHUB_APP_ID: ""
+    GITHUB_APP_PRIVATE_KEY: ""
   persistence:
     enabled: true
     size: 5Gi
