@@ -1,8 +1,10 @@
 package api
 
 import (
+	"github.com/dada-tuda/console/backend/internal/auth"
 	"github.com/dada-tuda/console/backend/internal/buildagent"
 	"github.com/dada-tuda/console/backend/internal/config"
+	"github.com/dada-tuda/console/backend/internal/dadagent"
 	"github.com/dada-tuda/console/backend/internal/grafana"
 	"github.com/dada-tuda/console/backend/internal/logsearch"
 	"github.com/dada-tuda/console/backend/internal/mlflow"
@@ -30,6 +32,12 @@ type Handler struct {
 	eswrite       *logsearch.WriteClient  // nil when ELASTICSEARCH_URL unset
 	ingestLimiter *ingestLimiter          // per-app token bucket
 	maxLabels     int                     // cardinality guard: metrics per ingest request
+
+	// DadaAgent cloud-task integration. dadagent is nil when DADA_AGENT_BASE_URL /
+	// CLOUD_AGENT_CLIENT_ID are unset (create handler returns 503). agentVerifier
+	// is the JWKS verifier that gates the agent webhook callback; nil disables it.
+	dadagent      *dadagent.Client
+	agentVerifier *auth.KeycloakVerifier
 }
 
 // NewHandler constructs a Handler with the given dependencies.
@@ -68,6 +76,11 @@ func NewHandler(pool *pgxpool.Pool, cfg *config.Config) *Handler {
 	h.maxLabels = cfg.MonitoringMaxLabels
 	if h.maxLabels <= 0 {
 		h.maxLabels = 30
+	}
+
+	if cfg.DadaAgentBaseURL != "" && cfg.CloudAgentClientID != "" {
+		ts := dadagent.NewTokenSource(cfg.KeycloakTokenURL, cfg.CloudAgentClientID, cfg.CloudAgentClientSecret)
+		h.dadagent = dadagent.New(cfg.DadaAgentBaseURL, ts)
 	}
 	return h
 }

@@ -104,6 +104,18 @@ func SetupRouter(pool *pgxpool.Pool, cfg *config.Config) *gin.Engine {
 	// a session. Lives outside the JWT group on purpose.
 	r.GET("/api/v1/git/install/callback", h.GitInstallCallback)
 
+	// DadaAgent cloud-task webhook callback (status/artifacts). Public route on
+	// purpose — it is bearer-gated by a Keycloak JWKS verifier inside the handler
+	// (only the agent's own client, azp=dada-agent, is accepted), not by the user
+	// JWT middleware. Disabled when KEYCLOAK_ISSUER is unset / verifier build fails.
+	if v, err := auth.NewKeycloakVerifier(context.Background(), cfg.KeycloakIssuer, false, "", "dada-agent"); err == nil {
+		h.agentVerifier = v
+		r.POST("/api/v1/webhooks/dadagent", h.DadaAgentWebhook)
+		log.Printf("cloud-task: dadagent webhook enabled at /api/v1/webhooks/dadagent")
+	} else {
+		log.Printf("cloud-task: dadagent webhook disabled (keycloak verifier: %v)", err)
+	}
+
 	// Embedded MCP server at /mcp (Streamable HTTP transport).
 	// Each tool call self-proxies to cfg.MCPSelfURL/api/v1/... so auth and all
 	// middleware apply unchanged. Disabled via MCP_ENABLED=false.
@@ -176,6 +188,12 @@ func SetupRouter(pool *pgxpool.Pool, cfg *config.Config) *gin.Engine {
 		api.GET("/projects/:projectId/environments/:envId/apps/:appName/state", h.GetAppState)
 		api.GET("/projects/:projectId/environments/:envId/apps/:appName/logs", h.GetAppLogs)
 		api.GET("/projects/:projectId/environments/:envId/apps/:appName/metrics", h.GetAppMetrics)
+
+		// Cloud tasks (DadaAgent integration).
+		api.GET("/projects/:projectId/environments/:envId/apps/:appName/cloud-tasks", h.ListCloudTasks)
+		api.POST("/projects/:projectId/environments/:envId/apps/:appName/cloud-tasks", h.CreateCloudTask)
+		api.GET("/projects/:projectId/cloud-tasks/:taskId", h.GetCloudTask)
+		api.GET("/projects/:projectId/cloud-tasks/:taskId/artifacts/:fileId", h.ProxyCloudTaskArtifact)
 
 		// Aggregated log search (Elasticsearch/filebeat proxy, read-only).
 		api.GET("/projects/:projectId/logs", h.SearchLogs)

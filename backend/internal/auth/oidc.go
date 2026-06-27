@@ -29,6 +29,14 @@ type KeycloakClaims struct {
 	// Native OIDC scope claim (space-delimited). dada-cloud decodes authz from
 	// Groups + Scope; there is no pre-shaped org_role/projects claim (ADR-009).
 	Scope string
+
+	// Azp is the authorized party (the client the token was issued to). The
+	// cloud-task webhook gate accepts only the agent's own client (azp=dada-agent).
+	Azp string
+
+	// ResourceAccessClients lists the clients present under resource_access; used
+	// as a fallback identity check for the webhook gate.
+	ResourceAccessClients []string
 }
 
 // rawKeycloakClaims mirrors the JSON shape of a Keycloak access token. Only the
@@ -40,6 +48,7 @@ type rawKeycloakClaims struct {
 	Name              string   `json:"name"`
 	Groups            []string `json:"groups"`
 	Scope             string   `json:"scope"`
+	Azp               string   `json:"azp"`
 	RealmAccess       struct {
 		Roles []string `json:"roles"`
 	} `json:"realm_access"`
@@ -167,14 +176,21 @@ func (v *KeycloakVerifier) Verify(ctx context.Context, rawToken string) (*Keyclo
 		}
 	}
 
+	clients := make([]string, 0, len(rc.ResourceAccess))
+	for client := range rc.ResourceAccess {
+		clients = append(clients, client)
+	}
+
 	return &KeycloakClaims{
-		Subject:           rc.Subject,
-		PreferredUsername: rc.PreferredUsername,
-		Email:             rc.Email,
-		Name:              rc.Name,
-		Groups:            rc.Groups,
-		Roles:             roles,
-		Scope:             rc.Scope,
+		Subject:               rc.Subject,
+		PreferredUsername:     rc.PreferredUsername,
+		Email:                 rc.Email,
+		Name:                  rc.Name,
+		Groups:                rc.Groups,
+		Roles:                 roles,
+		Scope:                 rc.Scope,
+		Azp:                   rc.Azp,
+		ResourceAccessClients: clients,
 	}, nil
 }
 
