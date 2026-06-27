@@ -151,7 +151,7 @@ async function loadOidcProvider(): Promise<React.ComponentType<{ children: React
           oidc: {
             authority: OIDC_AUTHORITY,
             clientId: OIDC_CLIENT_ID,
-            scope: "openid profile email",
+            scope: "openid profile email builds:write deploy:write",
           },
           rolesClientId: OIDC_CLIENT_ID,
         }}
