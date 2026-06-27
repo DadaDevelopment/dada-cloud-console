@@ -171,6 +171,28 @@ type Config struct {
 	MCPSelfURL       string // MCP_SELF_URL (default derived from PORT)
 	MCPOverridesPath string // MCP_OVERRIDES_PATH (default "overrides.yaml")
 	MCPResourceURL   string // MCP_RESOURCE_URL (default "https://console.dada-tuda.ru/mcp")
+
+	// DadaAgent cloud-task integration (ADR-cloud-task). The console fires
+	// autonomous agent tasks from an app chip: it mints a short-lived GitHub App
+	// install token + a Keycloak client-credentials token, submits + executes a
+	// DadaAgent intent, and receives status/artifacts via a JWKS-gated webhook.
+	// Empty DadaAgentBaseURL/CloudAgentClientID disables the create handler (503).
+	//   DadaAgentBaseURL       — base HTTP URL of the agent (e.g. http://dadagent.agent.svc:8080)
+	//   KeycloakTokenURL       — issuer + /protocol/openid-connect/token
+	//   CloudAgentClientID     — Keycloak SA client (dada-cloud-backend) for client-credentials
+	//   CloudAgentClientSecret — secret for the SA client (never logged)
+	//   CloudTaskCallbackURL   — public webhook URL the agent calls back
+	//   GithubAppID            — numeric app id of argocd-dada
+	//   GithubAppPrivateKey    — PEM (PKCS1/PKCS8) signing key for the App JWT (never logged)
+	//   MetrikaOAuthToken      — Yandex Metrika mgmt API token (never logged)
+	DadaAgentBaseURL       string // DADA_AGENT_BASE_URL
+	KeycloakTokenURL       string // KEYCLOAK_TOKEN_URL
+	CloudAgentClientID     string // CLOUD_AGENT_CLIENT_ID
+	CloudAgentClientSecret string // CLOUD_AGENT_CLIENT_SECRET
+	CloudTaskCallbackURL   string // CLOUD_TASK_CALLBACK_URL
+	GithubAppID            string // GITHUB_APP_ID
+	GithubAppPrivateKey    string // GITHUB_APP_PRIVATE_KEY
+	MetrikaOAuthToken      string // METRIKA_OAUTH_TOKEN
 }
 
 // Load reads configuration from environment variables.
@@ -238,6 +260,14 @@ func Load() (*Config, error) {
 		MCPSelfURL:               getEnv("MCP_SELF_URL", ""),
 		MCPOverridesPath:         getEnv("MCP_OVERRIDES_PATH", "overrides.yaml"),
 		MCPResourceURL:           getEnv("MCP_RESOURCE_URL", "https://console.dada-tuda.ru/mcp"),
+		DadaAgentBaseURL:       getEnv("DADA_AGENT_BASE_URL", ""),
+		KeycloakTokenURL:       getEnv("KEYCLOAK_TOKEN_URL", ""),
+		CloudAgentClientID:     getEnv("CLOUD_AGENT_CLIENT_ID", ""),
+		CloudAgentClientSecret: getEnv("CLOUD_AGENT_CLIENT_SECRET", ""),
+		CloudTaskCallbackURL:   getEnv("CLOUD_TASK_CALLBACK_URL", ""),
+		GithubAppID:            getEnv("GITHUB_APP_ID", ""),
+		GithubAppPrivateKey:    getEnv("GITHUB_APP_PRIVATE_KEY", ""),
+		MetrikaOAuthToken:      getEnv("METRIKA_OAUTH_TOKEN", ""),
 	}
 
 	if cfg.DBURL == "" {
