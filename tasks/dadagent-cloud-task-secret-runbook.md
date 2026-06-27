@@ -72,6 +72,18 @@ kubectl -n argocd-prod get secret dada-cloud-console-backend -o json \
 # cloud_tasks row goes status=running.
 ```
 
+## DEPLOYED + VERIFIED on prod (2026-06-27)
+
+- Keycloak SA clients `dada-cloud-backend` + `dada-agent` created (ServiceIdentity → crossplane openidclient, realm master). Secrets in `argocd-prod/<name>-keycloak` key `attribute.client_secret`. Both mint client-credentials tokens (azp correct).
+- Backend image bumped `d9fd4233`→`22445a1f` (build #216, main HEAD). Live, healthy, log `cloud-task: dadagent webhook enabled`. ConfigMap has all 4 cloud-task env; Secret patched with the 3 keys (App ID `3500292` + PEM reused from `dada-cloud-console-build-agent`, CLOUD_AGENT_CLIENT_SECRET from the dada-cloud-backend client).
+- DadaAgent rolled `master-1.0.0-209`→`211` (HEAD 55bbbf0) — includes skill vendoring (dd288e7) + Keycloak host reconcile (55bbbf0). Reachable + ready.
+- **GitHub seam (the original 502) proven live:** App JWT (App ID 3500292 + PEM) → GET /app/installations OK (inst `126992982`, DadaDevelopment) → install-token mint OK (`ghs_…`, contents:write).
+- **Inbound webhook proven live:** POST /api/v1/webhooks/dadagent — no auth → 401; `dada-agent` SA bearer → 200 `{"ok":true}` (JWKS + azp + id.dada-tuda.ru host all validate).
+- Backend SA can list `yandexmetrikacounters` (RBAC ok).
+
+### Remaining blocker to a green PR-producing fire (PRE-EXISTING, separate subsystem)
+The create endpoint `POST …/cloud-tasks` will 424 at counter-resolve: `YandexMetrikaCounter` XR `status.counterId` is empty for all apps. Root cause = Crossplane composition `yandexmetrika-counter` (dada-argo) never patches the search DR response (`counters[0].id`) into `status.counterId`. The real id IS available — e.g. `dada-development-site` → `109705971` (Active) in the `*-ym-search` DisposableRequest response body. Fixed the stuck `crossplane.io/external-create-pending` annotation on that DR (it now reconciles Synced=True) but the composition mapping is the actual gap. Also the create call needs a console-user bearer (project canWrite) — not fabricated here; fire via the app-page chip (frontend on 22445a1f) or a browser token.
+
 ## Why each is needed
 
 - `GITHUB_APP_ID` + `GITHUB_APP_PRIVATE_KEY` feed internal/github/installtoken.go (App JWT →
