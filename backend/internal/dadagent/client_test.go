@@ -31,9 +31,9 @@ func TestSubmitIntent_PostsBearerAndBody(t *testing.T) {
 
 	c := New(agent.URL, NewTokenSource(kc.URL, "cid", "sec"))
 	res, err := c.SubmitIntent(context.Background(), IntentRequest{
-		IntentID: "int-1", Summary: "do thing", TaskType: "yandex-metrika-goals",
-		CoreLoopImpact: "instrument site", PrimaryPillar: "growth",
-		VisiblePrimitives: []string{"web"}, KPIHypothesis: []KPI{{Name: "conv", Direction: "up"}},
+		IntentID: "int-1", Summary: "do thing", TaskType: "feature",
+		CoreLoopImpact: "instrument site", PrimaryPillar: "SPD",
+		VisiblePrimitives: []string{"intents"}, KPIHypothesis: []string{"orchestration_success_rate"},
 		CloudPayload: map[string]any{"cloud_task_id": "ct-1"},
 	})
 	if err != nil {
@@ -45,7 +45,7 @@ func TestSubmitIntent_PostsBearerAndBody(t *testing.T) {
 	if gotAuth != "Bearer tok" {
 		t.Fatalf("auth=%q", gotAuth)
 	}
-	if gotPath != "/v1/agentsync/intents" || body["task_type"] != "yandex-metrika-goals" {
+	if gotPath != "/v1/agentsync/intents" || body["task_type"] != "feature" {
 		t.Fatalf("path=%q body=%v", gotPath, body)
 	}
 }

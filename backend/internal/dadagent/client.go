@@ -12,13 +12,11 @@ import (
 )
 
 // KPI is one KPI-hypothesis line the agent requires on intent submission.
-type KPI struct {
-	Name      string `json:"name"`
-	Direction string `json:"direction"`
-}
-
 // IntentRequest is the cloud-side shape of the agent's IntentSubmitRequest.
 // CloudPayload rides in the agent's cloud_payload field (agent-side addition).
+// TaskType, PrimaryPillar, VisiblePrimitives and KPIHypothesis must use the
+// agent's fixed enums; cloud-task dispatch keys off CloudPayload.skill_id, so
+// TaskType is a generic placeholder ("feature").
 type IntentRequest struct {
 	IntentID          string         `json:"intent_id"`
 	Summary           string         `json:"summary"`
@@ -27,7 +25,7 @@ type IntentRequest struct {
 	CoreLoopImpact    string         `json:"core_loop_impact"`
 	PrimaryPillar     string         `json:"primary_pillar"`
 	VisiblePrimitives []string       `json:"visible_primitives"`
-	KPIHypothesis     []KPI          `json:"kpi_hypothesis"`
+	KPIHypothesis     []string       `json:"kpi_hypothesis"`
 	CloudPayload      map[string]any `json:"cloud_payload"`
 }
 

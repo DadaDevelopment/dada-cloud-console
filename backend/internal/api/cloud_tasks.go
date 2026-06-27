@@ -125,11 +125,11 @@ func (h *Handler) CreateCloudTask(c *gin.Context) {
 	in := dadagent.IntentRequest{
 		IntentID:          intentID,
 		Summary:           entry.Summary + " (" + appName + ")",
-		TaskType:          entry.TaskType,
+		TaskType:          "feature",
 		CoreLoopImpact:    "Cloud-fired task to improve " + appName + " growth instrumentation.",
-		PrimaryPillar:     "growth",
-		VisiblePrimitives: []string{"web"},
-		KPIHypothesis:     []dadagent.KPI{{Name: "conversion_goals", Direction: "up"}},
+		PrimaryPillar:     "SPD",
+		VisiblePrimitives: []string{"intents"},
+		KPIHypothesis:     []string{"orchestration_success_rate"},
 		CloudPayload: map[string]any{
 			"cloud_task_id": row.ID,
 			"skill_id":      entry.SkillID,
