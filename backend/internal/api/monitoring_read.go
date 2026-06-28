@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"sort"
 	"strings"
 	"time"
 
@@ -34,12 +35,16 @@ import (
 // a project_id fallback for org_id here would select zero series — the ingest path
 // never writes those values. Trade-off: monitoring_app = name means a rename
 // re-points reads at the new name; acceptable until ingest stamps a stable id.
-func monitoringLabels(orgID string, app *models.MonitoringApp) map[string]string {
-	return map[string]string{
+func monitoringLabels(orgID string, app *models.MonitoringApp, source string) map[string]string {
+	labels := map[string]string{
 		"org_id":         orgID,
 		"project_id":     app.ProjectID.String(),
 		"monitoring_app": app.Name,
 	}
+	if source != "" {
+		labels["source"] = source
+	}
+	return labels
 }
 
 // monitoringOrgLabel returns the org_id label value used to scope a project's
@@ -61,7 +66,7 @@ func (h *Handler) monitoringOrgLabel(ctx context.Context, projectID uuid.UUID) s
 // promSelector renders the labels as a PromQL stream selector `{k="v",...}` with
 // values escaped. Keys are emitted in a fixed order for stable queries.
 func promSelector(labels map[string]string) string {
-	order := []string{"org_id", "project_id", "monitoring_app"}
+	order := []string{"org_id", "project_id", "monitoring_app", "source"}
 	parts := make([]string, 0, len(order))
 	for _, k := range order {
 		if v, ok := labels[k]; ok && v != "" {
@@ -69,6 +74,15 @@ func promSelector(labels map[string]string) string {
 		}
 	}
 	return "{" + strings.Join(parts, ",") + "}"
+}
+
+func monitoringSourceFromQuery(c *gin.Context) (string, bool) {
+	source := strings.TrimSpace(c.Query("source"))
+	if len(source) > maxSourceLen {
+		respondError(c, http.StatusBadRequest, "source too long")
+		return "", false
+	}
+	return source, true
 }
 
 // loadMonitoringApp loads one monitoring resource scoped to project+environment.
@@ -182,9 +196,13 @@ func (h *Handler) GetMonitoringHealth(c *gin.Context) {
 	if app == nil {
 		return
 	}
+	source, ok := monitoringSourceFromQuery(c)
+	if !ok {
+		return
+	}
 	orgID := h.monitoringOrgLabel(c.Request.Context(), app.ProjectID)
 	cfg := h.loadHealthConfig(c.Request.Context(), app.ID)
-	status := h.computeHealth(c.Request.Context(), app, orgID, cfg)
+	status := h.computeHealth(c.Request.Context(), app, orgID, source, cfg)
 	c.JSON(http.StatusOK, status)
 }
 
@@ -207,8 +225,8 @@ func (h *Handler) loadHealthConfig(ctx context.Context, appID uuid.UUID) models.
 }
 
 // computeHealth merges the three signals into a state + critical flag.
-func (h *Handler) computeHealth(ctx context.Context, app *models.MonitoringApp, orgID string, cfg models.HealthConfig) models.HealthStatus {
-	labels := monitoringLabels(orgID, app)
+func (h *Handler) computeHealth(ctx context.Context, app *models.MonitoringApp, orgID, source string, cfg models.HealthConfig) models.HealthStatus {
+	labels := monitoringLabels(orgID, app, source)
 	now := time.Now()
 	st := models.HealthStatus{State: models.HealthUnknown, Reasons: []string{}}
 
@@ -248,6 +266,67 @@ func (h *Handler) computeHealth(ctx context.Context, app *models.MonitoringApp, 
 		st.Reasons = append(st.Reasons, fmt.Sprintf("%d firing Grafana alert(s)", st.FiringAlerts))
 	}
 	return st
+}
+
+// GetMonitoringSources discovers device/source labels present for a monitoring
+// resource in the requested window.
+//
+// @ID          getMonitoringSources
+// @Summary     List monitoring resource devices/sources
+// @Description Discovers source labels currently present for the monitoring resource, so the UI can pivot metrics and logs per device. Read-only. Returns 503 when Prometheus is not configured.
+// @Tags        monitoring
+// @Produce     json
+// @Security    BearerAuth
+// @Param       projectId path     string true  "Project UUID"
+// @Param       envId     path     string true  "Environment UUID"
+// @Param       appId     path     string true  "Monitoring resource UUID"
+// @Param       range     query    string false "Time range (e.g. 15m, 1h, 6h, 24h)"
+// @Success     200       {object} map[string]interface{} "object with a sources array"
+// @Failure     401       {object} map[string]string
+// @Failure     404       {object} map[string]string
+// @Failure     503       {object} map[string]string
+// @Router      /projects/{projectId}/environments/{envId}/monitoring/{appId}/sources [get]
+// GetMonitoringSources discovers device/source labels present for this
+// monitoring resource in the requested range. The list is metric-driven: IoT
+// devices that emit arbitrary metrics still surface here because detection keys
+// off the source label rather than a fixed metric allow-list.
+func (h *Handler) GetMonitoringSources(c *gin.Context) {
+	app, _, _ := h.resolveMonitoringApp(c)
+	if app == nil {
+		return
+	}
+	if h.prometheus == nil {
+		respondError(c, http.StatusServiceUnavailable, "metrics not configured")
+		return
+	}
+
+	ctx := c.Request.Context()
+	orgID := h.monitoringOrgLabel(ctx, app.ProjectID)
+	labels := monitoringLabels(orgID, app, "")
+	start, end, _ := parseRange(c)
+	window := fmt.Sprintf("%ds", int(end.Sub(start).Seconds()))
+	discover := fmt.Sprintf(`group by (source) (last_over_time(%s[%s]))`, promSelector(labels), window)
+
+	samples, err := h.prometheus.QueryInstant(ctx, discover, end)
+	if err != nil {
+		respondError(c, http.StatusBadGateway, "failed to discover sources: "+err.Error())
+		return
+	}
+	seen := map[string]struct{}{}
+	out := make([]string, 0, len(samples))
+	for _, s := range samples {
+		source := strings.TrimSpace(s.Metric["source"])
+		if source == "" {
+			continue
+		}
+		if _, ok := seen[source]; ok {
+			continue
+		}
+		seen[source] = struct{}{}
+		out = append(out, source)
+	}
+	sort.Strings(out)
+	c.JSON(http.StatusOK, gin.H{"sources": out})
 }
 
 // lastSeen returns the most recent metric or log timestamp for the resource, or
@@ -351,8 +430,12 @@ func (h *Handler) GetMonitoringMetrics(c *gin.Context) {
 		return
 	}
 	ctx := c.Request.Context()
+	source, ok := monitoringSourceFromQuery(c)
+	if !ok {
+		return
+	}
 	orgID := h.monitoringOrgLabel(ctx, app.ProjectID)
-	labels := monitoringLabels(orgID, app)
+	labels := monitoringLabels(orgID, app, source)
 	sel := promSelector(labels)
 
 	start, end, step := parseRange(c)
@@ -424,8 +507,12 @@ func (h *Handler) GetMonitoringLogs(c *gin.Context) {
 		respondError(c, http.StatusServiceUnavailable, "log search not configured")
 		return
 	}
+	source, ok := monitoringSourceFromQuery(c)
+	if !ok {
+		return
+	}
 	orgID := h.monitoringOrgLabel(c.Request.Context(), app.ProjectID)
-	labels := monitoringLabels(orgID, app)
+	labels := monitoringLabels(orgID, app, source)
 
 	since := time.Hour
 	switch c.Query("range") {
@@ -441,6 +528,7 @@ func (h *Handler) GetMonitoringLogs(c *gin.Context) {
 	res, err := h.appLogsearch.Search(c.Request.Context(), logsearch.SearchOpts{
 		ProjectID:     labels["project_id"],
 		MonitoringApp: labels["monitoring_app"],
+		Source:        labels["source"],
 		Query:         c.Query("q"),
 		Level:         c.Query("level"),
 		Since:         time.Now().Add(-since),

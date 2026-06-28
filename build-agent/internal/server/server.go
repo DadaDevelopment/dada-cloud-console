@@ -4,10 +4,13 @@ package server
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
+	"path"
 	"strconv"
 	"strings"
 	"time"
@@ -252,11 +255,230 @@ type frameworkDetection struct {
 	OutputDir      *string `json:"output_dir"`
 }
 
-// handleDetect returns a best-effort framework detection. Real Nixpacks
-// detection requires cloning the repo, which is deferred to the build Job; here
-// we return an all-null result so the wizard prompts for manual selection.
+type githubContent struct {
+	Type     string `json:"type"`
+	Name     string `json:"name"`
+	Path     string `json:"path"`
+	Content  string `json:"content"`
+	Encoding string `json:"encoding"`
+}
+
+var githubHTTPClient = http.DefaultClient
+
+// handleDetect returns a best-effort framework detection by inspecting the
+// repository tree via the GitHub API. This stays intentionally lightweight: it
+// gives the import wizard a useful default without claiming to replace the
+// clone-and-build detection that still happens in the real build job.
 func (s *Server) handleDetect(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, frameworkDetection{})
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil {
+		http.Error(w, "bad installation id", http.StatusBadRequest)
+		return
+	}
+	repo := strings.TrimSpace(r.URL.Query().Get("repo"))
+	if repo == "" {
+		http.Error(w, "repo is required", http.StatusBadRequest)
+		return
+	}
+	rootDir := strings.TrimSpace(r.URL.Query().Get("root_dir"))
+	if rootDir == "" || rootDir == "." {
+		rootDir = ""
+	}
+
+	det, err := s.detectFramework(r.Context(), id, repo, rootDir)
+	if err != nil {
+		log.Warn().Err(err).Int64("installation", id).Str("repo", repo).Str("root_dir", rootDir).Msg("framework detect fallback")
+		writeJSON(w, frameworkDetection{})
+		return
+	}
+	writeJSON(w, det)
+}
+
+func (s *Server) detectFramework(ctx context.Context, installationID int64, repoFullName, rootDir string) (frameworkDetection, error) {
+	token, err := s.gh.InstallToken(ctx, installationID)
+	if err != nil {
+		return frameworkDetection{}, err
+	}
+
+	parts := strings.SplitN(repoFullName, "/", 2)
+	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+		return frameworkDetection{}, fmt.Errorf("bad repo full name: %q", repoFullName)
+	}
+	owner, repo := parts[0], parts[1]
+
+	entries, err := githubListDir(ctx, token, owner, repo, rootDir)
+	if err != nil {
+		return frameworkDetection{}, err
+	}
+	byName := make(map[string]githubContent, len(entries))
+	for _, entry := range entries {
+		byName[strings.ToLower(entry.Name)] = entry
+	}
+
+	if _, ok := byName["dockerfile"]; ok {
+		fw := "dockerfile"
+		return frameworkDetection{Framework: &fw}, nil
+	}
+	if _, ok := byName["pom.xml"]; ok {
+		fw, build, install := "spring-maven", "./mvnw package", "./mvnw -q -DskipTests dependency:go-offline"
+		return frameworkDetection{Framework: &fw, BuildCommand: &build, InstallCommand: &install}, nil
+	}
+	if _, ok := byName["build.gradle"]; ok {
+		fw, build, install := "spring-gradle", "./gradlew build", "./gradlew dependencies"
+		return frameworkDetection{Framework: &fw, BuildCommand: &build, InstallCommand: &install}, nil
+	}
+	if _, ok := byName["build.gradle.kts"]; ok {
+		fw, build, install := "spring-gradle", "./gradlew build", "./gradlew dependencies"
+		return frameworkDetection{Framework: &fw, BuildCommand: &build, InstallCommand: &install}, nil
+	}
+
+	if entry, ok := byName["package.json"]; ok {
+		raw, err := githubReadFile(ctx, token, owner, repo, entry.Path)
+		if err == nil {
+			return detectNodeFramework(raw), nil
+		}
+	}
+
+	for _, name := range []string{"requirements.txt", "pyproject.toml", "pipfile"} {
+		if entry, ok := byName[name]; ok {
+			raw, err := githubReadFile(ctx, token, owner, repo, entry.Path)
+			if err == nil {
+				return detectPythonFramework(raw), nil
+			}
+		}
+	}
+
+	if _, ok := byName["index.html"]; ok {
+		fw, output := "static", "dist"
+		return frameworkDetection{Framework: &fw, OutputDir: &output}, nil
+	}
+	return frameworkDetection{}, nil
+}
+
+func detectNodeFramework(packageJSON string) frameworkDetection {
+	var pkg struct {
+		Dependencies    map[string]string `json:"dependencies"`
+		DevDependencies map[string]string `json:"devDependencies"`
+		Scripts         map[string]string `json:"scripts"`
+	}
+	if err := json.Unmarshal([]byte(packageJSON), &pkg); err != nil {
+		return frameworkDetection{}
+	}
+	hasDep := func(name string) bool {
+		_, ok := pkg.Dependencies[name]
+		if ok {
+			return true
+		}
+		_, ok = pkg.DevDependencies[name]
+		return ok
+	}
+
+	fw := "node"
+	output := ""
+	switch {
+	case hasDep("next"):
+		fw = "nextjs"
+		output = ".next"
+	case hasDep("@nestjs/core"):
+		fw = "nestjs"
+		output = "dist"
+	case hasDep("@remix-run/node") || hasDep("@remix-run/react"):
+		fw = "remix"
+		output = "build"
+	case hasDep("vite"):
+		fw = "vite"
+		output = "dist"
+	case hasDep("express"):
+		fw = "node"
+	}
+
+	install := "npm ci"
+	build := ""
+	if _, ok := pkg.Scripts["build"]; ok {
+		build = "npm run build"
+	}
+	return detectionWithStrings(fw, build, install, output)
+}
+
+func detectPythonFramework(raw string) frameworkDetection {
+	lower := strings.ToLower(raw)
+	switch {
+	case strings.Contains(lower, "fastapi"):
+		return detectionWithStrings("fastapi", "", "pip install -r requirements.txt", "")
+	case strings.Contains(lower, "django"):
+		return detectionWithStrings("django", "", "pip install -r requirements.txt", "")
+	case strings.Contains(lower, "flask"):
+		return detectionWithStrings("flask", "", "pip install -r requirements.txt", "")
+	default:
+		return frameworkDetection{}
+	}
+}
+
+func detectionWithStrings(framework, build, install, output string) frameworkDetection {
+	d := frameworkDetection{}
+	if framework != "" {
+		d.Framework = &framework
+	}
+	if build != "" {
+		d.BuildCommand = &build
+	}
+	if install != "" {
+		d.InstallCommand = &install
+	}
+	if output != "" {
+		d.OutputDir = &output
+	}
+	return d
+}
+
+func githubListDir(ctx context.Context, token, owner, repo, dir string) ([]githubContent, error) {
+	var out []githubContent
+	if err := githubAPI(ctx, token, owner, repo, dir, &out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func githubReadFile(ctx context.Context, token, owner, repo, filePath string) (string, error) {
+	var out githubContent
+	if err := githubAPI(ctx, token, owner, repo, filePath, &out); err != nil {
+		return "", err
+	}
+	if out.Encoding != "base64" {
+		return "", fmt.Errorf("unsupported github content encoding %q", out.Encoding)
+	}
+	decoded, err := base64.StdEncoding.DecodeString(strings.ReplaceAll(out.Content, "\n", ""))
+	if err != nil {
+		return "", fmt.Errorf("decode github content: %w", err)
+	}
+	return string(decoded), nil
+}
+
+func githubAPI(ctx context.Context, token, owner, repo, repoPath string, dst any) error {
+	clean := strings.Trim(strings.TrimSpace(repoPath), "/")
+	endpoint := fmt.Sprintf("https://api.github.com/repos/%s/%s/contents", url.PathEscape(owner), url.PathEscape(repo))
+	if clean != "" {
+		endpoint += "/" + path.Clean(clean)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Authorization", "token "+token)
+	req.Header.Set("Accept", "application/vnd.github+json")
+	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
+	resp, err := githubHTTPClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		return fmt.Errorf("github contents %s: status %d", clean, resp.StatusCode)
+	}
+	if err := json.NewDecoder(resp.Body).Decode(dst); err != nil {
+		return fmt.Errorf("decode github contents: %w", err)
+	}
+	return nil
 }
 
 func writeJSON(w http.ResponseWriter, v any) {

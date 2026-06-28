@@ -673,6 +673,10 @@ export interface Channel {
   created_at: string;
 }
 
+export interface MonitoringSourcesResponse {
+  sources: string[];
+}
+
 export interface CloudTaskArtifact {
   file_id: string;
   name: string;

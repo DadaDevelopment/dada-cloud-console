@@ -20,7 +20,7 @@ export function LogsViewer({
   projectId: string;
   vm?: string;
   app?: string;
-  monitoring?: { projectId: string; envId: string; appId: string };
+  monitoring?: { projectId: string; envId: string; appId: string; source?: string };
 }) {
   const { t } = useT();
   const [query, setQuery] = useState("");
@@ -45,6 +45,7 @@ export function LogsViewer({
             q,
             since: effectiveSince,
             size: 300,
+            source: monitoring.source,
           });
         } else {
           r = await logsApi.search(projectId, { vm, app, q, since: effectiveSince, size: 300 });

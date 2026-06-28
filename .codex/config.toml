@@ -1,0 +1,5 @@
+[mcp_servers.jenkins]
+url = "https://jenkins.dada-tuda.ru/mcp-server/mcp"
+
+[mcp_servers.jenkins.http_headers]
+Authorization = "Basic amVua2lucy1mb3ItbjhuOjExNGFiOWNjMjAzZjUzODM0NjM5MWUzNDRkODA3YWQzODc="

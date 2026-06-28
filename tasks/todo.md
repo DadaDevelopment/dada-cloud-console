@@ -218,6 +218,37 @@ Design doc: `tasks/design-values-editor.md`
 
 Intent: Make gitops-agent expect each app directory to own its Argo App descriptor plus Helm chart and values, instead of pointing App manifests back to top-level `helm/*`.
 
+---
+
+# 2026-06-28 Prod validation: GitHub deploy + IoT monitoring readiness
+
+Goal: validate the live prod path in Kubernetes and close the highest-value gaps
+that block two product scenarios from being honestly "ready".
+
+## Scenario 1 — GitHub repo → deploy → domain
+- [x] Find prod console/gateway ingresses, workloads, and live API entrypoints
+- [x] Verify build-agent / Jenkins / GitHub App wiring from cluster secrets and DB
+- [x] Confirm live domain attach path against DB + ingress + certificate reality
+- [x] Make framework detection honest enough for the import wizard (best-effort repo inspection instead of all-null)
+- [x] Re-verify backend + build-agent tests after detection changes
+
+## Scenario 2 — few-click metrics receiver → time-series → display
+- [x] Verify live ingest gateway in prod and inspect write-path config
+- [x] Trace dynamic-metric + per-device behavior in code and identify read-path gaps
+- [x] Add source/device-aware monitoring reads (health, metrics, logs)
+- [x] Add device/source discovery + selector in the monitoring UI
+- [x] Re-verify backend + frontend after monitoring changes
+
+## Review
+- Prod validation found both scenario backbones already live in Kubernetes, with
+  two important readiness gaps: monitoring read-back collapsed multiple devices
+  into one resource view, and Git import advertised framework detection while
+  returning an all-null result. Both are now closed in code and verified by
+  `go test ./...` in `backend/` and `build-agent/`, plus `npm run build` in
+  `frontend/`. Domain attach was additionally confirmed live through ingress +
+  certificate state for `app.a2a-hub.pro`, with a separate note that the DB
+  status fields are still stale relative to actual readiness.
+
 New canonical app tree:
 
 ```text

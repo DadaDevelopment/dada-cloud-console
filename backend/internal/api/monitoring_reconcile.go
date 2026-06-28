@@ -157,7 +157,7 @@ func (h *Handler) loadDesiredAlertRules(ctx context.Context) ([]desiredAlertRule
 		if ownerID != nil {
 			orgID = ownerID.String()
 		}
-		labels := monitoringLabels(orgID, &models.MonitoringApp{ID: appID, ProjectID: projectID})
+		labels := monitoringLabels(orgID, &models.MonitoringApp{ID: appID, ProjectID: projectID}, "")
 		contactPoint := ""
 		if channelID != nil {
 			contactPoint = receiverName(*channelID)

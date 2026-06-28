@@ -31,7 +31,7 @@ export function MetricsPanel(
   props:
     | { kind: "vm"; projectId: string; serverName: string }
     | { kind: "app"; projectId: string; envId: string; appName: string }
-    | { kind: "monitoring"; projectId: string; envId: string; appId: string }
+    | { kind: "monitoring"; projectId: string; envId: string; appId: string; source?: string }
 ) {
   const [range, setRange] = useState<Range>("1h");
   const [data, setData] = useState<MetricsResponse | null>(null);
@@ -43,7 +43,7 @@ export function MetricsPanel(
     props.kind === "vm"
       ? `vm:${props.projectId}:${props.serverName}`
       : props.kind === "monitoring"
-      ? `monitoring:${props.projectId}:${props.envId}:${props.appId}`
+      ? `monitoring:${props.projectId}:${props.envId}:${props.appId}:${props.source ?? ""}`
       : `app:${props.projectId}:${props.envId}:${props.appName}`;
 
   const load = useCallback(async () => {
@@ -52,7 +52,7 @@ export function MetricsPanel(
       if (props.kind === "vm") {
         d = await appServersApi.getMetrics(props.projectId, props.serverName, range);
       } else if (props.kind === "monitoring") {
-        d = await monitoringApi.getMetrics(props.projectId, props.envId, props.appId, range);
+        d = await monitoringApi.getMetrics(props.projectId, props.envId, props.appId, range, props.source);
       } else {
         d = await appsApi.getMetrics(props.projectId, props.envId, props.appName, range);
       }

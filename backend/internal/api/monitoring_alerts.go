@@ -120,7 +120,7 @@ func (h *Handler) ensureGrafanaResource(ctx context.Context, app *models.Monitor
 	// Best-effort; older Grafana may reject.
 	_ = h.grafana.SetFolderTenant(ctx, folderUID)
 
-	labels := monitoringLabels(orgID, app)
+	labels := monitoringLabels(orgID, app, "")
 	sel := promSelector(labels)
 	dash := grafana.BuildDashboard(dashUID, app.Name, h.cfg.GrafanaPromDatasourceUID, h.discoverPanels(ctx, sel))
 	if err := h.grafana.UpsertDashboard(ctx, folderUID, dash); err != nil {
@@ -526,7 +526,7 @@ func (h *Handler) CreateAlertRule(c *gin.Context) {
 		return
 	}
 
-	labels := monitoringLabels(orgID, app)
+	labels := monitoringLabels(orgID, app, "")
 	sel := promSelector(labels)
 	ruleID := uuid.New()
 	rule := grafana.BuildThresholdRule(h.cfg.GrafanaPromDatasourceUID, grafana.ThresholdRule{
