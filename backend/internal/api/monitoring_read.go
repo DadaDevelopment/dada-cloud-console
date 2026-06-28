@@ -257,9 +257,24 @@ func (h *Handler) lastSeen(ctx context.Context, app *models.MonitoringApp, label
 	var newest *time.Time
 
 	if h.prometheus != nil {
-		// timestamp(last_over_time(...)) yields the unix-seconds of the last sample
-		// within the window; max across series gives the freshest.
-		expr := fmt.Sprintf("timestamp(last_over_time(%s[24h]))", promSelector(labels))
+		// Real freshest-sample timestamp across all of the resource's metric series,
+		// over a 24h lookback. Three constraints force this exact shape:
+		//   - timestamp() reads the true sample time only off a raw selector (it
+		//     returns the *eval* time when wrapped around last_over_time, so the old
+		//     last_over_time form reported "now" for any data in-window — wrong).
+		//   - a raw instant selector only sees samples inside Prometheus' 5m
+		//     staleness window, so a [24h:1m] subquery scans the whole day and
+		//     max_over_time keeps the latest real sample time.
+		//   - timestamp() strips __name__, collapsing cpu/memory/temp to one
+		//     identical labelset → "vector cannot contain metrics with the same
+		//     labelset" and the whole query errored (→ nil → every multi-metric
+		//     resource showed "unknown"). label_replace stashes __name__ in a side
+		//     label first so the series stay distinct; max() then folds them to the
+		//     single freshest timestamp.
+		expr := fmt.Sprintf(
+			`max(max_over_time(timestamp(label_replace(%s, "mname", "$1", "__name__", "(.+)"))[24h:1m]))`,
+			promSelector(labels),
+		)
 		if samples, err := h.prometheus.QueryInstant(ctx, expr, time.Now()); err == nil {
 			for _, s := range samples {
 				ts := time.Unix(int64(s.Point.V), 0).UTC()
