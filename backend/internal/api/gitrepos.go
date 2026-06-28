@@ -585,7 +585,7 @@ func (h *Handler) ListInstallationRepos(c *gin.Context) {
 //
 // @ID          detectFramework
 // @Summary     Detect a repository's framework
-// @Description Proxies to the build-agent, which clones the repo at the given root dir and runs Nixpacks framework detection. Requires write access. Returns 503 when the build-agent is not configured.
+// @Description Proxies to the build-agent, which inspects the repository tree (including a shallow recursive search under the chosen root dir) and returns a best-effort framework guess. Requires write access. Returns 503 when the build-agent is not configured.
 // @Tags        git
 // @Produce     json
 // @Security    BearerAuth

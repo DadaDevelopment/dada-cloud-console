@@ -265,6 +265,13 @@ type githubContent struct {
 
 var githubHTTPClient = http.DefaultClient
 
+type frameworkCandidate struct {
+	detection frameworkDetection
+	score     int
+	depth     int
+	path      string
+}
+
 // handleDetect returns a best-effort framework detection by inspecting the
 // repository tree via the GitHub API. This stays intentionally lightweight: it
 // gives the import wizard a useful default without claiming to replace the
@@ -306,63 +313,187 @@ func (s *Server) detectFramework(ctx context.Context, installationID int64, repo
 	}
 	owner, repo := parts[0], parts[1]
 
-	entries, err := githubListDir(ctx, token, owner, repo, rootDir)
+	cands, err := s.scanFrameworkCandidates(ctx, token, owner, repo, rootDir, 0, 2)
 	if err != nil {
 		return frameworkDetection{}, err
 	}
+	if best, ok := bestFrameworkCandidate(cands); ok {
+		return best.detection, nil
+	}
+	return frameworkDetection{}, nil
+}
+
+func (s *Server) scanFrameworkCandidates(ctx context.Context, token, owner, repo, dir string, depth, maxDepth int) ([]frameworkCandidate, error) {
+	entries, err := githubListDir(ctx, token, owner, repo, dir)
+	if err != nil {
+		return nil, err
+	}
+
+	cands := detectCandidatesInDir(ctx, token, owner, repo, dir, depth, entries)
+	if depth >= maxDepth {
+		return cands, nil
+	}
+
+	for _, entry := range entries {
+		if entry.Type != "dir" {
+			continue
+		}
+		childDir := joinRepoPath(dir, entry.Name)
+		childCands, err := s.scanFrameworkCandidates(ctx, token, owner, repo, childDir, depth+1, maxDepth)
+		if err != nil {
+			return nil, err
+		}
+		cands = append(cands, childCands...)
+	}
+	return cands, nil
+}
+
+func detectCandidatesInDir(ctx context.Context, token, owner, repo, dir string, depth int, entries []githubContent) []frameworkCandidate {
 	byName := make(map[string]githubContent, len(entries))
 	for _, entry := range entries {
 		byName[strings.ToLower(entry.Name)] = entry
 	}
 
-	if _, ok := byName["dockerfile"]; ok {
-		fw := "dockerfile"
-		return frameworkDetection{Framework: &fw}, nil
-	}
-	if _, ok := byName["pom.xml"]; ok {
-		fw, build, install := "spring-maven", "./mvnw package", "./mvnw -q -DskipTests dependency:go-offline"
-		return frameworkDetection{Framework: &fw, BuildCommand: &build, InstallCommand: &install}, nil
-	}
-	if _, ok := byName["build.gradle"]; ok {
-		fw, build, install := "spring-gradle", "./gradlew build", "./gradlew dependencies"
-		return frameworkDetection{Framework: &fw, BuildCommand: &build, InstallCommand: &install}, nil
-	}
-	if _, ok := byName["build.gradle.kts"]; ok {
-		fw, build, install := "spring-gradle", "./gradlew build", "./gradlew dependencies"
-		return frameworkDetection{Framework: &fw, BuildCommand: &build, InstallCommand: &install}, nil
-	}
+	cands := make([]frameworkCandidate, 0, 8)
 
-	if entry, ok := byName["package.json"]; ok {
-		raw, err := githubReadFile(ctx, token, owner, repo, entry.Path)
-		if err == nil {
-			return detectNodeFramework(raw), nil
+	if entry, ok := findFile(byName, "package.json"); ok {
+		if cand, ok := detectNodeFramework(ctx, token, owner, repo, entry, byName, depth); ok {
+			cands = append(cands, cand)
 		}
 	}
-
-	for _, name := range []string{"requirements.txt", "pyproject.toml", "pipfile"} {
-		if entry, ok := byName[name]; ok {
-			raw, err := githubReadFile(ctx, token, owner, repo, entry.Path)
-			if err == nil {
-				return detectPythonFramework(raw), nil
-			}
+	if entry, ok := findFile(byName, "pyproject.toml"); ok {
+		if cand, ok := detectPythonFramework(ctx, token, owner, repo, entry, byName, depth); ok {
+			cands = append(cands, cand)
 		}
 	}
-
-	if _, ok := byName["index.html"]; ok {
-		fw, output := "static", "dist"
-		return frameworkDetection{Framework: &fw, OutputDir: &output}, nil
+	if entry, ok := findFile(byName, "requirements.txt"); ok {
+		if cand, ok := detectRequirementsFramework(ctx, token, owner, repo, entry, depth); ok {
+			cands = append(cands, cand)
+		}
 	}
-	return frameworkDetection{}, nil
+	if entry, ok := findFile(byName, "setup.py"); ok {
+		if cand, ok := detectSetupPyFramework(ctx, token, owner, repo, entry, depth); ok {
+			cands = append(cands, cand)
+		}
+	}
+	if entry, ok := findFile(byName, "build.gradle"); ok {
+		if cand, ok := detectGradleFramework(ctx, token, owner, repo, entry, byName, depth); ok {
+			cands = append(cands, cand)
+		}
+	}
+	if entry, ok := findFile(byName, "build.gradle.kts"); ok {
+		if cand, ok := detectGradleKtsFramework(ctx, token, owner, repo, entry, byName, depth); ok {
+			cands = append(cands, cand)
+		}
+	}
+	if entry, ok := findFile(byName, "pom.xml"); ok {
+		if cand, ok := detectMavenFramework(ctx, token, owner, repo, entry, depth); ok {
+			cands = append(cands, cand)
+		}
+	}
+	if cand, ok := detectConfigOnlyFramework(byName, depth); ok {
+		cands = append(cands, cand)
+	}
+	cands = append(cands, detectCandidatesFromLockfiles(ctx, token, owner, repo, byName, depth)...)
+	if entry, ok := findFile(byName, "go.mod"); ok {
+		cands = append(cands, frameworkCandidate{
+			detection: detectionWithStrings("go", "go build ./...", "", ""),
+			score:     20,
+			depth:     depth,
+			path:      entry.Path,
+		})
+	}
+	if entry, ok := findFile(byName, "Dockerfile"); ok {
+		cands = append(cands, frameworkCandidate{
+			detection: detectionWithStrings("dockerfile", "", "", ""),
+			score:     5,
+			depth:     depth,
+			path:      entry.Path,
+		})
+	}
+	return cands
 }
 
-func detectNodeFramework(packageJSON string) frameworkDetection {
+func bestFrameworkCandidate(cands []frameworkCandidate) (frameworkCandidate, bool) {
+	if len(cands) == 0 {
+		return frameworkCandidate{}, false
+	}
+	best := cands[0]
+	for _, cand := range cands[1:] {
+		switch {
+		case cand.score > best.score:
+			best = cand
+		case cand.score == best.score && cand.depth < best.depth:
+			best = cand
+		case cand.score == best.score && cand.depth == best.depth && len(cand.path) < len(best.path):
+			best = cand
+		}
+	}
+	if best.score == 0 {
+		return frameworkCandidate{}, false
+	}
+	return best, true
+}
+
+func findFile(byName map[string]githubContent, name string) (githubContent, bool) {
+	entry, ok := byName[strings.ToLower(name)]
+	return entry, ok && entry.Type != "dir"
+}
+
+func joinRepoPath(base, child string) string {
+	base = strings.Trim(base, "/")
+	child = strings.Trim(child, "/")
+	if base == "" {
+		return child
+	}
+	if child == "" {
+		return base
+	}
+	return base + "/" + child
+}
+
+func hasAnyFile(byName map[string]githubContent, names ...string) bool {
+	for _, name := range names {
+		if _, ok := findFile(byName, name); ok {
+			return true
+		}
+	}
+	return false
+}
+
+func detectConfigOnlyFramework(byName map[string]githubContent, depth int) (frameworkCandidate, bool) {
+	switch {
+	case hasAnyFile(byName, "next.config.js", "next.config.mjs", "next.config.ts", "next.config.cjs"):
+		fw, build, install, output := "nextjs", "npm run build", "npm ci", ".next"
+		return frameworkCandidate{detection: detectionWithStrings(fw, build, install, output), score: 120, depth: depth}, true
+	case hasAnyFile(byName, "nuxt.config.js", "nuxt.config.mjs", "nuxt.config.ts", "nuxt.config.cjs"):
+		fw, build, install, output := "nuxt", "npm run build", "npm ci", ".output"
+		return frameworkCandidate{detection: detectionWithStrings(fw, build, install, output), score: 115, depth: depth}, true
+	case hasAnyFile(byName, "svelte.config.js", "svelte.config.mjs", "svelte.config.ts", "svelte.config.cjs"):
+		fw, build, install := "sveltekit", "npm run build", "npm ci"
+		return frameworkCandidate{detection: detectionWithStrings(fw, build, install, ""), score: 112, depth: depth}, true
+	case hasAnyFile(byName, "vite.config.js", "vite.config.mjs", "vite.config.ts", "vite.config.cjs"):
+		fw, build, install, output := "vite", "npm run build", "npm ci", "dist"
+		return frameworkCandidate{detection: detectionWithStrings(fw, build, install, output), score: 90, depth: depth}, true
+	default:
+		return frameworkCandidate{}, false
+	}
+}
+
+func detectNodeFramework(ctx context.Context, token, owner, repo string, entry githubContent, byName map[string]githubContent, depth int) (frameworkCandidate, bool) {
+	raw, err := githubReadFile(ctx, token, owner, repo, entry.Path)
+	if err != nil {
+		return frameworkCandidate{}, false
+	}
 	var pkg struct {
+		Name            string            `json:"name"`
 		Dependencies    map[string]string `json:"dependencies"`
 		DevDependencies map[string]string `json:"devDependencies"`
 		Scripts         map[string]string `json:"scripts"`
+		Workspaces      any               `json:"workspaces"`
 	}
-	if err := json.Unmarshal([]byte(packageJSON), &pkg); err != nil {
-		return frameworkDetection{}
+	if err := json.Unmarshal([]byte(raw), &pkg); err != nil {
+		return frameworkCandidate{}, false
 	}
 	hasDep := func(name string) bool {
 		_, ok := pkg.Dependencies[name]
@@ -372,46 +503,313 @@ func detectNodeFramework(packageJSON string) frameworkDetection {
 		_, ok = pkg.DevDependencies[name]
 		return ok
 	}
-
-	fw := "node"
-	output := ""
-	switch {
-	case hasDep("next"):
-		fw = "nextjs"
-		output = ".next"
-	case hasDep("@nestjs/core"):
-		fw = "nestjs"
-		output = "dist"
-	case hasDep("@remix-run/node") || hasDep("@remix-run/react"):
-		fw = "remix"
-		output = "build"
-	case hasDep("vite"):
-		fw = "vite"
-		output = "dist"
-	case hasDep("express"):
-		fw = "node"
+	hasAnyDep := func(names ...string) bool {
+		for _, name := range names {
+			if hasDep(name) {
+				return true
+			}
+		}
+		return false
+	}
+	hasScript := func(name string) bool {
+		_, ok := pkg.Scripts[name]
+		return ok
 	}
 
-	install := "npm ci"
 	build := ""
-	if _, ok := pkg.Scripts["build"]; ok {
+	install := "npm ci"
+	output := ""
+	score := 70
+	framework := "node"
+
+	switch {
+	case hasDep("next") || hasAnyFile(byName, "next.config.js", "next.config.mjs", "next.config.ts", "next.config.cjs"):
+		framework = "nextjs"
 		build = "npm run build"
+		output = ".next"
+		score = 125
+	case hasAnyDep("nuxt", "@nuxt/devtools"), hasAnyFile(byName, "nuxt.config.js", "nuxt.config.mjs", "nuxt.config.ts", "nuxt.config.cjs"):
+		framework = "nuxt"
+		build = "npm run build"
+		output = ".output"
+		score = 120
+	case hasAnyDep("@sveltejs/kit"), hasAnyFile(byName, "svelte.config.js", "svelte.config.mjs", "svelte.config.ts", "svelte.config.cjs"):
+		framework = "sveltekit"
+		build = "npm run build"
+		score = 118
+	case hasAnyDep("@remix-run/node", "@remix-run/react", "@remix-run/dev"):
+		framework = "remix"
+		build = "npm run build"
+		output = "build"
+		score = 110
+	case hasAnyDep("react", "react-dom", "@vitejs/plugin-react") || hasAnyFile(byName, "vite.config.js", "vite.config.mjs", "vite.config.ts", "vite.config.cjs") && hasAnyDep("react", "react-dom", "@vitejs/plugin-react"):
+		framework = "react"
+		build = "npm run build"
+		output = "dist"
+		score = 105
+	case hasDep("vite") || hasAnyFile(byName, "vite.config.js", "vite.config.mjs", "vite.config.ts", "vite.config.cjs"):
+		framework = "vite"
+		build = "npm run build"
+		output = "dist"
+		score = 95
+	case hasAnyDep("react", "react-dom") && hasScript("build"):
+		framework = "react"
+		build = "npm run build"
+		output = "dist"
+		score = 100
+	default:
+		if hasScript("build") {
+			build = "npm run build"
+			score = 60
+		}
 	}
-	return detectionWithStrings(fw, build, install, output)
+
+	if framework == "node" && !hasScript("build") && !hasAnyDep("react", "react-dom", "vite", "next", "nuxt", "@sveltejs/kit", "@remix-run/node", "@remix-run/react", "@vitejs/plugin-react") {
+		return frameworkCandidate{}, false
+	}
+
+	det := detectionWithStrings(framework, build, install, output)
+	if build == "" && hasScript("build") {
+		det.BuildCommand = ptrString("npm run build")
+	}
+	return frameworkCandidate{detection: det, score: score, depth: depth, path: entry.Path}, true
 }
 
-func detectPythonFramework(raw string) frameworkDetection {
+func detectRequirementsFramework(ctx context.Context, token, owner, repo string, entry githubContent, depth int) (frameworkCandidate, bool) {
+	raw, err := githubReadFile(ctx, token, owner, repo, entry.Path)
+	if err != nil {
+		return frameworkCandidate{}, false
+	}
+	return detectPythonContent(raw, entry.Path, depth, 100)
+}
+
+func detectSetupPyFramework(ctx context.Context, token, owner, repo string, entry githubContent, depth int) (frameworkCandidate, bool) {
+	raw, err := githubReadFile(ctx, token, owner, repo, entry.Path)
+	if err != nil {
+		return frameworkCandidate{}, false
+	}
+	return detectPythonContent(raw, entry.Path, depth, 70)
+}
+
+func detectPythonFramework(ctx context.Context, token, owner, repo string, entry githubContent, byName map[string]githubContent, depth int) (frameworkCandidate, bool) {
+	raw, err := githubReadFile(ctx, token, owner, repo, entry.Path)
+	if err != nil {
+		return frameworkCandidate{}, false
+	}
+	cand, ok := detectPythonContent(raw, entry.Path, depth, 105)
+	if !ok {
+		return frameworkCandidate{}, false
+	}
+	if hasAnyFile(byName, "requirements.txt", "poetry.lock") {
+		if cand.detection.InstallCommand == nil || *cand.detection.InstallCommand == "" {
+			cand.detection.InstallCommand = ptrString("pip install -r requirements.txt")
+		}
+	}
+	return cand, true
+}
+
+func detectPythonContent(raw, path string, depth, score int) (frameworkCandidate, bool) {
+	lower := strings.ToLower(raw)
+	framework := ""
+	switch {
+	case strings.Contains(lower, "fastapi"):
+		framework = "fastapi"
+	case strings.Contains(lower, "django"):
+		framework = "django"
+	case strings.Contains(lower, "flask"):
+		framework = "flask"
+	case strings.Contains(lower, "uvicorn"):
+		framework = "python"
+	default:
+		if framework == "" {
+			return frameworkCandidate{}, false
+		}
+	}
+	build := ""
+	install := "pip install -r requirements.txt"
+	return frameworkCandidate{
+		detection: detectionWithStrings(framework, build, install, ""),
+		score:     score,
+		depth:     depth,
+		path:      path,
+	}, true
+}
+
+func detectGradleFramework(ctx context.Context, token, owner, repo string, entry githubContent, byName map[string]githubContent, depth int) (frameworkCandidate, bool) {
+	raw, err := githubReadFile(ctx, token, owner, repo, entry.Path)
+	if err != nil {
+		return frameworkCandidate{}, false
+	}
+	return detectGradleContent(raw, entry.Path, byName, depth)
+}
+
+func detectGradleKtsFramework(ctx context.Context, token, owner, repo string, entry githubContent, byName map[string]githubContent, depth int) (frameworkCandidate, bool) {
+	raw, err := githubReadFile(ctx, token, owner, repo, entry.Path)
+	if err != nil {
+		return frameworkCandidate{}, false
+	}
+	return detectGradleContent(raw, entry.Path, byName, depth)
+}
+
+func detectGradleContent(raw, path string, byName map[string]githubContent, depth int) (frameworkCandidate, bool) {
+	lower := strings.ToLower(raw)
+	score := 50
+	build := "./gradlew build"
+	install := "./gradlew dependencies"
+	output := "build/libs"
+	framework := "gradle"
+
+	switch {
+	case strings.Contains(lower, "org.springframework.boot") || strings.Contains(lower, "spring-boot") || strings.Contains(lower, "org.springframework"):
+		framework = "spring"
+		score = 115
+	case strings.Contains(lower, "id('scala')") || strings.Contains(lower, `id "scala"`) || strings.Contains(lower, "scala-library") || strings.Contains(lower, "org.scala-lang") || strings.Contains(lower, "io.github.gitbucket"):
+		framework = "scala"
+		score = 120
+		if strings.Contains(lower, "shadowjar") || hasAnyFile(byName, "gradle") {
+			build = "./gradlew shadowJar"
+		}
+	default:
+		if strings.Contains(lower, "shadowjar") {
+			build = "./gradlew shadowJar"
+		}
+	}
+
+	return frameworkCandidate{
+		detection: detectionWithStrings(framework, build, install, output),
+		score:     score,
+		depth:     depth,
+		path:      path,
+	}, true
+}
+
+func detectMavenFramework(ctx context.Context, token, owner, repo string, entry githubContent, depth int) (frameworkCandidate, bool) {
+	raw, err := githubReadFile(ctx, token, owner, repo, entry.Path)
+	if err != nil {
+		return frameworkCandidate{}, false
+	}
+	lower := strings.ToLower(raw)
+	framework := "maven"
+	score := 50
+	build := "mvn package"
+	install := "mvn dependency:go-offline"
+	output := "target"
+	if strings.Contains(lower, "org.springframework.boot") || strings.Contains(lower, "spring-boot") || strings.Contains(lower, "org.springframework") {
+		framework = "spring"
+		score = 112
+	}
+	return frameworkCandidate{
+		detection: detectionWithStrings(framework, build, install, output),
+		score:     score,
+		depth:     depth,
+		path:      entry.Path,
+	}, true
+}
+
+func ptrString(s string) *string {
+	return &s
+}
+
+func detectNodeFrameworkFromLockfile(raw string) (frameworkCandidate, bool) {
+	lower := strings.ToLower(raw)
+	switch {
+	case strings.Contains(lower, "\"next\""), strings.Contains(lower, "next@"):
+		fw, build, install, output := "nextjs", "npm run build", "npm ci", ".next"
+		return frameworkCandidate{detection: detectionWithStrings(fw, build, install, output), score: 100, depth: 0}, true
+	case strings.Contains(lower, "\"nuxt\""), strings.Contains(lower, "nuxt@"):
+		fw, build, install, output := "nuxt", "npm run build", "npm ci", ".output"
+		return frameworkCandidate{detection: detectionWithStrings(fw, build, install, output), score: 98, depth: 0}, true
+	case strings.Contains(lower, "@sveltejs/kit"):
+		fw, build, install := "sveltekit", "npm run build", "npm ci"
+		return frameworkCandidate{detection: detectionWithStrings(fw, build, install, ""), score: 96, depth: 0}, true
+	case strings.Contains(lower, "@vitejs/plugin-react"), strings.Contains(lower, "react-dom"), strings.Contains(lower, "\"react\""):
+		fw, build, install, output := "react", "npm run build", "npm ci", "dist"
+		return frameworkCandidate{detection: detectionWithStrings(fw, build, install, output), score: 90, depth: 0}, true
+	case strings.Contains(lower, "\"vite\""):
+		fw, build, install, output := "vite", "npm run build", "npm ci", "dist"
+		return frameworkCandidate{detection: detectionWithStrings(fw, build, install, output), score: 85, depth: 0}, true
+	default:
+		return frameworkCandidate{}, false
+	}
+}
+
+func detectNodeFrameworkFromLockfileEntry(ctx context.Context, token, owner, repo string, entry githubContent, depth int) (frameworkCandidate, bool) {
+	raw, err := githubReadFile(ctx, token, owner, repo, entry.Path)
+	if err != nil {
+		return frameworkCandidate{}, false
+	}
+	cand, ok := detectNodeFrameworkFromLockfile(raw)
+	if !ok {
+		return frameworkCandidate{}, false
+	}
+	cand.depth = depth
+	cand.path = entry.Path
+	return cand, true
+}
+
+func detectPythonLockfileFramework(raw string, path string, depth int) (frameworkCandidate, bool) {
 	lower := strings.ToLower(raw)
 	switch {
 	case strings.Contains(lower, "fastapi"):
-		return detectionWithStrings("fastapi", "", "pip install -r requirements.txt", "")
+		fw, install := "fastapi", "pip install -r requirements.txt"
+		return frameworkCandidate{detection: detectionWithStrings(fw, "", install, ""), score: 100, depth: depth, path: path}, true
 	case strings.Contains(lower, "django"):
-		return detectionWithStrings("django", "", "pip install -r requirements.txt", "")
+		fw, install := "django", "pip install -r requirements.txt"
+		return frameworkCandidate{detection: detectionWithStrings(fw, "", install, ""), score: 98, depth: depth, path: path}, true
 	case strings.Contains(lower, "flask"):
-		return detectionWithStrings("flask", "", "pip install -r requirements.txt", "")
+		fw, install := "flask", "pip install -r requirements.txt"
+		return frameworkCandidate{detection: detectionWithStrings(fw, "", install, ""), score: 96, depth: depth, path: path}, true
 	default:
-		return frameworkDetection{}
+		return frameworkCandidate{}, false
 	}
+}
+
+func detectPythonLockfileFrameworkEntry(ctx context.Context, token, owner, repo string, entry githubContent, depth int) (frameworkCandidate, bool) {
+	raw, err := githubReadFile(ctx, token, owner, repo, entry.Path)
+	if err != nil {
+		return frameworkCandidate{}, false
+	}
+	return detectPythonLockfileFramework(raw, entry.Path, depth)
+}
+
+func detectCandidatesFromLockfiles(ctx context.Context, token, owner, repo string, byName map[string]githubContent, depth int) []frameworkCandidate {
+	cands := []frameworkCandidate{}
+	lockfiles := []string{"package-lock.json", "yarn.lock", "pnpm-lock.yaml"}
+	for _, name := range lockfiles {
+		if entry, ok := findFile(byName, name); ok {
+			if cand, ok := detectNodeFrameworkFromLockfileEntry(ctx, token, owner, repo, entry, depth); ok {
+				cands = append(cands, cand)
+			}
+		}
+	}
+	for _, name := range []string{"poetry.lock", "uv.lock"} {
+		if entry, ok := findFile(byName, name); ok {
+			if cand, ok := detectPythonLockfileFrameworkEntry(ctx, token, owner, repo, entry, depth); ok {
+				cands = append(cands, cand)
+			}
+		}
+	}
+	return cands
+}
+
+func detectPythonFrameworkByLockfiles(ctx context.Context, token, owner, repo string, byName map[string]githubContent, depth int) []frameworkCandidate {
+	return detectCandidatesFromLockfiles(ctx, token, owner, repo, byName, depth)
+}
+
+func detectFrameworkByConfigAndLockfiles(ctx context.Context, token, owner, repo string, dir string, depth int) ([]frameworkCandidate, error) {
+	entries, err := githubListDir(ctx, token, owner, repo, dir)
+	if err != nil {
+		return nil, err
+	}
+	return append(detectCandidatesInDir(ctx, token, owner, repo, dir, depth, entries), detectCandidatesFromLockfiles(ctx, token, owner, repo, mapFromEntries(entries), depth)...), nil
+}
+
+func mapFromEntries(entries []githubContent) map[string]githubContent {
+	out := make(map[string]githubContent, len(entries))
+	for _, entry := range entries {
+		out[strings.ToLower(entry.Name)] = entry
+	}
+	return out
 }
 
 func detectionWithStrings(framework, build, install, output string) frameworkDetection {

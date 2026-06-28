@@ -5,19 +5,20 @@ import (
 	"fmt"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // GitIntegration holds the per-project git configuration from git_integrations.
 type GitIntegration struct {
-	ID              uuid.UUID
-	ProjectID       uuid.UUID
-	Provider        string
-	RepoURL         string
-	Branch          string
-	TokenEncrypted  []byte
-	WebhookSecret   *string
-	UsePR           bool
+	ID             uuid.UUID
+	ProjectID      uuid.UUID
+	Provider       string
+	RepoURL        string
+	Branch         string
+	TokenEncrypted []byte
+	WebhookSecret  *string
+	UsePR          bool
 }
 
 // GetIntegration returns the git integration for a project, or nil if none exists.
@@ -34,7 +35,9 @@ func GetIntegration(ctx context.Context, pool *pgxpool.Pool, projectID uuid.UUID
 		&g.TokenEncrypted, &g.WebhookSecret, &g.UsePR,
 	)
 	if err != nil {
-		// pgx returns pgx.ErrNoRows; callers treat nil result as "use default"
+		if err == pgx.ErrNoRows {
+			return nil, nil
+		}
 		return nil, fmt.Errorf("get git_integration: %w", err)
 	}
 	return &g, nil

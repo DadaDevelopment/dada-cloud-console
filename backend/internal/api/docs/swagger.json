@@ -6589,7 +6589,7 @@
                         "BearerAuth": []
                     }
                 ],
-                "description": "Proxies to the build-agent, which clones the repo at the given root dir and runs Nixpacks framework detection. Requires write access. Returns 503 when the build-agent is not configured.",
+                "description": "Proxies to the build-agent, which inspects the repository tree (including a shallow recursive search under the chosen root dir) and returns a best-effort framework guess. Requires write access. Returns 503 when the build-agent is not configured.",
                 "produces": [
                     "application/json"
                 ],

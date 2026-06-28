@@ -229,19 +229,28 @@ func (w *DBWatcher) projectEnv(ctx context.Context, projectID uuid.UUID, environ
 // managerFor returns the git.Manager for a project, creating one if needed.
 func (w *DBWatcher) managerFor(ctx context.Context, projectID uuid.UUID) (*git.Manager, error) {
 	integration, err := db.GetIntegration(ctx, w.pool, projectID)
-	if err != nil || integration == nil {
-		// Use default manager
+	if err != nil {
+		return nil, err
+	}
+	return w.managerForIntegration(projectID, integration)
+}
+
+// managerForIntegration resolves the git manager for a project once the
+// project-specific integration row (if any) is already known.
+func (w *DBWatcher) managerForIntegration(projectID uuid.UUID, integration *db.GitIntegration) (*git.Manager, error) {
+	if integration == nil {
+		// Shared-repo mode: projects without a dedicated git_integration still use
+		// the platform default GitOps repo. Broken integrations must not silently
+		// fall back here.
 		return w.managers[w.cfg.DefaultRepoURL], nil
 	}
-
 	if mgr, ok := w.managers[integration.RepoURL]; ok {
 		return mgr, nil
 	}
 
 	token, err := crypto.DecryptToken(w.cfg.EncryptionKey, integration.TokenEncrypted)
 	if err != nil {
-		log.Warn().Err(err).Str("project", projectID.String()).Msg("could not decrypt token, falling back to default repo")
-		return w.managers[w.cfg.DefaultRepoURL], nil
+		return nil, fmt.Errorf("decrypt git integration token for project %s: %w", projectID, err)
 	}
 
 	mgr := git.New(git.RepoConfig{
