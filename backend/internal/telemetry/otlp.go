@@ -42,7 +42,52 @@ var reservedLabels = map[string]struct{}{
 	"monitoring_app": {}, "source": {}, "le": {},
 }
 
-const serviceNameKey = "service.name"
+// Device-identity contract (OTEL semantic conventions). The `source` label —
+// the per-device pivot the console groups by — is resolved from these resource
+// (or datapoint) attributes in strict precedence, NOT from a custom field:
+//   1. service.instance.id — canonical unique id of one running instance/device.
+//   2. host.name           — the host the data came from.
+//   3. service.name        — logical service (last resort; N devices sharing one
+//                            service.name collapse to a single source).
+// This is fixed regardless of what a client happens to emit: a device that wants
+// to appear as its own row MUST set service.instance.id (or at least host.name).
+const (
+	serviceInstanceIDKey = "service.instance.id"
+	hostNameKey          = "host.name"
+	serviceNameKey       = "service.name"
+)
+
+// deviceIdentityKeys is the precedence order resolveSource walks. Also the set
+// mergeAttrLabels skips, so an identity attribute is mapped to `source` only and
+// never duplicated as a free series label.
+var deviceIdentityKeys = []string{serviceInstanceIDKey, hostNameKey, serviceNameKey}
+
+// isDeviceIdentityKey reports whether an attribute key is one of the identity
+// keys mapped to `source` (so it is excluded from the free attribute labels).
+func isDeviceIdentityKey(key string) bool {
+	for _, k := range deviceIdentityKeys {
+		if key == k {
+			return true
+		}
+	}
+	return false
+}
+
+// resolveSource picks the device `source` per the contract above. For each key in
+// precedence it prefers a datapoint-level value over a resource-level one, then
+// falls through to the next key. Returns "" when none are present (the series is
+// then unscoped to a device, surfaced under "All devices").
+func resolveSource(resAttrs, dpAttrs []*commonpb.KeyValue) string {
+	for _, key := range deviceIdentityKeys {
+		if v := attrLookup(dpAttrs, key); v != "" {
+			return v
+		}
+		if v := attrLookup(resAttrs, key); v != "" {
+			return v
+		}
+	}
+	return ""
+}
 
 // isJSONContentType reports whether the OTLP/HTTP request carries JSON (vs the
 // SDK-default application/x-protobuf).
@@ -127,8 +172,8 @@ func mergeAttrLabels(dst map[string]string, attrs []*commonpb.KeyValue, max int,
 		if _, reserved := reservedLabels[name]; reserved {
 			continue
 		}
-		if name == serviceNameKey || kv.GetKey() == serviceNameKey {
-			continue // service.name maps to `source`, handled separately
+		if isDeviceIdentityKey(kv.GetKey()) {
+			continue // identity attrs map to `source` only (resolveSource), never a free label
 		}
 		if _, exists := dst[name]; exists {
 			continue
@@ -143,8 +188,9 @@ func mergeAttrLabels(dst map[string]string, attrs []*commonpb.KeyValue, max int,
 // series, injecting authoritative tenant labels. Gauge and Sum number points
 // become single samples; explicit-bucket Histograms expand to
 // _bucket{le}/_sum/_count. Exponential histograms and summaries are dropped
-// (v1) and counted in `dropped`. service.name (resource or datapoint attr) maps
-// to the `source` label only.
+// (v1) and counted in `dropped`. The `source` label is resolved per the
+// device-identity contract (resolveSource): service.instance.id -> host.name ->
+// service.name, datapoint attrs overriding resource attrs.
 func MetricsToSeries(req *metricsv1.MetricsData, t Tenant) (series []prometheus.WriteSeries, dropped int) {
 	maxLabels := t.MaxLabels
 	if maxLabels <= 0 {
@@ -152,22 +198,21 @@ func MetricsToSeries(req *metricsv1.MetricsData, t Tenant) (series []prometheus.
 	}
 	for _, rm := range req.GetResourceMetrics() {
 		resAttrs := rm.GetResource().GetAttributes()
-		resSource := attrLookup(resAttrs, serviceNameKey)
 		for _, sm := range rm.GetScopeMetrics() {
 			for _, m := range sm.GetMetrics() {
 				name := SanitizeMetricName(m.GetName())
 				switch {
 				case m.GetGauge() != nil:
 					for _, dp := range m.GetGauge().GetDataPoints() {
-						series = append(series, t.numberSeries(name, dp, resAttrs, resSource, maxLabels))
+						series = append(series, t.numberSeries(name, dp, resAttrs, maxLabels))
 					}
 				case m.GetSum() != nil:
 					for _, dp := range m.GetSum().GetDataPoints() {
-						series = append(series, t.numberSeries(name, dp, resAttrs, resSource, maxLabels))
+						series = append(series, t.numberSeries(name, dp, resAttrs, maxLabels))
 					}
 				case m.GetHistogram() != nil:
 					for _, dp := range m.GetHistogram().GetDataPoints() {
-						series = append(series, t.histogramSeries(name, dp, resAttrs, resSource, maxLabels)...)
+						series = append(series, t.histogramSeries(name, dp, resAttrs, maxLabels)...)
 					}
 				default:
 					// ExponentialHistogram / Summary / unset — deferred (v1).

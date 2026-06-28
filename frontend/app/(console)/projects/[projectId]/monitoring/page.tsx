@@ -71,8 +71,14 @@ function buildSnippet(tab: SnippetTab, apiKey: string): string {
       return `import { NodeSDK } from '@opentelemetry/sdk-node';
 import { OTLPMetricExporter } from '@opentelemetry/exporter-metrics-otlp-http';
 import { PeriodicExportingMetricReader } from '@opentelemetry/sdk-metrics';
+import { resourceFromAttributes } from '@opentelemetry/resources';
 
 const sdk = new NodeSDK({
+  // service.instance.id = the device id the console groups by (Device identity).
+  resource: resourceFromAttributes({
+    'service.name': 'my-service',
+    'service.instance.id': 'device-01',
+  }),
   metricReader: new PeriodicExportingMetricReader({
     exporter: new OTLPMetricExporter({
       url: '${metricsUrl}',
@@ -85,31 +91,43 @@ sdk.start();`;
       return `from opentelemetry import metrics
 from opentelemetry.sdk.metrics import MeterProvider
 from opentelemetry.sdk.metrics.export import PeriodicExportingMetricReader
+from opentelemetry.sdk.resources import Resource
 from opentelemetry.exporter.otlp.proto.http.metric_exporter import OTLPMetricExporter
 
+# service.instance.id = the device id the console groups by (Device identity).
+resource = Resource.create({
+    "service.name": "my-service",
+    "service.instance.id": "device-01",
+})
 exporter = OTLPMetricExporter(
     endpoint="${metricsUrl}",
     headers={"X-API-Key": "${apiKey}"},
 )
 reader = PeriodicExportingMetricReader(exporter)
-provider = MeterProvider(metric_readers=[reader])
+provider = MeterProvider(resource=resource, metric_readers=[reader])
 metrics.set_meter_provider(provider)`;
     case "env":
       return `# Set these environment variables before starting your app.
 # The OTel SDK will pick them up automatically (zero-code instrumentation).
 OTEL_EXPORTER_OTLP_ENDPOINT=${INGEST_BASE}
 OTEL_EXPORTER_OTLP_HEADERS=X-API-Key=${apiKey}
+# Device identity: service.instance.id is the per-device id the console groups by.
+OTEL_RESOURCE_ATTRIBUTES=service.name=my-service,service.instance.id=device-01
 # Metrics endpoint: ${metricsUrl}
 # Logs endpoint:    ${logsUrl}`;
     case "curl":
       return `# Send a test metric payload (OTLP/JSON)
+# service.instance.id = the device id the console groups by (see Device identity).
 curl -X POST '${metricsUrl}' \\
   -H 'Content-Type: application/json' \\
   -H 'X-API-Key: ${apiKey}' \\
   -d '{
     "resourceMetrics": [{
       "resource": {
-        "attributes": [{"key":"service.name","value":{"stringValue":"my-service"}}]
+        "attributes": [
+          {"key":"service.name","value":{"stringValue":"my-service"}},
+          {"key":"service.instance.id","value":{"stringValue":"device-01"}}
+        ]
       },
       "scopeMetrics": [{
         "metrics": [{
@@ -241,6 +259,14 @@ function OnboardingCard({
             {t("monitoring.step3.body")}
           </p>
           <CodeSnippets apiKey={apiKey ?? "dmon_<your-key>"} />
+          <div className="mt-3 rounded-lg border border-blue-100 bg-blue-50 px-3 py-2.5">
+            <p className="text-xs font-semibold text-blue-900">
+              {t("monitoring.step3.deviceContract.title")}
+            </p>
+            <p className="mt-1 text-xs leading-relaxed text-blue-800">
+              {t("monitoring.step3.deviceContract.body")}
+            </p>
+          </div>
         </Step>
       </div>
     </div>

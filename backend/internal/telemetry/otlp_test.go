@@ -283,3 +283,89 @@ func toViews(series []prometheus.WriteSeries) []writeSeriesView {
 	}
 	return out
 }
+
+// TestResolveSourcePrecedence locks the device-identity contract: source is
+// resolved service.instance.id -> host.name -> service.name, with datapoint
+// attrs overriding resource attrs per key.
+func TestResolveSourcePrecedence(t *testing.T) {
+	cases := []struct {
+		name     string
+		resAttrs []*commonpb.KeyValue
+		dpAttrs  []*commonpb.KeyValue
+		want     string
+	}{
+		{
+			name:     "instance id wins over host and service",
+			resAttrs: []*commonpb.KeyValue{strAttr("service.name", "svc"), strAttr("host.name", "h1"), strAttr("service.instance.id", "inst-1")},
+			want:     "inst-1",
+		},
+		{
+			name:     "host name wins over service name",
+			resAttrs: []*commonpb.KeyValue{strAttr("service.name", "svc"), strAttr("host.name", "h1")},
+			want:     "h1",
+		},
+		{
+			name:     "service name is last resort",
+			resAttrs: []*commonpb.KeyValue{strAttr("service.name", "svc")},
+			want:     "svc",
+		},
+		{
+			name:     "datapoint overrides resource for same key",
+			resAttrs: []*commonpb.KeyValue{strAttr("service.instance.id", "res-inst")},
+			dpAttrs:  []*commonpb.KeyValue{strAttr("service.instance.id", "dp-inst")},
+			want:     "dp-inst",
+		},
+		{
+			name:     "stronger resource key beats weaker datapoint key",
+			resAttrs: []*commonpb.KeyValue{strAttr("service.instance.id", "res-inst")},
+			dpAttrs:  []*commonpb.KeyValue{strAttr("service.name", "dp-svc")},
+			want:     "res-inst",
+		},
+		{
+			name: "none present yields empty",
+			want: "",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := resolveSource(tc.resAttrs, tc.dpAttrs); got != tc.want {
+				t.Errorf("resolveSource = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestIdentityAttrsNotDuplicatedAsLabels ensures an identity attribute maps to
+// `source` only and never also appears as a free series label.
+func TestIdentityAttrsNotDuplicatedAsLabels(t *testing.T) {
+	md := &metricsv1.MetricsData{ResourceMetrics: []*metricsv1.ResourceMetrics{{
+		Resource: &resourcev1.Resource{Attributes: []*commonpb.KeyValue{
+			strAttr("service.instance.id", "inst-9"),
+			strAttr("host.name", "host-9"),
+			strAttr("service.name", "svc-9"),
+			strAttr("region", "eu"),
+		}},
+		ScopeMetrics: []*metricsv1.ScopeMetrics{{Metrics: []*metricsv1.Metric{{
+			Name: "temp",
+			Data: &metricsv1.Metric_Gauge{Gauge: &metricsv1.Gauge{DataPoints: []*metricsv1.NumberDataPoint{{
+				Value: &metricsv1.NumberDataPoint_AsDouble{AsDouble: 1},
+			}}}},
+		}}}},
+	}}}
+	series, _ := MetricsToSeries(md, testTenant())
+	if len(series) != 1 {
+		t.Fatalf("series = %d, want 1", len(series))
+	}
+	got := series[0].Labels
+	if got["source"] != "inst-9" {
+		t.Errorf("source = %q, want inst-9", got["source"])
+	}
+	for _, k := range []string{"service.instance.id", "service_instance_id", "host.name", "host_name", "service.name", "service_name"} {
+		if _, ok := got[k]; ok {
+			t.Errorf("identity key %q leaked as a free label", k)
+		}
+	}
+	if got["region"] != "eu" {
+		t.Errorf("non-identity attr region = %q, want eu (should still be a label)", got["region"])
+	}
+}

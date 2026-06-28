@@ -12,8 +12,8 @@ import (
 	metricsv1 "go.opentelemetry.io/proto/otlp/metrics/v1"
 )
 
-// authoritativeLabels returns the fixed tenant labels for a series. `source`
-// comes from the client service.name (resource or datapoint level) — the only
+// authoritativeLabels returns the fixed tenant labels for a series. `source` is
+// the device identity resolved per the contract (resolveSource): the only
 // client-controlled value allowed, and only into `source`.
 func (t Tenant) authoritativeLabels(name, source string) map[string]string {
 	return map[string]string{
@@ -36,11 +36,8 @@ func nanoToMS(nano uint64) int64 {
 }
 
 // numberSeries converts a gauge/sum number data point to one sample.
-func (t Tenant) numberSeries(name string, dp *metricsv1.NumberDataPoint, resAttrs []*commonpb.KeyValue, resSource string, maxLabels int) prometheus.WriteSeries {
-	source := resSource
-	if s := attrLookup(dp.GetAttributes(), serviceNameKey); s != "" {
-		source = s
-	}
+func (t Tenant) numberSeries(name string, dp *metricsv1.NumberDataPoint, resAttrs []*commonpb.KeyValue, maxLabels int) prometheus.WriteSeries {
+	source := resolveSource(resAttrs, dp.GetAttributes())
 	labels := t.authoritativeLabels(name, source)
 	added := mergeAttrLabels(labels, resAttrs, maxLabels, 0)
 	mergeAttrLabels(labels, dp.GetAttributes(), maxLabels, added)
@@ -57,11 +54,8 @@ func (t Tenant) numberSeries(name string, dp *metricsv1.NumberDataPoint, resAttr
 // <name>_count. OTLP bucket_counts are per-bucket; Prometheus le-buckets are
 // cumulative, so we accumulate. bucket_counts has len(explicit_bounds)+1 entries
 // (the last is the +Inf overflow bucket).
-func (t Tenant) histogramSeries(name string, dp *metricsv1.HistogramDataPoint, resAttrs []*commonpb.KeyValue, resSource string, maxLabels int) []prometheus.WriteSeries {
-	source := resSource
-	if s := attrLookup(dp.GetAttributes(), serviceNameKey); s != "" {
-		source = s
-	}
+func (t Tenant) histogramSeries(name string, dp *metricsv1.HistogramDataPoint, resAttrs []*commonpb.KeyValue, maxLabels int) []prometheus.WriteSeries {
+	source := resolveSource(resAttrs, dp.GetAttributes())
 	tsMS := nanoToMS(dp.GetTimeUnixNano())
 
 	// Shared attribute labels (without __name__/le) computed once.
@@ -113,18 +107,15 @@ func (t Tenant) histogramSeries(name string, dp *metricsv1.HistogramDataPoint, r
 
 // LogsToAppLogs flattens an OTLP logs export into AppLog documents with
 // authoritative tenancy. body -> Message, severity_text|number -> Level (upper),
-// service.name -> Source, time_unix_nano -> Timestamp, attributes -> Fields.
+// device identity (resolveSource) -> Source, time_unix_nano -> Timestamp,
+// attributes -> Fields.
 func LogsToAppLogs(req *logsv1.LogsData, t Tenant) []logsearch.AppLog {
 	var out []logsearch.AppLog
 	for _, rl := range req.GetResourceLogs() {
 		resAttrs := rl.GetResource().GetAttributes()
-		resSource := attrLookup(resAttrs, serviceNameKey)
 		for _, sl := range rl.GetScopeLogs() {
 			for _, lr := range sl.GetLogRecords() {
-				source := resSource
-				if s := attrLookup(lr.GetAttributes(), serviceNameKey); s != "" {
-					source = s
-				}
+				source := resolveSource(resAttrs, lr.GetAttributes())
 				ts := time.Now()
 				if n := lr.GetTimeUnixNano(); n != 0 {
 					ts = time.Unix(0, int64(n)).UTC()
