@@ -65,7 +65,7 @@ type gitRepo struct {
 //
 // @ID          listGitInstallations
 // @Summary     List git provider installations for a project
-// @Description Returns the GitHub App (or GitLab) installations bound to the project. Read-only.
+// @Description Returns the GitHub App (or GitLab) installations bound to the project's org.
 // @Tags        git
 // @Produce     json
 // @Security    BearerAuth
@@ -98,10 +98,11 @@ func (h *Handler) ListGitInstallations(c *gin.Context) {
 	}
 
 	rows, err := h.pool.Query(c.Request.Context(),
-		`SELECT id, project_id, provider, installation_id, account_login, account_type, created_at
-		 FROM git_app_installations
-		 WHERE project_id = $1
-		 ORDER BY created_at`,
+		`SELECT gai.id, gai.project_id, gai.provider, gai.installation_id, gai.account_login, gai.account_type, gai.created_at
+		 FROM git_app_installations gai
+		 JOIN projects p ON p.org_id = gai.org_id
+		 WHERE p.id = $1
+		 ORDER BY gai.created_at`,
 		projectID,
 	)
 	if err != nil {
@@ -335,8 +336,8 @@ type availableInstallation struct {
 // (the only path that works once the App is installed org-wide).
 //
 // @ID          listAvailableInstallations
-// @Summary     List bindable git App installations
-// @Description Lists all GitHub App installations visible to the build-agent, flagging which are already bound to the project. Requires write access. 503 when the build-agent is unconfigured.
+// @Summary     List bindable git App installations for the project's org
+// @Description Lists GitHub App installations scoped to the project's org (each org owns its own GitHub accounts). Installations from other orgs are never returned. canWrite required. 503 when the build-agent is unconfigured.
 // @Tags        git
 // @Produce     json
 // @Security    BearerAuth
@@ -374,39 +375,49 @@ func (h *Handler) ListAvailableInstallations(c *gin.Context) {
 		return
 	}
 
-	insts, err := h.buildagent.ListAppInstallations(c.Request.Context())
-	if err != nil {
-		respondError(c, http.StatusBadGateway, "failed to list installations")
-		return
-	}
-
-	// Which numeric installation ids are already bound to this project?
-	bound := map[int64]bool{}
+	// Return installations that belong to the same org as the project.
+	// Each org owns its own GitHub accounts; other orgs' installations are never
+	// returned here (prevents cross-tenant leakage like dadaDevelopment being
+	// visible to users in unrelated personal orgs).
 	rows, err := h.pool.Query(c.Request.Context(),
-		`SELECT installation_id FROM git_app_installations WHERE project_id = $1`, projectID)
+		`SELECT gai.installation_id, gai.account_login, gai.account_type,
+		        gai.project_id = $1 AS bound
+		 FROM git_app_installations gai
+		 JOIN projects p ON p.org_id = gai.org_id
+		 WHERE p.id = $1
+		 ORDER BY gai.account_login`,
+		projectID,
+	)
 	if err != nil {
 		respondError(c, http.StatusInternalServerError, "failed to query installations")
 		return
 	}
+	defer rows.Close()
+
+	out := []availableInstallation{}
+	seen := map[int64]bool{}
 	for rows.Next() {
 		var id int64
-		if err := rows.Scan(&id); err != nil {
-			rows.Close()
+		var login, acctType string
+		var bound bool
+		if err := rows.Scan(&id, &login, &acctType, &bound); err != nil {
 			respondError(c, http.StatusInternalServerError, "failed to scan installation")
 			return
 		}
-		bound[id] = true
-	}
-	rows.Close()
-
-	out := []availableInstallation{}
-	for _, in := range insts {
+		if seen[id] {
+			continue
+		}
+		seen[id] = true
 		out = append(out, availableInstallation{
-			InstallationID: strconv.FormatInt(in.InstallationID, 10),
-			AccountLogin:   in.AccountLogin,
-			AccountType:    in.AccountType,
-			Bound:          bound[in.InstallationID],
+			InstallationID: strconv.FormatInt(id, 10),
+			AccountLogin:   login,
+			AccountType:    acctType,
+			Bound:          bound,
 		})
+	}
+	if err := rows.Err(); err != nil {
+		respondError(c, http.StatusInternalServerError, "error reading installations")
+		return
 	}
 	c.JSON(http.StatusOK, gin.H{"installations": out})
 }
@@ -484,11 +495,12 @@ func (h *Handler) BindInstallation(c *gin.Context) {
 	var scanID int64
 	err = h.pool.QueryRow(c.Request.Context(),
 		`INSERT INTO git_app_installations
-		   (project_id, provider, installation_id, account_login, account_type)
-		 VALUES ($1, 'github', $2, $3, $4)
-		 ON CONFLICT (project_id, provider, installation_id)
+		   (project_id, org_id, provider, installation_id, account_login, account_type)
+		 VALUES ($1, (SELECT org_id FROM projects WHERE id = $1), 'github', $2, $3, $4)
+		 ON CONFLICT (org_id, provider, installation_id)
 		 DO UPDATE SET account_login = EXCLUDED.account_login,
 		               account_type  = EXCLUDED.account_type,
+		               project_id    = EXCLUDED.project_id,
 		               updated_at    = NOW()
 		 RETURNING id, project_id, provider, installation_id, account_login, account_type, created_at`,
 		projectID, installID, acct.AccountLogin, acct.AccountType,
@@ -671,7 +683,7 @@ func (h *Handler) DetectFramework(c *gin.Context) {
 //
 // @ID          listGitRepos
 // @Summary     List git-linked repos in an environment
-// @Description Returns the git repositories linked to apps in the given environment. Read-only. Never returns stored tokens or webhook secrets.
+// @Description Returns the git repositories linked to apps in the given environment. Any project member. Never returns stored tokens or webhook secrets.
 // @Tags        git
 // @Produce     json
 // @Security    BearerAuth
@@ -699,13 +711,17 @@ func (h *Handler) ListGitRepos(c *gin.Context) {
 		return
 	}
 
-	_, err = h.effectiveRole(c.Request.Context(), claims, projectID)
+	role, err := h.effectiveRole(c.Request.Context(), claims, projectID)
 	if err == pgx.ErrNoRows {
 		respondNotFound(c)
 		return
 	}
 	if err != nil {
 		respondError(c, http.StatusInternalServerError, "failed to check project membership")
+		return
+	}
+	if !canWrite(role) {
+		respondForbidden(c)
 		return
 	}
 
