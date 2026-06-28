@@ -490,6 +490,7 @@ export interface GitInstallation {
   provider: GitProvider;
   installation_id: string;
   account_login: string;
+  account_type: string;
   account_avatar_url?: string;
   created_at: string;
 }

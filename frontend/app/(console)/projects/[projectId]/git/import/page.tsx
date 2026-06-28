@@ -3,7 +3,7 @@ import { useCallback, useEffect, useState, FormEvent } from "react";
 import { useParams, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { gitApi, buildsApi } from "@/lib/api";
-import type { GitInstallation, GitRemoteRepo, FrameworkDetection, Build } from "@/lib/types";
+import type { GitInstallation, GitRemoteRepo, FrameworkDetection, Build, AvailableInstallation } from "@/lib/types";
 import { BuildLogViewer } from "@/components/deploy/build-log-viewer";
 import { BuildStatusBadge, isBuildActive } from "@/components/deploy/build-status-badge";
 import { Spinner } from "@/components/ui/spinner";
@@ -16,6 +16,11 @@ import { Search, Lock, ChevronDown } from "lucide-react";
 
 type FrameworkPreset = { id: string; label: string; port: number };
 type PresetGroup = { group: string; items: FrameworkPreset[] };
+type GitRemoteRepoCandidate = GitRemoteRepo & {
+  installationId: string;
+  accountLogin: string;
+  accountType: string;
+};
 
 const FRAMEWORK_PRESETS: PresetGroup[] = [
   {
@@ -95,13 +100,12 @@ export default function GitImportPage() {
   const [installations, setInstallations] = useState<GitInstallation[]>([]);
   const [loadingInstalls, setLoadingInstalls] = useState(true);
   const [installError, setInstallError] = useState<string | null>(null);
-  const [selectedInstall, setSelectedInstall] = useState<GitInstallation | null>(null);
 
-  const [remoteRepos, setRemoteRepos] = useState<GitRemoteRepo[]>([]);
+  const [remoteRepos, setRemoteRepos] = useState<GitRemoteRepoCandidate[]>([]);
   const [loadingRepos, setLoadingRepos] = useState(false);
   const [repoError, setRepoError] = useState<string | null>(null);
   const [reposUnavailable, setReposUnavailable] = useState(false);
-  const [selectedRepo, setSelectedRepo] = useState<GitRemoteRepo | null>(null);
+  const [selectedRepo, setSelectedRepo] = useState<GitRemoteRepoCandidate | null>(null);
   const [repoQuery, setRepoQuery] = useState("");
   // When a repo is picked the list collapses into a compact bar; "Change" reopens it.
   const [repoPickerOpen, setRepoPickerOpen] = useState(true);
@@ -128,30 +132,108 @@ export default function GitImportPage() {
   // spec the build was triggered with can't drift under the user.
   const deploying = submitting || !!build || !!deployError;
 
+  const refreshInstallations = useCallback(
+    async (autoBindAvailable: boolean) => {
+      setLoadingInstalls(true);
+      setInstallError(null);
+      try {
+        let bound = (await gitApi.installations(projectId)).installations ?? [];
+
+        if (autoBindAvailable) {
+          let available: AvailableInstallation[] = [];
+          try {
+            available = (await gitApi.availableInstallations(projectId)).installations ?? [];
+          } catch (err) {
+            if (bound.length === 0) throw err;
+          }
+
+          const toBind = available.filter((item) => !item.bound);
+          if (toBind.length > 0) {
+            await Promise.all(toBind.map((item) => gitApi.bindInstallation(projectId, item.installation_id)));
+            bound = (await gitApi.installations(projectId)).installations ?? [];
+          }
+        }
+
+        setInstallations(bound);
+      } catch (err) {
+        setInstallError(err instanceof Error ? err.message : t("git.import.error.loadInstalls"));
+      } finally {
+        setLoadingInstalls(false);
+      }
+    },
+    [projectId, t]
+  );
+
   useEffect(() => {
     /* eslint-disable react-hooks/set-state-in-effect */
     if (!envId) {
       if (!isLoadingEnvs) setLoadingInstalls(false);
       return;
     }
-    setLoadingInstalls(true);
     /* eslint-enable react-hooks/set-state-in-effect */
-    gitApi
-      .installations(projectId)
-      .then((d) => setInstallations(d.installations ?? []))
-      .catch((err) => setInstallError(err instanceof Error ? err.message : t("git.import.error.loadInstalls")))
-      .finally(() => setLoadingInstalls(false));
+    void refreshInstallations(allowed);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [projectId, envId, isLoadingEnvs]);
+  }, [projectId, envId, isLoadingEnvs, allowed, refreshInstallations]);
 
   const loadRepos = useCallback(
-    async (install: GitInstallation) => {
+    async (installs: GitInstallation[]) => {
       setLoadingRepos(true);
       setRepoError(null);
       setReposUnavailable(false);
       try {
-        const d = await gitApi.remoteRepos(projectId, install.id);
-        setRemoteRepos(d.repos ?? []);
+        const results = await Promise.allSettled(
+          installs.map(async (install) => {
+            const d = await gitApi.remoteRepos(projectId, install.id);
+            return (d.repos ?? []).map((repo) => ({
+              ...repo,
+              installationId: install.id,
+              accountLogin: install.account_login,
+              accountType: install.account_type,
+            }));
+          })
+        );
+
+        const merged = new Map<string, GitRemoteRepoCandidate>();
+        let successCount = 0;
+        let unavailableCount = 0;
+        let firstError: string | null = null;
+
+        for (const result of results) {
+          if (result.status === "fulfilled") {
+            successCount++;
+            for (const repo of result.value) {
+              const prev = merged.get(repo.full_name);
+              if (!prev) {
+                merged.set(repo.full_name, repo);
+                continue;
+              }
+              const prevUpdated = prev.updated_at ? Date.parse(prev.updated_at) : 0;
+              const nextUpdated = repo.updated_at ? Date.parse(repo.updated_at) : 0;
+              if (nextUpdated > prevUpdated) merged.set(repo.full_name, repo);
+            }
+            continue;
+          }
+
+          const msg = result.reason instanceof Error ? result.reason.message : t("git.import.error.loadRepos");
+          if (/503|unavailable|not configured/i.test(msg)) unavailableCount++;
+          if (!firstError) firstError = msg;
+        }
+
+        const repos = Array.from(merged.values()).sort((a, b) => {
+          const aUpdated = a.updated_at ? Date.parse(a.updated_at) : 0;
+          const bUpdated = b.updated_at ? Date.parse(b.updated_at) : 0;
+          if (aUpdated !== bUpdated) return bUpdated - aUpdated;
+          return a.full_name.localeCompare(b.full_name);
+        });
+        setRemoteRepos(repos);
+
+        if (repos.length === 0 && unavailableCount === installs.length) {
+          setReposUnavailable(true);
+        } else if (repos.length === 0 && firstError) {
+          setRepoError(firstError);
+        } else if (successCount === 0 && firstError) {
+          setRepoError(firstError);
+        }
       } catch (err) {
         const msg = err instanceof Error ? err.message : t("git.import.error.loadRepos");
         if (/503|unavailable|not configured/i.test(msg)) setReposUnavailable(true);
@@ -164,13 +246,11 @@ export default function GitImportPage() {
     [projectId]
   );
 
-  // Auto-select the first account so the repo list shows immediately — the org
-  // dropdown lets the user switch. No separate "pick account" screen.
+  // Repo picker is fed from the union of all bound GitHub installations so the
+  // user sees personal + org repositories as one searchable list.
   useEffect(() => {
-    if (!selectedInstall && installations.length > 0) {
-      const first = installations[0];
-      setSelectedInstall(first); // eslint-disable-line react-hooks/set-state-in-effect
-      void loadRepos(first);
+    if (installations.length > 0) {
+      void loadRepos(installations);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [installations]);
@@ -184,8 +264,7 @@ export default function GitImportPage() {
         const toBind = list.filter((a) => !a.bound);
         if (list.length) {
           await Promise.all(toBind.map((a) => gitApi.bindInstallation(projectId, a.installation_id)));
-          const d = await gitApi.installations(projectId);
-          setInstallations(d.installations ?? []);
+          await refreshInstallations(false);
           return;
         }
       }
@@ -198,12 +277,11 @@ export default function GitImportPage() {
   }
 
   const runDetect = useCallback(
-    async (repo: GitRemoteRepo, root: string) => {
-      if (!selectedInstall) return;
+    async (repo: GitRemoteRepoCandidate, root: string) => {
       setDetecting(true);
       setDetection(null);
       try {
-        const d = await gitApi.detect(projectId, selectedInstall.id, repo.full_name, root || ".");
+        const d = await gitApi.detect(projectId, repo.installationId, repo.full_name, root || ".");
         setDetection(d);
       } catch {
         setDetection({ framework: null, build_command: null, install_command: null, output_dir: null });
@@ -211,10 +289,10 @@ export default function GitImportPage() {
         setDetecting(false);
       }
     },
-    [projectId, selectedInstall]
+    [projectId]
   );
 
-  function pickRepo(repo: GitRemoteRepo) {
+  function pickRepo(repo: GitRemoteRepoCandidate) {
     setSelectedRepo(repo);
     setRepoPickerOpen(false);
     setBranch(repo.default_branch || "main");
@@ -223,25 +301,15 @@ export default function GitImportPage() {
     void runDetect(repo, ".");
   }
 
-  function switchInstall(id: string) {
-    const next = installations.find((i) => i.id === id);
-    if (!next) return;
-    setSelectedRepo(null);
-    setRepoPickerOpen(true);
-    setRepoQuery("");
-    setSelectedInstall(next);
-    void loadRepos(next);
-  }
-
   async function handleSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    if (!selectedInstall || !selectedRepo) return;
+    if (!selectedRepo) return;
     setSubmitError(null);
     setDeployError(null);
     setSubmitting(true);
     try {
       await gitApi.linkRepo(projectId, envId, {
-        installation_id: selectedInstall.id,
+        installation_id: selectedRepo.installationId,
         repo_full_name: selectedRepo.full_name,
         app_name: appName,
         production_branch: branch,
@@ -369,7 +437,9 @@ export default function GitImportPage() {
                 </span>
                 <div className="min-w-0">
                   <p className="truncate text-sm font-medium text-gray-900">{selectedRepo.full_name}</p>
-                  <p className="truncate text-xs text-gray-400">{selectedRepo.default_branch || "main"}</p>
+                  <p className="truncate text-xs text-gray-400">
+                    {selectedRepo.accountLogin} · {selectedRepo.default_branch || "main"}
+                  </p>
                 </div>
               </div>
               {!deploying && (
@@ -384,20 +454,11 @@ export default function GitImportPage() {
           ) : (
             <>
               <div className="flex flex-col gap-2 sm:flex-row">
-                <div className="relative sm:w-64">
-                  <GithubMark className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-500" />
-                  <select
-                    value={selectedInstall?.id ?? ""}
-                    onChange={(e) => switchInstall(e.target.value)}
-                    className="w-full appearance-none rounded-lg border border-gray-300 bg-white py-2 pl-9 pr-9 text-sm font-medium text-gray-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-                  >
-                    {installations.map((inst) => (
-                      <option key={inst.id} value={inst.id}>
-                        {inst.account_login}
-                      </option>
-                    ))}
-                  </select>
-                  <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+                <div className="flex items-center rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700 shadow-sm sm:w-64">
+                  <GithubMark className="mr-2 h-4 w-4 shrink-0 text-gray-500" />
+                  <span className="truncate">
+                    {installations.map((inst) => inst.account_login).join(", ")}
+                  </span>
                 </div>
                 <div className="relative flex-1">
                   <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
@@ -451,7 +512,7 @@ export default function GitImportPage() {
                               {repo.private && <Lock className="h-3 w-3 shrink-0 text-gray-400" />}
                             </div>
                             <p className="truncate text-xs text-gray-400">
-                              {repo.updated_at ? timeAgo(repo.updated_at) : repo.full_name}
+                              {repo.accountLogin}{repo.updated_at ? ` · ${timeAgo(repo.updated_at)}` : ""}
                             </p>
                           </div>
                         </div>

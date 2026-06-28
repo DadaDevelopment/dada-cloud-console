@@ -249,6 +249,24 @@ that block two product scenarios from being honestly "ready".
   certificate state for `app.a2a-hub.pro`, with a separate note that the DB
   status fields are still stale relative to actual readiness.
 
+---
+
+# 2026-06-28 GitHub install aggregation in repo import
+
+Goal: make GitHub import behave as one correct repo picker, not an account mode
+switch, so personal + organization repositories show up together by default.
+
+## Tasks
+- [x] Confirm installations pagination and account-type handling in build-agent/backend
+- [x] Identify the real issue: frontend was auto-selecting one bound installation and loading repos only for it
+- [x] Auto-bind all currently available GitHub App installations for the project on page load (when the user can write)
+- [x] Load and merge repos from all bound installations into one searchable list
+- [x] Preserve correct detect/deploy behavior by carrying the source installation with the selected repo
+- [x] Verify with `npm run build` in `frontend/`
+
+## Review
+- The bug was primarily UX/data-flow, not GitHub pagination: backend already paginates `/app/installations` and `/installation/repositories`. The import page now syncs available installations into the project, aggregates repos across them, deduplicates by `full_name`, and keeps the chosen installation attached to the selected repo for detect/link/deploy calls.
+
 New canonical app tree:
 
 ```text
