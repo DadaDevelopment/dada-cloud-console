@@ -475,10 +475,10 @@ function AlertsTab({
   const [error, setError] = useState<string | null>(null);
 
   const [isRuleModalOpen, setIsRuleModalOpen] = useState(false);
+  const [metricOptions, setMetricOptions] = useState<string[]>([]);
   const [ruleForm, setRuleForm] = useState({
     name: "",
-    metric: "cpu",
-    metricCustom: "",
+    metric: "",
     condition: ">",
     threshold: 80,
     duration: "5m",
@@ -515,6 +515,17 @@ function AlertsTab({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId, envId, appId]);
 
+  // Discover the resource's actual metric names so the rule form suggests real
+  // keys instead of a hardcoded cpu/memory/temp list. Best-effort: a device that
+  // sends arbitrary metrics still gets accurate suggestions, and the field stays
+  // free-text so any not-yet-seen metric can be targeted.
+  useEffect(() => {
+    monitoringApi
+      .getMetrics(projectId, envId, appId, "24h")
+      .then((d) => setMetricOptions(Object.keys(d.metrics ?? {}).sort()))
+      .catch(() => setMetricOptions([]));
+  }, [projectId, envId, appId]);
+
   async function deleteRule(ruleId: string) {
     try {
       await monitoringApi.deleteAlertRule(projectId, envId, appId, ruleId);
@@ -536,11 +547,9 @@ function AlertsTab({
     setRuleError(null);
     setIsRuleSubmitting(true);
     try {
-      const metric =
-        ruleForm.metric === "custom" ? ruleForm.metricCustom : ruleForm.metric;
       const r = await monitoringApi.createAlertRule(projectId, envId, appId, {
         name: ruleForm.name,
-        metric,
+        metric: ruleForm.metric.trim(),
         condition: ruleForm.condition,
         threshold: ruleForm.threshold,
         duration: ruleForm.duration,
@@ -548,7 +557,7 @@ function AlertsTab({
       });
       setRules((prev) => [...prev, r.rule]);
       setIsRuleModalOpen(false);
-      setRuleForm({ name: "", metric: "cpu", metricCustom: "", condition: ">", threshold: 80, duration: "5m", channel_id: "" });
+      setRuleForm({ name: "", metric: "", condition: ">", threshold: 80, duration: "5m", channel_id: "" });
     } catch (err) {
       setRuleError(err instanceof Error ? err.message : t("monitoring.detail.modal.rule.error"));
     } finally {
@@ -744,16 +753,20 @@ function AlertsTab({
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="block text-sm font-medium text-gray-700">{t("monitoring.detail.modal.rule.metric")}</label>
-              <select
+              <input
+                type="text"
+                required
+                list="monitoring-metric-options"
                 value={ruleForm.metric}
                 onChange={(e) => setRuleForm((p) => ({ ...p, metric: e.target.value }))}
-                className="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-              >
-                <option value="cpu">cpu</option>
-                <option value="memory">memory</option>
-                <option value="temperature">temperature</option>
-                <option value="custom">custom…</option>
-              </select>
+                placeholder={metricOptions[0] ?? "metric_name"}
+                className="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm font-mono text-gray-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              />
+              <datalist id="monitoring-metric-options">
+                {metricOptions.map((m) => (
+                  <option key={m} value={m} />
+                ))}
+              </datalist>
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700">{t("monitoring.detail.modal.rule.condition")}</label>
@@ -769,20 +782,6 @@ function AlertsTab({
               </select>
             </div>
           </div>
-
-          {ruleForm.metric === "custom" && (
-            <div>
-              <label className="block text-sm font-medium text-gray-700">{t("monitoring.detail.modal.rule.metricCustom")}</label>
-              <input
-                type="text"
-                required
-                value={ruleForm.metricCustom}
-                onChange={(e) => setRuleForm((p) => ({ ...p, metricCustom: e.target.value }))}
-                placeholder="my_custom_metric"
-                className="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm font-mono text-gray-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-              />
-            </div>
-          )}
 
           <div className="grid grid-cols-2 gap-3">
             <div>

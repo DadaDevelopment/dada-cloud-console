@@ -8,8 +8,11 @@ import { Spinner } from "@/components/ui/spinner";
 const RANGES = ["15m", "1h", "6h", "24h"] as const;
 type Range = (typeof RANGES)[number];
 
-// Display titles + draw order per metric key. Keys match the backend metric
-// spec (metrics.go). Unknown keys still render with their raw key as title.
+// VM and app metrics come from a fixed collector schema (node_exporter / cAdvisor),
+// so their keys + titles are known ahead of time. Monitoring resources accept
+// ARBITRARY metric names from the device, so their panels are discovered from the
+// response at render time — see the monitoring branch below. Never assume cpu/mem/
+// temp for monitoring: render exactly what the device sent, nothing more.
 const VM_KEYS: { key: string; title: string; color?: string }[] = [
   { key: "cpu_pct", title: "CPU" },
   { key: "mem_pct", title: "Memory", color: "#7c3aed" },
@@ -21,11 +24,25 @@ const APP_KEYS: { key: string; title: string; color?: string }[] = [
   { key: "cpu_cores", title: "CPU (cores)" },
   { key: "mem_bytes", title: "Memory", color: "#7c3aed" },
 ];
-const MONITORING_KEYS: { key: string; title: string; color?: string }[] = [
-  { key: "cpu", title: "CPU" },
-  { key: "memory", title: "Memory", color: "#7c3aed" },
-  { key: "temperature", title: "Temp", color: "#ea580c" },
-];
+
+// Cosmetic-only: a friendlier title for a few common metric names. NEVER used to
+// add, drop, or order panels — only to prettify a discovered key's label.
+const MONITORING_TITLES: Record<string, string> = {
+  cpu: "CPU",
+  memory: "Memory",
+  mem: "Memory",
+  temperature: "Temperature",
+  temp: "Temperature",
+};
+
+// Stable color per discovered metric so a panel keeps its color across renders
+// regardless of discovery order.
+const PALETTE = ["#2563eb", "#7c3aed", "#ea580c", "#059669", "#0891b2", "#db2777", "#ca8a04", "#dc2626"];
+function colorForKey(key: string): string {
+  let h = 0;
+  for (let i = 0; i < key.length; i++) h = (h * 31 + key.charCodeAt(i)) >>> 0;
+  return PALETTE[h % PALETTE.length];
+}
 
 export function MetricsPanel(
   props:
@@ -74,14 +91,17 @@ export function MetricsPanel(
     return () => clearInterval(id);
   }, [load]);
 
-  // Build specs: for monitoring, start with known keys then append dynamic ones.
+  // Monitoring panels are fully data-driven: one panel per metric the device
+  // actually sent, discovered from the response. No fixed cpu/mem/temp set, so a
+  // device emitting arbitrary metrics renders exactly its own keys and an idle
+  // device renders an explicit empty state (handled in the render below).
   let specs: { key: string; title: string; color?: string }[];
   if (props.kind === "monitoring") {
-    const knownKeys = new Set(MONITORING_KEYS.map((k) => k.key));
-    const dynamicKeys = data
-      ? Object.keys(data.metrics).filter((k) => !knownKeys.has(k)).map((k) => ({ key: k, title: k }))
+    specs = data
+      ? Object.keys(data.metrics)
+          .sort()
+          .map((k) => ({ key: k, title: MONITORING_TITLES[k] ?? k, color: colorForKey(k) }))
       : [];
-    specs = [...MONITORING_KEYS, ...dynamicKeys];
   } else {
     specs = props.kind === "vm" ? VM_KEYS : APP_KEYS;
   }
@@ -118,6 +138,13 @@ export function MetricsPanel(
         </div>
       ) : error ? (
         <div className="px-5 py-4 text-sm text-red-600">{error}</div>
+      ) : specs.length === 0 ? (
+        <div className="flex h-32 flex-col items-center justify-center gap-1 px-5 text-center">
+          <p className="text-sm font-medium text-gray-500">No metrics in this range</p>
+          <p className="text-xs text-gray-400">
+            Charts appear automatically once this resource reports metrics.
+          </p>
+        </div>
       ) : (
         <div className="grid gap-4 p-5 sm:grid-cols-2 lg:grid-cols-3">
           {specs.map(({ key, title, color }) => {
