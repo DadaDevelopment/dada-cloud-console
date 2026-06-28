@@ -215,11 +215,13 @@ func (r *Runner) execute(ctx context.Context, b *db.Build, repo *db.Repo, llog *
 
 	// --- building: trigger the job, resolve its build number ---
 	params := map[string]string{
-		"repo":      cloneURL,
-		"branch":    b.Branch,
-		"framework": string(framework),
-		"buildType": "debug",
-		"env":       b.EnvironmentID.String(),
+		"repo":         cloneURL,
+		"branch":       b.Branch,
+		"framework":    string(framework),
+		"buildType":    "debug",
+		"env":          b.EnvironmentID.String(),
+		"project_slug": repo.ProjectSlug,
+		"app_name":     repo.AppName,
 	}
 	queueID, err := r.jenkins.TriggerBuild(ctx, r.cfg.JenkinsJob, params)
 	if err != nil {
