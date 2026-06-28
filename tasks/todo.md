@@ -179,6 +179,26 @@ New config to set in deploy: backend `PORTAINER_URL`, `PORTAINER_API_TOKEN`; por
 
 ---
 
+# 2026-06-28 gitops-agent default repo fallback
+
+Intent: Stop ordinary project GitOps operations from silently writing into the shared default repo when a project lacks a dedicated `git_integrations` row or its token cannot be decrypted.
+
+- [x] Trace `gitops-agent` manager selection and separate platform-only default-repo uses from per-project manifest writes
+- [~] Change per-project operation routing to fail closed instead of falling back to `GITOPS_DEFAULT_REPO_URL`
+- [x] Keep explicit platform-owned bootstrap paths working where the default repo is intentional
+- [x] Add targeted tests for the new routing/error behavior
+- [x] Verify with `go test` for `gitops-agent`
+
+## Review
+- Done in this pass:
+  - `db.GetIntegration` no longer conflates missing rows with real DB errors.
+  - `gitops-agent` no longer redirects a project with a broken encrypted token into the shared default repo.
+  - Focused unit tests cover missing integration, decrypt failure, and manager caching.
+- Remaining follow-up:
+  - A project with no `git_integrations` row still uses shared-repo mode by design. Removing that behavior entirely needs an explicit product/infra migration because current prod depends on it.
+
+---
+
 # 2026-05-29 values.yaml live editor (WS)
 
 Design doc: `tasks/design-values-editor.md`
@@ -258,6 +278,19 @@ switch, so personal + organization repositories show up together by default.
 
 ## Tasks
 - [x] Confirm installations pagination and account-type handling in build-agent/backend
+
+# 2026-06-28 Project create modal polish
+
+## Tasks
+- [x] Reduce the create-project modal to one visible name field for self-service users
+- [x] Keep organization implicit as the caller's personal space during project creation
+- [x] Raise input/placeholder contrast so the field is readable on a light modal
+- [ ] Verify the updated console page builds cleanly
+
+## Review
+- Create-project modal now has one visible name field, no organization picker, and defaults to the caller's personal org by omitting `org_id`.
+- Submit is now enabled as soon as the visible name is non-empty; slug generation happens automatically under the hood.
+- Verified with `npm run lint -- 'app/(console)/projects/page.tsx' 'lib/api.ts' 'lib/i18n/console/messages/projects.ts'` and `npm run build` in `frontend/`.
 - [x] Identify the real issue: frontend was auto-selecting one bound installation and loading repos only for it
 - [x] Auto-bind all currently available GitHub App installations for the project on page load (when the user can write)
 - [x] Load and merge repos from all bound installations into one searchable list

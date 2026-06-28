@@ -18,25 +18,14 @@ export const projects: Messages = {
 
   "projects.modal.title": { ru: "Новый проект", en: "New project" },
   "projects.modal.subtitle": {
-    ru: "Оставьте организацию пустой, чтобы создать проект в личном пространстве — вы станете его владельцем.",
-    en: "Leave the organization blank to create it in your personal space — you become its Owner.",
+    ru: "Проект создаётся в личном пространстве — вы станете его владельцем.",
+    en: "Projects are created in your personal space by default — you become the Owner.",
   },
-  "projects.slug.label": { ru: "Слаг", en: "Slug" },
-  "projects.slug.help": {
-    ru: "3–40 символов, строчные буквы/цифры/дефисы, начинается с буквы. Используется как префикс пространства имён.",
-    en: "3–40 chars, lowercase letters/digits/dashes, starts with a letter. Used as the namespace prefix.",
-  },
-  "projects.displayName.label": { ru: "Отображаемое имя", en: "Display name" },
-  "projects.displayName.placeholder": { ru: "Моё приложение", en: "My App" },
-  "projects.org.label": { ru: "Организация", en: "Organization" },
-  "projects.org.placeholder": { ru: "личная", en: "personal" },
-  "projects.org.helpPre": {
-    ru: "Общая организация, которой вы управляете (например, ",
-    en: "A shared org you administer (e.g. ",
-  },
-  "projects.org.helpPost": {
-    ru: "). Пусто = личная организация.",
-    en: "). Blank = personal org.",
+  "projects.name.label": { ru: "Имя проекта", en: "Project name" },
+  "projects.name.placeholder": { ru: "my-project", en: "my-project" },
+  "projects.name.help": {
+    ru: "3–40 символов, строчные буквы/цифры/дефисы, начинается с буквы. Используется как slug и префикс пространства имён.",
+    en: "3–40 chars, lowercase letters/digits/dashes, starts with a letter. Used as the slug and namespace prefix.",
   },
   "projects.submit": { ru: "Создать проект", en: "Create project" },
 

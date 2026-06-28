@@ -148,8 +148,8 @@ export const authApi = {
 
 export const projectsApi = {
   list: () => apiFetch<ProjectsResponse>("/api/v1/projects"),
-  // Create a project. Omit org_id to land it in your personal org (you become
-  // Owner); pass org_id only for a shared org you administer.
+  // Create a project. The create-project UI always leaves org_id empty so new
+  // projects land in the caller's personal org by default.
   create: (data: { slug: string; display_name?: string; org_id?: string; default_environment?: string }) =>
     apiFetch<CreateProjectResponse>("/api/v1/projects", { method: "POST", body: data }),
   get: (id: string) => apiFetch<ProjectDetailResponse>(`/api/v1/projects/${id}`),

@@ -24,6 +24,32 @@ function SkeletonCard() {
 // user gets instant feedback instead of a round-trip 400.
 const SLUG_RE = /^[a-z][a-z0-9-]{1,38}[a-z0-9]$/;
 
+const CYRILLIC_MAP: Record<string, string> = {
+  а: "a", б: "b", в: "v", г: "g", д: "d", е: "e", ё: "e", ж: "zh", з: "z", и: "i", й: "y",
+  к: "k", л: "l", м: "m", н: "n", о: "o", п: "p", р: "r", с: "s", т: "t", у: "u", ф: "f",
+  х: "h", ц: "ts", ч: "ch", ш: "sh", щ: "sch", ъ: "", ы: "y", ь: "", э: "e", ю: "yu", я: "ya",
+};
+
+function normalizeProjectSlug(value: string) {
+  const transliterated = value
+    .toLowerCase()
+    .trim()
+    .split("")
+    .map((ch) => CYRILLIC_MAP[ch] ?? ch)
+    .join("")
+    .replace(/\s+/g, "-")
+    .replace(/[^a-z0-9-]/g, "")
+    .replace(/-+/g, "-")
+    .replace(/^-+|-+$/g, "");
+
+  if (SLUG_RE.test(transliterated)) return transliterated;
+
+  const fallback = `project-${Math.abs(
+    Array.from(value.trim()).reduce((hash, ch) => ((hash << 5) - hash + ch.codePointAt(0)!) | 0, 0)
+  ).toString(36)}`;
+  return fallback.slice(0, 40).replace(/-+$/g, "");
+}
+
 function CreateProjectModal({
   onClose,
   onCreated,
@@ -32,24 +58,22 @@ function CreateProjectModal({
   onCreated: (projectId: string) => void;
 }) {
   const { t } = useT();
-  const [slug, setSlug] = useState("");
-  const [displayName, setDisplayName] = useState("");
-  const [orgId, setOrgId] = useState("");
+  const [projectName, setProjectName] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const slugValid = SLUG_RE.test(slug);
+  const slug = normalizeProjectSlug(projectName);
+  const canSubmit = projectName.trim().length > 0 && !submitting;
 
   async function submit(e: FormEvent) {
     e.preventDefault();
-    if (!slugValid || submitting) return;
+    if (!canSubmit) return;
     setSubmitting(true);
     setError(null);
     try {
       const res = await projectsApi.create({
         slug,
-        display_name: displayName.trim() || undefined,
-        org_id: orgId.trim() || undefined,
+        display_name: projectName.trim() || undefined,
       });
       onCreated(res.project_id);
     } catch (err) {
@@ -62,54 +86,25 @@ function CreateProjectModal({
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
       <div className="w-full max-w-md rounded-xl border border-gray-200 bg-white p-6 shadow-xl">
         <h2 className="text-lg font-semibold text-gray-900">{t("projects.modal.title")}</h2>
-        <p className="mt-1 text-sm text-gray-500">
+        <p className="mt-1 text-sm text-gray-600">
           {t("projects.modal.subtitle")}
         </p>
 
         <form onSubmit={submit} className="mt-5 space-y-4">
           <div>
-            <label htmlFor="slug" className="block text-sm font-medium text-gray-700">
-              {t("projects.slug.label")}
+            <label htmlFor="project_name" className="block text-sm font-medium text-gray-800">
+              {t("projects.name.label")}
             </label>
             <input
-              id="slug"
+              id="project_name"
               autoFocus
-              value={slug}
-              onChange={(e) => setSlug(e.target.value.toLowerCase())}
-              placeholder="my-app"
-              className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 font-mono text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              value={projectName}
+              onChange={(e) => setProjectName(e.target.value)}
+              placeholder={t("projects.name.placeholder")}
+              className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 placeholder-gray-400 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
             />
-            <p className="mt-1 text-xs text-gray-400">
-              {t("projects.slug.help")}
-            </p>
-          </div>
-
-          <div>
-            <label htmlFor="display_name" className="block text-sm font-medium text-gray-700">
-              {t("projects.displayName.label")} <span className="text-gray-400">{t("common.optional")}</span>
-            </label>
-            <input
-              id="display_name"
-              value={displayName}
-              onChange={(e) => setDisplayName(e.target.value)}
-              placeholder={slug || t("projects.displayName.placeholder")}
-              className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-            />
-          </div>
-
-          <div>
-            <label htmlFor="org_id" className="block text-sm font-medium text-gray-700">
-              {t("projects.org.label")} <span className="text-gray-400">{t("common.optional")}</span>
-            </label>
-            <input
-              id="org_id"
-              value={orgId}
-              onChange={(e) => setOrgId(e.target.value)}
-              placeholder={t("projects.org.placeholder")}
-              className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-            />
-            <p className="mt-1 text-xs text-gray-400">
-              {t("projects.org.helpPre")}<span className="font-mono">dada</span>{t("projects.org.helpPost")}
+            <p className="mt-1 text-xs text-gray-500">
+              {t("projects.name.help")}
             </p>
           </div>
 
@@ -129,7 +124,7 @@ function CreateProjectModal({
             </button>
             <button
               type="submit"
-              disabled={!slugValid || submitting}
+              disabled={!canSubmit}
               className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
             >
               {submitting ? t("common.creating") : t("projects.submit")}
