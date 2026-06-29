@@ -292,136 +292,149 @@ spec:
                 echo "Image tag: ${resolvedTag}  (commit: ${sha})"
             }
 
-            // ── Go backend ────────────────────────────────────────────────
-            container('go-builder') {
-                runStage('Toolchain (Go)') {
-                    sh '''
-                        set -eux
-                        go version
-                        apk add --no-cache helm git >/dev/null 2>&1 || true
-                        helm version --short
-                    '''
-                }
-
-                runStage('Backend tests') {
-                    dir('backend') {
-                        sh 'go test ./... -count=1'
-                    }
-                }
-
-                runStage('Backend build') {
-                    dir('backend') {
-                        sh 'CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -buildvcs=false -ldflags="-s -w" -o bin/server ./cmd/server'
-                    }
-                }
-
-                runStage('Gateway build') {
-                    dir('backend') {
-                        sh 'CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -buildvcs=false -ldflags="-s -w" -o bin/gateway ./cmd/gateway'
-                    }
-                }
-
-                runStage('Grafana-embed-gateway build') {
-                    dir('backend') {
-                        sh 'CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -buildvcs=false -ldflags="-s -w" -o bin/grafana-embed-gateway ./cmd/grafana-embed-gateway'
-                    }
-                }
-
-                runStage('GitOps-agent tests') {
-                    dir('gitops-agent') {
-                        sh 'go test ./... -count=1'
-                    }
-                }
-
-                runStage('GitOps-agent build') {
-                    dir('gitops-agent') {
-                        sh 'CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -buildvcs=false -ldflags="-s -w" -o bin/gitops-agent ./cmd/gitops-agent'
-                    }
-                }
-
-                runStage('Build-agent tests') {
-                    dir('build-agent') {
-                        sh 'go test ./... -count=1'
-                    }
-                }
-
-                runStage('Build-agent build') {
-                    dir('build-agent') {
-                        sh 'CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -buildvcs=false -ldflags="-s -w" -o bin/build-agent ./cmd/build-agent'
-                    }
-                }
-
-                runStage('Portainer-agent tests') {
-                    dir('portainer-agent') {
-                        sh 'go test ./... -count=1'
-                    }
-                }
-
-                runStage('Portainer-agent build') {
-                    dir('portainer-agent') {
-                        sh 'CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -buildvcs=false -ldflags="-s -w" -o bin/portainer-agent ./cmd/portainer-agent'
-                    }
-                }
-
-                runStage('Helm lint + render') {
-                    sh """
-                        set -eux
-                        helm lint helm/dada-cloud-console
-                        helm template dada-cloud-console helm/dada-cloud-console \
-                          --namespace devops-tools \
-                          --set backend.image.tag=${resolvedTag} \
-                          --set frontend.image.tag=${resolvedTag} \
-                          --set gitopsAgent.image.tag=${resolvedTag} \
-                          --set portainerAgent.image.tag=${resolvedTag} \
-                          --set buildAgent.image.tag=${resolvedTag} \
-                          --set gateway.image.tag=${resolvedTag} \
-                          --set ingress.host=console.dada-tuda.ru \
-                          > /tmp/dada-cloud-console-rendered.yaml
-                        echo "Rendered \$(wc -l < /tmp/dada-cloud-console-rendered.yaml) lines"
-                    """
-                }
-            }
-
-            // ── Node.js frontend ──────────────────────────────────────────
-            container('node-builder') {
-                runStage('Frontend install') {
-                    dir('frontend') {
-                        // @dada/* deps resolve from internal Nexus npm (.npmrc).
-                        // NEXUS_NPM_AUTH = base64("user:pass"); .npmrc expands it.
-                        withCredentials([usernamePassword(
-                                credentialsId: 'docker-nexus-admin-psws',
-                                usernameVariable: 'NEXUS_USER',
-                                passwordVariable: 'NEXUS_PASS'
-                        )]) {
-                            sh '''
-                                set -eu
-                                export NEXUS_NPM_AUTH=$(printf '%s:%s' "$NEXUS_USER" "$NEXUS_PASS" | base64 | tr -d '\\n')
-                                npm ci
-                            '''
-                        }
-                    }
-                }
-
-                runStage('Frontend typecheck + build') {
-                    dir('frontend') {
-                        withEnv([
-                            "NEXT_PUBLIC_AUTH_MODE=${NEXT_PUBLIC_AUTH_MODE}",
-                            "NEXT_PUBLIC_KEYCLOAK_ISSUER=${NEXT_PUBLIC_KEYCLOAK_ISSUER}",
-                            "NEXT_PUBLIC_OIDC_CLIENT_ID=${NEXT_PUBLIC_OIDC_CLIENT_ID}",
-                            "NEXT_PUBLIC_CONSOLE_URL=${NEXT_PUBLIC_CONSOLE_URL}",
-                        ]) {
+            // ── Build lanes: one pod, two containers, run concurrently ────
+            // The Go backend lane and the Node frontend lane share no inputs,
+            // so run them in parallel INSIDE THE SAME POD (go-builder vs
+            // node-builder containers) instead of back-to-back. failFast aborts
+            // the surviving lane the moment the other fails. Go sub-steps stay
+            // sequential on purpose — fanning them out too would peg the node
+            // CPU and drop the JNLP channel (see the resource notes above).
+            // stage() (not runStage) inside the branches: currentStageName is
+            // shared mutable state, unsafe to write from parallel branches.
+            parallel(
+                failFast: true,
+                'backend (go)': {
+                    container('go-builder') {
+                        stage('Toolchain (Go)') {
                             sh '''
                                 set -eux
-                                node -e "const p=require('./package.json'); process.exit(p.scripts && p.scripts.typecheck ? 0 : 1)" \
-                                  && npm run typecheck || echo "No typecheck script — skip"
-                                node -e "const p=require('./package.json'); process.exit(p.scripts && p.scripts.lint ? 0 : 1)" \
-                                  && npm run lint || echo "No lint script — skip"
-                                npm run build
+                                go version
+                                apk add --no-cache helm git >/dev/null 2>&1 || true
+                                helm version --short
                             '''
+                        }
+
+                        stage('Backend tests') {
+                            dir('backend') {
+                                sh 'go test ./... -count=1'
+                            }
+                        }
+
+                        stage('Backend build') {
+                            dir('backend') {
+                                sh 'CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -buildvcs=false -ldflags="-s -w" -o bin/server ./cmd/server'
+                            }
+                        }
+
+                        stage('Gateway build') {
+                            dir('backend') {
+                                sh 'CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -buildvcs=false -ldflags="-s -w" -o bin/gateway ./cmd/gateway'
+                            }
+                        }
+
+                        stage('Grafana-embed-gateway build') {
+                            dir('backend') {
+                                sh 'CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -buildvcs=false -ldflags="-s -w" -o bin/grafana-embed-gateway ./cmd/grafana-embed-gateway'
+                            }
+                        }
+
+                        stage('GitOps-agent tests') {
+                            dir('gitops-agent') {
+                                sh 'go test ./... -count=1'
+                            }
+                        }
+
+                        stage('GitOps-agent build') {
+                            dir('gitops-agent') {
+                                sh 'CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -buildvcs=false -ldflags="-s -w" -o bin/gitops-agent ./cmd/gitops-agent'
+                            }
+                        }
+
+                        stage('Build-agent tests') {
+                            dir('build-agent') {
+                                sh 'go test ./... -count=1'
+                            }
+                        }
+
+                        stage('Build-agent build') {
+                            dir('build-agent') {
+                                sh 'CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -buildvcs=false -ldflags="-s -w" -o bin/build-agent ./cmd/build-agent'
+                            }
+                        }
+
+                        stage('Portainer-agent tests') {
+                            dir('portainer-agent') {
+                                sh 'go test ./... -count=1'
+                            }
+                        }
+
+                        stage('Portainer-agent build') {
+                            dir('portainer-agent') {
+                                sh 'CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -buildvcs=false -ldflags="-s -w" -o bin/portainer-agent ./cmd/portainer-agent'
+                            }
+                        }
+
+                        stage('Helm lint + render') {
+                            sh """
+                                set -eux
+                                helm lint helm/dada-cloud-console
+                                helm template dada-cloud-console helm/dada-cloud-console \
+                                  --namespace devops-tools \
+                                  --set backend.image.tag=${resolvedTag} \
+                                  --set frontend.image.tag=${resolvedTag} \
+                                  --set gitopsAgent.image.tag=${resolvedTag} \
+                                  --set portainerAgent.image.tag=${resolvedTag} \
+                                  --set buildAgent.image.tag=${resolvedTag} \
+                                  --set gateway.image.tag=${resolvedTag} \
+                                  --set ingress.host=console.dada-tuda.ru \
+                                  > /tmp/dada-cloud-console-rendered.yaml
+                                echo "Rendered \$(wc -l < /tmp/dada-cloud-console-rendered.yaml) lines"
+                            """
+                        }
+                    }
+                },
+                'frontend (node)': {
+                    container('node-builder') {
+                        stage('Frontend install') {
+                            dir('frontend') {
+                                // @dada/* deps resolve from internal Nexus npm (.npmrc).
+                                // NEXUS_NPM_AUTH = base64("user:pass"); .npmrc expands it.
+                                withCredentials([usernamePassword(
+                                        credentialsId: 'docker-nexus-admin-psws',
+                                        usernameVariable: 'NEXUS_USER',
+                                        passwordVariable: 'NEXUS_PASS'
+                                )]) {
+                                    sh '''
+                                        set -eu
+                                        export NEXUS_NPM_AUTH=$(printf '%s:%s' "$NEXUS_USER" "$NEXUS_PASS" | base64 | tr -d '\\n')
+                                        npm ci
+                                    '''
+                                }
+                            }
+                        }
+
+                        stage('Frontend typecheck + build') {
+                            dir('frontend') {
+                                withEnv([
+                                    "NEXT_PUBLIC_AUTH_MODE=${NEXT_PUBLIC_AUTH_MODE}",
+                                    "NEXT_PUBLIC_KEYCLOAK_ISSUER=${NEXT_PUBLIC_KEYCLOAK_ISSUER}",
+                                    "NEXT_PUBLIC_OIDC_CLIENT_ID=${NEXT_PUBLIC_OIDC_CLIENT_ID}",
+                                    "NEXT_PUBLIC_CONSOLE_URL=${NEXT_PUBLIC_CONSOLE_URL}",
+                                ]) {
+                                    sh '''
+                                        set -eux
+                                        node -e "const p=require('./package.json'); process.exit(p.scripts && p.scripts.typecheck ? 0 : 1)" \
+                                          && npm run typecheck || echo "No typecheck script — skip"
+                                        node -e "const p=require('./package.json'); process.exit(p.scripts && p.scripts.lint ? 0 : 1)" \
+                                          && npm run lint || echo "No lint script — skip"
+                                        npm run build
+                                    '''
+                                }
+                            }
                         }
                     }
                 }
-            }
+            )
 
             // ── Docker ────────────────────────────────────────────────────
             container('docker') {
