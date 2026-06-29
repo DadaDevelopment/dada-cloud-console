@@ -45,7 +45,7 @@ func New(baseURL string, ts *TokenSource) *Client {
 	if baseURL == "" || ts == nil {
 		return nil
 	}
-	return &Client{baseURL: strings.TrimRight(baseURL, "/"), ts: ts, hc: &http.Client{Timeout: 30 * time.Second}}
+	return &Client{baseURL: strings.TrimRight(baseURL, "/"), ts: ts, hc: &http.Client{Timeout: 120 * time.Second}}
 }
 
 func (c *Client) auth(ctx context.Context, req *http.Request) error {

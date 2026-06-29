@@ -1,8 +1,11 @@
 package api
 
 import (
+	"context"
 	"io"
+	"log"
 	"net/http"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -139,20 +142,33 @@ func (h *Handler) CreateCloudTask(c *gin.Context) {
 		},
 	}
 
-	res, err := h.dadagent.SubmitIntent(c.Request.Context(), in)
-	if err != nil {
-		_ = h.updateCloudTaskByIntent(c.Request.Context(), intentID, "failed", "", nil, err.Error())
-		respondError(c, http.StatusBadGateway, "agent submit failed")
-		return
-	}
-	_ = h.setCloudTaskWorkflow(c.Request.Context(), intentID, res.WorkflowID)
-	if err := h.dadagent.ExecuteIntent(c.Request.Context(), intentID); err != nil {
-		_ = h.updateCloudTaskByIntent(c.Request.Context(), intentID, "failed", "", nil, err.Error())
-		respondError(c, http.StatusBadGateway, "agent execute failed")
-		return
-	}
-	row.WorkflowID = &res.WorkflowID
+	go h.runCloudTaskIntent(intentID, in)
+
 	c.JSON(http.StatusAccepted, gin.H{"cloud_task": row})
+}
+
+// runCloudTaskIntent submits then executes a DadaAgent intent off the HTTP
+// request path. The cloud_tasks row already exists in 'running'; the agent's
+// callback webhook (/api/v1/webhooks/dadagent) drives the row to its terminal
+// state. Detached context: the request is already answered (202) and the agent's
+// readiness gate can outlive any request deadline. Only a hard submit/execute
+// failure (no callback will ever arrive) flips the row to 'failed'.
+func (h *Handler) runCloudTaskIntent(intentID string, in dadagent.IntentRequest) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+
+	res, err := h.dadagent.SubmitIntent(ctx, in)
+	if err != nil {
+		log.Printf("cloud-task: intent %s submit failed: %v", intentID, err)
+		_ = h.updateCloudTaskByIntent(ctx, intentID, "failed", "", nil, err.Error())
+		return
+	}
+	_ = h.setCloudTaskWorkflow(ctx, intentID, res.WorkflowID)
+	if err := h.dadagent.ExecuteIntent(ctx, intentID); err != nil {
+		log.Printf("cloud-task: intent %s execute failed: %v", intentID, err)
+		_ = h.updateCloudTaskByIntent(ctx, intentID, "failed", "", nil, err.Error())
+		return
+	}
 }
 
 // ListCloudTasks returns the cloud tasks for one app, newest first.
