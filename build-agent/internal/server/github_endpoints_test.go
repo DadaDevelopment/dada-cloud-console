@@ -188,7 +188,7 @@ func TestHandleDetectNextJS(t *testing.T) {
 				{"type": "file", "name": "package.json", "path": "package.json"},
 			}), nil
 		case "/repos/org/app/contents/package.json":
-			raw := `{"dependencies":{"next":"15.0.0"},"scripts":{"build":"next build"}}`
+			raw := `{"packageManager":"pnpm@10.12.4","dependencies":{"next":"15.0.0"},"scripts":{"build":"next build","start":"next start"}}`
 			return jsonResponse(t, http.StatusOK, map[string]any{
 				"type": "file", "name": "package.json", "path": "package.json",
 				"encoding": "base64", "content": base64.StdEncoding.EncodeToString([]byte(raw)),
@@ -215,11 +215,133 @@ func TestHandleDetectNextJS(t *testing.T) {
 	if d.Framework == nil || *d.Framework != "nextjs" {
 		t.Fatalf("framework = %v, want nextjs", d.Framework)
 	}
-	if d.BuildCommand == nil || *d.BuildCommand != "npm run build" {
-		t.Fatalf("build_command = %v, want npm run build", d.BuildCommand)
+	if d.PackageManager == nil || *d.PackageManager != "pnpm@10.12.4" {
+		t.Fatalf("package_manager = %v, want pnpm@10.12.4", d.PackageManager)
 	}
-	if d.InstallCommand == nil || *d.InstallCommand != "npm ci" {
-		t.Fatalf("install_command = %v, want npm ci", d.InstallCommand)
+	if d.BuildCommand == nil || *d.BuildCommand != "pnpm run build" {
+		t.Fatalf("build_command = %v, want pnpm run build", d.BuildCommand)
+	}
+	if d.InstallCommand == nil || *d.InstallCommand != "pnpm install" {
+		t.Fatalf("install_command = %v, want pnpm install", d.InstallCommand)
+	}
+	if d.StartCommand == nil || *d.StartCommand != "pnpm run start" {
+		t.Fatalf("start_command = %v, want pnpm run start", d.StartCommand)
+	}
+	if d.Port == nil || *d.Port != 3000 {
+		t.Fatalf("port = %v, want 3000", d.Port)
+	}
+}
+
+func TestHandleDetectSpringGradle(t *testing.T) {
+	old := githubHTTPClient
+	t.Cleanup(func() { githubHTTPClient = old })
+	githubHTTPClient = &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		switch req.URL.Path {
+		case "/repos/org/app/contents":
+			return jsonResponse(t, http.StatusOK, []map[string]any{
+				{"type": "file", "name": "build.gradle", "path": "build.gradle"},
+			}), nil
+		case "/repos/org/app/contents/build.gradle":
+			raw := `plugins { id 'java'; id 'org.springframework.boot' version '3.4.0' }`
+			return jsonResponse(t, http.StatusOK, map[string]any{
+				"type": "file", "name": "build.gradle", "path": "build.gradle",
+				"encoding": "base64", "content": base64.StdEncoding.EncodeToString([]byte(raw)),
+			}), nil
+		default:
+			return jsonResponse(t, http.StatusNotFound, map[string]string{"error": "not found"}), nil
+		}
+	})}
+
+	srv := httptest.NewServer(newTestServer(&fakeApp{}))
+	defer srv.Close()
+	resp, err := http.Get(srv.URL + "/github/installations/1/detect?repo=org/app&root_dir=.")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var d frameworkDetection
+	if err := json.NewDecoder(resp.Body).Decode(&d); err != nil {
+		t.Fatal(err)
+	}
+	if d.Framework == nil || *d.Framework != "spring-gradle" {
+		t.Fatalf("framework = %v, want spring-gradle", d.Framework)
+	}
+	if d.BuildCommand == nil || *d.BuildCommand != "./gradlew build" {
+		t.Fatalf("build_command = %v, want ./gradlew build", d.BuildCommand)
+	}
+	if d.InstallCommand == nil || *d.InstallCommand != "./gradlew dependencies" {
+		t.Fatalf("install_command = %v, want ./gradlew dependencies", d.InstallCommand)
+	}
+	if d.Port == nil || *d.Port != 8080 {
+		t.Fatalf("port = %v, want 8080", d.Port)
+	}
+}
+
+func TestHandleDetectNestedMonorepoPackageManager(t *testing.T) {
+	old := githubHTTPClient
+	t.Cleanup(func() { githubHTTPClient = old })
+	githubHTTPClient = &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		switch req.URL.Path {
+		case "/repos/org/app/contents":
+			return jsonResponse(t, http.StatusOK, []map[string]any{
+				{"type": "file", "name": "package.json", "path": "package.json"},
+				{"type": "dir", "name": "frontend", "path": "frontend"},
+			}), nil
+		case "/repos/org/app/contents/package.json":
+			raw := `{"packageManager":"pnpm@10.12.4","private":true,"workspaces":["frontend"]}`
+			return jsonResponse(t, http.StatusOK, map[string]any{
+				"type": "file", "name": "package.json", "path": "package.json",
+				"encoding": "base64", "content": base64.StdEncoding.EncodeToString([]byte(raw)),
+			}), nil
+		case "/repos/org/app/contents/frontend":
+			return jsonResponse(t, http.StatusOK, []map[string]any{
+				{"type": "file", "name": "package.json", "path": "frontend/package.json"},
+			}), nil
+		case "/repos/org/app/contents/frontend/package.json":
+			raw := `{"dependencies":{"next":"15.0.0"},"scripts":{"build":"next build","start":"next start"}}`
+			return jsonResponse(t, http.StatusOK, map[string]any{
+				"type": "file", "name": "package.json", "path": "frontend/package.json",
+				"encoding": "base64", "content": base64.StdEncoding.EncodeToString([]byte(raw)),
+			}), nil
+		default:
+			return jsonResponse(t, http.StatusNotFound, map[string]string{"error": "not found"}), nil
+		}
+	})}
+
+	srv := httptest.NewServer(newTestServer(&fakeApp{}))
+	defer srv.Close()
+	resp, err := http.Get(srv.URL + "/github/installations/1/detect?repo=org/app&root_dir=.")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var d frameworkDetection
+	if err := json.NewDecoder(resp.Body).Decode(&d); err != nil {
+		t.Fatal(err)
+	}
+	if d.Framework == nil || *d.Framework != "nextjs" {
+		t.Fatalf("framework = %v, want nextjs", d.Framework)
+	}
+	if d.PackageManager == nil || *d.PackageManager != "pnpm@10.12.4" {
+		t.Fatalf("package_manager = %v, want pnpm@10.12.4", d.PackageManager)
+	}
+	if d.BuildCommand == nil || *d.BuildCommand != "pnpm run build" {
+		t.Fatalf("build_command = %v, want pnpm run build", d.BuildCommand)
+	}
+	if d.InstallCommand == nil || *d.InstallCommand != "pnpm install" {
+		t.Fatalf("install_command = %v, want pnpm install", d.InstallCommand)
+	}
+	if d.StartCommand == nil || *d.StartCommand != "pnpm run start" {
+		t.Fatalf("start_command = %v, want pnpm run start", d.StartCommand)
+	}
+	if d.Port == nil || *d.Port != 3000 {
+		t.Fatalf("port = %v, want 3000", d.Port)
 	}
 }
 

@@ -84,8 +84,8 @@ export const git: Messages = {
   },
   "git.import.connectGitHub": { ru: "Подключить GitHub", en: "Connect GitHub" },
   "git.import.connectGitLab": { ru: "Подключить GitLab", en: "Connect GitLab" },
-  "git.import.connectAnotherGitHub": { ru: "+ Подключить ещё один аккаунт GitHub", en: "+ Connect another GitHub account" },
-  "git.import.connectAnotherGitLab": { ru: "+ GitLab", en: "+ GitLab" },
+  "git.import.connectAnotherGitHub": { ru: "Подключить ещё один аккаунт GitHub", en: "Connect another GitHub account" },
+  "git.import.connectAnotherGitLab": { ru: "Подключить ещё один GitLab", en: "Connect another GitLab" },
 
   "git.import.select": { ru: "Выбрать →", en: "Select →" },
   "git.import.backToAccounts": { ru: "← Назад к аккаунтам", en: "← Back to accounts" },
@@ -127,8 +127,8 @@ export const git: Messages = {
   "git.import.framework.label": { ru: "Фреймворк", en: "Framework" },
   "git.import.framework.auto": { ru: "Автоопределение", en: "Auto-detect" },
   "git.import.framework.hint": {
-    ru: "Порт подставится по умолчанию для фреймворка — можно изменить ниже. Сборка всё равно автоопределяется.",
-    en: "Sets a default port for the framework — editable below. The build is still auto-detected.",
+    ru: "Детект подставляет семейство сборки, package manager, команды и порт по умолчанию — ниже можно изменить вручную.",
+    en: "Detection fills in the build family, package manager, commands, and port by default — you can still edit them below.",
   },
 
   "git.import.autoDeploy.label": { ru: "Авто-деплой", en: "Auto-deploy" },

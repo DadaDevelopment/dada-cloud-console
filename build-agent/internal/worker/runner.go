@@ -16,6 +16,7 @@ import (
 	"github.com/dada-tuda/console/build-agent/internal/metrics"
 	"github.com/dada-tuda/console/build-agent/internal/queue"
 	"github.com/dada-tuda/console/build-agent/internal/registry"
+	"github.com/dada-tuda/console/build-agent/internal/server"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rs/zerolog"
@@ -203,7 +204,7 @@ func (r *Runner) execute(ctx context.Context, b *db.Build, repo *db.Repo, llog *
 	// --- detecting: framework param + authenticated clone URL ---
 	framework := detect.Resolve(repo.FrameworkOverride)
 
-	_, cloneURL, err := r.gitCreds(ctx, repo, b)
+	token, cloneURL, err := r.gitCreds(ctx, repo, b)
 	if err != nil {
 		return buildOutcome{}, fmt.Errorf("git creds: %w", err)
 	}
@@ -222,6 +223,27 @@ func (r *Runner) execute(ctx context.Context, b *db.Build, repo *db.Repo, llog *
 		"env":          b.EnvironmentID.String(),
 		"project_slug": repo.ProjectSlug,
 		"app_name":     repo.AppName,
+	}
+
+	// Build-time framework detection: hand the Jenkins job concrete install/build/
+	// start/output so it can template a Dockerfile for repos that carry none.
+	// GitHub-only (detection hits the GitHub API) and best-effort — on failure the
+	// pipeline falls back to a repo Dockerfile.
+	if repo.Provider == "github" {
+		if det, derr := server.DetectForBuild(ctx, token, repo.RepoFullName, repo.RootDir); derr != nil {
+			llog.Warn().Err(derr).Msg("build-time framework detect failed; pipeline falls back to repo Dockerfile")
+		} else {
+			params["detected_framework"] = det.Framework
+			params["package_manager"] = det.PackageManager
+			params["install_cmd"] = det.InstallCommand
+			params["build_cmd"] = det.BuildCommand
+			params["start_cmd"] = det.StartCommand
+			params["output_dir"] = det.OutputDir
+			if det.Port > 0 {
+				params["app_port"] = strconv.Itoa(det.Port)
+			}
+			llog.Info().Str("framework", det.Framework).Msg("build-time framework detected")
+		}
 	}
 	queueID, err := r.jenkins.TriggerBuild(ctx, r.cfg.JenkinsJob, params)
 	if err != nil {

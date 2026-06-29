@@ -533,9 +533,12 @@ export interface GitRepo {
 
 export interface FrameworkDetection {
   framework: string | null;
+  package_manager: string | null;
   build_command: string | null;
   install_command: string | null;
+  start_command: string | null;
   output_dir: string | null;
+  port: number | null;
 }
 
 export interface Build {

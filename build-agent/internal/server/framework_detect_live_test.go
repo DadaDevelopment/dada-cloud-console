@@ -35,16 +35,21 @@ func TestLiveDetectFrameworks(t *testing.T) {
 
 	s := &Server{gh: &liveTokenApp{token: tok}}
 	cases := []struct {
-		name string
-		repo string
-		root string
-		want string
+		name        string
+		repo        string
+		root        string
+		want        string
+		wantPM      string
+		wantPort    int
+		wantBuild   string
+		wantInstall string
+		wantStart   string
 	}{
-		{name: "gitbucket-mcp-plugin", repo: "DadaDevelopment/gitbucket-mcp-plugin", root: ".", want: "scala"},
-		{name: "reels-tracker", repo: "DadaDevelopment/reels-tracker", root: ".", want: "fastapi"},
-		{name: "telemost-bot", repo: "DadaDevelopment/telemost-bot", root: ".", want: "fastapi"},
-		{name: "dada-development-site", repo: "DadaDevelopment/dada-development-site", root: ".", want: "react"},
-		{name: "dada-cloud-console", repo: "DadaDevelopment/dada-cloud-console", root: ".", want: "nextjs"},
+		{name: "gitbucket-mcp-plugin", repo: "DadaDevelopment/gitbucket-mcp-plugin", root: ".", want: "scala", wantPM: "gradle", wantPort: 8080, wantBuild: "./gradlew shadowJar", wantInstall: "./gradlew dependencies"},
+		{name: "reels-tracker", repo: "DadaDevelopment/reels-tracker", root: ".", want: "fastapi", wantPM: "pip", wantPort: 8000, wantInstall: "pip install -r requirements.txt"},
+		{name: "telemost-bot", repo: "DadaDevelopment/telemost-bot", root: ".", want: "fastapi", wantPM: "pip", wantPort: 8000, wantInstall: "pip install -r requirements.txt"},
+		{name: "dada-development-site", repo: "DadaDevelopment/dada-development-site", root: ".", want: "react", wantPM: "npm", wantPort: 3000, wantBuild: "npm run build", wantInstall: "npm ci", wantStart: "npm run preview"},
+		{name: "dada-cloud-console", repo: "DadaDevelopment/dada-cloud-console", root: ".", want: "nextjs", wantPM: "npm", wantPort: 3000, wantBuild: "npm run build", wantInstall: "npm ci", wantStart: "npm run start"},
 	}
 
 	for _, tc := range cases {
@@ -59,9 +64,24 @@ func TestLiveDetectFrameworks(t *testing.T) {
 				t.Fatalf("framework = nil, want %s", tc.want)
 			}
 			got := *det.Framework
-			t.Logf("%s => framework=%s build=%s install=%s output=%s", tc.repo, got, strOrEmpty(det.BuildCommand), strOrEmpty(det.InstallCommand), strOrEmpty(det.OutputDir))
+			t.Logf("%s => framework=%s pm=%s build=%s install=%s start=%s output=%s port=%d", tc.repo, got, strOrEmpty(det.PackageManager), strOrEmpty(det.BuildCommand), strOrEmpty(det.InstallCommand), strOrEmpty(det.StartCommand), strOrEmpty(det.OutputDir), intOrZero(det.Port))
 			if got != tc.want {
 				t.Fatalf("framework = %q, want %q", got, tc.want)
+			}
+			if det.PackageManager == nil || *det.PackageManager != tc.wantPM {
+				t.Fatalf("package_manager = %v, want %s", det.PackageManager, tc.wantPM)
+			}
+			if det.Port == nil || *det.Port != tc.wantPort {
+				t.Fatalf("port = %v, want %d", det.Port, tc.wantPort)
+			}
+			if tc.wantBuild != "" && (det.BuildCommand == nil || *det.BuildCommand != tc.wantBuild) {
+				t.Fatalf("build_command = %v, want %s", det.BuildCommand, tc.wantBuild)
+			}
+			if tc.wantInstall != "" && (det.InstallCommand == nil || *det.InstallCommand != tc.wantInstall) {
+				t.Fatalf("install_command = %v, want %s", det.InstallCommand, tc.wantInstall)
+			}
+			if tc.wantStart != "" && (det.StartCommand == nil || *det.StartCommand != tc.wantStart) {
+				t.Fatalf("start_command = %v, want %s", det.StartCommand, tc.wantStart)
 			}
 		})
 	}
@@ -70,6 +90,13 @@ func TestLiveDetectFrameworks(t *testing.T) {
 func strOrEmpty(v *string) string {
 	if v == nil {
 		return ""
+	}
+	return *v
+}
+
+func intOrZero(v *int) int {
+	if v == nil {
+		return 0
 	}
 	return *v
 }

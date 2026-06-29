@@ -12,7 +12,7 @@ import { useProjectContext } from "@/lib/project-context";
 import { canMutate } from "@/lib/rbac";
 import { useT } from "@/lib/i18n/console/context";
 import { timeAgo } from "@/lib/format";
-import { Search, Lock, ChevronDown } from "lucide-react";
+import { Search, Lock, ChevronDown, Plus } from "lucide-react";
 
 type FrameworkPreset = { id: string; label: string; port: number };
 type PresetGroup = { group: string; items: FrameworkPreset[] };
@@ -24,10 +24,14 @@ type GitRemoteRepoCandidate = GitRemoteRepo & {
 
 const FRAMEWORK_PRESETS: PresetGroup[] = [
   {
-    group: "Java",
+    group: "Java / JVM",
     items: [
       { id: "spring-maven", label: "Spring Boot (Maven)", port: 8080 },
       { id: "spring-gradle", label: "Spring Boot (Gradle)", port: 8080 },
+      { id: "scala", label: "Scala / JVM", port: 8080 },
+      { id: "maven", label: "Maven", port: 8080 },
+      { id: "gradle", label: "Gradle", port: 8080 },
+      { id: "go", label: "Go", port: 8080 },
     ],
   },
   {
@@ -36,25 +40,81 @@ const FRAMEWORK_PRESETS: PresetGroup[] = [
       { id: "fastapi", label: "FastAPI", port: 8000 },
       { id: "flask", label: "Flask", port: 5000 },
       { id: "django", label: "Django", port: 8000 },
+      { id: "python", label: "Python", port: 8000 },
     ],
   },
   {
     group: "JavaScript / TypeScript",
     items: [
       { id: "nextjs", label: "Next.js", port: 3000 },
+      { id: "nuxt", label: "Nuxt", port: 3000 },
+      { id: "sveltekit", label: "SvelteKit", port: 3000 },
+      { id: "react", label: "React", port: 3000 },
       { id: "nestjs", label: "NestJS", port: 3000 },
-      { id: "node", label: "Node.js / Express", port: 3000 },
+      { id: "express", label: "Express", port: 3000 },
+      { id: "fastify", label: "Fastify", port: 3000 },
+      { id: "node", label: "Node.js", port: 3000 },
       { id: "vite", label: "Vite", port: 4173 },
       { id: "remix", label: "Remix", port: 3000 },
     ],
   },
   {
     group: "Static",
-    items: [{ id: "static", label: "Static site", port: 80 }],
+    items: [
+      { id: "static", label: "Static site", port: 80 },
+      { id: "dockerfile", label: "Dockerfile", port: 8080 },
+    ],
   },
 ];
 
 const PRESET_BY_ID = new Map(FRAMEWORK_PRESETS.flatMap((g) => g.items).map((p) => [p.id, p]));
+
+const DETECTED_FRAMEWORK_TO_PRESET_ID: Record<string, string> = {
+  spring: "spring-maven",
+  "spring-boot": "spring-maven",
+  "spring-maven": "spring-maven",
+  "spring-gradle": "spring-gradle",
+  scala: "scala",
+  maven: "maven",
+  gradle: "gradle",
+  go: "go",
+  python: "python",
+  fastapi: "fastapi",
+  django: "django",
+  flask: "flask",
+  nextjs: "nextjs",
+  nuxt: "nuxt",
+  sveltekit: "sveltekit",
+  react: "react",
+  express: "express",
+  fastify: "fastify",
+  remix: "remix",
+  vite: "vite",
+  node: "node",
+  static: "static",
+  dockerfile: "dockerfile",
+};
+
+function detectedPresetId(framework: string | null): string | null {
+  if (!framework) return null;
+  const normalized = framework.toLowerCase();
+  return DETECTED_FRAMEWORK_TO_PRESET_ID[normalized] ?? (PRESET_BY_ID.has(normalized) ? normalized : null);
+}
+
+function detectedPort(detection: FrameworkDetection | null): number | null {
+  if (!detection) return null;
+  if (typeof detection.port === "number" && Number.isFinite(detection.port) && detection.port > 0) {
+    return detection.port;
+  }
+  const presetId = detectedPresetId(detection.framework);
+  if (!presetId) return null;
+  return PRESET_BY_ID.get(presetId)?.port ?? null;
+}
+
+function frameworkLabel(framework: string | null): string {
+  if (!framework) return "";
+  return PRESET_BY_ID.get(framework)?.label ?? framework;
+}
 
 function GithubMark({ className }: { className?: string }) {
   return (
@@ -100,6 +160,7 @@ export default function GitImportPage() {
   const [installations, setInstallations] = useState<GitInstallation[]>([]);
   const [loadingInstalls, setLoadingInstalls] = useState(true);
   const [installError, setInstallError] = useState<string | null>(null);
+  const [connectingProvider, setConnectingProvider] = useState<"github" | "gitlab" | null>(null);
 
   const [remoteRepos, setRemoteRepos] = useState<GitRemoteRepoCandidate[]>([]);
   const [loadingRepos, setLoadingRepos] = useState(false);
@@ -118,6 +179,8 @@ export default function GitImportPage() {
   const [autoDeploy, setAutoDeploy] = useState(true);
   const [detection, setDetection] = useState<FrameworkDetection | null>(null);
   const [frameworkOverride, setFrameworkOverride] = useState("");
+  const [frameworkTouched, setFrameworkTouched] = useState(false);
+  const [portTouched, setPortTouched] = useState(false);
   const [detecting, setDetecting] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
@@ -172,7 +235,6 @@ export default function GitImportPage() {
     }
     /* eslint-enable react-hooks/set-state-in-effect */
     void refreshInstallations(allowed);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId, envId, isLoadingEnvs, allowed, refreshInstallations]);
 
   const loadRepos = useCallback(
@@ -249,16 +311,24 @@ export default function GitImportPage() {
   // Repo picker is fed from the union of all bound GitHub installations so the
   // user sees personal + org repositories as one searchable list.
   useEffect(() => {
-    if (installations.length > 0) {
-      void loadRepos(installations);
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [installations]);
+    if (installations.length === 0) return;
+    const currentInstallations = installations;
+    const timer = window.setTimeout(() => {
+      void loadRepos(currentInstallations);
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [installations, loadRepos]);
 
-  async function handleConnectProvider(provider: "github" | "gitlab") {
+  async function handleConnectProvider(provider: "github" | "gitlab", forceInstall = false) {
     setInstallError(null);
+    setConnectingProvider(provider);
     try {
-      if (provider === "github") {
+      // Initial connect binds an already-installed org/user without a GitHub
+      // round-trip. "Add another account" (forceInstall) skips that shortcut and
+      // always opens GitHub's install picker so the user can grant a *new*
+      // account/org — otherwise the existing binding short-circuits the redirect
+      // and a second account can never be added.
+      if (provider === "github" && !forceInstall) {
         const { installations: avail } = await gitApi.availableInstallations(projectId);
         const list = avail ?? [];
         const toBind = list.filter((a) => !a.bound);
@@ -273,6 +343,8 @@ export default function GitImportPage() {
     } catch (err) {
       const msg = err instanceof Error ? err.message : t("git.import.error.startInstall");
       setInstallError(/503|unavailable|not configured/i.test(msg) ? t("git.import.unavailable") : msg);
+    } finally {
+      setConnectingProvider(null);
     }
   }
 
@@ -282,14 +354,36 @@ export default function GitImportPage() {
       setDetection(null);
       try {
         const d = await gitApi.detect(projectId, repo.installationId, repo.full_name, root || ".");
+        const presetId = detectedPresetId(d.framework);
+        if (presetId && !frameworkTouched) {
+          setFrameworkOverride(presetId);
+        }
+        if (!frameworkTouched && !portTouched) {
+          const nextPort = detectedPort(d);
+          if (typeof nextPort === "number" && Number.isFinite(nextPort)) {
+            setPort(nextPort);
+          }
+        }
         setDetection(d);
       } catch {
-        setDetection({ framework: null, build_command: null, install_command: null, output_dir: null });
+        const emptyDetection = {
+          framework: null,
+          package_manager: null,
+          build_command: null,
+          install_command: null,
+          start_command: null,
+          output_dir: null,
+          port: null,
+        };
+        if (!frameworkTouched && !portTouched) {
+          setPort(8080);
+        }
+        setDetection(emptyDetection);
       } finally {
         setDetecting(false);
       }
     },
-    [projectId]
+    [frameworkTouched, portTouched, projectId]
   );
 
   function pickRepo(repo: GitRemoteRepoCandidate) {
@@ -298,6 +392,10 @@ export default function GitImportPage() {
     setBranch(repo.default_branch || "main");
     setRootDir(".");
     setAppName(toKubeName(repo.full_name.split("/").pop() || ""));
+    setFrameworkOverride("");
+    setFrameworkTouched(false);
+    setPortTouched(false);
+    setPort(8080);
     void runDetect(repo, ".");
   }
 
@@ -420,10 +518,18 @@ export default function GitImportPage() {
               <p className="text-sm font-medium text-gray-600">{t("git.import.noAccounts.title")}</p>
               <p className="mt-1 text-xs text-gray-400">{t("git.import.noAccounts.hint")}</p>
               <div className="mt-4 flex justify-center gap-3">
-                <button onClick={() => handleConnectProvider("github")} className="rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50">
+                <button
+                  onClick={() => handleConnectProvider("github")}
+                  disabled={connectingProvider !== null}
+                  className="rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
+                >
                   {t("git.import.connectGitHub")}
                 </button>
-                <button onClick={() => handleConnectProvider("gitlab")} className="rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50">
+                <button
+                  onClick={() => handleConnectProvider("gitlab")}
+                  disabled={connectingProvider !== null}
+                  className="rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
+                >
                   {t("git.import.connectGitLab")}
                 </button>
               </div>
@@ -453,12 +559,24 @@ export default function GitImportPage() {
             </div>
           ) : (
             <>
-              <div className="flex flex-col gap-2 sm:flex-row">
-                <div className="flex items-center rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700 shadow-sm sm:w-64">
-                  <GithubMark className="mr-2 h-4 w-4 shrink-0 text-gray-500" />
-                  <span className="truncate">
-                    {installations.map((inst) => inst.account_login).join(", ")}
-                  </span>
+              <div className="flex flex-col gap-2">
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="flex items-center rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700 shadow-sm sm:max-w-md">
+                    <GithubMark className="mr-2 h-4 w-4 shrink-0 text-gray-500" />
+                    <span className="truncate">
+                      {installations.map((inst) => inst.account_login).join(", ")}
+                    </span>
+                  </div>
+                  {!deploying && (
+                    <button
+                      onClick={() => handleConnectProvider("github", true)}
+                      disabled={connectingProvider !== null}
+                      className="inline-flex shrink-0 items-center justify-center gap-2 rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 shadow-sm transition-colors hover:border-blue-400 hover:text-blue-600 disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      <Plus className="h-4 w-4" />
+                      <span>{t("git.import.connectAnotherGitHub")}</span>
+                    </button>
+                  )}
                 </div>
                 <div className="relative flex-1">
                   <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
@@ -545,15 +663,26 @@ export default function GitImportPage() {
                     </div>
                   ) : detection ? (
                     <div className="mt-2 space-y-1 text-sm">
-                      <p className="font-medium text-gray-900">{detection.framework ?? t("git.import.unknownFramework")}</p>
+                      <p className="font-medium text-gray-900">
+                        {frameworkLabel(detection.framework) || t("git.import.unknownFramework")}
+                      </p>
                       {detection.build_command && (
                         <p className="text-xs text-gray-500">build: <span className="font-mono">{detection.build_command}</span></p>
                       )}
                       {detection.install_command && (
                         <p className="text-xs text-gray-500">install: <span className="font-mono">{detection.install_command}</span></p>
                       )}
+                      {detection.package_manager && (
+                        <p className="text-xs text-gray-500">pm: <span className="font-mono">{detection.package_manager}</span></p>
+                      )}
+                      {detection.start_command && (
+                        <p className="text-xs text-gray-500">start: <span className="font-mono">{detection.start_command}</span></p>
+                      )}
                       {detection.output_dir && (
                         <p className="text-xs text-gray-500">output: <span className="font-mono">{detection.output_dir}</span></p>
+                      )}
+                      {typeof detection.port === "number" && (
+                        <p className="text-xs text-gray-500">port: <span className="font-mono">{detection.port}</span></p>
                       )}
                     </div>
                   ) : null}
@@ -583,6 +712,8 @@ export default function GitImportPage() {
                       onChange={(e) => {
                         const id = e.target.value;
                         setFrameworkOverride(id);
+                        setFrameworkTouched(id !== "");
+                        setPortTouched(false);
                         const preset = PRESET_BY_ID.get(id);
                         if (preset) setPort(preset.port);
                       }}
@@ -613,7 +744,10 @@ export default function GitImportPage() {
                       min={1}
                       max={65535}
                       value={port}
-                      onChange={(e) => setPort(parseInt(e.target.value, 10) || 8080)}
+                      onChange={(e) => {
+                        setPortTouched(true);
+                        setPort(parseInt(e.target.value, 10) || 8080);
+                      }}
                       className="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
                     />
                   </div>

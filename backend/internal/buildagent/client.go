@@ -111,9 +111,12 @@ func (c *Client) GetInstallationAccount(ctx context.Context, installationID int6
 // FrameworkDetection mirrors the frontend FrameworkDetection shape.
 type FrameworkDetection struct {
 	Framework      *string `json:"framework"`
+	PackageManager *string `json:"package_manager"`
 	BuildCommand   *string `json:"build_command"`
 	InstallCommand *string `json:"install_command"`
+	StartCommand   *string `json:"start_command"`
 	OutputDir      *string `json:"output_dir"`
+	Port           *int    `json:"port"`
 }
 
 // DetectFramework proxies GET /github/detect on the agent.

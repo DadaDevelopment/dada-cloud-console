@@ -250,9 +250,12 @@ func (s *Server) handleAppInstallations(w http.ResponseWriter, r *http.Request) 
 // frameworkDetection mirrors the backend/frontend FrameworkDetection shape.
 type frameworkDetection struct {
 	Framework      *string `json:"framework"`
+	PackageManager *string `json:"package_manager"`
 	BuildCommand   *string `json:"build_command"`
 	InstallCommand *string `json:"install_command"`
+	StartCommand   *string `json:"start_command"`
 	OutputDir      *string `json:"output_dir"`
+	Port           *int    `json:"port"`
 }
 
 type githubContent struct {
@@ -264,6 +267,171 @@ type githubContent struct {
 }
 
 var githubHTTPClient = http.DefaultClient
+
+type packageManagerSpec struct {
+	name    string
+	version string
+}
+
+func parsePackageManager(raw string) packageManagerSpec {
+	raw = strings.TrimSpace(strings.ToLower(raw))
+	if raw == "" {
+		return packageManagerSpec{}
+	}
+	name := raw
+	version := ""
+	if cut := strings.IndexByte(raw, '@'); cut > 0 {
+		name = raw[:cut]
+		version = raw[cut+1:]
+	}
+	if name == "" {
+		return packageManagerSpec{}
+	}
+	return packageManagerSpec{name: name, version: version}
+}
+
+func packageManagerFromFiles(byName map[string]githubContent) packageManagerSpec {
+	switch {
+	case hasAnyFile(byName, "bun.lockb", "bun.lock"):
+		return packageManagerSpec{name: "bun"}
+	case hasAnyFile(byName, "pnpm-lock.yaml", "pnpm-workspace.yaml"):
+		return packageManagerSpec{name: "pnpm"}
+	case hasAnyFile(byName, "yarn.lock", ".yarnrc.yml"):
+		return packageManagerSpec{name: "yarn"}
+	case hasAnyFile(byName, "package-lock.json", "npm-shrinkwrap.json"):
+		return packageManagerSpec{name: "npm"}
+	default:
+		return packageManagerSpec{}
+	}
+}
+
+func nodePackageManagerHint(byName map[string]githubContent, inherited packageManagerSpec) packageManagerSpec {
+	switch {
+	case hasAnyFile(byName, "bun.lockb", "bun.lock"):
+		return packageManagerSpec{name: "bun"}
+	case hasAnyFile(byName, "pnpm-lock.yaml", "pnpm-workspace.yaml"):
+		return packageManagerSpec{name: "pnpm"}
+	case hasAnyFile(byName, "yarn.lock", ".yarnrc.yml"):
+		return packageManagerSpec{name: "yarn"}
+	case hasAnyFile(byName, "package-lock.json", "npm-shrinkwrap.json"):
+		return packageManagerSpec{name: "npm"}
+	default:
+		if _, ok := findFile(byName, "package.json"); ok {
+			if !inherited.empty() {
+				return inherited
+			}
+			return packageManagerSpec{name: "npm"}
+		}
+		return inherited
+	}
+}
+
+func nodePackageManagerFromPackageJSON(ctx context.Context, token, owner, repo, filePath string) (packageManagerSpec, bool) {
+	raw, err := githubReadFile(ctx, token, owner, repo, filePath)
+	if err != nil {
+		return packageManagerSpec{}, false
+	}
+	var pkg struct {
+		PackageManager string `json:"packageManager"`
+	}
+	if err := json.Unmarshal([]byte(raw), &pkg); err != nil {
+		return packageManagerSpec{}, false
+	}
+	pm := parsePackageManager(pkg.PackageManager)
+	if pm.empty() {
+		return packageManagerSpec{}, false
+	}
+	return pm, true
+}
+
+func (pm packageManagerSpec) empty() bool {
+	return pm.name == ""
+}
+
+func (pm packageManagerSpec) label() string {
+	if pm.name == "" {
+		return ""
+	}
+	if pm.version != "" {
+		return pm.name + "@" + pm.version
+	}
+	return pm.name
+}
+
+func (pm packageManagerSpec) run(script string) string {
+	if pm.name == "" {
+		pm.name = "npm"
+	}
+	switch pm.name {
+	case "npm":
+		return "npm run " + script
+	case "pnpm":
+		return "pnpm run " + script
+	case "yarn":
+		return "yarn run " + script
+	case "bun":
+		return "bun run " + script
+	default:
+		return "npm run " + script
+	}
+}
+
+func (pm packageManagerSpec) exec(binary string, args ...string) string {
+	if pm.name == "" {
+		pm.name = "npm"
+	}
+	switch pm.name {
+	case "npm":
+		return "npm exec -- " + strings.Join(append([]string{binary}, args...), " ")
+	case "pnpm":
+		return "pnpm exec " + strings.Join(append([]string{binary}, args...), " ")
+	case "yarn":
+		return "yarn exec " + strings.Join(append([]string{binary}, args...), " ")
+	case "bun":
+		return "bunx " + strings.Join(append([]string{binary}, args...), " ")
+	default:
+		return "npm exec -- " + strings.Join(append([]string{binary}, args...), " ")
+	}
+}
+
+func (pm packageManagerSpec) install(hasLock bool) string {
+	if pm.name == "" {
+		pm.name = "npm"
+	}
+	switch pm.name {
+	case "npm":
+		if hasLock {
+			return "npm ci"
+		}
+		return "npm install"
+	case "pnpm":
+		if hasLock {
+			return "pnpm install --frozen-lockfile"
+		}
+		return "pnpm install"
+	case "yarn":
+		if strings.HasPrefix(pm.version, "1.") || pm.version == "" {
+			if hasLock {
+				return "yarn install --frozen-lockfile"
+			}
+			return "yarn install"
+		}
+		if hasLock {
+			return "yarn install --immutable"
+		}
+		return "yarn install"
+	case "bun":
+		if hasLock {
+			return "bun install --frozen-lockfile"
+		}
+		return "bun install"
+	default:
+		if hasLock {
+			return "npm ci"
+		}
+		return "npm install"
+	}
+}
 
 type frameworkCandidate struct {
 	detection frameworkDetection
@@ -306,14 +474,20 @@ func (s *Server) detectFramework(ctx context.Context, installationID int64, repo
 	if err != nil {
 		return frameworkDetection{}, err
 	}
+	return detectWithToken(ctx, token, repoFullName, rootDir)
+}
 
+// detectWithToken is the token-based detection core shared by the HTTP import
+// wizard (handleDetect) and the build-time path (DetectForBuild). It assumes
+// rootDir is already normalized ("" for repo root).
+func detectWithToken(ctx context.Context, token, repoFullName, rootDir string) (frameworkDetection, error) {
 	parts := strings.SplitN(repoFullName, "/", 2)
 	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
 		return frameworkDetection{}, fmt.Errorf("bad repo full name: %q", repoFullName)
 	}
 	owner, repo := parts[0], parts[1]
 
-	cands, err := s.scanFrameworkCandidates(ctx, token, owner, repo, rootDir, 0, 2)
+	cands, err := scanFrameworkCandidates(ctx, token, owner, repo, rootDir, 0, 2, packageManagerSpec{})
 	if err != nil {
 		return frameworkDetection{}, err
 	}
@@ -323,13 +497,71 @@ func (s *Server) detectFramework(ctx context.Context, installationID int64, repo
 	return frameworkDetection{}, nil
 }
 
-func (s *Server) scanFrameworkCandidates(ctx context.Context, token, owner, repo, dir string, depth, maxDepth int) ([]frameworkCandidate, error) {
+// BuildDetection is the dereferenced, build-time view of frameworkDetection. The
+// worker passes these to the Jenkins job as plain parameters so the pipeline can
+// template a Dockerfile for repos that carry none.
+type BuildDetection struct {
+	Framework      string
+	PackageManager string
+	InstallCommand string
+	BuildCommand   string
+	StartCommand   string
+	OutputDir      string
+	Port           int
+}
+
+// DetectForBuild runs framework detection with an installation token the runner
+// already holds (no HTTP round-trip). Best-effort: callers treat an error as "no
+// detection" and let the pipeline fall back to a repo Dockerfile.
+func DetectForBuild(ctx context.Context, token, repoFullName, rootDir string) (BuildDetection, error) {
+	rootDir = strings.TrimSpace(rootDir)
+	if rootDir == "." {
+		rootDir = ""
+	}
+	det, err := detectWithToken(ctx, token, repoFullName, rootDir)
+	if err != nil {
+		return BuildDetection{}, err
+	}
+	return BuildDetection{
+		Framework:      derefString(det.Framework),
+		PackageManager: derefString(det.PackageManager),
+		InstallCommand: derefString(det.InstallCommand),
+		BuildCommand:   derefString(det.BuildCommand),
+		StartCommand:   derefString(det.StartCommand),
+		OutputDir:      derefString(det.OutputDir),
+		Port:           derefInt(det.Port),
+	}, nil
+}
+
+func derefString(p *string) string {
+	if p == nil {
+		return ""
+	}
+	return *p
+}
+
+func derefInt(p *int) int {
+	if p == nil {
+		return 0
+	}
+	return *p
+}
+
+func scanFrameworkCandidates(ctx context.Context, token, owner, repo, dir string, depth, maxDepth int, inheritedNodePM packageManagerSpec) ([]frameworkCandidate, error) {
 	entries, err := githubListDir(ctx, token, owner, repo, dir)
 	if err != nil {
 		return nil, err
 	}
 
-	cands := detectCandidatesInDir(ctx, token, owner, repo, dir, depth, entries)
+	byName := mapFromEntries(entries)
+	localNodePM := nodePackageManagerHint(byName, inheritedNodePM)
+	if entry, ok := findFile(byName, "package.json"); ok {
+		if pm, ok := nodePackageManagerFromPackageJSON(ctx, token, owner, repo, entry.Path); ok {
+			localNodePM = pm
+		}
+	}
+
+	cands := detectCandidatesInDir(ctx, token, owner, repo, dir, depth, entries, localNodePM)
 	if depth >= maxDepth {
 		return cands, nil
 	}
@@ -339,7 +571,7 @@ func (s *Server) scanFrameworkCandidates(ctx context.Context, token, owner, repo
 			continue
 		}
 		childDir := joinRepoPath(dir, entry.Name)
-		childCands, err := s.scanFrameworkCandidates(ctx, token, owner, repo, childDir, depth+1, maxDepth)
+		childCands, err := scanFrameworkCandidates(ctx, token, owner, repo, childDir, depth+1, maxDepth, localNodePM)
 		if err != nil {
 			return nil, err
 		}
@@ -348,16 +580,17 @@ func (s *Server) scanFrameworkCandidates(ctx context.Context, token, owner, repo
 	return cands, nil
 }
 
-func detectCandidatesInDir(ctx context.Context, token, owner, repo, dir string, depth int, entries []githubContent) []frameworkCandidate {
+func detectCandidatesInDir(ctx context.Context, token, owner, repo, dir string, depth int, entries []githubContent, inheritedNodePM packageManagerSpec) []frameworkCandidate {
 	byName := make(map[string]githubContent, len(entries))
 	for _, entry := range entries {
 		byName[strings.ToLower(entry.Name)] = entry
 	}
+	pmHint := nodePackageManagerHint(byName, inheritedNodePM)
 
 	cands := make([]frameworkCandidate, 0, 8)
 
 	if entry, ok := findFile(byName, "package.json"); ok {
-		if cand, ok := detectNodeFramework(ctx, token, owner, repo, entry, byName, depth); ok {
+		if cand, ok := detectNodeFramework(ctx, token, owner, repo, entry, byName, pmHint, depth); ok {
 			cands = append(cands, cand)
 		}
 	}
@@ -386,12 +619,17 @@ func detectCandidatesInDir(ctx context.Context, token, owner, repo, dir string, 
 			cands = append(cands, cand)
 		}
 	}
+	if entry, ok := findFile(byName, "build.sbt"); ok {
+		if cand, ok := detectSbtFramework(ctx, token, owner, repo, entry, depth); ok {
+			cands = append(cands, cand)
+		}
+	}
 	if entry, ok := findFile(byName, "pom.xml"); ok {
 		if cand, ok := detectMavenFramework(ctx, token, owner, repo, entry, depth); ok {
 			cands = append(cands, cand)
 		}
 	}
-	if cand, ok := detectConfigOnlyFramework(byName, depth); ok {
+	if cand, ok := detectConfigOnlyFramework(byName, pmHint, depth); ok {
 		cands = append(cands, cand)
 	}
 	cands = append(cands, detectCandidatesFromLockfiles(ctx, token, owner, repo, byName, depth)...)
@@ -461,31 +699,48 @@ func hasAnyFile(byName map[string]githubContent, names ...string) bool {
 	return false
 }
 
-func detectConfigOnlyFramework(byName map[string]githubContent, depth int) (frameworkCandidate, bool) {
+func detectConfigOnlyFramework(byName map[string]githubContent, pmHint packageManagerSpec, depth int) (frameworkCandidate, bool) {
+	pm := pmHint
+	if pm.empty() {
+		pm = packageManagerFromFiles(byName)
+	}
+	if pm.empty() {
+		pm = packageManagerSpec{name: "npm"}
+	}
+
 	switch {
 	case hasAnyFile(byName, "next.config.js", "next.config.mjs", "next.config.ts", "next.config.cjs"):
-		fw, build, install, output := "nextjs", "npm run build", "npm ci", ".next"
-		return frameworkCandidate{detection: detectionWithStrings(fw, build, install, output), score: 120, depth: depth}, true
+		det := detectionWithStrings("nextjs", pm.exec("next", "build"), pm.install(hasAnyFile(byName, "package-lock.json", "yarn.lock", "pnpm-lock.yaml", "bun.lock", "bun.lockb")), ".next")
+		det.PackageManager = ptrString(pm.label())
+		det.StartCommand = ptrString(pm.exec("next", "start"))
+		return frameworkCandidate{detection: det, score: 120, depth: depth}, true
 	case hasAnyFile(byName, "nuxt.config.js", "nuxt.config.mjs", "nuxt.config.ts", "nuxt.config.cjs"):
-		fw, build, install, output := "nuxt", "npm run build", "npm ci", ".output"
-		return frameworkCandidate{detection: detectionWithStrings(fw, build, install, output), score: 115, depth: depth}, true
+		det := detectionWithStrings("nuxt", pm.exec("nuxi", "build"), pm.install(hasAnyFile(byName, "package-lock.json", "yarn.lock", "pnpm-lock.yaml", "bun.lock", "bun.lockb")), ".output")
+		det.PackageManager = ptrString(pm.label())
+		det.StartCommand = ptrString(pm.exec("nuxi", "preview"))
+		return frameworkCandidate{detection: det, score: 115, depth: depth}, true
 	case hasAnyFile(byName, "svelte.config.js", "svelte.config.mjs", "svelte.config.ts", "svelte.config.cjs"):
-		fw, build, install := "sveltekit", "npm run build", "npm ci"
-		return frameworkCandidate{detection: detectionWithStrings(fw, build, install, ""), score: 112, depth: depth}, true
+		det := detectionWithStrings("sveltekit", pm.exec("svelte-kit", "build"), pm.install(hasAnyFile(byName, "package-lock.json", "yarn.lock", "pnpm-lock.yaml", "bun.lock", "bun.lockb")), "build")
+		det.PackageManager = ptrString(pm.label())
+		det.StartCommand = ptrString(pm.exec("vite", "preview"))
+		return frameworkCandidate{detection: det, score: 112, depth: depth}, true
 	case hasAnyFile(byName, "vite.config.js", "vite.config.mjs", "vite.config.ts", "vite.config.cjs"):
-		fw, build, install, output := "vite", "npm run build", "npm ci", "dist"
-		return frameworkCandidate{detection: detectionWithStrings(fw, build, install, output), score: 90, depth: depth}, true
+		det := detectionWithStrings("vite", pm.exec("vite", "build"), pm.install(hasAnyFile(byName, "package-lock.json", "yarn.lock", "pnpm-lock.yaml", "bun.lock", "bun.lockb")), "dist")
+		det.PackageManager = ptrString(pm.label())
+		det.StartCommand = ptrString(pm.exec("vite", "preview"))
+		return frameworkCandidate{detection: det, score: 90, depth: depth}, true
 	default:
 		return frameworkCandidate{}, false
 	}
 }
 
-func detectNodeFramework(ctx context.Context, token, owner, repo string, entry githubContent, byName map[string]githubContent, depth int) (frameworkCandidate, bool) {
+func detectNodeFramework(ctx context.Context, token, owner, repo string, entry githubContent, byName map[string]githubContent, pmHint packageManagerSpec, depth int) (frameworkCandidate, bool) {
 	raw, err := githubReadFile(ctx, token, owner, repo, entry.Path)
 	if err != nil {
 		return frameworkCandidate{}, false
 	}
 	var pkg struct {
+		PackageManager  string            `json:"packageManager"`
 		Name            string            `json:"name"`
 		Dependencies    map[string]string `json:"dependencies"`
 		DevDependencies map[string]string `json:"devDependencies"`
@@ -516,8 +771,21 @@ func detectNodeFramework(ctx context.Context, token, owner, repo string, entry g
 		return ok
 	}
 
+	pm := parsePackageManager(pkg.PackageManager)
+	if pm.empty() {
+		pm = pmHint
+	}
+	if pm.empty() {
+		pm = packageManagerFromFiles(byName)
+	}
+	if pm.empty() {
+		pm = packageManagerSpec{name: "npm"}
+	}
+
+	hasLock := hasAnyFile(byName, "package-lock.json", "npm-shrinkwrap.json", "yarn.lock", "pnpm-lock.yaml", "bun.lock", "bun.lockb")
 	build := ""
-	install := "npm ci"
+	install := pm.install(hasLock)
+	start := ""
 	output := ""
 	score := 70
 	framework := "node"
@@ -525,54 +793,135 @@ func detectNodeFramework(ctx context.Context, token, owner, repo string, entry g
 	switch {
 	case hasDep("next") || hasAnyFile(byName, "next.config.js", "next.config.mjs", "next.config.ts", "next.config.cjs"):
 		framework = "nextjs"
-		build = "npm run build"
+		build = nodeBuildCommand(pm, pkg.Scripts, framework)
+		start = nodeStartCommand(pm, pkg.Scripts, framework)
 		output = ".next"
 		score = 125
 	case hasAnyDep("nuxt", "@nuxt/devtools"), hasAnyFile(byName, "nuxt.config.js", "nuxt.config.mjs", "nuxt.config.ts", "nuxt.config.cjs"):
 		framework = "nuxt"
-		build = "npm run build"
+		build = nodeBuildCommand(pm, pkg.Scripts, framework)
+		start = nodeStartCommand(pm, pkg.Scripts, framework)
 		output = ".output"
 		score = 120
 	case hasAnyDep("@sveltejs/kit"), hasAnyFile(byName, "svelte.config.js", "svelte.config.mjs", "svelte.config.ts", "svelte.config.cjs"):
 		framework = "sveltekit"
-		build = "npm run build"
+		build = nodeBuildCommand(pm, pkg.Scripts, framework)
+		start = nodeStartCommand(pm, pkg.Scripts, framework)
+		output = "build"
 		score = 118
 	case hasAnyDep("@remix-run/node", "@remix-run/react", "@remix-run/dev"):
 		framework = "remix"
-		build = "npm run build"
+		build = nodeBuildCommand(pm, pkg.Scripts, framework)
+		start = nodeStartCommand(pm, pkg.Scripts, framework)
 		output = "build"
 		score = 110
+	case hasAnyDep("@nestjs/core", "@nestjs/common", "@nestjs/platform-express", "@nestjs/platform-fastify"):
+		framework = "nestjs"
+		build = nodeBuildCommand(pm, pkg.Scripts, framework)
+		start = nodeStartCommand(pm, pkg.Scripts, framework)
+		output = "dist"
+		score = 109
+	case hasAnyDep("fastify"):
+		framework = "fastify"
+		build = nodeBuildCommand(pm, pkg.Scripts, framework)
+		start = nodeStartCommand(pm, pkg.Scripts, framework)
+		output = "dist"
+		score = 106
+	case hasAnyDep("express"):
+		framework = "express"
+		build = nodeBuildCommand(pm, pkg.Scripts, framework)
+		start = nodeStartCommand(pm, pkg.Scripts, framework)
+		output = "dist"
+		score = 104
 	case hasAnyDep("react", "react-dom", "@vitejs/plugin-react") || hasAnyFile(byName, "vite.config.js", "vite.config.mjs", "vite.config.ts", "vite.config.cjs") && hasAnyDep("react", "react-dom", "@vitejs/plugin-react"):
 		framework = "react"
-		build = "npm run build"
+		build = nodeBuildCommand(pm, pkg.Scripts, framework)
+		start = nodeStartCommand(pm, pkg.Scripts, framework)
 		output = "dist"
 		score = 105
 	case hasDep("vite") || hasAnyFile(byName, "vite.config.js", "vite.config.mjs", "vite.config.ts", "vite.config.cjs"):
 		framework = "vite"
-		build = "npm run build"
+		build = nodeBuildCommand(pm, pkg.Scripts, framework)
+		start = nodeStartCommand(pm, pkg.Scripts, framework)
 		output = "dist"
 		score = 95
 	case hasAnyDep("react", "react-dom") && hasScript("build"):
 		framework = "react"
-		build = "npm run build"
+		build = nodeBuildCommand(pm, pkg.Scripts, framework)
+		start = nodeStartCommand(pm, pkg.Scripts, framework)
 		output = "dist"
 		score = 100
+	case hasScript("build") || hasScript("start") || hasScript("preview"):
+		build = nodeBuildCommand(pm, pkg.Scripts, framework)
+		start = nodeStartCommand(pm, pkg.Scripts, "node")
+		score = 60
 	default:
-		if hasScript("build") {
-			build = "npm run build"
-			score = 60
+		if hasScript("start") || hasScript("preview") {
+			start = nodeStartCommand(pm, pkg.Scripts, "node")
+			score = 55
 		}
 	}
 
-	if framework == "node" && !hasScript("build") && !hasAnyDep("react", "react-dom", "vite", "next", "nuxt", "@sveltejs/kit", "@remix-run/node", "@remix-run/react", "@vitejs/plugin-react") {
+	if framework == "node" && build == "" && start == "" && !hasScript("build") && !hasScript("start") && !hasScript("preview") && !hasAnyDep("react", "react-dom", "vite", "next", "nuxt", "@sveltejs/kit", "@remix-run/node", "@remix-run/react", "@vitejs/plugin-react", "@nestjs/core", "@nestjs/common", "fastify", "express") {
 		return frameworkCandidate{}, false
 	}
 
 	det := detectionWithStrings(framework, build, install, output)
+	if pm.label() != "" {
+		det.PackageManager = ptrString(pm.label())
+	}
+	if start != "" {
+		det.StartCommand = ptrString(start)
+	}
 	if build == "" && hasScript("build") {
-		det.BuildCommand = ptrString("npm run build")
+		det.BuildCommand = ptrString(pm.run("build"))
 	}
 	return frameworkCandidate{detection: det, score: score, depth: depth, path: entry.Path}, true
+}
+
+func nodeBuildCommand(pm packageManagerSpec, scripts map[string]string, framework string) string {
+	if _, ok := scripts["build"]; ok {
+		return pm.run("build")
+	}
+	switch framework {
+	case "nextjs":
+		return pm.exec("next", "build")
+	case "nuxt":
+		return pm.exec("nuxi", "build")
+	case "sveltekit":
+		return pm.exec("svelte-kit", "build")
+	case "remix":
+		return pm.exec("remix", "build")
+	case "vite", "react":
+		return pm.exec("vite", "build")
+	case "nestjs":
+		return pm.exec("nest", "build")
+	default:
+		return ""
+	}
+}
+
+func nodeStartCommand(pm packageManagerSpec, scripts map[string]string, framework string) string {
+	if _, ok := scripts["start"]; ok {
+		return pm.run("start")
+	}
+	if _, ok := scripts["preview"]; ok {
+		return pm.run("preview")
+	}
+	switch framework {
+	case "nextjs":
+		return pm.exec("next", "start")
+	case "nuxt":
+		return pm.exec("nuxi", "preview")
+	case "sveltekit":
+		return pm.exec("vite", "preview")
+	case "vite", "react":
+		return pm.exec("vite", "preview")
+	case "nestjs":
+		return "node dist/main.js"
+	default:
+		return ""
+	}
 }
 
 func detectRequirementsFramework(ctx context.Context, token, owner, repo string, entry githubContent, depth int) (frameworkCandidate, bool) {
@@ -600,12 +949,47 @@ func detectPythonFramework(ctx context.Context, token, owner, repo string, entry
 	if !ok {
 		return frameworkCandidate{}, false
 	}
-	if hasAnyFile(byName, "requirements.txt", "poetry.lock") {
+	switch {
+	case hasAnyFile(byName, "poetry.lock"):
+		if cand.detection.PackageManager == nil || *cand.detection.PackageManager != "poetry" {
+			cand.detection.PackageManager = ptrString("poetry")
+		}
+		if cand.detection.InstallCommand == nil || *cand.detection.InstallCommand == "" {
+			cand.detection.InstallCommand = ptrString("poetry install")
+		}
+	case hasAnyFile(byName, "uv.lock"):
+		if cand.detection.PackageManager == nil || *cand.detection.PackageManager != "uv" {
+			cand.detection.PackageManager = ptrString("uv")
+		}
+		if cand.detection.InstallCommand == nil || *cand.detection.InstallCommand == "" {
+			cand.detection.InstallCommand = ptrString("uv sync")
+		}
+	case hasAnyFile(byName, "requirements.txt"):
+		if cand.detection.PackageManager == nil || *cand.detection.PackageManager != "pip" {
+			cand.detection.PackageManager = ptrString("pip")
+		}
 		if cand.detection.InstallCommand == nil || *cand.detection.InstallCommand == "" {
 			cand.detection.InstallCommand = ptrString("pip install -r requirements.txt")
 		}
 	}
 	return cand, true
+}
+
+func pythonPackageManagerFromContent(raw, path string) (packageManagerSpec, string) {
+	lower := strings.ToLower(raw)
+	path = strings.ToLower(path)
+	switch {
+	case strings.Contains(lower, "tool.poetry") || strings.Contains(lower, "poetry-core") || strings.Contains(lower, "[tool.poetry]"):
+		return packageManagerSpec{name: "poetry"}, "poetry install"
+	case strings.Contains(lower, "[tool.uv]") || strings.Contains(lower, "uv ="):
+		return packageManagerSpec{name: "uv"}, "uv sync"
+	case strings.Contains(path, "requirements.txt"):
+		return packageManagerSpec{name: "pip"}, "pip install -r requirements.txt"
+	case strings.Contains(path, "setup.py"):
+		return packageManagerSpec{name: "pip"}, "pip install -e ."
+	default:
+		return packageManagerSpec{name: "pip"}, "pip install -e ."
+	}
 }
 
 func detectPythonContent(raw, path string, depth, score int) (frameworkCandidate, bool) {
@@ -626,12 +1010,27 @@ func detectPythonContent(raw, path string, depth, score int) (frameworkCandidate
 		}
 	}
 	build := ""
-	install := "pip install -r requirements.txt"
+	pm, install := pythonPackageManagerFromContent(raw, path)
+	if pm.name == "pip" && strings.Contains(strings.ToLower(path), "requirements.txt") {
+		install = "pip install -r requirements.txt"
+	}
+	if pm.name == "poetry" && strings.Contains(strings.ToLower(path), "pyproject.toml") {
+		install = "poetry install"
+	}
+	if pm.name == "uv" && strings.Contains(strings.ToLower(path), "pyproject.toml") {
+		install = "uv sync"
+	}
 	return frameworkCandidate{
-		detection: detectionWithStrings(framework, build, install, ""),
-		score:     score,
-		depth:     depth,
-		path:      path,
+		detection: func() frameworkDetection {
+			det := detectionWithStrings(framework, build, install, "")
+			if pm.label() != "" {
+				det.PackageManager = ptrString(pm.label())
+			}
+			return det
+		}(),
+		score: score,
+		depth: depth,
+		path:  path,
 	}, true
 }
 
@@ -658,11 +1057,14 @@ func detectGradleContent(raw, path string, byName map[string]githubContent, dept
 	install := "./gradlew dependencies"
 	output := "build/libs"
 	framework := "gradle"
+	pm := "gradle"
+	start := ""
 
 	switch {
 	case strings.Contains(lower, "org.springframework.boot") || strings.Contains(lower, "spring-boot") || strings.Contains(lower, "org.springframework"):
-		framework = "spring"
+		framework = "spring-gradle"
 		score = 115
+		start = "java -jar build/libs/*.jar"
 	case strings.Contains(lower, "id('scala')") || strings.Contains(lower, `id "scala"`) || strings.Contains(lower, "scala-library") || strings.Contains(lower, "org.scala-lang") || strings.Contains(lower, "io.github.gitbucket"):
 		framework = "scala"
 		score = 120
@@ -676,10 +1078,36 @@ func detectGradleContent(raw, path string, byName map[string]githubContent, dept
 	}
 
 	return frameworkCandidate{
-		detection: detectionWithStrings(framework, build, install, output),
-		score:     score,
+		detection: func() frameworkDetection {
+			det := detectionWithStrings(framework, build, install, output)
+			det.PackageManager = ptrString(pm)
+			if start != "" {
+				det.StartCommand = ptrString(start)
+			}
+			return det
+		}(),
+		score: score,
+		depth: depth,
+		path:  path,
+	}, true
+}
+
+func detectSbtFramework(ctx context.Context, token, owner, repo string, entry githubContent, depth int) (frameworkCandidate, bool) {
+	raw, err := githubReadFile(ctx, token, owner, repo, entry.Path)
+	if err != nil {
+		return frameworkCandidate{}, false
+	}
+	lower := strings.ToLower(raw)
+	if !strings.Contains(lower, "scala") && !strings.Contains(lower, "gitbucket") && !strings.Contains(lower, "sbt.version") {
+		return frameworkCandidate{}, false
+	}
+	det := detectionWithStrings("scala", "sbt package", "sbt update", "target")
+	det.PackageManager = ptrString("sbt")
+	return frameworkCandidate{
+		detection: det,
+		score:     118,
 		depth:     depth,
-		path:      path,
+		path:      entry.Path,
 	}, true
 }
 
@@ -694,15 +1122,25 @@ func detectMavenFramework(ctx context.Context, token, owner, repo string, entry 
 	build := "mvn package"
 	install := "mvn dependency:go-offline"
 	output := "target"
+	pm := "maven"
+	start := ""
 	if strings.Contains(lower, "org.springframework.boot") || strings.Contains(lower, "spring-boot") || strings.Contains(lower, "org.springframework") {
-		framework = "spring"
+		framework = "spring-maven"
 		score = 112
+		start = "java -jar target/*.jar"
 	}
 	return frameworkCandidate{
-		detection: detectionWithStrings(framework, build, install, output),
-		score:     score,
-		depth:     depth,
-		path:      entry.Path,
+		detection: func() frameworkDetection {
+			det := detectionWithStrings(framework, build, install, output)
+			det.PackageManager = ptrString(pm)
+			if start != "" {
+				det.StartCommand = ptrString(start)
+			}
+			return det
+		}(),
+		score: score,
+		depth: depth,
+		path:  entry.Path,
 	}, true
 }
 
@@ -710,24 +1148,54 @@ func ptrString(s string) *string {
 	return &s
 }
 
-func detectNodeFrameworkFromLockfile(raw string) (frameworkCandidate, bool) {
+func nodePackageManagerFromLockfileName(name string) packageManagerSpec {
+	switch strings.ToLower(name) {
+	case "bun.lock", "bun.lockb":
+		return packageManagerSpec{name: "bun"}
+	case "pnpm-lock.yaml":
+		return packageManagerSpec{name: "pnpm"}
+	case "yarn.lock":
+		return packageManagerSpec{name: "yarn"}
+	case "package-lock.json":
+		return packageManagerSpec{name: "npm"}
+	default:
+		return packageManagerSpec{}
+	}
+}
+
+func detectNodeFrameworkFromLockfile(raw string, pm packageManagerSpec) (frameworkCandidate, bool) {
 	lower := strings.ToLower(raw)
 	switch {
 	case strings.Contains(lower, "\"next\""), strings.Contains(lower, "next@"):
-		fw, build, install, output := "nextjs", "npm run build", "npm ci", ".next"
-		return frameworkCandidate{detection: detectionWithStrings(fw, build, install, output), score: 100, depth: 0}, true
+		fw, build, output := "nextjs", pm.exec("next", "build"), ".next"
+		det := detectionWithStrings(fw, build, pm.install(true), output)
+		det.PackageManager = ptrString(pm.label())
+		det.StartCommand = ptrString(pm.exec("next", "start"))
+		return frameworkCandidate{detection: det, score: 100, depth: 0}, true
 	case strings.Contains(lower, "\"nuxt\""), strings.Contains(lower, "nuxt@"):
-		fw, build, install, output := "nuxt", "npm run build", "npm ci", ".output"
-		return frameworkCandidate{detection: detectionWithStrings(fw, build, install, output), score: 98, depth: 0}, true
+		fw, build, output := "nuxt", pm.exec("nuxi", "build"), ".output"
+		det := detectionWithStrings(fw, build, pm.install(true), output)
+		det.PackageManager = ptrString(pm.label())
+		det.StartCommand = ptrString(pm.exec("nuxi", "preview"))
+		return frameworkCandidate{detection: det, score: 98, depth: 0}, true
 	case strings.Contains(lower, "@sveltejs/kit"):
-		fw, build, install := "sveltekit", "npm run build", "npm ci"
-		return frameworkCandidate{detection: detectionWithStrings(fw, build, install, ""), score: 96, depth: 0}, true
+		fw, build := "sveltekit", pm.exec("svelte-kit", "build")
+		det := detectionWithStrings(fw, build, pm.install(true), "build")
+		det.PackageManager = ptrString(pm.label())
+		det.StartCommand = ptrString(pm.exec("vite", "preview"))
+		return frameworkCandidate{detection: det, score: 96, depth: 0}, true
 	case strings.Contains(lower, "@vitejs/plugin-react"), strings.Contains(lower, "react-dom"), strings.Contains(lower, "\"react\""):
-		fw, build, install, output := "react", "npm run build", "npm ci", "dist"
-		return frameworkCandidate{detection: detectionWithStrings(fw, build, install, output), score: 90, depth: 0}, true
+		fw, build, output := "react", pm.exec("vite", "build"), "dist"
+		det := detectionWithStrings(fw, build, pm.install(true), output)
+		det.PackageManager = ptrString(pm.label())
+		det.StartCommand = ptrString(pm.exec("vite", "preview"))
+		return frameworkCandidate{detection: det, score: 90, depth: 0}, true
 	case strings.Contains(lower, "\"vite\""):
-		fw, build, install, output := "vite", "npm run build", "npm ci", "dist"
-		return frameworkCandidate{detection: detectionWithStrings(fw, build, install, output), score: 85, depth: 0}, true
+		fw, build, output := "vite", pm.exec("vite", "build"), "dist"
+		det := detectionWithStrings(fw, build, pm.install(true), output)
+		det.PackageManager = ptrString(pm.label())
+		det.StartCommand = ptrString(pm.exec("vite", "preview"))
+		return frameworkCandidate{detection: det, score: 85, depth: 0}, true
 	default:
 		return frameworkCandidate{}, false
 	}
@@ -738,7 +1206,11 @@ func detectNodeFrameworkFromLockfileEntry(ctx context.Context, token, owner, rep
 	if err != nil {
 		return frameworkCandidate{}, false
 	}
-	cand, ok := detectNodeFrameworkFromLockfile(raw)
+	pm := nodePackageManagerFromLockfileName(entry.Name)
+	if pm.empty() {
+		pm = packageManagerSpec{name: "npm"}
+	}
+	cand, ok := detectNodeFrameworkFromLockfile(raw, pm)
 	if !ok {
 		return frameworkCandidate{}, false
 	}
@@ -749,16 +1221,42 @@ func detectNodeFrameworkFromLockfileEntry(ctx context.Context, token, owner, rep
 
 func detectPythonLockfileFramework(raw string, path string, depth int) (frameworkCandidate, bool) {
 	lower := strings.ToLower(raw)
+	pm := packageManagerSpec{name: "pip"}
+	install := "pip install -r requirements.txt"
+	switch {
+	case strings.Contains(strings.ToLower(path), "poetry.lock"):
+		pm = packageManagerSpec{name: "poetry"}
+		install = "poetry install"
+	case strings.Contains(strings.ToLower(path), "uv.lock"):
+		pm = packageManagerSpec{name: "uv"}
+		install = "uv sync"
+	}
 	switch {
 	case strings.Contains(lower, "fastapi"):
-		fw, install := "fastapi", "pip install -r requirements.txt"
-		return frameworkCandidate{detection: detectionWithStrings(fw, "", install, ""), score: 100, depth: depth, path: path}, true
+		fw := "fastapi"
+		det := detectionWithStrings(fw, "", install, "")
+		det.PackageManager = ptrString(pm.label())
+		return frameworkCandidate{detection: det, score: 100, depth: depth, path: path}, true
 	case strings.Contains(lower, "django"):
-		fw, install := "django", "pip install -r requirements.txt"
-		return frameworkCandidate{detection: detectionWithStrings(fw, "", install, ""), score: 98, depth: depth, path: path}, true
+		fw := "django"
+		det := detectionWithStrings(fw, "", install, "")
+		det.PackageManager = ptrString(pm.label())
+		return frameworkCandidate{detection: det, score: 98, depth: depth, path: path}, true
 	case strings.Contains(lower, "flask"):
-		fw, install := "flask", "pip install -r requirements.txt"
-		return frameworkCandidate{detection: detectionWithStrings(fw, "", install, ""), score: 96, depth: depth, path: path}, true
+		fw := "flask"
+		det := detectionWithStrings(fw, "", install, "")
+		det.PackageManager = ptrString(pm.label())
+		return frameworkCandidate{detection: det, score: 96, depth: depth, path: path}, true
+	case strings.Contains(lower, "poetry"):
+		fw := "python"
+		det := detectionWithStrings(fw, "", install, "")
+		det.PackageManager = ptrString(pm.label())
+		return frameworkCandidate{detection: det, score: 94, depth: depth, path: path}, true
+	case strings.Contains(lower, "uv"):
+		fw := "python"
+		det := detectionWithStrings(fw, "", install, "")
+		det.PackageManager = ptrString(pm.label())
+		return frameworkCandidate{detection: det, score: 93, depth: depth, path: path}, true
 	default:
 		return frameworkCandidate{}, false
 	}
@@ -801,7 +1299,9 @@ func detectFrameworkByConfigAndLockfiles(ctx context.Context, token, owner, repo
 	if err != nil {
 		return nil, err
 	}
-	return append(detectCandidatesInDir(ctx, token, owner, repo, dir, depth, entries), detectCandidatesFromLockfiles(ctx, token, owner, repo, mapFromEntries(entries), depth)...), nil
+	byName := mapFromEntries(entries)
+	pmHint := nodePackageManagerHint(byName, packageManagerSpec{})
+	return append(detectCandidatesInDir(ctx, token, owner, repo, dir, depth, entries, pmHint), detectCandidatesFromLockfiles(ctx, token, owner, repo, byName, depth)...), nil
 }
 
 func mapFromEntries(entries []githubContent) map[string]githubContent {
@@ -816,6 +1316,9 @@ func detectionWithStrings(framework, build, install, output string) frameworkDet
 	d := frameworkDetection{}
 	if framework != "" {
 		d.Framework = &framework
+		if p := frameworkDefaultPort(framework); p != nil {
+			d.Port = p
+		}
 	}
 	if build != "" {
 		d.BuildCommand = &build
@@ -828,6 +1331,27 @@ func detectionWithStrings(framework, build, install, output string) frameworkDet
 	}
 	return d
 }
+
+func frameworkDefaultPort(framework string) *int {
+	switch strings.ToLower(framework) {
+	case "nextjs", "nuxt", "sveltekit", "remix", "react", "nestjs", "node", "express", "fastify":
+		return ptrInt(3000)
+	case "vite":
+		return ptrInt(4173)
+	case "fastapi", "django", "python":
+		return ptrInt(8000)
+	case "flask":
+		return ptrInt(5000)
+	case "spring", "spring-maven", "spring-gradle", "maven", "gradle", "scala", "sbt", "go", "dockerfile":
+		return ptrInt(8080)
+	case "static":
+		return ptrInt(80)
+	default:
+		return nil
+	}
+}
+
+func ptrInt(v int) *int { return &v }
 
 func githubListDir(ctx context.Context, token, owner, repo, dir string) ([]githubContent, error) {
 	var out []githubContent

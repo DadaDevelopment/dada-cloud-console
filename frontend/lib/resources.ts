@@ -7,7 +7,7 @@
 // with a tooltip rather than being silently hidden.
 
 import type { MemberRole } from "./types";
-import { canApprove, isAdmin } from "./rbac";
+import { canApprove, canSeeManifests, isAdmin } from "./rbac";
 
 export type IconName =
   | "overview"
@@ -53,7 +53,7 @@ export const PROJECT_NAV: ResourceNavItem[] = [
   // "Advanced" header so they don't crowd the primary path.
   { key: "models", label: "AI Models", icon: "models", segment: "/models", group: "infra" },
   { key: "app-servers", label: "App Servers", icon: "app-servers", segment: "/app-servers", group: "infra" },
-  { key: "git", label: "Builds", icon: "git", segment: "/git", group: "infra" },
+  { key: "git", label: "Builds", icon: "git", segment: "/git", group: "infra", visible: canSeeManifests },
   // "Deployments" removed from the sidebar — overlapped with Applications and
   // confused users. Per-app build/deploy history stays reachable from the app
   // detail page (/apps/[appName]/deployments) and the Builds entry.

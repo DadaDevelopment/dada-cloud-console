@@ -25,7 +25,9 @@ type Config struct {
 
 	// Jenkins controller (control-plane trigger + poll + progressiveText).
 	// One parameterized pipeline job; the framework param (web|android|auto)
-	// selects the branch inside jenkins-lib. No per-repo Jenkinsfile.
+	// selects the branch inside jenkins-lib. Specific presets like nextjs /
+	// nuxt / react / fastapi / spring / express collapse to the web family
+	// here. No per-repo Jenkinsfile.
 	JenkinsURL   string
 	JenkinsUser  string
 	JenkinsToken string
@@ -70,9 +72,9 @@ func Load() (*Config, error) {
 	}
 
 	cfg := &Config{
-		DatabaseURL:    getEnv("DATABASE_URL", getEnv("DB_URL", "")),
-		WebhookPort:    getEnv("BUILD_WEBHOOK_PORT", "8091"),
-		PollInterval:   pollInterval,
+		DatabaseURL:   getEnv("DATABASE_URL", getEnv("DB_URL", "")),
+		WebhookPort:   getEnv("BUILD_WEBHOOK_PORT", "8091"),
+		PollInterval:  pollInterval,
 		MaxConcurrent: getEnvInt("BUILD_MAX_CONCURRENT", 4),
 		BuildTimeout:  buildTimeout,
 		MaxRetries:    getEnvInt("BUILD_MAX_RETRIES", 2),
