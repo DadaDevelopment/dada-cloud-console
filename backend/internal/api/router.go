@@ -159,6 +159,7 @@ func SetupRouter(pool *pgxpool.Pool, cfg *config.Config) *gin.Engine {
 		// Projects
 		api.GET("/projects", h.ListProjects)
 		api.POST("/projects", h.CreateProject)
+		api.POST("/projects/default", h.EnsureDefaultProject)
 		api.GET("/projects/:projectId", h.GetProject)
 
 		// Namespace policies (project settings — LimitRange + ResourceQuota)

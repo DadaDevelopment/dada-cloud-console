@@ -1,9 +1,9 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import Link from "next/link";
 import { useProjectContext } from "@/lib/project-context";
 import { useT } from "@/lib/i18n/console/context";
+import { CreateProjectModal } from "./create-project-modal";
 
 function ChevronUpDown({ className }: { className?: string }) {
   return (
@@ -21,8 +21,9 @@ function ChevronUpDown({ className }: { className?: string }) {
 export function ProjectSwitcher() {
   const router = useRouter();
   const { t } = useT();
-  const { projects, project, projectId } = useProjectContext();
+  const { projects, project, projectId, refetchProjects } = useProjectContext();
   const [open, setOpen] = useState(false);
+  const [showCreate, setShowCreate] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -94,14 +95,31 @@ export function ProjectSwitcher() {
               })
             )}
           </div>
-          <Link
-            href="/projects"
-            onClick={() => setOpen(false)}
-            className="block border-t border-gray-100 px-3 py-2.5 text-sm font-medium text-blue-600 hover:bg-gray-50"
+          <button
+            type="button"
+            onClick={() => {
+              setOpen(false);
+              setShowCreate(true);
+            }}
+            className="flex w-full items-center gap-2 border-t border-gray-100 px-3 py-2.5 text-left text-sm font-medium text-blue-600 hover:bg-gray-50"
           >
-            {t("shell.project.viewAll")}
-          </Link>
+            <svg className="h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+            </svg>
+            {t("shell.project.create")}
+          </button>
         </div>
+      )}
+
+      {showCreate && (
+        <CreateProjectModal
+          onClose={() => setShowCreate(false)}
+          onCreated={(newId) => {
+            setShowCreate(false);
+            refetchProjects();
+            router.push(`/projects/${newId}`);
+          }}
+        />
       )}
     </div>
   );

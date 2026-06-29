@@ -105,11 +105,27 @@ export async function apiFetch<T>(
     headers["Authorization"] = `Bearer ${bearerToken}`;
   }
 
-  const res = await fetch(`${baseUrl ?? API_BASE_URL}${path}`, {
-    method,
-    headers,
-    body: body !== undefined ? JSON.stringify(body) : undefined,
-  });
+  // Hard timeout so a hung request (e.g. a stuck SSO silent-refresh that never
+  // resolves the bearer token) surfaces as an error instead of an infinite
+  // spinner. 30s is well above any healthy API call.
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 30_000);
+  let res: Response;
+  try {
+    res = await fetch(`${baseUrl ?? API_BASE_URL}${path}`, {
+      method,
+      headers,
+      body: body !== undefined ? JSON.stringify(body) : undefined,
+      signal: controller.signal,
+    });
+  } catch (e) {
+    if (e instanceof DOMException && e.name === "AbortError") {
+      throw new Error("Request timed out. Try again.");
+    }
+    throw e;
+  } finally {
+    clearTimeout(timeout);
+  }
 
   if (!res.ok) {
     const err = await res.json().catch(() => ({ error: res.statusText }));
@@ -152,6 +168,10 @@ export const projectsApi = {
   // projects land in the caller's personal org by default.
   create: (data: { slug: string; display_name?: string; org_id?: string; default_environment?: string }) =>
     apiFetch<CreateProjectResponse>("/api/v1/projects", { method: "POST", body: data }),
+  // Idempotent: returns the caller's default project, creating one when they have
+  // zero. The console calls this on first load so the user lands inside a project.
+  ensureDefault: () =>
+    apiFetch<CreateProjectResponse>("/api/v1/projects/default", { method: "POST", body: {} }),
   get: (id: string) => apiFetch<ProjectDetailResponse>(`/api/v1/projects/${id}`),
   operations: (projectId: string) => apiFetch<OperationsResponse>(`/api/v1/projects/${projectId}/operations`),
   getOperation: (projectId: string, opId: string) =>

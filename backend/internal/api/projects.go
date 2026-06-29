@@ -1,9 +1,11 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/dada-tuda/console/backend/internal/auth"
@@ -179,44 +181,14 @@ func (h *Handler) CreateProject(c *gin.Context) {
 	if defaultEnv == "" {
 		defaultEnv = "prod"
 	}
-	envType := "prod"
-	if defaultEnv == "dev" {
-		envType = "dev"
-	}
 
-	ctx := c.Request.Context()
-	tx, err := h.pool.Begin(ctx)
+	projectID, envID, err := h.insertProject(c.Request.Context(), claims.UserID, slug, displayName, org, defaultEnv)
 	if err != nil {
-		respondError(c, http.StatusInternalServerError, "failed to begin tx")
-		return
-	}
-	defer tx.Rollback(ctx) //nolint:errcheck // rollback after commit is a no-op
-
-	projectID := uuid.New()
-	if _, err := tx.Exec(ctx, `
-		INSERT INTO projects (id, name, display_name, org_id, owner_type, owner_id, default_environment)
-		VALUES ($1, $2, $3, $4, 'team', $5, $6)
-	`, projectID, slug, displayName, org, claims.UserID, defaultEnv); err != nil {
 		if isUniqueViolation(err) {
 			respondError(c, http.StatusConflict, "a project with this slug already exists")
 			return
 		}
 		respondError(c, http.StatusInternalServerError, "failed to create project")
-		return
-	}
-
-	var envID uuid.UUID
-	if err := tx.QueryRow(ctx, `
-		INSERT INTO environments (project_id, name, namespace, type)
-		VALUES ($1, $2, $3, $4)
-		RETURNING id
-	`, projectID, defaultEnv, slug+"-"+defaultEnv, envType).Scan(&envID); err != nil {
-		respondError(c, http.StatusInternalServerError, "failed to create default environment")
-		return
-	}
-
-	if err := tx.Commit(ctx); err != nil {
-		respondError(c, http.StatusInternalServerError, "failed to commit")
 		return
 	}
 
@@ -230,6 +202,166 @@ func (h *Handler) CreateProject(c *gin.Context) {
 		"org_id":                 org,
 		"role":                   role,
 	})
+}
+
+// insertProject creates a project row plus its default environment in one tx and
+// returns the new ids. Shared by CreateProject and EnsureDefaultProject so both
+// paths build identical rows (the gitops db-watcher then bootstraps the manifest).
+func (h *Handler) insertProject(ctx context.Context, ownerID uuid.UUID, slug, displayName, org, defaultEnv string) (uuid.UUID, uuid.UUID, error) {
+	envType := "prod"
+	if defaultEnv == "dev" {
+		envType = "dev"
+	}
+
+	tx, err := h.pool.Begin(ctx)
+	if err != nil {
+		return uuid.Nil, uuid.Nil, err
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck // rollback after commit is a no-op
+
+	projectID := uuid.New()
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO projects (id, name, display_name, org_id, owner_type, owner_id, default_environment)
+		VALUES ($1, $2, $3, $4, 'team', $5, $6)
+	`, projectID, slug, displayName, org, ownerID, defaultEnv); err != nil {
+		return uuid.Nil, uuid.Nil, err
+	}
+
+	var envID uuid.UUID
+	if err := tx.QueryRow(ctx, `
+		INSERT INTO environments (project_id, name, namespace, type)
+		VALUES ($1, $2, $3, $4)
+		RETURNING id
+	`, projectID, defaultEnv, slug+"-"+defaultEnv, envType).Scan(&envID); err != nil {
+		return uuid.Nil, uuid.Nil, err
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return uuid.Nil, uuid.Nil, err
+	}
+	return projectID, envID, nil
+}
+
+// defaultProjectSlug derives a stable, DNS-1123-label-safe slug from a username so
+// EnsureDefaultProject is idempotent per user (re-running finds the same slug and
+// short-circuits on the existing row). Falls back to a hash when the username does
+// not sanitize to a valid slug.
+func defaultProjectSlug(username string) string {
+	s := strings.ToLower(strings.TrimSpace(username))
+	s = nonSlugChars.ReplaceAllString(s, "-")
+	s = strings.Trim(s, "-")
+	if projectSlugRe.MatchString(s) {
+		return s
+	}
+	var hash uint32 = 2166136261
+	for _, r := range username {
+		hash = (hash ^ uint32(r)) * 16777619
+	}
+	return "default-" + strconv.FormatUint(uint64(hash), 36)
+}
+
+var nonSlugChars = regexp.MustCompile(`[^a-z0-9]+`)
+
+// EnsureDefaultProject returns the caller's default project, creating it when they
+// have none. Idempotent: the console calls it on first load so the user always lands
+// inside a project instead of an empty overview.
+//
+// @ID          ensureDefaultProject
+// @Summary     Get or create the caller's default project
+// @Description Returns the caller's default project, provisioning one (in your personal org, you are Owner) when you have zero projects. Idempotent — repeated calls return the same project.
+// @Tags        project
+// @Produce     json
+// @Security    BearerAuth
+// @Success     200 {object} map[string]interface{} "object with project_id, default_environment_id, org_id and role"
+// @Success     201 {object} map[string]interface{} "newly created default project"
+// @Failure     401 {object} map[string]string
+// @Router      /projects/default [post]
+func (h *Handler) EnsureDefaultProject(c *gin.Context) {
+	claims, ok := auth.GetClaims(c)
+	if !ok {
+		respondUnauthorized(c)
+		return
+	}
+
+	ctx := c.Request.Context()
+	god := isGod(claims)
+	explicitIDs := claimProjectIDs(claims)
+	adminOrgs := adminOrgIDs(claims)
+
+	// Reuse the list-visibility predicate: any visible project means the caller
+	// already has a home, so return the first one (stable by name) and stop.
+	var (
+		pid   uuid.UUID
+		org   string
+		envID uuid.UUID
+	)
+	err := h.pool.QueryRow(ctx, `
+		SELECT p.id, COALESCE(p.org_id, ''),
+		       (SELECT e.id FROM environments e WHERE e.project_id = p.id ORDER BY e.name LIMIT 1)
+		  FROM projects p
+		 WHERE $1 OR p.id = ANY($2) OR p.org_id = ANY($3)
+		 ORDER BY p.name
+		 LIMIT 1
+	`, god, explicitIDs, adminOrgs).Scan(&pid, &org, &envID)
+	if err == nil {
+		c.JSON(http.StatusOK, gin.H{
+			"project_id":             pid,
+			"default_environment_id": envID,
+			"org_id":                 org,
+			"role":                   effectiveCreateRole(claims, org),
+		})
+		return
+	}
+	if err != pgx.ErrNoRows {
+		respondError(c, http.StatusInternalServerError, "failed to look up projects")
+		return
+	}
+
+	// No visible project — provision the default in the caller's personal org.
+	if claims.Username == "" {
+		respondError(c, http.StatusBadRequest, "no username in token; cannot derive a personal org")
+		return
+	}
+	personalOrg := claims.Username
+	slug := defaultProjectSlug(claims.Username)
+	pid, envID, err = h.insertProject(ctx, claims.UserID, slug, "Default", personalOrg, "prod")
+	if err != nil {
+		if isUniqueViolation(err) {
+			// Slug already taken (race or pre-existing row not visible via claims):
+			// fetch it so the call stays idempotent rather than 409-ing the console.
+			if e := h.pool.QueryRow(ctx, `
+				SELECT p.id, COALESCE(p.org_id, ''),
+				       (SELECT e.id FROM environments e WHERE e.project_id = p.id ORDER BY e.name LIMIT 1)
+				  FROM projects p WHERE p.name = $1
+			`, slug).Scan(&pid, &org, &envID); e == nil {
+				c.JSON(http.StatusOK, gin.H{
+					"project_id":             pid,
+					"default_environment_id": envID,
+					"org_id":                 org,
+					"role":                   effectiveCreateRole(claims, org),
+				})
+				return
+			}
+		}
+		respondError(c, http.StatusInternalServerError, "failed to create default project")
+		return
+	}
+	c.JSON(http.StatusCreated, gin.H{
+		"project_id":             pid,
+		"default_environment_id": envID,
+		"org_id":                 personalOrg,
+		"role":                   effectiveCreateRole(claims, personalOrg),
+	})
+}
+
+// effectiveCreateRole mirrors the role a creator/owner holds on a freshly made
+// project: god or an unmapped personal org both resolve to Owner.
+func effectiveCreateRole(claims *auth.Claims, org string) models.MemberRole {
+	role := models.MemberRole(claims.OrgRole(org))
+	if isGod(claims) || role == "" {
+		role = models.MemberRoleOwner
+	}
+	return role
 }
 
 // GetProject returns a single project by ID, including environments and user role.

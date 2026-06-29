@@ -30,6 +30,9 @@ interface ProjectContextValue {
   // switcher
   projects: Project[];
   projectsLoading: boolean;
+  // the project the console treats as home (first/only project, or the
+  // auto-provisioned default). null until the list has loaded.
+  defaultProjectId: string | null;
   // active project (null when not inside /projects/[id]/*)
   projectId: string | null;
   project: Project | null;
@@ -38,6 +41,8 @@ interface ProjectContextValue {
   loading: boolean;
   error: string | null;
   refetch: () => void;
+  // re-fetch the switcher list (e.g. after creating a project).
+  refetchProjects: () => void;
   // environment selection
   selectedEnv: Environment | null;
   setSelectedEnvId: (envId: string) => void;
@@ -71,23 +76,57 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
   const [error, setError] = useState<string | null>(null);
   const [selectedEnvId, setSelectedEnvIdState] = useState<string>("");
   const [reloadKey, setReloadKey] = useState(0);
+  const [projectsReloadKey, setProjectsReloadKey] = useState(0);
+
+  // The project the console treats as home: the first/only project, or null while
+  // the list is still loading.
+  const defaultProjectId = projects.length > 0 ? projects[0].id : null;
 
   // The project the current env selection was initialised for, so switching
   // projects re-resolves the env instead of carrying the old one over.
   const envInitFor = useRef<string | null>(null);
+  // Guards the one-shot default-project bootstrap so an empty list provisions a
+  // default exactly once per session, not on every refetch.
+  const bootstrapped = useRef(false);
 
-  // Projects list (switcher) — fetched once.
+  // Projects list (switcher). Refetchable so creating a project updates the list.
   useEffect(() => {
     let cancelled = false;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setProjectsLoading(true);
     projectsApi
       .list()
-      .then((d) => !cancelled && setProjects(d.projects ?? []))
+      .then(async (d) => {
+        if (cancelled) return;
+        const list = d.projects ?? [];
+        // Empty list → auto-provision the default project once, then adopt it so
+        // the user lands inside a project instead of an empty overview.
+        if (list.length === 0 && !bootstrapped.current) {
+          bootstrapped.current = true;
+          try {
+            const def = await projectsApi.ensureDefault();
+            if (cancelled) return;
+            const refreshed = await projectsApi.list();
+            if (cancelled) return;
+            setProjects(refreshed.projects ?? []);
+            if (projectIdFromPath(window.location.pathname) === null) {
+              router.replace(`/projects/${def.project_id}`);
+            }
+            return;
+          } catch {
+            if (!cancelled) setProjects([]);
+            return;
+          }
+        }
+        setProjects(list);
+      })
       .catch(() => !cancelled && setProjects([]))
       .finally(() => !cancelled && setProjectsLoading(false));
     return () => {
       cancelled = true;
     };
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projectsReloadKey]);
 
   // Active project detail.
   useEffect(() => {
@@ -166,6 +205,7 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
   );
 
   const refetch = useCallback(() => setReloadKey((k) => k + 1), []);
+  const refetchProjects = useCallback(() => setProjectsReloadKey((k) => k + 1), []);
 
   const selectedEnv = useMemo(
     () => environments.find((e) => e.id === selectedEnvId) ?? null,
@@ -175,6 +215,7 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
   const value: ProjectContextValue = {
     projects,
     projectsLoading,
+    defaultProjectId,
     projectId,
     project,
     environments,
@@ -182,6 +223,7 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
     loading,
     error,
     refetch,
+    refetchProjects,
     selectedEnv,
     setSelectedEnvId,
   };

@@ -27,3 +27,31 @@ func TestProjectSlugRe(t *testing.T) {
 		}
 	}
 }
+
+func TestDefaultProjectSlug(t *testing.T) {
+	// A clean username sanitizes to a valid slug verbatim-ish.
+	cases := map[string]string{
+		"alexkekiy": "alexkekiy",
+		"John.Doe":  "john-doe",
+		"a_b c":     "a-b-c",
+		"-leading-": "leading",
+		"ab":        "default-", // too short after sanitize → hashed fallback (prefix)
+		"":          "default-", // empty → hashed fallback (prefix)
+	}
+	for username, want := range cases {
+		got := defaultProjectSlug(username)
+		if !projectSlugRe.MatchString(got) {
+			t.Errorf("defaultProjectSlug(%q) = %q is not a valid slug", username, got)
+		}
+		if len(want) > 0 && want[len(want)-1] == '-' {
+			// fallback case: only assert the prefix and validity.
+			if got[:len(want)] != want {
+				t.Errorf("defaultProjectSlug(%q) = %q, want prefix %q", username, got, want)
+			}
+			continue
+		}
+		if got != want {
+			t.Errorf("defaultProjectSlug(%q) = %q, want %q", username, got, want)
+		}
+	}
+}

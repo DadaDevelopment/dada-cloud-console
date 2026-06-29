@@ -20,6 +20,7 @@ export const shell: Messages = {
   "shell.project.select": { ru: "Выберите проект", en: "Select project" },
   "shell.project.none": { ru: "Нет проектов", en: "No projects" },
   "shell.project.viewAll": { ru: "Все проекты →", en: "View all projects →" },
+  "shell.project.create": { ru: "Создать проект", en: "Create project" },
 
   "shell.nav.advanced": { ru: "Дополнительно", en: "Advanced" },
   "shell.nav.admin": { ru: "Администрирование", en: "Admin" },

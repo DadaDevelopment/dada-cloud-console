@@ -718,6 +718,49 @@
                 }
             }
         },
+        "/projects/default": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Returns the caller's default project, provisioning one (in your personal org, you are Owner) when you have zero projects. Idempotent — repeated calls return the same project.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "project"
+                ],
+                "summary": "Get or create the caller's default project",
+                "operationId": "ensureDefaultProject",
+                "responses": {
+                    "200": {
+                        "description": "object with project_id, default_environment_id, org_id and role",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "201": {
+                        "description": "newly created default project",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/projects/{projectId}": {
             "get": {
                 "security": [
@@ -5982,7 +6025,7 @@
                         "BearerAuth": []
                     }
                 ],
-                "description": "Returns the git repositories linked to apps in the given environment. Read-only. Never returns stored tokens or webhook secrets.",
+                "description": "Returns the git repositories linked to apps in the given environment. Any project member. Never returns stored tokens or webhook secrets.",
                 "produces": [
                     "application/json"
                 ],
@@ -6409,7 +6452,7 @@
                         "BearerAuth": []
                     }
                 ],
-                "description": "Returns the GitHub App (or GitLab) installations bound to the project. Read-only.",
+                "description": "Returns the GitHub App (or GitLab) installations bound to the project's org.",
                 "produces": [
                     "application/json"
                 ],
@@ -6535,14 +6578,14 @@
                         "BearerAuth": []
                     }
                 ],
-                "description": "Lists all GitHub App installations visible to the build-agent, flagging which are already bound to the project. Requires write access. 503 when the build-agent is unconfigured.",
+                "description": "Lists GitHub App installations scoped to the project's org (each org owns its own GitHub accounts). Installations from other orgs are never returned. canWrite required. 503 when the build-agent is unconfigured.",
                 "produces": [
                     "application/json"
                 ],
                 "tags": [
                     "git"
                 ],
-                "summary": "List bindable git App installations",
+                "summary": "List bindable git App installations for the project's org",
                 "operationId": "listAvailableInstallations",
                 "parameters": [
                     {
@@ -7754,8 +7797,7 @@
                 "metrics": {
                     "type": "object",
                     "additionalProperties": {
-                        "type": "number",
-                        "format": "float64"
+                        "type": "number"
                     }
                 },
                 "source": {
