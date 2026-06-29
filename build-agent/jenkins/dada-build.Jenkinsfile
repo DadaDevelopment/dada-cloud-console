@@ -5,7 +5,7 @@
 // vars/dadaBuildPipeline.groovy (so it is versioned and reused, not pasted into
 // the job config). The Jenkins job's inline script is just:
 //
-//     @Library('jenkins-pipelines') _
+//     @Library('dada-tuda-jenkins-pipelines@develop') _
 //     dadaBuildPipeline()
 //
 // That pipeline: resolves project/app identity (from params, falling back to a
