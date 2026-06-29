@@ -325,10 +325,34 @@ func (r *Runner) bridge(ctx context.Context, b *db.Build, number int) (buildOutc
 			return out, "", fmt.Errorf("poll build: %w", err)
 		}
 		if !bi.Building {
-			// Drain any final bytes the build wrote after it stopped building.
-			text, next, _, err := r.jenkins.ProgressiveText(ctx, r.cfg.JenkinsJob, number, offset)
-			if err == nil && next != offset {
-				pending += text
+			// Jenkins can report building=false before progressiveText has
+			// exposed the console tail — and the ==> image: marker lives in that
+			// tail. Draining once races the flush and loses the marker (build
+			// shows SUCCESS in Jenkins but the runner sees "no markers"). Keep
+			// draining until the console is fully caught up (no more data and no
+			// new bytes), bounded so a stuck stream can't hang the build.
+			drainUntil := time.Now().Add(30 * time.Second)
+			for {
+				text, next, more, perr := r.jenkins.ProgressiveText(ctx, r.cfg.JenkinsJob, number, offset)
+				if perr != nil {
+					break
+				}
+				if next != offset {
+					offset = next
+					pending += text
+					pending = r.flushLines(ctx, b, pending, &out, false)
+				}
+				if !more && next == offset {
+					break
+				}
+				if time.Now().After(drainUntil) {
+					break
+				}
+				select {
+				case <-ctx.Done():
+					return out, "", ctx.Err()
+				case <-time.After(500 * time.Millisecond):
+				}
 			}
 			r.flushLines(ctx, b, pending, &out, true)
 			return out, bi.Result, nil
