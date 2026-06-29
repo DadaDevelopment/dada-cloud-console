@@ -300,12 +300,13 @@ func (h *Handler) GitInstallCallback(c *gin.Context) {
 		return
 	}
 
-	// Upsert: re-installing the same App for the same project is idempotent.
+	// Upsert: re-installing the same App for the same org is idempotent. Installations
+	// are scoped to the org (migration 026), so the conflict target is org-level.
 	_, err = h.pool.Exec(c.Request.Context(),
 		`INSERT INTO git_app_installations
-		   (project_id, provider, installation_id, account_login, account_type)
-		 VALUES ($1, 'github', $2, $3, $4)
-		 ON CONFLICT (project_id, provider, installation_id)
+		   (project_id, org_id, provider, installation_id, account_login, account_type)
+		 VALUES ($1, (SELECT org_id FROM projects WHERE id = $1), 'github', $2, $3, $4)
+		 ON CONFLICT (org_id, provider, installation_id)
 		 DO UPDATE SET account_login = EXCLUDED.account_login,
 		               account_type  = EXCLUDED.account_type,
 		               updated_at    = NOW()`,
