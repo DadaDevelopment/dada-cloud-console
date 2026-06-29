@@ -567,11 +567,15 @@ func (h *Handler) ListInstallationRepos(c *gin.Context) {
 		return
 	}
 
-	// Resolve the installation's numeric provider id, scoped to the project so
-	// existence isn't leaked across tenants.
+	// Resolve the installation's numeric provider id, scoped to the requesting
+	// project's org so existence isn't leaked across tenants. Installations are
+	// org-scoped after the migration 026 dedup, so the surviving row's
+	// project_id may differ from the request's project; match on org membership.
 	var providerInstallID int64
 	err = h.pool.QueryRow(c.Request.Context(),
-		`SELECT installation_id FROM git_app_installations WHERE id = $1 AND project_id = $2`,
+		`SELECT i.installation_id FROM git_app_installations i
+		  JOIN projects p ON p.org_id = i.org_id
+		 WHERE i.id = $1 AND p.id = $2`,
 		installationUUID, projectID,
 	).Scan(&providerInstallID)
 	if err == pgx.ErrNoRows {
@@ -658,9 +662,15 @@ func (h *Handler) DetectFramework(c *gin.Context) {
 		rootDir = "."
 	}
 
+	// Scope to the requesting project's org (not project_id): installations are
+	// org-scoped after migration 026 dedup, so the surviving row's project_id
+	// may differ from the request's project. Match on org membership to keep
+	// cross-tenant existence hidden.
 	var providerInstallID int64
 	err = h.pool.QueryRow(c.Request.Context(),
-		`SELECT installation_id FROM git_app_installations WHERE id = $1 AND project_id = $2`,
+		`SELECT i.installation_id FROM git_app_installations i
+		  JOIN projects p ON p.org_id = i.org_id
+		 WHERE i.id = $1 AND p.id = $2`,
 		installationUUID, projectID,
 	).Scan(&providerInstallID)
 	if err == pgx.ErrNoRows {
