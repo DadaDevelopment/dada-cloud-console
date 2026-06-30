@@ -11,7 +11,7 @@ import { useProjectContext } from "@/lib/project-context";
 import { canMutate } from "@/lib/rbac";
 import { timeAgo } from "@/lib/format";
 import { PhaseBadge } from "@/components/ui/phase-badge";
-import { AppSparkline } from "@/components/app-sparkline";
+import { MetricSparkline } from "@/components/metrics/fixed-metrics-dashboard";
 import { EmptyState } from "@/components/ui/empty-state";
 import { useT } from "@/lib/i18n/console/context";
 
@@ -201,7 +201,7 @@ export default function AppsPage() {
                 <p className="mt-2 text-xs text-gray-400">
                   {t("apps.card.synced", { ago: timeAgo(app.last_synced_at) })}
                 </p>
-                <AppSparkline projectId={projectId} envId={selectedEnvId} appName={app.name} />
+                <MetricSparkline projectId={projectId} envId={selectedEnvId} appName={app.name} />
               </Link>
             );
           })}

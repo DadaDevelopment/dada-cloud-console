@@ -11,7 +11,7 @@ import { Tooltip } from "@/components/ui/tooltip";
 import { useProjectContext } from "@/lib/project-context";
 import { canEditYaml, canMutate, canSeeTechnical } from "@/lib/rbac";
 import { ComposeStatePanel } from "@/components/compose-state-panel";
-import { MetricsPanel } from "@/components/metrics-panel";
+import { FixedMetricsDashboard } from "@/components/metrics/fixed-metrics-dashboard";
 import { LogsViewer } from "@/components/logs-viewer";
 import { PhaseBadge } from "@/components/ui/phase-badge";
 import { CloudTaskPanel } from "@/components/cloud-task/cloud-task-panel";
@@ -207,7 +207,7 @@ export default function AppDetailPage() {
       {isCompose ? (
         <div className="space-y-6">
           <ComposeStatePanel projectId={projectId} envId={envId} appName={appName} />
-          <MetricsPanel kind="app" projectId={projectId} envId={envId} appName={appName} />
+          <FixedMetricsDashboard kind="app" projectId={projectId} envId={envId} appName={appName} />
           <LogsViewer projectId={projectId} app={appName} />
         </div>
       ) : (
@@ -231,7 +231,7 @@ export default function AppDetailPage() {
               </div>
             ))}
           </div>
-          <MetricsPanel kind="app" projectId={projectId} envId={envId} appName={appName} />
+          <FixedMetricsDashboard kind="app" projectId={projectId} envId={envId} appName={appName} />
           <LogsViewer projectId={projectId} app={appName} />
         </div>
       )}

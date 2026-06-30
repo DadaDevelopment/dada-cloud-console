@@ -8,7 +8,7 @@ import { Modal } from "@/components/ui/modal";
 import { Spinner } from "@/components/ui/spinner";
 import { Breadcrumb } from "@/components/ui/breadcrumb";
 import { CopyButton } from "@/components/ui/copy-button";
-import { MetricsPanel } from "@/components/metrics-panel";
+import { FixedMetricsDashboard } from "@/components/metrics/fixed-metrics-dashboard";
 import { LogsViewer } from "@/components/logs-viewer";
 import { useProjectContext } from "@/lib/project-context";
 import { canMutate, canSeeTechnical } from "@/lib/rbac";
@@ -143,7 +143,7 @@ export default function AppServerDetailPage() {
       </div>
 
       <div className="mb-6">
-        <MetricsPanel kind="vm" projectId={projectId} serverName={serverName} />
+        <FixedMetricsDashboard kind="vm" projectId={projectId} serverName={serverName} />
       </div>
 
       <LogsViewer projectId={projectId} vm={serverName} />
