@@ -1,9 +1,41 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
-import * as echarts from "echarts";
+import * as echarts from "echarts/core";
+import { LineChart, BarChart, ScatterChart, GaugeChart, HeatmapChart } from "echarts/charts";
+import {
+  GridComponent,
+  TooltipComponent,
+  LegendComponent,
+  DataZoomComponent,
+  DataZoomInsideComponent,
+  DataZoomSliderComponent,
+  VisualMapComponent,
+  MarkLineComponent,
+} from "echarts/components";
+import { CanvasRenderer } from "echarts/renderers";
 import type { EChartsOption, EChartsType } from "echarts";
 import { cn } from "@/lib/cn";
 import { THEME_TOKENS, type ChartTheme } from "./theme";
+
+// Tree-shaken registration: only the charts/components the builders actually use
+// are pulled in, so the route chunk ships a fraction of the full echarts bundle.
+// LineChart carries the lttb sampling + progressive rendering the builders rely on.
+echarts.use([
+  LineChart,
+  BarChart,
+  ScatterChart,
+  GaugeChart,
+  HeatmapChart,
+  GridComponent,
+  TooltipComponent,
+  LegendComponent,
+  DataZoomComponent,
+  DataZoomInsideComponent,
+  DataZoomSliderComponent,
+  VisualMapComponent,
+  MarkLineComponent,
+  CanvasRenderer,
+]);
 
 /**
  * useChartTheme tracks the console's `.dark` class on <html> so charts re-render

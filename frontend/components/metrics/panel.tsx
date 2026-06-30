@@ -11,6 +11,7 @@ import {
   X,
 } from "lucide-react";
 import { EChart } from "@/components/charts/echart";
+import { useInViewport } from "@/components/charts/use-in-viewport";
 import { dispatchBuild } from "@/components/charts/builders";
 import { inferUnit } from "@/components/charts/format";
 import { VIZ_LABELS } from "@/components/charts/types";
@@ -104,6 +105,7 @@ export function Panel({
 }) {
   const { spec, loading, refresh } = usePanelSpec(panel, ctx);
   const [full, setFull] = useState(false);
+  const { ref: viewRef, seen } = useInViewport<HTMLDivElement>();
   const unit = spec?.unit || inferUnit(panel.metric);
   const hasData = (spec?.series?.length ?? 0) > 0 && spec!.series.some((s) => s.points.length > 0);
 
@@ -191,7 +193,9 @@ export function Panel({
           </DropdownMenu>
         </div>
       </div>
-      <div className="min-h-0 flex-1 p-2">{chart}</div>
+      <div ref={viewRef} className="min-h-0 flex-1 p-2">
+        {seen ? chart : <div className="h-full w-full animate-pulse rounded-md bg-gray-50 dark:bg-gray-800/50" />}
+      </div>
 
       {full && (
         <div className="fixed inset-0 z-50 flex flex-col bg-black/50 backdrop-blur-sm" onClick={() => setFull(false)}>
