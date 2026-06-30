@@ -14,7 +14,7 @@ import { EChart } from "@/components/charts/echart";
 import { useInViewport } from "@/components/charts/use-in-viewport";
 import { dispatchBuild } from "@/components/charts/builders";
 import { inferUnit } from "@/components/charts/format";
-import { VIZ_LABELS } from "@/components/charts/types";
+import { VIZ_LABELS, type Annotation } from "@/components/charts/types";
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -43,6 +43,8 @@ export interface PanelContext {
   /** Shared response keyed by metric, used when a panel has no overrides. */
   shared: Record<string, MonitoringMetricSpec> | undefined;
   sharedLoading: boolean;
+  /** Deploy/alert event markers overlaid on every time-series panel. */
+  eventAnnotations?: Annotation[];
 }
 
 /**
@@ -109,6 +111,11 @@ export function Panel({
   const unit = spec?.unit || inferUnit(panel.metric);
   const hasData = (spec?.series?.length ?? 0) > 0 && spec!.series.some((s) => s.points.length > 0);
 
+  const annotations = useMemo(
+    () => [...(panel.annotations ?? []), ...(ctx.eventAnnotations ?? [])],
+    [panel.annotations, ctx.eventAnnotations],
+  );
+
   const option = useMemo(() => {
     if (!spec) return null;
     return dispatchBuild({
@@ -116,11 +123,11 @@ export function Panel({
       viz: panel.viz,
       unit,
       thresholds: panel.thresholds,
-      annotations: panel.annotations,
+      annotations,
       wideRange: ctx.wideRange,
       zoom: panel.viz !== "gauge" && panel.viz !== "sparkline",
     });
-  }, [spec, panel.viz, panel.thresholds, panel.annotations, unit, ctx.wideRange]);
+  }, [spec, panel.viz, panel.thresholds, annotations, unit, ctx.wideRange]);
 
   const title = panel.title || panel.metric;
 

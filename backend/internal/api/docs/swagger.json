@@ -5983,6 +5983,92 @@
                 }
             }
         },
+        "/projects/{projectId}/environments/{envId}/monitoring/{appId}/events": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Returns deploy events in the monitoring resource's environment within the time window (range or from/to), as {time,label,kind} markers for overlay as chart annotations.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "monitoring"
+                ],
+                "summary": "Get dashboard event overlays",
+                "operationId": "getMonitoringEvents",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Project UUID",
+                        "name": "projectId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Environment UUID",
+                        "name": "envId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Monitoring resource UUID",
+                        "name": "appId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Relative window (15m,1h,6h,24h,7d)",
+                        "name": "range",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Absolute window start (unix seconds)",
+                        "name": "from",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Absolute window end (unix seconds)",
+                        "name": "to",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "object with an events array",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/projects/{projectId}/environments/{envId}/monitoring/{appId}/grafana-link": {
             "get": {
                 "security": [

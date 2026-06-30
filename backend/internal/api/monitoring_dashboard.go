@@ -143,3 +143,76 @@ func (h *Handler) SaveMonitoringDashboard(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, gin.H{"saved": true, "version": req.Version})
 }
+
+// maxDashboardEvents caps the event overlay so a busy environment can't return
+// thousands of markers for one chart.
+const maxDashboardEvents = 200
+
+// monitoringEvent is one timeline marker overlaid on the dashboard charts.
+type monitoringEvent struct {
+	Time  int64  `json:"time"`
+	Label string `json:"label"`
+	Kind  string `json:"kind"`
+}
+
+// GetMonitoringEvents returns the deploy events in the resource's environment
+// within the requested window, for overlay as chart annotations. Firing-alert
+// history is not persisted locally, so only deploys are surfaced today.
+//
+// @ID          getMonitoringEvents
+// @Summary     Get dashboard event overlays
+// @Description Returns deploy events in the monitoring resource's environment within the time window (range or from/to), as {time,label,kind} markers for overlay as chart annotations.
+// @Tags        monitoring
+// @Produce     json
+// @Security    BearerAuth
+// @Param       projectId path     string true "Project UUID"
+// @Param       envId     path     string true "Environment UUID"
+// @Param       appId     path     string true "Monitoring resource UUID"
+// @Param       range     query    string false "Relative window (15m,1h,6h,24h,7d)"
+// @Param       from      query    integer false "Absolute window start (unix seconds)"
+// @Param       to        query    integer false "Absolute window end (unix seconds)"
+// @Success     200       {object} map[string]interface{} "object with an events array"
+// @Failure     401       {object} map[string]string
+// @Failure     404       {object} map[string]string
+// @Router      /projects/{projectId}/environments/{envId}/monitoring/{appId}/events [get]
+func (h *Handler) GetMonitoringEvents(c *gin.Context) {
+	app, _, _ := h.resolveMonitoringApp(c)
+	if app == nil {
+		return
+	}
+	start, end, _ := parseRange(c)
+
+	rows, err := h.pool.Query(c.Request.Context(),
+		`SELECT app_name, trigger, created_at
+		   FROM deployments
+		  WHERE environment_id = $1 AND created_at BETWEEN $2 AND $3
+		  ORDER BY created_at
+		  LIMIT $4`,
+		app.EnvironmentID, start, end, maxDashboardEvents,
+	)
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, "failed to load events")
+		return
+	}
+	defer rows.Close()
+
+	events := []monitoringEvent{}
+	for rows.Next() {
+		var name, trigger string
+		var ts time.Time
+		if err := rows.Scan(&name, &trigger, &ts); err != nil {
+			respondError(c, http.StatusInternalServerError, "failed to scan event")
+			return
+		}
+		events = append(events, monitoringEvent{
+			Time:  ts.Unix(),
+			Label: trigger + " " + name,
+			Kind:  "deploy",
+		})
+	}
+	if err := rows.Err(); err != nil {
+		respondError(c, http.StatusInternalServerError, "error reading events")
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"events": events})
+}

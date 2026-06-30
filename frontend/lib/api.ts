@@ -760,6 +760,24 @@ export const monitoringApi = {
       { method: "PUT", body: { config, version } }
     ),
 
+  getEvents: (
+    projectId: string,
+    envId: string,
+    appId: string,
+    opts?: { range?: string; from?: number; to?: number }
+  ) => {
+    const qs = new URLSearchParams();
+    if (opts?.from && opts?.to) {
+      qs.set("from", String(opts.from));
+      qs.set("to", String(opts.to));
+    } else if (opts?.range) {
+      qs.set("range", opts.range);
+    }
+    return apiFetch<{ events: { time: number; label: string; kind: string }[] }>(
+      `/api/v1/projects/${projectId}/environments/${envId}/monitoring/${appId}/events?${qs.toString()}`
+    );
+  },
+
   listChannels: (projectId: string, envId: string) =>
     apiFetch<{ channels: Channel[] }>(
       `/api/v1/projects/${projectId}/environments/${envId}/monitoring/channels`

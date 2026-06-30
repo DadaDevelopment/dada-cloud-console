@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { LayoutDashboard, Compass } from "lucide-react";
 import { monitoringApi } from "@/lib/api";
 import type { MonitoringLabelsResponse } from "@/lib/types";
+import type { Annotation } from "@/components/charts/types";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Spinner } from "@/components/ui/spinner";
 import { useDashboardState } from "./use-dashboard-state";
@@ -76,12 +77,31 @@ export function MonitoringDashboard({
     refreshMs: state.refreshMs,
   });
 
+  const [events, setEvents] = useState<Annotation[]>([]);
+
   useEffect(() => {
     monitoringApi
       .getLabels(projectId, envId, appId, "24h")
       .then(setLabels)
       .catch(() => setLabels({ labels: {}, names: [] }));
   }, [projectId, envId, appId]);
+
+  // Deploy/alert event markers overlaid on every time-series panel, refreshed
+  // whenever the dashboard window changes.
+  useEffect(() => {
+    monitoringApi
+      .getEvents(projectId, envId, appId, { range: rp.range, from: rp.from, to: rp.to })
+      .then((res) =>
+        setEvents(
+          res.events.map((e) => ({
+            time: e.time,
+            label: e.label,
+            color: e.kind === "deploy" ? "#6366f1" : "#f59e0b",
+          })),
+        ),
+      )
+      .catch(() => setEvents([]));
+  }, [projectId, envId, appId, rp.range, rp.from, rp.to]);
 
   const metricNames = useMemo(() => Object.keys(data?.metrics ?? {}).sort(), [data]);
 
@@ -106,8 +126,9 @@ export function MonitoringDashboard({
       wideRange: isWideRange(state),
       shared: data?.metrics,
       sharedLoading: loading,
+      eventAnnotations: events,
     }),
-    [projectId, envId, appId, rp.range, rp.from, rp.to, state, filterList, data, loading],
+    [projectId, envId, appId, rp.range, rp.from, rp.to, state, filterList, data, loading, events],
   );
 
   const onLayoutChange = useCallback(
