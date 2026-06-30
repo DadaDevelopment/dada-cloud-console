@@ -120,9 +120,15 @@ func (h *Handler) ensureGrafanaResource(ctx context.Context, app *models.Monitor
 	// Best-effort; older Grafana may reject.
 	_ = h.grafana.SetFolderTenant(ctx, folderUID)
 
+	tenant := monitoringReadTenant(projectID, orgID)
+	dsUID, err := h.userMetricsDatasourceUID(ctx, projectID, tenant)
+	if err != nil {
+		return err
+	}
+
 	labels := monitoringLabels(orgID, app, "")
 	sel := promSelector(labels)
-	dash := grafana.BuildDashboard(dashUID, app.Name, h.cfg.GrafanaPromDatasourceUID, h.discoverPanels(ctx, sel, orgID))
+	dash := grafana.BuildDashboard(dashUID, app.Name, dsUID, h.discoverPanels(ctx, sel, tenant))
 	if err := h.grafana.UpsertDashboard(ctx, folderUID, dash); err != nil {
 		return err
 	}
@@ -140,14 +146,34 @@ func (h *Handler) ensureGrafanaResource(ctx context.Context, app *models.Monitor
 	return nil
 }
 
+// userMetricsDatasourceUID ensures a per-project Grafana datasource that queries
+// Mimir with this project's X-Scope-OrgID tenant header and returns its UID, so
+// embedded dashboards/alerts read ONLY this tenant's series. When no Mimir query
+// URL is configured it falls back to the global Prometheus datasource (single
+// shared store, no per-tenant isolation in the embed).
+func (h *Handler) userMetricsDatasourceUID(ctx context.Context, projectID uuid.UUID, tenant string) (string, error) {
+	if h.grafana == nil {
+		return "", fmt.Errorf("grafana not configured")
+	}
+	if h.cfg.GrafanaMimirQueryURL == "" {
+		return h.cfg.GrafanaPromDatasourceUID, nil
+	}
+	uid := datasourceUIDForProject(projectID)
+	if err := h.grafana.EnsureDatasource(ctx, uid, "dada-user-"+projectID.String(), h.cfg.GrafanaMimirQueryURL, tenant); err != nil {
+		return "", err
+	}
+	return uid, nil
+}
+
 // discoverPanels builds one timeseries panel per metric name present for the
 // resource (label-driven). Empty when Prometheus is unconfigured or silent.
-func (h *Handler) discoverPanels(ctx context.Context, sel string, orgID string) []grafana.MetricPanel {
+// tenant is the X-Scope-OrgID header for the Mimir read (see monitoringReadTenant).
+func (h *Handler) discoverPanels(ctx context.Context, sel string, tenant string) []grafana.MetricPanel {
 	panels := []grafana.MetricPanel{}
 	if h.userMetrics == nil {
 		return panels
 	}
-	samples, err := h.userMetrics.QueryInstant(ctx, "group by (__name__) (last_over_time("+sel+"[6h]))", time.Now(), orgID)
+	samples, err := h.userMetrics.QueryInstant(ctx, "group by (__name__) (last_over_time("+sel+"[6h]))", time.Now(), tenant)
 	if err != nil {
 		return panels
 	}
@@ -520,16 +546,22 @@ func (h *Handler) CreateAlertRule(c *gin.Context) {
 		contactPoint = receiverName(*req.ChannelID)
 	}
 
-	// Folder must exist before the rule references it.
+	// Folder + per-project Mimir datasource must exist before the rule references them.
 	if err := h.ensureGrafanaResource(ctx, app, projectID, orgID); err != nil {
 		respondError(c, http.StatusBadGateway, "grafana provisioning failed: "+err.Error())
+		return
+	}
+	tenant := monitoringReadTenant(projectID, orgID)
+	dsUID, err := h.userMetricsDatasourceUID(ctx, projectID, tenant)
+	if err != nil {
+		respondError(c, http.StatusBadGateway, "grafana datasource provisioning failed: "+err.Error())
 		return
 	}
 
 	labels := monitoringLabels(orgID, app, "")
 	sel := promSelector(labels)
 	ruleID := uuid.New()
-	rule := grafana.BuildThresholdRule(h.cfg.GrafanaPromDatasourceUID, grafana.ThresholdRule{
+	rule := grafana.BuildThresholdRule(dsUID, grafana.ThresholdRule{
 		UID:          ruleUIDForID(ruleID),
 		Title:        req.Name,
 		FolderUID:    app.GrafanaFolderUID,

@@ -133,6 +133,48 @@ func (c *Client) do(ctx context.Context, method, path string, body, out any, pro
 	return resp.StatusCode, nil
 }
 
+// ---- Datasources (per project, Mimir tenant-scoped) ------------------------
+
+// EnsureDatasource creates-or-updates a per-project Prometheus-type datasource
+// that queries Mimir with a FIXED X-Scope-OrgID tenant header. Embedded
+// dashboards and alert rules for the project point at this datasource, so they
+// read ONLY this tenant's series — Mimir enforces the boundary regardless of the
+// PromQL a user might craft, which a single shared datasource (relying solely on
+// the project_id label) cannot guarantee. uid must be stable per project so the
+// call is idempotent. tenant is the X-Scope-OrgID value (see
+// monitoringReadTenant: project_id, optionally federated with the legacy tenant).
+func (c *Client) EnsureDatasource(ctx context.Context, uid, name, mimirURL, tenant string) error {
+	body := map[string]any{
+		"uid":    uid,
+		"name":   name,
+		"type":   "prometheus",
+		"access": "proxy",
+		"url":    mimirURL,
+		"jsonData": map[string]any{
+			"httpMethod":      "POST",
+			"httpHeaderName1": "X-Scope-OrgID",
+		},
+		"secureJsonData": map[string]any{
+			"httpHeaderValue1": tenant,
+		},
+	}
+	status, err := c.do(ctx, http.MethodGet, "/api/datasources/uid/"+uid, nil, nil, false)
+	if err == nil {
+		// PUT replaces the datasource (incl. the tenant header) for this uid.
+		_, err = c.do(ctx, http.MethodPut, "/api/datasources/uid/"+uid, body, nil, false)
+		return err
+	}
+	if status != http.StatusNotFound {
+		return err
+	}
+	_, err = c.do(ctx, http.MethodPost, "/api/datasources", body, nil, false)
+	// A concurrent create (same uid/name) returns 409 — treat as success.
+	if err != nil && strings.Contains(err.Error(), "status 409") {
+		return nil
+	}
+	return err
+}
+
 // ---- Folders (per project) -------------------------------------------------
 
 // EnsureFolder creates the project folder if absent (idempotent). uid must be a

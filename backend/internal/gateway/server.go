@@ -213,7 +213,13 @@ func (s *Server) handleOTLPMetrics(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusRequestEntityTooLarge, map[string]string{"error": "too many series in one request"})
 		return
 	}
-	if err := s.promwrite.Write(r.Context(), res.tenant.OrgID, series); err != nil {
+	// Mimir tenant = project_id (X-Scope-OrgID). Per-project is the real isolation
+	// boundary: the single-org collapse made owner_id identical across nearly all
+	// projects, so an org-level tenant would fold every project into one Mimir
+	// tenant (no per-project retention/limits/query isolation). The console read
+	// path stamps the same project_id tenant (see monitoringReadTenant). org_id
+	// stays a LABEL on each series for back-compat.
+	if err := s.promwrite.Write(r.Context(), res.tenant.ProjectID, series); err != nil {
 		log.Error().Err(err).Str("app", res.appID.String()).Msg("prometheus remote-write failed")
 		writeJSON(w, http.StatusBadGateway, map[string]string{"error": "remote-write failed: " + err.Error()})
 		return
@@ -324,7 +330,7 @@ func (s *Server) handleJSONMetrics(w http.ResponseWriter, r *http.Request) {
 			TimestampMS: tsMS,
 		})
 	}
-	if err := s.promwrite.Write(r.Context(), t.OrgID, series); err != nil {
+	if err := s.promwrite.Write(r.Context(), t.ProjectID, series); err != nil {
 		writeJSON(w, http.StatusBadGateway, map[string]string{"error": "remote-write failed: " + err.Error()})
 		return
 	}

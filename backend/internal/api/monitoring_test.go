@@ -8,6 +8,28 @@ import (
 	"golang.org/x/crypto/argon2"
 )
 
+func TestMonitoringReadTenant(t *testing.T) {
+	proj := uuid.New()
+	owner := uuid.New()
+
+	// owner present and != project -> federate project|owner for back-compat.
+	if got, want := monitoringReadTenant(proj, owner.String()), proj.String()+"|"+owner.String(); got != want {
+		t.Errorf("with owner: got %q, want %q", got, want)
+	}
+	// owner empty (owner-less project) -> federate with legacy DefaultTenant.
+	if got, want := monitoringReadTenant(proj, ""), proj.String()+"|anonymous"; got != want {
+		t.Errorf("no owner: got %q, want %q", got, want)
+	}
+	// degenerate: legacy == project -> no pipe (never federate a tenant with itself).
+	if got, want := monitoringReadTenant(proj, proj.String()), proj.String(); got != want {
+		t.Errorf("legacy==project: got %q, want %q", got, want)
+	}
+	// uid helper stays within Grafana's 40-char datasource uid budget.
+	if uid := datasourceUIDForProject(proj); len(uid) > 40 || uid[:3] != "dds" {
+		t.Errorf("datasourceUIDForProject = %q (len %d)", uid, len(uid))
+	}
+}
+
 func TestSanitizeMetricName(t *testing.T) {
 	cases := map[string]string{
 		"http_requests_total": "http_requests_total",

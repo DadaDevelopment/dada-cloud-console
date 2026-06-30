@@ -140,6 +140,14 @@ type Config struct {
 	GrafanaAdminPassword     string // GRAFANA_ADMIN_PASSWORD
 	GrafanaPromDatasourceUID string // GRAFANA_PROM_DATASOURCE_UID
 
+	// GrafanaMimirQueryURL is the in-cluster Mimir Prometheus-query base used to
+	// provision a PER-PROJECT Grafana datasource (carrying X-Scope-OrgID = the
+	// project tenant) so embedded dashboards/alerts read only that tenant's series
+	// in Mimir. e.g. http://mimir.monitoring.svc.cluster.local:8080/prometheus.
+	// When empty, dashboards/alerts fall back to GrafanaPromDatasourceUID (single
+	// shared store, no per-tenant isolation in the embed).
+	GrafanaMimirQueryURL string // GRAFANA_MIMIR_QUERY_URL
+
 	// Grafana embed auth (backend-mediated iframe SSO). The console mints a
 	// short-lived HMAC token (GrafanaEmbedSecret) scoped to one console user +
 	// dashboard; the iframe carries it to the grafana-embed-gateway, which fronts
@@ -271,6 +279,7 @@ func Load() (*Config, error) {
 		GrafanaAdminUser:          getEnv("GRAFANA_ADMIN_USER", ""),
 		GrafanaAdminPassword:      getEnv("GRAFANA_ADMIN_PASSWORD", ""),
 		GrafanaPromDatasourceUID:  getEnv("GRAFANA_PROM_DATASOURCE_UID", ""),
+		GrafanaMimirQueryURL:      getEnv("GRAFANA_MIMIR_QUERY_URL", ""),
 		GrafanaEmbedSecret:        getEnv("GRAFANA_EMBED_SECRET", ""),
 		GrafanaEmbedInternalURL:   getEnv("GRAFANA_EMBED_INTERNAL_URL", ""),
 		GrafanaEmbedUpstreamHost:  getEnv("GRAFANA_EMBED_UPSTREAM_HOST", "grafana.dada-tuda.ru"),

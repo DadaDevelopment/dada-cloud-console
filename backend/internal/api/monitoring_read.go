@@ -64,6 +64,33 @@ func (h *Handler) monitoringOrgLabel(ctx context.Context, projectID uuid.UUID) s
 	return owner.String()
 }
 
+// monitoringReadTenant returns the X-Scope-OrgID header value used to READ a
+// project's user metrics from Mimir. Tenant granularity is the PROJECT
+// (project_id): the single-org collapse made projects.owner_id identical across
+// nearly all projects, so an org-level tenant collapsed every project into ONE
+// Mimir tenant (no per-project retention/limits/isolation). project_id restores
+// real per-project isolation and matches the write path (the gateway stamps
+// X-Scope-OrgID = project_id).
+//
+// Back-compat: series written before the per-project cutover carry the legacy
+// tenant header — owner_id, or DefaultTenant ("anonymous") for owner-less
+// projects. To keep that data readable we federate the current project tenant
+// with the legacy tenant via Mimir tenant-federation (pipe-joined ids). The
+// project_id label on every series still scopes results to this project, so
+// federation cannot leak another project's series. ownerLabel is the value from
+// monitoringOrgLabel (owner_id or "").
+func monitoringReadTenant(projectID uuid.UUID, ownerLabel string) string {
+	cur := projectID.String()
+	legacy := ownerLabel
+	if legacy == "" {
+		legacy = prometheus.DefaultTenant
+	}
+	if legacy == cur {
+		return cur
+	}
+	return cur + "|" + legacy
+}
+
 // promSelector renders the labels as a PromQL stream selector `{k="v",...}` with
 // values escaped. Keys are emitted in a fixed order for stable queries.
 func promSelector(labels map[string]string) string {
@@ -202,8 +229,9 @@ func (h *Handler) GetMonitoringHealth(c *gin.Context) {
 		return
 	}
 	orgID := h.monitoringOrgLabel(c.Request.Context(), app.ProjectID)
+	tenant := monitoringReadTenant(app.ProjectID, orgID)
 	cfg := h.loadHealthConfig(c.Request.Context(), app.ID)
-	status := h.computeHealth(c.Request.Context(), app, orgID, source, cfg)
+	status := h.computeHealth(c.Request.Context(), app, orgID, tenant, source, cfg)
 	c.JSON(http.StatusOK, status)
 }
 
@@ -226,12 +254,12 @@ func (h *Handler) loadHealthConfig(ctx context.Context, appID uuid.UUID) models.
 }
 
 // computeHealth merges the three signals into a state + critical flag.
-func (h *Handler) computeHealth(ctx context.Context, app *models.MonitoringApp, orgID, source string, cfg models.HealthConfig) models.HealthStatus {
+func (h *Handler) computeHealth(ctx context.Context, app *models.MonitoringApp, orgID, tenant, source string, cfg models.HealthConfig) models.HealthStatus {
 	labels := monitoringLabels(orgID, app, source)
 	now := time.Now()
 	st := models.HealthStatus{State: models.HealthUnknown, Reasons: []string{}}
 
-	lastSeen := h.lastSeen(ctx, app, labels)
+	lastSeen := h.lastSeen(ctx, app, labels, tenant)
 	st.LastSeen = lastSeen
 
 	st.ErrorRate15m = h.errorCount(ctx, app, labels, now.Add(-15*time.Minute), now)
@@ -321,12 +349,13 @@ func (h *Handler) GetMonitoringLabels(c *gin.Context) {
 
 	ctx := c.Request.Context()
 	orgID := h.monitoringOrgLabel(ctx, app.ProjectID)
+	tenant := monitoringReadTenant(app.ProjectID, orgID)
 	labels := monitoringLabels(orgID, app, "")
 	start, end, _ := parseRange(c)
 	window := fmt.Sprintf("%ds", int(end.Sub(start).Seconds()))
 	discover := fmt.Sprintf(`last_over_time(%s[%s])`, promSelector(labels), window)
 
-	samples, err := h.userMetrics.QueryInstant(ctx, discover, end, orgID)
+	samples, err := h.userMetrics.QueryInstant(ctx, discover, end, tenant)
 	if err != nil {
 		respondError(c, http.StatusBadGateway, "failed to discover labels: "+err.Error())
 		return
@@ -380,7 +409,7 @@ func (h *Handler) GetMonitoringLabels(c *gin.Context) {
 // lastSeen returns the most recent metric or log timestamp for the resource, or
 // nil if it has never reported. Errors in either source are swallowed (treated
 // as "no data from that source").
-func (h *Handler) lastSeen(ctx context.Context, app *models.MonitoringApp, labels map[string]string) *time.Time {
+func (h *Handler) lastSeen(ctx context.Context, app *models.MonitoringApp, labels map[string]string, tenant string) *time.Time {
 	var newest *time.Time
 
 	if h.prometheus != nil {
@@ -402,7 +431,7 @@ func (h *Handler) lastSeen(ctx context.Context, app *models.MonitoringApp, label
 			`max(max_over_time(timestamp(label_replace(%s, "mname", "$1", "__name__", "(.+)"))[24h:1m]))`,
 			promSelector(labels),
 		)
-		if samples, err := h.userMetrics.QueryInstant(ctx, expr, time.Now(), labels["org_id"]); err == nil {
+		if samples, err := h.userMetrics.QueryInstant(ctx, expr, time.Now(), tenant); err == nil {
 			for _, s := range samples {
 				ts := time.Unix(int64(s.Point.V), 0).UTC()
 				if newest == nil || ts.After(*newest) {
@@ -549,6 +578,7 @@ func (h *Handler) GetMonitoringMetrics(c *gin.Context) {
 	}
 
 	orgID := h.monitoringOrgLabel(ctx, app.ProjectID)
+	tenant := monitoringReadTenant(app.ProjectID, orgID)
 	labels := monitoringLabels(orgID, app, "")
 	sel := selectorWithMatchers(labels, filters)
 
@@ -560,7 +590,7 @@ func (h *Handler) GetMonitoringMetrics(c *gin.Context) {
 	window := fmt.Sprintf("%ds", int(end.Sub(start).Seconds()))
 	names := []string{}
 	discover := fmt.Sprintf("group by (__name__) (last_over_time(%s[%s]))", sel, window)
-	if samples, err := h.userMetrics.QueryInstant(ctx, discover, end, orgID); err == nil {
+	if samples, err := h.userMetrics.QueryInstant(ctx, discover, end, tenant); err == nil {
 		for _, s := range samples {
 			if n := s.Metric["__name__"]; n != "" {
 				names = append(names, n)
@@ -604,7 +634,7 @@ func (h *Handler) GetMonitoringMetrics(c *gin.Context) {
 			expr = fmt.Sprintf("avg(%s)", inner)
 		}
 
-		result, err := h.userMetrics.QueryRange(ctx, expr, start, end, step, orgID)
+		result, err := h.userMetrics.QueryRange(ctx, expr, start, end, step, tenant)
 		if err != nil {
 			if liveErr == "" {
 				liveErr = err.Error()
@@ -792,4 +822,10 @@ func folderUIDForProject(projectID uuid.UUID) string {
 
 func dashboardUIDForApp(appID uuid.UUID) string {
 	return "dma" + hex.EncodeToString(appID[:])
+}
+
+// datasourceUIDForProject derives a stable Grafana datasource UID (<=40 chars)
+// for the project's Mimir tenant-scoped datasource.
+func datasourceUIDForProject(projectID uuid.UUID) string {
+	return "dds" + hex.EncodeToString(projectID[:])
 }
