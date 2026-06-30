@@ -207,8 +207,13 @@ func MetricsToSeries(req *metricsv1.MetricsData, t Tenant) (series []prometheus.
 						series = append(series, t.numberSeries(name, dp, resAttrs, maxLabels))
 					}
 				case m.GetSum() != nil:
-					for _, dp := range m.GetSum().GetDataPoints() {
-						series = append(series, t.numberSeries(name, dp, resAttrs, maxLabels))
+					sum := m.GetSum()
+					sumName := name
+					if sum.GetIsMonotonic() {
+						sumName = CounterMetricName(name)
+					}
+					for _, dp := range sum.GetDataPoints() {
+						series = append(series, t.numberSeries(sumName, dp, resAttrs, maxLabels))
 					}
 				case m.GetHistogram() != nil:
 					for _, dp := range m.GetHistogram().GetDataPoints() {

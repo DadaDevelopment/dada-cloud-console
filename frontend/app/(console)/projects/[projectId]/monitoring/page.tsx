@@ -74,10 +74,10 @@ import { PeriodicExportingMetricReader } from '@opentelemetry/sdk-metrics';
 import { resourceFromAttributes } from '@opentelemetry/resources';
 
 const sdk = new NodeSDK({
-  // service.instance.id = the device id the console groups by (Device identity).
+  // service.instance.id is optional: it becomes a "source" label you can group and filter by.
   resource: resourceFromAttributes({
     'service.name': 'my-service',
-    'service.instance.id': 'device-01',
+    'service.instance.id': 'instance-01',
   }),
   metricReader: new PeriodicExportingMetricReader({
     exporter: new OTLPMetricExporter({
@@ -94,10 +94,10 @@ from opentelemetry.sdk.metrics.export import PeriodicExportingMetricReader
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.exporter.otlp.proto.http.metric_exporter import OTLPMetricExporter
 
-# service.instance.id = the device id the console groups by (Device identity).
+# service.instance.id is optional: it becomes a "source" label you can group and filter by.
 resource = Resource.create({
     "service.name": "my-service",
-    "service.instance.id": "device-01",
+    "service.instance.id": "instance-01",
 })
 exporter = OTLPMetricExporter(
     endpoint="${metricsUrl}",
@@ -111,13 +111,15 @@ metrics.set_meter_provider(provider)`;
 # The OTel SDK will pick them up automatically (zero-code instrumentation).
 OTEL_EXPORTER_OTLP_ENDPOINT=${INGEST_BASE}
 OTEL_EXPORTER_OTLP_HEADERS=X-API-Key=${apiKey}
-# Device identity: service.instance.id is the per-device id the console groups by.
-OTEL_RESOURCE_ATTRIBUTES=service.name=my-service,service.instance.id=device-01
+# service.instance.id is optional: it becomes a "source" label you can group and filter by.
+OTEL_RESOURCE_ATTRIBUTES=service.name=my-service,service.instance.id=instance-01
 # Metrics endpoint: ${metricsUrl}
 # Logs endpoint:    ${logsUrl}`;
     case "curl":
-      return `# Send a test metric payload (OTLP/JSON)
-# service.instance.id = the device id the console groups by (see Device identity).
+      return `# Send a test counter sample (OTLP/JSON). Re-run it a few times: the value
+# climbs with the clock, so the console charts a real rate instead of a flat line.
+# service.instance.id is optional: it becomes a "source" label you can group/filter by.
+NOW=$(date +%s)
 curl -X POST '${metricsUrl}' \\
   -H 'Content-Type: application/json' \\
   -H 'X-API-Key: ${apiKey}' \\
@@ -126,7 +128,7 @@ curl -X POST '${metricsUrl}' \\
       "resource": {
         "attributes": [
           {"key":"service.name","value":{"stringValue":"my-service"}},
-          {"key":"service.instance.id","value":{"stringValue":"device-01"}}
+          {"key":"service.instance.id","value":{"stringValue":"instance-01"}}
         ]
       },
       "scopeMetrics": [{
@@ -134,8 +136,8 @@ curl -X POST '${metricsUrl}' \\
           "name": "test.counter",
           "sum": {
             "dataPoints": [{
-              "asDouble": 1,
-              "timeUnixNano": "${Date.now()}000000"
+              "asDouble": '"$NOW"',
+              "timeUnixNano": "'"$NOW"'000000000"
             }],
             "aggregationTemporality": 2,
             "isMonotonic": true

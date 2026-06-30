@@ -82,4 +82,13 @@ clusters/beget-prod/projects/platform/environments/prod/apps/kube-prometheus-sta
 - [ ] Staff-engineer review pass.
 
 ## Review / results
-(filled as waves complete)
+
+- Wave 1 DONE (commit d30438c, pushed). Counter rate() fix (kills "value not dynamics"
+  bug at the source), generic groupBy/filter scopes, /sources→/labels, devices removed
+  FE+BE+i18n+onboarding, multi-series chart. Verified: go build+vet, tsc, eslint green.
+  Live counter-dynamics verification pending deploy (needs real Prometheus).
+- Wave 2 DONE (commit 42af9f5, pushed). Grafana iframe tab removed (kills "Unable to find
+  application file" + 10s wait). Native dashboard = Overview+Metrics (instant). Grafana via
+  header deep link. Dead i18n cleaned. Verified: tsc, eslint green.
+- Wave 3 STAGED, NOT applied — prod gitops infra + risky longhorn PVC resize → gated on user.
+- Wave 4 in progress (onboarding polish).

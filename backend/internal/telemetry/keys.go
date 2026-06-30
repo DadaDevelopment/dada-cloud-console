@@ -112,3 +112,15 @@ func SanitizeMetricName(s string) string {
 	}
 	return out
 }
+
+// CounterMetricName applies the OpenTelemetry → Prometheus naming convention for
+// monotonic sums: a cumulative counter carries a _total suffix so the read path
+// (and standard Prometheus tooling) recognise it as a counter and rate() it
+// instead of charting the raw monotonically-increasing value. Names that already
+// end in _total are returned unchanged.
+func CounterMetricName(name string) string {
+	if strings.HasSuffix(name, "_total") {
+		return name
+	}
+	return name + "_total"
+}
