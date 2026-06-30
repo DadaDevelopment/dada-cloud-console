@@ -58,7 +58,7 @@ func (h *Handler) runK8sContainerMetrics(ctx context.Context, namespace, image s
 	metrics := gin.H{}
 	var liveErr string
 	for _, s := range k8sContainerMetricSpecs {
-		series, err := h.prometheus.QueryRange(ctx, fmt.Sprintf(s.expr, ns, img), start, end, step)
+		series, err := h.prometheus.QueryRange(ctx, fmt.Sprintf(s.expr, ns, img), start, end, step, "")
 		if err != nil {
 			if liveErr == "" {
 				liveErr = err.Error()
@@ -127,7 +127,7 @@ func (h *Handler) runMetricSpecs(ctx context.Context, specs []metricSpec, label 
 	metrics := gin.H{}
 	var liveErr string
 	for _, s := range specs {
-		series, err := h.prometheus.QueryRange(ctx, fillExpr(s.expr, escaped), start, end, step)
+		series, err := h.prometheus.QueryRange(ctx, fillExpr(s.expr, escaped), start, end, step, "")
 		if err != nil {
 			if liveErr == "" {
 				liveErr = err.Error()

@@ -20,25 +20,47 @@ import (
 	"time"
 )
 
-// Client is a read-only Prometheus query client.
+// DefaultTenant is the tenant used when a query (or pushed series) carries no
+// org_id. Grafana Mimir requires a non-empty X-Scope-OrgID; "anonymous" is its
+// conventional catch-all and keeps the read and write paths aligned for
+// owner-less projects.
+const DefaultTenant = "anonymous"
+
+// Client is a read-only Prometheus query client. When multitenant is set the
+// client targets a Grafana Mimir query-frontend and stamps X-Scope-OrgID on
+// every request (per-tenant isolation); a plain Prometheus ignores the header.
 type Client struct {
-	baseURL    string
-	user, pass string
-	httpClient *http.Client
+	baseURL     string
+	user, pass  string
+	multitenant bool
+	httpClient  *http.Client
 }
 
 // New creates a read-only Prometheus client. Returns nil when baseURL is empty
 // so callers can treat the metrics feature as disabled. baseURL is the API root
 // (e.g. https://prometheus.example.com), not a /api/v1/... path.
 func New(baseURL, user, pass string) *Client {
+	return newClient(baseURL, user, pass, false)
+}
+
+// NewMultitenant creates a read client for a multi-tenant Grafana Mimir store.
+// It is identical to New but stamps X-Scope-OrgID (the per-request orgID, or
+// DefaultTenant when empty) on every query so Mimir scopes the read to one
+// tenant.
+func NewMultitenant(baseURL, user, pass string) *Client {
+	return newClient(baseURL, user, pass, true)
+}
+
+func newClient(baseURL, user, pass string, multitenant bool) *Client {
 	if baseURL == "" {
 		return nil
 	}
 	return &Client{
-		baseURL:    strings.TrimRight(baseURL, "/"),
-		user:       user,
-		pass:       pass,
-		httpClient: &http.Client{Timeout: 15 * time.Second},
+		baseURL:     strings.TrimRight(baseURL, "/"),
+		user:        user,
+		pass:        pass,
+		multitenant: multitenant,
+		httpClient:  &http.Client{Timeout: 15 * time.Second},
 	}
 }
 
@@ -96,7 +118,7 @@ type promEnvelope struct {
 	} `json:"data"`
 }
 
-func (c *Client) get(ctx context.Context, path string, q url.Values) (*promEnvelope, error) {
+func (c *Client) get(ctx context.Context, path string, q url.Values, orgID string) (*promEnvelope, error) {
 	u := c.baseURL + path + "?" + q.Encode()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
 	if err != nil {
@@ -104,6 +126,13 @@ func (c *Client) get(ctx context.Context, path string, q url.Values) (*promEnvel
 	}
 	if c.user != "" {
 		req.SetBasicAuth(c.user, c.pass)
+	}
+	if c.multitenant {
+		t := orgID
+		if t == "" {
+			t = DefaultTenant
+		}
+		req.Header.Set("X-Scope-OrgID", t)
 	}
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
@@ -124,14 +153,16 @@ func (c *Client) get(ctx context.Context, path string, q url.Values) (*promEnvel
 	return &env, nil
 }
 
-// QueryRange runs /api/v1/query_range and returns matrix series.
-func (c *Client) QueryRange(ctx context.Context, promQL string, start, end time.Time, step time.Duration) ([]Series, error) {
+// QueryRange runs /api/v1/query_range and returns matrix series. orgID is the
+// tenant for a multi-tenant (Mimir) client; pass "" for a plain Prometheus
+// client (the header is then omitted).
+func (c *Client) QueryRange(ctx context.Context, promQL string, start, end time.Time, step time.Duration, orgID string) ([]Series, error) {
 	q := url.Values{}
 	q.Set("query", promQL)
 	q.Set("start", strconv.FormatInt(start.Unix(), 10))
 	q.Set("end", strconv.FormatInt(end.Unix(), 10))
 	q.Set("step", strconv.Itoa(int(step.Seconds())))
-	env, err := c.get(ctx, "/api/v1/query_range", q)
+	env, err := c.get(ctx, "/api/v1/query_range", q, orgID)
 	if err != nil {
 		return nil, err
 	}
@@ -142,14 +173,16 @@ func (c *Client) QueryRange(ctx context.Context, promQL string, start, end time.
 	return series, nil
 }
 
-// QueryInstant runs /api/v1/query and returns instant-vector samples.
-func (c *Client) QueryInstant(ctx context.Context, promQL string, ts time.Time) ([]Sample, error) {
+// QueryInstant runs /api/v1/query and returns instant-vector samples. orgID is
+// the tenant for a multi-tenant (Mimir) client; pass "" for a plain Prometheus
+// client (the header is then omitted).
+func (c *Client) QueryInstant(ctx context.Context, promQL string, ts time.Time, orgID string) ([]Sample, error) {
 	q := url.Values{}
 	q.Set("query", promQL)
 	if !ts.IsZero() {
 		q.Set("time", strconv.FormatInt(ts.Unix(), 10))
 	}
-	env, err := c.get(ctx, "/api/v1/query", q)
+	env, err := c.get(ctx, "/api/v1/query", q, orgID)
 	if err != nil {
 		return nil, err
 	}

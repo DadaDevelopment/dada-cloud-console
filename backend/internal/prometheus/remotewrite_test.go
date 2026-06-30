@@ -175,11 +175,14 @@ func TestWriteClient_PostsSnappyProtobuf(t *testing.T) {
 	if c == nil {
 		t.Fatal("NewWriteClient returned nil for non-empty URL")
 	}
-	err := c.Write(context.Background(), []WriteSeries{
+	err := c.Write(context.Background(), "org-7", []WriteSeries{
 		{Labels: map[string]string{"__name__": "m", "org_id": "o"}, Value: 1, TimestampMS: 5},
 	})
 	if err != nil {
 		t.Fatalf("Write: %v", err)
+	}
+	if gotHeaders.Get("X-Scope-OrgID") != "org-7" {
+		t.Errorf("X-Scope-OrgID: got %q, want org-7", gotHeaders.Get("X-Scope-OrgID"))
 	}
 	if gotHeaders.Get("Content-Encoding") != "snappy" {
 		t.Errorf("Content-Encoding: got %q", gotHeaders.Get("Content-Encoding"))
@@ -209,5 +212,11 @@ func TestNewWriteClient_AppendsWritePath(t *testing.T) {
 	c2 := NewWriteClient("https://prom.example.com/api/v1/write", "", "")
 	if c2.endpoint != "https://prom.example.com/api/v1/write" {
 		t.Errorf("endpoint not deduped: got %q", c2.endpoint)
+	}
+	// Grafana Mimir's remote-write path is /api/v1/push — must be used as-is,
+	// not have /api/v1/write appended onto it.
+	c3 := NewWriteClient("http://mimir:8080/api/v1/push", "", "")
+	if c3.endpoint != "http://mimir:8080/api/v1/push" {
+		t.Errorf("mimir push endpoint mangled: got %q", c3.endpoint)
 	}
 }

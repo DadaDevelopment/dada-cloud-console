@@ -27,15 +27,17 @@ type WriteClient struct {
 	httpClient *http.Client
 }
 
-// NewWriteClient builds a remote-write client. baseURL is the Prometheus API
-// root (e.g. https://prometheus.example.com); /api/v1/write is appended if not
-// already present. Returns nil when baseURL is empty.
+// NewWriteClient builds a remote-write client. baseURL is the receiver API root
+// (e.g. https://prometheus.example.com); /api/v1/write is appended when no
+// explicit remote-write path is present. A URL that already ends in the
+// Prometheus path (/api/v1/write) or the Grafana Mimir path (/api/v1/push) is
+// used as-is. Returns nil when baseURL is empty.
 func NewWriteClient(baseURL, user, pass string) *WriteClient {
 	if baseURL == "" {
 		return nil
 	}
 	endpoint := strings.TrimRight(baseURL, "/")
-	if !strings.HasSuffix(endpoint, "/api/v1/write") {
+	if !strings.HasSuffix(endpoint, "/api/v1/write") && !strings.HasSuffix(endpoint, "/api/v1/push") {
 		endpoint += "/api/v1/write"
 	}
 	return &WriteClient{
@@ -54,8 +56,12 @@ type WriteSeries struct {
 }
 
 // Write encodes the series as a remote-write WriteRequest (protobuf + snappy)
-// and POSTs it. A nil receiver is a no-op error so callers nil-check first.
-func (c *WriteClient) Write(ctx context.Context, series []WriteSeries) error {
+// and POSTs it. orgID is the tenant: it is stamped as X-Scope-OrgID (or
+// DefaultTenant when empty) so a multi-tenant Grafana Mimir receiver scopes the
+// samples to one tenant. A plain Prometheus receiver ignores the header, so
+// setting it unconditionally is backward-compatible. A nil receiver is a no-op
+// error so callers nil-check first.
+func (c *WriteClient) Write(ctx context.Context, orgID string, series []WriteSeries) error {
 	if c == nil {
 		return fmt.Errorf("remote-write not configured")
 	}
@@ -72,6 +78,11 @@ func (c *WriteClient) Write(ctx context.Context, series []WriteSeries) error {
 	req.Header.Set("Content-Type", "application/x-protobuf")
 	req.Header.Set("Content-Encoding", "snappy")
 	req.Header.Set("X-Prometheus-Remote-Write-Version", "0.1.0")
+	tenant := orgID
+	if tenant == "" {
+		tenant = DefaultTenant
+	}
+	req.Header.Set("X-Scope-OrgID", tenant)
 	if c.user != "" {
 		req.SetBasicAuth(c.user, c.pass)
 	}

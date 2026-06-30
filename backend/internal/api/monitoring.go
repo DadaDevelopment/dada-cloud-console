@@ -339,7 +339,7 @@ func (h *Handler) IngestMetrics(c *gin.Context) {
 		})
 	}
 
-	if err := h.promwrite.Write(c.Request.Context(), series); err != nil {
+	if err := h.promwrite.Write(c.Request.Context(), target.orgID, series); err != nil {
 		respondError(c, http.StatusBadGateway, "remote-write failed: "+err.Error())
 		return
 	}

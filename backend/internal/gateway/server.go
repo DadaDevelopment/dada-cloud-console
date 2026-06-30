@@ -213,7 +213,7 @@ func (s *Server) handleOTLPMetrics(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusRequestEntityTooLarge, map[string]string{"error": "too many series in one request"})
 		return
 	}
-	if err := s.promwrite.Write(r.Context(), series); err != nil {
+	if err := s.promwrite.Write(r.Context(), res.tenant.OrgID, series); err != nil {
 		log.Error().Err(err).Str("app", res.appID.String()).Msg("prometheus remote-write failed")
 		writeJSON(w, http.StatusBadGateway, map[string]string{"error": "remote-write failed: " + err.Error()})
 		return
@@ -324,7 +324,7 @@ func (s *Server) handleJSONMetrics(w http.ResponseWriter, r *http.Request) {
 			TimestampMS: tsMS,
 		})
 	}
-	if err := s.promwrite.Write(r.Context(), series); err != nil {
+	if err := s.promwrite.Write(r.Context(), t.OrgID, series); err != nil {
 		writeJSON(w, http.StatusBadGateway, map[string]string{"error": "remote-write failed: " + err.Error()})
 		return
 	}

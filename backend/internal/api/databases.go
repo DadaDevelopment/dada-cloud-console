@@ -102,7 +102,7 @@ func enrichDatabaseSizes(ctx context.Context, h *Handler, dbs []models.ResourceS
 	if h.prometheus == nil || len(dbs) == 0 {
 		return
 	}
-	samples, err := h.prometheus.QueryInstant(ctx, "pg_database_size_bytes", time.Time{})
+	samples, err := h.prometheus.QueryInstant(ctx, "pg_database_size_bytes", time.Time{}, "")
 	if err != nil {
 		return
 	}

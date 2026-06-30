@@ -99,6 +99,17 @@ type Config struct {
 	PrometheusQueryUser string // PROMETHEUS_QUERY_USER
 	PrometheusQueryPass string // PROMETHEUS_QUERY_PASS
 
+	// User-telemetry read store (multi-tenant Grafana Mimir). The monitoring
+	// product (user-pushed metrics) reads from here with a per-tenant
+	// X-Scope-OrgID header; infra/container/db metrics keep reading the plain
+	// PrometheusQueryURL above. Base URL only, ending at the Prometheus-compatible
+	// query root (Mimir: http://mimir:8080/prometheus). Empty → the monitoring
+	// read path falls back to PrometheusQueryURL (single shared store, no
+	// per-tenant isolation) so this is safe to ship before Mimir exists.
+	UserMetricsQueryURL  string // USER_METRICS_QUERY_URL
+	UserMetricsQueryUser string // USER_METRICS_QUERY_USER
+	UserMetricsQueryPass string // USER_METRICS_QUERY_PASS
+
 	// Elasticsearch log search (read-only). VMs ship container logs via filebeat;
 	// this is the read side for aggregated log search. Empty ElasticsearchURL
 	// disables the /logs search endpoint.
@@ -248,6 +259,9 @@ func Load() (*Config, error) {
 		PrometheusQueryURL:        getEnv("PROMETHEUS_QUERY_URL", ""),
 		PrometheusQueryUser:       getEnv("PROMETHEUS_QUERY_USER", ""),
 		PrometheusQueryPass:       getEnv("PROMETHEUS_QUERY_PASS", ""),
+		UserMetricsQueryURL:       getEnv("USER_METRICS_QUERY_URL", ""),
+		UserMetricsQueryUser:      getEnv("USER_METRICS_QUERY_USER", ""),
+		UserMetricsQueryPass:      getEnv("USER_METRICS_QUERY_PASS", ""),
 		ElasticsearchURL:          getEnv("ELASTICSEARCH_URL", ""),
 		ElasticsearchAPIKey:       getEnv("ELASTICSEARCH_API_KEY", ""),
 		ElasticsearchIndex:        getEnv("ELASTICSEARCH_LOG_INDEX", "filebeat-*"),

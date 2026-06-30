@@ -24,9 +24,10 @@ type Handler struct {
 	cfg        *config.Config
 	mlflow     *mlflow.Client
 	portainer  *portainer.Client  // nil when PORTAINER_URL/PORTAINER_API_TOKEN unset
-	prometheus *prometheus.Client // nil when PROMETHEUS_QUERY_URL unset
-	logsearch  *logsearch.Client  // nil when ELASTICSEARCH_URL unset
-	buildagent *buildagent.Client // nil when BUILD_AGENT_URL unset
+	prometheus  *prometheus.Client // nil when PROMETHEUS_QUERY_URL unset; infra/container/db reads
+	userMetrics *prometheus.Client // user-telemetry read store (multi-tenant Mimir); == prometheus when USER_METRICS_QUERY_URL unset
+	logsearch   *logsearch.Client  // nil when ELASTICSEARCH_URL unset
+	buildagent  *buildagent.Client // nil when BUILD_AGENT_URL unset
 
 	// Monitoring read/alert/health layer (ADR-011).
 	grafana      *grafana.Client   // nil when GRAFANA_BASE_URL/GRAFANA_API_TOKEN unset
@@ -63,6 +64,14 @@ func NewHandler(pool *pgxpool.Pool, cfg *config.Config) *Handler {
 	}
 	h.portainer = portainer.New(cfg.PortainerURL, cfg.PortainerAPIToken)
 	h.prometheus = prometheus.New(cfg.PrometheusQueryURL, cfg.PrometheusQueryUser, cfg.PrometheusQueryPass)
+	// User-telemetry reads go to the multi-tenant Mimir store (per-tenant
+	// X-Scope-OrgID). When USER_METRICS_QUERY_URL is unset, reuse the plain
+	// Prometheus client so behaviour is unchanged until the Mimir cutover.
+	if cfg.UserMetricsQueryURL != "" {
+		h.userMetrics = prometheus.NewMultitenant(cfg.UserMetricsQueryURL, cfg.UserMetricsQueryUser, cfg.UserMetricsQueryPass)
+	} else {
+		h.userMetrics = h.prometheus
+	}
 	h.logsearch = logsearch.New(cfg.ElasticsearchURL, cfg.ElasticsearchAPIKey, cfg.ElasticsearchIndex)
 	h.buildagent = buildagent.New(cfg.BuildAgentURL)
 	// Prefer admin basic-auth (survives the emptyDir-backed Grafana's DB wipe on

@@ -326,7 +326,7 @@ func (h *Handler) GetMonitoringLabels(c *gin.Context) {
 	window := fmt.Sprintf("%ds", int(end.Sub(start).Seconds()))
 	discover := fmt.Sprintf(`last_over_time(%s[%s])`, promSelector(labels), window)
 
-	samples, err := h.prometheus.QueryInstant(ctx, discover, end)
+	samples, err := h.userMetrics.QueryInstant(ctx, discover, end, orgID)
 	if err != nil {
 		respondError(c, http.StatusBadGateway, "failed to discover labels: "+err.Error())
 		return
@@ -402,7 +402,7 @@ func (h *Handler) lastSeen(ctx context.Context, app *models.MonitoringApp, label
 			`max(max_over_time(timestamp(label_replace(%s, "mname", "$1", "__name__", "(.+)"))[24h:1m]))`,
 			promSelector(labels),
 		)
-		if samples, err := h.prometheus.QueryInstant(ctx, expr, time.Now()); err == nil {
+		if samples, err := h.userMetrics.QueryInstant(ctx, expr, time.Now(), labels["org_id"]); err == nil {
 			for _, s := range samples {
 				ts := time.Unix(int64(s.Point.V), 0).UTC()
 				if newest == nil || ts.After(*newest) {
@@ -560,7 +560,7 @@ func (h *Handler) GetMonitoringMetrics(c *gin.Context) {
 	window := fmt.Sprintf("%ds", int(end.Sub(start).Seconds()))
 	names := []string{}
 	discover := fmt.Sprintf("group by (__name__) (last_over_time(%s[%s]))", sel, window)
-	if samples, err := h.prometheus.QueryInstant(ctx, discover, end); err == nil {
+	if samples, err := h.userMetrics.QueryInstant(ctx, discover, end, orgID); err == nil {
 		for _, s := range samples {
 			if n := s.Metric["__name__"]; n != "" {
 				names = append(names, n)
@@ -604,7 +604,7 @@ func (h *Handler) GetMonitoringMetrics(c *gin.Context) {
 			expr = fmt.Sprintf("avg(%s)", inner)
 		}
 
-		result, err := h.prometheus.QueryRange(ctx, expr, start, end, step)
+		result, err := h.userMetrics.QueryRange(ctx, expr, start, end, step, orgID)
 		if err != nil {
 			if liveErr == "" {
 				liveErr = err.Error()

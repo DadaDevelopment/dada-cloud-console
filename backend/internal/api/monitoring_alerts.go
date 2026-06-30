@@ -122,7 +122,7 @@ func (h *Handler) ensureGrafanaResource(ctx context.Context, app *models.Monitor
 
 	labels := monitoringLabels(orgID, app, "")
 	sel := promSelector(labels)
-	dash := grafana.BuildDashboard(dashUID, app.Name, h.cfg.GrafanaPromDatasourceUID, h.discoverPanels(ctx, sel))
+	dash := grafana.BuildDashboard(dashUID, app.Name, h.cfg.GrafanaPromDatasourceUID, h.discoverPanels(ctx, sel, orgID))
 	if err := h.grafana.UpsertDashboard(ctx, folderUID, dash); err != nil {
 		return err
 	}
@@ -142,12 +142,12 @@ func (h *Handler) ensureGrafanaResource(ctx context.Context, app *models.Monitor
 
 // discoverPanels builds one timeseries panel per metric name present for the
 // resource (label-driven). Empty when Prometheus is unconfigured or silent.
-func (h *Handler) discoverPanels(ctx context.Context, sel string) []grafana.MetricPanel {
+func (h *Handler) discoverPanels(ctx context.Context, sel string, orgID string) []grafana.MetricPanel {
 	panels := []grafana.MetricPanel{}
-	if h.prometheus == nil {
+	if h.userMetrics == nil {
 		return panels
 	}
-	samples, err := h.prometheus.QueryInstant(ctx, "group by (__name__) (last_over_time("+sel+"[6h]))", time.Now())
+	samples, err := h.userMetrics.QueryInstant(ctx, "group by (__name__) (last_over_time("+sel+"[6h]))", time.Now(), orgID)
 	if err != nil {
 		return panels
 	}

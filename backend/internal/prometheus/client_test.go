@@ -53,7 +53,7 @@ func TestQueryRange_ParsesMatrixAndSetsBasicAuth(t *testing.T) {
 
 	c := New(srv.URL, "user", "pass")
 	series, err := c.QueryRange(context.Background(), `up{vm_name="vm-1"}`,
-		time.Unix(1733300000, 0), time.Unix(1733300060, 0), time.Minute)
+		time.Unix(1733300000, 0), time.Unix(1733300060, 0), time.Minute, "")
 	if err != nil {
 		t.Fatalf("QueryRange: %v", err)
 	}
@@ -80,7 +80,7 @@ func TestQueryRange_PropagatesErrorStatus(t *testing.T) {
 	}))
 	defer srv.Close()
 	c := New(srv.URL, "", "")
-	if _, err := c.QueryRange(context.Background(), "boom", time.Now().Add(-time.Hour), time.Now(), time.Minute); err == nil {
+	if _, err := c.QueryRange(context.Background(), "boom", time.Now().Add(-time.Hour), time.Now(), time.Minute, ""); err == nil {
 		t.Fatal("expected error when status != success")
 	}
 }
