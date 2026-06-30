@@ -1,5 +1,54 @@
 # Multi-tenant metrics via Grafana Mimir (per-tenant retention, default 15d)
 
+## UPDATE: TENANT = project_id (per-project isolation) — code shipped 2026-06-30
+
+The first cutover used tenant = `projects.owner_id`. The single-org collapse
+(migration 022) made owner_id identical across nearly all projects, so EVERY
+project folded into one Mimir tenant — per-tenant retention/limits/query-isolation
+were effectively global. Fix: tenant = **project_id** on write AND read.
+
+Decision (why project_id, not org): project is the real isolation boundary a
+customer cares about (own retention, own ingest budget, hard query isolation).
+org-level is meaningless while orgs are collapsed.
+
+What changed:
+- dada-cloud: gateway write X-Scope-OrgID = `res.tenant.ProjectID` (OTLP+JSON);
+  console read `monitoringReadTenant()` = project_id, federated with the legacy
+  tenant (`project_id|owner-or-anonymous`) so pre-cutover data stays readable
+  (project_id label still scopes ⇒ no leak). Per-project Grafana datasource
+  (`EnsureDatasource`) injects the tenant header for the embed. New env
+  `GRAFANA_MIMIR_QUERY_URL`. (commit on main, build/vet/tests green.)
+- argo-infra (console-migration): Mimir `tenant_federation.enabled: true`;
+  runtime overrides `perTenantRetention`→`perTenantOverrides` (retention +
+  ingestion_rate/burst + max series, keyed by project_id); VM push tenant =
+  basic-auth username (`X-Scope-OrgID $remote_user`, shared cred → "anonymous");
+  cloud-console gets `GRAFANA_MIMIR_QUERY_URL`.
+
+VERIFIED LIVE (kubectl port-forward, real client code): pushed dada_e2e_probe to
+tenantA(projA=42) + tenantB(projB=7); each tenant reads only its own series;
+cross-tenant query EMPTY both ways ⇒ isolation holds. Federation read
+(`tenantA|tenantB`) currently rejected live with "too many tenant IDs ... max: 1"
+— that is the undeployed `tenant_federation.enabled` flag; works once applied.
+
+NEEDS PROD APPLY (user triggers):
+1. Build + pin the new backend image, then deploy cloud-console (manual tag pin,
+   no image-updater) — activates project_id read/write + per-project datasource +
+   GRAFANA_MIMIR_QUERY_URL.
+2. argo sync Mimir + RESTART mimir-0 (tenant_federation is a static config flag,
+   not runtime_config) so federated back-compat reads work.
+3. argo sync vm-observability (new "anonymous" cred + $remote_user tenant). NOTE:
+   existing VMs using the old `vmagent` cred will 401 until re-pointed to the
+   "anonymous" user (same password) — coordinate the agent config flip.
+4. Verify end-to-end through the DEPLOYED console read path (project A vs B), the
+   remaining Not-tested gap (needs the new image live + two real projects).
+
+FOLLOW-UPS (not blocking): per-PROJECT VM credential issuance (username =
+project_id) at provision time in console/portainer-agent — until then VM metrics
+land in "anonymous". User-VM LOGS are not per-tenant (filebeat→ES carries no
+org_id); ES multi-tenancy is field/ILM-based, separate work.
+
+---
+
 ## STATUS: SHIPPED + VERIFIED LIVE (2026-06-30)
 Mimir deployed on beget-prod, healthy (/ready 200, S3 connected). Cutover applied:
 gateway write + console read + vm-metrics ingress → Mimir; infra Prometheus → 7d.
