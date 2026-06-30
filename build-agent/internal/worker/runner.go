@@ -355,6 +355,15 @@ func (r *Runner) bridge(ctx context.Context, b *db.Build, number int) (buildOutc
 				}
 			}
 			r.flushLines(ctx, b, pending, &out, true)
+			// Belt-and-suspenders: building=false can be observed a beat before
+			// Jenkins flushes the final console lines, so even the bounded drain
+			// above can race the ==> image: marker (it lands in the same ~0.5s as
+			// the build-complete signal). A completed build's full console always
+			// contains the marker — if streaming missed it, re-read the whole log
+			// once and parse markers only (no re-emit, so the live UI is unchanged).
+			if out.imageURI == "" && len(out.artifacts) == 0 {
+				r.parseFullConsole(ctx, number, &out)
+			}
 			return out, bi.Result, nil
 		}
 
@@ -363,6 +372,34 @@ func (r *Runner) bridge(ctx context.Context, b *db.Build, number int) (buildOutc
 			return out, "", ctx.Err()
 		case <-time.After(logPoll):
 		}
+	}
+}
+
+// parseFullConsole re-reads the entire Jenkins console (from offset 0, following
+// progressiveText pagination) and runs parseMarker over every line. It does NOT
+// emit — it is a safety net to recover output markers the live stream raced past
+// when the build finished. Bounded so a misbehaving stream can't loop forever.
+func (r *Runner) parseFullConsole(ctx context.Context, number int, out *buildOutcome) {
+	var (
+		sb     strings.Builder
+		offset int64
+	)
+	for i := 0; i < 2000; i++ {
+		text, next, more, err := r.jenkins.ProgressiveText(ctx, r.cfg.JenkinsJob, number, offset)
+		if err != nil {
+			return
+		}
+		sb.WriteString(text)
+		if next == offset && !more {
+			break
+		}
+		offset = next
+		if !more {
+			break
+		}
+	}
+	for _, line := range strings.Split(sb.String(), "\n") {
+		parseMarker(strings.TrimRight(line, "\r"), out)
 	}
 }
 
