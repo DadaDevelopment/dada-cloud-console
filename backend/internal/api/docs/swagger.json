@@ -5674,6 +5674,89 @@
                 }
             }
         },
+        "/projects/{projectId}/environments/{envId}/monitoring/{appId}/labels": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Enumerates metric names and the distinct label key/value pairs present for the monitoring resource, so the UI can drive group-by and filter scopes. Read-only. Returns 503 when Prometheus is not configured.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "monitoring"
+                ],
+                "summary": "List monitoring resource metric names and label dimensions",
+                "operationId": "getMonitoringLabels",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Project UUID",
+                        "name": "projectId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Environment UUID",
+                        "name": "envId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Monitoring resource UUID",
+                        "name": "appId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Time range (e.g. 15m, 1h, 6h, 24h)",
+                        "name": "range",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "object with labels and names",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/projects/{projectId}/environments/{envId}/monitoring/{appId}/logs": {
             "get": {
                 "security": [
@@ -5776,7 +5859,7 @@
                         "BearerAuth": []
                     }
                 ],
-                "description": "Returns native metric panels for the resource. Metric names are discovered from series labels, so custom metrics render with no code change. Read-only. Returns 503 when Prometheus is not configured.",
+                "description": "Returns native metric panels for the resource. Metric names are discovered from series labels, so custom metrics render with no code change. Counters are rate()d; optional groupBy/filter scope the series. Read-only. Returns 503 when Prometheus is not configured.",
                 "produces": [
                     "application/json"
                 ],
@@ -5812,6 +5895,28 @@
                         "description": "Time range (e.g. 15m, 1h, 6h, 24h)",
                         "name": "range",
                         "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Label key to split series by",
+                        "name": "groupBy",
+                        "in": "query"
+                    },
+                    {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "collectionFormat": "csv",
+                        "description": "Repeatable key=value exact matchers",
+                        "name": "filter",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Counter handling: on|off|auto (default auto)",
+                        "name": "rate",
+                        "in": "query"
                     }
                 ],
                 "responses": {
@@ -5822,87 +5927,13 @@
                             "additionalProperties": true
                         }
                     },
-                    "401": {
-                        "description": "Unauthorized",
+                    "400": {
+                        "description": "Bad Request",
                         "schema": {
                             "type": "object",
                             "additionalProperties": {
                                 "type": "string"
                             }
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
-                        }
-                    },
-                    "503": {
-                        "description": "Service Unavailable",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
-                        }
-                    }
-                }
-            }
-        },
-        "/projects/{projectId}/environments/{envId}/monitoring/{appId}/sources": {
-            "get": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ],
-                "description": "Discovers source labels currently present for the monitoring resource, so the UI can pivot metrics and logs per device. Read-only. Returns 503 when Prometheus is not configured.",
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "monitoring"
-                ],
-                "summary": "List monitoring resource devices/sources",
-                "operationId": "getMonitoringSources",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Project UUID",
-                        "name": "projectId",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "type": "string",
-                        "description": "Environment UUID",
-                        "name": "envId",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "type": "string",
-                        "description": "Monitoring resource UUID",
-                        "name": "appId",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "type": "string",
-                        "description": "Time range (e.g. 15m, 1h, 6h, 24h)",
-                        "name": "range",
-                        "in": "query"
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "object with a sources array",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": true
                         }
                     },
                     "401": {
