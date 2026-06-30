@@ -749,6 +749,17 @@ export const monitoringApi = {
       { method: "DELETE" }
     ),
 
+  getDashboard: (projectId: string, envId: string, appId: string) =>
+    apiFetch<{ config: unknown | null; version: number; updated_at?: string }>(
+      `/api/v1/projects/${projectId}/environments/${envId}/monitoring/${appId}/dashboard`
+    ),
+
+  saveDashboard: (projectId: string, envId: string, appId: string, config: unknown, version: number) =>
+    apiFetch<{ saved: boolean; version: number }>(
+      `/api/v1/projects/${projectId}/environments/${envId}/monitoring/${appId}/dashboard`,
+      { method: "PUT", body: { config, version } }
+    ),
+
   listChannels: (projectId: string, envId: string) =>
     apiFetch<{ channels: Channel[] }>(
       `/api/v1/projects/${projectId}/environments/${envId}/monitoring/channels`

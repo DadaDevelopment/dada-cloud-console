@@ -50,7 +50,7 @@ export function MonitoringDashboard({
   envId: string;
   appId: string;
 }) {
-  const [state, update] = useDashboardState(projectId, appId);
+  const [state, update] = useDashboardState(projectId, envId, appId);
   const [labels, setLabels] = useState<MonitoringLabelsResponse>({ labels: {}, names: [] });
   const [editable, setEditable] = useState(false);
   const [tab, setTab] = useState("dashboard");
