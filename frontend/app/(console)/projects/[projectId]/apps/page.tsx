@@ -48,6 +48,7 @@ export default function AppsPage() {
 
   useEffect(() => {
     if (!selectedEnvId) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- fetch-on-mount pattern used by console pages; clears the loading flag once env resolution settles.
       if (!isLoadingEnvs) setIsLoadingApps(false);
       return;
     }
