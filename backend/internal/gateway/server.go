@@ -33,6 +33,7 @@ type Config struct {
 // Server is the stateless ingest HTTP handler set.
 type Server struct {
 	store     keyStore
+	intro     introspector            // nil when user-service introspection unconfigured -> sk-dada- keys 401
 	promwrite *prometheus.WriteClient // nil when remote-write unconfigured -> 503
 	eswrite   *logsearch.WriteClient  // nil when ES unconfigured -> 503
 	limiter   *telemetry.IngestLimiter
@@ -46,8 +47,10 @@ type Server struct {
 func (s *Server) SetDBPinger(fn func(context.Context) error) { s.ping = fn }
 
 // NewServer builds the gateway handler set. promwrite/eswrite may be nil; the
-// corresponding ingest path then returns 503 (mirrors the console).
-func NewServer(store keyStore, promwrite *prometheus.WriteClient, eswrite *logsearch.WriteClient, cfg Config) *Server {
+// corresponding ingest path then returns 503 (mirrors the console). intro may be
+// nil; unified sk-dada- keys then fail closed (401) while legacy dmon_ keys keep
+// working.
+func NewServer(store keyStore, intro *telemetry.Introspector, promwrite *prometheus.WriteClient, eswrite *logsearch.WriteClient, cfg Config) *Server {
 	if cfg.MaxLabels <= 0 {
 		cfg.MaxLabels = 30
 	}
@@ -57,13 +60,17 @@ func NewServer(store keyStore, promwrite *prometheus.WriteClient, eswrite *logse
 	if cfg.MaxMessageBytes <= 0 {
 		cfg.MaxMessageBytes = 32 * 1024
 	}
-	return &Server{
+	s := &Server{
 		store:     store,
 		promwrite: promwrite,
 		eswrite:   eswrite,
 		limiter:   telemetry.NewIngestLimiter(cfg.RateLimitPerMin),
 		cfg:       cfg,
 	}
+	if intro != nil {
+		s.intro = intro
+	}
+	return s
 }
 
 // Handler returns the gateway's HTTP router. OTLP paths follow the OTLP/HTTP
@@ -147,7 +154,7 @@ func (s *Server) authn(w http.ResponseWriter, r *http.Request, scope string) (re
 		return resolved{}, false
 	}
 	key := telemetry.KeyFromHeaders(r.Header.Get("X-API-Key"), r.Header.Get("Authorization"))
-	res, err := resolveKey(r.Context(), s.store, key, s.cfg.MaxLabels)
+	res, err := resolveKey(r.Context(), s.store, s.intro, key, s.cfg.MaxLabels)
 	if err != nil {
 		if errors.Is(err, errKeyUnknown) {
 			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "invalid api key"})

@@ -20,6 +20,7 @@ import (
 	"github.com/dada-tuda/console/backend/internal/gateway"
 	"github.com/dada-tuda/console/backend/internal/logsearch"
 	"github.com/dada-tuda/console/backend/internal/prometheus"
+	"github.com/dada-tuda/console/backend/internal/telemetry"
 	"github.com/joho/godotenv"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
@@ -72,7 +73,12 @@ func main() {
 		log.Warn().Msg("elasticsearch not configured — /v1/logs and /api/v1/logs will 503")
 	}
 
-	srv := gateway.NewServer(gateway.NewPGKeyStore(pool), promwrite, eswrite, gateway.Config{
+	intro := telemetry.NewIntrospector(cfg.UserServiceURL)
+	if intro == nil {
+		log.Warn().Msg("user-service introspection not configured — unified sk-dada- keys will 401 (legacy dmon_ keys still accepted)")
+	}
+
+	srv := gateway.NewServer(gateway.NewPGKeyStore(pool), intro, promwrite, eswrite, gateway.Config{
 		MaxLabels:       cfg.MonitoringMaxLabels,
 		MaxSeriesPerReq: cfg.MonitoringMaxSeriesPerReq,
 		RateLimitPerMin: cfg.MonitoringRateLimitPerMin,

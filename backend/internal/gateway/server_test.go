@@ -206,7 +206,7 @@ func postOTLP(t *testing.T, h http.Handler, path, key, ct string, body []byte) *
 }
 
 func newTestServer(store keyStore, prom *prometheus.WriteClient, es *logsearch.WriteClient, cfg Config) http.Handler {
-	return NewServer(store, prom, es, cfg).Handler()
+	return NewServer(store, nil, prom, es, cfg).Handler()
 }
 
 // ---- tests ----
@@ -267,7 +267,7 @@ func TestPrefixCollisionResolvesByHash(t *testing.T) {
 	store := fakeKeyStore{rows: map[string][]keyRow{
 		telemetry.KeyLookupPrefix(keyA): {rowB, rowA}, // rowB first to prove hash, not order, decides
 	}}
-	res, err := resolveKey(context.Background(), store, keyA, 30)
+	res, err := resolveKey(context.Background(), store, nil, keyA, 30)
 	if err != nil {
 		t.Fatalf("resolve: %v", err)
 	}
@@ -275,6 +275,57 @@ func TestPrefixCollisionResolvesByHash(t *testing.T) {
 		t.Errorf("resolved wrong tenant: %+v", res.tenant)
 	}
 	_ = keyB
+}
+
+// stubIntrospector satisfies the gateway introspector interface for tests.
+type stubIntrospector struct {
+	res telemetry.IntrospectionResult
+	err error
+}
+
+func (s stubIntrospector) Introspect(_ context.Context, _ string) (telemetry.IntrospectionResult, error) {
+	return s.res, s.err
+}
+
+// A unified sk-dada- key resolves via introspection to the SAME resolved-tenant
+// fields the dmon_ path produces, so the stamped label contract is identical.
+func TestUnifiedKeyResolvesViaIntrospection(t *testing.T) {
+	intro := stubIntrospector{res: telemetry.IntrospectionResult{
+		Valid:         true,
+		PrincipalID:   uuid.New().String(),
+		Scopes:        []string{"metrics:write", "logs:write"},
+		ProjectID:     "proj-1",
+		OrgID:         "org-1",
+		MonitoringApp: "iot-fleet",
+	}}
+	res, err := resolveKey(context.Background(), fakeKeyStore{}, intro, "sk-dada-abc123", 30)
+	if err != nil {
+		t.Fatalf("resolve unified: %v", err)
+	}
+	if res.tenant.ProjectID != "proj-1" || res.tenant.OrgID != "org-1" || res.tenant.MonitoringApp != "iot-fleet" {
+		t.Errorf("tenant labels mismatch: %+v", res.tenant)
+	}
+	if res.tenant.MaxLabels != 30 {
+		t.Errorf("MaxLabels = %d, want 30", res.tenant.MaxLabels)
+	}
+	if !res.hasScope("metrics:write") || !res.hasScope("logs:write") {
+		t.Errorf("scopes not carried: %v", res.scopes)
+	}
+}
+
+// invalid=false from introspection -> unknown key (401 upstream).
+func TestUnifiedKeyInvalidRejected(t *testing.T) {
+	intro := stubIntrospector{res: telemetry.IntrospectionResult{Valid: false}}
+	if _, err := resolveKey(context.Background(), fakeKeyStore{}, intro, "sk-dada-bad", 30); !errors.Is(err, errKeyUnknown) {
+		t.Errorf("err = %v, want errKeyUnknown", err)
+	}
+}
+
+// A unified key with no introspector configured fails closed.
+func TestUnifiedKeyNoIntrospectorFailsClosed(t *testing.T) {
+	if _, err := resolveKey(context.Background(), fakeKeyStore{}, nil, "sk-dada-x", 30); !errors.Is(err, errKeyUnknown) {
+		t.Errorf("err = %v, want errKeyUnknown", err)
+	}
 }
 
 // Missing/forged key -> 401.
@@ -388,17 +439,17 @@ func TestReadyz(t *testing.T) {
 		t.Errorf("no targets: status = %d, want 503", rr.Code)
 	}
 	// target present, no pinger -> 200
-	if rr := getPath(t, NewServer(store, prom, nil, Config{}).Handler(), "/readyz"); rr.Code != 200 {
+	if rr := getPath(t, NewServer(store, nil, prom, nil, Config{}).Handler(), "/readyz"); rr.Code != 200 {
 		t.Errorf("no pinger: status = %d, want 200", rr.Code)
 	}
 	// pinger fails -> 503
-	srvDown := NewServer(store, prom, nil, Config{})
+	srvDown := NewServer(store, nil, prom, nil, Config{})
 	srvDown.SetDBPinger(func(context.Context) error { return errors.New("db down") })
 	if rr := getPath(t, srvDown.Handler(), "/readyz"); rr.Code != 503 {
 		t.Errorf("ping fail: status = %d, want 503", rr.Code)
 	}
 	// pinger ok -> 200
-	srvUp := NewServer(store, prom, nil, Config{})
+	srvUp := NewServer(store, nil, prom, nil, Config{})
 	srvUp.SetDBPinger(func(context.Context) error { return nil })
 	if rr := getPath(t, srvUp.Handler(), "/readyz"); rr.Code != 200 {
 		t.Errorf("ping ok: status = %d, want 200", rr.Code)

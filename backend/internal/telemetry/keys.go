@@ -14,10 +14,16 @@ import (
 	"golang.org/x/crypto/argon2"
 )
 
-// KeyPrefix is the recognizable prefix every monitoring ingest key carries. A
-// presented token starting with it is treated as a scoped device key rather
-// than a JWT.
+// KeyPrefix is the recognizable prefix every legacy monitoring ingest key
+// carries. A presented token starting with it is treated as a scoped device key
+// rather than a JWT, resolved against the local monitoring_apps table.
 const KeyPrefix = "dmon_"
+
+// UnifiedKeyPrefix is the prefix of the unified platform API key (gateway
+// unification). Keys carrying it are not stored locally; they are resolved via
+// user-service introspection. Accepted alongside KeyPrefix during the
+// dual-accept window (FORK-2).
+const UnifiedKeyPrefix = "sk-dada-"
 
 // prefixLen is the displayable prefix length stored in monitoring_apps.
 // api_key_prefix ("dmon_" + 8 base64url chars). It is the narrow used for the
@@ -34,19 +40,33 @@ const (
 )
 
 // KeyFromHeaders extracts a presented monitoring ingest key from either an
-// X-API-Key value or an "Authorization: Bearer <key>" value. Returns "" when no
-// dmon_ key is present so the caller can fall back to JWT auth. Both raw header
-// strings are passed in so this stays framework-agnostic (usable from Gin and
-// from the gateway's net/http handlers).
+// X-API-Key value or an "Authorization: Bearer <key>" value. It accepts both the
+// legacy dmon_ prefix and the unified sk-dada- prefix (dual-accept window).
+// Returns "" when no ingest key is present so the caller can fall back to JWT
+// auth. Both raw header strings are passed in so this stays framework-agnostic
+// (usable from Gin and from the gateway's net/http handlers).
 func KeyFromHeaders(apiKey, authorization string) string {
-	if k := strings.TrimSpace(apiKey); strings.HasPrefix(k, KeyPrefix) {
+	if k := strings.TrimSpace(apiKey); isIngestKey(k) {
 		return k
 	}
 	parts := strings.SplitN(authorization, " ", 2)
-	if len(parts) == 2 && strings.EqualFold(parts[0], "bearer") && strings.HasPrefix(parts[1], KeyPrefix) {
+	if len(parts) == 2 && strings.EqualFold(parts[0], "bearer") && isIngestKey(parts[1]) {
 		return parts[1]
 	}
 	return ""
+}
+
+// isIngestKey reports whether a token carries a recognized ingest-key prefix
+// (legacy dmon_ or unified sk-dada-).
+func isIngestKey(k string) bool {
+	return strings.HasPrefix(k, KeyPrefix) || strings.HasPrefix(k, UnifiedKeyPrefix)
+}
+
+// IsUnifiedKey reports whether a presented key is a unified sk-dada- key (which
+// must be resolved via user-service introspection) rather than a legacy dmon_
+// key (resolved locally against monitoring_apps).
+func IsUnifiedKey(k string) bool {
+	return strings.HasPrefix(k, UnifiedKeyPrefix)
 }
 
 // KeyLookupPrefix returns the indexed candidate prefix for a presented key

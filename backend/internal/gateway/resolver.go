@@ -39,6 +39,13 @@ type keyStore interface {
 	candidatesByPrefix(ctx context.Context, prefix string) ([]keyRow, error)
 }
 
+// introspector resolves a unified sk-dada- key to its principal+tenant data via
+// user-service (with local caching). Narrow interface so tests can stub it;
+// satisfied by *telemetry.Introspector.
+type introspector interface {
+	Introspect(ctx context.Context, key string) (telemetry.IntrospectionResult, error)
+}
+
 // pgKeyStore is the Postgres-backed keyStore (read-only). It only ever SELECTs
 // from monitoring_apps + its joins.
 type pgKeyStore struct{ pool *pgxpool.Pool }
@@ -89,13 +96,19 @@ func (r resolved) hasScope(want string) bool {
 	return false
 }
 
-// resolveKey authenticates a presented dmon_ key by the ADR-012 path: index the
-// candidates by api_key_prefix (the narrow), then constant-time argon2id verify
-// to pick the real match (the decider). The tenant labels come only from the DB
-// row — never from the request payload.
-func resolveKey(ctx context.Context, store keyStore, key string, maxLabels int) (resolved, error) {
+// resolveKey authenticates a presented ingest key. A unified sk-dada- key is
+// resolved via user-service introspection (intro); a legacy dmon_ key takes the
+// ADR-012 path: index the candidates by api_key_prefix (the narrow), then
+// constant-time argon2id verify to pick the real match (the decider). Either way
+// the tenant labels come only from the authoritative source (introspection or
+// the DB row) — never from the request payload — so the stamped label contract
+// is identical across both key types.
+func resolveKey(ctx context.Context, store keyStore, intro introspector, key string, maxLabels int) (resolved, error) {
 	if key == "" {
 		return resolved{}, errKeyUnknown
+	}
+	if telemetry.IsUnifiedKey(key) {
+		return resolveUnifiedKey(ctx, intro, key, maxLabels)
 	}
 	candidates, err := store.candidatesByPrefix(ctx, telemetry.KeyLookupPrefix(key))
 	if err != nil {
@@ -117,4 +130,34 @@ func resolveKey(ctx context.Context, store keyStore, key string, maxLabels int) 
 		return resolved{appID: r.appID, scopes: r.scopes, tenant: t}, nil
 	}
 	return resolved{}, errKeyUnknown
+}
+
+// resolveUnifiedKey authenticates a unified sk-dada- key via introspection and
+// builds the same resolved struct the dmon_ path returns. The tenant fields are
+// mapped 1:1 from the introspection result so the labels stamped on every series
+// /log are byte-identical to the legacy path. The per-app rate-limit key is the
+// principal id (a UUID) when introspection returns a parseable one; otherwise a
+// deterministic UUID derived from the principal id keeps rate limiting stable.
+func resolveUnifiedKey(ctx context.Context, intro introspector, key string, maxLabels int) (resolved, error) {
+	if intro == nil {
+		return resolved{}, errKeyUnknown
+	}
+	ir, err := intro.Introspect(ctx, key)
+	if err != nil {
+		return resolved{}, err
+	}
+	if !ir.Valid {
+		return resolved{}, errKeyUnknown
+	}
+	t := telemetry.Tenant{
+		OrgID:         ir.OrgID,
+		ProjectID:     ir.ProjectID,
+		MonitoringApp: ir.MonitoringApp,
+		MaxLabels:     maxLabels,
+	}
+	appID, err := uuid.Parse(ir.PrincipalID)
+	if err != nil {
+		appID = uuid.NewSHA1(uuid.NameSpaceOID, []byte(ir.PrincipalID))
+	}
+	return resolved{appID: appID, scopes: ir.Scopes, tenant: t}, nil
 }

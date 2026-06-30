@@ -184,6 +184,12 @@ type Config struct {
 	GatewayDBURL string // GATEWAY_DB_URL
 	GatewayPort  string // GATEWAY_PORT (default 8081)
 
+	// UserServiceURL is the base URL of user-service. The telemetry gateway calls
+	// its POST /v1/apikeys/introspect endpoint to resolve unified sk-dada- ingest
+	// keys (gateway unification). Empty disables unified-key acceptance (sk-dada-
+	// keys then 401; legacy dmon_ keys keep working).
+	UserServiceURL string // USER_SERVICE_URL
+
 	// SMTP for the Email contact point (shared with IAM invitations). Wired into
 	// Grafana's email contact point settings at provision time.
 	SMTPHost string // SMTP_HOST
@@ -293,6 +299,7 @@ func Load() (*Config, error) {
 		MonitoringMaxLabels:       int(getEnvInt64("MONITORING_MAX_LABELS", 30)),
 		MonitoringMaxSeriesPerReq: int(getEnvInt64("MONITORING_MAX_SERIES_PER_REQUEST", 2000)),
 		GatewayDBURL:              getEnv("GATEWAY_DB_URL", ""),
+		UserServiceURL:            getEnv("USER_SERVICE_URL", ""),
 		GatewayPort:               getEnv("GATEWAY_PORT", "8081"),
 		SMTPHost:                  getEnv("SMTP_HOST", ""),
 		SMTPPort:                  int(getEnvInt64("SMTP_PORT", 587)),
@@ -310,9 +317,9 @@ func Load() (*Config, error) {
 		CloudTaskCallbackURL:      getEnv("CLOUD_TASK_CALLBACK_URL", ""),
 		GithubAppID:               getEnv("GITHUB_APP_ID", ""),
 		GithubAppPrivateKey:       getEnv("GITHUB_APP_PRIVATE_KEY", ""),
-		MetrikaOAuthToken:           getEnv("METRIKA_OAUTH_TOKEN", ""),
-		BillingEnabled:              getEnv("BILLING_ENABLED", "false") == "true",
-		BillingMeterIntervalSec:     getEnvInt64("BILLING_METER_INTERVAL_SECS", 3600),
+		MetrikaOAuthToken:         getEnv("METRIKA_OAUTH_TOKEN", ""),
+		BillingEnabled:            getEnv("BILLING_ENABLED", "false") == "true",
+		BillingMeterIntervalSec:   getEnvInt64("BILLING_METER_INTERVAL_SECS", 3600),
 	}
 
 	if cfg.DBURL == "" {

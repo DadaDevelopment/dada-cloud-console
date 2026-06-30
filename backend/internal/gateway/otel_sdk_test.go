@@ -27,7 +27,7 @@ func TestRealOTelSDKPush(t *testing.T) {
 	store := fakeKeyStore{rows: map[string][]keyRow{telemetry.KeyLookupPrefix(key): {row}}}
 
 	cap := &capturedSeries{}
-	gw := httptest.NewServer(NewServer(store, newPromStub(t, cap), nil, Config{}).Handler())
+	gw := httptest.NewServer(NewServer(store, nil, newPromStub(t, cap), nil, Config{}).Handler())
 	t.Cleanup(gw.Close)
 
 	ctx := context.Background()
