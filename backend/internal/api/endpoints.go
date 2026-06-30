@@ -102,7 +102,7 @@ type createEndpointRequest struct {
 //
 // @ID          createEndpoint
 // @Summary     Register a public endpoint (domain) for an app
-// @Description Registers a public API endpoint (PublicApi resource) exposing an app at a given FQDN, with optional auth (none, platform-jwt, api-key, internal) and Swagger publishing. Asynchronous: returns 202 with an operation; poll the operation until terminal.
+// @Description Registers a public API endpoint (PublicApi resource) exposing an app at a given FQDN, with optional auth (none, platform-jwt, internal) and Swagger publishing. Asynchronous: returns 202 with an operation; poll the operation until terminal.
 // @Tags        endpoint
 // @Accept      json
 // @Produce     json
@@ -176,9 +176,9 @@ func (h *Handler) CreateEndpoint(c *gin.Context) {
 		req.SwaggerTitle = appName
 	}
 
-	validSchemes := map[string]bool{"none": true, "platform-jwt": true, "api-key": true, "internal": true}
+	validSchemes := map[string]bool{"none": true, "platform-jwt": true, "internal": true}
 	if !validSchemes[req.AuthScheme] {
-		respondError(c, http.StatusBadRequest, "auth_scheme must be none, platform-jwt, api-key, or internal")
+		respondError(c, http.StatusBadRequest, "auth_scheme must be none, platform-jwt, or internal")
 		return
 	}
 

@@ -367,7 +367,6 @@ export default function AppDetailPage() {
             >
               <option value="none">{t("apps.modal.domain.authScheme.none")}</option>
               <option value="platform-jwt">platform-jwt</option>
-              <option value="api-key">api-key</option>
               <option value="internal">internal</option>
             </select>
           </div>
