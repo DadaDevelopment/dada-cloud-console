@@ -206,6 +206,129 @@ func (c *Client) DeleteStack(ctx context.Context, stackID, endpointID int) error
 	return nil
 }
 
+// EnsureEdgeCompute enables Portainer's edge-compute features and sets the URL
+// edge agents poll for edge-stack updates. Required before /api/edge_groups and
+// /api/edge_stacks work (they 503 otherwise). Idempotent. edgePortainerURL is the
+// public Portainer URL agents reach (e.g. https://portainer.dada-tuda.ru).
+func (c *Client) EnsureEdgeCompute(ctx context.Context, edgePortainerURL string) error {
+	body := map[string]any{
+		"EnableEdgeComputeFeatures": true,
+		"EdgePortainerUrl":          edgePortainerURL,
+	}
+	return c.doJSON(ctx, http.MethodPut, "/api/settings", body, nil)
+}
+
+// EnsureTag returns the id of the tag with the given name, creating it if absent.
+func (c *Client) EnsureTag(ctx context.Context, name string) (int, error) {
+	var tags []Tag
+	if err := c.doJSON(ctx, http.MethodGet, "/api/tags", nil, &tags); err != nil {
+		return 0, fmt.Errorf("list tags: %w", err)
+	}
+	for _, t := range tags {
+		if t.Name == name {
+			return t.ID, nil
+		}
+	}
+	var created Tag
+	if err := c.doJSON(ctx, http.MethodPost, "/api/tags", map[string]string{"name": name}, &created); err != nil {
+		return 0, fmt.Errorf("create tag %q: %w", name, err)
+	}
+	return created.ID, nil
+}
+
+// ListEdgeGroups returns all edge groups.
+func (c *Client) ListEdgeGroups(ctx context.Context) ([]EdgeGroup, error) {
+	var groups []EdgeGroup
+	if err := c.doJSON(ctx, http.MethodGet, "/api/edge_groups", nil, &groups); err != nil {
+		return nil, err
+	}
+	return groups, nil
+}
+
+// EnsureEdgeGroup returns the dynamic edge group with the given name, creating it
+// (matching any endpoint carrying tagID) if absent. Idempotent.
+func (c *Client) EnsureEdgeGroup(ctx context.Context, name string, tagID int) (*EdgeGroup, error) {
+	groups, err := c.ListEdgeGroups(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for i := range groups {
+		if groups[i].Name == name {
+			return &groups[i], nil
+		}
+	}
+	var created EdgeGroup
+	if err := c.doJSON(ctx, http.MethodPost, "/api/edge_groups", createEdgeGroupRequest{
+		Name:    name,
+		Dynamic: true,
+		TagIDs:  []int{tagID},
+	}, &created); err != nil {
+		return nil, fmt.Errorf("create edge group %q: %w", name, err)
+	}
+	return &created, nil
+}
+
+// TagEndpoint adds tagID to an edge endpoint so a dynamic edge group includes it.
+// Idempotent: it merges with the endpoint's existing tags. PUT /api/endpoints/{id}
+// with the full TagIDs set is the only supported way to assign endpoint tags.
+func (c *Client) TagEndpoint(ctx context.Context, endpointID, tagID int) error {
+	ep, err := c.GetEndpoint(ctx, endpointID)
+	if err != nil {
+		return err
+	}
+	for _, t := range ep.TagIDs {
+		if t == tagID {
+			return nil // already tagged
+		}
+	}
+	tags := append(append([]int{}, ep.TagIDs...), tagID)
+	return c.doJSON(ctx, http.MethodPut, fmt.Sprintf("/api/endpoints/%d", endpointID),
+		map[string]any{"TagIDs": tags}, nil)
+}
+
+// ListEdgeStacks returns all edge stacks.
+func (c *Client) ListEdgeStacks(ctx context.Context) ([]EdgeStack, error) {
+	var stacks []EdgeStack
+	if err := c.doJSON(ctx, http.MethodGet, "/api/edge_stacks", nil, &stacks); err != nil {
+		return nil, err
+	}
+	return stacks, nil
+}
+
+// CreateEdgeStackFromGit creates a compose edge stack sourced from git, targeting
+// the given edge groups. Portainer pulls the compose and pushes it to every
+// endpoint in those groups.
+func (c *Client) CreateEdgeStackFromGit(ctx context.Context, req CreateEdgeStackGitRequest) (*EdgeStack, error) {
+	var stack EdgeStack
+	if err := c.doJSON(ctx, http.MethodPost, "/api/edge_stacks/create/repository", req, &stack); err != nil {
+		return nil, err
+	}
+	return &stack, nil
+}
+
+// RedeployEdgeStackFromGit triggers a git pull + redeploy of an existing edge
+// stack, fanning the latest config to every endpoint in its edge groups. This is
+// how a config change reaches ALL VMs (existing included) without SSH.
+func (c *Client) RedeployEdgeStackFromGit(ctx context.Context, stackID int) error {
+	return c.doJSON(ctx, http.MethodPut, fmt.Sprintf("/api/edge_stacks/%d/git", stackID),
+		map[string]any{}, nil)
+}
+
+// EnsureEdgeStackFromGit returns the edge stack with the given name, creating it
+// from git if absent. Idempotent ensure used by the reconcile loop.
+func (c *Client) EnsureEdgeStackFromGit(ctx context.Context, req CreateEdgeStackGitRequest) (*EdgeStack, error) {
+	stacks, err := c.ListEdgeStacks(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for i := range stacks {
+		if stacks[i].Name == req.Name {
+			return &stacks[i], nil
+		}
+	}
+	return c.CreateEdgeStackFromGit(ctx, req)
+}
+
 // ListContainers lists containers on an endpoint, filtered by label (e.g. "dada.io/app=myapp").
 func (c *Client) ListContainers(ctx context.Context, endpointID int, labelFilter string) ([]Container, error) {
 	filter := fmt.Sprintf(`{"label":[%q]}`, labelFilter)
