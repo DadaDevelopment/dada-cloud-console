@@ -1,11 +1,14 @@
 nodes:
-  - flavor: 8vcpu-16gb
-    count: 3
-    monthly_cost_rub: 4000
+  - flavor: prod-k8s-3node
+    count: 1
+    monthly_cost_rub: 7711.80
+  - flavor: platform-overhead
+    count: 1
+    monthly_cost_rub: 2328.60
 capacity:
-  vcpu: 24
-  ram_gb: 48
-  storage_gb: 300
+  vcpu: 18
+  ram_gb: 33
+  storage_gb: 195
 cost_weights:
   cpu: 0.5
   ram: 0.3

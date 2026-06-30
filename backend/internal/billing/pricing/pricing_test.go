@@ -24,6 +24,21 @@ func testUnitCost() costengine.UnitCost {
 	return u
 }
 
+// realUnitCost loads the embedded production cluster-cost config so the margin
+// guard validates published plan prices against the REAL cluster cost, not a fixture.
+func realUnitCost(t *testing.T) costengine.UnitCost {
+	t.Helper()
+	cfg, err := billing.LoadClusterCost("")
+	if err != nil {
+		t.Fatalf("LoadClusterCost: %v", err)
+	}
+	u, err := costengine.ComputeUnitCost(cfg)
+	if err != nil {
+		t.Fatalf("ComputeUnitCost: %v", err)
+	}
+	return u
+}
+
 func testPlans() []pricing.Plan {
 	return []pricing.Plan{
 		{
@@ -146,7 +161,7 @@ func TestMarginGuard(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadPlans: %v", err)
 	}
-	u := testUnitCost()
+	u := realUnitCost(t)
 
 	t.Logf("UnitCost: PerVCPU=%.4f  PerGBRAM=%.4f  PerGBStorage=%.4f", u.PerVCPU, u.PerGBRAM, u.PerGBStorage)
 
@@ -170,9 +185,9 @@ func TestMarginTable(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadPlans: %v", err)
 	}
-	u := testUnitCost()
+	u := realUnitCost(t)
 
-	fmt.Printf("\n=== Margin Table (cluster 12000 RUB/mo, weights cpu=0.5 ram=0.3 storage=0.2) ===\n")
+	fmt.Printf("\n=== Margin Table (real prod cluster cost, weights cpu=0.5 ram=0.3 storage=0.2) ===\n")
 	fmt.Printf("UnitCost: PerVCPU=%.4f  PerGBRAM=%.4f  PerGBStorage=%.4f\n\n", u.PerVCPU, u.PerGBRAM, u.PerGBStorage)
 	fmt.Printf("%-12s  %10s  %10s  %10s  %10s\n", "Plan", "Price(RUB)", "Floor(RUB)", "Margin(RUB)", "Margin%")
 	for _, p := range plans {
