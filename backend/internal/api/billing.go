@@ -97,6 +97,9 @@ func (h *Handler) countResource(ctx context.Context, orgID, resource string) (in
 // *quotaExceededError when the org is at or over its plan limit. A limit of 0
 // means unlimited (Enterprise).
 func (h *Handler) checkQuota(ctx context.Context, orgID, resource string) error {
+	if !h.cfg.BillingEnabled {
+		return nil
+	}
 	plan, err := h.planFor(ctx, orgID)
 	if err != nil {
 		return err
