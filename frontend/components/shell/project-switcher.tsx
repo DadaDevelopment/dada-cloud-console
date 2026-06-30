@@ -64,7 +64,7 @@ export function ProjectSwitcher() {
         >
           <div className="max-h-80 overflow-y-auto py-1">
             {projects.length === 0 ? (
-              <div className="px-3 py-2 text-sm text-gray-400">{t("shell.project.none")}</div>
+              <div className="px-3 py-2 text-sm text-gray-500">{t("shell.project.none")}</div>
             ) : (
               projects.map((p) => {
                 const active = p.id === projectId;
@@ -83,7 +83,7 @@ export function ProjectSwitcher() {
                   >
                     <span className="min-w-0">
                       <span className="block truncate font-medium">{p.display_name}</span>
-                      <span className="block truncate font-mono text-xs text-gray-400">{p.name}</span>
+                      <span className="block truncate font-mono text-xs text-gray-500">{p.name}</span>
                     </span>
                     {active && (
                       <svg className="h-4 w-4 shrink-0 text-blue-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>

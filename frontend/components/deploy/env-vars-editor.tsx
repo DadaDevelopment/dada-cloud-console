@@ -126,7 +126,7 @@ export function EnvVarsEditor({
       <div className="mb-4 flex items-center justify-between">
         <div>
           <h2 className="text-lg font-semibold text-gray-900">Environment variables</h2>
-          <p className="text-sm text-gray-400">Injected at build and/or runtime. Secrets are encrypted at rest.</p>
+          <p className="text-sm text-gray-600">Injected at build and/or runtime. Secrets are encrypted at rest.</p>
         </div>
         {canEdit && (
           <button
@@ -156,7 +156,7 @@ export function EnvVarsEditor({
       ) : (
         <div className="overflow-hidden rounded-xl border border-gray-200">
           <table className="w-full text-sm">
-            <thead className="bg-gray-50 text-left text-xs font-semibold uppercase tracking-wide text-gray-400">
+            <thead className="bg-gray-50 text-left text-xs font-semibold uppercase tracking-wide text-gray-600">
               <tr>
                 <th className="px-4 py-2.5">Key</th>
                 <th className="px-4 py-2.5">Value</th>
@@ -255,7 +255,7 @@ export function EnvVarsEditor({
 
           <div>
             <label className="block text-sm font-medium text-gray-700">
-              Value {form.editingExisting && <span className="font-normal text-gray-400">(replaces current)</span>}
+              Value {form.editingExisting && <span className="font-normal text-gray-500">(replaces current)</span>}
             </label>
             <input
               type="text"
@@ -283,7 +283,7 @@ export function EnvVarsEditor({
           <div className="flex items-center justify-between rounded-lg border border-gray-200 px-4 py-3">
             <div>
               <p className="text-sm font-medium text-gray-700">Secret</p>
-              <p className="text-xs text-gray-400">Encrypted at rest and masked in the UI</p>
+              <p className="text-xs text-gray-500">Encrypted at rest and masked in the UI</p>
             </div>
             <button
               type="button"

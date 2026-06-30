@@ -116,7 +116,7 @@ export function CommandPalette({ initialOpen = false }: { initialOpen?: boolean 
         />
         <ul className="max-h-80 overflow-y-auto py-1">
           {filtered.length === 0 ? (
-            <li className="px-4 py-6 text-center text-sm text-gray-400">{t("shell.palette.noMatches")}</li>
+            <li className="px-4 py-6 text-center text-sm text-gray-500">{t("shell.palette.noMatches")}</li>
           ) : (
             filtered.map((c, idx) => (
               <li key={c.id}>
@@ -131,13 +131,13 @@ export function CommandPalette({ initialOpen = false }: { initialOpen?: boolean 
                     {c.icon && <ResourceIcon name={c.icon} className="h-4 w-4 text-gray-400" />}
                     {c.label}
                   </span>
-                  {c.hint && <span className="text-xs text-gray-400">{c.hint}</span>}
+                  {c.hint && <span className="text-xs text-gray-500">{c.hint}</span>}
                 </button>
               </li>
             ))
           )}
         </ul>
-        <div className="flex items-center gap-3 border-t border-gray-100 px-4 py-2 text-xs text-gray-400">
+        <div className="flex items-center gap-3 border-t border-gray-100 px-4 py-2 text-xs text-gray-500">
           <span><kbd className="rounded border border-gray-200 px-1">↑↓</kbd> {t("shell.palette.navigate")}</span>
           <span><kbd className="rounded border border-gray-200 px-1">↵</kbd> {t("shell.palette.open")}</span>
           <span><kbd className="rounded border border-gray-200 px-1">esc</kbd> {t("shell.palette.close")}</span>

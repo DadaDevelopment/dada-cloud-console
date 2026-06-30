@@ -69,6 +69,18 @@ func RenderBootstrap(p BootstrapParams) (string, error) {
 	return buf.String(), nil
 }
 
+// bootstrapCommand returns the remote shell command that consumes the rendered
+// bootstrap script on stdin. A root (or empty) login runs it directly; any other
+// login is escalated with passwordless sudo, since the script performs privileged
+// operations and carries no per-command sudo. "-n" makes sudo fail fast rather
+// than block on a password prompt.
+func bootstrapCommand(user string) string {
+	if user == "" || user == "root" {
+		return "bash -s"
+	}
+	return "sudo -n bash -s"
+}
+
 // dialAddr normalizes a host into a "host:port" dial address.
 // "ip" → "ip:22"; "ip:port" is passed through unchanged.
 func dialAddr(host string) string {
@@ -81,7 +93,12 @@ func dialAddr(host string) string {
 // RunBootstrap SSHes into host, streams the rendered bootstrap script via stdin,
 // and waits for "BOOTSTRAP_COMPLETE" in stdout.
 // host: "ip" (defaults to port 22) or "ip:port" for a custom SSH port.
-// user: "root" (default on Beget Ubuntu VDS).
+// user: the SSH login. "root" (or empty) runs the script directly. Any other
+// user is assumed to have passwordless sudo and the whole script is escalated
+// via "sudo -n bash -s" — the bootstrap performs privileged operations (apt,
+// systemctl, writing /etc, host bind-mounts) and carries no per-command sudo,
+// so a non-root login without escalation would fail. "-n" fails fast instead of
+// hanging on a password prompt when passwordless sudo is unavailable.
 // privateKeyPEM: PEM-encoded private key matching the SSH key on the target VM.
 func RunBootstrap(ctx context.Context, host, user, privateKeyPEM string, params BootstrapParams) error {
 	signer, err := gossh.ParsePrivateKey([]byte(privateKeyPEM))
@@ -145,7 +162,7 @@ func RunBootstrap(ctx context.Context, host, user, privateKeyPEM string, params 
 		}
 	}()
 
-	if err := session.Start("bash -s"); err != nil {
+	if err := session.Start(bootstrapCommand(user)); err != nil {
 		return fmt.Errorf("start bash: %w", err)
 	}
 
