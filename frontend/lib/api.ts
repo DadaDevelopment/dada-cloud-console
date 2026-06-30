@@ -57,7 +57,8 @@ import type {
   HealthStatus,
   AlertRule,
   Channel,
-  MonitoringSourcesResponse,
+  MonitoringMetricsResponse,
+  MonitoringLabelsResponse,
   CloudTasksResponse,
   CloudTaskResponse,
   CreateCloudTaskResponse,
@@ -658,26 +659,29 @@ export const monitoringApi = {
       { method: "DELETE" }
     ),
 
-  getHealth: (projectId: string, envId: string, appId: string, source?: string) => {
+  getHealth: (projectId: string, envId: string, appId: string) =>
+    apiFetch<HealthStatus>(
+      `/api/v1/projects/${projectId}/environments/${envId}/monitoring/${appId}/health`
+    ),
+
+  getLabels: (projectId: string, envId: string, appId: string, range = "24h") => {
+    const qs = new URLSearchParams({ range });
+    return apiFetch<MonitoringLabelsResponse>(
+      `/api/v1/projects/${projectId}/environments/${envId}/monitoring/${appId}/labels?${qs.toString()}`
+    );
+  },
+
+  getMetrics: (
+    projectId: string,
+    envId: string,
+    appId: string,
+    opts?: { range?: string; groupBy?: string; filters?: string[] }
+  ) => {
     const qs = new URLSearchParams();
-    if (source) qs.set("source", source);
-    const query = qs.toString();
-    return apiFetch<HealthStatus>(
-      `/api/v1/projects/${projectId}/environments/${envId}/monitoring/${appId}/health${query ? `?${query}` : ""}`
-    );
-  },
-
-  getSources: (projectId: string, envId: string, appId: string, range = "24h") => {
-    const qs = new URLSearchParams({ range });
-    return apiFetch<MonitoringSourcesResponse>(
-      `/api/v1/projects/${projectId}/environments/${envId}/monitoring/${appId}/sources?${qs.toString()}`
-    );
-  },
-
-  getMetrics: (projectId: string, envId: string, appId: string, range = "1h", source?: string) => {
-    const qs = new URLSearchParams({ range });
-    if (source) qs.set("source", source);
-    return apiFetch<MetricsResponse>(
+    qs.set("range", opts?.range ?? "1h");
+    if (opts?.groupBy) qs.set("groupBy", opts.groupBy);
+    for (const f of opts?.filters ?? []) qs.append("filter", f);
+    return apiFetch<MonitoringMetricsResponse>(
       `/api/v1/projects/${projectId}/environments/${envId}/monitoring/${appId}/metrics?${qs.toString()}`
     );
   },
@@ -686,13 +690,12 @@ export const monitoringApi = {
     projectId: string,
     envId: string,
     appId: string,
-    params: { q?: string; since?: string; size?: number; source?: string }
+    params: { q?: string; since?: string; size?: number }
   ) => {
     const qs = new URLSearchParams();
     if (params.q) qs.set("q", params.q);
     if (params.since) qs.set("since", params.since);
     if (params.size) qs.set("size", String(params.size));
-    if ("source" in params && params.source) qs.set("source", params.source);
     return apiFetch<LogSearchResponse>(
       `/api/v1/projects/${projectId}/environments/${envId}/monitoring/${appId}/logs?${qs.toString()}`
     );

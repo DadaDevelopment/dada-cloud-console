@@ -55,15 +55,6 @@ export const monitoring: Messages = {
     ru: "Используйте OTel SDK с указанным эндпоинтом и ключом, или задайте переменные окружения для инструментирования без кода.",
     en: "Use the OTel SDK with the endpoint and key below, or set env vars for zero-code instrumentation.",
   },
-  "monitoring.step3.deviceContract.title": {
-    ru: "Идентификация устройства",
-    en: "Device identity",
-  },
-  "monitoring.step3.deviceContract.body": {
-    ru: "Каждое устройство — это OpenTelemetry-ресурс. Консоль группирует данные по устройству в таком порядке: service.instance.id → host.name → service.name. Чтобы устройство было отдельной строкой, задайте service.instance.id (уникальный id экземпляра). Имена метрик произвольны — рисуется ровно то, что вы прислали.",
-    en: "Each device is one OpenTelemetry resource. The console groups data per device in this order: service.instance.id → host.name → service.name. To get its own row, set service.instance.id (a unique instance id). Metric names are arbitrary — only what you send is charted.",
-  },
-
   "monitoring.card.createdAt": { ru: "Создано {date}", en: "Created {date}" },
   "monitoring.card.monitoringApp": { ru: "приложение мониторинга", en: "monitoring app" },
 

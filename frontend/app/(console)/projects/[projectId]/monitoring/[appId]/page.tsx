@@ -9,7 +9,6 @@ import type {
   HealthState,
   AlertRule,
   Channel,
-  MonitoringSourcesResponse,
 } from "@/lib/types";
 import { Modal } from "@/components/ui/modal";
 import { Spinner } from "@/components/ui/spinner";
@@ -217,8 +216,6 @@ export default function MonitoringDetailPage() {
 
   const [app, setApp] = useState<MonitoringApp | null>(null);
   const [health, setHealth] = useState<HealthStatus | null>(null);
-  const [sources, setSources] = useState<MonitoringSourcesResponse["sources"]>([]);
-  const [source, setSource] = useState("");
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -233,18 +230,16 @@ export default function MonitoringDetailPage() {
     }
     Promise.all([
       monitoringApi.get(projectId, envId, appId),
-      monitoringApi.getHealth(projectId, envId, appId, source).catch(() => null),
-      monitoringApi.getSources(projectId, envId, appId).catch(() => ({ sources: [] })),
+      monitoringApi.getHealth(projectId, envId, appId).catch(() => null),
     ])
-      .then(([d, h, discovered]) => {
+      .then(([d, h]) => {
         setApp(d.app);
         setHealth(h);
-        setSources(discovered.sources ?? []);
       })
       .catch((err) => setError(err instanceof Error ? err.message : t("monitoring.detail.error.loadApp")))
       .finally(() => setIsLoading(false));
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [projectId, envId, appId, source]);
+  }, [projectId, envId, appId]);
 
   async function openGrafana() {
     setIsGrafanaLoading(true);
@@ -297,29 +292,6 @@ export default function MonitoringDetailPage() {
             <h1 className="font-mono text-2xl font-bold text-gray-900">{app.name}</h1>
             {health && <HealthBadge state={health.state} critical={health.critical} />}
           </div>
-          <div className="mt-3 flex items-center gap-2">
-            <label htmlFor="monitoring-source" className="text-sm text-gray-500">
-              Device
-            </label>
-            <select
-              id="monitoring-source"
-              value={source}
-              onChange={(e) => setSource(e.target.value)}
-              className="rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm text-gray-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-            >
-              <option value="">All devices</option>
-              {sources.map((item) => (
-                <option key={item} value={item}>
-                  {item}
-                </option>
-              ))}
-            </select>
-            {sources.length > 0 && (
-              <span className="text-xs text-gray-400">
-                {sources.length} discovered
-              </span>
-            )}
-          </div>
         </div>
         <button
           onClick={openGrafana}
@@ -363,7 +335,6 @@ export default function MonitoringDetailPage() {
           projectId={projectId}
           envId={envId}
           appId={appId}
-          source={source}
         />
       )}
       {tab === "dashboard" && (
@@ -374,12 +345,12 @@ export default function MonitoringDetailPage() {
         />
       )}
       {tab === "metrics" && (
-        <MetricsPanel kind="monitoring" projectId={projectId} envId={envId} appId={appId} source={source} />
+        <MetricsPanel kind="monitoring" projectId={projectId} envId={envId} appId={appId} />
       )}
       {tab === "logs" && (
         <LogsViewer
           projectId={projectId}
-          monitoring={{ projectId, envId, appId, source }}
+          monitoring={{ projectId, envId, appId }}
         />
       )}
       {tab === "alerts" && (
@@ -400,14 +371,12 @@ function OverviewTab({
   projectId,
   envId,
   appId,
-  source,
 }: {
   app: MonitoringApp;
   health: HealthStatus | null;
   projectId: string;
   envId: string;
   appId: string;
-  source: string;
 }) {
   const { t } = useT();
   return (
@@ -447,11 +416,11 @@ function OverviewTab({
         )}
       </div>
 
-      <MetricsPanel kind="monitoring" projectId={projectId} envId={envId} appId={appId} source={source} />
+      <MetricsPanel kind="monitoring" projectId={projectId} envId={envId} appId={appId} />
 
       <LogsViewer
         projectId={projectId}
-        monitoring={{ projectId, envId, appId, source }}
+        monitoring={{ projectId, envId, appId }}
       />
     </div>
   );
@@ -521,7 +490,7 @@ function AlertsTab({
   // free-text so any not-yet-seen metric can be targeted.
   useEffect(() => {
     monitoringApi
-      .getMetrics(projectId, envId, appId, "24h")
+      .getMetrics(projectId, envId, appId, { range: "24h" })
       .then((d) => setMetricOptions(Object.keys(d.metrics ?? {}).sort()))
       .catch(() => setMetricOptions([]));
   }, [projectId, envId, appId]);

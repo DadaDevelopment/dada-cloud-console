@@ -259,14 +259,6 @@ function OnboardingCard({
             {t("monitoring.step3.body")}
           </p>
           <CodeSnippets apiKey={apiKey ?? "dmon_<your-key>"} />
-          <div className="mt-3 rounded-lg border border-blue-100 bg-blue-50 px-3 py-2.5">
-            <p className="text-xs font-semibold text-blue-900">
-              {t("monitoring.step3.deviceContract.title")}
-            </p>
-            <p className="mt-1 text-xs leading-relaxed text-blue-800">
-              {t("monitoring.step3.deviceContract.body")}
-            </p>
-          </div>
         </Step>
       </div>
     </div>

@@ -263,7 +263,7 @@ func SetupRouter(pool *pgxpool.Pool, cfg *config.Config) *gin.Engine {
 		api.GET(mon+"/:appId", h.GetMonitoringApp)
 		api.DELETE(mon+"/:appId", h.DeleteMonitoringApp)
 		api.GET(mon+"/:appId/health", h.GetMonitoringHealth)
-		api.GET(mon+"/:appId/sources", h.GetMonitoringSources)
+		api.GET(mon+"/:appId/labels", h.GetMonitoringLabels)
 		api.GET(mon+"/:appId/metrics", h.GetMonitoringMetrics)
 		api.GET(mon+"/:appId/logs", h.GetMonitoringLogs)
 		api.GET(mon+"/:appId/grafana-link", h.GetMonitoringGrafanaLink)

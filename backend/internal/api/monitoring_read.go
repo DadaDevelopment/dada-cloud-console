@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -268,12 +269,34 @@ func (h *Handler) computeHealth(ctx context.Context, app *models.MonitoringApp, 
 	return st
 }
 
-// GetMonitoringSources discovers device/source labels present for a monitoring
-// resource in the requested window.
+// labelHideSet are the label keys never exposed as a selectable group-by/filter
+// dimension: tenant-scoping labels (already fixed by the resource), the histogram
+// bucket bound, and the metric name pseudo-label.
+var labelHideSet = map[string]struct{}{
+	"org_id": {}, "project_id": {}, "environment": {},
+	"monitoring_app": {}, "le": {}, "__name__": {},
+}
+
+const (
+	maxLabelKeys      = 40
+	maxLabelValues    = 100
+	maxLabelKeyLen    = 100
+	maxFilterValueLen = 200
+)
+
+// labelKeyPattern validates a PromQL label key supplied as a group-by or filter
+// dimension, rejecting anything that could break out of a matcher position.
+var labelKeyPattern = regexp.MustCompile(`^[a-zA-Z_][a-zA-Z0-9_]*$`)
+
+// GetMonitoringLabels enumerates the metric names and the distinct label
+// key/value pairs currently present for a monitoring resource in the requested
+// window. The UI uses names to discover panels and labels to drive generic
+// group-by and filter scopes. Every label is just an instance dimension; there
+// is no privileged per-instance pivot.
 //
-// @ID          getMonitoringSources
-// @Summary     List monitoring resource devices/sources
-// @Description Discovers source labels currently present for the monitoring resource, so the UI can pivot metrics and logs per device. Read-only. Returns 503 when Prometheus is not configured.
+// @ID          getMonitoringLabels
+// @Summary     List monitoring resource metric names and label dimensions
+// @Description Enumerates metric names and the distinct label key/value pairs present for the monitoring resource, so the UI can drive group-by and filter scopes. Read-only. Returns 503 when Prometheus is not configured.
 // @Tags        monitoring
 // @Produce     json
 // @Security    BearerAuth
@@ -281,16 +304,12 @@ func (h *Handler) computeHealth(ctx context.Context, app *models.MonitoringApp, 
 // @Param       envId     path     string true  "Environment UUID"
 // @Param       appId     path     string true  "Monitoring resource UUID"
 // @Param       range     query    string false "Time range (e.g. 15m, 1h, 6h, 24h)"
-// @Success     200       {object} map[string]interface{} "object with a sources array"
+// @Success     200       {object} map[string]interface{} "object with labels and names"
 // @Failure     401       {object} map[string]string
 // @Failure     404       {object} map[string]string
 // @Failure     503       {object} map[string]string
-// @Router      /projects/{projectId}/environments/{envId}/monitoring/{appId}/sources [get]
-// GetMonitoringSources discovers device/source labels present for this
-// monitoring resource in the requested range. The list is metric-driven: IoT
-// devices that emit arbitrary metrics still surface here because detection keys
-// off the source label rather than a fixed metric allow-list.
-func (h *Handler) GetMonitoringSources(c *gin.Context) {
+// @Router      /projects/{projectId}/environments/{envId}/monitoring/{appId}/labels [get]
+func (h *Handler) GetMonitoringLabels(c *gin.Context) {
 	app, _, _ := h.resolveMonitoringApp(c)
 	if app == nil {
 		return
@@ -305,28 +324,57 @@ func (h *Handler) GetMonitoringSources(c *gin.Context) {
 	labels := monitoringLabels(orgID, app, "")
 	start, end, _ := parseRange(c)
 	window := fmt.Sprintf("%ds", int(end.Sub(start).Seconds()))
-	discover := fmt.Sprintf(`group by (source) (last_over_time(%s[%s]))`, promSelector(labels), window)
+	discover := fmt.Sprintf(`last_over_time(%s[%s])`, promSelector(labels), window)
 
 	samples, err := h.prometheus.QueryInstant(ctx, discover, end)
 	if err != nil {
-		respondError(c, http.StatusBadGateway, "failed to discover sources: "+err.Error())
+		respondError(c, http.StatusBadGateway, "failed to discover labels: "+err.Error())
 		return
 	}
-	seen := map[string]struct{}{}
-	out := make([]string, 0, len(samples))
+
+	nameSeen := map[string]struct{}{}
+	names := []string{}
+	valueSets := map[string]map[string]struct{}{}
 	for _, s := range samples {
-		source := strings.TrimSpace(s.Metric["source"])
-		if source == "" {
-			continue
+		if n := s.Metric["__name__"]; n != "" {
+			if _, ok := nameSeen[n]; !ok {
+				nameSeen[n] = struct{}{}
+				names = append(names, n)
+			}
 		}
-		if _, ok := seen[source]; ok {
-			continue
+		for k, v := range s.Metric {
+			if _, hidden := labelHideSet[k]; hidden {
+				continue
+			}
+			if v == "" {
+				continue
+			}
+			set := valueSets[k]
+			if set == nil {
+				if len(valueSets) >= maxLabelKeys {
+					continue
+				}
+				set = map[string]struct{}{}
+				valueSets[k] = set
+			}
+			if len(set) >= maxLabelValues {
+				continue
+			}
+			set[v] = struct{}{}
 		}
-		seen[source] = struct{}{}
-		out = append(out, source)
 	}
-	sort.Strings(out)
-	c.JSON(http.StatusOK, gin.H{"sources": out})
+
+	out := map[string][]string{}
+	for k, set := range valueSets {
+		vals := make([]string, 0, len(set))
+		for v := range set {
+			vals = append(vals, v)
+		}
+		sort.Strings(vals)
+		out[k] = vals
+	}
+	sort.Strings(names)
+	c.JSON(http.StatusOK, gin.H{"labels": out, "names": names})
 }
 
 // lastSeen returns the most recent metric or log timestamp for the resource, or
@@ -401,21 +449,62 @@ func (h *Handler) errorCount(ctx context.Context, app *models.MonitoringApp, lab
 	return res.Total
 }
 
+// selectorWithMatchers renders a PromQL stream selector from the fixed base
+// labels plus arbitrary exact matchers. base keys are emitted in promSelector's
+// stable order; extra matchers follow, sorted by key, with already-escaped
+// values. Unlike promSelector (which whitelists known keys), this carries
+// user-supplied filter keys through verbatim, so callers MUST validate keys
+// against labelKeyPattern and escape values before passing them here.
+func selectorWithMatchers(base map[string]string, extra map[string]string) string {
+	order := []string{"org_id", "project_id", "monitoring_app", "source"}
+	parts := make([]string, 0, len(order)+len(extra))
+	for _, k := range order {
+		if v, ok := base[k]; ok && v != "" {
+			parts = append(parts, fmt.Sprintf(`%s="%s"`, k, prometheus.EscapeLabelValue(v)))
+		}
+	}
+	keys := make([]string, 0, len(extra))
+	for k := range extra {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		parts = append(parts, fmt.Sprintf(`%s="%s"`, k, extra[k]))
+	}
+	return "{" + strings.Join(parts, ",") + "}"
+}
+
+// isCounterName reports whether a metric name follows the Prometheus cumulative
+// counter / histogram naming convention, so the read path rate()s it instead of
+// rendering the raw monotonically-increasing value.
+func isCounterName(name string) bool {
+	return strings.HasSuffix(name, "_total") ||
+		strings.HasSuffix(name, "_count") ||
+		strings.HasSuffix(name, "_sum") ||
+		strings.HasSuffix(name, "_bucket")
+}
+
 // GetMonitoringMetrics returns native metric panels for the resource. Metric
 // names are discovered from the series labels (label-driven), so custom metrics
-// render with no code change. Each metric is averaged across sources.
+// render with no code change. Cumulative counters are rate()d; other metrics are
+// averaged. An optional groupBy splits each metric into one series per value of
+// that label; optional filter matchers narrow the selected series.
 //
 // @ID          getMonitoringMetrics
 // @Summary     Get monitoring resource metrics
-// @Description Returns native metric panels for the resource. Metric names are discovered from series labels, so custom metrics render with no code change. Read-only. Returns 503 when Prometheus is not configured.
+// @Description Returns native metric panels for the resource. Metric names are discovered from series labels, so custom metrics render with no code change. Counters are rate()d; optional groupBy/filter scope the series. Read-only. Returns 503 when Prometheus is not configured.
 // @Tags        monitoring
 // @Produce     json
 // @Security    BearerAuth
-// @Param       projectId path     string true  "Project UUID"
-// @Param       envId     path     string true  "Environment UUID"
-// @Param       appId     path     string true  "Monitoring resource UUID"
-// @Param       range     query    string false "Time range (e.g. 15m, 1h, 6h, 24h)"
+// @Param       projectId path     string   true  "Project UUID"
+// @Param       envId     path     string   true  "Environment UUID"
+// @Param       appId     path     string   true  "Monitoring resource UUID"
+// @Param       range     query    string   false "Time range (e.g. 15m, 1h, 6h, 24h)"
+// @Param       groupBy   query    string   false "Label key to split series by"
+// @Param       filter    query    []string false "Repeatable key=value exact matchers"
+// @Param       rate      query    string   false "Counter handling: on|off|auto (default auto)"
 // @Success     200       {object} map[string]interface{} "metrics by name"
+// @Failure     400       {object} map[string]string
 // @Failure     401       {object} map[string]string
 // @Failure     404       {object} map[string]string
 // @Failure     503       {object} map[string]string
@@ -430,13 +519,38 @@ func (h *Handler) GetMonitoringMetrics(c *gin.Context) {
 		return
 	}
 	ctx := c.Request.Context()
-	source, ok := monitoringSourceFromQuery(c)
-	if !ok {
+
+	groupBy := strings.TrimSpace(c.Query("groupBy"))
+	if groupBy != "" && (len(groupBy) > maxLabelKeyLen || !labelKeyPattern.MatchString(groupBy)) {
+		respondError(c, http.StatusBadRequest, "invalid groupBy")
 		return
 	}
+
+	filters := map[string]string{}
+	for _, raw := range c.QueryArray("filter") {
+		eq := strings.IndexByte(raw, '=')
+		if eq <= 0 {
+			continue
+		}
+		key := strings.TrimSpace(raw[:eq])
+		val := raw[eq+1:]
+		if len(key) > maxLabelKeyLen || !labelKeyPattern.MatchString(key) {
+			continue
+		}
+		if len(val) > maxFilterValueLen {
+			continue
+		}
+		filters[key] = prometheus.EscapeLabelValue(val)
+	}
+
+	rateMode := strings.TrimSpace(c.Query("rate"))
+	if rateMode != "on" && rateMode != "off" {
+		rateMode = "auto"
+	}
+
 	orgID := h.monitoringOrgLabel(ctx, app.ProjectID)
-	labels := monitoringLabels(orgID, app, source)
-	sel := promSelector(labels)
+	labels := monitoringLabels(orgID, app, "")
+	sel := selectorWithMatchers(labels, filters)
 
 	start, end, step := parseRange(c)
 
@@ -454,24 +568,72 @@ func (h *Handler) GetMonitoringMetrics(c *gin.Context) {
 		}
 	}
 
+	rateWindow := 4 * step
+	if rateWindow < 60*time.Second {
+		rateWindow = 60 * time.Second
+	}
+	rw := fmt.Sprintf("%ds", int(rateWindow.Seconds()))
+
 	metrics := gin.H{}
 	var liveErr string
 	for _, name := range names {
-		expr := fmt.Sprintf("avg(%s%s)", name, sel)
-		series, err := h.prometheus.QueryRange(ctx, expr, start, end, step)
+		counter := isCounterName(name)
+		switch rateMode {
+		case "on":
+			counter = true
+		case "off":
+			counter = false
+		}
+
+		var inner string
+		if counter {
+			inner = fmt.Sprintf("rate(%s%s[%s])", name, sel, rw)
+		} else {
+			inner = fmt.Sprintf("%s%s", name, sel)
+		}
+
+		var expr string
+		switch {
+		case groupBy != "" && counter:
+			expr = fmt.Sprintf("sum by (%s) (%s)", groupBy, inner)
+		case groupBy != "":
+			expr = fmt.Sprintf("avg by (%s) (%s)", groupBy, inner)
+		case counter:
+			expr = fmt.Sprintf("sum(%s)", inner)
+		default:
+			expr = fmt.Sprintf("avg(%s)", inner)
+		}
+
+		result, err := h.prometheus.QueryRange(ctx, expr, start, end, step)
 		if err != nil {
 			if liveErr == "" {
 				liveErr = err.Error()
 			}
 			continue
 		}
-		points := []prometheus.Point{}
-		if len(series) > 0 {
-			points = series[0].Points
+		series := make([]gin.H, 0, len(result))
+		for _, s := range result {
+			label := ""
+			if groupBy != "" {
+				label = s.Metric[groupBy]
+			}
+			series = append(series, gin.H{"label": label, "points": s.Points})
 		}
-		metrics[name] = gin.H{"unit": "", "series": points}
+		sort.Slice(series, func(i, j int) bool {
+			return series[i]["label"].(string) < series[j]["label"].(string)
+		})
+		kind := "gauge"
+		if counter {
+			kind = "counter"
+		}
+		metrics[name] = gin.H{"unit": "", "kind": kind, "series": series}
 	}
-	resp := gin.H{"range": end.Sub(start).String(), "step": step.String(), "metrics": metrics}
+	resp := gin.H{
+		"range":   end.Sub(start).String(),
+		"step":    step.String(),
+		"groupBy": groupBy,
+		"metrics": metrics,
+	}
 	if liveErr != "" {
 		resp["live_error"] = liveErr
 	}

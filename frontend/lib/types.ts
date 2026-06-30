@@ -117,16 +117,38 @@ export interface MetricPoint {
   v: number;
 }
 
-export interface MetricSeries {
-  unit: string;
-  series: MetricPoint[];
-}
-
 export interface MetricsResponse {
   range: string;
   step: string;
-  metrics: Record<string, MetricSeries>;
+  metrics: Record<string, { unit: string; series: MetricPoint[] }>;
   live_error?: string;
+}
+
+// Native monitoring metrics carry one or more labelled series per metric name
+// (group-by/filter aware) and a counter/gauge kind so the chart can render
+// rate()d counters correctly.
+export interface MetricSeries {
+  label: string;
+  points: MetricPoint[];
+}
+
+export interface MonitoringMetricSpec {
+  unit: string;
+  kind?: "counter" | "gauge";
+  series: MetricSeries[];
+}
+
+export interface MonitoringMetricsResponse {
+  range: string;
+  step: string;
+  groupBy?: string;
+  metrics: Record<string, MonitoringMetricSpec>;
+  live_error?: string;
+}
+
+export interface MonitoringLabelsResponse {
+  labels: Record<string, string[]>;
+  names: string[];
 }
 
 // Aggregated logs (Elasticsearch/filebeat proxy) -----------------------------
@@ -675,10 +697,6 @@ export interface Channel {
   name: string;
   type: "telegram" | "email" | "webhook";
   created_at: string;
-}
-
-export interface MonitoringSourcesResponse {
-  sources: string[];
 }
 
 export interface CloudTaskArtifact {

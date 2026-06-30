@@ -20,7 +20,7 @@ export function LogsViewer({
   projectId: string;
   vm?: string;
   app?: string;
-  monitoring?: { projectId: string; envId: string; appId: string; source?: string };
+  monitoring?: { projectId: string; envId: string; appId: string };
 }) {
   const { t } = useT();
   const [query, setQuery] = useState("");
@@ -45,7 +45,6 @@ export function LogsViewer({
             q,
             since: effectiveSince,
             size: 300,
-            source: monitoring.source,
           });
         } else {
           r = await logsApi.search(projectId, { vm, app, q, since: effectiveSince, size: 300 });
@@ -64,6 +63,7 @@ export function LogsViewer({
   );
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     void load(query);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [load]);
