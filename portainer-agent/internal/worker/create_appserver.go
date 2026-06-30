@@ -133,15 +133,10 @@ func (w *VMWatcher) doCreateAppServer(ctx context.Context, op db.Operation) erro
 // a Portainer edge endpoint, then SSHes in to install Docker + the Edge Agent.
 // Mirrors doCreateAppServer minus the Terraform provisioning steps.
 //
-// The SSH private key is one-shot — it is scrubbed from operations.payload once
-// the operation reaches a terminal state (success or failure).
+// The SSH private key is scrubbed from operations.payload only once the operation
+// SUCCEEDS. On failure the key is retained so RetryOperation can re-run the enroll
+// without forcing the operator to re-paste it.
 func (w *VMWatcher) doCreateManualAppServer(ctx context.Context, op db.Operation, p createAppServerPayload) error {
-	defer func() {
-		if err := db.ScrubOperationSecret(context.Background(), w.pool, op.ID, "ssh_private_key"); err != nil {
-			log.Warn().Err(err).Str("op", op.ID.String()).Msg("failed to scrub ssh key from payload")
-		}
-	}()
-
 	if p.VMIP == "" || p.SSHPrivateKey == "" {
 		return fmt.Errorf("manual app server requires vm_ip and ssh_private_key")
 	}
@@ -209,6 +204,10 @@ func (w *VMWatcher) doCreateManualAppServer(ctx context.Context, op db.Operation
 	}
 	if err := db.MarkReady(ctx, w.pool, op.ID); err != nil {
 		return fmt.Errorf("mark operation ready: %w", err)
+	}
+
+	if err := db.ScrubOperationSecret(context.Background(), w.pool, op.ID, "ssh_private_key"); err != nil {
+		log.Warn().Err(err).Str("op", op.ID.String()).Msg("failed to scrub ssh key from payload")
 	}
 
 	log.Info().Str("server", p.Name).Int("portainer_id", ep.ID).Msg("manual AppServer ready")

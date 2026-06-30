@@ -56,4 +56,10 @@ export const appServers: Messages = {
   "appServers.detail.portainer": { ru: "Portainer", en: "Portainer" },
   "appServers.detail.online": { ru: "онлайн", en: "online" },
   "appServers.detail.offline": { ru: "офлайн", en: "offline" },
+
+  "appServers.retry.button": { ru: "Повторить подключение", en: "Retry connect" },
+  "appServers.retry.title": { ru: "Повторить подключение AppServer", en: "Retry AppServer connect" },
+  "appServers.retry.submit": { ru: "Повторить", en: "Retry" },
+  "appServers.retry.help": { ru: "Подключение завершилось ошибкой. Вставьте SSH-ключ ещё раз, чтобы повторить — он используется однократно и не сохраняется.", en: "The connect failed. Paste the SSH key again to retry — it is used once and not stored." },
+  "appServers.error.retry": { ru: "Не удалось повторить подключение", en: "Failed to retry connect" },
 };

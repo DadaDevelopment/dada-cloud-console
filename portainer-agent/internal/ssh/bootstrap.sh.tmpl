@@ -61,6 +61,7 @@ docker rm -f node_exporter 2>/dev/null || true
 _i=0; while docker inspect node_exporter >/dev/null 2>&1 && [ $_i -lt 30 ]; do sleep 2; _i=$((_i+1)); done
 docker run -d \
   --name node_exporter --restart unless-stopped \
+  --log-driver none \
   --net host --pid host \
   -v /:/host:ro,rslave \
   quay.io/prometheus/node-exporter:v1.8.2 \
@@ -75,6 +76,7 @@ docker rm -f cadvisor 2>/dev/null || true
 _i=0; while docker inspect cadvisor >/dev/null 2>&1 && [ $_i -lt 45 ]; do sleep 2; _i=$((_i+1)); done
 docker run -d \
   --name cadvisor --restart unless-stopped \
+  --log-driver none \
   -v /:/rootfs:ro -v /var/run:/var/run:ro \
   -v /sys:/sys:ro -v /var/lib/docker/:/var/lib/docker:ro \
   -p ${CADVISOR_PORT}:8080 gcr.io/cadvisor/cadvisor:v0.49.1
@@ -111,6 +113,7 @@ docker rm -f prometheus-agent 2>/dev/null || true
 chown -R 65534:65534 /var/lib/prometheus-agent 2>/dev/null || true
 docker run -d \
   --name prometheus-agent --restart unless-stopped \
+  --log-driver none \
   -v /etc/prometheus-agent/prometheus.yml:/etc/prometheus/prometheus.yml:ro \
   -v /var/lib/prometheus-agent:/prometheus \
   --network host \
@@ -123,7 +126,16 @@ echo "[bootstrap] Prometheus Agent started (remote_write to {{.PrometheusRemoteW
 echo "[bootstrap] No public Prometheus remote_write endpoint configured — skipping node_exporter/cAdvisor/prometheus-agent"
 {{end}}
 {{if .ElasticsearchURL}}
-# ── Filebeat 8.13.4 → Elasticsearch ─────────────────────────────────────────
+# ── Filebeat 8.17.3 → Elasticsearch ─────────────────────────────────────────
+# Only APPLICATION container logs reach Elasticsearch. The platform's own
+# observability sidecars (node_exporter/cadvisor/prometheus-agent/filebeat/edge
+# agent) are silenced at the source via `--log-driver none`, so they never write
+# a json log file and filebeat never sees them — this is what keeps the console
+# log view free of infra noise. We deliberately do NOT rely on
+# add_docker_metadata to filter by container name: filebeat's `container` input
+# mis-parses container.id on this Docker build (it keeps the `-json.log` suffix),
+# so docker-API enrichment never matches. Source-level silencing is robust
+# regardless of that.
 mkdir -p /etc/filebeat
 cat > /etc/filebeat/filebeat.yml << FBEOF
 filebeat.inputs:
@@ -139,15 +151,13 @@ filebeat.inputs:
     fields:
       vm_name: "{{.ServerName}}"
     processors:
-      - add_docker_metadata:
-          host: "unix:///var/run/docker.sock"
       - drop_fields:
           fields: ["agent", "ecs"]
           ignore_missing: true
 output.elasticsearch:
   hosts: ["{{.ElasticsearchURL}}"]
   api_key: "{{.ElasticsearchAPIKey}}"
-  index: "dada-vm-logs-%{[container.labels.dada_io_app]:unknown}-%{+yyyy.MM.dd}"
+  index: "dada-vm-logs-{{.ServerName}}-%{+yyyy.MM.dd}"
 setup.ilm.enabled: false
 setup.template.enabled: false
 logging.level: warning
@@ -156,10 +166,11 @@ FBEOF
 docker rm -f filebeat 2>/dev/null || true
 docker run -d \
   --name filebeat --restart unless-stopped --user root \
+  --log-driver none \
   -v /etc/filebeat/filebeat.yml:/usr/share/filebeat/filebeat.yml:ro \
   -v /var/lib/docker/containers:/var/lib/docker/containers:ro \
   -v /var/run/docker.sock:/var/run/docker.sock:ro \
-  docker.elastic.co/beats/filebeat:8.13.4
+  docker.elastic.co/beats/filebeat:8.17.3
 echo "[bootstrap] Filebeat started"
 {{else}}
 echo "[bootstrap] No public Elasticsearch endpoint configured — skipping filebeat"
@@ -171,6 +182,7 @@ set -e
 docker rm -f portainer_edge_agent 2>/dev/null || true
 docker run -d \
   --name portainer_edge_agent --restart=always \
+  --log-driver none \
   -v /var/run/docker.sock:/var/run/docker.sock \
   -v /var/lib/docker/volumes:/var/lib/docker/volumes \
   -v /:/host -v portainer_agent_data:/data \
