@@ -62,16 +62,23 @@ fragile dependency, and matches the user's fallback branch. Do NOT touch grafana
 - [ ] Verify native dashboard renders instantly with dynamics + scopes.
 
 ### Wave 3 — Retention configurable (15d) — goal 2
-EXACT targets (argo-infra kube-prometheus-stack values.yaml,
-clusters/beget-prod/projects/platform/environments/prod/apps/kube-prometheus-stack/values.yaml):
-- [ ] line 5023 `retention: 7d` → `15d`
-- [ ] line 5027 `retentionSize: "5GiB"` → `"10GiB"`
-- [ ] line 5148 PVC `storage: 8Gi` → `16Gi` (longhorn-cache; expansion may be blocked — verify at apply)
-- [ ] update comment block 5134-5140 wording (7d → 15d)
-- [ ] ES ILM 15d — locate ILM policy (elasticsearch-infra), set rollover/delete 15d
-- NOTE: retention is a HELM VALUE = configurable knob (satisfies "настраиваемый"). Per-tenant
-  retention NOT feasible on shared single-tenant Prometheus — global 15d, documented honestly.
-- APPLY batched with Grafana infra change (both gitops→prod), AFTER Wave 1 verified.
+TOPOLOGY VERIFIED 2026-06-30 (not assumed). Full writeup: docs/runbooks/telemetry-retention.md.
+- USER metrics + INFRA-pod metrics share ONE Prometheus (`monitoring-stack-prometheus`, the
+  kube-prometheus-stack instance, `fullnameOverride: monitoring-stack`). It is the ONLY one with
+  `enableRemoteWriteReceiver: true`. Gateway remote-write + external VM agents both land here.
+  → Prometheus has ONE global retention; per-store / per-tenant split NOT possible without a 2nd
+    TSDB (longhorn-gated proposal, NOT applied). Honest global-for-user-store 15d is the target.
+- USER logs `dada-app-logs-*` separate cleanly via per-index ES ILM (logs CAN split; metrics can't).
+
+DONE (argo-infra, branch console-migration):
+- [x] kube-prometheus-stack values.yaml `retention: 7d` → `15d` (the gitops knob).
+- [x] retentionSize LEFT `"5GiB"` as safety cap; PVC LEFT `8Gi` → NO longhorn resize. Effective
+      retention = min(15d, 5GiB). Side-effect on infra retention is bounded by the disk cap and
+      documented loudly in the values comment (NOT silent).
+- [x] ES ILM 15d for `dada-app-logs-*`: new app `dada-app-logs-ilm` (local chart) — bootstrap Job
+      PUTs ILM policy `dada-app-logs-policy` (delete @ retentionDays, default 15) + index template.
+      `retentionDays` is the gitops knob. dada-vm-logs-* / filebeat-* untouched (separation kept).
+- helm template + helm lint + yaml parse green. Auto-syncs via tenant-apps ApplicationSet on push.
 
 ### Wave 4 — Onboarding/setup polish — goal 1
 - [ ] Review monitoring onboarding page; tighten copy + copy-paste snippet; remove device
@@ -90,5 +97,23 @@ clusters/beget-prod/projects/platform/environments/prod/apps/kube-prometheus-sta
 - Wave 2 DONE (commit 42af9f5, pushed). Grafana iframe tab removed (kills "Unable to find
   application file" + 10s wait). Native dashboard = Overview+Metrics (instant). Grafana via
   header deep link. Dead i18n cleaned. Verified: tsc, eslint green.
-- Wave 3 STAGED, NOT applied — prod gitops infra + risky longhorn PVC resize → gated on user.
-- Wave 4 in progress (onboarding polish).
+- Wave 4 DONE (commit 58eea73, pushed). Ingest root-fix: monotonic OTLP sums get _total
+  (CounterMetricName) so ANY custom counter is rate()d — fixes the exact test_counter flat-line
+  case. Onboarding curl demo now climbs (date +%s) and shows real dynamics; all device wording
+  gone from snippets. Verified: go build, telemetry tests, tsc, eslint green.
+- Wave 3 retention: SAFE path chosen = bump time retention 7d→15d ONLY, leave retentionSize
+  5GiB + PVC 8Gi (NO longhorn resize). Prometheus keeps min(15d, 5GiB). Reversible. GATED:
+  argo-infra = prod gitops, awaiting user go-ahead.
+- Wave 5 verification: needs the new console image deployed (CI builds; deploy = manual tag
+  pin in argo-infra). Live counter-dynamics check pending deploy. GATED on prod-deploy decision.
+
+- CI: build #249 (58eea73) FAILED — TestOpenAPICoverage: /labels route not in generated
+  swagger spec (annotations present, embedded docs stale). MINE, owned. Fixed by regenerating
+  internal/api/docs/swagger.json (commit 13d5f5c). Full `go test ./...` green locally. Awaiting
+  CI rebuild confirmation.
+- Retention: delegated to Claude chip task (task_1bfaf5b2) — user clarified user-pushed cloud
+  telemetry retention is a SEPARATE store from cluster-pod scrape; make it gitops-configurable.
+- Deploy: "пуш сам всё сделает" (auto-deploy on push) — no manual tag pin needed.
+
+## Status: code waves shipped (main: d30438c, 42af9f5, 58eea73, +CI fix 13d5f5c).
+Live dynamics verification follows auto-deploy. Retention separated into its own chip task.
