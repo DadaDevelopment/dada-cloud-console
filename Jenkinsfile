@@ -46,7 +46,12 @@ def podLabel  = "kubeagent-${env.JOB_BASE_NAME ?: 'job'}-${env.BUILD_NUMBER ?: '
         .toLowerCase()
 def agentName = "kubeagent-${env.JOB_BASE_NAME}-${env.BUILD_NUMBER}-${UUID.randomUUID().toString().take(6)}"
 
-properties([disableConcurrentBuilds(abortPrevious: true)])
+// disableConcurrentBuilds WITHOUT abortPrevious: queue concurrent main pushes
+// behind the running build instead of aborting it. abortPrevious starved the
+// deploy — when main is pushed more often than a build takes (~11 min), every
+// build was superseded (NOT_BUILT) before its GitOps write-back ran, so nothing
+// ever deployed. Queueing lets each build finish + write back its tag in order.
+properties([disableConcurrentBuilds()])
 
 podTemplate(
         cloud: 'self-managed',
