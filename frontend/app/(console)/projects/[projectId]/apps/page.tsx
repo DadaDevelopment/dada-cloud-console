@@ -111,8 +111,8 @@ export default function AppsPage() {
               { label: t("nav.apps") },
             ]}
           />
-          <h1 className="mt-2 text-2xl font-bold text-gray-900">{t("apps.title")}</h1>
-          <p className="mt-0.5 text-sm text-gray-500">{t("apps.subtitle")}</p>
+          <h1 className="mt-2 text-2xl font-bold text-gray-900 dark:text-gray-100">{t("apps.title")}</h1>
+          <p className="mt-0.5 text-sm text-gray-500 dark:text-gray-400">{t("apps.subtitle")}</p>
         </div>
         {canCreate && (
         <div className="flex items-center gap-2">
@@ -133,7 +133,7 @@ export default function AppsPage() {
           <button
             onClick={() => setIsModalOpen(true)}
             disabled={!selectedEnvId || isVMEnvironment}
-            className="inline-flex items-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 transition-colors"
+            className="inline-flex items-center gap-2 rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 transition-colors"
           >
             {t("apps.deployImage")}
           </button>
@@ -142,13 +142,13 @@ export default function AppsPage() {
       </div>
 
       {error && (
-        <div className="mb-6 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+        <div className="mb-6 rounded-lg border border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-950/40 px-4 py-3 text-sm text-red-700 dark:text-red-300">
           {error}
         </div>
       )}
 
       {isVMEnvironment && (
-        <div className="mb-6 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+        <div className="mb-6 rounded-lg border border-amber-200 dark:border-amber-900 bg-amber-50 dark:bg-amber-950/40 px-4 py-3 text-sm text-amber-800 dark:text-amber-300">
           {t("apps.vmWarning")}
           <Link href={`/projects/${projectId}/app-servers`} className="ml-1 font-medium underline">
             {t("apps.vmWarning.manageAppServers")}
@@ -184,21 +184,21 @@ export default function AppsPage() {
               <Link
                 key={app.id}
                 href={`/projects/${projectId}/apps/${app.name}?envId=${selectedEnvId}`}
-                className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm hover:border-blue-200 hover:shadow-md transition-all"
+                className="rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-5 shadow-sm hover:border-blue-200 hover:shadow-md transition-all"
               >
                 <div className="mb-3 flex items-start justify-between">
                   <div className="min-w-0 flex-1">
-                    <p className="font-mono text-sm font-semibold text-gray-900">{app.name}</p>
-                    <p className="mt-0.5 font-mono text-xs text-gray-400 truncate">{summary.image ?? "—"}</p>
+                    <p className="font-mono text-sm font-semibold text-gray-900 dark:text-gray-100">{app.name}</p>
+                    <p className="mt-0.5 font-mono text-xs text-gray-400 dark:text-gray-500 truncate">{summary.image ?? "—"}</p>
                   </div>
                   <PhaseBadge phase={app.phase} />
                 </div>
-                <div className="flex items-center gap-3 text-xs text-gray-400">
+                <div className="flex items-center gap-3 text-xs text-gray-400 dark:text-gray-500">
                   <span>{summary.profile ?? "small"}</span>
                   <span>·</span>
                   <span>{t("apps.card.replicas", { count: String(summary.replicas ?? 2) })}</span>
                 </div>
-                <p className="mt-2 text-xs text-gray-400">
+                <p className="mt-2 text-xs text-gray-400 dark:text-gray-500">
                   {t("apps.card.synced", { ago: timeAgo(app.last_synced_at) })}
                 </p>
                 <MetricSparkline projectId={projectId} envId={selectedEnvId} appName={app.name} />
@@ -218,7 +218,7 @@ export default function AppsPage() {
       >
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <label className="block text-sm font-medium text-gray-700">
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-200">
               {t("apps.modal.create.name.label")}
             </label>
             <input
@@ -229,25 +229,25 @@ export default function AppsPage() {
               placeholder="my-service"
               pattern="[a-z0-9-]+"
               title={t("apps.modal.create.name.title")}
-              className="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              className="mt-1 block w-full rounded-lg border border-gray-300 dark:border-gray-700 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
             />
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700">{t("apps.modal.create.image.label")}</label>
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-200">{t("apps.modal.create.image.label")}</label>
             <input
               type="text"
               required
               value={form.image}
               onChange={(e) => handleFormChange("image", e.target.value)}
               placeholder="ghcr.io/org/service:v1.0.0"
-              className="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm font-mono text-gray-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              className="mt-1 block w-full rounded-lg border border-gray-300 dark:border-gray-700 px-3 py-2 text-sm font-mono text-gray-900 dark:text-gray-100 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
             />
           </div>
 
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="block text-sm font-medium text-gray-700">{t("apps.modal.create.port.label")}</label>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-200">{t("apps.modal.create.port.label")}</label>
               <input
                 type="number"
                 required
@@ -255,11 +255,11 @@ export default function AppsPage() {
                 max={65535}
                 value={form.port}
                 onChange={(e) => handleFormChange("port", parseInt(e.target.value, 10))}
-                className="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                className="mt-1 block w-full rounded-lg border border-gray-300 dark:border-gray-700 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
               />
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700">{t("apps.modal.create.replicas.label")}</label>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-200">{t("apps.modal.create.replicas.label")}</label>
               <input
                 type="number"
                 required
@@ -267,17 +267,17 @@ export default function AppsPage() {
                 max={10}
                 value={form.replicas}
                 onChange={(e) => handleFormChange("replicas", parseInt(e.target.value, 10) || 1)}
-                className="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                className="mt-1 block w-full rounded-lg border border-gray-300 dark:border-gray-700 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
               />
             </div>
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700">{t("apps.modal.create.profile.label")}</label>
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-200">{t("apps.modal.create.profile.label")}</label>
             <select
               value={form.profile}
               onChange={(e) => handleFormChange("profile", e.target.value)}
-              className="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              className="mt-1 block w-full rounded-lg border border-gray-300 dark:border-gray-700 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
             >
               <option value="small">small</option>
               <option value="medium">medium</option>
@@ -286,7 +286,7 @@ export default function AppsPage() {
           </div>
 
           {submitError && (
-            <div role="alert" className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+            <div role="alert" className="rounded-lg border border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-950/40 px-4 py-3 text-sm text-red-700 dark:text-red-300">
               {submitError}
             </div>
           )}
@@ -298,7 +298,7 @@ export default function AppsPage() {
                 setIsModalOpen(false);
                 setSubmitError(null);
               }}
-              className="rounded-lg px-4 py-2 text-sm font-medium text-gray-600 hover:bg-gray-100 transition-colors"
+              className="rounded-lg px-4 py-2 text-sm font-medium text-gray-600 dark:text-gray-400 hover:bg-gray-100 transition-colors"
             >
               {t("common.cancel")}
             </button>

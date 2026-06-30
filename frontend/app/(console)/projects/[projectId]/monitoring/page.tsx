@@ -156,7 +156,7 @@ function CodeSnippets({ apiKey }: { apiKey: string }) {
 
   return (
     <div>
-      <div className="flex gap-1 border-b border-gray-200 mb-0">
+      <div className="flex gap-1 border-b border-gray-200 dark:border-gray-800 mb-0">
         {SNIPPET_TABS.map((tab) => (
           <button
             key={tab.key}
@@ -164,15 +164,15 @@ function CodeSnippets({ apiKey }: { apiKey: string }) {
             onClick={() => setActiveTab(tab.key)}
             className={`px-3 py-1.5 text-xs font-medium rounded-t-md border-b-2 transition-colors ${
               activeTab === tab.key
-                ? "border-blue-600 text-blue-600 bg-white"
-                : "border-transparent text-gray-500 hover:text-gray-700 hover:bg-gray-50"
+                ? "border-blue-600 text-blue-600 bg-white dark:bg-gray-900"
+                : "border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800"
             }`}
           >
             {tab.label}
           </button>
         ))}
       </div>
-      <div className="relative rounded-b-lg rounded-tr-lg bg-gray-900 border border-t-0 border-gray-200">
+      <div className="relative rounded-b-lg rounded-tr-lg bg-gray-900 border border-t-0 border-gray-200 dark:border-gray-800">
         <div className="absolute top-2 right-2 z-10">
           <CopyButton value={snippet} label={t("common.copy")} className="bg-gray-700 border-gray-600 text-gray-300 hover:bg-gray-600" />
         </div>
@@ -204,11 +204,11 @@ function OnboardingCard({
   );
 
   return (
-    <div className="rounded-xl border border-blue-100 bg-white shadow-sm overflow-hidden">
-      <div className="flex items-center justify-between px-5 py-3 border-b border-gray-100 bg-gray-50">
+    <div className="rounded-xl border border-blue-100 dark:border-blue-900 bg-white dark:bg-gray-900 shadow-sm overflow-hidden">
+      <div className="flex items-center justify-between px-5 py-3 border-b border-gray-100 dark:border-gray-800 bg-gray-50 dark:bg-gray-900">
         <div className="flex items-center gap-2">
-          <span className="font-mono text-sm font-semibold text-gray-900">{app.name}</span>
-          <span className="text-xs text-gray-400">{t("monitoring.status.readyToReceive")}</span>
+          <span className="font-mono text-sm font-semibold text-gray-900 dark:text-gray-100">{app.name}</span>
+          <span className="text-xs text-gray-400 dark:text-gray-500">{t("monitoring.status.readyToReceive")}</span>
         </div>
         {loading ? (
           <StateChip tone="neutral" dot>{t("monitoring.status.checking")}</StateChip>
@@ -230,7 +230,7 @@ function OnboardingCard({
           {apiKey ? (
             <div className="space-y-2">
               <div className="flex items-start gap-2">
-                <pre className="flex-1 overflow-x-auto rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5 font-mono text-sm text-amber-900 break-all whitespace-pre-wrap">
+                <pre className="flex-1 overflow-x-auto rounded-lg border border-amber-200 dark:border-amber-900 bg-amber-50 dark:bg-amber-950/40 px-3 py-2.5 font-mono text-sm text-amber-900 dark:text-amber-100 break-all whitespace-pre-wrap">
                   {apiKey}
                 </pre>
                 <CopyButton value={apiKey} label={t("common.copy")} />

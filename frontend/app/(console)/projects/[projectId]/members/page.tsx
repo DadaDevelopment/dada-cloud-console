@@ -19,7 +19,7 @@ const ROLES: MemberRole[] = ["Owner", "Admin", "Developer", "ReadOnly"];
 function RolePill({ role }: { role: MemberRole }) {
   const { t } = useT();
   return (
-    <span className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium ${roleColors[role] ?? "bg-gray-100 text-gray-600"}`}>
+    <span className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium ${roleColors[role] ?? "bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400"}`}>
       {t(`roles.${role}`)}
     </span>
   );

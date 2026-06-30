@@ -61,10 +61,10 @@ export function AccountMenu() {
       </button>
 
       {open && (
-        <div role="menu" className="absolute right-0 z-50 mt-2 w-64 overflow-hidden rounded-xl border border-gray-200 bg-white shadow-2xl">
-          <div className="border-b border-gray-100 px-4 py-3">
-            <p className="truncate text-sm font-semibold text-gray-900">{name}</p>
-            {user?.email && <p className="truncate text-xs text-gray-400">{user.email}</p>}
+        <div role="menu" className="absolute right-0 z-50 mt-2 w-64 overflow-hidden rounded-xl border border-gray-200 bg-white shadow-2xl dark:border-gray-800 dark:bg-gray-900">
+          <div className="border-b border-gray-100 px-4 py-3 dark:border-gray-800">
+            <p className="truncate text-sm font-semibold text-gray-900 dark:text-gray-100">{name}</p>
+            {user?.email && <p className="truncate text-xs text-gray-400 dark:text-gray-500">{user.email}</p>}
             {role && (
               <span className={`mt-2 inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${roleColors[role]}`}>
                 {t(`roles.${role}`)}
@@ -72,20 +72,20 @@ export function AccountMenu() {
             )}
           </div>
           <div className="py-1">
-            <Link role="menuitem" href="/ai-studio" onClick={() => setOpen(false)} className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">
+            <Link role="menuitem" href="/ai-studio" onClick={() => setOpen(false)} className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 dark:text-gray-200 dark:hover:bg-gray-800">
               AI Studio
             </Link>
             {showApprovals && (
-              <Link role="menuitem" href="/admin/approvals" onClick={() => setOpen(false)} className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">
+              <Link role="menuitem" href="/admin/approvals" onClick={() => setOpen(false)} className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 dark:text-gray-200 dark:hover:bg-gray-800">
                 {t("shell.account.approvals")}
               </Link>
             )}
           </div>
-          <div className="border-t border-gray-100 py-1">
+          <div className="border-t border-gray-100 py-1 dark:border-gray-800">
             <button
               role="menuitem"
               onClick={handleLogout}
-              className="block w-full px-4 py-2 text-left text-sm text-red-600 hover:bg-red-50"
+              className="block w-full px-4 py-2 text-left text-sm text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950/40"
             >
               {t("shell.account.signOut")}
             </button>

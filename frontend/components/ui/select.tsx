@@ -15,14 +15,14 @@ export const SelectTrigger = React.forwardRef<
   <SelectPrimitive.Trigger
     ref={ref}
     className={cn(
-      "inline-flex h-8 items-center justify-between gap-1.5 rounded-lg border border-gray-200 bg-white px-2.5 text-xs font-medium text-gray-700 shadow-sm outline-none transition-colors hover:border-gray-300 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 disabled:cursor-not-allowed disabled:opacity-50 data-[placeholder]:text-gray-400",
+      "inline-flex h-8 items-center justify-between gap-1.5 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-2.5 text-xs font-medium text-gray-700 dark:text-gray-200 shadow-sm outline-none transition-colors hover:border-gray-300 dark:hover:border-gray-600 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 disabled:cursor-not-allowed disabled:opacity-50 data-[placeholder]:text-gray-400 dark:data-[placeholder]:text-gray-500",
       className,
     )}
     {...props}
   >
     {children}
     <SelectPrimitive.Icon asChild>
-      <ChevronDown className="h-3.5 w-3.5 text-gray-400" />
+      <ChevronDown className="h-3.5 w-3.5 text-gray-400 dark:text-gray-500" />
     </SelectPrimitive.Icon>
   </SelectPrimitive.Trigger>
 ));
@@ -37,7 +37,7 @@ export const SelectContent = React.forwardRef<
       ref={ref}
       position={position}
       className={cn(
-        "z-50 max-h-72 min-w-[8rem] overflow-hidden rounded-xl border border-gray-200 bg-white text-sm text-gray-800 shadow-xl",
+        "z-50 max-h-72 min-w-[8rem] overflow-hidden rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 text-sm text-gray-800 dark:text-gray-200 shadow-xl",
         "data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95",
         className,
       )}
@@ -58,7 +58,7 @@ export const SelectItem = React.forwardRef<
   <SelectPrimitive.Item
     ref={ref}
     className={cn(
-      "relative flex cursor-pointer select-none items-center rounded-lg py-1.5 pl-7 pr-2.5 text-sm outline-none transition-colors focus:bg-gray-100 data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
+      "relative flex cursor-pointer select-none items-center rounded-lg py-1.5 pl-7 pr-2.5 text-sm outline-none transition-colors focus:bg-gray-100 dark:focus:bg-gray-800 data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
       className,
     )}
     {...props}
@@ -74,7 +74,7 @@ export const SelectItem = React.forwardRef<
 SelectItem.displayName = "SelectItem";
 
 export const SelectLabel = ({ children }: { children: React.ReactNode }) => (
-  <SelectPrimitive.Label className="px-2.5 py-1.5 text-xs font-semibold uppercase tracking-wide text-gray-400">
+  <SelectPrimitive.Label className="px-2.5 py-1.5 text-xs font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500">
     {children}
   </SelectPrimitive.Label>
 );

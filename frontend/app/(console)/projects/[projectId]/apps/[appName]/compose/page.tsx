@@ -121,12 +121,12 @@ function ComposeFilePane({
   }, [saving, dirty]);
 
   return (
-    <div className="flex flex-col rounded-xl border border-gray-200 bg-white">
-      <div className="flex items-center justify-between border-b border-gray-100 px-4 py-2.5">
+    <div className="flex flex-col rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900">
+      <div className="flex items-center justify-between border-b border-gray-100 dark:border-gray-800 px-4 py-2.5">
         <div className="flex items-center gap-2">
           <StatusDot status={status} />
-          <span className="font-mono text-sm font-semibold text-gray-800">{file}</span>
-          {dirty && !saving && <span className="text-xs text-yellow-600">{t("apps.compose.pane.unsaved")}</span>}
+          <span className="font-mono text-sm font-semibold text-gray-800 dark:text-gray-200">{file}</span>
+          {dirty && !saving && <span className="text-xs text-yellow-600 dark:text-yellow-400">{t("apps.compose.pane.unsaved")}</span>}
         </div>
         <button
           onClick={save}
@@ -195,21 +195,21 @@ export default function ComposePage() {
             { label: t("apps.compose.crumb") },
           ]}
         />
-        <h1 className="mt-2 text-2xl font-bold text-gray-900">
+        <h1 className="mt-2 text-2xl font-bold text-gray-900 dark:text-gray-100">
           <span className="font-mono">{appName}</span>
-          <span className="ml-2 text-lg font-normal text-gray-400">{t("apps.compose.heading.suffix")}</span>
+          <span className="ml-2 text-lg font-normal text-gray-400 dark:text-gray-500">{t("apps.compose.heading.suffix")}</span>
         </h1>
-        <p className="mt-0.5 text-sm text-gray-500">
+        <p className="mt-0.5 text-sm text-gray-500 dark:text-gray-400">
           {t("apps.compose.subtitle")}
         </p>
       </div>
 
       {!roleLoading && !allowed ? (
-        <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+        <div className="rounded-lg border border-amber-200 dark:border-amber-900 bg-amber-50 dark:bg-amber-950/40 px-4 py-3 text-sm text-amber-800 dark:text-amber-300">
           {t("apps.compose.error.noPermission")}
         </div>
       ) : !envId ? (
-        <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
+        <div className="rounded-lg border border-amber-200 dark:border-amber-900 bg-amber-50 dark:bg-amber-950/40 px-4 py-3 text-sm text-amber-700 dark:text-amber-300">
           {t("apps.compose.error.noEnv")}
         </div>
       ) : (

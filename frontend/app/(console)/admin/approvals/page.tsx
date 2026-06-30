@@ -13,8 +13,8 @@ import { useT } from "@/lib/i18n/console/context";
 
 function ResourcePill({ kind }: { kind: string }) {
   const tone = kind === "AIModel"
-    ? "bg-indigo-50 text-indigo-700"
-    : "bg-gray-100 text-gray-600";
+    ? "bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300"
+    : "bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400";
   return (
     <span className={`inline-flex items-center rounded px-2 py-0.5 text-xs font-medium ${tone}`}>
       {kind}
@@ -106,7 +106,7 @@ export default function ApprovalsPage() {
       key: "project",
       header: t("approvals.col.project"),
       sortValue: (r) => r.project_name,
-      render: (r) => <span className="font-mono text-gray-900">{r.project_name}</span>,
+      render: (r) => <span className="font-mono text-gray-900 dark:text-gray-100">{r.project_name}</span>,
     },
     {
       key: "resource",
@@ -114,22 +114,22 @@ export default function ApprovalsPage() {
       render: (r) => (
         <div className="flex items-center gap-2">
           <ResourcePill kind={r.operation.resource_kind} />
-          <span className="font-mono text-gray-700">{r.operation.resource_name}</span>
+          <span className="font-mono text-gray-700 dark:text-gray-200">{r.operation.resource_name}</span>
         </div>
       ),
     },
     { key: "action", header: t("approvals.col.action"), sortValue: (r) => r.operation.action, render: (r) => r.operation.action },
-    { key: "by", header: t("approvals.col.requestedBy"), render: (r) => <span className="text-gray-600">{r.requested_by || "—"}</span> },
+    { key: "by", header: t("approvals.col.requestedBy"), render: (r) => <span className="text-gray-600 dark:text-gray-400">{r.requested_by || "—"}</span> },
     {
       key: "age",
       header: t("approvals.col.age"),
       sortValue: (r) => new Date(r.operation.created_at).getTime(),
-      render: (r) => <span className="text-xs text-gray-400">{timeAgo(r.operation.created_at)}</span>,
+      render: (r) => <span className="text-xs text-gray-400 dark:text-gray-500">{timeAgo(r.operation.created_at)}</span>,
     },
     {
       key: "summary",
       header: t("approvals.col.summary"),
-      render: (r) => <span className="text-xs text-gray-500">{summarisePayload(r.operation.action, r.operation.payload) || "—"}</span>,
+      render: (r) => <span className="text-xs text-gray-500 dark:text-gray-400">{summarisePayload(r.operation.action, r.operation.payload) || "—"}</span>,
     },
     {
       key: "decision",
@@ -149,7 +149,7 @@ export default function ApprovalsPage() {
             <button
               onClick={() => { setRejectingOp(r); setRejectReason(""); }}
               disabled={busy}
-              className="inline-flex items-center gap-1 rounded-lg border border-red-200 bg-white px-3 py-1.5 text-xs font-medium text-red-600 hover:bg-red-50 disabled:opacity-50 transition-colors"
+              className="inline-flex items-center gap-1 rounded-lg border border-red-200 dark:border-red-900 bg-white dark:bg-gray-900 px-3 py-1.5 text-xs font-medium text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-gray-800 disabled:opacity-50 transition-colors"
             >
               {t("approvals.action.reject")}
             </button>
@@ -167,7 +167,7 @@ export default function ApprovalsPage() {
           { label: t("approvals.crumb.admin") },
           { label: t("approvals.crumb.approvals") },
         ]} />
-        <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+        <div className="mt-4 rounded-lg border border-amber-200 dark:border-amber-900 bg-amber-50 dark:bg-amber-950/40 px-4 py-3 text-sm text-amber-800 dark:text-amber-300">
           {t("approvals.accessDenied")}
         </div>
       </div>
@@ -185,14 +185,14 @@ export default function ApprovalsPage() {
               { label: t("approvals.crumb.approvals") },
             ]}
           />
-          <h1 className="mt-2 text-2xl font-bold text-gray-900">{t("approvals.title")}</h1>
-          <p className="mt-0.5 text-sm text-gray-500">
+          <h1 className="mt-2 text-2xl font-bold text-gray-900 dark:text-gray-100">{t("approvals.title")}</h1>
+          <p className="mt-0.5 text-sm text-gray-500 dark:text-gray-400">
             {t("approvals.subtitle")}
           </p>
         </div>
         <button
           onClick={() => { setIsLoading(true); load(); }}
-          className="inline-flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 hover:border-blue-300 hover:text-blue-600 transition-colors shadow-sm"
+          className="inline-flex items-center gap-2 rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 px-3 py-1.5 text-sm font-medium text-gray-700 dark:text-gray-200 hover:border-blue-300 hover:text-blue-600 transition-colors shadow-sm"
         >
           <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
@@ -202,10 +202,10 @@ export default function ApprovalsPage() {
       </div>
 
       {error && (
-        <div className="mb-6 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>
+        <div className="mb-6 rounded-lg border border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-950/40 px-4 py-3 text-sm text-red-700 dark:text-red-400">{error}</div>
       )}
       {actionError && (
-        <div className="mb-6 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{actionError}</div>
+        <div className="mb-6 rounded-lg border border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-950/40 px-4 py-3 text-sm text-red-700 dark:text-red-400">{actionError}</div>
       )}
 
       <DataTable<PendingApproval>
@@ -217,12 +217,12 @@ export default function ApprovalsPage() {
         pageSize={15}
         columns={columns}
         emptyState={
-          <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-gray-300 bg-gray-50 py-16">
-            <svg className="mb-3 h-12 w-12 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-gray-300 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 py-16">
+            <svg className="mb-3 h-12 w-12 text-gray-300 dark:text-gray-700" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
             </svg>
-            <p className="text-sm font-medium text-gray-500">{t("approvals.empty.title")}</p>
-            <p className="mt-1 text-xs text-gray-400">{t("approvals.empty.body")}</p>
+            <p className="text-sm font-medium text-gray-500 dark:text-gray-400">{t("approvals.empty.title")}</p>
+            <p className="mt-1 text-xs text-gray-400 dark:text-gray-500">{t("approvals.empty.body")}</p>
           </div>
         }
       />
@@ -233,22 +233,22 @@ export default function ApprovalsPage() {
         title={t("approvals.reject.title")}
       >
         <form onSubmit={submitReject} className="space-y-4">
-          <p className="text-sm text-gray-600">{t("approvals.reject.body")}</p>
+          <p className="text-sm text-gray-600 dark:text-gray-400">{t("approvals.reject.body")}</p>
           <div>
-            <label className="block text-sm font-medium text-gray-700">{t("approvals.reject.reasonLabel")}</label>
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-200">{t("approvals.reject.reasonLabel")}</label>
             <textarea
               required
               value={rejectReason}
               onChange={(e) => setRejectReason(e.target.value)}
               rows={3}
               placeholder={t("approvals.reject.reasonPlaceholder")}
-              className="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-red-500 focus:outline-none focus:ring-1 focus:ring-red-500"
+              className="mt-1 block w-full rounded-lg border border-gray-300 dark:border-gray-700 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 shadow-sm focus:border-red-500 focus:outline-none focus:ring-1 focus:ring-red-500"
             />
           </div>
           <div className="flex justify-end gap-3 pt-2">
             <button
               type="button" onClick={() => { setRejectingOp(null); setRejectReason(""); }}
-              className="rounded-lg px-4 py-2 text-sm font-medium text-gray-600 hover:bg-gray-100 transition-colors"
+              className="rounded-lg px-4 py-2 text-sm font-medium text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
             >
               {t("common.cancel")}
             </button>

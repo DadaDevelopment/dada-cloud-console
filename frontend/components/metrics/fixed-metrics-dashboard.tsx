@@ -88,22 +88,22 @@ export function FixedMetricsDashboard(props: Props) {
   const wideRange = range === "24h";
 
   return (
-    <div className="rounded-xl border border-gray-200 bg-white">
-      <div className="flex items-center justify-between border-b border-gray-100 px-5 py-3">
-        <h2 className="text-sm font-semibold text-gray-800">Metrics</h2>
+    <div className="rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900">
+      <div className="flex items-center justify-between border-b border-gray-100 dark:border-gray-800 px-5 py-3">
+        <h2 className="text-sm font-semibold text-gray-800 dark:text-gray-200">Metrics</h2>
         <div className="flex items-center gap-2">
           {data?.live_error && (
-            <span title={data.live_error} className="text-xs text-amber-600">
+            <span title={data.live_error} className="text-xs text-amber-600 dark:text-amber-400">
               partial
             </span>
           )}
-          <div className="inline-flex rounded-lg border border-gray-200 p-0.5">
+          <div className="inline-flex rounded-lg border border-gray-200 dark:border-gray-800 p-0.5">
             {RANGES.map((r) => (
               <button
                 key={r}
                 onClick={() => setRange(r)}
                 className={`rounded-md px-2 py-1 text-xs font-medium transition-colors ${
-                  range === r ? "bg-blue-600 text-white" : "text-gray-500 hover:bg-gray-100"
+                  range === r ? "bg-blue-600 text-white" : "text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800"
                 }`}
               >
                 {r}
@@ -118,7 +118,7 @@ export function FixedMetricsDashboard(props: Props) {
           <Spinner size="md" />
         </div>
       ) : error ? (
-        <div className="px-5 py-4 text-sm text-red-600">{error}</div>
+        <div className="px-5 py-4 text-sm text-red-600 dark:text-red-400">{error}</div>
       ) : (
         <div className="grid gap-4 p-5 sm:grid-cols-2 lg:grid-cols-3">
           {specs.map(({ key, title }) => (
@@ -152,16 +152,16 @@ function FixedPanel({
   );
 
   return (
-    <div className="rounded-lg border border-gray-200 bg-white p-4">
+    <div className="rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-4">
       <div className="flex items-baseline justify-between">
-        <span className="text-xs font-semibold uppercase tracking-wide text-gray-400">{title}</span>
-        <span className="text-sm font-semibold text-gray-900">{hasData ? formatValue(current, unit) : "—"}</span>
+        <span className="text-xs font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500">{title}</span>
+        <span className="text-sm font-semibold text-gray-900 dark:text-gray-100">{hasData ? formatValue(current, unit) : "—"}</span>
       </div>
       <div className="mt-2 h-24">
         {option ? (
           <EChart option={option} height="100%" aria-label={title} />
         ) : (
-          <div className="flex h-full items-center justify-center text-xs text-gray-300">no data</div>
+          <div className="flex h-full items-center justify-center text-xs text-gray-300 dark:text-gray-600">no data</div>
         )}
       </div>
     </div>
@@ -240,15 +240,15 @@ export function MetricSparkline({
   if (data && !hasData) return null;
 
   return (
-    <div className="mt-2 flex items-center gap-2 border-t border-gray-100 pt-1.5">
+    <div className="mt-2 flex items-center gap-2 border-t border-gray-100 dark:border-gray-800 pt-1.5">
       {!data ? (
-        <div className="h-10 w-16 animate-pulse rounded bg-gray-50" />
+        <div className="h-10 w-16 animate-pulse rounded bg-gray-50 dark:bg-gray-900" />
       ) : (
         <>
-          <div className="h-10 w-16 shrink-0 rounded bg-gray-50/60" style={{ width: SPARK_W, height: SPARK_H }}>
+          <div className="h-10 w-16 shrink-0 rounded bg-gray-50/60 dark:bg-gray-800/60" style={{ width: SPARK_W, height: SPARK_H }}>
             <EChart option={option} bare height={SPARK_H} aria-label="CPU and memory, last hour (normalized)" />
           </div>
-          <div className="flex shrink-0 flex-col text-[10px] leading-tight text-gray-400">
+          <div className="flex shrink-0 flex-col text-[10px] leading-tight text-gray-400 dark:text-gray-500">
             <span style={{ color: "#2563eb" }}>{fmtCores(lastCpu)}</span>
             <span style={{ color: "#7c3aed" }}>{formatValue(lastMem, "B")}</span>
           </div>

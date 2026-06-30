@@ -161,8 +161,8 @@ export function AddPanelDialog({
                 className={cn(
                   "rounded-lg border px-2 py-1.5 text-xs font-medium transition-colors",
                   viz === v
-                    ? "border-blue-600 bg-blue-50 text-blue-700"
-                    : "border-gray-200 bg-white text-gray-600 hover:border-gray-300",
+                    ? "border-blue-600 bg-blue-50 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300"
+                    : "border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 text-gray-600 dark:text-gray-400 hover:border-gray-300 dark:hover:border-gray-700",
                 )}
               >
                 {VIZ_LABELS[v]}
@@ -176,7 +176,7 @@ export function AddPanelDialog({
             value={title}
             onChange={(e) => setTitle(e.target.value)}
             placeholder={metric}
-            className="block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+            className="block w-full rounded-lg border border-gray-300 dark:border-gray-700 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 dark:bg-gray-800 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
           />
         </Field>
 
@@ -217,7 +217,7 @@ export function AddPanelDialog({
         <Field
           label={isTimeline ? "Status bands (by threshold)" : "Thresholds"}
         >
-          <p className="-mt-0.5 mb-1.5 text-[11px] text-gray-400">
+          <p className="-mt-0.5 mb-1.5 text-[11px] text-gray-400 dark:text-gray-500">
             {isTimeline
               ? "Each band colors samples at or above its value; the highest matching wins."
               : "Horizontal reference lines drawn across the chart."}
@@ -230,14 +230,14 @@ export function AddPanelDialog({
                   value={Number.isFinite(t.value) ? t.value : ""}
                   onChange={(e) => patchThreshold(i, { value: parseFloat(e.target.value) })}
                   placeholder="value"
-                  className="w-24 rounded-md border border-gray-300 px-2 py-1.5 text-xs text-gray-900 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                  className="w-24 rounded-md border border-gray-300 dark:border-gray-700 px-2 py-1.5 text-xs text-gray-900 dark:text-gray-100 dark:bg-gray-800 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
                 />
                 <ColorPicker value={t.color} onChange={(c) => patchThreshold(i, { color: c })} />
                 <input
                   value={t.label ?? ""}
                   onChange={(e) => patchThreshold(i, { label: e.target.value })}
                   placeholder="label (optional)"
-                  className="min-w-0 flex-1 rounded-md border border-gray-300 px-2 py-1.5 text-xs text-gray-900 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                  className="min-w-0 flex-1 rounded-md border border-gray-300 dark:border-gray-700 px-2 py-1.5 text-xs text-gray-900 dark:text-gray-100 dark:bg-gray-800 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
                 />
                 <RemoveBtn onClick={() => removeThreshold(i)} />
               </div>
@@ -248,7 +248,7 @@ export function AddPanelDialog({
 
         {!isTimeline && (
           <Field label="Annotations">
-            <p className="-mt-0.5 mb-1.5 text-[11px] text-gray-400">
+            <p className="-mt-0.5 mb-1.5 text-[11px] text-gray-400 dark:text-gray-500">
               Vertical markers at a fixed time (e.g. a deploy or incident).
             </p>
             <div className="space-y-1.5">
@@ -258,14 +258,14 @@ export function AddPanelDialog({
                     type="datetime-local"
                     value={a.time ? toLocalInput(a.time) : ""}
                     onChange={(e) => patchAnnotation(i, { time: fromLocalInput(e.target.value) })}
-                    className="rounded-md border border-gray-300 px-2 py-1.5 text-xs text-gray-900 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                    className="rounded-md border border-gray-300 dark:border-gray-700 px-2 py-1.5 text-xs text-gray-900 dark:text-gray-100 dark:bg-gray-800 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
                   />
                   <ColorPicker value={a.color ?? MARKER_COLORS[0]} onChange={(c) => patchAnnotation(i, { color: c })} />
                   <input
                     value={a.label}
                     onChange={(e) => patchAnnotation(i, { label: e.target.value })}
                     placeholder="label"
-                    className="min-w-0 flex-1 rounded-md border border-gray-300 px-2 py-1.5 text-xs text-gray-900 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                    className="min-w-0 flex-1 rounded-md border border-gray-300 dark:border-gray-700 px-2 py-1.5 text-xs text-gray-900 dark:text-gray-100 dark:bg-gray-800 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
                   />
                   <RemoveBtn onClick={() => removeAnnotation(i)} />
                 </div>
@@ -278,7 +278,7 @@ export function AddPanelDialog({
         <div className="flex justify-end gap-2 pt-1">
           <button
             onClick={onClose}
-            className="rounded-lg px-4 py-2 text-sm font-medium text-gray-600 hover:bg-gray-100"
+            className="rounded-lg px-4 py-2 text-sm font-medium text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800"
           >
             Cancel
           </button>
@@ -298,7 +298,7 @@ export function AddPanelDialog({
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div>
-      <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-gray-500">{label}</label>
+      <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">{label}</label>
       {children}
     </div>
   );
@@ -311,7 +311,7 @@ function ColorPicker({ value, onChange }: { value: string; onChange: (c: string)
       value={value}
       onChange={(e) => onChange(e.target.value)}
       title="Marker color"
-      className="h-8 w-8 shrink-0 cursor-pointer rounded-md border border-gray-300 bg-white p-0.5"
+      className="h-8 w-8 shrink-0 cursor-pointer rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 p-0.5"
     />
   );
 }
@@ -322,7 +322,7 @@ function RemoveBtn({ onClick }: { onClick: () => void }) {
       type="button"
       onClick={onClick}
       title="Remove"
-      className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-gray-400 hover:bg-red-50 hover:text-red-600"
+      className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-gray-400 dark:text-gray-500 hover:bg-red-50 dark:hover:bg-red-950/40 hover:text-red-600 dark:hover:text-red-400"
     >
       <Trash2 className="h-3.5 w-3.5" />
     </button>
@@ -334,7 +334,7 @@ function AddRowBtn({ label, onClick }: { label: string; onClick: () => void }) {
     <button
       type="button"
       onClick={onClick}
-      className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-blue-600 hover:bg-blue-50"
+      className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-950/40"
     >
       <Plus className="h-3.5 w-3.5" /> {label}
     </button>

@@ -5,6 +5,7 @@ import { useAuth } from "@/lib/auth";
 import { Spinner } from "@/components/ui/spinner";
 import { ProjectProvider, useProjectContext } from "@/lib/project-context";
 import { ConsoleLangProvider } from "@/lib/i18n/console/context";
+import { ThemeProvider } from "@/lib/theme/context";
 import { TopBar } from "@/components/shell/top-bar";
 import { ProjectNav } from "@/components/shell/project-nav";
 import { CommandPalette } from "@/components/shell/command-palette";
@@ -22,7 +23,7 @@ function ConsoleShell({ children }: { children: React.ReactNode }) {
             <ProjectNav />
           </aside>
         )}
-        <main className="flex-1 overflow-y-auto bg-white">
+        <main className="flex-1 overflow-y-auto bg-white dark:bg-gray-950">
           <div className="p-8">{children}</div>
         </main>
       </div>
@@ -57,11 +58,13 @@ export default function ConsoleLayout({ children }: { children: React.ReactNode 
         </div>
       }
     >
-      <ConsoleLangProvider>
-        <ProjectProvider>
-          <ConsoleShell>{children}</ConsoleShell>
-        </ProjectProvider>
-      </ConsoleLangProvider>
+      <ThemeProvider>
+        <ConsoleLangProvider>
+          <ProjectProvider>
+            <ConsoleShell>{children}</ConsoleShell>
+          </ProjectProvider>
+        </ConsoleLangProvider>
+      </ThemeProvider>
     </Suspense>
   );
 }

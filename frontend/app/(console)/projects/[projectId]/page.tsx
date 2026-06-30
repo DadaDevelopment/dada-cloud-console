@@ -83,7 +83,7 @@ export default function ProjectOverviewPage() {
 
   if (error) {
     return (
-      <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+      <div className="rounded-lg border border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-950/40 px-4 py-3 text-sm text-red-700 dark:text-red-300">
         {error}
       </div>
     );
@@ -105,8 +105,8 @@ export default function ProjectOverviewPage() {
       <div className="mb-6 flex items-start justify-between gap-4">
         <div className="min-w-0">
           <Breadcrumb items={[{ label: t("common.crumb.projects"), href: "/projects" }, { label: project.display_name }]} />
-          <h1 className="mt-2 text-2xl font-bold text-gray-900">{project.display_name}</h1>
-          <p className="mt-0.5 font-mono text-sm text-gray-400">{project.name}</p>
+          <h1 className="mt-2 text-2xl font-bold text-gray-900 dark:text-gray-100">{project.display_name}</h1>
+          <p className="mt-0.5 font-mono text-sm text-gray-400 dark:text-gray-500">{project.name}</p>
         </div>
         <Link
           href={`/projects/${projectId}/git/import`}
@@ -141,12 +141,12 @@ export default function ProjectOverviewPage() {
       )}
 
       {!checklistComplete && (
-        <div className="mb-8 rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
+        <div className="mb-8 rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-5 shadow-sm">
           <div className="mb-3 flex items-center justify-between">
-            <h2 className="text-sm font-semibold text-gray-900">{t("overview.checklist.title")}</h2>
-            <span className="text-xs text-gray-400">{t("overview.checklist.progress", { done: checklistDone, total: checklist.length })}</span>
+            <h2 className="text-sm font-semibold text-gray-900 dark:text-gray-100">{t("overview.checklist.title")}</h2>
+            <span className="text-xs text-gray-400 dark:text-gray-500">{t("overview.checklist.progress", { done: checklistDone, total: checklist.length })}</span>
           </div>
-          <div className="mb-4 h-1.5 w-full overflow-hidden rounded-full bg-gray-100">
+          <div className="mb-4 h-1.5 w-full overflow-hidden rounded-full bg-gray-100 dark:bg-gray-800">
             <div
               className="h-full rounded-full bg-blue-600 transition-all"
               style={{ width: `${(checklistDone / checklist.length) * 100}%` }}
@@ -157,18 +157,18 @@ export default function ProjectOverviewPage() {
               <li key={item.key}>
                 <Link
                   href={item.href}
-                  className="group flex items-center gap-3 rounded-lg px-2 py-2 transition-colors hover:bg-gray-50"
+                  className="group flex items-center gap-3 rounded-lg px-2 py-2 transition-colors hover:bg-gray-50 dark:hover:bg-gray-800"
                 >
                   <span
                     className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full border ${
-                      item.done ? "border-green-500 bg-green-500 text-white" : "border-gray-300 text-transparent"
+                      item.done ? "border-green-500 bg-green-500 text-white" : "border-gray-300 dark:border-gray-700 text-transparent"
                     }`}
                   >
                     <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
                     </svg>
                   </span>
-                  <span className={`flex-1 text-sm ${item.done ? "text-gray-400 line-through" : "text-gray-700"}`}>
+                  <span className={`flex-1 text-sm ${item.done ? "text-gray-400 dark:text-gray-500 line-through" : "text-gray-700 dark:text-gray-200"}`}>
                     {item.label}
                   </span>
                   {!item.done && (
@@ -211,7 +211,7 @@ export default function ProjectOverviewPage() {
       </div>
 
       <div className="mb-8">
-        <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-gray-500">{t("overview.section.more")}</h2>
+        <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">{t("overview.section.more")}</h2>
         <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
           <SecondaryLink icon="monitoring" label={t("nav.monitoring")} hint={t("overview.secondary.monitoring.hint")} href={`/projects/${projectId}/monitoring`} />
           <SecondaryLink icon="operations" label={t("nav.operations")} hint={t("overview.secondary.operations.hint")} href={`/projects/${projectId}/operations`} />
@@ -225,7 +225,7 @@ export default function ProjectOverviewPage() {
 
       <div>
         <div className="mb-3 flex items-center justify-between">
-          <h2 className="text-sm font-semibold uppercase tracking-wide text-gray-500">{t("overview.section.recentOps")}</h2>
+          <h2 className="text-sm font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">{t("overview.section.recentOps")}</h2>
           <Link href={`/projects/${projectId}/operations`} className="text-xs text-blue-600 hover:text-blue-700">
             {t("overview.allOps")}
           </Link>
@@ -238,21 +238,21 @@ export default function ProjectOverviewPage() {
             action={{ label: t("overview.ops.empty.action"), href: `/projects/${projectId}/git/import` }}
           />
         ) : (
-          <div className="overflow-hidden rounded-xl border border-gray-200 bg-white">
+          <div className="overflow-hidden rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900">
             {operations.map((op, idx) => (
               <div
                 key={op.id}
                 className={`flex items-center gap-4 px-5 py-4 ${
-                  idx < operations.length - 1 ? "border-b border-gray-100" : ""
+                  idx < operations.length - 1 ? "border-b border-gray-100 dark:border-gray-800" : ""
                 }`}
               >
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2">
-                    <span className="text-sm font-medium text-gray-900">{op.action}</span>
-                    <span className="text-xs text-gray-400">·</span>
-                    <span className="font-mono text-xs text-gray-500">{op.resource_name}</span>
+                    <span className="text-sm font-medium text-gray-900 dark:text-gray-100">{op.action}</span>
+                    <span className="text-xs text-gray-400 dark:text-gray-500">·</span>
+                    <span className="font-mono text-xs text-gray-500 dark:text-gray-400">{op.resource_name}</span>
                   </div>
-                  <div className="mt-0.5 text-xs text-gray-400">{timeAgo(op.created_at)}</div>
+                  <div className="mt-0.5 text-xs text-gray-400 dark:text-gray-500">{timeAgo(op.created_at)}</div>
                 </div>
                 <Badge status={op.status} />
               </div>
@@ -265,9 +265,9 @@ export default function ProjectOverviewPage() {
 }
 
 const toneClasses: Record<string, string> = {
-  blue: "bg-blue-100 text-blue-600",
-  green: "bg-green-100 text-green-600",
-  indigo: "bg-indigo-100 text-indigo-600",
+  blue: "bg-blue-100 dark:bg-blue-950/40 text-blue-600 dark:text-blue-400",
+  green: "bg-green-100 dark:bg-green-950/40 text-green-600 dark:text-green-400",
+  indigo: "bg-indigo-100 dark:bg-indigo-950/40 text-indigo-600 dark:text-indigo-400",
 };
 
 function ActionCard({
@@ -286,12 +286,12 @@ function ActionCard({
   href: string;
 }) {
   return (
-    <div className="flex flex-col rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
+    <div className="flex flex-col rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-5 shadow-sm">
       <div className={`mb-4 flex h-10 w-10 items-center justify-center rounded-lg ${toneClasses[tone]}`}>
         <ResourceIcon name={icon} className="h-5 w-5" />
       </div>
-      <p className="text-sm font-semibold text-gray-900">{title}</p>
-      <p className="mt-1 flex-1 text-sm text-gray-500">{hint}</p>
+      <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">{title}</p>
+      <p className="mt-1 flex-1 text-sm text-gray-500 dark:text-gray-400">{hint}</p>
       <Link
         href={href}
         className="mt-4 inline-flex items-center justify-center gap-1.5 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700"
@@ -316,14 +316,14 @@ function SecondaryLink({
   return (
     <Link
       href={href}
-      className="group flex items-center gap-3 rounded-lg border border-gray-200 bg-white px-4 py-3 shadow-sm transition-all hover:border-blue-200 hover:shadow-md"
+      className="group flex items-center gap-3 rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 px-4 py-3 shadow-sm transition-all hover:border-blue-200 hover:shadow-md"
     >
-      <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-gray-100 text-gray-500 transition-colors group-hover:bg-blue-600 group-hover:text-white">
+      <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400 transition-colors group-hover:bg-blue-600 group-hover:text-white">
         <ResourceIcon name={icon} className="h-4 w-4" />
       </div>
       <div className="min-w-0">
-        <p className="text-sm font-medium text-gray-900">{label}</p>
-        <p className="truncate text-xs text-gray-400">{hint}</p>
+        <p className="text-sm font-medium text-gray-900 dark:text-gray-100">{label}</p>
+        <p className="truncate text-xs text-gray-400 dark:text-gray-500">{hint}</p>
       </div>
     </Link>
   );

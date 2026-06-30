@@ -6,21 +6,20 @@ import { cn } from "@/lib/cn";
 import { THEME_TOKENS, type ChartTheme } from "./theme";
 
 /**
- * useChartTheme tracks the OS color scheme so charts re-render with a matching
- * palette when the user flips light/dark. Returns "light" on the server and
- * before hydration to keep SSR markup stable.
+ * useChartTheme tracks the console's `.dark` class on <html> so charts re-render
+ * with a matching palette when the user flips the in-app theme toggle. A
+ * MutationObserver on the class attribute drives the update. Returns "light" on
+ * the server and before hydration to keep SSR markup stable.
  */
 export function useChartTheme(): ChartTheme {
-  const [theme, setTheme] = useState<ChartTheme>(() =>
-    typeof window !== "undefined" && window.matchMedia?.("(prefers-color-scheme: dark)").matches
-      ? "dark"
-      : "light",
-  );
+  const [theme, setTheme] = useState<ChartTheme>("light");
   useEffect(() => {
-    const mq = window.matchMedia("(prefers-color-scheme: dark)");
-    const apply = () => setTheme(mq.matches ? "dark" : "light");
-    mq.addEventListener("change", apply);
-    return () => mq.removeEventListener("change", apply);
+    const root = document.documentElement;
+    const apply = () => setTheme(root.classList.contains("dark") ? "dark" : "light");
+    apply();
+    const obs = new MutationObserver(apply);
+    obs.observe(root, { attributes: true, attributeFilter: ["class"] });
+    return () => obs.disconnect();
   }, []);
   return theme;
 }

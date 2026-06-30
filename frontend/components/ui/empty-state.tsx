@@ -19,10 +19,10 @@ export interface EmptyStateProps {
 
 export function EmptyState({ icon, title, description, action, secondary }: EmptyStateProps) {
   return (
-    <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-gray-300 bg-gray-50 px-6 py-16 text-center">
-      {icon && <div className="mb-3 text-gray-300">{icon}</div>}
-      <p className="text-sm font-semibold text-gray-700">{title}</p>
-      {description && <p className="mt-1 max-w-sm text-sm text-gray-500">{description}</p>}
+    <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-gray-300 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 px-6 py-16 text-center">
+      {icon && <div className="mb-3 text-gray-300 dark:text-gray-600">{icon}</div>}
+      <p className="text-sm font-semibold text-gray-700 dark:text-gray-200">{title}</p>
+      {description && <p className="mt-1 max-w-sm text-sm text-gray-500 dark:text-gray-400">{description}</p>}
       {(action || secondary) && (
         <div className="mt-5 flex items-center gap-3 text-sm">
           {action && (

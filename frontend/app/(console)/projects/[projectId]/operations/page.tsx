@@ -19,11 +19,11 @@ function isInProgress(status: OperationStatus): boolean {
 }
 
 function statusColor(status: OperationStatus): string {
-  if (status === "Ready") return "bg-green-100 text-green-700";
-  if (status === "Failed") return "bg-red-100 text-red-700";
-  if (status === "Cancelled") return "bg-gray-100 text-gray-600";
-  if (status === "WaitingForApproval") return "bg-yellow-100 text-yellow-700";
-  return "bg-blue-100 text-blue-700";
+  if (status === "Ready") return "bg-green-100 dark:bg-green-950/40 text-green-700 dark:text-green-300";
+  if (status === "Failed") return "bg-red-100 dark:bg-red-950/40 text-red-700 dark:text-red-300";
+  if (status === "Cancelled") return "bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400";
+  if (status === "WaitingForApproval") return "bg-yellow-100 dark:bg-yellow-950/40 text-yellow-700 dark:text-yellow-300";
+  return "bg-blue-100 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300";
 }
 
 function statusDot(status: OperationStatus): string {

@@ -129,12 +129,12 @@ function SectionHeader({ n, label, done, active }: { n: number; label: string; d
     <div className="flex items-center gap-3">
       <span
         className={`flex h-6 w-6 items-center justify-center rounded-full text-xs font-semibold ${
-          done ? "bg-green-500 text-white" : active ? "bg-blue-600 text-white" : "bg-gray-200 text-gray-400"
+          done ? "bg-green-500 text-white" : active ? "bg-blue-600 text-white" : "bg-gray-200 dark:bg-gray-700 text-gray-400 dark:text-gray-500"
         }`}
       >
         {done ? "✓" : n}
       </span>
-      <h2 className={`text-sm font-semibold ${active || done ? "text-gray-900" : "text-gray-400"}`}>{label}</h2>
+      <h2 className={`text-sm font-semibold ${active || done ? "text-gray-900 dark:text-gray-100" : "text-gray-400 dark:text-gray-500"}`}>{label}</h2>
     </div>
   );
 }
@@ -484,7 +484,7 @@ export default function GitImportPage() {
     return (
       <div>
         {crumbs}
-        <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+        <div className="mt-4 rounded-lg border border-amber-200 dark:border-amber-900 bg-amber-50 dark:bg-amber-950/40 px-4 py-3 text-sm text-amber-800 dark:text-amber-300">
           {t("git.import.noPermission")}
         </div>
       </div>
@@ -497,8 +497,8 @@ export default function GitImportPage() {
   return (
     <div className="max-w-2xl">
       {crumbs}
-      <h1 className="mt-2 text-2xl font-bold text-gray-900">{t("git.import.title")}</h1>
-      <p className="mt-1 text-sm text-gray-400">{t("git.import.subtitle")}</p>
+      <h1 className="mt-2 text-2xl font-bold text-gray-900 dark:text-gray-100">{t("git.import.title")}</h1>
+      <p className="mt-1 text-sm text-gray-400 dark:text-gray-500">{t("git.import.subtitle")}</p>
 
       <div className="mt-8 space-y-8">
         {/* ── 1. Source ── */}
@@ -506,7 +506,7 @@ export default function GitImportPage() {
           <SectionHeader n={1} label={t("git.import.section.source")} done={!!selectedRepo} active={!selectedRepo} />
 
           {installError && (
-            <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{installError}</div>
+            <div className="rounded-lg border border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-950/40 px-4 py-3 text-sm text-red-700 dark:text-red-300">{installError}</div>
           )}
 
           {loadingInstalls ? (
@@ -514,21 +514,21 @@ export default function GitImportPage() {
               <Spinner />
             </div>
           ) : installations.length === 0 ? (
-            <div className="rounded-xl border border-dashed border-gray-300 bg-gray-50 p-8 text-center">
-              <p className="text-sm font-medium text-gray-600">{t("git.import.noAccounts.title")}</p>
-              <p className="mt-1 text-xs text-gray-400">{t("git.import.noAccounts.hint")}</p>
+            <div className="rounded-xl border border-dashed border-gray-300 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 p-8 text-center">
+              <p className="text-sm font-medium text-gray-600 dark:text-gray-400">{t("git.import.noAccounts.title")}</p>
+              <p className="mt-1 text-xs text-gray-400 dark:text-gray-500">{t("git.import.noAccounts.hint")}</p>
               <div className="mt-4 flex justify-center gap-3">
                 <button
                   onClick={() => handleConnectProvider("github")}
                   disabled={connectingProvider !== null}
-                  className="rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
+                  className="rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   {t("git.import.connectGitHub")}
                 </button>
                 <button
                   onClick={() => handleConnectProvider("gitlab")}
                   disabled={connectingProvider !== null}
-                  className="rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
+                  className="rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   {t("git.import.connectGitLab")}
                 </button>
@@ -536,14 +536,14 @@ export default function GitImportPage() {
             </div>
           ) : selectedRepo && !repoPickerOpen ? (
             // Compact selected-repo bar.
-            <div className="flex items-center justify-between gap-3 rounded-xl border border-gray-200 bg-white px-4 py-3 shadow-sm">
+            <div className="flex items-center justify-between gap-3 rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 px-4 py-3 shadow-sm">
               <div className="flex min-w-0 items-center gap-3">
-                <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-gray-100 text-gray-500">
+                <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400">
                   <GithubMark className="h-4 w-4" />
                 </span>
                 <div className="min-w-0">
-                  <p className="truncate text-sm font-medium text-gray-900">{selectedRepo.full_name}</p>
-                  <p className="truncate text-xs text-gray-400">
+                  <p className="truncate text-sm font-medium text-gray-900 dark:text-gray-100">{selectedRepo.full_name}</p>
+                  <p className="truncate text-xs text-gray-400 dark:text-gray-500">
                     {selectedRepo.accountLogin} · {selectedRepo.default_branch || "main"}
                   </p>
                 </div>
@@ -551,7 +551,7 @@ export default function GitImportPage() {
               {!deploying && (
                 <button
                   onClick={() => setRepoPickerOpen(true)}
-                  className="shrink-0 rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 shadow-sm transition-colors hover:border-blue-400 hover:text-blue-600"
+                  className="shrink-0 rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-1.5 text-sm font-medium text-gray-700 dark:text-gray-200 shadow-sm transition-colors hover:border-blue-400 hover:text-blue-600"
                 >
                   {t("git.import.changeRepo")}
                 </button>
@@ -561,8 +561,8 @@ export default function GitImportPage() {
             <>
               <div className="flex flex-col gap-2">
                 <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                  <div className="flex items-center rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700 shadow-sm sm:max-w-md">
-                    <GithubMark className="mr-2 h-4 w-4 shrink-0 text-gray-500" />
+                  <div className="flex items-center rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 text-sm text-gray-700 dark:text-gray-200 shadow-sm sm:max-w-md">
+                    <GithubMark className="mr-2 h-4 w-4 shrink-0 text-gray-500 dark:text-gray-400" />
                     <span className="truncate">
                       {installations.map((inst) => inst.account_login).join(", ")}
                     </span>
@@ -571,7 +571,7 @@ export default function GitImportPage() {
                     <button
                       onClick={() => handleConnectProvider("github", true)}
                       disabled={connectingProvider !== null}
-                      className="inline-flex shrink-0 items-center justify-center gap-2 rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 shadow-sm transition-colors hover:border-blue-400 hover:text-blue-600 disabled:cursor-not-allowed disabled:opacity-60"
+                      className="inline-flex shrink-0 items-center justify-center gap-2 rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 text-sm font-medium text-gray-700 dark:text-gray-200 shadow-sm transition-colors hover:border-blue-400 hover:text-blue-600 disabled:cursor-not-allowed disabled:opacity-60"
                     >
                       <Plus className="h-4 w-4" />
                       <span>{t("git.import.connectAnotherGitHub")}</span>
@@ -579,23 +579,23 @@ export default function GitImportPage() {
                   )}
                 </div>
                 <div className="relative flex-1">
-                  <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+                  <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400 dark:text-gray-500" />
                   <input
                     type="text"
                     value={repoQuery}
                     onChange={(e) => setRepoQuery(e.target.value)}
                     placeholder={t("git.import.searchPlaceholder")}
-                    className="w-full rounded-lg border border-gray-300 bg-white py-2 pl-9 pr-3 text-sm text-gray-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                    className="w-full rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 py-2 pl-9 pr-3 text-sm text-gray-900 dark:text-gray-100 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
                   />
                 </div>
               </div>
 
               {repoError && (
-                <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{repoError}</div>
+                <div className="rounded-lg border border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-950/40 px-4 py-3 text-sm text-red-700 dark:text-red-300">{repoError}</div>
               )}
 
               {reposUnavailable ? (
-                <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+                <div className="rounded-lg border border-amber-200 dark:border-amber-900 bg-amber-50 dark:bg-amber-950/40 px-4 py-3 text-sm text-amber-800 dark:text-amber-300">
                   {t("git.import.reposUnavailable")}
                 </div>
               ) : loadingRepos ? (
@@ -603,40 +603,40 @@ export default function GitImportPage() {
                   <Spinner />
                 </div>
               ) : remoteRepos.length === 0 ? (
-                <p className="rounded-xl border border-dashed border-gray-300 bg-gray-50 p-8 text-center text-sm text-gray-500">
+                <p className="rounded-xl border border-dashed border-gray-300 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 p-8 text-center text-sm text-gray-500 dark:text-gray-400">
                   {t("git.import.noRepos")}
                 </p>
               ) : filteredRepos.length === 0 ? (
-                <p className="rounded-xl border border-dashed border-gray-300 bg-gray-50 p-8 text-center text-sm text-gray-500">
+                <p className="rounded-xl border border-dashed border-gray-300 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 p-8 text-center text-sm text-gray-500 dark:text-gray-400">
                   {t("git.import.noMatch")}
                 </p>
               ) : (
-                <div className="max-h-[420px] divide-y divide-gray-100 overflow-y-auto rounded-xl border border-gray-200 bg-white shadow-sm">
+                <div className="max-h-[420px] divide-y divide-gray-100 dark:divide-gray-800 overflow-y-auto rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 shadow-sm">
                   {filteredRepos.map((repo) => {
                     const shortName = repo.full_name.split("/").pop() || repo.full_name;
                     const isSel = selectedRepo?.full_name === repo.full_name;
                     return (
                       <div
                         key={repo.full_name}
-                        className={`group flex items-center justify-between gap-3 px-4 py-3 transition-colors hover:bg-gray-50 ${isSel ? "bg-blue-50/50" : ""}`}
+                        className={`group flex items-center justify-between gap-3 px-4 py-3 transition-colors hover:bg-gray-50 ${isSel ? "bg-blue-50/50 dark:bg-blue-950/40" : ""}`}
                       >
                         <div className="flex min-w-0 items-center gap-3">
-                          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-gray-100 text-gray-500">
+                          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400">
                             <GithubMark className="h-4 w-4" />
                           </span>
                           <div className="min-w-0">
                             <div className="flex items-center gap-2">
-                              <p className="truncate text-sm font-medium text-gray-900">{shortName}</p>
-                              {repo.private && <Lock className="h-3 w-3 shrink-0 text-gray-400" />}
+                              <p className="truncate text-sm font-medium text-gray-900 dark:text-gray-100">{shortName}</p>
+                              {repo.private && <Lock className="h-3 w-3 shrink-0 text-gray-400 dark:text-gray-500" />}
                             </div>
-                            <p className="truncate text-xs text-gray-400">
+                            <p className="truncate text-xs text-gray-400 dark:text-gray-500">
                               {repo.accountLogin}{repo.updated_at ? ` · ${timeAgo(repo.updated_at)}` : ""}
                             </p>
                           </div>
                         </div>
                         <button
                           onClick={() => pickRepo(repo)}
-                          className="shrink-0 rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 shadow-sm transition-colors hover:border-blue-400 hover:text-blue-600 group-hover:border-blue-300"
+                          className="shrink-0 rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-1.5 text-sm font-medium text-gray-700 dark:text-gray-200 shadow-sm transition-colors hover:border-blue-400 hover:text-blue-600 group-hover:border-blue-300"
                         >
                           {isSel ? t("git.import.selectedButton") : t("git.import.importButton")}
                         </button>
@@ -655,42 +655,42 @@ export default function GitImportPage() {
             <SectionHeader n={2} label={t("git.import.section.configure")} done={deploying} active={!deploying} />
             <form onSubmit={handleSubmit} className="space-y-5">
               <fieldset disabled={deploying} className="space-y-5 disabled:opacity-60">
-                <div className="rounded-lg border border-gray-200 bg-white px-4 py-3">
-                  <p className="text-xs font-semibold uppercase tracking-wide text-gray-400">{t("git.import.detectedFramework")}</p>
+                <div className="rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 px-4 py-3">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500">{t("git.import.detectedFramework")}</p>
                   {detecting ? (
-                    <div className="mt-2 flex items-center gap-2 text-sm text-gray-500">
+                    <div className="mt-2 flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400">
                       <Spinner size="sm" /> {t("git.import.detecting")}
                     </div>
                   ) : detection ? (
                     <div className="mt-2 space-y-1 text-sm">
-                      <p className="font-medium text-gray-900">
+                      <p className="font-medium text-gray-900 dark:text-gray-100">
                         {frameworkLabel(detection.framework) || t("git.import.unknownFramework")}
                       </p>
                       {detection.build_command && (
-                        <p className="text-xs text-gray-500">build: <span className="font-mono">{detection.build_command}</span></p>
+                        <p className="text-xs text-gray-500 dark:text-gray-400">build: <span className="font-mono">{detection.build_command}</span></p>
                       )}
                       {detection.install_command && (
-                        <p className="text-xs text-gray-500">install: <span className="font-mono">{detection.install_command}</span></p>
+                        <p className="text-xs text-gray-500 dark:text-gray-400">install: <span className="font-mono">{detection.install_command}</span></p>
                       )}
                       {detection.package_manager && (
-                        <p className="text-xs text-gray-500">pm: <span className="font-mono">{detection.package_manager}</span></p>
+                        <p className="text-xs text-gray-500 dark:text-gray-400">pm: <span className="font-mono">{detection.package_manager}</span></p>
                       )}
                       {detection.start_command && (
-                        <p className="text-xs text-gray-500">start: <span className="font-mono">{detection.start_command}</span></p>
+                        <p className="text-xs text-gray-500 dark:text-gray-400">start: <span className="font-mono">{detection.start_command}</span></p>
                       )}
                       {detection.output_dir && (
-                        <p className="text-xs text-gray-500">output: <span className="font-mono">{detection.output_dir}</span></p>
+                        <p className="text-xs text-gray-500 dark:text-gray-400">output: <span className="font-mono">{detection.output_dir}</span></p>
                       )}
                       {typeof detection.port === "number" && (
-                        <p className="text-xs text-gray-500">port: <span className="font-mono">{detection.port}</span></p>
+                        <p className="text-xs text-gray-500 dark:text-gray-400">port: <span className="font-mono">{detection.port}</span></p>
                       )}
                     </div>
                   ) : null}
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium text-gray-700">
-                    {t("git.import.appName.label")} <span className="font-normal text-gray-400">{t("git.import.appName.hint")}</span>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-200">
+                    {t("git.import.appName.label")} <span className="font-normal text-gray-400 dark:text-gray-500">{t("git.import.appName.hint")}</span>
                   </label>
                   <input
                     type="text"
@@ -699,13 +699,13 @@ export default function GitImportPage() {
                     onChange={(e) => setAppName(toKubeName(e.target.value))}
                     placeholder={t("git.import.appName.placeholder")}
                     pattern="[a-z0-9-]+"
-                    className="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm font-mono text-gray-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                    className="mt-1 block w-full rounded-lg border border-gray-300 dark:border-gray-700 px-3 py-2 text-sm font-mono text-gray-900 dark:text-gray-100 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
                   />
-                  <p className="mt-1 text-xs text-gray-400">{t("git.import.appName.help")}</p>
+                  <p className="mt-1 text-xs text-gray-400 dark:text-gray-500">{t("git.import.appName.help")}</p>
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium text-gray-700">{t("git.import.framework.label")}</label>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-200">{t("git.import.framework.label")}</label>
                   <div className="relative mt-1">
                     <select
                       value={frameworkOverride}
@@ -717,7 +717,7 @@ export default function GitImportPage() {
                         const preset = PRESET_BY_ID.get(id);
                         if (preset) setPort(preset.port);
                       }}
-                      className="block w-full appearance-none rounded-lg border border-gray-300 bg-white px-3 py-2 pr-9 text-sm text-gray-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                      className="block w-full appearance-none rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 pr-9 text-sm text-gray-900 dark:text-gray-100 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
                     >
                       <option value="">{t("git.import.framework.auto")}</option>
                       {FRAMEWORK_PRESETS.map((g) => (
@@ -730,14 +730,14 @@ export default function GitImportPage() {
                         </optgroup>
                       ))}
                     </select>
-                    <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+                    <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400 dark:text-gray-500" />
                   </div>
-                  <p className="mt-1 text-xs text-gray-400">{t("git.import.framework.hint")}</p>
+                  <p className="mt-1 text-xs text-gray-400 dark:text-gray-500">{t("git.import.framework.hint")}</p>
                 </div>
 
                 <div className="grid grid-cols-2 gap-3">
                   <div>
-                    <label className="block text-sm font-medium text-gray-700">{t("git.import.port.label")}</label>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-200">{t("git.import.port.label")}</label>
                     <input
                       type="number"
                       required
@@ -748,15 +748,15 @@ export default function GitImportPage() {
                         setPortTouched(true);
                         setPort(parseInt(e.target.value, 10) || 8080);
                       }}
-                      className="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                      className="mt-1 block w-full rounded-lg border border-gray-300 dark:border-gray-700 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
                     />
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700">{t("git.import.profile.label")}</label>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-200">{t("git.import.profile.label")}</label>
                     <select
                       value={profile}
                       onChange={(e) => setProfile(e.target.value)}
-                      className="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                      className="mt-1 block w-full rounded-lg border border-gray-300 dark:border-gray-700 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
                     >
                       <option value="small">small</option>
                       <option value="medium">medium</option>
@@ -767,50 +767,50 @@ export default function GitImportPage() {
 
                 <div className="grid grid-cols-2 gap-3">
                   <div>
-                    <label className="block text-sm font-medium text-gray-700">{t("git.import.branch.label")}</label>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-200">{t("git.import.branch.label")}</label>
                     <input
                       type="text"
                       required
                       value={branch}
                       onChange={(e) => setBranch(e.target.value)}
                       placeholder="main"
-                      className="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm font-mono text-gray-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                      className="mt-1 block w-full rounded-lg border border-gray-300 dark:border-gray-700 px-3 py-2 text-sm font-mono text-gray-900 dark:text-gray-100 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
                     />
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700">{t("git.import.rootDir.label")}</label>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-200">{t("git.import.rootDir.label")}</label>
                     <input
                       type="text"
                       value={rootDir}
                       onChange={(e) => setRootDir(e.target.value)}
                       onBlur={() => selectedRepo && runDetect(selectedRepo, rootDir)}
                       placeholder="."
-                      className="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm font-mono text-gray-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                      className="mt-1 block w-full rounded-lg border border-gray-300 dark:border-gray-700 px-3 py-2 text-sm font-mono text-gray-900 dark:text-gray-100 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
                     />
                   </div>
                 </div>
 
-                <div className="flex items-center justify-between rounded-lg border border-gray-200 px-4 py-3">
+                <div className="flex items-center justify-between rounded-lg border border-gray-200 dark:border-gray-800 px-4 py-3">
                   <div>
-                    <p className="text-sm font-medium text-gray-700">{t("git.import.autoDeploy.label")}</p>
-                    <p className="text-xs text-gray-400">{t("git.import.autoDeploy.hint")}</p>
+                    <p className="text-sm font-medium text-gray-700 dark:text-gray-200">{t("git.import.autoDeploy.label")}</p>
+                    <p className="text-xs text-gray-400 dark:text-gray-500">{t("git.import.autoDeploy.hint")}</p>
                   </div>
                   <button
                     type="button"
                     onClick={() => setAutoDeploy((v) => !v)}
                     className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 ${
-                      autoDeploy ? "bg-blue-600" : "bg-gray-200"
+                      autoDeploy ? "bg-blue-600" : "bg-gray-200 dark:bg-gray-700"
                     }`}
                     role="switch"
                     aria-checked={autoDeploy}
                   >
-                    <span className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${autoDeploy ? "translate-x-6" : "translate-x-1"}`} />
+                    <span className={`inline-block h-4 w-4 transform rounded-full bg-white dark:bg-gray-900 shadow transition-transform ${autoDeploy ? "translate-x-6" : "translate-x-1"}`} />
                   </button>
                 </div>
               </fieldset>
 
               {submitError && (
-                <div role="alert" className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                <div role="alert" className="rounded-lg border border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-950/40 px-4 py-3 text-sm text-red-700 dark:text-red-300">
                   {submitError}
                 </div>
               )}
@@ -819,7 +819,7 @@ export default function GitImportPage() {
                 <div className="flex justify-end gap-3 pt-1">
                   <Link
                     href={`/projects/${projectId}/git${envId ? `?envId=${envId}` : ""}`}
-                    className="rounded-lg px-4 py-2 text-sm font-medium text-gray-600 hover:bg-gray-100 transition-colors"
+                    className="rounded-lg px-4 py-2 text-sm font-medium text-gray-600 dark:text-gray-400 hover:bg-gray-100 transition-colors"
                   >
                     {t("common.cancel")}
                   </Link>
@@ -846,16 +846,16 @@ export default function GitImportPage() {
               active={build?.status !== "success"}
             />
 
-            <div className="rounded-lg border border-gray-200 bg-gray-50 px-4 py-3">
+            <div className="rounded-lg border border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-gray-900 px-4 py-3">
               <div className="flex items-center justify-between gap-3">
                 <div className="min-w-0">
-                  <p className="truncate font-mono text-sm font-medium text-gray-900">{appName}</p>
-                  <p className="truncate text-xs text-gray-400">{selectedRepo.full_name}</p>
+                  <p className="truncate font-mono text-sm font-medium text-gray-900 dark:text-gray-100">{appName}</p>
+                  <p className="truncate text-xs text-gray-400 dark:text-gray-500">{selectedRepo.full_name}</p>
                 </div>
                 {build ? (
                   <BuildStatusBadge status={build.status} />
                 ) : deployError ? null : (
-                  <span className="inline-flex items-center gap-2 text-xs text-gray-500">
+                  <span className="inline-flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
                     <Spinner size="sm" /> {t("git.import.deploy.starting")}
                   </span>
                 )}
@@ -863,19 +863,19 @@ export default function GitImportPage() {
             </div>
 
             {deployError ? (
-              <div role="alert" className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+              <div role="alert" className="rounded-lg border border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-950/40 px-4 py-3 text-sm text-red-700 dark:text-red-300">
                 {deployError}
               </div>
             ) : build ? (
               <BuildLogViewer projectId={projectId} buildId={build.id} />
             ) : (
-              <div className="flex h-32 items-center justify-center rounded-lg border border-gray-200 bg-white">
+              <div className="flex h-32 items-center justify-center rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900">
                 <Spinner />
               </div>
             )}
 
             {build && build.status === "success" && (
-              <div className="rounded-lg border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-800">
+              <div className="rounded-lg border border-green-200 dark:border-green-900 bg-green-50 dark:bg-green-950/40 px-4 py-3 text-sm text-green-800 dark:text-green-300">
                 {t("git.import.deploy.success")}
               </div>
             )}
@@ -884,14 +884,14 @@ export default function GitImportPage() {
               {(deployError || (build && (build.status === "failed" || build.status === "canceled"))) && (
                 <button
                   onClick={triggerDeploy}
-                  className="rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
+                  className="rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-50 transition-colors"
                 >
                   {t("git.import.deploy.retry")}
                 </button>
               )}
               <Link
                 href={`/projects/${projectId}/apps/${appName}/deployments${envId ? `?envId=${envId}` : ""}`}
-                className="rounded-lg px-4 py-2 text-sm font-medium text-gray-600 hover:bg-gray-100 transition-colors"
+                className="rounded-lg px-4 py-2 text-sm font-medium text-gray-600 dark:text-gray-400 hover:bg-gray-100 transition-colors"
               >
                 {t("git.import.deploy.viewDeployments")}
               </Link>

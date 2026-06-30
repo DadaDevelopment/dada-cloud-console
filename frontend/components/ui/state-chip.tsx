@@ -10,12 +10,12 @@ import { clsx } from "clsx";
 export type ChipTone = "ready" | "needs-action" | "error" | "protected" | "backup" | "neutral";
 
 const toneMap: Record<ChipTone, string> = {
-  ready: "bg-green-100 text-green-700",
-  "needs-action": "bg-amber-100 text-amber-700",
-  error: "bg-red-100 text-red-700",
-  protected: "bg-slate-100 text-slate-700",
-  backup: "bg-blue-100 text-blue-700",
-  neutral: "bg-gray-100 text-gray-600",
+  ready: "bg-green-100 dark:bg-green-950/40 text-green-700 dark:text-green-300",
+  "needs-action": "bg-amber-100 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300",
+  error: "bg-red-100 dark:bg-red-950/40 text-red-700 dark:text-red-300",
+  protected: "bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300",
+  backup: "bg-blue-100 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300",
+  neutral: "bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400",
 };
 
 const dotMap: Record<ChipTone, string> = {
@@ -24,7 +24,7 @@ const dotMap: Record<ChipTone, string> = {
   error: "bg-red-500",
   protected: "bg-slate-400",
   backup: "bg-blue-500",
-  neutral: "bg-gray-400",
+  neutral: "bg-gray-400 dark:bg-gray-500",
 };
 
 export function StateChip({

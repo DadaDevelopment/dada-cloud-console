@@ -4,6 +4,7 @@ import { ProjectSwitcher } from "./project-switcher";
 import { OrgSwitcher } from "./org-switcher";
 import { AccountMenu } from "./account-menu";
 import { ConsoleLangToggle } from "./console-lang-toggle";
+import { ThemeToggle } from "./theme-toggle";
 import { useT } from "@/lib/i18n/console/context";
 
 /** Detects platform for the ⌘ / Ctrl hint without breaking SSR. */
@@ -56,6 +57,7 @@ export function TopBar({ onOpenPalette }: { onOpenPalette: () => void }) {
       </button>
 
       <div className="ml-auto flex items-center gap-3">
+        <ThemeToggle />
         <ConsoleLangToggle />
         <AccountMenu />
       </div>

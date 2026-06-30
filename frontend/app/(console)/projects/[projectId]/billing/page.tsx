@@ -35,8 +35,8 @@ function UsageBar({ used, limit, label }: { used: number; limit: number | null; 
   return (
     <div className="space-y-1.5">
       <div className="flex items-center justify-between text-sm">
-        <span className="font-medium text-gray-700">{label}</span>
-        <span className={clsx("text-xs", nearLimit ? "font-semibold text-amber-600" : "text-gray-400")}>
+        <span className="font-medium text-gray-700 dark:text-gray-200">{label}</span>
+        <span className={clsx("text-xs", nearLimit ? "font-semibold text-amber-600" : "text-gray-400 dark:text-gray-500")}>
           {unlimited ? `${used} / ∞` : `${used} / ${limit}`}
         </span>
       </div>

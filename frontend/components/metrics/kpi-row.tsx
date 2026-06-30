@@ -57,19 +57,19 @@ function KpiCard({ kpi, index }: { kpi: Kpi; index: number }) {
   const sparkOption = useMemo(() => buildSparkline(kpi.spec.series, index), [kpi.spec.series, index]);
 
   return (
-    <div className="rounded-xl border border-gray-200 bg-white p-3 shadow-sm transition-shadow hover:shadow-md">
-      <p className="truncate font-mono text-[11px] uppercase tracking-wide text-gray-400" title={kpi.metric}>
+    <div className="rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-3 shadow-sm transition-shadow hover:shadow-md">
+      <p className="truncate font-mono text-[11px] uppercase tracking-wide text-gray-400 dark:text-gray-500" title={kpi.metric}>
         {kpi.metric}
       </p>
       <div className="mt-1 flex items-end justify-between gap-2">
-        <span className="text-xl font-semibold text-gray-900">{formatValue(kpi.current, kpi.unit)}</span>
+        <span className="text-xl font-semibold text-gray-900 dark:text-gray-100">{formatValue(kpi.current, kpi.unit)}</span>
         {deltaPct !== null && (
           <span
             className={cn(
               "inline-flex items-center gap-0.5 rounded-md px-1 py-0.5 text-[10px] font-semibold",
-              up && "bg-amber-50 text-amber-700",
-              down && "bg-emerald-50 text-emerald-700",
-              !up && !down && "bg-gray-100 text-gray-500",
+              up && "bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300",
+              down && "bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300",
+              !up && !down && "bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400",
             )}
           >
             {up ? <ArrowUpRight className="h-3 w-3" /> : down ? <ArrowDownRight className="h-3 w-3" /> : <Minus className="h-3 w-3" />}

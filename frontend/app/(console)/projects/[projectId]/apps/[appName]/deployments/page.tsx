@@ -124,9 +124,9 @@ export default function AppDeploymentsPage() {
               { label: t("apps.deployments.crumb") },
             ]}
           />
-          <h1 className="mt-2 text-2xl font-bold text-gray-900">
+          <h1 className="mt-2 text-2xl font-bold text-gray-900 dark:text-gray-100">
             <span className="font-mono">{appName}</span>
-            <span className="ml-2 text-lg font-normal text-gray-400">{t("apps.deployments.heading.suffix")}</span>
+            <span className="ml-2 text-lg font-normal text-gray-400 dark:text-gray-500">{t("apps.deployments.heading.suffix")}</span>
           </h1>
         </div>
         {canDeploy && !unavailable && (
@@ -141,10 +141,10 @@ export default function AppDeploymentsPage() {
       </div>
 
       {notice && (
-        <div className="mb-4 rounded-lg border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-700">{notice}</div>
+        <div className="mb-4 rounded-lg border border-green-200 dark:border-green-900 bg-green-50 dark:bg-green-950/40 px-4 py-3 text-sm text-green-700 dark:text-green-300">{notice}</div>
       )}
       {error && (
-        <div className="mb-6 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>
+        <div className="mb-6 rounded-lg border border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-950/40 px-4 py-3 text-sm text-red-700 dark:text-red-300">{error}</div>
       )}
 
       {loading ? (
@@ -152,7 +152,7 @@ export default function AppDeploymentsPage() {
           <Spinner />
         </div>
       ) : unavailable ? (
-        <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+        <div className="rounded-lg border border-amber-200 dark:border-amber-900 bg-amber-50 dark:bg-amber-950/40 px-4 py-3 text-sm text-amber-800 dark:text-amber-200">
           {t("apps.deployments.unavailable")}
           <Link href={`/projects/${projectId}/git${envId ? `?envId=${envId}` : ""}`} className="ml-1 font-medium underline">
             {t("apps.deployments.unavailable.link")}
@@ -161,9 +161,9 @@ export default function AppDeploymentsPage() {
       ) : (
         <div className="space-y-10">
           <section>
-            <h2 className="mb-3 text-lg font-semibold text-gray-900">{t("apps.deployments.section.deployments")}</h2>
+            <h2 className="mb-3 text-lg font-semibold text-gray-900 dark:text-gray-100">{t("apps.deployments.section.deployments")}</h2>
             {deployments.length === 0 ? (
-              <p className="rounded-xl border border-dashed border-gray-300 bg-gray-50 px-5 py-8 text-center text-sm text-gray-500">
+              <p className="rounded-xl border border-dashed border-gray-300 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 px-5 py-8 text-center text-sm text-gray-500 dark:text-gray-400">
                 {t("apps.deployments.empty.deployments")}
               </p>
             ) : (
@@ -171,25 +171,25 @@ export default function AppDeploymentsPage() {
                 {deployments.map((dep) => (
                   <div
                     key={dep.id}
-                    className={`flex items-center justify-between rounded-xl border bg-white px-5 py-4 shadow-sm ${
-                      dep.is_current ? "border-green-300 ring-1 ring-green-200" : "border-gray-200"
+                    className={`flex items-center justify-between rounded-xl border bg-white dark:bg-gray-900 px-5 py-4 shadow-sm ${
+                      dep.is_current ? "border-green-300 ring-1 ring-green-200 dark:ring-green-900" : "border-gray-200 dark:border-gray-800"
                     }`}
                   >
                     <div className="min-w-0">
                       <div className="flex items-center gap-2">
                         {dep.is_current && (
-                          <span className="inline-flex items-center rounded-full bg-green-100 px-2 py-0.5 text-xs font-semibold text-green-700">
+                          <span className="inline-flex items-center rounded-full bg-green-100 px-2 py-0.5 text-xs font-semibold text-green-700 dark:bg-green-950/40 dark:text-green-300">
                             {t("apps.deployments.badge.current")}
                           </span>
                         )}
-                        <span className="inline-flex items-center rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600">
+                        <span className="inline-flex items-center rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600 dark:bg-slate-800 dark:text-slate-300">
                           {dep.trigger}
                         </span>
-                        {dep.commit_sha && <span className="font-mono text-xs text-gray-500">{dep.commit_sha.slice(0, 7)}</span>}
-                        {dep.branch && <span className="text-xs text-gray-400">{dep.branch}</span>}
+                        {dep.commit_sha && <span className="font-mono text-xs text-gray-500 dark:text-gray-400">{dep.commit_sha.slice(0, 7)}</span>}
+                        {dep.branch && <span className="text-xs text-gray-400 dark:text-gray-500">{dep.branch}</span>}
                       </div>
-                      <p className="mt-1 truncate font-mono text-xs text-gray-400">{dep.image_uri}</p>
-                      <p className="mt-0.5 text-xs text-gray-400">{timeAgo(dep.created_at)}</p>
+                      <p className="mt-1 truncate font-mono text-xs text-gray-400 dark:text-gray-500">{dep.image_uri}</p>
+                      <p className="mt-0.5 text-xs text-gray-400 dark:text-gray-500">{timeAgo(dep.created_at)}</p>
                     </div>
                     {canDeploy && (
                       <div className="flex shrink-0 items-center gap-2 pl-4">
@@ -197,7 +197,7 @@ export default function AppDeploymentsPage() {
                           <button
                             onClick={() => handleDeployAction(dep.id, "promote")}
                             disabled={actionId === dep.id}
-                            className="rounded-lg border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+                            className="rounded-lg border border-gray-300 dark:border-gray-700 px-3 py-1.5 text-xs font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-50"
                           >
                             {actionId === dep.id ? t("apps.deployments.promoting") : t("apps.deployments.promote")}
                           </button>
@@ -205,7 +205,7 @@ export default function AppDeploymentsPage() {
                           <button
                             onClick={() => handleDeployAction(dep.id, "rollback")}
                             disabled={actionId === dep.id}
-                            className="rounded-lg border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+                            className="rounded-lg border border-gray-300 dark:border-gray-700 px-3 py-1.5 text-xs font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-50"
                           >
                             {actionId === dep.id ? t("apps.deployments.rollingBack") : t("apps.deployments.rollback")}
                           </button>
@@ -219,40 +219,40 @@ export default function AppDeploymentsPage() {
           </section>
 
           <section>
-            <h2 className="mb-3 text-lg font-semibold text-gray-900">{t("apps.deployments.section.builds")}</h2>
+            <h2 className="mb-3 text-lg font-semibold text-gray-900 dark:text-gray-100">{t("apps.deployments.section.builds")}</h2>
             {builds.length === 0 ? (
-              <p className="rounded-xl border border-dashed border-gray-300 bg-gray-50 px-5 py-8 text-center text-sm text-gray-500">
+              <p className="rounded-xl border border-dashed border-gray-300 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 px-5 py-8 text-center text-sm text-gray-500 dark:text-gray-400">
                 {t("apps.deployments.empty.builds")}
               </p>
             ) : (
               <div className="space-y-3">
                 {builds.map((b) => (
-                  <div key={b.id} className="flex items-center justify-between rounded-xl border border-gray-200 bg-white px-5 py-4 shadow-sm">
+                  <div key={b.id} className="flex items-center justify-between rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 px-5 py-4 shadow-sm">
                     <Link href={`/projects/${projectId}/apps/${appName}/builds/${b.id}${envId ? `?envId=${envId}` : ""}`} className="min-w-0 flex-1">
                       <div className="flex items-center gap-2">
                         <BuildStatusBadge status={b.status} />
-                        <span className="font-mono text-xs text-gray-500">{b.commit_sha?.slice(0, 7) ?? "—"}</span>
-                        <span className="text-xs text-gray-400">{b.branch}</span>
-                        <span className="inline-flex items-center rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600">
+                        <span className="font-mono text-xs text-gray-500 dark:text-gray-400">{b.commit_sha?.slice(0, 7) ?? "—"}</span>
+                        <span className="text-xs text-gray-400 dark:text-gray-500">{b.branch}</span>
+                        <span className="inline-flex items-center rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600 dark:bg-slate-800 dark:text-slate-300">
                           {b.trigger}
                         </span>
                       </div>
-                      {b.commit_message && <p className="mt-1 truncate text-sm text-gray-700">{b.commit_message}</p>}
-                      <p className="mt-0.5 text-xs text-gray-400">{timeAgo(b.created_at)}</p>
+                      {b.commit_message && <p className="mt-1 truncate text-sm text-gray-700 dark:text-gray-200">{b.commit_message}</p>}
+                      <p className="mt-0.5 text-xs text-gray-400 dark:text-gray-500">{timeAgo(b.created_at)}</p>
                     </Link>
                     <div className="flex shrink-0 items-center gap-3 pl-4">
                       {canDeploy && isBuildActive(b.status) && (
                         <button
                           onClick={() => handleCancel(b.id)}
                           disabled={actionId === b.id}
-                          className="rounded-lg border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+                          className="rounded-lg border border-gray-300 dark:border-gray-700 px-3 py-1.5 text-xs font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-50"
                         >
                           {actionId === b.id ? t("apps.deployments.cancelingBuild") : t("apps.deployments.cancelBuild")}
                         </button>
                       )}
                       <Link
                         href={`/projects/${projectId}/apps/${appName}/builds/${b.id}${envId ? `?envId=${envId}` : ""}`}
-                        className="text-sm font-medium text-blue-600 hover:text-blue-700"
+                        className="text-sm font-medium text-blue-600 dark:text-blue-400 hover:text-blue-700"
                       >
                         {t("apps.deployments.logs")}
                       </Link>

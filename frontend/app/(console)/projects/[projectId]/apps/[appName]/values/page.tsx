@@ -39,7 +39,7 @@ function StatusDot({ status }: { status: ConnStatus }) {
     error:      t("apps.values.status.error"),
   };
   return (
-    <span className="inline-flex items-center gap-1.5 text-xs text-gray-500">
+    <span className="inline-flex items-center gap-1.5 text-xs text-gray-500 dark:text-gray-400">
       <span className={`inline-block h-2 w-2 rounded-full ${colors[status]}`} />
       {labels[status]}
     </span>
@@ -197,7 +197,7 @@ export default function ValuesPage() {
             { label: t("apps.values.crumb") },
           ]}
         />
-        <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+        <div className="mt-4 rounded-lg border border-amber-200 dark:border-amber-900 bg-amber-50 dark:bg-amber-950/40 px-4 py-3 text-sm text-amber-800 dark:text-amber-300">
           {t("apps.values.error.noPermission")}
         </div>
       </div>
@@ -219,9 +219,9 @@ export default function ValuesPage() {
             ]}
           />
           <div className="mt-2 flex items-center gap-3">
-            <h1 className="text-2xl font-bold text-gray-900">
+            <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">
               <span className="font-mono">{appName}</span>
-              <span className="ml-2 text-gray-400 font-normal text-lg">{t("apps.values.heading.suffix")}</span>
+              <span className="ml-2 text-gray-400 dark:text-gray-500 font-normal text-lg">{t("apps.values.heading.suffix")}</span>
             </h1>
             <StatusDot status={status} />
           </div>
@@ -231,7 +231,7 @@ export default function ValuesPage() {
           {status === "closed" || status === "error" ? (
             <button
               onClick={connect}
-              className="rounded-lg border border-gray-300 px-3 py-1.5 text-sm font-medium text-gray-600 hover:bg-gray-50 transition-colors"
+              className="rounded-lg border border-gray-300 dark:border-gray-700 px-3 py-1.5 text-sm font-medium text-gray-600 dark:text-gray-400 hover:bg-gray-50 transition-colors"
             >
               {t("apps.values.reconnect")}
             </button>
@@ -248,14 +248,14 @@ export default function ValuesPage() {
 
       {/* Dirty indicator */}
       {dirty && !saving && (
-        <p className="mb-3 text-xs text-yellow-600">
-          {t("apps.values.unsaved")} <kbd className="rounded bg-yellow-100 px-1 py-0.5 font-mono text-yellow-700">Cmd+S</kbd> to save
+        <p className="mb-3 text-xs text-yellow-600 dark:text-yellow-400">
+          {t("apps.values.unsaved")} <kbd className="rounded bg-yellow-100 px-1 py-0.5 font-mono text-yellow-700 dark:text-yellow-300">Cmd+S</kbd> to save
         </p>
       )}
 
       {/* Editor */}
       {status === "connecting" && !yaml ? (
-        <div className="flex h-64 items-center justify-center rounded-lg border border-gray-200 bg-gray-50">
+        <div className="flex h-64 items-center justify-center rounded-lg border border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-gray-900">
           <Spinner size="lg" />
         </div>
       ) : (

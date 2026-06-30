@@ -70,17 +70,17 @@ export default function AIStudioRegistryPage() {
             { label: t("aiStudio.crumb.registry") },
           ]}
         />
-        <h1 className="mt-2 text-2xl font-bold text-gray-900">{t("aiStudio.title")}</h1>
-        <p className="mt-0.5 text-sm text-gray-500">{t("aiStudio.subtitle")}</p>
+        <h1 className="mt-2 text-2xl font-bold text-gray-900 dark:text-gray-100">{t("aiStudio.title")}</h1>
+        <p className="mt-0.5 text-sm text-gray-500 dark:text-gray-400">{t("aiStudio.subtitle")}</p>
       </div>
 
       {projects.length > 1 && (
         <div className="mb-4 flex items-center gap-3">
-          <label className="text-sm font-medium text-gray-700">{t("aiStudio.project.label")}</label>
+          <label className="text-sm font-medium text-gray-700 dark:text-gray-200">{t("aiStudio.project.label")}</label>
           <select
             value={selectedProjectId}
             onChange={(e) => handleProjectChange(e.target.value)}
-            className="rounded-lg border border-gray-300 px-3 py-1.5 text-sm text-gray-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+            className="rounded-lg border border-gray-300 dark:border-gray-700 px-3 py-1.5 text-sm text-gray-900 dark:text-gray-100 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
           >
             {projects.map((p) => (
               <option key={p.id} value={p.id}>{p.display_name}</option>
@@ -90,12 +90,12 @@ export default function AIStudioRegistryPage() {
       )}
 
       {warning && (
-        <div className="mb-4 rounded-lg border border-yellow-200 bg-yellow-50 px-4 py-3 text-sm text-yellow-800">
+        <div className="mb-4 rounded-lg border border-yellow-200 dark:border-yellow-900 bg-yellow-50 dark:bg-yellow-950/40 px-4 py-3 text-sm text-yellow-800 dark:text-yellow-300">
           {warning}
         </div>
       )}
       {error && (
-        <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+        <div className="mb-4 rounded-lg border border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-950/40 px-4 py-3 text-sm text-red-700 dark:text-red-400">
           {error}
         </div>
       )}
@@ -108,9 +108,9 @@ export default function AIStudioRegistryPage() {
         searchPlaceholder={t("aiStudio.search.placeholder")}
         columns={registryColumns(selectedProjectId, t)}
         emptyState={
-          <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-gray-300 bg-gray-50 py-16">
-            <p className="text-sm font-medium text-gray-500">{t("aiStudio.empty.title")}</p>
-            <p className="mt-1 text-xs text-gray-400">
+          <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-gray-300 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 py-16">
+            <p className="text-sm font-medium text-gray-500 dark:text-gray-400">{t("aiStudio.empty.title")}</p>
+            <p className="mt-1 text-xs text-gray-400 dark:text-gray-500">
               {t("aiStudio.empty.hint")} <span className="font-mono">{getProjectPrefixHint(projects, selectedProjectId)}</span>
             </p>
           </div>
@@ -126,7 +126,7 @@ function registryColumns(projectId: string, t: (key: string, vars?: Record<strin
       key: "name",
       header: t("aiStudio.col.name"),
       sortValue: (m) => m.name,
-      render: (m) => <span className="font-mono text-gray-900">{m.name}</span>,
+      render: (m) => <span className="font-mono text-gray-900 dark:text-gray-100">{m.name}</span>,
     },
     {
       key: "version",
@@ -143,7 +143,7 @@ function registryColumns(projectId: string, t: (key: string, vars?: Record<strin
       key: "updated",
       header: t("aiStudio.col.updated"),
       sortValue: (m) => m.last_updated_timestamp ?? 0,
-      render: (m) => <span className="text-xs text-gray-400">{fmtTimestamp(m.last_updated_timestamp)}</span>,
+      render: (m) => <span className="text-xs text-gray-400 dark:text-gray-500">{fmtTimestamp(m.last_updated_timestamp)}</span>,
     },
     {
       key: "action",

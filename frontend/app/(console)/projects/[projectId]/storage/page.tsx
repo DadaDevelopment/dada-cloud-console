@@ -117,8 +117,8 @@ export default function StoragePage() {
               { label: t("nav.storage") },
             ]}
           />
-          <h1 className="mt-2 text-2xl font-bold text-gray-900">{t("storage.title")}</h1>
-          <p className="mt-0.5 text-sm text-gray-500">{t("storage.subtitle")}</p>
+          <h1 className="mt-2 text-2xl font-bold text-gray-900 dark:text-gray-100">{t("storage.title")}</h1>
+          <p className="mt-0.5 text-sm text-gray-500 dark:text-gray-400">{t("storage.subtitle")}</p>
         </div>
         {canCreate && (
           <button
@@ -135,7 +135,7 @@ export default function StoragePage() {
       </div>
 
       {error && (
-        <div className="mb-6 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+        <div className="mb-6 rounded-lg border border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-950/40 px-4 py-3 text-sm text-red-700 dark:text-red-300">
           {error}
         </div>
       )}
@@ -169,12 +169,12 @@ export default function StoragePage() {
             return (
               <div
                 key={b.id}
-                className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm"
+                className="rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-5 shadow-sm"
               >
                 <div className="mb-3 flex items-start justify-between">
                   <div>
-                    <p className="font-mono text-sm font-semibold text-gray-900">{b.name}</p>
-                    <p className="mt-0.5 text-xs text-gray-400">
+                    <p className="font-mono text-sm font-semibold text-gray-900 dark:text-gray-100">{b.name}</p>
+                    <p className="mt-0.5 text-xs text-gray-400 dark:text-gray-500">
                       {String(summary.bucket_name ?? "")} · {String(summary.region ?? "ru1")}
                     </p>
                   </div>
@@ -182,17 +182,17 @@ export default function StoragePage() {
                 </div>
                 <div className="flex flex-wrap gap-1.5">
                   {Boolean(summary.public) && (
-                    <span className="inline-flex items-center rounded-full bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-700 ring-1 ring-amber-600/20">
+                    <span className="inline-flex items-center rounded-full bg-amber-50 dark:bg-amber-950/40 px-2 py-0.5 text-xs font-medium text-amber-700 dark:text-amber-300 ring-1 ring-amber-600/20">
                       {t("storage.badge.public")}
                     </span>
                   )}
-                  <span className="inline-flex items-center rounded-full bg-slate-50 px-2 py-0.5 text-xs font-medium text-slate-600 ring-1 ring-slate-500/20">
+                  <span className="inline-flex items-center rounded-full bg-slate-50 dark:bg-slate-950/40 px-2 py-0.5 text-xs font-medium text-slate-600 dark:text-slate-400 ring-1 ring-slate-500/20">
                     {summary.app_ref
                       ? t("storage.badge.appRef", { name: String(summary.app_ref) })
                       : t("storage.badge.envLevel")}
                   </span>
                 </div>
-                <p className="mt-2 text-xs text-gray-400">
+                <p className="mt-2 text-xs text-gray-400 dark:text-gray-500">
                   {t("common.status.synced", { ago: timeAgo(b.last_synced_at) })}
                 </p>
               </div>
@@ -208,8 +208,8 @@ export default function StoragePage() {
       >
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <label className="block text-sm font-medium text-gray-700">
-              {t("storage.modal.resourceName")} <span className="text-gray-400 font-normal">{t("storage.modal.resourceNameSub")}</span>
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-200">
+              {t("storage.modal.resourceName")} <span className="text-gray-400 dark:text-gray-500 font-normal">{t("storage.modal.resourceNameSub")}</span>
             </label>
             <input
               type="text"
@@ -219,48 +219,48 @@ export default function StoragePage() {
               placeholder="my-bucket"
               pattern="[a-z0-9-]+"
               title={t("storage.modal.resourceNameTitle")}
-              className="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              className="mt-1 block w-full rounded-lg border border-gray-300 dark:border-gray-700 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
             />
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700">{t("storage.modal.bucketName")}</label>
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-200">{t("storage.modal.bucketName")}</label>
             <input
               type="text"
               required
               value={form.bucket_name}
               onChange={(e) => handleFormChange("bucket_name", e.target.value)}
               placeholder="my-app-assets"
-              className="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              className="mt-1 block w-full rounded-lg border border-gray-300 dark:border-gray-700 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
             />
           </div>
 
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="block text-sm font-medium text-gray-700">{t("storage.modal.region")}</label>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-200">{t("storage.modal.region")}</label>
               <select
                 value={form.region}
                 onChange={(e) => handleFormChange("region", e.target.value)}
-                className="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                className="mt-1 block w-full rounded-lg border border-gray-300 dark:border-gray-700 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
               >
                 <option value="ru1">ru1</option>
               </select>
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700">{t("storage.modal.description")}</label>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-200">{t("storage.modal.description")}</label>
               <input
                 type="text"
                 value={form.description}
                 onChange={(e) => handleFormChange("description", e.target.value)}
                 placeholder={t("storage.modal.descriptionPlaceholder")}
-                className="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                className="mt-1 block w-full rounded-lg border border-gray-300 dark:border-gray-700 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
               />
             </div>
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700">
-              {t("storage.modal.appRef")} <span className="text-gray-400 font-normal">{t("storage.modal.appRefSub")}</span>
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-200">
+              {t("storage.modal.appRef")} <span className="text-gray-400 dark:text-gray-500 font-normal">{t("storage.modal.appRefSub")}</span>
             </label>
             <input
               type="text"
@@ -269,9 +269,9 @@ export default function StoragePage() {
               placeholder="my-app"
               pattern="[a-z0-9-]*"
               title={t("storage.modal.appRefTitle")}
-              className="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              className="mt-1 block w-full rounded-lg border border-gray-300 dark:border-gray-700 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
             />
-            <p className="mt-1 text-xs text-gray-400">
+            <p className="mt-1 text-xs text-gray-400 dark:text-gray-500">
               {t("storage.modal.appRefHelp")}
             </p>
           </div>
@@ -292,7 +292,7 @@ export default function StoragePage() {
           </div>
 
           {submitError && (
-            <div role="alert" className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+            <div role="alert" className="rounded-lg border border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-950/40 px-4 py-3 text-sm text-red-700 dark:text-red-300">
               {submitError}
             </div>
           )}
@@ -301,7 +301,7 @@ export default function StoragePage() {
             <button
               type="button"
               onClick={() => { setIsModalOpen(false); setSubmitError(null); }}
-              className="rounded-lg px-4 py-2 text-sm font-medium text-gray-600 hover:bg-gray-100 transition-colors"
+              className="rounded-lg px-4 py-2 text-sm font-medium text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
             >
               {t("common.cancel")}
             </button>
@@ -323,15 +323,15 @@ function Toggle({ label, description, checked, onChange }: {
   label: string; description: string; checked: boolean; onChange: (v: boolean) => void;
 }) {
   return (
-    <div className="flex items-center justify-between rounded-lg border border-gray-200 px-4 py-3">
+    <div className="flex items-center justify-between rounded-lg border border-gray-200 dark:border-gray-800 px-4 py-3">
       <div>
-        <p className="text-sm font-medium text-gray-700">{label}</p>
-        <p className="text-xs text-gray-400">{description}</p>
+        <p className="text-sm font-medium text-gray-700 dark:text-gray-200">{label}</p>
+        <p className="text-xs text-gray-400 dark:text-gray-500">{description}</p>
       </div>
       <button
         type="button"
         onClick={() => onChange(!checked)}
-        className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 ${checked ? "bg-blue-600" : "bg-gray-200"}`}
+        className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 ${checked ? "bg-blue-600" : "bg-gray-200 dark:bg-gray-700"}`}
         role="switch"
         aria-checked={checked}
       >

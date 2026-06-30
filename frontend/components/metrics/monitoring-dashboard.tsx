@@ -181,7 +181,7 @@ export function MonitoringDashboard({
             </TabsTrigger>
           </TabsList>
           {data?.live_error && (
-            <span title={data.live_error} className="text-xs text-amber-600">
+            <span title={data.live_error} className="text-xs text-amber-600 dark:text-amber-400">
               partial data
             </span>
           )}
@@ -205,7 +205,7 @@ export function MonitoringDashboard({
 
         <TabsContent value="dashboard">
           {error ? (
-            <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-600">{error}</div>
+            <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-600 dark:border-red-900 dark:bg-red-950/40 dark:text-red-400">{error}</div>
           ) : loading && !data ? (
             <div className="flex h-48 items-center justify-center">
               <Spinner size="lg" />
@@ -216,8 +216,8 @@ export function MonitoringDashboard({
             <div className="space-y-4">
               {data?.metrics && <KpiRow metrics={data.metrics} />}
               {state.panels.length === 0 ? (
-                <div className="rounded-xl border border-dashed border-gray-300 bg-gray-50 py-12 text-center">
-                  <p className="text-sm text-gray-500">No panels. Add one or explore metrics.</p>
+                <div className="rounded-xl border border-dashed border-gray-300 bg-gray-50 py-12 text-center dark:border-gray-700 dark:bg-gray-900">
+                  <p className="text-sm text-gray-500 dark:text-gray-400">No panels. Add one or explore metrics.</p>
                 </div>
               ) : (
                 <PanelGrid
@@ -258,9 +258,9 @@ export function MonitoringDashboard({
 
 function EmptyState() {
   return (
-    <div className="flex h-48 flex-col items-center justify-center gap-1 rounded-xl border border-dashed border-gray-300 bg-gray-50 text-center">
-      <p className="text-sm font-medium text-gray-500">No metrics in this range</p>
-      <p className="text-xs text-gray-400">Charts appear automatically once this resource reports metrics.</p>
+    <div className="flex h-48 flex-col items-center justify-center gap-1 rounded-xl border border-dashed border-gray-300 bg-gray-50 text-center dark:border-gray-700 dark:bg-gray-900">
+      <p className="text-sm font-medium text-gray-500 dark:text-gray-400">No metrics in this range</p>
+      <p className="text-xs text-gray-400 dark:text-gray-500">Charts appear automatically once this resource reports metrics.</p>
     </div>
   );
 }

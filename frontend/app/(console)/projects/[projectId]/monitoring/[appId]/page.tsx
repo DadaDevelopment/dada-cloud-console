@@ -24,10 +24,10 @@ const TABS: Tab[] = ["overview", "metrics", "logs", "alerts"];
 
 function HealthBadge({ state, critical }: { state: HealthState; critical: boolean }) {
   const colors: Record<HealthState, string> = {
-    healthy: "bg-green-100 text-green-800",
-    degraded: "bg-yellow-100 text-yellow-800",
-    down: "bg-red-100 text-red-800",
-    unknown: "bg-gray-100 text-gray-600",
+    healthy: "bg-green-100 text-green-800 dark:text-green-300",
+    degraded: "bg-yellow-100 text-yellow-800 dark:text-yellow-300",
+    down: "bg-red-100 text-red-800 dark:text-red-300",
+    unknown: "bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400",
   };
   return (
     <div className="flex items-center gap-2">
@@ -45,16 +45,16 @@ function HealthBadge({ state, critical }: { state: HealthState; critical: boolea
 
 function Row({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
   return (
-    <div className="flex items-start justify-between gap-4 border-b border-gray-100 py-2 last:border-0">
-      <span className="text-xs font-medium uppercase tracking-wide text-gray-400">{label}</span>
-      <span className={`text-sm text-gray-900 break-all text-right ${mono ? "font-mono" : ""}`}>{value}</span>
+    <div className="flex items-start justify-between gap-4 border-b border-gray-100 dark:border-gray-800 py-2 last:border-0">
+      <span className="text-xs font-medium uppercase tracking-wide text-gray-400 dark:text-gray-500">{label}</span>
+      <span className={`text-sm text-gray-900 dark:text-gray-100 break-all text-right ${mono ? "font-mono" : ""}`}>{value}</span>
     </div>
   );
 }
 
 function ErrorBox({ text }: { text: string }) {
   return (
-    <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{text}</div>
+    <div className="rounded-lg border border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-950/40 px-4 py-3 text-sm text-red-700 dark:text-red-300">{text}</div>
   );
 }
 
@@ -79,7 +79,7 @@ function ModalFooter({
       <button
         type="button"
         onClick={onCancel}
-        className="rounded-lg px-4 py-2 text-sm font-medium text-gray-600 hover:bg-gray-100 transition-colors"
+        className="rounded-lg px-4 py-2 text-sm font-medium text-gray-600 dark:text-gray-400 hover:bg-gray-100 transition-colors"
       >
         {t("common.cancel")}
       </button>
@@ -159,7 +159,7 @@ export default function MonitoringDetailPage() {
   }
   if (error || !app) {
     return (
-      <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+      <div className="rounded-lg border border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-950/40 px-4 py-3 text-sm text-red-700 dark:text-red-300">
         {error ?? t("monitoring.detail.notFound")}
       </div>
     );
@@ -176,24 +176,24 @@ export default function MonitoringDetailPage() {
     <div>
       <div className="mb-6 flex items-start justify-between">
         <div>
-          <div className="flex items-center gap-2 text-sm text-gray-500">
+          <div className="flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400">
             <Link href="/projects" className="hover:text-gray-700">{t("common.crumb.projects")}</Link>
             <span>/</span>
             <Link href={`/projects/${projectId}`} className="hover:text-gray-700">{t("common.crumb.overview")}</Link>
             <span>/</span>
             <Link href={`/projects/${projectId}/monitoring`} className="hover:text-gray-700">{t("nav.monitoring")}</Link>
             <span>/</span>
-            <span className="font-mono text-gray-900">{app.name}</span>
+            <span className="font-mono text-gray-900 dark:text-gray-100">{app.name}</span>
           </div>
           <div className="mt-2 flex items-center gap-3">
-            <h1 className="font-mono text-2xl font-bold text-gray-900">{app.name}</h1>
+            <h1 className="font-mono text-2xl font-bold text-gray-900 dark:text-gray-100">{app.name}</h1>
             {health && <HealthBadge state={health.state} critical={health.critical} />}
           </div>
         </div>
         <button
           onClick={openGrafana}
           disabled={isGrafanaLoading}
-          className="inline-flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 hover:border-orange-300 hover:text-orange-600 transition-colors shadow-sm disabled:opacity-50"
+          className="inline-flex items-center gap-2 rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 px-3 py-1.5 text-sm font-medium text-gray-700 dark:text-gray-200 hover:border-orange-300 hover:text-orange-600 transition-colors shadow-sm disabled:opacity-50"
         >
           {isGrafanaLoading ? <Spinner size="sm" /> : (
             <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -204,7 +204,7 @@ export default function MonitoringDetailPage() {
         </button>
       </div>
 
-      <div className="mb-6 border-b border-gray-200">
+      <div className="mb-6 border-b border-gray-200 dark:border-gray-800">
         <nav className="-mb-px flex gap-6">
           {tabs.map((tabItem) => {
             const active = tab === tabItem.key;
@@ -214,8 +214,8 @@ export default function MonitoringDetailPage() {
                 onClick={() => setTab(tabItem.key)}
                 className={`border-b-2 px-1 py-3 text-sm font-medium transition-colors ${
                   active
-                    ? "border-blue-600 text-blue-600"
-                    : "border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700"
+                    ? "border-blue-600 text-blue-600 dark:text-blue-400"
+                    : "border-transparent text-gray-500 dark:text-gray-400 hover:border-gray-300 hover:text-gray-700"
                 }`}
               >
                 {tabItem.label}
@@ -272,8 +272,8 @@ function OverviewTab({
   return (
     <div className="space-y-6">
       {health && (
-        <div className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
-          <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-gray-500">{t("monitoring.detail.health.title")}</h2>
+        <div className="rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-5 shadow-sm">
+          <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">{t("monitoring.detail.health.title")}</h2>
           <div className="space-y-1">
             <Row label={t("monitoring.detail.health.state")} value={health.state} />
             <Row label={t("monitoring.detail.health.lastSeen")} value={health.last_seen ? new Date(health.last_seen).toLocaleString() : "—"} />
@@ -282,10 +282,10 @@ function OverviewTab({
           </div>
           {health.reasons.length > 0 && (
             <div className="mt-3">
-              <p className="text-xs font-medium uppercase tracking-wide text-gray-400 mb-1">{t("monitoring.detail.health.reasons")}</p>
+              <p className="text-xs font-medium uppercase tracking-wide text-gray-400 dark:text-gray-500 mb-1">{t("monitoring.detail.health.reasons")}</p>
               <ul className="space-y-1">
                 {health.reasons.map((r, i) => (
-                  <li key={i} className="text-sm text-gray-700 flex items-start gap-2">
+                  <li key={i} className="text-sm text-gray-700 dark:text-gray-200 flex items-start gap-2">
                     <span className="mt-1 h-1.5 w-1.5 shrink-0 rounded-full bg-red-400" />
                     {r}
                   </li>
@@ -296,8 +296,8 @@ function OverviewTab({
         </div>
       )}
 
-      <div className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
-        <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-gray-500">{t("monitoring.detail.info.title")}</h2>
+      <div className="rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-5 shadow-sm">
+        <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">{t("monitoring.detail.info.title")}</h2>
         <Row label={t("monitoring.detail.info.id")} value={app.id} mono />
         <Row label={t("monitoring.detail.info.created")} value={new Date(app.created_at).toLocaleString()} />
         <Row label={t("monitoring.detail.info.updated")} value={new Date(app.updated_at).toLocaleString()} />
@@ -466,11 +466,11 @@ function AlertsTab({
     <div className="space-y-8">
       <div>
         <div className="mb-4 flex items-center justify-between">
-          <h2 className="text-sm font-semibold uppercase tracking-wide text-gray-500">{t("monitoring.detail.alerts.section")}</h2>
+          <h2 className="text-sm font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">{t("monitoring.detail.alerts.section")}</h2>
           {canWrite && (
             <button
               onClick={() => setIsRuleModalOpen(true)}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 hover:border-blue-300 hover:text-blue-600 transition-colors shadow-sm"
+              className="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 px-3 py-1.5 text-sm font-medium text-gray-700 dark:text-gray-200 hover:border-blue-300 hover:text-blue-600 transition-colors shadow-sm"
             >
               <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
@@ -481,32 +481,32 @@ function AlertsTab({
         </div>
 
         {rules.length === 0 ? (
-          <div className="rounded-xl border border-dashed border-gray-300 bg-gray-50 py-10 text-center">
-            <p className="text-sm text-gray-400">{t("monitoring.detail.alerts.empty")}</p>
+          <div className="rounded-xl border border-dashed border-gray-300 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 py-10 text-center">
+            <p className="text-sm text-gray-400 dark:text-gray-500">{t("monitoring.detail.alerts.empty")}</p>
           </div>
         ) : (
-          <div className="overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm">
-            <table className="min-w-full divide-y divide-gray-200">
-              <thead className="bg-gray-50">
+          <div className="overflow-hidden rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 shadow-sm">
+            <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-800">
+              <thead className="bg-gray-50 dark:bg-gray-900">
                 <tr>
-                  <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">{t("monitoring.detail.alerts.col.name")}</th>
-                  <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">{t("monitoring.detail.alerts.col.metric")}</th>
-                  <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">{t("monitoring.detail.alerts.col.condition")}</th>
-                  <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">{t("monitoring.detail.alerts.col.duration")}</th>
-                  <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">{t("monitoring.detail.alerts.col.channel")}</th>
+                  <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">{t("monitoring.detail.alerts.col.name")}</th>
+                  <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">{t("monitoring.detail.alerts.col.metric")}</th>
+                  <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">{t("monitoring.detail.alerts.col.condition")}</th>
+                  <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">{t("monitoring.detail.alerts.col.duration")}</th>
+                  <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">{t("monitoring.detail.alerts.col.channel")}</th>
                   {canWrite && <th className="px-5 py-3" />}
                 </tr>
               </thead>
-              <tbody className="divide-y divide-gray-100">
+              <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
                 {rules.map((rule) => (
                   <tr key={rule.id}>
-                    <td className="px-5 py-3 text-sm font-medium text-gray-900">{rule.name}</td>
-                    <td className="px-5 py-3 font-mono text-sm text-gray-700">{rule.metric}</td>
-                    <td className="px-5 py-3 font-mono text-sm text-gray-700">
+                    <td className="px-5 py-3 text-sm font-medium text-gray-900 dark:text-gray-100">{rule.name}</td>
+                    <td className="px-5 py-3 font-mono text-sm text-gray-700 dark:text-gray-200">{rule.metric}</td>
+                    <td className="px-5 py-3 font-mono text-sm text-gray-700 dark:text-gray-200">
                       {rule.condition} {rule.threshold}
                     </td>
-                    <td className="px-5 py-3 text-sm text-gray-700">{rule.duration}</td>
-                    <td className="px-5 py-3 text-sm text-gray-500">{rule.channel_name ?? "—"}</td>
+                    <td className="px-5 py-3 text-sm text-gray-700 dark:text-gray-200">{rule.duration}</td>
+                    <td className="px-5 py-3 text-sm text-gray-500 dark:text-gray-400">{rule.channel_name ?? "—"}</td>
                     {canWrite && (
                       <td className="px-5 py-3 text-right">
                         <button
@@ -527,11 +527,11 @@ function AlertsTab({
 
       <div>
         <div className="mb-4 flex items-center justify-between">
-          <h2 className="text-sm font-semibold uppercase tracking-wide text-gray-500">{t("monitoring.detail.channels.section")}</h2>
+          <h2 className="text-sm font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">{t("monitoring.detail.channels.section")}</h2>
           {canWrite && (
             <button
               onClick={() => setIsChannelModalOpen(true)}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 hover:border-blue-300 hover:text-blue-600 transition-colors shadow-sm"
+              className="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 px-3 py-1.5 text-sm font-medium text-gray-700 dark:text-gray-200 hover:border-blue-300 hover:text-blue-600 transition-colors shadow-sm"
             >
               <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
@@ -542,30 +542,30 @@ function AlertsTab({
         </div>
 
         {channels.length === 0 ? (
-          <div className="rounded-xl border border-dashed border-gray-300 bg-gray-50 py-10 text-center">
-            <p className="text-sm text-gray-400">{t("monitoring.detail.channels.empty")}</p>
+          <div className="rounded-xl border border-dashed border-gray-300 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 py-10 text-center">
+            <p className="text-sm text-gray-400 dark:text-gray-500">{t("monitoring.detail.channels.empty")}</p>
           </div>
         ) : (
-          <div className="overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm">
-            <table className="min-w-full divide-y divide-gray-200">
-              <thead className="bg-gray-50">
+          <div className="overflow-hidden rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 shadow-sm">
+            <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-800">
+              <thead className="bg-gray-50 dark:bg-gray-900">
                 <tr>
-                  <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">{t("monitoring.detail.channels.col.name")}</th>
-                  <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">{t("monitoring.detail.channels.col.type")}</th>
-                  <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">{t("monitoring.detail.channels.col.created")}</th>
+                  <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">{t("monitoring.detail.channels.col.name")}</th>
+                  <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">{t("monitoring.detail.channels.col.type")}</th>
+                  <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">{t("monitoring.detail.channels.col.created")}</th>
                   {canWrite && <th className="px-5 py-3" />}
                 </tr>
               </thead>
-              <tbody className="divide-y divide-gray-100">
+              <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
                 {channels.map((ch) => (
                   <tr key={ch.id}>
-                    <td className="px-5 py-3 text-sm font-medium text-gray-900">{ch.name}</td>
+                    <td className="px-5 py-3 text-sm font-medium text-gray-900 dark:text-gray-100">{ch.name}</td>
                     <td className="px-5 py-3">
-                      <span className="inline-flex items-center rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-700">
+                      <span className="inline-flex items-center rounded-full bg-gray-100 dark:bg-gray-800 px-2 py-0.5 text-xs font-medium text-gray-700 dark:text-gray-200">
                         {ch.type}
                       </span>
                     </td>
-                    <td className="px-5 py-3 text-xs text-gray-400">
+                    <td className="px-5 py-3 text-xs text-gray-400 dark:text-gray-500">
                       {new Date(ch.created_at).toLocaleDateString()}
                     </td>
                     {canWrite && (
@@ -596,20 +596,20 @@ function AlertsTab({
       >
         <form onSubmit={submitRule} className="space-y-4">
           <div>
-            <label className="block text-sm font-medium text-gray-700">{t("monitoring.detail.modal.rule.name")}</label>
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-200">{t("monitoring.detail.modal.rule.name")}</label>
             <input
               type="text"
               required
               value={ruleForm.name}
               onChange={(e) => setRuleForm((p) => ({ ...p, name: e.target.value }))}
               placeholder="high-cpu"
-              className="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              className="mt-1 block w-full rounded-lg border border-gray-300 dark:border-gray-700 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
             />
           </div>
 
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="block text-sm font-medium text-gray-700">{t("monitoring.detail.modal.rule.metric")}</label>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-200">{t("monitoring.detail.modal.rule.metric")}</label>
               <input
                 type="text"
                 required
@@ -617,7 +617,7 @@ function AlertsTab({
                 value={ruleForm.metric}
                 onChange={(e) => setRuleForm((p) => ({ ...p, metric: e.target.value }))}
                 placeholder={metricOptions[0] ?? "metric_name"}
-                className="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm font-mono text-gray-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                className="mt-1 block w-full rounded-lg border border-gray-300 dark:border-gray-700 px-3 py-2 text-sm font-mono text-gray-900 dark:text-gray-100 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
               />
               <datalist id="monitoring-metric-options">
                 {metricOptions.map((m) => (
@@ -626,11 +626,11 @@ function AlertsTab({
               </datalist>
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700">{t("monitoring.detail.modal.rule.condition")}</label>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-200">{t("monitoring.detail.modal.rule.condition")}</label>
               <select
                 value={ruleForm.condition}
                 onChange={(e) => setRuleForm((p) => ({ ...p, condition: e.target.value }))}
-                className="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                className="mt-1 block w-full rounded-lg border border-gray-300 dark:border-gray-700 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
               >
                 <option value=">">&gt;</option>
                 <option value="<">&lt;</option>
@@ -642,21 +642,21 @@ function AlertsTab({
 
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="block text-sm font-medium text-gray-700">{t("monitoring.detail.modal.rule.threshold")}</label>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-200">{t("monitoring.detail.modal.rule.threshold")}</label>
               <input
                 type="number"
                 required
                 value={ruleForm.threshold}
                 onChange={(e) => setRuleForm((p) => ({ ...p, threshold: parseFloat(e.target.value) }))}
-                className="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                className="mt-1 block w-full rounded-lg border border-gray-300 dark:border-gray-700 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
               />
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700">{t("monitoring.detail.modal.rule.duration")}</label>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-200">{t("monitoring.detail.modal.rule.duration")}</label>
               <select
                 value={ruleForm.duration}
                 onChange={(e) => setRuleForm((p) => ({ ...p, duration: e.target.value }))}
-                className="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                className="mt-1 block w-full rounded-lg border border-gray-300 dark:border-gray-700 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
               >
                 <option value="5m">5m</option>
                 <option value="10m">10m</option>
@@ -667,13 +667,13 @@ function AlertsTab({
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700">
-              {t("monitoring.detail.modal.rule.channel")} <span className="text-gray-400 font-normal">{t("common.optional")}</span>
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-200">
+              {t("monitoring.detail.modal.rule.channel")} <span className="text-gray-400 dark:text-gray-500 font-normal">{t("common.optional")}</span>
             </label>
             <select
               value={ruleForm.channel_id}
               onChange={(e) => setRuleForm((p) => ({ ...p, channel_id: e.target.value }))}
-              className="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              className="mt-1 block w-full rounded-lg border border-gray-300 dark:border-gray-700 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
             >
               <option value="">{t("monitoring.detail.modal.rule.channelNone")}</option>
               {channels.map((ch) => (
@@ -706,19 +706,19 @@ function AlertsTab({
       >
         <form onSubmit={submitChannel} className="space-y-4">
           <div>
-            <label className="block text-sm font-medium text-gray-700">{t("monitoring.detail.modal.channel.name")}</label>
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-200">{t("monitoring.detail.modal.channel.name")}</label>
             <input
               type="text"
               required
               value={channelForm.name}
               onChange={(e) => setChannelForm((p) => ({ ...p, name: e.target.value }))}
               placeholder="my-telegram-channel"
-              className="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              className="mt-1 block w-full rounded-lg border border-gray-300 dark:border-gray-700 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
             />
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700">{t("monitoring.detail.modal.channel.type")}</label>
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-200">{t("monitoring.detail.modal.channel.type")}</label>
             <select
               value={channelForm.type}
               onChange={(e) =>
@@ -727,7 +727,7 @@ function AlertsTab({
                   type: e.target.value as "telegram" | "email" | "webhook",
                 }))
               }
-              className="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              className="mt-1 block w-full rounded-lg border border-gray-300 dark:border-gray-700 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
             >
               <option value="telegram">Telegram</option>
               <option value="email">Email</option>
@@ -738,25 +738,25 @@ function AlertsTab({
           {channelForm.type === "telegram" && (
             <>
               <div>
-                <label className="block text-sm font-medium text-gray-700">{t("monitoring.detail.modal.channel.botToken")}</label>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-200">{t("monitoring.detail.modal.channel.botToken")}</label>
                 <input
                   type="text"
                   required
                   value={channelForm.bot_token}
                   onChange={(e) => setChannelForm((p) => ({ ...p, bot_token: e.target.value }))}
                   placeholder="123456:ABC-..."
-                  className="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm font-mono text-gray-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                  className="mt-1 block w-full rounded-lg border border-gray-300 dark:border-gray-700 px-3 py-2 text-sm font-mono text-gray-900 dark:text-gray-100 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700">{t("monitoring.detail.modal.channel.chatId")}</label>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-200">{t("monitoring.detail.modal.channel.chatId")}</label>
                 <input
                   type="text"
                   required
                   value={channelForm.chat_id}
                   onChange={(e) => setChannelForm((p) => ({ ...p, chat_id: e.target.value }))}
                   placeholder="-100123456789"
-                  className="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm font-mono text-gray-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                  className="mt-1 block w-full rounded-lg border border-gray-300 dark:border-gray-700 px-3 py-2 text-sm font-mono text-gray-900 dark:text-gray-100 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
                 />
               </div>
             </>
@@ -764,8 +764,8 @@ function AlertsTab({
 
           {channelForm.type === "email" && (
             <div>
-              <label className="block text-sm font-medium text-gray-700">
-                {t("monitoring.detail.modal.channel.emailAddresses")} <span className="text-gray-400 font-normal">{t("monitoring.detail.modal.channel.emailHint")}</span>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-200">
+                {t("monitoring.detail.modal.channel.emailAddresses")} <span className="text-gray-400 dark:text-gray-500 font-normal">{t("monitoring.detail.modal.channel.emailHint")}</span>
               </label>
               <input
                 type="text"
@@ -773,21 +773,21 @@ function AlertsTab({
                 value={channelForm.addresses}
                 onChange={(e) => setChannelForm((p) => ({ ...p, addresses: e.target.value }))}
                 placeholder="ops@acme.com, oncall@acme.com"
-                className="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                className="mt-1 block w-full rounded-lg border border-gray-300 dark:border-gray-700 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
               />
             </div>
           )}
 
           {channelForm.type === "webhook" && (
             <div>
-              <label className="block text-sm font-medium text-gray-700">{t("monitoring.detail.modal.channel.webhookUrl")}</label>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-200">{t("monitoring.detail.modal.channel.webhookUrl")}</label>
               <input
                 type="url"
                 required
                 value={channelForm.url}
                 onChange={(e) => setChannelForm((p) => ({ ...p, url: e.target.value }))}
                 placeholder="https://hooks.example.com/alert"
-                className="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm font-mono text-gray-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                className="mt-1 block w-full rounded-lg border border-gray-300 dark:border-gray-700 px-3 py-2 text-sm font-mono text-gray-900 dark:text-gray-100 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
               />
             </div>
           )}

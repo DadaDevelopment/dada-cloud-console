@@ -1,15 +1,13 @@
-// Shared resource-phase badge (previously duplicated per-page with slightly
-// divergent tone logic). Multi-tone is a superset of the old two-tone usages.
 function tone(phase: string): string {
   switch (phase.toLowerCase()) {
     case "ready":
-      return "bg-green-100 text-green-700";
+      return "bg-green-100 dark:bg-green-950/40 text-green-700 dark:text-green-300";
     case "failed":
-      return "bg-red-100 text-red-700";
+      return "bg-red-100 dark:bg-red-950/40 text-red-700 dark:text-red-300";
     case "waitingforapproval":
-      return "bg-amber-100 text-amber-700";
+      return "bg-amber-100 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300";
     default:
-      return "bg-yellow-100 text-yellow-700";
+      return "bg-yellow-100 dark:bg-yellow-950/40 text-yellow-700 dark:text-yellow-300";
   }
 }
 

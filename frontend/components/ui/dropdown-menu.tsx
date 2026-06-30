@@ -6,7 +6,7 @@ import { cn } from "@/lib/cn";
 export const DropdownMenu = DropdownPrimitive.Root;
 export const DropdownMenuTrigger = DropdownPrimitive.Trigger;
 export const DropdownMenuSeparator = () => (
-  <DropdownPrimitive.Separator className="my-1 h-px bg-gray-100" />
+  <DropdownPrimitive.Separator className="my-1 h-px bg-gray-100 dark:bg-gray-800" />
 );
 
 export const DropdownMenuContent = React.forwardRef<
@@ -19,7 +19,7 @@ export const DropdownMenuContent = React.forwardRef<
       align={align}
       sideOffset={sideOffset}
       className={cn(
-        "z-50 min-w-44 rounded-xl border border-gray-200 bg-white p-1 text-sm text-gray-800 shadow-xl outline-none",
+        "z-50 min-w-44 rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-1 text-sm text-gray-800 dark:text-gray-200 shadow-xl outline-none",
         "data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95",
         className,
       )}
@@ -36,8 +36,8 @@ export const DropdownMenuItem = React.forwardRef<
   <DropdownPrimitive.Item
     ref={ref}
     className={cn(
-      "flex cursor-pointer select-none items-center gap-2 rounded-lg px-2.5 py-1.5 text-sm outline-none transition-colors focus:bg-gray-100 data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
-      destructive ? "text-red-600 focus:bg-red-50" : "text-gray-700",
+      "flex cursor-pointer select-none items-center gap-2 rounded-lg px-2.5 py-1.5 text-sm outline-none transition-colors focus:bg-gray-100 dark:focus:bg-gray-800 data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
+      destructive ? "text-red-600 focus:bg-red-50 dark:focus:bg-red-950/40" : "text-gray-700 dark:text-gray-200",
       className,
     )}
     {...props}
@@ -46,7 +46,7 @@ export const DropdownMenuItem = React.forwardRef<
 DropdownMenuItem.displayName = "DropdownMenuItem";
 
 export const DropdownMenuLabel = ({ children }: { children: React.ReactNode }) => (
-  <DropdownPrimitive.Label className="px-2.5 py-1.5 text-xs font-semibold uppercase tracking-wide text-gray-400">
+  <DropdownPrimitive.Label className="px-2.5 py-1.5 text-xs font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500">
     {children}
   </DropdownPrimitive.Label>
 );

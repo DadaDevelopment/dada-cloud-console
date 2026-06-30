@@ -128,7 +128,7 @@ export default function ModelDetailPage() {
   }
   if (error || !detail) {
     return (
-      <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+      <div className="rounded-lg border border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-950/40 px-4 py-3 text-sm text-red-700 dark:text-red-300">
         {error ?? t("models.detail.notFound")}
       </div>
     );
@@ -153,27 +153,27 @@ export default function ModelDetailPage() {
     <div>
       <div className="mb-6 flex items-start justify-between">
         <div>
-          <div className="flex items-center gap-2 text-sm text-gray-500">
+          <div className="flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400">
             <Link href="/projects" className="hover:text-gray-700">{t("common.crumb.projects")}</Link>
             <span>/</span>
             <Link href={`/projects/${projectId}`} className="hover:text-gray-700">{t("common.crumb.overview")}</Link>
             <span>/</span>
             <Link href={`/projects/${projectId}/models`} className="hover:text-gray-700">{t("nav.models")}</Link>
             <span>/</span>
-            <span className="font-mono text-gray-900">{name}</span>
+            <span className="font-mono text-gray-900 dark:text-gray-100">{name}</span>
           </div>
           <div className="mt-2 flex items-center gap-3">
-            <h1 className="font-mono text-2xl font-bold text-gray-900">{name}</h1>
+            <h1 className="font-mono text-2xl font-bold text-gray-900 dark:text-gray-100">{name}</h1>
             <PhaseBadge phase={model.phase} />
           </div>
-          <p className="mt-1 text-xs text-gray-400">
+          <p className="mt-1 text-xs text-gray-400 dark:text-gray-500">
             {s.model_type} · {s.profile} · v{s.version ?? "—"} · stage {s.stage ?? "—"}
           </p>
         </div>
         <div className="flex items-center gap-2">
           <button
             onClick={() => { setCanaryPercent(canaryPct); setIsCanaryOpen(true); }}
-            className="inline-flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 hover:border-purple-300 hover:text-purple-600 transition-colors shadow-sm"
+            className="inline-flex items-center gap-2 rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 px-3 py-1.5 text-sm font-medium text-gray-700 dark:text-gray-200 hover:border-purple-300 hover:text-purple-600 transition-colors shadow-sm"
           >
             {t("models.detail.setCanary")}
           </button>
@@ -187,14 +187,14 @@ export default function ModelDetailPage() {
           )}
           <button
             onClick={() => { setDeleteForce(false); setIsDeleteOpen(true); }}
-            className="inline-flex items-center gap-2 rounded-lg border border-red-200 bg-white px-3 py-1.5 text-sm font-medium text-red-600 hover:bg-red-50 transition-colors shadow-sm"
+            className="inline-flex items-center gap-2 rounded-lg border border-red-200 dark:border-red-900 bg-white dark:bg-gray-900 px-3 py-1.5 text-sm font-medium text-red-600 dark:text-red-400 hover:bg-red-50 transition-colors shadow-sm"
           >
             {t("common.delete")}
           </button>
         </div>
       </div>
 
-      <div className="mb-6 border-b border-gray-200">
+      <div className="mb-6 border-b border-gray-200 dark:border-gray-800">
         <nav className="-mb-px flex gap-6">
           {tabs.map((t) => {
             if (t.admin && !isAdmin) return null;
@@ -205,8 +205,8 @@ export default function ModelDetailPage() {
                 onClick={() => setTab(t.key)}
                 className={`border-b-2 px-1 py-3 text-sm font-medium transition-colors ${
                   active
-                    ? "border-blue-600 text-blue-600"
-                    : "border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700"
+                    ? "border-blue-600 text-blue-600 dark:text-blue-400"
+                    : "border-transparent text-gray-500 dark:text-gray-400 hover:border-gray-300 hover:text-gray-700"
                 }`}
               >
                 {t.label}
@@ -242,7 +242,7 @@ export default function ModelDetailPage() {
       >
         <form onSubmit={submitCanary} className="space-y-4">
           <div>
-            <label className="block text-sm font-medium text-gray-700">
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-200">
               {t("models.canary.label", { pct: String(canaryPercent) })}
             </label>
             <input
@@ -251,7 +251,7 @@ export default function ModelDetailPage() {
               onChange={(e) => setCanaryPercent(parseInt(e.target.value, 10))}
               className="mt-2 w-full"
             />
-            <p className="mt-1 text-xs text-gray-400">
+            <p className="mt-1 text-xs text-gray-400 dark:text-gray-500">
               {t("models.canary.help")}
             </p>
           </div>
@@ -266,7 +266,7 @@ export default function ModelDetailPage() {
         title={t("models.promote.modal.title")}
       >
         <form onSubmit={submitPromote} className="space-y-4">
-          <p className="text-sm text-gray-600">
+          <p className="text-sm text-gray-600 dark:text-gray-400">
             {t("models.promote.body")}
           </p>
           {promoteError && <ErrorBox text={promoteError} />}
@@ -280,7 +280,7 @@ export default function ModelDetailPage() {
         title={t("models.delete.modal.title")}
       >
         <form onSubmit={submitDelete} className="space-y-4">
-          <p className="text-sm text-gray-600">
+          <p className="text-sm text-gray-600 dark:text-gray-400">
             {t("models.delete.body")}
           </p>
           <label className="flex items-center gap-2">
@@ -288,9 +288,9 @@ export default function ModelDetailPage() {
               type="checkbox"
               checked={deleteForce}
               onChange={(e) => setDeleteForce(e.target.checked)}
-              className="h-4 w-4 rounded border-gray-300 text-red-600 focus:ring-red-500"
+              className="h-4 w-4 rounded border-gray-300 dark:border-gray-700 text-red-600 dark:text-red-400 focus:ring-red-500"
             />
-            <span className="text-sm text-gray-700">
+            <span className="text-sm text-gray-700 dark:text-gray-200">
               {t("models.delete.force")}
             </span>
           </label>
@@ -319,37 +319,37 @@ function OverviewTab({
       </div>
 
       <div className="mt-6 grid gap-6 lg:grid-cols-2">
-        <div className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
-          <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-gray-500">{t("models.overview.source")}</h2>
+        <div className="rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-5 shadow-sm">
+          <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">{t("models.overview.source")}</h2>
           {s.artifact_uri && <Row label={t("models.overview.row.artifactUri")} value={s.artifact_uri} mono />}
           {s.container_image && <Row label={t("models.overview.row.containerImage")} value={s.container_image} mono />}
           {s.mlflow_name && <Row label={t("models.overview.row.mlflow")} value={`${s.mlflow_name} @ v${s.mlflow_version ?? "?"}`} mono />}
           {s.attached_app && <Row label={t("models.overview.row.attachedApp")} value={s.attached_app} mono />}
         </div>
 
-        <div className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
-          <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-gray-500">{t("models.overview.traffic")}</h2>
+        <div className="rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-5 shadow-sm">
+          <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">{t("models.overview.traffic")}</h2>
           {canaryActive ? (
             <>
-              <div className="flex items-center justify-between text-sm text-gray-600">
+              <div className="flex items-center justify-between text-sm text-gray-600 dark:text-gray-400">
                 <span>{t("models.overview.traffic.canary")}</span>
-                <span className="font-mono font-semibold text-purple-700">{canaryPct}%</span>
+                <span className="font-mono font-semibold text-purple-700 dark:text-purple-300">{canaryPct}%</span>
               </div>
-              <div className="mt-2 h-2 w-full overflow-hidden rounded-full bg-gray-100">
+              <div className="mt-2 h-2 w-full overflow-hidden rounded-full bg-gray-100 dark:bg-gray-800">
                 <div className="h-full bg-purple-500" style={{ width: `${canaryPct}%` }} />
               </div>
-              <p className="mt-3 text-xs text-gray-400">
+              <p className="mt-3 text-xs text-gray-400 dark:text-gray-500">
                 {t("models.overview.traffic.canaryHelp")}
               </p>
             </>
           ) : (
-            <p className="text-sm text-gray-500">{t("models.overview.traffic.stable")}</p>
+            <p className="text-sm text-gray-500 dark:text-gray-400">{t("models.overview.traffic.stable")}</p>
           )}
         </div>
       </div>
 
-      <div className="mt-6 rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
-        <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-gray-500">{t("models.overview.status")}</h2>
+      <div className="mt-6 rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-5 shadow-sm">
+        <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">{t("models.overview.status")}</h2>
         <Row label={t("models.overview.row.phase")} value={model.phase ?? "Unknown"} />
         <Row label={t("models.overview.row.lastSynced")} value={new Date(model.last_synced_at).toLocaleString()} />
         {s.status && <Row label={t("models.overview.row.status")} value={s.status} />}
@@ -398,17 +398,17 @@ function VersionsTab({
 
   return (
     <div className="space-y-6">
-      <div className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
-        <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-gray-500">{t("models.versions.updateArtifact")}</h2>
+      <div className="rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-5 shadow-sm">
+        <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">{t("models.versions.updateArtifact")}</h2>
         <form onSubmit={submit} className="space-y-4">
-          <div className="flex gap-1 rounded-lg border border-gray-200 bg-gray-50 p-1 w-fit">
+          <div className="flex gap-1 rounded-lg border border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-gray-900 p-1 w-fit">
             {(["artifact", "mlflow"] as const).map((m) => (
               <button
                 key={m}
                 type="button"
                 onClick={() => setMode(m)}
                 className={`rounded-md px-3 py-1 text-xs font-medium transition-colors ${
-                  mode === m ? "bg-white text-gray-900 shadow-sm" : "text-gray-500 hover:text-gray-700"
+                  mode === m ? "bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 shadow-sm" : "text-gray-500 dark:text-gray-400 hover:text-gray-700"
                 }`}
               >
                 {m === "artifact" ? "S3 URI" : "MLflow pin"}
@@ -417,31 +417,31 @@ function VersionsTab({
           </div>
           {mode === "artifact" ? (
             <div>
-              <label className="block text-sm font-medium text-gray-700">{t("models.versions.artifactUri.label")}</label>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-200">{t("models.versions.artifactUri.label")}</label>
               <input
                 type="text" required value={artifactURI}
                 onChange={(e) => setArtifactURI(e.target.value)}
                 placeholder="s3://platform-models/<project>/<name>/v2"
-                className="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm font-mono text-gray-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                className="mt-1 block w-full rounded-lg border border-gray-300 dark:border-gray-700 px-3 py-2 text-sm font-mono text-gray-900 dark:text-gray-100 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
               />
-              <p className="mt-1 text-xs text-gray-400">{t("models.versions.artifactUri.help")}</p>
+              <p className="mt-1 text-xs text-gray-400 dark:text-gray-500">{t("models.versions.artifactUri.help")}</p>
             </div>
           ) : (
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="block text-sm font-medium text-gray-700">{t("models.versions.mlflowName.label")}</label>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-200">{t("models.versions.mlflowName.label")}</label>
                 <input
                   type="text" required value={mlflowName}
                   onChange={(e) => setMlflowName(e.target.value)}
-                  className="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm font-mono text-gray-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                  className="mt-1 block w-full rounded-lg border border-gray-300 dark:border-gray-700 px-3 py-2 text-sm font-mono text-gray-900 dark:text-gray-100 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700">{t("models.versions.mlflowVersion.label")}</label>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-200">{t("models.versions.mlflowVersion.label")}</label>
                 <input
                   type="text" required value={mlflowVersion}
                   onChange={(e) => setMlflowVersion(e.target.value)}
-                  className="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm font-mono text-gray-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                  className="mt-1 block w-full rounded-lg border border-gray-300 dark:border-gray-700 px-3 py-2 text-sm font-mono text-gray-900 dark:text-gray-100 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
                 />
               </div>
             </div>
@@ -458,16 +458,16 @@ function VersionsTab({
         </form>
       </div>
 
-      <div className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
-        <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-gray-500">{t("models.versions.history")}</h2>
+      <div className="rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-5 shadow-sm">
+        <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">{t("models.versions.history")}</h2>
         {versionOps.length === 0 ? (
-          <p className="text-sm text-gray-500">{t("models.versions.noHistory")}</p>
+          <p className="text-sm text-gray-500 dark:text-gray-400">{t("models.versions.noHistory")}</p>
         ) : (
-          <ul className="divide-y divide-gray-100">
+          <ul className="divide-y divide-gray-100 dark:divide-gray-800">
             {versionOps.map((op) => (
               <li key={op.id} className="flex items-center justify-between py-2 text-sm">
-                <span className="text-gray-700">{op.action}</span>
-                <span className="text-xs text-gray-400">{new Date(op.created_at).toLocaleString()}</span>
+                <span className="text-gray-700 dark:text-gray-200">{op.action}</span>
+                <span className="text-xs text-gray-400 dark:text-gray-500">{new Date(op.created_at).toLocaleString()}</span>
               </li>
             ))}
           </ul>
@@ -503,28 +503,28 @@ function AccessTab({
 
   return (
     <div className="space-y-6">
-      <div className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
-        <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-gray-500">{t("models.access.auth")}</h2>
+      <div className="rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-5 shadow-sm">
+        <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">{t("models.access.auth")}</h2>
         <Row label={t("models.overview.specCard.authMode")} value={s.auth_mode ?? "—"} />
         {apiKeyPrefix ? (
           <Row label={t("models.overview.row.apiKeyPrefix")} value={`${apiKeyPrefix}…`} mono />
         ) : (
-          <p className="mt-2 text-sm text-gray-500">{t("models.access.noApiKey")}</p>
+          <p className="mt-2 text-sm text-gray-500 dark:text-gray-400">{t("models.access.noApiKey")}</p>
         )}
       </div>
 
       {s.auth_mode === "apikey" && (
-        <div className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
-          <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-gray-500">{t("models.access.reveal.title")}</h2>
-          <p className="text-sm text-gray-600">
+        <div className="rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-5 shadow-sm">
+          <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">{t("models.access.reveal.title")}</h2>
+          <p className="text-sm text-gray-600 dark:text-gray-400">
             {t("models.access.reveal.body")}
           </p>
           {revealed ? (
             <div className="mt-3">
-              <pre className="overflow-x-auto rounded-lg border border-amber-200 bg-amber-50 p-3 font-mono text-sm text-amber-900">
+              <pre className="overflow-x-auto rounded-lg border border-amber-200 dark:border-amber-900 bg-amber-50 dark:bg-amber-950/40 p-3 font-mono text-sm text-amber-900">
                 {revealed}
               </pre>
-              <p className="mt-2 text-xs text-amber-700">{t("models.access.reveal.save")}</p>
+              <p className="mt-2 text-xs text-amber-700 dark:text-amber-300">{t("models.access.reveal.save")}</p>
             </div>
           ) : (
             <button
@@ -546,36 +546,36 @@ function OperationsTab({ operations, projectId }: { operations: Operation[]; pro
   const { t } = useT();
   if (operations.length === 0) {
     return (
-      <div className="rounded-xl border border-dashed border-gray-300 bg-gray-50 py-12 text-center">
-        <p className="text-sm text-gray-500">{t("models.ops.empty")}</p>
+      <div className="rounded-xl border border-dashed border-gray-300 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 py-12 text-center">
+        <p className="text-sm text-gray-500 dark:text-gray-400">{t("models.ops.empty")}</p>
       </div>
     );
   }
   return (
-    <div className="overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm">
-      <table className="min-w-full divide-y divide-gray-200">
-        <thead className="bg-gray-50">
+    <div className="overflow-hidden rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 shadow-sm">
+      <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-800">
+        <thead className="bg-gray-50 dark:bg-gray-900">
           <tr>
-            <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">{t("models.ops.col.action")}</th>
-            <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">{t("models.ops.col.status")}</th>
-            <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">{t("models.ops.col.when")}</th>
-            <th className="px-5 py-3 text-right text-xs font-semibold uppercase tracking-wide text-gray-500">{t("models.ops.col.link")}</th>
+            <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">{t("models.ops.col.action")}</th>
+            <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">{t("models.ops.col.status")}</th>
+            <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">{t("models.ops.col.when")}</th>
+            <th className="px-5 py-3 text-right text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">{t("models.ops.col.link")}</th>
           </tr>
         </thead>
-        <tbody className="divide-y divide-gray-100">
+        <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
           {operations.map((op) => (
             <tr key={op.id}>
-              <td className="px-5 py-3 text-sm text-gray-900">{op.action}</td>
+              <td className="px-5 py-3 text-sm text-gray-900 dark:text-gray-100">{op.action}</td>
               <td className="px-5 py-3 text-sm">
-                <span className="inline-flex items-center rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-700">
+                <span className="inline-flex items-center rounded-full bg-gray-100 dark:bg-gray-800 px-2 py-0.5 text-xs font-medium text-gray-700 dark:text-gray-200">
                   {op.status}
                 </span>
               </td>
-              <td className="px-5 py-3 text-xs text-gray-400">{new Date(op.created_at).toLocaleString()}</td>
+              <td className="px-5 py-3 text-xs text-gray-400 dark:text-gray-500">{new Date(op.created_at).toLocaleString()}</td>
               <td className="px-5 py-3 text-right">
                 <Link
                   href={`/projects/${projectId}/operations?highlight=${op.id}`}
-                  className="text-xs text-blue-600 hover:text-blue-700"
+                  className="text-xs text-blue-600 dark:text-blue-400 hover:text-blue-700"
                 >
                   {t("models.ops.details")}
                 </Link>
@@ -597,17 +597,17 @@ function ManifestsTab({
   const lastOp = operations[0];
   return (
     <div className="space-y-6">
-      <div className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
-        <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-gray-500">{t("models.manifests.gitops")}</h2>
+      <div className="rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-5 shadow-sm">
+        <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">{t("models.manifests.gitops")}</h2>
         {lastOp?.git_path && <Row label={t("models.manifests.row.gitPath")} value={lastOp.git_path} mono />}
         {lastOp?.git_commit && <Row label={t("models.manifests.row.lastCommit")} value={lastOp.git_commit.slice(0, 12)} mono />}
         {lastOp?.argo_application && <Row label={t("models.manifests.row.argoApp")} value={lastOp.argo_application} mono />}
         <Row label={t("models.manifests.row.crossplane")} value={`aimodel-${model.name}`} mono />
       </div>
 
-      <div className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
-        <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-gray-500">{t("models.manifests.resolvedSpec")}</h2>
-        <pre className="max-h-96 overflow-auto rounded-lg border border-gray-200 bg-gray-50 p-3 font-mono text-xs text-gray-900">
+      <div className="rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-5 shadow-sm">
+        <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">{t("models.manifests.resolvedSpec")}</h2>
+        <pre className="max-h-96 overflow-auto rounded-lg border border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-gray-900 p-3 font-mono text-xs text-gray-900 dark:text-gray-100">
 {JSON.stringify(s, null, 2)}
         </pre>
       </div>
@@ -617,25 +617,25 @@ function ManifestsTab({
 
 function SpecCard({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
-      <p className="text-xs font-semibold uppercase tracking-wide text-gray-400">{label}</p>
-      <p className="mt-1 truncate text-sm font-medium text-gray-900 font-mono">{value}</p>
+    <div className="rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-5 shadow-sm">
+      <p className="text-xs font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500">{label}</p>
+      <p className="mt-1 truncate text-sm font-medium text-gray-900 dark:text-gray-100 font-mono">{value}</p>
     </div>
   );
 }
 
 function Row({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
   return (
-    <div className="flex items-start justify-between gap-4 border-b border-gray-100 py-2 last:border-0">
-      <span className="text-xs font-medium uppercase tracking-wide text-gray-400">{label}</span>
-      <span className={`text-sm text-gray-900 break-all text-right ${mono ? "font-mono" : ""}`}>{value}</span>
+    <div className="flex items-start justify-between gap-4 border-b border-gray-100 dark:border-gray-800 py-2 last:border-0">
+      <span className="text-xs font-medium uppercase tracking-wide text-gray-400 dark:text-gray-500">{label}</span>
+      <span className={`text-sm text-gray-900 dark:text-gray-100 break-all text-right ${mono ? "font-mono" : ""}`}>{value}</span>
     </div>
   );
 }
 
 function ErrorBox({ text }: { text: string }) {
   return (
-    <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{text}</div>
+    <div className="rounded-lg border border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-950/40 px-4 py-3 text-sm text-red-700 dark:text-red-300">{text}</div>
   );
 }
 
@@ -655,7 +655,7 @@ function ModalFooter({
     <div className="flex justify-end gap-3 pt-2">
       <button
         type="button" onClick={onCancel}
-        className="rounded-lg px-4 py-2 text-sm font-medium text-gray-600 hover:bg-gray-100 transition-colors"
+        className="rounded-lg px-4 py-2 text-sm font-medium text-gray-600 dark:text-gray-400 hover:bg-gray-100 transition-colors"
       >
         {t("common.cancel")}
       </button>

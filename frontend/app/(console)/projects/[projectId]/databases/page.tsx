@@ -120,8 +120,8 @@ export default function DatabasesPage() {
               { label: t("nav.databases") },
             ]}
           />
-          <h1 className="mt-2 text-2xl font-bold text-gray-900">{t("databases.title")}</h1>
-          <p className="mt-0.5 text-sm text-gray-500">{t("databases.subtitle")}</p>
+          <h1 className="mt-2 text-2xl font-bold text-gray-900 dark:text-gray-100">{t("databases.title")}</h1>
+          <p className="mt-0.5 text-sm text-gray-500 dark:text-gray-400">{t("databases.subtitle")}</p>
         </div>
         {canCreate && (
         <button
@@ -138,7 +138,7 @@ export default function DatabasesPage() {
       </div>
 
       {error && (
-        <div className="mb-6 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+        <div className="mb-6 rounded-lg border border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-950/40 px-4 py-3 text-sm text-red-700 dark:text-red-300">
           {error}
         </div>
       )}
@@ -177,25 +177,25 @@ export default function DatabasesPage() {
               <Link
                 key={db.id}
                 href={`/projects/${projectId}/databases/${db.name}${selectedEnvId ? `?envId=${selectedEnvId}` : ""}`}
-                className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm transition-all hover:border-blue-200 hover:shadow-md"
+                className="rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-5 shadow-sm transition-all hover:border-blue-200 hover:shadow-md"
               >
                 <div className="mb-3 flex items-start justify-between">
                   <div>
-                    <p className="font-mono text-sm font-semibold text-gray-900">{db.name}</p>
-                    <p className="mt-0.5 text-xs text-gray-400">{db.kind}</p>
+                    <p className="font-mono text-sm font-semibold text-gray-900 dark:text-gray-100">{db.name}</p>
+                    <p className="mt-0.5 text-xs text-gray-400 dark:text-gray-500">{db.kind}</p>
                   </div>
                   <PhaseBadge phase={db.phase} />
                 </div>
-                <div className="flex items-center gap-3 text-xs text-gray-500">
+                <div className="flex items-center gap-3 text-xs text-gray-500 dark:text-gray-400">
                   <span>{typeof s.size_bytes === "number" ? fmtBytes(s.size_bytes) : t("databases.card.size")}</span>
-                  <span className="text-gray-300">·</span>
+                  <span className="text-gray-300 dark:text-gray-700">·</span>
                   <span title={s.backup_last_at ?? ""}>
                     {s.backup_last_at
                       ? t("databases.card.backup", { ago: timeAgo(s.backup_last_at) })
                       : t("databases.card.noBackup")}
                   </span>
                 </div>
-                <p className="mt-2 text-xs text-gray-400">
+                <p className="mt-2 text-xs text-gray-400 dark:text-gray-500">
                   {t("databases.card.synced", { ago: timeAgo(db.last_synced_at) })}
                 </p>
               </Link>
@@ -214,9 +214,9 @@ export default function DatabasesPage() {
       >
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <label className="block text-sm font-medium text-gray-700">
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-200">
               {t("databases.modal.name.label")}{" "}
-              <span className="text-gray-400 font-normal">({t("databases.modal.name.hint")})</span>
+              <span className="text-gray-400 dark:text-gray-500 font-normal">({t("databases.modal.name.hint")})</span>
             </label>
             <input
               type="text"
@@ -226,12 +226,12 @@ export default function DatabasesPage() {
               placeholder="my-app-db"
               pattern="[a-z0-9-]+"
               title={t("databases.modal.name.validation")}
-              className="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              className="mt-1 block w-full rounded-lg border border-gray-300 dark:border-gray-700 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
             />
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700">
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-200">
               {t("databases.modal.pgName.label")}
             </label>
             <input
@@ -240,14 +240,14 @@ export default function DatabasesPage() {
               value={form.database}
               onChange={(e) => handleFormChange("database", e.target.value)}
               placeholder="myappdb"
-              className="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              className="mt-1 block w-full rounded-lg border border-gray-300 dark:border-gray-700 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
             />
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700">
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-200">
               {t("databases.modal.appRef.label")}{" "}
-              <span className="text-gray-400 font-normal">({t("databases.modal.appRef.hint")})</span>
+              <span className="text-gray-400 dark:text-gray-500 font-normal">({t("databases.modal.appRef.hint")})</span>
             </label>
             <input
               type="text"
@@ -256,23 +256,23 @@ export default function DatabasesPage() {
               placeholder="my-app"
               pattern="[a-z0-9-]*"
               title={t("databases.modal.name.validation")}
-              className="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              className="mt-1 block w-full rounded-lg border border-gray-300 dark:border-gray-700 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
             />
-            <p className="mt-1 text-xs text-gray-400">
+            <p className="mt-1 text-xs text-gray-400 dark:text-gray-500">
               {t("databases.modal.appRef.help")}
             </p>
           </div>
 
-          <div className="flex items-center justify-between rounded-lg border border-gray-200 px-4 py-3">
+          <div className="flex items-center justify-between rounded-lg border border-gray-200 dark:border-gray-800 px-4 py-3">
             <div>
-              <p className="text-sm font-medium text-gray-700">{t("databases.modal.backups.title")}</p>
-              <p className="text-xs text-gray-400">{t("databases.modal.backups.subtitle")}</p>
+              <p className="text-sm font-medium text-gray-700 dark:text-gray-200">{t("databases.modal.backups.title")}</p>
+              <p className="text-xs text-gray-400 dark:text-gray-500">{t("databases.modal.backups.subtitle")}</p>
             </div>
             <button
               type="button"
               onClick={() => handleFormChange("backup_enabled", !form.backup_enabled)}
               className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 ${
-                form.backup_enabled ? "bg-blue-600" : "bg-gray-200"
+                form.backup_enabled ? "bg-blue-600" : "bg-gray-200 dark:bg-gray-700"
               }`}
               role="switch"
               aria-checked={form.backup_enabled}
@@ -288,22 +288,22 @@ export default function DatabasesPage() {
           {form.backup_enabled && (
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="block text-sm font-medium text-gray-700">{t("databases.modal.schedule.label")}</label>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-200">{t("databases.modal.schedule.label")}</label>
                 <select
                   value={form.backup_schedule}
                   onChange={(e) => handleFormChange("backup_schedule", e.target.value)}
-                  className="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                  className="mt-1 block w-full rounded-lg border border-gray-300 dark:border-gray-700 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
                 >
                   <option value="hourly">{t("databases.modal.schedule.hourly")}</option>
                   <option value="daily">{t("databases.modal.schedule.daily")}</option>
                 </select>
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700">{t("databases.modal.retention.label")}</label>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-200">{t("databases.modal.retention.label")}</label>
                 <select
                   value={form.backup_retention}
                   onChange={(e) => handleFormChange("backup_retention", e.target.value)}
-                  className="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                  className="mt-1 block w-full rounded-lg border border-gray-300 dark:border-gray-700 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
                 >
                   <option value="7d">{t("databases.modal.retention.7d")}</option>
                   <option value="14d">{t("databases.modal.retention.14d")}</option>
@@ -314,7 +314,7 @@ export default function DatabasesPage() {
           )}
 
           {submitError && (
-            <div role="alert" className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+            <div role="alert" className="rounded-lg border border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-950/40 px-4 py-3 text-sm text-red-700 dark:text-red-300">
               {submitError}
             </div>
           )}
@@ -326,7 +326,7 @@ export default function DatabasesPage() {
                 setIsModalOpen(false);
                 setSubmitError(null);
               }}
-              className="rounded-lg px-4 py-2 text-sm font-medium text-gray-600 hover:bg-gray-100 transition-colors"
+              className="rounded-lg px-4 py-2 text-sm font-medium text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
             >
               {t("common.cancel")}
             </button>

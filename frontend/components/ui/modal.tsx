@@ -39,12 +39,12 @@ export function Modal({ isOpen, onClose, title, children }: ModalProps) {
       />
 
       {/* Modal panel */}
-      <div className="relative z-10 mx-4 w-full max-w-lg rounded-xl bg-white shadow-2xl">
-        <div className="flex items-center justify-between border-b border-gray-100 px-6 py-4">
-          <h2 className="text-base font-semibold text-gray-900">{title}</h2>
+      <div className="relative z-10 mx-4 w-full max-w-lg rounded-xl bg-white dark:bg-gray-900 shadow-2xl">
+        <div className="flex items-center justify-between border-b border-gray-100 dark:border-gray-800 px-6 py-4">
+          <h2 className="text-base font-semibold text-gray-900 dark:text-gray-100">{title}</h2>
           <button
             onClick={onClose}
-            className="flex h-7 w-7 items-center justify-center rounded-md text-gray-400 hover:bg-gray-100 hover:text-gray-600 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+            className="flex h-7 w-7 items-center justify-center rounded-md text-gray-400 dark:text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800 hover:text-gray-600 dark:hover:text-gray-300 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
             aria-label="Close"
           >
             <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">

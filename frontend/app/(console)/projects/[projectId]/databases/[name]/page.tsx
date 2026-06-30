@@ -26,8 +26,8 @@ interface DbSummary {
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div>
-      <p className="text-xs font-semibold uppercase tracking-wide text-gray-400">{label}</p>
-      <div className="mt-1 text-sm font-medium text-gray-900">{children}</div>
+      <p className="text-xs font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500">{label}</p>
+      <div className="mt-1 text-sm font-medium text-gray-900 dark:text-gray-100">{children}</div>
     </div>
   );
 }
@@ -73,7 +73,7 @@ export default function DatabaseDetailPage() {
   }
   if (error || !db) {
     return (
-      <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+      <div className="rounded-lg border border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-950/40 px-4 py-3 text-sm text-red-700 dark:text-red-300">
         {error ?? t("databases.error.notFound")}
       </div>
     );
@@ -100,15 +100,15 @@ export default function DatabaseDetailPage() {
           ]}
         />
         <div className="mt-2 flex items-center gap-3">
-          <h1 className="font-mono text-2xl font-bold text-gray-900">{db.name}</h1>
+          <h1 className="font-mono text-2xl font-bold text-gray-900 dark:text-gray-100">{db.name}</h1>
           <PhaseBadge phase={db.phase} />
         </div>
-        <p className="mt-0.5 text-sm text-gray-500">{t("databases.detail.subtitle")}</p>
+        <p className="mt-0.5 text-sm text-gray-500 dark:text-gray-400">{t("databases.detail.subtitle")}</p>
       </div>
 
       <section className="mb-8">
-        <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-gray-500">{t("databases.detail.overview")}</h2>
-        <div className="grid gap-4 rounded-xl border border-gray-200 bg-white p-6 shadow-sm sm:grid-cols-2 lg:grid-cols-4">
+        <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">{t("databases.detail.overview")}</h2>
+        <div className="grid gap-4 rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-6 shadow-sm sm:grid-cols-2 lg:grid-cols-4">
           <Field label={t("databases.detail.field.database")}>{dbName}</Field>
           <Field label={t("databases.detail.field.attachedApp")}>{appRef ? <span className="font-mono">{appRef}</span> : "—"}</Field>
           <Field label={t("databases.detail.field.environment")}>{selectedEnv?.name ?? "—"}</Field>
@@ -117,8 +117,8 @@ export default function DatabaseDetailPage() {
       </section>
 
       <section className="mb-8">
-        <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-gray-500">{t("databases.detail.connection")}</h2>
-        <div className="space-y-4 rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
+        <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">{t("databases.detail.connection")}</h2>
+        <div className="space-y-4 rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-6 shadow-sm">
           <div className="flex items-center justify-between gap-3">
             <Field label={t("databases.detail.field.host")}><span className="font-mono text-xs sm:text-sm">{host}</span></Field>
             <CopyButton value={host} />
@@ -127,15 +127,15 @@ export default function DatabaseDetailPage() {
             <Field label={t("databases.detail.field.dbName")}><span className="font-mono">{dbName}</span></Field>
             <Field label={t("databases.detail.field.port")}><span className="font-mono">5432</span></Field>
           </div>
-          <p className="rounded-lg bg-gray-50 px-3 py-2 text-xs text-gray-500">
+          <p className="rounded-lg bg-gray-50 dark:bg-gray-900 px-3 py-2 text-xs text-gray-500 dark:text-gray-400">
             {t("databases.detail.credentials")}
           </p>
         </div>
       </section>
 
       <section>
-        <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-gray-500">{t("databases.detail.backups")}</h2>
-        <div className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
+        <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">{t("databases.detail.backups")}</h2>
+        <div className="rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-6 shadow-sm">
           {backupOn ? (
             <div className="grid gap-4 sm:grid-cols-3">
               <Field label={t("databases.detail.backup.field.status")}>
@@ -147,8 +147,8 @@ export default function DatabaseDetailPage() {
               <Field label={t("databases.detail.backup.field.retention")}>{backup?.retention ?? "—"}</Field>
             </div>
           ) : (
-            <div className="flex items-center gap-2 text-sm text-gray-500">
-              <span className="h-2 w-2 rounded-full bg-gray-300" />
+            <div className="flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400">
+              <span className="h-2 w-2 rounded-full bg-gray-300 dark:bg-gray-700" />
               {t("databases.detail.backup.disabled")}
             </div>
           )}

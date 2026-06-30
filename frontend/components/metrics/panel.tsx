@@ -129,20 +129,20 @@ export function Panel({
       </div>
     ) : !hasData || !option ? (
       <div className="flex h-full flex-col items-center justify-center gap-1 text-center">
-        <p className="text-xs font-medium text-gray-400">No data in range</p>
+        <p className="text-xs font-medium text-gray-400 dark:text-gray-500">No data in range</p>
       </div>
     ) : (
       <EChart option={option} height="100%" aria-label={title} />
     );
 
   return (
-    <div className="group flex h-full flex-col overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm transition-shadow hover:shadow-md">
-      <div className="panel-drag flex cursor-move items-center justify-between gap-2 border-b border-gray-100 px-3 py-2">
+    <div className="group flex h-full flex-col overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm transition-shadow hover:shadow-md dark:border-gray-800 dark:bg-gray-900">
+      <div className="panel-drag flex cursor-move items-center justify-between gap-2 border-b border-gray-100 px-3 py-2 dark:border-gray-800">
         <div className="flex min-w-0 items-center gap-1.5">
-          {editable && <GripVertical className="h-3.5 w-3.5 shrink-0 text-gray-300" />}
+          {editable && <GripVertical className="h-3.5 w-3.5 shrink-0 text-gray-300 dark:text-gray-600" />}
           <div className="min-w-0">
-            <p className="truncate font-mono text-xs font-semibold text-gray-800">{title}</p>
-            <p className="truncate text-[10px] uppercase tracking-wide text-gray-400">
+            <p className="truncate font-mono text-xs font-semibold text-gray-800 dark:text-gray-200">{title}</p>
+            <p className="truncate text-[10px] uppercase tracking-wide text-gray-400 dark:text-gray-500">
               {VIZ_LABELS[panel.viz]}
               {(panel.agg ?? ctx.globalAgg) ? ` · ${panel.agg ?? ctx.globalAgg}` : ""}
               {(panel.groupBy ?? ctx.globalGroupBy) ? ` · by ${panel.groupBy ?? ctx.globalGroupBy}` : ""}
@@ -162,7 +162,7 @@ export function Panel({
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <button
-                className="flex h-6 w-6 items-center justify-center rounded-md text-gray-400 hover:bg-gray-100 hover:text-gray-700"
+                className="flex h-6 w-6 items-center justify-center rounded-md text-gray-400 hover:bg-gray-100 hover:text-gray-700 dark:text-gray-500 dark:hover:bg-gray-800 dark:hover:text-gray-300"
                 title="More"
               >
                 <MoreHorizontal className="h-3.5 w-3.5" />
@@ -196,14 +196,14 @@ export function Panel({
       {full && (
         <div className="fixed inset-0 z-50 flex flex-col bg-black/50 backdrop-blur-sm" onClick={() => setFull(false)}>
           <div
-            className="m-auto flex h-[80vh] w-[90vw] flex-col overflow-hidden rounded-2xl bg-white shadow-2xl"
+            className="m-auto flex h-[80vh] w-[90vw] flex-col overflow-hidden rounded-2xl bg-white shadow-2xl dark:bg-gray-900"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="flex items-center justify-between border-b border-gray-100 px-5 py-3">
-              <p className="font-mono text-sm font-semibold text-gray-900">{title}</p>
+            <div className="flex items-center justify-between border-b border-gray-100 px-5 py-3 dark:border-gray-800">
+              <p className="font-mono text-sm font-semibold text-gray-900 dark:text-gray-100">{title}</p>
               <button
                 onClick={() => setFull(false)}
-                className="flex h-7 w-7 items-center justify-center rounded-md text-gray-400 hover:bg-gray-100"
+                className="flex h-7 w-7 items-center justify-center rounded-md text-gray-400 hover:bg-gray-100 dark:text-gray-500 dark:hover:bg-gray-800"
               >
                 <X className="h-4 w-4" />
               </button>
@@ -221,7 +221,7 @@ function IconBtn({ title, onClick, children }: { title: string; onClick: () => v
     <button
       title={title}
       onClick={onClick}
-      className={cn("flex h-6 w-6 items-center justify-center rounded-md text-gray-400 hover:bg-gray-100 hover:text-gray-700")}
+      className={cn("flex h-6 w-6 items-center justify-center rounded-md text-gray-400 hover:bg-gray-100 hover:text-gray-700 dark:text-gray-500 dark:hover:bg-gray-800 dark:hover:text-gray-300")}
     >
       {children}
     </button>

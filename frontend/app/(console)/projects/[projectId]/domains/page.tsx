@@ -27,9 +27,9 @@ function CopyField({ label, value }: { label: string; value: string }) {
   const [copied, setCopied] = useState(false);
   return (
     <div>
-      <p className="text-xs font-medium text-gray-500">{label}</p>
+      <p className="text-xs font-medium text-gray-500 dark:text-gray-400">{label}</p>
       <div className="mt-1 flex items-center gap-2">
-        <code className="flex-1 break-all rounded-md bg-gray-50 border border-gray-200 px-3 py-2 text-xs text-gray-800">
+        <code className="flex-1 break-all rounded-md bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-800 px-3 py-2 text-xs text-gray-800 dark:text-gray-200">
           {value}
         </code>
         <button
@@ -40,7 +40,7 @@ function CopyField({ label, value }: { label: string; value: string }) {
               setTimeout(() => setCopied(false), 1500);
             });
           }}
-          className="rounded-md border border-gray-300 px-2 py-2 text-xs text-gray-600 hover:bg-gray-100 transition-colors"
+          className="rounded-md border border-gray-300 dark:border-gray-700 px-2 py-2 text-xs text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
         >
           {copied ? t("common.copied") : t("common.copy")}
         </button>
@@ -52,8 +52,8 @@ function CopyField({ label, value }: { label: string; value: string }) {
 function ChallengeBlock({ challenge }: { challenge: DomainChallenge }) {
   const { t } = useT();
   return (
-    <div className="mt-3 space-y-3 rounded-lg border border-gray-200 bg-white p-4">
-      <p className="text-sm text-gray-700">
+    <div className="mt-3 space-y-3 rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-4">
+      <p className="text-sm text-gray-700 dark:text-gray-200">
         {t("domains.challenge.instruction", { type: challenge.type })}
       </p>
       <CopyField label={t("domains.challenge.fieldType")} value={challenge.type} />
@@ -170,8 +170,8 @@ export default function ProjectDomainsPage() {
               { label: t("nav.domains") },
             ]}
           />
-          <h1 className="mt-2 text-2xl font-bold text-gray-900">{t("domains.title")}</h1>
-          <p className="mt-0.5 text-sm text-gray-500">{t("domains.subtitle")}</p>
+          <h1 className="mt-2 text-2xl font-bold text-gray-900 dark:text-gray-100">{t("domains.title")}</h1>
+          <p className="mt-0.5 text-sm text-gray-500 dark:text-gray-400">{t("domains.subtitle")}</p>
         </div>
         {canEdit && (
           <button
@@ -191,7 +191,7 @@ export default function ProjectDomainsPage() {
       </div>
 
       {error && (
-        <div className="mb-6 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+        <div className="mb-6 rounded-lg border border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-950/40 px-4 py-3 text-sm text-red-700 dark:text-red-300">
           {error}
         </div>
       )}
@@ -220,16 +220,16 @@ export default function ProjectDomainsPage() {
       ) : (
         <div className="space-y-4">
           {auths.map((a) => (
-            <div key={a.id} className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
+            <div key={a.id} className="rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-5 shadow-sm">
               <div className="flex items-start justify-between">
                 <div>
                   <div className="flex items-center gap-3">
-                    <p className="font-mono text-base font-semibold text-gray-900">{a.apex_domain}</p>
+                    <p className="font-mono text-base font-semibold text-gray-900 dark:text-gray-100">{a.apex_domain}</p>
                     <StateChip tone={domainStatusTone(a.status)} dot>
                       {domainStatusLabel(a.status)}
                     </StateChip>
                   </div>
-                  <p className="mt-1 text-xs text-gray-400">
+                  <p className="mt-1 text-xs text-gray-400 dark:text-gray-500">
                     {rowTimestamp(a)}
                     {a.error_message ? ` · ${a.error_message}` : ""}
                   </p>
@@ -240,7 +240,7 @@ export default function ProjectDomainsPage() {
                       <button
                         onClick={() => handleVerify(a.id)}
                         disabled={verifyingId === a.id}
-                        className="inline-flex items-center gap-2 rounded-lg border border-gray-300 px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-100 disabled:opacity-50 transition-colors"
+                        className="inline-flex items-center gap-2 rounded-lg border border-gray-300 dark:border-gray-700 px-3 py-1.5 text-sm font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-50 transition-colors"
                       >
                         {verifyingId === a.id ? <Spinner size="sm" /> : null}
                         {t("domains.action.verify")}
@@ -249,7 +249,7 @@ export default function ProjectDomainsPage() {
                     <button
                       onClick={() => handleDelete(a.id)}
                       disabled={deletingId === a.id}
-                      className="rounded-lg border border-red-200 px-3 py-1.5 text-sm font-medium text-red-600 hover:bg-red-50 disabled:opacity-50 transition-colors"
+                      className="rounded-lg border border-red-200 dark:border-red-900 px-3 py-1.5 text-sm font-medium text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/40 disabled:opacity-50 transition-colors"
                     >
                       {deletingId === a.id ? t("common.removing") : t("common.remove")}
                     </button>
@@ -273,7 +273,7 @@ export default function ProjectDomainsPage() {
       >
         <form onSubmit={handleAdd} className="space-y-4">
           <div>
-            <label className="block text-sm font-medium text-gray-700">{t("domains.modal.apexLabel")}</label>
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-200">{t("domains.modal.apexLabel")}</label>
             <input
               type="text"
               required
@@ -282,15 +282,15 @@ export default function ProjectDomainsPage() {
               placeholder="acme.com"
               pattern="[A-Za-z0-9.\-]+"
               title={t("domains.modal.apexTitle")}
-              className="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              className="mt-1 block w-full rounded-lg border border-gray-300 dark:border-gray-700 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
             />
-            <p className="mt-1 text-xs text-gray-400">
+            <p className="mt-1 text-xs text-gray-400 dark:text-gray-500">
               {t("domains.modal.apexHelp")}
             </p>
           </div>
 
           {submitError && (
-            <div role="alert" className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+            <div role="alert" className="rounded-lg border border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-950/40 px-4 py-3 text-sm text-red-700 dark:text-red-300">
               {submitError}
             </div>
           )}
@@ -302,7 +302,7 @@ export default function ProjectDomainsPage() {
                 setIsModalOpen(false);
                 setSubmitError(null);
               }}
-              className="rounded-lg px-4 py-2 text-sm font-medium text-gray-600 hover:bg-gray-100 transition-colors"
+              className="rounded-lg px-4 py-2 text-sm font-medium text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
             >
               {t("common.cancel")}
             </button>

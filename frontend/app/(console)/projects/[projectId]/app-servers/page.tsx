@@ -44,16 +44,16 @@ const emptyForm: CreateAppServerForm = {
 };
 
 const statusTone: Record<AppServerStatus, string> = {
-  Provisioning: "bg-blue-100 text-blue-800",
-  WaitingForAgent: "bg-amber-100 text-amber-800",
-  Ready: "bg-green-100 text-green-800",
-  Deleting: "bg-orange-100 text-orange-800",
-  Deleted: "bg-gray-200 text-gray-700",
-  Failed: "bg-red-100 text-red-800",
+  Provisioning: "bg-blue-100 text-blue-800 dark:text-blue-300",
+  WaitingForAgent: "bg-amber-100 text-amber-800 dark:text-amber-300",
+  Ready: "bg-green-100 text-green-800 dark:text-green-300",
+  Deleting: "bg-orange-100 text-orange-800 dark:text-orange-300",
+  Deleted: "bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-200",
+  Failed: "bg-red-100 text-red-800 dark:text-red-300",
 };
 
 function AppServerStatusBadge({ status }: { status: AppServerStatus }) {
-  return <Badge className={statusTone[status] ?? "bg-gray-100 text-gray-800"}>{status}</Badge>;
+  return <Badge className={statusTone[status] ?? "bg-gray-100 dark:bg-gray-800 text-gray-800 dark:text-gray-200"}>{status}</Badge>;
 }
 
 export default function AppServersPage() {
@@ -167,16 +167,16 @@ export default function AppServersPage() {
           <div className="flex items-center gap-2">
             <Link
               href={`/projects/${projectId}/app-servers/${s.name}`}
-              className="font-mono text-sm font-semibold text-gray-900 hover:text-amber-700 hover:underline"
+              className="font-mono text-sm font-semibold text-gray-900 dark:text-gray-100 hover:text-amber-700 hover:underline"
             >
               {s.name}
             </Link>
             {s.source === "manual" && (
-              <span className="rounded bg-gray-100 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-gray-500">manual</span>
+              <span className="rounded bg-gray-100 dark:bg-gray-800 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">manual</span>
             )}
           </div>
-          <p className="mt-0.5 text-xs text-gray-400">{t("appServers.updated", { ago: timeAgo(s.updated_at) })}</p>
-          {s.error_message && <p className="mt-1 text-xs text-red-600">{s.error_message}</p>}
+          <p className="mt-0.5 text-xs text-gray-400 dark:text-gray-500">{t("appServers.updated", { ago: timeAgo(s.updated_at) })}</p>
+          {s.error_message && <p className="mt-1 text-xs text-red-600 dark:text-red-400">{s.error_message}</p>}
         </div>
       ),
     },
@@ -196,8 +196,8 @@ export default function AppServersPage() {
         </div>
       ),
     },
-    { key: "ip", header: t("appServers.col.vmIp"), render: (s) => <span className="font-mono text-gray-600">{s.vm_ip ?? "—"}</span> },
-    { key: "portainer", header: t("appServers.col.portainer"), render: (s) => <span className="font-mono text-gray-600">{s.portainer_endpoint_id ?? "—"}</span> },
+    { key: "ip", header: t("appServers.col.vmIp"), render: (s) => <span className="font-mono text-gray-600 dark:text-gray-400">{s.vm_ip ?? "—"}</span> },
+    { key: "portainer", header: t("appServers.col.portainer"), render: (s) => <span className="font-mono text-gray-600 dark:text-gray-400">{s.portainer_endpoint_id ?? "—"}</span> },
     ...(canManage
       ? [{
           key: "actions",
@@ -207,7 +207,7 @@ export default function AppServersPage() {
             <button
               onClick={() => void handleDelete(s.name)}
               disabled={deletingName === s.name || s.status === "Deleting"}
-              className="rounded-lg border border-red-200 px-3 py-1.5 text-sm font-medium text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50"
+              className="rounded-lg border border-red-200 dark:border-red-900 px-3 py-1.5 text-sm font-medium text-red-700 dark:text-red-300 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50"
             >
               {deletingName === s.name ? t("common.deleting") : t("common.delete")}
             </button>
@@ -227,8 +227,8 @@ export default function AppServersPage() {
               { label: t("nav.app-servers") },
             ]}
           />
-          <h1 className="mt-2 text-2xl font-bold text-gray-900">{t("appServers.title")}</h1>
-          <p className="mt-0.5 text-sm text-gray-500">{t("appServers.subtitle")}</p>
+          <h1 className="mt-2 text-2xl font-bold text-gray-900 dark:text-gray-100">{t("appServers.title")}</h1>
+          <p className="mt-0.5 text-sm text-gray-500 dark:text-gray-400">{t("appServers.subtitle")}</p>
         </div>
         {canManage && (
         <button
@@ -244,7 +244,7 @@ export default function AppServersPage() {
       </div>
 
       {error && (
-        <div className="mb-6 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+        <div className="mb-6 rounded-lg border border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-950/40 px-4 py-3 text-sm text-red-700 dark:text-red-300">
           {error}
         </div>
       )}
@@ -257,13 +257,13 @@ export default function AppServersPage() {
         searchPlaceholder={t("appServers.search")}
         columns={columns}
         emptyState={
-          <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-gray-300 bg-gray-50 py-16">
-            <svg className="mb-3 h-12 w-12 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-gray-300 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 py-16">
+            <svg className="mb-3 h-12 w-12 text-gray-300 dark:text-gray-700" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M3 15.75V8.25A2.25 2.25 0 015.25 6h13.5A2.25 2.25 0 0121 8.25v7.5A2.25 2.25 0 0118.75 18H5.25A2.25 2.25 0 013 15.75zM7 9h10M7 12h4" />
             </svg>
-            <p className="text-sm font-medium text-gray-500">{t("appServers.empty.title")}</p>
+            <p className="text-sm font-medium text-gray-500 dark:text-gray-400">{t("appServers.empty.title")}</p>
             {canManage && (
-              <button onClick={() => setIsModalOpen(true)} className="mt-4 text-sm text-amber-700 hover:text-amber-800">
+              <button onClick={() => setIsModalOpen(true)} className="mt-4 text-sm text-amber-700 dark:text-amber-300 hover:text-amber-800">
                 {t("appServers.empty.provision")}
               </button>
             )}
@@ -281,35 +281,35 @@ export default function AppServersPage() {
       >
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <label className="block text-sm font-medium text-gray-700">{t("appServers.field.name.label")}</label>
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-200">{t("appServers.field.name.label")}</label>
             <input
               type="text"
               required
               value={form.name}
               onChange={(e) => handleFormChange("name", e.target.value)}
               placeholder="client-a-prod-1"
-              className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-amber-500 focus:outline-none focus:ring-1 focus:ring-amber-500"
+              className="mt-1 w-full rounded-lg border border-gray-300 dark:border-gray-700 px-3 py-2 text-sm focus:border-amber-500 focus:outline-none focus:ring-1 focus:ring-amber-500"
             />
-            <p className="mt-1 text-xs text-gray-400">{t("appServers.field.name.help")}</p>
+            <p className="mt-1 text-xs text-gray-400 dark:text-gray-500">{t("appServers.field.name.help")}</p>
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700">{t("appServers.field.source.label")}</label>
-            <div className="mt-1 inline-flex rounded-lg border border-gray-300 p-0.5">
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-200">{t("appServers.field.source.label")}</label>
+            <div className="mt-1 inline-flex rounded-lg border border-gray-300 dark:border-gray-700 p-0.5">
               {(["terraform", "manual"] as AppServerMode[]).map((m) => (
                 <button
                   key={m}
                   type="button"
                   onClick={() => setForm((prev) => ({ ...prev, mode: m }))}
                   className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
-                    form.mode === m ? "bg-amber-600 text-white" : "text-gray-600 hover:bg-gray-100"
+                    form.mode === m ? "bg-amber-600 text-white" : "text-gray-600 dark:text-gray-400 hover:bg-gray-100"
                   }`}
                 >
                   {m === "terraform" ? t("appServers.field.source.terraform") : t("appServers.field.source.manual")}
                 </button>
               ))}
             </div>
-            <p className="mt-1 text-xs text-gray-400">
+            <p className="mt-1 text-xs text-gray-400 dark:text-gray-500">
               {form.mode === "terraform"
                 ? t("appServers.field.source.help.terraform")
                 : t("appServers.field.source.help.manual")}
@@ -320,11 +320,11 @@ export default function AppServersPage() {
           <>
           <div className="grid gap-4 sm:grid-cols-2">
             <div>
-              <label className="block text-sm font-medium text-gray-700">{t("appServers.field.flavor.label")}</label>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-200">{t("appServers.field.flavor.label")}</label>
               <select
                 value={form.flavor}
                 onChange={(e) => handleFormChange("flavor", e.target.value)}
-                className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-amber-500 focus:outline-none focus:ring-1 focus:ring-amber-500"
+                className="mt-1 w-full rounded-lg border border-gray-300 dark:border-gray-700 px-3 py-2 text-sm focus:border-amber-500 focus:outline-none focus:ring-1 focus:ring-amber-500"
               >
                 <option value="small">small</option>
                 <option value="medium">medium</option>
@@ -332,11 +332,11 @@ export default function AppServersPage() {
               </select>
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700">{t("appServers.field.region.label")}</label>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-200">{t("appServers.field.region.label")}</label>
               <select
                 value={form.region}
                 onChange={(e) => handleFormChange("region", e.target.value)}
-                className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-amber-500 focus:outline-none focus:ring-1 focus:ring-amber-500"
+                className="mt-1 w-full rounded-lg border border-gray-300 dark:border-gray-700 px-3 py-2 text-sm focus:border-amber-500 focus:outline-none focus:ring-1 focus:ring-amber-500"
               >
                 <option value="ru1">ru1</option>
                 <option value="ru2">ru2</option>
@@ -348,21 +348,21 @@ export default function AppServersPage() {
 
           <div className="grid gap-4 sm:grid-cols-2">
             <div>
-              <label className="block text-sm font-medium text-gray-700">{t("appServers.field.osImage.label")}</label>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-200">{t("appServers.field.osImage.label")}</label>
               <input
                 type="text"
                 value={form.os_image}
                 onChange={(e) => handleFormChange("os_image", e.target.value)}
-                className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-amber-500 focus:outline-none focus:ring-1 focus:ring-amber-500"
+                className="mt-1 w-full rounded-lg border border-gray-300 dark:border-gray-700 px-3 py-2 text-sm focus:border-amber-500 focus:outline-none focus:ring-1 focus:ring-amber-500"
               />
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700">{t("appServers.field.sshKeyName.label")}</label>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-200">{t("appServers.field.sshKeyName.label")}</label>
               <input
                 type="text"
                 value={form.ssh_key_name}
                 onChange={(e) => handleFormChange("ssh_key_name", e.target.value)}
-                className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-amber-500 focus:outline-none focus:ring-1 focus:ring-amber-500"
+                className="mt-1 w-full rounded-lg border border-gray-300 dark:border-gray-700 px-3 py-2 text-sm focus:border-amber-500 focus:outline-none focus:ring-1 focus:ring-amber-500"
               />
             </div>
           </div>
@@ -373,50 +373,50 @@ export default function AppServersPage() {
           <>
           <div className="grid gap-4 sm:grid-cols-[2fr_1fr]">
             <div>
-              <label className="block text-sm font-medium text-gray-700">{t("appServers.field.vmIp.label")}</label>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-200">{t("appServers.field.vmIp.label")}</label>
               <input
                 type="text"
                 required
                 value={form.vm_ip}
                 onChange={(e) => handleFormChange("vm_ip", e.target.value)}
                 placeholder="203.0.113.10"
-                className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-amber-500 focus:outline-none focus:ring-1 focus:ring-amber-500"
+                className="mt-1 w-full rounded-lg border border-gray-300 dark:border-gray-700 px-3 py-2 text-sm focus:border-amber-500 focus:outline-none focus:ring-1 focus:ring-amber-500"
               />
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700">{t("appServers.field.sshPort.label")}</label>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-200">{t("appServers.field.sshPort.label")}</label>
               <input
                 type="number"
                 value={form.ssh_port}
                 onChange={(e) => handleFormChange("ssh_port", e.target.value)}
                 placeholder="22"
-                className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-amber-500 focus:outline-none focus:ring-1 focus:ring-amber-500"
+                className="mt-1 w-full rounded-lg border border-gray-300 dark:border-gray-700 px-3 py-2 text-sm focus:border-amber-500 focus:outline-none focus:ring-1 focus:ring-amber-500"
               />
             </div>
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700">{t("appServers.field.sshUser.label")}</label>
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-200">{t("appServers.field.sshUser.label")}</label>
             <input
               type="text"
               value={form.ssh_user}
               onChange={(e) => handleFormChange("ssh_user", e.target.value)}
               placeholder="root"
-              className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-amber-500 focus:outline-none focus:ring-1 focus:ring-amber-500"
+              className="mt-1 w-full rounded-lg border border-gray-300 dark:border-gray-700 px-3 py-2 text-sm focus:border-amber-500 focus:outline-none focus:ring-1 focus:ring-amber-500"
             />
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700">{t("appServers.field.sshKey.label")}</label>
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-200">{t("appServers.field.sshKey.label")}</label>
             <textarea
               required
               value={form.ssh_private_key}
               onChange={(e) => handleFormChange("ssh_private_key", e.target.value)}
               placeholder={"-----BEGIN OPENSSH PRIVATE KEY-----\n..."}
               rows={6}
-              className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 font-mono text-xs focus:border-amber-500 focus:outline-none focus:ring-1 focus:ring-amber-500"
+              className="mt-1 w-full rounded-lg border border-gray-300 dark:border-gray-700 px-3 py-2 font-mono text-xs focus:border-amber-500 focus:outline-none focus:ring-1 focus:ring-amber-500"
             />
-            <p className="mt-1 text-xs text-amber-700">
+            <p className="mt-1 text-xs text-amber-700 dark:text-amber-300">
               {t("appServers.field.sshKey.warn")}
             </p>
           </div>
@@ -424,7 +424,7 @@ export default function AppServersPage() {
           )}
 
           {submitError && (
-            <div role="alert" className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+            <div role="alert" className="rounded-lg border border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-950/40 px-3 py-2 text-sm text-red-700 dark:text-red-300">
               {submitError}
             </div>
           )}
@@ -433,7 +433,7 @@ export default function AppServersPage() {
             <button
               type="button"
               onClick={() => setIsModalOpen(false)}
-              className="rounded-lg px-4 py-2 text-sm font-medium text-gray-600 hover:bg-gray-100"
+              className="rounded-lg px-4 py-2 text-sm font-medium text-gray-600 dark:text-gray-400 hover:bg-gray-100"
             >
               {t("common.cancel")}
             </button>

@@ -74,7 +74,7 @@ export default function AppServerDetailPage() {
   }
   if (error || !server) {
     return (
-      <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+      <div className="rounded-lg border border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-950/40 px-4 py-3 text-sm text-red-700 dark:text-red-300">
         {error ?? t("appServers.error.notFound")}
       </div>
     );
@@ -103,8 +103,8 @@ export default function AppServerDetailPage() {
           ]}
         />
         <div className="mt-2 flex items-center gap-3">
-          <h1 className="font-mono text-2xl font-bold text-gray-900">{serverName}</h1>
-          <Badge className="bg-gray-100 text-gray-700">{server.source}</Badge>
+          <h1 className="font-mono text-2xl font-bold text-gray-900 dark:text-gray-100">{serverName}</h1>
+          <Badge className="bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-200">{server.source}</Badge>
           {server.status === "Ready" && (
             <span
               title={state?.online ? t("appServers.heartbeat.online") : t("appServers.heartbeat.none")}
@@ -127,15 +127,15 @@ export default function AppServerDetailPage() {
             </button>
           )}
         </div>
-        {server.error_message && <p className="mt-1 text-sm text-red-600">{server.error_message}</p>}
+        {server.error_message && <p className="mt-1 text-sm text-red-600 dark:text-red-400">{server.error_message}</p>}
       </div>
 
       <div className="mb-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         {cards.map(({ label, value, mono, copy }: { label: string; value: string; mono?: boolean; copy?: string }) => (
-          <div key={label} className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
-            <p className="text-xs font-semibold uppercase tracking-wide text-gray-400">{label}</p>
+          <div key={label} className="rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-5 shadow-sm">
+            <p className="text-xs font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500">{label}</p>
             <div className="mt-1 flex items-center justify-between gap-2">
-              <p className={`text-sm font-medium text-gray-900 truncate ${mono ? "font-mono" : ""}`}>{value}</p>
+              <p className={`text-sm font-medium text-gray-900 dark:text-gray-100 truncate ${mono ? "font-mono" : ""}`}>{value}</p>
               {copy && <CopyButton value={copy} className="shrink-0" />}
             </div>
           </div>
@@ -150,56 +150,56 @@ export default function AppServerDetailPage() {
 
       <Modal isOpen={retryOpen} onClose={() => setRetryOpen(false)} title={t("appServers.retry.title")}>
         <form onSubmit={handleRetry} className="space-y-4">
-          <p className="text-sm text-amber-700">{t("appServers.retry.help")}</p>
+          <p className="text-sm text-amber-700 dark:text-amber-300">{t("appServers.retry.help")}</p>
 
           <div className="grid gap-4 sm:grid-cols-[2fr_1fr]">
             <div>
-              <label className="block text-sm font-medium text-gray-700">{t("appServers.field.vmIp.label")}</label>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-200">{t("appServers.field.vmIp.label")}</label>
               <input
                 type="text"
                 value={server.vm_ip ?? ""}
                 readOnly
-                className="mt-1 w-full rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 font-mono text-sm text-gray-600"
+                className="mt-1 w-full rounded-lg border border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-gray-900 px-3 py-2 font-mono text-sm text-gray-600 dark:text-gray-400"
               />
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700">{t("appServers.field.sshPort.label")}</label>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-200">{t("appServers.field.sshPort.label")}</label>
               <input
                 type="number"
                 value={retryForm.ssh_port}
                 onChange={(e) => setRetryForm((prev) => ({ ...prev, ssh_port: e.target.value }))}
                 placeholder="22"
-                className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-amber-500 focus:outline-none focus:ring-1 focus:ring-amber-500"
+                className="mt-1 w-full rounded-lg border border-gray-300 dark:border-gray-700 px-3 py-2 text-sm focus:border-amber-500 focus:outline-none focus:ring-1 focus:ring-amber-500"
               />
             </div>
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700">{t("appServers.field.sshUser.label")}</label>
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-200">{t("appServers.field.sshUser.label")}</label>
             <input
               type="text"
               value={retryForm.ssh_user}
               onChange={(e) => setRetryForm((prev) => ({ ...prev, ssh_user: e.target.value }))}
               placeholder="root"
-              className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-amber-500 focus:outline-none focus:ring-1 focus:ring-amber-500"
+              className="mt-1 w-full rounded-lg border border-gray-300 dark:border-gray-700 px-3 py-2 text-sm focus:border-amber-500 focus:outline-none focus:ring-1 focus:ring-amber-500"
             />
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700">{t("appServers.field.sshKey.label")}</label>
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-200">{t("appServers.field.sshKey.label")}</label>
             <textarea
               required
               value={retryForm.ssh_private_key}
               onChange={(e) => setRetryForm((prev) => ({ ...prev, ssh_private_key: e.target.value }))}
               placeholder={"-----BEGIN OPENSSH PRIVATE KEY-----\n..."}
               rows={6}
-              className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 font-mono text-xs focus:border-amber-500 focus:outline-none focus:ring-1 focus:ring-amber-500"
+              className="mt-1 w-full rounded-lg border border-gray-300 dark:border-gray-700 px-3 py-2 font-mono text-xs focus:border-amber-500 focus:outline-none focus:ring-1 focus:ring-amber-500"
             />
-            <p className="mt-1 text-xs text-amber-700">{t("appServers.field.sshKey.warn")}</p>
+            <p className="mt-1 text-xs text-amber-700 dark:text-amber-300">{t("appServers.field.sshKey.warn")}</p>
           </div>
 
           {retryError && (
-            <div role="alert" className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+            <div role="alert" className="rounded-lg border border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-950/40 px-3 py-2 text-sm text-red-700 dark:text-red-300">
               {retryError}
             </div>
           )}
@@ -208,7 +208,7 @@ export default function AppServerDetailPage() {
             <button
               type="button"
               onClick={() => setRetryOpen(false)}
-              className="rounded-lg px-4 py-2 text-sm font-medium text-gray-600 hover:bg-gray-100"
+              className="rounded-lg px-4 py-2 text-sm font-medium text-gray-600 dark:text-gray-400 hover:bg-gray-100"
             >
               {t("common.cancel")}
             </button>

@@ -71,13 +71,13 @@ export function CreateProjectModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-      <div className="w-full max-w-md rounded-xl border border-gray-200 bg-white p-6 shadow-xl">
-        <h2 className="text-lg font-semibold text-gray-900">{t("projects.modal.title")}</h2>
-        <p className="mt-1 text-sm text-gray-600">{t("projects.modal.subtitle")}</p>
+      <div className="w-full max-w-md rounded-xl border border-gray-200 bg-white p-6 shadow-xl dark:border-gray-800 dark:bg-gray-900">
+        <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">{t("projects.modal.title")}</h2>
+        <p className="mt-1 text-sm text-gray-600 dark:text-gray-400">{t("projects.modal.subtitle")}</p>
 
         <form onSubmit={submit} className="mt-5 space-y-4">
           <div>
-            <label htmlFor="project_name" className="block text-sm font-medium text-gray-800">
+            <label htmlFor="project_name" className="block text-sm font-medium text-gray-800 dark:text-gray-200">
               {t("projects.name.label")}
             </label>
             <input
@@ -86,13 +86,13 @@ export function CreateProjectModal({
               value={projectName}
               onChange={(e) => setProjectName(e.target.value)}
               placeholder={t("projects.name.placeholder")}
-              className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 placeholder-gray-400 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 placeholder-gray-400 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100 dark:placeholder-gray-500"
             />
-            <p className="mt-1 text-xs text-gray-500">{t("projects.name.help")}</p>
+            <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">{t("projects.name.help")}</p>
           </div>
 
           {error && (
-            <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+            <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/40 dark:text-red-300">
               {error}
             </div>
           )}
@@ -101,7 +101,7 @@ export function CreateProjectModal({
             <button
               type="button"
               onClick={onClose}
-              className="rounded-lg px-4 py-2 text-sm font-medium text-gray-600 hover:bg-gray-100"
+              className="rounded-lg px-4 py-2 text-sm font-medium text-gray-600 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-800"
             >
               {t("common.cancel")}
             </button>

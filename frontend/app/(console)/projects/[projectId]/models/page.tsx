@@ -175,8 +175,8 @@ export default function ModelsPage() {
               { label: t("nav.models") },
             ]}
           />
-          <h1 className="mt-2 text-2xl font-bold text-gray-900">{t("models.title")}</h1>
-          <p className="mt-0.5 text-sm text-gray-500">{t("models.subtitle")}</p>
+          <h1 className="mt-2 text-2xl font-bold text-gray-900 dark:text-gray-100">{t("models.title")}</h1>
+          <p className="mt-0.5 text-sm text-gray-500 dark:text-gray-400">{t("models.subtitle")}</p>
         </div>
         {canDeploy && (
         <button
@@ -206,7 +206,7 @@ export default function ModelsPage() {
       )}
 
       {error && (
-        <div className="mb-6 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+        <div className="mb-6 rounded-lg border border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-950/40 px-4 py-3 text-sm text-red-700 dark:text-red-300">
           {error}
         </div>
       )}
@@ -214,11 +214,11 @@ export default function ModelsPage() {
       {isLoadingModels ? (
         <div className="flex h-40 items-center justify-center"><Spinner /></div>
       ) : models.length === 0 ? (
-        <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-gray-300 bg-gray-50 py-16">
-          <svg className="mb-3 h-12 w-12 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-gray-300 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 py-16">
+          <svg className="mb-3 h-12 w-12 text-gray-300 dark:text-gray-700" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
           </svg>
-          <p className="text-sm font-medium text-gray-500">{t("models.empty.title", { env: selectedEnv?.name ?? "" })}</p>
+          <p className="text-sm font-medium text-gray-500 dark:text-gray-400">{t("models.empty.title", { env: selectedEnv?.name ?? "" })}</p>
           <button
             onClick={() => setIsModalOpen(true)}
             className="mt-4 text-sm text-blue-600 hover:text-blue-700"
@@ -234,12 +234,12 @@ export default function ModelsPage() {
               <Link
                 key={m.id}
                 href={`/projects/${projectId}/models/${m.name}?envId=${selectedEnvId}`}
-                className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm hover:border-blue-200 hover:shadow-md transition-all"
+                className="rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-5 shadow-sm hover:border-blue-200 hover:shadow-md transition-all"
               >
                 <div className="mb-3 flex items-start justify-between gap-2">
                   <div className="min-w-0 flex-1">
-                    <p className="font-mono text-sm font-semibold text-gray-900 truncate">{m.name}</p>
-                    <p className="mt-0.5 text-xs text-gray-400">v{s.version ?? "—"}</p>
+                    <p className="font-mono text-sm font-semibold text-gray-900 dark:text-gray-100 truncate">{m.name}</p>
+                    <p className="mt-0.5 text-xs text-gray-400 dark:text-gray-500">v{s.version ?? "—"}</p>
                   </div>
                   <PhaseBadge phase={m.phase} />
                 </div>
@@ -252,7 +252,7 @@ export default function ModelsPage() {
                     <Pill color="gray">canary {s.canary_percent}%</Pill>
                   )}
                 </div>
-                <p className="mt-3 text-xs text-gray-400">{t("models.card.synced", { ago: timeAgo(m.last_synced_at) })}</p>
+                <p className="mt-3 text-xs text-gray-400 dark:text-gray-500">{t("models.card.synced", { ago: timeAgo(m.last_synced_at) })}</p>
               </Link>
             );
           })}
@@ -266,7 +266,7 @@ export default function ModelsPage() {
       >
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <label className="block text-sm font-medium text-gray-700">
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-200">
               {t("models.form.name.label")}
             </label>
             <input
@@ -274,27 +274,27 @@ export default function ModelsPage() {
               onChange={(e) => update("name", e.target.value)}
               placeholder="iris-classifier"
               pattern="[a-z0-9-]+"
-              className="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm font-mono text-gray-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              className="mt-1 block w-full rounded-lg border border-gray-300 dark:border-gray-700 px-3 py-2 text-sm font-mono text-gray-900 dark:text-gray-100 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
             />
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700">{t("models.form.modelType.label")}</label>
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-200">{t("models.form.modelType.label")}</label>
             <select
               value={form.model_type}
               onChange={(e) => update("model_type", e.target.value as AIModelType)}
-              className="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              className="mt-1 block w-full rounded-lg border border-gray-300 dark:border-gray-700 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
             >
               {MODEL_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
             </select>
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700">{t("models.form.source.label")}</label>
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-200">{t("models.form.source.label")}</label>
             <select
               value={form.source}
               onChange={(e) => update("source", e.target.value as AIModelSource)}
-              className="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              className="mt-1 block w-full rounded-lg border border-gray-300 dark:border-gray-700 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
             >
               <option value="s3">{t("models.form.source.s3")}</option>
               <option value="mlflow">{t("models.form.source.mlflow")}</option>
@@ -304,35 +304,35 @@ export default function ModelsPage() {
 
           {form.source === "s3" && (
             <div>
-              <label className="block text-sm font-medium text-gray-700">{t("models.form.artifactUri.label")}</label>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-200">{t("models.form.artifactUri.label")}</label>
               <input
                 type="text" required value={form.artifact_uri}
                 onChange={(e) => update("artifact_uri", e.target.value)}
                 placeholder="s3://platform-models/<project>/iris/v1"
-                className="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm font-mono text-gray-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                className="mt-1 block w-full rounded-lg border border-gray-300 dark:border-gray-700 px-3 py-2 text-sm font-mono text-gray-900 dark:text-gray-100 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
               />
-              <p className="mt-1 text-xs text-gray-400">{t("models.form.artifactUri.help")}</p>
+              <p className="mt-1 text-xs text-gray-400 dark:text-gray-500">{t("models.form.artifactUri.help")}</p>
             </div>
           )}
 
           {form.source === "mlflow" && (
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="block text-sm font-medium text-gray-700">{t("models.form.mlflowName.label")}</label>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-200">{t("models.form.mlflowName.label")}</label>
                 <input
                   type="text" required value={form.mlflow_name}
                   onChange={(e) => update("mlflow_name", e.target.value)}
                   placeholder="iris"
-                  className="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm font-mono text-gray-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                  className="mt-1 block w-full rounded-lg border border-gray-300 dark:border-gray-700 px-3 py-2 text-sm font-mono text-gray-900 dark:text-gray-100 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700">{t("models.form.mlflowVersion.label")}</label>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-200">{t("models.form.mlflowVersion.label")}</label>
                 <input
                   type="text" required value={form.mlflow_version}
                   onChange={(e) => update("mlflow_version", e.target.value)}
                   placeholder="3"
-                  className="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm font-mono text-gray-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                  className="mt-1 block w-full rounded-lg border border-gray-300 dark:border-gray-700 px-3 py-2 text-sm font-mono text-gray-900 dark:text-gray-100 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
                 />
               </div>
             </div>
@@ -340,38 +340,38 @@ export default function ModelsPage() {
 
           {form.source === "custom" && (
             <div>
-              <label className="block text-sm font-medium text-gray-700">{t("models.form.containerImage.label")}</label>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-200">{t("models.form.containerImage.label")}</label>
               <input
                 type="text" required value={form.container_image}
                 onChange={(e) => update("container_image", e.target.value)}
                 placeholder="ghcr.io/org/runner:1.0"
-                className="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm font-mono text-gray-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                className="mt-1 block w-full rounded-lg border border-gray-300 dark:border-gray-700 px-3 py-2 text-sm font-mono text-gray-900 dark:text-gray-100 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
               />
             </div>
           )}
 
           <div>
-            <label className="block text-sm font-medium text-gray-700">{t("models.form.profile.label")}</label>
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-200">{t("models.form.profile.label")}</label>
             <select
               value={form.profile}
               onChange={(e) => update("profile", e.target.value)}
-              className="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              className="mt-1 block w-full rounded-lg border border-gray-300 dark:border-gray-700 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
             >
               {PROFILES.map((p) => <option key={p.name} value={p.name}>{p.label}</option>)}
             </select>
             {gpuRequiresApproval && (
-              <p className="mt-1 text-xs text-amber-700">
+              <p className="mt-1 text-xs text-amber-700 dark:text-amber-300">
                 {t("models.form.profile.gpuApproval")}
               </p>
             )}
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700">{t("models.form.authMode.label")}</label>
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-200">{t("models.form.authMode.label")}</label>
             <select
               value={form.auth_mode}
               onChange={(e) => update("auth_mode", e.target.value as AIModelAuthMode)}
-              className="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              className="mt-1 block w-full rounded-lg border border-gray-300 dark:border-gray-700 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
             >
               <option value="apikey">{t("models.form.authMode.apikey")}</option>
               <option value="jwt">{t("models.form.authMode.jwt")}</option>
@@ -381,31 +381,31 @@ export default function ModelsPage() {
 
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="block text-sm font-medium text-gray-700">
-                {t("models.form.attachedApp.label")} <span className="font-normal text-gray-400">{t("common.optional")}</span>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-200">
+                {t("models.form.attachedApp.label")} <span className="font-normal text-gray-400 dark:text-gray-500">{t("common.optional")}</span>
               </label>
               <input
                 type="text" value={form.attached_app_name}
                 onChange={(e) => update("attached_app_name", e.target.value)}
                 placeholder="my-api"
-                className="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm font-mono text-gray-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                className="mt-1 block w-full rounded-lg border border-gray-300 dark:border-gray-700 px-3 py-2 text-sm font-mono text-gray-900 dark:text-gray-100 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
               />
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700">
-                {t("models.form.versionLabel.label")} <span className="font-normal text-gray-400">{t("common.optional")}</span>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-200">
+                {t("models.form.versionLabel.label")} <span className="font-normal text-gray-400 dark:text-gray-500">{t("common.optional")}</span>
               </label>
               <input
                 type="text" value={form.version}
                 onChange={(e) => update("version", e.target.value)}
                 placeholder="v1"
-                className="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm font-mono text-gray-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                className="mt-1 block w-full rounded-lg border border-gray-300 dark:border-gray-700 px-3 py-2 text-sm font-mono text-gray-900 dark:text-gray-100 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
               />
             </div>
           </div>
 
           {submitError && (
-            <div role="alert" className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+            <div role="alert" className="rounded-lg border border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-950/40 px-4 py-3 text-sm text-red-700 dark:text-red-300">
               {submitError}
             </div>
           )}
@@ -414,7 +414,7 @@ export default function ModelsPage() {
             <button
               type="button"
               onClick={() => { setIsModalOpen(false); setSubmitError(null); }}
-              className="rounded-lg px-4 py-2 text-sm font-medium text-gray-600 hover:bg-gray-100 transition-colors"
+              className="rounded-lg px-4 py-2 text-sm font-medium text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
             >
               {t("common.cancel")}
             </button>
@@ -439,17 +439,17 @@ function QuotaCard({
   const over = max > 0 && used > max;
   const barColor = over ? "bg-red-500" : pct > 80 ? "bg-amber-500" : "bg-blue-500";
   return (
-    <div className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
+    <div className="rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-4 shadow-sm">
       <div className="flex items-center justify-between">
-        <p className="text-xs font-semibold uppercase tracking-wide text-gray-400">
+        <p className="text-xs font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500">
           {label}
-          {advisory && <span className="ml-1 normal-case text-amber-600">{t("models.quota.advisory")}</span>}
+          {advisory && <span className="ml-1 normal-case text-amber-600 dark:text-amber-400">{t("models.quota.advisory")}</span>}
         </p>
-        <p className="text-sm font-semibold text-gray-900 font-mono">
+        <p className="text-sm font-semibold text-gray-900 dark:text-gray-100 font-mono">
           {used.toLocaleString()} / {max.toLocaleString()}
         </p>
       </div>
-      <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-gray-100">
+      <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-gray-100 dark:bg-gray-800">
         <div className={`h-full ${barColor}`} style={{ width: `${pct}%` }} />
       </div>
     </div>
@@ -458,10 +458,10 @@ function QuotaCard({
 
 function Pill({ children, color }: { children: React.ReactNode; color: "indigo" | "purple" | "gray" | "amber" }) {
   const tones = {
-    indigo: "bg-indigo-50 text-indigo-700",
-    purple: "bg-purple-50 text-purple-700",
-    gray: "bg-gray-100 text-gray-600",
-    amber: "bg-amber-50 text-amber-700",
+    indigo: "bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300",
+    purple: "bg-purple-50 dark:bg-purple-950/40 text-purple-700 dark:text-purple-300",
+    gray: "bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400",
+    amber: "bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300",
   };
   return (
     <span className={`inline-flex items-center rounded px-2 py-0.5 text-xs font-medium ${tones[color]}`}>

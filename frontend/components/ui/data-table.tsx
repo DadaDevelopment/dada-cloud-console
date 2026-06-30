@@ -107,7 +107,7 @@ export function DataTable<T>({
         <div className="mb-4 flex flex-wrap items-center gap-3">
           {searchText && (
             <div className="relative min-w-[16rem] flex-1">
-              <svg className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5} aria-hidden="true">
+              <svg className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400 dark:text-gray-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5} aria-hidden="true">
                 <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" />
               </svg>
               <input
@@ -119,20 +119,20 @@ export function DataTable<T>({
                 }}
                 placeholder={searchPlaceholder}
                 aria-label={searchPlaceholder}
-                className="w-full rounded-lg border border-gray-300 py-2 pl-9 pr-3 text-sm text-gray-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                className="w-full rounded-lg border border-gray-300 dark:border-gray-700 py-2 pl-9 pr-3 text-sm text-gray-900 dark:text-gray-100 bg-white dark:bg-gray-900 shadow-sm placeholder-gray-400 dark:placeholder-gray-500 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
               />
             </div>
           )}
           {toolbar}
-          <span className="text-xs text-gray-400">
+          <span className="text-xs text-gray-400 dark:text-gray-500">
             {sorted.length} {sorted.length === 1 ? "result" : "results"}
           </span>
         </div>
       )}
 
-      <div className="overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm">
-        <table className="min-w-full divide-y divide-gray-200">
-          <thead className="bg-gray-50">
+      <div className="overflow-hidden rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 shadow-sm">
+        <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-800">
+          <thead className="bg-gray-50 dark:bg-gray-900">
             <tr>
               {columns.map((col) => {
                 const isSorted = sortKey === col.key;
@@ -141,7 +141,7 @@ export function DataTable<T>({
                     key={col.key}
                     aria-sort={isSorted ? (sortDir === "asc" ? "ascending" : "descending") : undefined}
                     className={clsx(
-                      "px-5 py-3 text-xs font-semibold uppercase tracking-wide text-gray-500",
+                      "px-5 py-3 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400",
                       col.align === "right" ? "text-right" : "text-left",
                       col.headerClassName,
                     )}
@@ -150,10 +150,10 @@ export function DataTable<T>({
                       <button
                         type="button"
                         onClick={() => toggleSort(col)}
-                        className="inline-flex items-center gap-1 rounded hover:text-gray-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+                        className="inline-flex items-center gap-1 rounded hover:text-gray-700 dark:hover:text-gray-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
                       >
                         {col.header}
-                        <span className="text-gray-400">
+                        <span className="text-gray-400 dark:text-gray-500">
                           {isSorted ? (sortDir === "asc" ? "▲" : "▼") : "↕"}
                         </span>
                       </button>
@@ -165,10 +165,10 @@ export function DataTable<T>({
               })}
             </tr>
           </thead>
-          <tbody className="divide-y divide-gray-100">
+          <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
             {pageRows.length === 0 ? (
               <tr>
-                <td colSpan={columns.length} className="px-5 py-10 text-center text-sm text-gray-400">
+                <td colSpan={columns.length} className="px-5 py-10 text-center text-sm text-gray-400 dark:text-gray-500">
                   No results match your search.
                 </td>
               </tr>
@@ -177,13 +177,13 @@ export function DataTable<T>({
                 <tr
                   key={getRowKey(row)}
                   onClick={onRowClick ? () => onRowClick(row) : undefined}
-                  className={clsx("hover:bg-gray-50", onRowClick && "cursor-pointer")}
+                  className={clsx("hover:bg-gray-50 dark:hover:bg-gray-800", onRowClick && "cursor-pointer")}
                 >
                   {columns.map((col) => (
                     <td
                       key={col.key}
                       className={clsx(
-                        "px-5 py-3 text-sm text-gray-700",
+                        "px-5 py-3 text-sm text-gray-700 dark:text-gray-200",
                         col.align === "right" ? "text-right" : "text-left",
                         col.className,
                       )}
@@ -199,7 +199,7 @@ export function DataTable<T>({
       </div>
 
       {pageCount > 1 && (
-        <div className="mt-3 flex items-center justify-between text-sm text-gray-500">
+        <div className="mt-3 flex items-center justify-between text-sm text-gray-500 dark:text-gray-400">
           <span>
             Page {safePage + 1} of {pageCount}
           </span>
@@ -208,7 +208,7 @@ export function DataTable<T>({
               type="button"
               onClick={() => setPage((p) => Math.max(0, p - 1))}
               disabled={safePage === 0}
-              className="rounded-lg border border-gray-200 px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-40"
+              className="rounded-lg border border-gray-200 dark:border-gray-700 px-3 py-1.5 text-sm font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-40"
             >
               Previous
             </button>
@@ -216,7 +216,7 @@ export function DataTable<T>({
               type="button"
               onClick={() => setPage((p) => Math.min(pageCount - 1, p + 1))}
               disabled={safePage >= pageCount - 1}
-              className="rounded-lg border border-gray-200 px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-40"
+              className="rounded-lg border border-gray-200 dark:border-gray-700 px-3 py-1.5 text-sm font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-40"
             >
               Next
             </button>
