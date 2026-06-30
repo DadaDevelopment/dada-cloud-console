@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState, useRef, FormEvent } from "react";
+import { useEffect, useState, FormEvent } from "react";
 import { useParams, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { monitoringApi } from "@/lib/api";
@@ -18,7 +18,9 @@ import { useProjectContext } from "@/lib/project-context";
 import { canMutate } from "@/lib/rbac";
 import { useT } from "@/lib/i18n/console/context";
 
-type Tab = "overview" | "dashboard" | "metrics" | "logs" | "alerts";
+type Tab = "overview" | "metrics" | "logs" | "alerts";
+
+const TABS: Tab[] = ["overview", "metrics", "logs", "alerts"];
 
 function HealthBadge({ state, critical }: { state: HealthState; critical: boolean }) {
   const colors: Record<HealthState, string> = {
@@ -98,111 +100,6 @@ function ModalFooter({
   );
 }
 
-function GrafanaDashboardTab({
-  projectId,
-  envId,
-  appId,
-}: {
-  projectId: string;
-  envId: string;
-  appId: string;
-}) {
-  const { t } = useT();
-  const [url, setUrl] = useState<string | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
-  const [fetchError, setFetchError] = useState<string | null>(null);
-  const [iframeBlocked, setIframeBlocked] = useState(false);
-  const [iframeLoaded, setIframeLoaded] = useState(false);
-  const loadTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  useEffect(() => {
-    if (!envId) return;
-    /* eslint-disable react-hooks/set-state-in-effect */
-    setIsLoading(true);
-    /* eslint-enable react-hooks/set-state-in-effect */
-    monitoringApi
-      .getGrafanaLink(projectId, envId, appId)
-      .then((r) => setUrl(r.url))
-      .catch((err) => setFetchError(err instanceof Error ? err.message : t("monitoring.detail.grafana.error.load")))
-      .finally(() => setIsLoading(false));
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [projectId, envId, appId]);
-
-  useEffect(() => {
-    if (!url) return;
-    loadTimeoutRef.current = setTimeout(() => {
-      if (!iframeLoaded) setIframeBlocked(true);
-    }, 10_000);
-    return () => {
-      if (loadTimeoutRef.current) clearTimeout(loadTimeoutRef.current);
-    };
-  }, [url, iframeLoaded]);
-
-  if (isLoading) {
-    return (
-      <div className="flex h-64 items-center justify-center">
-        <Spinner />
-      </div>
-    );
-  }
-
-  if (fetchError || !url) {
-    return (
-      <div className="space-y-4">
-        <ErrorBox text={fetchError ?? t("monitoring.detail.grafana.unavailable")} />
-        <p className="text-sm text-gray-500">
-          {t("monitoring.detail.grafana.notProvisioned")}{" "}
-          <span className="font-mono text-gray-700">grafana_dashboard_uid</span> set.
-        </p>
-      </div>
-    );
-  }
-
-  return (
-    <div className="space-y-3">
-      <div className="flex items-center justify-between">
-        <p className="text-xs text-gray-400">
-          {iframeBlocked
-            ? t("monitoring.detail.grafana.blocked")
-            : t("monitoring.detail.grafana.hint")}
-        </p>
-        <a
-          href={url}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 hover:border-orange-300 hover:text-orange-600 transition-colors shadow-sm"
-        >
-          <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
-          </svg>
-          {t("monitoring.detail.openInGrafana")}
-        </a>
-      </div>
-
-      {!iframeBlocked && (
-        <div className="relative overflow-hidden rounded-xl border border-gray-200 bg-gray-50" style={{ height: "680px" }}>
-          {!iframeLoaded && (
-            <div className="absolute inset-0 flex items-center justify-center">
-              <Spinner size="lg" />
-            </div>
-          )}
-          <iframe
-            src={url}
-            title={t("monitoring.detail.tab.dashboard")}
-            className="h-full w-full border-0"
-            allow="clipboard-write"
-            onLoad={() => {
-              setIframeLoaded(true);
-              if (loadTimeoutRef.current) clearTimeout(loadTimeoutRef.current);
-            }}
-            onError={() => setIframeBlocked(true)}
-          />
-        </div>
-      )}
-    </div>
-  );
-}
-
 export default function MonitoringDetailPage() {
   const { t } = useT();
   const params = useParams<{ projectId: string; appId: string }>();
@@ -211,7 +108,8 @@ export default function MonitoringDetailPage() {
   const { selectedEnv, role } = useProjectContext();
   const envId = search.get("envId") || selectedEnv?.id || "";
 
-  const initialTab = (search.get("tab") as Tab) ?? "overview";
+  const requestedTab = search.get("tab") as Tab | null;
+  const initialTab: Tab = requestedTab && TABS.includes(requestedTab) ? requestedTab : "overview";
   const [tab, setTab] = useState<Tab>(initialTab);
 
   const [app, setApp] = useState<MonitoringApp | null>(null);
@@ -269,7 +167,6 @@ export default function MonitoringDetailPage() {
 
   const tabs: { key: Tab; label: string }[] = [
     { key: "overview", label: t("monitoring.detail.tab.overview") },
-    { key: "dashboard", label: t("monitoring.detail.tab.dashboard") },
     { key: "metrics", label: t("monitoring.detail.tab.metrics") },
     { key: "logs", label: t("monitoring.detail.tab.logs") },
     { key: "alerts", label: t("monitoring.detail.tab.alerts") },
@@ -332,13 +229,6 @@ export default function MonitoringDetailPage() {
         <OverviewTab
           app={app}
           health={health}
-          projectId={projectId}
-          envId={envId}
-          appId={appId}
-        />
-      )}
-      {tab === "dashboard" && (
-        <GrafanaDashboardTab
           projectId={projectId}
           envId={envId}
           appId={appId}

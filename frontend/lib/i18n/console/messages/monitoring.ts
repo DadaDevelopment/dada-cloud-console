@@ -88,7 +88,6 @@ export const monitoring: Messages = {
   "monitoring.detail.openInGrafana": { ru: "Открыть в Grafana", en: "Open in Grafana" },
 
   "monitoring.detail.tab.overview": { ru: "Обзор", en: "Overview" },
-  "monitoring.detail.tab.dashboard": { ru: "Дашборд", en: "Dashboard" },
   "monitoring.detail.tab.metrics": { ru: "Метрики", en: "Metrics" },
   "monitoring.detail.tab.logs": { ru: "Логи", en: "Logs" },
   "monitoring.detail.tab.alerts": { ru: "Алерты", en: "Alerts" },
@@ -105,21 +104,6 @@ export const monitoring: Messages = {
   "monitoring.detail.info.created": { ru: "Создано", en: "Created" },
   "monitoring.detail.info.updated": { ru: "Обновлено", en: "Updated" },
   "monitoring.detail.info.grafanaUid": { ru: "Grafana dashboard UID", en: "Grafana dashboard UID" },
-
-  "monitoring.detail.grafana.blocked": {
-    ru: "Дашборд заблокирован политикой безопасности браузера — откройте напрямую.",
-    en: "Dashboard blocked by browser security policy — open it directly.",
-  },
-  "monitoring.detail.grafana.hint": {
-    ru: "Живой Grafana дашборд. Если панель пустая — нужно включить встраивание Grafana на сервере.",
-    en: "Live Grafana dashboard. If the panel is blank, Grafana embedding may need to be enabled on the server.",
-  },
-  "monitoring.detail.grafana.unavailable": { ru: "Ссылка на Grafana недоступна", en: "Grafana link unavailable" },
-  "monitoring.detail.grafana.notProvisioned": {
-    ru: "Дашборд Grafana ещё не подготовлен. Убедитесь, что у приложения мониторинга установлен grafana_dashboard_uid.",
-    en: "The Grafana dashboard may not have been provisioned yet. Check that the monitoring app has a grafana_dashboard_uid set.",
-  },
-  "monitoring.detail.grafana.error.load": { ru: "Не удалось получить ссылку на Grafana", en: "Failed to get Grafana link" },
 
   "monitoring.detail.alerts.section": { ru: "Правила алертов", en: "Alert Rules" },
   "monitoring.detail.alerts.createRule": { ru: "Создать правило", en: "Create Rule" },
