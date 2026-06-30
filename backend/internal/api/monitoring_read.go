@@ -513,6 +513,58 @@ func isCounterName(name string) bool {
 		strings.HasSuffix(name, "_bucket")
 }
 
+// validAgg reports whether agg is an allowed aggregation selector. The empty
+// string means "use the historical default" (sum for counters, avg otherwise).
+// Validating against this fixed set is what makes it safe to interpolate the
+// function name straight into PromQL in aggExpr.
+func validAgg(agg string) bool {
+	switch agg {
+	case "", "avg", "sum", "min", "max", "count", "p50", "p90", "p95", "p99":
+		return true
+	}
+	return false
+}
+
+// quantileArg maps a pXX aggregation selector to its PromQL quantile argument.
+func quantileArg(fn string) (string, bool) {
+	switch fn {
+	case "p50":
+		return "0.5", true
+	case "p90":
+		return "0.9", true
+	case "p95":
+		return "0.95", true
+	case "p99":
+		return "0.99", true
+	}
+	return "", false
+}
+
+// aggExpr wraps the inner series selector in the chosen aggregation. agg "" keeps
+// the historical default (sum for cumulative counters, avg otherwise). Percentile
+// selectors (p50/p90/p95/p99) map to PromQL quantile. agg MUST have passed
+// validAgg, so fn is never attacker-controlled despite the Sprintf.
+func aggExpr(agg, groupBy, inner string, counterDefault bool) string {
+	fn := agg
+	if fn == "" {
+		if counterDefault {
+			fn = "sum"
+		} else {
+			fn = "avg"
+		}
+	}
+	if q, ok := quantileArg(fn); ok {
+		if groupBy != "" {
+			return fmt.Sprintf("quantile by (%s) (%s, %s)", groupBy, q, inner)
+		}
+		return fmt.Sprintf("quantile(%s, %s)", q, inner)
+	}
+	if groupBy != "" {
+		return fmt.Sprintf("%s by (%s) (%s)", fn, groupBy, inner)
+	}
+	return fmt.Sprintf("%s(%s)", fn, inner)
+}
+
 // GetMonitoringMetrics returns native metric panels for the resource. Metric
 // names are discovered from the series labels (label-driven), so custom metrics
 // render with no code change. Cumulative counters are rate()d; other metrics are
@@ -528,10 +580,13 @@ func isCounterName(name string) bool {
 // @Param       projectId path     string   true  "Project UUID"
 // @Param       envId     path     string   true  "Environment UUID"
 // @Param       appId     path     string   true  "Monitoring resource UUID"
-// @Param       range     query    string   false "Time range (e.g. 15m, 1h, 6h, 24h)"
+// @Param       range     query    string   false "Time range: preset (15m/1h/6h/24h) or flexible <n><m|h|d|w> (e.g. 30m, 7d)"
+// @Param       from      query    int      false "Absolute window start (unix seconds); used with to"
+// @Param       to        query    int      false "Absolute window end (unix seconds); used with from"
 // @Param       groupBy   query    string   false "Label key to split series by"
 // @Param       filter    query    []string false "Repeatable key=value exact matchers"
 // @Param       rate      query    string   false "Counter handling: on|off|auto (default auto)"
+// @Param       agg       query    string   false "Aggregation: avg|sum|min|max|count|p50|p90|p95|p99 (default sum for counters, avg otherwise)"
 // @Success     200       {object} map[string]interface{} "metrics by name"
 // @Failure     400       {object} map[string]string
 // @Failure     401       {object} map[string]string
@@ -575,6 +630,12 @@ func (h *Handler) GetMonitoringMetrics(c *gin.Context) {
 	rateMode := strings.TrimSpace(c.Query("rate"))
 	if rateMode != "on" && rateMode != "off" {
 		rateMode = "auto"
+	}
+
+	agg := strings.ToLower(strings.TrimSpace(c.Query("agg")))
+	if !validAgg(agg) {
+		respondError(c, http.StatusBadRequest, "invalid agg")
+		return
 	}
 
 	orgID := h.monitoringOrgLabel(ctx, app.ProjectID)
@@ -622,17 +683,7 @@ func (h *Handler) GetMonitoringMetrics(c *gin.Context) {
 			inner = fmt.Sprintf("%s%s", name, sel)
 		}
 
-		var expr string
-		switch {
-		case groupBy != "" && counter:
-			expr = fmt.Sprintf("sum by (%s) (%s)", groupBy, inner)
-		case groupBy != "":
-			expr = fmt.Sprintf("avg by (%s) (%s)", groupBy, inner)
-		case counter:
-			expr = fmt.Sprintf("sum(%s)", inner)
-		default:
-			expr = fmt.Sprintf("avg(%s)", inner)
-		}
+		expr := aggExpr(agg, groupBy, inner, counter)
 
 		result, err := h.userMetrics.QueryRange(ctx, expr, start, end, step, tenant)
 		if err != nil {

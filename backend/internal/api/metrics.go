@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/dada-tuda/console/backend/internal/prometheus"
@@ -95,11 +96,29 @@ func fillExpr(expr, label string) string {
 	return fmt.Sprintf(expr, args...)
 }
 
-// parseRange resolves the ?range / ?step query params into a time window.
+// parseRange resolves the time window from query params. Precedence:
+//  1. absolute ?from=&to= (unix seconds, to > from) — used verbatim;
+//  2. relative ?range= — the four canonical presets (15m/1h/6h/24h) plus any
+//     flexible "<n><unit>" form (m/h/d/w, e.g. 30m, 2h, 7d, 4w), capped at 90d.
+//
+// The four presets keep their historical step exactly (60s / 60s / 5m / 15m) so
+// the VM/app callers are unaffected; custom windows get an adaptive step from
+// stepFor that keeps the point count bounded.
 func parseRange(c *gin.Context) (start, end time.Time, step time.Duration) {
 	end = time.Now()
+
+	if fromS, toS := c.Query("from"), c.Query("to"); fromS != "" && toS != "" {
+		from, err1 := strconv.ParseInt(fromS, 10, 64)
+		to, err2 := strconv.ParseInt(toS, 10, 64)
+		if err1 == nil && err2 == nil && to > from {
+			start = time.Unix(from, 0)
+			end = time.Unix(to, 0)
+			return start, end, stepFor(end.Sub(start))
+		}
+	}
+
 	dur := time.Hour
-	switch c.Query("range") {
+	switch r := c.Query("range"); r {
 	case "15m":
 		dur = 15 * time.Minute
 	case "1h", "":
@@ -108,15 +127,61 @@ func parseRange(c *gin.Context) (start, end time.Time, step time.Duration) {
 		dur = 6 * time.Hour
 	case "24h":
 		dur = 24 * time.Hour
+	default:
+		if d, ok := parseRangeDuration(r); ok {
+			dur = d
+		}
 	}
-	step = 60 * time.Second
-	if dur >= 6*time.Hour {
-		step = 5 * time.Minute
+	return end.Add(-dur), end, stepFor(dur)
+}
+
+// stepFor picks a resolution that keeps a range's point count sane. The four
+// canonical preset widths resolve to their historical steps; longer custom
+// windows step out further so a multi-week chart is not millions of samples.
+func stepFor(dur time.Duration) time.Duration {
+	switch {
+	case dur >= 30*24*time.Hour:
+		return 6 * time.Hour
+	case dur >= 7*24*time.Hour:
+		return time.Hour
+	case dur >= 24*time.Hour:
+		return 15 * time.Minute
+	case dur >= 6*time.Hour:
+		return 5 * time.Minute
+	default:
+		return 60 * time.Second
 	}
-	if dur >= 24*time.Hour {
-		step = 15 * time.Minute
+}
+
+// parseRangeDuration parses a flexible "<n><unit>" window where unit is one of
+// m (minute), h (hour), d (day), w (week). Returns false for malformed input so
+// the caller can fall back to the default. The window is capped at 90 days.
+func parseRangeDuration(s string) (time.Duration, bool) {
+	if len(s) < 2 {
+		return 0, false
 	}
-	return end.Add(-dur), end, step
+	n, err := strconv.Atoi(s[:len(s)-1])
+	if err != nil || n <= 0 {
+		return 0, false
+	}
+	var unit time.Duration
+	switch s[len(s)-1] {
+	case 'm':
+		unit = time.Minute
+	case 'h':
+		unit = time.Hour
+	case 'd':
+		unit = 24 * time.Hour
+	case 'w':
+		unit = 7 * 24 * time.Hour
+	default:
+		return 0, false
+	}
+	d := time.Duration(n) * unit
+	if max := 90 * 24 * time.Hour; d > max {
+		return max, true
+	}
+	return d, true
 }
 
 // runMetricSpecs executes the given specs for one label value and assembles the

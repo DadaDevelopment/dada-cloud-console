@@ -6198,8 +6198,20 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
-                        "description": "Time range (e.g. 15m, 1h, 6h, 24h)",
+                        "description": "Time range: preset (15m/1h/6h/24h) or flexible \u003cn\u003e\u003cm|h|d|w\u003e (e.g. 30m, 7d)",
                         "name": "range",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Absolute window start (unix seconds); used with to",
+                        "name": "from",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Absolute window end (unix seconds); used with from",
+                        "name": "to",
                         "in": "query"
                     },
                     {
@@ -6222,6 +6234,12 @@ const docTemplate = `{
                         "type": "string",
                         "description": "Counter handling: on|off|auto (default auto)",
                         "name": "rate",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Aggregation: avg|sum|min|max|count|p50|p90|p95|p99 (default sum for counters, avg otherwise)",
+                        "name": "agg",
                         "in": "query"
                     }
                 ],

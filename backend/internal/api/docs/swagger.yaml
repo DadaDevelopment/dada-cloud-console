@@ -4311,10 +4311,19 @@ paths:
         name: appId
         required: true
         type: string
-      - description: Time range (e.g. 15m, 1h, 6h, 24h)
+      - description: 'Time range: preset (15m/1h/6h/24h) or flexible <n><m|h|d|w>
+          (e.g. 30m, 7d)'
         in: query
         name: range
         type: string
+      - description: Absolute window start (unix seconds); used with to
+        in: query
+        name: from
+        type: integer
+      - description: Absolute window end (unix seconds); used with from
+        in: query
+        name: to
+        type: integer
       - description: Label key to split series by
         in: query
         name: groupBy
@@ -4329,6 +4338,11 @@ paths:
       - description: 'Counter handling: on|off|auto (default auto)'
         in: query
         name: rate
+        type: string
+      - description: 'Aggregation: avg|sum|min|max|count|p50|p90|p95|p99 (default
+          sum for counters, avg otherwise)'
+        in: query
+        name: agg
         type: string
       produces:
       - application/json

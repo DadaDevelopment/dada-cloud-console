@@ -12,7 +12,7 @@ import type {
 } from "@/lib/types";
 import { Modal } from "@/components/ui/modal";
 import { Spinner } from "@/components/ui/spinner";
-import { MetricsPanel } from "@/components/metrics-panel";
+import { MonitoringDashboard } from "@/components/metrics/monitoring-dashboard";
 import { LogsViewer } from "@/components/logs-viewer";
 import { useProjectContext } from "@/lib/project-context";
 import { canMutate } from "@/lib/rbac";
@@ -235,7 +235,7 @@ export default function MonitoringDetailPage() {
         />
       )}
       {tab === "metrics" && (
-        <MetricsPanel kind="monitoring" projectId={projectId} envId={envId} appId={appId} />
+        <MonitoringDashboard projectId={projectId} envId={envId} appId={appId} />
       )}
       {tab === "logs" && (
         <LogsViewer
@@ -305,8 +305,6 @@ function OverviewTab({
           <Row label={t("monitoring.detail.info.grafanaUid")} value={app.grafana_dashboard_uid} mono />
         )}
       </div>
-
-      <MetricsPanel kind="monitoring" projectId={projectId} envId={envId} appId={appId} />
 
       <LogsViewer
         projectId={projectId}

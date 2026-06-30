@@ -53,3 +53,72 @@ Not verified in a live browser: needs Keycloak SSO + Postgres backend, which a l
 preview can't faithfully exercise. Backend logic is unit-tested; frontend typechecks.
 Remaining (out of scope / infra): the underlying SSO silent-refresh hang, if that was
 the true cause, is only mitigated (timeout), not fixed in the auth layer.
+
+---
+
+# 2026-06-30 Metrics → Observability Dashboard rebuild (ECharts)
+
+Scope (locked with user): backend+frontend together; land on **monitoring detail** page first
+(richest data: discovery + groupBy + filter); **panel editor MVP** (add-panel dialog,
+drag/resize grid, localStorage persistence).
+
+Backend ceiling today: ranges 15m/1h/6h/24h; agg fixed (counter→sum/rate, gauge→avg);
+no percentiles; no custom range. We lift this minimally.
+
+## Phase 0 — Backend (Go) ✅
+- [x] parseRange: flexible `range` (30m,2h,7d,12h) + absolute `from`/`to` unix; presets unchanged.
+- [x] GetMonitoringMetrics: `agg` allowlist (avg|sum|min|max|count|p50|p90|p95|p99); percentiles→quantile(_by); default unchanged.
+- [x] Unit tests parseRange + aggExpr; `go test ./internal/api/...` green; swagger regenerated.
+
+## Phase 1 — Frontend foundation
+- [x] Install echarts + react-grid-layout (+types). Local npmjs install.
+- [ ] lib/cn.ts (clsx+twMerge).
+- [ ] components/charts/echart.tsx: theme-aware (matchMedia), ResizeObserver, progressive, base option, dynamic ssr:false.
+
+## Phase 2 — shadcn/Radix primitives
+- [ ] tabs, dropdown-menu, popover, command, select wrapper.
+
+## Phase 3 — Data layer
+- [ ] types.ts + api.ts getMetrics opts (agg, from/to). useMetricsQuery hook (configurable poll, abort).
+
+## Phase 4 — Chart kit
+- [ ] line/area/stacked/bar/histogram/heatmap/scatter/gauge/sparkline/status-timeline builders + thresholds/annotations.
+
+## Phase 5 — Dashboard shell
+- [ ] Toolbar (range+custom, refresh, source, labels, groupBy, agg). KPI row (value+delta+sparkline+status). 12-col grid + panel chrome.
+
+## Phase 6 — Metrics Explorer
+- [ ] metric search, label filter, groupBy, aggregation wired.
+
+## Phase 7 — Panel editor MVP
+- [ ] Add-panel dialog (metric+viz+groupBy+agg), drag/resize/remove, localStorage save.
+
+## Phase 8 — Persistence
+- [ ] localStorage per project+resource: layout/filters/range/refresh/panels.
+
+## Phase 9 — Wire-in
+- [ ] Replace MetricsPanel(kind=monitoring) in monitoring/[appId] with new dashboard; vm/app keep old panel.
+
+## Phase 10 — Verify
+- [ ] frontend build + go test green; preview screenshots before/after; deliverables report.
+
+## Review (Metrics rebuild) ✅
+Done & verified (frontend tsc + eslint clean; `go test ./internal/api/` green; `next build` green;
+ECharts kit rendered live in a throwaway preview route — all 11 viz types painted, screenshot captured).
+
+Backend (Go):
+- parseRange: flexible `range` (`<n>m|h|d|w`) + absolute `from`/`to`; presets byte-identical; adaptive step for long windows; 90d cap.
+- GetMonitoringMetrics `agg` param (avg/sum/min/max/count/p50/p90/p95/p99), percentiles via PromQL quantile; allowlist-guarded; default behavior unchanged.
+- Unit tests `metrics_range_test.go`; swagger regenerated.
+
+Frontend (new):
+- charts/: echart.tsx (theme-aware ECharts adapter, ResizeObserver, lazy theme re-init), theme.ts, format.ts, types.ts, builders.ts (line/area/stacked/bar/histogram/heatmap/scatter/gauge/sparkline/status-timeline + thresholds/annotations/dataZoom).
+- metrics/: dashboard-types, use-metrics-query (seq-guarded poll), use-dashboard-state (localStorage persist), toolbar, kpi-row, panel, panel-grid (react-grid-layout@1.5.2), metrics-explorer, add-panel-dialog (editor MVP), monitoring-dashboard (orchestrator).
+- ui/: tabs, popover, dropdown-menu, select (Radix + cn). lib/cn.ts.
+- Wired into monitoring/[appId] metrics tab; removed duplicate panel from overview.
+
+Deferred / out of scope: vm + app surfaces still use old MetricsPanel (deliberate, monitoring-first);
+full class-based dark toggle for the whole console (charts already auto-follow prefers-color-scheme);
+status-timeline + annotations have builders but no UI yet to configure them.
+Not verified in a live browser end-to-end: needs Keycloak SSO + Prometheus data, which local preview
+can't exercise — visualization layer proven with synthetic data instead.

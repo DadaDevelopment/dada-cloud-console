@@ -675,11 +675,25 @@ export const monitoringApi = {
     projectId: string,
     envId: string,
     appId: string,
-    opts?: { range?: string; groupBy?: string; filters?: string[] }
+    opts?: {
+      range?: string;
+      groupBy?: string;
+      filters?: string[];
+      agg?: string;
+      from?: number;
+      to?: number;
+    }
   ) => {
     const qs = new URLSearchParams();
-    qs.set("range", opts?.range ?? "1h");
+    // Absolute window wins; otherwise fall back to the relative range.
+    if (opts?.from && opts?.to) {
+      qs.set("from", String(opts.from));
+      qs.set("to", String(opts.to));
+    } else {
+      qs.set("range", opts?.range ?? "1h");
+    }
     if (opts?.groupBy) qs.set("groupBy", opts.groupBy);
+    if (opts?.agg) qs.set("agg", opts.agg);
     for (const f of opts?.filters ?? []) qs.append("filter", f);
     return apiFetch<MonitoringMetricsResponse>(
       `/api/v1/projects/${projectId}/environments/${envId}/monitoring/${appId}/metrics?${qs.toString()}`
