@@ -61,24 +61,30 @@ fragile dependency, and matches the user's fallback branch. Do NOT touch grafana
       doesn't apply to direct navigation). Backend grafanaEmbedURL/deep-link stays.
 - [ ] Verify native dashboard renders instantly with dynamics + scopes.
 
-### Wave 3 — Retention configurable (15d) — goal 2
-TOPOLOGY VERIFIED 2026-06-30 (not assumed). Full writeup: docs/runbooks/telemetry-retention.md.
-- USER metrics + INFRA-pod metrics share ONE Prometheus (`monitoring-stack-prometheus`, the
-  kube-prometheus-stack instance, `fullnameOverride: monitoring-stack`). It is the ONLY one with
-  `enableRemoteWriteReceiver: true`. Gateway remote-write + external VM agents both land here.
-  → Prometheus has ONE global retention; per-store / per-tenant split NOT possible without a 2nd
-    TSDB (longhorn-gated proposal, NOT applied). Honest global-for-user-store 15d is the target.
-- USER logs `dada-app-logs-*` separate cleanly via per-index ES ILM (logs CAN split; metrics can't).
+### Wave 3 — Retention configurable (15d), TRUE store separation — goal 2
+TOPOLOGY VERIFIED 2026-06-30 then SPLIT. Full writeup: docs/runbooks/telemetry-retention.md.
+Stores are now physically separate (user vs infra) for both metrics and logs.
 
 DONE (argo-infra, branch console-migration):
-- [x] kube-prometheus-stack values.yaml `retention: 7d` → `15d` (the gitops knob).
-- [x] retentionSize LEFT `"5GiB"` as safety cap; PVC LEFT `8Gi` → NO longhorn resize. Effective
-      retention = min(15d, 5GiB). Side-effect on infra retention is bounded by the disk cap and
-      documented loudly in the values comment (NOT silent).
-- [x] ES ILM 15d for `dada-app-logs-*`: new app `dada-app-logs-ilm` (local chart) — bootstrap Job
-      PUTs ILM policy `dada-app-logs-policy` (delete @ retentionDays, default 15) + index template.
-      `retentionDays` is the gitops knob. dada-vm-logs-* / filebeat-* untouched (separation kept).
-- helm template + helm lint + yaml parse green. Auto-syncs via tenant-apps ApplicationSet on push.
+- [x] NEW dedicated USER metric store: app `user-telemetry-prometheus` (local chart) — a second
+      Prometheus CR (operator-reconciled, watches all ns), `enableRemoteWriteReceiver: true`,
+      SCRAPES NOTHING (nil selectors), retention 15d (knob), own longhorn-cache PVC 8Gi.
+- [x] Repoint user WRITE+READ → new store:
+      - `cloud-console` global.shared.prometheusQueryUrl → user-telemetry-prometheus:9090. The
+        OTLP gateway has no REMOTE_WRITE_URL so it falls back to this query URL → gateway WRITES
+        also move. One value moves console-read + gateway-write together.
+      - ingress `vm-metrics-write` (vm-observability) backend → user-telemetry-prometheus:9090
+        (external VM prometheus-agents now push to the user store).
+- [x] INFRA Prometheus `monitoring-stack-prometheus` reverted to 7d, re-framed infra-only. No
+      longer carries user telemetry → no shared retention knob anymore.
+- [x] USER logs ES ILM 15d: app `dada-app-logs-ilm` — Job PUTs ILM `dada-app-logs-policy`
+      (delete @ retentionDays default 15) + index template for dada-app-logs-*. filebeat-* /
+      dada-vm-logs-* untouched.
+- Verified: helm template + helm lint + yaml parse green. Auto-syncs via tenant-apps ApplicationSet.
+- Limitation: per-TENANT retention still N/A (user store is single shared Prometheus); global
+  user-store 15d delivered. Per-tenant would need VictoriaMetrics/Mimir (not deployed).
+- Storage flag: user store is a NEW longhorn-cache PVC (not the blocked in-place expansion);
+  same SC infra Prometheus + ES already use. Watch longhorn commit on first sync.
 
 ### Wave 4 — Onboarding/setup polish — goal 1
 - [ ] Review monitoring onboarding page; tighten copy + copy-paste snippet; remove device
