@@ -142,14 +142,14 @@ export function Toolbar({
       </Select>
 
       {/* Aggregation */}
-      <Select value={state.agg || ""} onValueChange={(v) => update({ agg: v })}>
+      <Select value={state.agg || "__default"} onValueChange={(v) => update({ agg: v === "__default" ? "" : v })}>
         <SelectTrigger className="w-28">
           <span className="text-gray-400 dark:text-gray-500">ƒ</span>
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
           {AGG_OPTIONS.map((o) => (
-            <SelectItem key={o.value} value={o.value}>
+            <SelectItem key={o.value || "__default"} value={o.value || "__default"}>
               {o.label}
             </SelectItem>
           ))}
