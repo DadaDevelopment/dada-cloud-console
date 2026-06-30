@@ -51,7 +51,7 @@ function StatusIcon({ status }: { status: OperationStatus }) {
   }
   if (status === "Cancelled") {
     return (
-      <svg className="h-4 w-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+      <svg className="h-4 w-4 text-gray-400 dark:text-gray-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" />
       </svg>
     );
@@ -154,15 +154,15 @@ export default function OperationsPage() {
           ]}
         />
         <div className="mt-2 flex items-center gap-3">
-          <h1 className="text-2xl font-bold text-gray-900">{t("operations.title")}</h1>
+          <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">{t("operations.title")}</h1>
           {hasInProgress && (
-            <span className="inline-flex items-center gap-1.5 rounded-full bg-blue-50 px-2.5 py-1 text-xs font-medium text-blue-600">
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-blue-50 dark:bg-blue-950/40 px-2.5 py-1 text-xs font-medium text-blue-600 dark:text-blue-400">
               <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-blue-600" />
               {t("operations.live")}
             </span>
           )}
         </div>
-        <p className="mt-0.5 text-sm text-gray-500">{t("operations.subtitle")}</p>
+        <p className="mt-0.5 text-sm text-gray-500 dark:text-gray-400">{t("operations.subtitle")}</p>
       </div>
 
       {error && (
@@ -172,18 +172,18 @@ export default function OperationsPage() {
       )}
 
       {operations.length === 0 ? (
-        <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-gray-300 bg-gray-50 py-16">
-          <svg className="mb-3 h-12 w-12 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-gray-300 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 py-16">
+          <svg className="mb-3 h-12 w-12 text-gray-300 dark:text-gray-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
           </svg>
-          <p className="text-sm font-medium text-gray-500">{t("operations.empty.title")}</p>
-          <p className="mt-1 text-xs text-gray-400">{t("operations.empty.subtitle")}</p>
+          <p className="text-sm font-medium text-gray-500 dark:text-gray-400">{t("operations.empty.title")}</p>
+          <p className="mt-1 text-xs text-gray-400 dark:text-gray-500">{t("operations.empty.subtitle")}</p>
         </div>
       ) : (
         <>
           <div className="mb-4 flex flex-wrap items-center gap-3">
             <div className="relative flex-1 min-w-[16rem]">
-              <svg className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+              <svg className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400 dark:text-gray-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" />
               </svg>
               <input
@@ -191,14 +191,14 @@ export default function OperationsPage() {
                 onChange={(e) => setQuery(e.target.value)}
                 placeholder={t("operations.search.placeholder")}
                 aria-label={t("operations.search.placeholder")}
-                className="w-full rounded-lg border border-gray-300 py-2 pl-9 pr-3 text-sm text-gray-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                className="w-full rounded-lg border border-gray-300 dark:border-gray-700 py-2 pl-9 pr-3 text-sm text-gray-900 dark:text-gray-100 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
               />
             </div>
             <select
               value={statusFilter}
               onChange={(e) => setStatusFilter(e.target.value as typeof statusFilter)}
               aria-label={t("common.status.status")}
-              className="rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              className="rounded-lg border border-gray-300 dark:border-gray-700 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
             >
               <option value="all">{t("operations.filter.all")}</option>
               <option value="in-progress">{t("operations.filter.inProgress")}</option>
@@ -206,47 +206,47 @@ export default function OperationsPage() {
               <option value="Failed">{t("operations.filter.failed")}</option>
               <option value="WaitingForApproval">{t("operations.filter.waitingForApproval")}</option>
             </select>
-            <span className="text-xs text-gray-400">
+            <span className="text-xs text-gray-400 dark:text-gray-500">
               {t("operations.countOf", { count: filtered.length, total: operations.length })}
             </span>
           </div>
 
           {filtered.length === 0 ? (
-            <div className="rounded-xl border border-dashed border-gray-300 bg-gray-50 py-12 text-center text-sm text-gray-400">
+            <div className="rounded-xl border border-dashed border-gray-300 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 py-12 text-center text-sm text-gray-400 dark:text-gray-500">
               {t("operations.noMatch")}
             </div>
           ) : (
-          <div className="overflow-hidden rounded-xl border border-gray-200 bg-white">
+          <div className="overflow-hidden rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900">
             {filtered.map((op, idx) => {
               const isExpanded = expandedId === op.id;
               const isHighlighted = highlightId === op.id;
               return (
               <div
                 key={op.id}
-                className={`${idx < filtered.length - 1 ? "border-b border-gray-100" : ""} ${
+                className={`${idx < filtered.length - 1 ? "border-b border-gray-100 dark:border-gray-800" : ""} ${
                   isHighlighted ? "bg-blue-50/50" : ""
                 }`}
               >
                 <button
                   onClick={() => setExpandedId(isExpanded ? null : op.id)}
-                  className="w-full px-5 py-4 text-left hover:bg-gray-50 transition-colors"
+                  className="w-full px-5 py-4 text-left hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
                 >
                   <div className="flex items-center gap-4">
-                    <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-gray-100 bg-white shadow-sm">
+                    <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-gray-100 dark:border-gray-800 bg-white dark:bg-gray-900 shadow-sm">
                       <StatusIcon status={op.status} />
                     </div>
 
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2 flex-wrap">
-                        <span className="text-sm font-medium text-gray-900">{op.action}</span>
-                        <span className="font-mono text-xs text-gray-500">{op.resource_name}</span>
+                        <span className="text-sm font-medium text-gray-900 dark:text-gray-100">{op.action}</span>
+                        <span className="font-mono text-xs text-gray-500 dark:text-gray-400">{op.resource_name}</span>
                         {op.resource_kind && (
-                          <span className="rounded bg-gray-100 px-1.5 py-0.5 font-mono text-xs text-gray-500">
+                          <span className="rounded bg-gray-100 dark:bg-gray-800 px-1.5 py-0.5 font-mono text-xs text-gray-500 dark:text-gray-400">
                             {op.resource_kind}
                           </span>
                         )}
                       </div>
-                      <div className="mt-1 flex items-center gap-3 text-xs text-gray-400">
+                      <div className="mt-1 flex items-center gap-3 text-xs text-gray-400 dark:text-gray-500">
                         <span>{timeAgo(op.created_at)}</span>
                         {op.git_commit && (
                           <>
@@ -263,7 +263,7 @@ export default function OperationsPage() {
                         {op.status}
                       </span>
                       <svg
-                        className={`h-4 w-4 text-gray-400 transition-transform ${isExpanded ? "rotate-180" : ""}`}
+                        className={`h-4 w-4 text-gray-400 dark:text-gray-500 transition-transform ${isExpanded ? "rotate-180" : ""}`}
                         fill="none"
                         viewBox="0 0 24 24"
                         stroke="currentColor"
@@ -275,39 +275,39 @@ export default function OperationsPage() {
                 </button>
 
                 {isExpanded && (
-                  <div className="border-t border-gray-100 bg-gray-50 px-5 py-4">
+                  <div className="border-t border-gray-100 dark:border-gray-800 bg-gray-50 dark:bg-gray-900 px-5 py-4">
                     <dl className="grid grid-cols-2 gap-x-6 gap-y-3 text-sm sm:grid-cols-3">
                       <div>
-                        <dt className="text-xs font-medium uppercase tracking-wide text-gray-400">{t("operations.detail.operationId")}</dt>
-                        <dd className="mt-1 font-mono text-xs text-gray-700">{op.id}</dd>
+                        <dt className="text-xs font-medium uppercase tracking-wide text-gray-400 dark:text-gray-500">{t("operations.detail.operationId")}</dt>
+                        <dd className="mt-1 font-mono text-xs text-gray-700 dark:text-gray-200">{op.id}</dd>
                       </div>
                       <div>
-                        <dt className="text-xs font-medium uppercase tracking-wide text-gray-400">{t("operations.detail.action")}</dt>
-                        <dd className="mt-1 text-xs text-gray-700">{op.action}</dd>
+                        <dt className="text-xs font-medium uppercase tracking-wide text-gray-400 dark:text-gray-500">{t("operations.detail.action")}</dt>
+                        <dd className="mt-1 text-xs text-gray-700 dark:text-gray-200">{op.action}</dd>
                       </div>
                       <div>
-                        <dt className="text-xs font-medium uppercase tracking-wide text-gray-400">{t("operations.detail.resource")}</dt>
-                        <dd className="mt-1 font-mono text-xs text-gray-700">{op.resource_name}</dd>
+                        <dt className="text-xs font-medium uppercase tracking-wide text-gray-400 dark:text-gray-500">{t("operations.detail.resource")}</dt>
+                        <dd className="mt-1 font-mono text-xs text-gray-700 dark:text-gray-200">{op.resource_name}</dd>
                       </div>
                       {op.git_commit && (
                         <div>
-                          <dt className="text-xs font-medium uppercase tracking-wide text-gray-400">{t("operations.detail.gitCommit")}</dt>
-                          <dd className="mt-1 font-mono text-xs text-gray-700">{op.git_commit}</dd>
+                          <dt className="text-xs font-medium uppercase tracking-wide text-gray-400 dark:text-gray-500">{t("operations.detail.gitCommit")}</dt>
+                          <dd className="mt-1 font-mono text-xs text-gray-700 dark:text-gray-200">{op.git_commit}</dd>
                         </div>
                       )}
                       {op.git_path && (
                         <div>
-                          <dt className="text-xs font-medium uppercase tracking-wide text-gray-400">{t("operations.detail.gitPath")}</dt>
-                          <dd className="mt-1 font-mono text-xs text-gray-700 break-all">{op.git_path}</dd>
+                          <dt className="text-xs font-medium uppercase tracking-wide text-gray-400 dark:text-gray-500">{t("operations.detail.gitPath")}</dt>
+                          <dd className="mt-1 font-mono text-xs text-gray-700 dark:text-gray-200 break-all">{op.git_path}</dd>
                         </div>
                       )}
                       <div>
-                        <dt className="text-xs font-medium uppercase tracking-wide text-gray-400">{t("operations.detail.created")}</dt>
-                        <dd className="mt-1 text-xs text-gray-700">{new Date(op.created_at).toLocaleString()}</dd>
+                        <dt className="text-xs font-medium uppercase tracking-wide text-gray-400 dark:text-gray-500">{t("operations.detail.created")}</dt>
+                        <dd className="mt-1 text-xs text-gray-700 dark:text-gray-200">{new Date(op.created_at).toLocaleString()}</dd>
                       </div>
                       <div>
-                        <dt className="text-xs font-medium uppercase tracking-wide text-gray-400">{t("operations.detail.updated")}</dt>
-                        <dd className="mt-1 text-xs text-gray-700">{new Date(op.updated_at).toLocaleString()}</dd>
+                        <dt className="text-xs font-medium uppercase tracking-wide text-gray-400 dark:text-gray-500">{t("operations.detail.updated")}</dt>
+                        <dd className="mt-1 text-xs text-gray-700 dark:text-gray-200">{new Date(op.updated_at).toLocaleString()}</dd>
                       </div>
                     </dl>
                     {op.error_message && (

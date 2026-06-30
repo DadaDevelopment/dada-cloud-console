@@ -116,7 +116,7 @@ export default function MembersPage() {
   if (!isAdmin(role)) {
     return (
       <div className="p-8">
-        <p className="text-sm text-gray-500">{t("members.accessDenied")}</p>
+        <p className="text-sm text-gray-500 dark:text-gray-400">{t("members.accessDenied")}</p>
       </div>
     );
   }
@@ -128,8 +128,8 @@ export default function MembersPage() {
       sortValue: (m) => m.display_name || m.email,
       render: (m) => (
         <div>
-          <div className="font-medium text-gray-900">{m.display_name || m.email}</div>
-          <div className="text-xs text-gray-500">{m.email}</div>
+          <div className="font-medium text-gray-900 dark:text-gray-100">{m.display_name || m.email}</div>
+          <div className="text-xs text-gray-500 dark:text-gray-400">{m.email}</div>
         </div>
       ),
     },
@@ -137,7 +137,7 @@ export default function MembersPage() {
       key: "type",
       header: t("members.col.type"),
       render: (m) => (
-        <span className="text-xs text-gray-500">
+        <span className="text-xs text-gray-500 dark:text-gray-400">
           {m.principal_type === "service_account" ? t("members.type.serviceAccount") : t("members.type.user")}
         </span>
       ),
@@ -154,7 +154,7 @@ export default function MembersPage() {
             value={m.role}
             disabled={busyId === m.principal_id}
             onChange={(e) => changeRole(m, e.target.value as MemberRole)}
-            className="rounded border border-gray-200 bg-white px-1.5 py-0.5 text-xs"
+            className="rounded border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 px-1.5 py-0.5 text-xs"
           >
             {ROLES.map((r) => (
               <option key={r} value={r}>{t(`roles.${r}`)}</option>
@@ -187,8 +187,8 @@ export default function MembersPage() {
 
       <div className="mb-6 mt-2 flex items-center justify-between">
         <div>
-          <h1 className="text-xl font-semibold text-gray-900">{t("members.title")}</h1>
-          <p className="text-sm text-gray-500">{t("members.subtitle")}</p>
+          <h1 className="text-xl font-semibold text-gray-900 dark:text-gray-100">{t("members.title")}</h1>
+          <p className="text-sm text-gray-500 dark:text-gray-400">{t("members.subtitle")}</p>
         </div>
         <Button onClick={() => setShowAdd(true)}>{t("members.modal.title")}</Button>
       </div>
@@ -207,7 +207,7 @@ export default function MembersPage() {
             searchText={(m) => `${m.display_name} ${m.email} ${m.role}`}
             searchPlaceholder={t("members.search.placeholder")}
             loading={loading}
-            emptyState={<div className="py-12 text-center text-sm text-gray-500">{t("members.empty")}</div>}
+            emptyState={<div className="py-12 text-center text-sm text-gray-500 dark:text-gray-400">{t("members.empty")}</div>}
           />
         </>
       )}
@@ -215,33 +215,33 @@ export default function MembersPage() {
       <Modal isOpen={showAdd} onClose={() => setShowAdd(false)} title={t("members.modal.title")}>
         <form onSubmit={submitAdd} className="space-y-4">
           <div>
-            <label className="mb-1 block text-sm font-medium text-gray-700">{t("members.modal.email.label")}</label>
+            <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-200">{t("members.modal.email.label")}</label>
             <input
               type="email"
               required
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               placeholder={t("members.modal.email.placeholder")}
-              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+              className="w-full rounded-lg border border-gray-300 dark:border-gray-700 px-3 py-2 text-sm"
             />
           </div>
           <div>
-            <label className="mb-1 block text-sm font-medium text-gray-700">{t("members.modal.role.label")}</label>
+            <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-200">{t("members.modal.role.label")}</label>
             <select
               value={addRole}
               onChange={(e) => setAddRole(e.target.value as MemberRole)}
-              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+              className="w-full rounded-lg border border-gray-300 dark:border-gray-700 px-3 py-2 text-sm"
             >
               {ROLES.map((r) => (
                 <option key={r} value={r}>{t(`roles.${r}`)}</option>
               ))}
             </select>
           </div>
-          <label className="flex items-start gap-2 text-sm text-gray-700">
+          <label className="flex items-start gap-2 text-sm text-gray-700 dark:text-gray-200">
             <input type="checkbox" checked={sendInvite} onChange={(e) => setSendInvite(e.target.checked)} className="mt-0.5" />
             <span>
               {t("members.modal.invite.label")}
-              <span className="block text-xs text-gray-500">
+              <span className="block text-xs text-gray-500 dark:text-gray-400">
                 {t("members.modal.invite.help")}
                 {sendInvite && !orgId && <span className="text-red-600">{t("members.modal.invite.noOrg")}</span>}
               </span>

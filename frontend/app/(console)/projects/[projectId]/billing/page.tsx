@@ -36,12 +36,12 @@ function UsageBar({ used, limit, label }: { used: number; limit: number | null; 
     <div className="space-y-1.5">
       <div className="flex items-center justify-between text-sm">
         <span className="font-medium text-gray-700 dark:text-gray-200">{label}</span>
-        <span className={clsx("text-xs", nearLimit ? "font-semibold text-amber-600" : "text-gray-400 dark:text-gray-500")}>
+        <span className={clsx("text-xs", nearLimit ? "font-semibold text-amber-600 dark:text-amber-400" : "text-gray-400 dark:text-gray-500")}>
           {unlimited ? `${used} / ∞` : `${used} / ${limit}`}
         </span>
       </div>
       {!unlimited && (
-        <div className="h-2 w-full overflow-hidden rounded-full bg-gray-100">
+        <div className="h-2 w-full overflow-hidden rounded-full bg-gray-100 dark:bg-gray-800">
           <div
             className={clsx(
               "h-full rounded-full transition-all",
@@ -135,18 +135,18 @@ export default function BillingPage() {
             { label: t("billing.title") },
           ]}
         />
-        <h1 className="mt-2 text-2xl font-bold text-gray-900">{t("billing.title")}</h1>
+        <h1 className="mt-2 text-2xl font-bold text-gray-900 dark:text-gray-100">{t("billing.title")}</h1>
       </div>
 
       {nearLimitResources.length > 0 && (
-        <div className="mb-6 rounded-xl border border-amber-200 bg-amber-50 px-5 py-4">
-          <p className="text-sm font-semibold text-amber-800">{t("billing.alertNearLimit")}</p>
+        <div className="mb-6 rounded-xl border border-amber-200 dark:border-amber-900 bg-amber-50 dark:bg-amber-950/40 px-5 py-4">
+          <p className="text-sm font-semibold text-amber-800 dark:text-amber-300">{t("billing.alertNearLimit")}</p>
           <ul className="mt-1 space-y-0.5">
             {nearLimitResources.map((k) => {
               const item = usage[k];
               const pct = item.limit ? Math.round((item.used / item.limit) * 100) : 0;
               return (
-                <li key={k} className="text-sm text-amber-700">
+                <li key={k} className="text-sm text-amber-700 dark:text-amber-400">
                   {t("billing.alertText")
                     .replace("{resource}", quotaLabel(k))
                     .replace("{pct}", String(pct))}
@@ -158,11 +158,11 @@ export default function BillingPage() {
       )}
 
       <div className="grid gap-6 lg:grid-cols-3">
-        <div className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
-          <p className="text-xs font-semibold uppercase tracking-wide text-gray-400">{t("billing.currentPlan")}</p>
-          <p className="mt-2 text-3xl font-bold text-gray-900">{planName}</p>
+        <div className="rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-6 shadow-sm">
+          <p className="text-xs font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500">{t("billing.currentPlan")}</p>
+          <p className="mt-2 text-3xl font-bold text-gray-900 dark:text-gray-100">{planName}</p>
           {account.plan !== "enterprise" && PLAN_PRICES_RUB[account.plan] !== undefined && (
-            <p className="mt-1 text-sm text-gray-500">
+            <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
               {PLAN_PRICES_RUB[account.plan] === 0
                 ? "0 ₽"
                 : `${PLAN_PRICES_RUB[account.plan].toLocaleString("ru")} ₽ / мес`}
@@ -178,35 +178,35 @@ export default function BillingPage() {
         </div>
 
         {account.invoicePreview && (
-          <div className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
-            <p className="text-xs font-semibold uppercase tracking-wide text-gray-400">{t("billing.invoiceTitle")}</p>
-            <p className="mt-2 text-3xl font-bold text-gray-900">
+          <div className="rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-6 shadow-sm">
+            <p className="text-xs font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500">{t("billing.invoiceTitle")}</p>
+            <p className="mt-2 text-3xl font-bold text-gray-900 dark:text-gray-100">
               {account.invoicePreview.amount.toLocaleString("ru")} {t("billing.currency.rub")}
             </p>
-            <p className="mt-1 text-sm text-gray-500">{account.invoicePreview.period}</p>
-            <span className="mt-4 inline-block rounded-full bg-gray-100 px-3 py-1 text-xs font-medium text-gray-500">
+            <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">{account.invoicePreview.period}</p>
+            <span className="mt-4 inline-block rounded-full bg-gray-100 dark:bg-gray-800 px-3 py-1 text-xs font-medium text-gray-500 dark:text-gray-400">
               {t("billing.invoicePreview")}
             </span>
           </div>
         )}
 
-        <div className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
-          <p className="text-xs font-semibold uppercase tracking-wide text-gray-400">{t("billing.upgradeTitle")}</p>
-          <p className="mt-2 text-sm text-gray-600">
+        <div className="rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-6 shadow-sm">
+          <p className="text-xs font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500">{t("billing.upgradeTitle")}</p>
+          <p className="mt-2 text-sm text-gray-600 dark:text-gray-400">
             {t("billing.alertNearLimit")}
           </p>
           <Link
             href="https://dada-tuda.ru/pricing"
             target="_blank"
-            className="mt-5 inline-flex items-center gap-1.5 rounded-lg border border-gray-200 px-4 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50"
+            className="mt-5 inline-flex items-center gap-1.5 rounded-lg border border-gray-200 dark:border-gray-700 px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-200 transition-colors hover:bg-gray-50 dark:hover:bg-gray-800"
           >
             {t("billing.upgradeCta")} →
           </Link>
         </div>
       </div>
 
-      <div className="mt-8 rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
-        <h2 className="mb-5 text-sm font-semibold text-gray-900">{t("billing.usageTitle")}</h2>
+      <div className="mt-8 rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-6 shadow-sm">
+        <h2 className="mb-5 text-sm font-semibold text-gray-900 dark:text-gray-100">{t("billing.usageTitle")}</h2>
         <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
           {USAGE_KEYS.map((k) => {
             const item = usage[k];
@@ -231,9 +231,9 @@ export default function BillingPage() {
             const displayUsed = formatUsedValue(k, item.used);
             const displayLimit = formatLimitValue(k, item.limit);
             return (
-              <div key={k} className="flex items-center justify-between rounded-lg bg-gray-50 px-4 py-3 text-sm">
-                <span className="text-gray-500">{quotaLabel(k)}</span>
-                <span className="font-medium text-gray-900">
+              <div key={k} className="flex items-center justify-between rounded-lg bg-gray-50 dark:bg-gray-900 px-4 py-3 text-sm">
+                <span className="text-gray-500 dark:text-gray-400">{quotaLabel(k)}</span>
+                <span className="font-medium text-gray-900 dark:text-gray-100">
                   {displayUsed} / {displayLimit === null ? t("billing.noLimit") : displayLimit}
                 </span>
               </div>
