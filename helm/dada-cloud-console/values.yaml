@@ -78,9 +78,11 @@ backend:
     # Inference proxy body cap (request + upstream response). Default 10MB.
     # Raise if a model legitimately needs larger payloads (e.g. vision).
     INFERENCE_MAX_BODY_BYTES: "10485760"
-    # Elasticsearch index pattern for aggregated log search (non-secret).
-    # Matches the VM filebeat bootstrap output: dada-vm-logs-<app|unknown>-<date>.
-    ELASTICSEARCH_LOG_INDEX: "dada-vm-logs-*"
+    # Log index pattern for the project log viewer (logs.go, non-secret). VM logs
+    # now land in the USER stream dada-app-logs-* (same as product-push app logs);
+    # the VM filebeat bootstrap writes dada-app-logs-<server>-<date>. The infra
+    # stream (filebeat-*, in-cluster kube pod logs) is NOT surfaced here.
+    ELASTICSEARCH_LOG_INDEX: "dada-app-logs-*"
     # Note: PORTAINER_URL (live state) and PROMETHEUS_QUERY_URL / ELASTICSEARCH_URL
     # (observability read path) are injected from global.shared via the ConfigMap.
     #

@@ -157,7 +157,7 @@ filebeat.inputs:
 output.elasticsearch:
   hosts: ["{{.ElasticsearchURL}}"]
   api_key: "{{.ElasticsearchAPIKey}}"
-  index: "dada-vm-logs-{{.ServerName}}-%{+yyyy.MM.dd}"
+  index: "dada-app-logs-{{.ServerName}}-%{+yyyy.MM.dd}"
 setup.ilm.enabled: false
 setup.template.enabled: false
 logging.level: warning
