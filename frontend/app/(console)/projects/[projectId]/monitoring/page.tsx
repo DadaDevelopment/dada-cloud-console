@@ -235,13 +235,13 @@ function OnboardingCard({
                 </pre>
                 <CopyButton value={apiKey} label={t("common.copy")} />
               </div>
-              <p className="text-xs text-amber-700 flex items-center gap-1.5">
+              <p className="text-xs text-amber-700 dark:text-amber-300 flex items-center gap-1.5">
                 <svg className="h-3.5 w-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
                 </svg>
                 {t("monitoring.step2.warning")}
               </p>
-              <p className="text-xs text-gray-400">
+              <p className="text-xs text-gray-400 dark:text-gray-500">
                 {t("monitoring.step2.needRotate")}{" "}
                 <Link
                   href={`/projects/${projectId}/monitoring/${app.id}`}
@@ -284,7 +284,7 @@ function Step({
         <div
           className={`h-7 w-7 rounded-full flex items-center justify-center text-xs font-bold ${
             done
-              ? "bg-green-100 text-green-700"
+              ? "bg-green-100 dark:bg-green-950/40 text-green-700 dark:text-green-300"
               : "bg-blue-600 text-white"
           }`}
         >
@@ -298,7 +298,7 @@ function Step({
         </div>
       </div>
       <div className="flex-1 min-w-0 pt-0.5">
-        <p className="text-sm font-semibold text-gray-800 mb-2">{title}</p>
+        <p className="text-sm font-semibold text-gray-800 dark:text-gray-200 mb-2">{title}</p>
         {children}
       </div>
     </div>
@@ -381,8 +381,8 @@ export default function MonitoringPage() {
               { label: t("nav.monitoring") },
             ]}
           />
-          <h1 className="mt-2 text-2xl font-bold text-gray-900">{t("monitoring.title")}</h1>
-          <p className="mt-0.5 text-sm text-gray-500">{t("monitoring.subtitle")}</p>
+          <h1 className="mt-2 text-2xl font-bold text-gray-900 dark:text-gray-100">{t("monitoring.title")}</h1>
+          <p className="mt-0.5 text-sm text-gray-500 dark:text-gray-400">{t("monitoring.subtitle")}</p>
         </div>
         {canCreate && apps.length > 0 && (
           <button
@@ -399,7 +399,7 @@ export default function MonitoringPage() {
       </div>
 
       {error && (
-        <div className="mb-6 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+        <div className="mb-6 rounded-lg border border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-950/40 px-4 py-3 text-sm text-red-700 dark:text-red-300">
           {error}
         </div>
       )}
@@ -445,15 +445,15 @@ export default function MonitoringPage() {
                 <Link
                   key={app.id}
                   href={`/projects/${projectId}/monitoring/${app.id}${selectedEnvId ? `?envId=${selectedEnvId}` : ""}`}
-                  className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm transition-all hover:border-blue-200 hover:shadow-md"
+                  className="rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-5 shadow-sm transition-all hover:border-blue-200 hover:shadow-md"
                 >
                   <div className="mb-3 flex items-start justify-between">
                     <div>
-                      <p className="font-mono text-sm font-semibold text-gray-900">{app.name}</p>
-                      <p className="mt-0.5 text-xs text-gray-400">{t("monitoring.card.monitoringApp")}</p>
+                      <p className="font-mono text-sm font-semibold text-gray-900 dark:text-gray-100">{app.name}</p>
+                      <p className="mt-0.5 text-xs text-gray-400 dark:text-gray-500">{t("monitoring.card.monitoringApp")}</p>
                     </div>
                   </div>
-                  <p className="text-xs text-gray-400">
+                  <p className="text-xs text-gray-400 dark:text-gray-500">
                     {t("monitoring.card.createdAt", { date: new Date(app.created_at).toLocaleDateString() })}
                   </p>
                 </Link>
@@ -474,7 +474,7 @@ export default function MonitoringPage() {
       >
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <label className="block text-sm font-medium text-gray-700">{t("monitoring.modal.name.label")}</label>
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-200">{t("monitoring.modal.name.label")}</label>
             <input
               type="text"
               required
@@ -483,12 +483,12 @@ export default function MonitoringPage() {
               placeholder={t("monitoring.modal.name.placeholder")}
               pattern="[a-z0-9-]+"
               title={t("monitoring.modal.name.validation")}
-              className="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              className="mt-1 block w-full rounded-lg border border-gray-300 dark:border-gray-700 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
             />
           </div>
 
           {submitError && (
-            <div role="alert" className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+            <div role="alert" className="rounded-lg border border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-950/40 px-4 py-3 text-sm text-red-700 dark:text-red-300">
               {submitError}
             </div>
           )}
@@ -501,7 +501,7 @@ export default function MonitoringPage() {
                 setSubmitError(null);
                 setName("");
               }}
-              className="rounded-lg px-4 py-2 text-sm font-medium text-gray-600 hover:bg-gray-100 transition-colors"
+              className="rounded-lg px-4 py-2 text-sm font-medium text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
             >
               {t("common.cancel")}
             </button>
@@ -538,15 +538,15 @@ function ZeroState({
   const { t } = useT();
 
   return (
-    <div className="rounded-xl border border-dashed border-gray-300 bg-gray-50 px-6 py-12">
+    <div className="rounded-xl border border-dashed border-gray-300 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 px-6 py-12">
       <div className="mx-auto max-w-md text-center">
-        <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-blue-50 border border-blue-100">
+        <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-blue-50 dark:bg-blue-950/40 border border-blue-100 dark:border-blue-900">
           <svg className="h-7 w-7 text-blue-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M3 13.125C3 12.504 3.504 12 4.125 12h2.25c.621 0 1.125.504 1.125 1.125v6.75C7.5 20.496 6.996 21 6.375 21h-2.25A1.125 1.125 0 013 19.875v-6.75zM9.75 8.625c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125v11.25c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V8.625zM16.5 4.125c0-.621.504-1.125 1.125-1.125h2.25C20.496 3 21 3.504 21 4.125v15.75c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V4.125z" />
           </svg>
         </div>
-        <h2 className="text-base font-semibold text-gray-900">{t("monitoring.zero.title")}</h2>
-        <p className="mt-1 text-sm text-gray-500">
+        <h2 className="text-base font-semibold text-gray-900 dark:text-gray-100">{t("monitoring.zero.title")}</h2>
+        <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
           {t("monitoring.zero.body")}
         </p>
         {canCreate && (
@@ -569,10 +569,10 @@ function ZeroState({
             { n: 3, key: "monitoring.zero.step3" },
           ].map(({ n, key }) => (
             <div key={n} className="flex items-start gap-3">
-              <span className="flex-none flex h-5 w-5 items-center justify-center rounded-full bg-gray-200 text-xs font-bold text-gray-600">
+              <span className="flex-none flex h-5 w-5 items-center justify-center rounded-full bg-gray-200 dark:bg-gray-700 text-xs font-bold text-gray-600 dark:text-gray-400">
                 {n}
               </span>
-              <p className="text-sm text-gray-600">{t(key)}</p>
+              <p className="text-sm text-gray-600 dark:text-gray-400">{t(key)}</p>
             </div>
           ))}
         </div>

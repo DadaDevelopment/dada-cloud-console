@@ -208,7 +208,7 @@ export default function AppServerDetailPage() {
             <button
               type="button"
               onClick={() => setRetryOpen(false)}
-              className="rounded-lg px-4 py-2 text-sm font-medium text-gray-600 dark:text-gray-400 hover:bg-gray-100"
+              className="rounded-lg px-4 py-2 text-sm font-medium text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800"
             >
               {t("common.cancel")}
             </button>

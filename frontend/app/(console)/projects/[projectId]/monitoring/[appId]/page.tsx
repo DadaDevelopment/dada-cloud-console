@@ -24,8 +24,8 @@ const TABS: Tab[] = ["overview", "metrics", "logs", "alerts"];
 
 function HealthBadge({ state, critical }: { state: HealthState; critical: boolean }) {
   const colors: Record<HealthState, string> = {
-    healthy: "bg-green-100 text-green-800 dark:text-green-300",
-    degraded: "bg-yellow-100 text-yellow-800 dark:text-yellow-300",
+    healthy: "bg-green-100 dark:bg-green-950/40 text-green-800 dark:text-green-300",
+    degraded: "bg-yellow-100 dark:bg-yellow-950/40 text-yellow-800 dark:text-yellow-300",
     down: "bg-red-100 text-red-800 dark:text-red-300",
     unknown: "bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400",
   };
@@ -79,7 +79,7 @@ function ModalFooter({
       <button
         type="button"
         onClick={onCancel}
-        className="rounded-lg px-4 py-2 text-sm font-medium text-gray-600 dark:text-gray-400 hover:bg-gray-100 transition-colors"
+        className="rounded-lg px-4 py-2 text-sm font-medium text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
       >
         {t("common.cancel")}
       </button>
@@ -177,11 +177,11 @@ export default function MonitoringDetailPage() {
       <div className="mb-6 flex items-start justify-between">
         <div>
           <div className="flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400">
-            <Link href="/projects" className="hover:text-gray-700">{t("common.crumb.projects")}</Link>
+            <Link href="/projects" className="hover:text-gray-700 dark:hover:text-gray-200">{t("common.crumb.projects")}</Link>
             <span>/</span>
-            <Link href={`/projects/${projectId}`} className="hover:text-gray-700">{t("common.crumb.overview")}</Link>
+            <Link href={`/projects/${projectId}`} className="hover:text-gray-700 dark:hover:text-gray-200">{t("common.crumb.overview")}</Link>
             <span>/</span>
-            <Link href={`/projects/${projectId}/monitoring`} className="hover:text-gray-700">{t("nav.monitoring")}</Link>
+            <Link href={`/projects/${projectId}/monitoring`} className="hover:text-gray-700 dark:hover:text-gray-200">{t("nav.monitoring")}</Link>
             <span>/</span>
             <span className="font-mono text-gray-900 dark:text-gray-100">{app.name}</span>
           </div>
@@ -215,7 +215,7 @@ export default function MonitoringDetailPage() {
                 className={`border-b-2 px-1 py-3 text-sm font-medium transition-colors ${
                   active
                     ? "border-blue-600 text-blue-600 dark:text-blue-400"
-                    : "border-transparent text-gray-500 dark:text-gray-400 hover:border-gray-300 hover:text-gray-700"
+                    : "border-transparent text-gray-500 dark:text-gray-400 hover:border-gray-300 dark:hover:border-gray-700 hover:text-gray-700 dark:hover:text-gray-200"
                 }`}
               >
                 {tabItem.label}

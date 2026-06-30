@@ -107,7 +107,7 @@ export default function BuildDetailPage() {
               <button
                 onClick={handleCancel}
                 disabled={canceling}
-                className="rounded-lg border border-gray-300 dark:border-gray-700 px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-50 disabled:opacity-50 transition-colors"
+                className="rounded-lg border border-gray-300 dark:border-gray-700 px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-50 transition-colors"
               >
                 {canceling ? t("apps.builds.canceling") : t("apps.builds.cancel")}
               </button>

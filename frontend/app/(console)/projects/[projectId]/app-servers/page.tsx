@@ -44,12 +44,12 @@ const emptyForm: CreateAppServerForm = {
 };
 
 const statusTone: Record<AppServerStatus, string> = {
-  Provisioning: "bg-blue-100 text-blue-800 dark:text-blue-300",
-  WaitingForAgent: "bg-amber-100 text-amber-800 dark:text-amber-300",
-  Ready: "bg-green-100 text-green-800 dark:text-green-300",
-  Deleting: "bg-orange-100 text-orange-800 dark:text-orange-300",
+  Provisioning: "bg-blue-100 text-blue-800 dark:bg-blue-950/40 dark:text-blue-200",
+  WaitingForAgent: "bg-amber-100 text-amber-800 dark:bg-amber-950/40 dark:text-amber-200",
+  Ready: "bg-green-100 text-green-800 dark:bg-green-950/40 dark:text-green-200",
+  Deleting: "bg-orange-100 text-orange-800 dark:bg-orange-950/40 dark:text-orange-200",
   Deleted: "bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-200",
-  Failed: "bg-red-100 text-red-800 dark:text-red-300",
+  Failed: "bg-red-100 text-red-800 dark:bg-red-950/40 dark:text-red-200",
 };
 
 function AppServerStatusBadge({ status }: { status: AppServerStatus }) {
@@ -302,7 +302,7 @@ export default function AppServersPage() {
                   type="button"
                   onClick={() => setForm((prev) => ({ ...prev, mode: m }))}
                   className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
-                    form.mode === m ? "bg-amber-600 text-white" : "text-gray-600 dark:text-gray-400 hover:bg-gray-100"
+                    form.mode === m ? "bg-amber-600 text-white" : "text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800"
                   }`}
                 >
                   {m === "terraform" ? t("appServers.field.source.terraform") : t("appServers.field.source.manual")}
@@ -433,7 +433,7 @@ export default function AppServersPage() {
             <button
               type="button"
               onClick={() => setIsModalOpen(false)}
-              className="rounded-lg px-4 py-2 text-sm font-medium text-gray-600 dark:text-gray-400 hover:bg-gray-100"
+              className="rounded-lg px-4 py-2 text-sm font-medium text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800"
             >
               {t("common.cancel")}
             </button>
