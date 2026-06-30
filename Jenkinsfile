@@ -23,8 +23,10 @@ def EMBED_GATEWAY_IMAGE   = "${GITHUB_REGISTRY}/${GITHUB_ORG}/dada-cloud-console
 // GitOps write-back: after a successful push, pin the just-built tag into the
 // ArgoCD source so prod actually rolls (there is NO image-updater; the tag is
 // the deploy trigger). Argo's prod app tracks the console-migration branch of
-// argo-infra; only the 4 console component tags are touched (migrationJob is
-// left alone).
+// argo-infra; the 6 console component tags (backend, frontend, gateway,
+// gitopsAgent, portainerAgent, buildAgent) are pinned in lockstep (migrationJob
+// is left alone). Gateway MUST stay in this list: it carries internal/telemetry,
+// so omitting it strands the OTLP ingest path on a stale image while reads update.
 def ARGO_REPO        = 'github.com/DadaDevelopment/argo-infra.git'
 def ARGO_BRANCH      = 'console-migration'
 def ARGO_VALUES_PATH = 'clusters/beget-prod/projects/platform/environments/prod/apps/cloud-console/values.yaml'
@@ -546,7 +548,7 @@ spec:
                                   https://\${GIT_USERNAME}:\${GIT_TOKEN}@${ARGO_REPO} /tmp/argo-infra
                                 cd /tmp/argo-infra
                                 export TAG='${resolvedTag}'
-                                yq -i '(.backend.image.tag, .frontend.image.tag, .gitopsAgent.image.tag, .portainerAgent.image.tag, .buildAgent.image.tag) = strenv(TAG) | (.backend.image.tag, .frontend.image.tag, .gitopsAgent.image.tag, .portainerAgent.image.tag, .buildAgent.image.tag) style="double"' ${ARGO_VALUES_PATH}
+                                yq -i '(.backend.image.tag, .frontend.image.tag, .gateway.image.tag, .gitopsAgent.image.tag, .portainerAgent.image.tag, .buildAgent.image.tag) = strenv(TAG) | (.backend.image.tag, .frontend.image.tag, .gateway.image.tag, .gitopsAgent.image.tag, .portainerAgent.image.tag, .buildAgent.image.tag) style="double"' ${ARGO_VALUES_PATH}
                                 git config user.email 'platform-bot@dada-tuda.ru'
                                 git config user.name  'DADA Platform Bot'
                                 if git diff --quiet -- ${ARGO_VALUES_PATH}; then
