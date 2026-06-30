@@ -147,6 +147,15 @@ func (h *Handler) CreateApp(c *gin.Context) {
 		return
 	}
 
+	if orgID, orgErr := h.projectOrg(c.Request.Context(), projectID); orgErr == nil {
+		if qErr := h.checkQuota(c.Request.Context(), orgID, "apps"); qErr != nil {
+			if qe, ok := qErr.(*quotaExceededError); ok {
+				respondQuotaExceeded(c, qe.Resource, qe.Limit)
+				return
+			}
+		}
+	}
+
 	var runtime models.EnvironmentRuntime
 	if err := h.pool.QueryRow(c.Request.Context(),
 		`SELECT runtime FROM environments WHERE id = $1 AND project_id = $2`,

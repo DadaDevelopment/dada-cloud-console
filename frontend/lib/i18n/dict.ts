@@ -10,7 +10,26 @@ export const DEFAULT_LOCALE: Locale = "ru";
 type Service = { key: string; title: string; desc: string; href: string; badge?: string };
 type Feature = { title: string; desc: string };
 type Faq = { q: string; a: string };
-type Plan = { key: string; name: string; price: string; period: string; tagline: string; features: string[]; cta: string; highlight?: boolean };
+type Plan = {
+  key: string;
+  name: string;
+  price: string;
+  period: string;
+  tagline: string;
+  features: string[];
+  quotaMatrix: {
+    apps: string;
+    databases: string;
+    storage: string;
+    domains: string;
+    environments: string;
+    members: string;
+    backups: string;
+    support: string;
+  };
+  cta: string;
+  highlight?: boolean;
+};
 type Step = { num: string; title: string; desc: string };
 type Scenario = { tag: string; title: string; desc: string };
 type Proof = { quote: string; author: string };
@@ -98,6 +117,19 @@ export interface Dict {
     heroSubtitle: string;
     plans: Plan[];
     note: string;
+    recommender: {
+      title: string;
+      subtitle: string;
+      labelApps: string;
+      labelDatabases: string;
+      labelDomains: string;
+      labelMembers: string;
+      labelStorage: string;
+      submit: string;
+      loading: string;
+      result: string;
+      errorFallback: string;
+    };
   };
   footer: {
     tagline: string;
@@ -175,11 +207,11 @@ const ru: Dict = {
     pricingTitle: "Прозрачные планы",
     pricingSubtitle: "Без сюрпризов в счёте. Hard-лимит и оценка цены до деплоя.",
     pricingTiers: [
-      { name: "Sandbox", price: "0 ₽", tagline: "Попробовать и пет-проекты", bullets: ["1 проект", "Деплой из GitHub", "Postgres для теста", "Базовые логи"] },
-      { name: "Solo", price: "от 1 490 ₽", tagline: "Один разработчик в продакшене", bullets: ["Несколько сервисов", "Managed Postgres", "Домен + HTTPS", "Логи и откаты"], highlight: true },
-      { name: "Startup-team", price: "Индивидуально", tagline: "Растущая команда 2–10", bullets: ["Командные роли", "Гибкие квоты", "Приоритетная поддержка", "Помощь с миграцией"] },
+      { name: "Free", price: "0 ₽", tagline: "Попробовать и пет-проекты", bullets: ["1 приложение", "1 база данных", "Деплой из GitHub", "Базовые логи"] },
+      { name: "Startup", price: "990 ₽/мес", tagline: "Один разработчик в продакшене", bullets: ["5 приложений", "2 базы данных", "5 доменов", "Бэкапы 7 дней"], highlight: true },
+      { name: "Business", price: "2 900 ₽/мес", tagline: "Растущая команда с продакшеном", bullets: ["20 приложений", "10 баз данных", "Бэкапы 30 дней", "Приоритетная поддержка"] },
     ],
-    pricingNote: "Цены ориентировочные на этапе запуска. Полная таблица — на странице цен.",
+    pricingNote: "Полная таблица тарифов — на странице цен.",
     faqTitle: "Частые возражения",
     faq: [
       { q: "У меня уже есть VPS", a: "VPS вы тащите сами: обновления ОС, бэкапы, деплой-скрипты, ночные SSH-сессии когда что-то легло. Тут база, домен, выкат и откат уже работают, а сам VPS можно перенести в проект и забыть про эту рутину." },
@@ -252,38 +284,136 @@ const ru: Dict = {
   },
   pricing: {
     heroTitle: "Простые и прозрачные цены",
-    heroSubtitle: "Платите за используемые ресурсы. Без скрытых платежей.",
+    heroSubtitle: "Платите за план, а не за каждый ресурс. Без скрытых платежей.",
     plans: [
       {
-        key: "starter",
-        name: "Starter",
+        key: "free",
+        name: "Free",
         price: "0 ₽",
         period: "",
-        tagline: "Для пробы и пет-проектов",
-        features: ["1 проект", "Облачные серверы по часам", "Объектное хранилище", "Базовый мониторинг", "Поддержка по email"],
+        tagline: "Попробовать и пет-проекты",
+        features: [
+          "1 приложение",
+          "1 база данных",
+          "1 ГБ хранилища",
+          "1 домен",
+          "1 среда",
+          "1 участник",
+          "Без резервных копий",
+          "Поддержка сообщества",
+        ],
+        quotaMatrix: {
+          apps: "1",
+          databases: "1",
+          storage: "1 ГБ",
+          domains: "1",
+          environments: "1",
+          members: "1",
+          backups: "Нет",
+          support: "Сообщество",
+        },
         cta: "Создать аккаунт",
       },
       {
-        key: "pro",
-        name: "Pro",
-        price: "от 1 490 ₽",
+        key: "startup",
+        name: "Startup",
+        price: "990 ₽",
         period: "/мес",
-        tagline: "Для растущих команд",
-        features: ["Несколько проектов", "Managed Kubernetes", "Управляемые БД", "CDN и приватные сети", "Расширенный мониторинг и алерты"],
+        tagline: "Один разработчик или небольшая команда",
+        features: [
+          "5 приложений",
+          "2 базы данных",
+          "10 ГБ хранилища",
+          "5 доменов",
+          "2 среды",
+          "3 участника",
+          "Бэкапы 7 дней",
+          "Поддержка по email",
+        ],
+        quotaMatrix: {
+          apps: "5",
+          databases: "2",
+          storage: "10 ГБ",
+          domains: "5",
+          environments: "2",
+          members: "3",
+          backups: "7 дней",
+          support: "Email",
+        },
         cta: "Начать",
         highlight: true,
       },
       {
         key: "business",
         name: "Business",
-        price: "Индивидуально",
+        price: "2 900 ₽",
+        period: "/мес",
+        tagline: "Растущая команда с нагрузкой в продакшене",
+        features: [
+          "20 приложений",
+          "10 баз данных",
+          "100 ГБ хранилища",
+          "20 доменов",
+          "5 сред",
+          "10 участников",
+          "Бэкапы 30 дней",
+          "Приоритетная поддержка",
+        ],
+        quotaMatrix: {
+          apps: "20",
+          databases: "10",
+          storage: "100 ГБ",
+          domains: "20",
+          environments: "5",
+          members: "10",
+          backups: "30 дней",
+          support: "Приоритетная",
+        },
+        cta: "Начать",
+      },
+      {
+        key: "enterprise",
+        name: "Enterprise",
+        price: "По запросу",
         period: "",
-        tagline: "Для нагруженных проектов",
-        features: ["SLA и приоритетная поддержка", "Гибкие квоты ресурсов", "Командные роли и RBAC", "Выделенные ресурсы", "Помощь с миграцией"],
-        cta: "Получить консультацию",
+        tagline: "Индивидуальные квоты и SLA",
+        features: [
+          "Любое количество приложений",
+          "Неограниченные базы данных",
+          "Хранилище по договорённости",
+          "Неограниченные домены",
+          "Неограниченные среды",
+          "Неограниченные участники",
+          "Бэкапы по договорённости",
+          "Приоритетная поддержка + SLA",
+        ],
+        quotaMatrix: {
+          apps: "Без ограничений",
+          databases: "Без ограничений",
+          storage: "По договорённости",
+          domains: "Без ограничений",
+          environments: "Без ограничений",
+          members: "Без ограничений",
+          backups: "По договорённости",
+          support: "Приоритет + SLA",
+        },
+        cta: "Связаться с нами",
       },
     ],
-    note: "Цены ориентировочные и приведены для примера на этапе запуска платформы.",
+    note: "",
+    recommender: {
+      title: "Подобрать план",
+      subtitle: "Укажите ваши потребности — мы подберём подходящий план.",
+      labelApps: "Приложений",
+      labelDatabases: "Баз данных",
+      labelDomains: "Доменов",
+      labelMembers: "Участников команды",
+      labelStorage: "Хранилище (ГБ)",
+      submit: "Подобрать",
+      loading: "Подбираем…",
+      result: "Вам подойдёт:",
+      errorFallback: "Не удалось связаться с сервером — используем локальный расчёт.",
+    },
   },
   footer: {
     tagline: "Облачная платформа на основе GitOps.",
@@ -377,11 +507,11 @@ const en: Dict = {
     pricingTitle: "Transparent plans",
     pricingSubtitle: "No billing surprises. Hard limit and a price estimate before deploy.",
     pricingTiers: [
-      { name: "Sandbox", price: "$0", tagline: "Trials and pet projects", bullets: ["1 project", "Deploy from GitHub", "Postgres for testing", "Basic logs"] },
-      { name: "Solo", price: "from $19", tagline: "One developer in production", bullets: ["Multiple services", "Managed Postgres", "Domain + HTTPS", "Logs and rollbacks"], highlight: true },
-      { name: "Startup-team", price: "Custom", tagline: "Growing team of 2–10", bullets: ["Team roles", "Flexible quotas", "Priority support", "Migration help"] },
+      { name: "Free", price: "$0", tagline: "Trials and pet projects", bullets: ["1 application", "1 database", "Deploy from GitHub", "Basic logs"] },
+      { name: "Startup", price: "$12/mo", tagline: "Solo developer in production", bullets: ["5 applications", "2 databases", "5 domains", "7-day backups"], highlight: true },
+      { name: "Business", price: "$35/mo", tagline: "Growing team with production load", bullets: ["20 applications", "10 databases", "30-day backups", "Priority support"] },
     ],
-    pricingNote: "Indicative pricing at launch. Full table on the pricing page.",
+    pricingNote: "Full pricing table on the pricing page.",
     faqTitle: "Common objections",
     faq: [
       { q: "I already have a VPS", a: "A VPS is on you: OS updates, backups, deploy scripts, the late-night SSH session when something falls over. Here the database, domain, deploy and rollback already work, and the VPS itself can move into a project so you forget that chore." },
@@ -454,38 +584,136 @@ const en: Dict = {
   },
   pricing: {
     heroTitle: "Simple, transparent pricing",
-    heroSubtitle: "Pay for the resources you use. No hidden fees.",
+    heroSubtitle: "Pay for a plan, not per resource. No hidden fees.",
     plans: [
       {
-        key: "starter",
-        name: "Starter",
+        key: "free",
+        name: "Free",
         price: "$0",
         period: "",
-        tagline: "For trials and pet projects",
-        features: ["1 project", "Hourly cloud servers", "Object storage", "Basic monitoring", "Email support"],
+        tagline: "Try it out and pet projects",
+        features: [
+          "1 application",
+          "1 database",
+          "1 GB storage",
+          "1 domain",
+          "1 environment",
+          "1 team member",
+          "No backups",
+          "Community support",
+        ],
+        quotaMatrix: {
+          apps: "1",
+          databases: "1",
+          storage: "1 GB",
+          domains: "1",
+          environments: "1",
+          members: "1",
+          backups: "None",
+          support: "Community",
+        },
         cta: "Create account",
       },
       {
-        key: "pro",
-        name: "Pro",
-        price: "from $19",
+        key: "startup",
+        name: "Startup",
+        price: "from $12",
         period: "/mo",
-        tagline: "For growing teams",
-        features: ["Multiple projects", "Managed Kubernetes", "Managed databases", "CDN and private networks", "Advanced monitoring and alerts"],
+        tagline: "Solo developer or small team",
+        features: [
+          "5 applications",
+          "2 databases",
+          "10 GB storage",
+          "5 domains",
+          "2 environments",
+          "3 team members",
+          "7-day backups",
+          "Email support",
+        ],
+        quotaMatrix: {
+          apps: "5",
+          databases: "2",
+          storage: "10 GB",
+          domains: "5",
+          environments: "2",
+          members: "3",
+          backups: "7 days",
+          support: "Email",
+        },
         cta: "Get started",
         highlight: true,
       },
       {
         key: "business",
         name: "Business",
+        price: "from $35",
+        period: "/mo",
+        tagline: "Growing team with production workloads",
+        features: [
+          "20 applications",
+          "10 databases",
+          "100 GB storage",
+          "20 domains",
+          "5 environments",
+          "10 team members",
+          "30-day backups",
+          "Priority support",
+        ],
+        quotaMatrix: {
+          apps: "20",
+          databases: "10",
+          storage: "100 GB",
+          domains: "20",
+          environments: "5",
+          members: "10",
+          backups: "30 days",
+          support: "Priority",
+        },
+        cta: "Get started",
+      },
+      {
+        key: "enterprise",
+        name: "Enterprise",
         price: "Custom",
         period: "",
-        tagline: "For demanding workloads",
-        features: ["SLA and priority support", "Flexible resource quotas", "Team roles and RBAC", "Dedicated resources", "Migration assistance"],
+        tagline: "Custom quotas and SLA",
+        features: [
+          "Unlimited applications",
+          "Unlimited databases",
+          "Storage by agreement",
+          "Unlimited domains",
+          "Unlimited environments",
+          "Unlimited team members",
+          "Backups by agreement",
+          "Priority support + SLA",
+        ],
+        quotaMatrix: {
+          apps: "Unlimited",
+          databases: "Unlimited",
+          storage: "By agreement",
+          domains: "Unlimited",
+          environments: "Unlimited",
+          members: "Unlimited",
+          backups: "By agreement",
+          support: "Priority + SLA",
+        },
         cta: "Contact sales",
       },
     ],
-    note: "Prices are indicative and shown as examples at the platform launch stage.",
+    note: "",
+    recommender: {
+      title: "Find your plan",
+      subtitle: "Tell us what you need — we'll recommend the right plan.",
+      labelApps: "Applications",
+      labelDatabases: "Databases",
+      labelDomains: "Domains",
+      labelMembers: "Team members",
+      labelStorage: "Storage (GB)",
+      submit: "Recommend",
+      loading: "Finding best plan…",
+      result: "We recommend:",
+      errorFallback: "Could not reach the server — using local calculation.",
+    },
   },
   footer: {
     tagline: "A GitOps-based cloud platform.",

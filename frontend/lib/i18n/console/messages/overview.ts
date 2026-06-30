@@ -51,6 +51,7 @@ export const overview: Messages = {
   "overview.secondary.models.hint": { ru: "Инференс KServe", en: "KServe inference" },
   "overview.secondary.appServers.hint": { ru: "VM-хосты", en: "VM hosts" },
   "overview.secondary.git.hint": { ru: "Репозитории и билды", en: "Repositories and builds" },
+  "overview.secondary.billing.hint": { ru: "Тарифный план и квоты", en: "Plan and quotas" },
 
   "overview.section.recentOps": { ru: "Последние операции", en: "Recent operations" },
   "overview.allOps": { ru: "Все операции →", en: "All operations →" },

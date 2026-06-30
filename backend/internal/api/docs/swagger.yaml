@@ -1,0 +1,5600 @@
+basePath: /api/v1
+definitions:
+  github_com_dada-tuda_console_backend_internal_billing_pricing.Need:
+    properties:
+      apps:
+        type: integer
+      databases:
+        type: integer
+      domains:
+        type: integer
+      members:
+        type: integer
+      storageGB:
+        type: integer
+    type: object
+  github_com_dada-tuda_console_backend_internal_models.AIModelAuthMode:
+    enum:
+    - apikey
+    - jwt
+    - public
+    type: string
+    x-enum-varnames:
+    - AIModelAuthAPIKey
+    - AIModelAuthJWT
+    - AIModelAuthPublic
+  github_com_dada-tuda_console_backend_internal_models.AIModelSource:
+    enum:
+    - mlflow
+    - s3
+    - custom
+    type: string
+    x-enum-varnames:
+    - AIModelSourceMLflow
+    - AIModelSourceS3
+    - AIModelSourceCustom
+  internal_api.addDomainAuthorizationRequest:
+    properties:
+      apex_domain:
+        type: string
+    type: object
+  internal_api.attachHostnameRequest:
+    properties:
+      hostname:
+        type: string
+    type: object
+  internal_api.bindInstallationRequest:
+    properties:
+      installation_id:
+        description: numeric GitHub installation id
+        type: string
+    type: object
+  internal_api.connectGitRepoRequest:
+    properties:
+      app_name:
+        type: string
+      auto_deploy:
+        type: boolean
+      clone_url:
+        type: string
+      framework_override:
+        type: string
+      installation_id:
+        type: string
+      port:
+        description: |-
+          Intended app spec, applied by the first successful build when it creates the
+          app. Defaulted server-side when omitted (8080 / 2 / small).
+        type: integer
+      production_branch:
+        type: string
+      profile:
+        type: string
+      provider:
+        description: Provider defaults to github when an installation_id is supplied.
+        type: string
+      replicas:
+        type: integer
+      repo_full_name:
+        type: string
+      root_dir:
+        type: string
+      token:
+        description: 'GitLab only: a personal/project access token to store encrypted.
+          Ignored for GitHub.'
+        type: string
+    type: object
+  internal_api.createAIModelRequest:
+    properties:
+      artifact_uri:
+        type: string
+      attached_app_name:
+        type: string
+      auth_mode:
+        $ref: '#/definitions/github_com_dada-tuda_console_backend_internal_models.AIModelAuthMode'
+      container_image:
+        type: string
+      mlflow_name:
+        type: string
+      mlflow_version:
+        type: string
+      model_type:
+        type: string
+      name:
+        type: string
+      profile:
+        type: string
+      source:
+        $ref: '#/definitions/github_com_dada-tuda_console_backend_internal_models.AIModelSource'
+      version:
+        type: string
+    type: object
+  internal_api.createAppRequest:
+    properties:
+      image:
+        type: string
+      name:
+        type: string
+      port:
+        type: integer
+      profile:
+        type: string
+      replicas:
+        type: integer
+    type: object
+  internal_api.createAppServerRequest:
+    properties:
+      flavor:
+        type: string
+      mode:
+        description: '"terraform" (default) | "manual"'
+        type: string
+      name:
+        type: string
+      os_image:
+        type: string
+      region:
+        type: string
+      ssh_key_name:
+        type: string
+      ssh_port:
+        type: integer
+      ssh_private_key:
+        type: string
+      ssh_user:
+        type: string
+      vm_ip:
+        description: Manual-mode fields (connecting a pre-existing VM over SSH).
+        type: string
+    type: object
+  internal_api.createCloudTaskRequest:
+    properties:
+      task_type:
+        type: string
+    type: object
+  internal_api.createEndpointRequest:
+    properties:
+      auth_enabled:
+        type: boolean
+      auth_scheme:
+        type: string
+      auth_scopes:
+        items:
+          type: string
+        type: array
+      fqdn:
+        type: string
+      swagger_enabled:
+        type: boolean
+      swagger_path:
+        type: string
+      swagger_title:
+        type: string
+    type: object
+  internal_api.createMonitoringRequest:
+    properties:
+      name:
+        type: string
+    type: object
+  internal_api.createProjectRequest:
+    properties:
+      default_environment:
+        description: DefaultEnvironment names the first environment; defaults to "prod".
+        type: string
+      display_name:
+        description: DisplayName is the human label; defaults to Slug when empty.
+        type: string
+      org_id:
+        description: |-
+          OrgID is the owning org. Empty → the caller's personal org (their username).
+          A non-empty value requires the caller to be Owner/Admin of that org.
+        type: string
+      slug:
+        description: Slug is the project name (DNS-1123-label-safe). Unique platform-wide.
+        type: string
+    required:
+    - slug
+    type: object
+  internal_api.createS3BucketRequest:
+    properties:
+      app_ref:
+        description: AppRef optionally binds the bucket to an app's chart. Empty =
+          env-level shared storage.
+        type: string
+      bucket_name:
+        type: string
+      description:
+        type: string
+      ftp_sftp_enable:
+        type: boolean
+      name:
+        type: string
+      public:
+        type: boolean
+      region:
+        type: string
+    type: object
+  internal_api.createServiceDatabaseRequest:
+    properties:
+      app_ref:
+        type: string
+      backup_enabled:
+        type: boolean
+      backup_retention:
+        type: string
+      backup_schedule:
+        type: string
+      database:
+        type: string
+      name:
+        type: string
+    type: object
+  internal_api.gitInstallation:
+    properties:
+      account_login:
+        type: string
+      account_type:
+        type: string
+      created_at:
+        type: string
+      id:
+        type: string
+      installation_id:
+        description: BIGINT rendered as string
+        type: string
+      project_id:
+        type: string
+      provider:
+        type: string
+    type: object
+  internal_api.ingestLogsRequest:
+    properties:
+      level:
+        type: string
+      message:
+        type: string
+      source:
+        type: string
+    type: object
+  internal_api.ingestMetricsRequest:
+    properties:
+      metrics:
+        additionalProperties:
+          format: float64
+          type: number
+        type: object
+      source:
+        type: string
+      timestamp:
+        type: string
+    type: object
+  internal_api.loginRequest:
+    properties:
+      email:
+        type: string
+      password:
+        type: string
+      username:
+        type: string
+    required:
+    - password
+    type: object
+  internal_api.setEnvVarRequest:
+    properties:
+      is_secret:
+        type: boolean
+      scope:
+        type: string
+      value:
+        type: string
+    type: object
+  internal_api.updateAppImageRequest:
+    properties:
+      image:
+        type: string
+    type: object
+info:
+  contact: {}
+  description: |-
+    Platform API to order and manage cloud resources — managed databases, apps, VMs (app servers), AI models, and public API endpoints — on the DADA Cloud platform.
+    Mutations are asynchronous: create/update/delete enqueue an operation and return 202 Accepted with an operation object; poll GET /projects/{projectId}/operations/{operationId} until the operation reaches a terminal status (Ready or Failed).
+  title: DADA Cloud Console API
+  version: "1.0"
+paths:
+  /admin/operations:
+    get:
+      description: Returns operations in the WaitingForApproval state across all projects
+        where the caller is a platform-admin, each with the project name and requester.
+        Read-only. The GPU-model creation gate is the first consumer.
+      operationId: listAdminApprovals
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: object with an approvals array
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: List operations awaiting admin approval
+      tags:
+      - admin
+  /admin/operations/{opId}/approve:
+    post:
+      consumes:
+      - application/json
+      description: Approves a WaitingForApproval operation, transitioning it to Created
+        so the dispatcher executes it. Platform-admin only. An optional note is recorded
+        in the audit trail.
+      operationId: approveOperation
+      parameters:
+      - description: Operation UUID
+        in: path
+        name: opId
+        required: true
+        type: string
+      - description: Optional object with a note string
+        in: body
+        name: body
+        schema:
+          additionalProperties: true
+          type: object
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: object with the updated operation
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "409":
+          description: Conflict
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Approve an operation awaiting approval
+      tags:
+      - admin
+  /admin/operations/{opId}/reject:
+    post:
+      consumes:
+      - application/json
+      description: Rejects a WaitingForApproval operation, transitioning it to Cancelled.
+        Platform-admin only. A reason is required and surfaced to the requester in
+        the operations timeline.
+      operationId: rejectOperation
+      parameters:
+      - description: Operation UUID
+        in: path
+        name: opId
+        required: true
+        type: string
+      - description: Object with a required reason string
+        in: body
+        name: body
+        required: true
+        schema:
+          additionalProperties: true
+          type: object
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: object with the updated operation
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "409":
+          description: Conflict
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Reject an operation awaiting approval
+      tags:
+      - admin
+  /auth/login:
+    post:
+      consumes:
+      - application/json
+      description: 'Authenticates a user by username or email plus password and returns
+        a JWT bearer token. Public endpoint — no authentication required. Use the
+        returned token as the Authorization: Bearer header for every other endpoint.'
+      operationId: login
+      parameters:
+      - description: Login credentials (username or email, plus password)
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_api.loginRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: object with the JWT token and the authenticated user
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Log in and obtain a bearer token
+      tags:
+      - auth
+  /auth/me:
+    get:
+      description: Returns the identity (id, username, email, display name) of the
+        user owning the bearer token. Read-only. Useful to confirm who the token belongs
+        to before taking actions.
+      operationId: getCurrentUser
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: object with the authenticated user
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Get the current authenticated user
+      tags:
+      - auth
+  /billing/plans:
+    get:
+      description: Returns all available billing plans with quotas, capabilities,
+        and pricing.
+      operationId: getBillingPlans
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BearerAuth: []
+      summary: List billing plans
+      tags:
+      - billing
+  /billing/recommend-plan:
+    post:
+      consumes:
+      - application/json
+      description: Returns the cheapest plan that satisfies the supplied resource
+        requirements.
+      operationId: recommendBillingPlan
+      parameters:
+      - description: Resource requirements
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/github_com_dada-tuda_console_backend_internal_billing_pricing.Need'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Recommend a billing plan
+      tags:
+      - billing
+  /git/install/callback:
+    get:
+      description: Public endpoint GitHub redirects to after App install. Verifies
+        the signed state, persists the installation, redirects to the import wizard.
+      operationId: gitInstallCallback
+      parameters:
+      - description: GitHub installation id
+        in: query
+        name: installation_id
+        required: true
+        type: string
+      - description: Signed install state
+        in: query
+        name: state
+        required: true
+        type: string
+      responses:
+        "302":
+          description: Found
+      summary: GitHub App install callback (Setup URL)
+      tags:
+      - git
+  /mlflow/registered-models:
+    get:
+      description: Returns the MLflow registered models visible to a project, filtered
+        by the project's AI storage prefix. Read-only. The project query param (project
+        UUID) is required.
+      operationId: listMlflowModels
+      parameters:
+      - description: Project UUID
+        in: query
+        name: project
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: object with a models array
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "502":
+          description: Bad Gateway
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "503":
+          description: Service Unavailable
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: List MLflow registered models for a project
+      tags:
+      - mlflow
+  /mlflow/registered-models/{name}/versions:
+    get:
+      description: Returns all versions of one MLflow registered model, filtered by
+        the project's AI storage prefix. Read-only. The project query param (project
+        UUID) is required.
+      operationId: listMlflowModelVersions
+      parameters:
+      - description: MLflow registered model name
+        in: path
+        name: name
+        required: true
+        type: string
+      - description: Project UUID
+        in: query
+        name: project
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: object with a versions array
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "502":
+          description: Bad Gateway
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "503":
+          description: Service Unavailable
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: List versions of an MLflow registered model
+      tags:
+      - mlflow
+  /mlflow/registered-models/{name}/versions/{version}:
+    get:
+      description: Returns a single MLflow registered-model version, including its
+        artifact source URI, scoped to the project's AI storage prefix. Read-only.
+        The project query param (project UUID) is required.
+      operationId: getMlflowModelVersion
+      parameters:
+      - description: MLflow registered model name
+        in: path
+        name: name
+        required: true
+        type: string
+      - description: Model version
+        in: path
+        name: version
+        required: true
+        type: string
+      - description: Project UUID
+        in: query
+        name: project
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: object with the version
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "502":
+          description: Bad Gateway
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "503":
+          description: Service Unavailable
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Get one MLflow model version
+      tags:
+      - mlflow
+  /projects:
+    get:
+      description: Returns every project the authenticated user is a member of, each
+        annotated with the caller's role in that project. Read-only. Start here to
+        discover project IDs for other calls.
+      operationId: listProjects
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: object with a projects array
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: List projects the caller can access
+      tags:
+      - project
+    post:
+      consumes:
+      - application/json
+      description: Creates a project plus its default environment. Without org_id
+        the project goes into your personal org (you are Owner). With org_id you must
+        be Owner/Admin of that org. The slug must be DNS-1123-label-safe and is unique
+        platform-wide.
+      operationId: createProject
+      parameters:
+      - description: Project to create
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_api.createProjectRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: object with project_id, default_environment_id, org_id and
+            role
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "409":
+          description: slug already taken
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Create a project
+      tags:
+      - project
+  /projects/{projectId}:
+    get:
+      description: Returns one project, the caller's role, and the project's environments
+        (each with id, name, namespace, runtime). Read-only. Use the returned environment
+        IDs for app/database/model calls.
+      operationId: getProject
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: object with project, role and environments
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Get a project with its environments
+      tags:
+      - project
+  /projects/{projectId}/app-servers:
+    get:
+      description: Returns all app servers (provisioned or connected VMs) in a project,
+        excluding deleted ones, newest first. Read-only.
+      operationId: listAppServers
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: object with an app_servers array
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: List app servers (VMs) in a project
+      tags:
+      - appserver
+    post:
+      consumes:
+      - application/json
+      description: 'Creates an app server either by provisioning a new VM via Terraform
+        (mode=terraform, the default) or by connecting an existing VM over SSH (mode=manual,
+        requires vm_ip and ssh_private_key). Asynchronous: returns 202 with an operation;
+        poll the operation until terminal.'
+      operationId: createAppServer
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      - description: App server specification
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_api.createAppServerRequest'
+      produces:
+      - application/json
+      responses:
+        "202":
+          description: object with the accepted operation
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "409":
+          description: Conflict
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Provision or connect an app server (VM)
+      tags:
+      - appserver
+  /projects/{projectId}/app-servers/{serverName}:
+    delete:
+      description: 'Destructive: tears down the app server. For Terraform-provisioned
+        servers this destroys the underlying VM and is irreversible. Asynchronous:
+        returns 202 with an operation; poll the operation until terminal.'
+      operationId: deleteAppServer
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      - description: App server name
+        in: path
+        name: serverName
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "202":
+          description: object with the accepted operation
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Delete an app server (VM)
+      tags:
+      - appserver
+    get:
+      description: Returns one app server's record (status, VM IP, provider, Portainer
+        endpoint) by name. Read-only.
+      operationId: getAppServer
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      - description: App server name
+        in: path
+        name: serverName
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: object with the app_server
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Get an app server (VM) by name
+      tags:
+      - appserver
+  /projects/{projectId}/app-servers/{serverName}/metrics:
+    get:
+      description: Returns time-series CPU, memory, disk and network metrics for an
+        app server (VM) from the central Prometheus. Read-only. The range query param
+        selects the window (15m, 1h, 6h, 24h; default 1h).
+      operationId: getAppServerMetrics
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      - description: App server name
+        in: path
+        name: serverName
+        required: true
+        type: string
+      - description: 'Time window: 15m, 1h, 6h or 24h (default 1h)'
+        in: query
+        name: range
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: object with range, step and metrics series
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "503":
+          description: Service Unavailable
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Get VM resource metrics for an app server
+      tags:
+      - appserver
+  /projects/{projectId}/app-servers/{serverName}/state:
+    get:
+      description: 'Returns the live state of an app server: online/heartbeat from
+        Portainer plus the running containers, falling back to the stored DB status
+        when no live endpoint exists. Read-only.'
+      operationId: getAppServerState
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      - description: App server name
+        in: path
+        name: serverName
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: object with status, online flag and containers
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Get live state of an app server (VM)
+      tags:
+      - appserver
+  /projects/{projectId}/billing/account:
+    get:
+      description: Returns the plan, quota usage, and monthly invoice preview for
+        the org that owns the project.
+      operationId: getBillingAccount
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Get billing account
+      tags:
+      - billing
+  /projects/{projectId}/billing/plan:
+    put:
+      consumes:
+      - application/json
+      description: Upserts the org's plan in billing_accounts. Requires write role
+        on the project.
+      operationId: assignBillingPlan
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      - description: Plan key
+        in: body
+        name: body
+        required: true
+        schema:
+          additionalProperties:
+            type: string
+          type: object
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Assign a billing plan
+      tags:
+      - billing
+  /projects/{projectId}/billing/usage:
+    get:
+      description: Returns per-resource current usage versus plan quota for the org
+        that owns the project.
+      operationId: getBillingUsage
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Get billing usage
+      tags:
+      - billing
+  /projects/{projectId}/builds/{buildId}:
+    get:
+      description: Returns a single build by id. Read-only.
+      operationId: getBuild
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      - description: Build UUID
+        in: path
+        name: buildId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: object with the build
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Get a build
+      tags:
+      - build
+  /projects/{projectId}/builds/{buildId}/artifacts:
+    get:
+      description: Returns the Android artifacts (APK/AAB) produced by a build. Read-only.
+      operationId: listBuildArtifacts
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      - description: Build UUID
+        in: path
+        name: buildId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: object with an artifacts array
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: List build artifacts
+      tags:
+      - build
+  /projects/{projectId}/builds/{buildId}/artifacts/{artifactId}/download:
+    get:
+      description: Streams the APK/AAB bytes through the backend (Nexus creds stay
+        server-side). Read-only.
+      operationId: downloadBuildArtifact
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      - description: Build UUID
+        in: path
+        name: buildId
+        required: true
+        type: string
+      - description: Artifact UUID
+        in: path
+        name: artifactId
+        required: true
+        type: string
+      produces:
+      - application/octet-stream
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: file
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "503":
+          description: Service Unavailable
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Download a build artifact
+      tags:
+      - build
+  /projects/{projectId}/builds/{buildId}/cancel:
+    post:
+      description: Cancels a queued or in-progress build. Returns 409 if the build
+        already reached a terminal state. Requires write access.
+      operationId: cancelBuild
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      - description: Build UUID
+        in: path
+        name: buildId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: object with the updated build
+          schema:
+            additionalProperties: true
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "409":
+          description: Conflict
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Cancel a build
+      tags:
+      - build
+  /projects/{projectId}/builds/{buildId}/logs-token:
+    post:
+      description: Issues a short-lived delegate token plus WebSocket URL the frontend
+        uses to stream a build's logs from the build-agent. Requires write access.
+        Returns 503 when the build-agent is not configured.
+      operationId: createBuildLogsToken
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      - description: Build UUID
+        in: path
+        name: buildId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: object with token and ws_url
+          schema:
+            additionalProperties: true
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "503":
+          description: Service Unavailable
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Issue a token for the build log stream
+      tags:
+      - build
+  /projects/{projectId}/cloud-tasks/{taskId}:
+    get:
+      description: Returns a single DadaAgent cloud task.
+      operationId: getCloudTask
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      - description: Cloud task UUID
+        in: path
+        name: taskId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: object with the cloud_task
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Get a cloud task by id
+      tags:
+      - cloud-tasks
+  /projects/{projectId}/cloud-tasks/{taskId}/artifacts/{fileId}:
+    get:
+      description: Streams an artifact file produced by the agent for a cloud task.
+      operationId: proxyCloudTaskArtifact
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      - description: Cloud task UUID
+        in: path
+        name: taskId
+        required: true
+        type: string
+      - description: Agent file id
+        in: path
+        name: fileId
+        required: true
+        type: string
+      produces:
+      - application/octet-stream
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: file
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "502":
+          description: Bad Gateway
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "503":
+          description: Service Unavailable
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Download a cloud task artifact
+      tags:
+      - cloud-tasks
+  /projects/{projectId}/deployments/{deploymentId}/promote:
+    post:
+      description: 'Re-deploys the immutable image of a deployment (e.g. promoting
+        a preview build). No rebuild — enqueues a DeployImageVersion operation. Asynchronous:
+        returns 202 with the operation. Requires write access.'
+      operationId: promoteDeployment
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      - description: Deployment UUID
+        in: path
+        name: deploymentId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "202":
+          description: object with the accepted operation
+          schema:
+            additionalProperties: true
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Promote a deployment
+      tags:
+      - deployment
+  /projects/{projectId}/deployments/{deploymentId}/rollback:
+    post:
+      description: 'Re-deploys the immutable image of an earlier deployment. No rebuild
+        — enqueues a DeployImageVersion operation. Asynchronous: returns 202 with
+        the operation. Requires write access.'
+      operationId: rollbackDeployment
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      - description: Deployment UUID
+        in: path
+        name: deploymentId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "202":
+          description: object with the accepted operation
+          schema:
+            additionalProperties: true
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Roll back to a prior deployment
+      tags:
+      - deployment
+  /projects/{projectId}/domain-authorizations:
+    get:
+      operationId: listDomainAuthorizations
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: List apex domain authorizations
+      tags:
+      - domain
+    post:
+      consumes:
+      - application/json
+      description: Registers a user-owned apex domain (e.g. acme.com) and returns
+        a TXT challenge. Once the record is published and verified, the project may
+        attach that apex and any of its subdomains to its deployments.
+      operationId: addDomainAuthorization
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      - description: Apex domain
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_api.addDomainAuthorizationRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "409":
+          description: Conflict
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Authorize an apex domain for a project
+      tags:
+      - domain
+  /projects/{projectId}/domain-authorizations/{id}:
+    delete:
+      operationId: deleteDomainAuthorization
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      - description: Authorization UUID
+        in: path
+        name: id
+        required: true
+        type: string
+      responses:
+        "204":
+          description: No Content
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "409":
+          description: Conflict
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Remove an apex domain authorization
+      tags:
+      - domain
+  /projects/{projectId}/domain-authorizations/{id}/verify:
+    post:
+      operationId: verifyDomainAuthorization
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      - description: Authorization UUID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Force a DNS verification check now
+      tags:
+      - domain
+  /projects/{projectId}/environments/{envId}/apps:
+    get:
+      description: Returns all App resources (Helm or compose) in a project environment,
+        with their live phase/status. Read-only.
+      operationId: listApps
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      - description: Environment UUID
+        in: path
+        name: envId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: object with an apps array of ResourceSnapshot
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: List apps in an environment
+      tags:
+      - app
+    post:
+      consumes:
+      - application/json
+      description: 'Provisions a new app in an environment. For Kubernetes (Helm)
+        environments image is required and port/replicas/profile apply; for VM (compose)
+        environments the app deploys as a Docker Compose stack onto the environment''s
+        app server, which must already be Ready. Asynchronous: returns 202 with an
+        operation; poll the operation until terminal.'
+      operationId: createApp
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      - description: Environment UUID
+        in: path
+        name: envId
+        required: true
+        type: string
+      - description: App specification
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_api.createAppRequest'
+      produces:
+      - application/json
+      responses:
+        "202":
+          description: object with the accepted operation
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "409":
+          description: Conflict
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Deploy a new app
+      tags:
+      - app
+  /projects/{projectId}/environments/{envId}/apps/{appName}/builds:
+    get:
+      description: Returns the build history for an app in an environment, most recent
+        first. Read-only.
+      operationId: listBuilds
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      - description: Environment UUID
+        in: path
+        name: envId
+        required: true
+        type: string
+      - description: App name
+        in: path
+        name: appName
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: object with a builds array
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: List builds for an app
+      tags:
+      - build
+    post:
+      description: Queues a new build of the app's linked repository at its production
+        branch HEAD. Builds are imperative — this returns 202 with the queued build
+        (not an operation). Requires write access.
+      operationId: triggerBuild
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      - description: Environment UUID
+        in: path
+        name: envId
+        required: true
+        type: string
+      - description: App name
+        in: path
+        name: appName
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "202":
+          description: object with the queued build
+          schema:
+            additionalProperties: true
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "409":
+          description: Conflict
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Trigger a manual build
+      tags:
+      - build
+  /projects/{projectId}/environments/{envId}/apps/{appName}/cloud-tasks:
+    get:
+      description: Returns the DadaAgent cloud tasks fired for an app, newest first.
+      operationId: listCloudTasks
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      - description: Environment UUID
+        in: path
+        name: envId
+        required: true
+        type: string
+      - description: App name
+        in: path
+        name: appName
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: object with a cloud_tasks array
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: List cloud tasks for an app
+      tags:
+      - cloud-tasks
+    post:
+      consumes:
+      - application/json
+      description: Mints a GitHub install token + agent params, submits and executes
+        a DadaAgent intent. Write role required.
+      operationId: createCloudTask
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      - description: Environment UUID
+        in: path
+        name: envId
+        required: true
+        type: string
+      - description: App name
+        in: path
+        name: appName
+        required: true
+        type: string
+      - description: Task type to run
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_api.createCloudTaskRequest'
+      produces:
+      - application/json
+      responses:
+        "202":
+          description: object with the created cloud_task
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "503":
+          description: Service Unavailable
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Fire a DadaAgent cloud task for an app
+      tags:
+      - cloud-tasks
+  /projects/{projectId}/environments/{envId}/apps/{appName}/deployments:
+    get:
+      description: Returns the deployment history for an app in an environment, most
+        recent first. Read-only.
+      operationId: listDeployments
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      - description: Environment UUID
+        in: path
+        name: envId
+        required: true
+        type: string
+      - description: App name
+        in: path
+        name: appName
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: object with a deployments array
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: List deployments for an app
+      tags:
+      - deployment
+  /projects/{projectId}/environments/{envId}/apps/{appName}/endpoints:
+    get:
+      description: Returns all public API endpoints (PublicApi resources / domains)
+        registered for an app in an environment, with their live phase/status. Read-only.
+      operationId: listEndpoints
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      - description: Environment UUID
+        in: path
+        name: envId
+        required: true
+        type: string
+      - description: App name
+        in: path
+        name: appName
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: object with an endpoints array of ResourceSnapshot
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: List public endpoints of an app
+      tags:
+      - endpoint
+    post:
+      consumes:
+      - application/json
+      description: 'Registers a public API endpoint (PublicApi resource) exposing
+        an app at a given FQDN, with optional auth (none, platform-jwt, api-key, internal)
+        and Swagger publishing. Asynchronous: returns 202 with an operation; poll
+        the operation until terminal.'
+      operationId: createEndpoint
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      - description: Environment UUID
+        in: path
+        name: envId
+        required: true
+        type: string
+      - description: App name
+        in: path
+        name: appName
+        required: true
+        type: string
+      - description: Endpoint specification (FQDN, auth, swagger)
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_api.createEndpointRequest'
+      produces:
+      - application/json
+      responses:
+        "202":
+          description: object with the accepted operation
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "409":
+          description: Conflict
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Register a public endpoint (domain) for an app
+      tags:
+      - endpoint
+  /projects/{projectId}/environments/{envId}/apps/{appName}/env:
+    get:
+      description: Returns the environment variables for an app. Non-secret values
+        are returned in plaintext; secret values are masked (omitted). Read-only.
+      operationId: listEnvVars
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      - description: Environment UUID
+        in: path
+        name: envId
+        required: true
+        type: string
+      - description: App name
+        in: path
+        name: appName
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: object with an env_vars array
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: List environment variables for an app
+      tags:
+      - env-var
+  /projects/{projectId}/environments/{envId}/apps/{appName}/env/{key}:
+    delete:
+      description: Removes a single environment variable from an app. Requires write
+        access.
+      operationId: deleteEnvVar
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      - description: Environment UUID
+        in: path
+        name: envId
+        required: true
+        type: string
+      - description: App name
+        in: path
+        name: appName
+        required: true
+        type: string
+      - description: Variable key
+        in: path
+        name: key
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "204":
+          description: No Content
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Delete an environment variable
+      tags:
+      - env-var
+    get:
+      description: Returns the decrypted plaintext value of a single environment variable.
+        Requires reveal=true and write access.
+      operationId: revealEnvVar
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      - description: Environment UUID
+        in: path
+        name: envId
+        required: true
+        type: string
+      - description: App name
+        in: path
+        name: appName
+        required: true
+        type: string
+      - description: Variable key
+        in: path
+        name: key
+        required: true
+        type: string
+      - description: Must be true to reveal
+        in: query
+        name: reveal
+        required: true
+        type: boolean
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: object with the decrypted value
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Reveal a single environment variable
+      tags:
+      - env-var
+    put:
+      consumes:
+      - application/json
+      description: Creates or updates a single environment variable for an app. The
+        value is always stored AES-GCM encrypted. Requires write access.
+      operationId: setEnvVar
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      - description: Environment UUID
+        in: path
+        name: envId
+        required: true
+        type: string
+      - description: App name
+        in: path
+        name: appName
+        required: true
+        type: string
+      - description: Variable key
+        in: path
+        name: key
+        required: true
+        type: string
+      - description: Variable value
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_api.setEnvVarRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: object with the saved env var
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Set an environment variable
+      tags:
+      - env-var
+  /projects/{projectId}/environments/{envId}/apps/{appName}/hostnames:
+    get:
+      operationId: listHostnames
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      - description: Environment UUID
+        in: path
+        name: envId
+        required: true
+        type: string
+      - description: App name
+        in: path
+        name: appName
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: List custom hostnames attached to an app
+      tags:
+      - domain
+    post:
+      consumes:
+      - application/json
+      description: Attaches a hostname (the apex itself or any subdomain) under a
+        verified apex authorization to an app/environment. Returns the DNS record
+        the user must point at the platform LB, plus a 202 operation that provisions
+        the Ingress + TLS cert.
+      operationId: attachHostname
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      - description: Environment UUID
+        in: path
+        name: envId
+        required: true
+        type: string
+      - description: App name
+        in: path
+        name: appName
+        required: true
+        type: string
+      - description: Hostname
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_api.attachHostnameRequest'
+      produces:
+      - application/json
+      responses:
+        "202":
+          description: Accepted
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "409":
+          description: Conflict
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Attach a custom hostname to an app
+      tags:
+      - domain
+  /projects/{projectId}/environments/{envId}/apps/{appName}/hostnames/{id}:
+    delete:
+      operationId: detachHostname
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      - description: Environment UUID
+        in: path
+        name: envId
+        required: true
+        type: string
+      - description: App name
+        in: path
+        name: appName
+        required: true
+        type: string
+      - description: Hostname UUID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "202":
+          description: Accepted
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Detach a custom hostname from an app
+      tags:
+      - domain
+  /projects/{projectId}/environments/{envId}/apps/{appName}/image:
+    patch:
+      consumes:
+      - application/json
+      description: 'Rolls an existing app to a new container image. Asynchronous:
+        returns 202 with an operation; poll the operation until terminal.'
+      operationId: updateAppImage
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      - description: Environment UUID
+        in: path
+        name: envId
+        required: true
+        type: string
+      - description: App name
+        in: path
+        name: appName
+        required: true
+        type: string
+      - description: New image reference
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_api.updateAppImageRequest'
+      produces:
+      - application/json
+      responses:
+        "202":
+          description: object with the accepted operation
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Deploy a new image version for an app
+      tags:
+      - app
+  /projects/{projectId}/environments/{envId}/apps/{appName}/logs:
+    get:
+      description: Returns the last N lines of a single container's logs for a VM
+        (compose) app, proxied from Portainer. Read-only. The container query param
+        (container id) is required; tail defaults to 200 (max 5000).
+      operationId: getAppLogs
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      - description: Environment UUID
+        in: path
+        name: envId
+        required: true
+        type: string
+      - description: App name
+        in: path
+        name: appName
+        required: true
+        type: string
+      - description: Container id to read logs from
+        in: query
+        name: container
+        required: true
+        type: string
+      - description: Number of log lines to return (1-5000, default 200)
+        in: query
+        name: tail
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: object with a logs string
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "502":
+          description: Bad Gateway
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "503":
+          description: Service Unavailable
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Get recent logs of a compose app container
+      tags:
+      - app
+  /projects/{projectId}/environments/{envId}/apps/{appName}/metrics:
+    get:
+      description: Returns time-series CPU and memory metrics for a compose app's
+        containers from the central Prometheus. Read-only. The range query param selects
+        the window (15m, 1h, 6h, 24h; default 1h).
+      operationId: getAppMetrics
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      - description: Environment UUID
+        in: path
+        name: envId
+        required: true
+        type: string
+      - description: App name
+        in: path
+        name: appName
+        required: true
+        type: string
+      - description: 'Time window: 15m, 1h, 6h or 24h (default 1h)'
+        in: query
+        name: range
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: object with range, step and metrics series
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "503":
+          description: Service Unavailable
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Get container resource metrics for an app
+      tags:
+      - app
+  /projects/{projectId}/environments/{envId}/apps/{appName}/state:
+    get:
+      description: Returns the live Docker Compose stack + container state for a VM
+        (compose) app, queried from Portainer. Read-only. Returns 503 when live state
+        is not configured.
+      operationId: getAppState
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      - description: Environment UUID
+        in: path
+        name: envId
+        required: true
+        type: string
+      - description: App name
+        in: path
+        name: appName
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: object with stack, online flag and containers
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "409":
+          description: Conflict
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "503":
+          description: Service Unavailable
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Get live state of a compose app
+      tags:
+      - app
+  /projects/{projectId}/environments/{envId}/apps/{appName}/values-token:
+    post:
+      description: Issues a short-lived delegate token plus WebSocket URL that the
+        frontend uses to open a live editing session against the gitops-agent values
+        editor for an app's config file (values.yaml, compose.yaml or .env). Requires
+        write access. Returns 503 when the values editor is not configured.
+      operationId: createValuesToken
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      - description: Environment UUID
+        in: path
+        name: envId
+        required: true
+        type: string
+      - description: App name
+        in: path
+        name: appName
+        required: true
+        type: string
+      - description: 'Config file to edit: values.yaml, compose.yaml or .env (default
+          values.yaml)'
+        in: query
+        name: file
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: object with token and ws_url
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "503":
+          description: Service Unavailable
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Issue a short-lived token for the app values editor
+      tags:
+      - app
+  /projects/{projectId}/environments/{envId}/databases:
+    get:
+      description: Returns all managed PostgreSQL (ServiceDatabaseV2) resources in
+        the given project environment, with their live phase/status.
+      operationId: listDatabases
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      - description: Environment UUID
+        in: path
+        name: envId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: object with a databases array of ResourceSnapshot
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: List databases in an environment
+      tags:
+      - database
+    post:
+      consumes:
+      - application/json
+      description: 'Provisions a new managed PostgreSQL database (ServiceDatabaseV2).
+        app_ref is optional: omit it for a standalone, environment-level database,
+        or set it to bind the database to an app''s chart. Asynchronous: returns 202
+        with an operation; poll the operation until it reaches a terminal status.'
+      operationId: createDatabase
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      - description: Environment UUID
+        in: path
+        name: envId
+        required: true
+        type: string
+      - description: Database specification
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_api.createServiceDatabaseRequest'
+      produces:
+      - application/json
+      responses:
+        "202":
+          description: object with the accepted operation
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "409":
+          description: Conflict
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Order a managed PostgreSQL database
+      tags:
+      - database
+  /projects/{projectId}/environments/{envId}/models:
+    get:
+      description: Returns all AIModel resources in a project environment, with their
+        live phase/status. Read-only.
+      operationId: listModels
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      - description: Environment UUID
+        in: path
+        name: envId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: object with a models array of ResourceSnapshot
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: List AI models in an environment
+      tags:
+      - model
+    post:
+      consumes:
+      - application/json
+      description: 'Provisions a new AIModel from an MLflow registered version, an
+        S3 artifact URI, or a custom container image. GPU profiles land in WaitingForApproval
+        when the project''s GPU quota is 0 (non-admins) or are rejected when over
+        quota. Asynchronous: returns 202 with an operation; poll the operation until
+        terminal.'
+      operationId: createModel
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      - description: Environment UUID
+        in: path
+        name: envId
+        required: true
+        type: string
+      - description: Model specification
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_api.createAIModelRequest'
+      produces:
+      - application/json
+      responses:
+        "202":
+          description: object with the accepted operation
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "409":
+          description: Conflict
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Deploy a new AI model
+      tags:
+      - model
+  /projects/{projectId}/environments/{envId}/models/{name}:
+    delete:
+      description: 'Destructive: removes an AIModel. By default the deletion is blocked
+        while an app is attached; force=true bypasses that guard and is platform-admin
+        only. Asynchronous: returns 202 with an operation; poll the operation until
+        terminal.'
+      operationId: deleteModel
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      - description: Environment UUID
+        in: path
+        name: envId
+        required: true
+        type: string
+      - description: Model name
+        in: path
+        name: name
+        required: true
+        type: string
+      - description: Force delete even if an app is attached (platform-admin only)
+        in: query
+        name: force
+        type: boolean
+      produces:
+      - application/json
+      responses:
+        "202":
+          description: object with the accepted operation
+          schema:
+            additionalProperties: true
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Delete an AI model
+      tags:
+      - model
+    get:
+      description: Returns one AIModel snapshot plus its API key prefix (never the
+        plaintext key). Read-only.
+      operationId: getModel
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      - description: Environment UUID
+        in: path
+        name: envId
+        required: true
+        type: string
+      - description: Model name
+        in: path
+        name: name
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: object with the model and api_key_prefix
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Get an AI model by name
+      tags:
+      - model
+  /projects/{projectId}/environments/{envId}/models/{name}/api-key:
+    get:
+      description: One-shot reveal of an AI model's plaintext API key, created when
+        the model was deployed. The reveal window is short-lived and single-use; returns
+        410 once consumed or expired. Requires reveal=true and write access. Only
+        the original requester or a platform-admin may consume it.
+      operationId: revealModelApiKey
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      - description: Environment UUID
+        in: path
+        name: envId
+        required: true
+        type: string
+      - description: Model name
+        in: path
+        name: name
+        required: true
+        type: string
+      - description: Must be true to consume the reveal
+        in: query
+        name: reveal
+        required: true
+        type: boolean
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: object with the plaintext api_key
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "410":
+          description: Gone
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Reveal an AI model's API key (one-shot)
+      tags:
+      - model
+  /projects/{projectId}/environments/{envId}/models/{name}/artifact:
+    patch:
+      consumes:
+      - application/json
+      description: 'Points an existing AIModel at a new artifact, either by a direct
+        artifact_uri or by an mlflow_name + mlflow_version pin. Asynchronous: returns
+        202 with an operation; poll the operation until terminal.'
+      operationId: updateModelArtifact
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      - description: Environment UUID
+        in: path
+        name: envId
+        required: true
+        type: string
+      - description: Model name
+        in: path
+        name: name
+        required: true
+        type: string
+      - description: Object with artifact_uri, or mlflow_name + mlflow_version
+        in: body
+        name: body
+        required: true
+        schema:
+          additionalProperties: true
+          type: object
+      produces:
+      - application/json
+      responses:
+        "202":
+          description: object with the accepted operation
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Update an AI model's artifact
+      tags:
+      - model
+  /projects/{projectId}/environments/{envId}/models/{name}/canary:
+    patch:
+      consumes:
+      - application/json
+      description: 'Sets the percentage of traffic routed to the model''s canary (latest)
+        revision (0-100). Asynchronous: returns 202 with an operation; poll the operation
+        until terminal.'
+      operationId: setModelCanaryTraffic
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      - description: Environment UUID
+        in: path
+        name: envId
+        required: true
+        type: string
+      - description: Model name
+        in: path
+        name: name
+        required: true
+        type: string
+      - description: Object with traffic_percent (0-100)
+        in: body
+        name: body
+        required: true
+        schema:
+          additionalProperties: true
+          type: object
+      produces:
+      - application/json
+      responses:
+        "202":
+          description: object with the accepted operation
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Set canary traffic percentage for an AI model
+      tags:
+      - model
+  /projects/{projectId}/environments/{envId}/models/{name}/infer:
+    post:
+      consumes:
+      - application/json
+      description: Proxies an inference request to the in-cluster KServe predictor
+        for a deployed AI model and returns the prediction. The request and response
+        bodies are passed through transparently (KServe v1 or v2 protocol depending
+        on model type). Playground use only — production traffic should go through
+        the model's public endpoint. The model must be Ready (otherwise 503).
+      operationId: inferModel
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      - description: Environment UUID
+        in: path
+        name: envId
+        required: true
+        type: string
+      - description: Model name
+        in: path
+        name: name
+        required: true
+        type: string
+      - description: Inference payload (KServe v1/v2 predict request, passed through
+          verbatim)
+        in: body
+        name: body
+        required: true
+        schema:
+          additionalProperties: true
+          type: object
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: the upstream predictor response, passed through verbatim
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "413":
+          description: Request Entity Too Large
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "502":
+          description: Bad Gateway
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "503":
+          description: Service Unavailable
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Run inference against a deployed model (playground)
+      tags:
+      - model
+  /projects/{projectId}/environments/{envId}/models/{name}/mlflow-pin:
+    patch:
+      consumes:
+      - application/json
+      description: 'Pins an existing AIModel to a specific MLflow registered model
+        + version. Asynchronous: returns 202 with an operation; poll the operation
+        until terminal.'
+      operationId: pinModelMlflowVersion
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      - description: Environment UUID
+        in: path
+        name: envId
+        required: true
+        type: string
+      - description: Model name
+        in: path
+        name: name
+        required: true
+        type: string
+      - description: Object with mlflow_name and mlflow_version
+        in: body
+        name: body
+        required: true
+        schema:
+          additionalProperties: true
+          type: object
+      produces:
+      - application/json
+      responses:
+        "202":
+          description: object with the accepted operation
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Pin an AI model to an MLflow version
+      tags:
+      - model
+  /projects/{projectId}/environments/{envId}/models/{name}/promote:
+    post:
+      description: 'Promotes the model''s canary (latest) revision to 100% of traffic,
+        clearing the canary split. Asynchronous: returns 202 with an operation; poll
+        the operation until terminal.'
+      operationId: promoteModel
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      - description: Environment UUID
+        in: path
+        name: envId
+        required: true
+        type: string
+      - description: Model name
+        in: path
+        name: name
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "202":
+          description: object with the accepted operation
+          schema:
+            additionalProperties: true
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Promote an AI model's canary to 100%
+      tags:
+      - model
+  /projects/{projectId}/environments/{envId}/monitoring:
+    post:
+      consumes:
+      - application/json
+      description: Registers a monitoring app in a project environment and issues
+        a scoped API key (metrics:write, logs:write). The plaintext key is returned
+        exactly once and never recoverable.
+      operationId: createMonitoringApp
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      - description: Environment UUID
+        in: path
+        name: envId
+        required: true
+        type: string
+      - description: Monitoring resource name
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_api.createMonitoringRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: object with monitoring_app and api_key (shown once)
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "409":
+          description: Conflict
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Create a monitoring resource
+      tags:
+      - monitoring
+  /projects/{projectId}/environments/{envId}/monitoring/{appId}:
+    delete:
+      description: Tears down the Grafana objects (alert rules + dashboard) and deletes
+        the monitoring resource. Mirror alert-rule rows cascade; project-scoped channels
+        are left intact. Write-gated (Owner/Admin/Developer).
+      operationId: deleteMonitoringApp
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      - description: Environment UUID
+        in: path
+        name: envId
+        required: true
+        type: string
+      - description: Monitoring resource UUID
+        in: path
+        name: appId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "204":
+          description: deleted
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Delete a monitoring resource
+      tags:
+      - monitoring
+    get:
+      description: Returns one monitoring resource (ingest target) scoped to a project
+        + environment. Read-only.
+      operationId: getMonitoringApp
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      - description: Environment UUID
+        in: path
+        name: envId
+        required: true
+        type: string
+      - description: Monitoring resource UUID
+        in: path
+        name: appId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: object with the app
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Get a monitoring resource
+      tags:
+      - monitoring
+  /projects/{projectId}/environments/{envId}/monitoring/{appId}/alert-rules:
+    get:
+      description: Lists the resource's alert rules (Postgres mirror of Grafana rules),
+        with channel name resolved. Read-only.
+      operationId: listMonitoringAlertRules
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      - description: Environment UUID
+        in: path
+        name: envId
+        required: true
+        type: string
+      - description: Monitoring resource UUID
+        in: path
+        name: appId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: object with alert_rules
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: List alert rules
+      tags:
+      - monitoring
+    post:
+      consumes:
+      - application/json
+      description: Provisions a Grafana threshold alert (metric + condition + threshold,
+        optional channel) and mirrors it. Write-gated (Owner/Admin/Developer). Returns
+        503 when Grafana is not configured.
+      operationId: createMonitoringAlertRule
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      - description: Environment UUID
+        in: path
+        name: envId
+        required: true
+        type: string
+      - description: Monitoring resource UUID
+        in: path
+        name: appId
+        required: true
+        type: string
+      - description: 'Rule: name, metric, condition, threshold, duration, channel_id'
+        in: body
+        name: body
+        required: true
+        schema:
+          additionalProperties: true
+          type: object
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: object with the alert_rule
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "409":
+          description: Conflict
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "502":
+          description: Bad Gateway
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "503":
+          description: Service Unavailable
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Create an alert rule
+      tags:
+      - monitoring
+  /projects/{projectId}/environments/{envId}/monitoring/{appId}/alert-rules/{ruleId}:
+    delete:
+      description: Removes the Grafana alert rule and its mirror row. Write-gated
+        (Owner/Admin/Developer).
+      operationId: deleteMonitoringAlertRule
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      - description: Environment UUID
+        in: path
+        name: envId
+        required: true
+        type: string
+      - description: Monitoring resource UUID
+        in: path
+        name: appId
+        required: true
+        type: string
+      - description: Alert rule UUID
+        in: path
+        name: ruleId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "204":
+          description: deleted
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "502":
+          description: Bad Gateway
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Delete an alert rule
+      tags:
+      - monitoring
+  /projects/{projectId}/environments/{envId}/monitoring/{appId}/grafana-link:
+    get:
+      description: Ensures the resource's Grafana folder + dashboard exist and returns
+        the browser deep link. Returns 503 when Grafana is not configured.
+      operationId: getMonitoringGrafanaLink
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      - description: Environment UUID
+        in: path
+        name: envId
+        required: true
+        type: string
+      - description: Monitoring resource UUID
+        in: path
+        name: appId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: object with the url
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "502":
+          description: Bad Gateway
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "503":
+          description: Service Unavailable
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Get Grafana deep link for a monitoring resource
+      tags:
+      - monitoring
+  /projects/{projectId}/environments/{envId}/monitoring/{appId}/health:
+    get:
+      description: Computes resource health (healthy/degraded/down/unknown + critical)
+        from last-seen, ERROR-log rate, and firing Grafana alerts. Read-only.
+      operationId: getMonitoringHealth
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      - description: Environment UUID
+        in: path
+        name: envId
+        required: true
+        type: string
+      - description: Monitoring resource UUID
+        in: path
+        name: appId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: health status
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Get monitoring resource health
+      tags:
+      - monitoring
+  /projects/{projectId}/environments/{envId}/monitoring/{appId}/labels:
+    get:
+      description: Enumerates metric names and the distinct label key/value pairs
+        present for the monitoring resource, so the UI can drive group-by and filter
+        scopes. Read-only. Returns 503 when Prometheus is not configured.
+      operationId: getMonitoringLabels
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      - description: Environment UUID
+        in: path
+        name: envId
+        required: true
+        type: string
+      - description: Monitoring resource UUID
+        in: path
+        name: appId
+        required: true
+        type: string
+      - description: Time range (e.g. 15m, 1h, 6h, 24h)
+        in: query
+        name: range
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: object with labels and names
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "503":
+          description: Service Unavailable
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: List monitoring resource metric names and label dimensions
+      tags:
+      - monitoring
+  /projects/{projectId}/environments/{envId}/monitoring/{appId}/logs:
+    get:
+      description: Reads back the resource's app logs (dada-app-logs-*), scoped by
+        labels. Read-only. Returns 503 when log search is not configured.
+      operationId: getMonitoringLogs
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      - description: Environment UUID
+        in: path
+        name: envId
+        required: true
+        type: string
+      - description: Monitoring resource UUID
+        in: path
+        name: appId
+        required: true
+        type: string
+      - description: Time range (15m, 1h, 6h, 24h, 7d)
+        in: query
+        name: range
+        type: string
+      - description: Full-text query
+        in: query
+        name: q
+        type: string
+      - description: Log level filter (e.g. ERROR)
+        in: query
+        name: level
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: log search result
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "503":
+          description: Service Unavailable
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Get monitoring resource logs
+      tags:
+      - monitoring
+  /projects/{projectId}/environments/{envId}/monitoring/{appId}/metrics:
+    get:
+      description: Returns native metric panels for the resource. Metric names are
+        discovered from series labels, so custom metrics render with no code change.
+        Counters are rate()d; optional groupBy/filter scope the series. Read-only.
+        Returns 503 when Prometheus is not configured.
+      operationId: getMonitoringMetrics
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      - description: Environment UUID
+        in: path
+        name: envId
+        required: true
+        type: string
+      - description: Monitoring resource UUID
+        in: path
+        name: appId
+        required: true
+        type: string
+      - description: Time range (e.g. 15m, 1h, 6h, 24h)
+        in: query
+        name: range
+        type: string
+      - description: Label key to split series by
+        in: query
+        name: groupBy
+        type: string
+      - collectionFormat: csv
+        description: Repeatable key=value exact matchers
+        in: query
+        items:
+          type: string
+        name: filter
+        type: array
+      - description: 'Counter handling: on|off|auto (default auto)'
+        in: query
+        name: rate
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: metrics by name
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "503":
+          description: Service Unavailable
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Get monitoring resource metrics
+      tags:
+      - monitoring
+  /projects/{projectId}/environments/{envId}/monitoring/channels:
+    get:
+      description: 'Lists the project''s monitoring notification channels (Grafana
+        contact points: telegram/email/webhook). Read-only.'
+      operationId: listMonitoringChannels
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      - description: Environment UUID
+        in: path
+        name: envId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: object with channels
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: List notification channels
+      tags:
+      - monitoring
+    post:
+      consumes:
+      - application/json
+      description: Provisions a Grafana contact point (telegram/email/webhook) and
+        mirrors it. Write-gated (Owner/Admin/Developer). Returns 503 when Grafana
+        is not configured.
+      operationId: createMonitoringChannel
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      - description: Environment UUID
+        in: path
+        name: envId
+        required: true
+        type: string
+      - description: 'Channel: name, type, and type-specific settings'
+        in: body
+        name: body
+        required: true
+        schema:
+          additionalProperties: true
+          type: object
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: object with the channel
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "409":
+          description: Conflict
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "502":
+          description: Bad Gateway
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "503":
+          description: Service Unavailable
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Create a notification channel
+      tags:
+      - monitoring
+  /projects/{projectId}/environments/{envId}/monitoring/channels/{id}:
+    delete:
+      description: Removes the Grafana contact point and its mirror row. Write-gated
+        (Owner/Admin/Developer).
+      operationId: deleteMonitoringChannel
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      - description: Environment UUID
+        in: path
+        name: envId
+        required: true
+        type: string
+      - description: Channel UUID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "204":
+          description: deleted
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "502":
+          description: Bad Gateway
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Delete a notification channel
+      tags:
+      - monitoring
+  /projects/{projectId}/environments/{envId}/namespace-policy:
+    put:
+      consumes:
+      - application/json
+      description: 'Updates the Kubernetes LimitRange and ResourceQuota for an environment''s
+        namespace. Admin-only (platform-admin or client-admin). Asynchronous: returns
+        202 with an operation id; poll the operation endpoint until terminal.'
+      operationId: setNamespacePolicy
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      - description: Environment UUID
+        in: path
+        name: envId
+        required: true
+        type: string
+      - description: Object with limit_range and resource_quota JSON specs
+        in: body
+        name: body
+        required: true
+        schema:
+          additionalProperties: true
+          type: object
+      produces:
+      - application/json
+      responses:
+        "202":
+          description: object with the accepted operation id
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Set an environment's namespace LimitRange + ResourceQuota
+      tags:
+      - project
+  /projects/{projectId}/environments/{envId}/repos:
+    get:
+      description: Returns the git repositories linked to apps in the given environment.
+        Any project member. Never returns stored tokens or webhook secrets.
+      operationId: listGitRepos
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      - description: Environment UUID
+        in: path
+        name: envId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: object with a repos array
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: List git-linked repos in an environment
+      tags:
+      - git
+    post:
+      consumes:
+      - application/json
+      description: Links a GitHub/GitLab repository to an app in an environment so
+        pushes trigger builds. Stores any GitLab token encrypted and generates a per-repo
+        webhook secret. Requires write access.
+      operationId: connectGitRepo
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      - description: Environment UUID
+        in: path
+        name: envId
+        required: true
+        type: string
+      - description: Repo link specification
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_api.connectGitRepoRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: object with a repos array
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "409":
+          description: Conflict
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Link a git repository to an app
+      tags:
+      - git
+  /projects/{projectId}/environments/{envId}/repos/{repoId}:
+    delete:
+      description: Removes the git link for an app. Builds/deployments already created
+        are retained. Requires write access.
+      operationId: disconnectGitRepo
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      - description: Environment UUID
+        in: path
+        name: envId
+        required: true
+        type: string
+      - description: Git repo UUID
+        in: path
+        name: repoId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "204":
+          description: No Content
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Unlink a git repository
+      tags:
+      - git
+  /projects/{projectId}/environments/{envId}/s3buckets:
+    get:
+      description: Returns all managed S3 storage buckets (S3Bucket) in the given
+        project environment.
+      operationId: listS3Buckets
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      - description: Environment UUID
+        in: path
+        name: envId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: object with a buckets array of ResourceSnapshot
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: List S3 buckets in an environment
+      tags:
+      - storage
+    post:
+      consumes:
+      - application/json
+      description: 'Provisions a new Beget S3 bucket via Crossplane (S3Bucket XR).
+        Async: returns 202 with an operation; poll until terminal.'
+      operationId: createS3Bucket
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      - description: Environment UUID
+        in: path
+        name: envId
+        required: true
+        type: string
+      - description: Bucket specification
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_api.createS3BucketRequest'
+      produces:
+      - application/json
+      responses:
+        "202":
+          description: object with the accepted operation
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "409":
+          description: Conflict
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Order a managed S3 object storage bucket
+      tags:
+      - storage
+  /projects/{projectId}/git/install-url:
+    get:
+      description: Returns the GitHub App (or GitLab) install URL, with project +
+        CSRF state encoded, that the user visits to grant repository access. Requires
+        write access.
+      operationId: getGitInstallUrl
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      - description: 'Provider: github | gitlab'
+        in: query
+        name: provider
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: object with the install url
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "503":
+          description: Service Unavailable
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Get the git provider install URL
+      tags:
+      - git
+  /projects/{projectId}/git/installations:
+    get:
+      description: Returns the GitHub App (or GitLab) installations bound to the project's
+        org.
+      operationId: listGitInstallations
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: object with an installations array
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: List git provider installations for a project
+      tags:
+      - git
+    post:
+      consumes:
+      - application/json
+      description: Attaches an already-installed GitHub App installation to the project
+        (resolves the account via the build-agent, upserts git_app_installations).
+        Requires write access.
+      operationId: bindInstallation
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      - description: Installation id
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_api.bindInstallationRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/internal_api.gitInstallation'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "503":
+          description: Service Unavailable
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Bind an existing git App installation to a project
+      tags:
+      - git
+  /projects/{projectId}/git/installations/{installationId}/detect:
+    get:
+      description: Proxies to the build-agent, which inspects the repository tree
+        (including a shallow recursive search under the chosen root dir) and returns
+        a best-effort framework guess. Requires write access. Returns 503 when the
+        build-agent is not configured.
+      operationId: detectFramework
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      - description: Installation UUID
+        in: path
+        name: installationId
+        required: true
+        type: string
+      - description: Repository full name (org/repo)
+        in: query
+        name: repo
+        required: true
+        type: string
+      - description: Subdirectory to inspect (default .)
+        in: query
+        name: root_dir
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: framework detection result
+          schema:
+            additionalProperties: true
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "503":
+          description: Service Unavailable
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Detect a repository's framework
+      tags:
+      - git
+  /projects/{projectId}/git/installations/{installationId}/repos:
+    get:
+      description: Proxies to the build-agent, which lists the repositories the given
+        installation can access. Requires write access. Returns 503 when the build-agent
+        is not configured.
+      operationId: listInstallationRepos
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      - description: Installation UUID
+        in: path
+        name: installationId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: object with a repos array
+          schema:
+            additionalProperties: true
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "503":
+          description: Service Unavailable
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: List repositories visible to an installation
+      tags:
+      - git
+  /projects/{projectId}/git/installations/available:
+    get:
+      description: Lists GitHub App installations scoped to the project's org (each
+        org owns its own GitHub accounts). Installations from other orgs are never
+        returned. canWrite required. 503 when the build-agent is unconfigured.
+      operationId: listAvailableInstallations
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: object with an installations array
+          schema:
+            additionalProperties: true
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "503":
+          description: Service Unavailable
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: List bindable git App installations for the project's org
+      tags:
+      - git
+  /projects/{projectId}/logs:
+    get:
+      description: Runs an aggregated Elasticsearch log search scoped to the project.
+        Read-only. At least one of vm or app is required and must belong to the project
+        (prevents reading another tenant's logs). q is a free-text filter; since selects
+        the window (15m, 1h, 6h, 24h, 7d; default 1h); size caps results (1-1000,
+        default 200).
+      operationId: searchLogs
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      - description: App server (VM) name to scope logs to
+        in: query
+        name: vm
+        type: string
+      - description: App name to scope logs to
+        in: query
+        name: app
+        type: string
+      - description: Free-text search query
+        in: query
+        name: q
+        type: string
+      - description: 'Time window: 15m, 1h, 6h, 24h or 7d (default 1h)'
+        in: query
+        name: since
+        type: string
+      - description: Max log entries to return (1-1000, default 200)
+        in: query
+        name: size
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: object with a log entries array
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "502":
+          description: Bad Gateway
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "503":
+          description: Service Unavailable
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Search aggregated logs in a project
+      tags:
+      - observability
+  /projects/{projectId}/monitoring:
+    get:
+      description: Returns the monitoring apps in a project across all environments.
+        Only the displayable api_key_prefix is returned; secrets are never exposed.
+      operationId: listMonitoringApps
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: object with a monitoring_apps array
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: List monitoring resources
+      tags:
+      - monitoring
+  /projects/{projectId}/monitoring/{appId}/logs:
+    post:
+      consumes:
+      - application/json
+      description: Writes a single application log document to Elasticsearch (dada-app-logs-*).
+        Requires the logs:write scope. Tenancy labels are applied from authoritative
+        DB values.
+      operationId: ingestLogs
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      - description: Monitoring app UUID
+        in: path
+        name: appId
+        required: true
+        type: string
+      - description: Log payload
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_api.ingestLogsRequest'
+      produces:
+      - application/json
+      responses:
+        "202":
+          description: object with ingested count
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "413":
+          description: Request Entity Too Large
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "429":
+          description: Too Many Requests
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "502":
+          description: Bad Gateway
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "503":
+          description: Service Unavailable
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Ingest a log line
+      tags:
+      - monitoring
+  /projects/{projectId}/monitoring/{appId}/metrics:
+    post:
+      consumes:
+      - application/json
+      description: Converts a JSON metrics payload into Prometheus remote-write and
+        pushes it. Requires the metrics:write scope. Tenancy labels (org_id, project_id,
+        environment) are applied from authoritative DB values.
+      operationId: ingestMetrics
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      - description: Monitoring app UUID
+        in: path
+        name: appId
+        required: true
+        type: string
+      - description: Metrics payload
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_api.ingestMetricsRequest'
+      produces:
+      - application/json
+      responses:
+        "202":
+          description: object with ingested count
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "413":
+          description: Request Entity Too Large
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "429":
+          description: Too Many Requests
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "502":
+          description: Bad Gateway
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "503":
+          description: Service Unavailable
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Ingest metrics
+      tags:
+      - monitoring
+  /projects/{projectId}/operations:
+    get:
+      description: Returns the 50 most recent async operations for a project (newest
+        first), with their current status. Read-only. Use this to track the outcome
+        of create/update/delete calls.
+      operationId: listOperations
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: object with an operations array
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: List recent operations in a project
+      tags:
+      - operation
+  /projects/{projectId}/operations/{operationId}:
+    get:
+      description: Returns the current state (status, error, git/argo metadata) of
+        a single async operation. Read-only. Poll this after any create/update/delete
+        call until the operation reaches a terminal status (Ready or Failed).
+      operationId: getOperation
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      - description: Operation UUID
+        in: path
+        name: operationId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: object with the operation
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Get the state of an async operation
+      tags:
+      - operation
+  /projects/{projectId}/operations/{operationId}/retry:
+    post:
+      description: 'Re-queues a failed operation for another processing attempt (resets
+        it to Created and clears the prior error). Only operations in the Failed state
+        can be retried. Asynchronous: returns 202 with the re-queued operation; poll
+        it until terminal.'
+      operationId: retryOperation
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      - description: Operation UUID
+        in: path
+        name: operationId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "202":
+          description: object with the re-queued operation
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "409":
+          description: Conflict
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Retry a failed operation
+      tags:
+      - operation
+  /projects/{projectId}/quotas:
+    get:
+      description: Returns the project's CPU/GPU model quota limits, the number of
+        models currently in use, and the advisory monthly inference-call counter.
+        Read-only.
+      operationId: getProjectQuotas
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: object with quota limits and current usage
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Get a project's quotas and usage
+      tags:
+      - quota
+  /projects/default:
+    post:
+      description: Returns the caller's default project, provisioning one (in your
+        personal org, you are Owner) when you have zero projects. Idempotent — repeated
+        calls return the same project.
+      operationId: ensureDefaultProject
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: object with project_id, default_environment_id, org_id and
+            role
+          schema:
+            additionalProperties: true
+            type: object
+        "201":
+          description: newly created default project
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Get or create the caller's default project
+      tags:
+      - project
+securityDefinitions:
+  BearerAuth:
+    in: header
+    name: Authorization
+    type: apiKey
+swagger: "2.0"

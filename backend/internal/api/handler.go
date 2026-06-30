@@ -1,7 +1,11 @@
 package api
 
 import (
+	"log"
+
 	"github.com/dada-tuda/console/backend/internal/auth"
+	"github.com/dada-tuda/console/backend/internal/billing"
+	"github.com/dada-tuda/console/backend/internal/billing/pricing"
 	"github.com/dada-tuda/console/backend/internal/buildagent"
 	"github.com/dada-tuda/console/backend/internal/cloudtask"
 	"github.com/dada-tuda/console/backend/internal/config"
@@ -44,6 +48,11 @@ type Handler struct {
 	// YandexMetrikaCounter CR. Never nil: off-cluster it returns a resolver
 	// whose Resolve fails with a clear "not configured" error.
 	counters cloudtask.CounterResolver
+
+	// billingPlans is the full plan catalog loaded once at startup from the
+	// embedded plans.yaml. Always populated (the embedded file is compiled in);
+	// handlers degrade gracefully if somehow empty.
+	billingPlans []pricing.Plan
 }
 
 // NewHandler constructs a Handler with the given dependencies.
@@ -89,5 +98,16 @@ func NewHandler(pool *pgxpool.Pool, cfg *config.Config) *Handler {
 		h.dadagent = dadagent.New(cfg.DadaAgentBaseURL, ts)
 	}
 	h.counters = cloudtask.NewCounterResolver()
+
+	plans, err := billing.LoadPlans("")
+	if err != nil {
+		if cfg.BillingEnabled {
+			log.Fatalf("billing: failed to load plans (BILLING_ENABLED=true): %v", err)
+		}
+		log.Printf("billing: warn: failed to load plans: %v", err)
+	} else {
+		h.billingPlans = plans
+	}
+
 	return h
 }

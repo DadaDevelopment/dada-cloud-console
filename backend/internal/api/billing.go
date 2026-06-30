@@ -1,0 +1,353 @@
+package api
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"net/http"
+	"time"
+
+	"github.com/dada-tuda/console/backend/internal/auth"
+	"github.com/dada-tuda/console/backend/internal/billing"
+	"github.com/dada-tuda/console/backend/internal/billing/pricing"
+	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
+)
+
+// quotaExceededError is returned by checkQuota when the org is at or over
+// its plan limit for a countable resource.
+type quotaExceededError struct {
+	Resource string
+	Limit    int
+}
+
+func (e *quotaExceededError) Error() string {
+	return fmt.Sprintf("quota exceeded: %s limit=%d", e.Resource, e.Limit)
+}
+
+// planFor resolves the org's current plan from billing_accounts and finds
+// the matching pricing.Plan from the handler's loaded plan set. If the org
+// has no billing_accounts row the free plan is used.
+func (h *Handler) planFor(ctx context.Context, orgID string) (pricing.Plan, error) {
+	var planKey string
+	err := h.pool.QueryRow(ctx,
+		`SELECT plan FROM billing_accounts WHERE org_id = $1`, orgID,
+	).Scan(&planKey)
+	if errors.Is(err, pgx.ErrNoRows) {
+		planKey = "free"
+	} else if err != nil {
+		return pricing.Plan{}, fmt.Errorf("billing: planFor: %w", err)
+	}
+
+	for _, p := range h.billingPlans {
+		if p.Key == planKey {
+			return p, nil
+		}
+	}
+	for _, p := range h.billingPlans {
+		if p.Key == "free" {
+			return p, nil
+		}
+	}
+	if len(h.billingPlans) > 0 {
+		return h.billingPlans[0], nil
+	}
+	return pricing.Plan{}, fmt.Errorf("billing: no plans loaded")
+}
+
+// countResource counts the live number of a resource type owned by the org
+// across all its projects.
+func (h *Handler) countResource(ctx context.Context, orgID, resource string) (int, error) {
+	switch resource {
+	case "apps":
+		var n int
+		err := h.pool.QueryRow(ctx, `
+			SELECT COUNT(*) FROM resource_snapshots rs
+			JOIN projects p ON p.id = rs.project_id
+			WHERE p.org_id = $1 AND rs.kind = 'App'
+		`, orgID).Scan(&n)
+		return n, err
+
+	case "databases":
+		var n int
+		err := h.pool.QueryRow(ctx, `
+			SELECT COUNT(*) FROM service_databases sd
+			JOIN projects p ON p.id = sd.project_id
+			WHERE p.org_id = $1
+		`, orgID).Scan(&n)
+		return n, err
+
+	case "domains":
+		var n int
+		err := h.pool.QueryRow(ctx, `
+			SELECT COUNT(*) FROM domain_authorizations da
+			JOIN projects p ON p.id = da.project_id
+			WHERE p.org_id = $1
+		`, orgID).Scan(&n)
+		return n, err
+
+	case "team_members":
+		return 0, nil
+	}
+	return 0, fmt.Errorf("billing: unknown resource %q", resource)
+}
+
+// checkQuota is the hard gate for countable resources. It returns a
+// *quotaExceededError when the org is at or over its plan limit. A limit of 0
+// means unlimited (Enterprise).
+func (h *Handler) checkQuota(ctx context.Context, orgID, resource string) error {
+	plan, err := h.planFor(ctx, orgID)
+	if err != nil {
+		return err
+	}
+	limit, known := pricing.Quota(plan, resource)
+	if !known || limit == 0 {
+		return nil
+	}
+	count, err := h.countResource(ctx, orgID, resource)
+	if err != nil {
+		return err
+	}
+	if count >= limit {
+		return &quotaExceededError{Resource: resource, Limit: limit}
+	}
+	return nil
+}
+
+// respondQuotaExceeded writes the quota-exceeded 403 JSON body.
+func respondQuotaExceeded(c *gin.Context, resource string, limit int) {
+	c.JSON(http.StatusForbidden, gin.H{
+		"error":    "quota_exceeded",
+		"resource": resource,
+		"limit":    limit,
+		"upgrade":  true,
+		"message":  "Upgrade your plan to add more " + resource,
+	})
+}
+
+// GetBillingPlans returns all loaded plans.
+//
+// @ID          getBillingPlans
+// @Summary     List billing plans
+// @Description Returns all available billing plans with quotas, capabilities, and pricing.
+// @Tags        billing
+// @Produce     json
+// @Security    BearerAuth
+// @Success     200 {object} map[string]interface{}
+// @Router      /billing/plans [get]
+func (h *Handler) GetBillingPlans(c *gin.Context) {
+	c.JSON(http.StatusOK, gin.H{"plans": h.billingPlans})
+}
+
+// GetBillingAccount returns the org's plan, per-resource quotas + usage, and
+// an invoice preview for the current calendar month.
+//
+// @ID          getBillingAccount
+// @Summary     Get billing account
+// @Description Returns the plan, quota usage, and monthly invoice preview for the org that owns the project.
+// @Tags        billing
+// @Produce     json
+// @Security    BearerAuth
+// @Param       projectId path     string true "Project UUID"
+// @Success     200       {object} map[string]interface{}
+// @Failure     401       {object} map[string]string
+// @Failure     404       {object} map[string]string
+// @Failure     500       {object} map[string]string
+// @Router      /projects/{projectId}/billing/account [get]
+func (h *Handler) GetBillingAccount(c *gin.Context) {
+	_, ok := auth.GetClaims(c)
+	if !ok {
+		respondUnauthorized(c)
+		return
+	}
+	projectID, err := uuid.Parse(c.Param("projectId"))
+	if err != nil {
+		respondNotFound(c)
+		return
+	}
+	orgID, err := h.projectOrg(c.Request.Context(), projectID)
+	if err != nil {
+		respondNotFound(c)
+		return
+	}
+	plan, err := h.planFor(c.Request.Context(), orgID)
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, "failed to resolve billing plan")
+		return
+	}
+	usage, err := h.buildUsage(c.Request.Context(), orgID, plan)
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, "failed to compute usage")
+		return
+	}
+	now := time.Now().UTC()
+	period := fmt.Sprintf("%d-%02d", now.Year(), now.Month())
+	c.JSON(http.StatusOK, gin.H{
+		"plan":   plan,
+		"quotas": plan.Quotas,
+		"usage":  usage,
+		"invoicePreview": gin.H{
+			"period":   period,
+			"amount":   plan.PriceRUB,
+			"currency": "RUB",
+			"status":   "preview",
+		},
+	})
+}
+
+// GetBillingUsage returns per-resource usage vs quota for the org owning the project.
+//
+// @ID          getBillingUsage
+// @Summary     Get billing usage
+// @Description Returns per-resource current usage versus plan quota for the org that owns the project.
+// @Tags        billing
+// @Produce     json
+// @Security    BearerAuth
+// @Param       projectId path     string true "Project UUID"
+// @Success     200       {object} map[string]interface{}
+// @Failure     401       {object} map[string]string
+// @Failure     404       {object} map[string]string
+// @Failure     500       {object} map[string]string
+// @Router      /projects/{projectId}/billing/usage [get]
+func (h *Handler) GetBillingUsage(c *gin.Context) {
+	_, ok := auth.GetClaims(c)
+	if !ok {
+		respondUnauthorized(c)
+		return
+	}
+	projectID, err := uuid.Parse(c.Param("projectId"))
+	if err != nil {
+		respondNotFound(c)
+		return
+	}
+	orgID, err := h.projectOrg(c.Request.Context(), projectID)
+	if err != nil {
+		respondNotFound(c)
+		return
+	}
+	plan, err := h.planFor(c.Request.Context(), orgID)
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, "failed to resolve billing plan")
+		return
+	}
+	usage, err := h.buildUsage(c.Request.Context(), orgID, plan)
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, "failed to compute usage")
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"usage": usage})
+}
+
+// RecommendPlan accepts a Need body and returns the cheapest fitting plan.
+//
+// @ID          recommendBillingPlan
+// @Summary     Recommend a billing plan
+// @Description Returns the cheapest plan that satisfies the supplied resource requirements.
+// @Tags        billing
+// @Accept      json
+// @Produce     json
+// @Security    BearerAuth
+// @Param       body body     pricing.Need true "Resource requirements"
+// @Success     200  {object} map[string]interface{}
+// @Failure     400  {object} map[string]string
+// @Router      /billing/recommend-plan [post]
+func (h *Handler) RecommendPlan(c *gin.Context) {
+	var need pricing.Need
+	if err := c.ShouldBindJSON(&need); err != nil {
+		respondError(c, http.StatusBadRequest, err.Error())
+		return
+	}
+	plan, reason := pricing.RecommendPlan(need, h.billingPlans)
+	c.JSON(http.StatusOK, gin.H{"recommended": plan.Key, "reason": reason})
+}
+
+// AssignPlan upserts billing_accounts for the org owning the project. Requires
+// write role. Plan key must exist in the loaded plan set.
+//
+// @ID          assignBillingPlan
+// @Summary     Assign a billing plan
+// @Description Upserts the org's plan in billing_accounts. Requires write role on the project.
+// @Tags        billing
+// @Accept      json
+// @Produce     json
+// @Security    BearerAuth
+// @Param       projectId path     string                 true "Project UUID"
+// @Param       body      body     map[string]string      true "Plan key"
+// @Success     200       {object} map[string]interface{}
+// @Failure     400       {object} map[string]string
+// @Failure     401       {object} map[string]string
+// @Failure     403       {object} map[string]string
+// @Failure     404       {object} map[string]string
+// @Failure     500       {object} map[string]string
+// @Router      /projects/{projectId}/billing/plan [put]
+func (h *Handler) AssignPlan(c *gin.Context) {
+	claims, ok := auth.GetClaims(c)
+	if !ok {
+		respondUnauthorized(c)
+		return
+	}
+	projectID, err := uuid.Parse(c.Param("projectId"))
+	if err != nil {
+		respondNotFound(c)
+		return
+	}
+	role, err := h.effectiveRole(c.Request.Context(), claims, projectID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		respondNotFound(c)
+		return
+	}
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, "failed to check project membership")
+		return
+	}
+	if !canWrite(role) {
+		respondForbidden(c)
+		return
+	}
+	var body struct {
+		Plan string `json:"plan" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil {
+		respondError(c, http.StatusBadRequest, err.Error())
+		return
+	}
+	var found bool
+	for _, p := range h.billingPlans {
+		if p.Key == body.Plan {
+			found = true
+			break
+		}
+	}
+	if !found {
+		respondError(c, http.StatusBadRequest, "unknown plan key: "+body.Plan)
+		return
+	}
+	orgID, err := h.projectOrg(c.Request.Context(), projectID)
+	if err != nil {
+		respondNotFound(c)
+		return
+	}
+	provider := &billing.ManualProvider{Pool: h.pool}
+	if err := provider.AssignPlan(c.Request.Context(), orgID, body.Plan); err != nil {
+		respondError(c, http.StatusInternalServerError, "failed to assign plan")
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"org_id": orgID, "plan": body.Plan})
+}
+
+// buildUsage constructs the per-resource {used, limit} map for GetBillingAccount
+// and GetBillingUsage.
+func (h *Handler) buildUsage(ctx context.Context, orgID string, plan pricing.Plan) (map[string]gin.H, error) {
+	resources := []string{"apps", "databases", "domains", "team_members"}
+	out := make(map[string]gin.H, len(resources))
+	for _, res := range resources {
+		used, err := h.countResource(ctx, orgID, res)
+		if err != nil {
+			return nil, fmt.Errorf("billing: count %s: %w", res, err)
+		}
+		limit, _ := pricing.Quota(plan, res)
+		out[res] = gin.H{"used": used, "limit": limit}
+	}
+	return out, nil
+}

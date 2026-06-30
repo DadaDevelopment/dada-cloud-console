@@ -306,6 +306,13 @@ func SetupRouter(pool *pgxpool.Pool, cfg *config.Config) *gin.Engine {
 			// Inference proxy (playground only — production traffic goes via PublicApi ingress).
 			api.POST("/projects/:projectId/environments/:envId/models/:name/infer", h.ProxyInference)
 		}
+
+		// Billing (plan catalog, account, usage, recommender, plan assignment).
+		api.GET("/billing/plans", h.GetBillingPlans)
+		api.POST("/billing/recommend-plan", h.RecommendPlan)
+		api.GET("/projects/:projectId/billing/account", h.GetBillingAccount)
+		api.GET("/projects/:projectId/billing/usage", h.GetBillingUsage)
+		api.PUT("/projects/:projectId/billing/plan", h.AssignPlan)
 	}
 
 	// Device-facing monitoring ingest. Separate group so a scoped dmon_ key

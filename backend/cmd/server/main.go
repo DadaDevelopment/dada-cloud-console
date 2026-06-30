@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/dada-tuda/console/backend/internal/api"
+	"github.com/dada-tuda/console/backend/internal/billing"
 	"github.com/dada-tuda/console/backend/internal/config"
 	"github.com/dada-tuda/console/backend/internal/db"
 	"github.com/joho/godotenv"
@@ -124,6 +125,29 @@ func main() {
 			}
 		}
 	}()
+
+	if cfg.BillingEnabled {
+		billingPlans, planErr := billing.LoadPlans("")
+		if planErr != nil {
+			log.Fatal().Err(planErr).Msg("billing: failed to load plans (BILLING_ENABLED=true)")
+		}
+		meterInterval := time.Duration(cfg.BillingMeterIntervalSec) * time.Second
+		meterCtx, meterCancel := context.WithCancel(context.Background())
+		defer meterCancel()
+		go func() {
+			ticker := time.NewTicker(meterInterval)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-meterCtx.Done():
+					return
+				case <-ticker.C:
+					api.MeterUsage(meterCtx, pool, cfg, billingPlans)
+				}
+			}
+		}()
+		log.Info().Dur("interval", meterInterval).Msg("billing meter started")
+	}
 
 	<-quit
 	log.Info().Msg("shutting down server")

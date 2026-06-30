@@ -780,6 +780,89 @@ export const cloudTasksApi = {
     `/api/v1/projects/${projectId}/cloud-tasks/${taskId}/artifacts/${fileId}`,
 };
 
+export type BillingPlanKey = "free" | "startup" | "business" | "enterprise";
+
+export interface BillingQuota {
+  apps: number | null;
+  databases: number | null;
+  storage_gb: number | null;
+  domains: number | null;
+  environments: number | null;
+  members: number | null;
+  backup_retention_days: number | null;
+}
+
+export interface BillingUsageItem {
+  used: number;
+  limit: number | null;
+}
+
+export interface BillingUsage {
+  apps: BillingUsageItem;
+  databases: BillingUsageItem;
+  storage_gb: BillingUsageItem;
+  domains: BillingUsageItem;
+  environments: BillingUsageItem;
+  members: BillingUsageItem;
+}
+
+export interface InvoicePreview {
+  period: string;
+  amount: number;
+  currency: string;
+  status: "preview";
+}
+
+export interface BillingAccount {
+  plan: BillingPlanKey;
+  quotas: BillingQuota;
+  usage: BillingUsage;
+  invoicePreview: InvoicePreview;
+}
+
+export interface BillingPlan {
+  key: BillingPlanKey;
+  name: string;
+  price_rub: number | null;
+  quotas: BillingQuota;
+}
+
+export interface RecommendPlanRequest {
+  apps: number;
+  databases: number;
+  domains: number;
+  members: number;
+  storage_gb: number;
+}
+
+export interface RecommendPlanResponse {
+  recommended: BillingPlanKey;
+  reason: string;
+}
+
+export const billingApi = {
+  getPlans: () =>
+    apiFetch<{ plans: BillingPlan[] }>("/api/v1/billing/plans"),
+
+  getAccount: (projectId: string) =>
+    apiFetch<BillingAccount>(`/api/v1/projects/${projectId}/billing/account`),
+
+  getUsage: (projectId: string) =>
+    apiFetch<{ usage: BillingUsage }>(`/api/v1/projects/${projectId}/billing/usage`),
+
+  recommendPlan: (need: RecommendPlanRequest) =>
+    apiFetch<RecommendPlanResponse>("/api/v1/billing/recommend-plan", {
+      method: "POST",
+      body: need,
+    }),
+
+  assignPlan: (projectId: string, plan: BillingPlanKey) =>
+    apiFetch<{ plan: BillingPlanKey }>(`/api/v1/projects/${projectId}/billing/plan`, {
+      method: "PUT",
+      body: { plan },
+    }),
+};
+
 // Inference proxy is intentionally NOT in apiFetch (which forces JSON):
 // the playground needs to send multipart and receive arbitrary content types.
 // Returns the raw Response so callers can decide how to interpret the body.

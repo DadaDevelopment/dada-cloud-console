@@ -219,6 +219,7 @@ export default function ProjectOverviewPage() {
           <SecondaryLink icon="models" label={t("nav.models")} hint={t("overview.secondary.models.hint")} href={`/projects/${projectId}/models`} />
           <SecondaryLink icon="app-servers" label={t("nav.app-servers")} hint={t("overview.secondary.appServers.hint")} href={`/projects/${projectId}/app-servers`} />
           <SecondaryLink icon="git" label={t("nav.git")} hint={t("overview.secondary.git.hint")} href={`/projects/${projectId}/git`} />
+          <SecondaryLink icon="billing" label={t("nav.billing")} hint={t("overview.secondary.billing.hint")} href={`/projects/${projectId}/billing`} />
         </div>
       </div>
 

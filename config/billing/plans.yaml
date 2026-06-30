@@ -1,0 +1,86 @@
+plans:
+  - key: free
+    name: Free
+    price_rub: 0
+    quotas:
+      apps: 1
+      databases: 1
+      storage_gb: 1
+      domains: 1
+      environments: 1
+      team_members: 1
+      backup_retention_days: 0
+    capabilities: []
+    support_level: community
+    # internal_footprint = expected average actual usage per plan (NOT customer quota ceiling).
+    # Used only for internal margin/cost modeling; never shown to customers.
+    # PaaS oversubscription: idle headroom is absorbed by markup.
+    internal_footprint:
+      vcpu: 0.1
+      ram_gb: 0.25
+      storage_gb: 1
+
+  - key: startup
+    name: Startup
+    price_rub: 990
+    quotas:
+      apps: 5
+      databases: 2
+      storage_gb: 10
+      domains: 5
+      environments: 2
+      team_members: 3
+      backup_retention_days: 7
+    capabilities:
+      - email_support
+    support_level: email
+    # internal_footprint = expected average actual usage per plan (NOT customer quota ceiling).
+    internal_footprint:
+      vcpu: 0.3
+      ram_gb: 0.6
+      storage_gb: 10
+
+  - key: business
+    name: Business
+    price_rub: 2900
+    quotas:
+      apps: 20
+      databases: 10
+      storage_gb: 100
+      domains: 20
+      environments: 5
+      team_members: 10
+      backup_retention_days: 30
+    capabilities:
+      - email_support
+      - priority_support
+    support_level: priority
+    # internal_footprint = expected average actual usage per plan (NOT customer quota ceiling).
+    internal_footprint:
+      vcpu: 1.2
+      ram_gb: 3.0
+      storage_gb: 20
+
+  - key: enterprise
+    name: Enterprise
+    price_rub: 0
+    quotas:
+      apps: 0
+      databases: 0
+      storage_gb: 0
+      domains: 0
+      environments: 0
+      team_members: 0
+      backup_retention_days: 0
+    capabilities:
+      - email_support
+      - priority_support
+      - sla
+      - sso
+      - audit_log
+    support_level: priority+sla
+    # internal_footprint for enterprise is negotiated per-contract; set to zero here.
+    internal_footprint:
+      vcpu: 0
+      ram_gb: 0
+      storage_gb: 0

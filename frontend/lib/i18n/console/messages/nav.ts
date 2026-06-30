@@ -20,4 +20,5 @@ export const nav: Messages = {
   "nav.queues": { ru: "Очереди сообщений", en: "Message Queues" },
   "nav.members": { ru: "Участники", en: "Members" },
   "nav.approvals": { ru: "Согласования", en: "Approvals" },
+  "nav.billing": { ru: "Биллинг", en: "Billing" },
 };

@@ -102,6 +102,15 @@ func (h *Handler) AddDomainAuthorization(c *gin.Context) {
 		return
 	}
 
+	if orgID, orgErr := h.projectOrg(c.Request.Context(), projectID); orgErr == nil {
+		if qErr := h.checkQuota(c.Request.Context(), orgID, "domains"); qErr != nil {
+			if qe, ok := qErr.(*quotaExceededError); ok {
+				respondQuotaExceeded(c, qe.Resource, qe.Limit)
+				return
+			}
+		}
+	}
+
 	var req addDomainAuthorizationRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		respondError(c, http.StatusBadRequest, err.Error())

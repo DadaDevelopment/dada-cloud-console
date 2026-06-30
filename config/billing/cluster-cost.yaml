@@ -1,0 +1,13 @@
+nodes:
+  - flavor: 8vcpu-16gb
+    count: 3
+    monthly_cost_rub: 4000
+capacity:
+  vcpu: 24
+  ram_gb: 48
+  storage_gb: 300
+cost_weights:
+  cpu: 0.5
+  ram: 0.3
+  storage: 0.2
+egress_rub_per_gb: 0
