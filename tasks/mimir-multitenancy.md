@@ -1,5 +1,18 @@
 # Multi-tenant metrics via Grafana Mimir (per-tenant retention, default 15d)
 
+## STATUS: SHIPPED + VERIFIED LIVE (2026-06-30)
+Mimir deployed on beget-prod, healthy (/ready 200, S3 connected). Cutover applied:
+gateway write + console read + vm-metrics ingress → Mimir; infra Prometheus → 7d.
+Verified end-to-end: synthetic OTLP push as `probe-org` → read back 42; `other-org` →
+empty (per-tenant isolation). Decision: KEEP Prometheus for infra scrape/rules/alert
+(34 PrometheusRules, 17 SM, 7 PM, 1 AM) — Mimir can't scrape/consume those.
+Live fixes during rollout: longhorn floor → emptyDir (history in S3); non-root crash →
+activity_tracker.filepath=/data. Follow-ups: per-VM X-Scope-OrgID (VMs share `anonymous`);
+Grafana embed datasource still on old Prometheus.
+
+---
+
+
 Goal: per-tenant retention for USER-pushed cloud telemetry. Tenant = `projects.owner_id`
 (org UUID) — the SAME value the write path already stamps as the authoritative `org_id`
 label and the read path computes via `monitoringOrgLabel()`. Default retention 15d,

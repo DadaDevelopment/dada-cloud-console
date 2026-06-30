@@ -1,63 +1,67 @@
 # Telemetry retention — where it lives & how to change it
 
-Goal: USER-pushed cloud telemetry (the product) retained **15 days by default**, as a
-**gitops-configurable** value, kept **separate** from cluster-pod infra telemetry.
+USER cloud telemetry runs on a dedicated **multi-tenant Grafana Mimir** with **per-tenant
+retention** (default 15d). Infra-pod telemetry stays on Prometheus. Verified live on
+beget-prod 2026-06-30.
 
-Topology investigated + split executed 2026-06-30. User and infra telemetry now live in
-**separate stores** for both metrics and logs.
+| Store | Holds | Retention knob (gitops, argo-infra) | Default |
+|-------|-------|--------------------------------------|---------|
+| **USER metrics** (Mimir) | OTLP gateway + external VM remote-write, per tenant | `apps/mimir/chart/values.yaml` → `defaultRetention` + `perTenantRetention.<org_id>` | **15d** (per-tenant) |
+| INFRA metrics (Prometheus) | cluster-pod scrape, rules, alerting | `apps/kube-prometheus-stack/values.yaml` → `prometheus.prometheusSpec.retention` | 7d |
+| **USER logs** (ES ILM) | `dada-app-logs-*` | `apps/dada-app-logs-ilm/chart/values.yaml` → `retentionDays` | **15d** |
+| INFRA logs (ES ILM) | `filebeat-*` | `apps/elastic-stack/values.yaml` | 7d/14d |
 
-| Store | What it holds | Retention knob (gitops, argo-infra) | Default |
-|-------|---------------|--------------------------------------|---------|
-| **USER metrics** | OTLP gateway + external VM remote-write | `apps/user-telemetry-prometheus/chart/values.yaml` → `retention` | **15d** |
-| INFRA metrics | cluster-pod scrape | `apps/kube-prometheus-stack/values.yaml` → `prometheus.prometheusSpec.retention` | 7d |
-| **USER logs** | `dada-app-logs-*` | `apps/dada-app-logs-ilm/chart/values.yaml` → `retentionDays` | **15d** |
-| INFRA logs | `filebeat-*` | `apps/elastic-stack/values.yaml` → `filebeat-prod-policy` | 7d/14d |
+## Why two metric stores (not redundant)
 
-## Topology — two dedicated metric stores
+Mimir does **not** scrape and does **not** consume PrometheusRule CRs — it's a
+storage+query backend fed by remote-write. The kube-prometheus-stack Prometheus does the
+scraping (17 ServiceMonitors, 7 PodMonitors, node/kube-state/cAdvisor), evaluates 34
+PrometheusRules, and drives Alertmanager. None of that moves to Mimir for free. Decision
+(2026-06-30): keep the split — Prometheus = infra scrape/rules/alert (7d); Mimir = the
+multi-tenant product store.
 
-- **USER metrics → `user-telemetry-prometheus`** (ns `monitoring`): a dedicated Prometheus,
-  reconciled by the existing kube-prometheus-stack operator (it watches all namespaces).
-  `enableRemoteWriteReceiver: true`, **scrapes nothing** (all selectors nil), 15d retention,
-  own `longhorn-cache` PVC. Service: `user-telemetry-prometheus.monitoring.svc:9090`.
-- **INFRA metrics → `monitoring-stack-prometheus`** (the kube-prometheus-stack instance):
-  cluster-pod scrape only, 7d. Its remote-write receiver stays enabled but is now unused.
+## Mimir topology
 
-### Write path (how user metrics reach the user store)
-- **OTLP gateway** (`backend/cmd/gateway`): `PROMETHEUS_REMOTE_WRITE_URL` is unset, so it
-  falls back to `PROMETHEUS_QUERY_URL` for remote-write (`backend/cmd/gateway/main.go`).
-  That URL is now the user store (see below) → gateway writes land in the user store.
-- **External user VMs**: prometheus-agents push to `prometheus-dada-prod.dada-tuda.ru/api/v1/write`
-  (basic-auth). Ingress `vm-metrics-write` (app `vm-observability`) backends the user store.
+- App `mimir` (ns monitoring): monolithic single binary, metrics-only target set
+  (no ruler/alertmanager → one S3 bucket suffices), `multitenancy_enabled`.
+- Tenant = `org_id` (`projects.owner_id`) via the `X-Scope-OrgID` header.
+- Blocks in Beget S3 (`S3Bucket` claim `dada-mimir-blocks` → secret `mimir-s3-credentials`;
+  Mimir reads the generated bucket name from the secret). Local `/data` is an **emptyDir**
+  (the longhorn-cache disks are at the minimal-available floor; history is durable in S3,
+  only the last ~2h head is at risk on a pod reschedule).
+- Service `mimir.monitoring.svc:8080` — push `/api/v1/push`, query `/prometheus`.
+
+### Write path
+- OTLP gateway (`backend/cmd/gateway`): `PROMETHEUS_REMOTE_WRITE_URL` →
+  `http://mimir.monitoring.svc:8080/api/v1/push`; the gateway stamps
+  `X-Scope-OrgID = tenant.OrgID` per request.
+- External VM agents → ingress `vm-metrics-write` (app `vm-observability`): rewrites
+  `/api/v1/write`→`/api/v1/push` and injects `X-Scope-OrgID: anonymous` (default tenant).
+  **Follow-up:** template a per-VM `X-Scope-OrgID` at provision time so VM metrics are
+  per-tenant too (today they share the `anonymous` tenant).
 
 ### Read path
-- Console reads user metrics from `global.shared.prometheusQueryUrl`, set in the
-  `cloud-console` app values to `http://user-telemetry-prometheus.monitoring.svc:9090`.
-  Same key the gateway falls back to — one value moves read + gateway-write together.
-
-## Topology — logs (per-index ILM)
-- `dada-app-logs-*` (USER): ILM `dada-app-logs-policy` (delete @ 15d) + index template, applied
-  by app `dada-app-logs-ilm` (bootstrap Job PUTs to Elasticsearch).
-- `filebeat-*` (infra) `filebeat-prod-policy` 7d/14d and `dada-vm-logs-*` are untouched.
+- Backend has a SECOND client `userMetrics` (`prometheus.NewMultitenant`) used ONLY by the
+  monitoring product reads (`monitoring_read.go`, `monitoring_alerts.go`); it sends
+  `X-Scope-OrgID = caller org_id`. `USER_METRICS_QUERY_URL` →
+  `http://mimir.monitoring.svc:8080/prometheus`.
+- Infra/container/db reads (`metrics.go`, `databases.go`) keep the plain client →
+  `monitoring-stack-prometheus`.
 
 ## How to change retention
 
 | Want to change | Edit (argo-infra) | Field |
 |----------------|-------------------|-------|
-| User metric retention | `apps/user-telemetry-prometheus/chart/values.yaml` | `retention` (and `retentionSize`/`storage.size` cap) |
+| User metric retention — ALL tenants | `apps/mimir/chart/values.yaml` | `defaultRetention` |
+| User metric retention — ONE tenant | `apps/mimir/chart/values.yaml` | `perTenantRetention.<org_id>: 30d` |
 | User log retention | `apps/dada-app-logs-ilm/chart/values.yaml` | `retentionDays` |
 | Infra metric retention | `apps/kube-prometheus-stack/values.yaml` | `prometheus.prometheusSpec.retention` |
 
-Commit + push to branch `console-migration` → ArgoCD (automated sync) applies. Metric stores
-roll the Prometheus pod; the log ILM re-runs its bootstrap Job (idempotent PUT).
+Commit + push to `console-migration` → ArgoCD applies. Mimir hot-reloads `runtime.yaml`
+(per-tenant overrides) every 15s — no restart. `defaultRetention` change rolls the pod.
 
-## Storage note (longhorn)
-- The user store provisions a **new** `longhorn-cache` PVC (8Gi, 1 replica) — same storage
-  class the infra Prometheus (8Gi) and Elasticsearch (20Gi) already use successfully there.
-  This is NEW-PVC provisioning, not the historically-blocked **expansion** of an existing PVC.
-- If 15d of user series ever exceeds the disk cap (`retentionSize "6GiB"`), raise both
-  `retentionSize` and `storage.size` together — but a fresh larger PVC, not an in-place resize.
+## This is genuinely per-tenant
 
-## Limitations (honest)
-- **No per-tenant retention.** The user store is a single shared Prometheus across all tenants;
-  Prometheus has one global retention. Global-for-user-store 15d is delivered. True per-tenant
-  retention would need a multi-tenant TSDB (VictoriaMetrics/Mimir) — not deployed.
+Unlike a single Prometheus (one global retention), Mimir scopes retention per
+`X-Scope-OrgID`. Verified: a synthetic push as tenant `probe-org` is invisible to
+`other-org` (full isolation). So "настраиваемый срок хранения" is now per-organization.
