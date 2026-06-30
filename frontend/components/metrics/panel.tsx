@@ -114,10 +114,11 @@ export function Panel({
       viz: panel.viz,
       unit,
       thresholds: panel.thresholds,
+      annotations: panel.annotations,
       wideRange: ctx.wideRange,
       zoom: panel.viz !== "gauge" && panel.viz !== "sparkline",
     });
-  }, [spec, panel.viz, panel.thresholds, unit, ctx.wideRange]);
+  }, [spec, panel.viz, panel.thresholds, panel.annotations, unit, ctx.wideRange]);
 
   const title = panel.title || panel.metric;
 

@@ -137,6 +137,8 @@ export function MonitoringDashboard({
           title: p.title,
           groupBy: p.groupBy,
           agg: p.agg,
+          thresholds: p.thresholds,
+          annotations: p.annotations,
           x: 0,
           y: maxY,
           w: PANEL_W,

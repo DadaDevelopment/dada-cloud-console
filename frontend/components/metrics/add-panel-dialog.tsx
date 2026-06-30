@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useState } from "react";
+import { Plus, Trash2 } from "lucide-react";
 import { Modal } from "@/components/ui/modal";
 import {
   Select,
@@ -8,11 +9,25 @@ import {
   SelectContent,
   SelectItem,
 } from "@/components/ui/select";
-import { VIZ_LABELS, type VizType } from "@/components/charts/types";
+import { VIZ_LABELS, type VizType, type Threshold, type Annotation } from "@/components/charts/types";
 import { AGG_OPTIONS, type PanelConfig } from "./dashboard-types";
 import { cn } from "@/lib/cn";
 
 const INHERIT = "__inherit";
+
+/** Palette offered for new threshold / annotation markers. */
+const MARKER_COLORS = ["#dc2626", "#ea580c", "#ca8a04", "#059669", "#2563eb", "#7c3aed"];
+
+/** datetime-local string (local tz) ↔ unix seconds helpers for annotations. */
+function toLocalInput(unixSec: number): string {
+  const d = new Date(unixSec * 1000);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+function fromLocalInput(s: string): number {
+  const ms = new Date(s).getTime();
+  return Number.isNaN(ms) ? 0 : Math.floor(ms / 1000);
+}
 
 /**
  * AddPanelDialog is the panel editor MVP: pick a metric, a visualization, and
@@ -39,6 +54,8 @@ export function AddPanelDialog({
   const [title, setTitle] = useState("");
   const [groupBy, setGroupBy] = useState<string>(INHERIT);
   const [agg, setAgg] = useState<string>(INHERIT);
+  const [thresholds, setThresholds] = useState<Threshold[]>([]);
+  const [annotations, setAnnotations] = useState<Annotation[]>([]);
 
   useEffect(() => {
     if (!open) return;
@@ -50,12 +67,16 @@ export function AddPanelDialog({
       setTitle(editing.title ?? "");
       setGroupBy(editing.groupBy === undefined ? INHERIT : editing.groupBy || "__none");
       setAgg(editing.agg === undefined ? INHERIT : editing.agg || "");
+      setThresholds(editing.thresholds ?? []);
+      setAnnotations(editing.annotations ?? []);
     } else {
       setMetric(availableMetrics[0] ?? "");
       setViz("line");
       setTitle("");
       setGroupBy(INHERIT);
       setAgg(INHERIT);
+      setThresholds([]);
+      setAnnotations([]);
     }
     /* eslint-enable react-hooks/set-state-in-effect */
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -63,6 +84,8 @@ export function AddPanelDialog({
 
   function submit() {
     if (!metric) return;
+    const cleanThresholds = thresholds.filter((t) => Number.isFinite(t.value));
+    const cleanAnnotations = annotations.filter((a) => a.time > 0 && a.label.trim() !== "");
     onSave({
       id: editing?.id,
       metric,
@@ -70,8 +93,38 @@ export function AddPanelDialog({
       title: title.trim() || undefined,
       groupBy: groupBy === INHERIT ? undefined : groupBy === "__none" ? "" : groupBy,
       agg: agg === INHERIT ? undefined : agg,
+      thresholds: cleanThresholds.length ? cleanThresholds : undefined,
+      annotations: cleanAnnotations.length ? cleanAnnotations : undefined,
     });
     onClose();
+  }
+
+  const isTimeline = viz === "status-timeline";
+
+  function addThreshold() {
+    setThresholds((t) => [
+      ...t,
+      { value: 0, color: MARKER_COLORS[t.length % MARKER_COLORS.length], label: "" },
+    ]);
+  }
+  function patchThreshold(i: number, patch: Partial<Threshold>) {
+    setThresholds((t) => t.map((x, j) => (j === i ? { ...x, ...patch } : x)));
+  }
+  function removeThreshold(i: number) {
+    setThresholds((t) => t.filter((_, j) => j !== i));
+  }
+
+  function addAnnotation() {
+    setAnnotations((a) => [
+      ...a,
+      { time: Math.floor(Date.now() / 1000), label: "", color: MARKER_COLORS[a.length % MARKER_COLORS.length] },
+    ]);
+  }
+  function patchAnnotation(i: number, patch: Partial<Annotation>) {
+    setAnnotations((a) => a.map((x, j) => (j === i ? { ...x, ...patch } : x)));
+  }
+  function removeAnnotation(i: number) {
+    setAnnotations((a) => a.filter((_, j) => j !== i));
   }
 
   const vizKeys = Object.keys(VIZ_LABELS) as VizType[];
@@ -161,6 +214,67 @@ export function AddPanelDialog({
           </Field>
         </div>
 
+        <Field
+          label={isTimeline ? "Status bands (by threshold)" : "Thresholds"}
+        >
+          <p className="-mt-0.5 mb-1.5 text-[11px] text-gray-400">
+            {isTimeline
+              ? "Each band colors samples at or above its value; the highest matching wins."
+              : "Horizontal reference lines drawn across the chart."}
+          </p>
+          <div className="space-y-1.5">
+            {thresholds.map((t, i) => (
+              <div key={i} className="flex items-center gap-1.5">
+                <input
+                  type="number"
+                  value={Number.isFinite(t.value) ? t.value : ""}
+                  onChange={(e) => patchThreshold(i, { value: parseFloat(e.target.value) })}
+                  placeholder="value"
+                  className="w-24 rounded-md border border-gray-300 px-2 py-1.5 text-xs text-gray-900 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                />
+                <ColorPicker value={t.color} onChange={(c) => patchThreshold(i, { color: c })} />
+                <input
+                  value={t.label ?? ""}
+                  onChange={(e) => patchThreshold(i, { label: e.target.value })}
+                  placeholder="label (optional)"
+                  className="min-w-0 flex-1 rounded-md border border-gray-300 px-2 py-1.5 text-xs text-gray-900 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                />
+                <RemoveBtn onClick={() => removeThreshold(i)} />
+              </div>
+            ))}
+            <AddRowBtn label={isTimeline ? "Add band" : "Add threshold"} onClick={addThreshold} />
+          </div>
+        </Field>
+
+        {!isTimeline && (
+          <Field label="Annotations">
+            <p className="-mt-0.5 mb-1.5 text-[11px] text-gray-400">
+              Vertical markers at a fixed time (e.g. a deploy or incident).
+            </p>
+            <div className="space-y-1.5">
+              {annotations.map((a, i) => (
+                <div key={i} className="flex items-center gap-1.5">
+                  <input
+                    type="datetime-local"
+                    value={a.time ? toLocalInput(a.time) : ""}
+                    onChange={(e) => patchAnnotation(i, { time: fromLocalInput(e.target.value) })}
+                    className="rounded-md border border-gray-300 px-2 py-1.5 text-xs text-gray-900 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                  />
+                  <ColorPicker value={a.color ?? MARKER_COLORS[0]} onChange={(c) => patchAnnotation(i, { color: c })} />
+                  <input
+                    value={a.label}
+                    onChange={(e) => patchAnnotation(i, { label: e.target.value })}
+                    placeholder="label"
+                    className="min-w-0 flex-1 rounded-md border border-gray-300 px-2 py-1.5 text-xs text-gray-900 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                  />
+                  <RemoveBtn onClick={() => removeAnnotation(i)} />
+                </div>
+              ))}
+              <AddRowBtn label="Add annotation" onClick={addAnnotation} />
+            </div>
+          </Field>
+        )}
+
         <div className="flex justify-end gap-2 pt-1">
           <button
             onClick={onClose}
@@ -187,5 +301,42 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
       <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-gray-500">{label}</label>
       {children}
     </div>
+  );
+}
+
+function ColorPicker({ value, onChange }: { value: string; onChange: (c: string) => void }) {
+  return (
+    <input
+      type="color"
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      title="Marker color"
+      className="h-8 w-8 shrink-0 cursor-pointer rounded-md border border-gray-300 bg-white p-0.5"
+    />
+  );
+}
+
+function RemoveBtn({ onClick }: { onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title="Remove"
+      className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-gray-400 hover:bg-red-50 hover:text-red-600"
+    >
+      <Trash2 className="h-3.5 w-3.5" />
+    </button>
+  );
+}
+
+function AddRowBtn({ label, onClick }: { label: string; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-blue-600 hover:bg-blue-50"
+    >
+      <Plus className="h-3.5 w-3.5" /> {label}
+    </button>
   );
 }

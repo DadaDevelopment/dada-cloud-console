@@ -1,4 +1,4 @@
-import type { VizType, Threshold } from "@/components/charts/types";
+import type { VizType, Threshold, Annotation } from "@/components/charts/types";
 
 /** Refresh interval options (ms). 0 = paused. */
 export const REFRESH_OPTIONS = [
@@ -34,7 +34,10 @@ export interface PanelConfig {
   /** Per-panel overrides; fall back to the dashboard globals when undefined. */
   groupBy?: string;
   agg?: string;
+  /** Horizontal reference lines; on a status-timeline they define the band colors. */
   thresholds?: Threshold[];
+  /** Vertical event markers at fixed points in time (unix seconds). */
+  annotations?: Annotation[];
   /** react-grid-layout cell. */
   x: number;
   y: number;
