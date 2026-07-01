@@ -36,6 +36,15 @@ func NewVMWatcher(pool *pgxpool.Pool, cfg *config.Config) *VMWatcher {
 // Start begins the polling loop. Blocks until ctx is cancelled.
 func (w *VMWatcher) Start(ctx context.Context) {
 	log.Info().Dur("interval", w.cfg.PollIntervalDB).Msg("vm-watcher started")
+	// Enforce Portainer edge-compute settings declaratively from the
+	// gitops-deployed agent (idempotent, best-effort) instead of a one-off manual
+	// API call. Edge groups + edge stacks 503 until this is set, so a fresh
+	// Portainer (DB wipe / new instance) self-heals on the next agent boot.
+	if err := w.portainer.EnsureEdgeCompute(ctx, w.cfg.PortainerEdgeURL); err != nil {
+		log.Warn().Err(err).Msg("vm-watcher: enable edge-compute failed (edge stacks unavailable until fixed)")
+	} else {
+		log.Info().Str("edge_url", w.cfg.PortainerEdgeURL).Msg("vm-watcher: portainer edge-compute ensured")
+	}
 	ticker := time.NewTicker(w.cfg.PollIntervalDB)
 	defer ticker.Stop()
 	for {
