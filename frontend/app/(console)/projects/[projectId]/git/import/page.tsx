@@ -5,6 +5,8 @@ import Link from "next/link";
 import { gitApi, buildsApi } from "@/lib/api";
 import type { GitInstallation, GitRemoteRepo, FrameworkDetection, Build, AvailableInstallation } from "@/lib/types";
 import { BuildLogViewer } from "@/components/deploy/build-log-viewer";
+import { FrameworkLogo } from "@/components/deploy/framework-logo";
+import { Select, SelectContent, SelectItem, SelectLabel, SelectTrigger, SelectValue, SelectGroup } from "@/components/ui/select";
 import { BuildStatusBadge, isBuildActive } from "@/components/deploy/build-status-badge";
 import { Spinner } from "@/components/ui/spinner";
 import { Breadcrumb } from "@/components/ui/breadcrumb";
@@ -12,7 +14,7 @@ import { useProjectContext } from "@/lib/project-context";
 import { canMutate } from "@/lib/rbac";
 import { useT } from "@/lib/i18n/console/context";
 import { timeAgo } from "@/lib/format";
-import { Search, Lock, ChevronDown, Plus } from "lucide-react";
+import { Search, Lock, Plus } from "lucide-react";
 
 type FrameworkPreset = { id: string; label: string; port: number };
 type PresetGroup = { group: string; items: FrameworkPreset[] };
@@ -663,7 +665,8 @@ export default function GitImportPage() {
                     </div>
                   ) : detection ? (
                     <div className="mt-2 space-y-1 text-sm">
-                      <p className="font-medium text-gray-900 dark:text-gray-100">
+                      <p className="flex items-center gap-2 font-medium text-gray-900 dark:text-gray-100">
+                        <FrameworkLogo id={detectedPresetId(detection.framework)} className="h-5 w-5" />
                         {frameworkLabel(detection.framework) || t("git.import.unknownFramework")}
                       </p>
                       {detection.build_command && (
@@ -706,31 +709,38 @@ export default function GitImportPage() {
 
                 <div>
                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-200">{t("git.import.framework.label")}</label>
-                  <div className="relative mt-1">
-                    <select
-                      value={frameworkOverride}
-                      onChange={(e) => {
-                        const id = e.target.value;
+                  <div className="mt-1">
+                    <Select
+                      value={frameworkOverride || "auto"}
+                      onValueChange={(raw) => {
+                        const id = raw === "auto" ? "" : raw;
                         setFrameworkOverride(id);
                         setFrameworkTouched(id !== "");
                         setPortTouched(false);
                         const preset = PRESET_BY_ID.get(id);
                         if (preset) setPort(preset.port);
                       }}
-                      className="block w-full appearance-none rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 pr-9 text-sm text-gray-900 dark:text-gray-100 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
                     >
-                      <option value="">{t("git.import.framework.auto")}</option>
-                      {FRAMEWORK_PRESETS.map((g) => (
-                        <optgroup key={g.group} label={g.group}>
-                          {g.items.map((p) => (
-                            <option key={p.id} value={p.id}>
-                              {p.label}
-                            </option>
-                          ))}
-                        </optgroup>
-                      ))}
-                    </select>
-                    <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400 dark:text-gray-500" />
+                      <SelectTrigger className="h-auto w-full px-3 py-2 text-sm [&>span]:flex [&>span]:items-center [&>span]:gap-2">
+                        <SelectValue placeholder={t("git.import.framework.auto")} />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="auto">{t("git.import.framework.auto")}</SelectItem>
+                        {FRAMEWORK_PRESETS.map((g) => (
+                          <SelectGroup key={g.group}>
+                            <SelectLabel>{g.group}</SelectLabel>
+                            {g.items.map((p) => (
+                              <SelectItem key={p.id} value={p.id}>
+                                <span className="flex items-center gap-2">
+                                  <FrameworkLogo id={p.id} className="h-4 w-4" />
+                                  {p.label}
+                                </span>
+                              </SelectItem>
+                            ))}
+                          </SelectGroup>
+                        ))}
+                      </SelectContent>
+                    </Select>
                   </div>
                   <p className="mt-1 text-xs text-gray-400 dark:text-gray-500">{t("git.import.framework.hint")}</p>
                 </div>
