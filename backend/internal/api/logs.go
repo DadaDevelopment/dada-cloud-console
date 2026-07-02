@@ -1,13 +1,16 @@
 package api
 
 import (
+	"context"
 	"net/http"
+	"sort"
 	"strconv"
 	"time"
 
 	"github.com/dada-tuda/console/backend/internal/logsearch"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/rs/zerolog/log"
 )
 
 // SearchLogs runs an aggregated Elasticsearch log search scoped to the caller's
@@ -119,8 +122,76 @@ func (h *Handler) SearchLogs(c *gin.Context) {
 		respondError(c, http.StatusBadGateway, "log search failed: "+err.Error())
 		return
 	}
+
+	// Native (k8s) apps: their pod stdout never reaches the user stream above —
+	// it lands in the infra stream (in-cluster filebeat). Query it as a second
+	// source, scoped hard by the environments' namespaces resolved from the DB
+	// (never from user input) so a same-named app in another tenant can't leak.
+	// Infra-stream failures are non-fatal: user-stream results still return.
+	if app != "" && h.infraLogsearch != nil {
+		namespaces, nsErr := h.k8sAppNamespaces(c.Request.Context(), projectID, app)
+		if nsErr != nil {
+			log.Warn().Err(nsErr).Str("app", app).Msg("logs: resolving k8s namespaces")
+		} else if len(namespaces) > 0 {
+			infra, infraErr := h.infraLogsearch.Search(c.Request.Context(), logsearch.SearchOpts{
+				KubeApp:        app,
+				KubeNamespaces: namespaces,
+				Query:          c.Query("q"),
+				Since:          time.Now().Add(-since),
+				Size:           size,
+			})
+			if infraErr != nil {
+				log.Warn().Err(infraErr).Str("app", app).Msg("logs: infra stream search")
+			} else {
+				result = mergeLogResults(result, infra, size)
+			}
+		}
+	}
+
 	if result.Entries == nil {
 		result.Entries = []logsearch.LogEntry{}
 	}
 	c.JSON(http.StatusOK, result)
+}
+
+// k8sAppNamespaces returns the namespaces of the k8s environments where an App
+// snapshot with this name exists in the project. Empty for VM-only apps.
+func (h *Handler) k8sAppNamespaces(ctx context.Context, projectID uuid.UUID, app string) ([]string, error) {
+	rows, err := h.pool.Query(ctx,
+		`SELECT DISTINCT e.namespace FROM resource_snapshots rs
+		 JOIN environments e ON e.id = rs.environment_id
+		 WHERE rs.project_id = $1 AND rs.kind = 'App' AND rs.name = $2
+		   AND e.runtime = 'k8s' AND e.namespace <> ''`,
+		projectID, app,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var namespaces []string
+	for rows.Next() {
+		var ns string
+		if err := rows.Scan(&ns); err != nil {
+			return nil, err
+		}
+		namespaces = append(namespaces, ns)
+	}
+	return namespaces, rows.Err()
+}
+
+// mergeLogResults combines the user-stream and infra-stream responses into one
+// newest-first list capped at size. Timestamps are ES @timestamp strings
+// (RFC3339, zero-padded UTC) so lexicographic order is chronological.
+func mergeLogResults(a, b *logsearch.SearchResult, size int) *logsearch.SearchResult {
+	out := &logsearch.SearchResult{
+		Total:   a.Total + b.Total,
+		Entries: append(append([]logsearch.LogEntry{}, a.Entries...), b.Entries...),
+	}
+	sort.SliceStable(out.Entries, func(i, j int) bool {
+		return out.Entries[i].Timestamp > out.Entries[j].Timestamp
+	})
+	if len(out.Entries) > size {
+		out.Entries = out.Entries[:size]
+	}
+	return out
 }

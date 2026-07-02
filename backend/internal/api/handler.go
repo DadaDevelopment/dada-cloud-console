@@ -20,14 +20,17 @@ import (
 
 // Handler holds shared dependencies for all API handlers.
 type Handler struct {
-	pool       *pgxpool.Pool
-	cfg        *config.Config
-	mlflow     *mlflow.Client
-	portainer  *portainer.Client  // nil when PORTAINER_URL/PORTAINER_API_TOKEN unset
+	pool        *pgxpool.Pool
+	cfg         *config.Config
+	mlflow      *mlflow.Client
+	portainer   *portainer.Client  // nil when PORTAINER_URL/PORTAINER_API_TOKEN unset
 	prometheus  *prometheus.Client // nil when PROMETHEUS_QUERY_URL unset; infra/container/db reads
 	userMetrics *prometheus.Client // user-telemetry read store (multi-tenant Mimir); == prometheus when USER_METRICS_QUERY_URL unset
 	logsearch   *logsearch.Client  // nil when ELASTICSEARCH_URL unset
-	buildagent  *buildagent.Client // nil when BUILD_AGENT_URL unset
+	// Infra stream (in-cluster kube pod logs) — the second /logs source for
+	// native (k8s) apps; nil when ES unset or ELASTICSEARCH_INFRA_LOG_INDEX=off.
+	infraLogsearch *logsearch.Client
+	buildagent     *buildagent.Client // nil when BUILD_AGENT_URL unset
 
 	// Monitoring read/alert/health layer (ADR-011).
 	grafana      *grafana.Client   // nil when GRAFANA_BASE_URL/GRAFANA_API_TOKEN unset
@@ -73,6 +76,9 @@ func NewHandler(pool *pgxpool.Pool, cfg *config.Config) *Handler {
 		h.userMetrics = h.prometheus
 	}
 	h.logsearch = logsearch.New(cfg.ElasticsearchURL, cfg.ElasticsearchAPIKey, cfg.ElasticsearchIndex)
+	if cfg.ElasticsearchInfraIndex != "off" {
+		h.infraLogsearch = logsearch.New(cfg.ElasticsearchURL, cfg.ElasticsearchAPIKey, cfg.ElasticsearchInfraIndex)
+	}
 	h.buildagent = buildagent.New(cfg.BuildAgentURL)
 	// Prefer admin basic-auth (survives the emptyDir-backed Grafana's DB wipe on
 	// pod restart); fall back to the service-account token when admin creds are unset.

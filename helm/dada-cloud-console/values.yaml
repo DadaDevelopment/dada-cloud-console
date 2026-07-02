@@ -80,9 +80,13 @@ backend:
     INFERENCE_MAX_BODY_BYTES: "10485760"
     # Log index pattern for the project log viewer (logs.go, non-secret). VM logs
     # now land in the USER stream dada-app-logs-* (same as product-push app logs);
-    # the VM filebeat bootstrap writes dada-app-logs-<server>-<date>. The infra
-    # stream (filebeat-*, in-cluster kube pod logs) is NOT surfaced here.
+    # the VM filebeat bootstrap writes dada-app-logs-<server>-<date>.
     ELASTICSEARCH_LOG_INDEX: "dada-app-logs-*"
+    # Native (k8s) app pod stdout lands in the infra stream instead, so the log
+    # viewer queries it as a second source — scoped by the app's environment
+    # namespaces (tenancy enforced server-side). Requires the read API key to
+    # cover this pattern too. Set to "off" to disable the second query.
+    ELASTICSEARCH_INFRA_LOG_INDEX: "filebeat-*"
     # Note: PORTAINER_URL (live state) and PROMETHEUS_QUERY_URL / ELASTICSEARCH_URL
     # (observability read path) are injected from global.shared via the ConfigMap.
     #
