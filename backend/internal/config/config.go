@@ -116,6 +116,11 @@ type Config struct {
 	ElasticsearchURL    string // ELASTICSEARCH_URL
 	ElasticsearchAPIKey string // ELASTICSEARCH_API_KEY
 	ElasticsearchIndex  string // ELASTICSEARCH_LOG_INDEX (default "filebeat-*")
+	// Infra stream carrying in-cluster kube pod logs — where native (k8s) app
+	// stdout lands. Queried namespace-scoped as a second source by /logs so
+	// native apps get logs alongside the VM/compose user stream. Set to "off"
+	// to disable the second query.
+	ElasticsearchInfraIndex string // ELASTICSEARCH_INFRA_LOG_INDEX (default "filebeat-*")
 
 	// Monitoring (ADR-011). Grafana is the source of truth for alert rules,
 	// contact points and the rich per-resource dashboards; this is the API client
@@ -279,6 +284,7 @@ func Load() (*Config, error) {
 		ElasticsearchURL:          getEnv("ELASTICSEARCH_URL", ""),
 		ElasticsearchAPIKey:       getEnv("ELASTICSEARCH_API_KEY", ""),
 		ElasticsearchIndex:        getEnv("ELASTICSEARCH_LOG_INDEX", "filebeat-*"),
+		ElasticsearchInfraIndex:   getEnv("ELASTICSEARCH_INFRA_LOG_INDEX", "filebeat-*"),
 		GrafanaBaseURL:            getEnv("GRAFANA_BASE_URL", ""),
 		GrafanaPublicURL:          getEnv("GRAFANA_PUBLIC_URL", ""),
 		GrafanaAPIToken:           getEnv("GRAFANA_API_TOKEN", ""),

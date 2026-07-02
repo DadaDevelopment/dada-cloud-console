@@ -81,6 +81,15 @@ type SearchOpts struct {
 	MonitoringApp string
 	Source        string
 	Level         string
+
+	// Native (k8s) app scoping for the infra stream (filebeat-*, in-cluster kube
+	// pod logs shipped by the elastic-stack filebeat). KubeApp matches the
+	// dada.io/app pod label the app-resources chart sets; KubeNamespaces is the
+	// tenancy boundary — the environments' namespaces the app belongs to. Search
+	// refuses KubeApp without KubeNamespaces so an app-name collision in another
+	// tenant's namespace can never leak logs.
+	KubeApp        string
+	KubeNamespaces []string
 }
 
 // termOneOf builds a bool/should over keyword + text variants of a field so a
@@ -123,6 +132,15 @@ type sourceDoc struct {
 		Name string `json:"name"`
 	} `json:"host"`
 	Stream string `json:"stream"`
+	// Infra-stream (filebeat-*) docs carry kubernetes metadata instead of
+	// vm_name/app. Labels keys are dedotted by filebeat (dada_io/app).
+	Kubernetes struct {
+		Namespace string `json:"namespace"`
+		Pod       struct {
+			Name string `json:"name"`
+		} `json:"pod"`
+		Labels map[string]any `json:"labels"`
+	} `json:"kubernetes"`
 }
 
 func (c *Client) buildQuery(opts SearchOpts) map[string]any {
@@ -162,6 +180,42 @@ func (c *Client) buildQuery(opts SearchOpts) map[string]any {
 			},
 		})
 	}
+	// Native app scoping over the infra stream. kubernetes.namespace is the hard
+	// tenancy filter; the caller (SearchLogs) resolves it from the environments
+	// table, never from user input.
+	if len(opts.KubeNamespaces) > 0 {
+		filters = append(filters, map[string]any{
+			"bool": map[string]any{
+				"should": []map[string]any{
+					{"terms": map[string]any{"kubernetes.namespace": opts.KubeNamespaces}},
+					{"terms": map[string]any{"kubernetes.namespace.keyword": opts.KubeNamespaces}},
+				},
+				"minimum_should_match": 1,
+			},
+		})
+	}
+	if opts.KubeApp != "" {
+		// filebeat dedots label keys ("." → "_") by default, so dada.io/app is
+		// indexed as kubernetes.labels.dada_io/app; match the un-dedotted form and
+		// the "<app>-deploy" Deployment-name chart convention too (same fallback
+		// chain the gitops-agent status reconciler uses). Keyword + text variants
+		// are tried defensively, mirroring the VM filters above.
+		should := []map[string]any{
+			{"term": map[string]any{"kubernetes.labels.dada_io/app": opts.KubeApp}},
+			{"term": map[string]any{"kubernetes.labels.dada_io/app.keyword": opts.KubeApp}},
+			{"term": map[string]any{"kubernetes.labels.dada.io/app": opts.KubeApp}},
+		}
+		for _, name := range []string{opts.KubeApp + "-deploy", opts.KubeApp} {
+			should = append(should,
+				map[string]any{"term": map[string]any{"kubernetes.deployment.name": name}},
+				map[string]any{"term": map[string]any{"kubernetes.deployment.name.keyword": name}},
+			)
+		}
+		filters = append(filters, map[string]any{
+			"bool": map[string]any{"should": should, "minimum_should_match": 1},
+		})
+	}
+
 	// Monitoring app-log label scoping (dada-app-logs-* index).
 	if opts.ProjectID != "" {
 		filters = append(filters, termOneOf("project_id", opts.ProjectID))
@@ -221,6 +275,11 @@ func (c *Client) buildQuery(opts SearchOpts) map[string]any {
 // Search runs a bounded _search against the configured index and returns
 // normalized, newest-first log entries.
 func (c *Client) Search(ctx context.Context, opts SearchOpts) (*SearchResult, error) {
+	if opts.KubeApp != "" && len(opts.KubeNamespaces) == 0 {
+		// Tenancy guard: an app-name filter over the shared infra stream without
+		// a namespace scope would match same-named apps of other tenants.
+		return nil, fmt.Errorf("logsearch: KubeApp requires KubeNamespaces")
+	}
 	body, err := json.Marshal(c.buildQuery(opts))
 	if err != nil {
 		return nil, err
@@ -261,6 +320,20 @@ func (c *Client) Search(ctx context.Context, opts SearchOpts) (*SearchResult, er
 	out := &SearchResult{Total: parsed.Hits.Total.Value}
 	for _, h := range parsed.Hits.Hits {
 		vm := h.Source.VMName
+		app := h.Source.App
+		// k8s docs: surface the pod name where the VM name would go and recover
+		// the app from the dada.io/app label (dedotted or not).
+		if k := h.Source.Kubernetes; k.Pod.Name != "" {
+			vm = k.Pod.Name
+			if app == "" {
+				for _, key := range []string{"dada_io/app", "dada.io/app"} {
+					if v, ok := k.Labels[key].(string); ok && v != "" {
+						app = v
+						break
+					}
+				}
+			}
+		}
 		if vm == "" {
 			vm = h.Source.Host.Name
 		}
@@ -268,7 +341,7 @@ func (c *Client) Search(ctx context.Context, opts SearchOpts) (*SearchResult, er
 			Timestamp: h.Source.Timestamp,
 			Message:   h.Source.Message,
 			VMName:    vm,
-			App:       h.Source.App,
+			App:       app,
 			Stream:    h.Source.Stream,
 		})
 	}

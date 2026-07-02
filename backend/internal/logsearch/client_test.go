@@ -1,6 +1,7 @@
 package logsearch
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"io"
@@ -79,6 +80,56 @@ func TestSearch_BuildsQueryAndParsesHits(t *testing.T) {
 	// host.name fallback when vm_name absent.
 	if res.Entries[1].VMName != "vm-2" {
 		t.Errorf("entry1 vm fallback = %q, want vm-2", res.Entries[1].VMName)
+	}
+}
+
+func TestSearch_KubeAppRequiresNamespaces(t *testing.T) {
+	c := New("https://es.example.com", "", "")
+	if _, err := c.Search(context.Background(), SearchOpts{KubeApp: "web"}); err == nil {
+		t.Fatal("expected tenancy-guard error for KubeApp without KubeNamespaces")
+	}
+}
+
+func TestBuildQuery_KubeFilters(t *testing.T) {
+	c := New("https://es.example.com", "", "")
+	q := c.buildQuery(SearchOpts{KubeApp: "web", KubeNamespaces: []string{"acme-prod"}})
+	raw, err := json.Marshal(q)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	for _, want := range []string{
+		`"kubernetes.namespace":["acme-prod"]`,
+		`"kubernetes.labels.dada_io/app":"web"`,
+		`"kubernetes.deployment.name":"web-deploy"`,
+	} {
+		if !bytes.Contains(raw, []byte(want)) {
+			t.Errorf("query missing %s in %s", want, raw)
+		}
+	}
+}
+
+func TestSearch_ParsesKubernetesHits(t *testing.T) {
+	const body = `{"hits":{"total":{"value":1},"hits":[
+		{"_source":{"@timestamp":"2026-06-04T00:00:00Z","message":"hi","stream":"stdout",
+		 "kubernetes":{"namespace":"acme-prod","pod":{"name":"web-deploy-abc12"},"labels":{"dada_io/app":"web"}}}}
+	]}}`
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(body))
+	}))
+	defer srv.Close()
+
+	c := New(srv.URL, "", "filebeat-*")
+	res, err := c.Search(context.Background(), SearchOpts{KubeApp: "web", KubeNamespaces: []string{"acme-prod"}})
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if len(res.Entries) != 1 {
+		t.Fatalf("entries = %d, want 1", len(res.Entries))
+	}
+	e := res.Entries[0]
+	if e.VMName != "web-deploy-abc12" || e.App != "web" || e.Message != "hi" {
+		t.Errorf("entry = %+v", e)
 	}
 }
 
