@@ -89,7 +89,7 @@ export function FixedMetricsDashboard(props: Props) {
 
   return (
     <div className="rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900">
-      <div className="flex items-center justify-between border-b border-gray-100 dark:border-gray-800 px-5 py-3">
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-gray-100 dark:border-gray-800 px-5 py-3">
         <h2 className="text-sm font-semibold text-gray-800 dark:text-gray-200">Metrics</h2>
         <div className="flex items-center gap-2">
           {data?.live_error && (

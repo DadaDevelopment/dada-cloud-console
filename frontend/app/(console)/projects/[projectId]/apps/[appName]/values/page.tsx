@@ -207,7 +207,7 @@ export default function ValuesPage() {
   return (
     <div>
       {/* Header */}
-      <div className="mb-6 flex items-start justify-between">
+      <div className="mb-6 flex flex-wrap items-start justify-between gap-3">
         <div>
           <Breadcrumb
             items={[
@@ -227,7 +227,7 @@ export default function ValuesPage() {
           </div>
         </div>
 
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-3">
           {status === "closed" || status === "error" ? (
             <button
               onClick={connect}

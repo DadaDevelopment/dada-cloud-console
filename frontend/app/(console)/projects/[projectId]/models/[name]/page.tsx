@@ -151,7 +151,7 @@ export default function ModelDetailPage() {
 
   return (
     <div>
-      <div className="mb-6 flex items-start justify-between">
+      <div className="mb-6 flex flex-wrap items-start justify-between gap-3">
         <div>
           <div className="flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400">
             <Link href="/projects" className="hover:text-gray-700">{t("common.crumb.projects")}</Link>
@@ -170,7 +170,7 @@ export default function ModelDetailPage() {
             {s.model_type} · {s.profile} · v{s.version ?? "—"} · stage {s.stage ?? "—"}
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <button
             onClick={() => { setCanaryPercent(canaryPct); setIsCanaryOpen(true); }}
             className="inline-flex items-center gap-2 rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 px-3 py-1.5 text-sm font-medium text-gray-700 dark:text-gray-200 hover:border-purple-300 hover:text-purple-600 transition-colors shadow-sm"
@@ -552,7 +552,7 @@ function OperationsTab({ operations, projectId }: { operations: Operation[]; pro
     );
   }
   return (
-    <div className="overflow-hidden rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 shadow-sm">
+    <div className="overflow-x-auto rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 shadow-sm">
       <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-800">
         <thead className="bg-gray-50 dark:bg-gray-900">
           <tr>

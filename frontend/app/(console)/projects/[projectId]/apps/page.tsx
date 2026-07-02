@@ -102,7 +102,7 @@ export default function AppsPage() {
 
   return (
     <div>
-      <div className="mb-8 flex items-start justify-between">
+      <div className="mb-8 flex flex-wrap items-start justify-between gap-3">
         <div>
           <Breadcrumb
             items={[
@@ -115,7 +115,7 @@ export default function AppsPage() {
           <p className="mt-0.5 text-sm text-gray-500 dark:text-gray-400">{t("apps.subtitle")}</p>
         </div>
         {canCreate && (
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <Link
             href={`/projects/${projectId}/git/import${selectedEnvId ? `?envId=${selectedEnvId}` : ""}`}
             aria-disabled={!selectedEnvId || isVMEnvironment}

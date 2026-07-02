@@ -174,7 +174,7 @@ export default function MonitoringDetailPage() {
 
   return (
     <div>
-      <div className="mb-6 flex items-start justify-between">
+      <div className="mb-6 flex flex-wrap items-start justify-between gap-3">
         <div>
           <div className="flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400">
             <Link href="/projects" className="hover:text-gray-700 dark:hover:text-gray-200">{t("common.crumb.projects")}</Link>
@@ -485,7 +485,7 @@ function AlertsTab({
             <p className="text-sm text-gray-400 dark:text-gray-500">{t("monitoring.detail.alerts.empty")}</p>
           </div>
         ) : (
-          <div className="overflow-hidden rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 shadow-sm">
+          <div className="overflow-x-auto rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 shadow-sm">
             <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-800">
               <thead className="bg-gray-50 dark:bg-gray-900">
                 <tr>
@@ -546,7 +546,7 @@ function AlertsTab({
             <p className="text-sm text-gray-400 dark:text-gray-500">{t("monitoring.detail.channels.empty")}</p>
           </div>
         ) : (
-          <div className="overflow-hidden rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 shadow-sm">
+          <div className="overflow-x-auto rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 shadow-sm">
             <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-800">
               <thead className="bg-gray-50 dark:bg-gray-900">
                 <tr>

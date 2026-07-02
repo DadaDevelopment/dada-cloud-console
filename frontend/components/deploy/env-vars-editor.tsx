@@ -154,7 +154,7 @@ export function EnvVarsEditor({
           No environment variables.
         </p>
       ) : (
-        <div className="overflow-hidden rounded-xl border border-gray-200">
+        <div className="overflow-x-auto rounded-xl border border-gray-200">
           <table className="w-full text-sm">
             <thead className="bg-gray-50 text-left text-xs font-semibold uppercase tracking-wide text-gray-600">
               <tr>

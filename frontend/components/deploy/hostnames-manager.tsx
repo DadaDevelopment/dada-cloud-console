@@ -164,7 +164,7 @@ export function HostnamesManager({ projectId, envId, appName, canEdit }: Props) 
           No custom hostnames attached to this app.
         </div>
       ) : (
-        <div className="overflow-hidden rounded-xl border border-gray-200 bg-white">
+        <div className="overflow-x-auto rounded-xl border border-gray-200 bg-white">
           <table className="w-full text-sm">
             <thead className="bg-gray-50 text-left text-xs font-medium text-gray-500">
               <tr>
