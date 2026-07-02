@@ -45,13 +45,13 @@ export function ProjectSwitcher() {
   const label = project?.display_name ?? (projectId ? "…" : t("shell.project.select"));
 
   return (
-    <div ref={ref} className="relative">
+    <div ref={ref} className="relative min-w-0">
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
         aria-haspopup="listbox"
         aria-expanded={open}
-        className="flex h-9 max-w-[14rem] items-center gap-2 rounded-lg border border-slate-700 bg-slate-800 px-3 text-sm font-medium text-white transition-colors hover:bg-slate-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+        className="flex h-9 w-full max-w-[14rem] items-center gap-2 rounded-lg border border-slate-700 bg-slate-800 px-3 text-sm font-medium text-white transition-colors hover:bg-slate-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
       >
         <span className="truncate">{label}</span>
         <ChevronUpDown className="h-4 w-4 shrink-0 text-slate-400" />

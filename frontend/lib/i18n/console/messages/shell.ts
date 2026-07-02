@@ -22,6 +22,9 @@ export const shell: Messages = {
   "shell.project.viewAll": { ru: "Все проекты →", en: "View all projects →" },
   "shell.project.create": { ru: "Создать проект", en: "Create project" },
 
+  "shell.nav.openMenu": { ru: "Открыть меню", en: "Open menu" },
+  "shell.nav.closeMenu": { ru: "Закрыть меню", en: "Close menu" },
+
   "shell.nav.advanced": { ru: "Дополнительно", en: "Advanced" },
   "shell.nav.admin": { ru: "Администрирование", en: "Admin" },
   "shell.nav.comingSoon": { ru: "Скоро", en: "Coming soon" },

@@ -102,7 +102,7 @@ export default function ProjectOverviewPage() {
 
   return (
     <div>
-      <div className="mb-6 flex items-start justify-between gap-4">
+      <div className="mb-6 flex flex-wrap items-start justify-between gap-4">
         <div className="min-w-0">
           <Breadcrumb items={[{ label: t("common.crumb.projects"), href: "/projects" }, { label: project.display_name }]} />
           <h1 className="mt-2 text-2xl font-bold text-gray-900 dark:text-gray-100">{project.display_name}</h1>

@@ -1,6 +1,6 @@
 "use client";
 import { Suspense, useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth";
 import { Spinner } from "@/components/ui/spinner";
 import { ProjectProvider, useProjectContext } from "@/lib/project-context";
@@ -12,19 +12,54 @@ import { CommandPalette } from "@/components/shell/command-palette";
 
 function ConsoleShell({ children }: { children: React.ReactNode }) {
   const { projectId } = useProjectContext();
+  const pathname = usePathname();
   const [paletteOpenSignal, setPaletteOpenSignal] = useState(0);
+  // Mobile-only drawer state; on lg+ the sidebar is always visible.
+  const [navOpen, setNavOpen] = useState(false);
+
+  // Navigating (tapping a sidebar link) closes the drawer.
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setNavOpen(false);
+  }, [pathname]);
+
+  useEffect(() => {
+    if (!navOpen) return;
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") setNavOpen(false);
+    }
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [navOpen]);
 
   return (
-    <div className="flex h-screen flex-col overflow-hidden">
-      <TopBar onOpenPalette={() => setPaletteOpenSignal((n) => n + 1)} />
-      <div className="flex flex-1 overflow-hidden">
+    <div className="flex h-dvh flex-col overflow-hidden">
+      <TopBar
+        onOpenPalette={() => setPaletteOpenSignal((n) => n + 1)}
+        onToggleNav={projectId ? () => setNavOpen((o) => !o) : undefined}
+        navOpen={navOpen}
+      />
+      <div className="relative flex flex-1 overflow-hidden">
         {projectId && (
-          <aside className="flex w-60 shrink-0 flex-col bg-slate-900">
-            <ProjectNav />
-          </aside>
+          <>
+            {navOpen && (
+              <div
+                className="absolute inset-0 z-30 bg-black/50 lg:hidden"
+                onClick={() => setNavOpen(false)}
+                aria-hidden="true"
+              />
+            )}
+            <aside
+              className={`absolute inset-y-0 left-0 z-40 flex w-64 max-w-[85vw] shrink-0 flex-col bg-slate-900 shadow-2xl transition-transform duration-200 lg:static lg:w-60 lg:translate-x-0 lg:shadow-none ${
+                navOpen ? "translate-x-0" : "-translate-x-full"
+              }`}
+            >
+              <ProjectNav />
+            </aside>
+          </>
         )}
         <main className="flex-1 overflow-y-auto bg-white dark:bg-gray-950">
-          <div className="p-8">{children}</div>
+          <div className="p-4 sm:p-6 lg:p-8">{children}</div>
         </main>
       </div>
       {/* key forces the palette to mount/open when the top-bar button is clicked */}
@@ -43,7 +78,7 @@ export default function ConsoleLayout({ children }: { children: React.ReactNode 
 
   if (isLoading) {
     return (
-      <div className="flex h-screen items-center justify-center bg-gray-50">
+      <div className="flex h-dvh items-center justify-center bg-gray-50">
         <Spinner size="lg" />
       </div>
     );
@@ -53,7 +88,7 @@ export default function ConsoleLayout({ children }: { children: React.ReactNode 
   return (
     <Suspense
       fallback={
-        <div className="flex h-screen items-center justify-center bg-gray-50">
+        <div className="flex h-dvh items-center justify-center bg-gray-50">
           <Spinner size="lg" />
         </div>
       }

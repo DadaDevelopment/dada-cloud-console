@@ -144,7 +144,7 @@ export default function AppDetailPage() {
 
   return (
     <div>
-      <div className="mb-8 flex items-start justify-between">
+      <div className="mb-8 flex flex-wrap items-start justify-between gap-3">
         <div>
           <Breadcrumb
             items={[
@@ -159,7 +159,7 @@ export default function AppDetailPage() {
             <PhaseBadge phase={app.phase} />
           </div>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <Link
             href={`/projects/${projectId}/apps/${appName}/deployments${envId ? `?envId=${envId}` : ""}`}
             className="inline-flex items-center gap-2 rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 px-3 py-2 text-sm font-medium text-gray-700 dark:text-gray-200 hover:border-blue-300 hover:text-blue-600 transition-colors shadow-sm"
@@ -247,7 +247,7 @@ export default function AppDetailPage() {
       </div>
 
       <div className="mt-10">
-        <div className="mb-4 flex items-center justify-between">
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
           <div>
             <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">{t("apps.domains.title")}</h2>
             <p className="text-sm text-gray-400 dark:text-gray-500">{t("apps.domains.subtitle")}</p>

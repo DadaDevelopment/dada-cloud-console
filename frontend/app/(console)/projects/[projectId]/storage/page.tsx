@@ -108,7 +108,7 @@ export default function StoragePage() {
 
   return (
     <div>
-      <div className="mb-8 flex items-start justify-between">
+      <div className="mb-8 flex flex-wrap items-start justify-between gap-3">
         <div>
           <Breadcrumb
             items={[
