@@ -1,0 +1,63 @@
+# REFERENCE DRAFT — fin-data Phase-1 gitops compose. NOT a deploy artifact.
+#
+# This is a starting scaffold for the real compose.yaml that will be authored in
+# the gitops repo via the console editor (gitops-agent handleFileWS). Its shape
+# comes from prior observation of the fin-data VM (hand-run project `compose`:
+# nginx + profi-backend + profi + postgres, images from nexus.dada-tuda.ru/dada).
+#
+# ⚠️  EVERY value marked CONFIRM must be replaced with the exact value from
+#     scripts/vm-discover.sh output (REPORT.md / inspect/*.json / volumes.compose.yaml)
+#     before it goes near prod. Do not deploy this file as-is. The whole point of
+#     Phase 0 is that names/tags/ports are copied from live state, never guessed.
+#
+# Data-safety rule: the postgres volume is declared `external: true` pinned to the
+# LIVE name so `docker compose up` ADOPTS the existing prod data instead of
+# creating an empty `<stack>_<vol>`. Paste the exact block from
+# vm-discovery/<host>/volumes.compose.yaml over the `volumes:` section below.
+
+# Networks: all four services are in THIS stack and reach each other by service
+# name over the stack's own default network — so no `external` network is needed
+# (reusing the old `compose_default` would just add a lifecycle dependency on the
+# retired project). Let compose create its default network.
+
+services:
+  postgres:
+    image: postgres:CONFIRM        # CONFIRM exact tag from inspect (do not "upgrade" it)
+    container_name: CONFIRM        # CONFIRM: match live, or omit to avoid name collision at cutover
+    restart: unless-stopped
+    env_file: .env                 # POSTGRES_* + app DSN via the secret channel (env_vars → rendered .env)
+    volumes:
+      - profi_pg_data:/var/lib/postgresql/data   # CONFIRM mount path from inspect
+
+  profi-backend:
+    image: nexus.dada-tuda.ru/dada/profi-backend:CONFIRM   # CONFIRM tag (this is the release-bump baseline)
+    restart: unless-stopped
+    env_file: .env
+    depends_on:
+      - postgres
+
+  profi:
+    image: nexus.dada-tuda.ru/dada/profi:CONFIRM           # CONFIRM tag (frontend)
+    restart: unless-stopped
+    env_file: .env
+
+  nginx:
+    image: nginx:CONFIRM           # CONFIRM tag
+    restart: unless-stopped
+    ports:
+      - "80:80"                    # CONFIRM published ports from REPORT.md
+      - "443:443"
+    depends_on:
+      - profi
+      - profi-backend
+    volumes:
+      # CONFIRM: nginx config / TLS certs are almost certainly bind mounts on the
+      # host — mirror the exact host paths from inspect (Type=bind) verbatim here.
+      - CONFIRM_HOST_PATH:/etc/nginx/conf.d:ro
+
+# ── data-safety: paste vm-discovery/<host>/volumes.compose.yaml here ──────────
+# The generator pins every named volume external with its literal live name:
+volumes:
+  profi_pg_data:
+    external: true
+    name: compose_profi_pg_data    # CONFIRM against volumes.compose.yaml — the live prod volume

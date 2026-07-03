@@ -150,6 +150,13 @@ Under `clusters/beget-prod/projects/<fin-data-slug>/environments/prod/apps/<app>
     volume** (from Phase 0 `inspect/*.json`), because the external volume is
     already initialised — the apps' DSN has to match what's on disk.
 
+A **reference scaffold** for fin-data's compose (structure known from prior VM
+observation: `nginx + profi-backend + profi + postgres`, volume
+`compose_profi_pg_data`) is at `tasks/vm-gitops-findata-compose.reference.yaml`
+— every guessed value is marked `CONFIRM`, to be replaced from the Phase-0
+`vm-discover.sh` output before it goes near prod. It is a draft, **not** a deploy
+artifact.
+
 **Authoring mechanism (verified in code):** compose apps are edited through the
 console's file editor (`gitops-agent` `handleFileWS`) — `compose.yaml` and `.env`
 are committed to git on save. `RenderComposeSkeleton` only seeds an nginx
