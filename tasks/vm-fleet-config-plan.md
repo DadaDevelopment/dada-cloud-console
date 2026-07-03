@@ -51,7 +51,7 @@ Portainer Edge Stack  ──(Edge Group dada-vms, dynamic by tag dada-managed)�
 
 ## Phases
 
-### Phase 1 — TAG the fleet + author the edge stack (foundational)
+### Phase 1 — TAG + author edge stack ✅ DONE (findata; fluent-bit log fix LIVE)
 - Ensure every enrolled VM is tagged `dada-managed` (in `doCreateAppServer` after
   enroll: `TagEndpoint(endpointID, tagID)`). Backfill existing endpoints (findata)
   now.
@@ -81,7 +81,7 @@ Portainer Edge Stack  ──(Edge Group dada-vms, dynamic by tag dada-managed)�
   (edge stack can `docker rm -f filebeat` via an init step, or name-collision
   handling).
 
-### Phase 4 — VERIFY fleet convergence + lock-in
+### Phase 4 — VERIFY ✅ proven on findata (sentinel shipped via edge-managed fluent-bit → dada-vm-logs-findata-* in OpenSearch); fleet redeploy = delete+recreate edge stack (Portainer /git redeploy 404 in v2.39.2)
 - findata: fluent-bit ships → `dada-vm-logs-findata-*` appears in OpenSearch →
   console Logs tab populates (closes the log gap).
 - Prove a fleet update: bump the edge stack compose → redeploy → the change lands
