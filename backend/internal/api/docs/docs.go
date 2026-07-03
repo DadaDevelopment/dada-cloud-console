@@ -250,7 +250,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/internal_api.loginRequest"
+                            "$ref": "#/definitions/api.loginRequest"
                         }
                     }
                 ],
@@ -372,7 +372,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/github_com_dada-tuda_console_backend_internal_billing_pricing.Need"
+                            "$ref": "#/definitions/pricing.Need"
                         }
                     }
                 ],
@@ -751,7 +751,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/internal_api.createProjectRequest"
+                            "$ref": "#/definitions/api.createProjectRequest"
                         }
                     }
                 ],
@@ -984,7 +984,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/internal_api.createAppServerRequest"
+                            "$ref": "#/definitions/api.createAppServerRequest"
                         }
                     }
                 ],
@@ -1145,6 +1145,85 @@ const docTemplate = `{
                     },
                     "404": {
                         "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/projects/{projectId}/app-servers/{serverName}/discover": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Inventories the containers, images, ports and named volumes running on an enrolled VM through the Portainer docker proxy — no SSH. Produces an external-volume compose block for the GitOps migration. Requires the VM to be enrolled (has a Portainer endpoint). Asynchronous: returns 202 with an operation; poll it and read validation_result.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "appserver"
+                ],
+                "summary": "Discover an app server's running workload (read-only)",
+                "operationId": "discoverAppServerWorkload",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Project UUID",
+                        "name": "projectId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "App server name",
+                        "name": "serverName",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "202": {
+                        "description": "object with the accepted operation",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "409": {
+                        "description": "VM is not enrolled yet",
                         "schema": {
                             "type": "object",
                             "additionalProperties": {
@@ -2204,7 +2283,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/internal_api.addDomainAuthorizationRequest"
+                            "$ref": "#/definitions/api.addDomainAuthorizationRequest"
                         }
                     }
                 ],
@@ -2476,7 +2555,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/internal_api.createAppRequest"
+                            "$ref": "#/definitions/api.createAppRequest"
                         }
                     }
                 ],
@@ -2792,7 +2871,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/internal_api.createCloudTaskRequest"
+                            "$ref": "#/definitions/api.createCloudTaskRequest"
                         }
                     }
                 ],
@@ -2993,7 +3072,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Registers a public API endpoint (PublicApi resource) exposing an app at a given FQDN, with optional auth (none, platform-jwt, api-key, internal) and Swagger publishing. Asynchronous: returns 202 with an operation; poll the operation until terminal.",
+                "description": "Registers a public API endpoint (PublicApi resource) exposing an app at a given FQDN, with optional auth (none, platform-jwt, internal) and Swagger publishing. Asynchronous: returns 202 with an operation; poll the operation until terminal.",
                 "consumes": [
                     "application/json"
                 ],
@@ -3033,7 +3112,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/internal_api.createEndpointRequest"
+                            "$ref": "#/definitions/api.createEndpointRequest"
                         }
                     }
                 ],
@@ -3297,7 +3376,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/internal_api.setEnvVarRequest"
+                            "$ref": "#/definitions/api.setEnvVarRequest"
                         }
                     }
                 ],
@@ -3520,7 +3599,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/internal_api.attachHostnameRequest"
+                            "$ref": "#/definitions/api.attachHostnameRequest"
                         }
                     }
                 ],
@@ -3701,7 +3780,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/internal_api.updateAppImageRequest"
+                            "$ref": "#/definitions/api.updateAppImageRequest"
                         }
                     }
                 ],
@@ -4211,7 +4290,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/internal_api.createServiceDatabaseRequest"
+                            "$ref": "#/definitions/api.createServiceDatabaseRequest"
                         }
                     }
                 ],
@@ -4352,7 +4431,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/internal_api.createAIModelRequest"
+                            "$ref": "#/definitions/api.createAIModelRequest"
                         }
                     }
                 ],
@@ -5113,7 +5192,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/internal_api.createMonitoringRequest"
+                            "$ref": "#/definitions/api.createMonitoringRequest"
                         }
                     }
                 ],
@@ -5826,6 +5905,256 @@ const docTemplate = `{
                 }
             }
         },
+        "/projects/{projectId}/environments/{envId}/monitoring/{appId}/dashboard": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Returns the calling user's persisted dashboard layout/config for a monitoring resource (per-user). Returns config:null when nothing is saved yet.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "monitoring"
+                ],
+                "summary": "Get the saved dashboard config",
+                "operationId": "getMonitoringDashboard",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Project UUID",
+                        "name": "projectId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Environment UUID",
+                        "name": "envId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Monitoring resource UUID",
+                        "name": "appId",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "object with config, version, updated_at",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            },
+            "put": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Upserts the calling user's dashboard layout/config (per-user) for a monitoring resource. The config is an opaque JSON object owned by the frontend.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "monitoring"
+                ],
+                "summary": "Save the dashboard config",
+                "operationId": "saveMonitoringDashboard",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Project UUID",
+                        "name": "projectId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Environment UUID",
+                        "name": "envId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Monitoring resource UUID",
+                        "name": "appId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Dashboard config blob + version",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/api.saveDashboardRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "object with saved, version",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "413": {
+                        "description": "Request Entity Too Large",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/projects/{projectId}/environments/{envId}/monitoring/{appId}/events": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Returns deploy events in the monitoring resource's environment within the time window (range or from/to), as {time,label,kind} markers for overlay as chart annotations.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "monitoring"
+                ],
+                "summary": "Get dashboard event overlays",
+                "operationId": "getMonitoringEvents",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Project UUID",
+                        "name": "projectId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Environment UUID",
+                        "name": "envId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Monitoring resource UUID",
+                        "name": "appId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Relative window (15m,1h,6h,24h,7d)",
+                        "name": "range",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Absolute window start (unix seconds)",
+                        "name": "from",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Absolute window end (unix seconds)",
+                        "name": "to",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "object with an events array",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/projects/{projectId}/environments/{envId}/monitoring/{appId}/grafana-link": {
             "get": {
                 "security": [
@@ -6472,7 +6801,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/internal_api.connectGitRepoRequest"
+                            "$ref": "#/definitions/api.connectGitRepoRequest"
                         }
                     }
                 ],
@@ -6686,7 +7015,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/internal_api.createS3BucketRequest"
+                            "$ref": "#/definitions/api.createS3BucketRequest"
                         }
                     }
                 ],
@@ -6885,7 +7214,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/internal_api.bindInstallationRequest"
+                            "$ref": "#/definitions/api.bindInstallationRequest"
                         }
                     }
                 ],
@@ -6893,7 +7222,7 @@ const docTemplate = `{
                     "201": {
                         "description": "Created",
                         "schema": {
-                            "$ref": "#/definitions/internal_api.gitInstallation"
+                            "$ref": "#/definitions/api.gitInstallation"
                         }
                     },
                     "400": {
@@ -7347,7 +7676,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/internal_api.ingestLogsRequest"
+                            "$ref": "#/definitions/api.ingestLogsRequest"
                         }
                     }
                 ],
@@ -7465,7 +7794,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/internal_api.ingestMetricsRequest"
+                            "$ref": "#/definitions/api.ingestMetricsRequest"
                         }
                     }
                 ],
@@ -7793,53 +8122,7 @@ const docTemplate = `{
         }
     },
     "definitions": {
-        "github_com_dada-tuda_console_backend_internal_billing_pricing.Need": {
-            "type": "object",
-            "properties": {
-                "apps": {
-                    "type": "integer"
-                },
-                "databases": {
-                    "type": "integer"
-                },
-                "domains": {
-                    "type": "integer"
-                },
-                "members": {
-                    "type": "integer"
-                },
-                "storageGB": {
-                    "type": "integer"
-                }
-            }
-        },
-        "github_com_dada-tuda_console_backend_internal_models.AIModelAuthMode": {
-            "type": "string",
-            "enum": [
-                "apikey",
-                "jwt",
-                "public"
-            ],
-            "x-enum-varnames": [
-                "AIModelAuthAPIKey",
-                "AIModelAuthJWT",
-                "AIModelAuthPublic"
-            ]
-        },
-        "github_com_dada-tuda_console_backend_internal_models.AIModelSource": {
-            "type": "string",
-            "enum": [
-                "mlflow",
-                "s3",
-                "custom"
-            ],
-            "x-enum-varnames": [
-                "AIModelSourceMLflow",
-                "AIModelSourceS3",
-                "AIModelSourceCustom"
-            ]
-        },
-        "internal_api.addDomainAuthorizationRequest": {
+        "api.addDomainAuthorizationRequest": {
             "type": "object",
             "properties": {
                 "apex_domain": {
@@ -7847,7 +8130,7 @@ const docTemplate = `{
                 }
             }
         },
-        "internal_api.attachHostnameRequest": {
+        "api.attachHostnameRequest": {
             "type": "object",
             "properties": {
                 "hostname": {
@@ -7855,7 +8138,7 @@ const docTemplate = `{
                 }
             }
         },
-        "internal_api.bindInstallationRequest": {
+        "api.bindInstallationRequest": {
             "type": "object",
             "properties": {
                 "installation_id": {
@@ -7864,7 +8147,7 @@ const docTemplate = `{
                 }
             }
         },
-        "internal_api.connectGitRepoRequest": {
+        "api.connectGitRepoRequest": {
             "type": "object",
             "properties": {
                 "app_name": {
@@ -7911,7 +8194,7 @@ const docTemplate = `{
                 }
             }
         },
-        "internal_api.createAIModelRequest": {
+        "api.createAIModelRequest": {
             "type": "object",
             "properties": {
                 "artifact_uri": {
@@ -7921,7 +8204,7 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "auth_mode": {
-                    "$ref": "#/definitions/github_com_dada-tuda_console_backend_internal_models.AIModelAuthMode"
+                    "$ref": "#/definitions/models.AIModelAuthMode"
                 },
                 "container_image": {
                     "type": "string"
@@ -7942,14 +8225,14 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "source": {
-                    "$ref": "#/definitions/github_com_dada-tuda_console_backend_internal_models.AIModelSource"
+                    "$ref": "#/definitions/models.AIModelSource"
                 },
                 "version": {
                     "type": "string"
                 }
             }
         },
-        "internal_api.createAppRequest": {
+        "api.createAppRequest": {
             "type": "object",
             "properties": {
                 "image": {
@@ -7969,7 +8252,7 @@ const docTemplate = `{
                 }
             }
         },
-        "internal_api.createAppServerRequest": {
+        "api.createAppServerRequest": {
             "type": "object",
             "properties": {
                 "flavor": {
@@ -8006,7 +8289,7 @@ const docTemplate = `{
                 }
             }
         },
-        "internal_api.createCloudTaskRequest": {
+        "api.createCloudTaskRequest": {
             "type": "object",
             "properties": {
                 "task_type": {
@@ -8014,7 +8297,7 @@ const docTemplate = `{
                 }
             }
         },
-        "internal_api.createEndpointRequest": {
+        "api.createEndpointRequest": {
             "type": "object",
             "properties": {
                 "auth_enabled": {
@@ -8043,7 +8326,7 @@ const docTemplate = `{
                 }
             }
         },
-        "internal_api.createMonitoringRequest": {
+        "api.createMonitoringRequest": {
             "type": "object",
             "properties": {
                 "name": {
@@ -8051,7 +8334,7 @@ const docTemplate = `{
                 }
             }
         },
-        "internal_api.createProjectRequest": {
+        "api.createProjectRequest": {
             "type": "object",
             "required": [
                 "slug"
@@ -8075,7 +8358,7 @@ const docTemplate = `{
                 }
             }
         },
-        "internal_api.createS3BucketRequest": {
+        "api.createS3BucketRequest": {
             "type": "object",
             "properties": {
                 "app_ref": {
@@ -8102,7 +8385,7 @@ const docTemplate = `{
                 }
             }
         },
-        "internal_api.createServiceDatabaseRequest": {
+        "api.createServiceDatabaseRequest": {
             "type": "object",
             "properties": {
                 "app_ref": {
@@ -8125,7 +8408,7 @@ const docTemplate = `{
                 }
             }
         },
-        "internal_api.gitInstallation": {
+        "api.gitInstallation": {
             "type": "object",
             "properties": {
                 "account_login": {
@@ -8152,7 +8435,7 @@ const docTemplate = `{
                 }
             }
         },
-        "internal_api.ingestLogsRequest": {
+        "api.ingestLogsRequest": {
             "type": "object",
             "properties": {
                 "level": {
@@ -8166,7 +8449,7 @@ const docTemplate = `{
                 }
             }
         },
-        "internal_api.ingestMetricsRequest": {
+        "api.ingestMetricsRequest": {
             "type": "object",
             "properties": {
                 "metrics": {
@@ -8184,7 +8467,7 @@ const docTemplate = `{
                 }
             }
         },
-        "internal_api.loginRequest": {
+        "api.loginRequest": {
             "type": "object",
             "required": [
                 "password"
@@ -8201,7 +8484,10 @@ const docTemplate = `{
                 }
             }
         },
-        "internal_api.setEnvVarRequest": {
+        "api.saveDashboardRequest": {
+            "type": "object"
+        },
+        "api.setEnvVarRequest": {
             "type": "object",
             "properties": {
                 "is_secret": {
@@ -8215,11 +8501,57 @@ const docTemplate = `{
                 }
             }
         },
-        "internal_api.updateAppImageRequest": {
+        "api.updateAppImageRequest": {
             "type": "object",
             "properties": {
                 "image": {
                     "type": "string"
+                }
+            }
+        },
+        "models.AIModelAuthMode": {
+            "type": "string",
+            "enum": [
+                "apikey",
+                "jwt",
+                "public"
+            ],
+            "x-enum-varnames": [
+                "AIModelAuthAPIKey",
+                "AIModelAuthJWT",
+                "AIModelAuthPublic"
+            ]
+        },
+        "models.AIModelSource": {
+            "type": "string",
+            "enum": [
+                "mlflow",
+                "s3",
+                "custom"
+            ],
+            "x-enum-varnames": [
+                "AIModelSourceMLflow",
+                "AIModelSourceS3",
+                "AIModelSourceCustom"
+            ]
+        },
+        "pricing.Need": {
+            "type": "object",
+            "properties": {
+                "apps": {
+                    "type": "integer"
+                },
+                "databases": {
+                    "type": "integer"
+                },
+                "domains": {
+                    "type": "integer"
+                },
+                "members": {
+                    "type": "integer"
+                },
+                "storageGB": {
+                    "type": "integer"
                 }
             }
         }

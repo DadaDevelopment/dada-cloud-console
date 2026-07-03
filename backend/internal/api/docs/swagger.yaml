@@ -1,55 +1,22 @@
 basePath: /api/v1
 definitions:
-  github_com_dada-tuda_console_backend_internal_billing_pricing.Need:
-    properties:
-      apps:
-        type: integer
-      databases:
-        type: integer
-      domains:
-        type: integer
-      members:
-        type: integer
-      storageGB:
-        type: integer
-    type: object
-  github_com_dada-tuda_console_backend_internal_models.AIModelAuthMode:
-    enum:
-    - apikey
-    - jwt
-    - public
-    type: string
-    x-enum-varnames:
-    - AIModelAuthAPIKey
-    - AIModelAuthJWT
-    - AIModelAuthPublic
-  github_com_dada-tuda_console_backend_internal_models.AIModelSource:
-    enum:
-    - mlflow
-    - s3
-    - custom
-    type: string
-    x-enum-varnames:
-    - AIModelSourceMLflow
-    - AIModelSourceS3
-    - AIModelSourceCustom
-  internal_api.addDomainAuthorizationRequest:
+  api.addDomainAuthorizationRequest:
     properties:
       apex_domain:
         type: string
     type: object
-  internal_api.attachHostnameRequest:
+  api.attachHostnameRequest:
     properties:
       hostname:
         type: string
     type: object
-  internal_api.bindInstallationRequest:
+  api.bindInstallationRequest:
     properties:
       installation_id:
         description: numeric GitHub installation id
         type: string
     type: object
-  internal_api.connectGitRepoRequest:
+  api.connectGitRepoRequest:
     properties:
       app_name:
         type: string
@@ -84,14 +51,14 @@ definitions:
           Ignored for GitHub.'
         type: string
     type: object
-  internal_api.createAIModelRequest:
+  api.createAIModelRequest:
     properties:
       artifact_uri:
         type: string
       attached_app_name:
         type: string
       auth_mode:
-        $ref: '#/definitions/github_com_dada-tuda_console_backend_internal_models.AIModelAuthMode'
+        $ref: '#/definitions/models.AIModelAuthMode'
       container_image:
         type: string
       mlflow_name:
@@ -105,11 +72,11 @@ definitions:
       profile:
         type: string
       source:
-        $ref: '#/definitions/github_com_dada-tuda_console_backend_internal_models.AIModelSource'
+        $ref: '#/definitions/models.AIModelSource'
       version:
         type: string
     type: object
-  internal_api.createAppRequest:
+  api.createAppRequest:
     properties:
       image:
         type: string
@@ -122,7 +89,7 @@ definitions:
       replicas:
         type: integer
     type: object
-  internal_api.createAppServerRequest:
+  api.createAppServerRequest:
     properties:
       flavor:
         type: string
@@ -147,12 +114,12 @@ definitions:
         description: Manual-mode fields (connecting a pre-existing VM over SSH).
         type: string
     type: object
-  internal_api.createCloudTaskRequest:
+  api.createCloudTaskRequest:
     properties:
       task_type:
         type: string
     type: object
-  internal_api.createEndpointRequest:
+  api.createEndpointRequest:
     properties:
       auth_enabled:
         type: boolean
@@ -171,12 +138,12 @@ definitions:
       swagger_title:
         type: string
     type: object
-  internal_api.createMonitoringRequest:
+  api.createMonitoringRequest:
     properties:
       name:
         type: string
     type: object
-  internal_api.createProjectRequest:
+  api.createProjectRequest:
     properties:
       default_environment:
         description: DefaultEnvironment names the first environment; defaults to "prod".
@@ -195,7 +162,7 @@ definitions:
     required:
     - slug
     type: object
-  internal_api.createS3BucketRequest:
+  api.createS3BucketRequest:
     properties:
       app_ref:
         description: AppRef optionally binds the bucket to an app's chart. Empty =
@@ -214,7 +181,7 @@ definitions:
       region:
         type: string
     type: object
-  internal_api.createServiceDatabaseRequest:
+  api.createServiceDatabaseRequest:
     properties:
       app_ref:
         type: string
@@ -229,7 +196,7 @@ definitions:
       name:
         type: string
     type: object
-  internal_api.gitInstallation:
+  api.gitInstallation:
     properties:
       account_login:
         type: string
@@ -247,7 +214,7 @@ definitions:
       provider:
         type: string
     type: object
-  internal_api.ingestLogsRequest:
+  api.ingestLogsRequest:
     properties:
       level:
         type: string
@@ -256,7 +223,7 @@ definitions:
       source:
         type: string
     type: object
-  internal_api.ingestMetricsRequest:
+  api.ingestMetricsRequest:
     properties:
       metrics:
         additionalProperties:
@@ -268,7 +235,7 @@ definitions:
       timestamp:
         type: string
     type: object
-  internal_api.loginRequest:
+  api.loginRequest:
     properties:
       email:
         type: string
@@ -279,7 +246,9 @@ definitions:
     required:
     - password
     type: object
-  internal_api.setEnvVarRequest:
+  api.saveDashboardRequest:
+    type: object
+  api.setEnvVarRequest:
     properties:
       is_secret:
         type: boolean
@@ -288,10 +257,43 @@ definitions:
       value:
         type: string
     type: object
-  internal_api.updateAppImageRequest:
+  api.updateAppImageRequest:
     properties:
       image:
         type: string
+    type: object
+  models.AIModelAuthMode:
+    enum:
+    - apikey
+    - jwt
+    - public
+    type: string
+    x-enum-varnames:
+    - AIModelAuthAPIKey
+    - AIModelAuthJWT
+    - AIModelAuthPublic
+  models.AIModelSource:
+    enum:
+    - mlflow
+    - s3
+    - custom
+    type: string
+    x-enum-varnames:
+    - AIModelSourceMLflow
+    - AIModelSourceS3
+    - AIModelSourceCustom
+  pricing.Need:
+    properties:
+      apps:
+        type: integer
+      databases:
+        type: integer
+      domains:
+        type: integer
+      members:
+        type: integer
+      storageGB:
+        type: integer
     type: object
 info:
   contact: {}
@@ -461,7 +463,7 @@ paths:
         name: body
         required: true
         schema:
-          $ref: '#/definitions/internal_api.loginRequest'
+          $ref: '#/definitions/api.loginRequest'
       produces:
       - application/json
       responses:
@@ -541,7 +543,7 @@ paths:
         name: body
         required: true
         schema:
-          $ref: '#/definitions/github_com_dada-tuda_console_backend_internal_billing_pricing.Need'
+          $ref: '#/definitions/pricing.Need'
       produces:
       - application/json
       responses:
@@ -802,7 +804,7 @@ paths:
         name: body
         required: true
         schema:
-          $ref: '#/definitions/internal_api.createProjectRequest'
+          $ref: '#/definitions/api.createProjectRequest'
       produces:
       - application/json
       responses:
@@ -933,7 +935,7 @@ paths:
         name: body
         required: true
         schema:
-          $ref: '#/definitions/internal_api.createAppServerRequest'
+          $ref: '#/definitions/api.createAppServerRequest'
       produces:
       - application/json
       responses:
@@ -1051,6 +1053,62 @@ paths:
       security:
       - BearerAuth: []
       summary: Get an app server (VM) by name
+      tags:
+      - appserver
+  /projects/{projectId}/app-servers/{serverName}/discover:
+    post:
+      description: 'Inventories the containers, images, ports and named volumes running
+        on an enrolled VM through the Portainer docker proxy — no SSH. Produces an
+        external-volume compose block for the GitOps migration. Requires the VM to
+        be enrolled (has a Portainer endpoint). Asynchronous: returns 202 with an
+        operation; poll it and read validation_result.'
+      operationId: discoverAppServerWorkload
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      - description: App server name
+        in: path
+        name: serverName
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "202":
+          description: object with the accepted operation
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "409":
+          description: VM is not enrolled yet
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Discover an app server's running workload (read-only)
       tags:
       - appserver
   /projects/{projectId}/app-servers/{serverName}/metrics:
@@ -1753,7 +1811,7 @@ paths:
         name: body
         required: true
         schema:
-          $ref: '#/definitions/internal_api.addDomainAuthorizationRequest'
+          $ref: '#/definitions/api.addDomainAuthorizationRequest'
       produces:
       - application/json
       responses:
@@ -1936,7 +1994,7 @@ paths:
         name: body
         required: true
         schema:
-          $ref: '#/definitions/internal_api.createAppRequest'
+          $ref: '#/definitions/api.createAppRequest'
       produces:
       - application/json
       responses:
@@ -2150,7 +2208,7 @@ paths:
         name: body
         required: true
         schema:
-          $ref: '#/definitions/internal_api.createCloudTaskRequest'
+          $ref: '#/definitions/api.createCloudTaskRequest'
       produces:
       - application/json
       responses:
@@ -2290,7 +2348,7 @@ paths:
       consumes:
       - application/json
       description: 'Registers a public API endpoint (PublicApi resource) exposing
-        an app at a given FQDN, with optional auth (none, platform-jwt, api-key, internal)
+        an app at a given FQDN, with optional auth (none, platform-jwt, internal)
         and Swagger publishing. Asynchronous: returns 202 with an operation; poll
         the operation until terminal.'
       operationId: createEndpoint
@@ -2315,7 +2373,7 @@ paths:
         name: body
         required: true
         schema:
-          $ref: '#/definitions/internal_api.createEndpointRequest'
+          $ref: '#/definitions/api.createEndpointRequest'
       produces:
       - application/json
       responses:
@@ -2541,7 +2599,7 @@ paths:
         name: body
         required: true
         schema:
-          $ref: '#/definitions/internal_api.setEnvVarRequest'
+          $ref: '#/definitions/api.setEnvVarRequest'
       produces:
       - application/json
       responses:
@@ -2646,7 +2704,7 @@ paths:
         name: body
         required: true
         schema:
-          $ref: '#/definitions/internal_api.attachHostnameRequest'
+          $ref: '#/definitions/api.attachHostnameRequest'
       produces:
       - application/json
       responses:
@@ -2767,7 +2825,7 @@ paths:
         name: body
         required: true
         schema:
-          $ref: '#/definitions/internal_api.updateAppImageRequest'
+          $ref: '#/definitions/api.updateAppImageRequest'
       produces:
       - application/json
       responses:
@@ -3119,7 +3177,7 @@ paths:
         name: body
         required: true
         schema:
-          $ref: '#/definitions/internal_api.createServiceDatabaseRequest'
+          $ref: '#/definitions/api.createServiceDatabaseRequest'
       produces:
       - application/json
       responses:
@@ -3217,7 +3275,7 @@ paths:
         name: body
         required: true
         schema:
-          $ref: '#/definitions/internal_api.createAIModelRequest'
+          $ref: '#/definitions/api.createAIModelRequest'
       produces:
       - application/json
       responses:
@@ -3745,7 +3803,7 @@ paths:
         name: body
         required: true
         schema:
-          $ref: '#/definitions/internal_api.createMonitoringRequest'
+          $ref: '#/definitions/api.createMonitoringRequest'
       produces:
       - application/json
       responses:
@@ -4061,6 +4119,177 @@ paths:
       security:
       - BearerAuth: []
       summary: Delete an alert rule
+      tags:
+      - monitoring
+  /projects/{projectId}/environments/{envId}/monitoring/{appId}/dashboard:
+    get:
+      description: Returns the calling user's persisted dashboard layout/config for
+        a monitoring resource (per-user). Returns config:null when nothing is saved
+        yet.
+      operationId: getMonitoringDashboard
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      - description: Environment UUID
+        in: path
+        name: envId
+        required: true
+        type: string
+      - description: Monitoring resource UUID
+        in: path
+        name: appId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: object with config, version, updated_at
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Get the saved dashboard config
+      tags:
+      - monitoring
+    put:
+      consumes:
+      - application/json
+      description: Upserts the calling user's dashboard layout/config (per-user) for
+        a monitoring resource. The config is an opaque JSON object owned by the frontend.
+      operationId: saveMonitoringDashboard
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      - description: Environment UUID
+        in: path
+        name: envId
+        required: true
+        type: string
+      - description: Monitoring resource UUID
+        in: path
+        name: appId
+        required: true
+        type: string
+      - description: Dashboard config blob + version
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/api.saveDashboardRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: object with saved, version
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "413":
+          description: Request Entity Too Large
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Save the dashboard config
+      tags:
+      - monitoring
+  /projects/{projectId}/environments/{envId}/monitoring/{appId}/events:
+    get:
+      description: Returns deploy events in the monitoring resource's environment
+        within the time window (range or from/to), as {time,label,kind} markers for
+        overlay as chart annotations.
+      operationId: getMonitoringEvents
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      - description: Environment UUID
+        in: path
+        name: envId
+        required: true
+        type: string
+      - description: Monitoring resource UUID
+        in: path
+        name: appId
+        required: true
+        type: string
+      - description: Relative window (15m,1h,6h,24h,7d)
+        in: query
+        name: range
+        type: string
+      - description: Absolute window start (unix seconds)
+        in: query
+        name: from
+        type: integer
+      - description: Absolute window end (unix seconds)
+        in: query
+        name: to
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: object with an events array
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Get dashboard event overlays
       tags:
       - monitoring
   /projects/{projectId}/environments/{envId}/monitoring/{appId}/grafana-link:
@@ -4672,7 +4901,7 @@ paths:
         name: body
         required: true
         schema:
-          $ref: '#/definitions/internal_api.connectGitRepoRequest'
+          $ref: '#/definitions/api.connectGitRepoRequest'
       produces:
       - application/json
       responses:
@@ -4816,7 +5045,7 @@ paths:
         name: body
         required: true
         schema:
-          $ref: '#/definitions/internal_api.createS3BucketRequest'
+          $ref: '#/definitions/api.createS3BucketRequest'
       produces:
       - application/json
       responses:
@@ -4951,14 +5180,14 @@ paths:
         name: body
         required: true
         schema:
-          $ref: '#/definitions/internal_api.bindInstallationRequest'
+          $ref: '#/definitions/api.bindInstallationRequest'
       produces:
       - application/json
       responses:
         "201":
           description: Created
           schema:
-            $ref: '#/definitions/internal_api.gitInstallation'
+            $ref: '#/definitions/api.gitInstallation'
         "400":
           description: Bad Request
           schema:
@@ -5268,7 +5497,7 @@ paths:
         name: body
         required: true
         schema:
-          $ref: '#/definitions/internal_api.ingestLogsRequest'
+          $ref: '#/definitions/api.ingestLogsRequest'
       produces:
       - application/json
       responses:
@@ -5348,7 +5577,7 @@ paths:
         name: body
         required: true
         schema:
-          $ref: '#/definitions/internal_api.ingestMetricsRequest'
+          $ref: '#/definitions/api.ingestMetricsRequest'
       produces:
       - application/json
       responses:
