@@ -329,11 +329,17 @@ func (c *Client) EnsureEdgeStackFromGit(ctx context.Context, req CreateEdgeStack
 	return c.CreateEdgeStackFromGit(ctx, req)
 }
 
-// ListContainers lists containers on an endpoint, filtered by label (e.g. "dada.io/app=myapp").
+// ListContainers lists running containers on an endpoint. When labelFilter is
+// non-empty it constrains by label (e.g. "dada.io/app=myapp"); when empty it
+// returns ALL running containers. An empty labelFilter must NOT be sent as
+// {"label":[""]} — Docker reads that as "a label whose key is the empty string"
+// and matches nothing, so the filter param is omitted entirely in that case.
 func (c *Client) ListContainers(ctx context.Context, endpointID int, labelFilter string) ([]Container, error) {
-	filter := fmt.Sprintf(`{"label":[%q]}`, labelFilter)
-	path := fmt.Sprintf("/api/endpoints/%d/docker/containers/json?filters=%s",
-		endpointID, url.QueryEscape(filter))
+	path := fmt.Sprintf("/api/endpoints/%d/docker/containers/json", endpointID)
+	if labelFilter != "" {
+		filter := fmt.Sprintf(`{"label":[%q]}`, labelFilter)
+		path += "?filters=" + url.QueryEscape(filter)
+	}
 	var containers []Container
 	if err := c.doJSON(ctx, http.MethodGet, path, nil, &containers); err != nil {
 		return nil, err

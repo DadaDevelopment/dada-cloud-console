@@ -77,6 +77,18 @@ func (w *VMWatcher) doDiscoverWorkload(ctx context.Context, op db.Operation) err
 	return db.MarkReady(ctx, w.pool, op.ID)
 }
 
+// platformSidecars are the observability/agent containers the platform itself
+// injects onto every enrolled VM at bootstrap. They are NOT part of the user's
+// workload, so discovery excludes them — otherwise their images and (worse) their
+// named volumes would pollute the adopt inventory + external-volume block.
+var platformSidecars = map[string]bool{
+	"portainer_edge_agent": true,
+	"filebeat":             true,
+	"prometheus-agent":     true,
+	"cadvisor":             true,
+	"node_exporter":        true,
+}
+
 // buildDiscoveryResult turns raw proxy containers into the console summary +
 // external-volume block. Pure function (no I/O) so it is unit-testable.
 func buildDiscoveryResult(endpointID int, containers []portainer.Container) discoveryResult {
@@ -84,9 +96,14 @@ func buildDiscoveryResult(endpointID int, containers []portainer.Container) disc
 
 	// namedVols maps a live named-volume name → a mount destination (for the note).
 	namedVols := map[string]string{}
+	skipped := 0
 
 	for _, c := range containers {
 		name := strings.TrimPrefix(firstName(c.Names), "/")
+		if platformSidecars[name] {
+			skipped++
+			continue
+		}
 		dc := discoveredContainer{
 			Name:   name,
 			Image:  c.Image,
@@ -118,6 +135,11 @@ func buildDiscoveryResult(endpointID int, containers []portainer.Container) disc
 		res.Containers = append(res.Containers, dc)
 	}
 
+	if skipped > 0 {
+		res.Warnings = append(res.Warnings, fmt.Sprintf(
+			"excluded %d platform-managed sidecar container(s) (edge agent, filebeat, prometheus-agent, cadvisor, node_exporter) — they are not part of the workload to adopt",
+			skipped))
+	}
 	res.ExternalVolumesYAML = renderExternalVolumesYAML(namedVols)
 	return res
 }

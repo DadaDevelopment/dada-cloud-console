@@ -29,10 +29,24 @@ func TestBuildDiscoveryResult(t *testing.T) {
 		},
 	}
 
+	// A platform sidecar with its own named volume must be excluded so it does
+	// not pollute the inventory or the external-volume block.
+	containers = append(containers, portainer.Container{
+		Names: []string{"/portainer_edge_agent"},
+		Image: "portainer/agent:2.21.0",
+		State: "running",
+		Mounts: []portainer.Mount{
+			{Type: "volume", Name: "portainer_agent_data", Destination: "/data", RW: true},
+		},
+	})
+
 	res := buildDiscoveryResult(3, containers)
 
 	if len(res.Containers) != 2 {
-		t.Fatalf("want 2 containers, got %d", len(res.Containers))
+		t.Fatalf("want 2 workload containers (sidecar excluded), got %d", len(res.Containers))
+	}
+	if strings.Contains(res.ExternalVolumesYAML, "portainer_agent_data") {
+		t.Errorf("sidecar volume leaked into external-volume block:\n%s", res.ExternalVolumesYAML)
 	}
 	if res.Containers[0].Name != "compose-postgres-1" {
 		t.Errorf("name not de-slashed: %q", res.Containers[0].Name)
@@ -41,8 +55,21 @@ func TestBuildDiscoveryResult(t *testing.T) {
 		!strings.Contains(res.ExternalVolumesYAML, "external: true") {
 		t.Errorf("external volume block missing the live PG volume:\n%s", res.ExternalVolumesYAML)
 	}
-	if len(res.Warnings) != 1 || !strings.Contains(res.Warnings[0], "/home/u/nginx.conf") {
+	hasBindWarn := false
+	hasSidecarWarn := false
+	for _, w := range res.Warnings {
+		if strings.Contains(w, "/home/u/nginx.conf") {
+			hasBindWarn = true
+		}
+		if strings.Contains(w, "sidecar") {
+			hasSidecarWarn = true
+		}
+	}
+	if !hasBindWarn {
 		t.Errorf("bind-mount warning missing: %v", res.Warnings)
+	}
+	if !hasSidecarWarn {
+		t.Errorf("sidecar-exclusion warning missing: %v", res.Warnings)
 	}
 	if res.Containers[1].Ports[0] != "443:443/tcp" {
 		t.Errorf("published port not formatted: %v", res.Containers[1].Ports)
