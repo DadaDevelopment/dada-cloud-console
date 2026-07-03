@@ -7,6 +7,8 @@ import type { Messages } from "./common";
 export const apps: Messages = {
   "apps.title": { ru: "Приложения", en: "Applications" },
   "apps.subtitle": { ru: "Управляемые рабочие нагрузки", en: "Managed application workloads" },
+  "apps.infra.title": { ru: "Инфраструктура", en: "Infrastructure" },
+  "apps.infra.subtitle": { ru: "Инфраструктурные сервисы окружения (БД, прокси и т.п.)", en: "Environment infrastructure services (databases, proxies, etc.)" },
 
   "apps.deployFromGit": { ru: "Деплой из Git", en: "Deploy from Git" },
   "apps.deployImage": { ru: "Деплой образа", en: "Deploy image" },

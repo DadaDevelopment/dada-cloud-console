@@ -293,6 +293,19 @@ export interface AppsResponse {
   apps: ResourceSnapshot[];
 }
 
+/** Generic infrastructure resources (kind='Infra'), e.g. a VM stack's pg/nginx. */
+export interface InfraResponse {
+  infra: ResourceSnapshot[];
+}
+
+/** summary_json shape for an Infra resource snapshot (subtype: database/proxy/…). */
+export interface InfraSummary {
+  image?: string;
+  subtype?: string;
+  service?: string;
+  status?: string;
+}
+
 export interface AppServersResponse {
   app_servers: AppServer[];
 }

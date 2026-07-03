@@ -184,6 +184,7 @@ func SetupRouter(pool *pgxpool.Pool, cfg *config.Config) *gin.Engine {
 
 		// Apps
 		api.GET("/projects/:projectId/environments/:envId/apps", h.ListApps)
+		api.GET("/projects/:projectId/environments/:envId/infra", h.ListInfra)
 		api.POST("/projects/:projectId/environments/:envId/apps", h.CreateApp)
 		api.PATCH("/projects/:projectId/environments/:envId/apps/:appName/image", h.UpdateAppImage)
 		api.POST("/projects/:projectId/environments/:envId/apps/:appName/values-token", h.GetValuesToken)

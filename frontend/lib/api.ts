@@ -13,6 +13,7 @@ import type {
   S3BucketsResponse,
   CreateS3BucketResponse,
   AppsResponse,
+  InfraResponse,
   AppServersResponse,
   AppServerResponse,
   CreateAppServerResponse,
@@ -207,6 +208,11 @@ export const databasesApi = {
 export const appsApi = {
   list: (projectId: string, envId: string) =>
     apiFetch<AppsResponse>(`/api/v1/projects/${projectId}/environments/${envId}/apps`),
+
+  // Generic infrastructure resources (kind='Infra') for an environment — e.g. the
+  // postgres/nginx services of a VM compose stack, decomposed from the app services.
+  listInfra: (projectId: string, envId: string) =>
+    apiFetch<InfraResponse>(`/api/v1/projects/${projectId}/environments/${envId}/infra`),
 
   create: (projectId: string, envId: string, data: {
     name: string;

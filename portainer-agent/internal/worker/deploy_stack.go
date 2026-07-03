@@ -60,6 +60,7 @@ func (w *VMWatcher) doDeployStack(ctx context.Context, op db.Operation) error {
 			}); err != nil {
 				return fmt.Errorf("redeploy stack: %w", err)
 			}
+			w.syncStackSnapshots(ctx, op, target.EndpointID, p.AppName)
 			return db.MarkReady(ctx, w.pool, op.ID)
 		}
 	}
@@ -77,5 +78,6 @@ func (w *VMWatcher) doDeployStack(ctx context.Context, op db.Operation) error {
 	}); err != nil {
 		return fmt.Errorf("create stack from git: %w", err)
 	}
+	w.syncStackSnapshots(ctx, op, target.EndpointID, p.AppName)
 	return db.MarkReady(ctx, w.pool, op.ID)
 }

@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import { ProjectSwitcher } from "./project-switcher";
+import { EnvSelector } from "./env-selector";
 import { OrgSwitcher } from "./org-switcher";
 import { AccountMenu } from "./account-menu";
 import { ConsoleLangToggle } from "./console-lang-toggle";
@@ -82,6 +83,7 @@ export function TopBar({
         <span className="text-slate-600">/</span>
       </div>
       <ProjectSwitcher />
+      <EnvSelector />
 
       <button
         type="button"

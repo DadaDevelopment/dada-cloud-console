@@ -3209,6 +3209,48 @@ paths:
       summary: Order a managed PostgreSQL database
       tags:
       - database
+  /projects/{projectId}/environments/{envId}/infra:
+    get:
+      description: Returns the environment's Infra resource snapshots (kind='Infra'),
+        such as the databases/proxies of a VM compose stack. Each carries a summary_json
+        with a subtype (database/proxy/cache/…). Read-only.
+      operationId: listInfra
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      - description: Environment UUID
+        in: path
+        name: envId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: object with an infra array
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: List infrastructure resources in an environment
+      tags:
+      - app
   /projects/{projectId}/environments/{envId}/models:
     get:
       description: Returns all AIModel resources in a project environment, with their

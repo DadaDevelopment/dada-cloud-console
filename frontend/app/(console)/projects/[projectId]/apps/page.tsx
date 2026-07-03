@@ -3,7 +3,7 @@ import { useEffect, useState, FormEvent } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { appsApi } from "@/lib/api";
-import type { ResourceSnapshot, AppSummary } from "@/lib/types";
+import type { ResourceSnapshot, AppSummary, InfraSummary } from "@/lib/types";
 import { Modal } from "@/components/ui/modal";
 import { Spinner } from "@/components/ui/spinner";
 import { Breadcrumb } from "@/components/ui/breadcrumb";
@@ -32,6 +32,7 @@ export default function AppsPage() {
   const { project, selectedEnv, role, loading: isLoadingEnvs } = useProjectContext();
   const selectedEnvId = selectedEnv?.id ?? "";
   const [apps, setApps] = useState<ResourceSnapshot[]>([]);
+  const [infra, setInfra] = useState<ResourceSnapshot[]>([]);
   const [isLoadingApps, setIsLoadingApps] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -59,6 +60,12 @@ export default function AppsPage() {
       .then((data) => setApps(data.apps ?? []))
       .catch((err) => setError(err instanceof Error ? err.message : t("apps.error.load")))
       .finally(() => setIsLoadingApps(false));
+    // Infrastructure (kind='Infra') — populated for VM compose stacks (pg/nginx).
+    // Best-effort: a failure here must not block the apps list.
+    appsApi
+      .listInfra(projectId, selectedEnvId)
+      .then((data) => setInfra(data.infra ?? []))
+      .catch(() => setInfra([]));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId, selectedEnvId, isLoadingEnvs]);
 
@@ -205,6 +212,37 @@ export default function AppsPage() {
               </Link>
             );
           })}
+        </div>
+      )}
+
+      {infra.length > 0 && (
+        <div className="mt-10">
+          <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">{t("apps.infra.title")}</h2>
+          <p className="mt-0.5 mb-4 text-sm text-gray-500 dark:text-gray-400">{t("apps.infra.subtitle")}</p>
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            {infra.map((r) => {
+              const s = r.summary_json as unknown as InfraSummary;
+              return (
+                <div
+                  key={r.id}
+                  className="rounded-xl border border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-gray-900/60 p-5 shadow-sm"
+                >
+                  <div className="mb-2 flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <p className="font-mono text-sm font-semibold text-gray-900 dark:text-gray-100">{r.name}</p>
+                      <p className="mt-0.5 font-mono text-xs text-gray-400 dark:text-gray-500 truncate">{s.image ?? "—"}</p>
+                    </div>
+                    {s.subtype && (
+                      <span className="shrink-0 rounded-full bg-slate-200 dark:bg-slate-700 px-2 py-0.5 text-xs font-medium text-slate-700 dark:text-slate-200">
+                        {s.subtype}
+                      </span>
+                    )}
+                  </div>
+                  <PhaseBadge phase={r.phase} />
+                </div>
+              );
+            })}
+          </div>
         </div>
       )}
 
