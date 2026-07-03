@@ -79,15 +79,15 @@ discovery, the one console-orchestrated bootstrap in Phase 2, and a single manua
   the AppServer detail page (`POST …/app-servers/{name}/discover`, 202 → poll).
   ⇒ Phase 0 is now a **console action on an enrolled VM**, no SSH. The SSH
   `vm-discover.sh` remains only as a pre-enroll fallback (identical artifact).
-- **Secret channel (verified):** creds live in the `env_vars` table
-  (`gitops-agent/internal/worker/envvars.go`) — **AES-GCM encrypted at rest**,
-  decrypted **only at render time** (`resolveRuntimeEnv`), **never** in
-  `operations.payload`. For the compose/VM track the renderer merges plain +
-  secret into the app's `.env` (`doCreateComposeApp`, `dbwatcher.go:617-633`);
-  that `.env` still lands plaintext in the gitops repo (no SealedSecret channel
-  for compose today — the platform ceiling). So "the secret channel" means:
-  register creds as `env_vars(is_secret=true)`, let the agent render `.env` — do
-  **not** hand-write `.env` into git.
+- **Config/creds for a compose app = the compose-native `.env` file** (owner
+  decision), authored directly in the console file editor (`handleFileWS` edits
+  `compose.yaml`/`.env` → commit → auto-redeploy) — **not** the `env_vars` DB
+  table. The `env_vars` path exists (`envvars.go`: AES-GCM at rest, rendered to
+  `.env` at deploy) but is over-indirection for a single VM stack; the `.env`
+  file is the mechanism compose already has and the same editor k8s uses for
+  `values.yaml`. Either way the final `.env` is plaintext in the gitops repo (no
+  SealedSecret for compose — the platform ceiling); the choice is purely about
+  the authoring surface (file, not table).
 - **Retiring the hand-run containers is a MANUAL, non-cloud step (owner
   decision):** we do **not** add a cloud stop/remove verb to `portainer-agent`.
   Before the stack deploy the operator stops the old containers by hand (Portainer
@@ -158,17 +158,17 @@ Under `clusters/beget-prod/projects/<fin-data-slug>/environments/prod/apps/<app>
 - `compose.yaml` reproducing Phase-0 reality: exact current **image tags** (this
   is the baseline the future "bump the digit" diffs against), matching ports and
   networks, and the **`volumes.compose.yaml` external block pasted verbatim**.
-- **Secrets via the platform secret channel — do NOT hand-write `.env` into git.**
-  Register the Phase-0-discovered runtime env (PG creds, the apps' DSN) as
-  `env_vars` rows for this compose app via the console, `is_secret=true`,
-  `scope=runtime`. They are stored **AES-GCM encrypted at rest** and the
-  gitops-agent renders the `.env` at deploy time (`resolveRuntimeEnv` →
-  `RenderEnvFile`); creds never pass through `operations.payload`. Single source,
-  editable in console, re-resolved on redeploy.
-  - Honest caveat: on the compose track the rendered `.env` still lands as
-    plaintext in the gitops repo (no SealedSecret for compose today). This is the
-    platform's current ceiling and matches every other app; the win is *encrypted
-    at rest + single source + not in payloads*, not *secrets never in git*.
+- **Config/creds the compose-native way — the `.env` file, not the `env_vars`
+  table.** (Owner decision: no DB-table indirection for a VM compose app; use the
+  mechanism compose already has and the same file editor k8s apps use for
+  `values.yaml`.) Options, both compose-standard:
+  - the sibling **`.env`** file (interpolated into `compose.yaml` `${VAR}` and
+    passed as `environment`), OR
+  - inline **`environment:` / `env_file:`** in `compose.yaml`.
+  Author it through the console's file editor (`handleFileWS` edits
+  `compose.yaml` and `.env` directly → commit → auto-redeploy) — no `env_vars`
+  rows, no render-from-DB step. Same secret-in-git ceiling as everything else
+  (no SealedSecret for compose), but native and single-file.
   - The creds MUST be the **real init-time creds baked into the existing PG
     volume** (from Phase 0 `inspect/*.json`), because the external volume is
     already initialised — the apps' DSN has to match what's on disk.
@@ -183,11 +183,11 @@ artifact.
 **Authoring mechanism (verified in code):** compose apps are edited through the
 console's file editor (`gitops-agent` `handleFileWS`) — `compose.yaml` and `.env`
 are committed to git on save. `RenderComposeSkeleton` only seeds an nginx
-skeleton at create; the **real compose.yaml is authored by editing that file**
-(paste the Phase-0 images/ports/networks + the external-volume block). `.env`
-renders from `env_vars` **at create time** (`doCreateComposeApp`), so register the
-creds *before* creating the app; thereafter the editor can also write `.env`
-directly.
+skeleton at create; the **real compose.yaml + `.env` are authored by editing
+those files directly** (paste the Phase-0 images/ports/networks + the
+external-volume block into `compose.yaml`; type the real env/DSN into `.env`).
+Editing either file commits and auto-redeploys — no `env_vars` table, no
+render-from-DB step.
 
 **Sequencing constraint (important):** every `compose.yaml`/`.env` save
 **auto-enqueues a `DeployStack`** (`ws_handler.go:174`). So finalize authoring
@@ -295,11 +295,11 @@ Lock the release flow (the point of all this):
 | New empty PG volume on first `up` (data loss) | `external: true` + literal `name:` auto-emitted by `vm-discover.sh`; asserted in Phase 3 and Phase 5. |
 | Volume is a bind mount, not named | Phase-0 report flags it; mirror host path verbatim. |
 | Two postgres on one datadir during cutover (corruption) | Old containers **manually stopped before** stack deploy (Phase 4); mandatory backup ×2 first. |
-| Wrong DB creds in `.env` | Real init-time creds captured from `inspect/*.json`, entered via secret channel; data safe regardless. |
+| Wrong DB creds in `.env` | Real init-time creds captured from `inspect/*.json`, typed into `.env` via the file editor; data safe regardless. |
 | Accidental `down -v`/prune | `Prune:false` kept; external volume; explicit ban documented. |
 | SSH used to hand-fix prod | Read-only discovery + one console bootstrap + one manual `stop` at cutover; nothing else. |
 | Bootstrap disturbs prod | Idempotent, Docker-guarded, additive; verified before any deploy. |
-| Secrets in git `.env` | Registered as `env_vars(is_secret=true)` — encrypted at rest, not in payloads; rendered `.env` still plaintext-in-git (platform ceiling, accepted). |
+| Secrets in git `.env` | Compose-native `.env` in the gitops repo (plaintext — platform ceiling for compose, no SealedSecret; accepted). Authored via the file editor, not the `env_vars` table. |
 
 ## Execution checklist
 
@@ -308,7 +308,8 @@ Lock the release flow (the point of all this):
       the operation). SSH `vm-discover.sh` kept as pre-enroll fallback. Run
       against fin-data (enrolled) to fill the inventory.
 - [ ] **Phase 1** author `compose.yaml` (external volume) in git; register creds
-      via secret channel (`env_vars`, no hand `.env`); dry-render diff vs inspect.
+      config/creds typed into the compose-native `.env` via the file editor (no
+      `env_vars` table); dry-render diff vs inspect.
 - [x] **Phase 3** tooling: `scripts/vm-rehearse.sh` (adoption + release + negative
       control) — verified `ALL CHECKS PASSED`, exit 0, self-cleaning. Re-run on a
       disposable endpoint once Phase-1 compose/`.env` exist.
