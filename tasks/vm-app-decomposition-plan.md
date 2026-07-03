@@ -50,7 +50,7 @@ removing the mis-placed `app_server_id`.
 - TODO: audit every place that assumes one env per project (frontend default-env
   resolution, project overview, apiFetch env id source) so Phase 3 is complete.
 
-### Phase 1 — MODEL: give findata its own environment (backend/data)
+### Phase 1 — MODEL ✅ DONE (env findata, runtime=vm, bound; k8s prod unbound)
 - Create env `findata` (name; namespace can stay `fin-core-prod` or a distinct
   one — decide) in project fin-core, **type=vm/compose, runtime=compose**,
   `app_server_id`=findata.
@@ -62,7 +62,7 @@ removing the mis-placed `app_server_id`.
 - Acceptance: `GetComposeDeployTarget(fin-core, findata)` → endpoint 3; k8s `prod`
   env no longer has an app_server; running containers unaffected.
 
-### Phase 2 — DECOMPOSE: apps + infra records in the findata env
+### Phase 2 — DECOMPOSE ✅ DONE (App/profi, App/profi-backend, Infra/postgres, Infra/nginx in findata; classifier wired into DeployStack)
 - Classify the stack's discovered services (reuse DiscoverWorkload data): app
   images → `App` (profi, profi-backend); infra images (postgres/nginx/redis/…) →
   infra kinds (`postgres` → ServiceDatabase-like, `nginx` → Ingress-like, or a
@@ -75,7 +75,7 @@ removing the mis-placed `app_server_id`.
 - Acceptance: `ListApps(fin-core, findata)` returns profi + profi-backend;
   infra listed separately; k8s `prod` env still returns its own profi/profi-backend.
 
-### Phase 3 — FRONTEND: make the VM environment navigable
+### Phase 3 — FRONTEND ✅ DONE (env switcher restored w/ >=2 guard; Infrastructure section)
 - Teach the console to show the app-server as an environment view (the app-server
   page is the natural home: "Applications" + "Infrastructure" sections for its
   env), OR re-introduce a minimal env switch scoped to VM envs.
