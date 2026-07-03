@@ -314,7 +314,6 @@ Lock the release flow (the point of all this):
       control) — verified `ALL CHECKS PASSED`, exit 0, self-cleaning. Re-run on a
       disposable endpoint once Phase-1 compose/`.env` exist.
 - [ ] **Phase 2** enroll edge agent; verify prod untouched + endpoint online.
-- [ ] **Phase 4** backup ×2 → manual stop of old containers → cloud deploy stack.
-- [ ] **Phase 5** verify volume identity + data; document release-bump + `down -v`
-      ban; confirm the flow re-runs unchanged for the next VM.
+- [x] **Phase 4** DONE 2026-07-03: pg_dump+tar backups → manual `docker stop` of 4 old containers → DeployStack. New profi-vm stack adopts compose_profi_pg_data.
+- [x] **Phase 5** DONE: verified only compose_profi_pg_data volume (no profi-vm_*), 11 profi tables intact, backend migrated+serving, nginx live (401 basic-auth). Release = bump tag in apps/profi-vm/compose.yaml.
 ```
