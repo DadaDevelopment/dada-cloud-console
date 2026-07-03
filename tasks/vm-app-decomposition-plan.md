@@ -90,11 +90,28 @@ removing the mis-placed `app_server_id`.
 - Document: app-server = env; compose stack = atomic deploy; services surfaced as
   apps+infra; release = bump tag in the stack's compose.yaml.
 
-## Open decisions (pin before coding)
+## Decisions (PINNED 2026-07-03)
 
-1. **Infra kind mapping**: postgres → `ServiceDatabase`(V2) vs a new generic
-   `Infra` kind; nginx → `Ingress` vs generic. (Simplest: generic `Infra` kind
-   with a subtype, so any compose infra maps without forcing k8s semantics.)
-2. **Namespace** for the findata env: reuse `fin-core-prod` or a distinct one.
-3. **Decomposition source of truth**: one-shot vs wired-into-deploy (reproducible).
-4. **Frontend home**: app-server-page-as-env-view vs restore a VM env switch.
+1. **Infra kind = generic `Infra`** with a `subtype` in summary_json
+   (database/proxy/cache/…). Any compose infra maps without forcing k8s semantics.
+   postgres → Infra{subtype:database}, nginx → Infra{subtype:proxy}.
+2. **Namespace** for the findata env: reuse `fin-core-prod` (default).
+3. **Decomposition = wired into the deploy/discovery path** (reproducible for the
+   next VM), not a one-shot hand-populate.
+4. **Frontend = restore the env switcher** (partial revert of env-collapse):
+   full multi-env navigation (k8s `prod` ⇆ `findata`). More code + regression risk
+   across all projects — the env-collapsed single-env UX must stay correct when a
+   project has exactly one env.
+
+## Execution order (like the discovery feature: code → CI → deploy → prod data)
+
+1. **Backend**: generic `Infra` kind (list endpoint / include in resource views);
+   VM-env creation path; classifier (app vs infra by image) wired into
+   DeployStack/Discovery so the findata env's App+Infra snapshots stay in sync.
+2. **Frontend**: restore env switcher (guard: 1-env projects unchanged); render an
+   Infrastructure section alongside Applications; VM env shows profi/profi-backend
+   + pg/nginx.
+3. **CI + deploy** the 6 images (main → build → argo).
+4. **Prod data**: create env `findata` (runtime=compose, app_server=findata),
+   unbind app_server from the k8s `prod` env, move the profi-vm stack path to the
+   new env; let the classifier populate App+Infra. Verify UI + running stack intact.
