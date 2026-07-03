@@ -35,16 +35,18 @@ func ClaimPending(ctx context.Context, pool *pgxpool.Pool) ([]Operation, error) 
 	defer tx.Rollback(ctx) //nolint:errcheck
 
 	// gitops-agent owns git rendering for ALL runtimes (k8s Helm apps and VM
-	// compose apps alike). The portainer-agent owns VM/endpoint lifecycle and
-	// stack deploys, so those actions are excluded here. The split is purely by
-	// action, making the two claim sets disjoint regardless of env.runtime.
+	// compose apps alike). The portainer-agent owns VM/endpoint lifecycle,
+	// stack deploys, and read-only workload discovery, so those actions are
+	// excluded here. The split is purely by action, making the two claim sets
+	// disjoint regardless of env.runtime — this list MUST mirror the exclusion of
+	// portainer-agent's ClaimPending include list (add new VM actions to both).
 	rows, err := tx.Query(ctx, `
 		UPDATE operations
 		SET    status = 'Processing', updated_at = NOW()
 		WHERE  id IN (
 			SELECT o.id FROM operations o
 			WHERE  o.status = 'Created'
-			  AND  o.action NOT IN ('CreateAppServer', 'DeleteAppServer', 'DeployStack')
+			  AND  o.action NOT IN ('CreateAppServer', 'DeleteAppServer', 'DeployStack', 'DiscoverWorkload')
 			ORDER  BY o.created_at
 			LIMIT  $1
 			FOR UPDATE SKIP LOCKED
