@@ -35,8 +35,8 @@ untouched — the exact same path for every VM.
 ┌ Phase 2  ENROLL ───────────── console-driven (one SSH bootstrap) ──────────┐
 │  edge agent onto the VM → Portainer controls docker → SSH retired           │
 └─────────────────────────────────────────────────────────────────────────────┘
-┌ Phase 3  REHEARSE ──────────── cloud, throwaway ───────────────────────────┐
-│  prove external-volume adoption + the release bump on disposable infra      │
+┌ Phase 3  REHEARSE ──────────── throwaway (tool: vm-rehearse.sh) ───────────┐
+│  proves external-volume adoption + release bump + negative control (green)  │
 └─────────────────────────────────────────────────────────────────────────────┘
 ┌ Phase 4  CUTOVER ──────────── backup → manual stop → cloud deploy ─────────┐
 │  backup ×2 → operator stops old containers by hand → deploy stack → verify  │
@@ -150,6 +150,22 @@ Under `clusters/beget-prod/projects/<fin-data-slug>/environments/prod/apps/<app>
     volume** (from Phase 0 `inspect/*.json`), because the external volume is
     already initialised — the apps' DSN has to match what's on disk.
 
+**Authoring mechanism (verified in code):** compose apps are edited through the
+console's file editor (`gitops-agent` `handleFileWS`) — `compose.yaml` and `.env`
+are committed to git on save. `RenderComposeSkeleton` only seeds an nginx
+skeleton at create; the **real compose.yaml is authored by editing that file**
+(paste the Phase-0 images/ports/networks + the external-volume block). `.env`
+renders from `env_vars` **at create time** (`doCreateComposeApp`), so register the
+creds *before* creating the app; thereafter the editor can also write `.env`
+directly.
+
+**Sequencing constraint (important):** every `compose.yaml`/`.env` save
+**auto-enqueues a `DeployStack`** (`ws_handler.go:174`). So finalize authoring
+**while the endpoint is NOT yet enrolled** (Phase 2) — an enqueued deploy can't
+land without an edge agent, so it's harmless. This is why **author (Phase 1)
+precedes enroll (Phase 2)**: it makes an accidental early deploy to prod
+impossible. Do not edit these files again until the Phase-4 window.
+
 Acceptance: a `docker compose config` dry render shows the datadir bound to the
 **existing external volume**, no volume redefinition; the rendered `.env` carries
 the Phase-0 creds (not guesses).
@@ -169,20 +185,27 @@ never stops/removes/reconfigures prod containers or volumes.
 - From here, discovery can also be re-confirmed via `ListContainers` (Portainer
   docker proxy) with no SSH — useful for VM #2+ as a cross-check.
 
-## Phase 3 — REHEARSE (cloud, throwaway)
+## Phase 3 — REHEARSE (throwaway) ✅ tooling landed + green
 
-On a disposable VM/endpoint, prove the two mechanics that must never fail on
-prod, entirely through the cloud path:
+`scripts/vm-rehearse.sh` proves the two mechanics that must never fail on prod,
+on throwaway local Docker, self-cleaning. Run it; it must exit 0 before any prod
+cutover. It asserts:
 
-1. Init a Postgres in a named volume, write a sentinel row.
-2. Deploy the Phase-1-style compose (external volume pinned) via the real
-   `CreateStackFromGit` path. Assert: sentinel survives, **no new `<stack>_*`
-   volume** appears.
-3. Simulate a release: bump the app image tag in git → redeploy → app container
-   recreated, **DB volume untouched**.
-4. Exercise the Phase-4 takeover mechanism (below) end-to-end here first.
+1. Seed a stand-in "prod" PG named volume + sentinel row, then stop the container
+   (data stays in the volume) — mirrors the Phase-4 manual stop.
+2. **Adoption:** deploy a compose with the volume pinned `external: true` →
+   asserts **no fresh `<stack>_pgdata`** appears and the **sentinel survives**.
+3. **Release bump:** change the app image tag → redeploy → asserts the **DB
+   volume is untouched** and the sentinel is intact.
+4. **Negative control:** a naive (non-external) compose → asserts it creates a
+   fresh empty `<stack>_pgdata` with **no sentinel** — the exact data-loss the
+   external pin prevents, made concrete.
 
-Green here gates prod.
+Verified: `ALL CHECKS PASSED`, exit 0, zero leftovers. The one gap vs prod is the
+transport (local `docker compose` here vs `CreateStackFromGit` on the endpoint);
+the volume-identity + release semantics it proves are transport-independent. Re-run
+after Phase 1's real compose/`.env` exist to rehearse them verbatim on a
+disposable endpoint.
 
 ## Phase 4 — CUTOVER (backup → manual stop → cloud deploy)
 
@@ -254,7 +277,9 @@ Lock the release flow (the point of all this):
       external-volume block). Run it against fin-data to fill the inventory.
 - [ ] **Phase 1** author `compose.yaml` (external volume) in git; register creds
       via secret channel (`env_vars`, no hand `.env`); dry-render diff vs inspect.
-- [ ] **Phase 3** rehearse adoption + release bump on throwaway (before prod).
+- [x] **Phase 3** tooling: `scripts/vm-rehearse.sh` (adoption + release + negative
+      control) — verified `ALL CHECKS PASSED`, exit 0, self-cleaning. Re-run on a
+      disposable endpoint once Phase-1 compose/`.env` exist.
 - [ ] **Phase 2** enroll edge agent; verify prod untouched + endpoint online.
 - [ ] **Phase 4** backup ×2 → manual stop of old containers → cloud deploy stack.
 - [ ] **Phase 5** verify volume identity + data; document release-bump + `down -v`
