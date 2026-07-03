@@ -38,16 +38,17 @@ untouched — the exact same path for every VM.
 ┌ Phase 3  REHEARSE ──────────── cloud, throwaway ───────────────────────────┐
 │  prove external-volume adoption + the release bump on disposable infra      │
 └─────────────────────────────────────────────────────────────────────────────┘
-┌ Phase 4  CUTOVER ──────────── 100% cloud (Portainer/gitops) ───────────────┐
-│  backup → cloud-stop old containers → deploy stack (adopts volume) → verify │
+┌ Phase 4  CUTOVER ──────────── backup → manual stop → cloud deploy ─────────┐
+│  backup ×2 → operator stops old containers by hand → deploy stack → verify  │
 └─────────────────────────────────────────────────────────────────────────────┘
 ┌ Phase 5  LOCK-IN ──────────── gitops ──────────────────────────────────────┐
 │  release = bump tag in git; ban down -v; same flow for the next VM          │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
-Everything from Phase 2 on is cloud/gitops. SSH appears only in Phase 0 (read)
-and once in Phase 2 (console bootstrap).
+Everything is cloud/gitops except three bounded manual touches: Phase 0 read-only
+discovery, the one console-orchestrated bootstrap in Phase 2, and a single manual
+`stop` of the old containers at cutover (Phase 4). No cloud kill verb is added.
 
 ## Current state (verified from code)
 
@@ -68,10 +69,20 @@ and once in Phase 2 (console bootstrap).
     `CreateStackFromGit`/`RedeployStack`, **`ListContainers`**, `StreamLogs`.
   - ⇒ once the edge agent is on, Portainer's docker proxy can **read** the
     workload (ListContainers) with no SSH at all.
-- **Gap for a cloud-native cutover:** the client can *list* containers but not
-  *stop/remove* them. The one place the flow needs to retire the hand-run
-  containers (they lock the PG datadir; two postgres on one volume = corruption)
-  currently has no cloud verb. See **Phase 4 / decision**.
+- **Secret channel (verified):** creds live in the `env_vars` table
+  (`gitops-agent/internal/worker/envvars.go`) — **AES-GCM encrypted at rest**,
+  decrypted **only at render time** (`resolveRuntimeEnv`), **never** in
+  `operations.payload`. For the compose/VM track the renderer merges plain +
+  secret into the app's `.env` (`doCreateComposeApp`, `dbwatcher.go:617-633`);
+  that `.env` still lands plaintext in the gitops repo (no SealedSecret channel
+  for compose today — the platform ceiling). So "the secret channel" means:
+  register creds as `env_vars(is_secret=true)`, let the agent render `.env` — do
+  **not** hand-write `.env` into git.
+- **Retiring the hand-run containers is a MANUAL, non-cloud step (owner
+  decision):** we do **not** add a cloud stop/remove verb to `portainer-agent`.
+  Before the stack deploy the operator stops the old containers by hand (Portainer
+  UI preferred; SSH allowed for the stop only), **after a mandatory backup**. No
+  new Go code in the prod-facing agent. See **Phase 4**.
 
 ## The core risk, precisely (PG volume)
 
@@ -124,13 +135,24 @@ Under `clusters/beget-prod/projects/<fin-data-slug>/environments/prod/apps/<app>
 - `compose.yaml` reproducing Phase-0 reality: exact current **image tags** (this
   is the baseline the future "bump the digit" diffs against), matching ports and
   networks, and the **`volumes.compose.yaml` external block pasted verbatim**.
-- `.env` with the real runtime env / DSN from Phase 0. (Plaintext-in-git per the
-  platform's existing convention — `renderer.RenderEnvFile` treats the repo as a
-  secret store. Confirm acceptable for these creds or route via the platform's
-  secret path.)
+- **Secrets via the platform secret channel — do NOT hand-write `.env` into git.**
+  Register the Phase-0-discovered runtime env (PG creds, the apps' DSN) as
+  `env_vars` rows for this compose app via the console, `is_secret=true`,
+  `scope=runtime`. They are stored **AES-GCM encrypted at rest** and the
+  gitops-agent renders the `.env` at deploy time (`resolveRuntimeEnv` →
+  `RenderEnvFile`); creds never pass through `operations.payload`. Single source,
+  editable in console, re-resolved on redeploy.
+  - Honest caveat: on the compose track the rendered `.env` still lands as
+    plaintext in the gitops repo (no SealedSecret for compose today). This is the
+    platform's current ceiling and matches every other app; the win is *encrypted
+    at rest + single source + not in payloads*, not *secrets never in git*.
+  - The creds MUST be the **real init-time creds baked into the existing PG
+    volume** (from Phase 0 `inspect/*.json`), because the external volume is
+    already initialised — the apps' DSN has to match what's on disk.
 
 Acceptance: a `docker compose config` dry render shows the datadir bound to the
-**existing external volume**, no volume redefinition.
+**existing external volume**, no volume redefinition; the rendered `.env` carries
+the Phase-0 creds (not guesses).
 
 ## Phase 2 — ENROLL the edge agent (console-driven; SSH retired after)
 
@@ -162,49 +184,40 @@ prod, entirely through the cloud path:
 
 Green here gates prod.
 
-## Phase 4 — CUTOVER (100% cloud: Portainer + gitops)
+## Phase 4 — CUTOVER (backup → manual stop → cloud deploy)
 
 The one moment we hand running, non-compose containers to compose management.
-Data is preserved because the volume is external; the sequence is fully
-cloud-driven (no SSH):
+Data is preserved because the volume is external. Owner decisions baked in:
+**no cloud kill verb — the operator stops the old containers by hand; a backup is
+mandatory first.**
 
 1. Maintenance window with the customer.
-2. **Backup ×2, via the cloud path** (Portainer exec / a one-shot job container
-   on the endpoint — not an SSH session):
+2. **Backup ×2 — MANDATORY, before touching anything:**
    - `pg_dump -Fc` the DB;
    - volume-level `tar` of the PG volume;
-   - copy both off-box.
-3. **Retire the hand-run containers via the cloud** (they hold the datadir lock;
-   a second postgres on the same volume corrupts it — so the old ones must stop
-   *before* the stack starts). This needs a cloud stop/remove — see the decision
-   below.
-4. **Deploy the stack** (`doDeployStack` → `CreateStackFromGit`). Portainer runs
-   `up`; Postgres attaches the **existing external volume**; apps come up on
-   their real image tags.
-5. **Verify** (Phase 5) before closing the window.
+   - copy both **off-box** and verify they restore.
+   Run via Portainer exec / a one-shot job container (cloud) or read-path SSH —
+   either is fine, it is read-only against the data.
+3. **Operator stops the hand-run containers by hand** (Portainer UI preferred,
+   still cloud; SSH `docker stop` permitted for the *stop only*). They hold the
+   datadir lock — a second postgres on the same volume corrupts it, so the old
+   postgres must be **stopped before the stack starts**. Stop is enough; no
+   `rm` needed (the stack uses its own container names + external volume). **No
+   new agent code for this — deliberate.**
+4. **Deploy the stack via the cloud** (`doDeployStack` → `CreateStackFromGit`).
+   Portainer runs `up`; Postgres attaches the **existing external volume**; apps
+   come up on their real image tags with the `.env` rendered from the secret
+   channel (Phase 1).
+5. **Verify** (Phase 5) before closing the window. Only after green: optionally
+   remove the now-stopped original containers by hand (never `-v`).
 
-Fail-safe: never `down -v`, never prune. On any anomaly, restore from backup; the
-external volume survives every path except an explicit manual delete.
+Fail-safe: never `down -v`, never prune. On any anomaly, restart the old
+containers / restore from backup; the external volume survives every path except
+an explicit manual delete.
 
-### Decision needed — how the cloud retires the old containers
-
-To keep the cutover reproducible and SSH-free, the flow needs a cloud verb to
-stop/remove the pre-existing containers. Options:
-
-- **A. Add `portainer-agent` container-lifecycle methods** (`StopContainer`,
-  `RemoveContainer` over Portainer's docker proxy) + a small **"adopt VM"
-  worker op** that: lists containers → stops the ones the stack will replace →
-  deploys the stack → optionally removes the stopped originals. Fully
-  reproducible, one console action per VM. *(New Go code in the prod-facing
-  agent; most work, best long-term.)*
-- **B. Operator does it in the Portainer UI** (stop the containers), then the
-  console deploys the stack. No new code; reproducible-by-runbook, not by button.
-- **C. compose without matching `container_name`** so there's no name collision,
-  but this does NOT solve the datadir lock — the old postgres must still stop
-  first — so C alone is insufficient and is rejected.
-
-Recommendation: **A** (matches "reproducible flow, all via cloud"), with **B** as
-the interim for the fin-data first-run so we don't block on new agent code.
+The only manual, non-gitops touch in the whole flow is this one **stop** (plus
+read-only discovery). Everything else — author, enroll, deploy, future releases —
+is cloud/gitops and reproducible for the next VM.
 
 ## Phase 5 — LOCK-IN (gitops)
 
@@ -228,21 +241,22 @@ Lock the release flow (the point of all this):
 |------|------------|
 | New empty PG volume on first `up` (data loss) | `external: true` + literal `name:` auto-emitted by `vm-discover.sh`; asserted in Phase 3 and Phase 5. |
 | Volume is a bind mount, not named | Phase-0 report flags it; mirror host path verbatim. |
-| Two postgres on one datadir during cutover (corruption) | Old containers stopped via the cloud **before** stack deploy (Phase 4 decision A/B). |
-| Wrong DB creds in `.env` | Real init-time creds captured from `inspect/*.json`; data safe regardless. |
+| Two postgres on one datadir during cutover (corruption) | Old containers **manually stopped before** stack deploy (Phase 4); mandatory backup ×2 first. |
+| Wrong DB creds in `.env` | Real init-time creds captured from `inspect/*.json`, entered via secret channel; data safe regardless. |
 | Accidental `down -v`/prune | `Prune:false` kept; external volume; explicit ban documented. |
-| SSH used to hand-fix prod | Banned by constraint 1; only read-only discovery + one console bootstrap. |
+| SSH used to hand-fix prod | Read-only discovery + one console bootstrap + one manual `stop` at cutover; nothing else. |
 | Bootstrap disturbs prod | Idempotent, Docker-guarded, additive; verified before any deploy. |
-| Secrets plaintext in git `.env` | Accept per platform convention or route via secret path; call out before writing. |
+| Secrets in git `.env` | Registered as `env_vars(is_secret=true)` — encrypted at rest, not in payloads; rendered `.env` still plaintext-in-git (platform ceiling, accepted). |
 
 ## Execution checklist
 
 - [x] **Phase 0** tooling: `scripts/vm-discover.sh` (read-only inventory +
       external-volume block). Run it against fin-data to fill the inventory.
-- [ ] **Phase 1** author `compose.yaml` + `.env`; dry-render diff vs inspect.
+- [ ] **Phase 1** author `compose.yaml` (external volume) in git; register creds
+      via secret channel (`env_vars`, no hand `.env`); dry-render diff vs inspect.
 - [ ] **Phase 3** rehearse adoption + release bump on throwaway (before prod).
 - [ ] **Phase 2** enroll edge agent; verify prod untouched + endpoint online.
-- [ ] **Phase 4** decision A vs B for cloud container-retire; backup ×2; cutover.
+- [ ] **Phase 4** backup ×2 → manual stop of old containers → cloud deploy stack.
 - [ ] **Phase 5** verify volume identity + data; document release-bump + `down -v`
       ban; confirm the flow re-runs unchanged for the next VM.
 ```
