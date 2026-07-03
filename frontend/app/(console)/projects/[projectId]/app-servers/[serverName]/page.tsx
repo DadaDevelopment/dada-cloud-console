@@ -1,8 +1,8 @@
 "use client";
 import { FormEvent, useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { appServersApi } from "@/lib/api";
-import type { AppServer, AppServerState } from "@/lib/types";
+import { appServersApi, projectsApi } from "@/lib/api";
+import type { AppServer, AppServerState, WorkloadDiscovery } from "@/lib/types";
 import { Badge } from "@/components/ui/badge";
 import { Modal } from "@/components/ui/modal";
 import { Spinner } from "@/components/ui/spinner";
@@ -27,6 +27,35 @@ export default function AppServerDetailPage() {
   const [state, setState] = useState<AppServerState | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+
+  const [discovering, setDiscovering] = useState(false);
+  const [discovery, setDiscovery] = useState<WorkloadDiscovery | null>(null);
+  const [discoverError, setDiscoverError] = useState<string | null>(null);
+
+  async function handleDiscover() {
+    setDiscoverError(null);
+    setDiscovery(null);
+    setDiscovering(true);
+    try {
+      const { operation } = await appServersApi.discover(projectId, serverName);
+      let op = operation;
+      for (let i = 0; i < 40 && op.status !== "Ready" && op.status !== "Failed"; i++) {
+        await new Promise((r) => setTimeout(r, 1500));
+        op = (await projectsApi.getOperation(projectId, op.id)).operation;
+      }
+      if (op.status === "Failed") {
+        throw new Error(op.error_message || t("appServers.discover.failed"));
+      }
+      if (op.status !== "Ready") {
+        throw new Error(t("appServers.discover.timeout"));
+      }
+      setDiscovery((op.validation_result as WorkloadDiscovery) ?? null);
+    } catch (err) {
+      setDiscoverError(err instanceof Error ? err.message : t("appServers.discover.failed"));
+    } finally {
+      setDiscovering(false);
+    }
+  }
 
   const [retryOpen, setRetryOpen] = useState(false);
   const [retrySubmitting, setRetrySubmitting] = useState(false);
@@ -126,6 +155,20 @@ export default function AppServerDetailPage() {
               {t("appServers.retry.button")}
             </button>
           )}
+          {canManage && server.portainer_endpoint_id != null && (
+            <button
+              onClick={handleDiscover}
+              disabled={discovering}
+              className="ml-auto inline-flex items-center gap-2 rounded-lg border border-gray-300 dark:border-gray-700 px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-200 transition-colors hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-50"
+            >
+              {discovering ? <Spinner size="sm" /> : (
+                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-4.35-4.35M11 19a8 8 0 100-16 8 8 0 000 16z" />
+                </svg>
+              )}
+              {t("appServers.discover.button")}
+            </button>
+          )}
         </div>
         {server.error_message && <p className="mt-1 text-sm text-red-600 dark:text-red-400">{server.error_message}</p>}
       </div>
@@ -141,6 +184,62 @@ export default function AppServerDetailPage() {
           </div>
         ))}
       </div>
+
+      {discoverError && (
+        <div role="alert" className="mb-6 rounded-lg border border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-950/40 px-4 py-3 text-sm text-red-700 dark:text-red-300">
+          {discoverError}
+        </div>
+      )}
+
+      {discovery && (
+        <div className="mb-6 rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-5 shadow-sm">
+          <div className="mb-3 flex items-center justify-between gap-2">
+            <h2 className="text-sm font-semibold text-gray-900 dark:text-gray-100">{t("appServers.discover.title")}</h2>
+            <span className="text-xs text-gray-400 dark:text-gray-500">{t("appServers.discover.readonly")}</span>
+          </div>
+
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-sm">
+              <thead>
+                <tr className="text-xs uppercase tracking-wide text-gray-400 dark:text-gray-500">
+                  <th className="py-1 pr-4 font-semibold">{t("appServers.discover.col.container")}</th>
+                  <th className="py-1 pr-4 font-semibold">{t("appServers.discover.col.image")}</th>
+                  <th className="py-1 pr-4 font-semibold">{t("appServers.discover.col.ports")}</th>
+                  <th className="py-1 font-semibold">{t("appServers.discover.col.volumes")}</th>
+                </tr>
+              </thead>
+              <tbody className="font-mono text-xs">
+                {discovery.containers.map((c) => (
+                  <tr key={c.name} className="border-t border-gray-100 dark:border-gray-800 align-top">
+                    <td className="py-1.5 pr-4 text-gray-900 dark:text-gray-100">{c.name}</td>
+                    <td className="py-1.5 pr-4 text-gray-600 dark:text-gray-400">{c.image}</td>
+                    <td className="py-1.5 pr-4 text-gray-600 dark:text-gray-400">{c.ports.join(", ") || "—"}</td>
+                    <td className="py-1.5 text-gray-600 dark:text-gray-400">
+                      {c.mounts.filter((m) => m.type === "volume").map((m) => m.name).join(", ") || "—"}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          <div className="mt-4">
+            <div className="mb-1 flex items-center justify-between gap-2">
+              <p className="text-xs font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500">{t("appServers.discover.externalVolumes")}</p>
+              <CopyButton value={discovery.external_volumes_yaml} className="shrink-0" />
+            </div>
+            <pre className="overflow-x-auto rounded-lg bg-gray-50 dark:bg-gray-950 p-3 font-mono text-xs text-gray-800 dark:text-gray-200">{discovery.external_volumes_yaml}</pre>
+          </div>
+
+          {discovery.warnings.length > 0 && (
+            <ul className="mt-3 space-y-1 text-xs text-amber-700 dark:text-amber-300">
+              {discovery.warnings.map((wm, i) => (
+                <li key={i}>⚠ {wm}</li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
 
       <div className="mb-6">
         <FixedMetricsDashboard kind="vm" projectId={projectId} serverName={serverName} />

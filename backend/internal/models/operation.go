@@ -95,6 +95,14 @@ type DeleteAppServerPayload struct {
 	AppServerName string `json:"app_server_name"`
 }
 
+// DiscoverWorkloadPayload is the typed payload for DiscoverWorkload operations:
+// a read-only inventory of an enrolled VM's running containers/volumes via the
+// Portainer docker proxy (no SSH). EndpointID is the VM's Portainer endpoint.
+type DiscoverWorkloadPayload struct {
+	ServerName string `json:"server_name"`
+	EndpointID int    `json:"endpoint_id"`
+}
+
 // UpdateAppEnvVarsPayload is the typed payload for UpdateAppEnvVars operations (VM track only).
 type UpdateAppEnvVarsPayload struct {
 	AppName string            `json:"app_name"`
@@ -192,8 +200,8 @@ type Operation struct {
 	ActorID          uuid.UUID       `json:"actor_id"                    db:"actor_id"`
 	ProjectID        uuid.UUID       `json:"project_id"                  db:"project_id"`
 	EnvironmentID    *uuid.UUID      `json:"environment_id,omitempty"    db:"environment_id"`
-	Action           string          `json:"action"                      db:"action"`           // CreateServiceDatabase, CreateApp, etc.
-	ResourceKind     string          `json:"resource_kind"               db:"resource_kind"`    // ServiceDatabase, App, ServiceEndpoint
+	Action           string          `json:"action"                      db:"action"`        // CreateServiceDatabase, CreateApp, etc.
+	ResourceKind     string          `json:"resource_kind"               db:"resource_kind"` // ServiceDatabase, App, ServiceEndpoint
 	ResourceName     string          `json:"resource_name"               db:"resource_name"`
 	Status           OperationStatus `json:"status"                      db:"status"`
 	Payload          json.RawMessage `json:"payload"                     db:"payload"`

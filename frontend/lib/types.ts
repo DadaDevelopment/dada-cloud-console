@@ -195,8 +195,34 @@ export interface Operation {
   argo_application?: string;
   error_code?: string;
   error_message?: string;
+  validation_result?: WorkloadDiscovery | Record<string, unknown> | null;
   created_at: string;
   updated_at: string;
+}
+
+export interface WorkloadDiscoveryMount {
+  type: string;
+  name?: string;
+  source?: string;
+  destination: string;
+  rw: boolean;
+}
+
+export interface WorkloadDiscoveryContainer {
+  name: string;
+  image: string;
+  state: string;
+  status: string;
+  ports: string[];
+  mounts: WorkloadDiscoveryMount[];
+}
+
+/** Result of a read-only DiscoverWorkload operation (Portainer docker proxy). */
+export interface WorkloadDiscovery {
+  endpoint_id: number;
+  containers: WorkloadDiscoveryContainer[];
+  external_volumes_yaml: string;
+  warnings: string[];
 }
 
 export interface ResourceSnapshot {

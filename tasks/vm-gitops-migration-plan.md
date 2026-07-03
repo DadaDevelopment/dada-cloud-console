@@ -25,9 +25,10 @@ untouched — the exact same path for every VM.
 ## The reproducible flow (overview)
 
 ```
-┌ Phase 0  DISCOVER ──────────── read-only SSH ──────────────────────────────┐
-│  scripts/vm-discover.sh user@host  →  inventory + volumes.compose.yaml      │
-│  (auto-pins every named volume external — the data-safety artifact)         │
+┌ Phase 0  DISCOVER ──────── cloud (console button) · SSH = fallback ─────────┐
+│  console "Discover workload" → DiscoverWorkload op → Portainer proxy read   │
+│  → inventory + external-volume block (auto-pinned, the data-safety artifact)│
+│  (pre-enroll only: scripts/vm-discover.sh SSH produces the same artifact)   │
 └─────────────────────────────────────────────────────────────────────────────┘
 ┌ Phase 1  AUTHOR ────────────── git (cloud) ────────────────────────────────┐
 │  gitops compose.yaml + .env that MATCH prod byte-for-byte, external volumes │
@@ -69,6 +70,15 @@ discovery, the one console-orchestrated bootstrap in Phase 2, and a single manua
     `CreateStackFromGit`/`RedeployStack`, **`ListContainers`**, `StreamLogs`.
   - ⇒ once the edge agent is on, Portainer's docker proxy can **read** the
     workload (ListContainers) with no SSH at all.
+- **Cloud discovery — BUILT this iteration (read-only):** `ListContainers` was
+  too thin (only names/state/labels), so it was widened to carry `Image`,
+  `Ports`, `Mounts` (Docker `/containers/json` already returns them), and a new
+  **`DiscoverWorkload` operation** (portainer-agent `discover_workload.go`) reads
+  the endpoint and writes an inventory + the auto-pinned external-volume block to
+  `operations.validation_result`. Surfaced as a **"Discover workload" button** on
+  the AppServer detail page (`POST …/app-servers/{name}/discover`, 202 → poll).
+  ⇒ Phase 0 is now a **console action on an enrolled VM**, no SSH. The SSH
+  `vm-discover.sh` remains only as a pre-enroll fallback (identical artifact).
 - **Secret channel (verified):** creds live in the `env_vars` table
   (`gitops-agent/internal/worker/envvars.go`) — **AES-GCM encrypted at rest**,
   decrypted **only at render time** (`resolveRuntimeEnv`), **never** in
@@ -107,18 +117,31 @@ volumes:
 the name is never hand-typed. Bind mount instead of named volume? The report
 flags it; mirror the host path verbatim.
 
-## Phase 0 — DISCOVER (read-only SSH) ✅ tooling landed
+## Phase 0 — DISCOVER (cloud-native; SSH = fallback) ✅ built
 
-Run the committed, read-only inventory tool. Zero mutation; every remote command
-is `inspect`/`ls`/`version`:
+**Primary path — console, no SSH.** On an enrolled VM, click **"Discover
+workload"** on the AppServer detail page. It enqueues a read-only
+`DiscoverWorkload` op; the portainer-agent reads the endpoint via the Portainer
+docker proxy (`ListContainers`, widened to carry Image/Ports/Mounts) and returns
+an inventory + the **auto-pinned external-volume block** on the operation. The
+console renders the container table, the ready-to-paste `volumes:` block (with a
+copy button), and **bind-mount warnings** (mirror host paths verbatim). Zero
+mutation — it only lists.
+
+Sequencing note: discovery is read-only and safe on an enrolled endpoint, so the
+clean order is **enroll → discover (cloud) → author**. The one caveat is that
+*authoring/creating the compose app* is what triggers a deploy (see Phase 1), so
+keep that for the cutover window — discovery itself never deploys.
+
+**Fallback — pre-enroll only.** If the VM has no edge agent yet, the read-only
+SSH tool produces the identical artifact:
 
 ```bash
 scripts/vm-discover.sh root@<fin-data-ip> -i <readonly_key> -o ./vm-discovery
 ```
 
-Produces per VM: `REPORT.md` (images, tags, ports, restart, networks, mounts),
-`inspect/*.json` (the record), `volumes.json`, and the safety artifact
-`volumes.compose.yaml` (**external-volume block, names auto-pinned**).
+Both paths emit the same safety artifact: the external-volume block with every
+named volume pinned `external: true` to its literal live name.
 
 Also capture the **real DB creds**: `POSTGRES_*` env is only read at first
 `initdb`; the prod volume is already initialised, so those are cosmetic for the
@@ -280,8 +303,10 @@ Lock the release flow (the point of all this):
 
 ## Execution checklist
 
-- [x] **Phase 0** tooling: `scripts/vm-discover.sh` (read-only inventory +
-      external-volume block). Run it against fin-data to fill the inventory.
+- [x] **Phase 0** cloud-native: `DiscoverWorkload` op + widened `ListContainers`
+      + console "Discover workload" button (read-only, external-volume block on
+      the operation). SSH `vm-discover.sh` kept as pre-enroll fallback. Run
+      against fin-data (enrolled) to fill the inventory.
 - [ ] **Phase 1** author `compose.yaml` (external volume) in git; register creds
       via secret channel (`env_vars`, no hand `.env`); dry-render diff vs inspect.
 - [x] **Phase 3** tooling: `scripts/vm-rehearse.sh` (adoption + release + negative

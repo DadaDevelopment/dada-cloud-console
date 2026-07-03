@@ -281,6 +281,14 @@ export const appServersApi = {
       { method: "DELETE" }
     ),
 
+  // Read-only workload discovery via the Portainer docker proxy (no SSH). Result
+  // lands on the returned operation's validation_result once it reaches Ready.
+  discover: (projectId: string, serverName: string) =>
+    apiFetch<{ operation: Operation; message: string }>(
+      `/api/v1/projects/${projectId}/app-servers/${serverName}/discover`,
+      { method: "POST" }
+    ),
+
   // VM resource metrics (central Prometheus proxy, node_exporter).
   getMetrics: (projectId: string, serverName: string, range = "1h") =>
     apiFetch<MetricsResponse>(

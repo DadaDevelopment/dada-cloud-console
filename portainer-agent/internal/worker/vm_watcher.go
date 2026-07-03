@@ -83,6 +83,8 @@ func (w *VMWatcher) dispatch(ctx context.Context, op db.Operation) error {
 		return w.doDeleteAppServer(ctx, op)
 	case "DeployStack":
 		return w.doDeployStack(ctx, op)
+	case "DiscoverWorkload":
+		return w.doDiscoverWorkload(ctx, op)
 	default:
 		return fmt.Errorf("unknown vm action: %s", op.Action)
 	}

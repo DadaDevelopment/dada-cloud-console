@@ -29,6 +29,7 @@ const claimBatchSize = 5
 // gitops-agent's claim set):
 //   - CreateAppServer / DeleteAppServer — VM lifecycle (no environment)
 //   - DeployStack — deploy/redeploy a compose stack onto an endpoint
+//   - DiscoverWorkload — read-only inventory of an endpoint's containers/volumes
 func ClaimPending(ctx context.Context, pool *pgxpool.Pool) ([]Operation, error) {
 	tx, err := pool.Begin(ctx)
 	if err != nil {
@@ -42,7 +43,7 @@ func ClaimPending(ctx context.Context, pool *pgxpool.Pool) ([]Operation, error) 
 		WHERE  id IN (
 			SELECT o.id FROM operations o
 			WHERE  o.status = 'Created'
-			  AND  o.action IN ('CreateAppServer', 'DeleteAppServer', 'DeployStack')
+			  AND  o.action IN ('CreateAppServer', 'DeleteAppServer', 'DeployStack', 'DiscoverWorkload')
 			ORDER  BY o.created_at
 			LIMIT  $1
 			FOR UPDATE SKIP LOCKED
@@ -96,6 +97,17 @@ func MarkFailed(ctx context.Context, pool *pgxpool.Pool, id uuid.UUID, code, mes
 // MarkReady sets status=Ready.
 func MarkReady(ctx context.Context, pool *pgxpool.Pool, id uuid.UUID) error {
 	return UpdateStatus(ctx, pool, id, "Ready")
+}
+
+// SaveValidationResult stores a handler's JSON result in operations.validation_result
+// (jsonb). Used by read-only ops like DiscoverWorkload to hand a payload back to
+// the API/console without a bespoke result table.
+func SaveValidationResult(ctx context.Context, pool *pgxpool.Pool, id uuid.UUID, result json.RawMessage) error {
+	_, err := pool.Exec(ctx,
+		`UPDATE operations SET validation_result = $2, updated_at = NOW() WHERE id = $1`,
+		id, result,
+	)
+	return err
 }
 
 // ScrubOperationSecret removes one-shot secret fields from an operation's JSONB

@@ -96,11 +96,37 @@ type CreateEdgeStackGitRequest struct {
 	RepositoryPassword       string `json:"repositoryPassword"`
 }
 
-// Container is a Docker container as returned by the Portainer proxy.
+// Container is a Docker container as returned by the Portainer proxy
+// (GET /containers/json). Image/Ports/Mounts are what a read-only workload
+// discovery needs — especially Mounts, which carry the live named-volume names
+// used to pin the gitops compose `external: true` (the PG data-safety artifact).
 type Container struct {
-	ID     string            `json:"Id"`
-	Names  []string          `json:"Names"`
-	State  string            `json:"State"`
-	Status string            `json:"Status"`
-	Labels map[string]string `json:"Labels"`
+	ID      string            `json:"Id"`
+	Names   []string          `json:"Names"`
+	Image   string            `json:"Image"`
+	ImageID string            `json:"ImageID"`
+	State   string            `json:"State"`
+	Status  string            `json:"Status"`
+	Labels  map[string]string `json:"Labels"`
+	Ports   []Port            `json:"Ports"`
+	Mounts  []Mount           `json:"Mounts"`
+}
+
+// Port is a published/exposed port entry from /containers/json.
+type Port struct {
+	IP          string `json:"IP"`
+	PrivatePort int    `json:"PrivatePort"`
+	PublicPort  int    `json:"PublicPort"`
+	Type        string `json:"Type"`
+}
+
+// Mount is a container mount from /containers/json. For Type=="volume", Name is
+// the live Docker volume name (what the external-volume pin must reference). For
+// Type=="bind", Source is the host path to mirror verbatim.
+type Mount struct {
+	Type        string `json:"Type"`
+	Name        string `json:"Name"`
+	Source      string `json:"Source"`
+	Destination string `json:"Destination"`
+	RW          bool   `json:"RW"`
 }

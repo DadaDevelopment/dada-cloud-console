@@ -62,4 +62,15 @@ export const appServers: Messages = {
   "appServers.retry.submit": { ru: "Повторить", en: "Retry" },
   "appServers.retry.help": { ru: "Подключение завершилось ошибкой. Вставьте SSH-ключ ещё раз, чтобы повторить — он используется однократно и не сохраняется.", en: "The connect failed. Paste the SSH key again to retry — it is used once and not stored." },
   "appServers.error.retry": { ru: "Не удалось повторить подключение", en: "Failed to retry connect" },
+
+  "appServers.discover.button": { ru: "Discovery нагрузки", en: "Discover workload" },
+  "appServers.discover.title": { ru: "Обнаруженная нагрузка", en: "Discovered workload" },
+  "appServers.discover.readonly": { ru: "только чтение · через Portainer, без SSH", en: "read-only · via Portainer, no SSH" },
+  "appServers.discover.failed": { ru: "Не удалось выполнить discovery нагрузки", en: "Workload discovery failed" },
+  "appServers.discover.timeout": { ru: "Discovery не завершился вовремя", en: "Discovery did not finish in time" },
+  "appServers.discover.col.container": { ru: "Контейнер", en: "Container" },
+  "appServers.discover.col.image": { ru: "Образ", en: "Image" },
+  "appServers.discover.col.ports": { ru: "Порты", en: "Ports" },
+  "appServers.discover.col.volumes": { ru: "Тома", en: "Volumes" },
+  "appServers.discover.externalVolumes": { ru: "Блок external-томов для GitOps compose", en: "External-volume block for the GitOps compose" },
 };

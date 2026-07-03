@@ -378,3 +378,90 @@ func (h *Handler) DeleteAppServer(c *gin.Context) {
 
 	c.JSON(http.StatusAccepted, gin.H{"operation": op, "message": "AppServer deletion queued"})
 }
+
+// DiscoverWorkload enqueues a read-only DiscoverWorkload operation that inventories
+// the VM's running containers/volumes via the Portainer docker proxy (no SSH). The
+// result (containers + a ready-to-paste external-volume compose block) lands on the
+// operation's validation_result; poll the operation to read it.
+//
+// @ID          discoverAppServerWorkload
+// @Summary     Discover an app server's running workload (read-only)
+// @Description Inventories the containers, images, ports and named volumes running on an enrolled VM through the Portainer docker proxy — no SSH. Produces an external-volume compose block for the GitOps migration. Requires the VM to be enrolled (has a Portainer endpoint). Asynchronous: returns 202 with an operation; poll it and read validation_result.
+// @Tags        appserver
+// @Produce     json
+// @Security    BearerAuth
+// @Param       projectId  path     string true "Project UUID"
+// @Param       serverName path     string true "App server name"
+// @Success     202        {object} map[string]interface{} "object with the accepted operation"
+// @Failure     401        {object} map[string]string
+// @Failure     403        {object} map[string]string
+// @Failure     404        {object} map[string]string
+// @Failure     409        {object} map[string]string "VM is not enrolled yet"
+// @Router      /projects/{projectId}/app-servers/{serverName}/discover [post]
+func (h *Handler) DiscoverWorkload(c *gin.Context) {
+	claims, ok := auth.GetClaims(c)
+	if !ok {
+		respondUnauthorized(c)
+		return
+	}
+	projectID, err := uuid.Parse(c.Param("projectId"))
+	if err != nil {
+		respondNotFound(c)
+		return
+	}
+	serverName := c.Param("serverName")
+
+	role, err := h.effectiveRole(c.Request.Context(), claims, projectID)
+	if err == pgx.ErrNoRows {
+		respondNotFound(c)
+		return
+	}
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, "failed to check project membership")
+		return
+	}
+	if !canWrite(role) {
+		respondForbidden(c)
+		return
+	}
+
+	// Discovery reads through the Portainer docker proxy, which requires the VM to
+	// be enrolled (have a Portainer endpoint). Reject early if it is not.
+	var endpointID *int
+	err = h.pool.QueryRow(c.Request.Context(),
+		`SELECT portainer_endpoint_id FROM app_servers
+		 WHERE project_id = $1 AND name = $2 AND status != 'Deleted'`,
+		projectID, serverName,
+	).Scan(&endpointID)
+	if err == pgx.ErrNoRows {
+		respondNotFound(c)
+		return
+	}
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, "failed to find app server")
+		return
+	}
+	if endpointID == nil {
+		respondError(c, http.StatusConflict, "app server is not enrolled yet (no Portainer endpoint); enroll it before discovery")
+		return
+	}
+
+	payload := models.DiscoverWorkloadPayload{ServerName: serverName, EndpointID: *endpointID}
+	payloadBytes, _ := json.Marshal(payload)
+
+	var op models.Operation
+	row := h.pool.QueryRow(c.Request.Context(),
+		`INSERT INTO operations (actor_id, project_id, action, resource_kind, resource_name, status, payload)
+		 VALUES ($1, $2, 'DiscoverWorkload', 'AppServer', $3, 'Created', $4)
+		 RETURNING id, actor_id, project_id, environment_id, action, resource_kind, resource_name,
+		           status, payload, validation_result, git_commit, git_path, argo_application,
+		           error_code, error_message, created_at, updated_at`,
+		claims.UserID, projectID, serverName, payloadBytes,
+	)
+	if err := scanOperation(row, &op); err != nil {
+		respondError(c, http.StatusInternalServerError, "failed to create operation")
+		return
+	}
+
+	c.JSON(http.StatusAccepted, gin.H{"operation": op, "message": "workload discovery queued"})
+}
