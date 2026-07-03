@@ -1,287 +1,248 @@
-# fin-data VM → full GitOps migration plan
+# VM → full GitOps: a reproducible flow (fin-data first)
 
-Move the **fin-data prod VM** from its current "partially imported, hand-run
-containers" state onto the same GitOps rails the rest of the platform uses
-(Portainer edge stack pulled from git), **without losing prod data**. The
-single dominating risk is the **Postgres data volume name**: a careless first
-`docker compose up` creates a fresh empty volume and the live DB re-initialises
-on top of nothing while the real data volume is orphaned.
+Bring an existing "hand-run containers" VM onto GitOps rails (Portainer stack
+pulled from git) **without losing prod data**, and do it as a **reproducible,
+VM-agnostic flow** — not a one-off manual setup. fin-data is the first subject;
+the same flow must work for the next VM unchanged.
 
-End state: the next fin-data release is just **bump the image tag digit in the
-gitops `compose.yaml` → console redeploys → Portainer pulls the new image**, PG
-volume untouched.
+Two hard constraints (from the owner):
+
+1. **SSH is READ-ONLY analysis only.** No hand-fixing, restarting, `docker rm`,
+   or reconfiguring the workload over SSH. Every *mutation* of the VM goes
+   **through the cloud** — Portainer (via `portainer-agent`) and gitops. The one
+   sanctioned SSH *write* is the console-orchestrated edge-agent bootstrap
+   (additive, idempotent, never touches prod containers); after that, SSH is
+   never used to change the workload again.
+2. **Reproducible flow, not a bespoke fin-data cutover.** Each step is a
+   parameterized capability (VM = any endpoint, app = any compose app) that we
+   can re-run for VM #2, #3, … The dominating risk — the **Postgres data volume
+   name** — is mitigated by tooling, not by remembering to do the right thing.
+
+End state: a new release is **bump the image tag digit in the gitops
+`compose.yaml` → console redeploys → Portainer pulls the new image**, PG volume
+untouched — the exact same path for every VM.
+
+## The reproducible flow (overview)
+
+```
+┌ Phase 0  DISCOVER ──────────── read-only SSH ──────────────────────────────┐
+│  scripts/vm-discover.sh user@host  →  inventory + volumes.compose.yaml      │
+│  (auto-pins every named volume external — the data-safety artifact)         │
+└─────────────────────────────────────────────────────────────────────────────┘
+┌ Phase 1  AUTHOR ────────────── git (cloud) ────────────────────────────────┐
+│  gitops compose.yaml + .env that MATCH prod byte-for-byte, external volumes │
+└─────────────────────────────────────────────────────────────────────────────┘
+┌ Phase 2  ENROLL ───────────── console-driven (one SSH bootstrap) ──────────┐
+│  edge agent onto the VM → Portainer controls docker → SSH retired           │
+└─────────────────────────────────────────────────────────────────────────────┘
+┌ Phase 3  REHEARSE ──────────── cloud, throwaway ───────────────────────────┐
+│  prove external-volume adoption + the release bump on disposable infra      │
+└─────────────────────────────────────────────────────────────────────────────┘
+┌ Phase 4  CUTOVER ──────────── 100% cloud (Portainer/gitops) ───────────────┐
+│  backup → cloud-stop old containers → deploy stack (adopts volume) → verify │
+└─────────────────────────────────────────────────────────────────────────────┘
+┌ Phase 5  LOCK-IN ──────────── gitops ──────────────────────────────────────┐
+│  release = bump tag in git; ban down -v; same flow for the next VM          │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+Everything from Phase 2 on is cloud/gitops. SSH appears only in Phase 0 (read)
+and once in Phase 2 (console bootstrap).
 
 ## Current state (verified from code)
 
-- **VM (`findata`, Portainer edge endpoint 3)** was brought in by the
+- **fin-data VM** (`findata`, Portainer edge endpoint 3) was brought in by the
   `beget-reader` **adopt** path (`portainer-agent/internal/worker/beget_reader.go`,
-  `terraform/adopt.go`):
-  - an `app_servers` row exists + a Terraform `import {}` with
-    `lifecycle { ignore_changes = all }` — the VM is *frozen/imported*, never
-    mutated by TF.
-  - **SSH bootstrap and Portainer edge enrollment were deliberately skipped**
-    ("an externally created VM has no agent credentials we control").
-  - ⇒ **no Portainer Edge Agent on the VM**, so Portainer cannot push any
-    stack to it yet. Prod runs as **manually-created docker containers**
-    (postgres + the two apps), managed by nobody but the customer/us by hand.
-- **Dev** runs in the k8s cluster (Helm app path); **prod** is this VM. Same two
-  apps, two runtimes. Dev is our free rehearsal environment — it costs nothing
-  to break.
-- **How GitOps deploy works** for VM/compose apps (the target rails):
-  - `gitops-agent` renders `compose.yaml` + sibling `.env` into the gitops repo
-    at `clusters/beget-prod/projects/<projectSlug>/environments/<envSlug>/apps/<app>/compose.yaml`
-    (`renderer.AppComposeGitPath`).
-  - `portainer-agent` `doDeployStack` (`worker/deploy_stack.go`):
-    - if a Portainer **stack with that name already exists** → `RedeployStack`
-      (`PullImage:true, Prune:false`);
-    - else → `CreateStackFromGit` (Portainer clones the gitops repo, runs
-      `docker compose -f compose.yaml up` with **project name = stack name**).
-  - The existing prod containers are **not** a Portainer stack, so the very
-    first deploy takes the `CreateStackFromGit` branch — this is the dangerous
-    moment.
+  `terraform/adopt.go`): `app_servers` row + frozen Terraform `import {}`
+  (`ignore_changes = all`). **SSH bootstrap + Portainer enrollment were skipped**
+  → **no edge agent yet**, so Portainer can't manage it. Prod (postgres + two
+  apps) runs as **hand-created docker containers** managed by nobody.
+- **Deploy rails** (target): `gitops-agent` renders
+  `clusters/beget-prod/projects/<slug>/environments/<env>/apps/<app>/compose.yaml`
+  + `.env`; `portainer-agent` `doDeployStack` (`worker/deploy_stack.go`) does
+  `RedeployStack` if the stack exists else `CreateStackFromGit` (Portainer runs
+  `docker compose up`, **project name = stack name**).
+- **Already-built cloud primitives** we lean on (no SSH):
+  - `portainer/client.go`: `CreateEdgeEndpoint`, `EnsureEdgeCompute`,
+    `EnsureEdgeGroup`/`TagEndpoint`, `CreateEdgeStackFromGit`,
+    `CreateStackFromGit`/`RedeployStack`, **`ListContainers`**, `StreamLogs`.
+  - ⇒ once the edge agent is on, Portainer's docker proxy can **read** the
+    workload (ListContainers) with no SSH at all.
+- **Gap for a cloud-native cutover:** the client can *list* containers but not
+  *stop/remove* them. The one place the flow needs to retire the hand-run
+  containers (they lock the PG datadir; two postgres on one volume = corruption)
+  currently has no cloud verb. See **Phase 4 / decision**.
 
-## The core risk, precisely
+## The core risk, precisely (PG volume)
 
-`docker compose up` names a service's named volume `"<project>_<volume>"` and
-**creates it if absent**. Portainer's project = the stack name we choose. So a
-naive compose like:
+`docker compose up` names a service's named volume `"<project>_<vol>"` and
+**creates it if absent**. Deployed as stack `fin-data-db`, a naive
+`volumes: { pgdata: {} }` yields a brand-new empty `fin-data-db_pgdata` →
+Postgres `initdb`s a fresh cluster → **the real prod volume is orphaned** and a
+later `down -v`/prune **deletes** it. That is the data-loss outcome.
 
-```yaml
-services:
-  db:
-    image: postgres:16
-    volumes: [ pgdata:/var/lib/postgresql/data ]
-volumes:
-  pgdata: {}
-```
-
-deployed as stack `fin-data-db` produces a brand-new empty volume
-`fin-data-db_pgdata`. Postgres sees an empty datadir → runs `initdb` → a fresh
-cluster. The real prod data (in whatever volume it lives today) is **orphaned**,
-and if anyone later runs `docker compose down -v` / Portainer prune, it is
-**deleted**. That is exactly the "проебать данные прода" outcome.
-
-**Fix:** the gitops compose must attach Postgres to the *exact existing* docker
-volume, declared **external**, so compose *adopts* it instead of creating one:
+**Mitigation (automated in Phase 0):** the gitops compose declares every
+stateful volume **external**, pinned to the literal live name, so compose
+*adopts* it:
 
 ```yaml
-services:
-  db:
-    image: postgres:16.4        # exact current prod tag — see Phase 0
-    container_name: <existing>  # match the running container name
-    restart: unless-stopped
-    volumes:
-      - pgdata:/var/lib/postgresql/data
 volumes:
   pgdata:
     external: true
-    name: <EXACT existing volume name from docker inspect>   # ← the whole ballgame
+    name: <EXACT live volume name>   # emitted by scripts/vm-discover.sh
 ```
 
-`external: true` ⇒ compose never creates or destroys it; it must already exist,
-and compose binds the live data. `name:` pins the literal docker volume name,
-independent of the stack/project prefix.
+`scripts/vm-discover.sh` generates this block straight from `docker inspect`, so
+the name is never hand-typed. Bind mount instead of named volume? The report
+flags it; mirror the host path verbatim.
 
-> If prod uses a **bind mount** (`/var/lib/postgresql/data` → a host path)
-> instead of a named volume, mirror that host path verbatim in the compose
-> `volumes:` short syntax instead of a named external volume. Discovery (Phase 0)
-> tells us which it is — **do not assume**.
+## Phase 0 — DISCOVER (read-only SSH) ✅ tooling landed
 
-## Guiding principles
-
-1. **Adopt, never recreate.** The compose must describe prod *as it already
-   runs* (image tags, volume, container names, ports, networks, env), so the
-   first `up` is a no-op-ish takeover, not a rebuild.
-2. **Read-only discovery before touching anything.** All of Phase 0 is
-   `inspect`/`ls` — zero mutation.
-3. **External volumes for every stateful mount.** PG first, but also any other
-   data volume (uploads, redis, etc.). Never let compose own prod data's
-   lifecycle.
-4. **Never `down -v`, never prune.** The redeploy path already sets
-   `Prune:false`; keep it. Document a hard ban on `docker compose down -v` for
-   this stack.
-5. **Rehearse on dev / a throwaway VM first.** Prove the external-volume
-   adoption on something disposable before prod.
-6. **Full backup immediately before the one cutover.** `pg_dump` **and** a
-   volume-level copy. Cutover only inside a maintenance window.
-
-## Phase 0 — Discovery (read-only, on the prod VM)
-
-Capture the ground truth and paste it into this doc / an ops ticket. Nothing
-here changes prod.
+Run the committed, read-only inventory tool. Zero mutation; every remote command
+is `inspect`/`ls`/`version`:
 
 ```bash
-# every running container, its image (with exact tag) and status
-docker ps --format 'table {{.Names}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}'
-
-# the Postgres container in full — pin datadir mount, exact image, env, network
-docker inspect <pg_container>            # look at .Mounts, .Config.Image,
-                                         # .Config.Env, .NetworkSettings.Networks,
-                                         # .HostConfig.RestartPolicy, .Config.Cmd
-
-# the volume(s) — exact Name / Mountpoint / Driver
-docker volume ls
-docker volume inspect <pg_volume_name>
-
-# app containers, same treatment
-docker inspect <app1_container> <app2_container>
-
-# networks (compose recreates these; capture names/driver to match or external)
-docker network ls
-docker network inspect <net>
-
-# exact postgres server version living in that volume (tag ≠ on-disk version)
-docker exec <pg_container> postgres --version
-docker exec <pg_container> psql -U <user> -c 'select version();'
+scripts/vm-discover.sh root@<fin-data-ip> -i <readonly_key> -o ./vm-discovery
 ```
 
-Record, per container: **exact image tag**, **volume name(s) + mountpoint (or
-bind path)**, **published ports**, **env (esp. the real DB creds — see note)**,
-**restart policy**, **network membership**, **`container_name`**.
+Produces per VM: `REPORT.md` (images, tags, ports, restart, networks, mounts),
+`inspect/*.json` (the record), `volumes.json`, and the safety artifact
+`volumes.compose.yaml` (**external-volume block, names auto-pinned**).
 
-> **Postgres creds gotcha:** `POSTGRES_USER/PASSWORD/DB` are only read on *first*
-> `initdb`. The prod volume is already initialised, so those envs are cosmetic
-> for the DB — but the **apps' DSNs must use the credentials that were baked in
-> at first init**. Capture the real user/password/db from the app env or the
-> running container, not from a fresh guess. Getting this wrong = apps can't
-> auth, but data is still safe.
+Also capture the **real DB creds**: `POSTGRES_*` env is only read at first
+`initdb`; the prod volume is already initialised, so those are cosmetic for the
+DB — but the apps' DSNs must use the credentials baked in at init. Pull them from
+the app containers' env in `inspect/*.json`, not from a guess.
 
-## Phase 1 — Author the gitops compose to match prod byte-for-byte
+Reproducible: same command, any VM. This is the only SSH the flow needs for
+analysis.
 
-Author, in the gitops repo, under
-`clusters/beget-prod/projects/<fin-data-slug>/environments/prod/apps/<app>/`:
+## Phase 1 — AUTHOR the gitops compose (git / cloud)
 
-- `compose.yaml` that reproduces Phase-0 reality:
-  - **Postgres**: `external: true` volume pinned to the discovered name (or the
-    discovered bind path); `image:` = the **exact** current tag; matching
-    `container_name`; same published ports; same network.
-  - **The two apps**: exact current image tags (this is the baseline the future
-    "bump the digit" flow diffs against); their real env via the sibling `.env`.
-- `.env` sibling with the **real** runtime env / DB DSN captured in Phase 0
-  (note: plaintext-in-git — the repo is already treated as a secret store per
-  `renderer.RenderEnvFile`; confirm that's acceptable for these creds, otherwise
-  route secrets the way the platform does elsewhere).
+Under `clusters/beget-prod/projects/<fin-data-slug>/environments/prod/apps/<app>/`:
 
-Cross-check the composed file against `docker inspect` output field by field.
-The success criterion for this phase: **a `docker compose config`/dry diff shows
-the compose would attach the existing volume and not redefine the datadir.**
+- `compose.yaml` reproducing Phase-0 reality: exact current **image tags** (this
+  is the baseline the future "bump the digit" diffs against), matching ports and
+  networks, and the **`volumes.compose.yaml` external block pasted verbatim**.
+- `.env` with the real runtime env / DSN from Phase 0. (Plaintext-in-git per the
+  platform's existing convention — `renderer.RenderEnvFile` treats the repo as a
+  secret store. Confirm acceptable for these creds or route via the platform's
+  secret path.)
 
-## Phase 2 — Enroll the VM into Portainer edge (no prod impact)
+Acceptance: a `docker compose config` dry render shows the datadir bound to the
+**existing external volume**, no volume redefinition.
 
-Get an **Edge Agent** onto the VM so Portainer can manage stacks. Use the
-existing manual-connect path (`doCreateManualAppServer` → `RunBootstrap`).
-`bootstrap.sh.tmpl` is **idempotent and safe for a live prod VM**:
+## Phase 2 — ENROLL the edge agent (console-driven; SSH retired after)
 
-- Docker install is skipped if Docker is already present (explicit guard against
-  the `docker.io` package conflict on pre-provisioned VMs).
-- It only **adds** the `portainer_edge_agent` container (+ optional obs
-  sidecars). It does **not** stop, remove, or touch the prod app/DB containers
-  or their volumes.
+Get an Edge Agent onto the VM so all further work is cloud-native. Use the
+existing manual-connect op (`doCreateManualAppServer` → `RunBootstrap`).
+`bootstrap.sh.tmpl` is safe for a live prod VM: Docker install is skipped if
+present; it only **adds** `portainer_edge_agent` (+ optional obs sidecars) and
+never stops/removes/reconfigures prod containers or volumes.
 
-Steps:
-1. Confirm the VM's `app_servers` row (already exists from adopt). Decide whether
-   to enroll via the console "connect manual VM" op or a targeted one-off; the
-   agent, edge endpoint 3, and this row must line up so `GetComposeDeployTarget`
-   resolves the right `EndpointID`.
-2. Run bootstrap → Edge Agent connects → endpoint 3 goes online in Portainer.
-3. **Do not deploy any stack yet.** Verify prod is still up and the agent is
-   green.
+- This is the one sanctioned SSH *write*, orchestrated by the console (not a
+  human hand-editing the box). After it, endpoint 3 is online in Portainer and
+  **SSH is never used on this VM again**.
+- Verify prod still up + agent green. **Deploy no stack yet.**
+- From here, discovery can also be re-confirmed via `ListContainers` (Portainer
+  docker proxy) with no SSH — useful for VM #2+ as a cross-check.
 
-> Optional: the obs sidecars (node_exporter/cadvisor/prometheus-agent/filebeat)
-> can be delivered later via the Edge Stack plan in
-> `tasks/vm-config-delivery-edge-stack.md`; keep bootstrap = Docker + Edge Agent
-> only for this migration to minimise prod surface.
+## Phase 3 — REHEARSE (cloud, throwaway)
 
-## Phase 3 — Rehearse the volume adoption (dev / throwaway)
+On a disposable VM/endpoint, prove the two mechanics that must never fail on
+prod, entirely through the cloud path:
 
-On the k8s dev env or a throwaway VM, prove the mechanic before prod:
+1. Init a Postgres in a named volume, write a sentinel row.
+2. Deploy the Phase-1-style compose (external volume pinned) via the real
+   `CreateStackFromGit` path. Assert: sentinel survives, **no new `<stack>_*`
+   volume** appears.
+3. Simulate a release: bump the app image tag in git → redeploy → app container
+   recreated, **DB volume untouched**.
+4. Exercise the Phase-4 takeover mechanism (below) end-to-end here first.
 
-1. Create a named volume, init a Postgres in it, write a sentinel row.
-2. Deploy the Phase-1-style compose (external volume pinned to that name) as a
-   Portainer stack via the real `CreateStackFromGit` path.
-3. Assert: the sentinel row survives, no `*_pgdata` new volume was created,
-   `docker volume ls` shows only the original.
-4. Then simulate a release: bump the app image tag in git, trigger redeploy,
-   assert the app container is recreated and the DB volume is **untouched**.
+Green here gates prod.
 
-Only proceed to prod once this is green.
+## Phase 4 — CUTOVER (100% cloud: Portainer + gitops)
 
-## Phase 4 — Prod cutover (single maintenance window)
+The one moment we hand running, non-compose containers to compose management.
+Data is preserved because the volume is external; the sequence is fully
+cloud-driven (no SSH):
 
-This is the only step with (brief) downtime, because handing already-running,
-non-compose containers to compose management requires recreating them under the
-compose project labels. Data is preserved because the volume is external.
+1. Maintenance window with the customer.
+2. **Backup ×2, via the cloud path** (Portainer exec / a one-shot job container
+   on the endpoint — not an SSH session):
+   - `pg_dump -Fc` the DB;
+   - volume-level `tar` of the PG volume;
+   - copy both off-box.
+3. **Retire the hand-run containers via the cloud** (they hold the datadir lock;
+   a second postgres on the same volume corrupts it — so the old ones must stop
+   *before* the stack starts). This needs a cloud stop/remove — see the decision
+   below.
+4. **Deploy the stack** (`doDeployStack` → `CreateStackFromGit`). Portainer runs
+   `up`; Postgres attaches the **existing external volume**; apps come up on
+   their real image tags.
+5. **Verify** (Phase 5) before closing the window.
 
-1. **Announce a maintenance window** with the customer.
-2. **Fresh backup, twice over:**
-   - `docker exec <pg> pg_dump -U <user> -Fc <db> > fin-data-<date>.dump`
-   - volume-level copy: `docker run --rm -v <pg_volume>:/v -v $PWD:/b alpine \
-     tar czf /b/fin-data-vol-<date>.tgz -C /v .`
-   - copy both **off the VM**.
-3. **Container-name collision handling:** compose won't attach to an existing
-   container that lacks its project labels; it will error "name already in use".
-   Resolve by, in order, per service:
-   - stop + `docker rm` the hand-run container (the **named/external volume
-     persists** — this is just a restart), then let the stack create the
-     replacement attached to the same external volume; **or**
-   - if you prefer zero-touch on PG, keep the DB container name distinct in
-     compose and point apps at it — but matching names + a clean recreate is the
-     cleaner long-term adopt. Prefer the stop/rm/recreate for PG since it's a
-     normal restart with data intact.
-4. **Deploy the stack** via the console/`doDeployStack` (`CreateStackFromGit`).
-   Watch: Portainer clones gitops, runs `up`, Postgres attaches the **existing**
-   external volume, apps come up on their real images.
-5. **Verify** (see Phase 5) before closing the window.
+Fail-safe: never `down -v`, never prune. On any anomaly, restore from backup; the
+external volume survives every path except an explicit manual delete.
 
-**If anything looks wrong** (empty DB, wrong volume): stop immediately, do
-**not** run `down -v`, restore from the backup, and re-diagnose. The old
-hand-run setup can be restarted from the untouched volume as the fallback.
+### Decision needed — how the cloud retires the old containers
 
-## Phase 5 — Verify & lock in the future-release path
+To keep the cutover reproducible and SSH-free, the flow needs a cloud verb to
+stop/remove the pre-existing containers. Options:
 
-Verify:
-- `docker volume ls` → only the original PG volume; **no** new `<stack>_pgdata`.
-- Row counts / sentinel checks match pre-cutover; `pg_dump` schema matches.
-- Both apps healthy, serving, connected to the DB.
-- Portainer shows fin-data as a git stack on endpoint 3.
+- **A. Add `portainer-agent` container-lifecycle methods** (`StopContainer`,
+  `RemoveContainer` over Portainer's docker proxy) + a small **"adopt VM"
+  worker op** that: lists containers → stops the ones the stack will replace →
+  deploys the stack → optionally removes the stopped originals. Fully
+  reproducible, one console action per VM. *(New Go code in the prod-facing
+  agent; most work, best long-term.)*
+- **B. Operator does it in the Portainer UI** (stop the containers), then the
+  console deploys the stack. No new code; reproducible-by-runbook, not by button.
+- **C. compose without matching `container_name`** so there's no name collision,
+  but this does NOT solve the datadir lock — the old postgres must still stop
+  first — so C alone is insufficient and is rejected.
 
-Lock in the release flow (the whole point):
-- **Next release = edit the image tag in the app's `compose.yaml` in git →
-  console deploy op → `doDeployStack` finds the existing stack → `RedeployStack`
-  with `PullImage:true, Prune:false`.** Portainer pulls the new image, recreates
-  the app container; PG (external volume) is untouched.
-- Confirm `Prune:false` stays (`worker/deploy_stack.go`) — guarantees removed
-  services never trigger a volume prune.
-- Add a repo guard / runbook note: **`docker compose down -v` on fin-data is
-  banned**; volume lifecycle is out-of-band and manual only.
+Recommendation: **A** (matches "reproducible flow, all via cloud"), with **B** as
+the interim for the fin-data first-run so we don't block on new agent code.
 
-## Rollback
+## Phase 5 — LOCK-IN (gitops)
 
-- Pre-cutover: nothing to roll back — Phases 0–2 are read-only/additive.
-- At cutover: restore is (a) restart the original hand-run containers against the
-  untouched external volume, or (b) restore `pg_dump`/volume tarball into a fresh
-  volume and repoint. Because we never prune and the volume is external, the data
-  volume survives every failure mode except an explicit manual delete.
+Verify: `ListContainers`/`docker volume ls` show only the original PG volume (no
+`<stack>_*`); row/sentinel counts match; apps healthy; Portainer shows fin-data
+as a git stack on endpoint 3.
+
+Lock the release flow (the point of all this):
+
+- **Release = edit the image tag in the app's `compose.yaml` in git → console
+  deploy op → `RedeployStack{PullImage:true, Prune:false}`.** New image pulled,
+  app container recreated, PG (external) untouched. Same for every app/VM.
+- Keep `Prune:false`; document a hard **ban on `docker compose down -v`** for VM
+  stacks (volume lifecycle is out-of-band/manual only).
+- The whole flow is now repeatable for VM #2: `vm-discover.sh` → author → enroll
+  → cutover, no bespoke steps.
 
 ## Risk register
 
 | Risk | Mitigation |
 |------|------------|
-| **New empty PG volume created on first `up`** (data loss) | `external: true` + pinned `name:` = the discovered volume; verified in Phase 3 rehearsal and Phase 5 (`docker volume ls`). |
-| Volume is a **bind mount**, not named | Phase 0 `docker inspect .Mounts` reveals it; mirror the host path in compose instead of a named external volume. |
-| **Wrong DB creds** in `.env` → apps can't auth | Capture real init-time creds in Phase 0; data stays safe regardless. |
-| **container_name collision** blocks the stack | Planned stop/rm/recreate against the persistent external volume in the window. |
-| Accidental `down -v` / prune later | `Prune:false` kept; explicit ban documented; volume external so `down` alone can't delete it. |
-| Bootstrap disturbs prod | Bootstrap is idempotent, Docker-install-guarded, and only *adds* the edge agent; verified in Phase 2 before any stack deploy. |
-| Secrets in plaintext git `.env` | Accept per existing platform convention, or route via the platform's secret path; call out explicitly before writing creds. |
+| New empty PG volume on first `up` (data loss) | `external: true` + literal `name:` auto-emitted by `vm-discover.sh`; asserted in Phase 3 and Phase 5. |
+| Volume is a bind mount, not named | Phase-0 report flags it; mirror host path verbatim. |
+| Two postgres on one datadir during cutover (corruption) | Old containers stopped via the cloud **before** stack deploy (Phase 4 decision A/B). |
+| Wrong DB creds in `.env` | Real init-time creds captured from `inspect/*.json`; data safe regardless. |
+| Accidental `down -v`/prune | `Prune:false` kept; external volume; explicit ban documented. |
+| SSH used to hand-fix prod | Banned by constraint 1; only read-only discovery + one console bootstrap. |
+| Bootstrap disturbs prod | Idempotent, Docker-guarded, additive; verified before any deploy. |
+| Secrets plaintext in git `.env` | Accept per platform convention or route via secret path; call out before writing. |
 
-## Build/execution order (checklist)
+## Execution checklist
 
-1. Phase 0 discovery on prod VM; paste the inventory here. **(read-only)**
-2. Phase 1 author `compose.yaml` + `.env`; field-by-field diff vs inspect.
-3. Phase 3 rehearse external-volume adoption on dev/throwaway; must be green.
-4. Phase 2 enroll VM edge agent; verify prod untouched + endpoint online.
-5. Phase 4 backup ×2 → cutover in window → deploy stack.
-6. Phase 5 verify volume identity + data + apps; document the bump-the-digit
-   release flow and the `down -v` ban.
+- [x] **Phase 0** tooling: `scripts/vm-discover.sh` (read-only inventory +
+      external-volume block). Run it against fin-data to fill the inventory.
+- [ ] **Phase 1** author `compose.yaml` + `.env`; dry-render diff vs inspect.
+- [ ] **Phase 3** rehearse adoption + release bump on throwaway (before prod).
+- [ ] **Phase 2** enroll edge agent; verify prod untouched + endpoint online.
+- [ ] **Phase 4** decision A vs B for cloud container-retire; backup ×2; cutover.
+- [ ] **Phase 5** verify volume identity + data; document release-bump + `down -v`
+      ban; confirm the flow re-runs unchanged for the next VM.
 ```
