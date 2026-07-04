@@ -7,6 +7,9 @@ import type { Messages } from "./common";
 export const apps: Messages = {
   "apps.title": { ru: "Приложения", en: "Applications" },
   "apps.subtitle": { ru: "Управляемые рабочие нагрузки", en: "Managed application workloads" },
+  "apps.rollback.button": { ru: "Откатить", en: "Rollback" },
+  "apps.rollback.confirm": { ru: "Откатить приложение к предыдущей версии compose.yaml и передеплоить?", en: "Roll this app back to the previous compose.yaml version and redeploy?" },
+  "apps.rollback.error": { ru: "Не удалось откатить", en: "Rollback failed" },
   "apps.infra.title": { ru: "Инфраструктура", en: "Infrastructure" },
   "apps.infra.subtitle": { ru: "Инфраструктурные сервисы окружения (БД, прокси и т.п.)", en: "Environment infrastructure services (databases, proxies, etc.)" },
 

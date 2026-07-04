@@ -233,6 +233,13 @@ export const appsApi = {
       { method: "PATCH", body: { image } }
     ),
 
+  // Roll a compose (VM) app back to its previous committed compose.yaml + redeploy.
+  rollback: (projectId: string, envId: string, appName: string) =>
+    apiFetch<{ operation: Operation; message: string }>(
+      `/api/v1/projects/${projectId}/environments/${envId}/apps/${appName}/rollback`,
+      { method: "POST" }
+    ),
+
   // Live compose state (Portainer proxy).
   getState: (projectId: string, envId: string, appName: string) =>
     apiFetch<AppState>(

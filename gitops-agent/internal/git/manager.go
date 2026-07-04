@@ -1,6 +1,7 @@
 package git
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -16,6 +17,10 @@ import (
 	"github.com/go-git/go-git/v5/plumbing/transport/http"
 	"github.com/rs/zerolog/log"
 )
+
+// ErrNoPreviousVersion is returned by PreviousFileContent when a file has only a
+// single version in history — there is nothing to roll back to.
+var ErrNoPreviousVersion = errors.New("no previous version to roll back to")
 
 // RepoConfig holds credentials for a specific remote repository.
 type RepoConfig struct {
@@ -380,6 +385,57 @@ func (m *Manager) ReadFileAtCommit(commitSHA, relativePath string) (string, erro
 	}
 	defer r.Close()
 
+	b, err := io.ReadAll(r)
+	if err != nil {
+		return "", err
+	}
+	return string(b), nil
+}
+
+// PreviousFileContent returns the content of relativePath as it was BEFORE the
+// most recent commit that changed it — i.e. the rollback target. It scans the
+// path-scoped history (newest first): the 1st entry is the current version, the
+// 2nd is the previous one. Returns ErrNoPreviousVersion when the file has only
+// ever had a single version (nothing to roll back to).
+func (m *Manager) PreviousFileContent(relativePath string) (string, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if _, err := m.pull(); err != nil {
+		return "", err
+	}
+	repo, err := gogit.PlainOpen(m.path)
+	if err != nil {
+		return "", fmt.Errorf("opening repo: %w", err)
+	}
+	head, err := repo.Head()
+	if err != nil {
+		return "", err
+	}
+	path := relativePath
+	iter, err := repo.Log(&gogit.LogOptions{From: head.Hash(), FileName: &path})
+	if err != nil {
+		return "", fmt.Errorf("log for %s: %w", relativePath, err)
+	}
+	defer iter.Close()
+
+	// 1st = current version's commit; 2nd = the previous version.
+	if _, err := iter.Next(); err != nil {
+		return "", fmt.Errorf("no history for %s: %w", relativePath, err)
+	}
+	prev, err := iter.Next()
+	if err != nil {
+		return "", ErrNoPreviousVersion
+	}
+	file, err := prev.File(relativePath)
+	if err != nil {
+		return "", fmt.Errorf("file at previous commit: %w", err)
+	}
+	r, err := file.Reader()
+	if err != nil {
+		return "", err
+	}
+	defer r.Close()
 	b, err := io.ReadAll(r)
 	if err != nil {
 		return "", err

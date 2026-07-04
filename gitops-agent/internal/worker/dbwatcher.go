@@ -213,9 +213,63 @@ func (w *DBWatcher) dispatch(ctx context.Context, op db.Operation) error {
 		return w.doDeletePreviewEnv(ctx, op)
 	case "ImportComposeStack":
 		return w.doImportComposeStack(ctx, op)
+	case "RollbackStack":
+		return w.doRollbackStack(ctx, op)
 	default:
 		return fmt.Errorf("unknown action: %s", op.Action)
 	}
+}
+
+// doRollbackStack reverts a compose app's compose.yaml to its previous committed
+// version and redeploys — the VM-runtime "Rollback" action (ADR-013 §8.3). Pure
+// git: the previous file version becomes a new commit (auditable, forward-only),
+// then a child DeployStack applies it. Data-safe by construction — the external
+// PG volume pin lives in every version, so rolling the compose never touches data.
+func (w *DBWatcher) doRollbackStack(ctx context.Context, op db.Operation) error {
+	var p struct {
+		AppName string `json:"app_name"`
+	}
+	if err := json.Unmarshal(op.Payload, &p); err != nil {
+		return fmt.Errorf("parse payload: %w", err)
+	}
+	if p.AppName == "" {
+		return fmt.Errorf("rollback: app_name required")
+	}
+
+	projectName, envName, _, err := w.projectEnv(ctx, op.ProjectID, op.EnvironmentID)
+	if err != nil {
+		return fmt.Errorf("project/env lookup: %w", err)
+	}
+	mgr, err := w.managerFor(ctx, op.ProjectID)
+	if err != nil {
+		return err
+	}
+
+	composePath := renderer.AppComposeGitPath(projectName, envName, p.AppName)
+	prev, err := mgr.PreviousFileContent(composePath)
+	if errors.Is(err, git.ErrNoPreviousVersion) {
+		return fmt.Errorf("nothing to roll back: %q has only one committed version", p.AppName)
+	}
+	if err != nil {
+		return fmt.Errorf("read previous compose version: %w", err)
+	}
+
+	commitMsg := fmt.Sprintf(
+		"[DADA Console] Rollback compose app %s to previous version\n\nOperation: %s\nProject: %s\nEnvironment: %s\n",
+		p.AppName, op.ID, projectName, envName,
+	)
+	if err := w.commitFilesAndRecord(ctx, op, mgr, composePath, []git.FileChange{
+		{Path: composePath, Content: prev},
+	}, commitMsg); err != nil {
+		return err
+	}
+
+	deployID, err := db.EnqueueDeployStack(ctx, w.pool, op.ID, p.AppName)
+	if err != nil {
+		return fmt.Errorf("enqueue deploy stack: %w", err)
+	}
+	log.Info().Str("app", p.AppName).Str("deploy_op", deployID.String()).Msg("compose rollback committed; deploy enqueued")
+	return nil
 }
 
 // projectEnv fetches project name, env name, and env namespace from the DB.

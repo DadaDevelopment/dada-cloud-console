@@ -99,6 +99,17 @@ export default function AppDetailPage() {
     }
   }
 
+  async function handleRollback() {
+    if (!window.confirm(t("apps.rollback.confirm"))) return;
+    try {
+      const result = await appsApi.rollback(projectId, envId, appName);
+      const opId = result.operation?.id;
+      router.push(`/projects/${projectId}/operations${opId ? `?highlight=${opId}` : ""}`);
+    } catch (err) {
+      window.alert(err instanceof Error ? err.message : t("apps.rollback.error"));
+    }
+  }
+
   async function handleDomainCreate(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setDomainSubmitError(null);
@@ -169,6 +180,17 @@ export default function AppDetailPage() {
             </svg>
             {t("apps.detail.deployments")}
           </Link>
+          {isCompose && canMutate(role) && (
+            <button
+              onClick={handleRollback}
+              className="inline-flex items-center gap-2 rounded-lg border border-amber-300 dark:border-amber-800 bg-white dark:bg-gray-900 px-3 py-2 text-sm font-medium text-amber-700 dark:text-amber-300 hover:bg-amber-50 dark:hover:bg-amber-950/30 transition-colors shadow-sm"
+            >
+              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 15L3 9m0 0l6-6M3 9h12a6 6 0 010 12h-3" />
+              </svg>
+              {t("apps.rollback.button")}
+            </button>
+          )}
           <Link
             href={`/projects/${projectId}/apps/${appName}/settings${envId ? `?envId=${envId}` : ""}`}
             className="inline-flex items-center gap-2 rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 px-3 py-2 text-sm font-medium text-gray-700 dark:text-gray-200 hover:border-blue-300 hover:text-blue-600 transition-colors shadow-sm"
