@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"github.com/dada-tuda/console/backend/internal/auth"
+	"github.com/dada-tuda/console/backend/internal/crypto"
 	"github.com/dada-tuda/console/backend/internal/models"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -554,11 +555,12 @@ func (h *Handler) ImportComposeStack(c *gin.Context) {
 
 	var endpointID *int
 	var serverStatus string
+	var serverID uuid.UUID
 	err = h.pool.QueryRow(c.Request.Context(),
-		`SELECT portainer_endpoint_id, status FROM app_servers
+		`SELECT id, portainer_endpoint_id, status FROM app_servers
 		 WHERE project_id = $1 AND name = $2 AND status != 'Deleted'`,
 		projectID, serverName,
-	).Scan(&endpointID, &serverStatus)
+	).Scan(&serverID, &endpointID, &serverStatus)
 	if err == pgx.ErrNoRows {
 		respondNotFound(c)
 		return
@@ -585,10 +587,25 @@ func (h *Handler) ImportComposeStack(c *gin.Context) {
 		projectID, serverName,
 	).Scan(&envID)
 	if err == pgx.ErrNoRows {
-		respondError(c, http.StatusConflict, "this app server has no environment attached")
-		return
-	}
-	if err != nil {
+		var projectSlug string
+		if err := h.pool.QueryRow(c.Request.Context(),
+			`SELECT name FROM projects WHERE id = $1`, projectID,
+		).Scan(&projectSlug); err != nil {
+			respondError(c, http.StatusInternalServerError, "failed to resolve project for environment")
+			return
+		}
+		if err := h.pool.QueryRow(c.Request.Context(),
+			`INSERT INTO environments (project_id, name, namespace, type, runtime, app_server_id)
+			 VALUES ($1, $2, $3, 'prod', 'vm', $4)
+			 ON CONFLICT (project_id, name)
+			 DO UPDATE SET runtime = 'vm', app_server_id = EXCLUDED.app_server_id, updated_at = NOW()
+			 RETURNING id`,
+			projectID, serverName, projectSlug+"-"+serverName, serverID,
+		).Scan(&envID); err != nil {
+			respondError(c, http.StatusInternalServerError, "failed to create app server environment")
+			return
+		}
+	} else if err != nil {
 		respondError(c, http.StatusInternalServerError, "failed to resolve app server environment")
 		return
 	}
@@ -605,6 +622,27 @@ func (h *Handler) ImportComposeStack(c *gin.Context) {
 	if existing > 0 {
 		respondError(c, http.StatusConflict, "an app with that name already exists in this environment")
 		return
+	}
+
+	for key, value := range req.Env {
+		encrypted, encErr := crypto.EncryptToken(h.cfg.GitopsEncryptionKey, []byte(value))
+		if encErr != nil {
+			respondError(c, http.StatusInternalServerError, "failed to encrypt imported env var")
+			return
+		}
+		if _, dbErr := h.pool.Exec(c.Request.Context(),
+			`INSERT INTO env_vars (environment_id, app_name, key, value_encrypted, is_secret, scope, created_by)
+			 VALUES ($1, $2, $3, $4, TRUE, 'runtime', $5)
+			 ON CONFLICT (environment_id, app_name, key)
+			 DO UPDATE SET value_encrypted = EXCLUDED.value_encrypted,
+			               is_secret = EXCLUDED.is_secret,
+			               scope = EXCLUDED.scope,
+			               updated_at = NOW()`,
+			envID, req.AppName, key, encrypted, claims.UserID,
+		); dbErr != nil {
+			respondError(c, http.StatusInternalServerError, "failed to persist imported env var")
+			return
+		}
 	}
 
 	payload := models.ImportComposeStackPayload{
