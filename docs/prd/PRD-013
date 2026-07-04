@@ -1,0 +1,956 @@
+PRD — Infrastructure Adoption Platform
+
+Status: Draft
+
+Owner: Platform Team
+
+Last Updated: 2026-07-03
+
+⸻
+
+1. Vision
+
+Problem
+
+Сегодня Dada Cloud отлично умеет создавать новую инфраструктуру.
+
+Но большинство потенциальных пользователей приходят не с пустым проектом.
+
+Они уже имеют:
+
+* VPS;
+* Docker;
+* Docker Compose;
+* Portainer;
+* Coolify;
+* несколько production-контейнеров;
+* домены;
+* volumes;
+* PostgreSQL;
+* Redis.
+
+Для перехода в новую платформу им приходится практически заново собирать инфраструктуру.
+
+Это создает высокий барьер входа.
+
+⸻
+
+Vision
+
+Infrastructure Adoption позволяет превратить уже существующую инфраструктуру в полноценный проект Dada Cloud без ее пересоздания.
+
+Основная идея продукта:
+
+Connect what already exists. Do not rebuild it.
+
+После подключения инфраструктура постепенно становится частью платформы.
+
+Пользователь может продолжать работать привычным образом, постепенно используя возможности Dada Cloud.
+
+⸻
+
+2. Goals
+
+Infrastructure Adoption должна:
+
+* уменьшить время перехода в платформу;
+* убрать необходимость ручной миграции;
+* позволить управлять существующей инфраструктурой через Dada UI;
+* постепенно перевести пользователя на Git-based deployment;
+* стать первым шагом к использованию Managed Services.
+
+⸻
+
+3. Non Goals
+
+Первая версия НЕ должна:
+
+* заменять Portainer;
+* заменять Docker Desktop;
+* автоматически мигрировать Compose в Kubernetes;
+* выполнять SSH-команды общего назначения;
+* автоматически изменять инфраструктуру без подтверждения пользователя.
+
+⸻
+
+4. Target Audience
+
+Primary ICP
+
+Existing VPS users
+
+Самая большая аудитория.
+
+Типичный стек:
+
+* Ubuntu
+* Docker
+* Docker Compose
+* nginx
+* PostgreSQL
+
+⸻
+
+Solo founders
+
+Уже сделали MVP.
+
+Не хотят заниматься DevOps.
+
+⸻
+
+AI Developers
+
+Используют Claude / GPT для написания кода.
+
+Деплой происходит вручную.
+
+⸻
+
+Small startups
+
+Команда 2–10 человек.
+
+Нет выделенного DevOps.
+
+⸻
+
+Agencies
+
+Много небольших проектов.
+
+Нужно единое место управления.
+
+⸻
+
+5. Jobs To Be Done
+
+JTBD 1
+
+У меня уже есть VPS.
+
+Я не хочу переносить инфраструктуру.
+
+Я хочу начать управлять ей через Dada.
+
+⸻
+
+JTBD 2
+
+Я хочу перестать деплоить через SSH.
+
+⸻
+
+JTBD 3
+
+Я хочу видеть логи, метрики и состояние приложения.
+
+⸻
+
+JTBD 4
+
+Я хочу постепенно перейти на Managed Services.
+
+⸻
+
+6. User Journey
+
+Step 1
+
+Пользователь нажимает
+
+Add Existing Infrastructure
+
+⸻
+
+Step 2
+
+Выбирает
+
+Linux VM
+
+⸻
+
+Step 3
+
+Устанавливает Agent
+
+curl ...
+bash
+
+или подключает существующий Agent.
+
+⸻
+
+Step 4
+
+Discovery автоматически обнаруживает:
+
+* Docker
+* Compose
+* Containers
+* Images
+* Networks
+* Volumes
+* Ports
+* Environment
+* Domains
+
+⸻
+
+Step 5
+
+Пользователь получает экран Review.
+
+Например:
+
+Found
+✓ frontend
+✓ backend
+✓ postgres
+✓ redis
+✓ nginx
+✓ 4 volumes
+✓ 2 networks
+
+⸻
+
+Step 6
+
+Можно:
+
+* исключить контейнер;
+* переименовать сервис;
+* изменить compose;
+* изменить env.
+
+⸻
+
+Step 7
+
+Нажать
+
+Import
+
+⸻
+
+Step 8
+
+Появляется обычный проект Dada Cloud.
+
+Без специальных режимов.
+
+⸻
+
+7. Product Principles
+
+Infrastructure First
+
+Платформа работает с инфраструктурой.
+
+Не с Docker.
+
+Не с Compose.
+
+⸻
+
+Review before Change
+
+Никогда ничего автоматически не менять.
+
+⸻
+
+Git is optional
+
+Git не является обязательным условием импорта.
+
+После успешного импорта пользователь может включить Git Sync.
+
+⸻
+
+Runtime Independence
+
+Пользователь не должен думать о Runtime.
+
+Для него существует просто
+
+Application
+
+⸻
+
+8. Functional Requirements
+
+FR-1 Connect VM
+
+Пользователь должен иметь возможность подключить существующую VM.
+
+⸻
+
+FR-2 Discovery
+
+Discovery должен определить:
+
+Docker
+
+Compose
+
+Containers
+
+Images
+
+Volumes
+
+Networks
+
+Ports
+
+Environment
+
+Healthchecks
+
+Labels
+
+⸻
+
+FR-3 Review
+
+Перед импортом пользователь может изменить:
+
+название проекта;
+
+названия сервисов;
+
+исключить ресурсы;
+
+изменить env.
+
+⸻
+
+FR-4 Import
+
+После подтверждения создается проект Dada Cloud.
+
+⸻
+
+FR-5 Continuous Management
+
+После первого Deploy пользователь использует стандартный интерфейс платформы.
+
+⸻
+
+FR-6 Logs
+
+Все контейнеры доступны через существующий Log Viewer.
+
+⸻
+
+FR-7 Metrics
+
+Все контейнеры автоматически получают Metrics.
+
+⸻
+
+FR-8 Deployments
+
+После импорта новый Deploy происходит через Git либо UI.
+
+⸻
+
+FR-9 Audit
+
+Все операции логируются через существующий Operation Framework.
+
+⸻
+
+9. MVP Scope
+
+Входит
+
+* VM Connect
+* Discovery
+* Compose Import
+* Review Wizard
+* Compose Editor
+* Git Generation
+* Deploy
+* Logs
+* Metrics
+
+⸻
+
+Не входит
+
+* Drift Detection
+* Rollback
+* Container Exec
+* Multi-server
+* Kubernetes Migration
+* Coolify Import
+* Portainer Import
+
+⸻
+
+10. UX Requirements
+
+После регистрации пользователь должен получить управляемую инфраструктуру менее чем за 10 минут.
+
+Весь процесс должен состоять максимум из:
+
+1. Подключить VM
+2. Проверить найденное
+3. Импортировать
+
+Никаких YAML-файлов не требуется.
+
+⸻
+
+11. Success Metrics
+
+Activation
+
+Время до первого управляемого проекта
+
+Target
+
+< 10 минут
+
+⸻
+
+Discovery Success Rate
+
+Сколько VM успешно анализируются.
+
+Target
+
+95%
+
+⸻
+
+Import Success Rate
+
+Сколько Discovery заканчиваются Import.
+
+Target
+
+70%
+
+⸻
+
+Git Adoption
+
+Доля пользователей, включивших Git Sync после импорта.
+
+Target
+
+60%
+
+⸻
+
+Managed Services Adoption
+
+Доля пользователей, подключивших хотя бы один Managed Service.
+
+Target
+
+40%
+
+⸻
+
+12. Future Roadmap
+
+V2
+
+* Drift Detection
+* Rollback
+* Stop/Restart Container
+* Deployment History
+
+⸻
+
+V3
+
+* Portainer Import
+* Coolify Import
+* Kubernetes Discovery
+* Runtime Migration
+
+⸻
+
+V4
+
+* AI Infrastructure Review
+* Automatic Optimization
+* Managed Database Migration
+* One-click Runtime Upgrade
+
+⸻
+
+13. Open Questions
+
+Перед реализацией необходимо принять несколько решений.
+
+Secrets
+
+Где хранить импортированные секреты?
+
+В Git?
+
+В Secret Store?
+
+Гибридная схема?
+
+⸻
+
+Runtime Drift
+
+Разрешается ли пользователю менять инфраструктуру через SSH после импорта?
+
+Если да —
+
+как отображать Drift?
+
+⸻
+
+Ownership
+
+После импорта Dada становится единственным владельцем инфраструктуры
+
+или допускается совместное управление?
+
+⸻
+
+Import Granularity
+
+Импортировать всю VM
+
+или отдельные Compose Projects?
+
+⸻
+
+14. Acceptance Criteria
+
+Функция считается реализованной, если пользователь может:
+
+* подключить существующую VM;
+* автоматически обнаружить Docker Compose инфраструктуру;
+* проверить результаты Discovery;
+* импортировать инфраструктуру без ручного переписывания compose;
+* развернуть импортированную инфраструктуру через Dada Cloud;
+* управлять приложением, логами, метриками и последующими деплоями через стандартный интерфейс платформы.
+
+⸻
+
+Заключение
+
+Infrastructure Adoption — это не отдельная функция платформы.
+
+Это новый способ попадания пользователя в Dada Cloud.
+
+После успешного импорта пользователь перестает воспринимать свою инфраструктуру как “старый VPS”. Она становится обычным проектом Dada Cloud и получает все преимущества платформы без необходимости полной миграции.
+
+
+
+⸻
+
+15. Product Strategy
+
+Infrastructure Adoption — это не новая возможность деплоя.
+
+Это новый способ получения пользователей.
+
+Сегодня пользовательский путь выглядит так:
+
+Создать проект
+↓
+Подключить Git
+↓
+Настроить Runtime
+↓
+Создать инфраструктуру
+↓
+Deploy
+
+Это отлично работает для новых проектов.
+
+Но практически бесполезно для существующих.
+
+Infrastructure Adoption добавляет второй путь.
+
+Существующий VPS
+↓
+Connect
+↓
+Discovery
+↓
+Import
+↓
+Manage
+
+Оба сценария приводят пользователя к одному и тому же состоянию.
+
+Разница только в точке входа.
+
+⸻
+
+16. Positioning
+
+Мы не конкурируем с Docker Compose.
+
+Мы не конкурируем с Portainer.
+
+Мы не конкурируем с Coolify.
+
+Мы конкурируем с тем, что пользователь продолжает управлять инфраструктурой вручную.
+
+Наше сообщение должно быть максимально простым.
+
+Не
+
+GitOps.
+
+Не
+
+Desired State.
+
+Не
+
+Runtime Abstraction.
+
+А
+
+Already have a server?
+
+Connect it in five minutes.
+
+Keep everything.
+
+Start managing it through Dada Cloud.
+
+Это сообщение должно быть центральным во всех материалах продукта.
+
+⸻
+
+17. Existing User Migration
+
+Функция должна одинаково хорошо работать для разных типов пользователей.
+
+Docker users
+
+docker run
+↓
+Discovery
+↓
+Application
+
+⸻
+
+Docker Compose users
+
+compose.yaml
+↓
+Discovery
+↓
+Review
+↓
+Managed Project
+
+⸻
+
+Portainer users
+
+Portainer
+↓
+Discovery
+↓
+Import
+↓
+Continue using Dada
+
+⸻
+
+Coolify users
+
+Coolify
+↓
+Discovery
+↓
+Import
+↓
+Managed Project
+
+Важный принцип:
+
+Пользователь не обязан удалять существующий инструмент в первый день.
+
+Dada постепенно становится основной точкой управления.
+
+⸻
+
+18. Product Boundaries
+
+Очень важно понимать, чем продукт не является.
+
+Не IDE
+
+Мы не заменяем VS Code.
+
+⸻
+
+Не Docker Desktop
+
+Мы не должны повторять все функции Docker.
+
+⸻
+
+Не Portainer
+
+Мы не управляем каждым контейнером вручную.
+
+⸻
+
+Не Kubernetes Dashboard
+
+Пользователь вообще не должен видеть Kubernetes.
+
+⸻
+
+Не Terraform
+
+Пользователь не описывает инфраструктуру декларативно.
+
+Платформа делает это сама.
+
+⸻
+
+19. Core UX Principles
+
+Principle 1
+
+Infrastructure should feel discoverable.
+
+После подключения пользователь сразу должен увидеть ценность.
+
+Discovery должен занимать минуты, а не часы.
+
+⸻
+
+Principle 2
+
+Never surprise the user.
+
+Любое изменение инфраструктуры требует подтверждения.
+
+⸻
+
+Principle 3
+
+The platform owns complexity.
+
+Пользователь не должен принимать решения вроде:
+
+* использовать ли external volume;
+* как назвать compose project;
+* какие labels необходимы.
+
+Платформа должна принимать безопасные значения по умолчанию.
+
+⸻
+
+Principle 4
+
+One UI.
+
+После импорта пользователь работает с тем же интерфейсом, что и пользователь, создавший приложение внутри Dada.
+
+Не должно существовать “режима импортированного приложения”.
+
+⸻
+
+20. MVP Backlog
+
+Epic 1 — Discovery
+
+Истории:
+
+* обнаружить Docker;
+* обнаружить Compose;
+* обнаружить контейнеры;
+* обнаружить volumes;
+* обнаружить networks;
+* обнаружить environment variables.
+
+Definition of Done:
+
+Пользователь получает полный inventory.
+
+⸻
+
+Epic 2 — Review
+
+Истории:
+
+* переименование сервисов;
+* исключение ресурсов;
+* просмотр compose;
+* просмотр env;
+* подтверждение импорта.
+
+Definition of Done:
+
+Пользователь понимает, что именно будет импортировано.
+
+⸻
+
+Epic 3 — Import
+
+Истории:
+
+* создание проекта;
+* генерация Desired State;
+* создание Git структуры;
+* первый Deploy.
+
+Definition of Done:
+
+Импортированный проект работает через стандартный pipeline Dada.
+
+⸻
+
+Epic 4 — Operations
+
+Истории:
+
+* просмотр логов;
+* просмотр метрик;
+* повторный Deploy;
+* изменение конфигурации.
+
+Definition of Done:
+
+После импорта пользователь больше не возвращается к ручному SSH-деплою.
+
+⸻
+
+21. Release Plan
+
+Alpha
+
+Только Docker Compose.
+
+Поддержка:
+
+* один сервер;
+* один compose project.
+
+⸻
+
+Beta
+
+Несколько compose проектов.
+
+Улучшенный Discovery.
+
+Первичная работа с Drift.
+
+⸻
+
+GA
+
+Полноценный Production Release.
+
+Поддержка:
+
+* rollback;
+* сервисных операций;
+* импортированных секретов;
+* стабильной истории деплоев.
+
+⸻
+
+22. Risks
+
+Технические
+
+* Discovery не сможет корректно восстановить сложные compose-конфигурации.
+* Некоторые контейнеры окажутся вне compose.
+* Возможны ошибки при работе с volumes.
+
+⸻
+
+Продуктовые
+
+Самый большой риск — сделать продукт похожим на Portainer.
+
+Если пользователь начинает думать:
+
+“Это просто еще один Portainer”,
+
+значит продукт развивается в неверном направлении.
+
+Dada должна оставаться платформой управления приложениями, а не интерфейсом для Docker API.
+
+⸻
+
+UX
+
+Если пользователь увидит десять экранов настройки перед первым импортом, мы проиграли.
+
+Главная ценность Infrastructure Adoption — скорость.
+
+⸻
+
+23. Future Vision
+
+Через несколько лет пользовательский путь должен выглядеть так:
+
+Create account
+↓
+Connect server
+↓
+Coffee ☕
+↓
+Infrastructure imported
+↓
+Applications
+↓
+Databases
+↓
+Domains
+↓
+Storage
+↓
+Logs
+↓
+Metrics
+↓
+Deployments
+
+Пользователь может никогда не открыть Docker Compose.
+
+Может никогда не установить kubectl.
+
+Может никогда не использовать SSH.
+
+Именно в этом заключается долгосрочная цель Infrastructure Adoption.
+
+⸻
+
+24. Success Definition
+
+Infrastructure Adoption считается успешной не тогда, когда мы научились импортировать Docker Compose.
+
+Она считается успешной тогда, когда существующая инфраструктура становится обычным проектом Dada Cloud, а пользователь перестает воспринимать ее как “старый VPS”.
+
+Это главный критерий успеха продукта.
+
+⸻
+
+
+
+Пользователь покупает не GitOps.
+
+Он покупает:
+
+“Я подключил существующий сервер и за 10 минут получил нормальную облачную платформу, ничего не переписывая.”
+
+Это и есть основная ценность всей инициативы.

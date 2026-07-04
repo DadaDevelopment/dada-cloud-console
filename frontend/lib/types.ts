@@ -225,6 +225,24 @@ export interface WorkloadDiscovery {
   warnings: string[];
 }
 
+/** One discovered container the user chose to adopt into the managed compose stack. */
+export interface ImportServiceInput {
+  container_name: string;
+  service_name: string;
+  image: string;
+  ports: string[];
+  volumes: string[];
+  include: boolean;
+}
+
+/** Body of POST /app-servers/:name/import — adopt discovered workload into a managed app. */
+export interface ImportRequest {
+  app_name: string;
+  services: ImportServiceInput[];
+  env: Record<string, string>;
+  ack_secrets_in_git: boolean;
+}
+
 export interface ResourceSnapshot {
   id: string;
   project_id: string;

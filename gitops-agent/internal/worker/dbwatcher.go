@@ -211,6 +211,8 @@ func (w *DBWatcher) dispatch(ctx context.Context, op db.Operation) error {
 		return w.doCreatePreviewEnv(ctx, op)
 	case "DeletePreviewEnv":
 		return w.doDeletePreviewEnv(ctx, op)
+	case "ImportComposeStack":
+		return w.doImportComposeStack(ctx, op)
 	default:
 		return fmt.Errorf("unknown action: %s", op.Action)
 	}
@@ -650,6 +652,79 @@ func (w *DBWatcher) doCreateComposeApp(ctx context.Context, op db.Operation, app
 		return fmt.Errorf("enqueue deploy stack: %w", err)
 	}
 	log.Info().Str("app", appName).Str("deploy_op", deployID.String()).Msg("compose app rendered; deploy enqueued")
+	return nil
+}
+
+// doImportComposeStack adopts a discovered VM workload (DiscoverWorkload) into
+// a managed compose App: it renders compose.yaml from the included services —
+// pinning any referenced named volume external so the first deploy attaches
+// existing prod data instead of creating an empty one (see
+// renderer.RenderComposeFromDiscovery) — writes the .env from the payload's
+// EnvVars verbatim (the API handler already enforced the ack_secrets_in_git
+// consent gate), commits both, records a Pending snapshot, and enqueues the
+// same DeployStack op a normal compose CreateApp uses so the imported stack
+// gets live state/logs/metrics like any other app.
+//
+// SEAM: unlike doCreateComposeApp, env vars here are NOT also persisted into
+// the env_vars table (resolveRuntimeEnv), so a later "edit env" / redeploy
+// through the normal app env UI will not see these values until someone sets
+// them there explicitly. Import only guarantees the FIRST deploy's .env
+// matches what was discovered/typed at import time.
+func (w *DBWatcher) doImportComposeStack(ctx context.Context, op db.Operation) error {
+	var p struct {
+		AppName    string                       `json:"app_name"`
+		ServerName string                       `json:"server_name"`
+		Services   []renderer.ImportServiceSpec `json:"services"`
+		EnvVars    map[string]string            `json:"env_vars"`
+	}
+	if err := json.Unmarshal(op.Payload, &p); err != nil {
+		return fmt.Errorf("parse payload: %w", err)
+	}
+
+	projectName, envName, _, err := w.projectEnv(ctx, op.ProjectID, op.EnvironmentID)
+	if err != nil {
+		return fmt.Errorf("project/env lookup: %w", err)
+	}
+
+	mgr, err := w.managerFor(ctx, op.ProjectID)
+	if err != nil {
+		return err
+	}
+
+	composeYAML, err := renderer.RenderComposeFromDiscovery(p.Services, len(p.EnvVars) > 0)
+	if err != nil {
+		return err
+	}
+
+	composePath := renderer.AppComposeGitPath(projectName, envName, p.AppName)
+	envPath := renderer.AppEnvGitPath(projectName, envName, p.AppName)
+	commitMsg := fmt.Sprintf(
+		"[DADA Console] Import compose stack %s from %s\n\nOperation: %s\nProject: %s\nEnvironment: %s\n",
+		p.AppName, p.ServerName, op.ID, projectName, envName,
+	)
+	if err := w.commitFilesAndRecord(ctx, op, mgr, composePath, []git.FileChange{
+		{Path: composePath, Content: composeYAML},
+		{Path: envPath, Content: renderer.RenderEnvFile(p.EnvVars)},
+	}, commitMsg); err != nil {
+		return err
+	}
+
+	summaryJSON, _ := json.Marshal(map[string]any{
+		"runtime": "compose", "status": "Pending", "imported_from": p.ServerName,
+	})
+	if err := db.UpsertSnapshot(ctx, w.pool,
+		op.ProjectID, op.EnvironmentID,
+		"App", p.AppName, "Pending", summaryJSON, time.Now(),
+	); err != nil {
+		return err
+	}
+
+	deployID, err := db.EnqueueDeployStack(ctx, w.pool, op.ID, p.AppName)
+	if err != nil {
+		return fmt.Errorf("enqueue deploy stack: %w", err)
+	}
+	log.Info().Str("app", p.AppName).Str("server", p.ServerName).Str("deploy_op", deployID.String()).
+		Msg("compose stack imported; deploy enqueued")
 	return nil
 }
 

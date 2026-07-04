@@ -1234,6 +1234,106 @@ const docTemplate = `{
                 }
             }
         },
+        "/projects/{projectId}/app-servers/{serverName}/import": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Adopts a subset of a VM's discovered containers (see the discover endpoint) into a new managed compose App bound to this app server's environment. Named volumes referenced by included services are pinned external in the rendered compose.yaml so the first deploy attaches existing data instead of creating an empty volume. Asynchronous: returns 202 with an operation; poll it until terminal.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "appserver"
+                ],
+                "summary": "Import a discovered workload as a managed app",
+                "operationId": "importComposeStack",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Project UUID",
+                        "name": "projectId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "App server name",
+                        "name": "serverName",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Import specification",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/api.importComposeStackRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "202": {
+                        "description": "object with the accepted operation",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "409": {
+                        "description": "VM not enrolled/Ready, no included services, or plaintext-secret consent missing",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/projects/{projectId}/app-servers/{serverName}/metrics": {
             "get": {
                 "security": [
@@ -8496,6 +8596,29 @@ const docTemplate = `{
                 }
             }
         },
+        "api.importComposeStackRequest": {
+            "type": "object",
+            "properties": {
+                "ack_secrets_in_git": {
+                    "type": "boolean"
+                },
+                "app_name": {
+                    "type": "string"
+                },
+                "env": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string"
+                    }
+                },
+                "services": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/models.ImportServiceSpec"
+                    }
+                }
+            }
+        },
         "api.ingestLogsRequest": {
             "type": "object",
             "properties": {
@@ -8595,6 +8718,35 @@ const docTemplate = `{
                 "AIModelSourceS3",
                 "AIModelSourceCustom"
             ]
+        },
+        "models.ImportServiceSpec": {
+            "type": "object",
+            "properties": {
+                "container_name": {
+                    "type": "string"
+                },
+                "image": {
+                    "type": "string"
+                },
+                "include": {
+                    "type": "boolean"
+                },
+                "ports": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "service_name": {
+                    "type": "string"
+                },
+                "volumes": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                }
+            }
         },
         "pricing.Need": {
             "type": "object",

@@ -39,6 +39,7 @@ import type {
   PendingApprovalsResponse,
   AppState,
   AppServerState,
+  ImportRequest,
   MetricsResponse,
   LogSearchResponse,
   // Vercel-flow
@@ -293,6 +294,15 @@ export const appServersApi = {
     apiFetch<{ operation: Operation; message: string }>(
       `/api/v1/projects/${projectId}/app-servers/${serverName}/discover`,
       { method: "POST" }
+    ),
+
+  // Adopt a discovered workload into a managed compose app: renders compose.yaml +
+  // .env from the selected services, commits to git, deploys via the existing stack
+  // pipeline. Async — poll the returned operation until terminal, then the app exists.
+  import: (projectId: string, serverName: string, body: ImportRequest) =>
+    apiFetch<{ operation: Operation; message: string }>(
+      `/api/v1/projects/${projectId}/app-servers/${serverName}/import`,
+      { method: "POST", body }
     ),
 
   // VM resource metrics (central Prometheus proxy, node_exporter).

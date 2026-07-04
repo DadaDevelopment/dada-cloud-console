@@ -214,6 +214,21 @@ definitions:
       provider:
         type: string
     type: object
+  api.importComposeStackRequest:
+    properties:
+      ack_secrets_in_git:
+        type: boolean
+      app_name:
+        type: string
+      env:
+        additionalProperties:
+          type: string
+        type: object
+      services:
+        items:
+          $ref: '#/definitions/models.ImportServiceSpec'
+        type: array
+    type: object
   api.ingestLogsRequest:
     properties:
       level:
@@ -282,6 +297,25 @@ definitions:
     - AIModelSourceMLflow
     - AIModelSourceS3
     - AIModelSourceCustom
+  models.ImportServiceSpec:
+    properties:
+      container_name:
+        type: string
+      image:
+        type: string
+      include:
+        type: boolean
+      ports:
+        items:
+          type: string
+        type: array
+      service_name:
+        type: string
+      volumes:
+        items:
+          type: string
+        type: array
+    type: object
   pricing.Need:
     properties:
       apps:
@@ -1109,6 +1143,78 @@ paths:
       security:
       - BearerAuth: []
       summary: Discover an app server's running workload (read-only)
+      tags:
+      - appserver
+  /projects/{projectId}/app-servers/{serverName}/import:
+    post:
+      consumes:
+      - application/json
+      description: 'Adopts a subset of a VM''s discovered containers (see the discover
+        endpoint) into a new managed compose App bound to this app server''s environment.
+        Named volumes referenced by included services are pinned external in the rendered
+        compose.yaml so the first deploy attaches existing data instead of creating
+        an empty volume. Asynchronous: returns 202 with an operation; poll it until
+        terminal.'
+      operationId: importComposeStack
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      - description: App server name
+        in: path
+        name: serverName
+        required: true
+        type: string
+      - description: Import specification
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/api.importComposeStackRequest'
+      produces:
+      - application/json
+      responses:
+        "202":
+          description: object with the accepted operation
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "409":
+          description: VM not enrolled/Ready, no included services, or plaintext-secret
+            consent missing
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Import a discovered workload as a managed app
       tags:
       - appserver
   /projects/{projectId}/app-servers/{serverName}/metrics:

@@ -465,3 +465,181 @@ func (h *Handler) DiscoverWorkload(c *gin.Context) {
 
 	c.JSON(http.StatusAccepted, gin.H{"operation": op, "message": "workload discovery queued"})
 }
+
+type importComposeStackRequest struct {
+	AppName         string                     `json:"app_name"`
+	Services        []models.ImportServiceSpec `json:"services"`
+	Env             map[string]string          `json:"env"`
+	AckSecretsInGit bool                       `json:"ack_secrets_in_git"`
+}
+
+// ImportComposeStack enqueues an operation that adopts a discovered VM workload
+// (see DiscoverWorkload) into a managed compose App: it renders compose.yaml +
+// .env from the included services, commits them to git, and deploys via the
+// same DeployStack chain a normal compose CreateApp uses — so the imported
+// stack shows up as an ordinary app with live state/logs/metrics.
+//
+// @ID          importComposeStack
+// @Summary     Import a discovered workload as a managed app
+// @Description Adopts a subset of a VM's discovered containers (see the discover endpoint) into a new managed compose App bound to this app server's environment. Named volumes referenced by included services are pinned external in the rendered compose.yaml so the first deploy attaches existing data instead of creating an empty volume. Asynchronous: returns 202 with an operation; poll it until terminal.
+// @Tags        appserver
+// @Accept      json
+// @Produce     json
+// @Security    BearerAuth
+// @Param       projectId  path     string                     true "Project UUID"
+// @Param       serverName path     string                     true "App server name"
+// @Param       body       body     importComposeStackRequest  true "Import specification"
+// @Success     202        {object} map[string]interface{} "object with the accepted operation"
+// @Failure     400        {object} map[string]string
+// @Failure     401        {object} map[string]string
+// @Failure     403        {object} map[string]string
+// @Failure     404        {object} map[string]string
+// @Failure     409        {object} map[string]string "VM not enrolled/Ready, no included services, or plaintext-secret consent missing"
+// @Router      /projects/{projectId}/app-servers/{serverName}/import [post]
+func (h *Handler) ImportComposeStack(c *gin.Context) {
+	claims, ok := auth.GetClaims(c)
+	if !ok {
+		respondUnauthorized(c)
+		return
+	}
+	projectID, err := uuid.Parse(c.Param("projectId"))
+	if err != nil {
+		respondNotFound(c)
+		return
+	}
+	serverName := c.Param("serverName")
+
+	role, err := h.effectiveRole(c.Request.Context(), claims, projectID)
+	if err == pgx.ErrNoRows {
+		respondNotFound(c)
+		return
+	}
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, "failed to check project membership")
+		return
+	}
+	if !canWrite(role) {
+		respondForbidden(c)
+		return
+	}
+
+	var req importComposeStackRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		respondError(c, http.StatusBadRequest, err.Error())
+		return
+	}
+	if req.AppName == "" {
+		respondError(c, http.StatusBadRequest, "app_name is required")
+		return
+	}
+	if err := validateKubeName(req.AppName); err != nil {
+		respondError(c, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	var included []models.ImportServiceSpec
+	for _, svc := range req.Services {
+		if svc.Include {
+			included = append(included, svc)
+		}
+	}
+	if len(included) == 0 {
+		respondError(c, http.StatusBadRequest, "at least one service must be included")
+		return
+	}
+	if len(req.Env) > 0 && !req.AckSecretsInGit {
+		respondError(c, http.StatusConflict, "env is non-empty; set ack_secrets_in_git=true to confirm plaintext .env may land in git")
+		return
+	}
+
+	var endpointID *int
+	var serverStatus string
+	err = h.pool.QueryRow(c.Request.Context(),
+		`SELECT portainer_endpoint_id, status FROM app_servers
+		 WHERE project_id = $1 AND name = $2 AND status != 'Deleted'`,
+		projectID, serverName,
+	).Scan(&endpointID, &serverStatus)
+	if err == pgx.ErrNoRows {
+		respondNotFound(c)
+		return
+	}
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, "failed to find app server")
+		return
+	}
+	if endpointID == nil {
+		respondError(c, http.StatusConflict, "app server is not enrolled yet (no Portainer endpoint); enroll it before importing")
+		return
+	}
+	if serverStatus != string(models.AppServerStatusReady) {
+		respondError(c, http.StatusConflict, "app server is not Ready yet")
+		return
+	}
+
+	var envID uuid.UUID
+	err = h.pool.QueryRow(c.Request.Context(),
+		`SELECT e.id FROM environments e
+		 JOIN app_servers s ON s.id = e.app_server_id
+		 WHERE s.project_id = $1 AND s.name = $2
+		 ORDER BY e.created_at LIMIT 1`,
+		projectID, serverName,
+	).Scan(&envID)
+	if err == pgx.ErrNoRows {
+		respondError(c, http.StatusConflict, "this app server has no environment attached")
+		return
+	}
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, "failed to resolve app server environment")
+		return
+	}
+
+	var existing int
+	if err := h.pool.QueryRow(c.Request.Context(),
+		`SELECT COUNT(*) FROM resource_snapshots
+		 WHERE project_id = $1 AND environment_id = $2 AND kind = 'App' AND name = $3`,
+		projectID, envID, req.AppName,
+	).Scan(&existing); err != nil {
+		respondError(c, http.StatusInternalServerError, "failed to check name uniqueness")
+		return
+	}
+	if existing > 0 {
+		respondError(c, http.StatusConflict, "an app with that name already exists in this environment")
+		return
+	}
+
+	payload := models.ImportComposeStackPayload{
+		AppName:         req.AppName,
+		ServerName:      serverName,
+		Services:        included,
+		EnvVars:         req.Env,
+		AckSecretsInGit: req.AckSecretsInGit,
+	}
+	payloadBytes, err := json.Marshal(payload)
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, "failed to marshal payload")
+		return
+	}
+
+	var op models.Operation
+	row := h.pool.QueryRow(c.Request.Context(),
+		`INSERT INTO operations (actor_id, project_id, environment_id, action, resource_kind, resource_name, status, payload)
+		 VALUES ($1, $2, $3, 'ImportComposeStack', 'App', $4, 'Created', $5)
+		 RETURNING id, actor_id, project_id, environment_id, action, resource_kind, resource_name,
+		           status, payload, validation_result, git_commit, git_path, argo_application,
+		           error_code, error_message, created_at, updated_at`,
+		claims.UserID, projectID, envID, req.AppName, payloadBytes,
+	)
+	if err := scanOperation(row, &op); err != nil {
+		respondError(c, http.StatusInternalServerError, "failed to create operation")
+		return
+	}
+
+	auditMeta, _ := json.Marshal(payload)
+	_, _ = h.pool.Exec(c.Request.Context(),
+		`INSERT INTO audit_events (actor_id, project_id, operation_id, action, resource_kind, resource_name, metadata)
+		 VALUES ($1, $2, $3, 'ImportComposeStack', 'App', $4, $5)`,
+		claims.UserID, projectID, op.ID, req.AppName, auditMeta,
+	)
+
+	c.JSON(http.StatusAccepted, gin.H{"operation": op, "message": "compose stack import queued"})
+}

@@ -103,6 +103,33 @@ type DiscoverWorkloadPayload struct {
 	EndpointID int    `json:"endpoint_id"`
 }
 
+// ImportServiceSpec is one discovered container the caller has chosen to adopt
+// into the imported compose app. Mirrors the shape DiscoverWorkload already
+// returns on validation_result (discoveredContainer), plus Include/ServiceName
+// which only make sense in the import direction.
+type ImportServiceSpec struct {
+	ContainerName string   `json:"container_name"`
+	ServiceName   string   `json:"service_name"`
+	Image         string   `json:"image"`
+	Ports         []string `json:"ports,omitempty"`
+	Volumes       []string `json:"volumes,omitempty"`
+	Include       bool     `json:"include"`
+}
+
+// ImportComposeStackPayload is the typed payload for ImportComposeStack
+// operations: adopts a discovered VM workload into a managed compose App —
+// render compose.yaml + .env from the included services, commit to git, then
+// deploy via the existing DeployStack chain. EnvVars are written verbatim into
+// the app's .env (same plaintext-in-git contract as RenderEnvFile); the
+// ack_secrets_in_git consent gate is enforced by the API handler, not here.
+type ImportComposeStackPayload struct {
+	AppName         string              `json:"app_name"`
+	ServerName      string              `json:"server_name"`
+	Services        []ImportServiceSpec `json:"services"`
+	EnvVars         map[string]string   `json:"env_vars,omitempty"`
+	AckSecretsInGit bool                `json:"ack_secrets_in_git"`
+}
+
 // UpdateAppEnvVarsPayload is the typed payload for UpdateAppEnvVars operations (VM track only).
 type UpdateAppEnvVarsPayload struct {
 	AppName string            `json:"app_name"`

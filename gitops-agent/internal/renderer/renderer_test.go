@@ -232,6 +232,83 @@ func TestRenderCustomIngress(t *testing.T) {
 	}
 }
 
+func TestRenderComposeFromDiscovery(t *testing.T) {
+	tests := []struct {
+		name           string
+		services       []renderer.ImportServiceSpec
+		hasEnv         bool
+		wantSubstrings []string
+		wantAbsent     []string
+	}{
+		{
+			name: "named volume pinned external",
+			services: []renderer.ImportServiceSpec{
+				{ContainerName: "web_1", ServiceName: "web", Image: "nginx:1.25", Ports: []string{"80:80"}, Volumes: []string{"data:/var/lib/x"}, Include: true},
+			},
+			wantSubstrings: []string{
+				"services:", "web:", "image: nginx:1.25", "80:80", "data:/var/lib/x",
+				"volumes:", "data:", "external: true", "name: data",
+			},
+		},
+		{
+			name: "bind mount passes through, no volumes block",
+			services: []renderer.ImportServiceSpec{
+				{ContainerName: "web_1", ServiceName: "web", Image: "nginx:1.25", Volumes: []string{"/opt/app/data:/var/lib/x"}, Include: true},
+			},
+			wantSubstrings: []string{"web:", "/opt/app/data:/var/lib/x"},
+			wantAbsent:     []string{"external: true"},
+		},
+		{
+			name: "excluded service dropped",
+			services: []renderer.ImportServiceSpec{
+				{ContainerName: "web_1", ServiceName: "web", Image: "nginx:1.25", Include: true},
+				{ContainerName: "cache_1", ServiceName: "cache", Image: "redis:7", Include: false},
+			},
+			wantSubstrings: []string{"web:"},
+			wantAbsent:     []string{"cache:", "redis:7"},
+		},
+		{
+			name: "env_file wired when env vars present",
+			services: []renderer.ImportServiceSpec{
+				{ContainerName: "web_1", ServiceName: "web", Image: "nginx:1.25", Include: true},
+			},
+			hasEnv:         true,
+			wantSubstrings: []string{"env_file:", "- .env"},
+		},
+		{
+			name: "no env_file when no env vars",
+			services: []renderer.ImportServiceSpec{
+				{ContainerName: "web_1", ServiceName: "web", Image: "nginx:1.25", Include: true},
+			},
+			hasEnv:     false,
+			wantAbsent: []string{"env_file:"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := renderer.RenderComposeFromDiscovery(tt.services, tt.hasEnv)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			var doc map[string]interface{}
+			if err := yaml.Unmarshal([]byte(got), &doc); err != nil {
+				t.Fatalf("rendered compose is not valid YAML: %v\nFull output:\n%s", err, got)
+			}
+			for _, want := range tt.wantSubstrings {
+				if !strings.Contains(got, want) {
+					t.Errorf("rendered compose missing %q\nFull output:\n%s", want, got)
+				}
+			}
+			for _, absent := range tt.wantAbsent {
+				if strings.Contains(got, absent) {
+					t.Errorf("rendered compose unexpectedly contains %q\nFull output:\n%s", absent, got)
+				}
+			}
+		})
+	}
+}
+
 func TestRenderProject(t *testing.T) {
 	spec := renderer.ProjectSpec{
 		Project:            "client-a",

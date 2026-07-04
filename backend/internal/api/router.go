@@ -181,6 +181,7 @@ func SetupRouter(pool *pgxpool.Pool, cfg *config.Config) *gin.Engine {
 		api.GET("/projects/:projectId/app-servers/:serverName/metrics", h.GetAppServerMetrics)
 		api.DELETE("/projects/:projectId/app-servers/:serverName", h.DeleteAppServer)
 		api.POST("/projects/:projectId/app-servers/:serverName/discover", h.DiscoverWorkload)
+		api.POST("/projects/:projectId/app-servers/:serverName/import", h.ImportComposeStack)
 
 		// Apps
 		api.GET("/projects/:projectId/environments/:envId/apps", h.ListApps)

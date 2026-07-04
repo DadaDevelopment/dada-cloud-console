@@ -1,0 +1,748 @@
+
+
+ADR-0020 — Infrastructure Adoption Framework
+
+Status: Proposed
+
+Date: 2026-07-03
+
+Authors: Dada Cloud Team
+
+⸻
+
+1. Context
+
+Background
+
+Одной из основных целей Dada Cloud является максимально простое развертывание приложений без необходимости глубокого понимания инфраструктуры.
+
+Сегодня пользователь может создать новое приложение внутри Dada Cloud, подключить Git-репозиторий и развернуть его на Kubernetes или на VM Runtime. Эта модель отлично подходит для новых проектов, однако практически не помогает существующим пользователям.
+
+Большинство потенциальных клиентов уже имеют работающую инфраструктуру:
+
+* VPS;
+* Docker;
+* Docker Compose;
+* Portainer;
+* Coolify;
+* собственные shell-скрипты;
+* десятки контейнеров, которые работают “как есть”.
+
+Для таких пользователей переход в новую платформу почти всегда означает:
+
+* переписать compose;
+* пересоздать окружение;
+* перенести volumes;
+* перенастроить секреты;
+* проверить сеть;
+* остановить production;
+* надеяться, что ничего не сломается.
+
+На практике именно этот барьер является причиной, по которой многие остаются на существующей инфраструктуре.
+
+Discovery-анализ существующего кода показал, что Dada Cloud уже содержит большую часть компонентов, необходимых для управления VM Runtime:
+
+* AppServer;
+* VM Environment;
+* Portainer Edge Agent;
+* DeployStack;
+* Git-backed deployment;
+* compose editor;
+* logs;
+* metrics;
+* operation queue.
+
+Отсутствует только возможность сделать существующую инфраструктуру частью платформы.
+
+Именно эту проблему решает Infrastructure Adoption.
+
+⸻
+
+2. Problem Statement
+
+Сегодня пользователь может управлять только той инфраструктурой, которая была создана внутри Dada Cloud.
+
+Платформа практически ничего не знает о существующей инфраструктуре пользователя.
+
+Это приводит к нескольким проблемам.
+
+Высокий порог входа
+
+Пользователь должен фактически мигрировать приложение.
+
+Это дорого.
+
+Это рискованно.
+
+Это занимает часы или дни.
+
+⸻
+
+Потеря существующих знаний
+
+Compose-файлы.
+
+Volumes.
+
+Networks.
+
+Secrets.
+
+Все это уже существует.
+
+Сегодня пользователь вынужден воспроизводить эти знания вручную.
+
+⸻
+
+Нет постепенного перехода
+
+Переход происходит по принципу “всё или ничего”.
+
+Пользователь либо полностью переносит инфраструктуру,
+
+либо остается на VPS.
+
+⸻
+
+Ограничение роста платформы
+
+Без возможности импортировать существующую инфраструктуру Dada Cloud конкурирует только за новые проекты.
+
+Это значительно уменьшает потенциальную аудиторию.
+
+⸻
+
+3. Decision
+
+Dada Cloud становится платформой не только для создания новой инфраструктуры, но и для управления существующей.
+
+Ключевой принцип:
+
+Existing infrastructure should be adopted, not recreated.
+
+Пользователь не переносит инфраструктуру.
+
+Пользователь делает её управляемой.
+
+⸻
+
+4. Goals
+
+Infrastructure Adoption должна позволить пользователю:
+
+* подключить существующую VM;
+* автоматически обнаружить инфраструктуру;
+* понять, что найдено;
+* подтвердить импорт;
+* получить управляемый проект внутри Dada Cloud;
+* продолжить использовать Git как источник изменений;
+* постепенно перейти на managed-возможности платформы.
+
+⸻
+
+5. Non Goals
+
+Первая версия не должна решать следующие задачи.
+
+Не заменяет Portainer
+
+Portainer остается Runtime Implementation.
+
+Dada управляет инфраструктурой более высокого уровня.
+
+⸻
+
+Не заменяет Docker
+
+Docker остается Runtime.
+
+⸻
+
+Не является Kubernetes Migration Tool
+
+Infrastructure Adoption не занимается переносом Compose в Kubernetes.
+
+Это отдельный этап развития платформы.
+
+⸻
+
+Не является IaC Generator
+
+Цель не состоит в генерации Terraform.
+
+⸻
+
+6. Core Principles
+
+Principle 1 — Adoption instead of Migration
+
+Любая существующая инфраструктура должна рассматриваться как потенциально управляемая.
+
+Даже если она была создана полностью вручную.
+
+⸻
+
+Principle 2 — Read before Write
+
+Любое подключение начинается только с чтения.
+
+Discovery никогда не изменяет инфраструктуру.
+
+Это критично для production-систем.
+
+⸻
+
+Principle 3 — Review before Import
+
+Никогда не импортировать автоматически.
+
+Пользователь всегда подтверждает:
+
+* сервисы;
+* volumes;
+* env;
+* compose;
+* сети.
+
+⸻
+
+Principle 4 — Git remains Source of Truth
+
+После импорта изменения происходят через Git.
+
+Discovery не становится источником правды.
+
+Он только помогает сформировать Desired State.
+
+⸻
+
+Principle 5 — Runtime Independence
+
+Compose не является внутренней моделью платформы.
+
+Compose — только один из Runtime Providers.
+
+В будущем аналогичным образом могут быть подключены:
+
+* Kubernetes;
+* Swarm;
+* Nomad;
+* Portainer;
+* Coolify.
+
+⸻
+
+7. High-Level Architecture
+
+Infrastructure Adoption состоит из трех независимых этапов.
+
+Stage 1 — Discovery
+
+Задача:
+
+Получить максимально полное описание существующей инфраструктуры.
+
+Discovery собирает:
+
+* контейнеры;
+* compose projects;
+* volumes;
+* images;
+* networks;
+* environment;
+* ports;
+* labels;
+* healthchecks.
+
+Результат Discovery является read-only.
+
+⸻
+
+Stage 2 — Import
+
+Discovery преобразуется в внутреннюю модель Dada Cloud.
+
+Пользователь получает возможность:
+
+* переименовать сервисы;
+* исключить ресурсы;
+* изменить структуру проекта;
+* подтвердить импорт.
+
+На этом этапе формируется Desired State.
+
+⸻
+
+Stage 3 — Continuous Management
+
+После первого Deploy инфраструктура становится обычным проектом Dada Cloud.
+
+Все дальнейшие изменения происходят через стандартные механизмы платформы.
+
+Продолжаем.
+
+⸻
+
+8. Architectural Decisions
+
+8.1 Infrastructure Adoption extends the existing deployment model
+
+Discovery показал, что Dada уже использует очень удачную модель:
+
+User Action
+        │
+        ▼
+ Operation Queue
+        │
+        ▼
+     Agent
+        │
+        ▼
+ Runtime
+
+Практически все изменения проходят через Operation.
+
+Это один из самых сильных архитектурных элементов платформы.
+
+Infrastructure Adoption не создает новый pipeline.
+
+Он расширяет существующий.
+
+Появляются только новые типы операций.
+
+Например
+
+DiscoverInfrastructure
+ImportInfrastructure
+GenerateDesiredState
+AdoptInfrastructure
+DetectDrift
+
+Все они становятся обычными Operation.
+
+Таким образом:
+
+* retry уже существует;
+* audit уже существует;
+* permissions уже существуют;
+* progress уже существует.
+
+Никакой второй системы создавать не требуется.
+
+⸻
+
+8.2 Existing entities remain unchanged
+
+Discovery показал правильную декомпозицию.
+
+Сегодня уже существуют
+
+Project
+Environment
+AppServer
+Operation
+
+Infrastructure Adoption не заменяет их.
+
+Новая функциональность строится поверх.
+
+Получается
+
+Project
+    Environment
+        Runtime
+            AppServer
+                Imported Resources
+
+То есть импорт не является новой сущностью уровня проекта.
+
+Это состояние AppServer.
+
+⸻
+
+8.3 Environment remains Runtime discriminator
+
+Discovery показал, что Runtime выбирается именно на уровне Environment.
+
+Это правильное решение.
+
+Его необходимо сохранить.
+
+Environment
+Runtime =
+Kubernetes
+VM
+
+Внутри VM Runtime могут существовать различные реализации.
+
+Например
+
+VM Runtime
+Docker Compose
+Docker
+Swarm
+
+При этом UI не должен знать, каким именно Runtime пользуется Environment.
+
+Все действия остаются одинаковыми.
+
+Deploy
+Restart
+Logs
+Metrics
+Rollback
+
+⸻
+
+8.4 Compose is NOT the internal model
+
+Это одно из важнейших решений.
+
+Очень легко сделать ошибку:
+
+Compose
+↓
+Platform
+
+Это тупик.
+
+Вместо этого вводится понятие
+
+Desired Infrastructure State
+
+Compose становится лишь одним из способов его представить.
+
+Пример.
+
+Пользователь видит
+
+Application
+Image
+Ports
+Secrets
+Volumes
+
+Backend уже сам решает
+
+Compose
+или
+Kubernetes
+или
+Swarm
+
+Такое решение позволяет постепенно развивать платформу без изменения пользовательского интерфейса.
+
+⸻
+
+8.5 Discovery Engine
+
+Discovery становится отдельным логическим компонентом платформы.
+
+Важно:
+
+Это не отдельный сервис.
+
+Это capability существующего Agent.
+
+Discovery выполняет исключительно операции чтения.
+
+Его задача —
+
+получить максимально полную информацию о Runtime.
+
+Например
+
+Docker Version
+Images
+Containers
+Compose Projects
+Networks
+Volumes
+Healthchecks
+Environment
+Ports
+Labels
+
+Discovery не должен
+
+* запускать контейнеры;
+* удалять контейнеры;
+* создавать compose;
+* менять файлы.
+
+Это исключительно inventory.
+
+⸻
+
+8.6 Desired State Generation
+
+После Discovery начинается второй этап.
+
+Из найденных ресурсов строится Desired State.
+
+Важно понимать разницу.
+
+Discovery говорит
+
+Что существует сейчас.
+
+Desired State говорит
+
+Чем должна управлять Dada.
+
+Это не всегда одно и то же.
+
+Например
+
+Discovery может найти
+
+Redis
+Old nginx
+Temporary container
+Debug container
+Unused image
+
+Пользователь исключает временные контейнеры.
+
+Desired State содержит только
+
+API
+Frontend
+Redis
+
+⸻
+
+8.7 Import Review
+
+Перед импортом пользователь получает возможность проверить результат.
+
+Это обязательный этап.
+
+Пользователь может
+
+* переименовать сервисы;
+* удалить найденные ресурсы;
+* изменить compose;
+* изменить env;
+* проверить volumes.
+
+Только после подтверждения начинается управление.
+
+⸻
+
+8.8 Continuous Management
+
+После первого успешного Deploy Infrastructure Adoption заканчивается.
+
+Дальше система работает так же, как и любой другой проект.
+
+Никаких отдельных экранов “Imported Project” существовать не должно.
+
+Пользователь работает с обычным приложением.
+
+⸻
+
+9. Security Model
+
+Infrastructure Adoption существенно расширяет возможности платформы.
+
+Поэтому вводятся ограничения.
+
+⸻
+
+Discovery
+
+Всегда read-only.
+
+⸻
+
+Import
+
+Меняет только состояние внутри Dada Cloud.
+
+Не меняет Runtime.
+
+⸻
+
+Deploy
+
+Может менять Runtime.
+
+Использует существующую модель RBAC.
+
+⸻
+
+Destructive operations
+
+Любые действия
+
+Stop
+Delete
+Remove
+Prune
+
+должны существовать как отдельные Operation.
+
+Они должны:
+
+* логироваться;
+* иметь audit trail;
+* требовать соответствующих разрешений.
+
+⸻
+
+Secrets
+
+Discovery может обнаружить существующие env.
+
+Однако автоматически коммитить секреты в Git запрещено.
+
+Возможны два режима.
+
+MVP
+
+Явное подтверждение пользователя.
+
+Future
+
+Secret Provider.
+
+⸻
+
+10. Risks
+
+Drift
+
+Пользователь может продолжать работать через SSH.
+
+Появляется расхождение между Desired State и Runtime.
+
+Это допустимо для MVP.
+
+В дальнейшем появляется Drift Detection.
+
+⸻
+
+Partial Discovery
+
+Некоторые контейнеры невозможно корректно сопоставить с Compose.
+
+В этом случае Discovery обязан явно показать
+
+Unknown Resources
+
+а не пытаться угадать.
+
+⸻
+
+Data Safety
+
+Volumes никогда не должны автоматически заменяться.
+
+Discovery обязан определять
+
+external volumes
+
+и использовать их при генерации Desired State.
+
+⸻
+
+Runtime Differences
+
+Compose позволяет многое.
+
+Kubernetes — другое.
+
+Desired State должен хранить только то,
+
+что имеет платформенный смысл.
+
+Runtime-specific параметры остаются Runtime-specific.
+
+⸻
+
+11. Alternatives Considered
+
+Build another Portainer
+
+Rejected.
+
+Portainer уже отлично решает задачи Runtime Management.
+
+Dada должна решать задачи Platform Management.
+
+⸻
+
+Build another Coolify
+
+Rejected.
+
+Coolify ориентирован на управление Compose.
+
+Dada ориентирована на управление инфраструктурой независимо от Runtime.
+
+⸻
+
+Force migration
+
+Rejected.
+
+Это создает основной барьер входа.
+
+⸻
+
+SSH-only
+
+Rejected.
+
+Императивные команды плохо масштабируются.
+
+Платформа должна работать через декларативные операции.
+
+⸻
+
+12. Consequences
+
+После принятия данного ADR Infrastructure Adoption становится стандартным способом подключения существующей инфраструктуры.
+
+Любой Runtime должен реализовывать одинаковый жизненный цикл:
+
+Connect
+↓
+Discover
+↓
+Review
+↓
+Import
+↓
+Manage
+
+Любой новый Runtime (Docker, Kubernetes, Nomad, Swarm и т.д.) должен интегрироваться через этот же процесс, а не создавать собственный пользовательский сценарий.
+
+⸻
+
+13. Future Evolution
+
+Следующие этапы развития не требуют изменения архитектуры:
+
+* Drift Detection;
+* Compose Rollback;
+* Portainer Import;
+* Coolify Import;
+* Kubernetes Import;
+* Runtime Migration (Compose → Kubernetes);
+* Managed Services поверх импортированной инфраструктуры.
+
+Все эти возможности являются расширениями Infrastructure Adoption Framework, а не отдельными подсистемами.
+
+⸻
+
+14. Summary
+
+Главное архитектурное решение этого ADR можно сформулировать одной фразой:
+
+Dada Cloud не переносит существующую инфраструктуру. Dada Cloud делает её управляемой.
+
+Compose, Docker, Kubernetes или любой другой Runtime перестают быть центром архитектуры. Они становятся реализациями единой модели управления инфраструктурой.
+
+Именно это позволяет платформе постепенно развиваться от “Git-backed Docker Compose” к полноценной облачной платформе без необходимости менять пользовательский опыт или переписывать существующую архитектуру.

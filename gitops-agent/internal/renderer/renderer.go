@@ -309,6 +309,103 @@ services:
 `, appName)
 }
 
+// ImportServiceSpec is one discovered container the caller chose to adopt into
+// an imported compose app. Mirrors models.ImportServiceSpec on the backend
+// (JSON tags are a hard contract — do not rename without updating both sides).
+type ImportServiceSpec struct {
+	ContainerName string   `json:"container_name"`
+	ServiceName   string   `json:"service_name"`
+	Image         string   `json:"image"`
+	Ports         []string `json:"ports,omitempty"`
+	Volumes       []string `json:"volumes,omitempty"`
+	Include       bool     `json:"include"`
+}
+
+// isBindMountSource reports whether a volume source (the part before ':' in a
+// compose "source:target" mount string) is a bind-mount host path rather than a
+// named volume: absolute paths and "./"-relative paths pass through as-is,
+// everything else is treated as a named volume that must be pinned external.
+func isBindMountSource(source string) bool {
+	return strings.HasPrefix(source, "/") || strings.HasPrefix(source, "./") || strings.HasPrefix(source, "../")
+}
+
+// RenderComposeFromDiscovery renders a docker-compose file adopting a
+// discovered VM workload: each included service is keyed by its ServiceName
+// with image/ports/volumes carried over verbatim, and env_file: [.env] wired
+// when env vars were supplied. DATA SAFETY: every named volume referenced by an
+// included service is pinned in the top-level volumes: block with
+// `external: true` and the literal live name, so the first `docker compose up`
+// ATTACHES the existing prod data instead of minting a fresh empty
+// `<stack>_<vol>` — the documented PG-data-loss risk (see
+// scripts/vm-discover.sh, tasks/vm-gitops-migration-plan.md Phase 4). Bind
+// mounts (absolute or ./-relative sources) pass through unchanged; they are not
+// named volumes and need no pinning.
+func RenderComposeFromDiscovery(services []ImportServiceSpec, hasEnv bool) (string, error) {
+	type serviceDoc struct {
+		Image   string   `yaml:"image"`
+		Restart string   `yaml:"restart,omitempty"`
+		Ports   []string `yaml:"ports,omitempty"`
+		Volumes []string `yaml:"volumes,omitempty"`
+		EnvFile []string `yaml:"env_file,omitempty"`
+	}
+	type volumeDoc struct {
+		External bool   `yaml:"external"`
+		Name     string `yaml:"name"`
+	}
+	type composeDoc struct {
+		Services map[string]serviceDoc `yaml:"services"`
+		Volumes  map[string]volumeDoc  `yaml:"volumes,omitempty"`
+	}
+
+	doc := composeDoc{Services: map[string]serviceDoc{}}
+	namedVolumes := map[string]bool{}
+
+	for _, svc := range services {
+		if !svc.Include {
+			continue
+		}
+		sd := serviceDoc{
+			Image:   svc.Image,
+			Restart: "unless-stopped",
+			Ports:   svc.Ports,
+			Volumes: svc.Volumes,
+		}
+		if hasEnv {
+			sd.EnvFile = []string{".env"}
+		}
+		doc.Services[svc.ServiceName] = sd
+
+		for _, v := range svc.Volumes {
+			source := v
+			if idx := strings.Index(v, ":"); idx >= 0 {
+				source = v[:idx]
+			}
+			if source == "" || isBindMountSource(source) {
+				continue
+			}
+			namedVolumes[source] = true
+		}
+	}
+
+	if len(namedVolumes) > 0 {
+		doc.Volumes = make(map[string]volumeDoc, len(namedVolumes))
+		names := make([]string, 0, len(namedVolumes))
+		for name := range namedVolumes {
+			names = append(names, name)
+		}
+		sort.Strings(names)
+		for _, name := range names {
+			doc.Volumes[name] = volumeDoc{External: true, Name: name}
+		}
+	}
+
+	b, err := yaml.Marshal(doc)
+	if err != nil {
+		return "", fmt.Errorf("rendering compose from discovery: %w", err)
+	}
+	return string(b), nil
+}
+
 // RenderEnvSkeleton returns a minimal .env placeholder for a compose app.
 func RenderEnvSkeleton() string {
 	return "# Environment variables for this compose app (KEY=VALUE per line).\n"
