@@ -7,9 +7,9 @@ import (
 	"time"
 
 	"github.com/dada-tuda/console/portainer-agent/internal/db"
+	"github.com/dada-tuda/console/portainer-agent/internal/portainer"
 	dadash "github.com/dada-tuda/console/portainer-agent/internal/ssh"
 	tf "github.com/dada-tuda/console/portainer-agent/internal/terraform"
-	"github.com/dada-tuda/console/portainer-agent/internal/portainer"
 	"github.com/rs/zerolog/log"
 )
 
@@ -117,7 +117,10 @@ func (w *VMWatcher) doCreateAppServer(ctx context.Context, op db.Operation) erro
 		return fmt.Errorf("wait for agent: %w", err)
 	}
 
-	// ── 7. Mark Ready ───────────────────────────────────────────────────────
+	// ── 7. Join the fleet (tag into edge group + ensure fleet edge stack) ────
+	w.joinFleet(ctx, ep.ID)
+
+	// ── 8. Mark Ready ───────────────────────────────────────────────────────
 	if err := db.SetAppServerReady(ctx, w.pool, serverID, ep.ID); err != nil {
 		return fmt.Errorf("set app_server ready: %w", err)
 	}
@@ -198,7 +201,10 @@ func (w *VMWatcher) doCreateManualAppServer(ctx context.Context, op db.Operation
 		return fmt.Errorf("wait for agent: %w", err)
 	}
 
-	// ── 6. Mark Ready ───────────────────────────────────────────────────────
+	// ── 6. Join the fleet (tag into edge group + ensure fleet edge stack) ────
+	w.joinFleet(ctx, ep.ID)
+
+	// ── 7. Mark Ready ───────────────────────────────────────────────────────
 	if err := db.SetAppServerReady(ctx, w.pool, serverID, ep.ID); err != nil {
 		return fmt.Errorf("set app_server ready: %w", err)
 	}

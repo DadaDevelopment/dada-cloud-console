@@ -29,18 +29,21 @@ func TestRenderBootstrap(t *testing.T) {
 		"aHR0cHM6Ly9wb3J0YWluZXI=",
 		"550e8400-e29b-41d4-a716-446655440000",
 		"https://prometheus.dada-tuda.ru/api/v1/write",
-		"https://elastic.dada-tuda.ru:9200",
-		"api_key_here",
+		"VM_NAME=test-server-1", // per-VM identity for the fleet edge stack
+		"/etc/dada/vm.env",
 		"BOOTSTRAP_COMPLETE",
 		"portainer/agent:2.21.0",
 		"node_exporter",
 		"cadvisor",
-		"filebeat",
 	}
 	for _, check := range checks {
 		if !strings.Contains(script, check) {
 			t.Errorf("expected rendered script to contain %q", check)
 		}
+	}
+	// filebeat is retired — logs now ship via the fleet fluent-bit edge stack.
+	if strings.Contains(script, "--name filebeat") {
+		t.Error("filebeat should no longer be installed by bootstrap (moved to the fleet edge stack)")
 	}
 }
 
@@ -60,7 +63,6 @@ var alwaysPresent = []string{
 var observabilityMarkers = []string{
 	"--name prometheus-agent",
 	"--enable-feature=agent",
-	"--name filebeat",
 	"/usr/local/bin/node_exporter",
 	"--name cadvisor",
 }
@@ -108,16 +110,15 @@ func TestRenderBootstrap_SkipsObservabilityForUnreachableEndpoints(t *testing.T)
 	}
 }
 
-// TestRenderBootstrap_IndependentSidecarGating proves the two sidecars are gated
-// independently: a public Prometheus endpoint with an in-cluster Elasticsearch
-// endpoint renders prometheus-agent but skips filebeat.
-func TestRenderBootstrap_IndependentSidecarGating(t *testing.T) {
+// TestRenderBootstrap_MetricsGatedLogsViaFleet proves the metrics sidecars still
+// render for a public Prometheus endpoint, while filebeat is gone entirely — logs
+// are delivered by the fleet fluent-bit edge stack, not bootstrap.
+func TestRenderBootstrap_MetricsGatedLogsViaFleet(t *testing.T) {
 	script, err := dadash.RenderBootstrap(dadash.BootstrapParams{
 		ServerName:               "vm-mixed",
 		EdgeKey:                  "edgekey",
 		EdgeID:                   "edge-id-3",
 		PrometheusRemoteWriteURL: "https://prometheus.dada-tuda.ru/api/v1/write",
-		ElasticsearchURL:         "http://elasticsearch-es-http.logging.svc.cluster.local:9200",
 	})
 	if err != nil {
 		t.Fatalf("RenderBootstrap error: %v", err)
@@ -126,6 +127,9 @@ func TestRenderBootstrap_IndependentSidecarGating(t *testing.T) {
 		t.Error("expected prometheus-agent to render for a public remote_write endpoint")
 	}
 	if strings.Contains(script, "--name filebeat") {
-		t.Error("expected filebeat to be skipped for an in-cluster Elasticsearch endpoint")
+		t.Error("filebeat must never render — logs ship via the fleet edge stack")
+	}
+	if !strings.Contains(script, "VM_NAME=vm-mixed") {
+		t.Error("expected the per-VM identity file (VM_NAME) to render for the fleet edge stack")
 	}
 }

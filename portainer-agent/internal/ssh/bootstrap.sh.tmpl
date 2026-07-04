@@ -23,6 +23,15 @@ fi
 systemctl enable docker --now 2>/dev/null || true
 echo "[bootstrap] Docker ready"
 
+# ── Per-VM identity for the fleet edge stack ─────────────────────────────────
+# The fleet observability edge stack (one compose for the whole dada-vms group)
+# reads VM_NAME from here to label metrics / name the log index per VM. Written
+# once at enroll; the group-wide config is delivered/updated via the edge stack,
+# not by re-running this bootstrap. See tasks/vm-fleet-config-plan.md.
+mkdir -p /etc/dada
+printf 'VM_NAME=%s\n' "{{.ServerName}}" > /etc/dada/vm.env
+echo "[bootstrap] wrote /etc/dada/vm.env (VM_NAME={{.ServerName}})"
+
 # Observability stack below is best-effort: on pre-provisioned VMs a port clash
 # (e.g. :8080 already taken) or a download hiccup must NOT prevent the Portainer
 # Edge Agent (the thing that makes the AppServer reach Ready) from deploying.
@@ -125,56 +134,14 @@ echo "[bootstrap] Prometheus Agent started (remote_write to {{.PrometheusRemoteW
 {{else}}
 echo "[bootstrap] No public Prometheus remote_write endpoint configured — skipping node_exporter/cAdvisor/prometheus-agent"
 {{end}}
-{{if .ElasticsearchURL}}
-# ── Filebeat 8.17.3 → Elasticsearch ─────────────────────────────────────────
-# Only APPLICATION container logs reach Elasticsearch. The platform's own
-# observability sidecars (node_exporter/cadvisor/prometheus-agent/filebeat/edge
-# agent) are silenced at the source via `--log-driver none`, so they never write
-# a json log file and filebeat never sees them — this is what keeps the console
-# log view free of infra noise. We deliberately do NOT rely on
-# add_docker_metadata to filter by container name: filebeat's `container` input
-# mis-parses container.id on this Docker build (it keeps the `-json.log` suffix),
-# so docker-API enrichment never matches. Source-level silencing is robust
-# regardless of that.
-mkdir -p /etc/filebeat
-cat > /etc/filebeat/filebeat.yml << FBEOF
-filebeat.inputs:
-  - type: container
-    paths:
-      - /var/lib/docker/containers/*/*.log
-    stream: all
-    # Tag every doc with the AppServer name (root field) so the console can
-    # filter logs per VM. filebeat's host.name is the OS hostname, not the
-    # AppServer name, and prometheus' vm_name external_label does not exist in
-    # log docs — so we set vm_name here, mirroring the prometheus external_label.
-    fields_under_root: true
-    fields:
-      vm_name: "{{.ServerName}}"
-    processors:
-      - drop_fields:
-          fields: ["agent", "ecs"]
-          ignore_missing: true
-output.elasticsearch:
-  hosts: ["{{.ElasticsearchURL}}"]
-  api_key: "{{.ElasticsearchAPIKey}}"
-  index: "dada-app-logs-{{.ServerName}}-%{+yyyy.MM.dd}"
-setup.ilm.enabled: false
-setup.template.enabled: false
-logging.level: warning
-FBEOF
-
-docker rm -f filebeat 2>/dev/null || true
-docker run -d \
-  --name filebeat --restart unless-stopped --user root \
-  --log-driver none \
-  -v /etc/filebeat/filebeat.yml:/usr/share/filebeat/filebeat.yml:ro \
-  -v /var/lib/docker/containers:/var/lib/docker/containers:ro \
-  -v /var/run/docker.sock:/var/run/docker.sock:ro \
-  docker.elastic.co/beats/filebeat:8.17.3
-echo "[bootstrap] Filebeat started"
-{{else}}
-echo "[bootstrap] No public Elasticsearch endpoint configured — skipping filebeat"
-{{end}}
+# ── Logs: delivered by the fleet edge stack, NOT bootstrap ───────────────────
+# filebeat is gone: filebeat 8.x is incompatible with OpenSearch (Elastic
+# `_license` handshake → 400), which broke VM logs fleet-wide after the
+# ES→OpenSearch migration. Container-log shipping is now a fluent-bit service in
+# the `vm-observability` Portainer edge stack (dada-vms group), reconciled from
+# git onto every VM — so the shipper is updated fleet-wide by editing the edge
+# stack, never by re-running this bootstrap. joinFleet (worker) tags the endpoint
+# into the group + ensures the edge stack right after enrollment.
 
 # ── Portainer Edge Agent 2.21.0 ──────────────────────────────────────────────
 # Critical path: restore strict mode and ensure a clean (re)deploy.
