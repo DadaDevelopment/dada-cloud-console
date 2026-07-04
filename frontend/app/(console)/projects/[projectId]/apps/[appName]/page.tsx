@@ -110,6 +110,17 @@ export default function AppDetailPage() {
     }
   }
 
+  async function handleRestart() {
+    if (!window.confirm(t("apps.restart.confirm"))) return;
+    try {
+      const result = await appsApi.restart(projectId, envId, appName);
+      const opId = result.operation?.id;
+      router.push(`/projects/${projectId}/operations${opId ? `?highlight=${opId}` : ""}`);
+    } catch (err) {
+      window.alert(err instanceof Error ? err.message : t("apps.restart.error"));
+    }
+  }
+
   async function handleDomainCreate(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setDomainSubmitError(null);
@@ -181,15 +192,26 @@ export default function AppDetailPage() {
             {t("apps.detail.deployments")}
           </Link>
           {isCompose && canMutate(role) && (
-            <button
-              onClick={handleRollback}
-              className="inline-flex items-center gap-2 rounded-lg border border-amber-300 dark:border-amber-800 bg-white dark:bg-gray-900 px-3 py-2 text-sm font-medium text-amber-700 dark:text-amber-300 hover:bg-amber-50 dark:hover:bg-amber-950/30 transition-colors shadow-sm"
-            >
-              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 15L3 9m0 0l6-6M3 9h12a6 6 0 010 12h-3" />
-              </svg>
-              {t("apps.rollback.button")}
-            </button>
+            <>
+              <button
+                onClick={handleRestart}
+                className="inline-flex items-center gap-2 rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 px-3 py-2 text-sm font-medium text-gray-700 dark:text-gray-200 hover:border-blue-300 hover:text-blue-600 transition-colors shadow-sm"
+              >
+                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182m0-4.991v4.99" />
+                </svg>
+                {t("apps.restart.button")}
+              </button>
+              <button
+                onClick={handleRollback}
+                className="inline-flex items-center gap-2 rounded-lg border border-amber-300 dark:border-amber-800 bg-white dark:bg-gray-900 px-3 py-2 text-sm font-medium text-amber-700 dark:text-amber-300 hover:bg-amber-50 dark:hover:bg-amber-950/30 transition-colors shadow-sm"
+              >
+                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 15L3 9m0 0l6-6M3 9h12a6 6 0 010 12h-3" />
+                </svg>
+                {t("apps.rollback.button")}
+              </button>
+            </>
           )}
           <Link
             href={`/projects/${projectId}/apps/${appName}/settings${envId ? `?envId=${envId}` : ""}`}

@@ -240,6 +240,13 @@ export const appsApi = {
       { method: "POST" }
     ),
 
+  // Restart a compose (VM) app: recreate containers from the current compose (no pull).
+  restart: (projectId: string, envId: string, appName: string) =>
+    apiFetch<{ operation: Operation; message: string }>(
+      `/api/v1/projects/${projectId}/environments/${envId}/apps/${appName}/restart`,
+      { method: "POST" }
+    ),
+
   // Live compose state (Portainer proxy).
   getState: (projectId: string, envId: string, appName: string) =>
     apiFetch<AppState>(

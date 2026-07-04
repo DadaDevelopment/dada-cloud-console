@@ -7,6 +7,9 @@ import type { Messages } from "./common";
 export const apps: Messages = {
   "apps.title": { ru: "Приложения", en: "Applications" },
   "apps.subtitle": { ru: "Управляемые рабочие нагрузки", en: "Managed application workloads" },
+  "apps.restart.button": { ru: "Перезапустить", en: "Restart" },
+  "apps.restart.confirm": { ru: "Перезапустить приложение (пересоздать контейнеры без обновления образов)?", en: "Restart the app (recreate containers without pulling new images)?" },
+  "apps.restart.error": { ru: "Не удалось перезапустить", en: "Restart failed" },
   "apps.rollback.button": { ru: "Откатить", en: "Rollback" },
   "apps.rollback.confirm": { ru: "Откатить приложение к предыдущей версии compose.yaml и передеплоить?", en: "Roll this app back to the previous compose.yaml version and redeploy?" },
   "apps.rollback.error": { ru: "Не удалось откатить", en: "Rollback failed" },
