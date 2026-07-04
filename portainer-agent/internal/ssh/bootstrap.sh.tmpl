@@ -29,111 +29,24 @@ echo "[bootstrap] Docker ready"
 # once at enroll; the group-wide config is delivered/updated via the edge stack,
 # not by re-running this bootstrap. See tasks/vm-fleet-config-plan.md.
 mkdir -p /etc/dada
-printf 'VM_NAME=%s\n' "{{.ServerName}}" > /etc/dada/vm.env
-echo "[bootstrap] wrote /etc/dada/vm.env (VM_NAME={{.ServerName}})"
+cat > /etc/dada/vm.env <<VMENV
+VM_NAME={{.ServerName}}
+{{if .PrometheusRemoteWriteURL}}PROM_REMOTE_WRITE_URL={{.PrometheusRemoteWriteURL}}
+PROM_USER={{.PrometheusUser}}
+PROM_PASS={{.PrometheusPass}}
+{{end}}VMENV
+chmod 600 /etc/dada/vm.env
+echo "[bootstrap] wrote /etc/dada/vm.env (VM_NAME={{.ServerName}}, fleet edge-stack identity)"
 
-# Observability stack below is best-effort: on pre-provisioned VMs a port clash
-# (e.g. :8080 already taken) or a download hiccup must NOT prevent the Portainer
-# Edge Agent (the thing that makes the AppServer reach Ready) from deploying.
-set +e
+# ── Observability: delivered by the fleet edge stack, NOT bootstrap ──────────
+# node_exporter, cadvisor, prometheus-agent (metrics) AND fluent-bit (logs) all
+# live in the `vm-observability` Portainer edge stack on the dada-vms group,
+# reconciled from git onto the whole fleet. That means one git edit updates every
+# VM's node config — no per-VM SSH / bootstrap re-run. Bootstrap's only job is to
+# drop the edge agent + the per-VM identity file (/etc/dada/vm.env above); the
+# joinFleet worker step then tags the endpoint into the group and ensures the edge
+# stack. See tasks/vm-fleet-config-plan.md.
 
-# Observability sidecars are OPT-IN and emitted only when a PUBLIC, externally
-# resolvable monitoring endpoint is configured. RenderBootstrap blanks any
-# in-cluster (…svc.cluster.local) URL before rendering, because external
-# manual-connect VMs cannot resolve cluster DNS — pointing prometheus-agent /
-# filebeat at such hosts makes them crash-loop (same root-cause class as the
-# edge-endpoint in-cluster-URL bug fixed in commit c39d3b7). An empty URL here
-# means "skip this sidecar" rather than "deploy with an unreachable target".
-{{if .PrometheusRemoteWriteURL}}
-# ── Free-port selection ──────────────────────────────────────────────────────
-# VMs differ — common ports (9100, 8080) may already be taken by the workload.
-# Pick the first FREE port from a list of uncommon candidates and feed the SAME
-# value into both the exporter and Prometheus' scrape target, so the agent always
-# knows where to scrape. Avoids the "port already allocated" crash seen on loaded
-# VMs (e.g. :8080 used by an existing app).
-pick_port() {
-  for _p in "$@"; do
-    if command -v ss >/dev/null 2>&1; then
-      ss -ltn 2>/dev/null | grep -q ":${_p} " || { echo "$_p"; return; }
-    else
-      (exec 3<>/dev/tcp/127.0.0.1/${_p}) 2>/dev/null && exec 3>&- || { echo "$_p"; return; }
-    fi
-  done
-  echo "$1"
-}
-NODE_EXPORTER_PORT=$(pick_port 19100 39100 49100 9100)
-CADVISOR_PORT=$(pick_port 18080 38080 48080 8080)
-echo "[bootstrap] observability ports: node_exporter=${NODE_EXPORTER_PORT} cadvisor=${CADVISOR_PORT}"
-
-# ── node_exporter 1.8.2 (container — consistent with the rest, no systemd) ────
-docker rm -f node_exporter 2>/dev/null || true
-_i=0; while docker inspect node_exporter >/dev/null 2>&1 && [ $_i -lt 30 ]; do sleep 2; _i=$((_i+1)); done
-docker run -d \
-  --name node_exporter --restart unless-stopped \
-  --log-driver none \
-  --net host --pid host \
-  -v /:/host:ro,rslave \
-  quay.io/prometheus/node-exporter:v1.8.2 \
-  --path.rootfs=/host \
-  --web.listen-address=:${NODE_EXPORTER_PORT}
-echo "[bootstrap] node_exporter :${NODE_EXPORTER_PORT} started"
-
-# ── cAdvisor v0.49.1 ─────────────────────────────────────────────────────────
-# cAdvisor has many bind mounts and is slow to remove; wait for the name to free
-# before recreating, else "name already in use / Removal In Progress".
-docker rm -f cadvisor 2>/dev/null || true
-_i=0; while docker inspect cadvisor >/dev/null 2>&1 && [ $_i -lt 45 ]; do sleep 2; _i=$((_i+1)); done
-docker run -d \
-  --name cadvisor --restart unless-stopped \
-  --log-driver none \
-  -v /:/rootfs:ro -v /var/run:/var/run:ro \
-  -v /sys:/sys:ro -v /var/lib/docker/:/var/lib/docker:ro \
-  -p ${CADVISOR_PORT}:8080 gcr.io/cadvisor/cadvisor:v0.49.1
-echo "[bootstrap] cAdvisor :${CADVISOR_PORT} started"
-
-# ── Prometheus Agent → remote_write ──────────────────────────────────────────
-mkdir -p /etc/prometheus-agent /var/lib/prometheus-agent
-cat > /etc/prometheus-agent/prometheus.yml << PROMEOF
-global:
-  scrape_interval: 30s
-  external_labels:
-    vm_name: "{{.ServerName}}"
-    runtime: "vm"
-scrape_configs:
-  - job_name: node_exporter
-    static_configs:
-      - targets: ["localhost:${NODE_EXPORTER_PORT}"]
-  - job_name: cadvisor
-    static_configs:
-      - targets: ["localhost:${CADVISOR_PORT}"]
-    metric_relabel_configs:
-      - source_labels: [container_label_dada_io_app]
-        target_label: app
-remote_write:
-  - url: "{{.PrometheusRemoteWriteURL}}"
-    basic_auth:
-      username: "{{.PrometheusUser}}"
-      password: "{{.PrometheusPass}}"
-PROMEOF
-
-docker rm -f prometheus-agent 2>/dev/null || true
-# prom/prometheus runs as uid 65534 (nobody); the host data dir is root-owned
-# after mkdir, so the agent cannot take its storage lock. Fix ownership first.
-chown -R 65534:65534 /var/lib/prometheus-agent 2>/dev/null || true
-docker run -d \
-  --name prometheus-agent --restart unless-stopped \
-  --log-driver none \
-  -v /etc/prometheus-agent/prometheus.yml:/etc/prometheus/prometheus.yml:ro \
-  -v /var/lib/prometheus-agent:/prometheus \
-  --network host \
-  prom/prometheus:v2.53.0 \
-  --config.file=/etc/prometheus/prometheus.yml \
-  --enable-feature=agent \
-  --storage.agent.path=/prometheus
-echo "[bootstrap] Prometheus Agent started (remote_write to {{.PrometheusRemoteWriteURL}})"
-{{else}}
-echo "[bootstrap] No public Prometheus remote_write endpoint configured — skipping node_exporter/cAdvisor/prometheus-agent"
-{{end}}
 # ── Logs: delivered by the fleet edge stack, NOT bootstrap ───────────────────
 # filebeat is gone: filebeat 8.x is incompatible with OpenSearch (Elastic
 # `_license` handshake → 400), which broke VM logs fleet-wide after the
