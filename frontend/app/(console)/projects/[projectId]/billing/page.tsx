@@ -4,9 +4,10 @@ import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import { billingApi } from "@/lib/api";
-import type { BillingAccount, BillingUsage } from "@/lib/api";
+import type { BillingAccount, BillingUsage, ConsumptionResponse } from "@/lib/api";
 import { Spinner } from "@/components/ui/spinner";
 import { Breadcrumb } from "@/components/ui/breadcrumb";
+import { ConsumptionBreakdown } from "@/components/billing/consumption-breakdown";
 import { useT } from "@/lib/i18n/console/context";
 import { clsx } from "clsx";
 
@@ -61,6 +62,7 @@ export default function BillingPage() {
   const { t } = useT();
 
   const [account, setAccount] = useState<BillingAccount | null>(null);
+  const [consumption, setConsumption] = useState<ConsumptionResponse | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -79,6 +81,19 @@ export default function BillingPage() {
     load();
     return () => { cancelled = true; };
   }, [projectId, t]);
+
+  useEffect(() => {
+    let cancelled = false;
+    billingApi
+      .consumption(projectId)
+      .then((data) => {
+        if (!cancelled) setConsumption(data);
+      })
+      .catch(() => {
+        if (!cancelled) setConsumption(null);
+      });
+    return () => { cancelled = true; };
+  }, [projectId]);
 
   if (isLoading) {
     return (
@@ -241,6 +256,16 @@ export default function BillingPage() {
           })}
         </div>
       </div>
+
+      {consumption && (
+        <div className="mt-8">
+          <div className="mb-3 flex items-center justify-between">
+            <h2 className="text-sm font-semibold text-gray-900 dark:text-gray-100">{t("consumption.title")}</h2>
+            <span className="text-xs text-gray-400 dark:text-gray-500">{t("consumption.note")}</span>
+          </div>
+          <ConsumptionBreakdown data={consumption} />
+        </div>
+      )}
     </div>
   );
 }

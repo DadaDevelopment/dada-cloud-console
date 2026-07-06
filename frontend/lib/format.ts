@@ -10,3 +10,12 @@ export function timeAgo(dateStr: string): string {
   if (diffHours < 24) return `${diffHours}h ago`;
   return `${Math.floor(diffHours / 24)}d ago`;
 }
+
+/**
+ * Formats a ruble amount with a ru-locale thousands separator and no decimals,
+ * suffixed with the ₽ sign, e.g. `1234.5` → "1 235 ₽". Fractional kopecks are
+ * rounded away because consumption estimates are shown at whole-ruble grain.
+ */
+export function formatRub(amount: number): string {
+  return `${Math.round(amount).toLocaleString("ru-RU")} ₽`;
+}

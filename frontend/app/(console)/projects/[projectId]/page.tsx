@@ -7,8 +7,11 @@ import {
   appsApi,
   databasesApi,
   customDomainsApi,
+  billingApi,
 } from "@/lib/api";
+import type { ConsumptionResponse } from "@/lib/api";
 import type { Project, Environment, Operation } from "@/lib/types";
+import { ConsumptionBreakdown } from "@/components/billing/consumption-breakdown";
 import { Badge } from "@/components/ui/badge";
 import { StateChip } from "@/components/ui/state-chip";
 import { Spinner } from "@/components/ui/spinner";
@@ -29,6 +32,8 @@ export default function ProjectOverviewPage() {
   const [project, setProject] = useState<Project | null>(null);
   const [operations, setOperations] = useState<Operation[]>([]);
   const [counts, setCounts] = useState<Counts | null>(null);
+  const [consumption, setConsumption] = useState<ConsumptionResponse | null>(null);
+  const [consumptionLoading, setConsumptionLoading] = useState(true);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -71,6 +76,25 @@ export default function ProjectOverviewPage() {
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projectId]);
+
+  useEffect(() => {
+    let cancelled = false;
+    setConsumptionLoading(true);
+    billingApi
+      .consumption(projectId)
+      .then((data) => {
+        if (!cancelled) setConsumption(data);
+      })
+      .catch(() => {
+        if (!cancelled) setConsumption(null);
+      })
+      .finally(() => {
+        if (!cancelled) setConsumptionLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [projectId]);
 
   if (isLoading) {
@@ -137,6 +161,22 @@ export default function ProjectOverviewPage() {
           ) : (
             <StateChip tone="neutral">{t("overview.chip.domainNone")}</StateChip>
           )}
+        </div>
+      )}
+
+      {(consumptionLoading || consumption) && (
+        <div className="mb-8">
+          <div className="mb-3 flex items-center justify-between">
+            <h2 className="text-sm font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">{t("consumption.title")}</h2>
+            <span className="text-xs text-gray-400 dark:text-gray-500">{t("consumption.note")}</span>
+          </div>
+          {consumptionLoading ? (
+            <div className="flex h-32 items-center justify-center rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900">
+              <Spinner />
+            </div>
+          ) : consumption ? (
+            <ConsumptionBreakdown data={consumption} />
+          ) : null}
         </div>
       )}
 

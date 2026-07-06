@@ -546,6 +546,38 @@ paths:
       summary: Get the current authenticated user
       tags:
       - auth
+  /billing/account/summary:
+    get:
+      description: 'Returns the org''s plan and current-month informational spend,
+        summed across every project the caller can read. Money-equivalent estimate
+        at our tariffs — NOT a bill. balance_rub is always 0 (payments not built yet).
+        Robust: metric gaps contribute 0.'
+      operationId: getAccountSummary
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: currency, plan, period_spend_rub and balance_rub
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Get account spend summary (informational)
+      tags:
+      - billing
   /billing/plans:
     get:
       description: Returns all available billing plans with quotas, capabilities,
@@ -1351,6 +1383,51 @@ paths:
       security:
       - BearerAuth: []
       summary: Get billing account
+      tags:
+      - billing
+  /projects/{projectId}/billing/consumption:
+    get:
+      description: 'Returns real resource consumption (per-app avg CPU/RAM from Prometheus,
+        per-database on-disk size) for the current calendar month, priced at our tariffs.
+        Informational transparency ("оценка по нашим тарифам") — NOT a bill. Always
+        available to any project member (viewer+). Robust: missing metrics contribute
+        0, the endpoint still returns 200.'
+      operationId: getProjectConsumption
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: period, currency, total_rub and per-resource breakdown
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Get project consumption (informational money-equivalent)
       tags:
       - billing
   /projects/{projectId}/billing/plan:

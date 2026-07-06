@@ -7,7 +7,11 @@ import (
 	"github.com/dada-tuda/console/backend/internal/billing/costengine"
 )
 
-const markupDefault = 2.7
+// MarkupDefault is the multiplier applied to the internal per-unit cost to
+// derive the customer-facing (informational) price.
+const MarkupDefault = 2.7
+
+const markupDefault = MarkupDefault
 
 // Quotas holds the per-plan resource limits.
 // A value of 0 means unlimited (used for Enterprise).

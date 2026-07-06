@@ -942,7 +942,42 @@ export const billingApi = {
       method: "PUT",
       body: { plan },
     }),
+
+  consumption: (projectId: string) =>
+    apiFetch<ConsumptionResponse>(`/api/v1/projects/${projectId}/billing/consumption`),
+
+  accountSummary: () =>
+    apiFetch<AccountSummary>("/api/v1/billing/account/summary"),
 };
+
+/** One metered resource row in the consumption estimate. */
+export interface ConsumptionResource {
+  kind: "app" | "database" | "storage";
+  name: string;
+  cpu_cores: number | null;
+  ram_gb: number | null;
+  storage_gb: number | null;
+  cost_rub: number;
+}
+
+/**
+ * Read-only money-equivalent estimate for a project's real resource usage over
+ * a period. Informational ("estimated at our rates"), not an issued invoice.
+ */
+export interface ConsumptionResponse {
+  period: { start: string; end: string };
+  currency: "RUB";
+  total_rub: number;
+  resources: ConsumptionResource[];
+}
+
+/** Account-wide spend snapshot for the top-bar spend widget. */
+export interface AccountSummary {
+  currency: "RUB";
+  plan: string;
+  period_spend_rub: number;
+  balance_rub: number;
+}
 
 // Inference proxy is intentionally NOT in apiFetch (which forces JSON):
 // the playground needs to send multipart and receive arbitrary content types.

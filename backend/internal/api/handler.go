@@ -5,6 +5,7 @@ import (
 
 	"github.com/dada-tuda/console/backend/internal/auth"
 	"github.com/dada-tuda/console/backend/internal/billing"
+	"github.com/dada-tuda/console/backend/internal/billing/costengine"
 	"github.com/dada-tuda/console/backend/internal/billing/pricing"
 	"github.com/dada-tuda/console/backend/internal/buildagent"
 	"github.com/dada-tuda/console/backend/internal/cloudtask"
@@ -57,6 +58,13 @@ type Handler struct {
 	// embedded plans.yaml. Always populated (the embedded file is compiled in);
 	// handlers degrade gracefully if somehow empty.
 	billingPlans []pricing.Plan
+
+	// billingUnit / billingMarkup back the informational "real consumption"
+	// consumption endpoints. Loaded once from the embedded cluster-cost.yaml;
+	// on failure billingUnit stays zero (all costs read 0) and we warn only —
+	// this surface is transparency, never a bill, so it must never be fatal.
+	billingUnit   costengine.UnitCost
+	billingMarkup float64
 }
 
 // NewHandler constructs a Handler with the given dependencies.
@@ -122,6 +130,15 @@ func NewHandler(pool *pgxpool.Pool, cfg *config.Config) *Handler {
 		log.Printf("billing: warn: failed to load plans: %v", err)
 	} else {
 		h.billingPlans = plans
+	}
+
+	h.billingMarkup = pricing.MarkupDefault
+	if cc, ccErr := billing.LoadClusterCost(""); ccErr != nil {
+		log.Printf("billing: warn: failed to load cluster-cost (consumption costs will be 0): %v", ccErr)
+	} else if unit, uErr := costengine.ComputeUnitCost(cc); uErr != nil {
+		log.Printf("billing: warn: failed to derive unit cost (consumption costs will be 0): %v", uErr)
+	} else {
+		h.billingUnit = unit
 	}
 
 	return h

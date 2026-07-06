@@ -4,6 +4,7 @@ import { ProjectSwitcher } from "./project-switcher";
 import { EnvSelector } from "./env-selector";
 import { OrgSwitcher } from "./org-switcher";
 import { AccountMenu } from "./account-menu";
+import { SpendWidget } from "./spend-widget";
 import { ConsoleLangToggle } from "./console-lang-toggle";
 import { ThemeToggle } from "./theme-toggle";
 import { useT } from "@/lib/i18n/console/context";
@@ -105,6 +106,7 @@ export function TopBar({
         >
           <SearchIcon className="h-4 w-4" />
         </button>
+        <SpendWidget />
         <ThemeToggle />
         <ConsoleLangToggle />
         <AccountMenu />

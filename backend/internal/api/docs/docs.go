@@ -319,6 +319,51 @@ const docTemplate = `{
                 }
             }
         },
+        "/billing/account/summary": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Returns the org's plan and current-month informational spend, summed across every project the caller can read. Money-equivalent estimate at our tariffs — NOT a bill. balance_rub is always 0 (payments not built yet). Robust: metric gaps contribute 0.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "billing"
+                ],
+                "summary": "Get account spend summary (informational)",
+                "operationId": "getAccountSummary",
+                "responses": {
+                    "200": {
+                        "description": "currency, plan, period_spend_rub and balance_rub",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/billing/plans": {
             "get": {
                 "security": [
@@ -1499,6 +1544,69 @@ const docTemplate = `{
                 "responses": {
                     "200": {
                         "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/projects/{projectId}/billing/consumption": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Returns real resource consumption (per-app avg CPU/RAM from Prometheus, per-database on-disk size) for the current calendar month, priced at our tariffs. Informational transparency (\"оценка по нашим тарифам\") — NOT a bill. Always available to any project member (viewer+). Robust: missing metrics contribute 0, the endpoint still returns 200.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "billing"
+                ],
+                "summary": "Get project consumption (informational money-equivalent)",
+                "operationId": "getProjectConsumption",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Project UUID",
+                        "name": "projectId",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "period, currency, total_rub and per-resource breakdown",
                         "schema": {
                             "type": "object",
                             "additionalProperties": true

@@ -18,6 +18,7 @@ import { aiStudio } from "./ai-studio";
 import { approvals } from "./approvals";
 import { cloudTasks } from "./cloud-tasks";
 import { billing } from "./billing";
+import { consumption } from "./consumption";
 
 /**
  * Flat key→{ru,en} map for the whole console. Each screen owns a namespace
@@ -45,4 +46,5 @@ export const messages: Messages = {
   ...approvals,
   ...cloudTasks,
   ...billing,
+  ...consumption,
 };
