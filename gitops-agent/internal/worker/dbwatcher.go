@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"sort"
 	"time"
 
 	"github.com/dada-tuda/console/gitops-agent/internal/config"
@@ -17,6 +18,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rs/zerolog/log"
+	"gopkg.in/yaml.v3"
 )
 
 // DBWatcher polls the operations table and commits manifests to git.
@@ -213,6 +215,8 @@ func (w *DBWatcher) dispatch(ctx context.Context, op db.Operation) error {
 		return w.doDeletePreviewEnv(ctx, op)
 	case "ImportComposeStack":
 		return w.doImportComposeStack(ctx, op)
+	case "AdoptComposeStack":
+		return w.doAdoptComposeStack(ctx, op)
 	case "RollbackStack":
 		return w.doRollbackStack(ctx, op)
 	default:
@@ -833,6 +837,124 @@ func (w *DBWatcher) renderEnvAggregate(ctx context.Context, op db.Operation, pro
 	}
 	log.Info().Str("env_stack", envStack).Int("apps", len(specs)).Str("deploy_op", deployID.String()).
 		Msg("assembled compose stack; deploy enqueued")
+	return nil
+}
+
+// doAdoptComposeStack converts an existing hand-authored single compose app
+// (source_app, e.g. an adopted VM's `profi-vm`) into N first-class per-service
+// Applications WITHOUT losing fidelity: it reads the live compose from git,
+// splits it into one Application per service carrying that service's VERBATIM
+// block, preserves the stack's top-level volumes (external-name mapping intact —
+// the data-safety invariant), copies the stack .env to the environment level,
+// renders the aggregate (== the live stack), replaces the single-app snapshot
+// with the N per-service snapshots, and enqueues a deploy of the assembled stack.
+// The external volume survives the stack swap, so prod data is preserved even
+// though the containers are recreated (a brief, acceptable cutover outage).
+// This is the reusable "adopt an existing compose" path; findata is its first use.
+func (w *DBWatcher) doAdoptComposeStack(ctx context.Context, op db.Operation) error {
+	var p struct {
+		SourceApp string `json:"source_app"`
+	}
+	if err := json.Unmarshal(op.Payload, &p); err != nil {
+		return fmt.Errorf("parse payload: %w", err)
+	}
+	if p.SourceApp == "" {
+		return fmt.Errorf("adopt: source_app is required")
+	}
+
+	projectName, envName, _, err := w.projectEnv(ctx, op.ProjectID, op.EnvironmentID)
+	if err != nil {
+		return fmt.Errorf("project/env lookup: %w", err)
+	}
+	mgr, err := w.managerFor(ctx, op.ProjectID)
+	if err != nil {
+		return err
+	}
+	if err := mgr.EnsureCloned(); err != nil {
+		return err
+	}
+
+	composeRaw, err := mgr.ReadFile(renderer.AppComposeGitPath(projectName, envName, p.SourceApp))
+	if err != nil {
+		return fmt.Errorf("read source compose: %w", err)
+	}
+	var doc map[string]any
+	if err := yaml.Unmarshal([]byte(composeRaw), &doc); err != nil {
+		return fmt.Errorf("parse source compose: %w", err)
+	}
+	servicesRaw, _ := doc["services"].(map[string]any)
+	if len(servicesRaw) == 0 {
+		return fmt.Errorf("adopt: source compose %q has no services", p.SourceApp)
+	}
+	volumes, _ := doc["volumes"].(map[string]any)
+	sourceEnv, _ := mgr.ReadFile(renderer.AppEnvGitPath(projectName, envName, p.SourceApp))
+
+	names := make([]string, 0, len(servicesRaw))
+	for name := range servicesRaw {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	var specs []renderer.AppServiceSpec
+	var files []git.FileChange
+	for _, name := range names {
+		block, _ := servicesRaw[name].(map[string]any)
+		spec := renderer.AppServiceSpec{AppName: name, Service: block}
+		specs = append(specs, spec)
+		frag, err := renderer.RenderAppServiceFragment(spec)
+		if err != nil {
+			return err
+		}
+		files = append(files, git.FileChange{Path: renderer.AppServiceGitPath(projectName, envName, name), Content: frag})
+
+		desired := map[string]any{"compose": block}
+		if volumes != nil {
+			desired["stack_volumes"] = volumes
+		}
+		if img, ok := block["image"].(string); ok {
+			desired["image"] = img
+		}
+		summaryJSON, _ := json.Marshal(map[string]any{
+			"runtime": "compose", "status": "Pending", "desired": desired, "adopted_from": p.SourceApp,
+		})
+		if err := db.UpsertSnapshot(ctx, w.pool,
+			op.ProjectID, op.EnvironmentID, "App", name, "Pending", summaryJSON, time.Now(),
+		); err != nil {
+			return err
+		}
+	}
+
+	agg, err := renderer.RenderAggregateCompose(specs, volumes)
+	if err != nil {
+		return err
+	}
+	aggPath := renderer.EnvComposeGitPath(projectName, envName)
+	files = append(files,
+		git.FileChange{Path: aggPath, Content: agg},
+		git.FileChange{Path: renderer.EnvDotEnvGitPath(projectName, envName), Content: sourceEnv},
+	)
+
+	commitMsg := fmt.Sprintf(
+		"[DADA Console] Adopt compose stack %s → %d Applications for %s/%s\n\nOperation: %s\n",
+		p.SourceApp, len(specs), projectName, envName, op.ID,
+	)
+	if err := w.commitFilesAndRecord(ctx, op, mgr, aggPath, files, commitMsg); err != nil {
+		return err
+	}
+
+	_, _ = w.pool.Exec(ctx,
+		`DELETE FROM resource_snapshots
+		 WHERE project_id = $1 AND environment_id = $2 AND kind = 'App' AND name = $3`,
+		op.ProjectID, op.EnvironmentID, p.SourceApp,
+	)
+
+	envStack := projectName + "-" + envName
+	deployID, err := db.EnqueueDeployStack(ctx, w.pool, op.ID, envStack)
+	if err != nil {
+		return fmt.Errorf("enqueue deploy stack: %w", err)
+	}
+	log.Info().Str("source", p.SourceApp).Int("apps", len(specs)).Str("env_stack", envStack).
+		Str("deploy_op", deployID.String()).Msg("adopted compose stack into per-service apps; deploy enqueued")
 	return nil
 }
 

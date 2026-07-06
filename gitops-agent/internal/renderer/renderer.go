@@ -431,6 +431,13 @@ func AppServiceGitPath(projectSlug, envSlug, appName string) string {
 	return AppBaseGitPath(projectSlug, envSlug, appName) + "/service.yaml"
 }
 
+// EnvDotEnvGitPath is the environment-level .env sitting beside the aggregate
+// compose.yaml. An ADOPTED stack whose verbatim service blocks reference
+// `env_file: [.env]` resolves it here (relative to the aggregate's directory).
+func EnvDotEnvGitPath(projectSlug, envSlug string) string {
+	return fmt.Sprintf("clusters/beget-prod/projects/%s/environments/%s/.env", projectSlug, envSlug)
+}
+
 // AppServiceSpec is one first-class Application's desired compose service. For
 // AUTHORED apps (create/import/managed) Image/Ports/Volumes/HasEnv build a
 // minimal service block. For ADOPTED apps (an existing hand-authored stack
