@@ -703,6 +703,15 @@ type composeDesired struct {
 	Image   string   `json:"image"`
 	Ports   []string `json:"ports,omitempty"`
 	Volumes []string `json:"volumes,omitempty"`
+	// Compose, when set, is the VERBATIM compose service block for an ADOPTED app
+	// (a hand-authored prod stack migrated into per-service Applications). It
+	// takes precedence over Image/Ports/Volumes so the aggregate reproduces the
+	// live service exactly (environment/expose/depends_on/bind-mounts preserved).
+	// StackVolumes is the stack's original top-level volumes block, carried so the
+	// external-volume name mapping (e.g. profi_pg_data -> compose_profi_pg_data)
+	// is never lost — the data-safety invariant for an adopted stateful stack.
+	Compose      map[string]any `json:"compose,omitempty"`
+	StackVolumes map[string]any `json:"stack_volumes,omitempty"`
 }
 
 // composeAppSummary marks an App snapshot as a first-class VM (compose)
@@ -765,12 +774,14 @@ func (w *DBWatcher) renderEnvAggregate(ctx context.Context, op db.Operation, pro
 
 	var specs []renderer.AppServiceSpec
 	var files []git.FileChange
+	var stackVolumes map[string]any
 	for _, a := range apps {
 		var s struct {
 			Desired composeDesired `json:"desired"`
 		}
 		_ = json.Unmarshal(a.summary, &s)
-		if s.Desired.Image == "" {
+		adopted := s.Desired.Compose != nil
+		if s.Desired.Image == "" && !adopted {
 			continue
 		}
 		env, err := w.resolveRuntimeEnv(ctx, environmentID, a.name)
@@ -784,6 +795,10 @@ func (w *DBWatcher) renderEnvAggregate(ctx context.Context, op db.Operation, pro
 			Ports:   s.Desired.Ports,
 			Volumes: s.Desired.Volumes,
 			HasEnv:  len(merged) > 0,
+			Service: s.Desired.Compose,
+		}
+		if s.Desired.StackVolumes != nil {
+			stackVolumes = s.Desired.StackVolumes
 		}
 		frag, err := renderer.RenderAppServiceFragment(spec)
 		if err != nil {
@@ -797,7 +812,7 @@ func (w *DBWatcher) renderEnvAggregate(ctx context.Context, op db.Operation, pro
 	}
 
 	aggPath := renderer.EnvComposeGitPath(projectName, envName)
-	agg, err := renderer.RenderAggregateCompose(specs)
+	agg, err := renderer.RenderAggregateCompose(specs, stackVolumes)
 	if err != nil {
 		return err
 	}

@@ -431,60 +431,56 @@ func AppServiceGitPath(projectSlug, envSlug, appName string) string {
 	return AppBaseGitPath(projectSlug, envSlug, appName) + "/service.yaml"
 }
 
-// AppServiceSpec is one first-class Application's desired compose service. The
-// AppServer assembles a slice of these into the per-environment aggregate.
+// AppServiceSpec is one first-class Application's desired compose service. For
+// AUTHORED apps (create/import/managed) Image/Ports/Volumes/HasEnv build a
+// minimal service block. For ADOPTED apps (an existing hand-authored stack
+// migrated into per-service Applications) Service holds the VERBATIM compose
+// service block, so the aggregate reproduces the live stack without recreating
+// containers — preserving environment/expose/depends_on/bind-mounts and, most
+// critically, the exact fields (never dropping data-carrying config).
 type AppServiceSpec struct {
 	AppName string
 	Image   string
 	Ports   []string
 	Volumes []string
 	HasEnv  bool
+	Service map[string]any
 }
 
-type composeServiceDoc struct {
-	Image   string            `yaml:"image"`
-	Restart string            `yaml:"restart,omitempty"`
-	Ports   []string          `yaml:"ports,omitempty"`
-	Volumes []string          `yaml:"volumes,omitempty"`
-	EnvFile []string          `yaml:"env_file,omitempty"`
-	Labels  map[string]string `yaml:"labels,omitempty"`
-}
-
-type composeExternalVolumeDoc struct {
-	External bool   `yaml:"external"`
-	Name     string `yaml:"name"`
-}
-
-type composeFileDoc struct {
-	Services map[string]composeServiceDoc        `yaml:"services"`
-	Volumes  map[string]composeExternalVolumeDoc `yaml:"volumes,omitempty"`
-}
-
-// serviceDocFromSpec builds the compose service block for one Application,
-// stamping the ComposeAppLabel (= app name) so telemetry can be scoped per app.
-// envFile is the .env path relative to the file the service is rendered into.
-func serviceDocFromSpec(spec AppServiceSpec, envFile string) composeServiceDoc {
-	sd := composeServiceDoc{
-		Image:   spec.Image,
-		Restart: "unless-stopped",
-		Ports:   spec.Ports,
-		Volumes: spec.Volumes,
-		Labels:  map[string]string{ComposeAppLabel: spec.AppName},
+// serviceBlock returns the compose service block for one Application: the
+// verbatim adopted block when present, else a minimal authored one. Per-app
+// telemetry is scoped by com.docker.compose.service (== the service key == app
+// name), so no extra label is stamped — that keeps an adopted block byte-equal
+// to the live stack and avoids a config-hash change that would recreate the
+// container.
+func (s AppServiceSpec) serviceBlock(envFile string) map[string]any {
+	if s.Service != nil {
+		return s.Service
 	}
-	if spec.HasEnv {
-		sd.EnvFile = []string{envFile}
+	b := map[string]any{"image": s.Image, "restart": "unless-stopped"}
+	if len(s.Ports) > 0 {
+		b["ports"] = s.Ports
 	}
-	return sd
+	if len(s.Volumes) > 0 {
+		b["volumes"] = s.Volumes
+	}
+	if s.HasEnv {
+		b["env_file"] = []string{envFile}
+	}
+	return b
 }
 
-// externalVolumesFor pins every named volume referenced by the given specs as
-// external with its literal live name — the same data-safety guarantee as
-// RenderComposeFromDiscovery, unioned across all Applications so the shared
-// stack never mints an empty <stack>_<vol> over existing prod data. Bind mounts
-// pass through and are skipped.
-func externalVolumesFor(specs []AppServiceSpec) map[string]composeExternalVolumeDoc {
+// externalVolumesFor pins every named volume referenced by AUTHORED apps as
+// external with its literal name, so a fresh stack never mints an empty
+// <stack>_<vol> over existing prod data. Adopted stacks pass their original
+// top-level volumes block explicitly instead (external-name mapping preserved),
+// so their specs are skipped here. Bind mounts pass through.
+func externalVolumesFor(specs []AppServiceSpec) map[string]any {
 	named := map[string]bool{}
 	for _, spec := range specs {
+		if spec.Service != nil {
+			continue
+		}
 		for _, v := range spec.Volumes {
 			source := v
 			if idx := strings.Index(v, ":"); idx >= 0 {
@@ -499,9 +495,9 @@ func externalVolumesFor(specs []AppServiceSpec) map[string]composeExternalVolume
 	if len(named) == 0 {
 		return nil
 	}
-	out := make(map[string]composeExternalVolumeDoc, len(named))
+	out := make(map[string]any, len(named))
 	for name := range named {
-		out[name] = composeExternalVolumeDoc{External: true, Name: name}
+		out[name] = map[string]any{"external": true, "name": name}
 	}
 	return out
 }
@@ -511,11 +507,11 @@ func externalVolumesFor(specs []AppServiceSpec) map[string]composeExternalVolume
 // ".env" (sibling of the fragment); the aggregate rewrites it to the app's
 // per-app .env path when it assembles the stack.
 func RenderAppServiceFragment(spec AppServiceSpec) (string, error) {
-	doc := composeFileDoc{
-		Services: map[string]composeServiceDoc{
-			spec.AppName: serviceDocFromSpec(spec, ".env"),
-		},
-		Volumes: externalVolumesFor([]AppServiceSpec{spec}),
+	doc := map[string]any{
+		"services": map[string]any{spec.AppName: spec.serviceBlock(".env")},
+	}
+	if v := externalVolumesFor([]AppServiceSpec{spec}); v != nil {
+		doc["volumes"] = v
 	}
 	b, err := yaml.Marshal(doc)
 	if err != nil {
@@ -525,20 +521,22 @@ func RenderAppServiceFragment(spec AppServiceSpec) (string, error) {
 }
 
 // RenderAggregateCompose assembles N first-class Applications into ONE
-// per-environment docker-compose file: one service per app (keyed by app name,
-// labelled ComposeAppLabel, env_file wired to apps/<app>/.env relative to the
-// aggregate's environment directory), plus the union of every app's external
-// named volumes. This is what Portainer deploys as a single stack per VM.
-// Services are emitted in a deterministic (map-marshalled, key-sorted by the
-// yaml encoder) order for stable diffs.
-func RenderAggregateCompose(specs []AppServiceSpec) (string, error) {
-	doc := composeFileDoc{
-		Services: make(map[string]composeServiceDoc, len(specs)),
-		Volumes:  externalVolumesFor(specs),
-	}
+// per-environment docker-compose file: one service per app (keyed by app name).
+// volumes, when non-nil, is the stack's verbatim top-level volumes block — used
+// for ADOPTED stacks to preserve external-volume name mappings exactly (the
+// data-safety invariant); when nil, external pins are derived from the authored
+// apps' named volumes. Deterministic key order (yaml map encoding is sorted).
+func RenderAggregateCompose(specs []AppServiceSpec, volumes map[string]any) (string, error) {
+	services := make(map[string]any, len(specs))
 	for _, spec := range specs {
-		envFile := fmt.Sprintf("apps/%s/.env", spec.AppName)
-		doc.Services[spec.AppName] = serviceDocFromSpec(spec, envFile)
+		services[spec.AppName] = spec.serviceBlock(fmt.Sprintf("apps/%s/.env", spec.AppName))
+	}
+	doc := map[string]any{"services": services}
+	if volumes == nil {
+		volumes = externalVolumesFor(specs)
+	}
+	if len(volumes) > 0 {
+		doc["volumes"] = volumes
 	}
 	b, err := yaml.Marshal(doc)
 	if err != nil {

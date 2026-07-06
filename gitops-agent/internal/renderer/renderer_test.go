@@ -427,19 +427,18 @@ func TestRenderAggregateCompose(t *testing.T) {
 		{AppName: "redis", Image: "redis:7"},
 		{AppName: "nginx", Image: "nginx:1.25", Ports: []string{"443:443", "80:80"}, Volumes: []string{"/etc/nginx:/etc/nginx:ro"}},
 	}
-	got, err := renderer.RenderAggregateCompose(specs)
+	got, err := renderer.RenderAggregateCompose(specs, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
 	var doc struct {
 		Services map[string]struct {
-			Image   string            `yaml:"image"`
-			Restart string            `yaml:"restart"`
-			Ports   []string          `yaml:"ports"`
-			Volumes []string          `yaml:"volumes"`
-			EnvFile []string          `yaml:"env_file"`
-			Labels  map[string]string `yaml:"labels"`
+			Image   string   `yaml:"image"`
+			Restart string   `yaml:"restart"`
+			Ports   []string `yaml:"ports"`
+			Volumes []string `yaml:"volumes"`
+			EnvFile []string `yaml:"env_file"`
 		} `yaml:"services"`
 		Volumes map[string]struct {
 			External bool   `yaml:"external"`
@@ -454,9 +453,6 @@ func TestRenderAggregateCompose(t *testing.T) {
 		t.Fatalf("want 3 services, got %d: %v", len(doc.Services), got)
 	}
 	for name, svc := range doc.Services {
-		if svc.Labels["dada.io/app"] != name {
-			t.Errorf("service %q: dada.io/app label = %q, want %q", name, svc.Labels["dada.io/app"], name)
-		}
 		if svc.Restart != "unless-stopped" {
 			t.Errorf("service %q: restart = %q, want unless-stopped", name, svc.Restart)
 		}
@@ -475,6 +471,55 @@ func TestRenderAggregateCompose(t *testing.T) {
 	}
 }
 
+// TestRenderAggregateComposeAdopted is the findata data-safety guarantee: an
+// adopted stack's verbatim service blocks + original top-level volumes (with the
+// external-name mapping profi_pg_data -> compose_profi_pg_data) round-trip
+// unchanged through the aggregate, so a redeploy never orphans prod data or drops
+// environment/expose/depends_on/bind-mounts.
+func TestRenderAggregateComposeAdopted(t *testing.T) {
+	pg := map[string]any{
+		"image":   "mirror.gcr.io/library/postgres:16-alpine",
+		"restart": "unless-stopped",
+		"environment": map[string]any{
+			"POSTGRES_DB": "feedback", "POSTGRES_USER": "postgres", "POSTGRES_PASSWORD": "pswd",
+		},
+		"ports":   []any{"65433:5432"},
+		"volumes": []any{"profi_pg_data:/var/lib/postgresql/data"},
+	}
+	backend := map[string]any{
+		"image":      "nexus.dada-tuda.ru/dada/profi-backend:master-1.0.0-194",
+		"restart":    "unless-stopped",
+		"env_file":   []any{".env"},
+		"expose":     []any{"8001"},
+		"depends_on": []any{"postgres"},
+	}
+	stackVols := map[string]any{
+		"profi_pg_data": map[string]any{"external": true, "name": "compose_profi_pg_data"},
+	}
+	got, err := renderer.RenderAggregateCompose([]renderer.AppServiceSpec{
+		{AppName: "postgres", Service: pg},
+		{AppName: "backend", Service: backend},
+	}, stackVols)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	var doc map[string]any
+	if err := yaml.Unmarshal([]byte(got), &doc); err != nil {
+		t.Fatalf("not valid yaml: %v\n%s", err, got)
+	}
+	for _, want := range []string{
+		"name: compose_profi_pg_data", "POSTGRES_PASSWORD: pswd",
+		"depends_on:", "expose:", "env_file:",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("adopted aggregate dropped %q:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "dada.io/app") {
+		t.Errorf("adopted service must NOT gain a dada.io/app label (would recreate the container):\n%s", got)
+	}
+}
+
 func TestRenderAppServiceFragment(t *testing.T) {
 	got, err := renderer.RenderAppServiceFragment(renderer.AppServiceSpec{
 		AppName: "api", Image: "ghcr.io/acme/api:2.1", Ports: []string{"8080:8080"},
@@ -483,7 +528,7 @@ func TestRenderAppServiceFragment(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	for _, want := range []string{"services:", "api:", "image: ghcr.io/acme/api:2.1", "dada.io/app: api", "external: true", "name: api_data"} {
+	for _, want := range []string{"services:", "api:", "image: ghcr.io/acme/api:2.1", "external: true", "name: api_data"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("fragment missing %q:\n%s", want, got)
 		}
