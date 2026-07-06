@@ -2,6 +2,7 @@
 import { createContext, useContext, useEffect, useState } from "react";
 import type { User } from "./types";
 import { setTokenGetter } from "./api";
+import { publishUid } from "./uid-cookie";
 
 interface AuthContextValue {
   user: User | null;
@@ -54,6 +55,12 @@ function LocalAuthProvider({ children }: { children: React.ReactNode }) {
       window.removeEventListener(AUTH_CHANGE_EVENT, handler as EventListener);
     };
   }, []);
+
+  // Keep the fleet-wide dada_uid cookie in sync with the current user across
+  // hydration, login, logout, and cross-tab storage events.
+  useEffect(() => {
+    publishUid(auth.user?.id ?? null);
+  }, [auth.user?.id]);
 
   function login(newToken?: string, newUser?: User) {
     if (!newToken || !newUser) return;
@@ -122,6 +129,13 @@ async function loadOidcProvider(): Promise<React.ComponentType<{ children: React
         active = false;
       };
     }, [sso, sso.status]);
+
+    // Publish the internal, non-PII id (OIDC sub) into the fleet-wide dada_uid
+    // cookie so same-domain static frontends can bind it to Yandex.Metrika.
+    // Cleared when the principal goes away (logout / unauthenticated).
+    useEffect(() => {
+      publishUid(sso.principal?.sub ?? null);
+    }, [sso.principal?.sub]);
 
     const user: User | null = sso.principal
       ? {
