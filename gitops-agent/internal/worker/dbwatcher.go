@@ -656,74 +656,169 @@ func (w *DBWatcher) doDeleteApp(ctx context.Context, op db.Operation) error {
 	return nil
 }
 
-// doCreateComposeApp renders a skeleton compose.yaml + .env into the app's git
-// tree, records a snapshot, and enqueues a DeployStack op for the portainer-agent
-// to deploy onto the environment's AppServer endpoint.
-func (w *DBWatcher) doCreateComposeApp(ctx context.Context, op db.Operation, appName string) error {
-	projectName, envName, _, err := w.projectEnv(ctx, op.ProjectID, op.EnvironmentID)
+// composeDesired is one Application's durable desired compose service spec,
+// stored under resource_snapshots.summary_json.desired at create/import time.
+// renderEnvAggregate reads it back to reassemble the per-environment stack; the
+// portainer-agent live-status sync merges (never overwrites) summary_json, so
+// this key survives deploy reconciliation.
+type composeDesired struct {
+	Image   string   `json:"image"`
+	Ports   []string `json:"ports,omitempty"`
+	Volumes []string `json:"volumes,omitempty"`
+}
+
+// composeAppSummary marks an App snapshot as a first-class VM (compose)
+// Application and carries its desired service spec.
+func composeAppSummary(desired composeDesired, extra map[string]any) json.RawMessage {
+	m := map[string]any{"runtime": "compose", "status": "Pending", "desired": desired}
+	for k, v := range extra {
+		m[k] = v
+	}
+	b, _ := json.Marshal(m)
+	return b
+}
+
+// renderEnvAggregate is the AppServer assembly step: it renders EVERY first-class
+// Application in the environment (each a resource_snapshots kind=App with a
+// desired compose spec) into one per-app service.yaml fragment + per-app .env,
+// plus the single aggregate compose.yaml the environment's Portainer endpoint
+// deploys as ONE stack ({projectSlug}-{envSlug}). It reads desired specs from
+// the DB (summary_json.desired), so it needs no git read-back; env vars are
+// resolved per app from the env_vars table. Apps with no image yet are skipped
+// from the stack (no workload until configured, like the k8s bare-app path).
+// Callers MUST upsert their App snapshot (with desired) BEFORE invoking this so
+// the new/updated app is included.
+func (w *DBWatcher) renderEnvAggregate(ctx context.Context, op db.Operation, projectID uuid.UUID, environmentID *uuid.UUID) error {
+	projectName, envName, _, err := w.projectEnv(ctx, projectID, environmentID)
 	if err != nil {
 		return fmt.Errorf("project/env lookup: %w", err)
 	}
-
-	mgr, err := w.managerFor(ctx, op.ProjectID)
+	mgr, err := w.managerFor(ctx, projectID)
 	if err != nil {
 		return err
 	}
 
-	// Resolve runtime env for the compose .env. Compose has no out-of-band secret
-	// channel, so sensitive + non-sensitive are merged into the .env (which is
-	// committed to git — same plaintext-in-git caveat as the k8s Secret path).
-	env, err := w.resolveRuntimeEnv(ctx, op.EnvironmentID, appName)
-	if err != nil {
-		return err
-	}
-
-	composePath := renderer.AppComposeGitPath(projectName, envName, appName)
-	envPath := renderer.AppEnvGitPath(projectName, envName, appName)
-	commitMsg := fmt.Sprintf(
-		"[DADA Console] Create compose app %s\n\nOperation: %s\nProject: %s\nEnvironment: %s\n",
-		appName, op.ID, projectName, envName,
+	rows, err := w.pool.Query(ctx,
+		`SELECT name, summary_json FROM resource_snapshots
+		 WHERE project_id = $1 AND environment_id = $2 AND kind = 'App'
+		 ORDER BY name`,
+		projectID, environmentID,
 	)
-	if err := w.commitFilesAndRecord(ctx, op, mgr, composePath, []git.FileChange{
-		{Path: composePath, Content: renderer.RenderComposeSkeleton(appName)},
-		{Path: envPath, Content: renderer.RenderEnvFile(env.merged())},
-	}, commitMsg); err != nil {
+	if err != nil {
+		return fmt.Errorf("list env apps: %w", err)
+	}
+	type appRow struct {
+		name    string
+		summary []byte
+	}
+	var apps []appRow
+	for rows.Next() {
+		var a appRow
+		if err := rows.Scan(&a.name, &a.summary); err != nil {
+			rows.Close()
+			return fmt.Errorf("scan app snapshot: %w", err)
+		}
+		apps = append(apps, a)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
 		return err
 	}
 
-	summaryJSON, _ := json.Marshal(map[string]any{
-		"runtime": "compose", "status": "Pending",
-	})
+	var specs []renderer.AppServiceSpec
+	var files []git.FileChange
+	for _, a := range apps {
+		var s struct {
+			Desired composeDesired `json:"desired"`
+		}
+		_ = json.Unmarshal(a.summary, &s)
+		if s.Desired.Image == "" {
+			continue
+		}
+		env, err := w.resolveRuntimeEnv(ctx, environmentID, a.name)
+		if err != nil {
+			return err
+		}
+		merged := env.merged()
+		spec := renderer.AppServiceSpec{
+			AppName: a.name,
+			Image:   s.Desired.Image,
+			Ports:   s.Desired.Ports,
+			Volumes: s.Desired.Volumes,
+			HasEnv:  len(merged) > 0,
+		}
+		frag, err := renderer.RenderAppServiceFragment(spec)
+		if err != nil {
+			return err
+		}
+		specs = append(specs, spec)
+		files = append(files,
+			git.FileChange{Path: renderer.AppServiceGitPath(projectName, envName, a.name), Content: frag},
+			git.FileChange{Path: renderer.AppEnvGitPath(projectName, envName, a.name), Content: renderer.RenderEnvFile(merged)},
+		)
+	}
+
+	aggPath := renderer.EnvComposeGitPath(projectName, envName)
+	agg, err := renderer.RenderAggregateCompose(specs)
+	if err != nil {
+		return err
+	}
+	files = append(files, git.FileChange{Path: aggPath, Content: agg})
+
+	commitMsg := fmt.Sprintf(
+		"[DADA Console] Assemble compose stack for %s/%s (%d apps)\n\nOperation: %s\n",
+		projectName, envName, len(specs), op.ID,
+	)
+	if err := w.commitFilesAndRecord(ctx, op, mgr, aggPath, files, commitMsg); err != nil {
+		return err
+	}
+
+	envStack := projectName + "-" + envName
+	deployID, err := db.EnqueueDeployStack(ctx, w.pool, op.ID, envStack)
+	if err != nil {
+		return fmt.Errorf("enqueue deploy stack: %w", err)
+	}
+	log.Info().Str("env_stack", envStack).Int("apps", len(specs)).Str("deploy_op", deployID.String()).
+		Msg("assembled compose stack; deploy enqueued")
+	return nil
+}
+
+// doCreateComposeApp records a first-class VM Application (its desired compose
+// service spec) and re-assembles the environment's aggregate stack. Supersedes
+// the former per-app compose.yaml skeleton: the app is now one service in the
+// shared per-environment stack (renderer.EnvComposeGitPath), not its own stack.
+func (w *DBWatcher) doCreateComposeApp(ctx context.Context, op db.Operation, appName string) error {
+	var p struct {
+		Image string `json:"image"`
+		Port  int    `json:"port"`
+	}
+	_ = json.Unmarshal(op.Payload, &p)
+
+	var ports []string
+	if p.Port > 0 {
+		ports = []string{fmt.Sprintf("%d:%d", p.Port, p.Port)}
+	}
+	summaryJSON := composeAppSummary(composeDesired{Image: p.Image, Ports: ports}, nil)
 	if err := db.UpsertSnapshot(ctx, w.pool,
 		op.ProjectID, op.EnvironmentID,
 		"App", appName, "Pending", summaryJSON, time.Now(),
 	); err != nil {
 		return err
 	}
-
-	deployID, err := db.EnqueueDeployStack(ctx, w.pool, op.ID, appName)
-	if err != nil {
-		return fmt.Errorf("enqueue deploy stack: %w", err)
-	}
-	log.Info().Str("app", appName).Str("deploy_op", deployID.String()).Msg("compose app rendered; deploy enqueued")
-	return nil
+	return w.renderEnvAggregate(ctx, op, op.ProjectID, op.EnvironmentID)
 }
 
 // doImportComposeStack adopts a discovered VM workload (DiscoverWorkload) into
-// a managed compose App: it renders compose.yaml from the included services —
-// pinning any referenced named volume external so the first deploy attaches
-// existing prod data instead of creating an empty one (see
-// renderer.RenderComposeFromDiscovery) — writes the .env from the payload's
-// EnvVars verbatim (the API handler already enforced the ack_secrets_in_git
-// consent gate), commits both, records a Pending snapshot, and enqueues the
-// same DeployStack op a normal compose CreateApp uses so the imported stack
-// gets live state/logs/metrics like any other app.
-//
-// SEAM: unlike doCreateComposeApp, env vars here are NOT also persisted into
-// the env_vars table (resolveRuntimeEnv), so a later "edit env" / redeploy
-// through the normal app env UI will not see these values until someone sets
-// them there explicitly. Import only guarantees the FIRST deploy's .env
-// matches what was discovered/typed at import time.
+// N first-class Applications — one per included service, NOT one opaque stack —
+// each recorded as a kind=App snapshot carrying its desired compose spec
+// (image/ports/volumes, with named volumes pinned external by the aggregate
+// renderer so the first deploy attaches existing prod data). It then runs the
+// AppServer assembly (renderEnvAggregate) once to render all apps into the
+// shared per-environment compose.yaml and deploy them as one stack, so every
+// imported service shows up as an ordinary managed app with per-app
+// state/logs/metrics. Per-app env vars are seeded into the env_vars table by the
+// API handler (ImportComposeStack), so resolveRuntimeEnv here reflects them and
+// a later "edit env" through the normal app UI works.
 func (w *DBWatcher) doImportComposeStack(ctx context.Context, op db.Operation) error {
 	var p struct {
 		AppName    string                       `json:"app_name"`
@@ -735,51 +830,23 @@ func (w *DBWatcher) doImportComposeStack(ctx context.Context, op db.Operation) e
 		return fmt.Errorf("parse payload: %w", err)
 	}
 
-	projectName, envName, _, err := w.projectEnv(ctx, op.ProjectID, op.EnvironmentID)
-	if err != nil {
-		return fmt.Errorf("project/env lookup: %w", err)
+	for _, svc := range p.Services {
+		if !svc.Include {
+			continue
+		}
+		summaryJSON := composeAppSummary(
+			composeDesired{Image: svc.Image, Ports: svc.Ports, Volumes: svc.Volumes},
+			map[string]any{"imported_from": p.ServerName},
+		)
+		if err := db.UpsertSnapshot(ctx, w.pool,
+			op.ProjectID, op.EnvironmentID,
+			"App", svc.ServiceName, "Pending", summaryJSON, time.Now(),
+		); err != nil {
+			return err
+		}
 	}
 
-	mgr, err := w.managerFor(ctx, op.ProjectID)
-	if err != nil {
-		return err
-	}
-
-	composeYAML, err := renderer.RenderComposeFromDiscovery(p.Services, len(p.EnvVars) > 0)
-	if err != nil {
-		return err
-	}
-
-	composePath := renderer.AppComposeGitPath(projectName, envName, p.AppName)
-	envPath := renderer.AppEnvGitPath(projectName, envName, p.AppName)
-	commitMsg := fmt.Sprintf(
-		"[DADA Console] Import compose stack %s from %s\n\nOperation: %s\nProject: %s\nEnvironment: %s\n",
-		p.AppName, p.ServerName, op.ID, projectName, envName,
-	)
-	if err := w.commitFilesAndRecord(ctx, op, mgr, composePath, []git.FileChange{
-		{Path: composePath, Content: composeYAML},
-		{Path: envPath, Content: renderer.RenderEnvFile(p.EnvVars)},
-	}, commitMsg); err != nil {
-		return err
-	}
-
-	summaryJSON, _ := json.Marshal(map[string]any{
-		"runtime": "compose", "status": "Pending", "imported_from": p.ServerName,
-	})
-	if err := db.UpsertSnapshot(ctx, w.pool,
-		op.ProjectID, op.EnvironmentID,
-		"App", p.AppName, "Pending", summaryJSON, time.Now(),
-	); err != nil {
-		return err
-	}
-
-	deployID, err := db.EnqueueDeployStack(ctx, w.pool, op.ID, p.AppName)
-	if err != nil {
-		return fmt.Errorf("enqueue deploy stack: %w", err)
-	}
-	log.Info().Str("app", p.AppName).Str("server", p.ServerName).Str("deploy_op", deployID.String()).
-		Msg("compose stack imported; deploy enqueued")
-	return nil
+	return w.renderEnvAggregate(ctx, op, op.ProjectID, op.EnvironmentID)
 }
 
 func (w *DBWatcher) doDeployImageVersion(ctx context.Context, op db.Operation) error {

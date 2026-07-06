@@ -31,14 +31,17 @@ var vmMetricSpecs = []metricSpec{
 	{"net_tx", "B/s", `sum by (vm_name) (rate(node_network_transmit_bytes_total{vm_name="%s",device!~"lo|veth.*|docker.*|br-.*"}[5m]))`},
 }
 
-// Container metrics are keyed by the docker-compose project label, which equals
-// the app/stack name (same label GetAppState filters containers by:
-// com.docker.compose.project). Verified live: the `dada_io_app` label the
-// bootstrap relabel expected is empty on real VMs, whereas
-// container_label_com_docker_compose_project carries the stack name.
+// Container metrics are keyed by the docker-compose SERVICE label, which equals
+// the first-class Application name: under the aggregated-per-VM model many
+// Applications share one compose project (the per-environment stack), so the
+// project label no longer isolates an app — the service label
+// (com.docker.compose.service, rendered == app name) does. cAdvisor exposes both
+// docker-compose labels as container_label_*; the service one carries the app.
+// Per-app metrics are best-effort until a fleet prometheus relabel stamps a
+// dedicated dada.io/app label (that relabel is empty on current VMs).
 var containerMetricSpecs = []metricSpec{
-	{"cpu_cores", "cores", `sum by (container_label_com_docker_compose_project) (rate(container_cpu_usage_seconds_total{container_label_com_docker_compose_project="%s"}[5m]))`},
-	{"mem_bytes", "B", `sum by (container_label_com_docker_compose_project) (container_memory_working_set_bytes{container_label_com_docker_compose_project="%s"})`},
+	{"cpu_cores", "cores", `sum by (container_label_com_docker_compose_service) (rate(container_cpu_usage_seconds_total{container_label_com_docker_compose_service="%s"}[5m]))`},
+	{"mem_bytes", "B", `sum by (container_label_com_docker_compose_service) (container_memory_working_set_bytes{container_label_com_docker_compose_service="%s"})`},
 }
 
 // k8sContainerMetricSpecs key container metrics by namespace + the exact image

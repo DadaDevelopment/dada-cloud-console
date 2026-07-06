@@ -420,3 +420,72 @@ func TestFQDNToName(t *testing.T) {
 		}
 	}
 }
+
+func TestRenderAggregateCompose(t *testing.T) {
+	specs := []renderer.AppServiceSpec{
+		{AppName: "api", Image: "ghcr.io/acme/api:2.1", Ports: []string{"8080:8080"}, Volumes: []string{"api_data:/var/lib/api"}, HasEnv: true},
+		{AppName: "redis", Image: "redis:7"},
+		{AppName: "nginx", Image: "nginx:1.25", Ports: []string{"443:443", "80:80"}, Volumes: []string{"/etc/nginx:/etc/nginx:ro"}},
+	}
+	got, err := renderer.RenderAggregateCompose(specs)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var doc struct {
+		Services map[string]struct {
+			Image   string            `yaml:"image"`
+			Restart string            `yaml:"restart"`
+			Ports   []string          `yaml:"ports"`
+			Volumes []string          `yaml:"volumes"`
+			EnvFile []string          `yaml:"env_file"`
+			Labels  map[string]string `yaml:"labels"`
+		} `yaml:"services"`
+		Volumes map[string]struct {
+			External bool   `yaml:"external"`
+			Name     string `yaml:"name"`
+		} `yaml:"volumes"`
+	}
+	if err := yaml.Unmarshal([]byte(got), &doc); err != nil {
+		t.Fatalf("aggregate is not valid yaml: %v\n%s", err, got)
+	}
+
+	if len(doc.Services) != 3 {
+		t.Fatalf("want 3 services, got %d: %v", len(doc.Services), got)
+	}
+	for name, svc := range doc.Services {
+		if svc.Labels["dada.io/app"] != name {
+			t.Errorf("service %q: dada.io/app label = %q, want %q", name, svc.Labels["dada.io/app"], name)
+		}
+		if svc.Restart != "unless-stopped" {
+			t.Errorf("service %q: restart = %q, want unless-stopped", name, svc.Restart)
+		}
+	}
+	if ef := doc.Services["api"].EnvFile; len(ef) != 1 || ef[0] != "apps/api/.env" {
+		t.Errorf("api env_file = %v, want [apps/api/.env]", ef)
+	}
+	if len(doc.Services["redis"].EnvFile) != 0 {
+		t.Errorf("redis should have no env_file, got %v", doc.Services["redis"].EnvFile)
+	}
+	if v, ok := doc.Volumes["api_data"]; !ok || !v.External || v.Name != "api_data" {
+		t.Errorf("named volume api_data must be pinned external with literal name, got %+v", doc.Volumes)
+	}
+	if _, ok := doc.Volumes["/etc/nginx"]; ok {
+		t.Errorf("bind mount /etc/nginx must NOT be pinned as an external volume")
+	}
+}
+
+func TestRenderAppServiceFragment(t *testing.T) {
+	got, err := renderer.RenderAppServiceFragment(renderer.AppServiceSpec{
+		AppName: "api", Image: "ghcr.io/acme/api:2.1", Ports: []string{"8080:8080"},
+		Volumes: []string{"api_data:/var/lib/api"}, HasEnv: true,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	for _, want := range []string{"services:", "api:", "image: ghcr.io/acme/api:2.1", "dada.io/app: api", "external: true", "name: api_data"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("fragment missing %q:\n%s", want, got)
+		}
+	}
+}

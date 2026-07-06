@@ -66,43 +66,60 @@ func classifyService(image string) (kind, subtype, name string) {
 	return "App", "", base
 }
 
-// syncStackSnapshots reads the just-deployed stack's containers via the Portainer
-// docker proxy and upserts one resource_snapshot per service into the operation's
-// environment: application services as kind=App (named after the image), infra
-// services as kind=Infra with a subtype. This is the decomposition that lets the
-// console show a VM compose stack as first-class apps + infra instead of one
-// opaque compose app. Reproducible: runs on every deploy, keyed off discovery.
+// syncStackSnapshots mirrors the just-deployed per-environment stack's live
+// container state onto the first-class Application snapshots. Each Application is
+// one compose SERVICE (service label == app name), so live status is matched to
+// its kind=App snapshot by service name and MERGED via UpdateLiveStatus — which
+// only touches existing rows (never resurrecting a deleted app) and preserves
+// summary_json.desired (the durable spec renderEnvAggregate reads). A running
+// service with no managing app row is recorded as an Orphaned app so the console
+// can surface drift (deletes are Prune:false, so a removed app lingers until
+// cleaned up). Reproducible: runs on every deploy.
 func (w *VMWatcher) syncStackSnapshots(ctx context.Context, op db.Operation, endpointID int, stackName string) {
+	if op.EnvironmentID == nil {
+		return
+	}
 	containers, err := w.portainer.ListContainers(ctx, endpointID, "")
 	if err != nil {
 		log.Warn().Err(err).Str("stack", stackName).Msg("stack snapshot sync: list containers failed (non-fatal)")
 		return
 	}
-	now := time.Now()
 	count := 0
 	for _, c := range containers {
 		if c.Labels["com.docker.compose.project"] != stackName {
 			continue
 		}
-		kind, subtype, name := classifyService(c.Image)
-		summary := map[string]any{
+		service := c.Labels["com.docker.compose.service"]
+		if service == "" {
+			continue
+		}
+		patch := map[string]any{
 			"image":       c.Image,
 			"status":      "Ready",
-			"runtime":     "compose",
 			"live_source": "vm",
-			"service":     c.Labels["com.docker.compose.service"],
 			"stack":       stackName,
 			"endpoint_id": endpointID,
 		}
-		if subtype != "" {
-			summary["subtype"] = subtype
-		}
-		summaryJSON, _ := json.Marshal(summary)
-		if err := db.UpsertSnapshot(ctx, w.pool, op.ProjectID, op.EnvironmentID, kind, name, "Ready", summaryJSON, now); err != nil {
-			log.Warn().Err(err).Str("name", name).Str("kind", kind).Msg("stack snapshot upsert failed (non-fatal)")
+		patchJSON, _ := json.Marshal(patch)
+		n, err := db.UpdateLiveStatus(ctx, w.pool, *op.EnvironmentID, "App", service, "Ready", patchJSON)
+		if err != nil {
+			log.Warn().Err(err).Str("service", service).Msg("stack live-status update failed (non-fatal)")
 			continue
+		}
+		if n == 0 {
+			orphan := map[string]any{
+				"image":       c.Image,
+				"status":      "Orphaned",
+				"runtime":     "compose",
+				"live_source": "vm",
+				"stack":       stackName,
+				"endpoint_id": endpointID,
+				"orphaned":    true,
+			}
+			orphanJSON, _ := json.Marshal(orphan)
+			_ = db.UpsertSnapshot(ctx, w.pool, op.ProjectID, op.EnvironmentID, "App", service, "Orphaned", orphanJSON, time.Now())
 		}
 		count++
 	}
-	log.Info().Str("stack", stackName).Int("services", count).Msg("stack decomposed into app/infra snapshots")
+	log.Info().Str("stack", stackName).Int("services", count).Msg("stack live status synced onto app snapshots")
 }

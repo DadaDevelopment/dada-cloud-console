@@ -406,6 +406,147 @@ func RenderComposeFromDiscovery(services []ImportServiceSpec, hasEnv bool) (stri
 	return string(b), nil
 }
 
+// ComposeAppLabel is the docker label every rendered VM service carries so the
+// platform can scope live state, logs and metrics to one first-class
+// Application within the shared per-environment stack. The service KEY is also
+// the app name, so com.docker.compose.service == this label value.
+const ComposeAppLabel = "dada.io/app"
+
+// EnvComposeGitPath is the AGGREGATE docker-compose file for a whole VM
+// environment. The AppServer layer assembles every Application in the
+// environment into this single file, which Portainer pulls and deploys as ONE
+// stack per VM. Each Application keeps its own service fragment
+// (AppServiceGitPath) as the durable desired spec; this file is the rendered
+// union of all of them. Supersedes the former per-app AppComposeGitPath.
+func EnvComposeGitPath(projectSlug, envSlug string) string {
+	return fmt.Sprintf("clusters/beget-prod/projects/%s/environments/%s/compose.yaml",
+		projectSlug, envSlug)
+}
+
+// AppServiceGitPath is the per-Application desired compose service block (one
+// service) for a VM app: the durable source of truth for that Application's
+// image/ports/volumes. renderEnvAggregate reads every app's fragment to rebuild
+// EnvComposeGitPath.
+func AppServiceGitPath(projectSlug, envSlug, appName string) string {
+	return AppBaseGitPath(projectSlug, envSlug, appName) + "/service.yaml"
+}
+
+// AppServiceSpec is one first-class Application's desired compose service. The
+// AppServer assembles a slice of these into the per-environment aggregate.
+type AppServiceSpec struct {
+	AppName string
+	Image   string
+	Ports   []string
+	Volumes []string
+	HasEnv  bool
+}
+
+type composeServiceDoc struct {
+	Image   string            `yaml:"image"`
+	Restart string            `yaml:"restart,omitempty"`
+	Ports   []string          `yaml:"ports,omitempty"`
+	Volumes []string          `yaml:"volumes,omitempty"`
+	EnvFile []string          `yaml:"env_file,omitempty"`
+	Labels  map[string]string `yaml:"labels,omitempty"`
+}
+
+type composeExternalVolumeDoc struct {
+	External bool   `yaml:"external"`
+	Name     string `yaml:"name"`
+}
+
+type composeFileDoc struct {
+	Services map[string]composeServiceDoc        `yaml:"services"`
+	Volumes  map[string]composeExternalVolumeDoc `yaml:"volumes,omitempty"`
+}
+
+// serviceDocFromSpec builds the compose service block for one Application,
+// stamping the ComposeAppLabel (= app name) so telemetry can be scoped per app.
+// envFile is the .env path relative to the file the service is rendered into.
+func serviceDocFromSpec(spec AppServiceSpec, envFile string) composeServiceDoc {
+	sd := composeServiceDoc{
+		Image:   spec.Image,
+		Restart: "unless-stopped",
+		Ports:   spec.Ports,
+		Volumes: spec.Volumes,
+		Labels:  map[string]string{ComposeAppLabel: spec.AppName},
+	}
+	if spec.HasEnv {
+		sd.EnvFile = []string{envFile}
+	}
+	return sd
+}
+
+// externalVolumesFor pins every named volume referenced by the given specs as
+// external with its literal live name — the same data-safety guarantee as
+// RenderComposeFromDiscovery, unioned across all Applications so the shared
+// stack never mints an empty <stack>_<vol> over existing prod data. Bind mounts
+// pass through and are skipped.
+func externalVolumesFor(specs []AppServiceSpec) map[string]composeExternalVolumeDoc {
+	named := map[string]bool{}
+	for _, spec := range specs {
+		for _, v := range spec.Volumes {
+			source := v
+			if idx := strings.Index(v, ":"); idx >= 0 {
+				source = v[:idx]
+			}
+			if source == "" || isBindMountSource(source) {
+				continue
+			}
+			named[source] = true
+		}
+	}
+	if len(named) == 0 {
+		return nil
+	}
+	out := make(map[string]composeExternalVolumeDoc, len(named))
+	for name := range named {
+		out[name] = composeExternalVolumeDoc{External: true, Name: name}
+	}
+	return out
+}
+
+// RenderAppServiceFragment renders one Application's durable service.yaml: a
+// single-service compose document keyed by the app name. env_file is a bare
+// ".env" (sibling of the fragment); the aggregate rewrites it to the app's
+// per-app .env path when it assembles the stack.
+func RenderAppServiceFragment(spec AppServiceSpec) (string, error) {
+	doc := composeFileDoc{
+		Services: map[string]composeServiceDoc{
+			spec.AppName: serviceDocFromSpec(spec, ".env"),
+		},
+		Volumes: externalVolumesFor([]AppServiceSpec{spec}),
+	}
+	b, err := yaml.Marshal(doc)
+	if err != nil {
+		return "", fmt.Errorf("rendering app service fragment %q: %w", spec.AppName, err)
+	}
+	return string(b), nil
+}
+
+// RenderAggregateCompose assembles N first-class Applications into ONE
+// per-environment docker-compose file: one service per app (keyed by app name,
+// labelled ComposeAppLabel, env_file wired to apps/<app>/.env relative to the
+// aggregate's environment directory), plus the union of every app's external
+// named volumes. This is what Portainer deploys as a single stack per VM.
+// Services are emitted in a deterministic (map-marshalled, key-sorted by the
+// yaml encoder) order for stable diffs.
+func RenderAggregateCompose(specs []AppServiceSpec) (string, error) {
+	doc := composeFileDoc{
+		Services: make(map[string]composeServiceDoc, len(specs)),
+		Volumes:  externalVolumesFor(specs),
+	}
+	for _, spec := range specs {
+		envFile := fmt.Sprintf("apps/%s/.env", spec.AppName)
+		doc.Services[spec.AppName] = serviceDocFromSpec(spec, envFile)
+	}
+	b, err := yaml.Marshal(doc)
+	if err != nil {
+		return "", fmt.Errorf("rendering aggregate compose: %w", err)
+	}
+	return string(b), nil
+}
+
 // RenderEnvSkeleton returns a minimal .env placeholder for a compose app.
 func RenderEnvSkeleton() string {
 	return "# Environment variables for this compose app (KEY=VALUE per line).\n"

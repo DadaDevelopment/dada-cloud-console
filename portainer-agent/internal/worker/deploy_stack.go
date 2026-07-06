@@ -9,16 +9,19 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
+// deployStackPayload.AppName carries the Portainer STACK name — under the
+// aggregated-per-VM model that is the per-environment stack ("{projectSlug}-{envSlug}"),
+// not an individual app. gitops-agent's renderEnvAggregate enqueues it.
 type deployStackPayload struct {
 	AppName string `json:"app_name"`
 }
 
-// composeGitPath builds the in-repo path to an app's compose.yaml. It must match
-// gitops-agent's renderer.AppComposeGitPath (cluster prefix is fixed to
-// beget-prod, as elsewhere in the platform).
-func composeGitPath(projectSlug, envSlug, appName string) string {
-	return fmt.Sprintf("clusters/beget-prod/projects/%s/environments/%s/apps/%s/compose.yaml",
-		projectSlug, envSlug, appName)
+// envComposeGitPath builds the in-repo path to an environment's AGGREGATE
+// compose.yaml. It must match gitops-agent's renderer.EnvComposeGitPath (cluster
+// prefix is fixed to beget-prod, as elsewhere in the platform).
+func envComposeGitPath(projectSlug, envSlug string) string {
+	return fmt.Sprintf("clusters/beget-prod/projects/%s/environments/%s/compose.yaml",
+		projectSlug, envSlug)
 }
 
 // doDeployStack deploys (or redeploys) a compose app as a Portainer stack on the
@@ -38,7 +41,7 @@ func (w *VMWatcher) doDeployStack(ctx context.Context, op db.Operation) error {
 		return fmt.Errorf("resolve deploy target: %w", err)
 	}
 
-	composePath := composeGitPath(target.ProjectSlug, target.EnvSlug, p.AppName)
+	composePath := envComposeGitPath(target.ProjectSlug, target.EnvSlug)
 	branchRef := fmt.Sprintf("refs/heads/%s", w.cfg.GitopsBranch)
 	useAuth := w.cfg.GitopsToken != ""
 

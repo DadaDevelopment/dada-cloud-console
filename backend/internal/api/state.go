@@ -169,21 +169,15 @@ func (h *Handler) GetAppState(c *gin.Context) {
 
 	resp := gin.H{"online": false}
 
-	if stacks, err := h.portainer.ListStacks(c.Request.Context(), endpoint); err == nil {
-		for i := range stacks {
-			if stacks[i].Name == appName {
-				resp["stack"] = stacks[i]
-				resp["online"] = stacks[i].Status == 1
-				break
-			}
-		}
-	}
-
-	containers, err := h.portainer.ListContainers(c.Request.Context(), endpoint, "com.docker.compose.project="+appName)
+	// One first-class Application is one compose service in the shared per-VM
+	// stack, so scope live containers to this app by the service label (== app
+	// name), not the whole stack's compose project.
+	containers, err := h.portainer.ListContainers(c.Request.Context(), endpoint, "com.docker.compose.service="+appName)
 	if err != nil {
 		resp["live_error"] = err.Error()
 	} else {
 		resp["containers"] = containers
+		resp["online"] = len(containers) > 0
 	}
 	c.JSON(http.StatusOK, resp)
 }

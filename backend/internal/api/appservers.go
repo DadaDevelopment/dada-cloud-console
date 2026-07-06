@@ -610,38 +610,47 @@ func (h *Handler) ImportComposeStack(c *gin.Context) {
 		return
 	}
 
-	var existing int
-	if err := h.pool.QueryRow(c.Request.Context(),
-		`SELECT COUNT(*) FROM resource_snapshots
-		 WHERE project_id = $1 AND environment_id = $2 AND kind = 'App' AND name = $3`,
-		projectID, envID, req.AppName,
-	).Scan(&existing); err != nil {
-		respondError(c, http.StatusInternalServerError, "failed to check name uniqueness")
-		return
-	}
-	if existing > 0 {
-		respondError(c, http.StatusConflict, "an app with that name already exists in this environment")
-		return
-	}
-
-	for key, value := range req.Env {
-		encrypted, encErr := crypto.EncryptToken(h.cfg.GitopsEncryptionKey, []byte(value))
-		if encErr != nil {
-			respondError(c, http.StatusInternalServerError, "failed to encrypt imported env var")
+	// Each included service becomes its own first-class Application; reject if any
+	// target app name already exists in this environment.
+	for _, svc := range included {
+		var existing int
+		if err := h.pool.QueryRow(c.Request.Context(),
+			`SELECT COUNT(*) FROM resource_snapshots
+			 WHERE project_id = $1 AND environment_id = $2 AND kind = 'App' AND name = $3`,
+			projectID, envID, svc.ServiceName,
+		).Scan(&existing); err != nil {
+			respondError(c, http.StatusInternalServerError, "failed to check name uniqueness")
 			return
 		}
-		if _, dbErr := h.pool.Exec(c.Request.Context(),
-			`INSERT INTO env_vars (environment_id, app_name, key, value_encrypted, is_secret, scope, created_by)
-			 VALUES ($1, $2, $3, $4, TRUE, 'runtime', $5)
-			 ON CONFLICT (environment_id, app_name, key)
-			 DO UPDATE SET value_encrypted = EXCLUDED.value_encrypted,
-			               is_secret = EXCLUDED.is_secret,
-			               scope = EXCLUDED.scope,
-			               updated_at = NOW()`,
-			envID, req.AppName, key, encrypted, claims.UserID,
-		); dbErr != nil {
-			respondError(c, http.StatusInternalServerError, "failed to persist imported env var")
+		if existing > 0 {
+			respondError(c, http.StatusConflict, "an app named '"+svc.ServiceName+"' already exists in this environment")
 			return
+		}
+	}
+
+	// Seed the imported env into every created Application's env_vars (encrypted,
+	// runtime scope) so a later edit-env/redeploy through the normal app UI keeps
+	// them. The import env is workload-wide, so each created app gets the full set.
+	for _, svc := range included {
+		for key, value := range req.Env {
+			encrypted, encErr := crypto.EncryptToken(h.cfg.GitopsEncryptionKey, []byte(value))
+			if encErr != nil {
+				respondError(c, http.StatusInternalServerError, "failed to encrypt imported env var")
+				return
+			}
+			if _, dbErr := h.pool.Exec(c.Request.Context(),
+				`INSERT INTO env_vars (environment_id, app_name, key, value_encrypted, is_secret, scope, created_by)
+				 VALUES ($1, $2, $3, $4, TRUE, 'runtime', $5)
+				 ON CONFLICT (environment_id, app_name, key)
+				 DO UPDATE SET value_encrypted = EXCLUDED.value_encrypted,
+				               is_secret = EXCLUDED.is_secret,
+				               scope = EXCLUDED.scope,
+				               updated_at = NOW()`,
+				envID, svc.ServiceName, key, encrypted, claims.UserID,
+			); dbErr != nil {
+				respondError(c, http.StatusInternalServerError, "failed to persist imported env var")
+				return
+			}
 		}
 	}
 

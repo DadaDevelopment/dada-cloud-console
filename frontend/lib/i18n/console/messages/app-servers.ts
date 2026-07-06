@@ -96,8 +96,8 @@ export const appServers: Messages = {
   "appServers.workloads.notEnrolled.title": { ru: "VM ещё не подключена", en: "VM not enrolled yet" },
   "appServers.workloads.notEnrolled.desc": { ru: "Discovery работает через Portainer edge-агент. Дождитесь статуса Ready.", en: "Discovery runs through the Portainer edge agent. Wait until the server is Ready." },
 
-  "appServers.import.title": { ru: "Импорт нагрузки в приложение Dada", en: "Import workload into a Dada app" },
-  "appServers.import.subtitle": { ru: "Выберите сервисы, которыми должна управлять Dada. Мы сгенерируем compose.yaml и .env, закоммитим в git и развернём — существующие тома сохраняются.", en: "Pick the services Dada should manage. We generate compose.yaml + .env, commit to git and deploy — existing volumes are preserved." },
+  "appServers.import.title": { ru: "Импорт в приложения Dada", en: "Import into Dada applications" },
+  "appServers.import.subtitle": { ru: "Каждый выбранный сервис станет отдельным приложением Dada — со своими логами, метриками и параметрами. Существующие тома сохраняются.", en: "Each selected service becomes its own Dada application — with its own logs, metrics and settings. Existing volumes are preserved." },
   "appServers.import.appName.label": { ru: "Название приложения", en: "Application name" },
   "appServers.import.appName.invalid": { ru: "Строчные буквы, цифры и дефисы; начинается с буквы.", en: "Lowercase letters, digits, hyphens; must start with a letter." },
   "appServers.import.services.label": { ru: "Сервисы", en: "Services" },

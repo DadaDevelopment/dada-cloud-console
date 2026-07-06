@@ -130,7 +130,7 @@ export function ImportWizard({ projectId, serverName, discovery, isOpen, onClose
       }
       if (op.status === "Failed" || op.status === "Cancelled") throw new Error(op.error_message || t("appServers.import.failed"));
       if (!terminal.has(op.status)) throw new Error(t("appServers.import.timeout"));
-      router.push(`/projects/${projectId}/apps/${appName}`);
+      router.push(`/projects/${projectId}/apps`);
     } catch (err) {
       setError(err instanceof Error ? err.message : t("appServers.import.failed"));
       setProgress(null);
