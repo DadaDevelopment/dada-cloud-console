@@ -223,18 +223,18 @@ export default function AppDetailPage() {
             </svg>
             {t("apps.detail.settings")}
           </Link>
-          {canEditYaml(role) && (
+          {canEditYaml(role) && !isCompose && (
           <Link
-            href={`/projects/${projectId}/apps/${appName}/${isCompose ? "compose" : "values"}${envId ? `?envId=${envId}` : ""}`}
+            href={`/projects/${projectId}/apps/${appName}/values${envId ? `?envId=${envId}` : ""}`}
             className="inline-flex items-center gap-2 rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 px-3 py-2 text-sm font-medium text-gray-700 dark:text-gray-200 hover:border-blue-300 hover:text-blue-600 transition-colors shadow-sm"
           >
             <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
             </svg>
-            {isCompose ? t("apps.detail.editCompose") : t("apps.detail.editValues")}
+            {t("apps.detail.editValues")}
           </Link>
           )}
-          {!isCompose && canMutate(role) && (
+          {canMutate(role) && (
             <button
               onClick={() => { setNewImage(summary.image ?? ""); setIsImageModalOpen(true); }}
               className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 transition-colors"

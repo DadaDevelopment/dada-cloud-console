@@ -600,6 +600,7 @@ func (w *DBWatcher) doDeleteApp(ctx context.Context, op db.Operation) error {
 		renderer.AppHelmValuesGitPath(projectName, envName, p.Name),
 		renderer.AppResourcesValuesGitPath(projectName, envName, p.Name),
 		renderer.AppComposeGitPath(projectName, envName, p.Name),
+		renderer.AppServiceGitPath(projectName, envName, p.Name),
 		renderer.AppEnvGitPath(projectName, envName, p.Name),
 	}
 	commitMsg := fmt.Sprintf(
@@ -653,6 +654,14 @@ func (w *DBWatcher) doDeleteApp(ctx context.Context, op db.Operation) error {
 		 WHERE project_id = $1 AND environment_id = $2 AND kind = 'App' AND name = $3`,
 		op.ProjectID, op.EnvironmentID, p.Name,
 	)
+
+	// For VM (compose) apps, re-assemble the environment's aggregate stack without
+	// the deleted app so its service leaves the running stack on the next deploy.
+	// The snapshot is already gone, so renderEnvAggregate excludes it.
+	var runtime string
+	if err := w.pool.QueryRow(ctx, `SELECT runtime FROM environments WHERE id = $1`, op.EnvironmentID).Scan(&runtime); err == nil && runtime == "vm" {
+		return w.renderEnvAggregate(ctx, op, op.ProjectID, op.EnvironmentID)
+	}
 	return nil
 }
 
@@ -849,6 +858,37 @@ func (w *DBWatcher) doImportComposeStack(ctx context.Context, op db.Operation) e
 	return w.renderEnvAggregate(ctx, op, op.ProjectID, op.EnvironmentID)
 }
 
+// updateComposeAppImage points a VM (compose) Application at a new image by
+// patching its desired.image in the snapshot and re-assembling the environment's
+// aggregate stack. Mirrors the k8s image-update path but for the compose runtime,
+// where the workload lives as one service in the shared per-VM stack.
+func (w *DBWatcher) updateComposeAppImage(ctx context.Context, op db.Operation, appName, image string) error {
+	var summaryRaw []byte
+	if err := w.pool.QueryRow(ctx, `
+		SELECT summary_json FROM resource_snapshots
+		WHERE project_id=$1 AND environment_id=$2 AND kind='App' AND name=$3
+	`, op.ProjectID, op.EnvironmentID, appName).Scan(&summaryRaw); err != nil {
+		return fmt.Errorf("loading app snapshot: %w", err)
+	}
+	cur := map[string]any{}
+	_ = json.Unmarshal(summaryRaw, &cur)
+	desired, _ := cur["desired"].(map[string]any)
+	if desired == nil {
+		desired = map[string]any{}
+	}
+	desired["image"] = image
+	cur["desired"] = desired
+	cur["runtime"] = "compose"
+	cur["status"] = "Pending"
+	updatedJSON, _ := json.Marshal(cur)
+	if err := db.UpsertSnapshot(ctx, w.pool,
+		op.ProjectID, op.EnvironmentID, "App", appName, "Pending", updatedJSON, time.Now(),
+	); err != nil {
+		return err
+	}
+	return w.renderEnvAggregate(ctx, op, op.ProjectID, op.EnvironmentID)
+}
+
 func (w *DBWatcher) doDeployImageVersion(ctx context.Context, op db.Operation) error {
 	var p struct {
 		AppName string `json:"app_name"`
@@ -856,6 +896,14 @@ func (w *DBWatcher) doDeployImageVersion(ctx context.Context, op db.Operation) e
 	}
 	if err := json.Unmarshal(op.Payload, &p); err != nil {
 		return fmt.Errorf("parse payload: %w", err)
+	}
+
+	var runtime string
+	if err := w.pool.QueryRow(ctx, `SELECT runtime FROM environments WHERE id = $1`, op.EnvironmentID).Scan(&runtime); err != nil {
+		return fmt.Errorf("load env runtime: %w", err)
+	}
+	if runtime == "vm" {
+		return w.updateComposeAppImage(ctx, op, p.AppName, p.Image)
 	}
 
 	projectName, envName, envNamespace, err := w.projectEnv(ctx, op.ProjectID, op.EnvironmentID)

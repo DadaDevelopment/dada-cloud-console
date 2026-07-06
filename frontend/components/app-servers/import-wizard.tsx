@@ -50,39 +50,6 @@ function parseEnv(text: string): Record<string, string> {
   return out;
 }
 
-function buildComposePreview(services: ImportServiceInput[], hasEnv: boolean): string {
-  const included = services.filter((s) => s.include);
-  if (included.length === 0) return "";
-  const lines: string[] = ["services:"];
-  const externalVols = new Set<string>();
-  for (const s of included) {
-    lines.push(`  ${s.service_name}:`);
-    lines.push(`    image: ${s.image}`);
-    if (s.ports.length) {
-      lines.push("    ports:");
-      s.ports.forEach((p) => lines.push(`      - "${p}"`));
-    }
-    if (hasEnv) lines.push("    env_file: [.env]");
-    if (s.volumes.length) {
-      lines.push("    volumes:");
-      s.volumes.forEach((v) => {
-        lines.push(`      - ${v}`);
-        const name = v.split(":")[0];
-        if (name && !v.startsWith("/") && !v.startsWith(".")) externalVols.add(name);
-      });
-    }
-  }
-  if (externalVols.size) {
-    lines.push("volumes:");
-    externalVols.forEach((n) => {
-      lines.push(`  ${n}:`);
-      lines.push("    external: true");
-      lines.push(`    name: ${n}`);
-    });
-  }
-  return lines.join("\n");
-}
-
 export function ImportWizard({ projectId, serverName, discovery, isOpen, onClose }: ImportWizardProps) {
   const router = useRouter();
   const { t } = useT();
@@ -92,7 +59,6 @@ export function ImportWizard({ projectId, serverName, discovery, isOpen, onClose
   const [envText, setEnvText] = useState("");
   const [ack, setAck] = useState(false);
   const [showEnv, setShowEnv] = useState(false);
-  const [showPreview, setShowPreview] = useState(false);
 
   const [submitting, setSubmitting] = useState(false);
   const [progress, setProgress] = useState<string | null>(null);
@@ -101,7 +67,6 @@ export function ImportWizard({ projectId, serverName, discovery, isOpen, onClose
   const env = useMemo(() => parseEnv(envText), [envText]);
   const hasEnv = Object.keys(env).length > 0;
   const includedCount = services.filter((s) => s.include).length;
-  const preview = useMemo(() => buildComposePreview(services, hasEnv), [services, hasEnv]);
 
   const appNameValid = /^[a-z]([-a-z0-9]*[a-z0-9])?$/.test(appName);
   const canSubmit = includedCount > 0 && appNameValid && (!hasEnv || ack) && !submitting;
@@ -241,22 +206,6 @@ export function ImportWizard({ projectId, serverName, discovery, isOpen, onClose
             </div>
           )}
         </div>
-
-        {preview && (
-          <div>
-            <button
-              type="button"
-              onClick={() => setShowPreview((v) => !v)}
-              className="flex items-center gap-1.5 text-sm font-medium text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-gray-100"
-            >
-              <svg className={`h-3.5 w-3.5 transition-transform ${showPreview ? "rotate-90" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" /></svg>
-              {t("appServers.import.preview.toggle")}
-            </button>
-            {showPreview && (
-              <pre className="mt-2 max-h-64 overflow-auto rounded-lg bg-gray-50 dark:bg-gray-950 p-3 font-mono text-xs text-gray-800 dark:text-gray-200">{preview}</pre>
-            )}
-          </div>
-        )}
 
         {error && (
           <div role="alert" className="rounded-lg border border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-950/40 px-3 py-2 text-sm text-red-700 dark:text-red-300">{error}</div>
