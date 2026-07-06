@@ -27,10 +27,15 @@ const (
 )
 
 // CreateServiceDatabasePayload is the typed payload for CreateServiceDatabase operations.
+// Engine is set for VM (compose) environments, where the managed database is
+// rendered as a platform-owned Application in the environment's aggregate stack
+// (postgres) rather than a Crossplane ServiceDatabaseV2 CRD; empty means the k8s
+// (Crossplane Postgres) path.
 type CreateServiceDatabasePayload struct {
 	Name            string `json:"name"`
 	Database        string `json:"database"`
 	AppRef          string `json:"app_ref"`
+	Engine          string `json:"engine,omitempty"`
 	BackupEnabled   bool   `json:"backup_enabled"`
 	BackupSchedule  string `json:"backup_schedule"`
 	BackupRetention string `json:"backup_retention"`

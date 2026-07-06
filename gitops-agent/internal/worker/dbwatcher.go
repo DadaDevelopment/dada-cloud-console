@@ -382,17 +382,46 @@ func (w *DBWatcher) ensureAppExists(mgr *git.Manager, projectName, envName, appN
 	}, nil
 }
 
+// doCreateComposeManagedDB materialises a managed database on a VM as a
+// platform-owned first-class Application in the environment's aggregate stack: a
+// pinned image with an external-pinned data volume. Its credentials (POSTGRES_*)
+// were seeded into env_vars by the API handler, so renderEnvAggregate resolves
+// them into the service's .env; a bound consumer app receives DATABASE_URL the
+// same way. No public ports — apps reach it over the compose network by name.
+func (w *DBWatcher) doCreateComposeManagedDB(ctx context.Context, op db.Operation, name, database, engine string) error {
+	image, dataPath := "postgres:16", "/var/lib/postgresql/data"
+	if engine == "redis" {
+		image, dataPath = "redis:7", "/data"
+	}
+	volume := fmt.Sprintf("%s-data:%s", name, dataPath)
+	summaryJSON := composeAppSummary(
+		composeDesired{Image: image, Volumes: []string{volume}},
+		map[string]any{"managed": engine, "database": database},
+	)
+	if err := db.UpsertSnapshot(ctx, w.pool,
+		op.ProjectID, op.EnvironmentID, "App", name, "Pending", summaryJSON, time.Now(),
+	); err != nil {
+		return err
+	}
+	return w.renderEnvAggregate(ctx, op, op.ProjectID, op.EnvironmentID)
+}
+
 func (w *DBWatcher) doCreateServiceDatabase(ctx context.Context, op db.Operation) error {
 	var p struct {
 		Name            string `json:"name"`
 		Database        string `json:"database"`
 		AppRef          string `json:"app_ref"`
+		Engine          string `json:"engine"`
 		BackupEnabled   bool   `json:"backup_enabled"`
 		BackupSchedule  string `json:"backup_schedule"`
 		BackupRetention string `json:"backup_retention"`
 	}
 	if err := json.Unmarshal(op.Payload, &p); err != nil {
 		return fmt.Errorf("parse payload: %w", err)
+	}
+
+	if p.Engine != "" {
+		return w.doCreateComposeManagedDB(ctx, op, p.Name, p.Database, p.Engine)
 	}
 
 	projectName, envName, envNamespace, err := w.projectEnv(ctx, op.ProjectID, op.EnvironmentID)

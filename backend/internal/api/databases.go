@@ -2,16 +2,30 @@ package api
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"time"
 
 	"github.com/dada-tuda/console/backend/internal/auth"
+	"github.com/dada-tuda/console/backend/internal/crypto"
 	"github.com/dada-tuda/console/backend/internal/models"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 )
+
+// randomPassword returns a 32-hex-char (16-byte) secret suitable for a managed
+// database credential.
+func randomPassword() (string, error) {
+	b := make([]byte, 16)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(b), nil
+}
 
 // ListDatabases returns all ServiceDatabase resources in a project environment.
 //
@@ -143,6 +157,24 @@ type createServiceDatabaseRequest struct {
 	BackupRetention string `json:"backup_retention"`
 }
 
+// seedEnvVar upserts one encrypted runtime env var for an app in an environment
+// (used to inject managed-database credentials/DSN for the VM compose track).
+func (h *Handler) seedEnvVar(ctx context.Context, envID uuid.UUID, appName, key, value string, createdBy uuid.UUID) error {
+	enc, err := crypto.EncryptToken(h.cfg.GitopsEncryptionKey, []byte(value))
+	if err != nil {
+		return err
+	}
+	_, err = h.pool.Exec(ctx,
+		`INSERT INTO env_vars (environment_id, app_name, key, value_encrypted, is_secret, scope, created_by)
+		 VALUES ($1, $2, $3, $4, TRUE, 'runtime', $5)
+		 ON CONFLICT (environment_id, app_name, key)
+		 DO UPDATE SET value_encrypted = EXCLUDED.value_encrypted, is_secret = EXCLUDED.is_secret,
+		               scope = EXCLUDED.scope, updated_at = NOW()`,
+		envID, appName, key, enc, createdBy,
+	)
+	return err
+}
+
 // CreateServiceDatabase enqueues an operation to provision a new ServiceDatabase CRD.
 //
 // @ID          createDatabase
@@ -244,11 +276,49 @@ func (h *Handler) CreateServiceDatabase(c *gin.Context) {
 		return
 	}
 
+	// VM (compose) environments render the managed database as a platform-owned
+	// Application in the environment's aggregate stack (postgres image + external
+	// volume). The backend generates the credential and seeds env vars now (it
+	// holds the encryption key); the gitops worker just materialises the App and
+	// re-assembles the stack. k8s keeps the Crossplane path (engine stays empty).
+	var runtime string
+	_ = h.pool.QueryRow(c.Request.Context(),
+		`SELECT runtime FROM environments WHERE id = $1`, envID).Scan(&runtime)
+
+	engine := ""
+	if runtime == "vm" {
+		engine = "postgres"
+		password, perr := randomPassword()
+		if perr != nil {
+			respondError(c, http.StatusInternalServerError, "failed to generate database credential")
+			return
+		}
+		const dbUser = "dada"
+		for _, kv := range [][2]string{
+			{"POSTGRES_PASSWORD", password},
+			{"POSTGRES_DB", req.Database},
+			{"POSTGRES_USER", dbUser},
+		} {
+			if err := h.seedEnvVar(c.Request.Context(), envID, req.Name, kv[0], kv[1], claims.UserID); err != nil {
+				respondError(c, http.StatusInternalServerError, "failed to seed database credentials")
+				return
+			}
+		}
+		if req.AppRef != "" {
+			dsn := fmt.Sprintf("postgres://%s:%s@%s:5432/%s", dbUser, password, req.Name, req.Database)
+			if err := h.seedEnvVar(c.Request.Context(), envID, req.AppRef, "DATABASE_URL", dsn, claims.UserID); err != nil {
+				respondError(c, http.StatusInternalServerError, "failed to inject database connection string")
+				return
+			}
+		}
+	}
+
 	// Marshal payload
 	payload := models.CreateServiceDatabasePayload{
 		Name:            req.Name,
 		Database:        req.Database,
 		AppRef:          req.AppRef,
+		Engine:          engine,
 		BackupEnabled:   req.BackupEnabled,
 		BackupSchedule:  req.BackupSchedule,
 		BackupRetention: req.BackupRetention,
