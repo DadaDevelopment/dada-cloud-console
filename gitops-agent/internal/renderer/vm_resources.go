@@ -35,11 +35,11 @@ type VMIngressTLS struct {
 // Ingress CR; here it renders nginx server blocks. It captures exactly what a
 // hand-written nginx.conf expressed — nothing runtime-specific leaks in.
 type VMIngressSpec struct {
-	Host        string     // primary server_name, e.g. "fin-data.pro"
-	Aliases     []string   // e.g. ["www.fin-data.pro"] → 301 redirect to Host
-	SSLRedirect bool       // listen 80 → 301 https
+	Host        string       // primary server_name, e.g. "fin-data.pro"
+	Aliases     []string     // e.g. ["www.fin-data.pro"] → 301 redirect to Host
+	SSLRedirect bool         // listen 80 → 301 https
 	TLS         VMIngressTLS // 443 + certs
-	BasicAuth   string     // auth_basic_user_file path; empty = no basic auth
+	BasicAuth   string       // auth_basic_user_file path; empty = no basic auth
 	Rules       []VMIngressRule
 }
 
@@ -90,6 +90,36 @@ func RenderNginxConf(spec VMIngressSpec) string {
 	}
 	b.WriteString("}\n")
 	return b.String()
+}
+
+// ServiceBlock renders the nginx Ingress as a compose service block map for the
+// AppServer aggregate (fills AppServiceSpec.Service). The generated config content
+// (RenderNginxConf) is delivered by the wiring layer to confSrc; certsSrc /
+// htpasswdSrc are the host/stack sources for the TLS certs + basic-auth file. Only
+// mounts with a non-empty source are emitted.
+func (spec VMIngressSpec) ServiceBlock(image, confSrc, certsSrc, htpasswdSrc string) map[string]any {
+	if image == "" {
+		image = "nginx:1.27-alpine"
+	}
+	vols := []string{}
+	if confSrc != "" {
+		vols = append(vols, confSrc+":/etc/nginx/templates/default.conf.template:ro")
+	}
+	if htpasswdSrc != "" && spec.BasicAuth != "" {
+		vols = append(vols, htpasswdSrc+":"+spec.BasicAuth+":ro")
+	}
+	if certsSrc != "" {
+		vols = append(vols, certsSrc+":/etc/nginx/certs:ro")
+	}
+	b := map[string]any{
+		"image":   image,
+		"restart": "unless-stopped",
+		"ports":   []string{"80:80", "443:443"},
+	}
+	if len(vols) > 0 {
+		b["volumes"] = vols
+	}
+	return b
 }
 
 // ── ServiceDatabase (postgres) ──────────────────────────────────────────────
@@ -158,4 +188,56 @@ func RenderPostgresService(spec VMDatabaseSpec) (serviceYAML, volumeName, postgr
 		postgresqlConf = pc.String()
 	}
 	return b.String(), spec.VolumeName, postgresqlConf
+}
+
+// ServiceBlock renders the postgres ServiceDatabase as a compose service block map
+// for the AppServer aggregate (fills AppServiceSpec.Service). The data volume is
+// ALWAYS external (data-safety). Params, when set, become `-c key=value` flags so
+// no config-file mount is needed.
+func (spec VMDatabaseSpec) ServiceBlock() map[string]any {
+	image := spec.Image
+	if image == "" {
+		v := spec.Version
+		if v == "" {
+			v = "16"
+		}
+		image = "postgres:" + v + "-alpine"
+	}
+	b := map[string]any{
+		"image":   image,
+		"restart": "unless-stopped",
+		"environment": map[string]any{
+			"POSTGRES_DB":       spec.Database,
+			"POSTGRES_USER":     spec.User,
+			"POSTGRES_PASSWORD": spec.Password,
+		},
+		"volumes": []string{spec.VolumeName + ":/var/lib/postgresql/data"},
+	}
+	if spec.HostPort != 0 {
+		b["ports"] = []string{fmt.Sprintf("%d:5432", spec.HostPort)}
+	}
+	if len(spec.Params) > 0 {
+		cmd := []string{"postgres"}
+		keys := make([]string, 0, len(spec.Params))
+		for k := range spec.Params {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		for _, k := range keys {
+			cmd = append(cmd, "-c", k+"="+spec.Params[k])
+		}
+		b["command"] = cmd
+	}
+	return b
+}
+
+// ExternalVolumeEntry returns the top-level `volumes:` entry that pins this
+// database's data volume external (name + external:true). The AppServer aggregate
+// passes these explicitly because it skips volume derivation for verbatim/typed
+// service blocks. Empty name → no entry.
+func (spec VMDatabaseSpec) ExternalVolumeEntry() (string, map[string]any) {
+	if spec.VolumeName == "" {
+		return "", nil
+	}
+	return spec.VolumeName, map[string]any{"external": true, "name": spec.VolumeName}
 }

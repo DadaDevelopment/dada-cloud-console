@@ -102,3 +102,40 @@ func TestRenderPostgresService_Defaults(t *testing.T) {
 		t.Errorf("default image should be postgres:16-alpine:\n%s", svc)
 	}
 }
+
+// Integration seam: typed Resource specs → AppServiceSpec.Service → the concurrent
+// session's RenderAggregateCompose. Proves the typed provider blocks aggregate
+// into ONE compose with the external DB volume pinned.
+func TestTypedResources_InAggregateCompose(t *testing.T) {
+	db := VMDatabaseSpec{
+		ServiceName: "postgres", Version: "16", Database: "feedback",
+		User: "postgres", Password: "pswd", VolumeName: "compose_profi_pg_data", HostPort: 65433,
+	}
+	ing := VMIngressSpec{
+		Host: "fin-data.pro", SSLRedirect: true, BasicAuth: "/etc/nginx/.htpasswd",
+		TLS:   VMIngressTLS{Enabled: true, MinVersion: "1.2", CertPath: "/etc/nginx/certs/live/fin-data.pro/fullchain.pem"},
+		Rules: []VMIngressRule{{Path: "/api/", App: "backend", Port: 8001}, {Path: "/", App: "frontend", Port: 5173}},
+	}
+	specs := []AppServiceSpec{
+		{AppName: "postgres", Service: db.ServiceBlock()},
+		{AppName: "nginx", Service: ing.ServiceBlock("nginx:1.27-alpine", "/home/ubuntuuser/compose/nginx/default.conf.template", "/etc/letsencrypt", "/home/ubuntuuser/compose/nginx/.htpasswd")},
+		{AppName: "backend", Image: "nexus.dada-tuda.ru/dada/profi-backend:master-1.0.0-194", HasEnv: true},
+	}
+	volName, volDef := db.ExternalVolumeEntry()
+	compose, err := RenderAggregateCompose(specs, map[string]any{volName: volDef})
+	if err != nil {
+		t.Fatalf("aggregate render: %v", err)
+	}
+	for _, w := range []string{
+		"postgres:", "nginx:", "backend:",
+		"POSTGRES_DB: feedback",
+		"compose_profi_pg_data",
+		"external: true",
+		"80:80", "443:443",
+		"master-1.0.0-194",
+	} {
+		if !strings.Contains(compose, w) {
+			t.Errorf("aggregate compose missing %q\n---\n%s", w, compose)
+		}
+	}
+}
