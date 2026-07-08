@@ -3,7 +3,7 @@ import { useEffect, useState, FormEvent } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { appsApi } from "@/lib/api";
-import type { ResourceSnapshot, AppSummary, InfraSummary } from "@/lib/types";
+import type { ResourceSnapshot, AppSummary, InfraSummary, Environment } from "@/lib/types";
 import { Modal } from "@/components/ui/modal";
 import { Spinner } from "@/components/ui/spinner";
 import { Breadcrumb } from "@/components/ui/breadcrumb";
@@ -29,14 +29,14 @@ export default function AppsPage() {
   const router = useRouter();
   const { t } = useT();
 
-  const { project, selectedEnv, role, loading: isLoadingEnvs } = useProjectContext();
-  const selectedEnvId = selectedEnv?.id ?? "";
-  const [apps, setApps] = useState<ResourceSnapshot[]>([]);
-  const [infra, setInfra] = useState<ResourceSnapshot[]>([]);
+  const { project, environments, role, loading: isLoadingEnvs } = useProjectContext();
+  const [appsByEnv, setAppsByEnv] = useState<Record<string, ResourceSnapshot[]>>({});
+  const [infraByEnv, setInfraByEnv] = useState<Record<string, ResourceSnapshot[]>>({});
   const [isLoadingApps, setIsLoadingApps] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [modalEnvId, setModalEnvId] = useState("");
   const [form, setForm] = useState<CreateAppForm>({
     name: "",
     image: "",
@@ -48,29 +48,44 @@ export default function AppsPage() {
   const [submitError, setSubmitError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!selectedEnvId) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect -- fetch-on-mount pattern used by console pages; clears the loading flag once env resolution settles.
+    if (environments.length === 0) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- fetch-on-mount pattern; clears loading once env resolution settles.
       if (!isLoadingEnvs) setIsLoadingApps(false);
       return;
     }
     setIsLoadingApps(true);
     setError(null);
-    appsApi
-      .list(projectId, selectedEnvId)
-      .then((data) => setApps(data.apps ?? []))
+    Promise.all(
+      environments.map((env) =>
+        appsApi
+          .list(projectId, env.id)
+          .then((d) => [env.id, d.apps ?? []] as const)
+          .catch(() => [env.id, [] as ResourceSnapshot[]] as const)
+      )
+    )
+      .then((entries) => setAppsByEnv(Object.fromEntries(entries)))
       .catch((err) => setError(err instanceof Error ? err.message : t("apps.error.load")))
       .finally(() => setIsLoadingApps(false));
-    // Infrastructure (kind='Infra') — populated for VM compose stacks (pg/nginx).
-    // Best-effort: a failure here must not block the apps list.
-    appsApi
-      .listInfra(projectId, selectedEnvId)
-      .then((data) => setInfra(data.infra ?? []))
-      .catch(() => setInfra([]));
+    // Infrastructure (kind='Infra') per env — best-effort; never blocks the apps list.
+    Promise.all(
+      environments.map((env) =>
+        appsApi
+          .listInfra(projectId, env.id)
+          .then((d) => [env.id, d.infra ?? []] as const)
+          .catch(() => [env.id, [] as ResourceSnapshot[]] as const)
+      )
+    ).then((entries) => setInfraByEnv(Object.fromEntries(entries)));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [projectId, selectedEnvId, isLoadingEnvs]);
+  }, [projectId, environments, isLoadingEnvs]);
 
   function handleFormChange(field: keyof CreateAppForm, value: string | number) {
     setForm((prev) => ({ ...prev, [field]: value }));
+  }
+
+  function openCreate(envId: string) {
+    setModalEnvId(envId);
+    setSubmitError(null);
+    setIsModalOpen(true);
   }
 
   async function handleSubmit(e: FormEvent<HTMLFormElement>) {
@@ -78,7 +93,7 @@ export default function AppsPage() {
     setSubmitError(null);
     setIsSubmitting(true);
     try {
-      const result = await appsApi.create(projectId, selectedEnvId, {
+      const result = await appsApi.create(projectId, modalEnvId, {
         name: form.name,
         image: form.image,
         port: form.port,
@@ -96,7 +111,6 @@ export default function AppsPage() {
     }
   }
 
-  const isVMEnvironment = selectedEnv?.runtime === "vm";
   const canCreate = canMutate(role);
 
   if (isLoadingEnvs) {
@@ -109,43 +123,16 @@ export default function AppsPage() {
 
   return (
     <div>
-      <div className="mb-8 flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <Breadcrumb
-            items={[
-              { label: t("common.crumb.projects"), href: "/projects" },
-              { label: project?.display_name ?? t("common.crumb.overview"), href: `/projects/${projectId}` },
-              { label: t("nav.apps") },
-            ]}
-          />
-          <h1 className="mt-2 text-2xl font-bold text-gray-900 dark:text-gray-100">{t("apps.title")}</h1>
-          <p className="mt-0.5 text-sm text-gray-500 dark:text-gray-400">{t("apps.subtitle")}</p>
-        </div>
-        {canCreate && (
-        <div className="flex flex-wrap items-center gap-2">
-          <Link
-            href={`/projects/${projectId}/git/import${selectedEnvId ? `?envId=${selectedEnvId}` : ""}`}
-            aria-disabled={!selectedEnvId || isVMEnvironment}
-            className={`inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-colors ${
-              !selectedEnvId || isVMEnvironment
-                ? "pointer-events-none cursor-not-allowed opacity-50"
-                : "hover:bg-blue-700"
-            }`}
-          >
-            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.568 3H5.25A2.25 2.25 0 003 5.25v4.318c0 .597.237 1.17.659 1.591l9.581 9.581c.699.699 1.78.872 2.607.33a18.095 18.095 0 005.223-5.223c.542-.827.369-1.908-.33-2.607L11.16 3.66A2.25 2.25 0 009.568 3z" />
-            </svg>
-            {t("apps.deployFromGit")}
-          </Link>
-          <button
-            onClick={() => setIsModalOpen(true)}
-            disabled={!selectedEnvId || isVMEnvironment}
-            className="inline-flex items-center gap-2 rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 transition-colors"
-          >
-            {t("apps.deployImage")}
-          </button>
-        </div>
-        )}
+      <div className="mb-8">
+        <Breadcrumb
+          items={[
+            { label: t("common.crumb.projects"), href: "/projects" },
+            { label: project?.display_name ?? t("common.crumb.overview"), href: `/projects/${projectId}` },
+            { label: t("nav.apps") },
+          ]}
+        />
+        <h1 className="mt-2 text-2xl font-bold text-gray-900 dark:text-gray-100">{t("apps.title")}</h1>
+        <p className="mt-0.5 text-sm text-gray-500 dark:text-gray-400">{t("apps.subtitle")}</p>
       </div>
 
       {error && (
@@ -154,95 +141,24 @@ export default function AppsPage() {
         </div>
       )}
 
-      {isVMEnvironment && (
-        <div className="mb-6 rounded-lg border border-amber-200 dark:border-amber-900 bg-amber-50 dark:bg-amber-950/40 px-4 py-3 text-sm text-amber-800 dark:text-amber-300">
-          {t("apps.vmWarning")}
-          <Link href={`/projects/${projectId}/app-servers`} className="ml-1 font-medium underline">
-            {t("apps.vmWarning.manageAppServers")}
-          </Link>
-        </div>
-      )}
-
       {isLoadingApps ? (
         <div className="flex h-40 items-center justify-center">
           <Spinner />
         </div>
-      ) : apps.length === 0 ? (
-        isVMEnvironment ? (
-          <EmptyState
-            title={t("apps.empty.title")}
-            description={t("apps.empty.vm.description")}
-          />
-        ) : (
-          <EmptyState
-            title={t("apps.empty.title")}
-            description={t("apps.empty.k8s.description")}
-            action={{
-              label: t("apps.empty.k8s.action"),
-              href: `/projects/${projectId}/git/import${selectedEnvId ? `?envId=${selectedEnvId}` : ""}`,
-            }}
-          />
-        )
       ) : (
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {apps.map((app) => {
-            const summary = app.summary_json as unknown as AppSummary;
-            return (
-              <Link
-                key={app.id}
-                href={`/projects/${projectId}/apps/${app.name}?envId=${selectedEnvId}`}
-                className="rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-5 shadow-sm hover:border-blue-200 hover:shadow-md transition-all"
-              >
-                <div className="mb-3 flex items-start justify-between">
-                  <div className="min-w-0 flex-1">
-                    <p className="font-mono text-sm font-semibold text-gray-900 dark:text-gray-100">{app.name}</p>
-                    <p className="mt-0.5 font-mono text-xs text-gray-400 dark:text-gray-500 truncate">{summary.image ?? "—"}</p>
-                  </div>
-                  <PhaseBadge phase={app.phase} />
-                </div>
-                <div className="flex items-center gap-3 text-xs text-gray-400 dark:text-gray-500">
-                  <span>{summary.profile ?? "small"}</span>
-                  <span>·</span>
-                  <span>{t("apps.card.replicas", { count: String(summary.replicas ?? 2) })}</span>
-                </div>
-                <p className="mt-2 text-xs text-gray-400 dark:text-gray-500">
-                  {t("apps.card.synced", { ago: timeAgo(app.last_synced_at) })}
-                </p>
-                <MetricSparkline projectId={projectId} envId={selectedEnvId} appName={app.name} />
-              </Link>
-            );
-          })}
-        </div>
-      )}
-
-      {infra.length > 0 && (
-        <div className="mt-10">
-          <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">{t("apps.infra.title")}</h2>
-          <p className="mt-0.5 mb-4 text-sm text-gray-500 dark:text-gray-400">{t("apps.infra.subtitle")}</p>
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {infra.map((r) => {
-              const s = r.summary_json as unknown as InfraSummary;
-              return (
-                <div
-                  key={r.id}
-                  className="rounded-xl border border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-gray-900/60 p-5 shadow-sm"
-                >
-                  <div className="mb-2 flex items-start justify-between gap-2">
-                    <div className="min-w-0">
-                      <p className="font-mono text-sm font-semibold text-gray-900 dark:text-gray-100">{r.name}</p>
-                      <p className="mt-0.5 font-mono text-xs text-gray-400 dark:text-gray-500 truncate">{s.image ?? "—"}</p>
-                    </div>
-                    {s.subtype && (
-                      <span className="shrink-0 rounded-full bg-slate-200 dark:bg-slate-700 px-2 py-0.5 text-xs font-medium text-slate-700 dark:text-slate-200">
-                        {s.subtype}
-                      </span>
-                    )}
-                  </div>
-                  <PhaseBadge phase={r.phase} />
-                </div>
-              );
-            })}
-          </div>
+        <div className="space-y-10">
+          {environments.map((env) => (
+            <EnvBlock
+              key={env.id}
+              env={env}
+              projectId={projectId}
+              apps={appsByEnv[env.id] ?? []}
+              infra={infraByEnv[env.id] ?? []}
+              canCreate={canCreate}
+              onCreate={() => openCreate(env.id)}
+              t={t}
+            />
+          ))}
         </div>
       )}
 
@@ -358,5 +274,122 @@ export default function AppsPage() {
         </form>
       </Modal>
     </div>
+  );
+}
+
+interface EnvBlockProps {
+  env: Environment;
+  projectId: string;
+  apps: ResourceSnapshot[];
+  infra: ResourceSnapshot[];
+  canCreate: boolean;
+  onCreate: () => void;
+  t: (key: string, vars?: Record<string, string>) => string;
+}
+
+function EnvBlock({ env, projectId, apps, infra, canCreate, onCreate, t }: EnvBlockProps) {
+  return (
+    <section>
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-3 border-b border-gray-100 dark:border-gray-800 pb-3">
+        <div className="flex items-center gap-2">
+          <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">{env.name}</h2>
+          <span className="rounded-full bg-gray-100 dark:bg-gray-800 px-2 py-0.5 text-xs font-medium text-gray-500 dark:text-gray-400">
+            {env.runtime === "vm" ? "VM" : "k8s"}
+          </span>
+          <span className="text-xs text-gray-400 dark:text-gray-500">{t("apps.env.count", { count: String(apps.length) })}</span>
+        </div>
+        {canCreate && (
+          <div className="flex flex-wrap items-center gap-2">
+            <Link
+              href={`/projects/${projectId}/git/import?envId=${env.id}`}
+              className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 transition-colors"
+            >
+              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.568 3H5.25A2.25 2.25 0 003 5.25v4.318c0 .597.237 1.17.659 1.591l9.581 9.581c.699.699 1.78.872 2.607.33a18.095 18.095 0 005.223-5.223c.542-.827.369-1.908-.33-2.607L11.16 3.66A2.25 2.25 0 009.568 3z" />
+              </svg>
+              {t("apps.deployFromGit")}
+            </Link>
+            <button
+              onClick={onCreate}
+              className="inline-flex items-center gap-2 rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-50 transition-colors"
+            >
+              {t("apps.deployImage")}
+            </button>
+          </div>
+        )}
+      </div>
+
+      {apps.length === 0 ? (
+        <EmptyState
+          title={t("apps.empty.title")}
+          description={env.runtime === "vm" ? t("apps.empty.vm.description") : t("apps.empty.k8s.description")}
+          action={
+            env.runtime === "vm"
+              ? undefined
+              : { label: t("apps.empty.k8s.action"), href: `/projects/${projectId}/git/import?envId=${env.id}` }
+          }
+        />
+      ) : (
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          {apps.map((app) => {
+            const summary = app.summary_json as unknown as AppSummary;
+            return (
+              <Link
+                key={app.id}
+                href={`/projects/${projectId}/apps/${app.name}?envId=${env.id}`}
+                className="rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-5 shadow-sm hover:border-blue-200 hover:shadow-md transition-all"
+              >
+                <div className="mb-3 flex items-start justify-between">
+                  <div className="min-w-0 flex-1">
+                    <p className="font-mono text-sm font-semibold text-gray-900 dark:text-gray-100">{app.name}</p>
+                    <p className="mt-0.5 font-mono text-xs text-gray-400 dark:text-gray-500 truncate">{summary.image ?? "—"}</p>
+                  </div>
+                  <PhaseBadge phase={app.phase} />
+                </div>
+                <div className="flex items-center gap-3 text-xs text-gray-400 dark:text-gray-500">
+                  <span>{summary.profile ?? "small"}</span>
+                  <span>·</span>
+                  <span>{t("apps.card.replicas", { count: String(summary.replicas ?? 2) })}</span>
+                </div>
+                <p className="mt-2 text-xs text-gray-400 dark:text-gray-500">
+                  {t("apps.card.synced", { ago: timeAgo(app.last_synced_at) })}
+                </p>
+                <MetricSparkline projectId={projectId} envId={env.id} appName={app.name} />
+              </Link>
+            );
+          })}
+        </div>
+      )}
+
+      {infra.length > 0 && (
+        <div className="mt-6">
+          <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300">{t("apps.infra.title")}</h3>
+          <div className="mt-3 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            {infra.map((r) => {
+              const s = r.summary_json as unknown as InfraSummary;
+              return (
+                <div
+                  key={r.id}
+                  className="rounded-xl border border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-gray-900/60 p-5 shadow-sm"
+                >
+                  <div className="mb-2 flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <p className="font-mono text-sm font-semibold text-gray-900 dark:text-gray-100">{r.name}</p>
+                      <p className="mt-0.5 font-mono text-xs text-gray-400 dark:text-gray-500 truncate">{s.image ?? "—"}</p>
+                    </div>
+                    {s.subtype && (
+                      <span className="shrink-0 rounded-full bg-slate-200 dark:bg-slate-700 px-2 py-0.5 text-xs font-medium text-slate-700 dark:text-slate-200">
+                        {s.subtype}
+                      </span>
+                    )}
+                  </div>
+                  <PhaseBadge phase={r.phase} />
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+    </section>
   );
 }

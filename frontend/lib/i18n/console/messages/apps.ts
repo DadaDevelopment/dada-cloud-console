@@ -13,11 +13,16 @@ export const apps: Messages = {
   "apps.rollback.button": { ru: "Откатить", en: "Rollback" },
   "apps.rollback.confirm": { ru: "Откатить приложение к предыдущей версии compose.yaml и передеплоить?", en: "Roll this app back to the previous compose.yaml version and redeploy?" },
   "apps.rollback.error": { ru: "Не удалось откатить", en: "Rollback failed" },
+  "apps.adopt.button": { ru: "Разбить на приложения", en: "Split into applications" },
+  "apps.adopt.hint": { ru: "Превратить этот compose-стек в отдельные приложения по сервисам (данные и тома сохраняются, короткий перезапуск).", en: "Turn this compose stack into per-service applications (data and volumes preserved, brief restart)." },
+  "apps.adopt.confirm": { ru: "Разбить стек на отдельные приложения по сервисам? Существующие тома сохраняются; стек кратко пересоздаётся.", en: "Split this stack into per-service applications? Existing volumes are preserved; the stack is briefly recreated." },
+  "apps.adopt.error": { ru: "Не удалось разбить на приложения", en: "Adopt failed" },
   "apps.infra.title": { ru: "Инфраструктура", en: "Infrastructure" },
   "apps.infra.subtitle": { ru: "Инфраструктурные сервисы окружения (БД, прокси и т.п.)", en: "Environment infrastructure services (databases, proxies, etc.)" },
 
   "apps.deployFromGit": { ru: "Деплой из Git", en: "Deploy from Git" },
   "apps.deployImage": { ru: "Деплой образа", en: "Deploy image" },
+  "apps.env.count": { ru: "{count} прил.", en: "{count} apps" },
 
   "apps.vmWarning": {
     ru: "Это окружение работает на VM-треке. Lifecycle AppServer доступен сейчас; деплой VM-приложений намеренно заблокирован до подключения воркера Portainer stack.",
