@@ -2,6 +2,7 @@ package worker
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -415,10 +416,19 @@ func (w *DBWatcher) doCreateComposeManagedDB(ctx context.Context, op db.Operatio
 // doCreateIngress materialises a managed Ingress (routing + TLS) Resource on a VM
 // env as a first-class nginx Application whose config is GENERATED from the
 // routing spec (renderer.RenderNginxConf) and shipped from git — replacing
-// hand-authored nginx templates. The generated conf is written as an app File and
-// mounted into the nginx service (certs come from the host letsencrypt store).
-// Then the env stack is reassembled. The nginx service shows as an ordinary
-// first-class app (its own logs/metrics/state), marked managed=ingress.
+// hand-authored nginx templates. Then the env stack is reassembled. The nginx
+// service shows as an ordinary first-class app (its own logs/metrics/state),
+// marked managed=ingress.
+//
+// Config delivery (EDGE-safe): a throwaway probe proved git-relative bind mounts
+// (`./apps/<name>/nginx.conf`) do NOT resolve on edge agents — the daemon creates
+// an empty directory at the mount source (`cat: Is a directory`), same class as
+// the earlier edge stack config-mount bug. So the generated conf ships
+// base64-encoded in an env var (git delivers the compose file reliably) and the
+// container's entrypoint decodes it to /etc/nginx/conf.d/default.conf before
+// nginx boots. base64 has no compose-special chars ($ / quotes), so no
+// interpolation escaping is needed. Certs/htpasswd stay host-absolute mounts
+// (edge-safe; the live adopted nginx uses the same).
 func (w *DBWatcher) doCreateIngress(ctx context.Context, op db.Operation) error {
 	var p struct {
 		Name        string   `json:"name"`
@@ -456,42 +466,15 @@ func (w *DBWatcher) doCreateIngress(ctx context.Context, op db.Operation) error 
 			depsSet[r.App] = true
 		}
 	}
-	conf := renderer.RenderNginxConf(spec)
-
-	// nginx service block: the generated conf comes from git (relative to the
-	// env-level aggregate compose), certs from the host.
-	// DELIVERY CAVEAT (gate before prod use on an EDGE endpoint): the relative
-	// bind `./apps/<name>/nginx.conf` must resolve when the stack is deployed. It
-	// is proven for regular endpoints; on an edge endpoint (findata) it is NOT yet
-	// verified — the docker daemon resolves binds against the host, and the git
-	// clone may live in the agent's FS (the class of bug seen with edge STACK
-	// config mounts). Verify with a throwaway managed Ingress on a disposable
-	// endpoint before converting findata's adopted (host-mounted) nginx. If it
-	// fails, switch delivery to an entrypoint that writes the conf from an env var.
-	vols := []string{fmt.Sprintf("./apps/%s/nginx.conf:/etc/nginx/conf.d/default.conf:ro", p.Name)}
-	if spec.TLS.Enabled {
-		vols = append(vols, "/etc/letsencrypt:/etc/nginx/certs:ro")
-	}
-	if spec.BasicAuth != "" {
-		vols = append(vols, spec.BasicAuth+":"+spec.BasicAuth+":ro")
-	}
-	block := map[string]any{
-		"image":   "nginx:1.27-alpine",
-		"restart": "unless-stopped",
-		"ports":   []string{"80:80", "443:443"},
-		"volumes": vols,
-	}
 	deps := make([]string, 0, len(depsSet))
 	for a := range depsSet {
 		deps = append(deps, a)
 	}
 	sort.Strings(deps)
-	if len(deps) > 0 {
-		block["depends_on"] = deps
-	}
+	block := ingressComposeBlock(spec, deps)
 
 	summaryJSON := composeAppSummary(
-		composeDesired{Compose: block, Files: map[string]string{"nginx.conf": conf}},
+		composeDesired{Compose: block},
 		map[string]any{"managed": "ingress", "host": p.Host},
 	)
 	if err := db.UpsertSnapshot(ctx, w.pool,
@@ -500,6 +483,38 @@ func (w *DBWatcher) doCreateIngress(ctx context.Context, op db.Operation) error 
 		return err
 	}
 	return w.renderEnvAggregate(ctx, op, op.ProjectID, op.EnvironmentID)
+}
+
+// ingressComposeBlock builds the nginx service block for a managed Ingress with
+// EDGE-safe config delivery: the rendered conf is base64-encoded into an env var
+// and decoded to disk by the entrypoint before nginx boots (git-relative bind
+// mounts do NOT resolve on edge agents — see doCreateIngress). Certs/htpasswd
+// stay host-absolute mounts. deps must be sorted by the caller (deterministic
+// output). Kept pure so the delivery contract is locked by a unit test.
+func ingressComposeBlock(spec renderer.VMIngressSpec, deps []string) map[string]any {
+	confB64 := base64.StdEncoding.EncodeToString([]byte(renderer.RenderNginxConf(spec)))
+	vols := []string{}
+	if spec.TLS.Enabled {
+		vols = append(vols, "/etc/letsencrypt:/etc/nginx/certs:ro")
+	}
+	if spec.BasicAuth != "" {
+		vols = append(vols, spec.BasicAuth+":"+spec.BasicAuth+":ro")
+	}
+	block := map[string]any{
+		"image":       "nginx:1.27-alpine",
+		"restart":     "unless-stopped",
+		"ports":       []string{"80:80", "443:443"},
+		"environment": map[string]any{"NGINX_CONF_B64": confB64},
+		"entrypoint": []string{"/bin/sh", "-c",
+			"echo \"$NGINX_CONF_B64\" | base64 -d > /etc/nginx/conf.d/default.conf && exec nginx -g 'daemon off;'"},
+	}
+	if len(vols) > 0 {
+		block["volumes"] = vols
+	}
+	if len(deps) > 0 {
+		block["depends_on"] = deps
+	}
+	return block
 }
 
 func (w *DBWatcher) doCreateServiceDatabase(ctx context.Context, op db.Operation) error {
