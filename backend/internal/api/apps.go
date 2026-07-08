@@ -521,6 +521,99 @@ func (h *Handler) RollbackApp(c *gin.Context) {
 	c.JSON(http.StatusAccepted, gin.H{"operation": op, "message": "rollback queued"})
 }
 
+// AdoptApp enqueues an AdoptComposeStack operation that splits an existing
+// single compose App into N first-class per-service Applications, preserving the
+// live stack byte-faithfully (verbatim service blocks + the external-volume name
+// mapping). Reusable "adopt an existing compose" action; the postgres external
+// volume survives the stack swap so prod data is preserved (brief cutover
+// outage). Compose (VM) apps only. No body — the path app IS the source.
+//
+// @ID          adoptApp
+// @Summary     Adopt a compose app into per-service Applications
+// @Description Splits an existing single compose App into one first-class Application per service, reproducing the live stack (verbatim blocks + preserved external volumes) and redeploying it. Compose (VM) apps only. Asynchronous: returns 202 with an operation; poll until terminal.
+// @Tags        app
+// @Produce     json
+// @Security    BearerAuth
+// @Param       projectId path     string true "Project UUID"
+// @Param       envId     path     string true "Environment UUID"
+// @Param       appName   path     string true "Source app name"
+// @Success     202       {object} map[string]interface{} "object with the accepted operation"
+// @Failure     401       {object} map[string]string
+// @Failure     403       {object} map[string]string
+// @Failure     404       {object} map[string]string
+// @Router      /projects/{projectId}/environments/{envId}/apps/{appName}/adopt [post]
+func (h *Handler) AdoptApp(c *gin.Context) {
+	claims, ok := auth.GetClaims(c)
+	if !ok {
+		respondUnauthorized(c)
+		return
+	}
+	projectID, err := uuid.Parse(c.Param("projectId"))
+	if err != nil {
+		respondNotFound(c)
+		return
+	}
+	envID, err := uuid.Parse(c.Param("envId"))
+	if err != nil {
+		respondNotFound(c)
+		return
+	}
+	appName := c.Param("appName")
+
+	role, err := h.effectiveRole(c.Request.Context(), claims, projectID)
+	if err == pgx.ErrNoRows {
+		respondNotFound(c)
+		return
+	}
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, "failed to check project membership")
+		return
+	}
+	if !canWrite(role) {
+		respondForbidden(c)
+		return
+	}
+
+	var count int
+	if err := h.pool.QueryRow(c.Request.Context(),
+		`SELECT COUNT(*) FROM resource_snapshots
+		 WHERE project_id = $1 AND environment_id = $2 AND kind = 'App' AND name = $3`,
+		projectID, envID, appName,
+	).Scan(&count); err != nil {
+		respondError(c, http.StatusInternalServerError, "failed to check app existence")
+		return
+	}
+	if count == 0 {
+		respondNotFound(c)
+		return
+	}
+
+	payloadBytes, _ := json.Marshal(map[string]string{"source_app": appName})
+
+	var op models.Operation
+	row := h.pool.QueryRow(c.Request.Context(),
+		`INSERT INTO operations (actor_id, project_id, environment_id, action, resource_kind, resource_name, status, payload)
+		 VALUES ($1, $2, $3, 'AdoptComposeStack', 'App', $4, 'Created', $5)
+		 RETURNING id, actor_id, project_id, environment_id, action, resource_kind, resource_name,
+		           status, payload, validation_result, git_commit, git_path, argo_application,
+		           error_code, error_message, created_at, updated_at`,
+		claims.UserID, projectID, envID, appName, payloadBytes,
+	)
+	if err := scanOperation(row, &op); err != nil {
+		respondError(c, http.StatusInternalServerError, "failed to create operation")
+		return
+	}
+
+	auditMeta, _ := json.Marshal(map[string]string{"source_app": appName})
+	_, _ = h.pool.Exec(c.Request.Context(),
+		`INSERT INTO audit_events (actor_id, project_id, operation_id, action, resource_kind, resource_name, metadata)
+		 VALUES ($1, $2, $3, 'AdoptComposeStack', 'App', $4, $5)`,
+		claims.UserID, projectID, op.ID, appName, auditMeta,
+	)
+
+	c.JSON(http.StatusAccepted, gin.H{"operation": op, "message": "adopt queued"})
+}
+
 // RestartApp enqueues a RestartStack operation that recreates a compose app's
 // containers from the current git compose (no image pull) — the VM-runtime
 // "Restart" action (ADR-013 §8.3). No body.

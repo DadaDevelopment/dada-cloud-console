@@ -190,6 +190,7 @@ func SetupRouter(pool *pgxpool.Pool, cfg *config.Config) *gin.Engine {
 		api.PATCH("/projects/:projectId/environments/:envId/apps/:appName/image", h.UpdateAppImage)
 		api.POST("/projects/:projectId/environments/:envId/apps/:appName/rollback", h.RollbackApp)
 		api.POST("/projects/:projectId/environments/:envId/apps/:appName/restart", h.RestartApp)
+		api.POST("/projects/:projectId/environments/:envId/apps/:appName/adopt", h.AdoptApp)
 		api.POST("/projects/:projectId/environments/:envId/apps/:appName/values-token", h.GetValuesToken)
 		api.GET("/projects/:projectId/environments/:envId/apps/:appName/state", h.GetAppState)
 		api.GET("/projects/:projectId/environments/:envId/apps/:appName/logs", h.GetAppLogs)
