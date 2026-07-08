@@ -488,9 +488,13 @@ func (w *DBWatcher) doCreateIngress(ctx context.Context, op db.Operation) error 
 // ingressComposeBlock builds the nginx service block for a managed Ingress with
 // EDGE-safe config delivery: the rendered conf is base64-encoded into an env var
 // and decoded to disk by the entrypoint before nginx boots (git-relative bind
-// mounts do NOT resolve on edge agents — see doCreateIngress). Certs/htpasswd
-// stay host-absolute mounts. deps must be sorted by the caller (deterministic
-// output). Kept pure so the delivery contract is locked by a unit test.
+// mounts do NOT resolve on edge agents — see doCreateIngress). The entrypoint
+// references the env var as $$NGINX_CONF_B64: compose interpolates a single $ at
+// deploy time (against the host env, not the service env → empty), so the $$ is
+// required to pass a literal $ through to the shell (both proven on the findata
+// edge endpoint). Certs/htpasswd stay host-absolute mounts. deps must be sorted
+// by the caller (deterministic output). Kept pure so the delivery contract is
+// locked by a unit test.
 func ingressComposeBlock(spec renderer.VMIngressSpec, deps []string) map[string]any {
 	confB64 := base64.StdEncoding.EncodeToString([]byte(renderer.RenderNginxConf(spec)))
 	vols := []string{}
@@ -506,7 +510,7 @@ func ingressComposeBlock(spec renderer.VMIngressSpec, deps []string) map[string]
 		"ports":       []string{"80:80", "443:443"},
 		"environment": map[string]any{"NGINX_CONF_B64": confB64},
 		"entrypoint": []string{"/bin/sh", "-c",
-			"echo \"$NGINX_CONF_B64\" | base64 -d > /etc/nginx/conf.d/default.conf && exec nginx -g 'daemon off;'"},
+			"echo \"$$NGINX_CONF_B64\" | base64 -d > /etc/nginx/conf.d/default.conf && exec nginx -g 'daemon off;'"},
 	}
 	if len(vols) > 0 {
 		block["volumes"] = vols

@@ -33,6 +33,11 @@ func TestIngressComposeBlock_EdgeSafeDelivery(t *testing.T) {
 	if !ok || len(ep) != 3 || !strings.Contains(ep[2], "base64 -d > /etc/nginx/conf.d/default.conf") {
 		t.Fatalf("entrypoint must decode conf to disk before nginx, got %+v", block["entrypoint"])
 	}
+	// Must compose-escape the env ref as $$ — a single $ is eaten by compose
+	// interpolation at deploy time, leaving the shell an empty var (proven on edge).
+	if !strings.Contains(ep[2], "$$NGINX_CONF_B64") {
+		t.Errorf("entrypoint must reference $$NGINX_CONF_B64 (compose-escaped), got %q", ep[2])
+	}
 
 	// No git-relative bind mount may appear — only host-absolute certs/htpasswd.
 	for _, v := range block["volumes"].([]string) {
