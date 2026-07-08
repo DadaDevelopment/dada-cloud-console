@@ -1,12 +1,105 @@
 package renderer_test
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 
 	"github.com/dada-tuda/console/gitops-agent/internal/renderer"
 	"gopkg.in/yaml.v3"
 )
+
+// findataLiveCompose is the exact prod profi-vm stack (fin-data.pro, Portainer
+// endpoint 3), sans comments. The adopt cutover MUST reproduce it structurally
+// so docker compose recreates nothing beyond the deliberate stack swap and the
+// external postgres volume (compose_profi_pg_data) is never orphaned.
+const findataLiveCompose = `
+services:
+  postgres:
+    image: mirror.gcr.io/library/postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: feedback
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: pswd
+    ports:
+      - "65433:5432"
+    volumes:
+      - profi_pg_data:/var/lib/postgresql/data
+  backend:
+    image: nexus.dada-tuda.ru/dada/profi-backend:master-1.0.0-194
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      DB_URL: postgresql+asyncpg://postgres:pswd@postgres:5432/feedback
+    expose:
+      - "8001"
+    depends_on:
+      - postgres
+  frontend:
+    image: nexus.dada-tuda.ru/dada/profi:master-1.0.0-174
+    restart: unless-stopped
+    environment:
+      VITE_API_BASE: https://fin-data.pro
+    expose:
+      - "5173"
+  nginx:
+    image: mirror.gcr.io/library/nginx:1.27-alpine
+    restart: unless-stopped
+    depends_on:
+      - backend
+      - frontend
+    environment:
+      DOMAIN: fin-data.pro
+      NGINX_SSL_CERT_PATH: /etc/nginx/certs/live/fin-data.pro/fullchain.pem
+      NGINX_SSL_KEY_PATH: /etc/nginx/certs/live/fin-data.pro/privkey.pem
+      BACKEND_UPSTREAM: backend:8001
+      FRONTEND_UPSTREAM: frontend:5173
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - /home/ubuntuuser/compose/nginx/default.conf.template:/etc/nginx/templates/default.conf.template:ro
+      - /home/ubuntuuser/compose/nginx/.htpasswd:/etc/nginx/.htpasswd:ro
+      - /etc/letsencrypt:/etc/nginx/certs:ro
+volumes:
+  profi_pg_data:
+    external: true
+    name: compose_profi_pg_data
+`
+
+// TestAdoptFindataRoundTrip is the prod cutover gate: parsing the live findata
+// compose and rendering it back through the adopt path (verbatim per-service
+// blocks + preserved top-level volumes) must reproduce the SAME services and
+// volumes structure — proving no data-carrying field is dropped and the external
+// volume name survives.
+func TestAdoptFindataRoundTrip(t *testing.T) {
+	var doc map[string]any
+	if err := yaml.Unmarshal([]byte(findataLiveCompose), &doc); err != nil {
+		t.Fatalf("parse live compose: %v", err)
+	}
+	services := doc["services"].(map[string]any)
+	volumes, _ := doc["volumes"].(map[string]any)
+	var specs []renderer.AppServiceSpec
+	for name, block := range services {
+		specs = append(specs, renderer.AppServiceSpec{AppName: name, Service: block.(map[string]any)})
+	}
+	got, err := renderer.RenderAggregateCompose(specs, volumes)
+	if err != nil {
+		t.Fatalf("render: %v", err)
+	}
+	var out map[string]any
+	if err := yaml.Unmarshal([]byte(got), &out); err != nil {
+		t.Fatalf("rendered not valid yaml: %v\n%s", err, got)
+	}
+	if !reflect.DeepEqual(out["services"], doc["services"]) {
+		t.Errorf("SERVICES changed by round-trip:\n--- orig ---\n%v\n--- got ---\n%v", doc["services"], out["services"])
+	}
+	if !reflect.DeepEqual(out["volumes"], doc["volumes"]) {
+		t.Errorf("VOLUMES changed by round-trip (DATA-SAFETY BREACH):\n orig=%v\n got=%v", doc["volumes"], out["volumes"])
+	}
+}
 
 func TestRenderServiceDatabase(t *testing.T) {
 	spec := renderer.ServiceDatabaseSpec{
