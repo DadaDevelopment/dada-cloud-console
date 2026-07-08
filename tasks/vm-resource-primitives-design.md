@@ -109,6 +109,70 @@ The import wizard creates the correct Resource per included service.
 - One Resource model spans k8s + VM (+ future Swarm/Nomad) via providers, per
   ADR-013 §5. New runtimes reuse the same Resource UI/API.
 
+## Parameter mapping — findata REAL config → Resource spec (proof)
+
+Read live from findata (read-only via the docker proxy). Every nginx/postgres
+parameter maps to a field on a runtime-agnostic Resource spec — the SAME spec the
+k8s provider already consumes. This is the concrete evidence that "we can express
+the exact same params via Ingress / ServiceDatabase and describe them the same way
+for VM".
+
+### nginx (real) → Network/Ingress Resource
+
+Live directives: `server_name fin-data.pro` (+ `www.fin-data.pro`),
+`ssl_protocols TLSv1.2 TLSv1.3`, `auth_basic "Private area"`,
+`location /api/ → proxy_pass http://backend:8001`,
+`location / → proxy_pass http://frontend:5173`, `ssl_certificate .../live/fin-data.pro/*`.
+
+```yaml
+Ingress:                         # nginx directive it renders from:
+  host: fin-data.pro             #   server_name ${DOMAIN}
+  aliases: [www.fin-data.pro]    #   server_name www.* → 301 redirect to host
+  sslRedirect: true              #   listen 80 → return 301 https
+  tls:
+    enabled: true                #   listen 443 ssl http2
+    minVersion: "1.2"            #   ssl_protocols TLSv1.2 TLSv1.3
+    cipherProfile: modern        #   ssl_ciphers HIGH:!aNULL:!MD5
+    cert: letsencrypt(fin-data.pro)  #   ssl_certificate .../live/fin-data.pro/{fullchain,privkey}
+  auth:
+    basic: { credentialsRef: <htpasswd/secret> }  # auth_basic + auth_basic_user_file
+  rules:
+    - path: /api/  → { app: backend,  port: 8001 }   # location /api/ proxy_pass backend:8001
+    - path: /      → { app: frontend, port: 5173 }   # location /      proxy_pass frontend:5173
+  # X-Forwarded-* / Host headers = default proxy behavior, not user params
+```
+- **k8s provider** → `Ingress` CR + nginx-ingress annotations (auth-basic, ssl-redirect) + cert-manager cert.
+- **VM provider** → the nginx service + **generates** `conf.d` from `rules`/`tls`/`auth` (no hand-edited template; upstream = the Application service names).
+
+### postgres (real) → ServiceDatabase Resource
+
+Live: `server_version 16.13`, `max_connections 100`, `shared_buffers 128MB`
+(image defaults), db `feedback`, user `postgres`, volume `compose_profi_pg_data`
+(external), host port `65433:5432`.
+
+```yaml
+ServiceDatabase:
+  engine: postgres
+  version: "16"                  # 16.13
+  database: feedback             # POSTGRES_DB
+  storage: { adopt: compose_profi_pg_data }   # external volume — data-safety invariant
+  params:                        # postgresql.conf tunables (defaults now, overridable)
+    max_connections: 100
+    shared_buffers: 128MB
+  exposure: { hostPort: 65433 }  # optional; internal (service DNS) by default
+  backup: { enabled: false }     # toggle → scheduled pg_dump (VM) / CNPG backup (k8s)
+  # platform owns user + password (rotate-able) → DATABASE_URL injected into consumers
+```
+- **k8s provider** → `ServiceDatabaseV2` CRD (CNPG), `params` → postgres cluster config.
+- **VM provider** → postgres compose service + external volume + `params` → a mounted
+  `postgresql.conf` (or `-c` flags) + managed creds + backup sidecar.
+
+**Takeaway:** the nginx.conf and postgres settings contain nothing that isn't a
+field on the Ingress / ServiceDatabase spec. So the user describes an Ingress or a
+Database ONCE (same form for k8s and VM); the runtime provider renders it. The VM
+stops carrying hand-written nginx templates / raw postgres env — those become
+generated output of the Resource spec.
+
 ## Boundary (this session)
 
 Design only. findata prod stays on the current single managed `profi-vm` stack
