@@ -138,6 +138,36 @@ definitions:
       swagger_title:
         type: string
     type: object
+  api.createIngressRequest:
+    properties:
+      aliases:
+        items:
+          type: string
+        type: array
+      basic_auth:
+        type: string
+      host:
+        type: string
+      name:
+        type: string
+      rules:
+        items:
+          $ref: '#/definitions/api.ingressRuleReq'
+        type: array
+      ssl_redirect:
+        type: boolean
+      tls:
+        properties:
+          cert_path:
+            type: string
+          enabled:
+            type: boolean
+          key_path:
+            type: string
+          min_version:
+            type: string
+        type: object
+    type: object
   api.createMonitoringRequest:
     properties:
       name:
@@ -249,6 +279,15 @@ definitions:
         type: string
       timestamp:
         type: string
+    type: object
+  api.ingressRuleReq:
+    properties:
+      app:
+        type: string
+      path:
+        type: string
+      port:
+        type: integer
     type: object
   api.loginRequest:
     properties:
@@ -3592,6 +3631,63 @@ paths:
       security:
       - BearerAuth: []
       summary: List infrastructure resources in an environment
+      tags:
+      - app
+  /projects/{projectId}/environments/{envId}/ingress:
+    post:
+      consumes:
+      - application/json
+      description: 'Provisions a managed Ingress on a VM (compose) environment: an
+        nginx Application whose config is generated from host/rules/TLS and shipped
+        from git. Rules route a path to an app service:port on the same stack. Asynchronous:
+        returns 202 with an operation; poll until terminal.'
+      operationId: createIngress
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      - description: Environment UUID
+        in: path
+        name: envId
+        required: true
+        type: string
+      - description: Ingress spec
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/api.createIngressRequest'
+      produces:
+      - application/json
+      responses:
+        "202":
+          description: object with the accepted operation
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Create a managed Ingress (routing) on a VM environment
       tags:
       - app
   /projects/{projectId}/environments/{envId}/models:

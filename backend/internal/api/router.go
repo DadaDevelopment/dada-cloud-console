@@ -168,6 +168,7 @@ func SetupRouter(pool *pgxpool.Pool, cfg *config.Config) *gin.Engine {
 		// Databases (ServiceDatabase CRD)
 		api.GET("/projects/:projectId/environments/:envId/databases", h.ListDatabases)
 		api.POST("/projects/:projectId/environments/:envId/databases", h.CreateServiceDatabase)
+		api.POST("/projects/:projectId/environments/:envId/ingress", h.CreateIngress)
 
 		// Object Storage (S3Bucket XR)
 		api.GET("/projects/:projectId/environments/:envId/s3buckets", h.ListS3Buckets)

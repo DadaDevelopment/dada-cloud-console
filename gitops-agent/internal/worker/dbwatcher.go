@@ -181,6 +181,8 @@ func (w *DBWatcher) dispatch(ctx context.Context, op db.Operation) error {
 	switch op.Action {
 	case "CreateServiceDatabase":
 		return w.doCreateServiceDatabase(ctx, op)
+	case "CreateIngress":
+		return w.doCreateIngress(ctx, op)
 	case "CreateApp":
 		return w.doCreateApp(ctx, op)
 	case "DeleteApp":
@@ -404,6 +406,96 @@ func (w *DBWatcher) doCreateComposeManagedDB(ctx context.Context, op db.Operatio
 	)
 	if err := db.UpsertSnapshot(ctx, w.pool,
 		op.ProjectID, op.EnvironmentID, "App", name, "Pending", summaryJSON, time.Now(),
+	); err != nil {
+		return err
+	}
+	return w.renderEnvAggregate(ctx, op, op.ProjectID, op.EnvironmentID)
+}
+
+// doCreateIngress materialises a managed Ingress (routing + TLS) Resource on a VM
+// env as a first-class nginx Application whose config is GENERATED from the
+// routing spec (renderer.RenderNginxConf) and shipped from git — replacing
+// hand-authored nginx templates. The generated conf is written as an app File and
+// mounted into the nginx service (certs come from the host letsencrypt store).
+// Then the env stack is reassembled. The nginx service shows as an ordinary
+// first-class app (its own logs/metrics/state), marked managed=ingress.
+func (w *DBWatcher) doCreateIngress(ctx context.Context, op db.Operation) error {
+	var p struct {
+		Name        string   `json:"name"`
+		Host        string   `json:"host"`
+		Aliases     []string `json:"aliases"`
+		SSLRedirect bool     `json:"ssl_redirect"`
+		BasicAuth   string   `json:"basic_auth"`
+		TLS         struct {
+			Enabled    bool   `json:"enabled"`
+			MinVersion string `json:"min_version"`
+			CertPath   string `json:"cert_path"`
+			KeyPath    string `json:"key_path"`
+		} `json:"tls"`
+		Rules []struct {
+			Path string `json:"path"`
+			App  string `json:"app"`
+			Port int    `json:"port"`
+		} `json:"rules"`
+	}
+	if err := json.Unmarshal(op.Payload, &p); err != nil {
+		return fmt.Errorf("parse payload: %w", err)
+	}
+	if p.Name == "" || p.Host == "" {
+		return fmt.Errorf("ingress: name and host are required")
+	}
+
+	spec := renderer.VMIngressSpec{
+		Host: p.Host, Aliases: p.Aliases, SSLRedirect: p.SSLRedirect, BasicAuth: p.BasicAuth,
+		TLS: renderer.VMIngressTLS{Enabled: p.TLS.Enabled, MinVersion: p.TLS.MinVersion, CertPath: p.TLS.CertPath, KeyPath: p.TLS.KeyPath},
+	}
+	depsSet := map[string]bool{}
+	for _, r := range p.Rules {
+		spec.Rules = append(spec.Rules, renderer.VMIngressRule{Path: r.Path, App: r.App, Port: r.Port})
+		if r.App != "" {
+			depsSet[r.App] = true
+		}
+	}
+	conf := renderer.RenderNginxConf(spec)
+
+	// nginx service block: the generated conf comes from git (relative to the
+	// env-level aggregate compose), certs from the host.
+	// DELIVERY CAVEAT (gate before prod use on an EDGE endpoint): the relative
+	// bind `./apps/<name>/nginx.conf` must resolve when the stack is deployed. It
+	// is proven for regular endpoints; on an edge endpoint (findata) it is NOT yet
+	// verified — the docker daemon resolves binds against the host, and the git
+	// clone may live in the agent's FS (the class of bug seen with edge STACK
+	// config mounts). Verify with a throwaway managed Ingress on a disposable
+	// endpoint before converting findata's adopted (host-mounted) nginx. If it
+	// fails, switch delivery to an entrypoint that writes the conf from an env var.
+	vols := []string{fmt.Sprintf("./apps/%s/nginx.conf:/etc/nginx/conf.d/default.conf:ro", p.Name)}
+	if spec.TLS.Enabled {
+		vols = append(vols, "/etc/letsencrypt:/etc/nginx/certs:ro")
+	}
+	if spec.BasicAuth != "" {
+		vols = append(vols, spec.BasicAuth+":"+spec.BasicAuth+":ro")
+	}
+	block := map[string]any{
+		"image":   "nginx:1.27-alpine",
+		"restart": "unless-stopped",
+		"ports":   []string{"80:80", "443:443"},
+		"volumes": vols,
+	}
+	deps := make([]string, 0, len(depsSet))
+	for a := range depsSet {
+		deps = append(deps, a)
+	}
+	sort.Strings(deps)
+	if len(deps) > 0 {
+		block["depends_on"] = deps
+	}
+
+	summaryJSON := composeAppSummary(
+		composeDesired{Compose: block, Files: map[string]string{"nginx.conf": conf}},
+		map[string]any{"managed": "ingress", "host": p.Host},
+	)
+	if err := db.UpsertSnapshot(ctx, w.pool,
+		op.ProjectID, op.EnvironmentID, "App", p.Name, "Pending", summaryJSON, time.Now(),
 	); err != nil {
 		return err
 	}
@@ -716,6 +808,12 @@ type composeDesired struct {
 	// is never lost — the data-safety invariant for an adopted stateful stack.
 	Compose      map[string]any `json:"compose,omitempty"`
 	StackVolumes map[string]any `json:"stack_volumes,omitempty"`
+	// Files are extra files written into the app's git dir alongside service.yaml
+	// (keyed by path relative to that dir), e.g. a managed Ingress's generated
+	// nginx.conf. The app's Compose block mounts them (relative to the env-level
+	// aggregate compose, i.e. ./apps/<name>/<file>). Lets a Resource ship rendered
+	// config declaratively from git instead of a hand-authored host file.
+	Files map[string]string `json:"files,omitempty"`
 }
 
 // composeAppSummary marks an App snapshot as a first-class VM (compose)
@@ -813,6 +911,14 @@ func (w *DBWatcher) renderEnvAggregate(ctx context.Context, op db.Operation, pro
 			git.FileChange{Path: renderer.AppServiceGitPath(projectName, envName, a.name), Content: frag},
 			git.FileChange{Path: renderer.AppEnvGitPath(projectName, envName, a.name), Content: renderer.RenderEnvFile(merged)},
 		)
+		// Extra rendered config files this app ships (e.g. a managed Ingress's
+		// generated nginx.conf), written into the app's git dir.
+		for rel, content := range s.Desired.Files {
+			files = append(files, git.FileChange{
+				Path:    renderer.AppBaseGitPath(projectName, envName, a.name) + "/" + rel,
+				Content: content,
+			})
+		}
 	}
 
 	aggPath := renderer.EnvComposeGitPath(projectName, envName)

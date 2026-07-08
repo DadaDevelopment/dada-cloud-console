@@ -4825,6 +4825,88 @@
                 }
             }
         },
+        "/projects/{projectId}/environments/{envId}/ingress": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Provisions a managed Ingress on a VM (compose) environment: an nginx Application whose config is generated from host/rules/TLS and shipped from git. Rules route a path to an app service:port on the same stack. Asynchronous: returns 202 with an operation; poll until terminal.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "app"
+                ],
+                "summary": "Create a managed Ingress (routing) on a VM environment",
+                "operationId": "createIngress",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Project UUID",
+                        "name": "projectId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Environment UUID",
+                        "name": "envId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Ingress spec",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/api.createIngressRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "202": {
+                        "description": "object with the accepted operation",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/projects/{projectId}/environments/{envId}/models": {
             "get": {
                 "security": [
@@ -8819,6 +8901,52 @@
                 }
             }
         },
+        "api.createIngressRequest": {
+            "type": "object",
+            "properties": {
+                "aliases": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "basic_auth": {
+                    "type": "string"
+                },
+                "host": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "rules": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/api.ingressRuleReq"
+                    }
+                },
+                "ssl_redirect": {
+                    "type": "boolean"
+                },
+                "tls": {
+                    "type": "object",
+                    "properties": {
+                        "cert_path": {
+                            "type": "string"
+                        },
+                        "enabled": {
+                            "type": "boolean"
+                        },
+                        "key_path": {
+                            "type": "string"
+                        },
+                        "min_version": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
         "api.createMonitoringRequest": {
             "type": "object",
             "properties": {
@@ -8980,6 +9108,20 @@
                 },
                 "timestamp": {
                     "type": "string"
+                }
+            }
+        },
+        "api.ingressRuleReq": {
+            "type": "object",
+            "properties": {
+                "app": {
+                    "type": "string"
+                },
+                "path": {
+                    "type": "string"
+                },
+                "port": {
+                    "type": "integer"
                 }
             }
         },
