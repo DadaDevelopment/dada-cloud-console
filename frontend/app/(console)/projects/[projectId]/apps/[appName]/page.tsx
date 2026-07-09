@@ -197,13 +197,13 @@ export default function AppDetailPage() {
             <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100 font-mono">{appName}</h1>
             <PhaseBadge phase={app.phase} />
             {resType === "ingress" && (
-              <span className="inline-flex items-center gap-1.5 rounded-full bg-blue-50 dark:bg-blue-950/40 px-2.5 py-0.5 text-xs font-medium text-blue-700 dark:text-blue-300 ring-1 ring-inset ring-blue-200 dark:ring-blue-900">
-                <Globe className="h-3.5 w-3.5" /> {t("resources.type.ingress")}
+              <span className="inline-flex items-center gap-1.5 rounded-full bg-blue-50 dark:bg-blue-950/40 px-3 py-1 text-sm font-medium text-blue-700 dark:text-blue-300 ring-1 ring-inset ring-blue-200 dark:ring-blue-900">
+                <Globe className="h-4 w-4" /> {t("resources.type.ingress")}
               </span>
             )}
             {resType === "database" && (
-              <span className="inline-flex items-center gap-1.5 rounded-full bg-violet-50 dark:bg-violet-950/40 px-2.5 py-0.5 text-xs font-medium text-violet-700 dark:text-violet-300 ring-1 ring-inset ring-violet-200 dark:ring-violet-900">
-                <Database className="h-3.5 w-3.5" /> {t("resources.type.database")}
+              <span className="inline-flex items-center gap-1.5 rounded-full bg-violet-50 dark:bg-violet-950/40 px-3 py-1 text-sm font-medium text-violet-700 dark:text-violet-300 ring-1 ring-inset ring-violet-200 dark:ring-violet-900">
+                <Database className="h-4 w-4" /> {t("resources.type.database")}
               </span>
             )}
           </div>
@@ -238,16 +238,18 @@ export default function AppDetailPage() {
                 </svg>
                 {t("apps.rollback.button")}
               </button>
-              <button
-                onClick={handleAdopt}
-                title={t("apps.adopt.hint")}
-                className="inline-flex items-center gap-2 rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 px-3 py-2 text-sm font-medium text-gray-700 dark:text-gray-200 hover:border-blue-300 hover:text-blue-600 transition-colors shadow-sm"
-              >
-                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h7" />
-                </svg>
-                {t("apps.adopt.button")}
-              </button>
+              {!isResource && (
+                <button
+                  onClick={handleAdopt}
+                  title={t("apps.adopt.hint")}
+                  className="inline-flex items-center gap-2 rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 px-3 py-2 text-sm font-medium text-gray-700 dark:text-gray-200 hover:border-blue-300 hover:text-blue-600 transition-colors shadow-sm"
+                >
+                  <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h7" />
+                  </svg>
+                  {t("apps.adopt.button")}
+                </button>
+              )}
             </>
           )}
           <Link
@@ -271,10 +273,10 @@ export default function AppDetailPage() {
             {t("apps.detail.editValues")}
           </Link>
           )}
-          {canMutate(role) && (
+          {canMutate(role) && !isResource && (
             <button
               onClick={() => { setNewImage(summary.image ?? ""); setIsImageModalOpen(true); }}
-              className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 transition-colors"
+              className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-blue-700 active:bg-blue-800 transition-colors"
             >
               <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
