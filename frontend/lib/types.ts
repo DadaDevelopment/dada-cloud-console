@@ -291,7 +291,6 @@ export interface DBBackup {
   database_name: string;
   status: string;
   kind: string;
-  kopia_snapshot?: string;
   size_bytes?: number;
   error_message?: string;
   created_at: string;

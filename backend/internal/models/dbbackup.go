@@ -15,7 +15,6 @@ type DBBackup struct {
 	EnvironmentID uuid.UUID  `json:"environment_id"`
 	ResourceName  string     `json:"resource_name"`
 	DatabaseName  string     `json:"database_name"`
-	KopiaSnapshot *string    `json:"kopia_snapshot,omitempty"`
 	DumpPath      string     `json:"dump_path"`
 	SizeBytes     *int64     `json:"size_bytes,omitempty"`
 	Status        string     `json:"status"`

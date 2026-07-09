@@ -9,7 +9,6 @@ CREATE TABLE IF NOT EXISTS db_backups (
     environment_id UUID NOT NULL REFERENCES environments(id),
     resource_name  VARCHAR(255) NOT NULL,
     database_name  VARCHAR(255) NOT NULL,
-    kopia_snapshot TEXT,
     dump_path      TEXT NOT NULL,
     size_bytes     BIGINT,
     status         VARCHAR(32)  NOT NULL DEFAULT 'Pending',

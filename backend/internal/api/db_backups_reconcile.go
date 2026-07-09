@@ -71,8 +71,7 @@ func (h *Handler) reconcileBackups(ctx context.Context) {
 		switch st.State {
 		case cloudtask.KanisterComplete:
 			_, _ = h.pool.Exec(ctx,
-				`UPDATE db_backups SET status = 'Ready', kopia_snapshot = $2, updated_at = NOW() WHERE id = $1`,
-				it.id, st.KopiaSnapshot)
+				`UPDATE db_backups SET status = 'Ready', updated_at = NOW() WHERE id = $1`, it.id)
 		case cloudtask.KanisterFailed:
 			_, _ = h.pool.Exec(ctx,
 				`UPDATE db_backups SET status = 'Failed', error_message = $2, updated_at = NOW() WHERE id = $1`,
@@ -121,8 +120,8 @@ func (h *Handler) reconcileRestores(ctx context.Context) {
 // the object, retried next pass since the row stays Ready until issued).
 func (h *Handler) expireBackups(ctx context.Context) {
 	rows, err := h.pool.Query(ctx,
-		`SELECT id, dump_path, kopia_snapshot FROM db_backups
-		 WHERE status = 'Ready' AND kopia_snapshot IS NOT NULL AND expires_at IS NOT NULL AND expires_at < NOW()
+		`SELECT id, dump_path FROM db_backups
+		 WHERE status = 'Ready' AND expires_at IS NOT NULL AND expires_at < NOW()
 		 LIMIT 20`)
 	if err != nil {
 		return
@@ -130,12 +129,11 @@ func (h *Handler) expireBackups(ctx context.Context) {
 	type item struct {
 		id       uuid.UUID
 		dumpPath string
-		kopia    string
 	}
 	var items []item
 	for rows.Next() {
 		var it item
-		if rows.Scan(&it.id, &it.dumpPath, &it.kopia) == nil {
+		if rows.Scan(&it.id, &it.dumpPath) == nil {
 			items = append(items, it)
 		}
 	}
@@ -148,7 +146,6 @@ func (h *Handler) expireBackups(ctx context.Context) {
 			Profile:     h.cfg.DBBackupProfile,
 			Blueprint:   h.cfg.DBBackupBlueprint,
 			DumpPath:    it.dumpPath,
-			Kopia:       it.kopia,
 		})
 		if err != nil {
 			continue

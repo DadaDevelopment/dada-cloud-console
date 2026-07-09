@@ -22,8 +22,9 @@ var actionSetGVR = schema.GroupVersionResource{
 
 // KanisterActionSpec parameterises one backup/restore/delete ActionSet. Namespace
 // is where the ActionSet, the target StatefulSet and the Kanister Profile all
-// live (the managed-Postgres namespace). Kopia is the input artifact snapshot,
-// required for restore and delete.
+// live (the managed-Postgres namespace). The dump is a plain object-store artifact
+// keyed by DumpPath (no kopia snapshot — the raw s3Compliant profile is not
+// repository-server-backed), so restore/delete need only Database + DumpPath.
 type KanisterActionSpec struct {
 	Namespace   string
 	StatefulSet string
@@ -31,17 +32,14 @@ type KanisterActionSpec struct {
 	Blueprint   string
 	Database    string
 	DumpPath    string
-	Kopia       string
 	Labels      map[string]string
 }
 
 // ActionSetStatus is the distilled live status of a Kanister ActionSet. State is
-// the Kanister phase (pending|running|complete|failed); KopiaSnapshot is the
-// output artifact of a completed backup.
+// the Kanister phase (pending|running|complete|failed).
 type ActionSetStatus struct {
-	State         string
-	KopiaSnapshot string
-	Error         string
+	State string
+	Error string
 }
 
 // Kanister phase constants.
@@ -86,15 +84,15 @@ func NewKanisterClient() KanisterClient {
 func (c *dynamicKanisterClient) Enabled() bool { return true }
 
 func (c *dynamicKanisterClient) CreateBackup(ctx context.Context, spec KanisterActionSpec) (string, error) {
-	return c.create(ctx, actionSetObject("backup", spec, false))
+	return c.create(ctx, actionSetObject("backup", spec))
 }
 
 func (c *dynamicKanisterClient) CreateRestore(ctx context.Context, spec KanisterActionSpec) (string, error) {
-	return c.create(ctx, actionSetObject("restore", spec, true))
+	return c.create(ctx, actionSetObject("restore", spec))
 }
 
 func (c *dynamicKanisterClient) CreateDelete(ctx context.Context, spec KanisterActionSpec) (string, error) {
-	return c.create(ctx, actionSetObject("delete", spec, true))
+	return c.create(ctx, actionSetObject("delete", spec))
 }
 
 func (c *dynamicKanisterClient) create(ctx context.Context, obj *unstructured.Unstructured) (string, error) {
@@ -127,9 +125,10 @@ func (c *dynamicKanisterClient) StatusByLabel(ctx context.Context, namespace, la
 	return parseActionSetStatus(&list.Items[0]), true, nil
 }
 
-// actionSetObject builds a single-action ActionSet. withArtifact injects the
-// input kopia snapshot (restore/delete consume the backup produced earlier).
-func actionSetObject(action string, spec KanisterActionSpec, withArtifact bool) *unstructured.Unstructured {
+// actionSetObject builds a single-action ActionSet. The dump artifact is keyed
+// entirely by the dumpPath option (plain object store), so restore/delete need
+// no input artifact.
+func actionSetObject(action string, spec KanisterActionSpec) *unstructured.Unstructured {
 	act := map[string]any{
 		"name":      action,
 		"blueprint": spec.Blueprint,
@@ -147,15 +146,6 @@ func actionSetObject(action string, spec KanisterActionSpec, withArtifact bool) 
 			"database": spec.Database,
 			"dumpPath": spec.DumpPath,
 		},
-	}
-	if withArtifact {
-		act["artifacts"] = map[string]any{
-			"pgBackup": map[string]any{
-				"keyValue": map[string]any{
-					"kopiaSnapshot": spec.Kopia,
-				},
-			},
-		}
 	}
 	labels := map[string]any{}
 	for k, v := range spec.Labels {
@@ -175,48 +165,15 @@ func actionSetObject(action string, spec KanisterActionSpec, withArtifact bool) 
 	}}
 }
 
-// parseActionSetStatus distils status.state, the pgBackup output artifact's
-// kopia snapshot, and any error message from a Kanister ActionSet.
+// parseActionSetStatus distils status.state and any error message from a
+// Kanister ActionSet.
 func parseActionSetStatus(obj *unstructured.Unstructured) ActionSetStatus {
 	st := ActionSetStatus{}
 	st.State, _, _ = unstructured.NestedString(obj.Object, "status", "state")
 	if msg, found, _ := unstructured.NestedString(obj.Object, "status", "error", "message"); found {
 		st.Error = msg
 	}
-	actions, _, _ := unstructured.NestedSlice(obj.Object, "status", "actions")
-	if len(actions) > 0 {
-		if a, ok := actions[0].(map[string]any); ok {
-			st.KopiaSnapshot = firstNonEmpty(
-				digString(a, "artifacts", "pgBackup", "keyValue", "kopiaSnapshot"),
-				digString(a, "artifacts", "pgBackup", "kopiaSnapshot"),
-			)
-		}
-	}
 	return st
-}
-
-// digString walks a nested map[string]any by keys, returning the string leaf or
-// "" when any hop is missing or not the expected type.
-func digString(m map[string]any, keys ...string) string {
-	cur := any(m)
-	for _, k := range keys {
-		asMap, ok := cur.(map[string]any)
-		if !ok {
-			return ""
-		}
-		cur = asMap[k]
-	}
-	s, _ := cur.(string)
-	return s
-}
-
-func firstNonEmpty(vals ...string) string {
-	for _, v := range vals {
-		if v != "" {
-			return v
-		}
-	}
-	return ""
 }
 
 // disabledKanisterClient is returned off-cluster; every create fails with the

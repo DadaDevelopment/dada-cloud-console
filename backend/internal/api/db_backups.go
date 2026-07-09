@@ -16,13 +16,13 @@ import (
 )
 
 const dbBackupSelect = `SELECT id, project_id, environment_id, resource_name, database_name,
-	kopia_snapshot, dump_path, size_bytes, status, kind, action_set, error_message,
+	dump_path, size_bytes, status, kind, action_set, error_message,
 	created_by, created_at, updated_at, expires_at FROM db_backups`
 
 // scanDBBackup scans one db_backups row (columns per dbBackupSelect).
 func scanDBBackup(row pgx.Row, b *models.DBBackup) error {
 	return row.Scan(&b.ID, &b.ProjectID, &b.EnvironmentID, &b.ResourceName, &b.DatabaseName,
-		&b.KopiaSnapshot, &b.DumpPath, &b.SizeBytes, &b.Status, &b.Kind, &b.ActionSet,
+		&b.DumpPath, &b.SizeBytes, &b.Status, &b.Kind, &b.ActionSet,
 		&b.ErrorMessage, &b.CreatedBy, &b.CreatedAt, &b.UpdatedAt, &b.ExpiresAt)
 }
 
@@ -195,9 +195,7 @@ func (h *Handler) startDBBackup(ctx context.Context, projectID, envID uuid.UUID,
 		`INSERT INTO db_backups (id, project_id, environment_id, resource_name, database_name,
 		     dump_path, status, kind, created_by, expires_at)
 		 VALUES ($1, $2, $3, $4, $5, $6, 'Pending', $7, $8, $9)
-		 RETURNING id, project_id, environment_id, resource_name, database_name, kopia_snapshot,
-		     dump_path, size_bytes, status, kind, action_set, error_message, created_by,
-		     created_at, updated_at, expires_at`,
+		 RETURNING `+dbBackupCols,
 		id, projectID, envID, resourceName, database, dumpPath, kind, createdBy, expiresAt,
 	)
 	if err := scanDBBackup(row, &b); err != nil {
@@ -219,16 +217,18 @@ func (h *Handler) startDBBackup(ctx context.Context, projectID, envID uuid.UUID,
 			id, err.Error())
 		return models.DBBackup{}, err
 	}
-	_ = h.pool.QueryRow(ctx,
+	if err := scanDBBackup(h.pool.QueryRow(ctx,
 		`UPDATE db_backups SET status = 'Running', action_set = $2, updated_at = NOW() WHERE id = $1
-		 RETURNING id, project_id, environment_id, resource_name, database_name, kopia_snapshot,
-		     dump_path, size_bytes, status, kind, action_set, error_message, created_by,
-		     created_at, updated_at, expires_at`,
-		id, asName).Scan(&b.ID, &b.ProjectID, &b.EnvironmentID, &b.ResourceName, &b.DatabaseName,
-		&b.KopiaSnapshot, &b.DumpPath, &b.SizeBytes, &b.Status, &b.Kind, &b.ActionSet,
-		&b.ErrorMessage, &b.CreatedBy, &b.CreatedAt, &b.UpdatedAt, &b.ExpiresAt)
+		 RETURNING `+dbBackupCols, id, asName), &b); err != nil {
+		return models.DBBackup{}, err
+	}
 	return b, nil
 }
+
+// dbBackupCols is the RETURNING/SELECT column list matching scanDBBackup.
+const dbBackupCols = `id, project_id, environment_id, resource_name, database_name,
+	dump_path, size_bytes, status, kind, action_set, error_message, created_by,
+	created_at, updated_at, expires_at`
 
 type restoreDatabaseRequest struct {
 	BackupID string `json:"backup_id"`
@@ -300,7 +300,7 @@ func (h *Handler) RestoreServiceDatabase(c *gin.Context) {
 		respondError(c, http.StatusInternalServerError, "failed to look up backup")
 		return
 	}
-	if backup.Status != models.DBBackupStatusReady || backup.KopiaSnapshot == nil || *backup.KopiaSnapshot == "" {
+	if backup.Status != models.DBBackupStatusReady {
 		respondError(c, http.StatusBadRequest, "backup is not ready to restore")
 		return
 	}
@@ -332,7 +332,6 @@ func (h *Handler) RestoreServiceDatabase(c *gin.Context) {
 		Blueprint:   h.cfg.DBBackupBlueprint,
 		Database:    database,
 		DumpPath:    backup.DumpPath,
-		Kopia:       *backup.KopiaSnapshot,
 		Labels:      map[string]string{"dada.io/operation-id": op.ID.String()},
 	})
 	if err != nil {
