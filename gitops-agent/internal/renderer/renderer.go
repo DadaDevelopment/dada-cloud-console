@@ -564,6 +564,13 @@ func RenderEnvSkeleton() string {
 // mechanism. SECURITY: sensitive values land in cleartext in the gitops repo;
 // the same plaintext-in-git caveat as RenderAppEnvSecret applies (treat the repo
 // as a secret store). When env is empty the skeleton placeholder is returned.
+//
+// Each `$` in a value is doubled to `$$`. Compose v2 interpolates env_file
+// values by default, so a bare `$` would be read as a variable reference and the
+// value silently truncated (a password `ab$cd` → `ab`, and a `$`-leading secret
+// → empty). Proven on the findata edge endpoint: `ab$cd12$xy` arrives as `ab`
+// unescaped, and correctly as `ab$cd12$xy` once doubled. `$$` is the compose
+// literal-$ escape and de-escapes back to a single `$` in the container.
 func RenderEnvFile(env map[string]string) string {
 	if len(env) == 0 {
 		return RenderEnvSkeleton()
@@ -576,7 +583,7 @@ func RenderEnvFile(env map[string]string) string {
 	var b strings.Builder
 	b.WriteString("# Managed by DADA Console — do not edit (regenerated on deploy).\n")
 	for _, k := range keys {
-		fmt.Fprintf(&b, "%s=%s\n", k, env[k])
+		fmt.Fprintf(&b, "%s=%s\n", k, strings.ReplaceAll(env[k], "$", "$$"))
 	}
 	return b.String()
 }
