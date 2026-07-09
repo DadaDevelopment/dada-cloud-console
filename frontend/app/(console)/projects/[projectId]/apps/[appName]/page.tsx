@@ -16,6 +16,10 @@ import { LogsViewer } from "@/components/logs-viewer";
 import { PhaseBadge } from "@/components/ui/phase-badge";
 import { CloudTaskPanel } from "@/components/cloud-task/cloud-task-panel";
 import { useT } from "@/lib/i18n/console/context";
+import { Globe, Database } from "lucide-react";
+import { classifyVMResource } from "@/lib/vm-resources";
+import { IngressDetail } from "@/components/resources/ingress-detail";
+import { ServiceDatabaseDetail } from "@/components/resources/service-database-detail";
 
 interface DomainForm {
   fqdn: string;
@@ -121,6 +125,17 @@ export default function AppDetailPage() {
     }
   }
 
+  async function handleAdopt() {
+    if (!window.confirm(t("apps.adopt.confirm"))) return;
+    try {
+      const result = await appsApi.adopt(projectId, envId, appName);
+      const opId = result.operation?.id;
+      router.push(`/projects/${projectId}/operations${opId ? `?highlight=${opId}` : ""}`);
+    } catch (err) {
+      window.alert(err instanceof Error ? err.message : t("apps.adopt.error"));
+    }
+  }
+
   async function handleDomainCreate(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setDomainSubmitError(null);
@@ -163,6 +178,8 @@ export default function AppDetailPage() {
 
   const summary = app.summary_json as { image?: string; port?: number; replicas?: number; profile?: string; runtime?: string };
   const isCompose = summary.runtime === "compose";
+  const resType = classifyVMResource(app);
+  const isResource = resType !== "app";
 
   return (
     <div>
@@ -179,6 +196,16 @@ export default function AppDetailPage() {
           <div className="mt-2 flex items-center gap-3">
             <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100 font-mono">{appName}</h1>
             <PhaseBadge phase={app.phase} />
+            {resType === "ingress" && (
+              <span className="inline-flex items-center gap-1.5 rounded-full bg-blue-50 dark:bg-blue-950/40 px-2.5 py-0.5 text-xs font-medium text-blue-700 dark:text-blue-300 ring-1 ring-inset ring-blue-200 dark:ring-blue-900">
+                <Globe className="h-3.5 w-3.5" /> {t("resources.type.ingress")}
+              </span>
+            )}
+            {resType === "database" && (
+              <span className="inline-flex items-center gap-1.5 rounded-full bg-violet-50 dark:bg-violet-950/40 px-2.5 py-0.5 text-xs font-medium text-violet-700 dark:text-violet-300 ring-1 ring-inset ring-violet-200 dark:ring-violet-900">
+                <Database className="h-3.5 w-3.5" /> {t("resources.type.database")}
+              </span>
+            )}
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -210,6 +237,16 @@ export default function AppDetailPage() {
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 15L3 9m0 0l6-6M3 9h12a6 6 0 010 12h-3" />
                 </svg>
                 {t("apps.rollback.button")}
+              </button>
+              <button
+                onClick={handleAdopt}
+                title={t("apps.adopt.hint")}
+                className="inline-flex items-center gap-2 rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 px-3 py-2 text-sm font-medium text-gray-700 dark:text-gray-200 hover:border-blue-300 hover:text-blue-600 transition-colors shadow-sm"
+              >
+                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h7" />
+                </svg>
+                {t("apps.adopt.button")}
               </button>
             </>
           )}
@@ -250,6 +287,8 @@ export default function AppDetailPage() {
 
       {isCompose ? (
         <div className="space-y-6">
+          {resType === "ingress" && <IngressDetail app={app} />}
+          {resType === "database" && <ServiceDatabaseDetail app={app} />}
           <ComposeStatePanel projectId={projectId} envId={envId} appName={appName} />
           <FixedMetricsDashboard kind="app" projectId={projectId} envId={envId} appName={appName} />
           <LogsViewer projectId={projectId} app={appName} />
@@ -280,6 +319,7 @@ export default function AppDetailPage() {
         </div>
       )}
 
+      {!isResource && (
       <div className="mt-10">
         <CloudTaskPanel
           projectId={projectId}
@@ -289,7 +329,9 @@ export default function AppDetailPage() {
           canMutate={canMutate(role)}
         />
       </div>
+      )}
 
+      {!isResource && (
       <div className="mt-10">
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
           <div>
@@ -349,6 +391,7 @@ export default function AppDetailPage() {
           </div>
         )}
       </div>
+      )}
 
       <Modal
         isOpen={isImageModalOpen}

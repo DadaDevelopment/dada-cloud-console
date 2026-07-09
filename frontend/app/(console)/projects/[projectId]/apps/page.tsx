@@ -14,6 +14,8 @@ import { PhaseBadge } from "@/components/ui/phase-badge";
 import { MetricSparkline } from "@/components/metrics/fixed-metrics-dashboard";
 import { EmptyState } from "@/components/ui/empty-state";
 import { useT } from "@/lib/i18n/console/context";
+import { Globe, Database } from "lucide-react";
+import { classifyVMResource, extractIngressSpec, extractDatabaseSpec } from "@/lib/vm-resources";
 
 interface CreateAppForm {
   name: string;
@@ -333,23 +335,52 @@ function EnvBlock({ env, projectId, apps, infra, canCreate, onCreate, t }: EnvBl
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {apps.map((app) => {
             const summary = app.summary_json as unknown as AppSummary;
+            const resType = classifyVMResource(app);
+            const ing = resType === "ingress" ? extractIngressSpec(app) : null;
+            const db = resType === "database" ? extractDatabaseSpec(app) : null;
+            const subtitle =
+              resType === "ingress"
+                ? ing?.host ?? summary.image ?? "—"
+                : resType === "database"
+                  ? `${db?.engine ?? ""}${db?.version ? " " + db.version : ""}`
+                  : summary.image ?? "—";
             return (
               <Link
                 key={app.id}
                 href={`/projects/${projectId}/apps/${app.name}?envId=${env.id}`}
                 className="rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-5 shadow-sm hover:border-blue-200 hover:shadow-md transition-all"
               >
-                <div className="mb-3 flex items-start justify-between">
-                  <div className="min-w-0 flex-1">
-                    <p className="font-mono text-sm font-semibold text-gray-900 dark:text-gray-100">{app.name}</p>
-                    <p className="mt-0.5 font-mono text-xs text-gray-400 dark:text-gray-500 truncate">{summary.image ?? "—"}</p>
+                <div className="mb-3 flex items-start justify-between gap-2">
+                  <div className="flex min-w-0 flex-1 items-start gap-2.5">
+                    {resType === "ingress" && (
+                      <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-blue-50 dark:bg-blue-950/40 text-blue-600 dark:text-blue-400">
+                        <Globe className="h-4 w-4" />
+                      </span>
+                    )}
+                    {resType === "database" && (
+                      <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-violet-50 dark:bg-violet-950/40 text-violet-600 dark:text-violet-400">
+                        <Database className="h-4 w-4" />
+                      </span>
+                    )}
+                    <div className="min-w-0">
+                      <p className="font-mono text-sm font-semibold text-gray-900 dark:text-gray-100 truncate">{app.name}</p>
+                      <p className="mt-0.5 truncate font-mono text-xs text-gray-400 dark:text-gray-500">{subtitle}</p>
+                    </div>
                   </div>
                   <PhaseBadge phase={app.phase} />
                 </div>
                 <div className="flex items-center gap-3 text-xs text-gray-400 dark:text-gray-500">
-                  <span>{summary.profile ?? "small"}</span>
-                  <span>·</span>
-                  <span>{t("apps.card.replicas", { count: String(summary.replicas ?? 2) })}</span>
+                  {resType === "ingress" ? (
+                    <span>{t("resources.card.routes", { count: String(ing?.rules?.length ?? 0) })}</span>
+                  ) : resType === "database" ? (
+                    <span className="truncate font-mono">{db?.volume || db?.database || "—"}</span>
+                  ) : (
+                    <>
+                      <span>{summary.profile ?? "small"}</span>
+                      <span>·</span>
+                      <span>{t("apps.card.replicas", { count: String(summary.replicas ?? 2) })}</span>
+                    </>
+                  )}
                 </div>
                 <p className="mt-2 text-xs text-gray-400 dark:text-gray-500">
                   {t("apps.card.synced", { ago: timeAgo(app.last_synced_at) })}
