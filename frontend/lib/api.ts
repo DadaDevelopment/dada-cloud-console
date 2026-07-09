@@ -247,6 +247,14 @@ export const appsApi = {
       { method: "POST" }
     ),
 
+  // Adopt an existing single compose app into N first-class per-service Applications
+  // (preserves the live stack + external volumes; brief cutover outage).
+  adopt: (projectId: string, envId: string, appName: string) =>
+    apiFetch<{ operation: Operation; message: string }>(
+      `/api/v1/projects/${projectId}/environments/${envId}/apps/${appName}/adopt`,
+      { method: "POST" }
+    ),
+
   // Live compose state (Portainer proxy).
   getState: (projectId: string, envId: string, appName: string) =>
     apiFetch<AppState>(
