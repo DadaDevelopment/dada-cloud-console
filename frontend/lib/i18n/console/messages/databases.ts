@@ -12,6 +12,10 @@ export const databases: Messages = {
     en: "Create a PostgreSQL instance and connect it to your app — the connection string will appear in environment variables automatically.",
   },
   "databases.empty.createFirst": { ru: "Создать первую базу данных →", en: "Create your first database →" },
+  "databases.empty.create": { ru: "Создать базу данных", en: "Create database" },
+  "databases.empty.step1": { ru: "Создайте инстанс PostgreSQL в нужном окружении", en: "Create a PostgreSQL instance in an environment" },
+  "databases.empty.step2": { ru: "Строка подключения появится в переменных окружения приложения", en: "The connection string appears in your app's environment variables" },
+  "databases.empty.step3": { ru: "Приложение подключается к базе по имени сервиса", en: "Your app connects to it by service name" },
 
   "databases.card.noBackup": { ru: "нет бэкапа", en: "no backup" },
   "databases.card.backup": { ru: "бэкап {ago}", en: "backup {ago}" },

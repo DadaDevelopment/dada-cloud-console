@@ -2,9 +2,12 @@ import type { Messages } from "./common";
 
 /** App Servers list page + detail page. Namespace: appServers.* */
 export const appServers: Messages = {
-  "appServers.title": { ru: "Серверы приложений", en: "App Servers" },
-  "appServers.subtitle": { ru: "Выделенные VM-хосты для Docker Compose рабочих нагрузок.", en: "Dedicated VM hosts for Docker Compose workloads." },
-  "appServers.create": { ru: "Создать AppServer", en: "Create AppServer" },
+  "appServers.title": { ru: "Managed VM", en: "Managed VM" },
+  "appServers.subtitle": {
+    ru: "Выделенные VM-хосты для приложений на Docker Compose. Закажите новую VM у нас — или подключите собственный сервер, и мы возьмём его под управление.",
+    en: "Dedicated VM hosts for Docker Compose apps. Order a new VM from us — or connect your own server and we'll bring it under management.",
+  },
+  "appServers.create": { ru: "Добавить VM", en: "Add VM" },
 
   "appServers.col.name": { ru: "Название", en: "Name" },
   "appServers.col.status": { ru: "Статус", en: "Status" },
@@ -19,10 +22,17 @@ export const appServers: Messages = {
 
   "appServers.search": { ru: "Поиск серверов…", en: "Search app servers…" },
 
-  "appServers.empty.title": { ru: "Серверов пока нет", en: "No AppServers yet" },
-  "appServers.empty.provision": { ru: "Создать первый VM-хост →", en: "Provision the first VM host →" },
+  "appServers.empty.title": { ru: "Пока нет ни одной VM", en: "No VMs yet" },
+  "appServers.empty.body": {
+    ru: "Закажите managed-VM у нас или подключите свой сервер по SSH — платформа развернёт агент и возьмёт хост под управление.",
+    en: "Order a managed VM from us or connect your own server over SSH — the platform installs an agent and brings the host under management.",
+  },
+  "appServers.empty.provision": { ru: "Добавить VM", en: "Add VM" },
+  "appServers.empty.step1": { ru: "Закажите новую VM или укажите доступ к своей по SSH", en: "Order a new VM or provide SSH access to your own" },
+  "appServers.empty.step2": { ru: "Платформа установит агент и подключит хост", en: "The platform installs an agent and connects the host" },
+  "appServers.empty.step3": { ru: "Деплойте на неё приложения через Docker Compose", en: "Deploy apps to it via Docker Compose" },
 
-  "appServers.modal.title": { ru: "Создать AppServer", en: "Create AppServer" },
+  "appServers.modal.title": { ru: "Добавить Managed VM", en: "Add Managed VM" },
 
   "appServers.field.name.label": { ru: "Название", en: "Name" },
   "appServers.field.name.help": { ru: "Имя в нижнем регистре в стиле DNS — используется для VM и Portainer endpoint.", en: "Lowercase DNS-style name used for the VM and Portainer endpoint." },

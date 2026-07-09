@@ -10,7 +10,8 @@ import { useProjectContext } from "@/lib/project-context";
 import { canMutate } from "@/lib/rbac";
 import { timeAgo } from "@/lib/format";
 import { PhaseBadge } from "@/components/ui/phase-badge";
-import { EmptyState } from "@/components/ui/empty-state";
+import { ResourceZeroState } from "@/components/ui/resource-zero-state";
+import { HardDrive } from "lucide-react";
 import { useT } from "@/lib/i18n/console/context";
 
 interface CreateBucketForm {
@@ -145,23 +146,18 @@ export default function StoragePage() {
           <Spinner />
         </div>
       ) : buckets.length === 0 ? (
-        <div className="space-y-4">
-          <EmptyState
-            title={t("storage.empty.title")}
-            description={t("storage.empty.description")}
-          />
-          {canCreate && (
-            <div className="flex justify-center">
-              <button
-                onClick={() => setIsModalOpen(true)}
-                disabled={!selectedEnvId}
-                className="text-sm font-medium text-blue-600 hover:text-blue-700 disabled:opacity-50"
-              >
-                {t("storage.empty.cta")}
-              </button>
-            </div>
-          )}
-        </div>
+        <ResourceZeroState
+          tone="amber"
+          icon={<HardDrive className="h-8 w-8" />}
+          title={t("storage.empty.title")}
+          description={t("storage.empty.description")}
+          cta={
+            canCreate
+              ? { label: t("storage.empty.create"), onClick: () => setIsModalOpen(true), disabled: !selectedEnvId }
+              : undefined
+          }
+          steps={[t("storage.empty.step1"), t("storage.empty.step2"), t("storage.empty.step3")]}
+        />
       ) : (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {buckets.map((b) => {

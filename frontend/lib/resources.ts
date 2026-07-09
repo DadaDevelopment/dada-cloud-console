@@ -7,7 +7,7 @@
 // with a tooltip rather than being silently hidden.
 
 import type { MemberRole } from "./types";
-import { canApprove, canSeeManifests, isAdmin } from "./rbac";
+import { canSeeManifests, isAdmin } from "./rbac";
 
 export type IconName =
   | "overview"
@@ -53,18 +53,14 @@ export const PROJECT_NAV: ResourceNavItem[] = [
   // --- advanced / infrastructure: still one click away, but folded under an
   // "Advanced" header so they don't crowd the primary path.
   { key: "models", label: "AI Models", icon: "models", segment: "/models", group: "infra" },
-  { key: "app-servers", label: "App Servers", icon: "app-servers", segment: "/app-servers", group: "infra" },
+  { key: "app-servers", label: "Managed VM", icon: "app-servers", segment: "/app-servers", group: "infra" },
   { key: "git", label: "Builds", icon: "git", segment: "/git", group: "infra", visible: canSeeManifests },
-  // "Deployments" removed from the sidebar — overlapped with Applications and
-  // confused users. Per-app build/deploy history stays reachable from the app
-  // detail page (/apps/[appName]/deployments) and the Builds entry.
-  { key: "operations", label: "Operations", icon: "operations", segment: "/operations", group: "infra" },
-  // --- roadmap placeholders (v2–v4): visible, disabled-with-tooltip ---
-  { key: "redis", label: "Redis", icon: "redis", segment: "/redis", group: "infra", comingSoon: true },
-  { key: "queues", label: "Message Queues", icon: "queue", segment: "/queues", group: "infra", comingSoon: true },
+  // Operations, Approvals, Redis and Message Queues were removed from the sidebar
+  // to keep the nav to real, task-oriented surfaces. Operations still runs — its
+  // route stays reachable via post-action redirects and deep links — it just no
+  // longer occupies a top-level nav slot.
   // --- admin group (global, cross-project) ---
   { key: "members", label: "Members", icon: "members", segment: "/members", group: "admin", visible: isAdmin },
-  { key: "approvals", label: "Approvals", icon: "approvals", segment: "", absoluteHref: "/admin/approvals", group: "admin", visible: canApprove },
   { key: "billing", label: "Billing", icon: "billing", segment: "/billing", group: "admin", visible: isAdmin },
 ];
 

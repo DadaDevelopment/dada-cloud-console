@@ -8,6 +8,8 @@ import { Badge } from "@/components/ui/badge";
 import { Modal } from "@/components/ui/modal";
 import { Breadcrumb } from "@/components/ui/breadcrumb";
 import { DataTable, type Column } from "@/components/ui/data-table";
+import { ResourceZeroState } from "@/components/ui/resource-zero-state";
+import { Server } from "lucide-react";
 import { useProjectContext } from "@/lib/project-context";
 import { canMutate } from "@/lib/rbac";
 import { timeAgo } from "@/lib/format";
@@ -257,17 +259,14 @@ export default function AppServersPage() {
         searchPlaceholder={t("appServers.search")}
         columns={columns}
         emptyState={
-          <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-gray-300 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 py-16">
-            <svg className="mb-3 h-12 w-12 text-gray-300 dark:text-gray-700" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M3 15.75V8.25A2.25 2.25 0 015.25 6h13.5A2.25 2.25 0 0121 8.25v7.5A2.25 2.25 0 0118.75 18H5.25A2.25 2.25 0 013 15.75zM7 9h10M7 12h4" />
-            </svg>
-            <p className="text-sm font-medium text-gray-500 dark:text-gray-400">{t("appServers.empty.title")}</p>
-            {canManage && (
-              <button onClick={() => setIsModalOpen(true)} className="mt-4 text-sm text-amber-700 dark:text-amber-300 hover:text-amber-800">
-                {t("appServers.empty.provision")}
-              </button>
-            )}
-          </div>
+          <ResourceZeroState
+            tone="emerald"
+            icon={<Server className="h-8 w-8" />}
+            title={t("appServers.empty.title")}
+            description={t("appServers.empty.body")}
+            cta={canManage ? { label: t("appServers.empty.provision"), onClick: () => setIsModalOpen(true) } : undefined}
+            steps={[t("appServers.empty.step1"), t("appServers.empty.step2"), t("appServers.empty.step3")]}
+          />
         }
       />
 

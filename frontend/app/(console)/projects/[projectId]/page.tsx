@@ -7,19 +7,13 @@ import {
   appsApi,
   databasesApi,
   customDomainsApi,
-  billingApi,
 } from "@/lib/api";
-import type { ConsumptionResponse } from "@/lib/api";
-import type { Project, Environment, Operation } from "@/lib/types";
-import { ConsumptionBreakdown } from "@/components/billing/consumption-breakdown";
-import { Badge } from "@/components/ui/badge";
+import type { Project, Environment } from "@/lib/types";
 import { StateChip } from "@/components/ui/state-chip";
 import { Spinner } from "@/components/ui/spinner";
 import { Breadcrumb } from "@/components/ui/breadcrumb";
-import { EmptyState } from "@/components/ui/empty-state";
 import { ResourceIcon } from "@/components/shell/icons";
 import type { IconName } from "@/lib/resources";
-import { timeAgo } from "@/lib/format";
 import { useT } from "@/lib/i18n/console/context";
 
 type Counts = { apps: number; appsReady: number; dbs: number; domainsVerified: number; domainsPending: number };
@@ -30,10 +24,7 @@ export default function ProjectOverviewPage() {
   const { t } = useT();
 
   const [project, setProject] = useState<Project | null>(null);
-  const [operations, setOperations] = useState<Operation[]>([]);
   const [counts, setCounts] = useState<Counts | null>(null);
-  const [consumption, setConsumption] = useState<ConsumptionResponse | null>(null);
-  const [consumptionLoading, setConsumptionLoading] = useState(true);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -41,13 +32,9 @@ export default function ProjectOverviewPage() {
     let cancelled = false;
     async function load() {
       try {
-        const [detail, ops] = await Promise.all([
-          projectsApi.get(projectId),
-          projectsApi.operations(projectId),
-        ]);
+        const detail = await projectsApi.get(projectId);
         if (cancelled) return;
         setProject(detail.project);
-        setOperations((ops.operations ?? []).slice(0, 5));
 
         const envs: Environment[] = detail.environments ?? [];
         const prod = envs.find((e) => e.type === "prod") ?? envs[0];
@@ -78,24 +65,6 @@ export default function ProjectOverviewPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId]);
 
-  useEffect(() => {
-    let cancelled = false;
-    setConsumptionLoading(true);
-    billingApi
-      .consumption(projectId)
-      .then((data) => {
-        if (!cancelled) setConsumption(data);
-      })
-      .catch(() => {
-        if (!cancelled) setConsumption(null);
-      })
-      .finally(() => {
-        if (!cancelled) setConsumptionLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [projectId]);
 
   if (isLoading) {
     return (
@@ -161,22 +130,6 @@ export default function ProjectOverviewPage() {
           ) : (
             <StateChip tone="neutral">{t("overview.chip.domainNone")}</StateChip>
           )}
-        </div>
-      )}
-
-      {(consumptionLoading || consumption) && (
-        <div className="mb-8">
-          <div className="mb-3 flex items-center justify-between">
-            <h2 className="text-sm font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">{t("consumption.title")}</h2>
-            <span className="text-xs text-gray-400 dark:text-gray-500">{t("consumption.note")}</span>
-          </div>
-          {consumptionLoading ? (
-            <div className="flex h-32 items-center justify-center rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900">
-              <Spinner />
-            </div>
-          ) : consumption ? (
-            <ConsumptionBreakdown data={consumption} />
-          ) : null}
         </div>
       )}
 
@@ -254,7 +207,6 @@ export default function ProjectOverviewPage() {
         <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">{t("overview.section.more")}</h2>
         <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
           <SecondaryLink icon="monitoring" label={t("nav.monitoring")} hint={t("overview.secondary.monitoring.hint")} href={`/projects/${projectId}/monitoring`} />
-          <SecondaryLink icon="operations" label={t("nav.operations")} hint={t("overview.secondary.operations.hint")} href={`/projects/${projectId}/operations`} />
           <SecondaryLink icon="storage" label={t("nav.storage")} hint={t("overview.secondary.storage.hint")} href={`/projects/${projectId}/storage`} />
           <SecondaryLink icon="models" label={t("nav.models")} hint={t("overview.secondary.models.hint")} href={`/projects/${projectId}/models`} />
           <SecondaryLink icon="app-servers" label={t("nav.app-servers")} hint={t("overview.secondary.appServers.hint")} href={`/projects/${projectId}/app-servers`} />
@@ -263,43 +215,6 @@ export default function ProjectOverviewPage() {
         </div>
       </div>
 
-      <div>
-        <div className="mb-3 flex items-center justify-between">
-          <h2 className="text-sm font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">{t("overview.section.recentOps")}</h2>
-          <Link href={`/projects/${projectId}/operations`} className="text-xs text-blue-600 hover:text-blue-700">
-            {t("overview.allOps")}
-          </Link>
-        </div>
-
-        {operations.length === 0 ? (
-          <EmptyState
-            title={t("overview.ops.empty.title")}
-            description={t("overview.ops.empty.description")}
-            action={{ label: t("overview.ops.empty.action"), href: `/projects/${projectId}/git/import` }}
-          />
-        ) : (
-          <div className="overflow-hidden rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900">
-            {operations.map((op, idx) => (
-              <div
-                key={op.id}
-                className={`flex items-center gap-4 px-5 py-4 ${
-                  idx < operations.length - 1 ? "border-b border-gray-100 dark:border-gray-800" : ""
-                }`}
-              >
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-2">
-                    <span className="text-sm font-medium text-gray-900 dark:text-gray-100">{op.action}</span>
-                    <span className="text-xs text-gray-400 dark:text-gray-500">·</span>
-                    <span className="font-mono text-xs text-gray-500 dark:text-gray-400">{op.resource_name}</span>
-                  </div>
-                  <div className="mt-0.5 text-xs text-gray-400 dark:text-gray-500">{timeAgo(op.created_at)}</div>
-                </div>
-                <Badge status={op.status} />
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
     </div>
   );
 }

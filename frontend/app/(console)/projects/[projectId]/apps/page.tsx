@@ -296,7 +296,7 @@ function EnvBlock({ env, projectId, apps, infra, canCreate, onCreate, t }: EnvBl
         <div className="flex items-center gap-2">
           <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">{env.name}</h2>
           <span className="rounded-full bg-gray-100 dark:bg-gray-800 px-2 py-0.5 text-xs font-medium text-gray-500 dark:text-gray-400">
-            {env.runtime === "vm" ? "VM" : "k8s"}
+            {env.runtime === "vm" ? t("env.runtime.vm") : t("env.runtime.cloud")}
           </span>
           <span className="text-xs text-gray-400 dark:text-gray-500">{t("apps.env.count", { count: String(apps.length) })}</span>
         </div>

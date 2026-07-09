@@ -13,7 +13,7 @@ export const nav: Messages = {
   "nav.domains": { ru: "Домены", en: "Domains" },
   "nav.monitoring": { ru: "Мониторинг", en: "Monitoring" },
   "nav.models": { ru: "AI-модели", en: "AI Models" },
-  "nav.app-servers": { ru: "Серверы приложений", en: "App Servers" },
+  "nav.app-servers": { ru: "Managed VM", en: "Managed VM" },
   "nav.git": { ru: "Сборки", en: "Builds" },
   "nav.operations": { ru: "Операции", en: "Operations" },
   "nav.redis": { ru: "Redis", en: "Redis" },
@@ -21,4 +21,6 @@ export const nav: Messages = {
   "nav.members": { ru: "Участники", en: "Members" },
   "nav.approvals": { ru: "Согласования", en: "Approvals" },
   "nav.billing": { ru: "Биллинг", en: "Billing" },
+  "env.runtime.vm": { ru: "VM", en: "VM" },
+  "env.runtime.cloud": { ru: "Облако", en: "Cloud" },
 };

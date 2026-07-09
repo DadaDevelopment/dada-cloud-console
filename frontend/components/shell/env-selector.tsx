@@ -74,7 +74,7 @@ export function EnvSelector() {
                 <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${
                   env.runtime === "vm" ? "bg-amber-100 text-amber-700" : "bg-slate-100 text-slate-600"
                 }`}>
-                  {env.runtime === "vm" ? "VM" : "K8s"}
+                  {env.runtime === "vm" ? "VM" : "Cloud"}
                 </span>
               </button>
             );

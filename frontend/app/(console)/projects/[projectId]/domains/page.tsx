@@ -9,7 +9,8 @@ import { Breadcrumb } from "@/components/ui/breadcrumb";
 import { useProjectContext } from "@/lib/project-context";
 import { canMutate } from "@/lib/rbac";
 import { timeAgo } from "@/lib/format";
-import { EmptyState } from "@/components/ui/empty-state";
+import { ResourceZeroState } from "@/components/ui/resource-zero-state";
+import { Globe } from "lucide-react";
 import { StateChip } from "@/components/ui/state-chip";
 import type { ChipTone } from "@/components/ui/state-chip";
 import { useT } from "@/lib/i18n/console/context";
@@ -201,22 +202,14 @@ export default function ProjectDomainsPage() {
           <Spinner />
         </div>
       ) : auths.length === 0 ? (
-        <div className="space-y-4">
-          <EmptyState
-            title={t("domains.empty.title")}
-            description={t("domains.empty.description")}
-          />
-          {canEdit && (
-            <div className="flex justify-center">
-              <button
-                onClick={() => setIsModalOpen(true)}
-                className="text-sm font-medium text-blue-600 hover:text-blue-700"
-              >
-                {t("domains.empty.cta")}
-              </button>
-            </div>
-          )}
-        </div>
+        <ResourceZeroState
+          tone="blue"
+          icon={<Globe className="h-8 w-8" />}
+          title={t("domains.empty.title")}
+          description={t("domains.empty.description")}
+          cta={canEdit ? { label: t("domains.empty.create"), onClick: () => setIsModalOpen(true) } : undefined}
+          steps={[t("domains.empty.step1"), t("domains.empty.step2"), t("domains.empty.step3")]}
+        />
       ) : (
         <div className="space-y-4">
           {auths.map((a) => (

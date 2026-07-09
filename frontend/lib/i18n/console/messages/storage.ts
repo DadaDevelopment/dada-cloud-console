@@ -12,6 +12,10 @@ export const storage: Messages = {
     en: "Create an S3-compatible bucket for files, media, and static assets — accessible via S3 API, FTP, and SFTP.",
   },
   "storage.empty.cta": { ru: "Создать первый бакет →", en: "Create your first bucket →" },
+  "storage.empty.create": { ru: "Создать бакет", en: "Create bucket" },
+  "storage.empty.step1": { ru: "Создайте бакет в нужном окружении", en: "Create a bucket in an environment" },
+  "storage.empty.step2": { ru: "Получите ключи доступа S3 — access key и secret", en: "Get S3 access keys — access key and secret" },
+  "storage.empty.step3": { ru: "Подключайтесь через S3 API, FTP или SFTP", en: "Connect via S3 API, FTP or SFTP" },
 
   "storage.badge.public": { ru: "Публичный", en: "Public" },
   "storage.badge.appRef": { ru: "приложение: {name}", en: "app: {name}" },

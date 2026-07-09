@@ -11,7 +11,8 @@ import { useProjectContext } from "@/lib/project-context";
 import { canMutate } from "@/lib/rbac";
 import { timeAgo } from "@/lib/format";
 import { PhaseBadge } from "@/components/ui/phase-badge";
-import { EmptyState } from "@/components/ui/empty-state";
+import { ResourceZeroState } from "@/components/ui/resource-zero-state";
+import { Database } from "lucide-react";
 import { useT } from "@/lib/i18n/console/context";
 
 interface CreateDbForm {
@@ -148,23 +149,18 @@ export default function DatabasesPage() {
           <Spinner />
         </div>
       ) : databases.length === 0 ? (
-        <div className="space-y-4">
-          <EmptyState
-            title={t("databases.empty.title")}
-            description={t("databases.empty.description")}
-          />
-          {canCreate && (
-            <div className="flex justify-center">
-              <button
-                onClick={() => setIsModalOpen(true)}
-                disabled={!selectedEnvId}
-                className="text-sm font-medium text-blue-600 hover:text-blue-700 disabled:opacity-50"
-              >
-                {t("databases.empty.createFirst")}
-              </button>
-            </div>
-          )}
-        </div>
+        <ResourceZeroState
+          tone="violet"
+          icon={<Database className="h-8 w-8" />}
+          title={t("databases.empty.title")}
+          description={t("databases.empty.description")}
+          cta={
+            canCreate
+              ? { label: t("databases.empty.create"), onClick: () => setIsModalOpen(true), disabled: !selectedEnvId }
+              : undefined
+          }
+          steps={[t("databases.empty.step1"), t("databases.empty.step2"), t("databases.empty.step3")]}
+        />
       ) : (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {databases.map((db) => {

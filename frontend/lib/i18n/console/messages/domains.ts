@@ -15,6 +15,10 @@ export const domains: Messages = {
     en: "Connect your own domain and get automatic HTTPS — verify ownership via a TXT record in DNS.",
   },
   "domains.empty.cta": { ru: "Добавить первый домен →", en: "Add your first domain →" },
+  "domains.empty.create": { ru: "Добавить домен", en: "Add domain" },
+  "domains.empty.step1": { ru: "Добавьте свой домен", en: "Add your own domain" },
+  "domains.empty.step2": { ru: "Подтвердите владение TXT-записью в DNS", en: "Verify ownership with a DNS TXT record" },
+  "domains.empty.step3": { ru: "HTTPS-сертификат выпустится автоматически", en: "An HTTPS certificate is issued automatically" },
 
   "domains.status.verified": { ru: "Подтверждён", en: "Verified" },
   "domains.status.failed": { ru: "Ошибка", en: "Error" },
