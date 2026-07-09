@@ -79,4 +79,11 @@ export const databases: Messages = {
     ru: "Резервные копии отключены для этой базы данных.",
     en: "Backups are disabled for this database.",
   },
+
+  "databases.delete.modal.title": { ru: "Удалить базу данных", en: "Delete database" },
+  "databases.delete.modal.body": {
+    ru: "Это необратимо удалит базу данных «{name}» и все её данные. Отменить это действие нельзя.",
+    en: "This permanently deletes the database \"{name}\" and all its data. This action cannot be undone.",
+  },
+  "databases.delete.error": { ru: "Не удалось удалить базу данных", en: "Failed to delete database" },
 };

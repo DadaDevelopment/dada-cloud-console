@@ -54,6 +54,11 @@ type Handler struct {
 	// whose Resolve fails with a clear "not configured" error.
 	counters cloudtask.CounterResolver
 
+	// s3creds reveals an S3 bucket's access keys/endpoint by reading the
+	// Crossplane connection secret on demand. Never nil: off-cluster it returns
+	// a resolver whose Resolve fails with a clear "not configured" error.
+	s3creds cloudtask.S3CredentialsResolver
+
 	// billingPlans is the full plan catalog loaded once at startup from the
 	// embedded plans.yaml. Always populated (the embedded file is compiled in);
 	// handlers degrade gracefully if somehow empty.
@@ -121,6 +126,7 @@ func NewHandler(pool *pgxpool.Pool, cfg *config.Config) *Handler {
 		h.dadagent = dadagent.New(cfg.DadaAgentBaseURL, ts)
 	}
 	h.counters = cloudtask.NewCounterResolver()
+	h.s3creds = cloudtask.NewS3CredentialsResolver(cfg.CrossplaneSecretNamespace)
 
 	plans, err := billing.LoadPlans("")
 	if err != nil {

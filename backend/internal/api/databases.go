@@ -357,3 +357,102 @@ func (h *Handler) CreateServiceDatabase(c *gin.Context) {
 		"message":   "ServiceDatabase creation queued",
 	})
 }
+
+// DeleteServiceDatabase enqueues an operation to tear down a managed
+// PostgreSQL database (ServiceDatabaseV2).
+//
+// @ID          deleteDatabase
+// @Summary     Delete a managed PostgreSQL database
+// @Description Destructive: permanently removes a managed PostgreSQL database (ServiceDatabaseV2) and its data. The agent drops the CR entry from git and Argo prunes it. Asynchronous: returns 202 with an operation; poll the operation until terminal. Only k8s (Crossplane) databases are deletable here; VM-hosted databases are managed as apps.
+// @Tags        database
+// @Produce     json
+// @Security    BearerAuth
+// @Param       projectId path     string true "Project UUID"
+// @Param       envId     path     string true "Environment UUID"
+// @Param       name      path     string true "Database resource name"
+// @Success     202       {object} map[string]interface{} "object with the accepted operation"
+// @Failure     401       {object} map[string]string
+// @Failure     403       {object} map[string]string
+// @Failure     404       {object} map[string]string
+// @Router      /projects/{projectId}/environments/{envId}/databases/{name} [delete]
+func (h *Handler) DeleteServiceDatabase(c *gin.Context) {
+	claims, ok := auth.GetClaims(c)
+	if !ok {
+		respondUnauthorized(c)
+		return
+	}
+	projectID, envID, ok := h.parseProjectEnv(c)
+	if !ok {
+		return
+	}
+	if _, err := h.requireWriter(c, claims.UserID, projectID); err != nil {
+		return
+	}
+	name := c.Param("name")
+
+	var summaryRaw []byte
+	err := h.pool.QueryRow(c.Request.Context(),
+		`SELECT summary_json FROM resource_snapshots
+		 WHERE project_id = $1 AND environment_id = $2 AND kind = 'ServiceDatabaseV2' AND name = $3`,
+		projectID, envID, name,
+	).Scan(&summaryRaw)
+	if err == pgx.ErrNoRows {
+		respondNotFound(c)
+		return
+	}
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, "failed to look up database")
+		return
+	}
+
+	appRef := serviceDatabaseAppRef(summaryRaw)
+
+	payload := models.DeleteServiceDatabasePayload{Name: name, AppRef: appRef}
+	payloadBytes, err := json.Marshal(payload)
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, "failed to marshal payload")
+		return
+	}
+
+	var op models.Operation
+	row := h.pool.QueryRow(c.Request.Context(),
+		`INSERT INTO operations (actor_id, project_id, environment_id, action, resource_kind, resource_name, status, payload)
+		 VALUES ($1, $2, $3, 'DeleteServiceDatabase', 'ServiceDatabaseV2', $4, 'Created', $5)
+		 RETURNING id, actor_id, project_id, environment_id, action, resource_kind, resource_name,
+		           status, payload, validation_result, git_commit, git_path, argo_application,
+		           error_code, error_message, created_at, updated_at`,
+		claims.UserID, projectID, envID, name, payloadBytes,
+	)
+	if err = scanOperation(row, &op); err != nil {
+		respondError(c, http.StatusInternalServerError, "failed to create operation")
+		return
+	}
+
+	auditMeta, _ := json.Marshal(payload)
+	_, _ = h.pool.Exec(c.Request.Context(),
+		`INSERT INTO audit_events (actor_id, project_id, operation_id, action, resource_kind, resource_name, metadata)
+		 VALUES ($1, $2, $3, 'DeleteServiceDatabase', 'ServiceDatabaseV2', $4, $5)`,
+		claims.UserID, projectID, op.ID, name, auditMeta,
+	)
+
+	c.JSON(http.StatusAccepted, gin.H{
+		"operation": op,
+		"message":   "ServiceDatabase deletion queued",
+	})
+}
+
+// serviceDatabaseAppRef pulls spec.appRef from a ServiceDatabaseV2 snapshot's
+// summary_json (empty when standalone, or when the summary is unparseable),
+// telling the agent which owner app's resources.values.yaml holds the CR entry.
+func serviceDatabaseAppRef(summaryRaw []byte) string {
+	var summary map[string]any
+	if json.Unmarshal(summaryRaw, &summary) != nil {
+		return ""
+	}
+	spec, ok := summary["spec"].(map[string]any)
+	if !ok {
+		return ""
+	}
+	appRef, _ := spec["appRef"].(string)
+	return appRef
+}

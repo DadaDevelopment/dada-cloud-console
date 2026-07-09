@@ -294,6 +294,15 @@ export interface CreateS3BucketResponse {
   message: string;
 }
 
+export interface S3BucketCredentialsResponse {
+  endpoint: string;
+  access_key: string;
+  secret_key: string;
+  bucket_name: string;
+  ftp_host?: string;
+  sftp_host?: string;
+}
+
 export interface OperationsResponse {
   operations: Operation[];
 }

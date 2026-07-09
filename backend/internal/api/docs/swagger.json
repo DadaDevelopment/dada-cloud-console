@@ -243,7 +243,7 @@
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.loginRequest"
+                            "$ref": "#/definitions/internal_api.loginRequest"
                         }
                     }
                 ],
@@ -410,7 +410,7 @@
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/pricing.Need"
+                            "$ref": "#/definitions/github_com_dada-tuda_console_backend_internal_billing_pricing.Need"
                         }
                     }
                 ],
@@ -789,7 +789,7 @@
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.createProjectRequest"
+                            "$ref": "#/definitions/internal_api.createProjectRequest"
                         }
                     }
                 ],
@@ -1022,7 +1022,7 @@
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.createAppServerRequest"
+                            "$ref": "#/definitions/internal_api.createAppServerRequest"
                         }
                     }
                 ],
@@ -1312,7 +1312,7 @@
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.importComposeStackRequest"
+                            "$ref": "#/definitions/internal_api.importComposeStackRequest"
                         }
                     }
                 ],
@@ -2484,7 +2484,7 @@
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.addDomainAuthorizationRequest"
+                            "$ref": "#/definitions/internal_api.addDomainAuthorizationRequest"
                         }
                     }
                 ],
@@ -2756,7 +2756,7 @@
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.createAppRequest"
+                            "$ref": "#/definitions/internal_api.createAppRequest"
                         }
                     }
                 ],
@@ -3149,7 +3149,7 @@
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.createCloudTaskRequest"
+                            "$ref": "#/definitions/internal_api.createCloudTaskRequest"
                         }
                     }
                 ],
@@ -3390,7 +3390,7 @@
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.createEndpointRequest"
+                            "$ref": "#/definitions/internal_api.createEndpointRequest"
                         }
                     }
                 ],
@@ -3654,7 +3654,7 @@
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.setEnvVarRequest"
+                            "$ref": "#/definitions/internal_api.setEnvVarRequest"
                         }
                     }
                 ],
@@ -3877,7 +3877,7 @@
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.attachHostnameRequest"
+                            "$ref": "#/definitions/internal_api.attachHostnameRequest"
                         }
                     }
                 ],
@@ -4058,7 +4058,7 @@
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.updateAppImageRequest"
+                            "$ref": "#/definitions/internal_api.updateAppImageRequest"
                         }
                     }
                 ],
@@ -4722,7 +4722,7 @@
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.createServiceDatabaseRequest"
+                            "$ref": "#/definitions/internal_api.createServiceDatabaseRequest"
                         }
                     }
                 ],
@@ -4754,6 +4754,83 @@
                     },
                     "409": {
                         "description": "Conflict",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/projects/{projectId}/environments/{envId}/databases/{name}": {
+            "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Destructive: permanently removes a managed PostgreSQL database (ServiceDatabaseV2) and its data. The agent drops the CR entry from git and Argo prunes it. Asynchronous: returns 202 with an operation; poll the operation until terminal. Only k8s (Crossplane) databases are deletable here; VM-hosted databases are managed as apps.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "database"
+                ],
+                "summary": "Delete a managed PostgreSQL database",
+                "operationId": "deleteDatabase",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Project UUID",
+                        "name": "projectId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Environment UUID",
+                        "name": "envId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Database resource name",
+                        "name": "name",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "202": {
+                        "description": "object with the accepted operation",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
                         "schema": {
                             "type": "object",
                             "additionalProperties": {
@@ -4865,7 +4942,7 @@
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.createIngressRequest"
+                            "$ref": "#/definitions/internal_api.createIngressRequest"
                         }
                     }
                 ],
@@ -5006,7 +5083,7 @@
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.createAIModelRequest"
+                            "$ref": "#/definitions/internal_api.createAIModelRequest"
                         }
                     }
                 ],
@@ -5767,7 +5844,7 @@
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.createMonitoringRequest"
+                            "$ref": "#/definitions/internal_api.createMonitoringRequest"
                         }
                     }
                 ],
@@ -6593,7 +6670,7 @@
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.saveDashboardRequest"
+                            "$ref": "#/definitions/internal_api.saveDashboardRequest"
                         }
                     }
                 ],
@@ -7376,7 +7453,7 @@
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.connectGitRepoRequest"
+                            "$ref": "#/definitions/internal_api.connectGitRepoRequest"
                         }
                     }
                 ],
@@ -7590,7 +7667,7 @@
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.createS3BucketRequest"
+                            "$ref": "#/definitions/internal_api.createS3BucketRequest"
                         }
                     }
                 ],
@@ -7622,6 +7699,108 @@
                     },
                     "409": {
                         "description": "Conflict",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/projects/{projectId}/environments/{envId}/s3buckets/{name}/credentials": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Reveals the S3 endpoint, access key and secret key for a bucket by reading its Crossplane connection secret. Requires reveal=true and write access; every reveal is audited. Returns 404 while the bucket is still provisioning (no secret yet) and 503 when in-cluster credential access is not configured.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "storage"
+                ],
+                "summary": "Reveal an S3 bucket's access credentials",
+                "operationId": "getS3BucketCredentials",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Project UUID",
+                        "name": "projectId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Environment UUID",
+                        "name": "envId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Bucket resource name",
+                        "name": "name",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "boolean",
+                        "description": "Must be true to reveal the credentials",
+                        "name": "reveal",
+                        "in": "query",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "object with endpoint, access_key, secret_key, bucket_name",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
                         "schema": {
                             "type": "object",
                             "additionalProperties": {
@@ -7789,7 +7968,7 @@
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.bindInstallationRequest"
+                            "$ref": "#/definitions/internal_api.bindInstallationRequest"
                         }
                     }
                 ],
@@ -7797,7 +7976,7 @@
                     "201": {
                         "description": "Created",
                         "schema": {
-                            "$ref": "#/definitions/api.gitInstallation"
+                            "$ref": "#/definitions/internal_api.gitInstallation"
                         }
                     },
                     "400": {
@@ -8251,7 +8430,7 @@
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.ingestLogsRequest"
+                            "$ref": "#/definitions/internal_api.ingestLogsRequest"
                         }
                     }
                 ],
@@ -8369,7 +8548,7 @@
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.ingestMetricsRequest"
+                            "$ref": "#/definitions/internal_api.ingestMetricsRequest"
                         }
                     }
                 ],
@@ -8697,7 +8876,82 @@
         }
     },
     "definitions": {
-        "api.addDomainAuthorizationRequest": {
+        "github_com_dada-tuda_console_backend_internal_billing_pricing.Need": {
+            "type": "object",
+            "properties": {
+                "apps": {
+                    "type": "integer"
+                },
+                "databases": {
+                    "type": "integer"
+                },
+                "domains": {
+                    "type": "integer"
+                },
+                "members": {
+                    "type": "integer"
+                },
+                "storageGB": {
+                    "type": "integer"
+                }
+            }
+        },
+        "github_com_dada-tuda_console_backend_internal_models.AIModelAuthMode": {
+            "type": "string",
+            "enum": [
+                "apikey",
+                "jwt",
+                "public"
+            ],
+            "x-enum-varnames": [
+                "AIModelAuthAPIKey",
+                "AIModelAuthJWT",
+                "AIModelAuthPublic"
+            ]
+        },
+        "github_com_dada-tuda_console_backend_internal_models.AIModelSource": {
+            "type": "string",
+            "enum": [
+                "mlflow",
+                "s3",
+                "custom"
+            ],
+            "x-enum-varnames": [
+                "AIModelSourceMLflow",
+                "AIModelSourceS3",
+                "AIModelSourceCustom"
+            ]
+        },
+        "github_com_dada-tuda_console_backend_internal_models.ImportServiceSpec": {
+            "type": "object",
+            "properties": {
+                "container_name": {
+                    "type": "string"
+                },
+                "image": {
+                    "type": "string"
+                },
+                "include": {
+                    "type": "boolean"
+                },
+                "ports": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "service_name": {
+                    "type": "string"
+                },
+                "volumes": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                }
+            }
+        },
+        "internal_api.addDomainAuthorizationRequest": {
             "type": "object",
             "properties": {
                 "apex_domain": {
@@ -8705,7 +8959,7 @@
                 }
             }
         },
-        "api.attachHostnameRequest": {
+        "internal_api.attachHostnameRequest": {
             "type": "object",
             "properties": {
                 "hostname": {
@@ -8713,7 +8967,7 @@
                 }
             }
         },
-        "api.bindInstallationRequest": {
+        "internal_api.bindInstallationRequest": {
             "type": "object",
             "properties": {
                 "installation_id": {
@@ -8722,7 +8976,7 @@
                 }
             }
         },
-        "api.connectGitRepoRequest": {
+        "internal_api.connectGitRepoRequest": {
             "type": "object",
             "properties": {
                 "app_name": {
@@ -8769,7 +9023,7 @@
                 }
             }
         },
-        "api.createAIModelRequest": {
+        "internal_api.createAIModelRequest": {
             "type": "object",
             "properties": {
                 "artifact_uri": {
@@ -8779,7 +9033,7 @@
                     "type": "string"
                 },
                 "auth_mode": {
-                    "$ref": "#/definitions/models.AIModelAuthMode"
+                    "$ref": "#/definitions/github_com_dada-tuda_console_backend_internal_models.AIModelAuthMode"
                 },
                 "container_image": {
                     "type": "string"
@@ -8800,14 +9054,14 @@
                     "type": "string"
                 },
                 "source": {
-                    "$ref": "#/definitions/models.AIModelSource"
+                    "$ref": "#/definitions/github_com_dada-tuda_console_backend_internal_models.AIModelSource"
                 },
                 "version": {
                     "type": "string"
                 }
             }
         },
-        "api.createAppRequest": {
+        "internal_api.createAppRequest": {
             "type": "object",
             "properties": {
                 "image": {
@@ -8827,7 +9081,7 @@
                 }
             }
         },
-        "api.createAppServerRequest": {
+        "internal_api.createAppServerRequest": {
             "type": "object",
             "properties": {
                 "flavor": {
@@ -8864,7 +9118,7 @@
                 }
             }
         },
-        "api.createCloudTaskRequest": {
+        "internal_api.createCloudTaskRequest": {
             "type": "object",
             "properties": {
                 "task_type": {
@@ -8872,7 +9126,7 @@
                 }
             }
         },
-        "api.createEndpointRequest": {
+        "internal_api.createEndpointRequest": {
             "type": "object",
             "properties": {
                 "auth_enabled": {
@@ -8901,7 +9155,7 @@
                 }
             }
         },
-        "api.createIngressRequest": {
+        "internal_api.createIngressRequest": {
             "type": "object",
             "properties": {
                 "aliases": {
@@ -8922,7 +9176,7 @@
                 "rules": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/api.ingressRuleReq"
+                        "$ref": "#/definitions/internal_api.ingressRuleReq"
                     }
                 },
                 "ssl_redirect": {
@@ -8947,7 +9201,7 @@
                 }
             }
         },
-        "api.createMonitoringRequest": {
+        "internal_api.createMonitoringRequest": {
             "type": "object",
             "properties": {
                 "name": {
@@ -8955,7 +9209,7 @@
                 }
             }
         },
-        "api.createProjectRequest": {
+        "internal_api.createProjectRequest": {
             "type": "object",
             "required": [
                 "slug"
@@ -8979,7 +9233,7 @@
                 }
             }
         },
-        "api.createS3BucketRequest": {
+        "internal_api.createS3BucketRequest": {
             "type": "object",
             "properties": {
                 "app_ref": {
@@ -9006,7 +9260,7 @@
                 }
             }
         },
-        "api.createServiceDatabaseRequest": {
+        "internal_api.createServiceDatabaseRequest": {
             "type": "object",
             "properties": {
                 "app_ref": {
@@ -9029,7 +9283,7 @@
                 }
             }
         },
-        "api.gitInstallation": {
+        "internal_api.gitInstallation": {
             "type": "object",
             "properties": {
                 "account_login": {
@@ -9056,7 +9310,7 @@
                 }
             }
         },
-        "api.importComposeStackRequest": {
+        "internal_api.importComposeStackRequest": {
             "type": "object",
             "properties": {
                 "ack_secrets_in_git": {
@@ -9074,12 +9328,12 @@
                 "services": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/models.ImportServiceSpec"
+                        "$ref": "#/definitions/github_com_dada-tuda_console_backend_internal_models.ImportServiceSpec"
                     }
                 }
             }
         },
-        "api.ingestLogsRequest": {
+        "internal_api.ingestLogsRequest": {
             "type": "object",
             "properties": {
                 "level": {
@@ -9093,14 +9347,13 @@
                 }
             }
         },
-        "api.ingestMetricsRequest": {
+        "internal_api.ingestMetricsRequest": {
             "type": "object",
             "properties": {
                 "metrics": {
                     "type": "object",
                     "additionalProperties": {
-                        "type": "number",
-                        "format": "float64"
+                        "type": "number"
                     }
                 },
                 "source": {
@@ -9111,7 +9364,7 @@
                 }
             }
         },
-        "api.ingressRuleReq": {
+        "internal_api.ingressRuleReq": {
             "type": "object",
             "properties": {
                 "app": {
@@ -9125,7 +9378,7 @@
                 }
             }
         },
-        "api.loginRequest": {
+        "internal_api.loginRequest": {
             "type": "object",
             "required": [
                 "password"
@@ -9142,10 +9395,21 @@
                 }
             }
         },
-        "api.saveDashboardRequest": {
-            "type": "object"
+        "internal_api.saveDashboardRequest": {
+            "type": "object",
+            "properties": {
+                "config": {
+                    "type": "array",
+                    "items": {
+                        "type": "integer"
+                    }
+                },
+                "version": {
+                    "type": "integer"
+                }
+            }
         },
-        "api.setEnvVarRequest": {
+        "internal_api.setEnvVarRequest": {
             "type": "object",
             "properties": {
                 "is_secret": {
@@ -9159,86 +9423,11 @@
                 }
             }
         },
-        "api.updateAppImageRequest": {
+        "internal_api.updateAppImageRequest": {
             "type": "object",
             "properties": {
                 "image": {
                     "type": "string"
-                }
-            }
-        },
-        "models.AIModelAuthMode": {
-            "type": "string",
-            "enum": [
-                "apikey",
-                "jwt",
-                "public"
-            ],
-            "x-enum-varnames": [
-                "AIModelAuthAPIKey",
-                "AIModelAuthJWT",
-                "AIModelAuthPublic"
-            ]
-        },
-        "models.AIModelSource": {
-            "type": "string",
-            "enum": [
-                "mlflow",
-                "s3",
-                "custom"
-            ],
-            "x-enum-varnames": [
-                "AIModelSourceMLflow",
-                "AIModelSourceS3",
-                "AIModelSourceCustom"
-            ]
-        },
-        "models.ImportServiceSpec": {
-            "type": "object",
-            "properties": {
-                "container_name": {
-                    "type": "string"
-                },
-                "image": {
-                    "type": "string"
-                },
-                "include": {
-                    "type": "boolean"
-                },
-                "ports": {
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    }
-                },
-                "service_name": {
-                    "type": "string"
-                },
-                "volumes": {
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    }
-                }
-            }
-        },
-        "pricing.Need": {
-            "type": "object",
-            "properties": {
-                "apps": {
-                    "type": "integer"
-                },
-                "databases": {
-                    "type": "integer"
-                },
-                "domains": {
-                    "type": "integer"
-                },
-                "members": {
-                    "type": "integer"
-                },
-                "storageGB": {
-                    "type": "integer"
                 }
             }
         }

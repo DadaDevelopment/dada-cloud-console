@@ -1,13 +1,15 @@
 "use client";
-import { useEffect, useState } from "react";
-import { useParams, useSearchParams } from "next/navigation";
+import { useEffect, useState, FormEvent } from "react";
+import { useParams, useSearchParams, useRouter } from "next/navigation";
 import { databasesApi } from "@/lib/api";
 import type { ResourceSnapshot } from "@/lib/types";
 import { Spinner } from "@/components/ui/spinner";
 import { Breadcrumb } from "@/components/ui/breadcrumb";
 import { CopyButton } from "@/components/ui/copy-button";
+import { Modal } from "@/components/ui/modal";
 import { useProjectContext } from "@/lib/project-context";
 import { PhaseBadge } from "@/components/ui/phase-badge";
+import { canMutate } from "@/lib/rbac";
 import { useT } from "@/lib/i18n/console/context";
 
 interface DbSpec {
@@ -32,17 +34,59 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
   );
 }
 
+function ErrorBox({ text }: { text: string }) {
+  return (
+    <div className="rounded-lg border border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-950/40 px-4 py-3 text-sm text-red-700 dark:text-red-300">{text}</div>
+  );
+}
+
+function ModalFooter({
+  onCancel, submitting, submitLabel, tone = "blue",
+}: {
+  onCancel: () => void; submitting: boolean; submitLabel: string;
+  tone?: "blue" | "red" | "purple";
+}) {
+  const { t } = useT();
+  const tones = {
+    blue: "bg-blue-600 hover:bg-blue-700",
+    red: "bg-red-600 hover:bg-red-700",
+    purple: "bg-purple-600 hover:bg-purple-700",
+  };
+  return (
+    <div className="flex justify-end gap-3 pt-2">
+      <button
+        type="button" onClick={onCancel}
+        className="rounded-lg px-4 py-2 text-sm font-medium text-gray-600 dark:text-gray-400 hover:bg-gray-100 transition-colors"
+      >
+        {t("common.cancel")}
+      </button>
+      <button
+        type="submit" disabled={submitting}
+        className={`inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium text-white ${tones[tone]} disabled:cursor-not-allowed disabled:opacity-50 transition-colors`}
+      >
+        {submitting ? <><Spinner size="sm" /> {t("common.deleting")}</> : submitLabel}
+      </button>
+    </div>
+  );
+}
+
 export default function DatabaseDetailPage() {
   const params = useParams<{ projectId: string; name: string }>();
   const search = useSearchParams();
+  const router = useRouter();
   const { projectId, name } = params;
-  const { project, selectedEnv } = useProjectContext();
+  const { project, selectedEnv, role } = useProjectContext();
   const { t } = useT();
   const envId = search.get("envId") || selectedEnv?.id || "";
+  const canManage = canMutate(role);
 
   const [db, setDb] = useState<ResourceSnapshot | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  const [isDeleteOpen, setIsDeleteOpen] = useState(false);
+  const [isDeleteSubmitting, setIsDeleteSubmitting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!envId) {
@@ -68,6 +112,27 @@ export default function DatabaseDetailPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId, name, envId, selectedEnv]);
 
+  function gotoOp(opId?: string) {
+    setTimeout(() => {
+      router.push(`/projects/${projectId}/operations${opId ? `?highlight=${opId}` : ""}`);
+    }, 1500);
+  }
+
+  async function submitDelete(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    setDeleteError(null);
+    setIsDeleteSubmitting(true);
+    try {
+      const r = await databasesApi.remove(projectId, envId, name);
+      setIsDeleteOpen(false);
+      gotoOp(r.operation?.id);
+    } catch (err) {
+      setDeleteError(err instanceof Error ? err.message : t("databases.delete.error"));
+    } finally {
+      setIsDeleteSubmitting(false);
+    }
+  }
+
   if (isLoading) {
     return <div className="flex h-64 items-center justify-center"><Spinner size="lg" /></div>;
   }
@@ -90,20 +155,32 @@ export default function DatabaseDetailPage() {
 
   return (
     <div>
-      <div className="mb-8">
-        <Breadcrumb
-          items={[
-            { label: t("common.crumb.projects"), href: "/projects" },
-            { label: project?.display_name ?? t("common.crumb.overview"), href: `/projects/${projectId}` },
-            { label: t("nav.databases"), href: `/projects/${projectId}/databases${envId ? `?env=${envId}` : ""}` },
-            { label: db.name },
-          ]}
-        />
-        <div className="mt-2 flex items-center gap-3">
-          <h1 className="font-mono text-2xl font-bold text-gray-900 dark:text-gray-100">{db.name}</h1>
-          <PhaseBadge phase={db.phase} />
+      <div className="mb-8 flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <Breadcrumb
+            items={[
+              { label: t("common.crumb.projects"), href: "/projects" },
+              { label: project?.display_name ?? t("common.crumb.overview"), href: `/projects/${projectId}` },
+              { label: t("nav.databases"), href: `/projects/${projectId}/databases${envId ? `?env=${envId}` : ""}` },
+              { label: db.name },
+            ]}
+          />
+          <div className="mt-2 flex items-center gap-3">
+            <h1 className="font-mono text-2xl font-bold text-gray-900 dark:text-gray-100">{db.name}</h1>
+            <PhaseBadge phase={db.phase} />
+          </div>
+          <p className="mt-0.5 text-sm text-gray-500 dark:text-gray-400">{t("databases.detail.subtitle")}</p>
         </div>
-        <p className="mt-0.5 text-sm text-gray-500 dark:text-gray-400">{t("databases.detail.subtitle")}</p>
+        {canManage && (
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              onClick={() => setIsDeleteOpen(true)}
+              className="inline-flex items-center gap-2 rounded-lg border border-red-200 dark:border-red-900 bg-white dark:bg-gray-900 px-3 py-1.5 text-sm font-medium text-red-600 dark:text-red-400 hover:bg-red-50 transition-colors shadow-sm"
+            >
+              {t("common.delete")}
+            </button>
+          </div>
+        )}
       </div>
 
       <section className="mb-8">
@@ -154,6 +231,20 @@ export default function DatabaseDetailPage() {
           )}
         </div>
       </section>
+
+      <Modal
+        isOpen={isDeleteOpen}
+        onClose={() => { setIsDeleteOpen(false); setDeleteError(null); }}
+        title={t("databases.delete.modal.title")}
+      >
+        <form onSubmit={submitDelete} className="space-y-4">
+          <p className="text-sm text-gray-600 dark:text-gray-400">
+            {t("databases.delete.modal.body", { name: db.name })}
+          </p>
+          {deleteError && <ErrorBox text={deleteError} />}
+          <ModalFooter onCancel={() => setIsDeleteOpen(false)} submitting={isDeleteSubmitting} submitLabel={t("common.delete")} tone="red" />
+        </form>
+      </Modal>
     </div>
   );
 }

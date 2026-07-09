@@ -41,6 +41,15 @@ type CreateServiceDatabasePayload struct {
 	BackupRetention string `json:"backup_retention"`
 }
 
+// DeleteServiceDatabasePayload is the typed payload for DeleteServiceDatabase
+// operations. AppRef is the owning app whose resources.values.yaml holds the
+// CR entry (empty = the standalone "service-databases-<project>" chart); the
+// agent needs it to target the right values file.
+type DeleteServiceDatabasePayload struct {
+	Name   string `json:"name"`
+	AppRef string `json:"app_ref,omitempty"`
+}
+
 // CreateS3BucketPayload is the typed payload for CreateS3Bucket operations.
 // AppRef is optional: when set, the bucket is owned by that app's chart; when
 // empty, it lands in the per-project standalone "s3-buckets-<project>" chart.

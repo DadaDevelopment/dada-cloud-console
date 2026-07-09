@@ -55,4 +55,36 @@ roleRef:
   kind: ClusterRole
   name: {{ include "dada-cloud-console.fullname" . }}-status-reader
   apiGroup: rbac.authorization.k8s.io
+---
+# Least-privilege, namespaced read of the Crossplane S3Bucket connection secrets
+# ("<bucket>-s3-credentials") so the console can reveal object-storage keys on
+# demand. Scoped to the crossplane-system namespace and Secrets only — NOT a
+# cluster-wide secret read.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "dada-cloud-console.fullname" . }}-s3-creds-reader
+  namespace: {{ .Values.rbac.crossplaneSecretNamespace | default "crossplane-system" }}
+  labels:
+    {{- include "dada-cloud-console.labels" . | nindent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "dada-cloud-console.fullname" . }}-s3-creds-reader
+  namespace: {{ .Values.rbac.crossplaneSecretNamespace | default "crossplane-system" }}
+  labels:
+    {{- include "dada-cloud-console.labels" . | nindent 4 }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "dada-cloud-console.fullname" . }}
+    namespace: {{ .Release.Namespace }}
+roleRef:
+  kind: Role
+  name: {{ include "dada-cloud-console.fullname" . }}-s3-creds-reader
+  apiGroup: rbac.authorization.k8s.io
 {{- end }}

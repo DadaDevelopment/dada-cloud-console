@@ -2,9 +2,11 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 
 	"github.com/dada-tuda/console/backend/internal/auth"
+	"github.com/dada-tuda/console/backend/internal/cloudtask"
 	"github.com/dada-tuda/console/backend/internal/models"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -226,5 +228,86 @@ func (h *Handler) CreateS3Bucket(c *gin.Context) {
 	c.JSON(http.StatusAccepted, gin.H{
 		"operation": op,
 		"message":   "S3Bucket creation queued",
+	})
+}
+
+// GetS3BucketCredentials reveals an S3 bucket's live access credentials by
+// reading the Crossplane connection secret on demand. Write-gated and audited;
+// the credentials are never persisted in the console database.
+//
+// @ID          getS3BucketCredentials
+// @Summary     Reveal an S3 bucket's access credentials
+// @Description Reveals the S3 endpoint, access key and secret key for a bucket by reading its Crossplane connection secret. Requires reveal=true and write access; every reveal is audited. Returns 404 while the bucket is still provisioning (no secret yet) and 503 when in-cluster credential access is not configured.
+// @Tags        storage
+// @Produce     json
+// @Security    BearerAuth
+// @Param       projectId path     string true "Project UUID"
+// @Param       envId     path     string true "Environment UUID"
+// @Param       name      path     string true "Bucket resource name"
+// @Param       reveal    query    bool   true "Must be true to reveal the credentials"
+// @Success     200       {object} map[string]interface{} "object with endpoint, access_key, secret_key, bucket_name"
+// @Failure     400       {object} map[string]string
+// @Failure     401       {object} map[string]string
+// @Failure     403       {object} map[string]string
+// @Failure     404       {object} map[string]string
+// @Failure     503       {object} map[string]string
+// @Router      /projects/{projectId}/environments/{envId}/s3buckets/{name}/credentials [get]
+func (h *Handler) GetS3BucketCredentials(c *gin.Context) {
+	claims, ok := auth.GetClaims(c)
+	if !ok {
+		respondUnauthorized(c)
+		return
+	}
+	projectID, envID, ok := h.parseProjectEnv(c)
+	if !ok {
+		return
+	}
+	if _, err := h.requireWriter(c, claims.UserID, projectID); err != nil {
+		return
+	}
+	name := c.Param("name")
+	if c.Query("reveal") != "true" {
+		respondError(c, http.StatusBadRequest, "reveal=true is required")
+		return
+	}
+
+	var count int
+	if err := h.pool.QueryRow(c.Request.Context(),
+		`SELECT COUNT(*) FROM resource_snapshots
+		 WHERE project_id = $1 AND environment_id = $2 AND kind = 'S3Bucket' AND name = $3`,
+		projectID, envID, name,
+	).Scan(&count); err != nil {
+		respondError(c, http.StatusInternalServerError, "failed to check bucket existence")
+		return
+	}
+	if count == 0 {
+		respondNotFound(c)
+		return
+	}
+
+	creds, err := h.s3creds.Resolve(c.Request.Context(), name)
+	if err != nil {
+		if errors.Is(err, cloudtask.ErrS3CredentialsNotReady) {
+			respondError(c, http.StatusNotFound, "credentials not available yet — the bucket is still provisioning")
+			return
+		}
+		respondError(c, http.StatusServiceUnavailable, "S3 credential access is not configured for this environment")
+		return
+	}
+
+	auditMeta, _ := json.Marshal(map[string]any{"revealed": true})
+	_, _ = h.pool.Exec(c.Request.Context(),
+		`INSERT INTO audit_events (actor_id, project_id, action, resource_kind, resource_name, metadata)
+		 VALUES ($1, $2, 'RevealS3Credentials', 'S3Bucket', $3, $4)`,
+		claims.UserID, projectID, name, auditMeta,
+	)
+
+	c.JSON(http.StatusOK, gin.H{
+		"endpoint":    creds.Endpoint,
+		"access_key":  creds.AccessKey,
+		"secret_key":  creds.SecretKey,
+		"bucket_name": creds.BucketName,
+		"ftp_host":    creds.FtpHost,
+		"sftp_host":   creds.SftpHost,
 	})
 }

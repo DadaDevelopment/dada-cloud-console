@@ -85,6 +85,11 @@ type Config struct {
 	NexusUser   string // NEXUS_USER
 	NexusToken  string // NEXUS_TOKEN
 
+	// Namespace holding the Crossplane connection secrets written by the S3Bucket
+	// composition (writeConnectionSecretToRef defaults here). The console reads
+	// "<bucket>-s3-credentials" from it to reveal object-storage keys on demand.
+	CrossplaneSecretNamespace string // CROSSPLANE_SECRET_NAMESPACE
+
 	// Portainer live-state proxy (read-only). Both must be set to enable the VM
 	// /state and /logs endpoints. Same values the portainer-agent uses.
 	PortainerURL      string // PORTAINER_URL
@@ -273,6 +278,7 @@ func Load() (*Config, error) {
 		NexusRawURL:               getEnv("NEXUS_RAW_URL", ""),
 		NexusUser:                 getEnv("NEXUS_USER", ""),
 		NexusToken:                getEnv("NEXUS_TOKEN", ""),
+		CrossplaneSecretNamespace: getEnv("CROSSPLANE_SECRET_NAMESPACE", "crossplane-system"),
 		PortainerURL:              getEnv("PORTAINER_URL", ""),
 		PortainerAPIToken:         getEnv("PORTAINER_API_TOKEN", ""),
 		PrometheusQueryURL:        getEnv("PROMETHEUS_QUERY_URL", ""),

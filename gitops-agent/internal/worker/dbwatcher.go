@@ -182,6 +182,8 @@ func (w *DBWatcher) dispatch(ctx context.Context, op db.Operation) error {
 	switch op.Action {
 	case "CreateServiceDatabase":
 		return w.doCreateServiceDatabase(ctx, op)
+	case "DeleteServiceDatabase":
+		return w.doDeleteServiceDatabase(ctx, op)
 	case "CreateIngress":
 		return w.doCreateIngress(ctx, op)
 	case "CreateApp":
@@ -628,6 +630,64 @@ func (w *DBWatcher) doCreateServiceDatabase(ctx context.Context, op db.Operation
 		op.ProjectID, op.EnvironmentID,
 		"ServiceDatabaseV2", p.Name, "Pending", summaryJSON, time.Now(),
 	)
+}
+
+// doDeleteServiceDatabase removes a managed ServiceDatabaseV2 CR entry from its
+// owner app's resources.values.yaml and drops the snapshot; Argo prunes the CR
+// once it leaves git. Mirrors doDeleteAIModel. AppRef comes from the operation
+// payload (empty = the standalone "service-databases-<project>" owner app).
+func (w *DBWatcher) doDeleteServiceDatabase(ctx context.Context, op db.Operation) error {
+	var p struct {
+		Name   string `json:"name"`
+		AppRef string `json:"app_ref"`
+	}
+	if err := json.Unmarshal(op.Payload, &p); err != nil {
+		return fmt.Errorf("parse payload: %w", err)
+	}
+	if p.Name == "" {
+		return fmt.Errorf("delete service database: name is required")
+	}
+	projectName, envName, _, err := w.projectEnv(ctx, op.ProjectID, op.EnvironmentID)
+	if err != nil {
+		return fmt.Errorf("project/env lookup: %w", err)
+	}
+	mgr, err := w.managerFor(ctx, op.ProjectID)
+	if err != nil {
+		return err
+	}
+	if err := mgr.EnsureCloned(); err != nil {
+		return err
+	}
+	valuesPath := renderer.ServiceDatabaseResourcesValuesGitPath(projectName, envName, p.AppRef)
+	manifestFile, changed, err := removeManifestsFile(mgr, valuesPath, [][2]string{
+		{"ServiceDatabaseV2", p.Name},
+	})
+	if err != nil {
+		return fmt.Errorf("remove manifests: %w", err)
+	}
+	commitMsg := fmt.Sprintf(
+		"[DADA Console] Delete ServiceDatabaseV2 %s\n\nOperation: %s\nProject: %s\nEnvironment: %s\n",
+		p.Name, op.ID, projectName, envName,
+	)
+	var sha string
+	if changed {
+		sha, err = mgr.CommitFilesAndPush([]git.FileChange{manifestFile}, commitMsg, w.cfg.BotName, w.cfg.BotEmail)
+		if err != nil {
+			return fmt.Errorf("git push (remove manifests): %w", err)
+		}
+		opID := op.ID
+		_ = db.InsertCommit(ctx, w.pool, sha, mgr.RepoURL(), mgr.Branch(),
+			valuesPath, commitMsg, w.cfg.BotName, w.cfg.BotEmail, &opID, "agent")
+	}
+	if err := db.MarkCommitted(ctx, w.pool, op.ID, sha, valuesPath); err != nil {
+		return err
+	}
+	_, _ = w.pool.Exec(ctx,
+		`DELETE FROM resource_snapshots
+		 WHERE project_id = $1 AND environment_id = $2 AND kind = 'ServiceDatabaseV2' AND name = $3`,
+		op.ProjectID, op.EnvironmentID, p.Name,
+	)
+	return nil
 }
 
 func (w *DBWatcher) doCreateApp(ctx context.Context, op db.Operation) error {

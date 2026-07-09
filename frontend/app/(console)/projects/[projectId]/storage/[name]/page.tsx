@@ -2,12 +2,13 @@
 import { useEffect, useState } from "react";
 import { useParams, useSearchParams } from "next/navigation";
 import { s3bucketsApi } from "@/lib/api";
-import type { ResourceSnapshot } from "@/lib/types";
+import type { ResourceSnapshot, S3BucketCredentialsResponse } from "@/lib/types";
 import { Spinner } from "@/components/ui/spinner";
 import { Breadcrumb } from "@/components/ui/breadcrumb";
 import { PhaseBadge } from "@/components/ui/phase-badge";
 import { CopyButton } from "@/components/ui/copy-button";
 import { useProjectContext } from "@/lib/project-context";
+import { canMutate } from "@/lib/rbac";
 import { timeAgo } from "@/lib/format";
 import { useT } from "@/lib/i18n/console/context";
 import { HardDrive } from "lucide-react";
@@ -18,31 +19,49 @@ interface BucketSummary {
   public?: boolean;
   ftp_sftp_enable?: boolean;
   app_ref?: string;
-  endpoint?: string;
-  access_key?: string;
-  access_key_id?: string;
-  secret_key?: string;
-  secret_access_key?: string;
 }
 
+type CredsErrorKind = "notReady" | "notConfigured" | "generic";
+
 /**
- * Object-storage bucket detail. Surfaces the S3 access info the backend actually
- * returns in `summary_json`, an aws-cli usage example, and a reveal-on-demand
- * secret. When the API does not carry credentials, the access panel is honest
- * about it instead of fabricating keys.
+ * Object-storage bucket detail. Bucket metadata comes from `summary_json`; S3
+ * access credentials are never included there and are fetched on demand from
+ * the credentials endpoint (sensitive + audited server-side), then rendered
+ * into an aws-cli usage example.
  */
 export default function BucketDetailPage() {
   const params = useParams<{ projectId: string; name: string }>();
   const { projectId, name } = params;
   const searchParams = useSearchParams();
-  const { project, selectedEnv } = useProjectContext();
+  const { project, selectedEnv, role } = useProjectContext();
   const { t } = useT();
   const envId = searchParams.get("envId") || selectedEnv?.id || "";
+  const canManage = canMutate(role);
 
   const [bucket, setBucket] = useState<ResourceSnapshot | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [revealSecret, setRevealSecret] = useState(false);
+
+  const [creds, setCreds] = useState<S3BucketCredentialsResponse | null>(null);
+  const [credsLoading, setCredsLoading] = useState(false);
+  const [credsError, setCredsError] = useState<{ kind: CredsErrorKind; message?: string } | null>(null);
+
+  async function revealCreds() {
+    setCredsLoading(true);
+    setCredsError(null);
+    try {
+      const r = await s3bucketsApi.credentials(projectId, envId, name);
+      setCreds(r);
+    } catch (e) {
+      const status = (e as { status?: number } | undefined)?.status;
+      if (status === 404) setCredsError({ kind: "notReady" });
+      else if (status === 503) setCredsError({ kind: "notConfigured" });
+      else setCredsError({ kind: "generic", message: e instanceof Error ? e.message : t("storage.detail.access.error") });
+    } finally {
+      setCredsLoading(false);
+    }
+  }
 
   useEffect(() => {
     if (!envId) return;
@@ -72,10 +91,9 @@ export default function BucketDetailPage() {
   const s = (bucket.summary_json ?? {}) as BucketSummary;
   const bucketName = s.bucket_name ?? bucket.name;
   const region = s.region ?? "ru1";
-  const endpoint = s.endpoint ?? "";
-  const accessKey = s.access_key ?? s.access_key_id ?? "";
-  const secretKey = s.secret_key ?? s.secret_access_key ?? "";
-  const hasCreds = Boolean(endpoint || accessKey || secretKey);
+  const endpoint = creds?.endpoint ?? "";
+  const accessKey = creds?.access_key ?? "";
+  const secretKey = creds?.secret_key ?? "";
 
   const endpointPlaceholder = endpoint || "<your-s3-endpoint>";
   const cli = `aws configure set aws_access_key_id ${accessKey || "<ACCESS_KEY>"}
@@ -134,29 +152,47 @@ aws --endpoint-url ${endpointPlaceholder} s3 cp s3://${bucketName}/file.txt ./`;
 
         <section className="rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-5 shadow-sm">
           <h2 className="mb-4 text-sm font-semibold text-gray-900 dark:text-gray-100">{t("storage.detail.access.title")}</h2>
-          {hasCreds ? (
+          {creds ? (
             <div className="space-y-3">
-              {endpoint && <SecretField label={t("storage.detail.access.endpoint")} value={endpoint} copyLabel={t("common.copy")} />}
-              {accessKey && <SecretField label={t("storage.detail.access.accessKey")} value={accessKey} copyLabel={t("common.copy")} />}
-              {secretKey && (
-                <div>
-                  <div className="flex items-center justify-between">
-                    <p className="text-xs font-medium text-gray-500 dark:text-gray-400">{t("storage.detail.access.secretKey")}</p>
-                    <button
-                      type="button"
-                      onClick={() => setRevealSecret((v) => !v)}
-                      className="text-xs font-medium text-blue-600 hover:text-blue-700"
-                    >
-                      {revealSecret ? t("storage.detail.access.hide") : t("storage.detail.access.reveal")}
-                    </button>
-                  </div>
-                  <div className="mt-1 flex items-center gap-2">
-                    <code className="flex-1 break-all rounded-md border border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-gray-900 px-3 py-2 font-mono text-xs text-gray-800 dark:text-gray-200">
-                      {revealSecret ? secretKey : "•".repeat(Math.min(secretKey.length, 40))}
-                    </code>
-                    <CopyButton value={secretKey} label={t("common.copy")} />
-                  </div>
+              <SecretField label={t("storage.detail.access.endpoint")} value={endpoint} copyLabel={t("common.copy")} />
+              <SecretField label={t("storage.detail.access.accessKey")} value={accessKey} copyLabel={t("common.copy")} />
+              <div>
+                <div className="flex items-center justify-between">
+                  <p className="text-xs font-medium text-gray-500 dark:text-gray-400">{t("storage.detail.access.secretKey")}</p>
+                  <button
+                    type="button"
+                    onClick={() => setRevealSecret((v) => !v)}
+                    className="text-xs font-medium text-blue-600 hover:text-blue-700"
+                  >
+                    {revealSecret ? t("storage.detail.access.hide") : t("storage.detail.access.reveal")}
+                  </button>
                 </div>
+                <div className="mt-1 flex items-center gap-2">
+                  <code className="flex-1 break-all rounded-md border border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-gray-900 px-3 py-2 font-mono text-xs text-gray-800 dark:text-gray-200">
+                    {revealSecret ? secretKey : "•".repeat(Math.min(secretKey.length, 40))}
+                  </code>
+                  <CopyButton value={secretKey} label={t("common.copy")} />
+                </div>
+              </div>
+            </div>
+          ) : canManage ? (
+            <div>
+              <button
+                type="button"
+                onClick={revealCreds}
+                disabled={credsLoading}
+                className="inline-flex items-center gap-2 rounded-lg bg-amber-600 px-4 py-2 text-sm font-medium text-white hover:bg-amber-700 disabled:opacity-50 transition-colors"
+              >
+                {credsLoading ? <><Spinner size="sm" /> {t("storage.detail.access.revealing")}</> : t("storage.detail.access.revealBtn")}
+              </button>
+              {credsError && (
+                <p className={`mt-3 text-sm ${credsError.kind === "generic" ? "text-red-600 dark:text-red-400" : "text-gray-500 dark:text-gray-400"}`}>
+                  {credsError.kind === "notReady"
+                    ? t("storage.detail.access.notReady")
+                    : credsError.kind === "notConfigured"
+                      ? t("storage.detail.access.notConfigured")
+                      : credsError.message}
+                </p>
               )}
             </div>
           ) : (

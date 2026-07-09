@@ -366,6 +366,10 @@ ingress:
 rbac:
   create: true
   extraRules: []
+  # Namespace holding the Crossplane S3Bucket connection secrets the console reads
+  # to reveal object-storage credentials. A namespaced Role (not cluster-wide) is
+  # granted get on Secrets here. Must match backend CROSSPLANE_SECRET_NAMESPACE.
+  crossplaneSecretNamespace: crossplane-system
 
 migrationJob:
   enabled: false

@@ -12,6 +12,7 @@ import type {
   CreateDatabaseResponse,
   S3BucketsResponse,
   CreateS3BucketResponse,
+  S3BucketCredentialsResponse,
   AppsResponse,
   InfraResponse,
   AppServersResponse,
@@ -132,7 +133,9 @@ export async function apiFetch<T>(
 
   if (!res.ok) {
     const err = await res.json().catch(() => ({ error: res.statusText }));
-    throw new Error((err as { error: string }).error ?? "API error");
+    const apiError = new Error((err as { error: string }).error ?? "API error") as Error & { status?: number };
+    apiError.status = res.status;
+    throw apiError;
   }
 
   // 204 / empty body (e.g. DELETE) → nothing to parse.
@@ -192,6 +195,11 @@ export const s3bucketsApi = {
     apiFetch<CreateS3BucketResponse>(`/api/v1/projects/${projectId}/environments/${envId}/s3buckets`, {
       method: "POST", body: data,
     }),
+
+  credentials: (projectId: string, envId: string, name: string) =>
+    apiFetch<S3BucketCredentialsResponse>(
+      `/api/v1/projects/${projectId}/environments/${envId}/s3buckets/${name}/credentials?reveal=true`
+    ),
 };
 
 export const databasesApi = {
@@ -204,6 +212,12 @@ export const databasesApi = {
     apiFetch<CreateDatabaseResponse>(`/api/v1/projects/${projectId}/environments/${envId}/databases`, {
       method: "POST", body: data,
     }),
+
+  remove: (projectId: string, envId: string, name: string) =>
+    apiFetch<OperationResponse>(
+      `/api/v1/projects/${projectId}/environments/${envId}/databases/${name}`,
+      { method: "DELETE" }
+    ),
 };
 
 export const appsApi = {

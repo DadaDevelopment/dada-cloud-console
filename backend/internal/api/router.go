@@ -168,11 +168,13 @@ func SetupRouter(pool *pgxpool.Pool, cfg *config.Config) *gin.Engine {
 		// Databases (ServiceDatabase CRD)
 		api.GET("/projects/:projectId/environments/:envId/databases", h.ListDatabases)
 		api.POST("/projects/:projectId/environments/:envId/databases", h.CreateServiceDatabase)
+		api.DELETE("/projects/:projectId/environments/:envId/databases/:name", h.DeleteServiceDatabase)
 		api.POST("/projects/:projectId/environments/:envId/ingress", h.CreateIngress)
 
 		// Object Storage (S3Bucket XR)
 		api.GET("/projects/:projectId/environments/:envId/s3buckets", h.ListS3Buckets)
 		api.POST("/projects/:projectId/environments/:envId/s3buckets", h.CreateS3Bucket)
+		api.GET("/projects/:projectId/environments/:envId/s3buckets/:name/credentials", h.GetS3BucketCredentials)
 
 		// AppServers (VM track)
 		api.GET("/projects/:projectId/app-servers", h.ListAppServers)

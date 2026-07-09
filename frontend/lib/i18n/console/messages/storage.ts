@@ -83,6 +83,17 @@ export const storage: Messages = {
     ru: "Ключи доступа выдаются вместе с бакетом и не отображаются в консоли. Добавьте их в приложение как переменные окружения. В примере ниже подставьте свои значения.",
     en: "Access keys are issued with the bucket and are not surfaced in the console. Add them to your app as environment variables — substitute your own values in the example below.",
   },
+  "storage.detail.access.revealBtn": { ru: "Показать учётные данные", en: "Reveal credentials" },
+  "storage.detail.access.revealing": { ru: "Загрузка…", en: "Revealing…" },
+  "storage.detail.access.notReady": {
+    ru: "Учётные данные пока недоступны — бакет ещё создаётся.",
+    en: "Credentials aren't available yet — the bucket is still provisioning.",
+  },
+  "storage.detail.access.notConfigured": {
+    ru: "Доступ к учётным данным не настроен для этого окружения.",
+    en: "Credential access isn't configured for this environment.",
+  },
+  "storage.detail.access.error": { ru: "Не удалось показать учётные данные", en: "Failed to reveal credentials" },
 
   "storage.detail.cli.title": { ru: "Пример aws-cli", en: "aws-cli example" },
   "storage.detail.cli.hint": {
