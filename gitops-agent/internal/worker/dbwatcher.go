@@ -473,9 +473,24 @@ func (w *DBWatcher) doCreateIngress(ctx context.Context, op db.Operation) error 
 	sort.Strings(deps)
 	block := ingressComposeBlock(spec, deps)
 
+	// Structured Ingress spec persisted alongside the rendered compose so the
+	// console renders routing/TLS as a first-class Resource (the generated conf is
+	// base64-opaque; the console reads this, not the nginx.conf).
+	ingressMeta := map[string]any{
+		"host":         p.Host,
+		"aliases":      p.Aliases,
+		"ssl_redirect": p.SSLRedirect,
+		"basic_auth":   p.BasicAuth != "",
+		"tls": map[string]any{
+			"enabled":     p.TLS.Enabled,
+			"min_version": p.TLS.MinVersion,
+			"cert_path":   p.TLS.CertPath,
+		},
+		"rules": p.Rules,
+	}
 	summaryJSON := composeAppSummary(
 		composeDesired{Compose: block},
-		map[string]any{"managed": "ingress", "host": p.Host},
+		map[string]any{"managed": "ingress", "host": p.Host, "ingress": ingressMeta},
 	)
 	if err := db.UpsertSnapshot(ctx, w.pool,
 		op.ProjectID, op.EnvironmentID, "App", p.Name, "Pending", summaryJSON, time.Now(),
