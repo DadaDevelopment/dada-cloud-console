@@ -13,6 +13,7 @@ import { timeAgo } from "@/lib/format";
 import { PhaseBadge } from "@/components/ui/phase-badge";
 import { MetricSparkline } from "@/components/metrics/fixed-metrics-dashboard";
 import { EmptyState } from "@/components/ui/empty-state";
+import { DeployChooser } from "@/components/deploy/deploy-chooser";
 import { useT } from "@/lib/i18n/console/context";
 import { Globe, Database } from "lucide-react";
 import { classifyVMResource, extractIngressSpec, extractDatabaseSpec } from "@/lib/vm-resources";
@@ -39,6 +40,8 @@ export default function AppsPage() {
 
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [modalEnvId, setModalEnvId] = useState("");
+  const [chooserOpen, setChooserOpen] = useState(false);
+  const [chooserEnvId, setChooserEnvId] = useState("");
   const [form, setForm] = useState<CreateAppForm>({
     name: "",
     image: "",
@@ -88,6 +91,11 @@ export default function AppsPage() {
     setModalEnvId(envId);
     setSubmitError(null);
     setIsModalOpen(true);
+  }
+
+  function openChooser(envId: string) {
+    setChooserEnvId(envId);
+    setChooserOpen(true);
   }
 
   async function handleSubmit(e: FormEvent<HTMLFormElement>) {
@@ -157,7 +165,7 @@ export default function AppsPage() {
               apps={appsByEnv[env.id] ?? []}
               infra={infraByEnv[env.id] ?? []}
               canCreate={canCreate}
-              onCreate={() => openCreate(env.id)}
+              onCreate={() => openChooser(env.id)}
               t={t}
             />
           ))}
@@ -275,6 +283,15 @@ export default function AppsPage() {
           </div>
         </form>
       </Modal>
+
+      <DeployChooser
+        open={chooserOpen}
+        onClose={() => setChooserOpen(false)}
+        projectId={projectId}
+        environments={environments}
+        defaultEnvId={chooserEnvId}
+        onPickImage={(envId) => openCreate(envId)}
+      />
     </div>
   );
 }
@@ -301,23 +318,15 @@ function EnvBlock({ env, projectId, apps, infra, canCreate, onCreate, t }: EnvBl
           <span className="text-xs text-gray-400 dark:text-gray-500">{t("apps.env.count", { count: String(apps.length) })}</span>
         </div>
         {canCreate && (
-          <div className="flex flex-wrap items-center gap-2">
-            <Link
-              href={`/projects/${projectId}/git/import?envId=${env.id}`}
-              className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 transition-colors"
-            >
-              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.568 3H5.25A2.25 2.25 0 003 5.25v4.318c0 .597.237 1.17.659 1.591l9.581 9.581c.699.699 1.78.872 2.607.33a18.095 18.095 0 005.223-5.223c.542-.827.369-1.908-.33-2.607L11.16 3.66A2.25 2.25 0 009.568 3z" />
-              </svg>
-              {t("apps.deployFromGit")}
-            </Link>
-            <button
-              onClick={onCreate}
-              className="inline-flex items-center gap-2 rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-50 transition-colors"
-            >
-              {t("apps.deployImage")}
-            </button>
-          </div>
+          <button
+            onClick={onCreate}
+            className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-blue-700 active:bg-blue-800 transition-colors"
+          >
+            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+            </svg>
+            {t("apps.deploy.button")}
+          </button>
         )}
       </div>
 

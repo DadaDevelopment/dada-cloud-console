@@ -22,6 +22,16 @@ export const apps: Messages = {
 
   "apps.deployFromGit": { ru: "Деплой из Git", en: "Deploy from Git" },
   "apps.deployImage": { ru: "Деплой образа", en: "Deploy image" },
+
+  "apps.deploy.button": { ru: "Задеплоить приложение", en: "Deploy application" },
+  "apps.deploy.title": { ru: "Задеплоить приложение", en: "Deploy application" },
+  "apps.deploy.chooseEnv": { ru: "Окружение", en: "Environment" },
+  "apps.deploy.chooseSource": { ru: "Откуда деплоим", en: "Deploy from" },
+  "apps.deploy.fromGit.title": { ru: "Из GitHub", en: "From GitHub" },
+  "apps.deploy.fromGit.desc": { ru: "Подключите репозиторий — сборка и деплой при каждом push.", en: "Connect a repo — build & deploy on every push." },
+  "apps.deploy.fromImage.title": { ru: "Из образа", en: "From image" },
+  "apps.deploy.fromImage.desc": { ru: "Задеплойте готовый Docker-образ из реестра.", en: "Deploy a prebuilt Docker image from a registry." },
+  "apps.deploy.continue": { ru: "Продолжить", en: "Continue" },
   "apps.env.count": { ru: "{count} прил.", en: "{count} apps" },
 
   "apps.vmWarning": {
