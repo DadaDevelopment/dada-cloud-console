@@ -106,6 +106,8 @@ export interface Dict {
     heroSubtitle: string;
     engines: string[];
     features: Feature[];
+    note: string;
+    noteLinkLabel: string;
   };
   storage: {
     heroTitle: string;
@@ -188,14 +190,14 @@ const ru: Dict = {
     value: [
       { title: "От push до HTTPS без своего CI/CD", desc: "Запушили в ветку — сервис собрался, выкатился и уже отвечает по HTTPS. Пайплайны под это писать не надо." },
       { title: "База и домен там же, где деплой", desc: "Postgres, домен и TLS живут в том же проекте. DATABASE_URL прилетает в сервис сам, руками строку не собираете." },
-      { title: "Логи, откат, потолок по счёту", desc: "Видно, что упало и почему. Откат в одну кнопку. Hard-лимит держит счёт в рамках, цену видно до деплоя." },
+      { title: "Мониторинг сразу после деплоя", desc: "Логи, метрики и алерты не нужно подключать отдельно — видно, что упало и где, а уведомление прилетает в Telegram или на почту раньше, чем напишет клиент." },
     ],
     scenariosTitle: "Под ваш случай",
     scenariosSubtitle: "От пет-проекта до растущей команды.",
     scenarios: [
-      { tag: "Solo / founder", title: "Запуск сервиса за минуты", desc: "Снимаете backend с VPS на docker-compose и переносите в один проект. Никаких релизов по SSH и самописных деплой-скриптов." },
+      { tag: "Solo / founder", title: "Запуск сервиса за минуты", desc: "Уже есть VPS с docker-compose? Подключите его по SSH как App Server — платформа берёт сервер под управление и предлагает забрать уже работающие контейнеры без пересборки." },
       { tag: "Стартап 2–10", title: "Команда без DevOps", desc: "Деплой из GitHub, доступы по ролям, общие логи и откаты. Инженеры катят сами. Отдельный ops под это держать не нужно." },
-      { tag: "Агентство", title: "Клиенты в одном месте", desc: "Домены, базы и доступы всех клиентов в одной панели. Новый проект поднимается за минуты вместо дня возни с настройкой." },
+      { tag: "Агентство", title: "Парк клиентских серверов в одной панели", desc: "Подключаете VM каждого клиента по SSH — домены, базы, деплой и мониторинг всех серверов видно из одной панели, без десятка отдельных логинов." },
     ],
     proofTitle: "Истории команд",
     proofSubtitle: "Скоро здесь будут живые кейсы.",
@@ -214,7 +216,7 @@ const ru: Dict = {
     pricingNote: "Полная таблица тарифов — на странице цен.",
     faqTitle: "Частые возражения",
     faq: [
-      { q: "У меня уже есть VPS", a: "VPS вы тащите сами: обновления ОС, бэкапы, деплой-скрипты, ночные SSH-сессии когда что-то легло. Тут база, домен, выкат и откат уже работают, а сам VPS можно перенести в проект и забыть про эту рутину." },
+      { q: "У меня уже есть VPS", a: "VPS вы тащите сами: обновления ОС, бэкапы, деплой-скрипты, ночные SSH-сессии когда что-то легло. Подключите его к платформе по SSH одним разом — мы поставим Docker и агента, а контейнеры, которые на нём уже работают, можно забрать в управляемые приложения без пересборки. Переносить данные никуда не нужно." },
       { q: "У нас есть GitHub Actions", a: "Actions соберут артефакт, и на этом всё. Дальше его надо куда-то выкатить, поднять базу, прицепить домен, придумать откат. Вот этот кусок от push до живого HTTPS-сервиса мы и берём на себя. Свой CD-пайплайн писать не придётся." },
       { q: "Мы ещё маленькие", a: "Тем более ваш вариант. Один проект вместо ручной инфраструктуры, которую в таком размере держать нечем. Sandbox бесплатный, hard-лимит не даст счёту улететь, а вырастете — переезжать не надо." },
     ],
@@ -222,22 +224,23 @@ const ru: Dict = {
     ctaSubtitle: "Подключение репозитория занимает минуту. Платите только за то, что реально потребляете.",
   },
   servers: {
-    heroTitle: "Облачные серверы VPS/VDS",
+    heroTitle: "Свой сервер — под управлением. Или закажите новый",
     heroSubtitle:
-      "Виртуальные машины на быстрых NVMe-дисках. Снапшоты, образы, горизонтальное масштабирование и почасовая оплата.",
+      "SSH-доступ — и через пару минут сервер под управлением: деплой, логи и метрики видно из панели, а контейнеры, которые там уже крутятся, можно забрать без пересборки. Не хотите переносить свой — закажем новую VM.",
     features: [
-      { title: "NVMe и современное железо", desc: "Серверные CPU и NVMe-накопители для предсказуемой производительности." },
-      { title: "Снапшоты и образы", desc: "Делайте снимок диска и разворачивайте новые машины из готовых образов." },
-      { title: "Сеть и приватные подсети", desc: "Гибкие сетевые настройки, приватные сети между серверами проекта." },
-      { title: "Мониторинг из коробки", desc: "Загрузка CPU, память, диск и сеть — графики без настройки." },
-      { title: "Резервное копирование", desc: "Автоматические бэкапы по расписанию и восстановление за минуты." },
-      { title: "Масштабирование", desc: "Добавляйте узлы и worker-группы по мере роста нагрузки." },
+      { title: "Подключите свой сервер по SSH", desc: "Один SSH-заход, чтобы поставить Docker и лёгкого edge-агента. Ключ используется один раз и нигде не сохраняется." },
+      { title: "Заберите то, что уже работает", desc: "Discovery находит контейнеры, уже запущенные на сервере, и предлагает импортировать их в управляемые приложения — без остановки и пересборки, тома с данными сохраняются." },
+      { title: "Или закажите у нас новую VM", desc: "Не хотите переносить свой сервер — выберите конфигурацию, регион и образ ОС в панели, и мы поднимем VM за вас." },
+      { title: "Один сервер или парк клиентских VM", desc: "Агентство ведёт VM всех клиентов в одной панели: статус, логи и метрики каждого сервера — без десятка отдельных логинов и SSH-сессий." },
+      { title: "Docker Compose как есть", desc: "Деплой идёт через ваш существующий docker-compose.yml — переписывать под платформу не нужно." },
+      { title: "Логи и метрики сервера сразу видно", desc: "CPU, память, диск и логи контейнеров — в панели сразу после подключения, отдельно настраивать мониторинг не нужно." },
     ],
     faqTitle: "Частые вопросы",
     faq: [
-      { q: "Как оплачивается сервер?", a: "Почасовая тарификация — платите только за время работы машины." },
-      { q: "Можно ли изменить конфигурацию?", a: "Да, ресурсы CPU/RAM/диск меняются без переустановки ОС." },
-      { q: "Есть ли защита от DDoS?", a: "Базовая защита от DDoS включена на уровне платформы." },
+      { q: "Вы получаете постоянный доступ к моему серверу?", a: "Нет. SSH-ключ нужен один раз — поставить Docker и edge-агента. Дальше платформа управляет сервером через агента, ключ нигде не хранится." },
+      { q: "Что будет с контейнерами, которые уже работают на сервере?", a: "Discovery покажет их в режиме только чтения. Если решите импортировать — каждый сервис станет отдельным приложением со своими логами и метриками, тома с данными сохранятся." },
+      { q: "Можно вести серверы нескольких клиентов в одной панели?", a: "Да, это основной сценарий для агентств: сервер каждого клиента подключается отдельно, а деплой, логи и мониторинг видны из одной панели." },
+      { q: "Обязательно переносить сервер, если он уже работает?", a: "Нет. Можно подключить существующий сервер как есть — переносить ничего не нужно. Либо закажите у нас новую VM, если хотите начать с чистого листа." },
     ],
   },
   kubernetes: {
@@ -260,26 +263,26 @@ const ru: Dict = {
     ],
   },
   databases: {
-    heroTitle: "Управляемые базы данных",
+    heroTitle: "Управляемый PostgreSQL",
     heroSubtitle:
-      "Запускайте PostgreSQL, MySQL и Redis без забот об обслуживании. Бэкапы, мониторинг и обновления — на нас.",
-    engines: ["PostgreSQL", "MySQL", "Redis"],
+      "Создаётся рядом с приложением, DATABASE_URL прилетает в сервис сам. Бэкапы настраиваются при создании, мониторинг и обновления — на нас.",
+    engines: ["PostgreSQL"],
     features: [
-      { title: "Автоматические бэкапы", desc: "Регулярные резервные копии и восстановление на точку во времени." },
+      { title: "Бэкапы по расписанию", desc: "Резервное копирование настраивается при создании базы, расписание видно в панели." },
       { title: "Мониторинг производительности", desc: "Метрики подключений, запросов и нагрузки в реальном времени." },
       { title: "Безопасный доступ", desc: "Приватные сети, доступ по ролям и шифрование соединений." },
       { title: "Масштабирование", desc: "Меняйте ресурсы инстанса без миграции данных вручную." },
     ],
+    note: "Нужны MySQL или Redis? Managed Postgres — здесь, MySQL и Redis разворачиваются на своём сервере.",
+    noteLinkLabel: "Серверы (App Servers) →",
   },
   storage: {
     heroTitle: "Объектное хранилище S3",
     heroSubtitle:
-      "S3-совместимое хранилище для бэкапов, медиа и статики. Раздавайте контент через CDN с пограничных узлов.",
+      "S3-совместимое хранилище для бэкапов, медиа и статики. Сейчас в статусе Beta — часть возможностей ещё дорабатывается.",
     features: [
       { title: "S3-совместимый API", desc: "Работает с привычными SDK и инструментами (aws-cli, s3cmd и др.)." },
-      { title: "CDN-раздача", desc: "Кэширование и доставка статики ближе к пользователю." },
       { title: "Оплата за объём", desc: "Платите только за реально занятое место и трафик." },
-      { title: "Версионирование", desc: "Храните версии объектов и защищайтесь от случайного удаления." },
     ],
   },
   pricing: {
@@ -419,7 +422,7 @@ const ru: Dict = {
     tagline: "Облачная платформа на основе GitOps.",
     productsTitle: "Продукты",
     products: [
-      { label: "Облачные серверы", href: "/cloud-servers" },
+      { label: "Серверы", href: "/cloud-servers" },
       { label: "Kubernetes", href: "/kubernetes" },
       { label: "Базы данных", href: "/databases" },
       { label: "Объектное хранилище", href: "/storage" },
@@ -488,14 +491,14 @@ const en: Dict = {
     value: [
       { title: "From push to HTTPS without your own CI/CD", desc: "Push to a branch and the service is built, shipped and already answering over HTTPS. No pipelines to write for it." },
       { title: "Database and domain right where you deploy", desc: "Postgres, domain and TLS live in the same project. DATABASE_URL lands in the service on its own — you don't assemble the string by hand." },
-      { title: "Logs, rollback, a ceiling on the bill", desc: "See what broke and why. Roll back with one button. A hard limit keeps the bill in check, and you see the price before you deploy." },
+      { title: "Monitoring the moment you deploy", desc: "Logs, metrics and alerts don't need separate wiring — see what broke and where, with a notification in Telegram or email before a client has to tell you." },
     ],
     scenariosTitle: "Built for your case",
     scenariosSubtitle: "From a pet project to a growing team.",
     scenarios: [
-      { tag: "Solo / founder", title: "Launch a service in minutes", desc: "Pull your backend off a VPS running docker-compose and move it into one project. No releases over SSH, no homegrown deploy scripts." },
+      { tag: "Solo / founder", title: "Launch a service in minutes", desc: "Already have a VPS running docker-compose? Connect it over SSH as an App Server — the platform takes it under management and offers to adopt the containers already running there, no rebuild." },
       { tag: "Startup 2–10", title: "A team without DevOps", desc: "Deploy from GitHub, role-based access, shared logs and rollbacks. Engineers ship themselves. No dedicated ops needed for it." },
-      { tag: "Agency", title: "Clients in one place", desc: "Every client's domains, databases and access in one panel. A new project comes up in minutes instead of a day of fiddling with setup." },
+      { tag: "Agency", title: "A whole client fleet, one panel", desc: "Connect each client's VM over SSH — domains, databases, deploys and monitoring for every server show up in one panel, no juggling a dozen separate logins." },
     ],
     proofTitle: "Team stories",
     proofSubtitle: "Real cases coming here soon.",
@@ -514,7 +517,7 @@ const en: Dict = {
     pricingNote: "Full pricing table on the pricing page.",
     faqTitle: "Common objections",
     faq: [
-      { q: "I already have a VPS", a: "A VPS is on you: OS updates, backups, deploy scripts, the late-night SSH session when something falls over. Here the database, domain, deploy and rollback already work, and the VPS itself can move into a project so you forget that chore." },
+      { q: "I already have a VPS", a: "A VPS is on you: OS updates, backups, deploy scripts, the late-night SSH session when something falls over. Connect it to the platform over SSH once — we install Docker and an agent, and containers already running on it can be adopted into managed applications with no rebuild. Nothing to migrate." },
       { q: "We have GitHub Actions", a: "Actions build an artifact and that's where they stop. You still have to ship it somewhere, stand up a database, attach a domain, figure out rollback. That stretch from push to a live HTTPS service is the part we take on. No CD pipeline of your own to write." },
       { q: "We're still small", a: "All the more reason. One project instead of manual infrastructure you've got no one to run at this size. Sandbox is free, a hard limit won't let the bill run off, and when you grow there's no migration to do." },
     ],
@@ -522,22 +525,23 @@ const en: Dict = {
     ctaSubtitle: "Connecting a repo takes a minute. You only pay for what you actually use.",
   },
   servers: {
-    heroTitle: "Cloud servers VPS/VDS",
+    heroTitle: "Your server, under management. Or order a new one",
     heroSubtitle:
-      "Virtual machines on fast NVMe disks. Snapshots, images, horizontal scaling and hourly billing.",
+      "Give us SSH access and in a couple of minutes the server is under management: deploys, logs and metrics show up in the panel, and containers already running there import without a rebuild. Don't want to migrate your own — we'll provision a new VM instead.",
     features: [
-      { title: "NVMe and modern hardware", desc: "Server-grade CPUs and NVMe drives for predictable performance." },
-      { title: "Snapshots and images", desc: "Snapshot a disk and spin up new machines from ready images." },
-      { title: "Networking and private subnets", desc: "Flexible network settings and private networks between project servers." },
-      { title: "Monitoring out of the box", desc: "CPU load, memory, disk and network — charts with zero setup." },
-      { title: "Backups", desc: "Scheduled automatic backups and restore in minutes." },
-      { title: "Scaling", desc: "Add nodes and worker groups as load grows." },
+      { title: "Connect your server over SSH", desc: "One SSH session installs Docker and a lightweight edge agent. The key is used once and is never stored." },
+      { title: "Adopt what's already running", desc: "Discovery finds containers already running on the server and offers to import them as managed applications — no downtime, no rebuild, data volumes are preserved." },
+      { title: "Or order a new VM from us", desc: "Don't want to migrate your own server — pick the flavor, region and OS image in the panel and we'll provision the VM for you." },
+      { title: "One server or a whole client fleet", desc: "An agency runs every client VM from one panel: status, logs and metrics per server — no more juggling a dozen separate logins and SSH sessions." },
+      { title: "Docker Compose as-is", desc: "Deploys run on your existing docker-compose.yml — nothing to rewrite for the platform." },
+      { title: "Server logs and metrics right away", desc: "CPU, memory, disk and container logs show up in the panel right after connecting — no separate monitoring setup." },
     ],
     faqTitle: "FAQ",
     faq: [
-      { q: "How is a server billed?", a: "Hourly billing — pay only for the time the machine runs." },
-      { q: "Can I change the configuration?", a: "Yes, CPU/RAM/disk resources change without reinstalling the OS." },
-      { q: "Is there DDoS protection?", a: "Basic DDoS protection is included at the platform level." },
+      { q: "Do you keep permanent access to my server?", a: "No. The SSH key is only needed once — to install Docker and the edge agent. After that the platform manages the server through the agent, and the key isn't stored anywhere." },
+      { q: "What happens to containers already running on the server?", a: "Discovery lists them read-only. If you choose to import, each service becomes its own application with its own logs and metrics, and data volumes are preserved." },
+      { q: "Can I run multiple clients' servers from one panel?", a: "Yes — that's the main agency scenario: each client's server connects separately, and deploys, logs and monitoring all show up in one panel." },
+      { q: "Do I have to migrate my server if it already works?", a: "No. You can connect the existing server as-is — nothing to migrate. Or order a fresh VM from us if you'd rather start clean." },
     ],
   },
   kubernetes: {
@@ -560,26 +564,26 @@ const en: Dict = {
     ],
   },
   databases: {
-    heroTitle: "Managed databases",
+    heroTitle: "Managed PostgreSQL",
     heroSubtitle:
-      "Run PostgreSQL, MySQL and Redis without worrying about maintenance. Backups, monitoring and upgrades are on us.",
-    engines: ["PostgreSQL", "MySQL", "Redis"],
+      "Created next to your application, with DATABASE_URL wired in automatically. Backups are configured at creation time; monitoring and upgrades are on us.",
+    engines: ["PostgreSQL"],
     features: [
-      { title: "Automatic backups", desc: "Regular backups and point-in-time recovery." },
+      { title: "Scheduled backups", desc: "Backup schedule is set when you create the database and shown right in the panel." },
       { title: "Performance monitoring", desc: "Connection, query and load metrics in real time." },
       { title: "Secure access", desc: "Private networks, role-based access and connection encryption." },
       { title: "Scaling", desc: "Change instance resources without manual data migration." },
     ],
+    note: "Need MySQL or Redis? Managed Postgres lives here — MySQL and Redis run on your own server.",
+    noteLinkLabel: "App Servers →",
   },
   storage: {
     heroTitle: "S3 object storage",
     heroSubtitle:
-      "S3-compatible storage for backups, media and static assets. Serve content through a CDN from edge nodes.",
+      "S3-compatible storage for backups, media and static assets. Currently in Beta — some capabilities are still being finished.",
     features: [
       { title: "S3-compatible API", desc: "Works with familiar SDKs and tools (aws-cli, s3cmd, etc.)." },
-      { title: "CDN delivery", desc: "Caching and content delivery closer to the user." },
       { title: "Pay for what you store", desc: "Pay only for space actually used and traffic." },
-      { title: "Versioning", desc: "Keep object versions and guard against accidental deletion." },
     ],
   },
   pricing: {
@@ -719,7 +723,7 @@ const en: Dict = {
     tagline: "A GitOps-based cloud platform.",
     productsTitle: "Products",
     products: [
-      { label: "Cloud servers", href: "/cloud-servers" },
+      { label: "Servers", href: "/cloud-servers" },
       { label: "Kubernetes", href: "/kubernetes" },
       { label: "Databases", href: "/databases" },
       { label: "Object storage", href: "/storage" },

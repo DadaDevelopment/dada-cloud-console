@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useState, FormEvent } from "react";
 import { useParams, useRouter } from "next/navigation";
+import Link from "next/link";
 import { s3bucketsApi } from "@/lib/api";
 import type { ResourceSnapshot } from "@/lib/types";
 import { Modal } from "@/components/ui/modal";
@@ -146,26 +147,34 @@ export default function StoragePage() {
           <Spinner />
         </div>
       ) : buckets.length === 0 ? (
-        <ResourceZeroState
-          tone="amber"
-          icon={<HardDrive className="h-8 w-8" />}
-          title={t("storage.empty.title")}
-          description={t("storage.empty.description")}
-          cta={
-            canCreate
-              ? { label: t("storage.empty.create"), onClick: () => setIsModalOpen(true), disabled: !selectedEnvId }
-              : undefined
-          }
-          steps={[t("storage.empty.step1"), t("storage.empty.step2"), t("storage.empty.step3")]}
-        />
+        <div>
+          <ResourceZeroState
+            tone="amber"
+            icon={<HardDrive className="h-8 w-8" />}
+            title={t("storage.empty.title")}
+            description={t("storage.empty.description")}
+            cta={
+              canCreate
+                ? { label: t("storage.empty.create"), onClick: () => setIsModalOpen(true), disabled: !selectedEnvId }
+                : undefined
+            }
+            steps={[t("storage.empty.step1"), t("storage.empty.step2"), t("storage.empty.step3")]}
+          />
+          <div className="mt-4 text-center">
+            <a href="/docs/product/user-guides/object-storage" className="text-sm font-medium text-blue-600 hover:text-blue-700">
+              {t("common.learnMore")} →
+            </a>
+          </div>
+        </div>
       ) : (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {buckets.map((b) => {
             const summary = b.summary_json as Record<string, unknown>;
             return (
-              <div
+              <Link
                 key={b.id}
-                className="rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-5 shadow-sm"
+                href={`/projects/${projectId}/storage/${b.name}${selectedEnvId ? `?envId=${selectedEnvId}` : ""}`}
+                className="rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-5 shadow-sm transition-all hover:border-blue-200 hover:shadow-md"
               >
                 <div className="mb-3 flex items-start justify-between">
                   <div>
@@ -191,7 +200,7 @@ export default function StoragePage() {
                 <p className="mt-2 text-xs text-gray-400 dark:text-gray-500">
                   {t("common.status.synced", { ago: timeAgo(b.last_synced_at) })}
                 </p>
-              </div>
+              </Link>
             );
           })}
         </div>

@@ -59,4 +59,34 @@ export const storage: Messages = {
 
   "storage.error.load": { ru: "Не удалось загрузить бакеты", en: "Failed to load buckets" },
   "storage.error.create": { ru: "Не удалось создать бакет", en: "Failed to create bucket" },
+
+  "storage.detail.notFound": { ru: "Бакет не найден", en: "Bucket not found" },
+  "storage.detail.overview": { ru: "Обзор", en: "Overview" },
+  "storage.detail.field.bucket": { ru: "Имя бакета", en: "Bucket name" },
+  "storage.detail.field.region": { ru: "Регион", en: "Region" },
+  "storage.detail.field.visibility": { ru: "Доступ", en: "Visibility" },
+  "storage.detail.field.ftp": { ru: "FTP/SFTP", en: "FTP/SFTP" },
+  "storage.detail.field.appRef": { ru: "Приложение", en: "App" },
+  "storage.detail.visibility.public": { ru: "Публичный", en: "Public" },
+  "storage.detail.visibility.private": { ru: "Приватный", en: "Private" },
+  "storage.detail.on": { ru: "Включено", en: "Enabled" },
+  "storage.detail.off": { ru: "Выключено", en: "Disabled" },
+  "storage.detail.envLevel": { ru: "уровень окружения", en: "environment-level" },
+
+  "storage.detail.access.title": { ru: "Доступ по S3", en: "S3 access" },
+  "storage.detail.access.endpoint": { ru: "Эндпоинт", en: "Endpoint" },
+  "storage.detail.access.accessKey": { ru: "Access key", en: "Access key" },
+  "storage.detail.access.secretKey": { ru: "Secret key", en: "Secret key" },
+  "storage.detail.access.reveal": { ru: "Показать", en: "Reveal" },
+  "storage.detail.access.hide": { ru: "Скрыть", en: "Hide" },
+  "storage.detail.access.none": {
+    ru: "Ключи доступа выдаются вместе с бакетом и не отображаются в консоли. Добавьте их в приложение как переменные окружения. В примере ниже подставьте свои значения.",
+    en: "Access keys are issued with the bucket and are not surfaced in the console. Add them to your app as environment variables — substitute your own values in the example below.",
+  },
+
+  "storage.detail.cli.title": { ru: "Пример aws-cli", en: "aws-cli example" },
+  "storage.detail.cli.hint": {
+    ru: "S3-совместимый API. Замените плейсхолдеры на свои значения.",
+    en: "S3-compatible API. Replace the placeholders with your own values.",
+  },
 };

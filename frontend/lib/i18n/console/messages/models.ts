@@ -44,6 +44,7 @@ export const models: Messages = {
     ru: "ⓘ GPU-профиль требует подтверждения администратора — операция будет поставлена в WaitingForApproval.",
     en: "ⓘ GPU profile requires admin approval — this op will be parked in WaitingForApproval.",
   },
+  "models.form.profile.gpuApprovalLink": { ru: "Открыть очередь подтверждений", en: "Open the approvals queue" },
 
   "models.form.authMode.label": { ru: "Режим аутентификации", en: "Auth mode" },
   "models.form.authMode.apikey": { ru: "api-key (по умолчанию)", en: "api-key (default)" },

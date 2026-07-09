@@ -361,7 +361,10 @@ export default function ModelsPage() {
             </select>
             {gpuRequiresApproval && (
               <p className="mt-1 text-xs text-amber-700 dark:text-amber-300">
-                {t("models.form.profile.gpuApproval")}
+                {t("models.form.profile.gpuApproval")}{" "}
+                <Link href="/admin/approvals" className="font-medium underline hover:no-underline">
+                  {t("models.form.profile.gpuApprovalLink")}
+                </Link>
               </p>
             )}
           </div>

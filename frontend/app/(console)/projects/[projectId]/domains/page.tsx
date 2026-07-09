@@ -1,8 +1,8 @@
 "use client";
-import { useEffect, useState, FormEvent } from "react";
+import { useEffect, useRef, useState, FormEvent } from "react";
 import { useParams } from "next/navigation";
-import { customDomainsApi } from "@/lib/api";
-import type { DomainAuthorization, DomainChallenge } from "@/lib/types";
+import { customDomainsApi, appsApi } from "@/lib/api";
+import type { DomainAuthorization, DomainChallenge, ResourceSnapshot, Environment } from "@/lib/types";
 import { Modal } from "@/components/ui/modal";
 import { Spinner } from "@/components/ui/spinner";
 import { Breadcrumb } from "@/components/ui/breadcrumb";
@@ -13,6 +13,7 @@ import { ResourceZeroState } from "@/components/ui/resource-zero-state";
 import { Globe } from "lucide-react";
 import { StateChip } from "@/components/ui/state-chip";
 import type { ChipTone } from "@/components/ui/state-chip";
+import { HostnamesManager } from "@/components/deploy/hostnames-manager";
 import { useT } from "@/lib/i18n/console/context";
 
 function domainStatusTone(status: DomainAuthorization["status"]): ChipTone {
@@ -67,7 +68,7 @@ function ChallengeBlock({ challenge }: { challenge: DomainChallenge }) {
 export default function ProjectDomainsPage() {
   const params = useParams<{ projectId: string }>();
   const projectId = params.projectId;
-  const { project, role } = useProjectContext();
+  const { project, environments, role } = useProjectContext();
   const { t } = useT();
 
   const [auths, setAuths] = useState<DomainAuthorization[]>([]);
@@ -81,8 +82,11 @@ export default function ProjectDomainsPage() {
 
   const [verifyingId, setVerifyingId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [autoChecking, setAutoChecking] = useState(false);
+  const authsRef = useRef<DomainAuthorization[]>([]);
 
   const canEdit = canMutate(role);
+  const hasPending = auths.some((a) => a.status !== "verified");
 
   useEffect(() => {
     /* eslint-disable react-hooks/set-state-in-effect */
@@ -96,6 +100,35 @@ export default function ProjectDomainsPage() {
       .finally(() => setIsLoading(false));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId]);
+
+  useEffect(() => {
+    authsRef.current = auths;
+  }, [auths]);
+
+  useEffect(() => {
+    if (!hasPending) return;
+    const id = setInterval(() => {
+      const targets = authsRef.current.filter((a) => a.status !== "verified");
+      if (targets.length === 0) return;
+      setAutoChecking(true);
+      Promise.all(
+        targets.map((a) =>
+          customDomainsApi
+            .verifyAuthorization(projectId, a.id)
+            .then((r) => ({ ...r.authorization, challenge: r.challenge }))
+            .catch(() => null)
+        )
+      )
+        .then((results) => {
+          setAuths((prev) =>
+            prev.map((a) => results.find((r) => r && r.id === a.id) ?? a)
+          );
+        })
+        .finally(() => setAutoChecking(false));
+    }, 30_000);
+    return () => clearInterval(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projectId, hasPending]);
 
   async function handleAdd(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -202,14 +235,21 @@ export default function ProjectDomainsPage() {
           <Spinner />
         </div>
       ) : auths.length === 0 ? (
-        <ResourceZeroState
-          tone="blue"
-          icon={<Globe className="h-8 w-8" />}
-          title={t("domains.empty.title")}
-          description={t("domains.empty.description")}
-          cta={canEdit ? { label: t("domains.empty.create"), onClick: () => setIsModalOpen(true) } : undefined}
-          steps={[t("domains.empty.step1"), t("domains.empty.step2"), t("domains.empty.step3")]}
-        />
+        <div>
+          <ResourceZeroState
+            tone="blue"
+            icon={<Globe className="h-8 w-8" />}
+            title={t("domains.empty.title")}
+            description={t("domains.empty.description")}
+            cta={canEdit ? { label: t("domains.empty.create"), onClick: () => setIsModalOpen(true) } : undefined}
+            steps={[t("domains.empty.step1"), t("domains.empty.step2"), t("domains.empty.step3")]}
+          />
+          <div className="mt-4 text-center">
+            <a href="/docs/product/user-guides/domains-and-https" className="text-sm font-medium text-blue-600 hover:text-blue-700">
+              {t("common.learnMore")} →
+            </a>
+          </div>
+        </div>
       ) : (
         <div className="space-y-4">
           {auths.map((a) => (
@@ -226,6 +266,17 @@ export default function ProjectDomainsPage() {
                     {rowTimestamp(a)}
                     {a.error_message ? ` · ${a.error_message}` : ""}
                   </p>
+                  {a.status !== "verified" && (
+                    <p className="mt-1 flex items-center gap-1.5 text-xs text-gray-400 dark:text-gray-500">
+                      {autoChecking ? (
+                        <>
+                          <Spinner size="sm" /> {t("domains.checking")}
+                        </>
+                      ) : (
+                        t("domains.autoCheck")
+                      )}
+                    </p>
+                  )}
                 </div>
                 {canEdit && (
                   <div className="flex items-center gap-2">
@@ -254,6 +305,15 @@ export default function ProjectDomainsPage() {
             </div>
           ))}
         </div>
+      )}
+
+      {!isLoading && (
+        <HostnameAttachSection
+          projectId={projectId}
+          environments={environments}
+          canEdit={canEdit}
+          hasVerifiedApex={auths.some((a) => a.status === "verified")}
+        />
       )}
 
       <Modal
@@ -316,6 +376,97 @@ export default function ProjectDomainsPage() {
           </div>
         </form>
       </Modal>
+    </div>
+  );
+}
+
+function HostnameAttachSection({
+  projectId,
+  environments,
+  canEdit,
+  hasVerifiedApex,
+}: {
+  projectId: string;
+  environments: Environment[];
+  canEdit: boolean;
+  hasVerifiedApex: boolean;
+}) {
+  const { t } = useT();
+  const [envId, setEnvId] = useState(environments[0]?.id ?? "");
+  const [apps, setApps] = useState<ResourceSnapshot[]>([]);
+  const [appName, setAppName] = useState("");
+  const [loadingApps, setLoadingApps] = useState(false);
+
+  useEffect(() => {
+    if (!envId) {
+      setApps([]);
+      return;
+    }
+    /* eslint-disable react-hooks/set-state-in-effect */
+    setLoadingApps(true);
+    setAppName("");
+    /* eslint-enable react-hooks/set-state-in-effect */
+    appsApi
+      .list(projectId, envId)
+      .then((d) => setApps(d.apps ?? []))
+      .catch(() => setApps([]))
+      .finally(() => setLoadingApps(false));
+  }, [projectId, envId]);
+
+  const selectClass =
+    "w-full rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2.5 text-sm text-gray-900 dark:text-gray-100 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/30 disabled:opacity-60";
+
+  return (
+    <div className="mt-10">
+      <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">{t("domains.hostnames.title")}</h2>
+      <p className="mt-0.5 text-sm text-gray-500 dark:text-gray-400">{t("domains.hostnames.subtitle")}</p>
+
+      {!hasVerifiedApex ? (
+        <div className="mt-4 rounded-lg border border-dashed border-gray-300 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 px-5 py-6 text-sm text-gray-500 dark:text-gray-400">
+          {t("domains.hostnames.needVerified")}
+        </div>
+      ) : (
+        <div className="mt-4 space-y-5">
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div>
+              <label className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-200">{t("domains.hostnames.env")}</label>
+              <select value={envId} onChange={(e) => setEnvId(e.target.value)} className={selectClass}>
+                {environments.map((env) => (
+                  <option key={env.id} value={env.id}>
+                    {env.name} · {env.runtime === "vm" ? t("env.runtime.vm") : t("env.runtime.cloud")}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-200">{t("domains.hostnames.app")}</label>
+              <select
+                value={appName}
+                onChange={(e) => setAppName(e.target.value)}
+                disabled={loadingApps || apps.length === 0}
+                className={selectClass}
+              >
+                <option value="">
+                  {loadingApps
+                    ? t("domains.hostnames.loadingApps")
+                    : apps.length === 0
+                      ? t("domains.hostnames.noApps")
+                      : t("domains.hostnames.selectApp")}
+                </option>
+                {apps.map((a) => (
+                  <option key={a.id} value={a.name}>
+                    {a.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          {envId && appName && (
+            <HostnamesManager projectId={projectId} envId={envId} appName={appName} canEdit={canEdit} />
+          )}
+        </div>
+      )}
     </div>
   );
 }

@@ -28,7 +28,9 @@ export const domains: Messages = {
   "domains.row.lastChecked": { ru: "Последняя проверка {ago}", en: "Last checked {ago}" },
   "domains.row.added": { ru: "Добавлен {ago}", en: "Added {ago}" },
 
-  "domains.action.verify": { ru: "Проверить", en: "Verify" },
+  "domains.action.verify": { ru: "Проверить сейчас", en: "Check now" },
+  "domains.autoCheck": { ru: "Автопроверка каждые 30 с", en: "Auto-checking every 30s" },
+  "domains.checking": { ru: "Проверка…", en: "Checking…" },
 
   "domains.challenge.instruction": {
     ru: "Добавьте эту запись {type} у вашего DNS-провайдера, затем нажмите «Проверить». Распространение может занять несколько минут.",
@@ -59,5 +61,53 @@ export const domains: Messages = {
   "domains.confirm.remove": {
     ru: "Удалить авторизацию домена? Сначала необходимо отвязать все подключённые хосты.",
     en: "Remove this domain authorization? Attached hostnames must be detached first.",
+  },
+
+  "domains.hostnames.title": { ru: "Привязать хост к приложению", en: "Attach a hostname to an app" },
+  "domains.hostnames.subtitle": {
+    ru: "Направьте поддомен подтверждённого домена на одно из ваших приложений — TLS-сертификат выпустится автоматически.",
+    en: "Point a subdomain of a verified domain at one of your apps — TLS is issued automatically.",
+  },
+  "domains.hostnames.needVerified": {
+    ru: "Сначала подтвердите хотя бы один apex-домен выше — после этого его хосты можно привязывать к приложениям.",
+    en: "Verify at least one apex domain above first — then its hostnames can be attached to apps.",
+  },
+  "domains.hostnames.env": { ru: "Окружение", en: "Environment" },
+  "domains.hostnames.app": { ru: "Приложение", en: "Application" },
+  "domains.hostnames.selectApp": { ru: "Выберите приложение…", en: "Select an app…" },
+  "domains.hostnames.loadingApps": { ru: "Загрузка приложений…", en: "Loading apps…" },
+  "domains.hostnames.noApps": { ru: "В этом окружении пока нет приложений", en: "No apps in this environment yet" },
+
+  "domains.hm.title": { ru: "Свои хосты", en: "Custom hostnames" },
+  "domains.hm.subtitle": {
+    ru: "Привяжите хост под доменом, который вы подтвердили для этого проекта. TLS выпускается автоматически.",
+    en: "Attach a hostname under a domain you've verified for this project. TLS is issued automatically.",
+  },
+  "domains.hm.authorizePre": { ru: "Подтвердите apex-домены на странице", en: "Authorize apex domains on the" },
+  "domains.hm.authorizeLink": { ru: "Домены проекта", en: "project Domains" },
+  "domains.hm.authorizePost": { ru: "сначала.", en: "page first." },
+  "domains.hm.inputTitle": {
+    ru: "Хост под подтверждённым apex, например shop.acme.com или acme.com",
+    en: "A hostname under a verified apex, e.g. shop.acme.com or acme.com",
+  },
+  "domains.hm.attach": { ru: "Привязать", en: "Attach" },
+  "domains.hm.attachError": { ru: "Не удалось привязать хост", en: "Failed to attach hostname" },
+  "domains.hm.loadError": { ru: "Не удалось загрузить хосты", en: "Failed to load hostnames" },
+  "domains.hm.dnsTitle": { ru: "Направьте свой DNS на платформу:", en: "Point your DNS at the platform:" },
+  "domains.hm.dnsNote": {
+    ru: "Сертификат выпустится, как только DNS начнёт указывать на ingress платформы.",
+    en: "The certificate is issued once DNS resolves to the platform ingress.",
+  },
+  "domains.hm.empty": { ru: "К этому приложению не привязано ни одного хоста.", en: "No custom hostnames attached to this app." },
+  "domains.hm.thHostname": { ru: "Хост", en: "Hostname" },
+  "domains.hm.thRecord": { ru: "Запись", en: "Record" },
+  "domains.hm.thStatus": { ru: "Статус", en: "Status" },
+  "domains.hm.thCert": { ru: "Сертификат", en: "Certificate" },
+  "domains.hm.detach": { ru: "Отвязать", en: "Detach" },
+  "domains.hm.detaching": { ru: "Отвязывание…", en: "Detaching…" },
+  "domains.hm.detachError": { ru: "Не удалось отвязать хост", en: "Failed to detach hostname" },
+  "domains.hm.confirmDetach": {
+    ru: "Отвязать {name}? Его TLS-сертификат и ingress будут удалены.",
+    en: "Detach {name}? Its TLS certificate and ingress will be removed.",
   },
 };

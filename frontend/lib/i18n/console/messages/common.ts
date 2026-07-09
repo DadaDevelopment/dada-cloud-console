@@ -22,6 +22,7 @@ export const common: Messages = {
   "common.copy": { ru: "Копировать", en: "Copy" },
   "common.copied": { ru: "Скопировано", en: "Copied" },
   "common.optional": { ru: "(необязательно)", en: "(optional)" },
+  "common.learnMore": { ru: "Подробнее", en: "Learn more" },
 
   "common.crumb.projects": { ru: "Проекты", en: "Projects" },
   "common.crumb.overview": { ru: "Обзор", en: "Overview" },

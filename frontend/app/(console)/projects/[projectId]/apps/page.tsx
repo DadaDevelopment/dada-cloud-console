@@ -336,9 +336,10 @@ function EnvBlock({ env, projectId, apps, infra, canCreate, onCreate, t }: EnvBl
           description={env.runtime === "vm" ? t("apps.empty.vm.description") : t("apps.empty.k8s.description")}
           action={
             env.runtime === "vm"
-              ? undefined
+              ? { label: t("apps.empty.vm.action"), href: `/projects/${projectId}/app-servers` }
               : { label: t("apps.empty.k8s.action"), href: `/projects/${projectId}/git/import?envId=${env.id}` }
           }
+          secondary={{ label: t("common.learnMore"), href: "/docs/product/user-guides/applications-deploy-from-github" }}
         />
       ) : (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">

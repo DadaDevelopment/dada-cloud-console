@@ -149,25 +149,30 @@ export default function DatabasesPage() {
           <Spinner />
         </div>
       ) : databases.length === 0 ? (
-        <ResourceZeroState
-          tone="violet"
-          icon={<Database className="h-8 w-8" />}
-          title={t("databases.empty.title")}
-          description={t("databases.empty.description")}
-          cta={
-            canCreate
-              ? { label: t("databases.empty.create"), onClick: () => setIsModalOpen(true), disabled: !selectedEnvId }
-              : undefined
-          }
-          steps={[t("databases.empty.step1"), t("databases.empty.step2"), t("databases.empty.step3")]}
-        />
+        <div>
+          <ResourceZeroState
+            tone="violet"
+            icon={<Database className="h-8 w-8" />}
+            title={t("databases.empty.title")}
+            description={t("databases.empty.description")}
+            cta={
+              canCreate
+                ? { label: t("databases.empty.create"), onClick: () => setIsModalOpen(true), disabled: !selectedEnvId }
+                : undefined
+            }
+            steps={[t("databases.empty.step1"), t("databases.empty.step2"), t("databases.empty.step3")]}
+          />
+          <div className="mt-4 text-center">
+            <a href="/docs/product/user-guides/databases-postgres" className="text-sm font-medium text-blue-600 hover:text-blue-700">
+              {t("common.learnMore")} →
+            </a>
+          </div>
+        </div>
       ) : (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {databases.map((db) => {
             const s = (db.summary_json ?? {}) as {
               size_bytes?: number;
-              backup_last_at?: string;
-              backup_count?: number;
             };
             return (
               <Link
@@ -184,12 +189,6 @@ export default function DatabasesPage() {
                 </div>
                 <div className="flex items-center gap-3 text-xs text-gray-500 dark:text-gray-400">
                   <span>{typeof s.size_bytes === "number" ? fmtBytes(s.size_bytes) : t("databases.card.size")}</span>
-                  <span className="text-gray-300 dark:text-gray-700">·</span>
-                  <span title={s.backup_last_at ?? ""}>
-                    {s.backup_last_at
-                      ? t("databases.card.backup", { ago: timeAgo(s.backup_last_at) })
-                      : t("databases.card.noBackup")}
-                  </span>
                 </div>
                 <p className="mt-2 text-xs text-gray-400 dark:text-gray-500">
                   {t("databases.card.synced", { ago: timeAgo(db.last_synced_at) })}

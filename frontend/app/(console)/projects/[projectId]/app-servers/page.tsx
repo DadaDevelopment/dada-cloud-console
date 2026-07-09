@@ -259,14 +259,21 @@ export default function AppServersPage() {
         searchPlaceholder={t("appServers.search")}
         columns={columns}
         emptyState={
-          <ResourceZeroState
-            tone="emerald"
-            icon={<Server className="h-8 w-8" />}
-            title={t("appServers.empty.title")}
-            description={t("appServers.empty.body")}
-            cta={canManage ? { label: t("appServers.empty.provision"), onClick: () => setIsModalOpen(true) } : undefined}
-            steps={[t("appServers.empty.step1"), t("appServers.empty.step2"), t("appServers.empty.step3")]}
-          />
+          <div>
+            <ResourceZeroState
+              tone="emerald"
+              icon={<Server className="h-8 w-8" />}
+              title={t("appServers.empty.title")}
+              description={t("appServers.empty.body")}
+              cta={canManage ? { label: t("appServers.empty.provision"), onClick: () => setIsModalOpen(true) } : undefined}
+              steps={[t("appServers.empty.step1"), t("appServers.empty.step2"), t("appServers.empty.step3")]}
+            />
+            <div className="mt-4 text-center">
+              <a href="/docs/product/user-guides/app-servers-bring-your-own-vm" className="text-sm font-medium text-blue-600 hover:text-blue-700">
+                {t("common.learnMore")} →
+              </a>
+            </div>
+          </div>
         }
       />
 

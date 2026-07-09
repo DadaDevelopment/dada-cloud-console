@@ -4,8 +4,8 @@ import type { Messages } from "./common";
 export const monitoring: Messages = {
   "monitoring.title": { ru: "Мониторинг", en: "Monitoring" },
   "monitoring.subtitle": {
-    ru: "Передавайте телеметрию с любого устройства через OpenTelemetry — дашборды и алерты уже включены.",
-    en: "Push telemetry from any device via OpenTelemetry — dashboards and alerts included.",
+    ru: "Метрики, логи и алерты для ваших сервисов — узнавайте о сбоях первыми.",
+    en: "Metrics, logs, and alerts for your services — know when something breaks before your users do.",
   },
 
   "monitoring.create": { ru: "Создать мониторинг", en: "Create Monitoring" },
@@ -28,9 +28,9 @@ export const monitoring: Messages = {
   },
 
   "monitoring.status.checking": { ru: "Проверка…", en: "Checking…" },
-  "monitoring.status.receiving": { ru: "Получение данных", en: "Receiving" },
-  "monitoring.status.waiting": { ru: "Ожидание первой телеметрии", en: "Waiting for first telemetry" },
-  "monitoring.status.readyToReceive": { ru: "готово к приёму телеметрии", en: "ready to receive telemetry" },
+  "monitoring.status.receiving": { ru: "Данные поступают", en: "Receiving data" },
+  "monitoring.status.waiting": { ru: "Ожидание первых данных", en: "Waiting for first data" },
+  "monitoring.status.readyToReceive": { ru: "готово к приёму данных", en: "ready to receive data" },
 
   "monitoring.onboarding.label": { ru: "Начало работы", en: "Getting started" },
   "monitoring.dismiss": { ru: "Скрыть", en: "Dismiss" },
@@ -50,32 +50,40 @@ export const monitoring: Messages = {
   "monitoring.step2.needRotate": { ru: "Нужно сменить ключ?", en: "Need to rotate?" },
   "monitoring.step2.manageKeys": { ru: "Управление ключами →", en: "Manage keys →" },
 
-  "monitoring.step3.title": { ru: "Подключите ваше устройство", en: "Connect your device" },
+  "monitoring.step3.title": { ru: "Начните видеть данные", en: "Start seeing your data" },
   "monitoring.step3.body": {
-    ru: "Используйте OTel SDK с указанным эндпоинтом и ключом, или задайте переменные окружения для инструментирования без кода.",
-    en: "Use the OTel SDK with the endpoint and key below, or set env vars for zero-code instrumentation.",
+    ru: "Как только ваш сервис начнёт отправлять данные, метрики и логи появятся здесь. Настраиваете внешний источник вручную — раскройте раздел ниже.",
+    en: "As soon as your service sends data, its metrics and logs appear here. Wiring up an external source by hand? Expand the section below.",
+  },
+  "monitoring.step3.advanced": {
+    ru: "Дополнительно: подключить внешний источник (OTLP / SDK)",
+    en: "Advanced: connect an external source (OTLP / SDK)",
+  },
+  "monitoring.step3.advancedHint": {
+    ru: "Направьте любой OpenTelemetry SDK или агент на эндпоинт приёма, используя ключ выше.",
+    en: "Point any OpenTelemetry SDK or agent at the ingest endpoint using the key above.",
   },
   "monitoring.card.createdAt": { ru: "Создано {date}", en: "Created {date}" },
   "monitoring.card.monitoringApp": { ru: "приложение мониторинга", en: "monitoring app" },
 
-  "monitoring.zero.title": { ru: "Начните получать телеметрию", en: "Start receiving telemetry" },
+  "monitoring.zero.title": { ru: "Следите за здоровьем сервисов", en: "Keep an eye on your services" },
   "monitoring.zero.body": {
-    ru: "Создайте ресурс мониторинга, скопируйте API key и отправляйте метрики или логи с любого устройства, используя стандартный OpenTelemetry SDK.",
-    en: "Create a monitoring resource, copy your API key, and push metrics or logs from any device using the stock OpenTelemetry SDK.",
+    ru: "Метрики, логи и алерты в одном месте. Создайте ресурс мониторинга — и вы увидите, что происходит с вашим сервисом, и получите уведомление при сбое.",
+    en: "Metrics, logs, and alerts in one place. Create a monitoring resource to see what your service is doing and get notified when it breaks.",
   },
-  "monitoring.zero.createBtn": { ru: "Создать приложение мониторинга", en: "Create Monitoring App" },
+  "monitoring.zero.createBtn": { ru: "Создать мониторинг", en: "Create monitoring" },
 
   "monitoring.zero.step1": {
-    ru: "Создайте ресурс мониторинга — он получит API key с ограниченным доступом.",
-    en: "Create a monitoring resource — gets a scoped API key.",
+    ru: "Создайте ресурс мониторинга для вашего сервиса.",
+    en: "Create a monitoring resource for your service.",
   },
   "monitoring.zero.step2": {
-    ru: "Скопируйте ключ (показывается один раз) и сохраните его в безопасном месте.",
-    en: "Copy the key (shown once) and store it securely.",
+    ru: "Скопируйте ключ доступа (показывается один раз) и сохраните его в безопасном месте.",
+    en: "Copy the access key (shown once) and store it securely.",
   },
   "monitoring.zero.step3": {
-    ru: "Направьте ваш OTel SDK на эндпоинт приёма — живой дашборд появится через секунды.",
-    en: "Point your OTel SDK at the ingest endpoint — live dashboard in seconds.",
+    ru: "Как только данные начнут поступать — здесь появятся живые метрики, логи и алерты.",
+    en: "Once data starts flowing, live metrics, logs, and alerts show up here.",
   },
 
   "monitoring.detail.notFound": { ru: "Приложение мониторинга не найдено", en: "Monitoring app not found" },

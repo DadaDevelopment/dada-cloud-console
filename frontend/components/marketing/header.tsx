@@ -16,6 +16,7 @@ export function MarketingHeader() {
 
   const links = [
     { href: localeHref("/#how", locale), label: t.nav.how },
+    { href: localeHref("/cloud-servers", locale), label: t.nav.servers },
     { href: localeHref("/databases", locale), label: t.nav.databases },
     { href: localeHref("/pricing", locale), label: t.nav.pricing },
     { href: localeHref("/developer", locale), label: t.nav.docs },

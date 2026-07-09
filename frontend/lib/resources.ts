@@ -50,10 +50,12 @@ export const PROJECT_NAV: ResourceNavItem[] = [
   { key: "storage", label: "Object Storage", icon: "storage", segment: "/storage", group: "resources" },
   { key: "domains", label: "Domains", icon: "domains", segment: "/domains", group: "resources" },
   { key: "monitoring", label: "Monitoring", icon: "monitoring", segment: "/monitoring", group: "resources" },
+  // App Servers is the primary differentiator (bring-your-own VM / order a VM /
+  // adopt existing workloads) — it belongs on the primary path, not folded away.
+  { key: "app-servers", label: "App Servers", icon: "app-servers", segment: "/app-servers", group: "resources" },
   // --- advanced / infrastructure: still one click away, but folded under an
   // "Advanced" header so they don't crowd the primary path.
   { key: "models", label: "AI Models", icon: "models", segment: "/models", group: "infra" },
-  { key: "app-servers", label: "Managed VM", icon: "app-servers", segment: "/app-servers", group: "infra" },
   { key: "git", label: "Builds", icon: "git", segment: "/git", group: "infra", visible: canSeeManifests },
   // Operations, Approvals, Redis and Message Queues were removed from the sidebar
   // to keep the nav to real, task-oriented surfaces. Operations still runs — its

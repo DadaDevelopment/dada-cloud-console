@@ -6,6 +6,7 @@ import { customDomainsApi } from "@/lib/api";
 import type { DomainHostname } from "@/lib/types";
 import { Spinner } from "@/components/ui/spinner";
 import { PhaseBadge } from "@/components/ui/phase-badge";
+import { useT } from "@/lib/i18n/console/context";
 
 // Level 2 of the Vercel-style model: attach a hostname (apex or subdomain under
 // an already-verified apex authorization) to this specific app + environment.
@@ -32,6 +33,7 @@ interface Props {
 
 export function HostnamesManager({ projectId, envId, appName, canEdit }: Props) {
   const router = useRouter();
+  const { t } = useT();
   const [hostnames, setHostnames] = useState<DomainHostname[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -54,8 +56,9 @@ export function HostnamesManager({ projectId, envId, appName, canEdit }: Props) 
     customDomainsApi
       .listHostnames(projectId, envId, appName)
       .then((data) => setHostnames(data.hostnames ?? []))
-      .catch((err) => setError(err instanceof Error ? err.message : "Failed to load hostnames"))
+      .catch((err) => setError(err instanceof Error ? err.message : t("domains.hm.loadError")))
       .finally(() => setIsLoading(false));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId, envId, appName]);
 
   async function handleAttach(e: FormEvent<HTMLFormElement>) {
@@ -69,14 +72,14 @@ export function HostnamesManager({ projectId, envId, appName, canEdit }: Props) 
       setDnsHint(result.dns_record);
       setInput("");
     } catch (err) {
-      setSubmitError(err instanceof Error ? err.message : "Failed to attach hostname");
+      setSubmitError(err instanceof Error ? err.message : t("domains.hm.attachError"));
     } finally {
       setIsSubmitting(false);
     }
   }
 
   async function handleDetach(h: DomainHostname) {
-    if (!confirm(`Detach ${h.hostname}? Its TLS certificate and ingress will be removed.`)) return;
+    if (!confirm(t("domains.hm.confirmDetach", { name: h.hostname }))) return;
     setDetachingId(h.id);
     setError(null);
     try {
@@ -85,7 +88,7 @@ export function HostnamesManager({ projectId, envId, appName, canEdit }: Props) 
       const opId = result.operation?.id;
       if (opId) router.push(`/projects/${projectId}/operations?highlight=${opId}`);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to detach hostname");
+      setError(err instanceof Error ? err.message : t("domains.hm.detachError"));
       setDetachingId(null);
     }
   }
@@ -101,14 +104,13 @@ export function HostnamesManager({ projectId, envId, appName, canEdit }: Props) 
   return (
     <div className="space-y-6">
       <div className="rounded-xl border border-gray-200 bg-white px-5 py-6">
-        <h2 className="text-lg font-semibold text-gray-900">Custom hostnames</h2>
+        <h2 className="text-lg font-semibold text-gray-900">{t("domains.hm.title")}</h2>
         <p className="mt-1 text-sm text-gray-500">
-          Attach a hostname under a domain you&apos;ve verified for this project. TLS is issued
-          automatically. Authorize apex domains on the{" "}
+          {t("domains.hm.subtitle")} {t("domains.hm.authorizePre")}{" "}
           <Link href={`/projects/${projectId}/domains`} className="font-medium text-blue-600 hover:text-blue-700">
-            project Domains
+            {t("domains.hm.authorizeLink")}
           </Link>{" "}
-          page first.
+          {t("domains.hm.authorizePost")}
         </p>
 
         {canEdit && (
@@ -120,7 +122,7 @@ export function HostnamesManager({ projectId, envId, appName, canEdit }: Props) 
               onChange={(e) => setInput(e.target.value)}
               placeholder="shop.acme.com"
               pattern="[A-Za-z0-9.\-]+"
-              title="A hostname under a verified apex, e.g. shop.acme.com or acme.com"
+              title={t("domains.hm.inputTitle")}
               className="min-w-64 flex-1 rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
             />
             <button
@@ -129,7 +131,7 @@ export function HostnamesManager({ projectId, envId, appName, canEdit }: Props) 
               className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50 transition-colors"
             >
               {isSubmitting ? <Spinner size="sm" /> : null}
-              Attach
+              {t("domains.hm.attach")}
             </button>
           </form>
         )}
@@ -142,12 +144,12 @@ export function HostnamesManager({ projectId, envId, appName, canEdit }: Props) 
 
         {dnsHint && (
           <div className="mt-3 rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-800">
-            <p className="font-medium">Point your DNS at the platform:</p>
+            <p className="font-medium">{t("domains.hm.dnsTitle")}</p>
             <p className="mt-1 font-mono text-xs">
               {dnsHint.type} {dnsHint.host} → {dnsHint.target}
             </p>
             <p className="mt-1 text-xs text-blue-700">
-              The certificate is issued once DNS resolves to the platform ingress.
+              {t("domains.hm.dnsNote")}
             </p>
           </div>
         )}
@@ -161,17 +163,17 @@ export function HostnamesManager({ projectId, envId, appName, canEdit }: Props) 
 
       {hostnames.length === 0 ? (
         <div className="rounded-lg border border-dashed border-gray-300 bg-gray-50 px-5 py-8 text-center text-sm text-gray-500">
-          No custom hostnames attached to this app.
+          {t("domains.hm.empty")}
         </div>
       ) : (
         <div className="overflow-x-auto rounded-xl border border-gray-200 bg-white">
           <table className="w-full text-sm">
             <thead className="bg-gray-50 text-left text-xs font-medium text-gray-500">
               <tr>
-                <th className="px-5 py-3">Hostname</th>
-                <th className="px-5 py-3">Record</th>
-                <th className="px-5 py-3">Status</th>
-                <th className="px-5 py-3">Certificate</th>
+                <th className="px-5 py-3">{t("domains.hm.thHostname")}</th>
+                <th className="px-5 py-3">{t("domains.hm.thRecord")}</th>
+                <th className="px-5 py-3">{t("domains.hm.thStatus")}</th>
+                <th className="px-5 py-3">{t("domains.hm.thCert")}</th>
                 {canEdit && <th className="px-5 py-3" />}
               </tr>
             </thead>
@@ -195,7 +197,7 @@ export function HostnamesManager({ projectId, envId, appName, canEdit }: Props) 
                         disabled={detachingId === h.id}
                         className="rounded-lg border border-red-200 px-3 py-1.5 text-xs font-medium text-red-600 hover:bg-red-50 disabled:opacity-50 transition-colors"
                       >
-                        {detachingId === h.id ? "Detaching…" : "Detach"}
+                        {detachingId === h.id ? t("domains.hm.detaching") : t("domains.hm.detach")}
                       </button>
                     </td>
                   )}

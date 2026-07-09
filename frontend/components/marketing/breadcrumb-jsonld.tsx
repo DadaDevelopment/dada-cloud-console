@@ -8,7 +8,7 @@ import { usePathname } from "next/navigation";
 const SITE_URL = "https://cloud.dada-tuda.ru";
 
 const LABELS: Record<string, { ru: string; en: string }> = {
-  "cloud-servers": { ru: "Облачные серверы", en: "Cloud servers" },
+  "cloud-servers": { ru: "Серверы", en: "Servers" },
   kubernetes: { ru: "Kubernetes", en: "Kubernetes" },
   databases: { ru: "Базы данных", en: "Databases" },
   storage: { ru: "Объектное хранилище", en: "Object storage" },

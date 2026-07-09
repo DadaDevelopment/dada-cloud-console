@@ -260,7 +260,15 @@ function OnboardingCard({
           <p className="mb-3 text-sm text-gray-500">
             {t("monitoring.step3.body")}
           </p>
-          <CodeSnippets apiKey={apiKey ?? "dmon_<your-key>"} />
+          <details className="group rounded-lg border border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-gray-900/60">
+            <summary className="cursor-pointer select-none px-4 py-2.5 text-sm font-medium text-gray-700 dark:text-gray-200 marker:text-gray-400">
+              {t("monitoring.step3.advanced")}
+            </summary>
+            <div className="border-t border-gray-200 dark:border-gray-800 px-4 py-4">
+              <p className="mb-3 text-xs text-gray-500 dark:text-gray-400">{t("monitoring.step3.advancedHint")}</p>
+              <CodeSnippets apiKey={apiKey ?? "dmon_<your-key>"} />
+            </div>
+          </details>
         </Step>
       </div>
     </div>
@@ -562,6 +570,14 @@ function ZeroState({
             {t("monitoring.zero.createBtn")}
           </button>
         )}
+        <div className="mt-3">
+          <a
+            href="/docs/product/user-guides/monitoring-metrics-logs-alerts"
+            className="text-sm font-medium text-blue-600 hover:text-blue-700"
+          >
+            {t("common.learnMore")} →
+          </a>
+        </div>
         <div className="mt-8 text-left space-y-3">
           {[
             { n: 1, key: "monitoring.zero.step1" },
