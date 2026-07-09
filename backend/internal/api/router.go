@@ -169,6 +169,9 @@ func SetupRouter(pool *pgxpool.Pool, cfg *config.Config) *gin.Engine {
 		api.GET("/projects/:projectId/environments/:envId/databases", h.ListDatabases)
 		api.POST("/projects/:projectId/environments/:envId/databases", h.CreateServiceDatabase)
 		api.DELETE("/projects/:projectId/environments/:envId/databases/:name", h.DeleteServiceDatabase)
+		api.GET("/projects/:projectId/environments/:envId/databases/:name/backups", h.ListDBBackups)
+		api.POST("/projects/:projectId/environments/:envId/databases/:name/backups", h.CreateDBBackup)
+		api.POST("/projects/:projectId/environments/:envId/databases/:name/restore", h.RestoreServiceDatabase)
 		api.POST("/projects/:projectId/environments/:envId/ingress", h.CreateIngress)
 
 		// Object Storage (S3Bucket XR)

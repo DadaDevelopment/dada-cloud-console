@@ -1,15 +1,18 @@
 "use client";
-import { useEffect, useState, FormEvent } from "react";
+import { useCallback, useEffect, useState, FormEvent } from "react";
 import { useParams, useSearchParams, useRouter } from "next/navigation";
 import { databasesApi } from "@/lib/api";
-import type { ResourceSnapshot } from "@/lib/types";
+import type { ResourceSnapshot, DBBackup } from "@/lib/types";
 import { Spinner } from "@/components/ui/spinner";
 import { Breadcrumb } from "@/components/ui/breadcrumb";
 import { CopyButton } from "@/components/ui/copy-button";
 import { Modal } from "@/components/ui/modal";
 import { useProjectContext } from "@/lib/project-context";
 import { PhaseBadge } from "@/components/ui/phase-badge";
+import { StateChip } from "@/components/ui/state-chip";
+import type { ChipTone } from "@/components/ui/state-chip";
 import { canMutate } from "@/lib/rbac";
+import { timeAgo } from "@/lib/format";
 import { useT } from "@/lib/i18n/console/context";
 
 interface DbSpec {
@@ -41,10 +44,10 @@ function ErrorBox({ text }: { text: string }) {
 }
 
 function ModalFooter({
-  onCancel, submitting, submitLabel, tone = "blue",
+  onCancel, submitting, submitLabel, tone = "blue", disabled = false, submittingLabel,
 }: {
   onCancel: () => void; submitting: boolean; submitLabel: string;
-  tone?: "blue" | "red" | "purple";
+  tone?: "blue" | "red" | "purple"; disabled?: boolean; submittingLabel?: string;
 }) {
   const { t } = useT();
   const tones = {
@@ -61,13 +64,51 @@ function ModalFooter({
         {t("common.cancel")}
       </button>
       <button
-        type="submit" disabled={submitting}
+        type="submit" disabled={submitting || disabled}
         className={`inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium text-white ${tones[tone]} disabled:cursor-not-allowed disabled:opacity-50 transition-colors`}
       >
-        {submitting ? <><Spinner size="sm" /> {t("common.deleting")}</> : submitLabel}
+        {submitting ? <><Spinner size="sm" /> {submittingLabel ?? t("common.deleting")}</> : submitLabel}
       </button>
     </div>
   );
+}
+
+function backupStatusTone(status: string): ChipTone {
+  switch (status) {
+    case "Ready": return "ready";
+    case "Failed": return "error";
+    case "Running":
+    case "Pending": return "needs-action";
+    default: return "neutral";
+  }
+}
+
+function backupStatusLabel(status: string): string {
+  switch (status) {
+    case "Ready": return "databases.backups.status.ready";
+    case "Running": return "databases.backups.status.running";
+    case "Pending": return "databases.backups.status.pending";
+    case "Failed": return "databases.backups.status.failed";
+    case "Deleting": return "databases.backups.status.deleting";
+    case "Deleted": return "databases.backups.status.deleted";
+    default: return status;
+  }
+}
+
+function backupKindLabel(kind: string): string {
+  switch (kind) {
+    case "manual": return "databases.backups.kind.manual";
+    case "scheduled": return "databases.backups.kind.scheduled";
+    case "pre-restore": return "databases.backups.kind.preRestore";
+    default: return kind;
+  }
+}
+
+function fmtBackupBytes(v: number): string {
+  if (v >= 1 << 30) return `${(v / (1 << 30)).toFixed(1)} GB`;
+  if (v >= 1 << 20) return `${(v / (1 << 20)).toFixed(0)} MB`;
+  if (v >= 1 << 10) return `${(v / (1 << 10)).toFixed(0)} KB`;
+  return `${v} B`;
 }
 
 export default function DatabaseDetailPage() {
@@ -87,6 +128,16 @@ export default function DatabaseDetailPage() {
   const [isDeleteOpen, setIsDeleteOpen] = useState(false);
   const [isDeleteSubmitting, setIsDeleteSubmitting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+
+  const [backups, setBackups] = useState<DBBackup[]>([]);
+  const [isBackupsLoading, setIsBackupsLoading] = useState(false);
+  const [backupsError, setBackupsError] = useState<string | null>(null);
+  const [isCreatingBackup, setIsCreatingBackup] = useState(false);
+
+  const [restoreTarget, setRestoreTarget] = useState<DBBackup | null>(null);
+  const [restoreConfirmName, setRestoreConfirmName] = useState("");
+  const [isRestoreSubmitting, setIsRestoreSubmitting] = useState(false);
+  const [restoreError, setRestoreError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!envId) {
@@ -116,6 +167,76 @@ export default function DatabaseDetailPage() {
     setTimeout(() => {
       router.push(`/projects/${projectId}/operations${opId ? `?highlight=${opId}` : ""}`);
     }, 1500);
+  }
+
+  const loadBackups = useCallback(
+    async (silent = false) => {
+      if (!envId || !canManage) return;
+      if (!silent) setIsBackupsLoading(true);
+      try {
+        const data = await databasesApi.listBackups(projectId, envId, name);
+        setBackups(data.backups ?? []);
+        setBackupsError(null);
+      } catch (err) {
+        setBackupsError(err instanceof Error ? err.message : t("databases.backups.error"));
+      } finally {
+        if (!silent) setIsBackupsLoading(false);
+      }
+    },
+    [projectId, envId, name, canManage, t]
+  );
+
+  useEffect(() => {
+    void loadBackups(); // eslint-disable-line react-hooks/set-state-in-effect
+  }, [loadBackups]);
+
+  useEffect(() => {
+    if (!canManage) return;
+    const hasActive = backups.some((b) => b.status === "Pending" || b.status === "Running");
+    if (!hasActive) return;
+    const interval = setInterval(() => void loadBackups(true), 4000);
+    return () => clearInterval(interval);
+  }, [backups, canManage, loadBackups]);
+
+  async function handleCreateBackup() {
+    setIsCreatingBackup(true);
+    setBackupsError(null);
+    try {
+      const { backup: created } = await databasesApi.createBackup(projectId, envId, name);
+      setBackups((prev) => [created, ...prev]);
+    } catch (err) {
+      setBackupsError(err instanceof Error ? err.message : t("databases.backups.createError"));
+    } finally {
+      setIsCreatingBackup(false);
+    }
+  }
+
+  function openRestore(target: DBBackup) {
+    setRestoreTarget(target);
+    setRestoreConfirmName("");
+    setRestoreError(null);
+  }
+
+  function closeRestore() {
+    setRestoreTarget(null);
+    setRestoreConfirmName("");
+    setRestoreError(null);
+  }
+
+  async function submitRestore(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    if (!restoreTarget || restoreConfirmName !== name) return;
+    setRestoreError(null);
+    setIsRestoreSubmitting(true);
+    try {
+      const r = await databasesApi.restore(projectId, envId, name, restoreTarget.id);
+      closeRestore();
+      gotoOp(r.operation?.id);
+    } catch (err) {
+      setRestoreError(err instanceof Error ? err.message : t("databases.backups.restoreError"));
+    } finally {
+      setIsRestoreSubmitting(false);
+    }
   }
 
   async function submitDelete(e: FormEvent<HTMLFormElement>) {
@@ -210,7 +331,7 @@ export default function DatabaseDetailPage() {
         </div>
       </section>
 
-      <section>
+      <section className="mb-8">
         <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">{t("databases.detail.backups")}</h2>
         <div className="rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-6 shadow-sm">
           {backupOn ? (
@@ -232,6 +353,71 @@ export default function DatabaseDetailPage() {
         </div>
       </section>
 
+      {canManage && (
+        <section>
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+            <h2 className="text-sm font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">{t("databases.backups.title")}</h2>
+            <button
+              onClick={handleCreateBackup}
+              disabled={isCreatingBackup}
+              className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50 transition-colors"
+            >
+              {isCreatingBackup ? <><Spinner size="sm" /> {t("databases.backups.creating")}</> : t("databases.backups.createBtn")}
+            </button>
+          </div>
+
+          {backupsError && <div className="mb-3"><ErrorBox text={backupsError} /></div>}
+
+          {isBackupsLoading ? (
+            <div className="flex h-24 items-center justify-center rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900">
+              <Spinner />
+            </div>
+          ) : backups.length === 0 ? (
+            <div className="flex items-center gap-2 rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-6 shadow-sm text-sm text-gray-500 dark:text-gray-400">
+              {t("databases.backups.empty")}
+            </div>
+          ) : (
+            <div className="overflow-x-auto rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 shadow-sm">
+              <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-800">
+                <thead className="bg-gray-50 dark:bg-gray-900">
+                  <tr>
+                    <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">{t("databases.backups.column.created")}</th>
+                    <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">{t("databases.backups.column.status")}</th>
+                    <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">{t("databases.backups.column.kind")}</th>
+                    <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">{t("databases.backups.column.size")}</th>
+                    <th className="px-5 py-3 text-right text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400" />
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
+                  {backups.map((b) => (
+                    <tr key={b.id}>
+                      <td className="px-5 py-3 text-xs text-gray-500 dark:text-gray-400">{timeAgo(b.created_at)}</td>
+                      <td className="px-5 py-3 text-sm">
+                        <StateChip tone={backupStatusTone(b.status)} dot>{t(backupStatusLabel(b.status))}</StateChip>
+                      </td>
+                      <td className="px-5 py-3 text-sm text-gray-600 dark:text-gray-400">{t(backupKindLabel(b.kind))}</td>
+                      <td className="px-5 py-3 text-sm text-gray-600 dark:text-gray-400">
+                        {typeof b.size_bytes === "number" ? fmtBackupBytes(b.size_bytes) : "—"}
+                      </td>
+                      <td className="px-5 py-3 text-right">
+                        {b.status === "Ready" && (
+                          <button
+                            onClick={() => openRestore(b)}
+                            className="text-xs font-medium text-blue-600 dark:text-blue-400 hover:text-blue-700"
+                          >
+                            {t("databases.backups.restore")}
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </section>
+      )}
+
       <Modal
         isOpen={isDeleteOpen}
         onClose={() => { setIsDeleteOpen(false); setDeleteError(null); }}
@@ -243,6 +429,43 @@ export default function DatabaseDetailPage() {
           </p>
           {deleteError && <ErrorBox text={deleteError} />}
           <ModalFooter onCancel={() => setIsDeleteOpen(false)} submitting={isDeleteSubmitting} submitLabel={t("common.delete")} tone="red" />
+        </form>
+      </Modal>
+
+      <Modal
+        isOpen={!!restoreTarget}
+        onClose={closeRestore}
+        title={t("databases.backups.restoreModal.title")}
+      >
+        <form onSubmit={submitRestore} className="space-y-4">
+          <p className="text-sm text-gray-600 dark:text-gray-400">
+            {t("databases.backups.restoreModal.body", { name })}
+          </p>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-200">
+              {t("databases.backups.restoreModal.confirmLabel", { name })}
+            </label>
+            <input
+              type="text"
+              required
+              value={restoreConfirmName}
+              onChange={(e) => setRestoreConfirmName(e.target.value)}
+              placeholder={name}
+              className="mt-1 block w-full rounded-lg border border-gray-300 dark:border-gray-700 px-3 py-2 text-sm font-mono text-gray-900 dark:text-gray-100 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+            />
+            {restoreConfirmName.length > 0 && restoreConfirmName !== name && (
+              <p className="mt-1 text-xs text-red-600 dark:text-red-400">{t("databases.backups.restoreModal.mismatch")}</p>
+            )}
+          </div>
+          {restoreError && <ErrorBox text={restoreError} />}
+          <ModalFooter
+            onCancel={closeRestore}
+            submitting={isRestoreSubmitting}
+            submittingLabel={t("databases.backups.restoreModal.restoring")}
+            submitLabel={t("databases.backups.restoreModal.submit")}
+            tone="red"
+            disabled={restoreConfirmName !== name}
+          />
         </form>
       </Modal>
     </div>

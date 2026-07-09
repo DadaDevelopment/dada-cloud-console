@@ -1,0 +1,212 @@
+package api
+
+import (
+	"context"
+	"log"
+	"time"
+
+	"github.com/dada-tuda/console/backend/internal/cloudtask"
+	"github.com/dada-tuda/console/backend/internal/models"
+	"github.com/google/uuid"
+)
+
+const (
+	backupReconcileInterval = 30 * time.Second
+	scheduledBackupEvery    = 24 * time.Hour
+)
+
+// StartBackupReconciler launches the background loop that advances in-flight
+// backup/restore ActionSets, enforces retention, and (opt-in) takes scheduled
+// backups. It is a no-op when Kanister access is not configured (off-cluster),
+// so tests and local dev never spawn it. Call once from main after NewHandler.
+func (h *Handler) StartBackupReconciler(ctx context.Context) {
+	if h.kanister == nil || !h.kanister.Enabled() {
+		return
+	}
+	go func() {
+		ticker := time.NewTicker(backupReconcileInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				h.reconcileBackups(ctx)
+				h.reconcileRestores(ctx)
+				h.expireBackups(ctx)
+				if h.cfg.DBBackupScheduleEnabled {
+					h.runScheduledBackups(ctx)
+				}
+			}
+		}
+	}()
+}
+
+// reconcileBackups advances Pending/Running backups by reading their ActionSet.
+func (h *Handler) reconcileBackups(ctx context.Context) {
+	rows, err := h.pool.Query(ctx,
+		`SELECT id, action_set FROM db_backups
+		 WHERE status IN ('Pending', 'Running') AND action_set IS NOT NULL`)
+	if err != nil {
+		return
+	}
+	type item struct {
+		id uuid.UUID
+		as string
+	}
+	var items []item
+	for rows.Next() {
+		var it item
+		if rows.Scan(&it.id, &it.as) == nil {
+			items = append(items, it)
+		}
+	}
+	rows.Close()
+
+	for _, it := range items {
+		st, err := h.kanister.Status(ctx, h.cfg.DBBackupNamespace, it.as)
+		if err != nil {
+			continue
+		}
+		switch st.State {
+		case cloudtask.KanisterComplete:
+			_, _ = h.pool.Exec(ctx,
+				`UPDATE db_backups SET status = 'Ready', kopia_snapshot = $2, updated_at = NOW() WHERE id = $1`,
+				it.id, st.KopiaSnapshot)
+		case cloudtask.KanisterFailed:
+			_, _ = h.pool.Exec(ctx,
+				`UPDATE db_backups SET status = 'Failed', error_message = $2, updated_at = NOW() WHERE id = $1`,
+				it.id, nonEmpty(st.Error, "backup ActionSet failed"))
+		}
+	}
+}
+
+// reconcileRestores advances non-terminal RestoreServiceDatabase operations by
+// reading the ActionSet labelled with the operation id.
+func (h *Handler) reconcileRestores(ctx context.Context) {
+	rows, err := h.pool.Query(ctx,
+		`SELECT id FROM operations
+		 WHERE action = 'RestoreServiceDatabase' AND status NOT IN ('Ready', 'Failed', 'Cancelled')`)
+	if err != nil {
+		return
+	}
+	var ids []uuid.UUID
+	for rows.Next() {
+		var id uuid.UUID
+		if rows.Scan(&id) == nil {
+			ids = append(ids, id)
+		}
+	}
+	rows.Close()
+
+	for _, id := range ids {
+		st, found, err := h.kanister.StatusByLabel(ctx, h.cfg.DBBackupNamespace, "dada.io/operation-id", id.String())
+		if err != nil || !found {
+			continue
+		}
+		switch st.State {
+		case cloudtask.KanisterComplete:
+			_, _ = h.pool.Exec(ctx,
+				`UPDATE operations SET status = 'Ready', updated_at = NOW() WHERE id = $1`, id)
+		case cloudtask.KanisterFailed:
+			_, _ = h.pool.Exec(ctx,
+				`UPDATE operations SET status = 'Failed', error_message = $2, updated_at = NOW() WHERE id = $1`,
+				id, nonEmpty(st.Error, "restore ActionSet failed"))
+		}
+	}
+}
+
+// expireBackups deletes the S3 artifacts of Ready backups past their retention
+// window and marks the rows Deleted (best-effort — a failed delete just leaves
+// the object, retried next pass since the row stays Ready until issued).
+func (h *Handler) expireBackups(ctx context.Context) {
+	rows, err := h.pool.Query(ctx,
+		`SELECT id, dump_path, kopia_snapshot FROM db_backups
+		 WHERE status = 'Ready' AND kopia_snapshot IS NOT NULL AND expires_at IS NOT NULL AND expires_at < NOW()
+		 LIMIT 20`)
+	if err != nil {
+		return
+	}
+	type item struct {
+		id       uuid.UUID
+		dumpPath string
+		kopia    string
+	}
+	var items []item
+	for rows.Next() {
+		var it item
+		if rows.Scan(&it.id, &it.dumpPath, &it.kopia) == nil {
+			items = append(items, it)
+		}
+	}
+	rows.Close()
+
+	for _, it := range items {
+		_, err := h.kanister.CreateDelete(ctx, cloudtask.KanisterActionSpec{
+			Namespace:   h.cfg.DBBackupNamespace,
+			StatefulSet: h.cfg.DBBackupStatefulSet,
+			Profile:     h.cfg.DBBackupProfile,
+			Blueprint:   h.cfg.DBBackupBlueprint,
+			DumpPath:    it.dumpPath,
+			Kopia:       it.kopia,
+		})
+		if err != nil {
+			continue
+		}
+		_, _ = h.pool.Exec(ctx,
+			`UPDATE db_backups SET status = 'Deleted', updated_at = NOW() WHERE id = $1`, it.id)
+	}
+}
+
+// runScheduledBackups takes a scheduled backup for each managed database whose
+// most recent backup is older than the schedule interval (or has none).
+func (h *Handler) runScheduledBackups(ctx context.Context) {
+	rows, err := h.pool.Query(ctx,
+		`SELECT rs.project_id, rs.environment_id, rs.name, rs.summary_json
+		 FROM resource_snapshots rs
+		 WHERE rs.kind = 'ServiceDatabaseV2'
+		   AND NOT EXISTS (
+		     SELECT 1 FROM db_backups b
+		     WHERE b.project_id = rs.project_id AND b.environment_id = rs.environment_id
+		       AND b.resource_name = rs.name
+		       AND b.status IN ('Pending', 'Running', 'Ready')
+		       AND b.created_at > NOW() - INTERVAL '24 hours'
+		   )`)
+	if err != nil {
+		return
+	}
+	type item struct {
+		projectID uuid.UUID
+		envID     uuid.UUID
+		name      string
+		database  string
+	}
+	var items []item
+	for rows.Next() {
+		var it item
+		var summary []byte
+		if rows.Scan(&it.projectID, &it.envID, &it.name, &summary) != nil {
+			continue
+		}
+		it.database = serviceDatabaseName(summary)
+		if it.database == "" {
+			it.database = it.name
+		}
+		items = append(items, it)
+	}
+	rows.Close()
+
+	for _, it := range items {
+		if _, err := h.startDBBackup(ctx, it.projectID, it.envID, it.name, it.database, models.DBBackupKindScheduled, nil); err != nil {
+			log.Printf("scheduled backup for %s failed to start: %v", it.name, err)
+		}
+	}
+	_ = scheduledBackupEvery
+}
+
+func nonEmpty(v, fallback string) string {
+	if v != "" {
+		return v
+	}
+	return fallback
+}

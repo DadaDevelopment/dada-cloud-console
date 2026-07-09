@@ -10,6 +10,8 @@ import type {
   Operation,
   DatabasesResponse,
   CreateDatabaseResponse,
+  DBBackup,
+  DBBackupsResponse,
   S3BucketsResponse,
   CreateS3BucketResponse,
   S3BucketCredentialsResponse,
@@ -217,6 +219,23 @@ export const databasesApi = {
     apiFetch<OperationResponse>(
       `/api/v1/projects/${projectId}/environments/${envId}/databases/${name}`,
       { method: "DELETE" }
+    ),
+
+  listBackups: (projectId: string, envId: string, name: string) =>
+    apiFetch<DBBackupsResponse>(
+      `/api/v1/projects/${projectId}/environments/${envId}/databases/${name}/backups`
+    ),
+
+  createBackup: (projectId: string, envId: string, name: string) =>
+    apiFetch<{ backup: DBBackup }>(
+      `/api/v1/projects/${projectId}/environments/${envId}/databases/${name}/backups`,
+      { method: "POST" }
+    ),
+
+  restore: (projectId: string, envId: string, name: string, backupId: string) =>
+    apiFetch<OperationResponse>(
+      `/api/v1/projects/${projectId}/environments/${envId}/databases/${name}/restore`,
+      { method: "POST", body: { backup_id: backupId } }
     ),
 };
 

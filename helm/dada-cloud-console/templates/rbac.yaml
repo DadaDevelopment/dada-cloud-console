@@ -87,4 +87,35 @@ roleRef:
   kind: Role
   name: {{ include "dada-cloud-console.fullname" . }}-s3-creds-reader
   apiGroup: rbac.authorization.k8s.io
+---
+# Per-database backup/restore: the console creates Kanister ActionSets in the
+# managed-Postgres namespace to run pg_dump/pg_restore against a single database.
+# Scoped to actionsets in that namespace only.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "dada-cloud-console.fullname" . }}-db-backup
+  namespace: {{ .Values.rbac.dbBackupNamespace | default "databases" }}
+  labels:
+    {{- include "dada-cloud-console.labels" . | nindent 4 }}
+rules:
+  - apiGroups: ["cr.kanister.io"]
+    resources: ["actionsets"]
+    verbs: ["create", "get", "list", "watch", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "dada-cloud-console.fullname" . }}-db-backup
+  namespace: {{ .Values.rbac.dbBackupNamespace | default "databases" }}
+  labels:
+    {{- include "dada-cloud-console.labels" . | nindent 4 }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "dada-cloud-console.fullname" . }}
+    namespace: {{ .Release.Namespace }}
+roleRef:
+  kind: Role
+  name: {{ include "dada-cloud-console.fullname" . }}-db-backup
+  apiGroup: rbac.authorization.k8s.io
 {{- end }}

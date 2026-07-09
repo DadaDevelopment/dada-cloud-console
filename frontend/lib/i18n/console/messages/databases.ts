@@ -86,4 +86,44 @@ export const databases: Messages = {
     en: "This permanently deletes the database \"{name}\" and all its data. This action cannot be undone.",
   },
   "databases.delete.error": { ru: "Не удалось удалить базу данных", en: "Failed to delete database" },
+
+  "databases.backups.title": { ru: "Резервные копии", en: "Backups" },
+  "databases.backups.empty": { ru: "Резервных копий пока нет.", en: "No backups yet." },
+  "databases.backups.createBtn": { ru: "Создать резервную копию", en: "Back up now" },
+  "databases.backups.creating": { ru: "Создание…", en: "Creating…" },
+  "databases.backups.column.created": { ru: "Создана", en: "Created" },
+  "databases.backups.column.status": { ru: "Статус", en: "Status" },
+  "databases.backups.column.kind": { ru: "Тип", en: "Kind" },
+  "databases.backups.column.size": { ru: "Размер", en: "Size" },
+  "databases.backups.restore": { ru: "Восстановить", en: "Restore" },
+  "databases.backups.error": { ru: "Не удалось загрузить резервные копии", en: "Failed to load backups" },
+  "databases.backups.createError": { ru: "Не удалось создать резервную копию", en: "Failed to create backup" },
+
+  "databases.backups.status.ready": { ru: "Готова", en: "Ready" },
+  "databases.backups.status.running": { ru: "Выполняется", en: "Running" },
+  "databases.backups.status.pending": { ru: "В очереди", en: "Pending" },
+  "databases.backups.status.failed": { ru: "Ошибка", en: "Failed" },
+  "databases.backups.status.deleting": { ru: "Удаляется", en: "Deleting" },
+  "databases.backups.status.deleted": { ru: "Удалена", en: "Deleted" },
+
+  "databases.backups.kind.manual": { ru: "Вручную", en: "Manual" },
+  "databases.backups.kind.scheduled": { ru: "По расписанию", en: "Scheduled" },
+  "databases.backups.kind.preRestore": { ru: "Перед восстановлением", en: "Pre-restore" },
+
+  "databases.backups.restoreModal.title": { ru: "Восстановить базу данных", en: "Restore database" },
+  "databases.backups.restoreModal.body": {
+    ru: "Это перезапишет текущую базу данных «{name}» содержимым выбранной резервной копии. Все текущие данные будут потеряны. Отменить это действие нельзя.",
+    en: "This overwrites the current database \"{name}\" with the contents of the selected backup. All current data will be lost. This action cannot be undone.",
+  },
+  "databases.backups.restoreModal.confirmLabel": {
+    ru: "Введите «{name}» для подтверждения",
+    en: "Type {name} to confirm",
+  },
+  "databases.backups.restoreModal.mismatch": {
+    ru: "Введённое имя не совпадает с именем базы данных",
+    en: "The typed name doesn't match the database name",
+  },
+  "databases.backups.restoreModal.submit": { ru: "Восстановить", en: "Restore" },
+  "databases.backups.restoreModal.restoring": { ru: "Восстановление…", en: "Restoring…" },
+  "databases.backups.restoreError": { ru: "Не удалось запустить восстановление", en: "Failed to start restore" },
 };

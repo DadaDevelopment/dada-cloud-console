@@ -90,6 +90,17 @@ type Config struct {
 	// "<bucket>-s3-credentials" from it to reveal object-storage keys on demand.
 	CrossplaneSecretNamespace string // CROSSPLANE_SECRET_NAMESPACE
 
+	// Per-database backup/restore via Kanister ActionSets. The console creates
+	// ActionSets referencing the shared blueprint + profile against the managed
+	// Postgres StatefulSet. Scheduling is opt-in (off by default) so deploying the
+	// code never starts hitting the shared server until explicitly enabled.
+	DBBackupNamespace       string // DB_BACKUP_NAMESPACE (kanister ns; where ActionSets + profile live)
+	DBBackupStatefulSet     string // DB_BACKUP_STATEFULSET (managed Postgres workload)
+	DBBackupProfile         string // DB_BACKUP_PROFILE (cr.kanister.io Profile name)
+	DBBackupBlueprint       string // DB_BACKUP_BLUEPRINT (per-db blueprint name)
+	DBBackupRetentionDays   int    // DB_BACKUP_RETENTION_DAYS
+	DBBackupScheduleEnabled bool   // DB_BACKUP_SCHEDULE_ENABLED (opt-in scheduled backups)
+
 	// Portainer live-state proxy (read-only). Both must be set to enable the VM
 	// /state and /logs endpoints. Same values the portainer-agent uses.
 	PortainerURL      string // PORTAINER_URL
@@ -279,6 +290,12 @@ func Load() (*Config, error) {
 		NexusUser:                 getEnv("NEXUS_USER", ""),
 		NexusToken:                getEnv("NEXUS_TOKEN", ""),
 		CrossplaneSecretNamespace: getEnv("CROSSPLANE_SECRET_NAMESPACE", "crossplane-system"),
+		DBBackupNamespace:         getEnv("DB_BACKUP_NAMESPACE", "databases"),
+		DBBackupStatefulSet:       getEnv("DB_BACKUP_STATEFULSET", "postgresql"),
+		DBBackupProfile:           getEnv("DB_BACKUP_PROFILE", "dada-db-backups"),
+		DBBackupBlueprint:         getEnv("DB_BACKUP_BLUEPRINT", "postgres-logical-db-blueprint"),
+		DBBackupRetentionDays:     int(getEnvInt64("DB_BACKUP_RETENTION_DAYS", 14)),
+		DBBackupScheduleEnabled:   getEnv("DB_BACKUP_SCHEDULE_ENABLED", "false") == "true",
 		PortainerURL:              getEnv("PORTAINER_URL", ""),
 		PortainerAPIToken:         getEnv("PORTAINER_API_TOKEN", ""),
 		PrometheusQueryURL:        getEnv("PROMETHEUS_QUERY_URL", ""),

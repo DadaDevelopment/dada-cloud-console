@@ -10,6 +10,7 @@ data:
   PROMETHEUS_QUERY_URL: {{ .Values.global.shared.prometheusQueryUrl | default "" | quote }}
   ELASTICSEARCH_URL: {{ .Values.global.shared.elasticsearchUrl | default "" | quote }}
   CROSSPLANE_SECRET_NAMESPACE: {{ .Values.rbac.crossplaneSecretNamespace | default "crossplane-system" | quote }}
+  DB_BACKUP_NAMESPACE: {{ .Values.rbac.dbBackupNamespace | default "databases" | quote }}
 {{- range $key, $value := .Values.backend.env }}
   {{ $key }}: {{ $value | quote }}
 {{- end }}

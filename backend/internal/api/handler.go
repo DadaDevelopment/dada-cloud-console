@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"log"
 
 	"github.com/dada-tuda/console/backend/internal/auth"
@@ -58,6 +59,11 @@ type Handler struct {
 	// Crossplane connection secret on demand. Never nil: off-cluster it returns
 	// a resolver whose Resolve fails with a clear "not configured" error.
 	s3creds cloudtask.S3CredentialsResolver
+
+	// kanister drives per-database backup/restore via Kanister ActionSets. Never
+	// nil: off-cluster it is disabled (Enabled() == false) and every create fails
+	// with a clear "not configured" error.
+	kanister cloudtask.KanisterClient
 
 	// billingPlans is the full plan catalog loaded once at startup from the
 	// embedded plans.yaml. Always populated (the embedded file is compiled in);
@@ -127,6 +133,7 @@ func NewHandler(pool *pgxpool.Pool, cfg *config.Config) *Handler {
 	}
 	h.counters = cloudtask.NewCounterResolver()
 	h.s3creds = cloudtask.NewS3CredentialsResolver(cfg.CrossplaneSecretNamespace)
+	h.kanister = cloudtask.NewKanisterClient()
 
 	plans, err := billing.LoadPlans("")
 	if err != nil {
@@ -146,6 +153,10 @@ func NewHandler(pool *pgxpool.Pool, cfg *config.Config) *Handler {
 	} else {
 		h.billingUnit = unit
 	}
+
+	// Advance in-flight backup/restore ActionSets + retention. No-op off-cluster
+	// (Kanister disabled), so tests and local dev never spawn it.
+	h.StartBackupReconciler(context.Background())
 
 	return h
 }

@@ -370,6 +370,9 @@ rbac:
   # to reveal object-storage credentials. A namespaced Role (not cluster-wide) is
   # granted get on Secrets here. Must match backend CROSSPLANE_SECRET_NAMESPACE.
   crossplaneSecretNamespace: crossplane-system
+  # Namespace where the console creates Kanister ActionSets for per-database
+  # backup/restore (the managed-Postgres namespace). Must match DB_BACKUP_NAMESPACE.
+  dbBackupNamespace: databases
 
 migrationJob:
   enabled: false
