@@ -1,5 +1,5 @@
 "use client";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { appsApi } from "@/lib/api";
 import type { AppState, PortainerContainer } from "@/lib/types";
 import { Spinner } from "@/components/ui/spinner";
@@ -19,6 +19,14 @@ function StateBadge({ state }: { state: string }) {
   return <span className={`rounded px-2 py-0.5 text-xs font-medium ${tone}`}>{state}</span>;
 }
 
+/**
+ * Live compose-state panel. GetAppState proxies the docker API over an edge
+ * tunnel to a remote VM, so a single 10s poll can transiently fail (returned as
+ * a non-fatal `live_error` on an otherwise-200 body). To stop the error banner
+ * from flickering on every blip, we keep the last-good containers and only
+ * surface the Portainer error after ~3 consecutive failed polls (~30s), clearing
+ * it immediately on the next success.
+ */
 export function ComposeStatePanel({
   projectId,
   envId,
@@ -30,7 +38,9 @@ export function ComposeStatePanel({
 }) {
   const [state, setState] = useState<AppState | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [liveError, setLiveError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const liveErrStreak = useRef(0);
 
   const [logsFor, setLogsFor] = useState<string | null>(null);
   const [logs, setLogs] = useState("");
@@ -39,8 +49,15 @@ export function ComposeStatePanel({
   const load = useCallback(async () => {
     try {
       const s = await appsApi.getState(projectId, envId, appName);
-      setState(s);
       setError(null);
+      if (s.live_error) {
+        liveErrStreak.current += 1;
+        setLiveError(liveErrStreak.current >= 3 ? s.live_error : null);
+      } else {
+        liveErrStreak.current = 0;
+        setState(s);
+        setLiveError(null);
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to load state");
     } finally {
@@ -104,8 +121,8 @@ export function ComposeStatePanel({
       {error && (
         <div className="px-5 py-3 text-sm text-red-600">{error}</div>
       )}
-      {state?.live_error && (
-        <div className="px-5 py-2 text-xs text-amber-700">Portainer: {state.live_error}</div>
+      {liveError && (
+        <div className="px-5 py-2 text-xs text-amber-700">Portainer: {liveError}</div>
       )}
 
       {containers.length === 0 ? (
