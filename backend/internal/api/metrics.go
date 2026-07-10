@@ -190,12 +190,16 @@ func parseRangeDuration(s string) (time.Duration, bool) {
 // runMetricSpecs executes the given specs for one label value and assembles the
 // response payload, recording the first query error in live_error (partial
 // results still return, mirroring GetAppState).
-func (h *Handler) runMetricSpecs(ctx context.Context, specs []metricSpec, label string, start, end time.Time, step time.Duration) gin.H {
+// runMetricSpecs reads VM/container metrics from the per-tenant Mimir store
+// (h.userMetrics), scoped to tenant (the project_id) via X-Scope-OrgID — the same
+// isolation the VM's prometheus-agent writes under. When USER_METRICS_QUERY_URL is
+// unset userMetrics falls back to the plain Prometheus client (tenant ignored).
+func (h *Handler) runMetricSpecs(ctx context.Context, specs []metricSpec, label, tenant string, start, end time.Time, step time.Duration) gin.H {
 	escaped := prometheus.EscapeLabelValue(label)
 	metrics := gin.H{}
 	var liveErr string
 	for _, s := range specs {
-		series, err := h.prometheus.QueryRange(ctx, fillExpr(s.expr, escaped), start, end, step, "")
+		series, err := h.userMetrics.QueryRange(ctx, fillExpr(s.expr, escaped), start, end, step, tenant)
 		if err != nil {
 			if liveErr == "" {
 				liveErr = err.Error()
@@ -270,7 +274,7 @@ func (h *Handler) GetAppServerMetrics(c *gin.Context) {
 	}
 
 	start, end, step := parseRange(c)
-	c.JSON(http.StatusOK, h.runMetricSpecs(c.Request.Context(), vmMetricSpecs, serverName, start, end, step))
+	c.JSON(http.StatusOK, h.runMetricSpecs(c.Request.Context(), vmMetricSpecs, serverName, projectID.String(), start, end, step))
 }
 
 // GetAppMetrics returns container resource metrics (CPU/RAM) for a compose app
@@ -340,5 +344,5 @@ func (h *Handler) GetAppMetrics(c *gin.Context) {
 		c.JSON(http.StatusOK, h.runK8sContainerMetrics(c.Request.Context(), namespace, image, start, end, step))
 		return
 	}
-	c.JSON(http.StatusOK, h.runMetricSpecs(c.Request.Context(), containerMetricSpecs, appName, start, end, step))
+	c.JSON(http.StatusOK, h.runMetricSpecs(c.Request.Context(), containerMetricSpecs, appName, projectID.String(), start, end, step))
 }
