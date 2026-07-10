@@ -31,6 +31,16 @@ type Config struct {
 	// in-cluster config is available (e.g. local runs).
 	StatusReconcileEnabled bool
 
+	// ClusterDiscoveryEnabled controls whether the status reconciler also mirrors
+	// EVERY custom platform CR found on the cluster into resource_snapshots
+	// (discover pass). Default false: resources become visible only through the
+	// two git paths (an app's resources.values.yaml and its chart/templates),
+	// where project+env come from the git path — so a resource can never leak
+	// into a project it wasn't committed under. Enable only to fall back to
+	// cluster-truth mirroring. Live App/AIModel phase updates are unaffected
+	// (they update existing rows regardless of this flag).
+	ClusterDiscoveryEnabled bool
+
 	// Webhook server — only started when port is non-empty.
 	WebhookPort string
 
@@ -86,7 +96,8 @@ func Load() (*Config, error) {
 		PollIntervalGit:    gitInterval,
 		PollIntervalStatus: statusInterval,
 
-		StatusReconcileEnabled: getEnv("GITOPS_STATUS_RECONCILE_ENABLED", "true") == "true",
+		StatusReconcileEnabled:  getEnv("GITOPS_STATUS_RECONCILE_ENABLED", "true") == "true",
+		ClusterDiscoveryEnabled: getEnv("GITOPS_CLUSTER_DISCOVERY_ENABLED", "false") == "true",
 		WebhookPort:       getEnv("GITOPS_WEBHOOK_PORT", ""),
 		EncryptionKey:     getEnv("GITOPS_ENCRYPTION_KEY", ""),
 		ClusterLBIP:       getEnv("CLUSTER_LB_IP", "93.189.231.60"),

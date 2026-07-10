@@ -64,9 +64,11 @@ func (r *StatusReconciler) Start(ctx context.Context) {
 }
 
 func (r *StatusReconciler) tick(ctx context.Context) {
-	r.discover(ctx)        // mirror all custom CRs into snapshots (existence + status)
-	r.reconcile(ctx)       // App phase/image/replicas from Deployments
-	r.reconcileModels(ctx) // refine AIModel readiness from KServe InferenceServices
+	if r.cfg.ClusterDiscoveryEnabled {
+		r.discover(ctx)
+	}
+	r.reconcile(ctx)
+	r.reconcileModels(ctx)
 }
 
 // reconcileModels mirrors KServe InferenceService readiness onto AIModel
