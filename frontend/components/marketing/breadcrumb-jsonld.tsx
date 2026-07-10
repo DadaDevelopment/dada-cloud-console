@@ -2,9 +2,13 @@
 
 import { usePathname } from "next/navigation";
 
-// BreadcrumbList (Schema.org / JSON-LD) for inner marketing pages, mirroring the
-// breadcrumb feature on development.dada-tuda.ru. Derived from the pathname so a
-// single instance in the marketing layout covers every RU and EN inner page.
+/**
+ * BreadcrumbList (Schema.org / JSON-LD) for the top-level inner marketing pages,
+ * mirroring the breadcrumb feature on development.dada-tuda.ru. Derived from the
+ * pathname so a single instance in the marketing layout covers every RU and EN
+ * inner page. Guide articles (/developer/<slug>) carry their own three-level
+ * breadcrumb from DocJsonLd, so they are intentionally not matched here.
+ */
 const SITE_URL = "https://cloud.dada-tuda.ru";
 
 const LABELS: Record<string, { ru: string; en: string }> = {
@@ -37,7 +41,6 @@ export function BreadcrumbJsonLd() {
 
   return (
     <script
-      // eslint-disable-next-line react/no-danger
       type="application/ld+json"
       dangerouslySetInnerHTML={{ __html: JSON.stringify(data) }}
     />

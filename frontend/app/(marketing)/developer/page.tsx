@@ -4,7 +4,8 @@ import Link from "next/link";
 import { ArrowRight } from "lucide-react";
 import { useLang } from "@/lib/i18n/context";
 import { consoleHref, localeHref } from "@/lib/site";
-import { ProductHero, CtaBand } from "@/components/marketing/sections";
+import { ProductHero, FaqList, CtaBand } from "@/components/marketing/sections";
+import { FaqJsonLd } from "@/components/marketing/faq-jsonld";
 
 const GUIDE_GROUPS: {
   title: { ru: string; en: string };
@@ -48,6 +49,7 @@ export default function DeveloperPage() {
     ru: {
       title: "API и разработчикам",
       subtitle: "Всё, что делает консоль — деплой приложений, серверы, базы, домены, мониторинг — доступно через REST API с авторизацией по токену.",
+      buildTitle: "Собрать на API",
       apiTitle: "REST API",
       apiDesc: "Каждый ресурс консоли доступен через /api/v1 с авторизацией по токену.",
       consoleTitle: "Открыть консоль",
@@ -55,10 +57,17 @@ export default function DeveloperPage() {
       guidesTitle: "Руководства",
       guidesSubtitle: "Пошаговые гайды по консоли — от первого деплоя до биллинга и ролей.",
       guidesNote: "Документация пока доступна только на английском.",
+      faqTitle: "Вопросы по API и разработке",
+      faq: [
+        { q: "Есть ли у DADA Cloud REST API?", a: "Да. Всё, что делает консоль — деплой приложений, серверы, базы, домены и мониторинг — доступно через REST API /api/v1 с авторизацией по токену." },
+        { q: "Где взять токен доступа к API?", a: "Токен выдаётся в консоли: войдите в панель и откройте проект — там доступен токен доступа и все ресурсы." },
+        { q: "На каком языке документация?", a: "Пошаговые руководства пока доступны на английском; сам лендинг — на русском и английском." },
+      ],
     },
     en: {
       title: "API & developers",
       subtitle: "Everything the console does — app deploys, servers, databases, domains, monitoring — is available over a token-authenticated REST API.",
+      buildTitle: "Build on the API",
       apiTitle: "REST API",
       apiDesc: "Every console resource is available via /api/v1 with token auth.",
       consoleTitle: "Open console",
@@ -66,13 +75,23 @@ export default function DeveloperPage() {
       guidesTitle: "Guides",
       guidesSubtitle: "Step-by-step how-tos for the console — from your first deploy to billing and roles.",
       guidesNote: "",
+      faqTitle: "API and developer FAQ",
+      faq: [
+        { q: "Does DADA Cloud have a REST API?", a: "Yes. Everything the console does — app deploys, servers, databases, domains and monitoring — is available over the /api/v1 REST API with token auth." },
+        { q: "Where do I get an API token?", a: "In the console: log in, open a project, and your access token and all resources are there." },
+        { q: "What language are the docs in?", a: "The step-by-step guides are currently in English; the marketing site itself is available in Russian and English." },
+      ],
     },
   }[locale];
 
   return (
     <>
+      <FaqJsonLd path="/developer" items={copy.faq} />
       <ProductHero title={copy.title} subtitle={copy.subtitle} />
       <section className="bg-white py-20">
+        <div className="mx-auto max-w-5xl px-4 sm:px-6 lg:px-8">
+          <h2 className="mb-8 text-3xl font-bold tracking-tight text-slate-900">{copy.buildTitle}</h2>
+        </div>
         <div className="mx-auto grid max-w-5xl gap-6 px-4 sm:px-6 md:grid-cols-2 lg:px-8">
           <div className="rounded-xl border border-slate-200 bg-white p-7">
             <h3 className="text-lg font-semibold text-slate-900">{copy.apiTitle}</h3>
@@ -117,6 +136,7 @@ export default function DeveloperPage() {
           </div>
         </div>
       </section>
+      <FaqList title={copy.faqTitle} items={copy.faq} />
       <CtaBand />
     </>
   );

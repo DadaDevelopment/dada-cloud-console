@@ -62,13 +62,14 @@ Each resource lists: **Insight** (the discovery/usability gap to fix), **JTBD**,
 
 ## 3. Databases (managed Postgres) — 🟡 landing
 
-- **Insight:** backups configure at create time but there is **no restore from the UI** — the
-  classic trust killer ("I back up but can't recover"). Postgres only, though marketing promises
-  MySQL/Redis. Managed MySQL/Redis actually live only on VMs (ServiceDatabase); the user won't
-  guess that. No delete, no connection metrics.
+- **Insight:** backups, **restore, and delete now ship** on the database detail page (Kanister-driven
+  restore with a confirm-name gate; commits f4d35b4 / 9369e07 / faaa84f from the parallel DB
+  session) — the earlier "back up but can't recover" gap is closed. Remaining gaps: Postgres only
+  (marketing still implies MySQL/Redis, which actually live only on VMs via ServiceDatabase — the
+  user won't guess that) and no connection metrics.
 - **JTBD:** hands-off Postgres; `DATABASE_URL` injected into the service automatically.
-- **Docs:** create Postgres + attach to an app; backups (schedule/retention) — and honestly, that
-  restore is via support for now; managed DB on a VM (ServiceDatabase, DSN).
+- **Docs:** create Postgres + attach to an app; backups (schedule/retention) + restore + delete
+  from the detail page; managed DB on a VM (ServiceDatabase, DSN).
 - **Landing:** 🟡 feature-block inside the core path (DB next to deploy), but **do not brag about
   PITR/restore** until they exist.
 - **UI:** add a restore button OR drop the backup promise from the card. Link "managed
@@ -210,9 +211,9 @@ Location: `frontend/content/docs/` (served publicly at https://cloud.dada-tuda.r
 1. ✅ Promote **App Servers** into the primary nav *(done in `lib/resources.ts`)*.
 2. ✅ Explicit deploy paths — the deploy chooser now offers GitHub / Docker image / Compose
    (it already had 2; Compose added).
-3. ✅ Databases — no restore/delete exists in the backend, so the backup/recovery badge was
-   **removed** (don't imply recoverability we can't deliver). Restore/delete is a backend gap
-   (see below), not a UI fix.
+3. ✅ Databases — backup/recovery badge removed from the **list** card (ambiguous there). Restore
+   and delete now live on the **detail** page, shipped by the parallel DB session (backend +
+   UI, commits f4d35b4 / 9369e07 / faaa84f) — no longer a gap.
 4. 🟡 Storage — bucket cards are now clickable → a detail view with metadata + an `aws-cli`
    example. Endpoint/access-key/secret are only shown *if* the API returns them; today it
    doesn't (backend gap below).
@@ -248,8 +249,9 @@ The subagents read the actual code; these correct earlier assumptions in this do
 
 These are not UI bugs — the API doesn't support them yet:
 
-1. **Database restore + delete** — backend has only `GET`/`POST` for databases. Backups run but
-   there is no restore path and no delete. Highest-trust item.
+1. ~~Database restore + delete~~ — **SHIPPED** by the parallel DB session: `/restore` + `/backups`
+   backend routes, `databasesApi.restore()`, and detail-page UI (restore modal with confirm-name,
+   delete modal, backups list). Commits f4d35b4 / 9369e07 / faaa84f.
 2. **Storage credentials in the API** — bucket create/list return only
    `bucket_name/region/public/app_ref`; no S3 endpoint/access-key/secret. Until the API returns
    them, a bucket can't actually be used from the panel.

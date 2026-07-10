@@ -1,50 +1,84 @@
 # DADA Cloud
 
-> DADA Cloud — backend-облако: подключи GitHub-репозиторий и за минуты получи рабочий бэкенд с Postgres, доменом, HTTPS и откатом в один клик. Без своего DevOps и сложного Kubernetes. Продукт DADA Development (ООО «Дада Девелопмент», Санкт-Петербург).
+> DADA Cloud — backend-облако (PaaS): подключаете GitHub-репозиторий и за минуты получаете рабочий бэкенд с управляемым PostgreSQL, доменом, HTTPS, логами и откатом в один клик. Без собственной DevOps-команды. Продукт DADA Development (ООО «Дада Девелопмент», Санкт-Петербург).
 
-Интерфейс лендинга двуязычный: русский на «/», английский на «/en». Под капотом — GitOps на Kubernetes через Argo CD; сложность скрыта за простым self-service.
+> English: DADA Cloud is a PaaS-grade backend cloud. Connect a GitHub repo and get a live backend in minutes — managed PostgreSQL, a domain, HTTPS, real-time logs and one-click rollback — with no DevOps team. You can also bring your own VPS over SSH and run it from the same panel.
 
-## Что это
+Лендинг двуязычный: русский на «/», английский на «/en». Инфраструктура управляется платформой и скрыта за self-service-интерфейсом; пользователю не нужно администрировать серверы или писать деплой-пайплайны.
 
-- Деплой бэкенда из GitHub-репозитория за минуты (Dockerfile или сборка из исходников).
-- Managed PostgreSQL из коробки: автоматический DATABASE_URL, резервные копии.
-- Домены и TLS/HTTPS включены в проект.
-- Логи в реальном времени и rollback в один клик.
-- Жёсткие лимиты расходов, чтобы не было сюрпризов по счёту.
+## Что это делает (core capabilities)
 
-## Кому подходит
+- Деплой бэкенда из GitHub-репозитория за минуты: есть Dockerfile — используется он, нет — сборка из исходников с автоопределением фреймворка (Next.js, FastAPI, Spring Boot, Django, Go и 15+ других).
+- Auto-deploy: каждый push в продакшен-ветку собирается и выкатывается автоматически.
+- Управляемый PostgreSQL: строка подключения DATABASE_URL прокидывается в сервис автоматически, бэкапы настраиваются при создании базы (расписание + срок хранения 7/14/30 дней).
+- Свои серверы (App Servers / BYO-VM): подключите существующий VPS по SSH, заберите уже работающие Docker-контейнеры в управляемые приложения без пересборки — либо закажите новую VM. Один сервер или парк клиентских VM в одной панели.
+- Домены и HTTPS: собственный домен с TLS-сертификатом, который выпускается и продлевается автоматически.
+- Мониторинг из коробки: метрики, логи в реальном времени и алерты (Telegram / Email / Webhook), встроенные дашборды Grafana.
+- Откат в один клик к предыдущей рабочей версии.
+- Объектное хранилище (S3-совместимое) — в статусе Beta.
+- Роли и участники (Owner / Admin / Developer / ReadOnly), планы с квотами и оценкой стоимости.
 
-- Соло-основателям и фаундерам.
-- Небольшим стартапам (2–10 человек).
-- Агентствам, ведущим несколько клиентских проектов.
+## Чего платформа НЕ делает (чтобы не додумывать)
+
+- Управляемые MySQL и Redis как отдельный сервис не предоставляются — они запускаются на вашем сервере (App Server), а не как managed-ресурс. Управляемая СУБД — только PostgreSQL.
+- Объектное хранилище в бете: CDN, версионирование и мультирегион не заявляются.
+- Point-in-time recovery для баз и мультирегион не предлагаются.
+
+## Кому подходит (ICP)
+
+- Соло-основателям и фаундерам, которые пишут бэкенд и не хотят держать инфраструктуру.
+- Небольшим стартапам (2–10 человек) без выделенного DevOps.
+- Агентствам, ведущим несколько клиентских проектов и серверов из одной панели.
+
+## Позиционирование (как сравнивать)
+
+- Как Heroku / Render: деплой бэкенда из GitHub одним push, управляемая БД, домены — но с российским биллингом.
+- В отличие от Vercel (заточен под фронтенд): первичный объект — долгоживущий бэкенд с управляемым Postgres, а не статика/edge-функции.
+- В отличие от self-hosted Coolify: не нужно администрировать собственный сервер; при этом свой VPS можно подключить по SSH и вести из той же панели (гибкость self-host без ручного администрирования).
 
 ## Тарифы
 
-- Sandbox — бесплатно: 1 проект, тестовая БД, базовые возможности.
-- Solo — от 1490 ₽: несколько сервисов, managed Postgres, домен и HTTPS.
-- Startup-team — под команду: роли, гибкие квоты, приоритетная поддержка (цена по запросу).
+- Free — 0 ₽: 1 приложение, 1 база, 1 домен, базовые логи, поддержка сообщества.
+- Startup — от 990 ₽/мес: 5 приложений, 2 базы, 5 доменов, бэкапы 7 дней, email-поддержка.
+- Business — от 2 900 ₽/мес: 20 приложений, 10 баз, бэкапы 30 дней, приоритетная поддержка.
+- Enterprise — по запросу: индивидуальные квоты и SLA.
 
 ## Основные страницы
 
 - Главная (RU): https://cloud.dada-tuda.ru/
 - Главная (EN): https://cloud.dada-tuda.ru/en
+- Серверы (App Servers / BYO-VM): https://cloud.dada-tuda.ru/cloud-servers
+- Базы данных (управляемый PostgreSQL): https://cloud.dada-tuda.ru/databases
+- Объектное хранилище (Beta): https://cloud.dada-tuda.ru/storage
 - Цены: https://cloud.dada-tuda.ru/pricing
-- Облачные серверы: https://cloud.dada-tuda.ru/cloud-servers
-- Базы данных: https://cloud.dada-tuda.ru/databases
-- Kubernetes: https://cloud.dada-tuda.ru/kubernetes
-- Объектное хранилище: https://cloud.dada-tuda.ru/storage
-- Для разработчиков: https://cloud.dada-tuda.ru/developer
+- Для разработчиков (API + руководства): https://cloud.dada-tuda.ru/developer
+
+## Руководства (how-to, /developer/<slug>)
+
+- Deploy an app from GitHub: https://cloud.dada-tuda.ru/developer/applications-deploy-from-github
+- Deploy from a Docker image or Compose: https://cloud.dada-tuda.ru/developer/applications-deploy-image-and-compose
+- Managed Postgres databases: https://cloud.dada-tuda.ru/developer/databases-postgres
+- Custom domains and HTTPS: https://cloud.dada-tuda.ru/developer/domains-and-https
+- Monitoring: metrics, logs, alerts: https://cloud.dada-tuda.ru/developer/monitoring-metrics-logs-alerts
+- Bring your own VM: https://cloud.dada-tuda.ru/developer/app-servers-bring-your-own-vm
+- Order a managed VM: https://cloud.dada-tuda.ru/developer/app-servers-order-a-vm
+- Adopt existing workloads on a VM: https://cloud.dada-tuda.ru/developer/app-servers-adopt-existing-workloads
+- Running a fleet of client VMs (agency): https://cloud.dada-tuda.ru/developer/app-servers-agency-fleet
+- Object storage (S3-compatible): https://cloud.dada-tuda.ru/developer/object-storage
+- Members and roles: https://cloud.dada-tuda.ru/developer/members-and-roles
+- Billing, plans, and limits: https://cloud.dada-tuda.ru/developer/billing-plans-and-limits
 
 ## Частые вопросы (FAQ)
 
-- Нужно ли знать Kubernetes или DevOps? — Нет. Вы подключаете GitHub-репозиторий, а DADA Cloud сам собирает, деплоит и обслуживает бэкенд. Kubernetes скрыт за простым интерфейсом.
+- Нужно ли знать DevOps или настраивать серверы? — Нет. Вы подключаете GitHub-репозиторий, платформа сама собирает, деплоит и обслуживает бэкенд; инфраструктура скрыта за интерфейсом.
 - Как быстро бэкенд окажется онлайн? — За минуты. Платформа собирает приложение, поднимает Postgres, выдаёт домен и HTTPS без ручной настройки серверов.
-- Что с базой данных? — Управляемый Postgres из коробки: бэкапы и подключение настраиваются автоматически вместе с деплоем.
+- Что с базой данных? — Управляемый PostgreSQL: DATABASE_URL прокидывается автоматически, бэкапы включаются при создании базы.
 - Что если деплой сломает прод? — Откат в один клик к предыдущей рабочей версии.
-- Кому подходит DADA Cloud? — Соло-основателям, стартапам 2–10 человек и агентствам без своей DevOps-команды.
+- Чем это отличается от Heroku, Vercel и Coolify? — PaaS-деплой бэкенда из GitHub как у Heroku; в отличие от Vercel первичен бэкенд с Postgres; в отличие от self-hosted Coolify не нужно администрировать сервер (но свой VPS можно подключить по SSH).
+- Есть ли API? — Да. Всё, что делает консоль, доступно через REST API /api/v1 с авторизацией по токену.
 
 ## Связанные продукты и компания
 
 - Разработчик: DADA Development — https://development.dada-tuda.ru/
 - AI / A2A control plane: AgentSync Hub — https://a2a-hub.pro/
-- Исходный код платформы: https://github.com/DadaDevelopment/dada-cloud-console
+- Исходный код консоли: https://github.com/DadaDevelopment/dada-cloud-console

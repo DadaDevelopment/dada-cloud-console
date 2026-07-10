@@ -3,6 +3,7 @@ import { LangProvider } from "@/lib/i18n/context";
 import { MarketingHeader } from "@/components/marketing/header";
 import { MarketingFooter } from "@/components/marketing/footer";
 import { BreadcrumbJsonLd } from "@/components/marketing/breadcrumb-jsonld";
+import { SiteJsonLd } from "@/components/marketing/site-jsonld";
 
 const SITE_URL = "https://cloud.dada-tuda.ru";
 const TITLE = "DADA Cloud — бэкенд-облако: задеплой бэкенд из GitHub за минуты";
@@ -18,9 +19,7 @@ export const metadata: Metadata = {
   description: DESCRIPTION,
   applicationName: "DADA Cloud",
   alternates: {
-    // No blanket canonical here: this layout wraps every marketing route, so a
-    // hardcoded "/" would wrongly canonicalize /pricing etc. to the home page.
-    // Each URL self-canonicalizes; the /en subtree sets its own canonical.
+    canonical: "/",
     languages: {
       "ru-RU": "/",
       "en-US": "/en",
@@ -63,6 +62,7 @@ export default function MarketingLayout({ children }: { children: React.ReactNod
   return (
     <LangProvider>
       <div className="flex min-h-screen flex-col bg-white">
+        <SiteJsonLd />
         <BreadcrumbJsonLd />
         <MarketingHeader />
         <main className="flex-1">{children}</main>

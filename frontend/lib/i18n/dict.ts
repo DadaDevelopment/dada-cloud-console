@@ -7,7 +7,6 @@ export type Locale = "ru" | "en";
 export const LOCALES: Locale[] = ["ru", "en"];
 export const DEFAULT_LOCALE: Locale = "ru";
 
-type Service = { key: string; title: string; desc: string; href: string; badge?: string };
 type Feature = { title: string; desc: string };
 type Faq = { q: string; a: string };
 type Plan = {
@@ -89,6 +88,7 @@ export interface Dict {
   servers: {
     heroTitle: string;
     heroSubtitle: string;
+    featuresTitle: string;
     features: Feature[];
     faqTitle: string;
     faq: Faq[];
@@ -97,14 +97,20 @@ export interface Dict {
     heroTitle: string;
     heroSubtitle: string;
     engines: string[];
+    featuresTitle: string;
     features: Feature[];
     note: string;
     noteLinkLabel: string;
+    faqTitle: string;
+    faq: Faq[];
   };
   storage: {
     heroTitle: string;
     heroSubtitle: string;
+    featuresTitle: string;
     features: Feature[];
+    faqTitle: string;
+    faq: Faq[];
   };
   pricing: {
     heroTitle: string;
@@ -198,7 +204,7 @@ const ru: Dict = {
       { quote: "Домены и базы клиентов больше не размазаны по десяти панелям. Всё в одном месте, выдыхаю.", author: "Агентство · скоро" },
     ],
     pricingTitle: "Прозрачные планы",
-    pricingSubtitle: "Без сюрпризов в счёте. Hard-лимит и оценка цены до деплоя.",
+    pricingSubtitle: "Без сюрпризов в счёте: понятные квоты плана и оценка стоимости до деплоя.",
     pricingTiers: [
       { name: "Free", price: "0 ₽", tagline: "Попробовать и пет-проекты", bullets: ["1 приложение", "1 база данных", "Деплой из GitHub", "Базовые логи"] },
       { name: "Startup", price: "990 ₽/мес", tagline: "Один разработчик в продакшене", bullets: ["5 приложений", "2 базы данных", "5 доменов", "Бэкапы 7 дней"], highlight: true },
@@ -209,7 +215,8 @@ const ru: Dict = {
     faq: [
       { q: "У меня уже есть VPS", a: "VPS вы тащите сами: обновления ОС, бэкапы, деплой-скрипты, ночные SSH-сессии когда что-то легло. Подключите его к платформе по SSH одним разом — мы поставим Docker и агента, а контейнеры, которые на нём уже работают, можно забрать в управляемые приложения без пересборки. Переносить данные никуда не нужно." },
       { q: "У нас есть GitHub Actions", a: "Actions соберут артефакт, и на этом всё. Дальше его надо куда-то выкатить, поднять базу, прицепить домен, придумать откат. Вот этот кусок от push до живого HTTPS-сервиса мы и берём на себя. Свой CD-пайплайн писать не придётся." },
-      { q: "Мы ещё маленькие", a: "Тем более ваш вариант. Один проект вместо ручной инфраструктуры, которую в таком размере держать нечем. Sandbox бесплатный, hard-лимит не даст счёту улететь, а вырастете — переезжать не надо." },
+      { q: "Мы ещё маленькие", a: "Тем более ваш вариант. Один проект вместо ручной инфраструктуры, которую в таком размере держать нечем. Sandbox бесплатный, квоты плана держат счёт под контролем, а вырастете — переезжать не надо." },
+      { q: "Чем это отличается от Heroku, Vercel и Coolify?", a: "DADA Cloud — backend-облако уровня PaaS: как Heroku или Render, вы деплоите бэкенд из GitHub одним push. В отличие от Vercel, заточенного под фронтенд, здесь первичен долгоживущий бэкенд с управляемым Postgres. А в отличие от self-hosted Coolify, свой сервер администрировать не нужно — хотя существующий VPS можно подключить по SSH и вести из той же панели." },
     ],
     ctaTitle: "Поднимите backend из GitHub сегодня",
     ctaSubtitle: "Подключение репозитория занимает минуту. Платите только за то, что реально потребляете.",
@@ -217,7 +224,8 @@ const ru: Dict = {
   servers: {
     heroTitle: "Свой сервер — под управлением. Или закажите новый",
     heroSubtitle:
-      "SSH-доступ — и через пару минут сервер под управлением: деплой, логи и метрики видно из панели, а контейнеры, которые там уже крутятся, можно забрать без пересборки. Не хотите переносить свой — закажем новую VM.",
+      "SSH-доступ — и через пару минут сервер под управлением: деплой, логи и метрики видно из панели, а контейнеры, которые там уже крутятся, можно забрать без пересборки. Не хотите переносить свой — закажем новую VM. Self-host гибкость Coolify, но без администрирования сервера вручную.",
+    featuresTitle: "Что вы получаете с App Servers",
     features: [
       { title: "Подключите свой сервер по SSH", desc: "Один SSH-заход, чтобы поставить Docker и лёгкого edge-агента. Ключ используется один раз и нигде не сохраняется." },
       { title: "Заберите то, что уже работает", desc: "Discovery находит контейнеры, уже запущенные на сервере, и предлагает импортировать их в управляемые приложения — без остановки и пересборки, тома с данными сохраняются." },
@@ -239,6 +247,7 @@ const ru: Dict = {
     heroSubtitle:
       "Создаётся рядом с приложением, DATABASE_URL прилетает в сервис сам. Бэкапы настраиваются при создании, мониторинг и обновления — на нас.",
     engines: ["PostgreSQL"],
+    featuresTitle: "Что входит в управляемый Postgres",
     features: [
       { title: "Бэкапы по расписанию", desc: "Резервное копирование настраивается при создании базы, расписание видно в панели." },
       { title: "Мониторинг производительности", desc: "Метрики подключений, запросов и нагрузки в реальном времени." },
@@ -247,14 +256,28 @@ const ru: Dict = {
     ],
     note: "Нужны MySQL или Redis? Managed Postgres — здесь, MySQL и Redis разворачиваются на своём сервере.",
     noteLinkLabel: "Серверы (App Servers) →",
+    faqTitle: "Частые вопросы о базах данных",
+    faq: [
+      { q: "Какие СУБД доступны как управляемые?", a: "Управляемый вариант — PostgreSQL. Он создаётся рядом с приложением, а строку подключения DATABASE_URL платформа прокидывает в сервис автоматически. MySQL и Redis запускаются на вашем сервере (App Server), а не как managed-ресурс." },
+      { q: "Нужно ли собирать строку подключения вручную?", a: "Нет. При создании базы вы привязываете её к приложению, и DATABASE_URL появляется в переменных окружения сервиса сам — DSN руками собирать не нужно." },
+      { q: "Есть ли резервные копии?", a: "Да. Бэкапы включаются при создании базы: вы выбираете расписание (почасовое или ежедневное) и срок хранения — 7, 14 или 30 дней." },
+      { q: "Можно ли менять ресурсы базы без миграции?", a: "Да. Ресурсы инстанса меняются без ручного переноса данных — приложение продолжает использовать ту же строку подключения." },
+    ],
   },
   storage: {
     heroTitle: "Объектное хранилище S3",
     heroSubtitle:
       "S3-совместимое хранилище для бэкапов, медиа и статики. Сейчас в статусе Beta — часть возможностей ещё дорабатывается.",
+    featuresTitle: "Возможности хранилища",
     features: [
       { title: "S3-совместимый API", desc: "Работает с привычными SDK и инструментами (aws-cli, s3cmd и др.)." },
       { title: "Оплата за объём", desc: "Платите только за реально занятое место и трафик." },
+    ],
+    faqTitle: "Вопросы об объектном хранилище",
+    faq: [
+      { q: "В каком статусе сейчас объектное хранилище?", a: "В статусе Beta. Создание S3-совместимых бакетов работает, часть возможностей ещё дорабатывается. Не закладывайте его в критичные сценарии, пока хранилище не вышло из беты." },
+      { q: "С какими инструментами оно совместимо?", a: "API S3-совместимый, поэтому хранилище работает с привычными инструментами — aws-cli, s3cmd и любыми SDK, которые умеют в S3." },
+      { q: "Как считается оплата?", a: "По объёму: вы платите за реально занятое место и трафик, а не за фиксированный тариф диска." },
     ],
   },
   pricing: {
@@ -391,7 +414,7 @@ const ru: Dict = {
     },
   },
   footer: {
-    tagline: "Облачная платформа на основе GitOps.",
+    tagline: "Backend-облако: из GitHub в прод за минуты.",
     productsTitle: "Продукты",
     products: [
       { label: "Серверы", href: "/cloud-servers" },
@@ -478,7 +501,7 @@ const en: Dict = {
       { quote: "Client domains and databases aren't smeared across ten panels anymore. One place, I can breathe.", author: "Agency · soon" },
     ],
     pricingTitle: "Transparent plans",
-    pricingSubtitle: "No billing surprises. Hard limit and a price estimate before deploy.",
+    pricingSubtitle: "No billing surprises: clear plan quotas and a cost estimate before you deploy.",
     pricingTiers: [
       { name: "Free", price: "$0", tagline: "Trials and pet projects", bullets: ["1 application", "1 database", "Deploy from GitHub", "Basic logs"] },
       { name: "Startup", price: "$12/mo", tagline: "Solo developer in production", bullets: ["5 applications", "2 databases", "5 domains", "7-day backups"], highlight: true },
@@ -489,7 +512,8 @@ const en: Dict = {
     faq: [
       { q: "I already have a VPS", a: "A VPS is on you: OS updates, backups, deploy scripts, the late-night SSH session when something falls over. Connect it to the platform over SSH once — we install Docker and an agent, and containers already running on it can be adopted into managed applications with no rebuild. Nothing to migrate." },
       { q: "We have GitHub Actions", a: "Actions build an artifact and that's where they stop. You still have to ship it somewhere, stand up a database, attach a domain, figure out rollback. That stretch from push to a live HTTPS service is the part we take on. No CD pipeline of your own to write." },
-      { q: "We're still small", a: "All the more reason. One project instead of manual infrastructure you've got no one to run at this size. Sandbox is free, a hard limit won't let the bill run off, and when you grow there's no migration to do." },
+      { q: "We're still small", a: "All the more reason. One project instead of manual infrastructure you've got no one to run at this size. Sandbox is free, plan quotas keep the bill in check, and when you grow there's no migration to do." },
+      { q: "How is this different from Heroku, Vercel and Coolify?", a: "DADA Cloud is a PaaS-grade backend cloud: like Heroku or Render, you deploy a backend from GitHub with a single push. Unlike Vercel, which is frontend-first, the long-running backend with managed Postgres is the primary object here. And unlike self-hosted Coolify, you don't administer your own server — though you can connect an existing VPS over SSH and run it from the same panel." },
     ],
     ctaTitle: "Get your backend live from GitHub today",
     ctaSubtitle: "Connecting a repo takes a minute. You only pay for what you actually use.",
@@ -497,7 +521,8 @@ const en: Dict = {
   servers: {
     heroTitle: "Your server, under management. Or order a new one",
     heroSubtitle:
-      "Give us SSH access and in a couple of minutes the server is under management: deploys, logs and metrics show up in the panel, and containers already running there import without a rebuild. Don't want to migrate your own — we'll provision a new VM instead.",
+      "Give us SSH access and in a couple of minutes the server is under management: deploys, logs and metrics show up in the panel, and containers already running there import without a rebuild. Don't want to migrate your own — we'll provision a new VM instead. The self-host flexibility of Coolify, without administering the server by hand.",
+    featuresTitle: "What you get with App Servers",
     features: [
       { title: "Connect your server over SSH", desc: "One SSH session installs Docker and a lightweight edge agent. The key is used once and is never stored." },
       { title: "Adopt what's already running", desc: "Discovery finds containers already running on the server and offers to import them as managed applications — no downtime, no rebuild, data volumes are preserved." },
@@ -519,6 +544,7 @@ const en: Dict = {
     heroSubtitle:
       "Created next to your application, with DATABASE_URL wired in automatically. Backups are configured at creation time; monitoring and upgrades are on us.",
     engines: ["PostgreSQL"],
+    featuresTitle: "What managed Postgres includes",
     features: [
       { title: "Scheduled backups", desc: "Backup schedule is set when you create the database and shown right in the panel." },
       { title: "Performance monitoring", desc: "Connection, query and load metrics in real time." },
@@ -527,14 +553,28 @@ const en: Dict = {
     ],
     note: "Need MySQL or Redis? Managed Postgres lives here — MySQL and Redis run on your own server.",
     noteLinkLabel: "App Servers →",
+    faqTitle: "Database FAQ",
+    faq: [
+      { q: "Which databases are available as managed?", a: "The managed engine is PostgreSQL. It's created next to your application and the DATABASE_URL connection string is injected into the service automatically. MySQL and Redis run on your own server (App Server), not as a managed resource." },
+      { q: "Do I have to build the connection string by hand?", a: "No. When you create the database you bind it to an application, and DATABASE_URL shows up in the service's environment variables on its own — no DSN to assemble manually." },
+      { q: "Are there backups?", a: "Yes. Backups are enabled when you create the database: you pick a schedule (hourly or daily) and a retention window — 7, 14 or 30 days." },
+      { q: "Can I resize the database without a migration?", a: "Yes. Instance resources change without manual data migration — the app keeps using the same connection string." },
+    ],
   },
   storage: {
     heroTitle: "S3 object storage",
     heroSubtitle:
       "S3-compatible storage for backups, media and static assets. Currently in Beta — some capabilities are still being finished.",
+    featuresTitle: "Storage capabilities",
     features: [
       { title: "S3-compatible API", desc: "Works with familiar SDKs and tools (aws-cli, s3cmd, etc.)." },
       { title: "Pay for what you store", desc: "Pay only for space actually used and traffic." },
+    ],
+    faqTitle: "Object storage FAQ",
+    faq: [
+      { q: "What state is object storage in?", a: "It's in Beta. Creating S3-compatible buckets works; some capabilities are still being finished. Don't build critical workflows on it until it's out of beta." },
+      { q: "What tools is it compatible with?", a: "The API is S3-compatible, so it works with familiar tools — aws-cli, s3cmd and any SDK that speaks S3." },
+      { q: "How is it billed?", a: "By volume: you pay for the space actually used and traffic, not a fixed disk tier." },
     ],
   },
   pricing: {
@@ -671,7 +711,7 @@ const en: Dict = {
     },
   },
   footer: {
-    tagline: "A GitOps-based cloud platform.",
+    tagline: "Backend cloud: from GitHub to production in minutes.",
     productsTitle: "Products",
     products: [
       { label: "Servers", href: "/cloud-servers" },
