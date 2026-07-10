@@ -86,9 +86,12 @@ Each resource lists: **Insight** (the discovery/usability gap to fix), **JTBD**,
   9369e07; verified against live composition + RBAC, not yet exercised with a real console bucket
   since none exist in prod). The reveal now also honors a **git-adopted** bucket's declared
   `spec.connectionSecret` (from its snapshot, guarded to `*-s3-credentials` names) instead of
-  assuming the console convention — earlier it only worked for console-created buckets.
-  Note: git-adoption itself only covers resources in the console's own gitops tree, not foreign
-  cluster/argo-infra XRs (so the infra mimir/opensearch buckets are not adopted). Remaining gaps:
+  assuming the console convention. Note: the console indexes buckets from BOTH sources — the git
+  passthrough (`resources.values.yaml`) AND live-cluster discovery (`gitops-agent worker/discovery.go`
+  lists every S3Bucket XR each tick with resolved values), so helm-chart-defined infra buckets
+  (mimir/opensearch) ARE indexed and visible (verified in `resource_snapshots`). Reveal for those
+  still 503s because their connection secret lives in the app namespace (monitoring/opensearch) and
+  the backend RBAC only reads crossplane-system — a deliberate scope, not a bug. Remaining gaps:
   ru1 only (no region picker); marketing still implies
   CDN + versioning the product doesn't have; no delete.
 - **JTBD:** S3 for media / static / backups.
