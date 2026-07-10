@@ -75,17 +75,22 @@ Each resource lists: **Insight** (the discovery/usability gap to fix), **JTBD**,
 - **UI:** add a restore button OR drop the backup promise from the card. Link "managed
   MySQL/Redis → on a VM". Add delete.
 
-## 4. Object Storage (S3 / Beget) — 🔴 landing
+## 4. Object Storage (S3 / Beget) — 🟡 landing
 
-- **Insight:** a bucket gets created but is **useless afterward**: no detail page, no
-  endpoint/access-key/secret shown. Cards are dead (not clickable). ru1 only. Marketing promises
-  CDN + versioning that the UI doesn't have.
+- **Insight:** now usable end-to-end (was the weakest resource). Bucket cards are clickable → a
+  detail page that **reveals live endpoint + access key + secret key on demand** and shows an
+  `aws-cli` example. The reveal is real: backend `GetS3BucketCredentials`
+  (`/s3buckets/:name/credentials?reveal=true`, write-gated + audited) reads the Crossplane
+  connection secret; the `s3bucket-beget-terraform` composition defaults to publishing
+  `<name>-s3-credentials` into `crossplane-system`, exactly where the backend reads (shipped
+  9369e07; verified against live composition + RBAC, not yet exercised with a real console bucket
+  since none exist in prod). Remaining gaps: ru1 only (no region picker); marketing still implies
+  CDN + versioning the product doesn't have; no delete.
 - **JTBD:** S3 for media / static / backups.
-- **Docs:** create a bucket + get S3 keys; attach to an app; FTP/SFTP access.
-- **Landing:** 🔴 not until finished — a promise without delivery hurts trust. Mark the storage
-  marketing section beta / remove it.
-- **UI:** detail view with endpoint + keys + an `aws-cli` example (otherwise the feature is
-  incomplete). Make cards links. Add delete.
+- **Docs:** create a bucket + reveal S3 keys on the detail page; attach to an app; FTP/SFTP access.
+- **Landing:** 🟡 now deliverable (create → reveal keys → use), but keep the CDN/versioning
+  over-promise off marketing.
+- **UI:** done — clickable cards + detail with reveal + aws-cli. Still add delete + a region picker.
 
 ## 5. Domains — 🟢 landing
 
@@ -252,11 +257,13 @@ These are not UI bugs — the API doesn't support them yet:
 1. ~~Database restore + delete~~ — **SHIPPED** by the parallel DB session: `/restore` + `/backups`
    backend routes, `databasesApi.restore()`, and detail-page UI (restore modal with confirm-name,
    delete modal, backups list). Commits f4d35b4 / 9369e07 / faaa84f.
-2. **Storage credentials in the API** — bucket create/list return only
-   `bucket_name/region/public/app_ref`; no S3 endpoint/access-key/secret. Until the API returns
-   them, a bucket can't actually be used from the panel.
+2. ~~Storage credentials in the API~~ — **SHIPPED** (9369e07): reveal endpoint
+   `GET /s3buckets/:name/credentials?reveal=true` reads the Crossplane connection secret
+   (`<name>-s3-credentials` in crossplane-system, matching the composition default); frontend
+   detail page reveals endpoint/access-key/secret on demand. Verified against live
+   composition/RBAC; not yet smoke-tested with a real console bucket (none exist in prod).
 3. **In-app billing/upgrade + price-before-deploy gate** — upgrade is an external link; no
-   payment flow, no hard-limit enforcement.
+   payment flow, no hard-limit enforcement. The only remaining backend gap of the three.
 
 ## Marketing cleanup shipped
 
