@@ -35,7 +35,14 @@ type S3Credentials struct {
 // clear error when the access path is not configured (no in-cluster client) so
 // the reveal handler surfaces it as a failed dependency instead of guessing.
 type S3CredentialsResolver interface {
+	// Resolve reads the connection secret at the composition-default location
+	// (<resourceName>-s3-credentials in the configured namespace).
 	Resolve(ctx context.Context, resourceName string) (S3Credentials, error)
+	// ResolveRef reads an explicitly-declared connection secret. An empty
+	// namespace falls back to the configured default. Used when an adopted
+	// bucket declares its own spec.connectionSecret instead of relying on the
+	// composition default.
+	ResolveRef(ctx context.Context, namespace, secretName string) (S3Credentials, error)
 }
 
 // clientsetS3CredentialsResolver reads connection secrets via the in-cluster
@@ -74,12 +81,22 @@ func NewS3CredentialsResolver(namespace string) S3CredentialsResolver {
 	return &clientsetS3CredentialsResolver{clientset: clientset, namespace: namespace}
 }
 
-// Resolve GETs the connection secret named "<resourceName>-s3-credentials" and
-// maps its Terraform-output keys to the console's credential view. A missing
-// secret (bucket still provisioning) returns ErrS3CredentialsNotReady.
+// Resolve GETs the connection secret named "<resourceName>-s3-credentials" in
+// the configured namespace — the composition default when the bucket does not
+// declare its own spec.connectionSecret.
 func (r *clientsetS3CredentialsResolver) Resolve(ctx context.Context, resourceName string) (S3Credentials, error) {
-	secretName := resourceName + "-s3-credentials"
-	sec, err := r.clientset.CoreV1().Secrets(r.namespace).Get(ctx, secretName, metav1.GetOptions{})
+	return r.ResolveRef(ctx, r.namespace, resourceName+"-s3-credentials")
+}
+
+// ResolveRef GETs the named connection secret (namespace defaults to the
+// resolver's configured namespace when empty) and maps its Terraform-output
+// keys to the console's credential view. A missing secret (bucket still
+// provisioning) returns ErrS3CredentialsNotReady.
+func (r *clientsetS3CredentialsResolver) ResolveRef(ctx context.Context, namespace, secretName string) (S3Credentials, error) {
+	if namespace == "" {
+		namespace = r.namespace
+	}
+	sec, err := r.clientset.CoreV1().Secrets(namespace).Get(ctx, secretName, metav1.GetOptions{})
 	if err != nil {
 		if apierrors.IsNotFound(err) {
 			return S3Credentials{}, ErrS3CredentialsNotReady
@@ -116,5 +133,9 @@ type unconfiguredS3CredentialsResolver struct {
 }
 
 func (u unconfiguredS3CredentialsResolver) Resolve(context.Context, string) (S3Credentials, error) {
+	return S3Credentials{}, fmt.Errorf("S3 credential access not configured: %w", u.err)
+}
+
+func (u unconfiguredS3CredentialsResolver) ResolveRef(context.Context, string, string) (S3Credentials, error) {
 	return S3Credentials{}, fmt.Errorf("S3 credential access not configured: %w", u.err)
 }

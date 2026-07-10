@@ -84,7 +84,12 @@ Each resource lists: **Insight** (the discovery/usability gap to fix), **JTBD**,
   connection secret; the `s3bucket-beget-terraform` composition defaults to publishing
   `<name>-s3-credentials` into `crossplane-system`, exactly where the backend reads (shipped
   9369e07; verified against live composition + RBAC, not yet exercised with a real console bucket
-  since none exist in prod). Remaining gaps: ru1 only (no region picker); marketing still implies
+  since none exist in prod). The reveal now also honors a **git-adopted** bucket's declared
+  `spec.connectionSecret` (from its snapshot, guarded to `*-s3-credentials` names) instead of
+  assuming the console convention — earlier it only worked for console-created buckets.
+  Note: git-adoption itself only covers resources in the console's own gitops tree, not foreign
+  cluster/argo-infra XRs (so the infra mimir/opensearch buckets are not adopted). Remaining gaps:
+  ru1 only (no region picker); marketing still implies
   CDN + versioning the product doesn't have; no delete.
 - **JTBD:** S3 for media / static / backups.
 - **Docs:** create a bucket + reveal S3 keys on the detail page; attach to an app; FTP/SFTP access.

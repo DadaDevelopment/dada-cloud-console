@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strings"
 
 	"github.com/dada-tuda/console/backend/internal/auth"
 	"github.com/dada-tuda/console/backend/internal/cloudtask"
@@ -271,21 +272,28 @@ func (h *Handler) GetS3BucketCredentials(c *gin.Context) {
 		return
 	}
 
-	var count int
+	var summaryRaw []byte
 	if err := h.pool.QueryRow(c.Request.Context(),
-		`SELECT COUNT(*) FROM resource_snapshots
+		`SELECT summary_json FROM resource_snapshots
 		 WHERE project_id = $1 AND environment_id = $2 AND kind = 'S3Bucket' AND name = $3`,
 		projectID, envID, name,
-	).Scan(&count); err != nil {
+	).Scan(&summaryRaw); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			respondNotFound(c)
+			return
+		}
 		respondError(c, http.StatusInternalServerError, "failed to check bucket existence")
 		return
 	}
-	if count == 0 {
-		respondNotFound(c)
-		return
-	}
 
-	creds, err := h.s3creds.Resolve(c.Request.Context(), name)
+	ns, secretName := declaredS3ConnectionSecret(summaryRaw)
+	var creds cloudtask.S3Credentials
+	var err error
+	if secretName != "" {
+		creds, err = h.s3creds.ResolveRef(c.Request.Context(), ns, secretName)
+	} else {
+		creds, err = h.s3creds.Resolve(c.Request.Context(), name)
+	}
 	if err != nil {
 		if errors.Is(err, cloudtask.ErrS3CredentialsNotReady) {
 			respondError(c, http.StatusNotFound, "credentials not available yet — the bucket is still provisioning")
@@ -310,4 +318,33 @@ func (h *Handler) GetS3BucketCredentials(c *gin.Context) {
 		"ftp_host":    creds.FtpHost,
 		"sftp_host":   creds.SftpHost,
 	})
+}
+
+// declaredS3ConnectionSecret extracts a bucket's explicitly-declared
+// spec.connectionSecret (namespace, name) from its resource-snapshot summary,
+// so a bucket adopted from git that publishes its credentials somewhere other
+// than the composition default can still be revealed. Returns empty strings
+// when the bucket relies on the default, so the caller falls back to the
+// <name>-s3-credentials convention. As a guard against pointing the reveal at
+// an unrelated secret, only names ending in "-s3-credentials" are honored.
+func declaredS3ConnectionSecret(summaryRaw []byte) (namespace, name string) {
+	if len(summaryRaw) == 0 {
+		return "", ""
+	}
+	var s struct {
+		Spec struct {
+			ConnectionSecret struct {
+				Name      string `json:"name"`
+				Namespace string `json:"namespace"`
+			} `json:"connectionSecret"`
+		} `json:"spec"`
+	}
+	if err := json.Unmarshal(summaryRaw, &s); err != nil {
+		return "", ""
+	}
+	ref := s.Spec.ConnectionSecret
+	if !strings.HasSuffix(ref.Name, "-s3-credentials") {
+		return "", ""
+	}
+	return ref.Namespace, ref.Name
 }
