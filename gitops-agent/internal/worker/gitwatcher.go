@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"regexp"
-	"strings"
 	"time"
 
 	"github.com/dada-tuda/console/gitops-agent/internal/config"
@@ -41,15 +40,6 @@ var namespacePolicyPathRe = regexp.MustCompile(`^clusters/[^/]+/namespace-polici
 // 1=project, 2=env, 3=app. Supersedes the former resources/templates/<kind>.yaml
 // layout.
 var resourcesValuesPathRe = regexp.MustCompile(`^clusters/[^/]+/projects/([^/]+)/environments/([^/]+)/apps/([^/]+)/resources\.values\.yaml$`)
-
-// chartTemplatePathRe matches a platform CR delivered by an app's helm chart
-// rather than the resources.values.yaml passthrough:
-// clusters/<cluster>/projects/<project>/environments/<env>/apps/<app>/chart/templates/<file>.yaml
-// Some platform apps (e.g. mimir, opensearch) provision their S3Bucket via a
-// chart template; indexing these too keeps the console's resource view in sync
-// with git regardless of which delivery style an app uses. Capture groups:
-// 1=project, 2=env, 3=app.
-var chartTemplatePathRe = regexp.MustCompile(`^clusters/[^/]+/projects/([^/]+)/environments/([^/]+)/apps/([^/]+)/chart/templates/[^/]+\.ya?ml$`)
 
 // ValuesNotifier is implemented by server.Hub to push live file updates to WS clients.
 type ValuesNotifier interface {
@@ -220,10 +210,6 @@ func (w *GitWatcher) processCommit(ctx context.Context, mgr *git.Manager, c git.
 		}
 		if m := resourcesValuesPathRe.FindStringSubmatch(filePath); m != nil {
 			w.syncResourcesValuesFile(ctx, mgr, filePath, m[1], m[2], c)
-			continue
-		}
-		if m := chartTemplatePathRe.FindStringSubmatch(filePath); m != nil {
-			w.syncChartTemplateFile(ctx, mgr, filePath, m[1], m[2], c)
 			continue
 		}
 		if m := valuesPathRe.FindStringSubmatch(filePath); m != nil {
@@ -444,98 +430,6 @@ func (w *GitWatcher) syncResourcesValuesFile(ctx context.Context, mgr *git.Manag
 	}
 
 	log.Info().Int("count", synced).Str("path", filePath).Msg("git-watcher: synced resources from git")
-}
-
-// chartCRKinds are the platform CR kinds the console indexes from a helm chart's
-// templates. Other rendered objects (Deployments, ConfigMaps, StatefulSets, ...)
-// are ignored so resource_snapshots stays a view of platform resources rather
-// than raw workloads.
-var chartCRKinds = map[string]bool{
-	"S3Bucket":          true,
-	"ServiceDatabaseV2": true,
-	"ServiceDatabase":   true,
-	"PublicApi":         true,
-	"AIModel":           true,
-}
-
-// helmActionRe matches an inline helm/sprig action so a chart template can be
-// parsed as YAML for indexing.
-var helmActionRe = regexp.MustCompile(`\{\{-?.*?-?\}\}`)
-
-const helmActionPlaceholder = "__templated__"
-
-// sanitizeHelmTemplate turns a helm chart template into parseable YAML for
-// indexing without rendering it: whole-line control-flow actions ({{- if }},
-// {{ range }}, {{ end }}) are dropped, and inline value actions become a
-// placeholder scalar. Only literal fields (kind, a literal metadata.name)
-// survive intact — which is all the resource index needs; a CR whose name is
-// itself templated is skipped downstream.
-func sanitizeHelmTemplate(content string) string {
-	lines := strings.Split(content, "\n")
-	out := make([]string, 0, len(lines))
-	for _, line := range lines {
-		if strings.HasPrefix(strings.TrimSpace(line), "{{") {
-			continue
-		}
-		out = append(out, helmActionRe.ReplaceAllString(line, `"`+helmActionPlaceholder+`"`))
-	}
-	return strings.Join(out, "\n")
-}
-
-// syncChartTemplateFile indexes the platform CRs declared in an app's helm chart
-// template into resource_snapshots, so buckets/databases delivered by a chart
-// (mimir, opensearch, ...) appear in the console alongside those declared via the
-// resources.values.yaml passthrough. Helm values are not rendered; only literal
-// CR identity (kind + literal metadata.name) is indexed.
-func (w *GitWatcher) syncChartTemplateFile(ctx context.Context, mgr *git.Manager, filePath, projectSlug, envSlug string, c git.Commit) {
-	content, err := mgr.ReadFileAtCommit(c.SHA, filePath)
-	if err != nil {
-		log.Warn().Err(err).Str("path", filePath).Msg("git-watcher: read chart template")
-		return
-	}
-
-	projectID, environmentID, err := w.resolveOrCreateProjectEnv(ctx, projectSlug, envSlug)
-	if err != nil {
-		log.Error().Err(err).Str("project", projectSlug).Str("env", envSlug).Msg("git-watcher: resolve project/env")
-		return
-	}
-	envUUID := &environmentID
-
-	dec := yaml.NewDecoder(strings.NewReader(sanitizeHelmTemplate(content)))
-	synced := 0
-	for {
-		var m resourceManifest
-		if err := dec.Decode(&m); err != nil {
-			break
-		}
-		if !chartCRKinds[m.Kind] {
-			continue
-		}
-		if m.Metadata.Name == "" || strings.Contains(m.Metadata.Name, helmActionPlaceholder) {
-			continue
-		}
-		summaryJSON, _ := json.Marshal(map[string]any{
-			"git_sha":     c.SHA,
-			"git_message": c.Message,
-			"git_author":  c.Author,
-			"name":        m.Metadata.Name,
-			"kind":        m.Kind,
-			"status":      "Unknown",
-			"message":     "Synced from git (helm chart template)",
-			"spec":        m.Spec,
-		})
-		if err := db.UpsertSnapshot(ctx, w.pool,
-			projectID, envUUID,
-			m.Kind, m.Metadata.Name, "Unknown", summaryJSON, c.When,
-		); err != nil {
-			log.Error().Err(err).Str("kind", m.Kind).Str("name", m.Metadata.Name).Msg("git-watcher: upsert chart-template snapshot")
-			continue
-		}
-		synced++
-	}
-	if synced > 0 {
-		log.Info().Int("count", synced).Str("path", filePath).Msg("git-watcher: synced chart-template resources")
-	}
 }
 
 func (w *GitWatcher) syncNamespacePolicyFile(ctx context.Context, mgr *git.Manager, filePath, namespace string, c git.Commit) {
