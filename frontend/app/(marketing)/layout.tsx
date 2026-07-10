@@ -7,7 +7,7 @@ import { BreadcrumbJsonLd } from "@/components/marketing/breadcrumb-jsonld";
 const SITE_URL = "https://cloud.dada-tuda.ru";
 const TITLE = "DADA Cloud — бэкенд-облако: задеплой бэкенд из GitHub за минуты";
 const DESCRIPTION =
-  "Бэкенд-облако для основателей, стартапов и агентств: подключи GitHub-репозиторий и за минуты получи рабочий бэкенд с Postgres, доменом, HTTPS и откатом в один клик. Без DevOps и сложного Kubernetes.";
+  "Бэкенд-облако для основателей, стартапов и агентств: подключи GitHub-репозиторий и за минуты получи рабочий бэкенд с Postgres, доменом, HTTPS и откатом в один клик. Без DevOps и сложной инфраструктуры.";
 
 export const metadata: Metadata = {
   metadataBase: new URL(SITE_URL),

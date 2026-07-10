@@ -3,6 +3,7 @@ import { useEffect, useState, FormEvent } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { appsApi } from "@/lib/api";
+import { docsHref } from "@/lib/site";
 import type { ResourceSnapshot, AppSummary, InfraSummary, Environment } from "@/lib/types";
 import { Modal } from "@/components/ui/modal";
 import { Spinner } from "@/components/ui/spinner";
@@ -339,7 +340,7 @@ function EnvBlock({ env, projectId, apps, infra, canCreate, onCreate, t }: EnvBl
               ? { label: t("apps.empty.vm.action"), href: `/projects/${projectId}/app-servers` }
               : { label: t("apps.empty.k8s.action"), href: `/projects/${projectId}/git/import?envId=${env.id}` }
           }
-          secondary={{ label: t("common.learnMore"), href: "/docs/product/user-guides/applications-deploy-from-github" }}
+          secondary={{ label: t("common.learnMore"), href: docsHref("applications-deploy-from-github") }}
         />
       ) : (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">

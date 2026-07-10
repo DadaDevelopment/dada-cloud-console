@@ -6,7 +6,7 @@ import type { Metadata } from "next";
 const SITE_URL = "https://cloud.dada-tuda.ru";
 const TITLE_EN = "DADA Cloud — backend cloud: ship your backend from GitHub in minutes";
 const DESCRIPTION_EN =
-  "Backend cloud for founders, startups and agencies: connect a GitHub repo and get a working backend in minutes — Postgres, a domain, HTTPS and one-click rollback. No DevOps team, no Kubernetes complexity.";
+  "Backend cloud for founders, startups and agencies: connect a GitHub repo and get a working backend in minutes — Postgres, a domain, HTTPS and one-click rollback. No DevOps team, no infrastructure to manage.";
 
 export const metadata: Metadata = {
   title: {

@@ -2,6 +2,7 @@
 import { useEffect, useRef, useState, FormEvent } from "react";
 import { useParams } from "next/navigation";
 import { customDomainsApi, appsApi } from "@/lib/api";
+import { docsHref } from "@/lib/site";
 import type { DomainAuthorization, DomainChallenge, ResourceSnapshot, Environment } from "@/lib/types";
 import { Modal } from "@/components/ui/modal";
 import { Spinner } from "@/components/ui/spinner";
@@ -127,7 +128,6 @@ export default function ProjectDomainsPage() {
         .finally(() => setAutoChecking(false));
     }, 30_000);
     return () => clearInterval(id);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId, hasPending]);
 
   async function handleAdd(e: FormEvent<HTMLFormElement>) {
@@ -245,7 +245,7 @@ export default function ProjectDomainsPage() {
             steps={[t("domains.empty.step1"), t("domains.empty.step2"), t("domains.empty.step3")]}
           />
           <div className="mt-4 text-center">
-            <a href="/docs/product/user-guides/domains-and-https" className="text-sm font-medium text-blue-600 hover:text-blue-700">
+            <a href={docsHref("domains-and-https")} target="_blank" rel="noopener noreferrer" className="text-sm font-medium text-blue-600 hover:text-blue-700">
               {t("common.learnMore")} →
             </a>
           </div>
@@ -398,11 +398,11 @@ function HostnameAttachSection({
   const [loadingApps, setLoadingApps] = useState(false);
 
   useEffect(() => {
+    /* eslint-disable react-hooks/set-state-in-effect */
     if (!envId) {
       setApps([]);
       return;
     }
-    /* eslint-disable react-hooks/set-state-in-effect */
     setLoadingApps(true);
     setAppName("");
     /* eslint-enable react-hooks/set-state-in-effect */

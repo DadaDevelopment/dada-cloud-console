@@ -12,6 +12,16 @@ export function consoleHref(path: string): string {
   return `${CONSOLE_URL}${path}`;
 }
 
+// Public user guides live on the marketing host under /developer/<slug>. The
+// console (a different origin) links to them via absolute URLs. There is no
+// dedicated marketing-origin env today, so this falls back to the production
+// marketing host; override with NEXT_PUBLIC_MARKETING_URL if that ever changes.
+const MARKETING_URL = (process.env.NEXT_PUBLIC_MARKETING_URL ?? "https://cloud.dada-tuda.ru").replace(/\/$/, "");
+
+export function docsHref(slug: string): string {
+  return `${MARKETING_URL}/developer/${slug}`;
+}
+
 // Marketing locale routing: RU is served at the root ("/", "/pricing"), EN at
 // the "/en" prefix ("/en", "/en/pricing"). Keep internal marketing links inside
 // the active locale so navigation doesn't bounce the user back to RU.

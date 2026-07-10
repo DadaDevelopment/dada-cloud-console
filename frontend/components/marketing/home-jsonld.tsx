@@ -33,8 +33,8 @@ const COPY: Record<"ru" | "en", Copy> = {
     offerDesc: "Бесплатный старт, оплата по мере роста.",
     faq: [
       {
-        q: "Нужно ли мне знать Kubernetes или DevOps?",
-        a: "Нет. Вы подключаете GitHub-репозиторий, а DADA Cloud сам собирает, деплоит и обслуживает бэкенд. Сложный Kubernetes скрыт за простым интерфейсом.",
+        q: "Нужно ли мне знать DevOps или настраивать серверы?",
+        a: "Нет. Вы подключаете GitHub-репозиторий, а DADA Cloud сам собирает, деплоит и обслуживает бэкенд. Вся инфраструктура скрыта за простым интерфейсом.",
       },
       {
         q: "Как быстро бэкенд окажется онлайн?",
@@ -64,8 +64,8 @@ const COPY: Record<"ru" | "en", Copy> = {
     offerDesc: "Free to start, pay as you grow.",
     faq: [
       {
-        q: "Do I need to know Kubernetes or DevOps?",
-        a: "No. You connect a GitHub repo and DADA Cloud builds, deploys and runs the backend for you. The Kubernetes complexity stays hidden behind a simple interface.",
+        q: "Do I need to know DevOps or manage servers?",
+        a: "No. You connect a GitHub repo and DADA Cloud builds, deploys and runs the backend for you. All the infrastructure complexity stays hidden behind a simple interface.",
       },
       {
         q: "How fast is the backend online?",

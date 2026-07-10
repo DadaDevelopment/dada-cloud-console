@@ -1,28 +1,71 @@
 "use client";
 
 import Link from "next/link";
+import { ArrowRight } from "lucide-react";
 import { useLang } from "@/lib/i18n/context";
-import { consoleHref } from "@/lib/site";
+import { consoleHref, localeHref } from "@/lib/site";
 import { ProductHero, CtaBand } from "@/components/marketing/sections";
+
+const GUIDE_GROUPS: {
+  title: { ru: string; en: string };
+  items: { slug: string; label: string }[];
+}[] = [
+  {
+    title: { ru: "Основное", en: "Core" },
+    items: [
+      { slug: "applications-deploy-from-github", label: "Deploy an app from GitHub" },
+      { slug: "applications-deploy-image-and-compose", label: "Deploy from an image or Compose" },
+      { slug: "databases-postgres", label: "Managed Postgres databases" },
+      { slug: "domains-and-https", label: "Custom domains and HTTPS" },
+      { slug: "monitoring-metrics-logs-alerts", label: "Monitoring: metrics, logs, alerts" },
+    ],
+  },
+  {
+    title: { ru: "Серверы", en: "Servers" },
+    items: [
+      { slug: "app-servers-bring-your-own-vm", label: "Bring your own VM" },
+      { slug: "app-servers-order-a-vm", label: "Order a managed VM" },
+      { slug: "app-servers-adopt-existing-workloads", label: "Adopt existing workloads on a VM" },
+      { slug: "app-servers-agency-fleet", label: "Running a fleet of client VMs" },
+    ],
+  },
+  {
+    title: { ru: "Дополнительно", en: "Advanced" },
+    items: [
+      { slug: "object-storage", label: "Object storage (S3-compatible)" },
+      { slug: "members-and-roles", label: "Members and roles" },
+      { slug: "billing-plans-and-limits", label: "Billing, plans, and limits" },
+      { slug: "builds", label: "Builds and deployments" },
+      { slug: "ai-models", label: "AI Models (model serving)" },
+      { slug: "ai-model-approvals", label: "AI model approvals" },
+    ],
+  },
+];
 
 export default function DeveloperPage() {
   const { locale } = useLang();
   const copy = {
     ru: {
-      title: "Документация и API",
-      subtitle: "Управляйте инфраструктурой через REST API и CLI. Полная документация платформы скоро.",
+      title: "API и разработчикам",
+      subtitle: "Всё, что делает консоль — деплой приложений, серверы, базы, домены, мониторинг — доступно через REST API с авторизацией по токену.",
       apiTitle: "REST API",
-      apiDesc: "Все ресурсы консоли доступны через /api/v1 с авторизацией по токену.",
+      apiDesc: "Каждый ресурс консоли доступен через /api/v1 с авторизацией по токену.",
       consoleTitle: "Открыть консоль",
-      consoleDesc: "Войдите, чтобы получить токен доступа и kubeconfig.",
+      consoleDesc: "Войдите в панель — там токен доступа к API и все ресурсы проекта.",
+      guidesTitle: "Руководства",
+      guidesSubtitle: "Пошаговые гайды по консоли — от первого деплоя до биллинга и ролей.",
+      guidesNote: "Документация пока доступна только на английском.",
     },
     en: {
-      title: "Documentation & API",
-      subtitle: "Manage your infrastructure via REST API and CLI. Full platform docs are coming soon.",
+      title: "API & developers",
+      subtitle: "Everything the console does — app deploys, servers, databases, domains, monitoring — is available over a token-authenticated REST API.",
       apiTitle: "REST API",
       apiDesc: "Every console resource is available via /api/v1 with token auth.",
       consoleTitle: "Open console",
-      consoleDesc: "Log in to get an access token and kubeconfig.",
+      consoleDesc: "Log in to the panel for your API access token and all project resources.",
+      guidesTitle: "Guides",
+      guidesSubtitle: "Step-by-step how-tos for the console — from your first deploy to billing and roles.",
+      guidesNote: "",
     },
   }[locale];
 
@@ -43,6 +86,35 @@ export default function DeveloperPage() {
             <h3 className="text-lg font-semibold text-slate-900">{copy.consoleTitle}</h3>
             <p className="mt-2 text-sm text-slate-600">{copy.consoleDesc}</p>
           </Link>
+        </div>
+      </section>
+      <section className="bg-slate-50 py-20">
+        <div className="mx-auto max-w-5xl px-4 sm:px-6 lg:px-8">
+          <h2 className="text-3xl font-bold tracking-tight text-slate-900">{copy.guidesTitle}</h2>
+          <p className="mt-3 max-w-2xl text-sm text-slate-600">{copy.guidesSubtitle}</p>
+          {copy.guidesNote && <p className="mt-2 text-xs text-slate-400">{copy.guidesNote}</p>}
+          <div className="mt-10 grid gap-8 md:grid-cols-3">
+            {GUIDE_GROUPS.map((group) => (
+              <div key={group.title.en}>
+                <h3 className="text-sm font-semibold uppercase tracking-wide text-slate-500">
+                  {group.title[locale]}
+                </h3>
+                <ul className="mt-4 space-y-1">
+                  {group.items.map((item) => (
+                    <li key={item.slug}>
+                      <Link
+                        href={localeHref(`/developer/${item.slug}`, locale)}
+                        className="group flex items-center justify-between gap-2 rounded-lg border border-transparent px-3 py-2 text-sm text-slate-700 transition-colors hover:border-slate-200 hover:bg-white hover:text-slate-900"
+                      >
+                        <span>{item.label}</span>
+                        <ArrowRight className="h-4 w-4 shrink-0 text-slate-300 transition-colors group-hover:text-blue-600" />
+                      </Link>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ))}
+          </div>
         </div>
       </section>
       <CtaBand />

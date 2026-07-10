@@ -10,7 +10,6 @@ import { localeHref } from "@/lib/site";
 const MARKETING_PATHS = new Set([
   "/",
   "/cloud-servers",
-  "/kubernetes",
   "/databases",
   "/storage",
   "/pricing",

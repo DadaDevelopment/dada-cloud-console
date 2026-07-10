@@ -54,6 +54,112 @@ body {
   background-size: 40px 40px;
 }
 
+.dada-doc {
+  color: #334155;
+  line-height: 1.7;
+  font-size: 0.975rem;
+}
+.dada-doc > :first-child {
+  margin-top: 0;
+}
+.dada-doc h1 {
+  font-size: 2rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: #0f172a;
+  margin: 0 0 1rem;
+}
+.dada-doc h2 {
+  font-size: 1.4rem;
+  font-weight: 700;
+  color: #0f172a;
+  margin: 2.25rem 0 0.75rem;
+}
+.dada-doc h3 {
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: #0f172a;
+  margin: 1.75rem 0 0.5rem;
+}
+.dada-doc h4,
+.dada-doc h5,
+.dada-doc h6 {
+  font-size: 1rem;
+  font-weight: 600;
+  color: #0f172a;
+  margin: 1.25rem 0 0.5rem;
+}
+.dada-doc p {
+  margin: 0 0 1rem;
+}
+.dada-doc a {
+  color: #2563eb;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.dada-doc a:hover {
+  color: #1d4ed8;
+}
+.dada-doc ul,
+.dada-doc ol {
+  margin: 0 0 1rem;
+  padding-left: 1.5rem;
+}
+.dada-doc ul {
+  list-style: disc;
+}
+.dada-doc ol {
+  list-style: decimal;
+}
+.dada-doc li {
+  margin: 0.35rem 0;
+}
+.dada-doc li > ul,
+.dada-doc li > ol {
+  margin: 0.35rem 0 0.5rem;
+}
+.dada-doc code {
+  background: #f1f5f9;
+  color: #0f172a;
+  border-radius: 0.3rem;
+  padding: 0.1rem 0.35rem;
+  font-size: 0.85em;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+.dada-doc pre {
+  background: #0f172a;
+  color: #e2e8f0;
+  border-radius: 0.6rem;
+  padding: 1rem;
+  overflow-x: auto;
+  margin: 0 0 1.25rem;
+}
+.dada-doc pre code {
+  background: transparent;
+  color: inherit;
+  padding: 0;
+}
+.dada-doc blockquote {
+  border-left: 3px solid #bfdbfe;
+  background: #f8fafc;
+  color: #475569;
+  padding: 0.75rem 1rem;
+  margin: 0 0 1.25rem;
+  border-radius: 0 0.4rem 0.4rem 0;
+}
+.dada-doc blockquote p:last-child {
+  margin-bottom: 0;
+}
+.dada-doc strong {
+  color: #0f172a;
+  font-weight: 600;
+}
+.dada-doc hr {
+  border: 0;
+  border-top: 1px solid #e2e8f0;
+  margin: 2rem 0;
+}
+
 
 
 

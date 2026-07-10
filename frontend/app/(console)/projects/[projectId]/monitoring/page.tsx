@@ -3,6 +3,7 @@ import { useEffect, useState, useCallback, useRef, FormEvent } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import { monitoringApi } from "@/lib/api";
+import { docsHref } from "@/lib/site";
 import type { MonitoringApp, HealthStatus } from "@/lib/types";
 import { Modal } from "@/components/ui/modal";
 import { Spinner } from "@/components/ui/spinner";
@@ -572,7 +573,9 @@ function ZeroState({
         )}
         <div className="mt-3">
           <a
-            href="/docs/product/user-guides/monitoring-metrics-logs-alerts"
+            href={docsHref("monitoring-metrics-logs-alerts")}
+            target="_blank"
+            rel="noopener noreferrer"
             className="text-sm font-medium text-blue-600 hover:text-blue-700"
           >
             {t("common.learnMore")} →

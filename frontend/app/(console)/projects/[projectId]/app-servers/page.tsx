@@ -3,6 +3,7 @@ import { FormEvent, useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { appServersApi } from "@/lib/api";
+import { docsHref } from "@/lib/site";
 import type { AppServer, AppServerStatus } from "@/lib/types";
 import { Badge } from "@/components/ui/badge";
 import { Modal } from "@/components/ui/modal";
@@ -269,7 +270,7 @@ export default function AppServersPage() {
               steps={[t("appServers.empty.step1"), t("appServers.empty.step2"), t("appServers.empty.step3")]}
             />
             <div className="mt-4 text-center">
-              <a href="/docs/product/user-guides/app-servers-bring-your-own-vm" className="text-sm font-medium text-blue-600 hover:text-blue-700">
+              <a href={docsHref("app-servers-bring-your-own-vm")} target="_blank" rel="noopener noreferrer" className="text-sm font-medium text-blue-600 hover:text-blue-700">
                 {t("common.learnMore")} →
               </a>
             </div>

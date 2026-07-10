@@ -10,7 +10,6 @@ const ROUTES: Array<{ path: string; priority: number; changeFrequency: MetadataR
   { path: "/pricing", priority: 0.9, changeFrequency: "weekly" },
   { path: "/cloud-servers", priority: 0.8, changeFrequency: "monthly" },
   { path: "/databases", priority: 0.8, changeFrequency: "monthly" },
-  { path: "/kubernetes", priority: 0.8, changeFrequency: "monthly" },
   { path: "/storage", priority: 0.8, changeFrequency: "monthly" },
   { path: "/developer", priority: 0.7, changeFrequency: "monthly" },
 ];

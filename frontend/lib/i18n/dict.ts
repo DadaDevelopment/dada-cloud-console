@@ -39,7 +39,6 @@ export interface Dict {
   nav: {
     cloud: string;
     servers: string;
-    kubernetes: string;
     databases: string;
     storage: string;
     pricing: string;
@@ -88,13 +87,6 @@ export interface Dict {
     ctaSubtitle: string;
   };
   servers: {
-    heroTitle: string;
-    heroSubtitle: string;
-    features: Feature[];
-    faqTitle: string;
-    faq: Faq[];
-  };
-  kubernetes: {
     heroTitle: string;
     heroSubtitle: string;
     features: Feature[];
@@ -150,7 +142,6 @@ const ru: Dict = {
   nav: {
     cloud: "Облако",
     servers: "Серверы",
-    kubernetes: "Kubernetes",
     databases: "Базы данных",
     storage: "Хранилище",
     pricing: "Цены",
@@ -241,25 +232,6 @@ const ru: Dict = {
       { q: "Что будет с контейнерами, которые уже работают на сервере?", a: "Discovery покажет их в режиме только чтения. Если решите импортировать — каждый сервис станет отдельным приложением со своими логами и метриками, тома с данными сохранятся." },
       { q: "Можно вести серверы нескольких клиентов в одной панели?", a: "Да, это основной сценарий для агентств: сервер каждого клиента подключается отдельно, а деплой, логи и мониторинг видны из одной панели." },
       { q: "Обязательно переносить сервер, если он уже работает?", a: "Нет. Можно подключить существующий сервер как есть — переносить ничего не нужно. Либо закажите у нас новую VM, если хотите начать с чистого листа." },
-    ],
-  },
-  kubernetes: {
-    heroTitle: "Управляемый Kubernetes",
-    heroSubtitle:
-      "Кластеры Kubernetes без рутины: управляющий узел, worker-группы, аддоны и мониторинг разворачиваются автоматически.",
-    features: [
-      { title: "Готовый кластер за минуты", desc: "Создайте кластер и worker-группы через панель или API." },
-      { title: "Аддоны в один клик", desc: "Ingress, мониторинг, хранилище и др. устанавливаются автоматически." },
-      { title: "Автомасштабирование узлов", desc: "Worker-группы масштабируются под нагрузку приложений." },
-      { title: "kubeconfig из консоли", desc: "Подключайтесь к кластеру одной командой — доступ выдаётся из панели." },
-      { title: "Мониторинг и алерты", desc: "Метрики узлов и подов, логи и оповещения из коробки." },
-      { title: "GitOps-деплой", desc: "Доставка приложений из Git-репозитория с откатами." },
-    ],
-    faqTitle: "Частые вопросы",
-    faq: [
-      { q: "Какая версия Kubernetes?", a: "Поддерживаются актуальные стабильные версии; обновление управляется платформой." },
-      { q: "Управляющий узел тарифицируется?", a: "Тарификация зависит от ресурсов worker-узлов и аддонов." },
-      { q: "Сервис в Beta?", a: "Да, Kubernetes сейчас в стадии Beta — API и панель могут меняться." },
     ],
   },
   databases: {
@@ -423,7 +395,6 @@ const ru: Dict = {
     productsTitle: "Продукты",
     products: [
       { label: "Серверы", href: "/cloud-servers" },
-      { label: "Kubernetes", href: "/kubernetes" },
       { label: "Базы данных", href: "/databases" },
       { label: "Объектное хранилище", href: "/storage" },
       { label: "Цены", href: "/pricing" },
@@ -451,7 +422,6 @@ const en: Dict = {
   nav: {
     cloud: "Cloud",
     servers: "Servers",
-    kubernetes: "Kubernetes",
     databases: "Databases",
     storage: "Storage",
     pricing: "Pricing",
@@ -542,25 +512,6 @@ const en: Dict = {
       { q: "What happens to containers already running on the server?", a: "Discovery lists them read-only. If you choose to import, each service becomes its own application with its own logs and metrics, and data volumes are preserved." },
       { q: "Can I run multiple clients' servers from one panel?", a: "Yes — that's the main agency scenario: each client's server connects separately, and deploys, logs and monitoring all show up in one panel." },
       { q: "Do I have to migrate my server if it already works?", a: "No. You can connect the existing server as-is — nothing to migrate. Or order a fresh VM from us if you'd rather start clean." },
-    ],
-  },
-  kubernetes: {
-    heroTitle: "Managed Kubernetes",
-    heroSubtitle:
-      "Kubernetes clusters without the chores: control plane, worker groups, addons and monitoring provisioned automatically.",
-    features: [
-      { title: "Cluster ready in minutes", desc: "Create a cluster and worker groups via panel or API." },
-      { title: "One-click addons", desc: "Ingress, monitoring, storage and more install automatically." },
-      { title: "Node autoscaling", desc: "Worker groups scale to your application load." },
-      { title: "kubeconfig from console", desc: "Connect with a single command — access issued from the panel." },
-      { title: "Monitoring and alerts", desc: "Node and pod metrics, logs and alerts out of the box." },
-      { title: "GitOps delivery", desc: "Deliver apps from a Git repo with rollbacks." },
-    ],
-    faqTitle: "FAQ",
-    faq: [
-      { q: "Which Kubernetes version?", a: "Current stable versions are supported; upgrades are managed by the platform." },
-      { q: "Is the control plane billed?", a: "Billing depends on worker-node resources and addons." },
-      { q: "Is the service in Beta?", a: "Yes, Kubernetes is currently in Beta — API and panel may change." },
     ],
   },
   databases: {
@@ -724,7 +675,6 @@ const en: Dict = {
     productsTitle: "Products",
     products: [
       { label: "Servers", href: "/cloud-servers" },
-      { label: "Kubernetes", href: "/kubernetes" },
       { label: "Databases", href: "/databases" },
       { label: "Object storage", href: "/storage" },
       { label: "Pricing", href: "/pricing" },

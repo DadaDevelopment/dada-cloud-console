@@ -201,7 +201,7 @@ Priority order:
   Ingress, ServiceDatabase, agency fleet.
 - **P3**: Storage, Roles, Billing, Builds, AI Models, Approvals.
 
-Location: `docs/product/user-guides/`.
+Location: `frontend/content/docs/` (served publicly at https://cloud.dada-tuda.ru/developer).
 
 ---
 
@@ -222,7 +222,7 @@ Location: `docs/product/user-guides/`.
    "Advanced: connect an external source" disclosure.
 7. ✅ Removed `Operations` / `Redis` / `Queues` (and `Approvals`) from the nav.
 8. ✅ Empty states — explanation + next step + "Learn more" → the matching guide under
-   `docs/product/user-guides/`.
+   `frontend/content/docs/`.
 9. ⬜ Link Approvals ↔ Models so "stuck on approval" is discoverable — **deferred**.
 
 ---

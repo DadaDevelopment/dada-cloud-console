@@ -3,6 +3,7 @@ import { useEffect, useState, FormEvent } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { databasesApi } from "@/lib/api";
+import { docsHref } from "@/lib/site";
 import type { ResourceSnapshot } from "@/lib/types";
 import { Modal } from "@/components/ui/modal";
 import { Spinner } from "@/components/ui/spinner";
@@ -163,7 +164,7 @@ export default function DatabasesPage() {
             steps={[t("databases.empty.step1"), t("databases.empty.step2"), t("databases.empty.step3")]}
           />
           <div className="mt-4 text-center">
-            <a href="/docs/product/user-guides/databases-postgres" className="text-sm font-medium text-blue-600 hover:text-blue-700">
+            <a href={docsHref("databases-postgres")} target="_blank" rel="noopener noreferrer" className="text-sm font-medium text-blue-600 hover:text-blue-700">
               {t("common.learnMore")} →
             </a>
           </div>
