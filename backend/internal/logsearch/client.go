@@ -163,13 +163,19 @@ func (c *Client) buildQuery(opts SearchOpts) map[string]any {
 		})
 	}
 	if opts.App != "" {
-		// The app/stack name surfaces under the docker-compose project label
-		// (same one GetAppState and the metrics queries use). dada_io_app is the
-		// bootstrap's intended label but is empty on real VMs, so match the
-		// compose-project label too. Try keyword + text variants defensively.
+		// A first-class VM Application == one docker-compose SERVICE in the shared
+		// per-VM stack, so the service label is what isolates one app (same as the
+		// container metrics query, which keys by com_docker_compose_service). The
+		// fleet fluent-bit lua enrichment stamps flat com_docker_compose_service /
+		// _project on every record from the container's config.v2.json. Keep the
+		// older container.labels.* / project variants for back-compat with the
+		// single-app model + any pre-enrichment logs. Keyword + text tried defensively.
 		filters = append(filters, map[string]any{
 			"bool": map[string]any{
 				"should": []map[string]any{
+					{"term": map[string]any{"com_docker_compose_service.keyword": opts.App}},
+					{"term": map[string]any{"com_docker_compose_service": opts.App}},
+					{"match": map[string]any{"com_docker_compose_service": opts.App}},
 					{"term": map[string]any{"container.labels.com_docker_compose_project": opts.App}},
 					{"term": map[string]any{"container.labels.com_docker_compose_project.keyword": opts.App}},
 					{"match": map[string]any{"container.labels.com_docker_compose_project": opts.App}},
