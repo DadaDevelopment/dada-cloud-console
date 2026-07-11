@@ -51,10 +51,17 @@ func TestParseMarkerMalformedArtifactIgnored(t *testing.T) {
 }
 
 func TestImageDigest(t *testing.T) {
-	if d := imageDigest("host/proj/app@sha256:abc"); d != "sha256:abc" {
+	good := "sha256:44f06c943670ec3d6c01807a089cea597b75deeacae58229df29a45951709c0e"
+	if d := imageDigest("host/proj/app@" + good); d != good {
 		t.Errorf("digest=%q", d)
 	}
 	if d := imageDigest("host/proj/app:tag"); d != "" {
 		t.Errorf("want empty for tag ref, got %q", d)
+	}
+	if d := imageDigest("host/proj/app@Name:      host/proj/app:main-b29"); d != "" {
+		t.Errorf("want empty for malformed non-digest suffix, got %q", d)
+	}
+	if d := imageDigest("host/proj/app@sha256:abc"); d != "" {
+		t.Errorf("want empty for short digest, got %q", d)
 	}
 }

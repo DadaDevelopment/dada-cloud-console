@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -493,12 +494,18 @@ func (r *Runner) confirm(ctx context.Context, repo *db.Repo, out *buildOutcome) 
 	}
 }
 
-// imageDigest returns the sha256:... portion of an image reference, or "".
+var digestRe = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
+
 func imageDigest(uri string) string {
-	if i := strings.LastIndex(uri, "@"); i >= 0 {
-		return uri[i+1:]
+	i := strings.LastIndex(uri, "@")
+	if i < 0 {
+		return ""
 	}
-	return ""
+	d := uri[i+1:]
+	if !digestRe.MatchString(d) {
+		return ""
+	}
+	return d
 }
 
 // gitCreds returns a clone token and the authenticated clone URL. GitHub uses a
