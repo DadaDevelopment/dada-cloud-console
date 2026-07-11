@@ -343,10 +343,35 @@ func (w *GitWatcher) resolveOrCreateProjectEnv(ctx context.Context, projectSlug,
 	return projectID, environmentID, nil
 }
 
+// resourceOwnerApps are the synthetic per-project owner apps that carry
+// standalone (appRef-less) sibling CRs (databases, buckets, models). They exist
+// only so ArgoCD renders those CRs via the shared app-resources chart; they have
+// no workload of their own and must never appear in the console's Applications
+// list. Mirrors renderer.StandaloneOwnerApp ("<type>-<project>").
+func isResourceOwnerApp(appName, projectSlug string) bool {
+	for _, t := range []string{"service-databases", "s3-buckets", "models"} {
+		if appName == t+"-"+projectSlug {
+			return true
+		}
+	}
+	return false
+}
+
 func (w *GitWatcher) syncAppFile(ctx context.Context, mgr *git.Manager, filePath, projectSlug, envSlug, appName string, c git.Commit) {
 	projectID, environmentID, err := w.resolveOrCreateProjectEnv(ctx, projectSlug, envSlug)
 	if err != nil {
 		log.Error().Err(err).Str("project", projectSlug).Str("env", envSlug).Msg("git-watcher: resolve project/env")
+		return
+	}
+
+	// Owner apps are plumbing, not workloads: never surface them as an App, and
+	// purge any snapshot a prior indexing pass created.
+	if isResourceOwnerApp(appName, projectSlug) {
+		if n, derr := db.DeleteSnapshot(ctx, w.pool, projectID, &environmentID, "App", appName); derr != nil {
+			log.Error().Err(derr).Str("app", appName).Msg("git-watcher: purge owner-app snapshot")
+		} else if n > 0 {
+			log.Info().Str("app", appName).Msg("git-watcher: purged synthetic owner-app snapshot")
+		}
 		return
 	}
 

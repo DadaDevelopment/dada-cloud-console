@@ -103,6 +103,7 @@ export const domains: Messages = {
   "domains.hm.thRecord": { ru: "Запись", en: "Record" },
   "domains.hm.thStatus": { ru: "Статус", en: "Status" },
   "domains.hm.thCert": { ru: "Сертификат", en: "Certificate" },
+  "domains.hm.defaultBadge": { ru: "по умолчанию", en: "default" },
   "domains.hm.detach": { ru: "Отвязать", en: "Detach" },
   "domains.hm.detaching": { ru: "Отвязывание…", en: "Detaching…" },
   "domains.hm.detachError": { ru: "Не удалось отвязать хост", en: "Failed to detach hostname" },

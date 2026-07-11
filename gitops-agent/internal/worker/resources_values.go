@@ -26,12 +26,24 @@ func loadResourcesValues(mgr *git.Manager, valuesPath string) (*renderer.Resourc
 // CR (keyed by kind+name), and returns the resulting file as a single
 // FileChange. Caller commits it (preserving single-commit-per-operation).
 func upsertManifestFile(mgr *git.Manager, valuesPath, crYAML string) (git.FileChange, error) {
+	return upsertManifestsFile(mgr, valuesPath, crYAML)
+}
+
+// upsertManifestsFile upserts one or more rendered CRs into the app's
+// resources.values.yaml in a single load/marshal cycle, returning one
+// FileChange. loadResourcesValues reads from disk, so callers that need several
+// manifests in the same file MUST pass them here together rather than calling
+// upsertManifestFile repeatedly (which would each re-read the unmodified file
+// and drop the earlier upserts).
+func upsertManifestsFile(mgr *git.Manager, valuesPath string, crYAMLs ...string) (git.FileChange, error) {
 	rv, err := loadResourcesValues(mgr, valuesPath)
 	if err != nil {
 		return git.FileChange{}, err
 	}
-	if err := rv.Upsert(crYAML); err != nil {
-		return git.FileChange{}, err
+	for _, crYAML := range crYAMLs {
+		if err := rv.Upsert(crYAML); err != nil {
+			return git.FileChange{}, err
+		}
 	}
 	out, err := rv.Marshal()
 	if err != nil {

@@ -789,14 +789,16 @@ func FQDNToName(fqdn string) string {
 // cert-manager (letsencrypt-prod, HTTP-01) per-host TLS cert. No DNS is managed
 // by the platform — the user owns their zone.
 type CustomIngressSpec struct {
-	Name            string // FQDNToName(hostname), the manifest name + TLS secret base
-	Namespace       string
-	ProjectSlug     string
-	EnvSlug         string
-	Hostname        string
-	ServiceName     string
-	ServicePortName string // the Service's named port; the common subchart always uses "http"
-	OperationID     string
+	Name              string // FQDNToName(hostname), the manifest name + TLS secret base
+	Namespace         string
+	ProjectSlug       string
+	EnvSlug           string
+	Hostname          string
+	ServiceName       string
+	ServicePortName   string
+	OperationID       string
+	WildcardTLSSecret string
+	Managed           bool
 }
 
 var customIngressTmpl = template.Must(template.New("customingress").Parse(`apiVersion: networking.k8s.io/v1
@@ -808,14 +810,19 @@ metadata:
     dada.io/project: {{ .ProjectSlug }}
     dada.io/environment: {{ .EnvSlug }}
     dada.io/operation: {{ .OperationID }}
+{{- if .Managed }}
+    dada.io/managed-domain: "true"
+{{- end }}
+{{- if not .WildcardTLSSecret }}
   annotations:
     cert-manager.io/cluster-issuer: letsencrypt-prod
+{{- end }}
 spec:
   ingressClassName: nginx
   tls:
     - hosts:
         - {{ .Hostname }}
-      secretName: {{ .Name }}-tls
+      secretName: {{ if .WildcardTLSSecret }}{{ .WildcardTLSSecret }}{{ else }}{{ .Name }}-tls{{ end }}
   rules:
     - host: {{ .Hostname }}
       http:
@@ -836,6 +843,60 @@ func RenderCustomIngress(spec CustomIngressSpec) (string, error) {
 	var buf bytes.Buffer
 	if err := customIngressTmpl.Execute(&buf, spec); err != nil {
 		return "", fmt.Errorf("rendering custom Ingress: %w", err)
+	}
+	return buf.String(), nil
+}
+
+// DefaultDomainDNSSpec holds parameters for the platform-owned A record that
+// backs a managed default (surrogate) hostname under our own base zone.
+type DefaultDomainDNSSpec struct {
+	Name        string
+	ProjectSlug string
+	EnvSlug     string
+	Hostname    string
+	ServiceName string
+	ServicePort int
+	Target      string
+	OperationID string
+}
+
+var defaultDomainDNSTmpl = template.Must(template.New("defaultdomaindns").Parse(`apiVersion: platform.dada-tuda.ru/v1alpha1
+kind: PublicApi
+metadata:
+  name: {{ .Name }}
+  labels:
+    dada.io/project: {{ .ProjectSlug }}
+    dada.io/environment: {{ .EnvSlug }}
+    dada.io/operation: {{ .OperationID }}
+    dada.io/managed-domain: "true"
+spec:
+  gatewayRoute: false
+  upstream:
+    serviceName: {{ .ServiceName }}
+    servicePort: {{ .ServicePort }}
+  route:
+    prefix: /
+    stripPrefix: false
+  dns:
+    enabled: true
+    fqdn: {{ .Hostname }}
+    recordType: A
+    target: {{ .Target | printf "%q" }}
+  crossplane:
+    compositionRef:
+      name: publicapi-beget-dns
+`))
+
+// RenderDefaultDomainDNS renders a DNS-only PublicApi composite that publishes
+// the A record for a managed default hostname into our Beget zone via the
+// publicapi-beget-dns composition. gatewayRoute is false: the surrogate host is
+// served by the plain Ingress rendered separately, so this composite only owns
+// the DNS record. It is upserted into the owning app's resources.values.yaml
+// (keyed PublicApi/<Name>) so its lifecycle follows the app.
+func RenderDefaultDomainDNS(spec DefaultDomainDNSSpec) (string, error) {
+	var buf bytes.Buffer
+	if err := defaultDomainDNSTmpl.Execute(&buf, spec); err != nil {
+		return "", fmt.Errorf("rendering default-domain DNS: %w", err)
 	}
 	return buf.String(), nil
 }

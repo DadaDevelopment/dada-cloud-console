@@ -39,6 +39,9 @@ type Config struct {
 	// registry browser (the wizard falls back to "paste artifactURI").
 	// AI_STUDIO_ENABLED remains as a runtime kill-switch — set to "false" to
 	// hide the routes again if needed; default is enabled.
+	DefaultDomainEnabled bool
+	DefaultDomainBase    string
+
 	AIStudioEnabled  bool
 	MLflowBaseURL    string
 	MLflowAuthHeader string // optional, forwarded as-is on every request
@@ -269,6 +272,8 @@ func Load() (*Config, error) {
 		CustomDomainATarget:       getEnv("CUSTOM_DOMAIN_A_TARGET", getEnv("CLUSTER_LB_IP", "93.189.231.60")),
 		CustomDomainCNAMETarget:   getEnv("CUSTOM_DOMAIN_CNAME_TARGET", "ingress.dada-tuda.ru"),
 		CustomDomainVerifyLabel:   getEnv("CUSTOM_DOMAIN_VERIFY_LABEL", "_dada-verify"),
+		DefaultDomainEnabled:      getEnv("DEFAULT_DOMAIN_ENABLED", "true") == "true",
+		DefaultDomainBase:         getEnv("DEFAULT_DOMAIN_BASE", "dada-tuda.ru"),
 		AuthMode:                  getEnv("AUTH_MODE", "local"),
 		KeycloakIssuer:            getEnv("KEYCLOAK_ISSUER", "https://id.dada-tuda.ru/realms/master"),
 		KeycloakVerifyAud:         getEnv("KEYCLOAK_VERIFY_AUD", "false") == "true",

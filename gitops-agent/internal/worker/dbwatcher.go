@@ -697,12 +697,13 @@ func (w *DBWatcher) doDeleteServiceDatabase(ctx context.Context, op db.Operation
 
 func (w *DBWatcher) doCreateApp(ctx context.Context, op db.Operation) error {
 	var p struct {
-		Name          string `json:"name"`
-		Image         string `json:"image"`
-		Port          int    `json:"port"`
-		Replicas      int    `json:"replicas"`
-		Profile       string `json:"profile"`
-		AppServerName string `json:"app_server_name"`
+		Name            string `json:"name"`
+		Image           string `json:"image"`
+		Port            int    `json:"port"`
+		Replicas        int    `json:"replicas"`
+		Profile         string `json:"profile"`
+		AppServerName   string `json:"app_server_name"`
+		DefaultHostname string `json:"default_hostname"`
 	}
 	if err := json.Unmarshal(op.Payload, &p); err != nil {
 		return fmt.Errorf("parse payload: %w", err)
@@ -774,6 +775,47 @@ func (w *DBWatcher) doCreateApp(ctx context.Context, op db.Operation) error {
 	if secretFile != nil {
 		files = append(files, *secretFile)
 	}
+
+	if p.DefaultHostname != "" {
+		ingressYAML, iErr := renderer.RenderCustomIngress(renderer.CustomIngressSpec{
+			Name:              renderer.FQDNToName(p.DefaultHostname),
+			Namespace:         envNamespace,
+			ProjectSlug:       projectName,
+			EnvSlug:           envName,
+			Hostname:          p.DefaultHostname,
+			ServiceName:       renderer.AppServiceName(p.Name),
+			ServicePortName:   renderer.DefaultAppServicePortName,
+			OperationID:       op.ID.String(),
+			WildcardTLSSecret: w.cfg.DefaultDomainTLSSecret,
+			Managed:           true,
+		})
+		if iErr != nil {
+			return iErr
+		}
+		dnsYAML, dErr := renderer.RenderDefaultDomainDNS(renderer.DefaultDomainDNSSpec{
+			Name:        renderer.FQDNToName(p.DefaultHostname),
+			ProjectSlug: projectName,
+			EnvSlug:     envName,
+			Hostname:    p.DefaultHostname,
+			ServiceName: renderer.AppServiceName(p.Name),
+			ServicePort: p.Port,
+			Target:      w.cfg.DefaultDomainDNSTarget,
+			OperationID: op.ID.String(),
+		})
+		if dErr != nil {
+			return dErr
+		}
+		if err := mgr.EnsureCloned(); err != nil {
+			return err
+		}
+		resValuesPath := renderer.AppResourcesValuesGitPath(projectName, envName, p.Name)
+		manifestFile, mErr := upsertManifestsFile(mgr, resValuesPath, ingressYAML, dnsYAML)
+		if mErr != nil {
+			return mErr
+		}
+		files = append(files, manifestFile)
+	}
+
 	commitMsg := fmt.Sprintf(
 		"[DADA Console] Create App %s\n\nOperation: %s\nProject: %s\nEnvironment: %s\n",
 		p.Name, op.ID, projectName, envName,

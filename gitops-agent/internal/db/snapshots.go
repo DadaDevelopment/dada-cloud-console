@@ -34,6 +34,23 @@ func UpsertSnapshot(ctx context.Context, pool *pgxpool.Pool,
 	return nil
 }
 
+// DeleteSnapshot removes a resource_snapshots row by identity. Used to purge
+// synthetic rows the console must not display (e.g. resources-only owner apps
+// that carry standalone DB/S3/model CRs but are not user workloads). Returns the
+// number of rows removed (0 = nothing to delete).
+func DeleteSnapshot(ctx context.Context, pool *pgxpool.Pool,
+	projectID uuid.UUID, environmentID *uuid.UUID, kind, name string,
+) (int64, error) {
+	tag, err := pool.Exec(ctx, `
+		DELETE FROM resource_snapshots
+		WHERE project_id = $1 AND environment_id IS NOT DISTINCT FROM $2 AND kind = $3 AND name = $4
+	`, projectID, environmentID, kind, name)
+	if err != nil {
+		return 0, fmt.Errorf("delete snapshot: %w", err)
+	}
+	return tag.RowsAffected(), nil
+}
+
 // UpdateLiveStatus mirrors live cluster state onto an existing snapshot of the
 // given kind: it sets phase and merges the given fields into summary_json (jsonb
 // concat preserves git_sha/message etc.). It only touches rows that already

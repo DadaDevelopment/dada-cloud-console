@@ -67,13 +67,14 @@ type CreateS3BucketPayload struct {
 // CreateAppPayload is the typed payload for CreateApp operations.
 // K8s fields: Replicas, Profile. VM fields: AppServerName, EnvVars.
 type CreateAppPayload struct {
-	Name          string            `json:"name"`
-	Image         string            `json:"image"`
-	Port          int               `json:"port"`
-	Replicas      int               `json:"replicas,omitempty"`
-	Profile       string            `json:"profile,omitempty"`
-	AppServerName string            `json:"app_server_name,omitempty"`
-	EnvVars       map[string]string `json:"env_vars,omitempty"`
+	Name            string            `json:"name"`
+	Image           string            `json:"image"`
+	Port            int               `json:"port"`
+	Replicas        int               `json:"replicas,omitempty"`
+	Profile         string            `json:"profile,omitempty"`
+	AppServerName   string            `json:"app_server_name,omitempty"`
+	EnvVars         map[string]string `json:"env_vars,omitempty"`
+	DefaultHostname string            `json:"default_hostname,omitempty"`
 }
 
 // DeployImageVersionPayload is the typed payload for DeployImageVersion operations.
@@ -207,7 +208,8 @@ type DomainAuthorization struct {
 // the domain_hostnames table.
 type DomainHostname struct {
 	ID              uuid.UUID  `json:"id"                     db:"id"`
-	AuthorizationID uuid.UUID  `json:"authorization_id"       db:"authorization_id"`
+	AuthorizationID *uuid.UUID `json:"authorization_id,omitempty" db:"authorization_id"`
+	Managed         bool       `json:"managed"                db:"managed"`
 	EnvironmentID   uuid.UUID  `json:"environment_id"         db:"environment_id"`
 	AppName         string     `json:"app_name"               db:"app_name"`
 	Hostname        string     `json:"hostname"               db:"hostname"`

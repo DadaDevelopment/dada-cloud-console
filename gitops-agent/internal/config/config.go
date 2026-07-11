@@ -50,6 +50,10 @@ type Config struct {
 	// Load-balancer IP written into PublicApi manifests.
 	ClusterLBIP string
 
+	// DefaultDomainDNSTarget is the A-record value published for managed default
+	// hostnames: the ingress-nginx-pub load-balancer IP that serves them.
+	DefaultDomainDNSTarget string
+
 	// DefaultDomainTLSSecret, when set, makes managed default-domain Ingresses
 	// reference a shared wildcard TLS secret (requires that secret to be
 	// replicated into every app namespace). Empty (the default) makes each
@@ -113,6 +117,7 @@ func Load() (*Config, error) {
 		ValuesTokenSecret:       getEnv("GITOPS_VALUES_TOKEN_SECRET", ""),
 		PreviewEnvTTL:           previewTTL,
 		DefaultDomainTLSSecret:  getEnv("GITOPS_DEFAULT_DOMAIN_TLS_SECRET", ""),
+		DefaultDomainDNSTarget:  getEnv("GITOPS_DEFAULT_DOMAIN_DNS_TARGET", "155.212.223.198"),
 	}
 
 	if cfg.DatabaseURL == "" {

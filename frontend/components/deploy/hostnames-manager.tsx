@@ -13,6 +13,10 @@ import { useT } from "@/lib/i18n/console/context";
 // Ownership/anti-hijack is enforced server-side — the apex must be verified for
 // THIS project before any of its hostnames can be attached here.
 
+function appHref(host: string): string {
+  return "https:" + "/".repeat(2) + host;
+}
+
 function statusStyle(status: DomainHostname["status"]): string {
   switch (status) {
     case "active":
@@ -180,7 +184,21 @@ export function HostnamesManager({ projectId, envId, appName, canEdit }: Props) 
             <tbody className="divide-y divide-gray-100">
               {hostnames.map((h) => (
                 <tr key={h.id}>
-                  <td className="px-5 py-3 font-mono text-gray-900">{h.hostname}</td>
+                  <td className="px-5 py-3 font-mono text-gray-900">
+                    <a
+                      href={appHref(h.hostname)}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-blue-600 hover:text-blue-700 hover:underline"
+                    >
+                      {h.hostname}
+                    </a>
+                    {h.managed && (
+                      <span className="ml-2 rounded-full border border-gray-200 bg-gray-50 px-2 py-0.5 text-xs font-medium text-gray-600">
+                        {t("domains.hm.defaultBadge")}
+                      </span>
+                    )}
+                  </td>
                   <td className="px-5 py-3 text-gray-500">{h.record_type}</td>
                   <td className="px-5 py-3">
                     <span className={`rounded-full border px-2 py-0.5 text-xs font-medium capitalize ${statusStyle(h.status)}`}>
@@ -192,13 +210,15 @@ export function HostnamesManager({ projectId, envId, appName, canEdit }: Props) 
                   </td>
                   {canEdit && (
                     <td className="px-5 py-3 text-right">
-                      <button
-                        onClick={() => handleDetach(h)}
-                        disabled={detachingId === h.id}
-                        className="rounded-lg border border-red-200 px-3 py-1.5 text-xs font-medium text-red-600 hover:bg-red-50 disabled:opacity-50 transition-colors"
-                      >
-                        {detachingId === h.id ? t("domains.hm.detaching") : t("domains.hm.detach")}
-                      </button>
+                      {!h.managed && (
+                        <button
+                          onClick={() => handleDetach(h)}
+                          disabled={detachingId === h.id}
+                          className="rounded-lg border border-red-200 px-3 py-1.5 text-xs font-medium text-red-600 hover:bg-red-50 disabled:opacity-50 transition-colors"
+                        >
+                          {detachingId === h.id ? t("domains.hm.detaching") : t("domains.hm.detach")}
+                        </button>
+                      )}
                     </td>
                   )}
                 </tr>

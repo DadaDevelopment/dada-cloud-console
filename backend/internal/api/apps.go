@@ -317,14 +317,22 @@ func (h *Handler) CreateApp(c *gin.Context) {
 		return
 	}
 
+	var defaultHostname string
+	if !isCompose && h.cfg.DefaultDomainEnabled && h.cfg.DefaultDomainBase != "" {
+		if suffix, sErr := randomHostSuffix(); sErr == nil {
+			defaultHostname = buildDefaultHostname(h.cfg.DefaultDomainBase, req.Name, suffix)
+		}
+	}
+
 	// Marshal payload
 	payload := models.CreateAppPayload{
-		Name:          req.Name,
-		Image:         req.Image,
-		Port:          req.Port,
-		Replicas:      req.Replicas,
-		Profile:       req.Profile,
-		AppServerName: appServerName, // empty for Helm apps
+		Name:            req.Name,
+		Image:           req.Image,
+		Port:            req.Port,
+		Replicas:        req.Replicas,
+		Profile:         req.Profile,
+		AppServerName:   appServerName,
+		DefaultHostname: defaultHostname,
 	}
 	payloadBytes, err := json.Marshal(payload)
 	if err != nil {
@@ -355,9 +363,22 @@ func (h *Handler) CreateApp(c *gin.Context) {
 		claims.UserID, projectID, op.ID, req.Name, auditMeta,
 	)
 
+	if defaultHostname != "" {
+		_, dhErr := h.pool.Exec(c.Request.Context(),
+			`INSERT INTO domain_hostnames (authorization_id, environment_id, app_name, hostname, record_type, status, cert_status, operation_id, managed)
+			 VALUES (NULL, $1, $2, $3, 'CNAME', 'pending', 'pending', $4, true)`,
+			envID, req.Name, defaultHostname, op.ID,
+		)
+		if dhErr != nil {
+			respondError(c, http.StatusInternalServerError, "failed to record default hostname")
+			return
+		}
+	}
+
 	c.JSON(http.StatusAccepted, gin.H{
-		"operation": op,
-		"message":   "App creation queued",
+		"operation":        op,
+		"default_hostname": defaultHostname,
+		"message":          "App creation queued",
 	})
 }
 

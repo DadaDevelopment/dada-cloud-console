@@ -427,6 +427,76 @@ func TestRenderCustomIngress(t *testing.T) {
 	}
 }
 
+func TestRenderDefaultIngress(t *testing.T) {
+	spec := renderer.CustomIngressSpec{
+		Name:              "myapp-a1b2c3-apps-dada-tuda-ru",
+		Namespace:         "delta-prod",
+		ProjectSlug:       "delta",
+		EnvSlug:           "prod",
+		Hostname:          "myapp-a1b2c3.apps.dada-tuda.ru",
+		ServiceName:       "myapp-service",
+		ServicePortName:   "http",
+		OperationID:       "op-ci",
+		WildcardTLSSecret: "apps-dada-tuda-wildcard-tls",
+		Managed:           true,
+	}
+	got, err := renderer.RenderCustomIngress(spec)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	wantSubstrings := []string{
+		"kind: Ingress",
+		"dada.io/managed-domain: \"true\"",
+		"host: myapp-a1b2c3.apps.dada-tuda.ru",
+		"secretName: apps-dada-tuda-wildcard-tls",
+		"name: myapp-service",
+	}
+	for _, want := range wantSubstrings {
+		if !strings.Contains(got, want) {
+			t.Errorf("rendered default Ingress missing %q\nFull output:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "cert-manager.io/cluster-issuer") {
+		t.Errorf("default Ingress must NOT request per-host issuance\nFull output:\n%s", got)
+	}
+	if strings.Contains(got, "secretName: myapp-a1b2c3-apps-dada-tuda-ru-tls") {
+		t.Errorf("default Ingress must use the wildcard secret, not a per-host one\nFull output:\n%s", got)
+	}
+}
+
+func TestRenderDefaultDomainDNS(t *testing.T) {
+	spec := renderer.DefaultDomainDNSSpec{
+		Name:        "myapp-a1b2c3-dada-tuda-ru",
+		ProjectSlug: "delta",
+		EnvSlug:     "prod",
+		Hostname:    "myapp-a1b2c3.dada-tuda.ru",
+		ServiceName: "myapp-service",
+		ServicePort: 8080,
+		Target:      "155.212.223.198",
+		OperationID: "op-ci",
+	}
+	got, err := renderer.RenderDefaultDomainDNS(spec)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	wantSubstrings := []string{
+		"kind: PublicApi",
+		"name: myapp-a1b2c3-dada-tuda-ru",
+		"dada.io/managed-domain: \"true\"",
+		"gatewayRoute: false",
+		"fqdn: myapp-a1b2c3.dada-tuda.ru",
+		"recordType: A",
+		"target: \"155.212.223.198\"",
+		"name: publicapi-beget-dns",
+		"servicePort: 8080",
+	}
+	for _, want := range wantSubstrings {
+		if !strings.Contains(got, want) {
+			t.Errorf("rendered default-domain DNS missing %q\nFull output:\n%s", want, got)
+		}
+	}
+}
+
 func TestRenderComposeFromDiscovery(t *testing.T) {
 	tests := []struct {
 		name           string

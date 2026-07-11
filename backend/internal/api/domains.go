@@ -332,18 +332,57 @@ func (h *Handler) DeleteDomainAuthorization(c *gin.Context) {
 		return
 	}
 
-	// Refuse if hostnames are still attached — caller must detach them first so
-	// the live Ingress/cert is torn down cleanly.
-	var attached int
-	if err := h.pool.QueryRow(c.Request.Context(),
-		`SELECT COUNT(*) FROM domain_hostnames WHERE authorization_id = $1`, authID,
-	).Scan(&attached); err != nil {
-		respondError(c, http.StatusInternalServerError, "failed to check attachments")
+	hnRows, err := h.pool.Query(c.Request.Context(),
+		`SELECT id, environment_id, app_name, hostname FROM domain_hostnames WHERE authorization_id = $1`, authID)
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, "failed to load attached hostnames")
 		return
 	}
-	if attached > 0 {
-		respondError(c, http.StatusConflict, "detach all hostnames before removing the authorization")
-		return
+	type attachedHostname struct {
+		id      uuid.UUID
+		envID   uuid.UUID
+		appName string
+		host    string
+	}
+	var attached []attachedHostname
+	for hnRows.Next() {
+		var a attachedHostname
+		if err := hnRows.Scan(&a.id, &a.envID, &a.appName, &a.host); err != nil {
+			hnRows.Close()
+			respondError(c, http.StatusInternalServerError, "failed to scan attached hostname")
+			return
+		}
+		attached = append(attached, a)
+	}
+	hnRows.Close()
+
+	for _, a := range attached {
+		payload := models.DetachCustomHostnamePayload{AppName: a.appName, Hostname: a.host}
+		payloadBytes, mErr := json.Marshal(payload)
+		if mErr != nil {
+			respondError(c, http.StatusInternalServerError, "failed to marshal detach payload")
+			return
+		}
+		var opID uuid.UUID
+		if err := h.pool.QueryRow(c.Request.Context(),
+			`INSERT INTO operations (actor_id, project_id, environment_id, action, resource_kind, resource_name, status, payload)
+			 VALUES ($1, $2, $3, 'DetachCustomHostname', 'CustomDomain', $4, 'Created', $5) RETURNING id`,
+			claims.UserID, projectID, a.envID, a.host, payloadBytes,
+		).Scan(&opID); err != nil {
+			respondError(c, http.StatusInternalServerError, "failed to queue hostname detachment")
+			return
+		}
+		if _, err := h.pool.Exec(c.Request.Context(),
+			`DELETE FROM domain_hostnames WHERE id = $1`, a.id); err != nil {
+			respondError(c, http.StatusInternalServerError, "failed to remove attached hostname")
+			return
+		}
+		auditMeta, _ := json.Marshal(payload)
+		_, _ = h.pool.Exec(c.Request.Context(),
+			`INSERT INTO audit_events (actor_id, project_id, operation_id, action, resource_kind, resource_name, metadata)
+			 VALUES ($1, $2, $3, 'DetachCustomHostname', 'CustomDomain', $4, $5)`,
+			claims.UserID, projectID, opID, a.host, auditMeta,
+		)
 	}
 
 	ct, err := h.pool.Exec(c.Request.Context(),
@@ -591,10 +630,10 @@ func (h *Handler) ListHostnames(c *gin.Context) {
 	}
 
 	rows, err := h.pool.Query(c.Request.Context(),
-		`SELECT id, authorization_id, environment_id, app_name, hostname, record_type,
+		`SELECT id, authorization_id, managed, environment_id, app_name, hostname, record_type,
 		        status, cert_status, operation_id, created_at, updated_at
 		 FROM domain_hostnames
-		 WHERE environment_id = $1 AND app_name = $2 ORDER BY hostname`,
+		 WHERE environment_id = $1 AND app_name = $2 ORDER BY managed DESC, hostname`,
 		envID, appName,
 	)
 	if err != nil {
@@ -607,7 +646,7 @@ func (h *Handler) ListHostnames(c *gin.Context) {
 	for rows.Next() {
 		var hn models.DomainHostname
 		if err := rows.Scan(
-			&hn.ID, &hn.AuthorizationID, &hn.EnvironmentID, &hn.AppName, &hn.Hostname, &hn.RecordType,
+			&hn.ID, &hn.AuthorizationID, &hn.Managed, &hn.EnvironmentID, &hn.AppName, &hn.Hostname, &hn.RecordType,
 			&hn.Status, &hn.CertStatus, &hn.OperationID, &hn.CreatedAt, &hn.UpdatedAt,
 		); err != nil {
 			respondError(c, http.StatusInternalServerError, "failed to scan hostname")
@@ -682,12 +721,12 @@ func (h *Handler) DetachHostname(c *gin.Context) {
 
 	var hn models.DomainHostname
 	err = h.pool.QueryRow(c.Request.Context(),
-		`SELECT id, authorization_id, environment_id, app_name, hostname, record_type,
+		`SELECT id, authorization_id, managed, environment_id, app_name, hostname, record_type,
 		        status, cert_status, operation_id, created_at, updated_at
 		 FROM domain_hostnames WHERE id = $1 AND environment_id = $2 AND app_name = $3`,
 		hostnameID, envID, appName,
 	).Scan(
-		&hn.ID, &hn.AuthorizationID, &hn.EnvironmentID, &hn.AppName, &hn.Hostname, &hn.RecordType,
+		&hn.ID, &hn.AuthorizationID, &hn.Managed, &hn.EnvironmentID, &hn.AppName, &hn.Hostname, &hn.RecordType,
 		&hn.Status, &hn.CertStatus, &hn.OperationID, &hn.CreatedAt, &hn.UpdatedAt,
 	)
 	if err == pgx.ErrNoRows {
@@ -696,6 +735,10 @@ func (h *Handler) DetachHostname(c *gin.Context) {
 	}
 	if err != nil {
 		respondError(c, http.StatusInternalServerError, "failed to load hostname")
+		return
+	}
+	if hn.Managed {
+		respondError(c, http.StatusConflict, "the default domain cannot be detached")
 		return
 	}
 
@@ -842,6 +885,23 @@ func randomToken() (string, error) {
 		return "", err
 	}
 	return hex.EncodeToString(b), nil
+}
+
+func randomHostSuffix() (string, error) {
+	b := make([]byte, 3)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(b), nil
+}
+
+func buildDefaultHostname(base, name, suffix string) string {
+	label := name
+	maxLabel := 63 - 1 - len(suffix)
+	if len(label) > maxLabel {
+		label = strings.TrimRight(label[:maxLabel], "-")
+	}
+	return fmt.Sprintf("%s-%s.%s", label, suffix, base)
 }
 
 // normalizeDomain lowercases and trims a domain, stripping any trailing dot and

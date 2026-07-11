@@ -428,7 +428,8 @@ export interface DomainAuthorization {
 
 export interface DomainHostname {
   id: string;
-  authorization_id: string;
+  authorization_id?: string;
+  managed?: boolean;
   environment_id: string;
   app_name: string;
   hostname: string;
