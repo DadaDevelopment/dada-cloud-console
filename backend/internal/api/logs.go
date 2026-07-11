@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"sort"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/dada-tuda/console/backend/internal/logsearch"
@@ -111,41 +112,65 @@ func (h *Handler) SearchLogs(c *gin.Context) {
 		}
 	}
 
-	result, err := h.logsearch.Search(c.Request.Context(), logsearch.SearchOpts{
-		VMName: vm,
-		App:    app,
-		Query:  c.Query("q"),
-		Since:  time.Now().Add(-since),
-		Size:   size,
-	})
-	if err != nil {
-		respondError(c, http.StatusBadGateway, "log search failed: "+err.Error())
-		return
-	}
+	ctx := c.Request.Context()
+	q := c.Query("q")
+	sinceTime := time.Now().Add(-since)
 
-	// Native (k8s) apps: their pod stdout never reaches the user stream above —
-	// it lands in the infra stream (in-cluster filebeat). Query it as a second
-	// source, scoped hard by the environments' namespaces resolved from the DB
-	// (never from user input) so a same-named app in another tenant can't leak.
-	// Infra-stream failures are non-fatal: user-stream results still return.
+	var (
+		wg       sync.WaitGroup
+		userRes  *logsearch.SearchResult
+		userErr  error
+		infraRes *logsearch.SearchResult
+	)
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		userRes, userErr = h.logsearch.Search(ctx, logsearch.SearchOpts{
+			VMName: vm,
+			App:    app,
+			Query:  q,
+			Since:  sinceTime,
+			Size:   size,
+		})
+	}()
+
 	if app != "" && h.infraLogsearch != nil {
-		namespaces, nsErr := h.k8sAppNamespaces(c.Request.Context(), projectID, app)
-		if nsErr != nil {
-			log.Warn().Err(nsErr).Str("app", app).Msg("logs: resolving k8s namespaces")
-		} else if len(namespaces) > 0 {
-			infra, infraErr := h.infraLogsearch.Search(c.Request.Context(), logsearch.SearchOpts{
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			namespaces, nsErr := h.k8sAppNamespaces(ctx, projectID, app)
+			if nsErr != nil {
+				log.Warn().Err(nsErr).Str("app", app).Msg("logs: resolving k8s namespaces")
+				return
+			}
+			if len(namespaces) == 0 {
+				return
+			}
+			infra, infraErr := h.infraLogsearch.Search(ctx, logsearch.SearchOpts{
 				KubeApp:        app,
 				KubeNamespaces: namespaces,
-				Query:          c.Query("q"),
-				Since:          time.Now().Add(-since),
+				Query:          q,
+				Since:          sinceTime,
 				Size:           size,
 			})
 			if infraErr != nil {
 				log.Warn().Err(infraErr).Str("app", app).Msg("logs: infra stream search")
-			} else {
-				result = mergeLogResults(result, infra, size)
+				return
 			}
-		}
+			infraRes = infra
+		}()
+	}
+
+	wg.Wait()
+
+	if userErr != nil {
+		respondError(c, http.StatusBadGateway, "log search failed: "+userErr.Error())
+		return
+	}
+	result := userRes
+	if infraRes != nil {
+		result = mergeLogResults(result, infraRes, size)
 	}
 
 	if result.Entries == nil {
