@@ -50,6 +50,13 @@ type Config struct {
 	// Load-balancer IP written into PublicApi manifests.
 	ClusterLBIP string
 
+	// DefaultDomainTLSSecret, when set, makes managed default-domain Ingresses
+	// reference a shared wildcard TLS secret (requires that secret to be
+	// replicated into every app namespace). Empty (the default) makes each
+	// surrogate host obtain its own per-host cert via cert-manager HTTP-01,
+	// exactly like user-owned custom domains -- no wildcard cert or reflector.
+	DefaultDomainTLSSecret string
+
 	// MLflow registry — used to resolve <name, version> → s3:// source URI
 	// when rendering AIModel manifests pinned to MLflow. Empty disables the
 	// resolver and any MLflow-pinned op fails with an actionable error.
@@ -84,27 +91,28 @@ func Load() (*Config, error) {
 	}
 
 	cfg := &Config{
-		DatabaseURL:       getEnv("DATABASE_URL", getEnv("DB_URL", "")),
-		DefaultRepoURL:    getEnv("GITOPS_DEFAULT_REPO_URL", ""),
-		DefaultBranch:     getEnv("GITOPS_DEFAULT_BRANCH", "main"),
-		DefaultUsername:   getEnv("GITOPS_DEFAULT_USERNAME", getEnv("GIT_USERNAME", "")),
-		DefaultToken:      getEnv("GITOPS_DEFAULT_TOKEN", getEnv("GIT_TOKEN", "")),
-		RepoLocalPath:     getEnv("GITOPS_REPO_LOCAL_PATH", "/var/lib/gitops-repos"),
-		BotName:           getEnv("GITOPS_BOT_NAME", "DADA Platform Bot"),
-		BotEmail:          getEnv("GITOPS_BOT_EMAIL", "bot@dada-tuda.ru"),
+		DatabaseURL:        getEnv("DATABASE_URL", getEnv("DB_URL", "")),
+		DefaultRepoURL:     getEnv("GITOPS_DEFAULT_REPO_URL", ""),
+		DefaultBranch:      getEnv("GITOPS_DEFAULT_BRANCH", "main"),
+		DefaultUsername:    getEnv("GITOPS_DEFAULT_USERNAME", getEnv("GIT_USERNAME", "")),
+		DefaultToken:       getEnv("GITOPS_DEFAULT_TOKEN", getEnv("GIT_TOKEN", "")),
+		RepoLocalPath:      getEnv("GITOPS_REPO_LOCAL_PATH", "/var/lib/gitops-repos"),
+		BotName:            getEnv("GITOPS_BOT_NAME", "DADA Platform Bot"),
+		BotEmail:           getEnv("GITOPS_BOT_EMAIL", "bot@dada-tuda.ru"),
 		PollIntervalDB:     dbInterval,
 		PollIntervalGit:    gitInterval,
 		PollIntervalStatus: statusInterval,
 
 		StatusReconcileEnabled:  getEnv("GITOPS_STATUS_RECONCILE_ENABLED", "true") == "true",
 		ClusterDiscoveryEnabled: getEnv("GITOPS_CLUSTER_DISCOVERY_ENABLED", "false") == "true",
-		WebhookPort:       getEnv("GITOPS_WEBHOOK_PORT", ""),
-		EncryptionKey:     getEnv("GITOPS_ENCRYPTION_KEY", ""),
-		ClusterLBIP:       getEnv("CLUSTER_LB_IP", "93.189.231.60"),
-		MLflowBaseURL:     getEnv("MLFLOW_BASE_URL", ""),
-		MLflowAuthHeader:  getEnv("MLFLOW_AUTH_HEADER", ""),
-		ValuesTokenSecret: getEnv("GITOPS_VALUES_TOKEN_SECRET", ""),
-		PreviewEnvTTL:     previewTTL,
+		WebhookPort:             getEnv("GITOPS_WEBHOOK_PORT", ""),
+		EncryptionKey:           getEnv("GITOPS_ENCRYPTION_KEY", ""),
+		ClusterLBIP:             getEnv("CLUSTER_LB_IP", "93.189.231.60"),
+		MLflowBaseURL:           getEnv("MLFLOW_BASE_URL", ""),
+		MLflowAuthHeader:        getEnv("MLFLOW_AUTH_HEADER", ""),
+		ValuesTokenSecret:       getEnv("GITOPS_VALUES_TOKEN_SECRET", ""),
+		PreviewEnvTTL:           previewTTL,
+		DefaultDomainTLSSecret:  getEnv("GITOPS_DEFAULT_DOMAIN_TLS_SECRET", ""),
 	}
 
 	if cfg.DatabaseURL == "" {
