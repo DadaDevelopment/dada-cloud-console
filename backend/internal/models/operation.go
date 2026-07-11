@@ -39,6 +39,7 @@ type CreateServiceDatabasePayload struct {
 	BackupEnabled   bool   `json:"backup_enabled"`
 	BackupSchedule  string `json:"backup_schedule"`
 	BackupRetention string `json:"backup_retention"`
+	ExternalEnabled bool   `json:"external_enabled,omitempty"`
 }
 
 // DeleteServiceDatabasePayload is the typed payload for DeleteServiceDatabase

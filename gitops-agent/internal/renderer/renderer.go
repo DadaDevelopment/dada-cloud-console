@@ -21,6 +21,7 @@ type ServiceDatabaseSpec struct {
 	BackupEnabled   bool
 	BackupSchedule  string
 	BackupRetention string
+	ExternalEnabled bool
 	OperationID     string
 }
 
@@ -33,10 +34,12 @@ metadata:
     dada.io/environment: {{ .EnvSlug }}
     dada.io/operation: {{ .OperationID }}
 spec:
-  appRef: {{ .AppRef }}
+  appRef: {{ if .AppRef }}{{ .AppRef }}{{ else }}{{ .Name }}{{ end }}
   namespace: {{ .Namespace }}
   engine: postgresql
   database: {{ .Database }}
+  external:
+    enabled: {{ .ExternalEnabled }}
   backup:
     enabled: {{ .BackupEnabled }}
     frequency: {{ .BackupSchedule }}
@@ -104,6 +107,18 @@ type AppSpec struct {
 	// it. The Secret manifest itself is rendered separately (RenderAppEnvSecret)
 	// into the app's resources.values.yaml.
 	SecretEnvName string
+
+	// ResourcesOnly marks a resources-carrier owner app (no workload of its own):
+	// the per-project "service-databases-<project>" / "s3-buckets-<project>" charts
+	// that exist only to own standalone sibling CRs. Such an app has no OCI/git
+	// workload chart, so its App CR must point spec.helm.path directly at the shared
+	// passthrough chart "helm/app-resources" fed by ResourcesValueFile — NOT at the
+	// per-app "<app>/resources" directory, which no longer exists on disk (ADR 0005)
+	// and makes ArgoCD fail with "app path does not exist".
+	ResourcesOnly bool
+	// ResourcesValueFile is the git path of the resources.values.yaml the passthrough
+	// chart renders. Required when ResourcesOnly is set.
+	ResourcesValueFile string
 }
 
 var appFuncMap = template.FuncMap{
@@ -129,9 +144,9 @@ spec:
   namespace: {{ .Namespace }}
   helm:
     repoURL: {{ .HelmRepoURL }}
-    path: {{ appResourcesGitPath .ProjectSlug .EnvSlug .Name }}
+    path: {{ if .ResourcesOnly }}helm/app-resources{{ else }}{{ appResourcesGitPath .ProjectSlug .EnvSlug .Name }}{{ end }}
     targetRevision: {{ .HelmTargetRevision }}
-    valueFile: {{ appHelmValuesGitPath .ProjectSlug .EnvSlug .Name }}
+    valueFile: {{ if .ResourcesOnly }}{{ .ResourcesValueFile }}{{ else }}{{ appHelmValuesGitPath .ProjectSlug .EnvSlug .Name }}{{ end }}
 `))
 
 func RenderApp(spec AppSpec) (string, error) {

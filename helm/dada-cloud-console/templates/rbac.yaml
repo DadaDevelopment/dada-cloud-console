@@ -118,4 +118,40 @@ roleRef:
   kind: Role
   name: {{ include "dada-cloud-console.fullname" . }}-db-backup
   apiGroup: rbac.authorization.k8s.io
+{{- if .Values.rbac.dbCredsReader | default true }}
+---
+# Reveal-on-demand of managed-database connection secrets
+# ("<database>-db-credentials"). Unlike S3 (a single crossplane-system
+# namespace), managed-Postgres connection secrets live in each project's own app
+# namespace, which is created dynamically per project -- so a single per-namespace
+# Role cannot cover them. This ClusterRole grants get on Secrets cluster-wide,
+# read-only and get-only, so the console can read a database's credentials from
+# whichever namespace owns it. Every reveal is gated on project write access and
+# audited server-side (RevealDatabaseCredentials).
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "dada-cloud-console.fullname" . }}-db-creds-reader
+  labels:
+    {{- include "dada-cloud-console.labels" . | nindent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "dada-cloud-console.fullname" . }}-db-creds-reader
+  labels:
+    {{- include "dada-cloud-console.labels" . | nindent 4 }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "dada-cloud-console.fullname" . }}
+    namespace: {{ .Release.Namespace }}
+roleRef:
+  kind: ClusterRole
+  name: {{ include "dada-cloud-console.fullname" . }}-db-creds-reader
+  apiGroup: rbac.authorization.k8s.io
+{{- end }}
 {{- end }}

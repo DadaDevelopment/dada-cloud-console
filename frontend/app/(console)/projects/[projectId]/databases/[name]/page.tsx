@@ -2,7 +2,7 @@
 import { useCallback, useEffect, useState, FormEvent } from "react";
 import { useParams, useSearchParams, useRouter } from "next/navigation";
 import { databasesApi } from "@/lib/api";
-import type { ResourceSnapshot, DBBackup } from "@/lib/types";
+import type { ResourceSnapshot, DBBackup, DatabaseCredentialsResponse } from "@/lib/types";
 import { Spinner } from "@/components/ui/spinner";
 import { Breadcrumb } from "@/components/ui/breadcrumb";
 import { CopyButton } from "@/components/ui/copy-button";
@@ -139,6 +139,27 @@ export default function DatabaseDetailPage() {
   const [isRestoreSubmitting, setIsRestoreSubmitting] = useState(false);
   const [restoreError, setRestoreError] = useState<string | null>(null);
 
+  const [creds, setCreds] = useState<DatabaseCredentialsResponse | null>(null);
+  const [credsLoading, setCredsLoading] = useState(false);
+  const [revealPw, setRevealPw] = useState(false);
+  const [credsError, setCredsError] = useState<{ kind: "notReady" | "notConfigured" | "generic"; message?: string } | null>(null);
+
+  async function revealCreds() {
+    setCredsLoading(true);
+    setCredsError(null);
+    try {
+      const r = await databasesApi.credentials(projectId, envId, name);
+      setCreds(r);
+    } catch (e) {
+      const status = (e as { status?: number } | undefined)?.status;
+      if (status === 404) setCredsError({ kind: "notReady" });
+      else if (status === 503) setCredsError({ kind: "notConfigured" });
+      else setCredsError({ kind: "generic", message: e instanceof Error ? e.message : t("databases.detail.access.error") });
+    } finally {
+      setCredsLoading(false);
+    }
+  }
+
   useEffect(() => {
     if (!envId) {
       if (!selectedEnv) return;
@@ -272,7 +293,10 @@ export default function DatabaseDetailPage() {
   const namespace = summary.namespace ?? spec.namespace;
   const backup = spec.backup;
   const backupOn = !!backup?.enabled;
-  const host = namespace ? `${db.name}.${namespace}.svc.cluster.local` : db.name;
+  const derivedHost = namespace ? `${db.name}.${namespace}.svc.cluster.local` : db.name;
+  const host = creds?.host || derivedHost;
+  const connPort = creds?.port || "5432";
+  const connDbName = creds?.database || dbName;
 
   return (
     <div>
@@ -322,12 +346,82 @@ export default function DatabaseDetailPage() {
             <CopyButton value={host} />
           </div>
           <div className="grid gap-4 sm:grid-cols-2">
-            <Field label={t("databases.detail.field.dbName")}><span className="font-mono">{dbName}</span></Field>
-            <Field label={t("databases.detail.field.port")}><span className="font-mono">5432</span></Field>
+            <Field label={t("databases.detail.field.dbName")}><span className="font-mono">{connDbName}</span></Field>
+            <Field label={t("databases.detail.field.port")}><span className="font-mono">{connPort}</span></Field>
           </div>
-          <p className="rounded-lg bg-gray-50 dark:bg-gray-900 px-3 py-2 text-xs text-gray-500 dark:text-gray-400">
-            {t("databases.detail.credentials")}
-          </p>
+          {!creds && (
+            <p className="text-xs text-gray-400 dark:text-gray-500">{t("databases.detail.hostHint")}</p>
+          )}
+          {creds ? (
+            <div className="space-y-3 border-t border-gray-100 dark:border-gray-800 pt-4">
+              <div>
+                <p className="text-xs font-medium text-gray-500 dark:text-gray-400">{t("databases.detail.access.username")}</p>
+                <div className="mt-1 flex items-center gap-2">
+                  <code className="flex-1 break-all rounded-md border border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-gray-900 px-3 py-2 font-mono text-xs text-gray-800 dark:text-gray-200">
+                    {creds.username}
+                  </code>
+                  <CopyButton value={creds.username} />
+                </div>
+              </div>
+              <div>
+                <div className="flex items-center justify-between">
+                  <p className="text-xs font-medium text-gray-500 dark:text-gray-400">{t("databases.detail.access.password")}</p>
+                  <button
+                    type="button"
+                    onClick={() => setRevealPw((v) => !v)}
+                    className="text-xs font-medium text-blue-600 hover:text-blue-700"
+                  >
+                    {revealPw ? t("databases.detail.access.hide") : t("databases.detail.access.reveal")}
+                  </button>
+                </div>
+                <div className="mt-1 flex items-center gap-2">
+                  <code className="flex-1 break-all rounded-md border border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-gray-900 px-3 py-2 font-mono text-xs text-gray-800 dark:text-gray-200">
+                    {revealPw ? creds.password : "•".repeat(Math.min(creds.password.length, 40))}
+                  </code>
+                  <CopyButton value={creds.password} />
+                </div>
+              </div>
+              {creds.external_host && (
+                <div>
+                  <p className="text-xs font-medium text-gray-500 dark:text-gray-400">{t("databases.detail.access.externalHost")}</p>
+                  <div className="mt-1 flex items-center gap-2">
+                    <code className="flex-1 break-all rounded-md border border-amber-200 dark:border-amber-900 bg-amber-50 dark:bg-amber-950/30 px-3 py-2 font-mono text-xs text-amber-800 dark:text-amber-300">
+                      {creds.external_host}:{creds.external_port || creds.port}
+                    </code>
+                    <CopyButton value={`${creds.external_host}:${creds.external_port || creds.port}`} />
+                  </div>
+                  <p className="mt-1 text-xs text-amber-600 dark:text-amber-500">{t("databases.detail.access.externalWarning")}</p>
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className="border-t border-gray-100 dark:border-gray-800 pt-4">
+              <p className="mb-3 text-xs text-gray-500 dark:text-gray-400">{t("databases.detail.credentials")}</p>
+              {canManage ? (
+                <>
+                  <button
+                    type="button"
+                    onClick={revealCreds}
+                    disabled={credsLoading}
+                    className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50 transition-colors"
+                  >
+                    {credsLoading ? <><Spinner size="sm" /> {t("databases.detail.access.revealing")}</> : t("databases.detail.access.revealBtn")}
+                  </button>
+                  {credsError && (
+                    <p className={`mt-3 text-sm ${credsError.kind === "generic" ? "text-red-600 dark:text-red-400" : "text-gray-500 dark:text-gray-400"}`}>
+                      {credsError.kind === "notReady"
+                        ? t("databases.detail.access.notReady")
+                        : credsError.kind === "notConfigured"
+                          ? t("databases.detail.access.notConfigured")
+                          : credsError.message}
+                    </p>
+                  )}
+                </>
+              ) : (
+                <p className="text-sm text-gray-500 dark:text-gray-400">{t("databases.detail.access.none")}</p>
+              )}
+            </div>
+          )}
         </div>
       </section>
 

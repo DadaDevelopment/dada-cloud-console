@@ -11,6 +11,8 @@ spec:
   namespace: internal-prod
   engine: postgresql
   database: codexlb
+  external:
+    enabled: false
   backup:
     enabled: false
     frequency: daily

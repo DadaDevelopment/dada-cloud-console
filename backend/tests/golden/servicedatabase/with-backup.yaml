@@ -11,6 +11,8 @@ spec:
   namespace: client-a-prod
   engine: postgresql
   database: profi
+  external:
+    enabled: false
   backup:
     enabled: true
     frequency: daily

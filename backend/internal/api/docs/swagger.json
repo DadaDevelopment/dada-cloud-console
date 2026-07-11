@@ -243,7 +243,7 @@
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/internal_api.loginRequest"
+                            "$ref": "#/definitions/api.loginRequest"
                         }
                     }
                 ],
@@ -410,7 +410,7 @@
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/github_com_dada-tuda_console_backend_internal_billing_pricing.Need"
+                            "$ref": "#/definitions/pricing.Need"
                         }
                     }
                 ],
@@ -789,7 +789,7 @@
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/internal_api.createProjectRequest"
+                            "$ref": "#/definitions/api.createProjectRequest"
                         }
                     }
                 ],
@@ -1022,7 +1022,7 @@
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/internal_api.createAppServerRequest"
+                            "$ref": "#/definitions/api.createAppServerRequest"
                         }
                     }
                 ],
@@ -1312,7 +1312,7 @@
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/internal_api.importComposeStackRequest"
+                            "$ref": "#/definitions/api.importComposeStackRequest"
                         }
                     }
                 ],
@@ -2484,7 +2484,7 @@
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/internal_api.addDomainAuthorizationRequest"
+                            "$ref": "#/definitions/api.addDomainAuthorizationRequest"
                         }
                     }
                 ],
@@ -2756,7 +2756,7 @@
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/internal_api.createAppRequest"
+                            "$ref": "#/definitions/api.createAppRequest"
                         }
                     }
                 ],
@@ -3149,7 +3149,7 @@
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/internal_api.createCloudTaskRequest"
+                            "$ref": "#/definitions/api.createCloudTaskRequest"
                         }
                     }
                 ],
@@ -3390,7 +3390,7 @@
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/internal_api.createEndpointRequest"
+                            "$ref": "#/definitions/api.createEndpointRequest"
                         }
                     }
                 ],
@@ -3654,7 +3654,7 @@
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/internal_api.setEnvVarRequest"
+                            "$ref": "#/definitions/api.setEnvVarRequest"
                         }
                     }
                 ],
@@ -3877,7 +3877,7 @@
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/internal_api.attachHostnameRequest"
+                            "$ref": "#/definitions/api.attachHostnameRequest"
                         }
                     }
                 ],
@@ -4058,7 +4058,7 @@
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/internal_api.updateAppImageRequest"
+                            "$ref": "#/definitions/api.updateAppImageRequest"
                         }
                     }
                 ],
@@ -4722,7 +4722,7 @@
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/internal_api.createServiceDatabaseRequest"
+                            "$ref": "#/definitions/api.createServiceDatabaseRequest"
                         }
                     }
                 ],
@@ -5002,6 +5002,108 @@
                 }
             }
         },
+        "/projects/{projectId}/environments/{envId}/databases/{name}/credentials": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Reveals the host, port, database name, username and password for a managed PostgreSQL database (ServiceDatabaseV2) by reading its Crossplane connection secret. Requires reveal=true and write access; every reveal is audited. Returns 404 while the database is still provisioning (no secret yet) and 503 when in-cluster credential access is not configured.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "database"
+                ],
+                "summary": "Reveal a database's connection credentials",
+                "operationId": "getDatabaseCredentials",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Project UUID",
+                        "name": "projectId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Environment UUID",
+                        "name": "envId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Database resource name",
+                        "name": "name",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "boolean",
+                        "description": "Must be true to reveal the credentials",
+                        "name": "reveal",
+                        "in": "query",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "object with host, port, database, username, password",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/projects/{projectId}/environments/{envId}/databases/{name}/restore": {
             "post": {
                 "security": [
@@ -5049,7 +5151,7 @@
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/internal_api.restoreDatabaseRequest"
+                            "$ref": "#/definitions/api.restoreDatabaseRequest"
                         }
                     }
                 ],
@@ -5210,7 +5312,7 @@
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/internal_api.createIngressRequest"
+                            "$ref": "#/definitions/api.createIngressRequest"
                         }
                     }
                 ],
@@ -5351,7 +5453,7 @@
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/internal_api.createAIModelRequest"
+                            "$ref": "#/definitions/api.createAIModelRequest"
                         }
                     }
                 ],
@@ -6112,7 +6214,7 @@
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/internal_api.createMonitoringRequest"
+                            "$ref": "#/definitions/api.createMonitoringRequest"
                         }
                     }
                 ],
@@ -6938,7 +7040,7 @@
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/internal_api.saveDashboardRequest"
+                            "$ref": "#/definitions/api.saveDashboardRequest"
                         }
                     }
                 ],
@@ -7721,7 +7823,7 @@
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/internal_api.connectGitRepoRequest"
+                            "$ref": "#/definitions/api.connectGitRepoRequest"
                         }
                     }
                 ],
@@ -7935,7 +8037,7 @@
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/internal_api.createS3BucketRequest"
+                            "$ref": "#/definitions/api.createS3BucketRequest"
                         }
                     }
                 ],
@@ -8236,7 +8338,7 @@
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/internal_api.bindInstallationRequest"
+                            "$ref": "#/definitions/api.bindInstallationRequest"
                         }
                     }
                 ],
@@ -8244,7 +8346,7 @@
                     "201": {
                         "description": "Created",
                         "schema": {
-                            "$ref": "#/definitions/internal_api.gitInstallation"
+                            "$ref": "#/definitions/api.gitInstallation"
                         }
                     },
                     "400": {
@@ -8698,7 +8800,7 @@
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/internal_api.ingestLogsRequest"
+                            "$ref": "#/definitions/api.ingestLogsRequest"
                         }
                     }
                 ],
@@ -8816,7 +8918,7 @@
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/internal_api.ingestMetricsRequest"
+                            "$ref": "#/definitions/api.ingestMetricsRequest"
                         }
                     }
                 ],
@@ -9144,82 +9246,7 @@
         }
     },
     "definitions": {
-        "github_com_dada-tuda_console_backend_internal_billing_pricing.Need": {
-            "type": "object",
-            "properties": {
-                "apps": {
-                    "type": "integer"
-                },
-                "databases": {
-                    "type": "integer"
-                },
-                "domains": {
-                    "type": "integer"
-                },
-                "members": {
-                    "type": "integer"
-                },
-                "storageGB": {
-                    "type": "integer"
-                }
-            }
-        },
-        "github_com_dada-tuda_console_backend_internal_models.AIModelAuthMode": {
-            "type": "string",
-            "enum": [
-                "apikey",
-                "jwt",
-                "public"
-            ],
-            "x-enum-varnames": [
-                "AIModelAuthAPIKey",
-                "AIModelAuthJWT",
-                "AIModelAuthPublic"
-            ]
-        },
-        "github_com_dada-tuda_console_backend_internal_models.AIModelSource": {
-            "type": "string",
-            "enum": [
-                "mlflow",
-                "s3",
-                "custom"
-            ],
-            "x-enum-varnames": [
-                "AIModelSourceMLflow",
-                "AIModelSourceS3",
-                "AIModelSourceCustom"
-            ]
-        },
-        "github_com_dada-tuda_console_backend_internal_models.ImportServiceSpec": {
-            "type": "object",
-            "properties": {
-                "container_name": {
-                    "type": "string"
-                },
-                "image": {
-                    "type": "string"
-                },
-                "include": {
-                    "type": "boolean"
-                },
-                "ports": {
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    }
-                },
-                "service_name": {
-                    "type": "string"
-                },
-                "volumes": {
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    }
-                }
-            }
-        },
-        "internal_api.addDomainAuthorizationRequest": {
+        "api.addDomainAuthorizationRequest": {
             "type": "object",
             "properties": {
                 "apex_domain": {
@@ -9227,7 +9254,7 @@
                 }
             }
         },
-        "internal_api.attachHostnameRequest": {
+        "api.attachHostnameRequest": {
             "type": "object",
             "properties": {
                 "hostname": {
@@ -9235,7 +9262,7 @@
                 }
             }
         },
-        "internal_api.bindInstallationRequest": {
+        "api.bindInstallationRequest": {
             "type": "object",
             "properties": {
                 "installation_id": {
@@ -9244,7 +9271,7 @@
                 }
             }
         },
-        "internal_api.connectGitRepoRequest": {
+        "api.connectGitRepoRequest": {
             "type": "object",
             "properties": {
                 "app_name": {
@@ -9291,7 +9318,7 @@
                 }
             }
         },
-        "internal_api.createAIModelRequest": {
+        "api.createAIModelRequest": {
             "type": "object",
             "properties": {
                 "artifact_uri": {
@@ -9301,7 +9328,7 @@
                     "type": "string"
                 },
                 "auth_mode": {
-                    "$ref": "#/definitions/github_com_dada-tuda_console_backend_internal_models.AIModelAuthMode"
+                    "$ref": "#/definitions/models.AIModelAuthMode"
                 },
                 "container_image": {
                     "type": "string"
@@ -9322,14 +9349,14 @@
                     "type": "string"
                 },
                 "source": {
-                    "$ref": "#/definitions/github_com_dada-tuda_console_backend_internal_models.AIModelSource"
+                    "$ref": "#/definitions/models.AIModelSource"
                 },
                 "version": {
                     "type": "string"
                 }
             }
         },
-        "internal_api.createAppRequest": {
+        "api.createAppRequest": {
             "type": "object",
             "properties": {
                 "image": {
@@ -9349,7 +9376,7 @@
                 }
             }
         },
-        "internal_api.createAppServerRequest": {
+        "api.createAppServerRequest": {
             "type": "object",
             "properties": {
                 "flavor": {
@@ -9386,7 +9413,7 @@
                 }
             }
         },
-        "internal_api.createCloudTaskRequest": {
+        "api.createCloudTaskRequest": {
             "type": "object",
             "properties": {
                 "task_type": {
@@ -9394,7 +9421,7 @@
                 }
             }
         },
-        "internal_api.createEndpointRequest": {
+        "api.createEndpointRequest": {
             "type": "object",
             "properties": {
                 "auth_enabled": {
@@ -9423,7 +9450,7 @@
                 }
             }
         },
-        "internal_api.createIngressRequest": {
+        "api.createIngressRequest": {
             "type": "object",
             "properties": {
                 "aliases": {
@@ -9444,7 +9471,7 @@
                 "rules": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/internal_api.ingressRuleReq"
+                        "$ref": "#/definitions/api.ingressRuleReq"
                     }
                 },
                 "ssl_redirect": {
@@ -9469,7 +9496,7 @@
                 }
             }
         },
-        "internal_api.createMonitoringRequest": {
+        "api.createMonitoringRequest": {
             "type": "object",
             "properties": {
                 "name": {
@@ -9477,7 +9504,7 @@
                 }
             }
         },
-        "internal_api.createProjectRequest": {
+        "api.createProjectRequest": {
             "type": "object",
             "required": [
                 "slug"
@@ -9501,7 +9528,7 @@
                 }
             }
         },
-        "internal_api.createS3BucketRequest": {
+        "api.createS3BucketRequest": {
             "type": "object",
             "properties": {
                 "app_ref": {
@@ -9528,7 +9555,7 @@
                 }
             }
         },
-        "internal_api.createServiceDatabaseRequest": {
+        "api.createServiceDatabaseRequest": {
             "type": "object",
             "properties": {
                 "app_ref": {
@@ -9546,12 +9573,15 @@
                 "database": {
                     "type": "string"
                 },
+                "external_enabled": {
+                    "type": "boolean"
+                },
                 "name": {
                     "type": "string"
                 }
             }
         },
-        "internal_api.gitInstallation": {
+        "api.gitInstallation": {
             "type": "object",
             "properties": {
                 "account_login": {
@@ -9578,7 +9608,7 @@
                 }
             }
         },
-        "internal_api.importComposeStackRequest": {
+        "api.importComposeStackRequest": {
             "type": "object",
             "properties": {
                 "ack_secrets_in_git": {
@@ -9596,12 +9626,12 @@
                 "services": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/github_com_dada-tuda_console_backend_internal_models.ImportServiceSpec"
+                        "$ref": "#/definitions/models.ImportServiceSpec"
                     }
                 }
             }
         },
-        "internal_api.ingestLogsRequest": {
+        "api.ingestLogsRequest": {
             "type": "object",
             "properties": {
                 "level": {
@@ -9615,13 +9645,14 @@
                 }
             }
         },
-        "internal_api.ingestMetricsRequest": {
+        "api.ingestMetricsRequest": {
             "type": "object",
             "properties": {
                 "metrics": {
                     "type": "object",
                     "additionalProperties": {
-                        "type": "number"
+                        "type": "number",
+                        "format": "float64"
                     }
                 },
                 "source": {
@@ -9632,7 +9663,7 @@
                 }
             }
         },
-        "internal_api.ingressRuleReq": {
+        "api.ingressRuleReq": {
             "type": "object",
             "properties": {
                 "app": {
@@ -9646,7 +9677,7 @@
                 }
             }
         },
-        "internal_api.loginRequest": {
+        "api.loginRequest": {
             "type": "object",
             "required": [
                 "password"
@@ -9663,7 +9694,7 @@
                 }
             }
         },
-        "internal_api.restoreDatabaseRequest": {
+        "api.restoreDatabaseRequest": {
             "type": "object",
             "properties": {
                 "backup_id": {
@@ -9671,21 +9702,10 @@
                 }
             }
         },
-        "internal_api.saveDashboardRequest": {
-            "type": "object",
-            "properties": {
-                "config": {
-                    "type": "array",
-                    "items": {
-                        "type": "integer"
-                    }
-                },
-                "version": {
-                    "type": "integer"
-                }
-            }
+        "api.saveDashboardRequest": {
+            "type": "object"
         },
-        "internal_api.setEnvVarRequest": {
+        "api.setEnvVarRequest": {
             "type": "object",
             "properties": {
                 "is_secret": {
@@ -9699,11 +9719,86 @@
                 }
             }
         },
-        "internal_api.updateAppImageRequest": {
+        "api.updateAppImageRequest": {
             "type": "object",
             "properties": {
                 "image": {
                     "type": "string"
+                }
+            }
+        },
+        "models.AIModelAuthMode": {
+            "type": "string",
+            "enum": [
+                "apikey",
+                "jwt",
+                "public"
+            ],
+            "x-enum-varnames": [
+                "AIModelAuthAPIKey",
+                "AIModelAuthJWT",
+                "AIModelAuthPublic"
+            ]
+        },
+        "models.AIModelSource": {
+            "type": "string",
+            "enum": [
+                "mlflow",
+                "s3",
+                "custom"
+            ],
+            "x-enum-varnames": [
+                "AIModelSourceMLflow",
+                "AIModelSourceS3",
+                "AIModelSourceCustom"
+            ]
+        },
+        "models.ImportServiceSpec": {
+            "type": "object",
+            "properties": {
+                "container_name": {
+                    "type": "string"
+                },
+                "image": {
+                    "type": "string"
+                },
+                "include": {
+                    "type": "boolean"
+                },
+                "ports": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "service_name": {
+                    "type": "string"
+                },
+                "volumes": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                }
+            }
+        },
+        "pricing.Need": {
+            "type": "object",
+            "properties": {
+                "apps": {
+                    "type": "integer"
+                },
+                "databases": {
+                    "type": "integer"
+                },
+                "domains": {
+                    "type": "integer"
+                },
+                "members": {
+                    "type": "integer"
+                },
+                "storageGB": {
+                    "type": "integer"
                 }
             }
         }

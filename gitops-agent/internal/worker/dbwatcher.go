@@ -377,17 +377,20 @@ func (w *DBWatcher) ensureAppExists(mgr *git.Manager, projectName, envName, appN
 		OperationID:        operationID,
 		HelmRepoURL:        mgr.RepoURL(),
 		HelmTargetRevision: mgr.Branch(),
+		ResourcesOnly:      true,
+		ResourcesValueFile: renderer.AppResourcesValuesGitPath(projectName, envName, appName),
 	})
 	if err != nil {
 		return nil, err
 	}
-	// No per-app resources/ chart is seeded anymore (ADR 0005). app.yaml sets
-	// spec.resources: true; the shared helm/app-resources chart renders the app's
-	// resources.values.yaml, which is created lazily on the first Upsert and is
-	// safely absent until then (ignoreMissingValueFiles: true).
+	// Resources-carrier owner app: no workload of its own. Its App CR points
+	// spec.helm.path at the shared helm/app-resources passthrough chart fed by the
+	// app's resources.values.yaml (created lazily on the first Upsert; safely
+	// absent until then via ignoreMissingValueFiles). No per-app resources/ chart
+	// and no bare values.yaml are seeded: the former no longer exists on disk (ADR
+	// 0005) and the latter is unused once valueFile points at resources.values.yaml.
 	return []git.FileChange{
 		{Path: appPath, Content: appYAML},
-		{Path: renderer.AppHelmValuesGitPath(projectName, envName, appName), Content: renderer.RenderBareAppValues()},
 	}, nil
 }
 
@@ -547,6 +550,7 @@ func (w *DBWatcher) doCreateServiceDatabase(ctx context.Context, op db.Operation
 		BackupEnabled   bool   `json:"backup_enabled"`
 		BackupSchedule  string `json:"backup_schedule"`
 		BackupRetention string `json:"backup_retention"`
+		ExternalEnabled bool   `json:"external_enabled"`
 	}
 	if err := json.Unmarshal(op.Payload, &p); err != nil {
 		return fmt.Errorf("parse payload: %w", err)
@@ -571,6 +575,7 @@ func (w *DBWatcher) doCreateServiceDatabase(ctx context.Context, op db.Operation
 		BackupEnabled:   p.BackupEnabled,
 		BackupSchedule:  defaultIfEmpty(p.BackupSchedule, "daily"),
 		BackupRetention: defaultIfEmpty(p.BackupRetention, "14d"),
+		ExternalEnabled: p.ExternalEnabled,
 		OperationID:     op.ID.String(),
 	})
 	if err != nil {

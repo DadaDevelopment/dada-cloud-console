@@ -5,11 +5,13 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"time"
 
 	"github.com/dada-tuda/console/backend/internal/auth"
+	"github.com/dada-tuda/console/backend/internal/cloudtask"
 	"github.com/dada-tuda/console/backend/internal/crypto"
 	"github.com/dada-tuda/console/backend/internal/models"
 	"github.com/gin-gonic/gin"
@@ -155,6 +157,7 @@ type createServiceDatabaseRequest struct {
 	BackupEnabled   bool   `json:"backup_enabled"`
 	BackupSchedule  string `json:"backup_schedule"`
 	BackupRetention string `json:"backup_retention"`
+	ExternalEnabled bool   `json:"external_enabled"`
 }
 
 // seedEnvVar upserts one encrypted runtime env var for an app in an environment
@@ -322,6 +325,7 @@ func (h *Handler) CreateServiceDatabase(c *gin.Context) {
 		BackupEnabled:   req.BackupEnabled,
 		BackupSchedule:  req.BackupSchedule,
 		BackupRetention: req.BackupRetention,
+		ExternalEnabled: req.ExternalEnabled,
 	}
 	payloadBytes, err := json.Marshal(payload)
 	if err != nil {
@@ -455,4 +459,153 @@ func serviceDatabaseAppRef(summaryRaw []byte) string {
 	}
 	appRef, _ := spec["appRef"].(string)
 	return appRef
+}
+
+// GetDatabaseCredentials reveals a managed PostgreSQL database's connection
+// credentials by reading its Crossplane connection secret on demand.
+//
+// @ID          getDatabaseCredentials
+// @Summary     Reveal a database's connection credentials
+// @Description Reveals the host, port, database name, username and password for a managed PostgreSQL database (ServiceDatabaseV2) by reading its Crossplane connection secret. Requires reveal=true and write access; every reveal is audited. Returns 404 while the database is still provisioning (no secret yet) and 503 when in-cluster credential access is not configured.
+// @Tags        database
+// @Produce     json
+// @Security    BearerAuth
+// @Param       projectId path     string true "Project UUID"
+// @Param       envId     path     string true "Environment UUID"
+// @Param       name      path     string true "Database resource name"
+// @Param       reveal    query    bool   true "Must be true to reveal the credentials"
+// @Success     200       {object} map[string]interface{} "object with host, port, database, username, password"
+// @Failure     400       {object} map[string]string
+// @Failure     401       {object} map[string]string
+// @Failure     403       {object} map[string]string
+// @Failure     404       {object} map[string]string
+// @Failure     503       {object} map[string]string
+// @Router      /projects/{projectId}/environments/{envId}/databases/{name}/credentials [get]
+func (h *Handler) GetDatabaseCredentials(c *gin.Context) {
+	claims, ok := auth.GetClaims(c)
+	if !ok {
+		respondUnauthorized(c)
+		return
+	}
+	projectID, envID, ok := h.parseProjectEnv(c)
+	if !ok {
+		return
+	}
+	if _, err := h.requireWriter(c, claims.UserID, projectID); err != nil {
+		return
+	}
+	name := c.Param("name")
+	if c.Query("reveal") != "true" {
+		respondError(c, http.StatusBadRequest, "reveal=true is required")
+		return
+	}
+
+	var summaryRaw []byte
+	if err := h.pool.QueryRow(c.Request.Context(),
+		`SELECT summary_json FROM resource_snapshots
+		 WHERE project_id = $1 AND environment_id = $2 AND kind = 'ServiceDatabaseV2' AND name = $3`,
+		projectID, envID, name,
+	).Scan(&summaryRaw); err != nil {
+		if err == pgx.ErrNoRows {
+			respondNotFound(c)
+			return
+		}
+		respondError(c, http.StatusInternalServerError, "failed to look up database")
+		return
+	}
+
+	// The connection secret is named "<appRef>-db-credentials" (the CRD ties the
+	// secret name to spec.appRef, not the resource name — e.g. a DB named
+	// "mlflow-v2" bound to app "mlflow-db" publishes "mlflow-db-db-credentials").
+	// Standalone DBs self-own (appRef defaults to the DB name), so fall back to name.
+	namespace := serviceDatabaseNamespace(summaryRaw)
+	secretOwner := serviceDatabaseAppRef(summaryRaw)
+	if secretOwner == "" {
+		secretOwner = name
+	}
+	creds, err := h.dbcreds.Resolve(c.Request.Context(), namespace, secretOwner)
+	if err != nil {
+		if errors.Is(err, cloudtask.ErrDBCredentialsNotReady) {
+			respondError(c, http.StatusNotFound, "credentials not available yet — the database is still provisioning")
+			return
+		}
+		respondError(c, http.StatusServiceUnavailable, "database credential access is not configured for this environment")
+		return
+	}
+
+	// host/port come from the connection secret written by the ServiceDatabaseV2
+	// composition — the AUTHORITATIVE endpoint the app actually connects to (a
+	// shared managed-Postgres Service, e.g. postgresql.databases.svc.cluster.local),
+	// NOT a per-database Service in the app namespace (none exists). Fall back to a
+	// derived in-namespace name only if the secret omits the endpoint.
+	database := serviceDatabaseDatname(summaryRaw)
+	host := creds.Endpoint
+	if host == "" {
+		host = name
+		if namespace != "" {
+			host = fmt.Sprintf("%s.%s.svc.cluster.local", name, namespace)
+		}
+	}
+	port := creds.Port
+	if port == "" {
+		port = "5432"
+	}
+
+	auditMeta, _ := json.Marshal(map[string]any{"revealed": true})
+	_, _ = h.pool.Exec(c.Request.Context(),
+		`INSERT INTO audit_events (actor_id, project_id, action, resource_kind, resource_name, metadata)
+		 VALUES ($1, $2, 'RevealDatabaseCredentials', 'ServiceDatabaseV2', $3, $4)`,
+		claims.UserID, projectID, name, auditMeta,
+	)
+
+	resp := gin.H{
+		"host":     host,
+		"port":     port,
+		"database": database,
+		"username": creds.Username,
+		"password": creds.Password,
+	}
+	if creds.ExternalHost != "" {
+		resp["external_host"] = creds.ExternalHost
+		extPort := creds.ExternalPort
+		if extPort == "" {
+			extPort = port
+		}
+		resp["external_port"] = extPort
+	}
+	c.JSON(http.StatusOK, resp)
+}
+
+// serviceDatabaseNamespace pulls the app namespace from a ServiceDatabaseV2
+// snapshot's summary_json (spec.namespace, or the top-level namespace mirror),
+// which is where the composition writes the "<db>-db-credentials" secret. Empty
+// when the summary is unparseable or the database has no namespace yet.
+func serviceDatabaseNamespace(summaryRaw []byte) string {
+	var summary map[string]any
+	if json.Unmarshal(summaryRaw, &summary) != nil {
+		return ""
+	}
+	if spec, ok := summary["spec"].(map[string]any); ok {
+		if ns, _ := spec["namespace"].(string); ns != "" {
+			return ns
+		}
+	}
+	ns, _ := summary["namespace"].(string)
+	return ns
+}
+
+// serviceDatabaseDatname pulls the Postgres database name (spec.database, or the
+// top-level database mirror) from a ServiceDatabaseV2 snapshot's summary_json.
+func serviceDatabaseDatname(summaryRaw []byte) string {
+	var summary map[string]any
+	if json.Unmarshal(summaryRaw, &summary) != nil {
+		return ""
+	}
+	if spec, ok := summary["spec"].(map[string]any); ok {
+		if d, _ := spec["database"].(string); d != "" {
+			return d
+		}
+	}
+	d, _ := summary["database"].(string)
+	return d
 }

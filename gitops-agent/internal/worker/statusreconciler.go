@@ -69,6 +69,7 @@ func (r *StatusReconciler) tick(ctx context.Context) {
 	}
 	r.reconcile(ctx)
 	r.reconcileModels(ctx)
+	r.reconcileDatabases(ctx)
 }
 
 // reconcileModels mirrors KServe InferenceService readiness onto AIModel
@@ -114,6 +115,55 @@ func (r *StatusReconciler) reconcileModels(ctx context.Context) {
 	}
 	if updated > 0 {
 		log.Debug().Int("updated", updated).Msg("status-reconciler: synced model statuses")
+	}
+}
+
+// reconcileDatabases mirrors ServiceDatabaseV2 (Crossplane) readiness onto DB
+// snapshots. The managed Postgres CRs are cluster-scoped, so each is matched to
+// its env by unambiguous snapshot name — like reconcileModels. This is the ONLY
+// live-status path for databases now that the cluster-wide discover() pass is
+// gated off by default (GITOPS_CLUSTER_DISCOVERY_ENABLED); without it a managed
+// DB is frozen at its create-time "Pending" forever. Existing rows only, so no
+// isolation leak: a CR with no snapshot in this project is never created here.
+func (r *StatusReconciler) reconcileDatabases(ctx context.Context) {
+	dbEnvs, err := db.SnapshotEnvsByKind(ctx, r.pool, "ServiceDatabaseV2")
+	if err != nil {
+		log.Error().Err(err).Msg("status-reconciler: list servicedatabase envs")
+		return
+	}
+	if len(dbEnvs) == 0 {
+		return
+	}
+
+	list, err := r.clients.Dynamic.Resource(pgvr("servicedatabasesv2")).Namespace("").List(ctx, metav1.ListOptions{})
+	if err != nil {
+		log.Warn().Err(err).Msg("status-reconciler: list servicedatabasesv2")
+		return
+	}
+
+	updated := 0
+	for i := range list.Items {
+		cr := &list.Items[i]
+		name := cr.GetName()
+		ids := dbEnvs[name]
+		if len(ids) != 1 {
+			continue // no DB snapshot for this name, or ambiguous
+		}
+		phase := crPhase(cr)
+		patch, _ := json.Marshal(map[string]any{
+			"status":      phase,
+			"live_source": "crossplane",
+			"live_at":     time.Now().UTC().Format(time.RFC3339),
+		})
+		n, err := db.UpdateLiveStatus(ctx, r.pool, ids[0], "ServiceDatabaseV2", name, phase, patch)
+		if err != nil {
+			log.Error().Err(err).Str("database", name).Msg("status-reconciler: update servicedatabase")
+			continue
+		}
+		updated += int(n)
+	}
+	if updated > 0 {
+		log.Debug().Int("updated", updated).Msg("status-reconciler: synced database statuses")
 	}
 }
 

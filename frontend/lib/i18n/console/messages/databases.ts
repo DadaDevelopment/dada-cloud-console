@@ -67,8 +67,46 @@ export const databases: Messages = {
   "databases.detail.field.dbName": { ru: "Имя базы данных", en: "Database name" },
   "databases.detail.field.port": { ru: "Порт", en: "Port" },
   "databases.detail.credentials": {
-    ru: "Учётные данные предоставляются как секрет Kubernetes в пространстве имён приложения и никогда не отображаются здесь. Используйте стандартные переменные окружения секрета в вашем приложении.",
-    en: "Credentials are provisioned as a Kubernetes secret in the app namespace and are never displayed here. Reference them in your app via the standard secret env vars.",
+    ru: "Учётные данные хранятся как секрет в пространстве имён приложения. Приложение получает их через стандартные переменные окружения секрета -- либо покажите их разово ниже.",
+    en: "Credentials are stored as a secret in the app namespace. Your app references them via the standard secret env vars -- or reveal them once below.",
+  },
+  "databases.detail.hostHint": {
+    ru: "Хост показан приблизительно. Точные хост, порт и имя базы берутся из секрета -- покажите учётные данные ниже.",
+    en: "Host shown is approximate. The exact host, port and database name come from the secret -- reveal credentials below.",
+  },
+  "databases.detail.access.title": { ru: "Учётные данные", en: "Credentials" },
+  "databases.detail.access.username": { ru: "Пользователь", en: "Username" },
+  "databases.detail.access.password": { ru: "Пароль", en: "Password" },
+  "databases.detail.access.reveal": { ru: "Показать", en: "Reveal" },
+  "databases.detail.access.hide": { ru: "Скрыть", en: "Hide" },
+  "databases.detail.access.revealBtn": { ru: "Показать учётные данные", en: "Reveal credentials" },
+  "databases.detail.access.revealing": { ru: "Загрузка...", en: "Revealing..." },
+  "databases.detail.access.none": {
+    ru: "Только участники с правом записи могут показывать учётные данные.",
+    en: "Only members with write access can reveal credentials.",
+  },
+  "databases.detail.access.notReady": {
+    ru: "Учётные данные пока недоступны -- база данных ещё создаётся.",
+    en: "Credentials are not available yet -- the database is still provisioning.",
+  },
+  "databases.detail.access.notConfigured": {
+    ru: "Показ учётных данных не настроен для этого окружения.",
+    en: "Credential reveal is not configured for this environment.",
+  },
+  "databases.detail.access.error": { ru: "Не удалось показать учётные данные", en: "Failed to reveal credentials" },
+  "databases.detail.access.externalHost": { ru: "Внешний хост (публичный)", en: "External host (public)" },
+  "databases.detail.access.externalWarning": {
+    ru: "Публичная точка доступа. Ограничьте доступ и используйте только TLS.",
+    en: "Public endpoint. Restrict access and connect over TLS only.",
+  },
+  "databases.modal.external.title": { ru: "Публичный доступ", en: "Public access" },
+  "databases.modal.external.subtitle": {
+    ru: "Разрешить подключение к базе данных извне кластера",
+    en: "Allow connecting to the database from outside the cluster",
+  },
+  "databases.modal.external.warning": {
+    ru: "База данных станет доступна из интернета. Изоляция обеспечивается логином/паролем и allow-list прокси. Включайте только при необходимости.",
+    en: "The database will be reachable from the internet. Isolation is enforced by login/password and a proxy allow-list. Enable only when needed.",
   },
   "databases.detail.backups": { ru: "Резервные копии", en: "Backups" },
   "databases.detail.backup.field.status": { ru: "Статус", en: "Status" },

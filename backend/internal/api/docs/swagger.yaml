@@ -223,6 +223,8 @@ definitions:
         type: string
       database:
         type: string
+      external_enabled:
+        type: boolean
       name:
         type: string
     type: object
@@ -299,6 +301,11 @@ definitions:
         type: string
     required:
     - password
+    type: object
+  api.restoreDatabaseRequest:
+    properties:
+      backup_id:
+        type: string
     type: object
   api.saveDashboardRequest:
     type: object
@@ -3591,6 +3598,317 @@ paths:
       summary: Order a managed PostgreSQL database
       tags:
       - database
+  /projects/{projectId}/environments/{envId}/databases/{name}:
+    delete:
+      description: 'Destructive: permanently removes a managed PostgreSQL database
+        (ServiceDatabaseV2) and its data. The agent drops the CR entry from git and
+        Argo prunes it. Asynchronous: returns 202 with an operation; poll the operation
+        until terminal. Only k8s (Crossplane) databases are deletable here; VM-hosted
+        databases are managed as apps.'
+      operationId: deleteDatabase
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      - description: Environment UUID
+        in: path
+        name: envId
+        required: true
+        type: string
+      - description: Database resource name
+        in: path
+        name: name
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "202":
+          description: object with the accepted operation
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Delete a managed PostgreSQL database
+      tags:
+      - database
+  /projects/{projectId}/environments/{envId}/databases/{name}/backups:
+    get:
+      description: Returns the per-database logical backup catalog (newest first)
+        for a managed PostgreSQL database.
+      operationId: listDatabaseBackups
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      - description: Environment UUID
+        in: path
+        name: envId
+        required: true
+        type: string
+      - description: Database resource name
+        in: path
+        name: name
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: object with a backups array
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: List a database's backups
+      tags:
+      - database
+    post:
+      description: 'Starts an on-demand per-database logical backup (pg_dump) via
+        a Kanister ActionSet. Asynchronous: returns 202 with the Pending/Running backup;
+        poll the backups list until Ready.'
+      operationId: createDatabaseBackup
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      - description: Environment UUID
+        in: path
+        name: envId
+        required: true
+        type: string
+      - description: Database resource name
+        in: path
+        name: name
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "202":
+          description: object with the accepted backup
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "503":
+          description: Service Unavailable
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Back up a managed database now
+      tags:
+      - database
+  /projects/{projectId}/environments/{envId}/databases/{name}/credentials:
+    get:
+      description: Reveals the host, port, database name, username and password for
+        a managed PostgreSQL database (ServiceDatabaseV2) by reading its Crossplane
+        connection secret. Requires reveal=true and write access; every reveal is
+        audited. Returns 404 while the database is still provisioning (no secret yet)
+        and 503 when in-cluster credential access is not configured.
+      operationId: getDatabaseCredentials
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      - description: Environment UUID
+        in: path
+        name: envId
+        required: true
+        type: string
+      - description: Database resource name
+        in: path
+        name: name
+        required: true
+        type: string
+      - description: Must be true to reveal the credentials
+        in: query
+        name: reveal
+        required: true
+        type: boolean
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: object with host, port, database, username, password
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "503":
+          description: Service Unavailable
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Reveal a database's connection credentials
+      tags:
+      - database
+  /projects/{projectId}/environments/{envId}/databases/{name}/restore:
+    post:
+      consumes:
+      - application/json
+      description: 'Destructive: overwrites the managed PostgreSQL database with the
+        contents of a cataloged backup, restoring only that one database (pg_restore)
+        via a Kanister ActionSet. Asynchronous: returns 202 with an operation; poll
+        until terminal.'
+      operationId: restoreDatabase
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      - description: Environment UUID
+        in: path
+        name: envId
+        required: true
+        type: string
+      - description: Database resource name
+        in: path
+        name: name
+        required: true
+        type: string
+      - description: Backup to restore from
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/api.restoreDatabaseRequest'
+      produces:
+      - application/json
+      responses:
+        "202":
+          description: object with the accepted operation
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "503":
+          description: Service Unavailable
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Restore a managed database from a backup
+      tags:
+      - database
   /projects/{projectId}/environments/{envId}/infra:
     get:
       description: Returns the environment's Infra resource snapshots (kind='Infra'),
@@ -5556,6 +5874,77 @@ paths:
       security:
       - BearerAuth: []
       summary: Order a managed S3 object storage bucket
+      tags:
+      - storage
+  /projects/{projectId}/environments/{envId}/s3buckets/{name}/credentials:
+    get:
+      description: Reveals the S3 endpoint, access key and secret key for a bucket
+        by reading its Crossplane connection secret. Requires reveal=true and write
+        access; every reveal is audited. Returns 404 while the bucket is still provisioning
+        (no secret yet) and 503 when in-cluster credential access is not configured.
+      operationId: getS3BucketCredentials
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      - description: Environment UUID
+        in: path
+        name: envId
+        required: true
+        type: string
+      - description: Bucket resource name
+        in: path
+        name: name
+        required: true
+        type: string
+      - description: Must be true to reveal the credentials
+        in: query
+        name: reveal
+        required: true
+        type: boolean
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: object with endpoint, access_key, secret_key, bucket_name
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "503":
+          description: Service Unavailable
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Reveal an S3 bucket's access credentials
       tags:
       - storage
   /projects/{projectId}/git/install-url:

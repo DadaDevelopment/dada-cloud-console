@@ -62,6 +62,12 @@ type Handler struct {
 	// a resolver whose Resolve fails with a clear "not configured" error.
 	s3creds cloudtask.S3CredentialsResolver
 
+	// dbcreds reveals a managed PostgreSQL database's connection credentials by
+	// reading its Crossplane connection secret ("<db>-db-credentials" in the app
+	// namespace) on demand. Never nil: off-cluster it returns a resolver whose
+	// Resolve fails with a clear "not configured" error.
+	dbcreds cloudtask.DBCredentialsResolver
+
 	// kanister drives per-database backup/restore via Kanister ActionSets. Never
 	// nil: off-cluster it is disabled (Enabled() == false) and every create fails
 	// with a clear "not configured" error.
@@ -143,6 +149,7 @@ func NewHandler(pool *pgxpool.Pool, cfg *config.Config) *Handler {
 	}
 	h.counters = cloudtask.NewCounterResolver()
 	h.s3creds = cloudtask.NewS3CredentialsResolver(cfg.CrossplaneSecretNamespace)
+	h.dbcreds = cloudtask.NewDBCredentialsResolver()
 	h.kanister = cloudtask.NewKanisterClient()
 
 	plans, err := billing.LoadPlans("")

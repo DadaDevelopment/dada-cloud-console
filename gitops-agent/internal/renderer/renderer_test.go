@@ -112,6 +112,7 @@ func TestRenderServiceDatabase(t *testing.T) {
 		BackupEnabled:   true,
 		BackupSchedule:  "daily",
 		BackupRetention: "14d",
+		ExternalEnabled: true,
 		OperationID:     "op-123",
 	}
 	got, err := renderer.RenderServiceDatabase(spec)
@@ -130,6 +131,7 @@ func TestRenderServiceDatabase(t *testing.T) {
 		"namespace: alpha-prod",
 		"engine: postgresql",
 		"database: myapp_db",
+		"external:",
 		"enabled: true",
 		"frequency: daily",
 		"retention: 14d",
@@ -157,6 +159,24 @@ func TestRenderServiceDatabase(t *testing.T) {
 	}
 	if ns, _ := spec2["namespace"].(string); ns != "alpha-prod" {
 		t.Errorf("spec.namespace = %q, want %q\nFull output:\n%s", ns, "alpha-prod", got)
+	}
+}
+
+func TestRenderServiceDatabaseStandaloneAppRef(t *testing.T) {
+	got, err := renderer.RenderServiceDatabase(renderer.ServiceDatabaseSpec{
+		Name:        "zerkalo",
+		Namespace:   "ggrk52-prod",
+		ProjectSlug: "ggrk52",
+		EnvSlug:     "prod",
+		AppRef:      "",
+		Database:    "zerkalo",
+		OperationID: "op-x",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(got, "appRef: zerkalo") {
+		t.Errorf("standalone DB must self-own (appRef defaults to name), never emit null appRef\nFull output:\n%s", got)
 	}
 }
 
@@ -197,6 +217,35 @@ func TestRenderApp(t *testing.T) {
 	for _, want := range wantSubstrings {
 		if !strings.Contains(got, want) {
 			t.Errorf("rendered App missing %q\nFull output:\n%s", want, got)
+		}
+	}
+}
+
+func TestRenderAppResourcesOnly(t *testing.T) {
+	spec := renderer.AppSpec{
+		Name:               "service-databases-beta",
+		Namespace:          "beta-prod",
+		ProjectSlug:        "beta",
+		EnvSlug:            "prod",
+		OperationID:        "op-789",
+		HelmRepoURL:        "https://github.com/DADA-TUDA/argo-infra.git",
+		HelmTargetRevision: "console-migration",
+		ResourcesOnly:      true,
+		ResourcesValueFile: "clusters/beget-prod/projects/beta/environments/prod/apps/service-databases-beta/resources.values.yaml",
+	}
+	got, err := renderer.RenderApp(spec)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if strings.Contains(got, "/service-databases-beta/resources\n") {
+		t.Errorf("resources-only App must NOT point spec.helm.path at the dead per-app resources/ dir\nFull output:\n%s", got)
+	}
+	for _, want := range []string{
+		"path: helm/app-resources",
+		"valueFile: clusters/beget-prod/projects/beta/environments/prod/apps/service-databases-beta/resources.values.yaml",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("resources-only App missing %q\nFull output:\n%s", want, got)
 		}
 	}
 }

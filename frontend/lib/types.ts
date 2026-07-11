@@ -301,6 +301,16 @@ export interface DBBackupsResponse {
   backups: DBBackup[];
 }
 
+export interface DatabaseCredentialsResponse {
+  host: string;
+  port: string;
+  database: string;
+  username: string;
+  password: string;
+  external_host?: string;
+  external_port?: string;
+}
+
 export interface S3BucketsResponse {
   buckets: ResourceSnapshot[];
 }
