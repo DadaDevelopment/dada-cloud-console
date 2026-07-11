@@ -468,6 +468,8 @@ func TestRenderProject(t *testing.T) {
 		"displayName: Client A Corp",
 		"ownerType: client",
 		"defaultEnvironment: prod",
+		"environments:",
+		"namespace: client-a-prod",
 		"quotas: {}",
 	}
 	for _, want := range wantSubstrings {
