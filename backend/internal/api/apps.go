@@ -3,6 +3,8 @@ package api
 import (
 	"encoding/json"
 	"net/http"
+	"sort"
+	"time"
 
 	"github.com/dada-tuda/console/backend/internal/auth"
 	"github.com/dada-tuda/console/backend/internal/models"
@@ -85,6 +87,61 @@ func (h *Handler) ListApps(c *gin.Context) {
 	if apps == nil {
 		apps = []models.ResourceSnapshot{}
 	}
+
+	seen := make(map[string]struct{}, len(apps))
+	for _, a := range apps {
+		seen[a.Name] = struct{}{}
+	}
+	grows, gerr := h.pool.Query(c.Request.Context(),
+		`SELECT id, app_name, repo_full_name,
+		        COALESCE(profile, 'small'), COALESCE(replicas, 2), COALESCE(port, 8080),
+		        updated_at
+		 FROM git_repos
+		 WHERE project_id = $1 AND environment_id = $2`,
+		projectID, envID,
+	)
+	if gerr == nil {
+		defer grows.Close()
+		for grows.Next() {
+			var (
+				id       uuid.UUID
+				name     string
+				repo     string
+				profile  string
+				replicas int
+				port     int
+				updated  time.Time
+			)
+			if scanErr := grows.Scan(&id, &name, &repo, &profile, &replicas, &port, &updated); scanErr != nil {
+				continue
+			}
+			if _, ok := seen[name]; ok {
+				continue
+			}
+			summary, _ := json.Marshal(map[string]any{
+				"image":          repo,
+				"profile":        profile,
+				"replicas":       replicas,
+				"port":           port,
+				"repo_full_name": repo,
+				"source":         "git",
+			})
+			envRef := envID
+			apps = append(apps, models.ResourceSnapshot{
+				ID:            id,
+				ProjectID:     projectID,
+				EnvironmentID: &envRef,
+				Kind:          "App",
+				Name:          name,
+				Phase:         "NotDeployed",
+				SummaryJSON:   summary,
+				LastSyncedAt:  updated,
+			})
+			seen[name] = struct{}{}
+		}
+	}
+
+	sort.Slice(apps, func(i, j int) bool { return apps[i].Name < apps[j].Name })
 
 	c.JSON(http.StatusOK, gin.H{"apps": apps})
 }
