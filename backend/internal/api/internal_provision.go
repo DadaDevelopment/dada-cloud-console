@@ -107,3 +107,61 @@ func (h *Handler) ProvisionProject(c *gin.Context) {
 		"default_environment_id": envID,
 	})
 }
+
+func (h *Handler) BackfillProjectGroups(c *gin.Context) {
+	if h.usersvc == nil {
+		respondError(c, http.StatusServiceUnavailable, "user-service client not configured")
+		return
+	}
+	ctx := c.Request.Context()
+	rows, err := h.pool.Query(ctx, `
+		SELECT p.id, p.name, COALESCE(p.display_name, ''), COALESCE(p.org_id, ''), COALESCE(u.keycloak_sub, '')
+		  FROM projects p
+		  LEFT JOIN users u ON u.id = p.owner_id
+		 WHERE COALESCE(p.org_id, '') <> ''
+		 ORDER BY p.created_at
+	`)
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, "query projects: "+err.Error())
+		return
+	}
+	defer rows.Close()
+
+	type item struct {
+		id, name, display, org, sub string
+	}
+	var items []item
+	for rows.Next() {
+		var id uuid.UUID
+		var name, display, org, sub string
+		if err := rows.Scan(&id, &name, &display, &org, &sub); err != nil {
+			respondError(c, http.StatusInternalServerError, "scan project: "+err.Error())
+			return
+		}
+		items = append(items, item{id: id.String(), name: name, display: display, org: org, sub: sub})
+	}
+	if err := rows.Err(); err != nil {
+		respondError(c, http.StatusInternalServerError, "iterate projects: "+err.Error())
+		return
+	}
+
+	okCount := 0
+	failCount := 0
+	errs := make([]string, 0)
+	for _, it := range items {
+		if e := h.usersvc.EnsureProjectGroups(ctx, it.org, it.id, it.name, it.display, it.sub); e != nil {
+			failCount++
+			if len(errs) < 30 {
+				errs = append(errs, it.id+": "+e.Error())
+			}
+			continue
+		}
+		okCount++
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"total":  len(items),
+		"ok":     okCount,
+		"failed": failCount,
+		"errors": errs,
+	})
+}

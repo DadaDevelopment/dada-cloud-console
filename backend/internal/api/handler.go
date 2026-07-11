@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"log"
+	"os"
 
 	"github.com/dada-tuda/console/backend/internal/auth"
 	"github.com/dada-tuda/console/backend/internal/billing"
@@ -17,6 +18,7 @@ import (
 	"github.com/dada-tuda/console/backend/internal/mlflow"
 	"github.com/dada-tuda/console/backend/internal/portainer"
 	"github.com/dada-tuda/console/backend/internal/prometheus"
+	"github.com/dada-tuda/console/backend/internal/userservice"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -76,6 +78,8 @@ type Handler struct {
 	// this surface is transparency, never a bill, so it must never be fatal.
 	billingUnit   costengine.UnitCost
 	billingMarkup float64
+
+	usersvc *userservice.Client
 }
 
 // NewHandler constructs a Handler with the given dependencies.
@@ -130,6 +134,12 @@ func NewHandler(pool *pgxpool.Pool, cfg *config.Config) *Handler {
 	if cfg.DadaAgentBaseURL != "" && cfg.CloudAgentClientID != "" {
 		ts := dadagent.NewTokenSource(cfg.KeycloakTokenURL, cfg.CloudAgentClientID, cfg.CloudAgentClientSecret)
 		h.dadagent = dadagent.New(cfg.DadaAgentBaseURL, ts)
+	}
+	if os.Getenv("PROJECT_GROUP_SYNC_ENABLED") == "true" &&
+		cfg.UserServiceURL != "" && cfg.KeycloakTokenURL != "" && cfg.CloudAgentClientID != "" {
+		uts := dadagent.NewTokenSource(cfg.KeycloakTokenURL, cfg.CloudAgentClientID, cfg.CloudAgentClientSecret)
+		h.usersvc = userservice.New(cfg.UserServiceURL, uts)
+		log.Printf("iam: project-group sync to user-service ENABLED")
 	}
 	h.counters = cloudtask.NewCounterResolver()
 	h.s3creds = cloudtask.NewS3CredentialsResolver(cfg.CrossplaneSecretNamespace)

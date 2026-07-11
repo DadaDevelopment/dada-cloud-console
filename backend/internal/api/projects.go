@@ -3,10 +3,12 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"log"
 	"net/http"
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/dada-tuda/console/backend/internal/auth"
 	"github.com/dada-tuda/console/backend/internal/models"
@@ -196,12 +198,26 @@ func (h *Handler) CreateProject(c *gin.Context) {
 	if isGod(claims) || role == "" {
 		role = models.MemberRoleOwner
 	}
+	h.ensureProjectGroupsAsync(org, projectID.String(), slug, displayName, claims.Subject)
 	c.JSON(http.StatusCreated, gin.H{
 		"project_id":             projectID,
 		"default_environment_id": envID,
 		"org_id":                 org,
 		"role":                   role,
 	})
+}
+
+func (h *Handler) ensureProjectGroupsAsync(org, projectID, slug, displayName, ownerSub string) {
+	if h.usersvc == nil {
+		return
+	}
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
+		defer cancel()
+		if err := h.usersvc.EnsureProjectGroups(ctx, org, projectID, slug, displayName, ownerSub); err != nil {
+			log.Printf("userservice: ensure project groups project=%s org=%s: %v", projectID, org, err)
+		}
+	}()
 }
 
 // insertProject creates a project row plus its default environment in one tx and
@@ -346,6 +362,7 @@ func (h *Handler) EnsureDefaultProject(c *gin.Context) {
 		respondError(c, http.StatusInternalServerError, "failed to create default project")
 		return
 	}
+	h.ensureProjectGroupsAsync(personalOrg, pid.String(), slug, "Default", claims.Subject)
 	c.JSON(http.StatusCreated, gin.H{
 		"project_id":             pid,
 		"default_environment_id": envID,

@@ -144,6 +144,7 @@ func SetupRouter(pool *pgxpool.Pool, cfg *config.Config) *gin.Engine {
 	if cfg.InternalAuthToken != "" {
 		internal := r.Group("/internal", requireInternalToken(cfg.InternalAuthToken))
 		internal.POST("/projects", h.ProvisionProject)
+		internal.POST("/backfill/project-groups", h.BackfillProjectGroups)
 		log.Printf("internal: provisioning API enabled at /internal")
 	}
 
