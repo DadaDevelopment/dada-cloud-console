@@ -121,25 +121,20 @@ type SearchResult struct {
 	Entries []LogEntry `json:"entries"`
 }
 
-// sourceDoc maps the filebeat _source fields we care about. Adjust here if the
-// live mapping differs.
 type sourceDoc struct {
 	Timestamp string `json:"@timestamp"`
 	Message   string `json:"message"`
+	Log       string `json:"log"`
 	VMName    string `json:"vm_name"`
 	App       string `json:"app"`
 	Host      struct {
 		Name string `json:"name"`
 	} `json:"host"`
-	Stream string `json:"stream"`
-	// Infra-stream (filebeat-*) docs carry kubernetes metadata instead of
-	// vm_name/app. Labels keys are dedotted by filebeat (dada_io/app).
+	Stream     string `json:"stream"`
 	Kubernetes struct {
-		Namespace string `json:"namespace"`
-		Pod       struct {
-			Name string `json:"name"`
-		} `json:"pod"`
-		Labels map[string]any `json:"labels"`
+		NamespaceName string         `json:"namespace_name"`
+		PodName       string         `json:"pod_name"`
+		Labels        map[string]any `json:"labels"`
 	} `json:"kubernetes"`
 }
 
@@ -193,8 +188,8 @@ func (c *Client) buildQuery(opts SearchOpts) map[string]any {
 		filters = append(filters, map[string]any{
 			"bool": map[string]any{
 				"should": []map[string]any{
-					{"terms": map[string]any{"kubernetes.namespace": opts.KubeNamespaces}},
-					{"terms": map[string]any{"kubernetes.namespace.keyword": opts.KubeNamespaces}},
+					{"terms": map[string]any{"kubernetes.namespace_name": opts.KubeNamespaces}},
+					{"terms": map[string]any{"kubernetes.namespace_name.keyword": opts.KubeNamespaces}},
 				},
 				"minimum_should_match": 1,
 			},
@@ -210,12 +205,6 @@ func (c *Client) buildQuery(opts SearchOpts) map[string]any {
 			{"term": map[string]any{"kubernetes.labels.dada_io/app": opts.KubeApp}},
 			{"term": map[string]any{"kubernetes.labels.dada_io/app.keyword": opts.KubeApp}},
 			{"term": map[string]any{"kubernetes.labels.dada.io/app": opts.KubeApp}},
-		}
-		for _, name := range []string{opts.KubeApp + "-deploy", opts.KubeApp} {
-			should = append(should,
-				map[string]any{"term": map[string]any{"kubernetes.deployment.name": name}},
-				map[string]any{"term": map[string]any{"kubernetes.deployment.name.keyword": name}},
-			)
 		}
 		filters = append(filters, map[string]any{
 			"bool": map[string]any{"should": should, "minimum_should_match": 1},
@@ -251,9 +240,9 @@ func (c *Client) buildQuery(opts SearchOpts) map[string]any {
 	if opts.Query != "" {
 		must = append(must, map[string]any{
 			"query_string": map[string]any{
-				"query":         opts.Query,
-				"default_field": "message",
-				"lenient":       true,
+				"query":   opts.Query,
+				"fields":  []string{"message", "log"},
+				"lenient": true,
 			},
 		})
 	}
@@ -327,10 +316,8 @@ func (c *Client) Search(ctx context.Context, opts SearchOpts) (*SearchResult, er
 	for _, h := range parsed.Hits.Hits {
 		vm := h.Source.VMName
 		app := h.Source.App
-		// k8s docs: surface the pod name where the VM name would go and recover
-		// the app from the dada.io/app label (dedotted or not).
-		if k := h.Source.Kubernetes; k.Pod.Name != "" {
-			vm = k.Pod.Name
+		if k := h.Source.Kubernetes; k.PodName != "" {
+			vm = k.PodName
 			if app == "" {
 				for _, key := range []string{"dada_io/app", "dada.io/app"} {
 					if v, ok := k.Labels[key].(string); ok && v != "" {
@@ -343,9 +330,13 @@ func (c *Client) Search(ctx context.Context, opts SearchOpts) (*SearchResult, er
 		if vm == "" {
 			vm = h.Source.Host.Name
 		}
+		msg := h.Source.Message
+		if msg == "" {
+			msg = h.Source.Log
+		}
 		out.Entries = append(out.Entries, LogEntry{
 			Timestamp: h.Source.Timestamp,
-			Message:   h.Source.Message,
+			Message:   msg,
 			VMName:    vm,
 			App:       app,
 			Stream:    h.Source.Stream,

@@ -98,9 +98,8 @@ func TestBuildQuery_KubeFilters(t *testing.T) {
 		t.Fatalf("marshal: %v", err)
 	}
 	for _, want := range []string{
-		`"kubernetes.namespace":["acme-prod"]`,
+		`"kubernetes.namespace_name":["acme-prod"]`,
 		`"kubernetes.labels.dada_io/app":"web"`,
-		`"kubernetes.deployment.name":"web-deploy"`,
 	} {
 		if !bytes.Contains(raw, []byte(want)) {
 			t.Errorf("query missing %s in %s", want, raw)
@@ -110,8 +109,8 @@ func TestBuildQuery_KubeFilters(t *testing.T) {
 
 func TestSearch_ParsesKubernetesHits(t *testing.T) {
 	const body = `{"hits":{"total":{"value":1},"hits":[
-		{"_source":{"@timestamp":"2026-06-04T00:00:00Z","message":"hi","stream":"stdout",
-		 "kubernetes":{"namespace":"acme-prod","pod":{"name":"web-deploy-abc12"},"labels":{"dada_io/app":"web"}}}}
+		{"_source":{"@timestamp":"2026-06-04T00:00:00Z","log":"hi","stream":"stdout",
+		 "kubernetes":{"namespace_name":"acme-prod","pod_name":"web-deploy-abc12","labels":{"dada_io/app":"web"}}}}
 	]}}`
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
