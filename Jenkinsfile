@@ -92,15 +92,9 @@ spec:
     - name: workspace-volume
       emptyDir:
         sizeLimit: 3Gi
-    - name: go-cache
-      emptyDir:
-        sizeLimit: 2Gi
-    - name: go-mod-cache
-      emptyDir:
-        sizeLimit: 2Gi
-    - name: npm-cache
-      emptyDir:
-        sizeLimit: 1Gi
+    - name: build-cache
+      persistentVolumeClaim:
+        claimName: jenkins-build-cache
     - name: docker-graph-storage
       emptyDir:
         sizeLimit: 8Gi
@@ -163,10 +157,12 @@ spec:
       volumeMounts:
         - name: workspace-volume
           mountPath: /home/jenkins/agent
-        - name: go-cache
+        - name: build-cache
           mountPath: /tmp/.cache/go-build
-        - name: go-mod-cache
+          subPath: go/build
+        - name: build-cache
           mountPath: /tmp/go/pkg/mod
+          subPath: go/mod
         - name: tools-volume
           mountPath: /tools
 
@@ -199,8 +195,9 @@ spec:
       volumeMounts:
         - name: workspace-volume
           mountPath: /home/jenkins/agent
-        - name: npm-cache
+        - name: build-cache
           mountPath: /tmp/.cache/npm
+          subPath: npm
 
     - name: docker
       image: ${DOCKER_CLI_IMAGE}
