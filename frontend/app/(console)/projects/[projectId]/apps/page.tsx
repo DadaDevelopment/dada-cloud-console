@@ -47,7 +47,7 @@ export default function AppsPage() {
     name: "",
     image: "",
     port: 8080,
-    replicas: 2,
+    replicas: 1,
     profile: "small",
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -112,7 +112,7 @@ export default function AppsPage() {
         profile: form.profile,
       });
       setIsModalOpen(false);
-      setForm({ name: "", image: "", port: 8080, replicas: 2, profile: "small" });
+      setForm({ name: "", image: "", port: 8080, replicas: 1, profile: "small" });
       const opId = result.operation?.id;
       router.push(`/projects/${projectId}/operations${opId ? `?highlight=${opId}` : ""}`);
     } catch (err) {

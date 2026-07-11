@@ -1302,7 +1302,7 @@ func (w *DBWatcher) doDeployImageVersion(ctx context.Context, op db.Operation) e
 		portVal = 8080
 	}
 	if replicasVal == 0 {
-		replicasVal = 2
+		replicasVal = 1
 	}
 	if profileVal == "" {
 		profileVal = "small"

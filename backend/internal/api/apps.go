@@ -94,7 +94,7 @@ func (h *Handler) ListApps(c *gin.Context) {
 	}
 	grows, gerr := h.pool.Query(c.Request.Context(),
 		`SELECT id, app_name, repo_full_name,
-		        COALESCE(profile, 'small'), COALESCE(replicas, 2), COALESCE(port, 8080),
+		        COALESCE(profile, 'small'), COALESCE(replicas, 1), COALESCE(port, 8080),
 		        updated_at
 		 FROM git_repos
 		 WHERE project_id = $1 AND environment_id = $2`,
@@ -273,7 +273,7 @@ func (h *Handler) CreateApp(c *gin.Context) {
 			req.Port = 8080
 		}
 		if req.Replicas == 0 {
-			req.Replicas = 2
+			req.Replicas = 1
 		}
 		if req.Profile == "" {
 			req.Profile = "small"
