@@ -191,6 +191,7 @@ func TestRenderApp(t *testing.T) {
 		Replicas:           2,
 		Profile:            "medium",
 		OperationID:        "op-456",
+		Framework:          "javascript",
 		HelmRepoURL:        "https://github.com/DADA-TUDA/argo-infra.git",
 		HelmTargetRevision: "main",
 	}
@@ -207,17 +208,20 @@ func TestRenderApp(t *testing.T) {
 		"dada.io/project: beta",
 		"dada.io/environment: staging",
 		"dada.io/operation: op-456",
-		"namespace: beta-staging",
+		"resources: true",
 		"helm:",
-		"repoURL: https://github.com/DADA-TUDA/argo-infra.git",
-		"path: clusters/beget-prod/projects/beta/environments/staging/apps/api-service/resources",
-		"targetRevision: main",
-		"valueFile: clusters/beget-prod/projects/beta/environments/staging/apps/api-service/values.yaml",
+		"repoURL: " + renderer.WorkloadRepoURL,
+		"path: helm/javascript",
+		"targetRevision: " + renderer.WorkloadBranch,
+		"releaseName: api-service",
 	}
 	for _, want := range wantSubstrings {
 		if !strings.Contains(got, want) {
 			t.Errorf("rendered App missing %q\nFull output:\n%s", want, got)
 		}
+	}
+	if strings.Contains(got, "/api-service/resources") {
+		t.Errorf("workload App must NOT point at the dead per-app resources/ dir\nFull output:\n%s", got)
 	}
 }
 
@@ -256,20 +260,69 @@ func TestRenderAppValues(t *testing.T) {
 		Port:     8080,
 		Replicas: 2,
 		Profile:  "medium",
+		Env:      map[string]string{"LOG_LEVEL": "info"},
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
 	wantSubstrings := []string{
-		"image: ghcr.io/dada-tuda/api-service:v1.2.3",
-		"port: 8080",
+		"common:",
+		"name: ghcr.io/dada-tuda/api-service",
+		"tag: v1.2.3",
+		"servicePort: 8080",
 		"replicas: 2",
-		"profile: medium",
+		"cpu: 100m",
+		"name: LOG_LEVEL",
+		"value: info",
 	}
 	for _, want := range wantSubstrings {
 		if !strings.Contains(got, want) {
 			t.Errorf("rendered App values missing %q\nFull output:\n%s", want, got)
+		}
+	}
+}
+
+func TestRenderAppValuesDigest(t *testing.T) {
+	got, err := renderer.RenderAppValues(renderer.AppSpec{
+		Image:    "nexus.dada-tuda.ru/ggrk52/magic-mirror@sha256:d1aceff1453361656f36ef154a5d7badead284272986e7d3f8148b360f66d1cb",
+		Port:     1488,
+		Replicas: 2,
+		Profile:  "small",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	for _, want := range []string{
+		"name: nexus.dada-tuda.ru/ggrk52/magic-mirror@sha256",
+		"tag: d1aceff1453361656f36ef154a5d7badead284272986e7d3f8148b360f66d1cb",
+		"servicePort: 1488",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("digest App values missing %q\nFull output:\n%s", want, got)
+		}
+	}
+}
+
+func TestRenderAppValuesSecretEnv(t *testing.T) {
+	got, err := renderer.RenderAppValues(renderer.AppSpec{
+		Image:         "ghcr.io/x/y:1",
+		Port:          8080,
+		Profile:       "small",
+		SecretEnvName: "y-env",
+		SecretEnvKeys: []string{"API_KEY"},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	for _, want := range []string{
+		"name: API_KEY",
+		"secretKeyRef:",
+		"name: y-env",
+		"key: API_KEY",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("secret-env App values missing %q\nFull output:\n%s", want, got)
 		}
 	}
 }

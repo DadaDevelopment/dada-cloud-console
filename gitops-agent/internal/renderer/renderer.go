@@ -97,6 +97,8 @@ type AppSpec struct {
 	OperationID        string
 	HelmRepoURL        string
 	HelmTargetRevision string
+	Framework          string
+	SecretEnvKeys      []string
 
 	// Env is the resolved non-sensitive runtime environment (env_vars rows with
 	// scope runtime|both and is_secret=false). Emitted verbatim into values.yaml's
@@ -121,16 +123,30 @@ type AppSpec struct {
 	ResourcesValueFile string
 }
 
-var appFuncMap = template.FuncMap{
-	"appResourcesGitPath":  AppResourcesGitPath,
-	"appHelmValuesGitPath": AppHelmValuesGitPath,
+const (
+	WorkloadRepoURL = "https://bitbucket.dada-tuda.ru/scm/dada/dada-argo.git"
+	WorkloadBranch  = "develop"
+)
+
+func ChartFor(framework string) string {
+	switch framework {
+	case "python":
+		return "python"
+	case "javascript", "web":
+		return "javascript"
+	case "spring", "spring-maven", "spring-gradle":
+		return "spring"
+	default:
+		return "app"
+	}
 }
 
-// NOTE: spec.helm.path still points at the resources/ directory and
-// spec.resources: true wires the shared app-resources chart (ADR 0005). The
-// per-app chart no longer lives on disk; the ApplicationSet renders the stable
-// shared helm/app-resources chart fed by resources.values.yaml
-// (ignoreMissingValueFiles: true). The App CR shape here is UNCHANGED.
+var appFuncMap = template.FuncMap{
+	"chartFor":        ChartFor,
+	"workloadRepoURL": func() string { return WorkloadRepoURL },
+	"workloadBranch":  func() string { return WorkloadBranch },
+}
+
 var appTmpl = template.Must(template.New("app").Funcs(appFuncMap).Parse(`apiVersion: platform.dada-tuda.ru/v1alpha1
 kind: App
 metadata:
@@ -141,12 +157,22 @@ metadata:
     dada.io/environment: {{ .EnvSlug }}
     dada.io/operation: {{ .OperationID }}
 spec:
+{{- if not .ResourcesOnly }}
+  resources: true
+{{- end }}
   namespace: {{ .Namespace }}
   helm:
+{{- if .ResourcesOnly }}
     repoURL: {{ .HelmRepoURL }}
-    path: {{ if .ResourcesOnly }}helm/app-resources{{ else }}{{ appResourcesGitPath .ProjectSlug .EnvSlug .Name }}{{ end }}
+    path: helm/app-resources
     targetRevision: {{ .HelmTargetRevision }}
-    valueFile: {{ if .ResourcesOnly }}{{ .ResourcesValueFile }}{{ else }}{{ appHelmValuesGitPath .ProjectSlug .EnvSlug .Name }}{{ end }}
+    valueFile: {{ .ResourcesValueFile }}
+{{- else }}
+    repoURL: {{ workloadRepoURL }}
+    path: helm/{{ chartFor .Framework }}
+    targetRevision: {{ workloadBranch }}
+    releaseName: {{ .Name }}
+{{- end }}
 `))
 
 func RenderApp(spec AppSpec) (string, error) {
@@ -157,31 +183,106 @@ func RenderApp(spec AppSpec) (string, error) {
 	return buf.String(), nil
 }
 
-type AppValuesSpec struct {
-	Image    string `yaml:"image"`
-	Port     int    `yaml:"port"`
-	Replicas int    `yaml:"replicas"`
-	Profile  string `yaml:"profile"`
-	// Env is the non-sensitive runtime environment injected into the workload
-	// container (app-resources chart emits `env:` from this map). Omitted when
-	// empty to keep diffs minimal for apps with no env vars.
-	Env map[string]string `yaml:"env,omitempty"`
-	// SecretEnvName references a per-app k8s Secret (rendered into
-	// resources.values.yaml) carrying the sensitive runtime env. The chart wires
-	// `envFrom: - secretRef: { name: <SecretEnvName> }`. Omitted when there are no
-	// sensitive vars.
-	SecretEnvName string `yaml:"secretEnvName,omitempty"`
+type commonImage struct {
+	Name string `yaml:"name,omitempty"`
+	Tag  string `yaml:"tag,omitempty"`
+}
+
+type commonSecretKeyRef struct {
+	Name string `yaml:"name"`
+	Key  string `yaml:"key"`
+}
+
+type commonEnvValueRef struct {
+	SecretKeyRef commonSecretKeyRef `yaml:"secretKeyRef"`
+}
+
+type commonEnvVar struct {
+	Name      string             `yaml:"name"`
+	Value     string             `yaml:"value,omitempty"`
+	ValueFrom *commonEnvValueRef `yaml:"valueFrom,omitempty"`
+}
+
+type commonResources struct {
+	Requests map[string]string `yaml:"requests"`
+	Limits   map[string]string `yaml:"limits"`
+}
+
+type commonValues struct {
+	Image       commonImage     `yaml:"image"`
+	ServicePort int             `yaml:"servicePort,omitempty"`
+	Replicas    int             `yaml:"replicas,omitempty"`
+	UseDotEnv   string          `yaml:"useDotEnv"`
+	Resources   commonResources `yaml:"resources"`
+	ExtraEnv    []commonEnvVar  `yaml:"extraEnv,omitempty"`
+}
+
+type appValuesFile struct {
+	Common commonValues `yaml:"common"`
+}
+
+func profileResources(profile string) commonResources {
+	switch profile {
+	case "medium":
+		return commonResources{
+			Requests: map[string]string{"cpu": "100m", "memory": "256Mi"},
+			Limits:   map[string]string{"cpu": "500m", "memory": "512Mi"},
+		}
+	case "large":
+		return commonResources{
+			Requests: map[string]string{"cpu": "250m", "memory": "512Mi"},
+			Limits:   map[string]string{"cpu": "1", "memory": "1Gi"},
+		}
+	default:
+		return commonResources{
+			Requests: map[string]string{"cpu": "10m", "memory": "128Mi"},
+			Limits:   map[string]string{"cpu": "250m", "memory": "256Mi"},
+		}
+	}
+}
+
+func splitImageRef(image string) (name, tag string) {
+	if at := strings.LastIndex(image, "@"); at >= 0 {
+		digest := image[at+1:]
+		if colon := strings.Index(digest, ":"); colon >= 0 {
+			return image[:at] + "@" + digest[:colon], digest[colon+1:]
+		}
+		return image[:at], digest
+	}
+	if colon := strings.LastIndex(image, ":"); colon >= 0 && !strings.Contains(image[colon:], "/") {
+		return image[:colon], image[colon+1:]
+	}
+	return image, "latest"
 }
 
 func RenderAppValues(spec AppSpec) (string, error) {
-	values := AppValuesSpec{
-		Image:         spec.Image,
-		Port:          spec.Port,
-		Replicas:      spec.Replicas,
-		Profile:       spec.Profile,
-		Env:           spec.Env,
-		SecretEnvName: spec.SecretEnvName,
+	name, tag := splitImageRef(spec.Image)
+	values := appValuesFile{Common: commonValues{
+		Image:       commonImage{Name: name, Tag: tag},
+		ServicePort: spec.Port,
+		Replicas:    spec.Replicas,
+		UseDotEnv:   "false",
+		Resources:   profileResources(spec.Profile),
+	}}
+
+	keys := make([]string, 0, len(spec.Env))
+	for k := range spec.Env {
+		keys = append(keys, k)
 	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		values.Common.ExtraEnv = append(values.Common.ExtraEnv, commonEnvVar{Name: k, Value: spec.Env[k]})
+	}
+
+	secretKeys := append([]string(nil), spec.SecretEnvKeys...)
+	sort.Strings(secretKeys)
+	for _, k := range secretKeys {
+		values.Common.ExtraEnv = append(values.Common.ExtraEnv, commonEnvVar{
+			Name:      k,
+			ValueFrom: &commonEnvValueRef{SecretKeyRef: commonSecretKeyRef{Name: spec.SecretEnvName, Key: k}},
+		})
+	}
+
 	b, err := yaml.Marshal(values)
 	if err != nil {
 		return "", fmt.Errorf("rendering App values: %w", err)

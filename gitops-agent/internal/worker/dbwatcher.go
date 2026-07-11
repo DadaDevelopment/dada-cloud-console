@@ -748,6 +748,9 @@ func (w *DBWatcher) doCreateApp(ctx context.Context, op db.Operation) error {
 	}
 	if env.hasSecret() {
 		appSpec.SecretEnvName = renderer.AppEnvSecretName(p.Name)
+		for k := range env.Secret {
+			appSpec.SecretEnvKeys = append(appSpec.SecretEnvKeys, k)
+		}
 	}
 	yaml, err := renderer.RenderApp(appSpec)
 	if err != nil {
@@ -1333,6 +1336,9 @@ func (w *DBWatcher) doDeployImageVersion(ctx context.Context, op db.Operation) e
 	}
 	if env.hasSecret() {
 		appSpec.SecretEnvName = renderer.AppEnvSecretName(p.AppName)
+		for k := range env.Secret {
+			appSpec.SecretEnvKeys = append(appSpec.SecretEnvKeys, k)
+		}
 	}
 	yaml, err := renderer.RenderApp(appSpec)
 	if err != nil {
