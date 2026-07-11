@@ -415,12 +415,16 @@ func (r *Runner) flushLines(ctx context.Context, b *db.Build, pending string, ou
 		}
 		line := strings.TrimRight(pending[:i], "\r")
 		pending = pending[i+1:]
-		r.emit(ctx, b.ID, line)
+		if clean, ok := sanitizeLogLine(line); ok {
+			r.emit(ctx, b.ID, clean)
+		}
 		parseMarker(line, out)
 	}
 	if final && pending != "" {
 		line := strings.TrimRight(pending, "\r")
-		r.emit(ctx, b.ID, line)
+		if clean, ok := sanitizeLogLine(line); ok {
+			r.emit(ctx, b.ID, clean)
+		}
 		parseMarker(line, out)
 		return ""
 	}
@@ -495,6 +499,55 @@ func (r *Runner) confirm(ctx context.Context, repo *db.Repo, out *buildOutcome) 
 }
 
 var digestRe = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
+
+var (
+	consoleNoteRe = regexp.MustCompile("\x1b\\[8m.*?\x1b\\[0m")
+	ansiRe        = regexp.MustCompile("\x1b\\[[0-9;]*[A-Za-z]")
+	credURLRe     = regexp.MustCompile(`([a-zA-Z][a-zA-Z0-9+.-]*:[/][/])[^/\s:@]+:[^/\s@]+@`)
+	ghTokenRe     = regexp.MustCompile(`gh[posru]_[A-Za-z0-9]{20,}`)
+)
+
+var jenkinsNoisePrefixes = []string{
+	"[Pipeline] ",
+	"[Checks API] ",
+	"Started by ",
+	"Loading library ",
+	"Attempting to resolve ",
+	"Found match: ",
+	"The recommended git tool",
+	"using GIT_SSH",
+	"using credential",
+	"Fetching ",
+	"Created Pod:",
+	"[PodInfo] ",
+	"Container [",
+	"Pod [",
+	"> git ",
+	"> /usr/bin/git ",
+	"Start of Pipeline",
+	"End of Pipeline",
+}
+
+func sanitizeLogLine(raw string) (string, bool) {
+	s := consoleNoteRe.ReplaceAllString(raw, "")
+	s = ansiRe.ReplaceAllString(s, "")
+	s = strings.TrimRight(s, "\r")
+	trimmed := strings.TrimSpace(s)
+	if trimmed == "" {
+		return "", false
+	}
+	if strings.HasPrefix(trimmed, "//") {
+		return "", false
+	}
+	for _, p := range jenkinsNoisePrefixes {
+		if strings.HasPrefix(trimmed, p) {
+			return "", false
+		}
+	}
+	s = credURLRe.ReplaceAllString(s, "$1***@")
+	s = ghTokenRe.ReplaceAllString(s, "***")
+	return s, true
+}
 
 func imageDigest(uri string) string {
 	i := strings.LastIndex(uri, "@")
