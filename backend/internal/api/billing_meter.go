@@ -78,9 +78,9 @@ func meterCountResource(ctx context.Context, pool *pgxpool.Pool, orgID, resource
 	case "databases":
 		var n int
 		err := pool.QueryRow(ctx, `
-			SELECT COUNT(*) FROM service_databases sd
-			JOIN projects p ON p.id = sd.project_id
-			WHERE p.org_id = $1
+			SELECT COUNT(*) FROM resource_snapshots rs
+			JOIN projects p ON p.id = rs.project_id
+			WHERE p.org_id = $1 AND rs.kind IN ('ServiceDatabase', 'ServiceDatabaseV2')
 		`, orgID).Scan(&n)
 		return n, err
 	case "domains":
