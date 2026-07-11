@@ -15,20 +15,30 @@ func sign(secret string, body []byte) string {
 	return "sha256=" + hex.EncodeToString(mac.Sum(nil))
 }
 
-func TestVerifyWebhookPerRepoSecret(t *testing.T) {
-	s := &Server{cfg: &config.Config{GitHubWebhookSecret: "global"}}
+func TestVerifyWebhookAppSecretPriority(t *testing.T) {
+	s := &Server{cfg: &config.Config{GitHubWebhookSecret: "app"}}
 	body := []byte(`{"ref":"refs/heads/main"}`)
 
-	// Per-repo secret takes precedence.
+	if !s.verifyWebhook("repo-secret", body, sign("app", body)) {
+		t.Error("valid App-level signature rejected")
+	}
+	if s.verifyWebhook("repo-secret", body, sign("repo-secret", body)) {
+		t.Error("per-repo signature accepted while App-level secret configured")
+	}
+	if s.verifyWebhook("repo-secret", body, sign("wrong", body)) {
+		t.Error("invalid signature accepted")
+	}
+}
+
+func TestVerifyWebhookPerRepoFallback(t *testing.T) {
+	s := &Server{cfg: &config.Config{}}
+	body := []byte(`{"ref":"refs/heads/main"}`)
+
 	if !s.verifyWebhook("repo-secret", body, sign("repo-secret", body)) {
-		t.Error("valid per-repo signature rejected")
+		t.Error("valid per-repo signature rejected when App-level secret empty")
 	}
 	if s.verifyWebhook("repo-secret", body, sign("wrong", body)) {
 		t.Error("invalid per-repo signature accepted")
-	}
-	// Falls back to global secret when repo secret empty.
-	if !s.verifyWebhook("", body, sign("global", body)) {
-		t.Error("valid global signature rejected")
 	}
 }
 

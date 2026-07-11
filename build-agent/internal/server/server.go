@@ -1408,13 +1408,21 @@ func writeJSON(w http.ResponseWriter, v any) {
 	_ = json.NewEncoder(w).Encode(v)
 }
 
-// verifyWebhook checks the HMAC against the per-repo secret when set, falling
-// back to the global app webhook secret. Absent any configured secret, the
-// signature is not enforced (dev convenience).
+// verifyWebhook checks the HMAC against the App-level webhook secret first.
+//
+// A GitHub App delivers every installation's events to one webhook URL, signed
+// with the single secret configured in the App settings -- never the per-repo
+// secret. So the App-level secret (BUILD_GITHUB_WEBHOOK_SECRET) takes priority.
+// The per-repo secret remains a fallback for future per-repo hook providers
+// (e.g. GitLab) where each repo registers its own hook. Absent any configured
+// secret, the signature is not enforced (dev convenience).
 func (s *Server) verifyWebhook(repoSecret string, body []byte, sig string) bool {
-	secret := repoSecret
-	if secret == "" && s.cfg != nil {
+	secret := ""
+	if s.cfg != nil {
 		secret = s.cfg.GitHubWebhookSecret
+	}
+	if secret == "" {
+		secret = repoSecret
 	}
 	if secret == "" {
 		return true
