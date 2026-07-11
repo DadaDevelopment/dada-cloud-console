@@ -65,3 +65,28 @@ func TestImageDigest(t *testing.T) {
 		t.Errorf("want empty for short digest, got %q", d)
 	}
 }
+
+func TestParseMarkerWithTimestampPrefix(t *testing.T) {
+	var out buildOutcome
+	parseMarker("[2026-07-11T20:14:29.539Z] ==> image: nexus.dada-tuda.ru/ggrk52/magic-mirror@sha256:39188ea53df4f218bd54bf12fac66661b3163e057fdbdd5a27f5dad1c087d77b", &out)
+	want := "nexus.dada-tuda.ru/ggrk52/magic-mirror@sha256:39188ea53df4f218bd54bf12fac66661b3163e057fdbdd5a27f5dad1c087d77b"
+	if out.imageURI != want {
+		t.Fatalf("imageURI=%q want %q", out.imageURI, want)
+	}
+}
+
+func TestParseMarkerIgnoresSetXEcho(t *testing.T) {
+	var out buildOutcome
+	parseMarker("[2026-07-11T20:14:29.539Z] + echo '==> image: nexus.dada-tuda.ru/ggrk52/magic-mirror@sha256:39188ea53df4f218bd54bf12fac66661b3163e057fdbdd5a27f5dad1c087d77b'", &out)
+	if out.imageURI != "" {
+		t.Fatalf("set -x echo must not be parsed, got %q", out.imageURI)
+	}
+}
+
+func TestParseMarkerIgnoresCommitMessage(t *testing.T) {
+	var out buildOutcome
+	parseMarker(`[2026-07-11T19:56:33.629Z] Commit message: "fix(dada-build): re-emit ==> image: marker dropped"`, &out)
+	if out.imageURI != "" {
+		t.Fatalf("commit message must not be parsed, got %q", out.imageURI)
+	}
+}

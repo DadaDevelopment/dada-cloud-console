@@ -437,7 +437,7 @@ func (r *Runner) flushLines(ctx context.Context, b *db.Build, pending string, ou
 //	==> image: <host>/<proj>/<app>@sha256:<digest>
 //	==> artifact: <apk|aab> <nexus-raw-url> <size_bytes> <sha256> <versionCode>
 func parseMarker(line string, out *buildOutcome) {
-	s := strings.TrimSpace(line)
+	s := stripLogTimestamp(strings.TrimSpace(line))
 	const imgP = "==> image:"
 	const artP = "==> artifact:"
 	switch {
@@ -500,6 +500,12 @@ func (r *Runner) confirm(ctx context.Context, repo *db.Repo, out *buildOutcome) 
 
 var digestRe = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
 
+var logTsRe = regexp.MustCompile(`^\[\d[^\]]*\]\s+`)
+
+func stripLogTimestamp(s string) string {
+	return logTsRe.ReplaceAllString(s, "")
+}
+
 var (
 	consoleNoteRe = regexp.MustCompile("\x1b\\[8m.*?\x1b\\[0m")
 	ansiRe        = regexp.MustCompile("\x1b\\[[0-9;]*[A-Za-z]")
@@ -536,11 +542,15 @@ func sanitizeLogLine(raw string) (string, bool) {
 	if trimmed == "" {
 		return "", false
 	}
-	if strings.HasPrefix(trimmed, "//") {
+	body := stripLogTimestamp(trimmed)
+	if body == "" {
+		return "", false
+	}
+	if strings.HasPrefix(body, "//") {
 		return "", false
 	}
 	for _, p := range jenkinsNoisePrefixes {
-		if strings.HasPrefix(trimmed, p) {
+		if strings.HasPrefix(body, p) {
 			return "", false
 		}
 	}

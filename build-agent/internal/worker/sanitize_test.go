@@ -14,6 +14,9 @@ func TestSanitizeDropsJenkinsNoise(t *testing.T) {
 		"\tContainer [dind] waiting [ContainerCreating] No message",
 		"\x1b[8mha:////4DpGRblob==\x1b[0m",
 		"   ",
+		"[2026-07-11T20:14:29.539Z] \x1b[8mha:////4M7blob==\x1b[0m[Pipeline] // container",
+		"[2026-07-11T20:14:29.613Z] \x1b[8mha:////blob==\x1b[0m[Pipeline] End of Pipeline",
+		"[2026-07-11T20:14:29.637Z] [Checks API] No suitable checks publisher found.",
 	}
 	for _, in := range drop {
 		if _, ok := sanitizeLogLine(in); ok {
