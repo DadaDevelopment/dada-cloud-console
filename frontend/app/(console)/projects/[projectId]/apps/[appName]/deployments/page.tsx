@@ -1,5 +1,5 @@
 "use client";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useParams, useSearchParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { buildsApi, deploymentsApi } from "@/lib/api";
@@ -11,6 +11,17 @@ import { canMutate } from "@/lib/rbac";
 import { timeAgo } from "@/lib/format";
 import { BuildStatusBadge, isBuildActive } from "@/components/deploy/build-status-badge";
 import { useT } from "@/lib/i18n/console/context";
+
+/**
+ * A single row in the unified deploy feed. Either a build attempt (every
+ * status, including failed/canceled) optionally carrying the deployment it
+ * produced, or an orphan deployment whose originating build row was pruned
+ * (e.g. a rollback to an old version). One list, newest first — no separate
+ * "builds" vs "deployments" split.
+ */
+type Row =
+  | { kind: "build"; at: string; build: Build; dep?: Deployment }
+  | { kind: "deploy"; at: string; dep: Deployment };
 
 export default function AppDeploymentsPage() {
   const params = useParams<{ projectId: string; appName: string }>();
@@ -60,13 +71,36 @@ export default function AppDeploymentsPage() {
     void load(); // eslint-disable-line react-hooks/set-state-in-effect
   }, [load]);
 
-  // Poll every 3s while any build is in-progress (mirrors operations/page.tsx).
+  /** Poll every 3s while any build is in-progress (mirrors operations/page.tsx). */
   useEffect(() => {
     const hasActive = builds.some((b) => isBuildActive(b.status));
     if (!hasActive) return;
     const interval = setInterval(() => void load(true), 3000);
     return () => clearInterval(interval);
   }, [builds, load]);
+
+  /**
+   * Fold builds + deployments into one feed. A deployment attaches to the build
+   * that produced it (build_id); deployments with no surviving build become
+   * their own rows. Everything is sorted newest-first.
+   */
+  const rows = useMemo<Row[]>(() => {
+    const depByBuild = new Map<string, Deployment>();
+    for (const d of deployments) if (d.build_id) depByBuild.set(d.build_id, d);
+    const buildIds = new Set(builds.map((b) => b.id));
+
+    const buildRows: Row[] = builds.map((b) => ({
+      kind: "build",
+      at: b.created_at,
+      build: b,
+      dep: depByBuild.get(b.id),
+    }));
+    const orphanRows: Row[] = deployments
+      .filter((d) => !d.build_id || !buildIds.has(d.build_id))
+      .map((d) => ({ kind: "deploy", at: d.created_at, dep: d }));
+
+    return [...buildRows, ...orphanRows].sort((a, b) => (a.at < b.at ? 1 : a.at > b.at ? -1 : 0));
+  }, [builds, deployments]);
 
   async function handleTrigger() {
     setTriggering(true);
@@ -109,6 +143,35 @@ export default function AppDeploymentsPage() {
       setError(err instanceof Error ? err.message : t(kind === "rollback" ? "apps.deployments.rollingBack" : "apps.deployments.promoting"));
       setActionId(null);
     }
+  }
+
+  function DeployActions({ dep }: { dep: Deployment }) {
+    if (!canDeploy) return null;
+    return dep.is_current ? (
+      <button
+        onClick={() => handleDeployAction(dep.id, "promote")}
+        disabled={actionId === dep.id}
+        className="rounded-lg border border-gray-300 dark:border-gray-700 px-3 py-1.5 text-xs font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-50"
+      >
+        {actionId === dep.id ? t("apps.deployments.promoting") : t("apps.deployments.promote")}
+      </button>
+    ) : (
+      <button
+        onClick={() => handleDeployAction(dep.id, "rollback")}
+        disabled={actionId === dep.id}
+        className="rounded-lg border border-gray-300 dark:border-gray-700 px-3 py-1.5 text-xs font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-50"
+      >
+        {actionId === dep.id ? t("apps.deployments.rollingBack") : t("apps.deployments.rollback")}
+      </button>
+    );
+  }
+
+  function CurrentBadge() {
+    return (
+      <span className="inline-flex items-center rounded-full bg-green-100 px-2 py-0.5 text-xs font-semibold text-green-700 dark:bg-green-950/40 dark:text-green-300">
+        {t("apps.deployments.badge.current")}
+      </span>
+    );
   }
 
   return (
@@ -159,16 +222,68 @@ export default function AppDeploymentsPage() {
           </Link>
         </div>
       ) : (
-        <div className="space-y-10">
-          <section>
-            <h2 className="mb-3 text-lg font-semibold text-gray-900 dark:text-gray-100">{t("apps.deployments.section.deployments")}</h2>
-            {deployments.length === 0 ? (
-              <p className="rounded-xl border border-dashed border-gray-300 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 px-5 py-8 text-center text-sm text-gray-500 dark:text-gray-400">
-                {t("apps.deployments.empty.deployments")}
-              </p>
-            ) : (
-              <div className="space-y-3">
-                {deployments.map((dep) => (
+        <section>
+          <div className="mb-3">
+            <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">{t("apps.deployments.section.deployments")}</h2>
+            <p className="mt-0.5 text-sm text-gray-500 dark:text-gray-400">{t("apps.deployments.section.hint")}</p>
+          </div>
+          {rows.length === 0 ? (
+            <p className="rounded-xl border border-dashed border-gray-300 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 px-5 py-8 text-center text-sm text-gray-500 dark:text-gray-400">
+              {t("apps.deployments.empty.feed")}
+            </p>
+          ) : (
+            <div className="space-y-3">
+              {rows.map((row) => {
+                if (row.kind === "build") {
+                  const b = row.build;
+                  const dep = row.dep;
+                  const isCurrent = dep?.is_current ?? false;
+                  const image = dep?.image_uri ?? b.image_uri;
+                  return (
+                    <div
+                      key={b.id}
+                      className={`flex items-center justify-between rounded-xl border bg-white dark:bg-gray-900 px-5 py-4 shadow-sm ${
+                        isCurrent ? "border-green-300 ring-1 ring-green-200 dark:ring-green-900" : "border-gray-200 dark:border-gray-800"
+                      }`}
+                    >
+                      <Link href={`/projects/${projectId}/apps/${appName}/builds/${b.id}${envId ? `?envId=${envId}` : ""}`} className="min-w-0 flex-1">
+                        <div className="flex flex-wrap items-center gap-2">
+                          {isCurrent && <CurrentBadge />}
+                          <BuildStatusBadge status={b.status} />
+                          <span className="font-mono text-xs text-gray-500 dark:text-gray-400">{b.commit_sha?.slice(0, 7) ?? "—"}</span>
+                          <span className="text-xs text-gray-400 dark:text-gray-500">{b.branch}</span>
+                          <span className="inline-flex items-center rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600 dark:bg-slate-800 dark:text-slate-300">
+                            {b.trigger}
+                          </span>
+                        </div>
+                        {b.commit_message && <p className="mt-1 truncate text-sm text-gray-700 dark:text-gray-200">{b.commit_message}</p>}
+                        {image && <p className="mt-1 truncate font-mono text-xs text-gray-400 dark:text-gray-500">{image}</p>}
+                        <p className="mt-0.5 text-xs text-gray-400 dark:text-gray-500">{timeAgo(b.created_at)}</p>
+                      </Link>
+                      <div className="flex shrink-0 items-center gap-3 pl-4">
+                        {canDeploy && isBuildActive(b.status) && (
+                          <button
+                            onClick={() => handleCancel(b.id)}
+                            disabled={actionId === b.id}
+                            className="rounded-lg border border-gray-300 dark:border-gray-700 px-3 py-1.5 text-xs font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-50"
+                          >
+                            {actionId === b.id ? t("apps.deployments.cancelingBuild") : t("apps.deployments.cancelBuild")}
+                          </button>
+                        )}
+                        {dep && <DeployActions dep={dep} />}
+                        <Link
+                          href={`/projects/${projectId}/apps/${appName}/builds/${b.id}${envId ? `?envId=${envId}` : ""}`}
+                          className="text-sm font-medium text-blue-600 dark:text-blue-400 hover:text-blue-700"
+                        >
+                          {t("apps.deployments.logs")}
+                        </Link>
+                      </div>
+                    </div>
+                  );
+                }
+
+                const dep = row.dep;
+                return (
                   <div
                     key={dep.id}
                     className={`flex items-center justify-between rounded-xl border bg-white dark:bg-gray-900 px-5 py-4 shadow-sm ${
@@ -176,12 +291,8 @@ export default function AppDeploymentsPage() {
                     }`}
                   >
                     <div className="min-w-0">
-                      <div className="flex items-center gap-2">
-                        {dep.is_current && (
-                          <span className="inline-flex items-center rounded-full bg-green-100 px-2 py-0.5 text-xs font-semibold text-green-700 dark:bg-green-950/40 dark:text-green-300">
-                            {t("apps.deployments.badge.current")}
-                          </span>
-                        )}
+                      <div className="flex flex-wrap items-center gap-2">
+                        {dep.is_current && <CurrentBadge />}
                         <span className="inline-flex items-center rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600 dark:bg-slate-800 dark:text-slate-300">
                           {dep.trigger}
                         </span>
@@ -191,78 +302,15 @@ export default function AppDeploymentsPage() {
                       <p className="mt-1 truncate font-mono text-xs text-gray-400 dark:text-gray-500">{dep.image_uri}</p>
                       <p className="mt-0.5 text-xs text-gray-400 dark:text-gray-500">{timeAgo(dep.created_at)}</p>
                     </div>
-                    {canDeploy && (
-                      <div className="flex shrink-0 items-center gap-2 pl-4">
-                        {dep.is_current ? (
-                          <button
-                            onClick={() => handleDeployAction(dep.id, "promote")}
-                            disabled={actionId === dep.id}
-                            className="rounded-lg border border-gray-300 dark:border-gray-700 px-3 py-1.5 text-xs font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-50"
-                          >
-                            {actionId === dep.id ? t("apps.deployments.promoting") : t("apps.deployments.promote")}
-                          </button>
-                        ) : (
-                          <button
-                            onClick={() => handleDeployAction(dep.id, "rollback")}
-                            disabled={actionId === dep.id}
-                            className="rounded-lg border border-gray-300 dark:border-gray-700 px-3 py-1.5 text-xs font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-50"
-                          >
-                            {actionId === dep.id ? t("apps.deployments.rollingBack") : t("apps.deployments.rollback")}
-                          </button>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                ))}
-              </div>
-            )}
-          </section>
-
-          <section>
-            <h2 className="mb-3 text-lg font-semibold text-gray-900 dark:text-gray-100">{t("apps.deployments.section.builds")}</h2>
-            {builds.length === 0 ? (
-              <p className="rounded-xl border border-dashed border-gray-300 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 px-5 py-8 text-center text-sm text-gray-500 dark:text-gray-400">
-                {t("apps.deployments.empty.builds")}
-              </p>
-            ) : (
-              <div className="space-y-3">
-                {builds.map((b) => (
-                  <div key={b.id} className="flex items-center justify-between rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 px-5 py-4 shadow-sm">
-                    <Link href={`/projects/${projectId}/apps/${appName}/builds/${b.id}${envId ? `?envId=${envId}` : ""}`} className="min-w-0 flex-1">
-                      <div className="flex items-center gap-2">
-                        <BuildStatusBadge status={b.status} />
-                        <span className="font-mono text-xs text-gray-500 dark:text-gray-400">{b.commit_sha?.slice(0, 7) ?? "—"}</span>
-                        <span className="text-xs text-gray-400 dark:text-gray-500">{b.branch}</span>
-                        <span className="inline-flex items-center rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600 dark:bg-slate-800 dark:text-slate-300">
-                          {b.trigger}
-                        </span>
-                      </div>
-                      {b.commit_message && <p className="mt-1 truncate text-sm text-gray-700 dark:text-gray-200">{b.commit_message}</p>}
-                      <p className="mt-0.5 text-xs text-gray-400 dark:text-gray-500">{timeAgo(b.created_at)}</p>
-                    </Link>
-                    <div className="flex shrink-0 items-center gap-3 pl-4">
-                      {canDeploy && isBuildActive(b.status) && (
-                        <button
-                          onClick={() => handleCancel(b.id)}
-                          disabled={actionId === b.id}
-                          className="rounded-lg border border-gray-300 dark:border-gray-700 px-3 py-1.5 text-xs font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-50"
-                        >
-                          {actionId === b.id ? t("apps.deployments.cancelingBuild") : t("apps.deployments.cancelBuild")}
-                        </button>
-                      )}
-                      <Link
-                        href={`/projects/${projectId}/apps/${appName}/builds/${b.id}${envId ? `?envId=${envId}` : ""}`}
-                        className="text-sm font-medium text-blue-600 dark:text-blue-400 hover:text-blue-700"
-                      >
-                        {t("apps.deployments.logs")}
-                      </Link>
+                    <div className="flex shrink-0 items-center gap-2 pl-4">
+                      <DeployActions dep={dep} />
                     </div>
                   </div>
-                ))}
-              </div>
-            )}
-          </section>
-        </div>
+                );
+              })}
+            </div>
+          )}
+        </section>
       )}
     </div>
   );

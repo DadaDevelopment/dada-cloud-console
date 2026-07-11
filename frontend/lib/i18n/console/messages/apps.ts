@@ -176,7 +176,15 @@ export const apps: Messages = {
   },
   "apps.deployments.unavailable.link": { ru: "Управление Git и сборками", en: "Manage Git & Builds" },
   "apps.deployments.section.deployments": { ru: "Деплои", en: "Deployments" },
+  "apps.deployments.section.hint": {
+    ru: "Каждый запуск сборки -- строка. Успешные помечены «Текущий», упавшие остаются в истории.",
+    en: "Every build run is a row here. Successful ones are marked \"Current\"; failed ones stay in the history.",
+  },
   "apps.deployments.section.builds": { ru: "Сборки", en: "Builds" },
+  "apps.deployments.empty.feed": {
+    ru: "Пока пусто. Подключите репозиторий и запустите сборку -- деплои и упавшие сборки появятся здесь.",
+    en: "Nothing yet. Connect a repository and trigger a build -- deploys and failed builds will appear here.",
+  },
   "apps.deployments.empty.deployments": { ru: "Деплоев пока нет.", en: "No deployments yet." },
   "apps.deployments.empty.builds": {
     ru: "Сборок пока нет. Подключите репозиторий и запустите сборку.",
