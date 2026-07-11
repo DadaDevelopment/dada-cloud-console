@@ -108,8 +108,11 @@ func TestBuildQuery_KubeFilters(t *testing.T) {
 }
 
 func TestSearch_ParsesKubernetesHits(t *testing.T) {
-	const body = `{"hits":{"total":{"value":1},"hits":[
+	const body = `{"hits":{"total":{"value":2},"hits":[
 		{"_source":{"@timestamp":"2026-06-04T00:00:00Z","log":"hi","stream":"stdout",
+		 "kubernetes":{"namespace_name":"acme-prod","pod_name":"web-deploy-abc12","labels":{"dada_io/app":"web"}}}},
+		{"_source":{"@timestamp":"2026-06-04T00:00:01Z","stream":"stdout",
+		 "app":{"level":50,"msg":"boom","err":{"code":"ENOENT"}},
 		 "kubernetes":{"namespace_name":"acme-prod","pod_name":"web-deploy-abc12","labels":{"dada_io/app":"web"}}}}
 	]}}`
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -123,12 +126,14 @@ func TestSearch_ParsesKubernetesHits(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Search: %v", err)
 	}
-	if len(res.Entries) != 1 {
-		t.Fatalf("entries = %d, want 1", len(res.Entries))
+	if len(res.Entries) != 2 {
+		t.Fatalf("entries = %d, want 2", len(res.Entries))
 	}
-	e := res.Entries[0]
-	if e.VMName != "web-deploy-abc12" || e.App != "web" || e.Message != "hi" {
-		t.Errorf("entry = %+v", e)
+	if e := res.Entries[0]; e.VMName != "web-deploy-abc12" || e.App != "web" || e.Message != "hi" {
+		t.Errorf("entry[0] = %+v", e)
+	}
+	if e := res.Entries[1]; e.App != "web" || e.Message != "boom" {
+		t.Errorf("entry[1] (app-as-object) = %+v", e)
 	}
 }
 

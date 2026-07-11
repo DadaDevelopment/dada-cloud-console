@@ -122,11 +122,11 @@ type SearchResult struct {
 }
 
 type sourceDoc struct {
-	Timestamp string `json:"@timestamp"`
-	Message   string `json:"message"`
-	Log       string `json:"log"`
-	VMName    string `json:"vm_name"`
-	App       string `json:"app"`
+	Timestamp string          `json:"@timestamp"`
+	Message   string          `json:"message"`
+	Log       string          `json:"log"`
+	VMName    string          `json:"vm_name"`
+	App       json.RawMessage `json:"app"`
 	Host      struct {
 		Name string `json:"name"`
 	} `json:"host"`
@@ -136,6 +136,27 @@ type sourceDoc struct {
 		PodName       string         `json:"pod_name"`
 		Labels        map[string]any `json:"labels"`
 	} `json:"kubernetes"`
+}
+
+func decodeAppField(raw json.RawMessage) (name, message string) {
+	if len(raw) == 0 {
+		return "", ""
+	}
+	var s string
+	if err := json.Unmarshal(raw, &s); err == nil {
+		return s, ""
+	}
+	var obj struct {
+		Msg     string `json:"msg"`
+		Message string `json:"message"`
+	}
+	if err := json.Unmarshal(raw, &obj); err == nil {
+		if obj.Msg != "" {
+			return "", obj.Msg
+		}
+		return "", obj.Message
+	}
+	return "", ""
 }
 
 func (c *Client) buildQuery(opts SearchOpts) map[string]any {
@@ -241,7 +262,7 @@ func (c *Client) buildQuery(opts SearchOpts) map[string]any {
 		must = append(must, map[string]any{
 			"query_string": map[string]any{
 				"query":   opts.Query,
-				"fields":  []string{"message", "log"},
+				"fields":  []string{"message", "log", "app.msg"},
 				"lenient": true,
 			},
 		})
@@ -315,7 +336,7 @@ func (c *Client) Search(ctx context.Context, opts SearchOpts) (*SearchResult, er
 	out := &SearchResult{Total: parsed.Hits.Total.Value}
 	for _, h := range parsed.Hits.Hits {
 		vm := h.Source.VMName
-		app := h.Source.App
+		app, appMsg := decodeAppField(h.Source.App)
 		if k := h.Source.Kubernetes; k.PodName != "" {
 			vm = k.PodName
 			if app == "" {
@@ -333,6 +354,9 @@ func (c *Client) Search(ctx context.Context, opts SearchOpts) (*SearchResult, er
 		msg := h.Source.Message
 		if msg == "" {
 			msg = h.Source.Log
+		}
+		if msg == "" {
+			msg = appMsg
 		}
 		out.Entries = append(out.Entries, LogEntry{
 			Timestamp: h.Source.Timestamp,
