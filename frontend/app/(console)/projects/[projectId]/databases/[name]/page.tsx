@@ -290,11 +290,9 @@ export default function DatabaseDetailPage() {
   const spec = summary.spec ?? {};
   const dbName = summary.database ?? spec.database ?? db.name;
   const appRef = summary.app_ref ?? spec.appRef;
-  const namespace = summary.namespace ?? spec.namespace;
   const backup = spec.backup;
   const backupOn = !!backup?.enabled;
-  const derivedHost = namespace ? `${db.name}.${namespace}.svc.cluster.local` : db.name;
-  const host = creds?.host || derivedHost;
+  const revealedHost = creds?.host ?? "";
   const connPort = creds?.port || "5432";
   const connDbName = creds?.database || dbName;
 
@@ -342,8 +340,12 @@ export default function DatabaseDetailPage() {
         <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">{t("databases.detail.connection")}</h2>
         <div className="space-y-4 rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-6 shadow-sm">
           <div className="flex items-center justify-between gap-3">
-            <Field label={t("databases.detail.field.host")}><span className="font-mono text-xs sm:text-sm">{host}</span></Field>
-            <CopyButton value={host} />
+            <Field label={t("databases.detail.field.host")}>
+              {revealedHost
+                ? <span className="font-mono text-xs sm:text-sm">{revealedHost}</span>
+                : <span className="font-mono text-xs sm:text-sm text-gray-400 dark:text-gray-500">{t("databases.detail.hostHidden")}</span>}
+            </Field>
+            {revealedHost && <CopyButton value={revealedHost} />}
           </div>
           <div className="grid gap-4 sm:grid-cols-2">
             <Field label={t("databases.detail.field.dbName")}><span className="font-mono">{connDbName}</span></Field>

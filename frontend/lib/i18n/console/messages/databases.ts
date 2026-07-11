@@ -70,9 +70,13 @@ export const databases: Messages = {
     ru: "Учётные данные хранятся как секрет в пространстве имён приложения. Приложение получает их через стандартные переменные окружения секрета -- либо покажите их разово ниже.",
     en: "Credentials are stored as a secret in the app namespace. Your app references them via the standard secret env vars -- or reveal them once below.",
   },
+  "databases.detail.hostHidden": {
+    ru: "Скрыт -- покажите учётные данные",
+    en: "Hidden -- reveal credentials",
+  },
   "databases.detail.hostHint": {
-    ru: "Хост показан приблизительно. Точные хост, порт и имя базы берутся из секрета -- покажите учётные данные ниже.",
-    en: "Host shown is approximate. The exact host, port and database name come from the secret -- reveal credentials below.",
+    ru: "Точные хост, порт и имя базы берутся из секрета -- покажите учётные данные ниже.",
+    en: "The exact host, port and database name come from the secret -- reveal credentials below.",
   },
   "databases.detail.access.title": { ru: "Учётные данные", en: "Credentials" },
   "databases.detail.access.username": { ru: "Пользователь", en: "Username" },
