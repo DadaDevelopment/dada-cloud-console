@@ -219,7 +219,7 @@ func (w *GitWatcher) processCommit(ctx context.Context, mgr *git.Manager, c git.
 			continue
 		}
 		if m := resourcesValuesPathRe.FindStringSubmatch(filePath); m != nil {
-			w.syncResourcesValuesFile(ctx, mgr, filePath, m[1], m[2], c)
+			w.syncResourcesValuesFile(ctx, mgr, filePath, m[1], m[2], m[3], c)
 			continue
 		}
 		if m := chartTemplatePathRe.FindStringSubmatch(filePath); m != nil {
@@ -415,7 +415,7 @@ type resourcesValuesManifest struct {
 // console. Each entry is upserted by its (kind, name); the upsert is LWW on the
 // commit time, so it never clobbers a fresher snapshot already written by the
 // API at request time. Supersedes the per-file resources/templates sync.
-func (w *GitWatcher) syncResourcesValuesFile(ctx context.Context, mgr *git.Manager, filePath, projectSlug, envSlug string, c git.Commit) {
+func (w *GitWatcher) syncResourcesValuesFile(ctx context.Context, mgr *git.Manager, filePath, projectSlug, envSlug, appName string, c git.Commit) {
 	content, err := mgr.ReadFileAtCommit(c.SHA, filePath)
 	if err != nil {
 		log.Warn().Err(err).Str("path", filePath).Msg("git-watcher: read resources.values.yaml")
@@ -446,6 +446,7 @@ func (w *GitWatcher) syncResourcesValuesFile(ctx context.Context, mgr *git.Manag
 			"git_message": c.Message,
 			"git_author":  c.Author,
 			"name":        manifest.Metadata.Name,
+			"app_name":    appName,
 			"kind":        manifest.Kind,
 			"status":      "Unknown",
 			"message":     "Synced from git",
