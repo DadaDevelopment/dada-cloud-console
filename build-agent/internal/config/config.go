@@ -103,7 +103,7 @@ func Load() (*Config, error) {
 		LogDBRetention:    logRetention,
 
 		DefaultDomainEnabled: getEnv("DEFAULT_DOMAIN_ENABLED", "true") == "true",
-		DefaultDomainBase:    getEnv("DEFAULT_DOMAIN_BASE", "apps.dada-tuda.ru"),
+		DefaultDomainBase:    getEnv("DEFAULT_DOMAIN_BASE", "dada-tuda.ru"),
 	}
 
 	if cfg.DatabaseURL == "" {
