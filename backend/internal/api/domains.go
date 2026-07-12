@@ -515,20 +515,14 @@ func (h *Handler) AttachHostname(c *gin.Context) {
 	}
 
 	var op models.Operation
-	err = h.pool.QueryRow(c.Request.Context(),
+	err = scanOperation(h.pool.QueryRow(c.Request.Context(),
 		`INSERT INTO operations (actor_id, project_id, environment_id, action, resource_kind, resource_name, status, payload)
 		 VALUES ($1, $2, $3, 'AttachCustomHostname', 'CustomDomain', $4, 'Created', $5)
 		 RETURNING id, actor_id, project_id, environment_id, action, resource_kind, resource_name,
 		           status, payload, validation_result, git_commit, git_path, argo_application,
 		           error_code, error_message, created_at, updated_at`,
 		claims.UserID, projectID, envID, hostname, payloadBytes,
-	).Scan(
-		&op.ID, &op.ActorID, &op.ProjectID, &op.EnvironmentID,
-		&op.Action, &op.ResourceKind, &op.ResourceName,
-		&op.Status, &op.Payload, &op.ValidationResult,
-		&op.GitCommit, &op.GitPath, &op.ArgoApplication,
-		&op.ErrorCode, &op.ErrorMessage, &op.CreatedAt, &op.UpdatedAt,
-	)
+	), &op)
 	if err != nil {
 		respondError(c, http.StatusInternalServerError, "failed to create operation")
 		return
@@ -750,20 +744,14 @@ func (h *Handler) DetachHostname(c *gin.Context) {
 	}
 
 	var op models.Operation
-	err = h.pool.QueryRow(c.Request.Context(),
+	err = scanOperation(h.pool.QueryRow(c.Request.Context(),
 		`INSERT INTO operations (actor_id, project_id, environment_id, action, resource_kind, resource_name, status, payload)
 		 VALUES ($1, $2, $3, 'DetachCustomHostname', 'CustomDomain', $4, 'Created', $5)
 		 RETURNING id, actor_id, project_id, environment_id, action, resource_kind, resource_name,
 		           status, payload, validation_result, git_commit, git_path, argo_application,
 		           error_code, error_message, created_at, updated_at`,
 		claims.UserID, projectID, envID, hn.Hostname, payloadBytes,
-	).Scan(
-		&op.ID, &op.ActorID, &op.ProjectID, &op.EnvironmentID,
-		&op.Action, &op.ResourceKind, &op.ResourceName,
-		&op.Status, &op.Payload, &op.ValidationResult,
-		&op.GitCommit, &op.GitPath, &op.ArgoApplication,
-		&op.ErrorCode, &op.ErrorMessage, &op.CreatedAt, &op.UpdatedAt,
-	)
+	), &op)
 	if err != nil {
 		respondError(c, http.StatusInternalServerError, "failed to create operation")
 		return
