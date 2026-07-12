@@ -565,15 +565,43 @@ func (h *Handler) GetDatabaseCredentials(c *gin.Context) {
 		"username": creds.Username,
 		"password": creds.Password,
 	}
-	if creds.ExternalHost != "" {
-		resp["external_host"] = creds.ExternalHost
-		extPort := creds.ExternalPort
+	// External endpoint: prefer what the composition published into the secret;
+	// otherwise, for a database opted into external access, fall back to the
+	// cluster's configured public endpoint (MVP TCP passthrough of the shared
+	// Postgres). username/password/database are identical to the internal path.
+	extHost, extPort := creds.ExternalHost, creds.ExternalPort
+	if extHost == "" && h.cfg.ExternalDBHost != "" && serviceDatabaseExternalEnabled(summaryRaw) {
+		extHost = h.cfg.ExternalDBHost
+		extPort = h.cfg.ExternalDBPort
+	}
+	if extHost != "" {
+		resp["external_host"] = extHost
 		if extPort == "" {
 			extPort = port
 		}
 		resp["external_port"] = extPort
 	}
 	c.JSON(http.StatusOK, resp)
+}
+
+// serviceDatabaseExternalEnabled reports whether a ServiceDatabaseV2 snapshot
+// opted into external (public) access (spec.external.enabled == true). Absent or
+// unparseable summaries are treated as not-enabled.
+func serviceDatabaseExternalEnabled(summaryRaw []byte) bool {
+	var summary map[string]any
+	if json.Unmarshal(summaryRaw, &summary) != nil {
+		return false
+	}
+	spec, ok := summary["spec"].(map[string]any)
+	if !ok {
+		return false
+	}
+	ext, ok := spec["external"].(map[string]any)
+	if !ok {
+		return false
+	}
+	enabled, _ := ext["enabled"].(bool)
+	return enabled
 }
 
 // serviceDatabaseNamespace pulls the app namespace from a ServiceDatabaseV2
