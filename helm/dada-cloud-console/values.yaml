@@ -95,11 +95,11 @@ backend:
     # GitHub App id/key) is in backend.secret below — in prod that half is patched
     # out-of-git into the existing Secret (see tasks/dadagent-cloud-task-secret-runbook.md).
     # Empty DADA_AGENT_BASE_URL/CLOUD_AGENT_CLIENT_ID disables the create handler (503).
-    #   DADA_AGENT_BASE_URL  — in-cluster DadaAgent svc (dada-agent-service:8080 → app 8001)
+    #   DADA_AGENT_BASE_URL  -- in-cluster DadaAgent svc (agent-sync-hub-backend:8080 → app 8001)
     #   KEYCLOAK_TOKEN_URL   — issuer + /protocol/openid-connect/token (client-credentials)
     #   CLOUD_AGENT_CLIENT_ID— Keycloak SA client the cloud uses to call the agent
     #   CLOUD_TASK_CALLBACK_URL — public webhook the agent calls back (console host)
-    DADA_AGENT_BASE_URL: "http://dada-agent-service.argocd-prod.svc.cluster.local:8080"
+    DADA_AGENT_BASE_URL: "http://agent-sync-hub-backend.argocd-prod.svc.cluster.local:8080"
     KEYCLOAK_TOKEN_URL: "https://id.dada-tuda.ru/realms/master/protocol/openid-connect/token"
     CLOUD_AGENT_CLIENT_ID: "dada-cloud-backend"
     CLOUD_TASK_CALLBACK_URL: "https://console.dada-tuda.ru/api/v1/webhooks/dadagent"
