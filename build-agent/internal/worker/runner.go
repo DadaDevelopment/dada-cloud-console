@@ -167,7 +167,10 @@ func (r *Runner) run(ctx context.Context, b *db.Build) {
 		// Web → deploy handoff (the ONLY re-entry into the declarative path).
 		// First build of a not-yet-existing app enqueues CreateApp; later builds
 		// enqueue DeployImageVersion. No placeholder image is ever deployed.
-		opID, herr := db.HandoffDeploy(ctx, r.pool, b, repo, out.imageURI)
+		opID, herr := db.HandoffDeploy(ctx, r.pool, b, repo, out.imageURI, db.DefaultDomainOpts{
+			Enabled: r.cfg.DefaultDomainEnabled,
+			Base:    r.cfg.DefaultDomainBase,
+		})
 		if herr != nil {
 			llog.Error().Err(herr).Msg("deploy handoff failed (build succeeded, deploy not enqueued)")
 		} else {

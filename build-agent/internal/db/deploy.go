@@ -2,8 +2,11 @@ package db
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -26,11 +29,37 @@ type deployImageVersionPayload struct {
 // builds target Helm environments). Used when a git-linked app does not exist yet
 // and its first successful build must materialize it.
 type createAppPayload struct {
-	Name     string `json:"name"`
-	Image    string `json:"image"`
-	Port     int    `json:"port"`
-	Replicas int    `json:"replicas,omitempty"`
-	Profile  string `json:"profile,omitempty"`
+	Name            string `json:"name"`
+	Image           string `json:"image"`
+	Port            int    `json:"port"`
+	Replicas        int    `json:"replicas,omitempty"`
+	Profile         string `json:"profile,omitempty"`
+	DefaultHostname string `json:"default_hostname,omitempty"`
+}
+
+// DefaultDomainOpts carries the platform default-domain knobs into HandoffDeploy
+// so a git-built app materialized by its first build gets the same auto
+// surrogate hostname as a console-created app (mirrors backend apps.go CreateApp).
+type DefaultDomainOpts struct {
+	Enabled bool
+	Base    string
+}
+
+func randomHostSuffix() (string, error) {
+	b := make([]byte, 3)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(b), nil
+}
+
+func buildDefaultHostname(base, name, suffix string) string {
+	label := name
+	maxLabel := 63 - 1 - len(suffix)
+	if len(label) > maxLabel {
+		label = strings.TrimRight(label[:maxLabel], "-")
+	}
+	return fmt.Sprintf("%s-%s.%s", label, suffix, base)
 }
 
 // HandoffDeploy is the success-path deploy handoff (plan §4, invariant 2). It is
@@ -53,7 +82,7 @@ type createAppPayload struct {
 //  3. UPDATE deployments.operation_id = <op id>.
 //
 // Returns the new operation id.
-func HandoffDeploy(ctx context.Context, pool *pgxpool.Pool, b *Build, repo *Repo, imageURI string) (uuid.UUID, error) {
+func HandoffDeploy(ctx context.Context, pool *pgxpool.Pool, b *Build, repo *Repo, imageURI string, dd DefaultDomainOpts) (uuid.UUID, error) {
 	tx, err := pool.Begin(ctx)
 	if err != nil {
 		return uuid.Nil, fmt.Errorf("begin deploy tx: %w", err)
@@ -89,17 +118,24 @@ func HandoffDeploy(ctx context.Context, pool *pgxpool.Pool, b *Build, repo *Repo
 
 	var action string
 	var payload []byte
+	var defaultHostname string
 	if appExists {
 		action = "DeployImageVersion"
 		payload, err = json.Marshal(deployImageVersionPayload{AppName: b.AppName, Image: imageURI})
 	} else {
 		action = "CreateApp"
+		if dd.Enabled && dd.Base != "" {
+			if suffix, sErr := randomHostSuffix(); sErr == nil {
+				defaultHostname = buildDefaultHostname(dd.Base, b.AppName, suffix)
+			}
+		}
 		payload, err = json.Marshal(createAppPayload{
-			Name:     b.AppName,
-			Image:    imageURI,
-			Port:     repo.Port,
-			Replicas: repo.Replicas,
-			Profile:  repo.Profile,
+			Name:            b.AppName,
+			Image:           imageURI,
+			Port:            repo.Port,
+			Replicas:        repo.Replicas,
+			Profile:         repo.Profile,
+			DefaultHostname: defaultHostname,
 		})
 	}
 	if err != nil {
@@ -117,6 +153,15 @@ func HandoffDeploy(ctx context.Context, pool *pgxpool.Pool, b *Build, repo *Repo
 
 	if _, err := tx.Exec(ctx, `UPDATE deployments SET operation_id = $1 WHERE id = $2`, opID, deployID); err != nil {
 		return uuid.Nil, fmt.Errorf("link operation: %w", err)
+	}
+
+	if defaultHostname != "" {
+		if _, err := tx.Exec(ctx, `
+			INSERT INTO domain_hostnames (authorization_id, environment_id, app_name, hostname, record_type, status, cert_status, operation_id, managed)
+			VALUES (NULL, $1, $2, $3, 'CNAME', 'pending', 'pending', $4, true)
+		`, b.EnvironmentID, b.AppName, defaultHostname, opID); err != nil {
+			return uuid.Nil, fmt.Errorf("record default hostname: %w", err)
+		}
 	}
 
 	// Best-effort audit (matches backend deployments.go).

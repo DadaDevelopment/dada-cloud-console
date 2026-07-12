@@ -55,6 +55,9 @@ type Config struct {
 	// Terminal-log object store + DB-log retention.
 	LogObjectStoreURL string
 	LogDBRetention    time.Duration
+
+	DefaultDomainEnabled bool
+	DefaultDomainBase    string
 }
 
 func Load() (*Config, error) {
@@ -98,6 +101,9 @@ func Load() (*Config, error) {
 
 		LogObjectStoreURL: getEnv("BUILD_LOG_OBJECT_STORE_URL", ""),
 		LogDBRetention:    logRetention,
+
+		DefaultDomainEnabled: getEnv("DEFAULT_DOMAIN_ENABLED", "true") == "true",
+		DefaultDomainBase:    getEnv("DEFAULT_DOMAIN_BASE", "apps.dada-tuda.ru"),
 	}
 
 	if cfg.DatabaseURL == "" {
