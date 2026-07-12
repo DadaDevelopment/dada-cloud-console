@@ -24,7 +24,7 @@ export function LogsViewer({
 }) {
   const { t } = useT();
   const [query, setQuery] = useState("");
-  const [since, setSince] = useState<Since>("1h");
+  const [since, setSince] = useState<Since>("24h");
   const [isLive, setIsLive] = useState(false);
   const [entries, setEntries] = useState<LogEntry[]>([]);
   const [total, setTotal] = useState(0);
