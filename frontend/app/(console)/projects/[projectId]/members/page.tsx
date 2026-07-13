@@ -57,9 +57,9 @@ export default function MembersPage() {
       setError(null);
     } catch (err) {
       const msg = err instanceof Error ? err.message : t("members.error.load");
-      if (/not\s*found/i.test(msg)) {
+      for (let attempt = 0; attempt < 2; attempt++) {
         try {
-          await new Promise((r) => setTimeout(r, 1500));
+          await new Promise((r) => setTimeout(r, 1500 * (attempt + 1)));
           const data = await userServiceApi.listProjectMembers(projectId);
           setMembers(data.members ?? []);
           setError(null);
