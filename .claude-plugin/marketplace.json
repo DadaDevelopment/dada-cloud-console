@@ -1,0 +1,23 @@
+{
+  "name": "dada-cloud",
+  "owner": {
+    "name": "Dada Cloud",
+    "email": "dev@dada-tuda.ru"
+  },
+  "metadata": {
+    "description": "Dada Cloud plugins for Claude Code."
+  },
+  "plugins": [
+    {
+      "name": "dada-cloud",
+      "source": "./mcp-plugin",
+      "description": "Deploy and manage apps on Dada Cloud from Claude Code — 132 MCP tools plus guided deploy/configure/diagnose prompts, over an authenticated browser login.",
+      "version": "0.1.0",
+      "author": {
+        "name": "Dada Cloud"
+      },
+      "category": "devops",
+      "tags": ["mcp", "deploy", "paas", "dada-cloud"]
+    }
+  ]
+}

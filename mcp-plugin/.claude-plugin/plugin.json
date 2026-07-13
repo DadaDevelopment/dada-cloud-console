@@ -1,0 +1,26 @@
+{
+  "name": "dada-cloud",
+  "version": "0.1.0",
+  "description": "Deploy and manage apps on Dada Cloud from Claude Code — 132 MCP tools plus guided deploy/configure/diagnose prompts, over an authenticated browser login.",
+  "author": {
+    "name": "Dada Cloud",
+    "url": "https://console.dada-tuda.ru"
+  },
+  "homepage": "https://console.dada-tuda.ru",
+  "keywords": ["mcp", "deploy", "paas", "dada-cloud"],
+  "mcpServers": {
+    "dada": {
+      "type": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "mcp-remote",
+        "https://console.dada-tuda.ru/mcp",
+        "--static-oauth-client-info",
+        "{\"client_id\":\"dada-mcp\"}",
+        "--static-oauth-client-metadata",
+        "{\"scope\":\"openid profile email offline_access read builds:read builds:write deploy:write\"}"
+      ]
+    }
+  }
+}
