@@ -149,7 +149,14 @@ func HandoffDeploy(ctx context.Context, pool *pgxpool.Pool, b *Build, repo *Repo
 		})
 	} else {
 		action = "CreateApp"
-		if dd.Enabled && dd.Base != "" {
+		var hasManagedDomain bool
+		_ = tx.QueryRow(ctx, `
+			SELECT EXISTS(
+				SELECT 1 FROM domain_hostnames
+				WHERE environment_id = $1 AND app_name = $2 AND managed = true
+			)
+		`, b.EnvironmentID, b.AppName).Scan(&hasManagedDomain)
+		if dd.Enabled && dd.Base != "" && !hasManagedDomain {
 			if suffix, sErr := randomHostSuffix(); sErr == nil {
 				defaultHostname = buildDefaultHostname(dd.Base, b.AppName, suffix)
 			}
