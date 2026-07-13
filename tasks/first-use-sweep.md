@@ -47,22 +47,25 @@ So the broker is genuinely unused and correctly at 0.
   **POST /orgs/{org}/projects hangs for personal-org projects** (alexkekiy,
   top.decker) — the group is never created → members 404 "IAM resource not
   found". Shared-"dada"-org projects are already provisioned so they work.
-- STILL OPEN — PERSISTENT (not transient): user-service up 27m, still timing out
-  on top.decker AND alexkekiy at 22:47:52 (6 timeouts/20min). Reads work
-  (`OrgController#getOrg` GET 200) but the WRITE `POST /orgs/{org}/projects`
-  hangs >20s every time, only for personal orgs.
-- LEADING HYPOTHESIS (for the user-service repo / bg task): user-service's
-  create-project-group write path still awaits the messaging/saga machinery that
-  its own values.yaml now EXCLUDES (`MessagingConfiguration`, `SagaConfig`,
-  `CancelConfig` under spring.autoconfigure.exclude — the same "broker-free"
-  change). A write that publishes/awaits a saga step that can never complete
-  (messaging disabled) would hang forever, while pure reads return fine. i.e. the
-  broker-free migration is INCOMPLETE for write paths. Fix is in spring.user-service
-  (Jenkins job `spring.user-service`), NOT dada-cloud and NOT rabbitmq.
-- dada-cloud mitigations are band-aids only (raising the 20s client timeout won't
-  help an infinite hang); do not ship them until the user-service hang is fixed.
-- Could not manually pre-create the Keycloak groups (admin token via
-  keycloak-0 kcadm/REST failed — service-account creds). Handoff to bg task.
+- CORRECTED (honest): I do NOT have authoritative evidence #1 is currently
+  broken. The user's own console log (23:14) shows the members path WORKING:
+  `GET /projects/81ad6b4f.../members` → `ProjectMemberAliasController#listMembers`
+  → 200 OK with a MembersResponse; `getOrg dada` → 200. And 30 min of console +
+  user-service logs show ZERO members 4xx/5xx / "not found" for top-decker
+  (2a7d7b72). So the screenshot "IAM resource not found" was almost certainly a
+  STALE pre-deploy state; the deployed self-heal (db9c2bf) has since provisioned
+  the groups.
+- What I got WRONG mid-investigation: (a) the `ensureProjectGroupsAsync` POST
+  timeouts in the backend log are best-effort BACKGROUND noise — alex-personal
+  members return 200 DESPITE those timeouts, so they do NOT gate the members
+  read; (b) my `wget` probe from the backend pod is INVALID as evidence — it
+  times out even for `getOrg dada`, which the console reaches at 200, so the
+  probe's token/path differs from the console's and proves nothing.
+- The members read is a plain GET; it works. If the "Default"/top-decker project
+  still shows the error, the ONE authoritative data point needed is the console
+  actually issuing `GET /projects/2a7d7b72/members` once (open that project's
+  members) so user-service logs the real status for that id. No current failure
+  is in the logs to chase. NOT rabbitmq, and no evidence of a user-service hang.
 - Both this session (646f602) AND the prior session (eeb451a) briefly set
   rabbitmq→1 on the same stale comment; both reverted. Final: argo-infra
   `71d7425` sets replicaCount 0 AND rewrites the misleading comment so nobody
