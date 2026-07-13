@@ -13,7 +13,7 @@ export const cost: Messages = {
   "cost.pv": { ru: "Диски", en: "Storage" },
   "cost.byEnvironment": { ru: "По окружениям", en: "By environment" },
   "cost.empty.title": { ru: "Пока нет данных о стоимости", en: "No cost data yet" },
-  "cost.empty.description": { ru: "Данные появятся по мере накопления статистики по кластеру.", en: "Data appears as cluster statistics accumulate." },
+  "cost.empty.description": { ru: "Данные появятся по мере накопления статистики.", en: "Data appears as statistics accumulate." },
   "cost.unavailable": { ru: "Учёт стоимости не настроен", en: "Cost reporting not configured" },
   "cost.error": { ru: "Не удалось загрузить стоимость", en: "Failed to load cost" },
 };

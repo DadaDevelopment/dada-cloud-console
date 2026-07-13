@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useState, FormEvent } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { useParams } from "next/navigation";
 import Link from "next/link";
 import { databasesApi } from "@/lib/api";
 import { docsHref } from "@/lib/site";
@@ -36,7 +36,7 @@ function fmtBytes(v: number): string {
 export default function DatabasesPage() {
   const params = useParams<{ projectId: string }>();
   const projectId = params.projectId;
-  const router = useRouter();
+  const [refreshTick, setRefreshTick] = useState(0);
   const { t } = useT();
 
   const { project, selectedEnv, role, loading: isLoadingEnvs } = useProjectContext();
@@ -73,7 +73,7 @@ export default function DatabasesPage() {
       .catch((err) => setError(err instanceof Error ? err.message : t("databases.error.load")))
       .finally(() => setIsLoadingDbs(false));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [projectId, selectedEnvId, isLoadingEnvs]);
+  }, [projectId, selectedEnvId, isLoadingEnvs, refreshTick]);
 
   function handleFormChange(field: keyof CreateDbForm, value: string | boolean) {
     setForm((prev) => ({ ...prev, [field]: value }));
@@ -84,7 +84,7 @@ export default function DatabasesPage() {
     setSubmitError(null);
     setIsSubmitting(true);
     try {
-      const result = await databasesApi.create(projectId, selectedEnvId, {
+      await databasesApi.create(projectId, selectedEnvId, {
         name: form.name,
         database: form.database,
         app_ref: form.app_ref,
@@ -95,8 +95,7 @@ export default function DatabasesPage() {
       });
       setIsModalOpen(false);
       setForm({ name: "", database: "", app_ref: "", backup_enabled: true, backup_schedule: "daily", backup_retention: "7d", external_enabled: false });
-      const opId = result.operation?.id;
-      router.push(`/projects/${projectId}/operations${opId ? `?highlight=${opId}` : ""}`);
+      setRefreshTick((v) => v + 1);
     } catch (err) {
       setSubmitError(err instanceof Error ? err.message : t("databases.error.create"));
     } finally {

@@ -21,7 +21,7 @@ export const models: Messages = {
 
   "models.modal.title": { ru: "Развернуть AI-модель", en: "Deploy AI Model" },
 
-  "models.form.name.label": { ru: "Имя (имя ресурса k8s)", en: "Name (k8s resource name)" },
+  "models.form.name.label": { ru: "Имя", en: "Name" },
   "models.form.modelType.label": { ru: "Тип модели", en: "Model type" },
   "models.form.source.label": { ru: "Источник", en: "Source" },
   "models.form.source.s3": { ru: "S3 артефакт URI", en: "S3 artifact URI" },

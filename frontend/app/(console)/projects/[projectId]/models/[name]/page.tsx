@@ -19,6 +19,7 @@ export default function ModelDetailPage() {
   const params = useParams<{ projectId: string; name: string }>();
   const search = useSearchParams();
   const router = useRouter();
+  const [refreshTick, setRefreshTick] = useState(0);
   const { t } = useT();
   const { projectId, name } = params;
   const { selectedEnv } = useProjectContext();
@@ -70,12 +71,10 @@ export default function ModelDetailPage() {
       .catch((err) => setError(err instanceof Error ? err.message : t("models.detail.error.load")))
       .finally(() => setIsLoading(false));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [projectId, envId, name]);
+  }, [projectId, envId, name, refreshTick]);
 
-  function gotoOp(opId?: string) {
-    setTimeout(() => {
-      router.push(`/projects/${projectId}/operations${opId ? `?highlight=${opId}` : ""}`);
-    }, 1500);
+  function gotoOp() {
+    setTimeout(() => setRefreshTick((v) => v + 1), 1500);
   }
 
   async function submitCanary(e: FormEvent<HTMLFormElement>) {
@@ -83,9 +82,9 @@ export default function ModelDetailPage() {
     setCanaryError(null);
     setIsCanarySubmitting(true);
     try {
-      const r = await aiModelsApi.setCanary(projectId, envId, name, canaryPercent);
+      await aiModelsApi.setCanary(projectId, envId, name, canaryPercent);
       setIsCanaryOpen(false);
-      gotoOp(r.operation?.id);
+      gotoOp();
     } catch (err) {
       setCanaryError(err instanceof Error ? err.message : t("models.canary.error"));
     } finally {
@@ -98,9 +97,9 @@ export default function ModelDetailPage() {
     setPromoteError(null);
     setIsPromoteSubmitting(true);
     try {
-      const r = await aiModelsApi.promote(projectId, envId, name);
+      await aiModelsApi.promote(projectId, envId, name);
       setIsPromoteOpen(false);
-      gotoOp(r.operation?.id);
+      gotoOp();
     } catch (err) {
       setPromoteError(err instanceof Error ? err.message : t("models.promote.error"));
     } finally {
@@ -113,9 +112,9 @@ export default function ModelDetailPage() {
     setDeleteError(null);
     setIsDeleteSubmitting(true);
     try {
-      const r = await aiModelsApi.delete(projectId, envId, name, deleteForce);
+      await aiModelsApi.delete(projectId, envId, name, deleteForce);
       setIsDeleteOpen(false);
-      gotoOp(r.operation?.id);
+      router.push(`/projects/${projectId}/models`);
     } catch (err) {
       setDeleteError(err instanceof Error ? err.message : t("models.delete.error"));
     } finally {

@@ -33,14 +33,9 @@ export function CostCard({ projectId }: { projectId: string }) {
         setUnavailable(false);
         setError(null);
       })
-      .catch((err: unknown) => {
+      .catch(() => {
         if (cancelled) return;
-        const msg = err instanceof Error ? err.message : "";
-        if (msg.includes("502") || msg.includes("503") || /not configured|unavailable/i.test(msg)) {
-          setUnavailable(true);
-        } else {
-          setError(t("cost.error"));
-        }
+        setUnavailable(true);
       })
       .finally(() => {
         if (!cancelled) setLoading(false);

@@ -29,7 +29,7 @@ export const databases: Messages = {
 
   "databases.modal.title": { ru: "Создать базу данных", en: "Create Database" },
   "databases.modal.name.label": { ru: "Имя базы данных", en: "Database Name" },
-  "databases.modal.name.hint": { ru: "(имя ресурса Kubernetes)", en: "(Kubernetes resource name)" },
+  "databases.modal.name.hint": { ru: "(строчные буквы, цифры и дефисы)", en: "(lowercase letters, digits and hyphens)" },
   "databases.modal.name.validation": {
     ru: "Только строчные буквы, цифры и дефисы",
     en: "Lowercase letters, numbers, and hyphens only",
@@ -63,7 +63,7 @@ export const databases: Messages = {
   "databases.detail.field.status": { ru: "Статус", en: "Status" },
   "databases.detail.field.statusUnknown": { ru: "Неизвестно", en: "Unknown" },
   "databases.detail.connection": { ru: "Подключение", en: "Connection" },
-  "databases.detail.field.host": { ru: "Хост (внутри кластера)", en: "Host (in-cluster)" },
+  "databases.detail.field.host": { ru: "Хост (внутри платформы)", en: "Host (internal)" },
   "databases.detail.field.dbName": { ru: "Имя базы данных", en: "Database name" },
   "databases.detail.field.port": { ru: "Порт", en: "Port" },
   "databases.detail.credentials": {
@@ -105,8 +105,8 @@ export const databases: Messages = {
   },
   "databases.modal.external.title": { ru: "Публичный доступ", en: "Public access" },
   "databases.modal.external.subtitle": {
-    ru: "Разрешить подключение к базе данных извне кластера",
-    en: "Allow connecting to the database from outside the cluster",
+    ru: "Разрешить подключение к базе данных извне платформы",
+    en: "Allow connecting to the database from outside the platform",
   },
   "databases.modal.external.warning": {
     ru: "База данных станет доступна из интернета. Изоляция обеспечивается логином/паролем и allow-list прокси. Включайте только при необходимости.",

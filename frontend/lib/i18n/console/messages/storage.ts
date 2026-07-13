@@ -23,7 +23,7 @@ export const storage: Messages = {
 
   "storage.modal.title": { ru: "Создать S3-бакет", en: "Create S3 Bucket" },
   "storage.modal.resourceName": { ru: "Имя ресурса", en: "Resource Name" },
-  "storage.modal.resourceNameSub": { ru: "(имя в Kubernetes)", en: "(Kubernetes name)" },
+  "storage.modal.resourceNameSub": { ru: "(строчные буквы, цифры и дефисы)", en: "(lowercase letters, digits and hyphens)" },
   "storage.modal.resourceNameTitle": {
     ru: "Только строчные буквы, цифры и дефисы",
     en: "Lowercase letters, numbers, and hyphens only",

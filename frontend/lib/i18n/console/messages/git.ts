@@ -114,7 +114,7 @@ export const git: Messages = {
   "git.import.detectRetry": { ru: "Повторить", en: "Retry" },
 
   "git.import.appName.label": { ru: "Имя приложения", en: "Application name" },
-  "git.import.appName.hint": { ru: "(имя ресурса Kubernetes)", en: "(Kubernetes resource name)" },
+  "git.import.appName.hint": { ru: "(строчные буквы, цифры и дефисы)", en: "(lowercase letters, digits and hyphens)" },
   "git.import.appName.placeholder": { ru: "my-service", en: "my-service" },
   "git.import.appName.help": {
     ru: "Приложение создаётся автоматически при первой успешной сборке — плейсхолдер не деплоится.",

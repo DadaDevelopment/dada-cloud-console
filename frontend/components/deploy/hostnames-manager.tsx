@@ -1,7 +1,6 @@
 "use client";
 import { useEffect, useState, FormEvent } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { customDomainsApi } from "@/lib/api";
 import type { DomainAuthorization, DomainHostname } from "@/lib/types";
 import { Spinner } from "@/components/ui/spinner";
@@ -40,7 +39,6 @@ interface Props {
 }
 
 export function HostnamesManager({ projectId, envId, appName, canEdit, verifiedApexes }: Props) {
-  const router = useRouter();
   const { t } = useT();
   const [path, setPath] = useState<ConnectPath>("delegate");
   const [delegateAuthId, setDelegateAuthId] = useState(verifiedApexes[0]?.id ?? "");
@@ -93,10 +91,8 @@ export function HostnamesManager({ projectId, envId, appName, canEdit, verifiedA
     setDetachingId(h.id);
     setError(null);
     try {
-      const result = await customDomainsApi.detachHostname(projectId, envId, appName, h.id);
+      await customDomainsApi.detachHostname(projectId, envId, appName, h.id);
       setHostnames((prev) => prev.filter((x) => x.id !== h.id));
-      const opId = result.operation?.id;
-      if (opId) router.push(`/projects/${projectId}/operations?highlight=${opId}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : t("domains.hm.detachError"));
       setDetachingId(null);

@@ -115,6 +115,7 @@ export default function DatabaseDetailPage() {
   const params = useParams<{ projectId: string; name: string }>();
   const search = useSearchParams();
   const router = useRouter();
+  const [refreshTick, setRefreshTick] = useState(0);
   const { projectId, name } = params;
   const { project, selectedEnv, role } = useProjectContext();
   const { t } = useT();
@@ -182,12 +183,10 @@ export default function DatabaseDetailPage() {
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [projectId, name, envId, selectedEnv]);
+  }, [projectId, name, envId, selectedEnv, refreshTick]);
 
-  function gotoOp(opId?: string) {
-    setTimeout(() => {
-      router.push(`/projects/${projectId}/operations${opId ? `?highlight=${opId}` : ""}`);
-    }, 1500);
+  function gotoOp() {
+    setTimeout(() => setRefreshTick((v) => v + 1), 1500);
   }
 
   const loadBackups = useCallback(
@@ -250,9 +249,9 @@ export default function DatabaseDetailPage() {
     setRestoreError(null);
     setIsRestoreSubmitting(true);
     try {
-      const r = await databasesApi.restore(projectId, envId, name, restoreTarget.id);
+      await databasesApi.restore(projectId, envId, name, restoreTarget.id);
       closeRestore();
-      gotoOp(r.operation?.id);
+      gotoOp();
     } catch (err) {
       setRestoreError(err instanceof Error ? err.message : t("databases.backups.restoreError"));
     } finally {
@@ -265,9 +264,9 @@ export default function DatabaseDetailPage() {
     setDeleteError(null);
     setIsDeleteSubmitting(true);
     try {
-      const r = await databasesApi.remove(projectId, envId, name);
+      await databasesApi.remove(projectId, envId, name);
       setIsDeleteOpen(false);
-      gotoOp(r.operation?.id);
+      router.push(`/projects/${projectId}/databases`);
     } catch (err) {
       setDeleteError(err instanceof Error ? err.message : t("databases.delete.error"));
     } finally {

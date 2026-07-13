@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useState, FormEvent } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { useParams } from "next/navigation";
 import Link from "next/link";
 import { s3bucketsApi } from "@/lib/api";
 import { docsHref } from "@/lib/site";
@@ -39,7 +39,7 @@ const DEFAULT_FORM: CreateBucketForm = {
 export default function StoragePage() {
   const params = useParams<{ projectId: string }>();
   const projectId = params.projectId;
-  const router = useRouter();
+  const [refreshTick, setRefreshTick] = useState(0);
   const { t } = useT();
 
   const { project, selectedEnv, role, loading: isLoadingEnvs } = useProjectContext();
@@ -68,7 +68,7 @@ export default function StoragePage() {
       .catch((err) => setError(err instanceof Error ? err.message : t("storage.error.load")))
       .finally(() => setIsLoadingBuckets(false));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [projectId, selectedEnvId, isLoadingEnvs]);
+  }, [projectId, selectedEnvId, isLoadingEnvs, refreshTick]);
 
   function handleFormChange(field: keyof CreateBucketForm, value: string | boolean) {
     setForm((prev) => ({ ...prev, [field]: value }));
@@ -79,7 +79,7 @@ export default function StoragePage() {
     setSubmitError(null);
     setIsSubmitting(true);
     try {
-      const result = await s3bucketsApi.create(projectId, selectedEnvId, {
+      await s3bucketsApi.create(projectId, selectedEnvId, {
         name: form.name,
         bucket_name: form.bucket_name,
         region: form.region,
@@ -90,8 +90,7 @@ export default function StoragePage() {
       });
       setIsModalOpen(false);
       setForm(DEFAULT_FORM);
-      const opId = result.operation?.id;
-      router.push(`/projects/${projectId}/operations${opId ? `?highlight=${opId}` : ""}`);
+      setRefreshTick((v) => v + 1);
     } catch (err) {
       setSubmitError(err instanceof Error ? err.message : t("storage.error.create"));
     } finally {

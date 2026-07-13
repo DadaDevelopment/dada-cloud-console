@@ -79,7 +79,7 @@ func (h *Handler) GetProjectCost(c *gin.Context) {
 
 	nsToEnv, err := h.projectNamespaces(c.Request.Context(), projectID)
 	if err != nil {
-		respondError(c, http.StatusInternalServerError, "failed to load project namespaces")
+		respondError(c, http.StatusServiceUnavailable, "cost data temporarily unavailable")
 		return
 	}
 	if len(nsToEnv) == 0 {
