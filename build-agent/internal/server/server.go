@@ -560,12 +560,227 @@ func detectWithToken(ctx context.Context, token, repoFullName, rootDir string) (
 	}
 	if best, ok := bestFrameworkCandidate(cands); ok {
 		det := best.detection
-		if port, ok := dockerfileExposePort(ctx, token, owner, repo, rootDir); ok {
+		if port, ok := resolveExplicitPort(ctx, token, owner, repo, rootDir, derefString(det.Framework)); ok {
 			det.Port = ptrInt(port)
 		}
 		return det, nil
 	}
 	return frameworkDetection{}, nil
+}
+
+// resolveExplicitPort finds the port the app actually binds by reading the
+// repo's own sources, in order of authority, so the static per-framework
+// default is only ever a last-resort fallback (returns false here, leaving the
+// caller's default in place):
+//
+//  1. Dockerfile EXPOSE  -- the deploy contract when the repo ships a Dockerfile.
+//  2. framework config   -- Spring server.port, Python uvicorn/flask/gunicorn.
+//  3. .env PORT          -- the conventional Node/Twelve-Factor override.
+func resolveExplicitPort(ctx context.Context, token, owner, repo, rootDir, framework string) (int, bool) {
+	if p, ok := dockerfileExposePort(ctx, token, owner, repo, rootDir); ok {
+		return p, true
+	}
+	switch strings.ToLower(framework) {
+	case "spring-maven", "spring-gradle", "maven", "gradle":
+		if p, ok := springServerPort(ctx, token, owner, repo, rootDir); ok {
+			return p, true
+		}
+	case "fastapi", "django", "flask", "python":
+		if p, ok := pythonAppPort(ctx, token, owner, repo, rootDir); ok {
+			return p, true
+		}
+	}
+	if p, ok := envFilePort(ctx, token, owner, repo, rootDir); ok {
+		return p, true
+	}
+	return 0, false
+}
+
+func tryReadFile(ctx context.Context, token, owner, repo, filePath string) (string, bool) {
+	raw, err := githubReadFile(ctx, token, owner, repo, filePath)
+	if err != nil {
+		return "", false
+	}
+	return raw, true
+}
+
+// springServerPort reads server.port from the conventional Spring config
+// locations (repo root and src/main/resources), preferring the first hit.
+func springServerPort(ctx context.Context, token, owner, repo, rootDir string) (int, bool) {
+	names := []string{"application.properties", "application.yml", "application.yaml"}
+	for _, dir := range []string{rootDir, joinRepoPath(rootDir, "src/main/resources")} {
+		for _, name := range names {
+			raw, ok := tryReadFile(ctx, token, owner, repo, joinRepoPath(dir, name))
+			if !ok {
+				continue
+			}
+			isYAML := strings.HasSuffix(name, ".yml") || strings.HasSuffix(name, ".yaml")
+			if p, ok := parseSpringServerPort(raw, isYAML); ok {
+				return p, true
+			}
+		}
+	}
+	return 0, false
+}
+
+// parseSpringServerPort handles the flat "server.port=8081" form (properties and
+// flattened yaml) plus the nested yaml block form.
+func parseSpringServerPort(content string, isYAML bool) (int, bool) {
+	for _, line := range strings.Split(content, "\n") {
+		t := strings.TrimSpace(line)
+		if t == "" || strings.HasPrefix(t, "#") {
+			continue
+		}
+		if p, ok := portAfterKeyword(t, "server.port"); ok {
+			return p, true
+		}
+	}
+	if isYAML {
+		return yamlNestedServerPort(content)
+	}
+	return 0, false
+}
+
+func yamlNestedServerPort(content string) (int, bool) {
+	inServer := false
+	serverIndent := -1
+	for _, line := range strings.Split(content, "\n") {
+		t := strings.TrimSpace(line)
+		if t == "" || strings.HasPrefix(t, "#") {
+			continue
+		}
+		indent := len(line) - len(strings.TrimLeft(line, " \t"))
+		if inServer {
+			if indent <= serverIndent {
+				inServer = false
+			} else if strings.HasPrefix(t, "port:") {
+				if p, ok := portAfterSeparators(t[len("port"):]); ok {
+					return p, true
+				}
+			}
+		}
+		if !inServer && strings.HasPrefix(t, "server:") {
+			inServer = true
+			serverIndent = indent
+		}
+	}
+	return 0, false
+}
+
+// pythonAppPort scans the usual entrypoint modules for an explicit bind port
+// (uvicorn.run(port=), --port, app.run(port=), gunicorn/-b host:port,
+// manage.py runserver host:port).
+func pythonAppPort(ctx context.Context, token, owner, repo, rootDir string) (int, bool) {
+	for _, name := range []string{"main.py", "app.py", "asgi.py", "server.py", "run.py", "__main__.py", "wsgi.py", "manage.py"} {
+		raw, ok := tryReadFile(ctx, token, owner, repo, joinRepoPath(rootDir, name))
+		if !ok {
+			continue
+		}
+		if p, ok := parsePythonPort(raw); ok {
+			return p, true
+		}
+	}
+	return 0, false
+}
+
+func parsePythonPort(content string) (int, bool) {
+	for _, line := range strings.Split(content, "\n") {
+		t := strings.TrimSpace(line)
+		if t == "" || strings.HasPrefix(t, "#") {
+			continue
+		}
+		if p, ok := portAfterKeyword(t, "port"); ok {
+			return p, true
+		}
+		for _, kw := range []string{"--bind", "-b ", "runserver"} {
+			if idx := strings.Index(t, kw); idx >= 0 {
+				if p, ok := firstColonPort(t[idx+len(kw):]); ok {
+					return p, true
+				}
+			}
+		}
+	}
+	return 0, false
+}
+
+// envFilePort reads a PORT assignment from a root .env file.
+func envFilePort(ctx context.Context, token, owner, repo, rootDir string) (int, bool) {
+	raw, ok := tryReadFile(ctx, token, owner, repo, joinRepoPath(rootDir, ".env"))
+	if !ok {
+		return 0, false
+	}
+	for _, line := range strings.Split(raw, "\n") {
+		t := strings.TrimSpace(line)
+		t = strings.TrimPrefix(t, "export ")
+		if strings.HasPrefix(t, "PORT=") || strings.HasPrefix(t, "PORT ") {
+			if p, ok := portAfterSeparators(t[len("PORT"):]); ok {
+				return p, true
+			}
+		}
+	}
+	return 0, false
+}
+
+// portAfterKeyword finds keyword (not preceded by a word byte, so "report" does
+// not match "port") and reads the port that follows past any separators.
+func portAfterKeyword(line, keyword string) (int, bool) {
+	from := 0
+	for {
+		idx := strings.Index(line[from:], keyword)
+		if idx < 0 {
+			return 0, false
+		}
+		idx += from
+		if idx == 0 || !isWordByte(line[idx-1]) {
+			if p, ok := portAfterSeparators(line[idx+len(keyword):]); ok {
+				return p, true
+			}
+		}
+		from = idx + len(keyword)
+	}
+}
+
+// firstColonPort reads the port from the first ':'-prefixed digit run in s (the
+// host:port form of a gunicorn --bind / manage.py runserver argument).
+func firstColonPort(s string) (int, bool) {
+	for i := 0; i < len(s); i++ {
+		if s[i] == ':' {
+			if p, ok := portAfterSeparators(s[i:]); ok {
+				return p, true
+			}
+		}
+	}
+	return 0, false
+}
+
+// portAfterSeparators skips separator characters then reads a valid port
+// (1..65535) from the immediately following digit run.
+func portAfterSeparators(s string) (int, bool) {
+	i := 0
+	for i < len(s) {
+		switch s[i] {
+		case ' ', '\t', '=', ':', '"', '\'', '(':
+			i++
+			continue
+		}
+		break
+	}
+	j := i
+	for j < len(s) && s[j] >= '0' && s[j] <= '9' {
+		j++
+	}
+	if j == i {
+		return 0, false
+	}
+	n, err := strconv.Atoi(s[i:j])
+	if err != nil || n <= 0 || n > 65535 {
+		return 0, false
+	}
+	return n, true
+}
+
+func isWordByte(b byte) bool {
+	return b == '_' || (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z') || (b >= '0' && b <= '9')
 }
 
 // dockerfileExposePort returns the first port declared by an EXPOSE directive in

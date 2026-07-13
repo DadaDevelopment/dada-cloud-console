@@ -237,6 +237,43 @@ func TestDetectPortJVM(t *testing.T) {
 	})
 }
 
+// TestDetectPortSpringServerPort proves the detector reads the real Spring
+// server.port instead of the 8080 default guess.
+func TestDetectPortSpringServerPort(t *testing.T) {
+	spring := "id 'org.springframework.boot' version '3.4.0'"
+	runPortCases(t, []portCase{
+		{"props-root", map[string]string{"build.gradle": spring, "application.properties": "server.port=8081\n"}, "spring-gradle", 8081},
+		{"props-resources", map[string]string{"build.gradle": spring, "src/main/resources/application.properties": "spring.application.name=x\nserver.port=8082\n"}, "spring-gradle", 8082},
+		{"yaml-flattened", map[string]string{"build.gradle": spring, "application.yml": "server.port: 7000\n"}, "spring-gradle", 7000},
+		{"yaml-nested-resources", map[string]string{"build.gradle": spring, "src/main/resources/application.yaml": "server:\n  port: 9090\n  servlet:\n    context-path: /api\n"}, "spring-gradle", 9090},
+		{"maven-no-config-default", map[string]string{"pom.xml": "<artifactId>spring-boot-starter-web</artifactId>"}, "spring-maven", 8080},
+	})
+}
+
+// TestDetectPortPythonSource proves the detector reads the real uvicorn/flask
+// bind port from the entrypoint module instead of the 8000/5000 default.
+func TestDetectPortPythonSource(t *testing.T) {
+	runPortCases(t, []portCase{
+		{"uvicorn-run-kwarg", map[string]string{"requirements.txt": "fastapi\nuvicorn\n", "main.py": "import uvicorn\nuvicorn.run(\"main:app\", host=\"0.0.0.0\", port=8001)\n"}, "fastapi", 8001},
+		{"flask-app-run", map[string]string{"requirements.txt": "flask\n", "app.py": "app.run(host=\"0.0.0.0\", port=5001)\n"}, "flask", 5001},
+		{"uvicorn-cli-flag", map[string]string{"requirements.txt": "fastapi\n", "run.py": "import os\nos.system(\"uvicorn app:app --port 8002\")\n"}, "fastapi", 8002},
+		{"gunicorn-bind", map[string]string{"requirements.txt": "fastapi\n", "server.py": "BIND = \"gunicorn -b 0.0.0.0:8003 app:app\"\n"}, "fastapi", 8003},
+		{"fastapi-no-port-default", map[string]string{"requirements.txt": "fastapi\nuvicorn\n", "main.py": "from fastapi import FastAPI\napp = FastAPI()\n"}, "fastapi", 8000},
+	})
+}
+
+// TestDetectPortDotEnv proves a root .env PORT overrides the Node framework
+// default guess (and its vite-preview alignment).
+func TestDetectPortDotEnv(t *testing.T) {
+	runPortCases(t, []portCase{
+		{"express-env", map[string]string{"package.json": pkg(`"express":"4"`, ""), ".env": "PORT=4001\n"}, "express", 4001},
+		{"nextjs-env", map[string]string{"package.json": pkg(`"next":"14"`, ""), ".env": "NODE_ENV=production\nPORT=4002\n"}, "nextjs", 4002},
+		{"vite-env-over-4173", map[string]string{"package.json": pkgWith(`"vite":"5"`, ""), "vite.config.ts": "export default {}", ".env": "PORT=4003\n"}, "vite", 4003},
+		{"react-env-export", map[string]string{"package.json": pkg(`"react":"18","react-dom":"18"`, ""), ".env": "export PORT=4004\n"}, "react", 4004},
+		{"express-no-env-default", map[string]string{"package.json": pkg(`"express":"4"`, "")}, "express", 3000},
+	})
+}
+
 func TestDetectPortGo(t *testing.T) {
 	runPortCases(t, []portCase{
 		{"go-mod", map[string]string{"go.mod": "module x\ngo 1.22\n"}, "go", 8080},
