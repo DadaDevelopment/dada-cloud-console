@@ -434,6 +434,37 @@
                 }
             }
         },
+        "/git/github/oauth/callback": {
+            "get": {
+                "description": "Public endpoint GitHub redirects to after user authorization. Consumes the one-time state, exchanges the code, binds the user's installations, redirects to the wizard.",
+                "tags": [
+                    "git"
+                ],
+                "summary": "GitHub App user-authorization callback",
+                "operationId": "gitHubOAuthCallback",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "GitHub OAuth code",
+                        "name": "code",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "One-time state",
+                        "name": "state",
+                        "in": "query",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "302": {
+                        "description": "Found"
+                    }
+                }
+            }
+        },
         "/git/install/callback": {
             "get": {
                 "description": "Public endpoint GitHub redirects to after App install. Verifies the signed state, persists the installation, redirects to the import wizard.",
@@ -8730,6 +8761,62 @@
                 }
             }
         },
+        "/projects/{projectId}/git/github/authorize": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Returns a GitHub OAuth authorize URL. After the user authorizes, the callback binds the installations that user can access to this project. canWrite required. 503 when GitHub OAuth is unconfigured.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "git"
+                ],
+                "summary": "Start GitHub App user authorization for a project",
+                "operationId": "startGitHubUserAuth",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Project UUID",
+                        "name": "projectId",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "object with a url field",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/projects/{projectId}/git/install-url": {
             "get": {
                 "security": [
@@ -10306,7 +10393,8 @@
                 "metrics": {
                     "type": "object",
                     "additionalProperties": {
-                        "type": "number"
+                        "type": "number",
+                        "format": "float64"
                     }
                 },
                 "source": {

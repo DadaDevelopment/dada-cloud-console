@@ -81,9 +81,12 @@ func (s *Server) Start(ctx context.Context) error {
 		// account resolve — the backend's install-callback has the DB but no App
 		// key, so it asks the agent who an installation belongs to.
 		mux.HandleFunc("GET /github/installations/{id}/account", s.handleInstallationAccount)
-		// list all App installations — the connect wizard binds an existing
+		// list all App installations -- the connect wizard binds an existing
 		// (already-installed) org instead of forcing a reinstall.
 		mux.HandleFunc("GET /github/app/installations", s.handleAppInstallations)
+		// exchange a user OAuth code → the installations that user can access.
+		// The backend proxies here so the OAuth client secret stays in the agent.
+		mux.HandleFunc("POST /github/oauth/exchange", s.handleOAuthExchange)
 	}
 	// Framework detection is best-effort here (no clone in the agent process — a
 	// clone-based Nixpacks detect belongs in the build Job). Always 200 so the
@@ -148,6 +151,11 @@ func (s *Server) githubWebhook(w http.ResponseWriter, r *http.Request) {
 	}
 
 	event := r.Header.Get("X-GitHub-Event")
+	if event == "installation" {
+		s.handleInstallationEvent(r.Context(), body, r.Header.Get("X-Hub-Signature-256"))
+		w.WriteHeader(http.StatusOK)
+		return
+	}
 	if event != "push" {
 		// pull_request and other events are accepted but not yet acted on.
 		w.WriteHeader(http.StatusOK)
@@ -193,6 +201,38 @@ func (s *Server) githubWebhook(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.WriteHeader(http.StatusOK)
+}
+
+// handleInstallationEvent prunes stale installation rows when GitHub reports the
+// App was uninstalled (action=deleted). Verified against the global App webhook
+// secret; other actions are ignored. Best-effort: errors are logged, not fatal.
+func (s *Server) handleInstallationEvent(ctx context.Context, body []byte, sig string) {
+	if s.pool == nil {
+		return
+	}
+	if !s.verifyWebhook(s.cfg.GitHubWebhookSecret, body, sig) {
+		log.Warn().Msg("installation webhook: invalid signature")
+		return
+	}
+	var ev struct {
+		Action       string `json:"action"`
+		Installation struct {
+			ID int64 `json:"id"`
+		} `json:"installation"`
+	}
+	if err := json.Unmarshal(body, &ev); err != nil {
+		log.Error().Err(err).Msg("installation webhook: bad payload")
+		return
+	}
+	if ev.Action != "deleted" || ev.Installation.ID == 0 {
+		return
+	}
+	n, err := db.DeleteInstallationsByNumericID(ctx, s.pool, ev.Installation.ID)
+	if err != nil {
+		log.Error().Err(err).Int64("installation", ev.Installation.ID).Msg("installation webhook: prune")
+		return
+	}
+	log.Info().Int64("installation", ev.Installation.ID).Int64("rows", n).Msg("installation deleted, pruned rows")
 }
 
 // handleInstallationRepos lists the repos visible to a GitHub App installation.
@@ -245,6 +285,33 @@ func (s *Server) handleAppInstallations(w http.ResponseWriter, r *http.Request) 
 		insts = []github.InstallationAccount{}
 	}
 	writeJSON(w, map[string]any{"installations": insts})
+}
+
+// handleOAuthExchange swaps a user OAuth code for the installations that user can
+// access. POST /github/oauth/exchange {"code":"..."} → {"login","installations":[...]}.
+// The OAuth client secret stays in the agent; the backend never sees it.
+func (s *Server) handleOAuthExchange(w http.ResponseWriter, r *http.Request) {
+	if s.cfg == nil || s.cfg.GitHubClientID == "" || s.cfg.GitHubClientSecret == "" {
+		http.Error(w, "github oauth not configured", http.StatusServiceUnavailable)
+		return
+	}
+	var req struct {
+		Code string `json:"code"`
+	}
+	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<16)).Decode(&req); err != nil || req.Code == "" {
+		http.Error(w, "missing code", http.StatusBadRequest)
+		return
+	}
+	res, err := github.ExchangeUserCode(r.Context(), s.cfg.GitHubClientID, s.cfg.GitHubClientSecret, req.Code)
+	if err != nil {
+		log.Error().Err(err).Msg("oauth exchange")
+		http.Error(w, "oauth exchange failed", http.StatusBadGateway)
+		return
+	}
+	if res.Installations == nil {
+		res.Installations = []github.InstallationAccount{}
+	}
+	writeJSON(w, res)
 }
 
 // frameworkDetection mirrors the backend/frontend FrameworkDetection shape.

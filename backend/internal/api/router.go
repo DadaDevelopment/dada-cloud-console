@@ -109,6 +109,7 @@ func SetupRouter(pool *pgxpool.Pool, cfg *config.Config) *gin.Engine {
 	// anonymous browser here after install; trust is the HMAC-signed state, not
 	// a session. Lives outside the JWT group on purpose.
 	r.GET("/api/v1/git/install/callback", h.GitInstallCallback)
+	r.GET("/api/v1/git/github/oauth/callback", h.GitHubOAuthCallback)
 
 	// DadaAgent cloud-task webhook callback (status/artifacts). Public route on
 	// purpose — it is bearer-gated by a Keycloak JWKS verifier inside the handler
@@ -246,6 +247,7 @@ func SetupRouter(pool *pgxpool.Pool, cfg *config.Config) *gin.Engine {
 		api.GET("/projects/:projectId/git/installations", h.ListGitInstallations)
 		api.GET("/projects/:projectId/git/installations/available", h.ListAvailableInstallations)
 		api.POST("/projects/:projectId/git/installations", h.BindInstallation)
+		api.GET("/projects/:projectId/git/github/authorize", h.StartGitHubUserAuth)
 		api.GET("/projects/:projectId/git/install-url", h.GetGitInstallURL)
 		api.GET("/projects/:projectId/git/installations/:installationId/repos", h.ListInstallationRepos)
 		api.GET("/projects/:projectId/git/installations/:installationId/detect", h.DetectFramework)

@@ -1,22 +1,74 @@
 basePath: /api/v1
 definitions:
-  api.addDomainAuthorizationRequest:
+  github_com_dada-tuda_console_backend_internal_billing_pricing.Need:
+    properties:
+      apps:
+        type: integer
+      databases:
+        type: integer
+      domains:
+        type: integer
+      members:
+        type: integer
+      storageGB:
+        type: integer
+    type: object
+  github_com_dada-tuda_console_backend_internal_models.AIModelAuthMode:
+    enum:
+    - apikey
+    - jwt
+    - public
+    type: string
+    x-enum-varnames:
+    - AIModelAuthAPIKey
+    - AIModelAuthJWT
+    - AIModelAuthPublic
+  github_com_dada-tuda_console_backend_internal_models.AIModelSource:
+    enum:
+    - mlflow
+    - s3
+    - custom
+    type: string
+    x-enum-varnames:
+    - AIModelSourceMLflow
+    - AIModelSourceS3
+    - AIModelSourceCustom
+  github_com_dada-tuda_console_backend_internal_models.ImportServiceSpec:
+    properties:
+      container_name:
+        type: string
+      image:
+        type: string
+      include:
+        type: boolean
+      ports:
+        items:
+          type: string
+        type: array
+      service_name:
+        type: string
+      volumes:
+        items:
+          type: string
+        type: array
+    type: object
+  internal_api.addDomainAuthorizationRequest:
     properties:
       apex_domain:
         type: string
     type: object
-  api.attachHostnameRequest:
+  internal_api.attachHostnameRequest:
     properties:
       hostname:
         type: string
     type: object
-  api.bindInstallationRequest:
+  internal_api.bindInstallationRequest:
     properties:
       installation_id:
         description: numeric GitHub installation id
         type: string
     type: object
-  api.connectGitRepoRequest:
+  internal_api.connectGitRepoRequest:
     properties:
       app_name:
         type: string
@@ -51,14 +103,14 @@ definitions:
           Ignored for GitHub.'
         type: string
     type: object
-  api.createAIModelRequest:
+  internal_api.createAIModelRequest:
     properties:
       artifact_uri:
         type: string
       attached_app_name:
         type: string
       auth_mode:
-        $ref: '#/definitions/models.AIModelAuthMode'
+        $ref: '#/definitions/github_com_dada-tuda_console_backend_internal_models.AIModelAuthMode'
       container_image:
         type: string
       mlflow_name:
@@ -72,11 +124,11 @@ definitions:
       profile:
         type: string
       source:
-        $ref: '#/definitions/models.AIModelSource'
+        $ref: '#/definitions/github_com_dada-tuda_console_backend_internal_models.AIModelSource'
       version:
         type: string
     type: object
-  api.createAppRequest:
+  internal_api.createAppRequest:
     properties:
       image:
         type: string
@@ -89,7 +141,7 @@ definitions:
       replicas:
         type: integer
     type: object
-  api.createAppServerRequest:
+  internal_api.createAppServerRequest:
     properties:
       flavor:
         type: string
@@ -114,12 +166,12 @@ definitions:
         description: Manual-mode fields (connecting a pre-existing VM over SSH).
         type: string
     type: object
-  api.createCloudTaskRequest:
+  internal_api.createCloudTaskRequest:
     properties:
       task_type:
         type: string
     type: object
-  api.createEndpointRequest:
+  internal_api.createEndpointRequest:
     properties:
       auth_enabled:
         type: boolean
@@ -138,7 +190,7 @@ definitions:
       swagger_title:
         type: string
     type: object
-  api.createIngressRequest:
+  internal_api.createIngressRequest:
     properties:
       aliases:
         items:
@@ -152,7 +204,7 @@ definitions:
         type: string
       rules:
         items:
-          $ref: '#/definitions/api.ingressRuleReq'
+          $ref: '#/definitions/internal_api.ingressRuleReq'
         type: array
       ssl_redirect:
         type: boolean
@@ -168,12 +220,12 @@ definitions:
             type: string
         type: object
     type: object
-  api.createMonitoringRequest:
+  internal_api.createMonitoringRequest:
     properties:
       name:
         type: string
     type: object
-  api.createProjectRequest:
+  internal_api.createProjectRequest:
     properties:
       default_environment:
         description: DefaultEnvironment names the first environment; defaults to "prod".
@@ -192,7 +244,7 @@ definitions:
     required:
     - slug
     type: object
-  api.createS3BucketRequest:
+  internal_api.createS3BucketRequest:
     properties:
       app_ref:
         description: AppRef optionally binds the bucket to an app's chart. Empty =
@@ -211,7 +263,7 @@ definitions:
       region:
         type: string
     type: object
-  api.createServiceDatabaseRequest:
+  internal_api.createServiceDatabaseRequest:
     properties:
       app_ref:
         type: string
@@ -228,7 +280,7 @@ definitions:
       name:
         type: string
     type: object
-  api.gitInstallation:
+  internal_api.gitInstallation:
     properties:
       account_login:
         type: string
@@ -246,7 +298,7 @@ definitions:
       provider:
         type: string
     type: object
-  api.importComposeStackRequest:
+  internal_api.importComposeStackRequest:
     properties:
       ack_secrets_in_git:
         type: boolean
@@ -258,72 +310,10 @@ definitions:
         type: object
       services:
         items:
-          $ref: '#/definitions/models.ImportServiceSpec'
+          $ref: '#/definitions/github_com_dada-tuda_console_backend_internal_models.ImportServiceSpec'
         type: array
     type: object
-  api.ingestLogsRequest:
-    properties:
-      level:
-        type: string
-      message:
-        type: string
-      source:
-        type: string
-    type: object
-  api.ingestMetricsRequest:
-    properties:
-      metrics:
-        additionalProperties:
-          format: float64
-          type: number
-        type: object
-      source:
-        type: string
-      timestamp:
-        type: string
-    type: object
-  api.ingressRuleReq:
-    properties:
-      app:
-        type: string
-      path:
-        type: string
-      port:
-        type: integer
-    type: object
-  api.loginRequest:
-    properties:
-      email:
-        type: string
-      password:
-        type: string
-      username:
-        type: string
-    required:
-    - password
-    type: object
-  api.restoreDatabaseRequest:
-    properties:
-      backup_id:
-        type: string
-    type: object
-  api.saveDashboardRequest:
-    type: object
-  api.setEnvVarRequest:
-    properties:
-      is_secret:
-        type: boolean
-      scope:
-        type: string
-      value:
-        type: string
-    type: object
-  api.updateAppImageRequest:
-    properties:
-      image:
-        type: string
-    type: object
-  api.upsertRecordRequest:
+  internal_api.importRecord:
     properties:
       contents:
         items:
@@ -336,57 +326,94 @@ definitions:
       type:
         type: string
     type: object
-  models.AIModelAuthMode:
-    enum:
-    - apikey
-    - jwt
-    - public
-    type: string
-    x-enum-varnames:
-    - AIModelAuthAPIKey
-    - AIModelAuthJWT
-    - AIModelAuthPublic
-  models.AIModelSource:
-    enum:
-    - mlflow
-    - s3
-    - custom
-    type: string
-    x-enum-varnames:
-    - AIModelSourceMLflow
-    - AIModelSourceS3
-    - AIModelSourceCustom
-  models.ImportServiceSpec:
+  internal_api.importZoneRequest:
     properties:
-      container_name:
-        type: string
-      image:
-        type: string
-      include:
-        type: boolean
-      ports:
+      records:
         items:
-          type: string
-        type: array
-      service_name:
-        type: string
-      volumes:
-        items:
-          type: string
+          $ref: '#/definitions/internal_api.importRecord'
         type: array
     type: object
-  pricing.Need:
+  internal_api.ingestLogsRequest:
     properties:
-      apps:
+      level:
+        type: string
+      message:
+        type: string
+      source:
+        type: string
+    type: object
+  internal_api.ingestMetricsRequest:
+    properties:
+      metrics:
+        additionalProperties:
+          format: float64
+          type: number
+        type: object
+      source:
+        type: string
+      timestamp:
+        type: string
+    type: object
+  internal_api.ingressRuleReq:
+    properties:
+      app:
+        type: string
+      path:
+        type: string
+      port:
         type: integer
-      databases:
+    type: object
+  internal_api.loginRequest:
+    properties:
+      email:
+        type: string
+      password:
+        type: string
+      username:
+        type: string
+    required:
+    - password
+    type: object
+  internal_api.restoreDatabaseRequest:
+    properties:
+      backup_id:
+        type: string
+    type: object
+  internal_api.saveDashboardRequest:
+    properties:
+      config:
+        items:
+          type: integer
+        type: array
+      version:
         type: integer
-      domains:
+    type: object
+  internal_api.setEnvVarRequest:
+    properties:
+      is_secret:
+        type: boolean
+      scope:
+        type: string
+      value:
+        type: string
+    type: object
+  internal_api.updateAppImageRequest:
+    properties:
+      image:
+        type: string
+    type: object
+  internal_api.upsertRecordRequest:
+    properties:
+      contents:
+        items:
+          type: string
+        type: array
+      name:
+        type: string
+      ttl:
         type: integer
-      members:
-        type: integer
-      storageGB:
-        type: integer
+      type:
+        type: string
     type: object
 info:
   contact: {}
@@ -556,7 +583,7 @@ paths:
         name: body
         required: true
         schema:
-          $ref: '#/definitions/api.loginRequest'
+          $ref: '#/definitions/internal_api.loginRequest'
       produces:
       - application/json
       responses:
@@ -668,7 +695,7 @@ paths:
         name: body
         required: true
         schema:
-          $ref: '#/definitions/pricing.Need'
+          $ref: '#/definitions/github_com_dada-tuda_console_backend_internal_billing_pricing.Need'
       produces:
       - application/json
       responses:
@@ -688,6 +715,29 @@ paths:
       summary: Recommend a billing plan
       tags:
       - billing
+  /git/github/oauth/callback:
+    get:
+      description: Public endpoint GitHub redirects to after user authorization. Consumes
+        the one-time state, exchanges the code, binds the user's installations, redirects
+        to the wizard.
+      operationId: gitHubOAuthCallback
+      parameters:
+      - description: GitHub OAuth code
+        in: query
+        name: code
+        required: true
+        type: string
+      - description: One-time state
+        in: query
+        name: state
+        required: true
+        type: string
+      responses:
+        "302":
+          description: Found
+      summary: GitHub App user-authorization callback
+      tags:
+      - git
   /git/install/callback:
     get:
       description: Public endpoint GitHub redirects to after App install. Verifies
@@ -929,7 +979,7 @@ paths:
         name: body
         required: true
         schema:
-          $ref: '#/definitions/api.createProjectRequest'
+          $ref: '#/definitions/internal_api.createProjectRequest'
       produces:
       - application/json
       responses:
@@ -1060,7 +1110,7 @@ paths:
         name: body
         required: true
         schema:
-          $ref: '#/definitions/api.createAppServerRequest'
+          $ref: '#/definitions/internal_api.createAppServerRequest'
       produces:
       - application/json
       responses:
@@ -1263,7 +1313,7 @@ paths:
         name: body
         required: true
         schema:
-          $ref: '#/definitions/api.importComposeStackRequest'
+          $ref: '#/definitions/internal_api.importComposeStackRequest'
       produces:
       - application/json
       responses:
@@ -2053,7 +2103,7 @@ paths:
         name: body
         required: true
         schema:
-          $ref: '#/definitions/api.addDomainAuthorizationRequest'
+          $ref: '#/definitions/internal_api.addDomainAuthorizationRequest'
       produces:
       - application/json
       responses:
@@ -2265,6 +2315,118 @@ paths:
       summary: Get a delegated apex's managed zone + records
       tags:
       - domain
+  /projects/{projectId}/domains/authorizations/{authId}/zone/import:
+    post:
+      consumes:
+      - application/json
+      description: Upserts each supplied record (name/type/ttl/contents) into the
+        apex's PowerDNS zone. NS/SOA and the protected apex NS are rejected; TXT contents
+        are quoted if needed. Records that fail validation or the write are skipped
+        and returned. Requires an existing managed zone.
+      operationId: importZone
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      - description: Authorization UUID
+        in: path
+        name: authId
+        required: true
+        type: string
+      - description: Records to import
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_api.importZoneRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "503":
+          description: Service Unavailable
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Import confirmed records into a delegated apex
+      tags:
+      - domain
+  /projects/{projectId}/domains/authorizations/{authId}/zone/import-preview:
+    get:
+      description: Probes the apex's current authoritative DNS (via the public resolver)
+        for apex A/AAAA/MX/TXT and www A/AAAA/CNAME and returns them as import suggestions
+        with a default TTL of 300. Read-only; writes nothing. Lookups are best-effort
+        and NS/SOA are excluded.
+      operationId: previewZoneImport
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      - description: Authorization UUID
+        in: path
+        name: authId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "503":
+          description: Service Unavailable
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Preview importable live records for a delegated apex
+      tags:
+      - domain
   /projects/{projectId}/domains/authorizations/{authId}/zone/records:
     delete:
       consumes:
@@ -2392,7 +2554,7 @@ paths:
         name: body
         required: true
         schema:
-          $ref: '#/definitions/api.upsertRecordRequest'
+          $ref: '#/definitions/internal_api.upsertRecordRequest'
       produces:
       - application/json
       responses:
@@ -2496,7 +2658,7 @@ paths:
         name: body
         required: true
         schema:
-          $ref: '#/definitions/api.createAppRequest'
+          $ref: '#/definitions/internal_api.createAppRequest'
       produces:
       - application/json
       responses:
@@ -2764,7 +2926,7 @@ paths:
         name: body
         required: true
         schema:
-          $ref: '#/definitions/api.createCloudTaskRequest'
+          $ref: '#/definitions/internal_api.createCloudTaskRequest'
       produces:
       - application/json
       responses:
@@ -2929,7 +3091,7 @@ paths:
         name: body
         required: true
         schema:
-          $ref: '#/definitions/api.createEndpointRequest'
+          $ref: '#/definitions/internal_api.createEndpointRequest'
       produces:
       - application/json
       responses:
@@ -3155,7 +3317,7 @@ paths:
         name: body
         required: true
         schema:
-          $ref: '#/definitions/api.setEnvVarRequest'
+          $ref: '#/definitions/internal_api.setEnvVarRequest'
       produces:
       - application/json
       responses:
@@ -3260,7 +3422,7 @@ paths:
         name: body
         required: true
         schema:
-          $ref: '#/definitions/api.attachHostnameRequest'
+          $ref: '#/definitions/internal_api.attachHostnameRequest'
       produces:
       - application/json
       responses:
@@ -3381,7 +3543,7 @@ paths:
         name: body
         required: true
         schema:
-          $ref: '#/definitions/api.updateAppImageRequest'
+          $ref: '#/definitions/internal_api.updateAppImageRequest'
       produces:
       - application/json
       responses:
@@ -3839,7 +4001,7 @@ paths:
         name: body
         required: true
         schema:
-          $ref: '#/definitions/api.createServiceDatabaseRequest'
+          $ref: '#/definitions/internal_api.createServiceDatabaseRequest'
       produces:
       - application/json
       responses:
@@ -4138,7 +4300,7 @@ paths:
         name: body
         required: true
         schema:
-          $ref: '#/definitions/api.restoreDatabaseRequest'
+          $ref: '#/definitions/internal_api.restoreDatabaseRequest'
       produces:
       - application/json
       responses:
@@ -4249,7 +4411,7 @@ paths:
         name: body
         required: true
         schema:
-          $ref: '#/definitions/api.createIngressRequest'
+          $ref: '#/definitions/internal_api.createIngressRequest'
       produces:
       - application/json
       responses:
@@ -4347,7 +4509,7 @@ paths:
         name: body
         required: true
         schema:
-          $ref: '#/definitions/api.createAIModelRequest'
+          $ref: '#/definitions/internal_api.createAIModelRequest'
       produces:
       - application/json
       responses:
@@ -4875,7 +5037,7 @@ paths:
         name: body
         required: true
         schema:
-          $ref: '#/definitions/api.createMonitoringRequest'
+          $ref: '#/definitions/internal_api.createMonitoringRequest'
       produces:
       - application/json
       responses:
@@ -5267,7 +5429,7 @@ paths:
         name: body
         required: true
         schema:
-          $ref: '#/definitions/api.saveDashboardRequest'
+          $ref: '#/definitions/internal_api.saveDashboardRequest'
       produces:
       - application/json
       responses:
@@ -5973,7 +6135,7 @@ paths:
         name: body
         required: true
         schema:
-          $ref: '#/definitions/api.connectGitRepoRequest'
+          $ref: '#/definitions/internal_api.connectGitRepoRequest'
       produces:
       - application/json
       responses:
@@ -6117,7 +6279,7 @@ paths:
         name: body
         required: true
         schema:
-          $ref: '#/definitions/api.createS3BucketRequest'
+          $ref: '#/definitions/internal_api.createS3BucketRequest'
       produces:
       - application/json
       responses:
@@ -6220,6 +6382,44 @@ paths:
       summary: Reveal an S3 bucket's access credentials
       tags:
       - storage
+  /projects/{projectId}/git/github/authorize:
+    get:
+      description: Returns a GitHub OAuth authorize URL. After the user authorizes,
+        the callback binds the installations that user can access to this project.
+        canWrite required. 503 when GitHub OAuth is unconfigured.
+      operationId: startGitHubUserAuth
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: object with a url field
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "503":
+          description: Service Unavailable
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Start GitHub App user authorization for a project
+      tags:
+      - git
   /projects/{projectId}/git/install-url:
     get:
       description: Returns the GitHub App (or GitLab) install URL, with project +
@@ -6323,14 +6523,14 @@ paths:
         name: body
         required: true
         schema:
-          $ref: '#/definitions/api.bindInstallationRequest'
+          $ref: '#/definitions/internal_api.bindInstallationRequest'
       produces:
       - application/json
       responses:
         "201":
           description: Created
           schema:
-            $ref: '#/definitions/api.gitInstallation'
+            $ref: '#/definitions/internal_api.gitInstallation'
         "400":
           description: Bad Request
           schema:
@@ -6640,7 +6840,7 @@ paths:
         name: body
         required: true
         schema:
-          $ref: '#/definitions/api.ingestLogsRequest'
+          $ref: '#/definitions/internal_api.ingestLogsRequest'
       produces:
       - application/json
       responses:
@@ -6720,7 +6920,7 @@ paths:
         name: body
         required: true
         schema:
-          $ref: '#/definitions/api.ingestMetricsRequest'
+          $ref: '#/definitions/internal_api.ingestMetricsRequest'
       produces:
       - application/json
       responses:

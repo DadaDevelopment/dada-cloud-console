@@ -8,6 +8,7 @@
 package buildagent
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -95,6 +96,43 @@ func (c *Client) ListAppInstallations(ctx context.Context) ([]InstallationAccoun
 		return nil, err
 	}
 	return out.Installations, nil
+}
+
+// UserAuth is the result of exchanging a user OAuth code: the authorizing user's
+// GitHub login and the installations they can access.
+type UserAuth struct {
+	Login         string                `json:"login"`
+	Installations []InstallationAccount `json:"installations"`
+}
+
+// ExchangeUserCode proxies POST /github/oauth/exchange on the agent (which holds
+// the OAuth client secret). Returns the installations the authorizing user can
+// access, so the backend binds only installations the user genuinely owns.
+func (c *Client) ExchangeUserCode(ctx context.Context, code string) (*UserAuth, error) {
+	body, err := json.Marshal(map[string]string{"code": code})
+	if err != nil {
+		return nil, err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
+		c.baseURL+"/github/oauth/exchange", bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("http POST /github/oauth/exchange: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		b, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
+		return nil, fmt.Errorf("build-agent oauth exchange: status %d: %s", resp.StatusCode, string(b))
+	}
+	var out UserAuth
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return nil, err
+	}
+	return &out, nil
 }
 
 // GetInstallationAccount proxies GET /github/installations/:id/account on the

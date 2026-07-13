@@ -339,6 +339,9 @@ export default function GitImportPage() {
           await refreshInstallations(false);
           return;
         }
+        const { url } = await gitApi.githubAuthorizeUrl(projectId);
+        window.location.href = url;
+        return;
       }
       const { url } = await gitApi.installUrl(projectId, provider);
       window.location.href = url;

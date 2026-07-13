@@ -44,6 +44,11 @@ type Config struct {
 	GitHubAppID         string
 	GitHubAppKey        string
 	GitHubWebhookSecret string
+	// GitHub App OAuth credentials (user-authorization flow). Used to exchange an
+	// authorization code for a user token and list the installations that user can
+	// access, so the console can attach an already-installed account to a project.
+	GitHubClientID     string
+	GitHubClientSecret string
 
 	// AES-GCM key (hex 32 bytes), shared with gitops-agent, for decrypting
 	// GitLab tokens / env-vars stored in the DB.
@@ -95,6 +100,8 @@ func Load() (*Config, error) {
 		GitHubAppID:         getEnv("BUILD_GITHUB_APP_ID", ""),
 		GitHubAppKey:        getEnv("BUILD_GITHUB_APP_KEY", ""),
 		GitHubWebhookSecret: getEnv("BUILD_GITHUB_WEBHOOK_SECRET", ""),
+		GitHubClientID:      getEnv("BUILD_GITHUB_CLIENT_ID", ""),
+		GitHubClientSecret:  getEnv("BUILD_GITHUB_CLIENT_SECRET", ""),
 
 		EncryptionKey: getEnv("GITOPS_ENCRYPTION_KEY", ""),
 		TokenSecret:   getEnv("BUILD_AGENT_TOKEN_SECRET", ""),

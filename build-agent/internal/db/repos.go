@@ -94,3 +94,15 @@ func ResolveReposByFullName(ctx context.Context, pool *pgxpool.Pool, fullName st
 	}
 	return out, rows.Err()
 }
+
+// DeleteInstallationsByNumericID removes every git_app_installations row for a
+// numeric GitHub installation id across all orgs. Called when GitHub reports the
+// App was uninstalled, so stale rows do not linger in the connect wizard.
+func DeleteInstallationsByNumericID(ctx context.Context, pool *pgxpool.Pool, installationID int64) (int64, error) {
+	tag, err := pool.Exec(ctx,
+		`DELETE FROM git_app_installations WHERE installation_id = $1`, installationID)
+	if err != nil {
+		return 0, fmt.Errorf("delete installation %d: %w", installationID, err)
+	}
+	return tag.RowsAffected(), nil
+}

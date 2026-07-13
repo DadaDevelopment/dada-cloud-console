@@ -250,7 +250,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.loginRequest"
+                            "$ref": "#/definitions/internal_api.loginRequest"
                         }
                     }
                 ],
@@ -417,7 +417,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/pricing.Need"
+                            "$ref": "#/definitions/github_com_dada-tuda_console_backend_internal_billing_pricing.Need"
                         }
                     }
                 ],
@@ -437,6 +437,37 @@ const docTemplate = `{
                                 "type": "string"
                             }
                         }
+                    }
+                }
+            }
+        },
+        "/git/github/oauth/callback": {
+            "get": {
+                "description": "Public endpoint GitHub redirects to after user authorization. Consumes the one-time state, exchanges the code, binds the user's installations, redirects to the wizard.",
+                "tags": [
+                    "git"
+                ],
+                "summary": "GitHub App user-authorization callback",
+                "operationId": "gitHubOAuthCallback",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "GitHub OAuth code",
+                        "name": "code",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "One-time state",
+                        "name": "state",
+                        "in": "query",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "302": {
+                        "description": "Found"
                     }
                 }
             }
@@ -796,7 +827,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.createProjectRequest"
+                            "$ref": "#/definitions/internal_api.createProjectRequest"
                         }
                     }
                 ],
@@ -1029,7 +1060,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.createAppServerRequest"
+                            "$ref": "#/definitions/internal_api.createAppServerRequest"
                         }
                     }
                 ],
@@ -1319,7 +1350,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.importComposeStackRequest"
+                            "$ref": "#/definitions/internal_api.importComposeStackRequest"
                         }
                     }
                 ],
@@ -2491,7 +2522,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.addDomainAuthorizationRequest"
+                            "$ref": "#/definitions/internal_api.addDomainAuthorizationRequest"
                         }
                     }
                 ],
@@ -2806,6 +2837,167 @@ const docTemplate = `{
                 }
             }
         },
+        "/projects/{projectId}/domains/authorizations/{authId}/zone/import": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Upserts each supplied record (name/type/ttl/contents) into the apex's PowerDNS zone. NS/SOA and the protected apex NS are rejected; TXT contents are quoted if needed. Records that fail validation or the write are skipped and returned. Requires an existing managed zone.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "domain"
+                ],
+                "summary": "Import confirmed records into a delegated apex",
+                "operationId": "importZone",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Project UUID",
+                        "name": "projectId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Authorization UUID",
+                        "name": "authId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Records to import",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.importZoneRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/projects/{projectId}/domains/authorizations/{authId}/zone/import-preview": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Probes the apex's current authoritative DNS (via the public resolver) for apex A/AAAA/MX/TXT and www A/AAAA/CNAME and returns them as import suggestions with a default TTL of 300. Read-only; writes nothing. Lookups are best-effort and NS/SOA are excluded.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "domain"
+                ],
+                "summary": "Preview importable live records for a delegated apex",
+                "operationId": "previewZoneImport",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Project UUID",
+                        "name": "projectId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Authorization UUID",
+                        "name": "authId",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/projects/{projectId}/domains/authorizations/{authId}/zone/records": {
             "get": {
                 "security": [
@@ -2913,7 +3105,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.upsertRecordRequest"
+                            "$ref": "#/definitions/internal_api.upsertRecordRequest"
                         }
                     }
                 ],
@@ -3151,7 +3343,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.createAppRequest"
+                            "$ref": "#/definitions/internal_api.createAppRequest"
                         }
                     }
                 ],
@@ -3544,7 +3736,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.createCloudTaskRequest"
+                            "$ref": "#/definitions/internal_api.createCloudTaskRequest"
                         }
                     }
                 ],
@@ -3785,7 +3977,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.createEndpointRequest"
+                            "$ref": "#/definitions/internal_api.createEndpointRequest"
                         }
                     }
                 ],
@@ -4049,7 +4241,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.setEnvVarRequest"
+                            "$ref": "#/definitions/internal_api.setEnvVarRequest"
                         }
                     }
                 ],
@@ -4272,7 +4464,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.attachHostnameRequest"
+                            "$ref": "#/definitions/internal_api.attachHostnameRequest"
                         }
                     }
                 ],
@@ -4453,7 +4645,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.updateAppImageRequest"
+                            "$ref": "#/definitions/internal_api.updateAppImageRequest"
                         }
                     }
                 ],
@@ -5117,7 +5309,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.createServiceDatabaseRequest"
+                            "$ref": "#/definitions/internal_api.createServiceDatabaseRequest"
                         }
                     }
                 ],
@@ -5546,7 +5738,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.restoreDatabaseRequest"
+                            "$ref": "#/definitions/internal_api.restoreDatabaseRequest"
                         }
                     }
                 ],
@@ -5707,7 +5899,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.createIngressRequest"
+                            "$ref": "#/definitions/internal_api.createIngressRequest"
                         }
                     }
                 ],
@@ -5848,7 +6040,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.createAIModelRequest"
+                            "$ref": "#/definitions/internal_api.createAIModelRequest"
                         }
                     }
                 ],
@@ -6609,7 +6801,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.createMonitoringRequest"
+                            "$ref": "#/definitions/internal_api.createMonitoringRequest"
                         }
                     }
                 ],
@@ -7435,7 +7627,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.saveDashboardRequest"
+                            "$ref": "#/definitions/internal_api.saveDashboardRequest"
                         }
                     }
                 ],
@@ -8218,7 +8410,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.connectGitRepoRequest"
+                            "$ref": "#/definitions/internal_api.connectGitRepoRequest"
                         }
                     }
                 ],
@@ -8432,7 +8624,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.createS3BucketRequest"
+                            "$ref": "#/definitions/internal_api.createS3BucketRequest"
                         }
                     }
                 ],
@@ -8557,6 +8749,62 @@ const docTemplate = `{
                     },
                     "404": {
                         "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/projects/{projectId}/git/github/authorize": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Returns a GitHub OAuth authorize URL. After the user authorizes, the callback binds the installations that user can access to this project. canWrite required. 503 when GitHub OAuth is unconfigured.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "git"
+                ],
+                "summary": "Start GitHub App user authorization for a project",
+                "operationId": "startGitHubUserAuth",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Project UUID",
+                        "name": "projectId",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "object with a url field",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
                         "schema": {
                             "type": "object",
                             "additionalProperties": {
@@ -8733,7 +8981,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.bindInstallationRequest"
+                            "$ref": "#/definitions/internal_api.bindInstallationRequest"
                         }
                     }
                 ],
@@ -8741,7 +8989,7 @@ const docTemplate = `{
                     "201": {
                         "description": "Created",
                         "schema": {
-                            "$ref": "#/definitions/api.gitInstallation"
+                            "$ref": "#/definitions/internal_api.gitInstallation"
                         }
                     },
                     "400": {
@@ -9195,7 +9443,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.ingestLogsRequest"
+                            "$ref": "#/definitions/internal_api.ingestLogsRequest"
                         }
                     }
                 ],
@@ -9313,7 +9561,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.ingestMetricsRequest"
+                            "$ref": "#/definitions/internal_api.ingestMetricsRequest"
                         }
                     }
                 ],
@@ -9641,7 +9889,82 @@ const docTemplate = `{
         }
     },
     "definitions": {
-        "api.addDomainAuthorizationRequest": {
+        "github_com_dada-tuda_console_backend_internal_billing_pricing.Need": {
+            "type": "object",
+            "properties": {
+                "apps": {
+                    "type": "integer"
+                },
+                "databases": {
+                    "type": "integer"
+                },
+                "domains": {
+                    "type": "integer"
+                },
+                "members": {
+                    "type": "integer"
+                },
+                "storageGB": {
+                    "type": "integer"
+                }
+            }
+        },
+        "github_com_dada-tuda_console_backend_internal_models.AIModelAuthMode": {
+            "type": "string",
+            "enum": [
+                "apikey",
+                "jwt",
+                "public"
+            ],
+            "x-enum-varnames": [
+                "AIModelAuthAPIKey",
+                "AIModelAuthJWT",
+                "AIModelAuthPublic"
+            ]
+        },
+        "github_com_dada-tuda_console_backend_internal_models.AIModelSource": {
+            "type": "string",
+            "enum": [
+                "mlflow",
+                "s3",
+                "custom"
+            ],
+            "x-enum-varnames": [
+                "AIModelSourceMLflow",
+                "AIModelSourceS3",
+                "AIModelSourceCustom"
+            ]
+        },
+        "github_com_dada-tuda_console_backend_internal_models.ImportServiceSpec": {
+            "type": "object",
+            "properties": {
+                "container_name": {
+                    "type": "string"
+                },
+                "image": {
+                    "type": "string"
+                },
+                "include": {
+                    "type": "boolean"
+                },
+                "ports": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "service_name": {
+                    "type": "string"
+                },
+                "volumes": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                }
+            }
+        },
+        "internal_api.addDomainAuthorizationRequest": {
             "type": "object",
             "properties": {
                 "apex_domain": {
@@ -9649,7 +9972,7 @@ const docTemplate = `{
                 }
             }
         },
-        "api.attachHostnameRequest": {
+        "internal_api.attachHostnameRequest": {
             "type": "object",
             "properties": {
                 "hostname": {
@@ -9657,7 +9980,7 @@ const docTemplate = `{
                 }
             }
         },
-        "api.bindInstallationRequest": {
+        "internal_api.bindInstallationRequest": {
             "type": "object",
             "properties": {
                 "installation_id": {
@@ -9666,7 +9989,7 @@ const docTemplate = `{
                 }
             }
         },
-        "api.connectGitRepoRequest": {
+        "internal_api.connectGitRepoRequest": {
             "type": "object",
             "properties": {
                 "app_name": {
@@ -9713,7 +10036,7 @@ const docTemplate = `{
                 }
             }
         },
-        "api.createAIModelRequest": {
+        "internal_api.createAIModelRequest": {
             "type": "object",
             "properties": {
                 "artifact_uri": {
@@ -9723,7 +10046,7 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "auth_mode": {
-                    "$ref": "#/definitions/models.AIModelAuthMode"
+                    "$ref": "#/definitions/github_com_dada-tuda_console_backend_internal_models.AIModelAuthMode"
                 },
                 "container_image": {
                     "type": "string"
@@ -9744,14 +10067,14 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "source": {
-                    "$ref": "#/definitions/models.AIModelSource"
+                    "$ref": "#/definitions/github_com_dada-tuda_console_backend_internal_models.AIModelSource"
                 },
                 "version": {
                     "type": "string"
                 }
             }
         },
-        "api.createAppRequest": {
+        "internal_api.createAppRequest": {
             "type": "object",
             "properties": {
                 "image": {
@@ -9771,7 +10094,7 @@ const docTemplate = `{
                 }
             }
         },
-        "api.createAppServerRequest": {
+        "internal_api.createAppServerRequest": {
             "type": "object",
             "properties": {
                 "flavor": {
@@ -9808,7 +10131,7 @@ const docTemplate = `{
                 }
             }
         },
-        "api.createCloudTaskRequest": {
+        "internal_api.createCloudTaskRequest": {
             "type": "object",
             "properties": {
                 "task_type": {
@@ -9816,7 +10139,7 @@ const docTemplate = `{
                 }
             }
         },
-        "api.createEndpointRequest": {
+        "internal_api.createEndpointRequest": {
             "type": "object",
             "properties": {
                 "auth_enabled": {
@@ -9845,7 +10168,7 @@ const docTemplate = `{
                 }
             }
         },
-        "api.createIngressRequest": {
+        "internal_api.createIngressRequest": {
             "type": "object",
             "properties": {
                 "aliases": {
@@ -9866,7 +10189,7 @@ const docTemplate = `{
                 "rules": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/api.ingressRuleReq"
+                        "$ref": "#/definitions/internal_api.ingressRuleReq"
                     }
                 },
                 "ssl_redirect": {
@@ -9891,7 +10214,7 @@ const docTemplate = `{
                 }
             }
         },
-        "api.createMonitoringRequest": {
+        "internal_api.createMonitoringRequest": {
             "type": "object",
             "properties": {
                 "name": {
@@ -9899,7 +10222,7 @@ const docTemplate = `{
                 }
             }
         },
-        "api.createProjectRequest": {
+        "internal_api.createProjectRequest": {
             "type": "object",
             "required": [
                 "slug"
@@ -9923,7 +10246,7 @@ const docTemplate = `{
                 }
             }
         },
-        "api.createS3BucketRequest": {
+        "internal_api.createS3BucketRequest": {
             "type": "object",
             "properties": {
                 "app_ref": {
@@ -9950,7 +10273,7 @@ const docTemplate = `{
                 }
             }
         },
-        "api.createServiceDatabaseRequest": {
+        "internal_api.createServiceDatabaseRequest": {
             "type": "object",
             "properties": {
                 "app_ref": {
@@ -9976,7 +10299,7 @@ const docTemplate = `{
                 }
             }
         },
-        "api.gitInstallation": {
+        "internal_api.gitInstallation": {
             "type": "object",
             "properties": {
                 "account_login": {
@@ -10003,7 +10326,7 @@ const docTemplate = `{
                 }
             }
         },
-        "api.importComposeStackRequest": {
+        "internal_api.importComposeStackRequest": {
             "type": "object",
             "properties": {
                 "ack_secrets_in_git": {
@@ -10021,108 +10344,12 @@ const docTemplate = `{
                 "services": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/models.ImportServiceSpec"
+                        "$ref": "#/definitions/github_com_dada-tuda_console_backend_internal_models.ImportServiceSpec"
                     }
                 }
             }
         },
-        "api.ingestLogsRequest": {
-            "type": "object",
-            "properties": {
-                "level": {
-                    "type": "string"
-                },
-                "message": {
-                    "type": "string"
-                },
-                "source": {
-                    "type": "string"
-                }
-            }
-        },
-        "api.ingestMetricsRequest": {
-            "type": "object",
-            "properties": {
-                "metrics": {
-                    "type": "object",
-                    "additionalProperties": {
-                        "type": "number",
-                        "format": "float64"
-                    }
-                },
-                "source": {
-                    "type": "string"
-                },
-                "timestamp": {
-                    "type": "string"
-                }
-            }
-        },
-        "api.ingressRuleReq": {
-            "type": "object",
-            "properties": {
-                "app": {
-                    "type": "string"
-                },
-                "path": {
-                    "type": "string"
-                },
-                "port": {
-                    "type": "integer"
-                }
-            }
-        },
-        "api.loginRequest": {
-            "type": "object",
-            "required": [
-                "password"
-            ],
-            "properties": {
-                "email": {
-                    "type": "string"
-                },
-                "password": {
-                    "type": "string"
-                },
-                "username": {
-                    "type": "string"
-                }
-            }
-        },
-        "api.restoreDatabaseRequest": {
-            "type": "object",
-            "properties": {
-                "backup_id": {
-                    "type": "string"
-                }
-            }
-        },
-        "api.saveDashboardRequest": {
-            "type": "object"
-        },
-        "api.setEnvVarRequest": {
-            "type": "object",
-            "properties": {
-                "is_secret": {
-                    "type": "boolean"
-                },
-                "scope": {
-                    "type": "string"
-                },
-                "value": {
-                    "type": "string"
-                }
-            }
-        },
-        "api.updateAppImageRequest": {
-            "type": "object",
-            "properties": {
-                "image": {
-                    "type": "string"
-                }
-            }
-        },
-        "api.upsertRecordRequest": {
+        "internal_api.importRecord": {
             "type": "object",
             "properties": {
                 "contents": {
@@ -10142,78 +10369,141 @@ const docTemplate = `{
                 }
             }
         },
-        "models.AIModelAuthMode": {
-            "type": "string",
-            "enum": [
-                "apikey",
-                "jwt",
-                "public"
-            ],
-            "x-enum-varnames": [
-                "AIModelAuthAPIKey",
-                "AIModelAuthJWT",
-                "AIModelAuthPublic"
-            ]
-        },
-        "models.AIModelSource": {
-            "type": "string",
-            "enum": [
-                "mlflow",
-                "s3",
-                "custom"
-            ],
-            "x-enum-varnames": [
-                "AIModelSourceMLflow",
-                "AIModelSourceS3",
-                "AIModelSourceCustom"
-            ]
-        },
-        "models.ImportServiceSpec": {
+        "internal_api.importZoneRequest": {
             "type": "object",
             "properties": {
-                "container_name": {
-                    "type": "string"
-                },
-                "image": {
-                    "type": "string"
-                },
-                "include": {
-                    "type": "boolean"
-                },
-                "ports": {
+                "records": {
                     "type": "array",
                     "items": {
-                        "type": "string"
-                    }
-                },
-                "service_name": {
-                    "type": "string"
-                },
-                "volumes": {
-                    "type": "array",
-                    "items": {
-                        "type": "string"
+                        "$ref": "#/definitions/internal_api.importRecord"
                     }
                 }
             }
         },
-        "pricing.Need": {
+        "internal_api.ingestLogsRequest": {
             "type": "object",
             "properties": {
-                "apps": {
+                "level": {
+                    "type": "string"
+                },
+                "message": {
+                    "type": "string"
+                },
+                "source": {
+                    "type": "string"
+                }
+            }
+        },
+        "internal_api.ingestMetricsRequest": {
+            "type": "object",
+            "properties": {
+                "metrics": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "number",
+                        "format": "float64"
+                    }
+                },
+                "source": {
+                    "type": "string"
+                },
+                "timestamp": {
+                    "type": "string"
+                }
+            }
+        },
+        "internal_api.ingressRuleReq": {
+            "type": "object",
+            "properties": {
+                "app": {
+                    "type": "string"
+                },
+                "path": {
+                    "type": "string"
+                },
+                "port": {
+                    "type": "integer"
+                }
+            }
+        },
+        "internal_api.loginRequest": {
+            "type": "object",
+            "required": [
+                "password"
+            ],
+            "properties": {
+                "email": {
+                    "type": "string"
+                },
+                "password": {
+                    "type": "string"
+                },
+                "username": {
+                    "type": "string"
+                }
+            }
+        },
+        "internal_api.restoreDatabaseRequest": {
+            "type": "object",
+            "properties": {
+                "backup_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "internal_api.saveDashboardRequest": {
+            "type": "object",
+            "properties": {
+                "config": {
+                    "type": "array",
+                    "items": {
+                        "type": "integer"
+                    }
+                },
+                "version": {
+                    "type": "integer"
+                }
+            }
+        },
+        "internal_api.setEnvVarRequest": {
+            "type": "object",
+            "properties": {
+                "is_secret": {
+                    "type": "boolean"
+                },
+                "scope": {
+                    "type": "string"
+                },
+                "value": {
+                    "type": "string"
+                }
+            }
+        },
+        "internal_api.updateAppImageRequest": {
+            "type": "object",
+            "properties": {
+                "image": {
+                    "type": "string"
+                }
+            }
+        },
+        "internal_api.upsertRecordRequest": {
+            "type": "object",
+            "properties": {
+                "contents": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "name": {
+                    "type": "string"
+                },
+                "ttl": {
                     "type": "integer"
                 },
-                "databases": {
-                    "type": "integer"
-                },
-                "domains": {
-                    "type": "integer"
-                },
-                "members": {
-                    "type": "integer"
-                },
-                "storageGB": {
-                    "type": "integer"
+                "type": {
+                    "type": "string"
                 }
             }
         }

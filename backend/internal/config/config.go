@@ -270,6 +270,7 @@ type Config struct {
 	CloudTaskCallbackURL   string // CLOUD_TASK_CALLBACK_URL
 	GithubAppID            string // GITHUB_APP_ID
 	GithubAppPrivateKey    string // GITHUB_APP_PRIVATE_KEY
+	GithubAppClientID      string // GITHUB_APP_CLIENT_ID (public; builds user-authorize URL, secret lives in build-agent)
 	MetrikaOAuthToken      string // METRIKA_OAUTH_TOKEN
 
 	BillingEnabled          bool  // BILLING_ENABLED (default false) — guards metering ticker; billing endpoints always load plans read-only
@@ -373,6 +374,7 @@ func Load() (*Config, error) {
 		CloudTaskCallbackURL:      getEnv("CLOUD_TASK_CALLBACK_URL", ""),
 		GithubAppID:               getEnv("GITHUB_APP_ID", ""),
 		GithubAppPrivateKey:       getEnv("GITHUB_APP_PRIVATE_KEY", ""),
+		GithubAppClientID:         getEnv("GITHUB_APP_CLIENT_ID", ""),
 		MetrikaOAuthToken:         getEnv("METRIKA_OAUTH_TOKEN", ""),
 		BillingEnabled:            getEnv("BILLING_ENABLED", "false") == "true",
 		BillingMeterIntervalSec:   getEnvInt64("BILLING_METER_INTERVAL_SECS", 3600),
