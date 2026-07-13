@@ -323,6 +323,19 @@ definitions:
       image:
         type: string
     type: object
+  api.upsertRecordRequest:
+    properties:
+      contents:
+        items:
+          type: string
+        type: array
+      name:
+        type: string
+      ttl:
+        type: integer
+      type:
+        type: string
+    type: object
   models.AIModelAuthMode:
     enum:
     - apikey
@@ -2155,6 +2168,266 @@ paths:
       security:
       - BearerAuth: []
       summary: Force a DNS verification check now
+      tags:
+      - domain
+  /projects/{projectId}/domains/authorizations/{authId}/delegate:
+    post:
+      consumes:
+      - application/json
+      description: Creates a managed PowerDNS zone for a verified apex authorization,
+        seeds apex + www routing, and returns the nameservers (ns1/ns2) the user sets
+        at their registrar. Once delegation propagates, the zone flips to active.
+      operationId: delegateAuthorization
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      - description: Authorization UUID
+        in: path
+        name: authId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            additionalProperties: true
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "503":
+          description: Service Unavailable
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Delegate an apex domain to the platform nameservers
+      tags:
+      - domain
+  /projects/{projectId}/domains/authorizations/{authId}/zone:
+    get:
+      operationId: getManagedZone
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      - description: Authorization UUID
+        in: path
+        name: authId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "503":
+          description: Service Unavailable
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Get a delegated apex's managed zone + records
+      tags:
+      - domain
+  /projects/{projectId}/domains/authorizations/{authId}/zone/records:
+    delete:
+      consumes:
+      - application/json
+      description: Deletes one rrset (name/type) via PowerDNS. The apex NS rrset and
+        the SOA are protected and cannot be removed. name/type may be supplied in
+        the JSON body or as query parameters.
+      operationId: deleteManagedRecord
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      - description: Authorization UUID
+        in: path
+        name: authId
+        required: true
+        type: string
+      - description: Record name
+        in: query
+        name: name
+        type: string
+      - description: Record type
+        in: query
+        name: type
+        type: string
+      produces:
+      - application/json
+      responses:
+        "204":
+          description: No Content
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "503":
+          description: Service Unavailable
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Delete a record from a delegated apex
+      tags:
+      - domain
+    get:
+      operationId: listManagedRecords
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      - description: Authorization UUID
+        in: path
+        name: authId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "503":
+          description: Service Unavailable
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: List records of a delegated apex
+      tags:
+      - domain
+    post:
+      consumes:
+      - application/json
+      description: Upserts one rrset (name/type/ttl/contents) via PowerDNS. The apex
+        NS rrset and the SOA are protected and cannot be modified.
+      operationId: upsertManagedRecord
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      - description: Authorization UUID
+        in: path
+        name: authId
+        required: true
+        type: string
+      - description: Record
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/api.upsertRecordRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "503":
+          description: Service Unavailable
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Create or replace a record in a delegated apex
       tags:
       - domain
   /projects/{projectId}/environments/{envId}/apps:

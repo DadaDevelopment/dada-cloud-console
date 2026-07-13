@@ -64,6 +64,11 @@ backend:
     # IP 93.189.231.60 is dead and made every custom-domain ACME challenge 404.
     CUSTOM_DOMAIN_A_TARGET: "155.212.223.198"
     CUSTOM_DOMAIN_CNAME_TARGET: "cloud.dada-tuda.ru"
+    # Managed DNS (NS delegation). PowerDNS API root (non-secret); the X-API-Key
+    # is in backend.secret (POWERDNS_API_KEY). PLATFORM_NAMESERVERS are the
+    # nameservers users delegate their zone to.
+    POWERDNS_API_URL: "http://powerdns-api.powerdns.svc:8081"
+    PLATFORM_NAMESERVERS: "ns1.dada-tuda.ru,ns2.dada-tuda.ru"
     # Identity provider. "local" = HS256 JWT (dev default). "keycloak" = JWKS validation;
     # JWT_SECRET is not required in keycloak mode.
     AUTH_MODE: "keycloak"
@@ -134,6 +139,10 @@ backend:
     CLOUD_AGENT_CLIENT_SECRET: ""
     GITHUB_APP_ID: ""
     GITHUB_APP_PRIVATE_KEY: ""
+    # Managed DNS (NS delegation). PowerDNS API X-API-Key. Empty disables all
+    # managed-DNS endpoints (503). In prod this is patched out-of-git into Secret
+    # dada-cloud-console-backend, like the DadaAgent secrets above.
+    POWERDNS_API_KEY: ""
   persistence:
     enabled: true
     size: 5Gi

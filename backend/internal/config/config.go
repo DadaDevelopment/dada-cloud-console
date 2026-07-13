@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 )
 
 // Config holds all application configuration loaded from environment variables.
@@ -24,6 +25,14 @@ type Config struct {
 	CustomDomainATarget     string // CUSTOM_DOMAIN_A_TARGET
 	CustomDomainCNAMETarget string // CUSTOM_DOMAIN_CNAME_TARGET
 	CustomDomainVerifyLabel string // CUSTOM_DOMAIN_VERIFY_LABEL
+
+	// Managed DNS via NS delegation (design: docs/plans/2026-07-13-ns-delegation-managed-dns.md).
+	// PowerDNSAPIURL is the in-cluster PowerDNS API root; PowerDNSAPIKey is the
+	// X-API-Key. An empty PowerDNSAPIKey disables all managed-DNS endpoints (503).
+	// PlatformNameservers are the nameservers users delegate their zone to.
+	PowerDNSAPIURL      string   // POWERDNS_API_URL
+	PowerDNSAPIKey      string   // POWERDNS_API_KEY (secret)
+	PlatformNameservers []string // PLATFORM_NAMESERVERS (comma-separated)
 
 	// Identity provider selection. AuthMode defaults to "local" → the existing
 	// HS256 local-JWT path (POST /auth/login + GinMiddleware). Set AUTH_MODE
@@ -280,6 +289,9 @@ func Load() (*Config, error) {
 		CustomDomainATarget:       getEnv("CUSTOM_DOMAIN_A_TARGET", getEnv("CLUSTER_LB_IP", "155.212.223.198")),
 		CustomDomainCNAMETarget:   getEnv("CUSTOM_DOMAIN_CNAME_TARGET", "cloud.dada-tuda.ru"),
 		CustomDomainVerifyLabel:   getEnv("CUSTOM_DOMAIN_VERIFY_LABEL", "_dada-verify"),
+		PowerDNSAPIURL:            getEnv("POWERDNS_API_URL", "http://powerdns-api.powerdns.svc:8081"),
+		PowerDNSAPIKey:            getEnv("POWERDNS_API_KEY", ""),
+		PlatformNameservers:       splitList(getEnv("PLATFORM_NAMESERVERS", "ns1.dada-tuda.ru,ns2.dada-tuda.ru")),
 		DefaultDomainEnabled:      getEnv("DEFAULT_DOMAIN_ENABLED", "true") == "true",
 		DefaultDomainBase:         getEnv("DEFAULT_DOMAIN_BASE", "dada-tuda.ru"),
 		AuthMode:                  getEnv("AUTH_MODE", "local"),
@@ -419,6 +431,18 @@ func getEnv(key, defaultVal string) string {
 		return v
 	}
 	return defaultVal
+}
+
+// splitList parses a comma-separated env value into a trimmed, non-empty slice.
+func splitList(v string) []string {
+	parts := strings.Split(v, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if s := strings.TrimSpace(p); s != "" {
+			out = append(out, s)
+		}
+	}
+	return out
 }
 
 func getEnvInt64(key string, defaultVal int64) int64 {

@@ -233,6 +233,12 @@ func SetupRouter(pool *pgxpool.Pool, cfg *config.Config) *gin.Engine {
 		api.POST("/projects/:projectId/environments/:envId/apps/:appName/hostnames", h.AttachHostname)
 		api.DELETE("/projects/:projectId/environments/:envId/apps/:appName/hostnames/:id", h.DetachHostname)
 
+		api.POST("/projects/:projectId/domains/authorizations/:authId/delegate", h.DelegateAuthorization)
+		api.GET("/projects/:projectId/domains/authorizations/:authId/zone", h.GetManagedZone)
+		api.GET("/projects/:projectId/domains/authorizations/:authId/zone/records", h.ListManagedRecords)
+		api.POST("/projects/:projectId/domains/authorizations/:authId/zone/records", h.UpsertManagedRecord)
+		api.DELETE("/projects/:projectId/domains/authorizations/:authId/zone/records", h.DeleteManagedRecord)
+
 		// Vercel-flow: git repos, builds, deployments, env vars.
 		// Git provider installations + remote repo listing (build-agent proxy).
 		api.GET("/projects/:projectId/git/installations", h.ListGitInstallations)
