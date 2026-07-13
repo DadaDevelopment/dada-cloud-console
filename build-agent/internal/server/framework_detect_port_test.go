@@ -116,6 +116,10 @@ func pkg(deps, extra string) string {
 	return `{"dependencies":{` + deps + `},"scripts":{"build":"build","start":"start"}` + extra + `}`
 }
 
+func pkgWith(deps, scripts string) string {
+	return `{"dependencies":{` + deps + `},"scripts":{` + scripts + `}}`
+}
+
 // TestDetectPortDockerfileExpose is the regression lock for the bug in the
 // import wizard: a repo carrying its own Dockerfile must take the port from the
 // Dockerfile's EXPOSE directive, not from the static per-framework default.
@@ -178,12 +182,27 @@ func TestDetectPortViteAndReact(t *testing.T) {
 	})
 }
 
+// TestDetectPortViteStartAlignment locks the contract that the reported port
+// matches the command the start actually launches: a Vite app served via
+// `vite preview` binds 4173, not the 3000 that react/sveltekit default to.
+// The effective start body is read from the real start/preview script when
+// present, else from the synthesized fallback command.
+func TestDetectPortViteStartAlignment(t *testing.T) {
+	runPortCases(t, []portCase{
+		{"react-no-scripts-fallback-preview", map[string]string{"package.json": pkgWith(`"react":"18","react-dom":"18"`, "")}, "react", 4173},
+		{"sveltekit-no-scripts-fallback-preview", map[string]string{"package.json": pkgWith(`"@sveltejs/kit":"2"`, "")}, "sveltekit", 4173},
+		{"react-preview-script-vite", map[string]string{"package.json": pkgWith(`"react":"18","react-dom":"18"`, `"build":"vite build","preview":"vite preview"`)}, "react", 4173},
+		{"react-start-script-node-ssr", map[string]string{"package.json": pkgWith(`"react":"18","react-dom":"18"`, `"build":"vite build","start":"node server.js"`)}, "react", 3000},
+		{"vite-preview-script-idempotent", map[string]string{"package.json": pkgWith(`"vite":"5"`, `"preview":"vite preview"`), "vite.config.ts": "export default {}"}, "vite", 4173},
+	})
+}
+
 func TestDetectPortNuxtSvelte(t *testing.T) {
 	runPortCases(t, []portCase{
 		{"nuxt-dep", map[string]string{"package.json": pkg(`"nuxt":"3"`, "")}, "nuxt", 3000},
 		{"nuxt-config", map[string]string{"nuxt.config.ts": "export default {}", "package.json": "{}"}, "nuxt", 3000},
 		{"svelte-dep", map[string]string{"package.json": pkg(`"@sveltejs/kit":"2"`, "")}, "sveltekit", 3000},
-		{"svelte-config", map[string]string{"svelte.config.js": "export default {}", "package.json": "{}"}, "sveltekit", 3000},
+		{"svelte-config", map[string]string{"svelte.config.js": "export default {}", "package.json": "{}"}, "sveltekit", 4173},
 		{"nuxt-devtools", map[string]string{"package.json": pkg(`"@nuxt/devtools":"1"`, "")}, "nuxt", 3000},
 	})
 }

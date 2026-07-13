@@ -1005,7 +1005,26 @@ func detectNodeFramework(ctx context.Context, token, owner, repo string, entry g
 	if build == "" && hasScript("build") {
 		det.BuildCommand = ptrString(pm.run("build"))
 	}
+	if strings.Contains(effectiveStartBody(pkg.Scripts, start), "vite preview") {
+		det.Port = ptrInt(4173)
+	}
 	return frameworkCandidate{detection: det, score: score, depth: depth, path: entry.Path}, true
+}
+
+// effectiveStartBody returns the command that actually runs at container start:
+// the explicit start (then preview) script body when the repo declares one,
+// otherwise the fallback command the detector synthesized. Framework port
+// defaults are a static guess; the reported port must match the process the
+// start command really launches. A Vite app served via `vite preview` binds
+// 4173, not the 3000 that "react"/"sveltekit" default to.
+func effectiveStartBody(scripts map[string]string, fallback string) string {
+	if v, ok := scripts["start"]; ok {
+		return v
+	}
+	if v, ok := scripts["preview"]; ok {
+		return v
+	}
+	return fallback
 }
 
 func nodeBuildCommand(pm packageManagerSpec, scripts map[string]string, framework string) string {
