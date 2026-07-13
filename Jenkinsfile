@@ -41,9 +41,7 @@ def NEXT_PUBLIC_OIDC_CLIENT_ID  = 'dada-console'
 // both hosts — on the console host this is simply same-origin.
 def NEXT_PUBLIC_CONSOLE_URL     = 'https://console.dada-tuda.ru'
 
-def podLabel  = "kubeagent-${env.JOB_BASE_NAME ?: 'job'}-${env.BUILD_NUMBER ?: 'manual'}"
-        .replaceAll('[^A-Za-z0-9-]', '-')
-        .toLowerCase()
+def podLabel  = 'dada-cloud-console-agent'
 def agentName = "kubeagent-${env.JOB_BASE_NAME}-${env.BUILD_NUMBER}-${UUID.randomUUID().toString().take(6)}"
 
 // disableConcurrentBuilds WITHOUT abortPrevious: queue concurrent main pushes
@@ -58,6 +56,8 @@ podTemplate(
         label: podLabel,
         namespace: 'devops-tools',
         serviceAccount: 'jenkins-admin',
+        idleMinutes: 20,
+        podRetention: onFailure(),
         yaml: """
 apiVersion: v1
 kind: Pod
