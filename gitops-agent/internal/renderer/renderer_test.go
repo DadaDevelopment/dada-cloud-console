@@ -223,6 +223,60 @@ func TestRenderApp(t *testing.T) {
 	if strings.Contains(got, "/api-service/resources") {
 		t.Errorf("workload App must NOT point at the dead per-app resources/ dir\nFull output:\n%s", got)
 	}
+	if strings.Contains(got, "argoName:") {
+		t.Errorf("App with no ArgoName must NOT emit spec.argoName (keeps legacy <app>-<env> name)\nFull output:\n%s", got)
+	}
+}
+
+func TestRenderAppArgoName(t *testing.T) {
+	spec := renderer.AppSpec{
+		Name:               "redis",
+		Namespace:          "top-decker-prod",
+		ProjectSlug:        "top-decker",
+		EnvSlug:            "prod",
+		Image:              "redis:latest",
+		Port:               6379,
+		Replicas:           1,
+		Profile:            "small",
+		OperationID:        "op-1",
+		HelmRepoURL:        "https://github.com/DADA-TUDA/argo-infra.git",
+		HelmTargetRevision: "main",
+		ArgoName:           "redis-prod-a1b2c3d4",
+	}
+	got, err := renderer.RenderApp(spec)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(got, "argoName: redis-prod-a1b2c3d4") {
+		t.Errorf("App with ArgoName must emit spec.argoName\nFull output:\n%s", got)
+	}
+	if !strings.Contains(got, "releaseName: redis") {
+		t.Errorf("releaseName must stay the bare app name (k8s resource names unchanged)\nFull output:\n%s", got)
+	}
+}
+
+func TestScopedArgoName(t *testing.T) {
+	const projA = "11111111-1111-1111-1111-111111111111"
+	const projB = "22222222-2222-2222-2222-222222222222"
+
+	a := renderer.ScopedArgoName("redis", "prod", projA)
+	b := renderer.ScopedArgoName("redis", "prod", projB)
+	if a == b {
+		t.Fatalf("same (app,env) in different projects must differ: %q == %q", a, b)
+	}
+	if a != renderer.ScopedArgoName("redis", "prod", projA) {
+		t.Fatalf("must be deterministic for a stable project id")
+	}
+	if !strings.HasPrefix(a, "redis-prod-") {
+		t.Errorf("want readable <app>-<env>- prefix, got %q", a)
+	}
+	if a == "redis-prod" {
+		t.Errorf("scoped name must be distinct from the legacy bare <app>-<env>")
+	}
+	long := renderer.ScopedArgoName(strings.Repeat("x", 80), "prod", projA)
+	if len(long) > 63 {
+		t.Errorf("Application name must be a valid RFC1123 label (<=63), got %d: %q", len(long), long)
+	}
 }
 
 func TestRenderAppResourcesOnly(t *testing.T) {

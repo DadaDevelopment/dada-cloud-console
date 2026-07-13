@@ -775,6 +775,8 @@ func (w *DBWatcher) doCreateApp(ctx context.Context, op db.Operation) error {
 			appSpec.SecretEnvKeys = append(appSpec.SecretEnvKeys, k)
 		}
 	}
+	argoName := renderer.ScopedArgoName(p.Name, envName, op.ProjectID.String())
+	appSpec.ArgoName = argoName
 	yaml, err := renderer.RenderApp(appSpec)
 	if err != nil {
 		return err
@@ -849,7 +851,7 @@ func (w *DBWatcher) doCreateApp(ctx context.Context, op db.Operation) error {
 	// Upsert snapshot so DeployImageVersion can re-render without reading git.
 	summary := map[string]any{
 		"image": p.Image, "framework": p.Framework, "port": p.Port, "replicas": p.Replicas,
-		"profile": p.Profile, "status": "Pending",
+		"profile": p.Profile, "status": "Pending", "argo_name": argoName,
 	}
 	if p.Volume != nil && p.Volume.Path != "" {
 		summary["volume"] = map[string]any{
@@ -1503,6 +1505,7 @@ func (w *DBWatcher) doDeployImageVersion(ctx context.Context, op db.Operation) e
 		appSpec.VolumeSize = vs
 		appSpec.VolumeStorageClass = vsc
 	}
+	appSpec.ArgoName, _ = cur["argo_name"].(string)
 	if env.hasSecret() {
 		appSpec.SecretEnvName = renderer.AppEnvSecretName(p.AppName)
 		for k := range env.Secret {
@@ -1639,6 +1642,7 @@ func (w *DBWatcher) doUpdateAppStorage(ctx context.Context, op db.Operation) err
 		VolumeSize:         p.Volume.Size,
 		VolumeStorageClass: p.Volume.StorageClass,
 	}
+	appSpec.ArgoName, _ = cur["argo_name"].(string)
 	if env.hasSecret() {
 		appSpec.SecretEnvName = renderer.AppEnvSecretName(p.AppName)
 		for k := range env.Secret {

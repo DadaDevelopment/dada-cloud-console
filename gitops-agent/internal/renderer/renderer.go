@@ -2,6 +2,7 @@ package renderer
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"fmt"
 	"sort"
 	"strings"
@@ -130,6 +131,32 @@ type AppSpec struct {
 	// ResourcesValueFile is the git path of the resources.values.yaml the passthrough
 	// chart renders. Required when ResourcesOnly is set.
 	ResourcesValueFile string
+
+	// ArgoName, when non-empty, is the explicit ArgoCD Application name the
+	// tenant-apps ApplicationSet must use for this app (via spec.argoName, with a
+	// fallback to the legacy "<app>-<env>"). It carries the project identity so two
+	// projects can share an app name in the same environment without colliding into
+	// one Application. It is stored per-app (resource_snapshots.summary_json) and
+	// re-used verbatim on every re-render — NEVER recomputed from the app name — so
+	// apps created before this field existed keep their bare "<app>-<env>" name and
+	// are never renamed. See ScopedArgoName.
+	ArgoName string
+}
+
+// ScopedArgoName builds a collision-free ArgoCD Application name for a NEW app:
+// "<app>-<env>-<projhash>" where projhash is the first 4 bytes of sha256(projectID)
+// as hex. The project hash guarantees two different projects never produce the same
+// Application name for the same (app, env), while a stable input keeps re-renders
+// idempotent. The result is a valid RFC1123 label (lowercase alnum + hyphens, <=63).
+// It is deliberately distinct from the legacy bare "<app>-<env>" scheme, so a new
+// app can never collide with an existing bare-named one either.
+func ScopedArgoName(app, env, projectID string) string {
+	sum := sha256.Sum256([]byte(projectID))
+	suffix := fmt.Sprintf("%s-%x", env, sum[:4])
+	if max := 63 - len(suffix) - 1; len(app) > max && max > 0 {
+		app = app[:max]
+	}
+	return app + "-" + suffix
 }
 
 const (
@@ -179,6 +206,9 @@ metadata:
     dada.io/environment: {{ .EnvSlug }}
     dada.io/operation: {{ .OperationID }}
 spec:
+{{- if .ArgoName }}
+  argoName: {{ .ArgoName }}
+{{- end }}
 {{- if not .ResourcesOnly }}
   resources: true
 {{- end }}

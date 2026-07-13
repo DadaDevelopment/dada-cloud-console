@@ -427,31 +427,28 @@ func (h *Handler) CreateApp(c *gin.Context) {
 		return
 	}
 
-	// Check name uniqueness across the WHOLE Argo instance, not just this
-	// project+env. ArgoCD names each generated Application "<app>-<env>" with no
-	// project segment, so the same app name in the same env under a different
-	// project collides into one Application name and wedges the tenant-apps
-	// ApplicationSet (duplicate-name -> Degraded -> every tenant app stops
-	// reconciling). resource_snapshots reflects git reality (manual and Jenkins
-	// files land there via the git watcher too), so guard on (name, env-name)
-	// globally. See project_appset_name_collision.
-	// Do NOT disclose which project owns the conflicting name: the owner may be a
-	// different tenant, and leaking its project name to the caller is a
-	// cross-tenant information disclosure. The message is identical whether the
-	// clash is in this project or another one.
+	// Uniqueness is scoped to THIS project+environment, not the whole Argo instance.
+	// New apps get a project-scoped ArgoCD Application name (App CR spec.argoName =
+	// "<app>-<env>-<projhash>", consumed by the tenant-apps ApplicationSet), so the
+	// same app name in the same env under two different projects no longer collides
+	// into one Application. k8s namespaces are already per project+env, so nothing
+	// else clashes either. Guarding globally would be a needless cross-tenant name
+	// grab (the S3-bucket-global-namespace surprise). See project_appset_name_collision.
+	// PRECONDITION: the argo-infra tenant-apps ApplicationSet must consume
+	// spec.argoName before this relaxation ships, else a cross-project duplicate
+	// still wedges Argo on the bare name.
 	var exists int
 	err = h.pool.QueryRow(c.Request.Context(),
 		`SELECT 1
 		 FROM resource_snapshots rs
-		 JOIN environments e ON e.id = rs.environment_id
 		 WHERE rs.kind = 'App' AND rs.name = $1
-		   AND e.name = (SELECT name FROM environments WHERE id = $2)
+		   AND rs.project_id = $2 AND rs.environment_id = $3
 		 LIMIT 1`,
-		req.Name, envID,
+		req.Name, projectID, envID,
 	).Scan(&exists)
 	if err == nil {
 		respondError(c, http.StatusConflict, fmt.Sprintf(
-			"the app name %q is already taken in this environment; app names must be unique per environment",
+			"the app name %q is already taken in this project's environment; choose another name",
 			req.Name))
 		return
 	} else if err != pgx.ErrNoRows {

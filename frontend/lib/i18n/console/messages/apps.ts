@@ -90,8 +90,8 @@ export const apps: Messages = {
   "apps.modal.create.submitting": { ru: "Создание…", en: "Creating…" },
   "apps.error.create": { ru: "Не удалось создать приложение", en: "Failed to create application" },
   "apps.error.create.duplicateGlobal": {
-    ru: "Это имя уже занято в окружении. Выберите другое имя.",
-    en: "This name is already taken in the environment. Choose another name.",
+    ru: "Приложение с таким именем уже есть в этом проекте. Выберите другое имя.",
+    en: "An app with this name already exists in this project. Choose another name.",
   },
 
   "apps.detail.deployments": { ru: "Деплои", en: "Deployments" },
