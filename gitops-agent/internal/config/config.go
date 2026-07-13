@@ -74,6 +74,18 @@ type Config struct {
 	// PreviewEnvTTL is how long a preview (ephemeral) environment lives before the
 	// reaper enqueues its teardown. Written to environments.expires_at on creation.
 	PreviewEnvTTL time.Duration
+
+	// OrphanGC garbage-collects App snapshots that no DeleteApp op ever cleaned
+	// up — rows left behind when an app is re-homed/renamed between projects and
+	// the incremental git-watcher missed the delete side of the diff. A k8s App
+	// snapshot with no live Deployment AND no app.yaml in git is an orphan. It is
+	// first soft-marked (phase=Orphaned) after OrphanMarkAfter, then physically
+	// deleted OrphanPurgeAfter later — a two-stage grace so a transient git/pod
+	// gap can never lose data. Compose (VM) apps are never touched: their desired
+	// spec lives in the DB, not git, so absence-from-git is not absence.
+	OrphanGCEnabled  bool
+	OrphanMarkAfter  time.Duration
+	OrphanPurgeAfter time.Duration
 }
 
 func Load() (*Config, error) {
@@ -92,6 +104,14 @@ func Load() (*Config, error) {
 	statusInterval, err := time.ParseDuration(getEnv("GITOPS_POLL_INTERVAL_STATUS", "30s"))
 	if err != nil {
 		return nil, fmt.Errorf("GITOPS_POLL_INTERVAL_STATUS: %w", err)
+	}
+	orphanMark, err := time.ParseDuration(getEnv("GITOPS_ORPHAN_MARK_AFTER", "1h"))
+	if err != nil {
+		return nil, fmt.Errorf("GITOPS_ORPHAN_MARK_AFTER: %w", err)
+	}
+	orphanPurge, err := time.ParseDuration(getEnv("GITOPS_ORPHAN_PURGE_AFTER", "24h"))
+	if err != nil {
+		return nil, fmt.Errorf("GITOPS_ORPHAN_PURGE_AFTER: %w", err)
 	}
 
 	cfg := &Config{
@@ -118,6 +138,10 @@ func Load() (*Config, error) {
 		PreviewEnvTTL:           previewTTL,
 		DefaultDomainTLSSecret:  getEnv("GITOPS_DEFAULT_DOMAIN_TLS_SECRET", ""),
 		DefaultDomainDNSTarget:  getEnv("GITOPS_DEFAULT_DOMAIN_DNS_TARGET", "155.212.223.198"),
+
+		OrphanGCEnabled:  getEnv("GITOPS_ORPHAN_GC_ENABLED", "true") == "true",
+		OrphanMarkAfter:  orphanMark,
+		OrphanPurgeAfter: orphanPurge,
 	}
 
 	if cfg.DatabaseURL == "" {

@@ -3,11 +3,13 @@ package worker
 import (
 	"context"
 	"encoding/json"
+	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/dada-tuda/console/gitops-agent/internal/config"
 	"github.com/dada-tuda/console/gitops-agent/internal/db"
+	"github.com/dada-tuda/console/gitops-agent/internal/git"
 	dadak8s "github.com/dada-tuda/console/gitops-agent/internal/k8s"
 	appsv1 "k8s.io/api/apps/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -42,10 +44,20 @@ type StatusReconciler struct {
 	cfg     *config.Config
 	client  kubernetes.Interface
 	clients *dadak8s.Clients
+
+	managers map[string]*git.Manager
+	gcBase   string
 }
 
 func NewStatusReconciler(pool *pgxpool.Pool, cfg *config.Config, clients *dadak8s.Clients) *StatusReconciler {
-	return &StatusReconciler{pool: pool, cfg: cfg, client: clients.Typed, clients: clients}
+	return &StatusReconciler{
+		pool:     pool,
+		cfg:      cfg,
+		client:   clients.Typed,
+		clients:  clients,
+		managers: map[string]*git.Manager{},
+		gcBase:   filepath.Join(cfg.RepoLocalPath, "orphan-gc"),
+	}
 }
 
 func (r *StatusReconciler) Start(ctx context.Context) {
@@ -67,10 +79,13 @@ func (r *StatusReconciler) tick(ctx context.Context) {
 	if r.cfg.ClusterDiscoveryEnabled {
 		r.discover(ctx)
 	}
-	r.reconcile(ctx)
+	live := r.reconcile(ctx)
 	r.reconcileModels(ctx)
 	r.reconcileDatabases(ctx)
 	r.reconcilePublicApis(ctx)
+	if r.cfg.OrphanGCEnabled {
+		r.reconcileOrphans(ctx, live)
+	}
 }
 
 // reconcileModels mirrors KServe InferenceService readiness onto AIModel
@@ -281,11 +296,15 @@ type snapKey struct {
 	app string
 }
 
-func (r *StatusReconciler) reconcile(ctx context.Context) {
+// reconcile mirrors live Deployment state onto App snapshots and returns the set
+// of snapshot keys (env + app) that had at least one live Deployment this tick.
+// The orphan GC consumes that set as its "still alive" guard: a snapshot present
+// here is never a prune candidate, even scaled to zero.
+func (r *StatusReconciler) reconcile(ctx context.Context) map[snapKey]bool {
 	envs, err := db.ListK8sEnvironments(ctx, r.pool)
 	if err != nil {
 		log.Error().Err(err).Msg("status-reconciler: list environments")
-		return
+		return nil
 	}
 	envByNs := make(map[string]uuid.UUID, len(envs))
 	envNames := make(map[string]bool, len(envs))
@@ -300,7 +319,7 @@ func (r *StatusReconciler) reconcile(ctx context.Context) {
 	appEnvs, err := db.AppSnapshotEnvs(ctx, r.pool)
 	if err != nil {
 		log.Error().Err(err).Msg("status-reconciler: list app snapshot envs")
-		return
+		return nil
 	}
 
 	// One cluster-wide list: covers both env namespaces and override namespaces
@@ -308,7 +327,7 @@ func (r *StatusReconciler) reconcile(ctx context.Context) {
 	deps, err := r.client.AppsV1().Deployments("").List(ctx, metav1.ListOptions{})
 	if err != nil {
 		log.Warn().Err(err).Msg("status-reconciler: list deployments")
-		return
+		return nil
 	}
 
 	agg := map[snapKey]*liveApp{}
@@ -360,6 +379,12 @@ func (r *StatusReconciler) reconcile(ctx context.Context) {
 	if updated > 0 {
 		log.Debug().Int("updated", updated).Msg("status-reconciler: synced app statuses")
 	}
+
+	live := make(map[snapKey]bool, len(agg))
+	for k := range agg {
+		live[k] = true
+	}
+	return live
 }
 
 // appKey maps a Deployment to its App snapshot name, in priority order:

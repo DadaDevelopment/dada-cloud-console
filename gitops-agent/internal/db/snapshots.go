@@ -51,6 +51,93 @@ func DeleteSnapshot(ctx context.Context, pool *pgxpool.Pool,
 	return tag.RowsAffected(), nil
 }
 
+// GCAppSnapshot is one k8s App snapshot considered by the orphan garbage
+// collector, joined to the slugs needed to resolve its git path.
+type GCAppSnapshot struct {
+	ID           uuid.UUID
+	ProjectID    uuid.UUID
+	EnvID        uuid.UUID
+	ProjectSlug  string
+	EnvSlug      string
+	Name         string
+	Phase        string
+	LastSyncedAt time.Time
+	OrphanedAt   *time.Time
+}
+
+// ListGCAppSnapshots returns every App snapshot in a k8s-runtime environment,
+// with the project/env slugs and the orphaned_at marker (summary_json.orphaned_at)
+// the two-stage GC needs. VM (compose) envs are excluded: their apps are
+// DB-authoritative, not git-backed, so the git-absence orphan test never applies.
+func ListGCAppSnapshots(ctx context.Context, pool *pgxpool.Pool) ([]GCAppSnapshot, error) {
+	rows, err := pool.Query(ctx, `
+		SELECT rs.id, rs.project_id, rs.environment_id, p.name, e.name,
+		       rs.name, rs.phase, rs.last_synced_at,
+		       (rs.summary_json->>'orphaned_at')::timestamptz
+		FROM resource_snapshots rs
+		JOIN projects p     ON p.id = rs.project_id
+		JOIN environments e ON e.id = rs.environment_id
+		WHERE rs.kind = 'App' AND e.runtime = 'k8s'
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("list gc app snapshots: %w", err)
+	}
+	defer rows.Close()
+
+	var out []GCAppSnapshot
+	for rows.Next() {
+		var s GCAppSnapshot
+		if err := rows.Scan(&s.ID, &s.ProjectID, &s.EnvID, &s.ProjectSlug, &s.EnvSlug,
+			&s.Name, &s.Phase, &s.LastSyncedAt, &s.OrphanedAt); err != nil {
+			return nil, fmt.Errorf("scan gc app snapshot: %w", err)
+		}
+		out = append(out, s)
+	}
+	return out, rows.Err()
+}
+
+// MarkSnapshotOrphaned soft-deletes a snapshot: phase=Orphaned and an orphaned_at
+// stamp the purge stage measures its grace from. Idempotent — orphaned_at is only
+// set when absent, so the purge clock starts once and isn't reset each tick.
+func MarkSnapshotOrphaned(ctx context.Context, pool *pgxpool.Pool, id uuid.UUID, at time.Time) error {
+	patch, _ := json.Marshal(map[string]any{"orphaned_at": at.UTC().Format(time.RFC3339), "live_source": "orphan-gc"})
+	_, err := pool.Exec(ctx, `
+		UPDATE resource_snapshots
+		SET phase        = 'Orphaned',
+		    summary_json = COALESCE(summary_json, '{}'::jsonb) || $2::jsonb
+		WHERE id = $1
+	`, id, patch)
+	if err != nil {
+		return fmt.Errorf("mark snapshot orphaned: %w", err)
+	}
+	return nil
+}
+
+// ClearSnapshotOrphan reverses a soft-delete when an app comes back (its git
+// manifest or a live Deployment reappears): drops the orphaned_at stamp and
+// parks phase at Pending so the next live/status pass writes the true state.
+func ClearSnapshotOrphan(ctx context.Context, pool *pgxpool.Pool, id uuid.UUID) error {
+	_, err := pool.Exec(ctx, `
+		UPDATE resource_snapshots
+		SET phase        = 'Pending',
+		    summary_json = (COALESCE(summary_json, '{}'::jsonb) - 'orphaned_at') || '{"live_source":"orphan-gc-cleared"}'::jsonb
+		WHERE id = $1
+	`, id)
+	if err != nil {
+		return fmt.Errorf("clear snapshot orphan: %w", err)
+	}
+	return nil
+}
+
+// DeleteSnapshotByID physically removes one snapshot row (the GC purge stage).
+func DeleteSnapshotByID(ctx context.Context, pool *pgxpool.Pool, id uuid.UUID) error {
+	_, err := pool.Exec(ctx, `DELETE FROM resource_snapshots WHERE id = $1`, id)
+	if err != nil {
+		return fmt.Errorf("delete snapshot by id: %w", err)
+	}
+	return nil
+}
+
 // UpdateLiveStatus mirrors live cluster state onto an existing snapshot of the
 // given kind: it sets phase and merges the given fields into summary_json (jsonb
 // concat preserves git_sha/message etc.). It only touches rows that already
