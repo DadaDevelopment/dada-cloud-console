@@ -27,6 +27,7 @@ func (p *Poller) Start(ctx context.Context) {
 	log.Info().Dur("interval", p.interval).Msg("build poller started")
 	p.runner.Reconcile(ctx)
 	p.runner.ReapStuck(ctx)
+	p.runner.ReconcileDeploys(ctx)
 	ticker := time.NewTicker(p.interval)
 	defer ticker.Stop()
 	for {
@@ -36,6 +37,7 @@ func (p *Poller) Start(ctx context.Context) {
 		case <-ticker.C:
 			p.runner.ReapStuck(ctx)
 			p.runner.DrainQueue(ctx)
+			p.runner.ReconcileDeploys(ctx)
 		}
 	}
 }

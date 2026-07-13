@@ -127,6 +127,59 @@ func InFlightBuilds(ctx context.Context, pool *pgxpool.Pool) ([]ReclaimBuild, er
 	return out, rows.Err()
 }
 
+// SuccessBuildsMissingDeploy returns the latest successful build per repo+branch
+// whose deploy handoff never landed: status is success with a pinned image, but
+// no deployments row references it. These are builds whose HandoffDeploy failed
+// (e.g. a transient DB error rolled it back), leaving the app NotDeployed with
+// nothing to retry. DISTINCT ON keeps only the newest such build per repo+branch
+// so a stale older image is never re-deployed over a newer one.
+func SuccessBuildsMissingDeploy(ctx context.Context, pool *pgxpool.Pool) ([]Build, error) {
+	rows, err := pool.Query(ctx, `
+		SELECT DISTINCT ON (b.git_repo_id, b.branch)
+		       b.id, b.git_repo_id, b.environment_id, b.app_name, b.commit_sha,
+		       b.branch, b.trigger, b.status, b.image_uri, b.created_at
+		FROM   builds b
+		WHERE  b.status = 'success' AND b.image_uri IS NOT NULL AND b.image_uri <> ''
+		  AND  NOT EXISTS (SELECT 1 FROM deployments d WHERE d.build_id = b.id)
+		  AND  b.created_at > NOW() - make_interval(days => 7)
+		ORDER  BY b.git_repo_id, b.branch, b.created_at DESC
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("success builds missing deploy: %w", err)
+	}
+	defer rows.Close()
+
+	var out []Build
+	for rows.Next() {
+		var b Build
+		if err := rows.Scan(
+			&b.ID, &b.GitRepoID, &b.EnvironmentID, &b.AppName, &b.CommitSHA,
+			&b.Branch, &b.Trigger, &b.Status, &b.ImageURI, &b.CreatedAt,
+		); err != nil {
+			return nil, fmt.Errorf("scan missing-deploy build: %w", err)
+		}
+		out = append(out, b)
+	}
+	return out, rows.Err()
+}
+
+// RowQuerier is satisfied by both *pgxpool.Pool and *pgxpool.Conn, so callers can
+// run a check on the same connection that holds an advisory lock.
+type RowQuerier interface {
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+}
+
+// DeploymentExistsForBuild reports whether a deployments row already references
+// the build. Used by the deploy reconciler to re-check under an advisory lock so
+// a rolling two-pod overlap cannot double-enqueue a deploy.
+func DeploymentExistsForBuild(ctx context.Context, q RowQuerier, buildID uuid.UUID) (bool, error) {
+	var exists bool
+	if err := q.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM deployments WHERE build_id = $1)`, buildID).Scan(&exists); err != nil {
+		return false, fmt.Errorf("deployment exists for build %s: %w", buildID, err)
+	}
+	return exists, nil
+}
+
 // ClaimQueued atomically claims the next queued build (one at a time so the
 // in-proc scheduler controls real concurrency) using FOR UPDATE SKIP LOCKED.
 // It moves the build queued→detecting and stamps started_at. Returns (nil, nil)

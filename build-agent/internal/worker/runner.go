@@ -2,6 +2,7 @@ package worker
 
 import (
 	"context"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"regexp"
@@ -254,6 +255,91 @@ func (r *Runner) finalize(ctx context.Context, b *db.Build, repo *db.Repo, out b
 	metrics.BuildTotal.WithLabelValues("success").Inc()
 	metrics.BuildDuration.WithLabelValues("total").Observe(time.Since(start).Seconds())
 	llog.Info().Str("image", out.imageURI).Int("artifacts", len(out.artifacts)).Msg("build succeeded")
+}
+
+// ReconcileDeploys drives orphaned successful builds to deployment. A build that
+// built + pinned its image but whose deploy handoff never landed (a transient DB
+// error rolled it back) has status=success and no deployments row, so nothing
+// would ever deploy it and the app stays NotDeployed. This finds the latest such
+// build per repo+branch and re-runs the handoff. Idempotent: once a deployment
+// row exists the build is no longer selected.
+func (r *Runner) ReconcileDeploys(ctx context.Context) {
+	builds, err := db.SuccessBuildsMissingDeploy(ctx, r.pool)
+	if err != nil {
+		log.Warn().Err(err).Msg("reconcile deploys: query failed")
+		return
+	}
+	for i := range builds {
+		r.retryHandoff(ctx, &builds[i])
+	}
+}
+
+// retryHandoff re-enqueues the deploy for one orphaned successful build. A
+// per-build advisory lock plus a re-check under that lock serialize the retry
+// cluster-wide so a rolling two-pod overlap cannot double-enqueue.
+func (r *Runner) retryHandoff(ctx context.Context, b *db.Build) {
+	llog := log.With().Str("build", b.ID.String()).Str("app", b.AppName).Logger()
+
+	conn, err := r.pool.Acquire(ctx)
+	if err != nil {
+		llog.Warn().Err(err).Msg("reconcile deploys: acquire conn failed")
+		return
+	}
+	defer conn.Release()
+
+	key := advisoryKey(b.ID)
+	var locked bool
+	if err := conn.QueryRow(ctx, `SELECT pg_try_advisory_lock($1)`, key).Scan(&locked); err != nil {
+		llog.Warn().Err(err).Msg("reconcile deploys: advisory lock failed")
+		return
+	}
+	if !locked {
+		return
+	}
+	defer func() { _, _ = conn.Exec(ctx, `SELECT pg_advisory_unlock($1)`, key) }()
+
+	if exists, err := db.DeploymentExistsForBuild(ctx, conn, b.ID); err != nil || exists {
+		return
+	}
+
+	repo, err := db.LoadRepo(ctx, r.pool, b.GitRepoID)
+	if err != nil {
+		llog.Warn().Err(err).Msg("reconcile deploys: load repo failed")
+		return
+	}
+	det := r.detectForHandoff(ctx, repo, b)
+	opID, err := db.HandoffDeploy(ctx, r.pool, b, repo, b.ImageURI, det, db.DefaultDomainOpts{
+		Enabled: r.cfg.DefaultDomainEnabled,
+		Base:    r.cfg.DefaultDomainBase,
+	})
+	if err != nil {
+		llog.Error().Err(err).Msg("reconcile deploys: handoff still failing")
+		return
+	}
+	llog.Info().Str("operation", opID.String()).Msg("reconcile deploys: re-enqueued deploy for orphaned successful build")
+	r.emit(ctx, b.ID, "console re-enqueued deploy (previous handoff had not completed)")
+}
+
+// detectForHandoff re-runs build-time detection to recover framework/port for a
+// reconciled deploy. Best-effort: any failure yields zero detection and
+// HandoffDeploy falls back to the git_repos app spec.
+func (r *Runner) detectForHandoff(ctx context.Context, repo *db.Repo, b *db.Build) db.DeployDetection {
+	if repo.Provider != "github" {
+		return db.DeployDetection{}
+	}
+	token, _, err := r.gitCreds(ctx, repo, b)
+	if err != nil {
+		return db.DeployDetection{}
+	}
+	det, err := server.DetectForBuild(ctx, token, repo.RepoFullName, repo.RootDir)
+	if err != nil {
+		return db.DeployDetection{}
+	}
+	return db.DeployDetection{Framework: det.Framework, Port: det.Port}
+}
+
+func advisoryKey(id uuid.UUID) int64 {
+	return int64(binary.BigEndian.Uint64(id[:8]))
 }
 
 // Reconcile re-attaches to Jenkins builds the previous agent instance was
