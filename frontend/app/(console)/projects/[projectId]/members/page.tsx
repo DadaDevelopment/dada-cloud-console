@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState, FormEvent } from "react";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import { useProjectContext } from "@/lib/project-context";
 import { useClaims } from "@/lib/claims";
 import { userServiceApi } from "@/lib/userService";
@@ -13,6 +13,7 @@ import { Modal } from "@/components/ui/modal";
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
 import { useT } from "@/lib/i18n/console/context";
+import { DeleteImpactModal, deleteImpactTargetKey, type DeleteImpactTarget } from "@/components/resources/delete-impact-modal";
 
 const ROLES: MemberRole[] = ["Owner", "Admin", "Developer", "ReadOnly"];
 
@@ -27,11 +28,14 @@ function RolePill({ role }: { role: MemberRole }) {
 
 export default function MembersPage() {
   const params = useParams<{ projectId: string }>();
+  const router = useRouter();
   const projectId = params.projectId;
-  const { project, role } = useProjectContext();
+  const { project, role, refetchProjects } = useProjectContext();
   const claims = useClaims();
   const { t } = useT();
   const orgId = project?.org_id || claims?.projectOrg[projectId];
+
+  const [deleteTarget, setDeleteTarget] = useState<DeleteImpactTarget | null>(null);
 
   const [members, setMembers] = useState<Member[]>([]);
   const [loading, setLoading] = useState(true);
@@ -111,6 +115,12 @@ export default function MembersPage() {
     } finally {
       setSubmitting(false);
     }
+  }
+
+  function handleProjectDeleted() {
+    setDeleteTarget(null);
+    refetchProjects();
+    router.push("/projects");
   }
 
   if (!isAdmin(role)) {
@@ -259,6 +269,30 @@ export default function MembersPage() {
 
       {loading && members.length === 0 && !error && (
         <div className="mt-4 flex justify-center"><Spinner /></div>
+      )}
+
+      <div className="mt-10 rounded-xl border border-red-200 dark:border-red-900 bg-white dark:bg-gray-900 px-5 py-5">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h2 className="text-sm font-semibold text-red-700 dark:text-red-400">{t("members.dangerZone.title")}</h2>
+            <p className="mt-0.5 text-sm text-gray-500 dark:text-gray-400">{t("members.dangerZone.subtitle")}</p>
+          </div>
+          <button
+            onClick={() => setDeleteTarget({ kind: "project", projectId, projectName: project?.name ?? projectId })}
+            className="inline-flex items-center gap-2 rounded-lg border border-red-200 dark:border-red-900 bg-white dark:bg-gray-900 px-3 py-2 text-sm font-medium text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/30 transition-colors shadow-sm"
+          >
+            {t("members.dangerZone.delete")}
+          </button>
+        </div>
+      </div>
+
+      {deleteTarget && (
+        <DeleteImpactModal
+          key={deleteImpactTargetKey(deleteTarget)}
+          target={deleteTarget}
+          onClose={() => setDeleteTarget(null)}
+          onDeleted={handleProjectDeleted}
+        />
       )}
     </div>
   );

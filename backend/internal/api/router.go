@@ -169,6 +169,8 @@ func SetupRouter(pool *pgxpool.Pool, cfg *config.Config) *gin.Engine {
 		api.POST("/projects", h.CreateProject)
 		api.POST("/projects/default", h.EnsureDefaultProject)
 		api.GET("/projects/:projectId", h.GetProject)
+		api.GET("/projects/:projectId/delete-impact", h.DeleteProjectImpact)
+		api.DELETE("/projects/:projectId", h.DeleteProject)
 
 		// Namespace policies (project settings — LimitRange + ResourceQuota)
 		api.PUT("/projects/:projectId/environments/:envId/namespace-policy", h.SetNamespacePolicy)
@@ -208,6 +210,8 @@ func SetupRouter(pool *pgxpool.Pool, cfg *config.Config) *gin.Engine {
 		api.POST("/projects/:projectId/environments/:envId/apps/:appName/restart", h.RestartApp)
 		api.POST("/projects/:projectId/environments/:envId/apps/:appName/adopt", h.AdoptApp)
 		api.POST("/projects/:projectId/environments/:envId/apps/:appName/values-token", h.GetValuesToken)
+		api.GET("/projects/:projectId/environments/:envId/apps/:appName/delete-impact", h.DeleteAppImpact)
+		api.DELETE("/projects/:projectId/environments/:envId/apps/:appName", h.DeleteApp)
 		api.GET("/projects/:projectId/environments/:envId/apps/:appName/state", h.GetAppState)
 		api.GET("/projects/:projectId/environments/:envId/apps/:appName/logs", h.GetAppLogs)
 		api.GET("/projects/:projectId/environments/:envId/apps/:appName/metrics", h.GetAppMetrics)

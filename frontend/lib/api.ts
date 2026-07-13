@@ -72,6 +72,7 @@ import type {
   CloudTasksResponse,
   CloudTaskResponse,
   CreateCloudTaskResponse,
+  DeleteImpactResponse,
 } from "./types";
 
 // Empty string → relative URLs → requests go through the ingress proxy.
@@ -189,6 +190,12 @@ export const projectsApi = {
   operations: (projectId: string) => apiFetch<OperationsResponse>(`/api/v1/projects/${projectId}/operations`),
   getOperation: (projectId: string, opId: string) =>
     apiFetch<{ operation: Operation }>(`/api/v1/projects/${projectId}/operations/${opId}`),
+
+  getDeleteImpact: (projectId: string) =>
+    apiFetch<DeleteImpactResponse>(`/api/v1/projects/${projectId}/delete-impact`),
+
+  remove: (projectId: string) =>
+    apiFetch<OperationResponse>(`/api/v1/projects/${projectId}`, { method: "DELETE" }),
 };
 
 export const s3bucketsApi = {
@@ -328,6 +335,17 @@ export const appsApi = {
   getMetrics: (projectId: string, envId: string, appName: string, range = "1h") =>
     apiFetch<MetricsResponse>(
       `/api/v1/projects/${projectId}/environments/${envId}/apps/${appName}/metrics?range=${range}`
+    ),
+
+  getDeleteImpact: (projectId: string, envId: string, appName: string) =>
+    apiFetch<DeleteImpactResponse>(
+      `/api/v1/projects/${projectId}/environments/${envId}/apps/${appName}/delete-impact`
+    ),
+
+  remove: (projectId: string, envId: string, appName: string) =>
+    apiFetch<OperationResponse>(
+      `/api/v1/projects/${projectId}/environments/${envId}/apps/${appName}`,
+      { method: "DELETE" }
     ),
 };
 

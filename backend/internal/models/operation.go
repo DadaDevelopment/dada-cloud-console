@@ -135,6 +135,17 @@ type DeleteAppServerPayload struct {
 	AppServerName string `json:"app_server_name"`
 }
 
+// DeleteAppPayload is the typed payload for DeleteApp operations. The worker's
+// existing doDeleteApp already consumes this shape.
+type DeleteAppPayload struct {
+	Name string `json:"name"`
+}
+
+// DeleteProjectPayload is the typed payload for DeleteProject operations. Empty
+// on purpose: the worker resolves everything it needs (slug, git tree) from
+// op.ProjectID.
+type DeleteProjectPayload struct{}
+
 // DiscoverWorkloadPayload is the typed payload for DiscoverWorkload operations:
 // a read-only inventory of an enrolled VM's running containers/volumes via the
 // Portainer docker proxy (no SSH). EndpointID is the VM's Portainer endpoint.

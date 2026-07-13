@@ -266,4 +266,11 @@ export const apps: Messages = {
     en: "File was updated in git — your unsaved changes are still here",
   },
   "apps.values.toast.committed": { ru: "Закоммичено · {sha}", en: "Committed · {sha}" },
+
+  "apps.dangerZone.title": { ru: "Опасная зона", en: "Danger zone" },
+  "apps.dangerZone.subtitle": {
+    ru: "Безвозвратное удаление приложения и всех связанных с ним ресурсов.",
+    en: "Permanently delete this app and everything attached to it.",
+  },
+  "apps.dangerZone.delete": { ru: "Удалить приложение", en: "Delete app" },
 };

@@ -52,4 +52,11 @@ export const members: Messages = {
     ru: "Вам нужна роль Владельца или Администратора для управления участниками.",
     en: "You need an Owner or Admin role to manage members.",
   },
+
+  "members.dangerZone.title": { ru: "Опасная зона", en: "Danger zone" },
+  "members.dangerZone.subtitle": {
+    ru: "Безвозвратное удаление проекта и всех его окружений, приложений и ресурсов.",
+    en: "Permanently delete this project and every environment, app, and resource in it.",
+  },
+  "members.dangerZone.delete": { ru: "Удалить проект", en: "Delete project" },
 };

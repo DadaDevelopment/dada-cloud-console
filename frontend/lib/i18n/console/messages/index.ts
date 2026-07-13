@@ -20,6 +20,7 @@ import { cloudTasks } from "./cloud-tasks";
 import { billing } from "./billing";
 import { consumption } from "./consumption";
 import { resources } from "./resources";
+import { deleteImpact } from "./delete-impact";
 
 /**
  * Flat key→{ru,en} map for the whole console. Each screen owns a namespace
@@ -49,4 +50,5 @@ export const messages: Messages = {
   ...billing,
   ...consumption,
   ...resources,
+  ...deleteImpact,
 };

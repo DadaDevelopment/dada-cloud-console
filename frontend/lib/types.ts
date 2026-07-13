@@ -577,6 +577,25 @@ export interface QuotaUsageResponse {
   inference_calls_month: number;
 }
 
+export type DeleteImpactGroup = "domain" | "database" | "storage" | "ingress" | "certificate" | "other";
+export type DeleteImpactSource = "console" | "cluster-only";
+
+export interface DeleteImpactItem {
+  kind: string;
+  name: string;
+  group: DeleteImpactGroup;
+  source: DeleteImpactSource;
+}
+
+export interface DeleteImpactResponse {
+  app?: string;
+  project?: string;
+  namespace: string;
+  cluster_scan: boolean;
+  items: DeleteImpactItem[];
+  clusterOnly: number;
+}
+
 export interface MLflowModelVersion {
   name: string;
   version: string;

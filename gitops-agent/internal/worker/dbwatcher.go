@@ -190,6 +190,8 @@ func (w *DBWatcher) dispatch(ctx context.Context, op db.Operation) error {
 		return w.doCreateApp(ctx, op)
 	case "DeleteApp":
 		return w.doDeleteApp(ctx, op)
+	case "DeleteProject":
+		return w.doDeleteProject(ctx, op)
 	case "DeployImageVersion":
 		return w.doDeployImageVersion(ctx, op)
 	case "UpdateAppStorage":
@@ -957,6 +959,90 @@ func (w *DBWatcher) doDeleteApp(ctx context.Context, op db.Operation) error {
 	if err := w.pool.QueryRow(ctx, `SELECT runtime FROM environments WHERE id = $1`, op.EnvironmentID).Scan(&runtime); err == nil && runtime == "vm" {
 		return w.renderEnvAggregate(ctx, op, op.ProjectID, op.EnvironmentID)
 	}
+	return nil
+}
+
+// doDeleteProject tears down an entire project (MVP scope): removes the whole
+// git tree clusters/beget-prod/projects/<slug>/ in one commit so Argo prunes
+// every app/resource the project owns, then wipes the project's DB rows in
+// FK-safe order. The commit sha is captured and the operation marked committed
+// BEFORE the DB wipe tx runs, because that tx deletes the operations row
+// (including this op) as part of the cascade — MarkCommitted has already
+// persisted by then. Namespace teardown and Keycloak cleanup are deliberately
+// skipped: single-org collapse means there is no per-project Keycloak group,
+// and Argo/git-prune plus namespace finalizers reap the namespace(s) without a
+// worker-side k8s client.
+func (w *DBWatcher) doDeleteProject(ctx context.Context, op db.Operation) error {
+	var slug string
+	if err := w.pool.QueryRow(ctx,
+		`SELECT name FROM projects WHERE id = $1`, op.ProjectID,
+	).Scan(&slug); err != nil {
+		return fmt.Errorf("project lookup: %w", err)
+	}
+
+	mgr, err := w.managerFor(ctx, op.ProjectID)
+	if err != nil {
+		return err
+	}
+	if err := mgr.EnsureCloned(); err != nil {
+		return err
+	}
+
+	projectDir := fmt.Sprintf("clusters/beget-prod/projects/%s", slug)
+	commitMsg := fmt.Sprintf(
+		"[DADA Console] Delete Project %s\n\nOperation: %s\n", slug, op.ID,
+	)
+	sha, err := mgr.RemoveAndPush([]string{projectDir}, commitMsg, w.cfg.BotName, w.cfg.BotEmail)
+	if err != nil {
+		return fmt.Errorf("git remove project tree: %w", err)
+	}
+	if sha != "" {
+		opID := op.ID
+		_ = db.InsertCommit(ctx, w.pool, sha, mgr.RepoURL(), mgr.Branch(),
+			projectDir, commitMsg, w.cfg.BotName, w.cfg.BotEmail, &opID, "agent")
+	}
+	if err := db.MarkCommitted(ctx, w.pool, op.ID, sha, projectDir); err != nil {
+		return err
+	}
+
+	tx, err := w.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin project wipe tx: %w", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
+
+	if _, err := tx.Exec(ctx,
+		`UPDATE git_commits SET operation_id = NULL WHERE operation_id IN (SELECT id FROM operations WHERE project_id = $1)`,
+		op.ProjectID,
+	); err != nil {
+		return fmt.Errorf("detach git_commits: %w", err)
+	}
+	if _, err := tx.Exec(ctx,
+		`UPDATE environments SET parent_env_id = NULL WHERE project_id = $1`,
+		op.ProjectID,
+	); err != nil {
+		return fmt.Errorf("detach preview parent_env_id: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `DELETE FROM audit_events WHERE project_id = $1`, op.ProjectID); err != nil {
+		return fmt.Errorf("delete audit_events: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `DELETE FROM db_backups WHERE project_id = $1`, op.ProjectID); err != nil {
+		return fmt.Errorf("delete db_backups: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `DELETE FROM resource_snapshots WHERE project_id = $1`, op.ProjectID); err != nil {
+		return fmt.Errorf("delete resource_snapshots: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `DELETE FROM operations WHERE project_id = $1`, op.ProjectID); err != nil {
+		return fmt.Errorf("delete operations: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `DELETE FROM projects WHERE id = $1`, op.ProjectID); err != nil {
+		return fmt.Errorf("delete project: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit project wipe tx: %w", err)
+	}
+
+	log.Info().Str("project", slug).Str("project_id", op.ProjectID.String()).Msg("db-watcher: deleted project")
 	return nil
 }
 
