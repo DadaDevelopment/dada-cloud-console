@@ -127,22 +127,31 @@ func InFlightBuilds(ctx context.Context, pool *pgxpool.Pool) ([]ReclaimBuild, er
 	return out, rows.Err()
 }
 
-// SuccessBuildsMissingDeploy returns the latest successful build per repo+branch
-// whose deploy handoff never landed: status is success with a pinned image, but
-// no deployments row references it. These are builds whose HandoffDeploy failed
-// (e.g. a transient DB error rolled it back), leaving the app NotDeployed with
-// nothing to retry. DISTINCT ON keeps only the newest such build per repo+branch
-// so a stale older image is never re-deployed over a newer one.
+// SuccessBuildsMissingDeploy returns, per repo+branch, the single newest
+// successful build when that build's deploy handoff never landed: it has a
+// pinned image but no deployments row. HandoffDeploy failed for it (e.g. a
+// transient DB error rolled it back), leaving the app NotDeployed with nothing
+// to retry.
+//
+// The "no deployment" filter must be applied AFTER selecting the newest build
+// per repo+branch, not inside the selection: an older success build that also
+// lacks a deployment is superseded by the newer one and must NOT be reconciled,
+// or the reconciler would deploy every historical build one per tick (newest
+// first), ending on the oldest image.
 func SuccessBuildsMissingDeploy(ctx context.Context, pool *pgxpool.Pool) ([]Build, error) {
 	rows, err := pool.Query(ctx, `
-		SELECT DISTINCT ON (b.git_repo_id, b.branch)
-		       b.id, b.git_repo_id, b.environment_id, b.app_name, b.commit_sha,
-		       b.branch, b.trigger, b.status, b.image_uri, b.created_at
-		FROM   builds b
-		WHERE  b.status = 'success' AND b.image_uri IS NOT NULL AND b.image_uri <> ''
-		  AND  NOT EXISTS (SELECT 1 FROM deployments d WHERE d.build_id = b.id)
-		  AND  b.created_at > NOW() - make_interval(days => 7)
-		ORDER  BY b.git_repo_id, b.branch, b.created_at DESC
+		SELECT id, git_repo_id, environment_id, app_name, commit_sha,
+		       branch, trigger, status, image_uri, created_at
+		FROM (
+			SELECT DISTINCT ON (b.git_repo_id, b.branch)
+			       b.id, b.git_repo_id, b.environment_id, b.app_name, b.commit_sha,
+			       b.branch, b.trigger, b.status, b.image_uri, b.created_at
+			FROM   builds b
+			WHERE  b.status = 'success' AND b.image_uri IS NOT NULL AND b.image_uri <> ''
+			  AND  b.created_at > NOW() - make_interval(days => 7)
+			ORDER  BY b.git_repo_id, b.branch, b.created_at DESC
+		) latest
+		WHERE NOT EXISTS (SELECT 1 FROM deployments d WHERE d.build_id = latest.id)
 	`)
 	if err != nil {
 		return nil, fmt.Errorf("success builds missing deploy: %w", err)
