@@ -198,6 +198,8 @@ func (w *DBWatcher) dispatch(ctx context.Context, op db.Operation) error {
 		return w.doCreatePublicApi(ctx, op)
 	case "AttachCustomHostname":
 		return w.doAttachCustomHostname(ctx, op)
+	case "AttachDefaultDomain":
+		return w.doAttachDefaultDomain(ctx, op)
 	case "DetachCustomHostname":
 		return w.doDetachCustomHostname(ctx, op)
 	case "CreateAIModel":
@@ -1734,6 +1736,93 @@ func (w *DBWatcher) doAttachCustomHostname(ctx context.Context, op db.Operation)
 
 	commitMsg := fmt.Sprintf(
 		"[DADA Console] Attach custom domain %s to app %s\n\nOperation: %s\nProject: %s\nEnvironment: %s\n",
+		p.Hostname, p.AppName, op.ID, projectName, envName,
+	)
+	return w.commitFilesAndRecord(ctx, op, mgr, valuesPath, files, commitMsg)
+}
+
+// doAttachDefaultDomain backfills a managed surrogate domain onto an existing
+// app. It renders the same two manifests as doCreateApp's default-domain block —
+// a per-host managed Ingress (WildcardTLSSecret when configured, else per-host
+// HTTP-01) plus a DNS-only PublicApi that publishes the A record into the Beget
+// zone — into the app's resources.values.yaml. The managed domain_hostnames row
+// is inserted by the enqueuer.
+func (w *DBWatcher) doAttachDefaultDomain(ctx context.Context, op db.Operation) error {
+	var p struct {
+		AppName  string `json:"app_name"`
+		Hostname string `json:"hostname"`
+	}
+	if err := json.Unmarshal(op.Payload, &p); err != nil {
+		return fmt.Errorf("parse payload: %w", err)
+	}
+
+	projectName, envName, envNamespace, err := w.projectEnv(ctx, op.ProjectID, op.EnvironmentID)
+	if err != nil {
+		return fmt.Errorf("project/env lookup: %w", err)
+	}
+
+	var summaryRaw []byte
+	if err := w.pool.QueryRow(ctx, `
+		SELECT summary_json FROM resource_snapshots
+		WHERE project_id=$1 AND environment_id=$2 AND kind='App' AND name=$3
+	`, op.ProjectID, op.EnvironmentID, p.AppName).Scan(&summaryRaw); err != nil {
+		return fmt.Errorf("loading app snapshot: %w", err)
+	}
+	var cur map[string]any
+	_ = json.Unmarshal(summaryRaw, &cur)
+	portVal, _ := cur["port"].(float64)
+	frameworkVal, _ := cur["framework"].(string)
+	if portVal == 0 {
+		portVal = float64(renderer.DefaultPortForFramework(frameworkVal))
+	}
+
+	mgr, err := w.managerFor(ctx, op.ProjectID)
+	if err != nil {
+		return err
+	}
+
+	ingressYAML, err := renderer.RenderCustomIngress(renderer.CustomIngressSpec{
+		Name:              renderer.FQDNToName(p.Hostname),
+		Namespace:         envNamespace,
+		ProjectSlug:       projectName,
+		EnvSlug:           envName,
+		Hostname:          p.Hostname,
+		ServiceName:       renderer.AppServiceName(p.AppName),
+		ServicePortName:   renderer.DefaultAppServicePortName,
+		OperationID:       op.ID.String(),
+		WildcardTLSSecret: w.cfg.DefaultDomainTLSSecret,
+		Managed:           true,
+	})
+	if err != nil {
+		return err
+	}
+	dnsYAML, err := renderer.RenderDefaultDomainDNS(renderer.DefaultDomainDNSSpec{
+		Name:        renderer.FQDNToName(p.Hostname),
+		ProjectSlug: projectName,
+		EnvSlug:     envName,
+		Hostname:    p.Hostname,
+		ServiceName: renderer.AppServiceName(p.AppName),
+		ServicePort: int(portVal),
+		Target:      w.cfg.DefaultDomainDNSTarget,
+		OperationID: op.ID.String(),
+	})
+	if err != nil {
+		return err
+	}
+
+	appFiles, err := w.ensureAppExists(mgr, projectName, envName, p.AppName, envNamespace, op.ID.String())
+	if err != nil {
+		return err
+	}
+	valuesPath := renderer.AppResourcesValuesGitPath(projectName, envName, p.AppName)
+	manifestFile, err := upsertManifestsFile(mgr, valuesPath, ingressYAML, dnsYAML)
+	if err != nil {
+		return err
+	}
+	files := append(appFiles, manifestFile)
+
+	commitMsg := fmt.Sprintf(
+		"[DADA Console] Attach default domain %s to app %s\n\nOperation: %s\nProject: %s\nEnvironment: %s\n",
 		p.Hostname, p.AppName, op.ID, projectName, envName,
 	)
 	return w.commitFilesAndRecord(ctx, op, mgr, valuesPath, files, commitMsg)
