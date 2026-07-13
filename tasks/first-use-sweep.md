@@ -39,8 +39,20 @@ via DirectUserOperations"), and the console's `EnsureProjectGroups` is a
 connections (`rabbitmqctl list_connections` empty); no pod floods NoRouteToHost.
 So the broker is genuinely unused and correctly at 0.
 - The REAL #1 fix is `db9c2bf` (HTTP self-heal of missing project groups), which
-  is live. top-decker is a PERSONAL-org project (org_id `top.decker`); its group
-  is provisioned on project access via the self-heal path.
+  is live and DOES fire — but it is INSUFFICIENT for personal orgs: live backend
+  log (22:41:33) shows the self-heal's HTTP call itself timing out:
+  `ensure project groups org=alexkekiy: Post ".../orgs/alexkekiy/projects":
+  context deadline exceeded (Client.Timeout awaiting headers)` (console client
+  timeout 20s). user-service is alive (getOrg GETs 200 at 22:47) but its
+  **POST /orgs/{org}/projects hangs for personal-org projects** (alexkekiy,
+  top.decker) — the group is never created → members 404 "IAM resource not
+  found". Shared-"dada"-org projects are already provisioned so they work.
+- STILL OPEN — the fix is USER-SERVICE-SIDE (separate Java repo): why does
+  `POST /orgs/{org}/projects` block >20s for a personal org (org group missing in
+  Keycloak? a sync/lock on first-time org creation?). Being investigated by the
+  dedicated background task. dada-cloud mitigations to weigh: raise the ensure
+  HTTP client timeout if user-service is slow-but-eventual, or make the console
+  create the org group before the project group. NOT rabbitmq.
 - Both this session (646f602) AND the prior session (eeb451a) briefly set
   rabbitmq→1 on the same stale comment; both reverted. Final: argo-infra
   `71d7425` sets replicaCount 0 AND rewrites the misleading comment so nobody
