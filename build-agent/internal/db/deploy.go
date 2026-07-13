@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/rs/zerolog/log"
 )
 
 // SystemUserID is the fixed, non-loginable actor used for agent-initiated
@@ -87,10 +88,14 @@ func buildDefaultHostname(base, name, suffix string) string {
 // repo+branch, so two concurrent first-builds racing to CreateApp the same name
 // is not a practical concern.
 //
-// Steps (single tx so a crash never leaves a dangling deployment):
+// Steps 1-3 run in one tx so a crash never leaves a dangling deployment:
 //  1. INSERT deployments (not yet current — the op-Ready watcher flips is_current).
 //  2. INSERT operations (CreateApp or DeployImageVersion, status=Created, actor=system).
-//  3. UPDATE deployments.operation_id = <op id>.
+//  3. UPDATE deployments.operation_id = <op id>, then COMMIT.
+//
+// Optional side effects (audit event, surrogate default hostname) run AFTER the
+// commit as separate best-effort statements: a failure there loses only that
+// side effect and never rolls back the committed deploy.
 //
 // Returns the new operation id.
 func HandoffDeploy(ctx context.Context, pool *pgxpool.Pool, b *Build, repo *Repo, imageURI string, det DeployDetection, dd DefaultDomainOpts) (uuid.UUID, error) {
@@ -176,25 +181,37 @@ func HandoffDeploy(ctx context.Context, pool *pgxpool.Pool, b *Build, repo *Repo
 		return uuid.Nil, fmt.Errorf("link operation: %w", err)
 	}
 
-	if defaultHostname != "" {
-		if _, err := tx.Exec(ctx, `
-			INSERT INTO domain_hostnames (authorization_id, environment_id, app_name, hostname, record_type, status, cert_status, operation_id, managed)
-			VALUES (NULL, $1, $2, $3, 'CNAME', 'pending', 'pending', $4, true)
-		`, b.EnvironmentID, b.AppName, defaultHostname, opID); err != nil {
-			return uuid.Nil, fmt.Errorf("record default hostname: %w", err)
-		}
-	}
-
-	// Best-effort audit (matches backend deployments.go).
-	_, _ = tx.Exec(ctx, `
-		INSERT INTO audit_events (actor_id, project_id, operation_id, action, resource_kind, resource_name, metadata)
-		VALUES ($1, $2, $3, $4, 'App', $5, $6)
-	`, SystemUserID, repo.ProjectID, opID, action, b.AppName, payload)
-
 	if err := tx.Commit(ctx); err != nil {
 		return uuid.Nil, fmt.Errorf("commit deploy: %w", err)
 	}
+
+	optionalDeploySideEffects(ctx, pool, b, repo, opID, action, payload, defaultHostname)
 	return opID, nil
+}
+
+// optionalDeploySideEffects records the audit event and the surrogate default
+// hostname AFTER the deploy transaction has committed. Each runs on its own
+// statement so a failure (a missing grant, a half-configured default-domain
+// feature) only loses that side effect and can never roll back the deploy that
+// already succeeded. Inside the deploy tx a single failing INSERT would poison
+// the whole transaction and drop the operation, leaving a successful build
+// stuck NotDeployed.
+func optionalDeploySideEffects(ctx context.Context, pool *pgxpool.Pool, b *Build, repo *Repo, opID uuid.UUID, action string, payload []byte, defaultHostname string) {
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO audit_events (actor_id, project_id, operation_id, action, resource_kind, resource_name, metadata)
+		VALUES ($1, $2, $3, $4, 'App', $5, $6)
+	`, SystemUserID, repo.ProjectID, opID, action, b.AppName, payload); err != nil {
+		log.Warn().Err(err).Str("app", b.AppName).Str("operation", opID.String()).Msg("deploy audit event insert failed (deploy already committed)")
+	}
+
+	if defaultHostname != "" {
+		if _, err := pool.Exec(ctx, `
+			INSERT INTO domain_hostnames (authorization_id, environment_id, app_name, hostname, record_type, status, cert_status, operation_id, managed)
+			VALUES (NULL, $1, $2, $3, 'CNAME', 'pending', 'pending', $4, true)
+		`, b.EnvironmentID, b.AppName, defaultHostname, opID); err != nil {
+			log.Warn().Err(err).Str("app", b.AppName).Str("hostname", defaultHostname).Msg("default surrogate hostname insert failed (deploy already committed; app deploys without an auto domain)")
+		}
+	}
 }
 
 // LatestImageForBranch returns the image_uri of the most recent successful build
