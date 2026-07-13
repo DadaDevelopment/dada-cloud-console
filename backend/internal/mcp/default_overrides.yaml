@@ -1,0 +1,67 @@
+# Default MCP tool curation (embedded into the backend binary).
+#
+# The reflective generator emits one tool per backend OpenAPI operation (~130).
+# Most are niche/admin/internal (monitoring internals, mlflow, billing, dns CRUD,
+# ingest/push endpoints, OAuth callbacks) and are noise for an agent — they bloat
+# the tool list every client has to carry. `keep` is an allowlist: only the tools
+# an agent needs for the core "spin up / deploy / configure / diagnose" loop are
+# exposed. New backend operations do NOT leak in.
+#
+# To expose the full set, mount a file at MCP_OVERRIDES_PATH with an empty `keep`.
+
+keep:
+  # Account / discovery
+  - getCurrentUser
+  - getAccountSummary
+  # Projects
+  - listProjects
+  - getProject
+  - createProject
+  - ensureDefaultProject
+  - getProjectQuotas
+  # Apps
+  - listApps
+  - createApp
+  - getAppState
+  - restartApp
+  - rollbackApp
+  - updateAppImage
+  - deleteApp
+  - deleteAppImpact
+  # Environment variables
+  - listEnvVars
+  - setEnvVar
+  - revealEnvVar
+  - deleteEnvVar
+  # Databases
+  - listDatabases
+  - createDatabase
+  - getDatabaseCredentials
+  - deleteDatabase
+  # Domains / hostnames
+  - listDomainAuthorizations
+  - addDomainAuthorization
+  - verifyDomainAuthorization
+  - listHostnames
+  - attachHostname
+  - detachHostname
+  # Builds
+  - listBuilds
+  - getBuild
+  - triggerBuild
+  # Logs (diagnose)
+  - getAppLogs
+  - searchLogs
+  # Operations (async result polling)
+  - getOperation
+  - listOperations
+  - retryOperation
+  # App servers (VMs)
+  - listAppServers
+  - getAppServer
+  - createAppServer
+  - getAppServerState
+
+rename: {}
+annotate: {}
+group: {}
