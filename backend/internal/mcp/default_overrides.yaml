@@ -17,13 +17,13 @@ keep:
   # Projects
   - listProjects
   - createProject
-  # Apps
+  # Apps (no delete/restart on purpose: delete is destructive, restart is not
+  # needed — env/image changes reconcile on their own)
   - listApps
   - createApp
-  - restartApp
   - updateAppImage
-  - deleteApp
-  # Environment variables (get-all / put / delete)
+  - updateAppStorage
+  # Environment variables (get-all / put / delete — delete is safe, scoped to a key)
   - listEnvVars
   - setEnvVar
   - deleteEnvVar
@@ -37,7 +37,12 @@ keep:
   # Builds
   - triggerBuild
   - getBuild
-  # Logs (diagnose)
+  # Operations — async-confirm primitive: mutations return an operation id and
+  # the API tells you to poll it (Committed = written, Failed = read the message)
+  - getOperation
+  # Logs (diagnose). searchLogs is the cloud (k8s) app log path (OpenSearch,
+  # scoped by app); getAppLogs is VM/compose-only (Portainer, needs a container id)
+  - searchLogs
   - getAppLogs
   # App servers (VMs)
   - listAppServers
