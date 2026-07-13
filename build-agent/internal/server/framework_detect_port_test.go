@@ -228,19 +228,16 @@ func TestDetectPortGo(t *testing.T) {
 	})
 }
 
-// TestDetectStaticSiteGap documents a real gap: a plain static site (index.html
-// with no framework marker) is NOT detected at all, even though
-// frameworkDefaultPort carries a "static" -> 80 entry that nothing ever emits.
-// Such a repo returns an empty detection and the wizard falls back to manual
-// selection. Update this test if a static detector is added.
-func TestDetectStaticSiteGap(t *testing.T) {
-	for _, files := range []map[string]string{
-		{"index.html": "<html></html>"},
-		{"index.html": "<html></html>", "style.css": "body{}"},
-	} {
-		det := detectFakeRepo(t, files)
-		if det.Framework != nil {
-			t.Fatalf("static site now detected as %q -- update this gap test and frameworkDefaultPort coverage", *det.Framework)
-		}
-	}
+// TestDetectPortStatic covers plain static sites: a repo with index.html and no
+// higher-priority framework marker resolves to framework "static" on port 80.
+// The static detector is the lowest-priority candidate, so any real framework
+// or a Dockerfile still wins (asserted by the last two cases).
+func TestDetectPortStatic(t *testing.T) {
+	runPortCases(t, []portCase{
+		{"index-only", map[string]string{"index.html": "<html></html>"}, "static", 80},
+		{"index-with-css", map[string]string{"index.html": "<html></html>", "style.css": "body{}"}, "static", 80},
+		{"index-with-js-assets", map[string]string{"index.html": "<html></html>", "app.js": "//", "assets/logo.png": "x"}, "static", 80},
+		{"index-plus-dockerfile-loses", map[string]string{"index.html": "<html></html>", "Dockerfile": "FROM nginx\nEXPOSE 80\n"}, "dockerfile", 80},
+		{"index-plus-vite-loses", map[string]string{"index.html": "<html></html>", "package.json": pkg(`"vite":"5"`, ""), "vite.config.ts": "export default {}"}, "vite", 4173},
+	})
 }

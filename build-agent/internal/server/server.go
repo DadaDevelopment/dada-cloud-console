@@ -770,6 +770,14 @@ func detectCandidatesInDir(ctx context.Context, token, owner, repo, dir string, 
 			path:      entry.Path,
 		})
 	}
+	if entry, ok := findFile(byName, "index.html"); ok {
+		cands = append(cands, frameworkCandidate{
+			detection: detectionWithStrings("static", "", "", "."),
+			score:     3,
+			depth:     depth,
+			path:      entry.Path,
+		})
+	}
 	return cands
 }
 
