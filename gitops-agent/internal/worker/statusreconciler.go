@@ -70,6 +70,7 @@ func (r *StatusReconciler) tick(ctx context.Context) {
 	r.reconcile(ctx)
 	r.reconcileModels(ctx)
 	r.reconcileDatabases(ctx)
+	r.reconcilePublicApis(ctx)
 }
 
 // reconcileModels mirrors KServe InferenceService readiness onto AIModel
@@ -164,6 +165,54 @@ func (r *StatusReconciler) reconcileDatabases(ctx context.Context) {
 	}
 	if updated > 0 {
 		log.Debug().Int("updated", updated).Msg("status-reconciler: synced database statuses")
+	}
+}
+
+// reconcilePublicApis mirrors PublicApi (Crossplane publicapi-beget-dns)
+// readiness onto PublicApi snapshots. Like databases/models the CRs are
+// cluster-scoped, so each is matched to its env by unambiguous snapshot name.
+// Without this a public endpoint is frozen at the git-watcher's create-time
+// "Unknown" forever even though its Ingress + DNS are live. Existing rows only,
+// so no isolation leak: a CR with no snapshot in this project is never created.
+func (r *StatusReconciler) reconcilePublicApis(ctx context.Context) {
+	apiEnvs, err := db.SnapshotEnvsByKind(ctx, r.pool, "PublicApi")
+	if err != nil {
+		log.Error().Err(err).Msg("status-reconciler: list publicapi envs")
+		return
+	}
+	if len(apiEnvs) == 0 {
+		return
+	}
+
+	list, err := r.clients.Dynamic.Resource(pgvr("publicapis")).Namespace("").List(ctx, metav1.ListOptions{})
+	if err != nil {
+		log.Warn().Err(err).Msg("status-reconciler: list publicapis")
+		return
+	}
+
+	updated := 0
+	for i := range list.Items {
+		cr := &list.Items[i]
+		name := cr.GetName()
+		ids := apiEnvs[name]
+		if len(ids) != 1 {
+			continue
+		}
+		phase := crPhase(cr)
+		patch, _ := json.Marshal(map[string]any{
+			"status":      phase,
+			"live_source": "crossplane",
+			"live_at":     time.Now().UTC().Format(time.RFC3339),
+		})
+		n, err := db.UpdateLiveStatus(ctx, r.pool, ids[0], "PublicApi", name, phase, patch)
+		if err != nil {
+			log.Error().Err(err).Str("publicapi", name).Msg("status-reconciler: update publicapi")
+			continue
+		}
+		updated += int(n)
+	}
+	if updated > 0 {
+		log.Debug().Int("updated", updated).Msg("status-reconciler: synced publicapi statuses")
 	}
 }
 
