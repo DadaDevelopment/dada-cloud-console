@@ -21,8 +21,10 @@ var SystemUserID = uuid.MustParse("00000000-0000-0000-0000-000000000000")
 // deployImageVersionPayload mirrors backend models.DeployImageVersionPayload.
 // Kept local so build-agent does not import the backend module.
 type deployImageVersionPayload struct {
-	AppName string `json:"app_name"`
-	Image   string `json:"image"`
+	AppName   string `json:"app_name"`
+	Image     string `json:"image"`
+	Framework string `json:"framework,omitempty"`
+	Port      int    `json:"port,omitempty"`
 }
 
 // createAppPayload mirrors backend models.CreateAppPayload (k8s fields only — git
@@ -31,10 +33,19 @@ type deployImageVersionPayload struct {
 type createAppPayload struct {
 	Name            string `json:"name"`
 	Image           string `json:"image"`
+	Framework       string `json:"framework,omitempty"`
 	Port            int    `json:"port"`
 	Replicas        int    `json:"replicas,omitempty"`
 	Profile         string `json:"profile,omitempty"`
 	DefaultHostname string `json:"default_hostname,omitempty"`
+}
+
+// DeployDetection carries build-time framework/port detection into the deploy
+// handoff so the rendered App picks the right chart + servicePort. Zero values
+// mean detection did not run; HandoffDeploy falls back to the git_repos spec.
+type DeployDetection struct {
+	Framework string
+	Port      int
 }
 
 // DefaultDomainOpts carries the platform default-domain knobs into HandoffDeploy
@@ -82,7 +93,7 @@ func buildDefaultHostname(base, name, suffix string) string {
 //  3. UPDATE deployments.operation_id = <op id>.
 //
 // Returns the new operation id.
-func HandoffDeploy(ctx context.Context, pool *pgxpool.Pool, b *Build, repo *Repo, imageURI string, dd DefaultDomainOpts) (uuid.UUID, error) {
+func HandoffDeploy(ctx context.Context, pool *pgxpool.Pool, b *Build, repo *Repo, imageURI string, det DeployDetection, dd DefaultDomainOpts) (uuid.UUID, error) {
 	tx, err := pool.Begin(ctx)
 	if err != nil {
 		return uuid.Nil, fmt.Errorf("begin deploy tx: %w", err)
@@ -119,9 +130,18 @@ func HandoffDeploy(ctx context.Context, pool *pgxpool.Pool, b *Build, repo *Repo
 	var action string
 	var payload []byte
 	var defaultHostname string
+	deployPort := repo.Port
+	if det.Port > 0 {
+		deployPort = det.Port
+	}
 	if appExists {
 		action = "DeployImageVersion"
-		payload, err = json.Marshal(deployImageVersionPayload{AppName: b.AppName, Image: imageURI})
+		payload, err = json.Marshal(deployImageVersionPayload{
+			AppName:   b.AppName,
+			Image:     imageURI,
+			Framework: det.Framework,
+			Port:      det.Port,
+		})
 	} else {
 		action = "CreateApp"
 		if dd.Enabled && dd.Base != "" {
@@ -132,7 +152,8 @@ func HandoffDeploy(ctx context.Context, pool *pgxpool.Pool, b *Build, repo *Repo
 		payload, err = json.Marshal(createAppPayload{
 			Name:            b.AppName,
 			Image:           imageURI,
-			Port:            repo.Port,
+			Framework:       det.Framework,
+			Port:            deployPort,
 			Replicas:        repo.Replicas,
 			Profile:         repo.Profile,
 			DefaultHostname: defaultHostname,

@@ -150,13 +150,33 @@ func (h *Handler) ListApps(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"apps": apps})
 }
 
+// jsFrameworks are the detected framework labels whose serve/dev process listens
+// on :5173 by default (mirrors the helm common chart's javascript stack and
+// renderer.ChartFor). Kept local so the backend module does not depend on the
+// gitops-agent renderer package.
+var jsFrameworks = map[string]bool{
+	"javascript": true, "web": true, "nextjs": true, "nuxt": true,
+	"sveltekit": true, "react": true, "nestjs": true, "express": true,
+	"fastify": true, "remix": true, "vite": true, "node": true,
+}
+
+// defaultPortForFramework returns the servicePort to assume when a create request
+// omits one: 5173 for javascript apps, 8080 otherwise.
+func defaultPortForFramework(framework string) int {
+	if jsFrameworks[framework] {
+		return 5173
+	}
+	return 8080
+}
+
 type createAppRequest struct {
-	Name     string        `json:"name"`
-	Image    string        `json:"image"`
-	Port     int           `json:"port"`
-	Replicas int           `json:"replicas"`
-	Profile  string        `json:"profile"`
-	Volume   *appVolumeReq `json:"volume,omitempty"`
+	Name      string        `json:"name"`
+	Image     string        `json:"image"`
+	Framework string        `json:"framework"`
+	Port      int           `json:"port"`
+	Replicas  int           `json:"replicas"`
+	Profile   string        `json:"profile"`
+	Volume    *appVolumeReq `json:"volume,omitempty"`
 }
 
 // appVolumeReq is the wire form of a persistent data directory request. Empty
@@ -318,7 +338,7 @@ func (h *Handler) CreateApp(c *gin.Context) {
 	if !isCompose {
 		// Helm app validation + defaults.
 		if req.Port == 0 {
-			req.Port = 8080
+			req.Port = defaultPortForFramework(req.Framework)
 		}
 		if req.Replicas == 0 {
 			req.Replicas = 1
@@ -386,6 +406,7 @@ func (h *Handler) CreateApp(c *gin.Context) {
 	payload := models.CreateAppPayload{
 		Name:            req.Name,
 		Image:           req.Image,
+		Framework:       req.Framework,
 		Port:            req.Port,
 		Replicas:        req.Replicas,
 		Profile:         req.Profile,

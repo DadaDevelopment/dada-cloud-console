@@ -701,6 +701,7 @@ func (w *DBWatcher) doCreateApp(ctx context.Context, op db.Operation) error {
 	var p struct {
 		Name            string `json:"name"`
 		Image           string `json:"image"`
+		Framework       string `json:"framework"`
 		Port            int    `json:"port"`
 		Replicas        int    `json:"replicas"`
 		Profile         string `json:"profile"`
@@ -720,6 +721,10 @@ func (w *DBWatcher) doCreateApp(ctx context.Context, op db.Operation) error {
 	// binding) rather than a Helm App.
 	if p.AppServerName != "" {
 		return w.doCreateComposeApp(ctx, op, p.Name)
+	}
+
+	if p.Port == 0 {
+		p.Port = renderer.DefaultPortForFramework(p.Framework)
 	}
 
 	projectName, envName, envNamespace, err := w.projectEnv(ctx, op.ProjectID, op.EnvironmentID)
@@ -746,6 +751,7 @@ func (w *DBWatcher) doCreateApp(ctx context.Context, op db.Operation) error {
 		ProjectSlug:        projectName,
 		EnvSlug:            envName,
 		Image:              p.Image,
+		Framework:          p.Framework,
 		Port:               p.Port,
 		Replicas:           p.Replicas,
 		Profile:            p.Profile,
@@ -838,7 +844,7 @@ func (w *DBWatcher) doCreateApp(ctx context.Context, op db.Operation) error {
 
 	// Upsert snapshot so DeployImageVersion can re-render without reading git.
 	summary := map[string]any{
-		"image": p.Image, "port": p.Port, "replicas": p.Replicas,
+		"image": p.Image, "framework": p.Framework, "port": p.Port, "replicas": p.Replicas,
 		"profile": p.Profile, "status": "Pending",
 	}
 	if p.Volume != nil && p.Volume.Path != "" {
@@ -1325,8 +1331,10 @@ func (w *DBWatcher) updateComposeAppImage(ctx context.Context, op db.Operation, 
 
 func (w *DBWatcher) doDeployImageVersion(ctx context.Context, op db.Operation) error {
 	var p struct {
-		AppName string `json:"app_name"`
-		Image   string `json:"image"`
+		AppName   string `json:"app_name"`
+		Image     string `json:"image"`
+		Framework string `json:"framework"`
+		Port      int    `json:"port"`
 	}
 	if err := json.Unmarshal(op.Payload, &p); err != nil {
 		return fmt.Errorf("parse payload: %w", err)
@@ -1358,8 +1366,15 @@ func (w *DBWatcher) doDeployImageVersion(ctx context.Context, op db.Operation) e
 	portVal, _ := cur["port"].(float64)
 	replicasVal, _ := cur["replicas"].(float64)
 	profileVal, _ := cur["profile"].(string)
+	frameworkVal, _ := cur["framework"].(string)
+	if p.Framework != "" {
+		frameworkVal = p.Framework
+	}
+	if p.Port > 0 {
+		portVal = float64(p.Port)
+	}
 	if portVal == 0 {
-		portVal = 8080
+		portVal = float64(renderer.DefaultPortForFramework(frameworkVal))
 	}
 	if replicasVal == 0 {
 		replicasVal = 1
@@ -1386,6 +1401,7 @@ func (w *DBWatcher) doDeployImageVersion(ctx context.Context, op db.Operation) e
 		ProjectSlug:        projectName,
 		EnvSlug:            envName,
 		Image:              p.Image,
+		Framework:          frameworkVal,
 		Port:               int(portVal),
 		Replicas:           int(replicasVal),
 		Profile:            profileVal,
@@ -1436,6 +1452,8 @@ func (w *DBWatcher) doDeployImageVersion(ctx context.Context, op db.Operation) e
 	}
 
 	cur["image"] = p.Image
+	cur["framework"] = frameworkVal
+	cur["port"] = portVal
 	cur["status"] = "Pending"
 	updatedJSON, _ := json.Marshal(cur)
 	return db.UpsertSnapshot(ctx, w.pool,
@@ -1494,8 +1512,9 @@ func (w *DBWatcher) doUpdateAppStorage(ctx context.Context, op db.Operation) err
 	portVal, _ := cur["port"].(float64)
 	replicasVal, _ := cur["replicas"].(float64)
 	profileVal, _ := cur["profile"].(string)
+	frameworkVal, _ := cur["framework"].(string)
 	if portVal == 0 {
-		portVal = 8080
+		portVal = float64(renderer.DefaultPortForFramework(frameworkVal))
 	}
 	if replicasVal == 0 {
 		replicasVal = 1
@@ -1520,6 +1539,7 @@ func (w *DBWatcher) doUpdateAppStorage(ctx context.Context, op db.Operation) err
 		ProjectSlug:        projectName,
 		EnvSlug:            envName,
 		Image:              imageVal,
+		Framework:          frameworkVal,
 		Port:               int(portVal),
 		Replicas:           int(replicasVal),
 		Profile:            profileVal,

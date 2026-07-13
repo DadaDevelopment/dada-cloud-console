@@ -79,6 +79,7 @@ type AppVolume struct {
 type CreateAppPayload struct {
 	Name            string            `json:"name"`
 	Image           string            `json:"image"`
+	Framework       string            `json:"framework,omitempty"`
 	Port            int               `json:"port"`
 	Replicas        int               `json:"replicas,omitempty"`
 	Profile         string            `json:"profile,omitempty"`
@@ -89,9 +90,14 @@ type CreateAppPayload struct {
 }
 
 // DeployImageVersionPayload is the typed payload for DeployImageVersion operations.
+// Framework/Port are carried from build-time detection so a redeploy re-renders
+// the app on the correct helm chart + servicePort; both are optional and fall
+// back to the persisted App snapshot when absent.
 type DeployImageVersionPayload struct {
-	AppName string `json:"app_name"`
-	Image   string `json:"image"`
+	AppName   string `json:"app_name"`
+	Image     string `json:"image"`
+	Framework string `json:"framework,omitempty"`
+	Port      int    `json:"port,omitempty"`
 }
 
 // UpdateAppStoragePayload is the typed payload for UpdateAppStorage operations:

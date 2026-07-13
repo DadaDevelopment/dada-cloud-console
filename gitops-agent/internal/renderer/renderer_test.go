@@ -838,3 +838,39 @@ func TestRenderAppServiceFragment(t *testing.T) {
 		}
 	}
 }
+
+// TestChartForAndDefaultPort locks the framework->chart/port mapping the deploy
+// path relies on: javascript-family frameworks must select the javascript chart
+// (common stack => :5173), never the generic app chart's :8080 default.
+func TestChartForAndDefaultPort(t *testing.T) {
+	js := []string{"javascript", "web", "nextjs", "nuxt", "sveltekit", "react", "nestjs", "express", "fastify", "remix", "vite", "node"}
+	for _, fw := range js {
+		if got := renderer.ChartFor(fw); got != "javascript" {
+			t.Errorf("ChartFor(%q) = %q, want javascript", fw, got)
+		}
+		if got := renderer.DefaultPortForFramework(fw); got != 5173 {
+			t.Errorf("DefaultPortForFramework(%q) = %d, want 5173", fw, got)
+		}
+	}
+	for _, fw := range []string{"python", "fastapi", "django", "flask"} {
+		if got := renderer.ChartFor(fw); got != "python" {
+			t.Errorf("ChartFor(%q) = %q, want python", fw, got)
+		}
+		if got := renderer.DefaultPortForFramework(fw); got != 8080 {
+			t.Errorf("DefaultPortForFramework(%q) = %d, want 8080", fw, got)
+		}
+	}
+	for _, fw := range []string{"spring", "spring-gradle", "maven", "gradle"} {
+		if got := renderer.ChartFor(fw); got != "spring" {
+			t.Errorf("ChartFor(%q) = %q, want spring", fw, got)
+		}
+	}
+	for _, fw := range []string{"", "go", "scala", "static", "dockerfile", "auto"} {
+		if got := renderer.ChartFor(fw); got != "app" {
+			t.Errorf("ChartFor(%q) = %q, want app", fw, got)
+		}
+		if got := renderer.DefaultPortForFramework(fw); got != 8080 {
+			t.Errorf("DefaultPortForFramework(%q) = %d, want 8080", fw, got)
+		}
+	}
+}

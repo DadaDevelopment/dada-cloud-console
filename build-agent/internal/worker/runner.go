@@ -61,6 +61,13 @@ type capturedArtifact struct {
 type buildOutcome struct {
 	imageURI  string             // web: ==> image: <host>/<proj>/<app>@sha256:<digest>
 	artifacts []capturedArtifact // android: ==> artifact: <type> <url> <size> <sha256> <versionCode>
+	// framework/port carry build-time detection into the deploy handoff so the
+	// rendered App picks the right helm chart + servicePort (a javascript app
+	// serving :5173 must not be pinned to the generic :8080 default). Empty/0
+	// when detection did not run (non-github, reattach) — HandoffDeploy falls
+	// back to the git_repos spec.
+	framework string
+	port      int
 }
 
 // NewRunner wires a Runner with production dependencies: a Jenkins REST client
@@ -215,7 +222,10 @@ func (r *Runner) finalize(ctx context.Context, b *db.Build, repo *db.Repo, out b
 		// Web → deploy handoff (the ONLY re-entry into the declarative path).
 		// First build of a not-yet-existing app enqueues CreateApp; later builds
 		// enqueue DeployImageVersion. No placeholder image is ever deployed.
-		opID, herr := db.HandoffDeploy(ctx, r.pool, b, repo, out.imageURI, db.DefaultDomainOpts{
+		opID, herr := db.HandoffDeploy(ctx, r.pool, b, repo, out.imageURI, db.DeployDetection{
+			Framework: out.framework,
+			Port:      out.port,
+		}, db.DefaultDomainOpts{
 			Enabled: r.cfg.DefaultDomainEnabled,
 			Base:    r.cfg.DefaultDomainBase,
 		})
@@ -354,6 +364,12 @@ func (r *Runner) execute(ctx context.Context, b *db.Build, repo *db.Repo, llog *
 		"app_name":     repo.AppName,
 	}
 
+	// Detected framework/port propagated into the deploy handoff (see buildOutcome).
+	// Seed with the coarse resolved framework; the finer build-time detection below
+	// overrides it when it succeeds.
+	detFramework := string(framework)
+	detPort := 0
+
 	// Build-time framework detection: hand the Jenkins job concrete install/build/
 	// start/output so it can template a Dockerfile for repos that carry none.
 	// GitHub-only (detection hits the GitHub API) and best-effort — on failure the
@@ -370,6 +386,10 @@ func (r *Runner) execute(ctx context.Context, b *db.Build, repo *db.Repo, llog *
 			params["output_dir"] = det.OutputDir
 			if det.Port > 0 {
 				params["app_port"] = strconv.Itoa(det.Port)
+				detPort = det.Port
+			}
+			if det.Framework != "" {
+				detFramework = det.Framework
 			}
 			llog.Info().Str("framework", det.Framework).Msg("build-time framework detected")
 		}
@@ -392,7 +412,12 @@ func (r *Runner) execute(ctx context.Context, b *db.Build, repo *db.Repo, llog *
 	}
 	r.emit(ctx, b.ID, fmt.Sprintf("jenkins build #%d started", number))
 
-	return r.attach(ctx, b, repo, number, llog)
+	out, err := r.attach(ctx, b, repo, number, llog)
+	if err == nil {
+		out.framework = detFramework
+		out.port = detPort
+	}
+	return out, err
 }
 
 // attach streams a triggered Jenkins build to completion: bridge the console,

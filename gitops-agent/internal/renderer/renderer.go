@@ -139,15 +139,28 @@ const (
 
 func ChartFor(framework string) string {
 	switch framework {
-	case "python":
+	case "python", "fastapi", "django", "flask":
 		return "python"
-	case "javascript", "web":
+	case "javascript", "web", "nextjs", "nuxt", "sveltekit", "react",
+		"nestjs", "express", "fastify", "remix", "vite", "node":
 		return "javascript"
-	case "spring", "spring-maven", "spring-gradle":
+	case "spring", "spring-maven", "spring-gradle", "maven", "gradle":
 		return "spring"
 	default:
 		return "app"
 	}
+}
+
+// DefaultPortForFramework is the port a framework's dev/serve process listens on
+// when no explicit port was captured, mirroring the helm common chart's
+// stack-based default ($defaultServicePort: javascript => 5173, else 8080).
+// Used so a deploy that lost its detected port does not blindly pin 8080 on a
+// javascript app that actually serves 5173.
+func DefaultPortForFramework(framework string) int {
+	if ChartFor(framework) == "javascript" {
+		return 5173
+	}
+	return 8080
 }
 
 var appFuncMap = template.FuncMap{
