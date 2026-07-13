@@ -3,7 +3,7 @@ import { useEffect, useState, FormEvent } from "react";
 import { useParams, useSearchParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { appsApi, endpointsApi, envVarsApi } from "@/lib/api";
-import type { ResourceSnapshot, AppVolume } from "@/lib/types";
+import type { ResourceSnapshot, AppVolume, OperationResponse } from "@/lib/types";
 import { Modal } from "@/components/ui/modal";
 import { Spinner } from "@/components/ui/spinner";
 import { Breadcrumb } from "@/components/ui/breadcrumb";
@@ -20,6 +20,7 @@ import { Globe, Database } from "lucide-react";
 import { classifyVMResource } from "@/lib/vm-resources";
 import { IngressDetail } from "@/components/resources/ingress-detail";
 import { ServiceDatabaseDetail } from "@/components/resources/service-database-detail";
+import { DeleteImpactModal, deleteImpactTargetKey, type DeleteImpactTarget } from "@/components/resources/delete-impact-modal";
 
 interface DomainForm {
   fqdn: string;
@@ -65,6 +66,8 @@ export default function AppDetailPage() {
   const [domainForm, setDomainForm] = useState<DomainForm>(defaultDomainForm(appName));
   const [isDomainSubmitting, setIsDomainSubmitting] = useState(false);
   const [domainSubmitError, setDomainSubmitError] = useState<string | null>(null);
+
+  const [deleteTarget, setDeleteTarget] = useState<DeleteImpactTarget | null>(null);
 
   useEffect(() => {
     if (!envId) return;
@@ -140,6 +143,12 @@ export default function AppDetailPage() {
     } catch (err) {
       window.alert(err instanceof Error ? err.message : t("apps.adopt.error"));
     }
+  }
+
+  function handleAppDeleted(result: OperationResponse) {
+    setDeleteTarget(null);
+    const opId = result.operation?.id;
+    router.push(`/projects/${projectId}/operations${opId ? `?highlight=${opId}` : ""}`);
   }
 
   async function handleDomainCreate(e: FormEvent<HTMLFormElement>) {
@@ -442,7 +451,18 @@ export default function AppDetailPage() {
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9" />
                     </svg>
                     <div>
-                      <p className="font-mono text-sm font-medium text-gray-900 dark:text-gray-100">{epSummary.fqdn ?? ep.name}</p>
+                      {epSummary.fqdn ? (
+                        <a
+                          href={`https:${"/".repeat(2)}${epSummary.fqdn}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="font-mono text-sm font-medium text-blue-600 dark:text-blue-400 hover:underline"
+                        >
+                          {epSummary.fqdn}
+                        </a>
+                      ) : (
+                        <p className="font-mono text-sm font-medium text-gray-900 dark:text-gray-100">{ep.name}</p>
+                      )}
                       <p className="text-xs text-gray-400 dark:text-gray-500">
                         {t("apps.domains.auth", { scheme: epSummary.auth_scheme ?? "none" })}
                         {epSummary.swagger_enabled && t("apps.domains.swagger")}
@@ -456,6 +476,23 @@ export default function AppDetailPage() {
           </div>
         )}
       </div>
+      )}
+
+      {!isResource && canMutate(role) && (
+        <div className="mt-10 rounded-xl border border-red-200 dark:border-red-900 bg-white dark:bg-gray-900 px-5 py-5">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h2 className="text-sm font-semibold text-red-700 dark:text-red-400">{t("apps.dangerZone.title")}</h2>
+              <p className="mt-0.5 text-sm text-gray-500 dark:text-gray-400">{t("apps.dangerZone.subtitle")}</p>
+            </div>
+            <button
+              onClick={() => setDeleteTarget({ kind: "app", projectId, envId, appName })}
+              className="inline-flex items-center gap-2 rounded-lg border border-red-200 dark:border-red-900 bg-white dark:bg-gray-900 px-3 py-2 text-sm font-medium text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/30 transition-colors shadow-sm"
+            >
+              {t("apps.dangerZone.delete")}
+            </button>
+          </div>
+        </div>
       )}
 
       <Modal
@@ -592,6 +629,15 @@ export default function AppDetailPage() {
           </div>
         </form>
       </Modal>
+
+      {deleteTarget && (
+        <DeleteImpactModal
+          key={deleteImpactTargetKey(deleteTarget)}
+          target={deleteTarget}
+          onClose={() => setDeleteTarget(null)}
+          onDeleted={handleAppDeleted}
+        />
+      )}
     </div>
   );
 }
