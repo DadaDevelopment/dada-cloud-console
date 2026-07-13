@@ -205,6 +205,13 @@ export const apps: Messages = {
   "apps.settings.tab.git": { ru: "Git", en: "Git" },
   "apps.settings.tab.domains": { ru: "Домены", en: "Domains" },
   "apps.settings.tab.storage": { ru: "Хранилище", en: "Storage" },
+  "apps.detail.config.title": { ru: "Конфигурация", en: "Configuration" },
+  "apps.detail.config.env": { ru: "Переменные окружения", en: "Environment variables" },
+  "apps.detail.config.envCount": { ru: "{n} переменных", en: "{n} variables" },
+  "apps.detail.config.storage": { ru: "Хранилище", en: "Storage" },
+  "apps.detail.config.storageNone": { ru: "Не подключено", en: "Not configured" },
+  "apps.detail.config.git": { ru: "Репозиторий", en: "Repository" },
+  "apps.detail.config.gitNone": { ru: "Не привязан", en: "Not connected" },
   "apps.storage.title": { ru: "Постоянное хранилище", en: "Persistent storage" },
   "apps.storage.subtitle": {
     ru: "Подключить постоянную директорию данных (ReadWriteMany) к приложению. Общий том для всех реплик.",

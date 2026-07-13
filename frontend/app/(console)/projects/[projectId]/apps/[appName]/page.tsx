@@ -2,8 +2,8 @@
 import { useEffect, useState, FormEvent } from "react";
 import { useParams, useSearchParams, useRouter } from "next/navigation";
 import Link from "next/link";
-import { appsApi, endpointsApi } from "@/lib/api";
-import type { ResourceSnapshot } from "@/lib/types";
+import { appsApi, endpointsApi, envVarsApi } from "@/lib/api";
+import type { ResourceSnapshot, AppVolume } from "@/lib/types";
 import { Modal } from "@/components/ui/modal";
 import { Spinner } from "@/components/ui/spinner";
 import { Breadcrumb } from "@/components/ui/breadcrumb";
@@ -54,6 +54,7 @@ export default function AppDetailPage() {
 
   const [endpoints, setEndpoints] = useState<ResourceSnapshot[]>([]);
   const [isLoadingEndpoints, setIsLoadingEndpoints] = useState(true);
+  const [envCount, setEnvCount] = useState<number | null>(null);
 
   const [isImageModalOpen, setIsImageModalOpen] = useState(false);
   const [newImage, setNewImage] = useState("");
@@ -83,6 +84,11 @@ export default function AppDetailPage() {
       .then((data) => setEndpoints(data.endpoints ?? []))
       .catch(() => setEndpoints([]))
       .finally(() => setIsLoadingEndpoints(false));
+
+    envVarsApi
+      .list(projectId, envId, appName)
+      .then((data) => setEnvCount((data.env_vars ?? []).length))
+      .catch(() => setEnvCount(null));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId, appName, envId]);
 
@@ -176,7 +182,7 @@ export default function AppDetailPage() {
     );
   }
 
-  const summary = app.summary_json as { image?: string; port?: number; replicas?: number; profile?: string; runtime?: string };
+  const summary = app.summary_json as { image?: string; port?: number; replicas?: number; profile?: string; runtime?: string; volume?: AppVolume; repo_full_name?: string };
   const isCompose = summary.runtime === "compose";
   const resType = classifyVMResource(app);
   const isResource = resType !== "app";
@@ -316,6 +322,55 @@ export default function AppDetailPage() {
               </div>
             ))}
           </div>
+
+          {!isResource && (
+            <div>
+              <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500">
+                {t("apps.detail.config.title")}
+              </h2>
+              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                {[
+                  {
+                    label: t("apps.detail.config.env"),
+                    value: envCount != null ? t("apps.detail.config.envCount", { n: envCount }) : "—",
+                    set: envCount != null && envCount > 0,
+                    tab: "env",
+                  },
+                  {
+                    label: t("apps.detail.config.storage"),
+                    value: summary.volume?.path
+                      ? `${summary.volume.path} · ${summary.volume.size}`
+                      : t("apps.detail.config.storageNone"),
+                    set: !!summary.volume?.path,
+                    tab: "storage",
+                  },
+                  {
+                    label: t("apps.detail.config.git"),
+                    value: summary.repo_full_name ?? t("apps.detail.config.gitNone"),
+                    set: !!summary.repo_full_name,
+                    tab: "git",
+                  },
+                ].map(({ label, value, set, tab }) => (
+                  <Link
+                    key={tab}
+                    href={`/projects/${projectId}/apps/${appName}/settings?tab=${tab}${envId ? `&envId=${envId}` : ""}`}
+                    className="group flex flex-col rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-5 shadow-sm transition-colors hover:border-blue-300 dark:hover:border-blue-700"
+                  >
+                    <div className="flex items-center justify-between">
+                      <p className="text-xs font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500">{label}</p>
+                      <svg className="h-4 w-4 text-gray-300 dark:text-gray-600 group-hover:text-blue-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                      </svg>
+                    </div>
+                    <p className={`mt-1 truncate text-sm font-medium ${set ? "text-gray-900 dark:text-gray-100 font-mono" : "text-gray-400 dark:text-gray-500"}`}>
+                      {value}
+                    </p>
+                  </Link>
+                ))}
+              </div>
+            </div>
+          )}
+
           <FixedMetricsDashboard kind="app" projectId={projectId} envId={envId} appName={appName} />
           <LogsViewer projectId={projectId} app={appName} />
         </div>

@@ -22,7 +22,11 @@ export default function AppSettingsPage() {
   const envId = searchParams.get("envId") || selectedEnv?.id || "";
   const { t } = useT();
 
-  const [tab, setTab] = useState<Tab>("env");
+  const initialTab = ((): Tab => {
+    const q = searchParams.get("tab");
+    return q === "git" || q === "domains" || q === "storage" ? q : "env";
+  })();
+  const [tab, setTab] = useState<Tab>(initialTab);
   const [verifiedApexes, setVerifiedApexes] = useState<DomainAuthorization[]>([]);
   const canEdit = canMutate(role);
 
