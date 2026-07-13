@@ -140,8 +140,11 @@ func SetupRouter(pool *pgxpool.Pool, cfg *config.Config) *gin.Engine {
 		if err != nil {
 			log.Fatalf("mcp: failed to initialize: %v", err)
 		}
-		r.Any("/mcp", gin.WrapH(http.StripPrefix("/mcp", mcpHandler)))
-		r.Any("/mcp/*path", gin.WrapH(http.StripPrefix("/mcp", mcpHandler)))
+		mcpProxy := gin.WrapH(http.StripPrefix("/mcp", mcpHandler))
+		r.Any("/mcp", func(c *gin.Context) {
+			c.Redirect(http.StatusPermanentRedirect, "/mcp/")
+		})
+		r.Any("/mcp/*path", mcpProxy)
 		log.Printf("mcp: serving at /mcp (self-proxy -> %s)", selfURL)
 	}
 

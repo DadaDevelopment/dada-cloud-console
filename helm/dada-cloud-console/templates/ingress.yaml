@@ -47,6 +47,16 @@ spec:
                 name: {{ include "dada-cloud-console.fullname" . }}-backend
                 port:
                   number: {{ .Values.backend.service.port }}
+          # Embedded MCP server (Streamable HTTP) lives on the backend at /mcp.
+          # Without this route /mcp falls to the catch-all "/" and the Next
+          # frontend answers 404. Must precede the "/" rule.
+          - path: /mcp
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "dada-cloud-console.fullname" . }}-backend
+                port:
+                  number: {{ .Values.backend.service.port }}
           {{- if and .Values.gitopsAgent.enabled .Values.gitopsAgent.webhookPort }}
           # WebSocket values editor — must come before the catch-all "/" rule.
           - path: /ws
