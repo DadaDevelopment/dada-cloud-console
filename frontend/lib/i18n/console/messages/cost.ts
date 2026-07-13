@@ -2,7 +2,7 @@ import type { Messages } from "./common";
 
 export const cost: Messages = {
   "cost.title": { ru: "Стоимость", en: "Cost" },
-  "cost.note": { ru: "фактический расход ресурсов кластера по тарифам", en: "actual cluster resource cost at our rates" },
+  "cost.note": { ru: "фактический расход по вашим ресурсам", en: "actual usage cost for your resources" },
   "cost.window.24h": { ru: "24 часа", en: "24h" },
   "cost.window.7d": { ru: "7 дней", en: "7d" },
   "cost.window.14d": { ru: "14 дней", en: "14d" },

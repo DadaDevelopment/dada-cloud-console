@@ -137,8 +137,8 @@ export default function AppServersPage() {
       const result = await appServersApi.create(projectId, payload);
       setIsModalOpen(false);
       setForm(emptyForm);
-      const opId = result.operation?.id;
-      router.push(`/projects/${projectId}/operations${opId ? `?highlight=${opId}` : ""}`);
+      void result;
+      router.push(`/projects/${projectId}/app-servers`);
     } catch (err) {
       setSubmitError(err instanceof Error ? err.message : t("appServers.error.create"));
     } finally {
@@ -151,8 +151,8 @@ export default function AppServersPage() {
     setError(null);
     try {
       const result = await appServersApi.remove(projectId, serverName);
-      const opId = result.operation?.id;
-      router.push(`/projects/${projectId}/operations${opId ? `?highlight=${opId}` : ""}`);
+      void result;
+      router.push(`/projects/${projectId}/app-servers`);
     } catch (err) {
       setError(err instanceof Error ? err.message : t("appServers.error.delete"));
     } finally {

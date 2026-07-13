@@ -117,8 +117,8 @@ export default function AppsPage() {
       });
       setIsModalOpen(false);
       setForm({ name: "", image: "", port: 8080, replicas: 1, profile: "small" });
-      const opId = result.operation?.id;
-      router.push(`/projects/${projectId}/operations${opId ? `?highlight=${opId}` : ""}`);
+      void result;
+      router.push(`/projects/${projectId}/apps/${form.name}`);
     } catch (err) {
       const raw = err instanceof Error ? err.message : "";
       let msg = raw || t("apps.error.create");

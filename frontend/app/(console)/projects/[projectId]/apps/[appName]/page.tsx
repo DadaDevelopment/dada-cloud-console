@@ -72,15 +72,32 @@ export default function AppDetailPage() {
   useEffect(() => {
     if (!envId) return;
 
-    appsApi
-      .list(projectId, envId)
-      .then((data) => {
-        const found = (data.apps ?? []).find((a) => a.name === appName);
-        if (!found) setError(t("apps.detail.error.notFound"));
-        else setApp(found);
-      })
-      .catch((err) => setError(err instanceof Error ? err.message : t("apps.detail.error.load")))
-      .finally(() => setIsLoading(false));
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const loadApp = (attempt: number) => {
+      appsApi
+        .list(projectId, envId)
+        .then((data) => {
+          if (cancelled) return;
+          const found = (data.apps ?? []).find((a) => a.name === appName);
+          if (found) {
+            setApp(found);
+            setError(null);
+            setIsLoading(false);
+          } else if (attempt < 8) {
+            timer = setTimeout(() => loadApp(attempt + 1), 2000);
+          } else {
+            setError(t("apps.detail.error.notFound"));
+            setIsLoading(false);
+          }
+        })
+        .catch((err) => {
+          if (cancelled) return;
+          setError(err instanceof Error ? err.message : t("apps.detail.error.load"));
+          setIsLoading(false);
+        });
+    };
+    loadApp(0);
 
     endpointsApi
       .list(projectId, envId, appName)
@@ -92,6 +109,11 @@ export default function AppDetailPage() {
       .list(projectId, envId, appName)
       .then((data) => setEnvCount((data.env_vars ?? []).length))
       .catch(() => setEnvCount(null));
+
+    return () => {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId, appName, envId]);
 

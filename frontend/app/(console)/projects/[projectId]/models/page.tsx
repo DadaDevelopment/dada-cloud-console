@@ -148,7 +148,8 @@ export default function ModelsPage() {
       setForm(defaultForm);
       // Redirect immediately to the live-updating, highlighted operation.
       const opId = result.operation?.id;
-      router.push(`/projects/${projectId}/operations${opId ? `?highlight=${opId}` : ""}`);
+      void opId;
+      router.push(`/projects/${projectId}/models`);
     } catch (err) {
       setSubmitError(err instanceof Error ? err.message : t("models.error.create"));
     } finally {
