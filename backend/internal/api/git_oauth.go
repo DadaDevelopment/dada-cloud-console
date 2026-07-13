@@ -78,6 +78,9 @@ func (h *Handler) StartGitHubUserAuth(c *gin.Context) {
 
 	u := "https://github.com/login/oauth/authorize?client_id=" +
 		url.QueryEscape(h.cfg.GithubAppClientID) + "&state=" + url.QueryEscape(state)
+	if h.cfg.GithubOAuthRedirectURI != "" {
+		u += "&redirect_uri=" + url.QueryEscape(h.cfg.GithubOAuthRedirectURI)
+	}
 	c.JSON(http.StatusOK, gin.H{"url": u})
 }
 

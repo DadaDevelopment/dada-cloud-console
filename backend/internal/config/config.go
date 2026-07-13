@@ -271,6 +271,7 @@ type Config struct {
 	GithubAppID            string // GITHUB_APP_ID
 	GithubAppPrivateKey    string // GITHUB_APP_PRIVATE_KEY
 	GithubAppClientID      string // GITHUB_APP_CLIENT_ID (public; builds user-authorize URL, secret lives in build-agent)
+	GithubOAuthRedirectURI string // GITHUB_OAUTH_REDIRECT_URI (absolute callback; disambiguates the App's multiple callback URLs, must be in the App allowlist)
 	MetrikaOAuthToken      string // METRIKA_OAUTH_TOKEN
 
 	BillingEnabled          bool  // BILLING_ENABLED (default false) — guards metering ticker; billing endpoints always load plans read-only
@@ -375,6 +376,7 @@ func Load() (*Config, error) {
 		GithubAppID:               getEnv("GITHUB_APP_ID", ""),
 		GithubAppPrivateKey:       getEnv("GITHUB_APP_PRIVATE_KEY", ""),
 		GithubAppClientID:         getEnv("GITHUB_APP_CLIENT_ID", ""),
+		GithubOAuthRedirectURI:    getEnv("GITHUB_OAUTH_REDIRECT_URI", ""),
 		MetrikaOAuthToken:         getEnv("METRIKA_OAUTH_TOKEN", ""),
 		BillingEnabled:            getEnv("BILLING_ENABLED", "false") == "true",
 		BillingMeterIntervalSec:   getEnvInt64("BILLING_METER_INTERVAL_SECS", 3600),
