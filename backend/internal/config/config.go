@@ -135,6 +135,11 @@ type Config struct {
 	PrometheusQueryUser string // PROMETHEUS_QUERY_USER
 	PrometheusQueryPass string // PROMETHEUS_QUERY_PASS
 
+	// OpenCost Allocation API base URL (read-only). Empty OpenCostURL disables
+	// the per-project /cost endpoint. Base URL only, e.g.
+	// http://opencost.opencost.svc.cluster.local:9003. No auth (in-cluster).
+	OpenCostURL string // OPENCOST_URL
+
 	// User-telemetry read store (multi-tenant Grafana Mimir). The monitoring
 	// product (user-pushed metrics) reads from here with a per-tenant
 	// X-Scope-OrgID header; infra/container/db metrics keep reading the plain
@@ -330,6 +335,7 @@ func Load() (*Config, error) {
 		PrometheusQueryURL:        getEnv("PROMETHEUS_QUERY_URL", ""),
 		PrometheusQueryUser:       getEnv("PROMETHEUS_QUERY_USER", ""),
 		PrometheusQueryPass:       getEnv("PROMETHEUS_QUERY_PASS", ""),
+		OpenCostURL:               getEnv("OPENCOST_URL", ""),
 		UserMetricsQueryURL:       getEnv("USER_METRICS_QUERY_URL", ""),
 		UserMetricsQueryUser:      getEnv("USER_METRICS_QUERY_USER", ""),
 		UserMetricsQueryPass:      getEnv("USER_METRICS_QUERY_PASS", ""),

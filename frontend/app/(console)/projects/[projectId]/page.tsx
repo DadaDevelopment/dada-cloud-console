@@ -15,6 +15,7 @@ import { Breadcrumb } from "@/components/ui/breadcrumb";
 import { ResourceIcon } from "@/components/shell/icons";
 import type { IconName } from "@/lib/resources";
 import { useT } from "@/lib/i18n/console/context";
+import { CostCard } from "@/components/cost/cost-card";
 
 type Counts = { apps: number; appsReady: number; dbs: number; domainsVerified: number; domainsPending: number };
 
@@ -132,6 +133,8 @@ export default function ProjectOverviewPage() {
           )}
         </div>
       )}
+
+      <CostCard projectId={projectId} />
 
       {!checklistComplete && (
         <div className="mb-8 rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-5 shadow-sm">

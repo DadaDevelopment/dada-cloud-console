@@ -19,6 +19,7 @@ import type {
   AppsResponse,
   InfraResponse,
   AppServersResponse,
+  CostResponse,
   AppServerResponse,
   CreateAppServerResponse,
   CreateAppResponse,
@@ -347,6 +348,11 @@ export const appsApi = {
       `/api/v1/projects/${projectId}/environments/${envId}/apps/${appName}`,
       { method: "DELETE" }
     ),
+};
+
+export const costApi = {
+  getProjectCost: (projectId: string, window: string = "30d") =>
+    apiFetch<CostResponse>(`/api/v1/projects/${projectId}/cost?window=${encodeURIComponent(window)}`),
 };
 
 export const appServersApi = {

@@ -43,6 +43,7 @@ global:
     prometheusQueryPass: ""
     elasticsearchUrl: "http://elasticsearch-infra-es-http.elastic-stack.svc.cluster.local:9200"
     elasticsearchApiKey: ""
+    opencostUrl: "http://opencost.opencost.svc.cluster.local:9003"
 
 backend:
   enabled: true

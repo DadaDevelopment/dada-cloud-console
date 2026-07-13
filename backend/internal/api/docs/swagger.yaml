@@ -52,6 +52,32 @@ definitions:
           type: string
         type: array
     type: object
+  internal_api.DeleteImpact:
+    properties:
+      app:
+        type: string
+      cluster_only:
+        type: integer
+      cluster_scan:
+        type: boolean
+      items:
+        items:
+          $ref: '#/definitions/internal_api.ImpactItem'
+        type: array
+      namespace:
+        type: string
+    type: object
+  internal_api.ImpactItem:
+    properties:
+      group:
+        type: string
+      kind:
+        type: string
+      name:
+        type: string
+      source:
+        type: string
+    type: object
   internal_api.addDomainAuthorizationRequest:
     properties:
       apex_domain:
@@ -139,6 +165,8 @@ definitions:
     type: object
   internal_api.createAppRequest:
     properties:
+      framework:
+        type: string
       image:
         type: string
       name:
@@ -1030,6 +1058,50 @@ paths:
       tags:
       - project
   /projects/{projectId}:
+    delete:
+      description: 'Destructive, asynchronous: enqueues a DeleteProject operation
+        that removes the project''s entire git tree (every environment/app/resource)
+        in one commit and wipes the project''s DB rows. Call the project delete-impact
+        endpoint first to preview the blast radius. Returns 202 with an operation;
+        poll it until terminal.'
+      operationId: deleteProject
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "202":
+          description: object with the accepted operation
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Delete a project
+      tags:
+      - projects
     get:
       description: Returns one project, the caller's role, and the project's environments
         (each with id, name, namespace, runtime). Read-only. Use the returned environment
@@ -1978,6 +2050,108 @@ paths:
       summary: Download a cloud task artifact
       tags:
       - cloud-tasks
+  /projects/{projectId}/cost:
+    get:
+      description: Returns the project's resource cost (CPU, RAM, persistent volumes)
+        over a window, aggregated from OpenCost by namespace with a per-environment
+        breakdown. Costs are in RUB (on-cluster OpenCost custom pricing). Read-only;
+        best-effort, returns 503 when OpenCost is not configured.
+      operationId: getProjectCost
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      - description: 'Cost window: 24h, 7d, 14d or 30d (default 30d)'
+        in: query
+        name: window
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "502":
+          description: Bad Gateway
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "503":
+          description: Service Unavailable
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Get per-project resource cost
+      tags:
+      - cost
+  /projects/{projectId}/delete-impact:
+    get:
+      description: Aggregates the per-app delete-impact scan (console-tracked resources
+        + live cluster scan) over every environment and app in the project.
+      operationId: deleteProjectImpact
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Preview the blast radius of deleting a project
+      tags:
+      - projects
   /projects/{projectId}/deployments/{deploymentId}/promote:
     post:
       description: 'Re-deploys the immutable image of a deployment (e.g. promoting
@@ -2707,6 +2881,60 @@ paths:
       summary: Deploy a new app
       tags:
       - app
+  /projects/{projectId}/environments/{envId}/apps/{appName}:
+    delete:
+      description: 'Destructive, asynchronous: enqueues a DeleteApp operation that
+        removes the app''s git folder (app.yaml/values.yaml/resources.values.yaml)
+        and every child resource it owns. Call the delete-impact endpoint first to
+        preview the blast radius. Returns 202 with an operation; poll it until terminal.'
+      operationId: deleteApp
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      - description: Environment UUID
+        in: path
+        name: envId
+        required: true
+        type: string
+      - description: App name
+        in: path
+        name: appName
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "202":
+          description: object with the accepted operation
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Delete an app
+      tags:
+      - apps
   /projects/{projectId}/environments/{envId}/apps/{appName}/adopt:
     post:
       description: 'Splits an existing single compose App into one first-class Application
@@ -2981,6 +3209,53 @@ paths:
       summary: Fire a DadaAgent cloud task for an app
       tags:
       - cloud-tasks
+  /projects/{projectId}/environments/{envId}/apps/{appName}/delete-impact:
+    get:
+      description: Merges console-tracked child resources with a live cluster scan
+        (Ingress, PublicApi, ServiceDatabaseV2, S3Bucket, Certificate, PVC) so the
+        UI can show the real deletion blast radius, including resources the console
+        never recorded.
+      operationId: deleteAppImpact
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      - description: Environment UUID
+        in: path
+        name: envId
+        required: true
+        type: string
+      - description: App name
+        in: path
+        name: appName
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_api.DeleteImpact'
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Preview the blast radius of deleting an app
+      tags:
+      - apps
   /projects/{projectId}/environments/{envId}/apps/{appName}/deployments:
     get:
       description: Returns the deployment history for an app in an environment, most

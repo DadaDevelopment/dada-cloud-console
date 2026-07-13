@@ -124,6 +124,30 @@ export interface MetricsResponse {
   live_error?: string;
 }
 
+/**
+ * Per-environment cost breakdown from the OpenCost Allocation API, keyed by the
+ * environment's Kubernetes namespace. Costs are in CostResponse.currency (RUB).
+ */
+export interface EnvCost {
+  environment: string;
+  namespace: string;
+  cpu: number;
+  ram: number;
+  pv: number;
+  total: number;
+}
+
+/** Project resource cost over a window (default 30d), aggregated by namespace. */
+export interface CostResponse {
+  window: string;
+  currency: string;
+  total: number;
+  cpu: number;
+  ram: number;
+  pv: number;
+  by_environment: EnvCost[];
+}
+
 // Native monitoring metrics carry one or more labelled series per metric name
 // (group-by/filter aware) and a counter/gauge kind so the chart can render
 // rate()d counters correctly.

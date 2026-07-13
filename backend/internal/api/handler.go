@@ -17,6 +17,7 @@ import (
 	"github.com/dada-tuda/console/backend/internal/grafana"
 	"github.com/dada-tuda/console/backend/internal/logsearch"
 	"github.com/dada-tuda/console/backend/internal/mlflow"
+	"github.com/dada-tuda/console/backend/internal/opencost"
 	"github.com/dada-tuda/console/backend/internal/pdns"
 	"github.com/dada-tuda/console/backend/internal/portainer"
 	"github.com/dada-tuda/console/backend/internal/prometheus"
@@ -33,6 +34,7 @@ type Handler struct {
 	prometheus  *prometheus.Client // nil when PROMETHEUS_QUERY_URL unset; infra/container/db reads
 	userMetrics *prometheus.Client // user-telemetry read store (multi-tenant Mimir); == prometheus when USER_METRICS_QUERY_URL unset
 	logsearch   *logsearch.Client  // nil when ELASTICSEARCH_URL unset
+	opencost    *opencost.Client   // nil when OPENCOST_URL unset; per-project cost reads
 	// Infra stream (in-cluster kube pod logs) — the second /logs source for
 	// native (k8s) apps; nil when ES unset or ELASTICSEARCH_INFRA_LOG_INDEX=off.
 	infraLogsearch *logsearch.Client
@@ -100,6 +102,7 @@ func NewHandler(pool *pgxpool.Pool, cfg *config.Config) *Handler {
 	}
 	h.portainer = portainer.New(cfg.PortainerURL, cfg.PortainerAPIToken)
 	h.prometheus = prometheus.New(cfg.PrometheusQueryURL, cfg.PrometheusQueryUser, cfg.PrometheusQueryPass)
+	h.opencost = opencost.New(cfg.OpenCostURL)
 	// User-telemetry reads go to the multi-tenant Mimir store (per-tenant
 	// X-Scope-OrgID). When USER_METRICS_QUERY_URL is unset, reuse the plain
 	// Prometheus client so behaviour is unchanged until the Mimir cutover.

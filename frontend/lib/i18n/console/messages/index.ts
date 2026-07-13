@@ -19,6 +19,7 @@ import { approvals } from "./approvals";
 import { cloudTasks } from "./cloud-tasks";
 import { billing } from "./billing";
 import { consumption } from "./consumption";
+import { cost } from "./cost";
 import { resources } from "./resources";
 import { deleteImpact } from "./delete-impact";
 
@@ -49,6 +50,7 @@ export const messages: Messages = {
   ...cloudTasks,
   ...billing,
   ...consumption,
+  ...cost,
   ...resources,
   ...deleteImpact,
 };
