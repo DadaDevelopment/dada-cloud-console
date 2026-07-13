@@ -878,7 +878,7 @@ func (h *Handler) ConnectGitRepo(c *gin.Context) {
 		req.Port = 8080
 	}
 	if req.Replicas == 0 {
-		req.Replicas = 2
+		req.Replicas = 1
 	}
 	if req.Profile == "" {
 		req.Profile = "small"

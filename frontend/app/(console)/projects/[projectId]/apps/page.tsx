@@ -389,7 +389,7 @@ function EnvBlock({ env, projectId, apps, infra, canCreate, onCreate, t }: EnvBl
                     <>
                       <span>{summary.profile ?? "small"}</span>
                       <span>·</span>
-                      <span>{t("apps.card.replicas", { count: String(summary.replicas ?? 2) })}</span>
+                      <span>{t("apps.card.replicas", { count: String(summary.replicas ?? 1) })}</span>
                     </>
                   )}
                 </div>
