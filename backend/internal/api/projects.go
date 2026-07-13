@@ -211,12 +211,17 @@ func (h *Handler) ensureProjectGroupsAsync(org, projectID, slug, displayName, ow
 	if h.usersvc == nil {
 		return
 	}
+	if _, done := h.groupsEnsured.Load(projectID); done {
+		return
+	}
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
 		defer cancel()
 		if err := h.usersvc.EnsureProjectGroups(ctx, org, projectID, slug, displayName, ownerSub); err != nil {
 			log.Printf("userservice: ensure project groups project=%s org=%s: %v", projectID, org, err)
+			return
 		}
+		h.groupsEnsured.Store(projectID, struct{}{})
 	}()
 }
 
@@ -307,19 +312,27 @@ func (h *Handler) EnsureDefaultProject(c *gin.Context) {
 	// Reuse the list-visibility predicate: any visible project means the caller
 	// already has a home, so return the first one (stable by name) and stop.
 	var (
-		pid   uuid.UUID
-		org   string
-		envID uuid.UUID
+		pid         uuid.UUID
+		org         string
+		envID       uuid.UUID
+		slug        string
+		displayName string
+		ownerSub    string
 	)
 	err := h.pool.QueryRow(ctx, `
 		SELECT p.id, COALESCE(p.org_id, ''),
-		       (SELECT e.id FROM environments e WHERE e.project_id = p.id ORDER BY e.name LIMIT 1)
+		       (SELECT e.id FROM environments e WHERE e.project_id = p.id ORDER BY e.name LIMIT 1),
+		       p.name, COALESCE(p.display_name, ''), COALESCE(u.keycloak_sub, '')
 		  FROM projects p
+		  LEFT JOIN users u ON u.id = p.owner_id
 		 WHERE $1 OR p.id = ANY($2) OR p.org_id = ANY($3)
 		 ORDER BY p.name
 		 LIMIT 1
-	`, god, explicitIDs, adminOrgs).Scan(&pid, &org, &envID)
+	`, god, explicitIDs, adminOrgs).Scan(&pid, &org, &envID, &slug, &displayName, &ownerSub)
 	if err == nil {
+		if org != "" {
+			h.ensureProjectGroupsAsync(org, pid.String(), slug, displayName, ownerSub)
+		}
 		c.JSON(http.StatusOK, gin.H{
 			"project_id":             pid,
 			"default_environment_id": envID,
@@ -339,7 +352,7 @@ func (h *Handler) EnsureDefaultProject(c *gin.Context) {
 		return
 	}
 	personalOrg := claims.Username
-	slug := defaultProjectSlug(claims.Username)
+	slug = defaultProjectSlug(claims.Username)
 	pid, envID, err = h.insertProject(ctx, claims.UserID, slug, "Default", personalOrg, "prod")
 	if err != nil {
 		if isUniqueViolation(err) {
@@ -350,6 +363,9 @@ func (h *Handler) EnsureDefaultProject(c *gin.Context) {
 				       (SELECT e.id FROM environments e WHERE e.project_id = p.id ORDER BY e.name LIMIT 1)
 				  FROM projects p WHERE p.name = $1
 			`, slug).Scan(&pid, &org, &envID); e == nil {
+				if org != "" {
+					h.ensureProjectGroupsAsync(org, pid.String(), slug, "Default", claims.Subject)
+				}
 				c.JSON(http.StatusOK, gin.H{
 					"project_id":             pid,
 					"default_environment_id": envID,
@@ -419,12 +435,14 @@ func (h *Handler) GetProject(c *gin.Context) {
 	}
 
 	var p models.Project
+	var ownerSub string
 	err = h.pool.QueryRow(c.Request.Context(),
-		`SELECT id, name, display_name, owner_type, owner_id, COALESCE(org_id, ''), default_environment, quotas, created_at, updated_at
-		 FROM projects WHERE id = $1`,
+		`SELECT p.id, p.name, p.display_name, p.owner_type, p.owner_id, COALESCE(p.org_id, ''),
+		        p.default_environment, p.quotas, p.created_at, p.updated_at, COALESCE(u.keycloak_sub, '')
+		 FROM projects p LEFT JOIN users u ON u.id = p.owner_id WHERE p.id = $1`,
 		projectID,
 	).Scan(&p.ID, &p.Name, &p.DisplayName, &p.OwnerType, &p.OwnerID, &p.OrgID,
-		&p.DefaultEnvironment, &p.Quotas, &p.CreatedAt, &p.UpdatedAt)
+		&p.DefaultEnvironment, &p.Quotas, &p.CreatedAt, &p.UpdatedAt, &ownerSub)
 	if err == pgx.ErrNoRows {
 		respondNotFound(c)
 		return
@@ -432,6 +450,10 @@ func (h *Handler) GetProject(c *gin.Context) {
 	if err != nil {
 		respondError(c, http.StatusInternalServerError, "failed to fetch project")
 		return
+	}
+
+	if p.OrgID != "" {
+		h.ensureProjectGroupsAsync(p.OrgID, p.ID.String(), p.Name, p.DisplayName, ownerSub)
 	}
 
 	// Fetch environments

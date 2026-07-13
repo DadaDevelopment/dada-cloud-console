@@ -4,6 +4,7 @@ import (
 	"context"
 	"log"
 	"os"
+	"sync"
 	"time"
 
 	"github.com/dada-tuda/console/backend/internal/auth"
@@ -92,6 +93,8 @@ type Handler struct {
 	billingMinUtil float64
 
 	usersvc *userservice.Client
+
+	groupsEnsured sync.Map
 
 	pdns *pdns.Client
 }

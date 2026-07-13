@@ -54,8 +54,21 @@ export default function MembersPage() {
     try {
       const data = await userServiceApi.listProjectMembers(projectId);
       setMembers(data.members ?? []);
+      setError(null);
     } catch (err) {
-      setError(err instanceof Error ? err.message : t("members.error.load"));
+      const msg = err instanceof Error ? err.message : t("members.error.load");
+      if (/not\s*found/i.test(msg)) {
+        try {
+          await new Promise((r) => setTimeout(r, 1500));
+          const data = await userServiceApi.listProjectMembers(projectId);
+          setMembers(data.members ?? []);
+          setError(null);
+          return;
+        } catch (retryErr) {
+          void retryErr;
+        }
+      }
+      setError(msg);
     } finally {
       setLoading(false);
     }
