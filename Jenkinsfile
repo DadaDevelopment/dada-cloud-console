@@ -56,8 +56,6 @@ podTemplate(
         label: podLabel,
         namespace: 'devops-tools',
         serviceAccount: 'jenkins-admin',
-        idleMinutes: 20,
-        podRetention: onFailure(),
         yaml: """
 apiVersion: v1
 kind: Pod
