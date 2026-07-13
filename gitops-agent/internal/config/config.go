@@ -105,11 +105,11 @@ func Load() (*Config, error) {
 	if err != nil {
 		return nil, fmt.Errorf("GITOPS_POLL_INTERVAL_STATUS: %w", err)
 	}
-	orphanMark, err := time.ParseDuration(getEnv("GITOPS_ORPHAN_MARK_AFTER", "1h"))
+	orphanMark, err := time.ParseDuration(getEnv("GITOPS_ORPHAN_MARK_AFTER", "15m"))
 	if err != nil {
 		return nil, fmt.Errorf("GITOPS_ORPHAN_MARK_AFTER: %w", err)
 	}
-	orphanPurge, err := time.ParseDuration(getEnv("GITOPS_ORPHAN_PURGE_AFTER", "24h"))
+	orphanPurge, err := time.ParseDuration(getEnv("GITOPS_ORPHAN_PURGE_AFTER", "2h"))
 	if err != nil {
 		return nil, fmt.Errorf("GITOPS_ORPHAN_PURGE_AFTER: %w", err)
 	}

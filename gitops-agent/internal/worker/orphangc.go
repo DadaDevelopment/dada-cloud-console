@@ -16,9 +16,9 @@ import (
 )
 
 // gcMinInterval throttles the orphan sweep: the status reconciler ticks every
-// ~30s but the GC only needs to run occasionally (its grace windows are hours),
-// and each run pulls every project repo. 5 minutes keeps git load negligible.
-const gcMinInterval = 5 * time.Minute
+// ~30s but the GC only needs to run every few minutes, and each run pulls every
+// project repo. 2 minutes keeps git load low while catching orphans promptly.
+const gcMinInterval = 2 * time.Minute
 
 // lastGC is package-tick state guarded implicitly by the single reconciler
 // goroutine (tick is sequential), not a field, to keep the struct edit minimal.
