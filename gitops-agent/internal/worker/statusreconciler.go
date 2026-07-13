@@ -174,6 +174,11 @@ func (r *StatusReconciler) reconcileDatabases(ctx context.Context) {
 // Without this a public endpoint is frozen at the git-watcher's create-time
 // "Unknown" forever even though its Ingress + DNS are live. Existing rows only,
 // so no isolation leak: a CR with no snapshot in this project is never created.
+//
+// It also self-heals summary_json.app_name from the CR's ArgoCD instance label
+// (app-env). The app Domains tab filters endpoints by app_name, so a snapshot
+// synced before app_name stamping (git-watcher 4100de1) is a real, live domain
+// invisible in the UI. Re-deriving it here fixes old rows and any future gap.
 func (r *StatusReconciler) reconcilePublicApis(ctx context.Context) {
 	apiEnvs, err := db.SnapshotEnvsByKind(ctx, r.pool, "PublicApi")
 	if err != nil {
@@ -182,6 +187,16 @@ func (r *StatusReconciler) reconcilePublicApis(ctx context.Context) {
 	}
 	if len(apiEnvs) == 0 {
 		return
+	}
+
+	envs, err := db.ListK8sEnvironments(ctx, r.pool)
+	if err != nil {
+		log.Error().Err(err).Msg("status-reconciler: list environments for publicapi")
+		return
+	}
+	envNames := make(map[string]bool, len(envs))
+	for _, e := range envs {
+		envNames[e.Name] = true
 	}
 
 	list, err := r.clients.Dynamic.Resource(pgvr("publicapis")).Namespace("").List(ctx, metav1.ListOptions{})
@@ -199,11 +214,15 @@ func (r *StatusReconciler) reconcilePublicApis(ctx context.Context) {
 			continue
 		}
 		phase := crPhase(cr)
-		patch, _ := json.Marshal(map[string]any{
+		fields := map[string]any{
 			"status":      phase,
 			"live_source": "crossplane",
 			"live_at":     time.Now().UTC().Format(time.RFC3339),
-		})
+		}
+		if app := stripEnvSuffix(cr.GetLabels()["argocd.argoproj.io/instance"], envNames); app != "" {
+			fields["app_name"] = app
+		}
+		patch, _ := json.Marshal(fields)
 		n, err := db.UpdateLiveStatus(ctx, r.pool, ids[0], "PublicApi", name, phase, patch)
 		if err != nil {
 			log.Error().Err(err).Str("publicapi", name).Msg("status-reconciler: update publicapi")
