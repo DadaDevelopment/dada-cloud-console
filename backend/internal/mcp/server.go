@@ -50,6 +50,7 @@ func NewHandler(specBytes []byte, cfg Config) (http.Handler, error) {
 	tools = ApplyOverrides(tools, ov)
 
 	srv := buildMCPServer(tools, cfg.BackendURL, spec.BasePath)
+	registerContent(srv, specBytes, tools)
 
 	fallbacks := 0
 	for _, t := range tools {
