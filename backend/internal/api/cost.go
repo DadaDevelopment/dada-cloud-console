@@ -92,7 +92,7 @@ func (h *Handler) GetProjectCost(c *gin.Context) {
 
 	allocs, err := h.opencost.Compute(c.Request.Context(), window, "namespace", "")
 	if err != nil {
-		respondError(c, http.StatusBadGateway, "failed to query cost data")
+		respondError(c, http.StatusServiceUnavailable, "cost data temporarily unavailable")
 		return
 	}
 

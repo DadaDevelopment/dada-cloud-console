@@ -74,6 +74,7 @@ export default function AppDetailPage() {
 
     let cancelled = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
+    const TERMINAL = new Set(["ready", "healthy", "running", "synced", "notdeployed", "failed", "degraded", "error"]);
     const loadApp = (attempt: number) => {
       appsApi
         .list(projectId, envId)
@@ -84,8 +85,12 @@ export default function AppDetailPage() {
             setApp(found);
             setError(null);
             setIsLoading(false);
-          } else if (attempt < 8) {
-            timer = setTimeout(() => loadApp(attempt + 1), 2000);
+            const settled = TERMINAL.has((found.phase ?? "").toLowerCase());
+            if (!settled && attempt < 40) {
+              timer = setTimeout(() => loadApp(attempt + 1), 3000);
+            }
+          } else if (attempt < 40) {
+            timer = setTimeout(() => loadApp(attempt + 1), 3000);
           } else {
             setError(t("apps.detail.error.notFound"));
             setIsLoading(false);
@@ -465,7 +470,13 @@ export default function AppDetailPage() {
         ) : (
           <div className="space-y-3">
             {endpoints.map((ep) => {
-              const epSummary = ep.summary_json as { fqdn?: string; auth_scheme?: string; swagger_enabled?: boolean };
+              const epSummary = ep.summary_json as {
+                fqdn?: string;
+                auth_scheme?: string;
+                swagger_enabled?: boolean;
+                spec?: { dns?: { fqdn?: string } };
+              };
+              const fqdn = epSummary.spec?.dns?.fqdn ?? epSummary.fqdn;
               return (
                 <div key={ep.id} className="flex items-center justify-between rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 px-5 py-4 shadow-sm">
                   <div className="flex items-center gap-4">
@@ -473,14 +484,14 @@ export default function AppDetailPage() {
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9" />
                     </svg>
                     <div>
-                      {epSummary.fqdn ? (
+                      {fqdn ? (
                         <a
-                          href={`https:${"/".repeat(2)}${epSummary.fqdn}`}
+                          href={`https:${"/".repeat(2)}${fqdn}`}
                           target="_blank"
                           rel="noopener noreferrer"
                           className="font-mono text-sm font-medium text-blue-600 dark:text-blue-400 hover:underline"
                         >
-                          {epSummary.fqdn}
+                          {fqdn}
                         </a>
                       ) : (
                         <p className="font-mono text-sm font-medium text-gray-900 dark:text-gray-100">{ep.name}</p>

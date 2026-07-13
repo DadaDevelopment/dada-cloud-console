@@ -36,7 +36,7 @@ export function CostCard({ projectId }: { projectId: string }) {
       .catch((err: unknown) => {
         if (cancelled) return;
         const msg = err instanceof Error ? err.message : "";
-        if (msg.includes("503") || /not configured/i.test(msg)) {
+        if (msg.includes("502") || msg.includes("503") || /not configured|unavailable/i.test(msg)) {
           setUnavailable(true);
         } else {
           setError(t("cost.error"));
