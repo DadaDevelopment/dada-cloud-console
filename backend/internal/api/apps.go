@@ -221,13 +221,25 @@ type appVolumeReq struct {
 
 // defaultVolumeStorageClass is a ReadWriteMany-capable Longhorn class with
 // reclaimPolicy=Retain, so deleting the PVC does not immediately destroy data.
-const defaultVolumeStorageClass = "longhorn-prod"
+//
+// It intentionally defaults to a 2-replica class. beget-prod runs three Longhorn
+// nodes with strict replica anti-affinity while chronic disk pressure keeps one
+// node below the schedulable floor at any given moment, so a 3-replica volume can
+// never reliably place its third replica: the Longhorn Volume reports
+// Scheduled=False (ReplicaSchedulingFailure) and refuses to attach, wedging the
+// pod in ContainerCreating for the lifetime of the pressure. A 2-replica volume
+// fits the two schedulable nodes and attaches cleanly. The 3-replica classes stay
+// allowed below so existing volumes can still be resized.
+const defaultVolumeStorageClass = "longhorn-dev"
 
 var volumeSizeRe = regexp.MustCompile(`^[1-9][0-9]*(Mi|Gi|Ti)$`)
 
 // allowedVolumeStorageClasses guards against pointing app data at ephemeral
-// (reclaimPolicy=Delete) classes. Both entries are Retain on beget-prod.
+// (reclaimPolicy=Delete) classes. All entries are Retain on beget-prod.
+// longhorn-dev is the 2-replica default (see defaultVolumeStorageClass); the
+// 3-replica classes remain selectable for back-compat with existing volumes.
 var allowedVolumeStorageClasses = map[string]bool{
+	"longhorn-dev":           true,
 	"longhorn-prod":          true,
 	"longhorn-stateful-prod": true,
 }
@@ -249,7 +261,7 @@ func validateAppVolume(v *appVolumeReq) (*models.AppVolume, error) {
 		sc = defaultVolumeStorageClass
 	}
 	if !allowedVolumeStorageClasses[sc] {
-		return nil, fmt.Errorf("storage_class must be one of: longhorn-prod, longhorn-stateful-prod")
+		return nil, fmt.Errorf("storage_class must be one of: longhorn-dev, longhorn-prod, longhorn-stateful-prod")
 	}
 	return &models.AppVolume{Path: v.Path, Size: v.Size, StorageClass: sc}, nil
 }

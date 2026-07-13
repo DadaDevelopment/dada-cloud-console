@@ -4,7 +4,19 @@ import { appsApi } from "@/lib/api";
 import type { AppVolume } from "@/lib/types";
 import { useT } from "@/lib/i18n/console/context";
 
-const STORAGE_CLASSES = ["longhorn-prod", "longhorn-stateful-prod"];
+/**
+ * Selectable Longhorn storage classes. longhorn-dev is the 2-replica default: it
+ * is the only class that reliably schedules on beget-prod, where three storage
+ * nodes with strict replica anti-affinity and chronic disk pressure keep one node
+ * below the schedulable floor, so a 3-replica volume cannot place its third
+ * replica and never attaches. The 3-replica classes stay listed for existing
+ * volumes but are labelled as such.
+ */
+const STORAGE_CLASSES: { value: string; label: string }[] = [
+  { value: "longhorn-dev", label: "Standard (2 replicas)" },
+  { value: "longhorn-prod", label: "High-redundancy (3 replicas, may not schedule)" },
+  { value: "longhorn-stateful-prod", label: "Stateful (3 replicas, may not schedule)" },
+];
 
 interface Props {
   projectId: string;
@@ -24,7 +36,7 @@ export function StorageManager({ projectId, envId, appName, canEdit }: Props) {
   const [current, setCurrent] = useState<AppVolume | null>(null);
   const [path, setPath] = useState("/data");
   const [size, setSize] = useState("1Gi");
-  const [storageClass, setStorageClass] = useState(STORAGE_CLASSES[0]);
+  const [storageClass, setStorageClass] = useState(STORAGE_CLASSES[0].value);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
 
@@ -115,8 +127,8 @@ export function StorageManager({ projectId, envId, appName, canEdit }: Props) {
             disabled={!canEdit || busy || !!current}
           >
             {STORAGE_CLASSES.map((sc) => (
-              <option key={sc} value={sc}>
-                {sc}
+              <option key={sc.value} value={sc.value}>
+                {sc.label}
               </option>
             ))}
           </select>
