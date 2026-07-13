@@ -24,6 +24,50 @@ type GitRemoteRepoCandidate = GitRemoteRepo & {
   accountType: string;
 };
 
+type WizardDraft = {
+  selectedRepo: GitRemoteRepoCandidate | null;
+  appName: string;
+  port: number;
+  profile: string;
+  branch: string;
+  rootDir: string;
+  autoDeploy: boolean;
+  frameworkOverride: string;
+  frameworkTouched: boolean;
+  portTouched: boolean;
+  detection: FrameworkDetection | null;
+  buildId: string | null;
+};
+
+function draftKey(projectId: string) {
+  return `dada.import-draft.${projectId}`;
+}
+
+function saveDraft(projectId: string, d: WizardDraft) {
+  try {
+    sessionStorage.setItem(draftKey(projectId), JSON.stringify(d));
+  } catch {
+    return;
+  }
+}
+
+function loadDraft(projectId: string): WizardDraft | null {
+  try {
+    const raw = sessionStorage.getItem(draftKey(projectId));
+    return raw ? (JSON.parse(raw) as WizardDraft) : null;
+  } catch {
+    return null;
+  }
+}
+
+function clearDraft(projectId: string) {
+  try {
+    sessionStorage.removeItem(draftKey(projectId));
+  } catch {
+    return;
+  }
+}
+
 const FRAMEWORK_PRESETS: PresetGroup[] = [
   {
     group: "Java / JVM",
@@ -192,16 +236,12 @@ export default function GitImportPage() {
   // continuous page and stream its logs until a terminal status.
   const [build, setBuild] = useState<Build | null>(null);
   const [deployError, setDeployError] = useState<string | null>(null);
-  const [resuming, setResuming] = useState(() => !!searchParams.get("build"));
+  const [hydrated, setHydrated] = useState(false);
 
   const allowed = canMutate(role);
   // Once a deploy is in flight (or finished) the earlier sections lock so the
   // spec the build was triggered with can't drift under the user.
   const deploying = submitting || !!build || !!deployError;
-  // Resumed from a ?build=<id> URL (refresh while streaming): we have the build
-  // but not the picked-repo state, so the setup sections are hidden and only the
-  // deploy/logs view is shown.
-  const resumedBuild = !!build && !selectedRepo;
 
   const refreshInstallations = useCallback(
     async (autoBindAvailable: boolean) => {
@@ -388,8 +428,8 @@ export default function GitImportPage() {
   );
 
   function pickRepo(repo: GitRemoteRepoCandidate) {
-    forgetBuild();
     setBuild(null);
+    setDeployError(null);
     setSelectedRepo(repo);
     setRepoPickerOpen(false);
     setBranch(repo.default_branch || "main");
@@ -400,18 +440,6 @@ export default function GitImportPage() {
     setPortTouched(false);
     setPort(8080);
     void runDetect(repo, ".");
-  }
-
-  function rememberBuild(id: string) {
-    const url = new URL(window.location.href);
-    url.searchParams.set("build", id);
-    window.history.replaceState(null, "", url.toString());
-  }
-
-  function forgetBuild() {
-    const url = new URL(window.location.href);
-    url.searchParams.delete("build");
-    window.history.replaceState(null, "", url.toString());
   }
 
   async function handleSubmit(e: FormEvent<HTMLFormElement>) {
@@ -445,7 +473,6 @@ export default function GitImportPage() {
     try {
       const { build: b } = await buildsApi.trigger(projectId, envId, appName);
       setBuild(b);
-      rememberBuild(b.id);
     } catch (err) {
       setDeployError(err instanceof Error ? err.message : t("git.import.deploy.triggerFailed"));
     } finally {
@@ -459,29 +486,74 @@ export default function GitImportPage() {
     try {
       const { build: b } = await buildsApi.trigger(projectId, envId, appName);
       setBuild(b);
-      rememberBuild(b.id);
     } catch (err) {
       setDeployError(err instanceof Error ? err.message : t("git.import.deploy.triggerFailed"));
     }
   }, [projectId, envId, appName, t]);
 
-  // Resume across a browser refresh: once a build is running its id lives in the
-  // URL (?build=<id>), so reloading re-attaches to the same build + log stream
-  // instead of dropping back to repo selection. History is replaced (not pushed)
-  // so this never triggers a navigation or breaks the back button.
   useEffect(() => {
-    const bid = searchParams.get("build");
-    if (!bid) return;
-    buildsApi
-      .get(projectId, bid)
-      .then(({ build: b }) => {
-        setBuild(b);
-        setAppName(b.app_name);
-      })
-      .catch(() => forgetBuild())
-      .finally(() => setResuming(false));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    /* eslint-disable react-hooks/set-state-in-effect */
+    const d = loadDraft(projectId);
+    if (d?.selectedRepo) {
+      setSelectedRepo(d.selectedRepo);
+      setRepoPickerOpen(false);
+    }
+    if (d?.appName) setAppName(d.appName);
+    if (typeof d?.port === "number") setPort(d.port);
+    if (d?.profile) setProfile(d.profile);
+    if (d?.branch) setBranch(d.branch);
+    if (d?.rootDir) setRootDir(d.rootDir);
+    if (typeof d?.autoDeploy === "boolean") setAutoDeploy(d.autoDeploy);
+    if (d?.frameworkOverride) setFrameworkOverride(d.frameworkOverride);
+    if (d?.frameworkTouched) setFrameworkTouched(true);
+    if (d?.portTouched) setPortTouched(true);
+    if (d?.detection) setDetection(d.detection);
+    setHydrated(true);
+    /* eslint-enable react-hooks/set-state-in-effect */
+    if (d?.buildId) {
+      buildsApi
+        .get(projectId, d.buildId)
+        .then(({ build: b }) => setBuild(b))
+        .catch(() => {});
+    }
   }, [projectId]);
+
+  useEffect(() => {
+    if (!hydrated) return;
+    if (!selectedRepo && !build) {
+      clearDraft(projectId);
+      return;
+    }
+    saveDraft(projectId, {
+      selectedRepo,
+      appName,
+      port,
+      profile,
+      branch,
+      rootDir,
+      autoDeploy,
+      frameworkOverride,
+      frameworkTouched,
+      portTouched,
+      detection,
+      buildId: build?.id ?? null,
+    });
+  }, [
+    hydrated,
+    projectId,
+    selectedRepo,
+    appName,
+    port,
+    profile,
+    branch,
+    rootDir,
+    autoDeploy,
+    frameworkOverride,
+    frameworkTouched,
+    portTouched,
+    detection,
+    build,
+  ]);
 
   // Poll the build's status while active so the deploy section reaches a terminal
   // state without a manual refresh.
@@ -496,7 +568,7 @@ export default function GitImportPage() {
     return () => clearInterval(id);
   }, [projectId, build]);
 
-  if (isLoadingEnvs) {
+  if (isLoadingEnvs || !hydrated) {
     return (
       <div className="flex h-64 items-center justify-center">
         <Spinner size="lg" />
@@ -536,14 +608,7 @@ export default function GitImportPage() {
       <p className="mt-1 text-sm text-gray-400 dark:text-gray-500">{t("git.import.subtitle")}</p>
 
       <div className="mt-8 space-y-8">
-        {resuming && !build && (
-          <div className="flex h-64 items-center justify-center">
-            <Spinner size="lg" />
-          </div>
-        )}
-
         {/* ── 1. Source ── */}
-        {!resumedBuild && !resuming && (
         <section className="space-y-3">
           <SectionHeader n={1} label={t("git.import.section.source")} done={!!selectedRepo} active={!selectedRepo} />
 
@@ -690,7 +755,6 @@ export default function GitImportPage() {
             </>
           )}
         </section>
-        )}
 
         {/* ── 2. Configure ── */}
         {selectedRepo && (
@@ -881,6 +945,7 @@ export default function GitImportPage() {
                 <div className="flex justify-end gap-3 pt-1">
                   <Link
                     href={`/projects/${projectId}/git${envId ? `?envId=${envId}` : ""}`}
+                    onClick={() => clearDraft(projectId)}
                     className="rounded-lg px-4 py-2 text-sm font-medium text-gray-600 dark:text-gray-400 hover:bg-gray-100 transition-colors"
                   >
                     {t("common.cancel")}
@@ -899,7 +964,7 @@ export default function GitImportPage() {
         )}
 
         {/* ── 3. Deploy ── */}
-        {deploying && (selectedRepo || resumedBuild) && (
+        {deploying && selectedRepo && (
           <section className="space-y-4">
             <SectionHeader
               n={3}
@@ -912,7 +977,7 @@ export default function GitImportPage() {
               <div className="flex items-center justify-between gap-3">
                 <div className="min-w-0">
                   <p className="truncate font-mono text-sm font-medium text-gray-900 dark:text-gray-100">{appName}</p>
-                  <p className="truncate text-xs text-gray-400 dark:text-gray-500">{selectedRepo?.full_name ?? build?.branch}</p>
+                  <p className="truncate text-xs text-gray-400 dark:text-gray-500">{selectedRepo.full_name}</p>
                 </div>
                 {build ? (
                   <BuildStatusBadge status={build.status} />
@@ -953,6 +1018,7 @@ export default function GitImportPage() {
               )}
               <Link
                 href={`/projects/${projectId}/apps/${appName}/deployments${envId ? `?envId=${envId}` : ""}`}
+                onClick={() => clearDraft(projectId)}
                 className="rounded-lg px-4 py-2 text-sm font-medium text-gray-600 dark:text-gray-400 hover:bg-gray-100 transition-colors"
               >
                 {t("git.import.deploy.viewDeployments")}
@@ -960,6 +1026,7 @@ export default function GitImportPage() {
               {build && build.status === "success" && (
                 <Link
                   href={`/projects/${projectId}/apps/${appName}${envId ? `?envId=${envId}` : ""}`}
+                  onClick={() => clearDraft(projectId)}
                   className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 transition-colors"
                 >
                   {t("git.import.deploy.openApp")}
