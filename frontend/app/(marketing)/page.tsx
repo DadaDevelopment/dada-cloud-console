@@ -14,6 +14,7 @@ import { useLang } from "@/lib/i18n/context";
 import { consoleHref, localeHref } from "@/lib/site";
 import { CtaBand, FaqList } from "@/components/marketing/sections";
 import { HomeJsonLd } from "@/components/marketing/home-jsonld";
+import { McpAgentSection } from "@/components/marketing/mcp-agent";
 import { clsx } from "clsx";
 
 const STEP_ICONS = [GitBranch, Database, RotateCcw];
@@ -138,6 +139,9 @@ export default function HomePage() {
           </div>
         </div>
       </section>
+
+      {/* MCP / AI agent */}
+      <McpAgentSection copy={t.home.mcp} href={localeHref("/developer/mcp-ai-agents", locale)} />
 
       {/* Social proof */}
       <section className="bg-slate-50 py-20">

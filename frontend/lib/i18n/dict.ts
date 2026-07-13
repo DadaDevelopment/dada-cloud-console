@@ -84,6 +84,14 @@ export interface Dict {
     faq: Faq[];
     ctaTitle: string;
     ctaSubtitle: string;
+    mcp: {
+      tag: string;
+      title: string;
+      subtitle: string;
+      chat: { role: "user" | "assistant"; text: string }[];
+      bullets: string[];
+      cta: string;
+    };
   };
   servers: {
     heroTitle: string;
@@ -220,6 +228,23 @@ const ru: Dict = {
     ],
     ctaTitle: "Поднимите backend из GitHub сегодня",
     ctaSubtitle: "Подключение репозитория занимает минуту. Платите только за то, что реально потребляете.",
+    mcp: {
+      tag: "Новое · MCP",
+      title: "Управляйте облаком прямо из Claude",
+      subtitle:
+        "Подключите платформу к Claude одной командой — и просите его словами: подними сервер, разверни приложение, покажи логи. Он сделает и отчитается.",
+      chat: [
+        { role: "user", text: "Claude, подними сервер под API и разверни туда приложение из моего репозитория" },
+        { role: "assistant", text: "Создаю сервер, беру репозиторий, собираю образ…" },
+        { role: "assistant", text: "Готово, сэр. Приложение живёт по HTTPS, база и домен на месте." },
+      ],
+      bullets: [
+        "132 действия платформы прямо в чате",
+        "Вход через браузер — ни токенов, ни ключей вручную",
+        "Работает только с вашими проектами, по вашим правам",
+      ],
+      cta: "Как подключить",
+    },
   },
   servers: {
     heroTitle: "Свой сервер — под управлением. Или закажите новый",
@@ -517,6 +542,23 @@ const en: Dict = {
     ],
     ctaTitle: "Get your backend live from GitHub today",
     ctaSubtitle: "Connecting a repo takes a minute. You only pay for what you actually use.",
+    mcp: {
+      tag: "New · MCP",
+      title: "Run your cloud straight from Claude",
+      subtitle:
+        "Connect the platform to Claude with one command, then just ask: spin up a server, deploy an app, show me the logs. It does it and reports back.",
+      chat: [
+        { role: "user", text: "Claude, spin up a server for my API and deploy the app from my repo" },
+        { role: "assistant", text: "Creating the server, pulling the repo, building the image…" },
+        { role: "assistant", text: "Done, sir. The app is live over HTTPS, database and domain in place." },
+      ],
+      bullets: [
+        "132 platform actions right in the chat",
+        "Browser login — no tokens or keys to paste",
+        "Scoped to your projects, under your permissions",
+      ],
+      cta: "How to connect",
+    },
   },
   servers: {
     heroTitle: "Your server, under management. Or order a new one",
