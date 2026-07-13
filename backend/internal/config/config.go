@@ -140,6 +140,13 @@ type Config struct {
 	// http://opencost.opencost.svc.cluster.local:9003. No auth (in-cluster).
 	OpenCostURL string // OPENCOST_URL
 
+	// Fully-loaded consumption pricing knobs (billing_fullcost.go). BillingMargin
+	// is the profit multiplier applied after infra-overhead loading (default 1.4);
+	// BillingMinUtilization floors the per-type user share so the overhead factor
+	// tops out at 1/min (default 0.30 -> 3.33x). Tunable without a rebuild.
+	BillingMargin         float64 // BILLING_MARGIN
+	BillingMinUtilization float64 // BILLING_MIN_UTILIZATION
+
 	// User-telemetry read store (multi-tenant Grafana Mimir). The monitoring
 	// product (user-pushed metrics) reads from here with a per-tenant
 	// X-Scope-OrgID header; infra/container/db metrics keep reading the plain
@@ -336,6 +343,8 @@ func Load() (*Config, error) {
 		PrometheusQueryUser:       getEnv("PROMETHEUS_QUERY_USER", ""),
 		PrometheusQueryPass:       getEnv("PROMETHEUS_QUERY_PASS", ""),
 		OpenCostURL:               getEnv("OPENCOST_URL", ""),
+		BillingMargin:             getEnvFloat("BILLING_MARGIN", 1.4),
+		BillingMinUtilization:     getEnvFloat("BILLING_MIN_UTILIZATION", 0.30),
 		UserMetricsQueryURL:       getEnv("USER_METRICS_QUERY_URL", ""),
 		UserMetricsQueryUser:      getEnv("USER_METRICS_QUERY_USER", ""),
 		UserMetricsQueryPass:      getEnv("USER_METRICS_QUERY_PASS", ""),
@@ -465,4 +474,18 @@ func getEnvInt64(key string, defaultVal int64) int64 {
 		return defaultVal
 	}
 	return n
+}
+
+// getEnvFloat reads a positive float env var, returning defaultVal when unset,
+// unparseable, or non-positive.
+func getEnvFloat(key string, defaultVal float64) float64 {
+	v := os.Getenv(key)
+	if v == "" {
+		return defaultVal
+	}
+	f, err := strconv.ParseFloat(v, 64)
+	if err != nil || f <= 0 {
+		return defaultVal
+	}
+	return f
 }

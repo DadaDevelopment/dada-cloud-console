@@ -14,13 +14,13 @@ func TestOverheadFactor(t *testing.T) {
 		{"users occupy whole cluster -> 1", 10, 10, 1},
 		{"users at half -> 2", 5, 10, 2},
 		{"share above floor -> exact ratio", 4, 10, 2.5},
-		{"share at floor -> capped", 3, 10, 1 / billingMinUtilization},
-		{"tiny share -> capped at floor", 0.1, 10, 1 / billingMinUtilization},
+		{"share at floor -> capped", 3, 10, 1 / 0.30},
+		{"tiny share -> capped at floor", 0.1, 10, 1 / 0.30},
 		{"zero total -> 1", 0, 0, 1},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			got := overheadFactor(c.user, c.tot)
+			got := overheadFactor(c.user, c.tot, 0.30)
 			if math.Abs(got-c.want) > 1e-9 {
 				t.Fatalf("overheadFactor(%v,%v) = %v, want %v", c.user, c.tot, got, c.want)
 			}

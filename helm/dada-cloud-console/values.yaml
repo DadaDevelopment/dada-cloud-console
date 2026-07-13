@@ -45,6 +45,14 @@ global:
     elasticsearchApiKey: ""
     opencostUrl: "http://opencost.opencost.svc.cluster.local:9003"
 
+# Fully-loaded consumption pricing knobs (backend billing_fullcost.go). Tunable
+# without a rebuild: edit here (gitops) or kubectl patch the config configmap +
+# rollout. margin = profit multiplier after infra-overhead loading; minUtilization
+# = user-share floor that caps the per-type overhead factor at 1/min.
+billing:
+  margin: "1.4"
+  minUtilization: "0.30"
+
 backend:
   enabled: true
   replicaCount: 1

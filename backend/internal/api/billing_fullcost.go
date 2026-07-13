@@ -28,14 +28,12 @@ import (
 // denominator is the whole cluster (not the head-count of users), the factor is
 // stable: adding a user does not swing existing users' bills.
 //
-// billingMinUtilization floors the per-type user share so the overhead factor
-// tops out at 1/billingMinUtilization (~3.33x). billingMargin is the profit
-// lever applied AFTER overhead loading; it replaces the old flat 2.7 markup,
-// which conflated overhead and margin. Both are tunable.
-const (
-	billingMinUtilization = 0.30
-	billingMargin         = 1.4
-)
+// The minUtilization floor (BILLING_MIN_UTILIZATION, default 0.30) caps the
+// factor at 1/minUtil (~3.33x). The margin (BILLING_MARGIN, default 1.4) is the
+// profit lever applied AFTER overhead loading; it replaces the old flat 2.7
+// markup, which conflated overhead and margin. Both come from config
+// (h.billingMinUtil / h.billingMargin) so they are tunable via env without a
+// rebuild.
 
 // consumptionPricing carries the per-type overhead factors (>=1) and the profit
 // margin used to turn a raw OpenCost allocation into a customer-facing price.
@@ -57,7 +55,7 @@ func (p consumptionPricing) price(cpuCost, ramCost, pvCost float64) float64 {
 // Best-effort: when OpenCost is unavailable it returns factors of 1 (no overhead
 // loading), so pricing degrades to raw*margin rather than erroring.
 func (h *Handler) billingPricing(ctx context.Context, start, end time.Time) consumptionPricing {
-	p := consumptionPricing{fCPU: 1, fRAM: 1, fPV: 1, margin: billingMargin}
+	p := consumptionPricing{fCPU: 1, fRAM: 1, fPV: 1, margin: h.billingMargin}
 	if h.opencost == nil {
 		return p
 	}
@@ -86,22 +84,22 @@ func (h *Handler) billingPricing(ctx context.Context, start, end time.Time) cons
 		}
 	}
 
-	p.fCPU = overheadFactor(userCPU, totCPU)
-	p.fRAM = overheadFactor(userRAM, totRAM)
-	p.fPV = overheadFactor(userPV, totPV)
+	p.fCPU = overheadFactor(userCPU, totCPU, h.billingMinUtil)
+	p.fRAM = overheadFactor(userRAM, totRAM, h.billingMinUtil)
+	p.fPV = overheadFactor(userPV, totPV, h.billingMinUtil)
 	return p
 }
 
-// overheadFactor returns 1 / max(userCost/total, minUtilization): how much each
-// raw user unit must scale up to also carry the shared infra overhead, bounded
-// by the minUtilization floor. Falls back to 1 when the total is zero.
-func overheadFactor(userCost, total float64) float64 {
+// overheadFactor returns 1 / max(userCost/total, minUtil): how much each raw
+// user unit must scale up to also carry the shared infra overhead, bounded by
+// the minUtil floor. Falls back to 1 when the total is zero.
+func overheadFactor(userCost, total, minUtil float64) float64 {
 	if total <= 0 {
 		return 1
 	}
 	share := userCost / total
-	if share < billingMinUtilization {
-		share = billingMinUtilization
+	if share < minUtil {
+		share = minUtil
 	}
 	return 1 / share
 }

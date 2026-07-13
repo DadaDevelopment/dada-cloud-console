@@ -86,8 +86,10 @@ type Handler struct {
 	// consumption endpoints. Loaded once from the embedded cluster-cost.yaml;
 	// on failure billingUnit stays zero (all costs read 0) and we warn only —
 	// this surface is transparency, never a bill, so it must never be fatal.
-	billingUnit   costengine.UnitCost
-	billingMarkup float64
+	billingUnit    costengine.UnitCost
+	billingMarkup  float64
+	billingMargin  float64
+	billingMinUtil float64
 
 	usersvc *userservice.Client
 
@@ -171,6 +173,8 @@ func NewHandler(pool *pgxpool.Pool, cfg *config.Config) *Handler {
 	}
 
 	h.billingMarkup = pricing.MarkupDefault
+	h.billingMargin = cfg.BillingMargin
+	h.billingMinUtil = cfg.BillingMinUtilization
 	if cc, ccErr := billing.LoadClusterCost(""); ccErr != nil {
 		log.Printf("billing: warn: failed to load cluster-cost (consumption costs will be 0): %v", ccErr)
 	} else if unit, uErr := costengine.ComputeUnitCost(cc); uErr != nil {
