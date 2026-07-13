@@ -178,12 +178,6 @@ func (r *Runner) run(ctx context.Context, b *db.Build) {
 // is NOT a failure: the Jenkins job keeps running and startup reconciliation
 // re-attaches to it, so the row is left in-flight rather than failed or canceled.
 func (r *Runner) handleBuildError(ctx context.Context, b *db.Build, repo *db.Repo, err error, llog *zerologLogger) {
-	if errors.Is(err, errBuildAborted) {
-		llog.Info().Msg("build canceled (jenkins aborted)")
-		r.emit(ctx, b.ID, "build canceled")
-		_, _ = db.MarkCanceled(ctx, r.pool, b.ID)
-		return
-	}
 	if errors.Is(err, context.Canceled) {
 		// The build context is done, so DB writes on it would fail — use a
 		// detached context. Supersession already marked the row canceled; a plain
@@ -199,9 +193,46 @@ func (r *Runner) handleBuildError(ctx context.Context, b *db.Build, repo *db.Rep
 		}
 		return
 	}
+	if isRetryable(err) {
+		reason := fmt.Sprintf("transient jenkins error, retrying: %v", err)
+		if retried, rerr := db.RequeueForRetry(ctx, r.pool, b.ID, reason, maxBuildAttempts); rerr == nil && retried {
+			llog.Warn().Err(err).Msg("build re-queued for retry (transient jenkins error)")
+			r.emit(ctx, b.ID, "retrying after transient error: "+err.Error())
+			metrics.BuildTotal.WithLabelValues("retried").Inc()
+			return
+		}
+	}
 	r.failFromCurrent(ctx, b, err)
 	r.postStatus(ctx, repo, b, "failure", "build failed")
 	metrics.BuildTotal.WithLabelValues("failed").Inc()
+}
+
+// maxBuildAttempts bounds automatic retries of a build that keeps hitting
+// transient failures.
+const maxBuildAttempts = 3
+
+// isRetryable reports whether a build failure is worth another attempt: an
+// external Jenkins ABORTED (the console never aborts Jenkins itself) or a
+// transient transport error talking to the Jenkins ingress (503/502/504,
+// timeouts, dropped connections). A real build FAILURE is not retryable.
+func isRetryable(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, errBuildAborted) {
+		return true
+	}
+	s := err.Error()
+	for _, m := range []string{
+		"status 503", "status 502", "status 504", "503 Service", "502 Bad", "504 Gateway",
+		"context deadline exceeded", "connection refused", "connection reset",
+		"i/o timeout", "unexpected EOF", "resolve build number",
+	} {
+		if strings.Contains(s, m) {
+			return true
+		}
+	}
+	return false
 }
 
 // finalize records success and hands off to the deploy path (web) or records

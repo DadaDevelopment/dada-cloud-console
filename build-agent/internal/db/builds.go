@@ -247,6 +247,35 @@ func Transition(ctx context.Context, pool *pgxpool.Pool, id uuid.UUID, from, to 
 	return tag.RowsAffected() == 1, nil
 }
 
+// RequeueForRetry sends an in-flight build back to the queue for another attempt
+// after a transient failure (Jenkins/ingress 503, timeout, external ABORTED),
+// recording the reason and bounding retries at maxAttempts. It clears the
+// started/finished timestamps and the Jenkins refs so the retry gets a fresh run
+// (and restart reconciliation does not re-attach to the dead run). Returns true
+// when the build was re-queued; false (with no error) when attempts are
+// exhausted or the row is no longer in-flight, so the caller can fail it with a
+// recorded reason instead.
+func RequeueForRetry(ctx context.Context, pool *pgxpool.Pool, id uuid.UUID, reason string, maxAttempts int) (bool, error) {
+	tag, err := pool.Exec(ctx, `
+		UPDATE builds
+		SET    status = 'queued',
+		       attempt = attempt + 1,
+		       error_message = $2,
+		       started_at = NULL,
+		       finished_at = NULL,
+		       jenkins_queue_id = NULL,
+		       jenkins_build_number = NULL,
+		       updated_at = NOW()
+		WHERE  id = $1
+		  AND  status IN ('detecting','building','pushing')
+		  AND  attempt < $3
+	`, id, reason, maxAttempts)
+	if err != nil {
+		return false, fmt.Errorf("requeue for retry %s: %w", id, err)
+	}
+	return tag.RowsAffected() == 1, nil
+}
+
 // MarkFailed moves a build to failed, recording the error message and
 // finished_at. Compare-and-set on `from` so it loses cleanly against a concurrent
 // cancel/supersede. Returns true when it changed a row.
