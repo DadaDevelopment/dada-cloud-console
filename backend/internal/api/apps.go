@@ -30,6 +30,32 @@ import (
 // @Success     200       {object} map[string]interface{} "object with an apps array of ResourceSnapshot"
 // @Failure     401       {object} map[string]string
 // @Failure     404       {object} map[string]string
+// FillRepoFullName injects repo_full_name (from git_repos, keyed by app name)
+// into each app's summary when the snapshot summary does not already carry it.
+// A deployed app's resource-snapshot summary omits the linked repo, so without
+// this the UI shows "not linked" even though the repo is connected in git_repos.
+func FillRepoFullName(apps []models.ResourceSnapshot, repoByName map[string]string) {
+	for i := range apps {
+		repo := repoByName[apps[i].Name]
+		if repo == "" {
+			continue
+		}
+		var m map[string]any
+		if len(apps[i].SummaryJSON) > 0 {
+			_ = json.Unmarshal(apps[i].SummaryJSON, &m)
+		}
+		if m == nil {
+			m = map[string]any{}
+		}
+		if cur, _ := m["repo_full_name"].(string); cur == "" {
+			m["repo_full_name"] = repo
+			if b, err := json.Marshal(m); err == nil {
+				apps[i].SummaryJSON = b
+			}
+		}
+	}
+}
+
 // @Router      /projects/{projectId}/environments/{envId}/apps [get]
 func (h *Handler) ListApps(c *gin.Context) {
 	claims, ok := auth.GetClaims(c)
@@ -104,6 +130,7 @@ func (h *Handler) ListApps(c *gin.Context) {
 		 WHERE project_id = $1 AND environment_id = $2`,
 		projectID, envID,
 	)
+	repoByName := make(map[string]string)
 	if gerr == nil {
 		defer grows.Close()
 		for grows.Next() {
@@ -118,6 +145,9 @@ func (h *Handler) ListApps(c *gin.Context) {
 			)
 			if scanErr := grows.Scan(&id, &name, &repo, &profile, &replicas, &port, &updated); scanErr != nil {
 				continue
+			}
+			if repo != "" {
+				repoByName[name] = repo
 			}
 			if _, ok := seen[name]; ok {
 				continue
@@ -144,6 +174,8 @@ func (h *Handler) ListApps(c *gin.Context) {
 			seen[name] = struct{}{}
 		}
 	}
+
+	FillRepoFullName(apps, repoByName)
 
 	sort.Slice(apps, func(i, j int) bool { return apps[i].Name < apps[j].Name })
 
