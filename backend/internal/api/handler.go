@@ -4,6 +4,7 @@ import (
 	"context"
 	"log"
 	"os"
+	"time"
 
 	"github.com/dada-tuda/console/backend/internal/auth"
 	"github.com/dada-tuda/console/backend/internal/billing"
@@ -16,6 +17,7 @@ import (
 	"github.com/dada-tuda/console/backend/internal/grafana"
 	"github.com/dada-tuda/console/backend/internal/logsearch"
 	"github.com/dada-tuda/console/backend/internal/mlflow"
+	"github.com/dada-tuda/console/backend/internal/pdns"
 	"github.com/dada-tuda/console/backend/internal/portainer"
 	"github.com/dada-tuda/console/backend/internal/prometheus"
 	"github.com/dada-tuda/console/backend/internal/userservice"
@@ -86,6 +88,8 @@ type Handler struct {
 	billingMarkup float64
 
 	usersvc *userservice.Client
+
+	pdns *pdns.Client
 }
 
 // NewHandler constructs a Handler with the given dependencies.
@@ -147,6 +151,7 @@ func NewHandler(pool *pgxpool.Pool, cfg *config.Config) *Handler {
 		h.usersvc = userservice.New(cfg.UserServiceURL, uts)
 		log.Printf("iam: project-group sync to user-service ENABLED")
 	}
+	h.pdns = pdns.NewClient(cfg.PowerDNSAPIURL, cfg.PowerDNSAPIKey, 15*time.Second)
 	h.counters = cloudtask.NewCounterResolver()
 	h.s3creds = cloudtask.NewS3CredentialsResolver(cfg.CrossplaneSecretNamespace)
 	h.dbcreds = cloudtask.NewDBCredentialsResolver()

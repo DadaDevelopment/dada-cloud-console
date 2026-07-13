@@ -106,8 +106,10 @@ in our DB, to avoid drift.
 - S1 backend infra: `internal/pdns` client (verify API key + issuer), migration
   (`delegation_mode`, `managed_zones`), zone create/list/record CRUD handlers,
   delegation poller. Ships behind a feature flag, no UI yet.
-- S2 cert: DNS-01 ClusterIssuer + gitops-agent path to issue delegated-domain
-  certs via DNS-01.
+- S2 cert (OPTIONAL, deferred): DNS-01 via the existing letsencrypt-dns01
+  issuer. NOT a blocker -- because delegate seeds apex/www -> our LB in the zone,
+  once NS propagates the domain resolves to us and the existing HTTP-01 attach
+  path issues the cert normally. DNS-01 only adds wildcard + issue-before-propagation.
 - S3 import: probe-based zone import preview endpoint.
 - S4 frontend: wizard dual-path toggle + record editor.
 - S5 hardening: powerdns recursion/AXFR/rate-limit lockdown; runbook; 2nd NS
