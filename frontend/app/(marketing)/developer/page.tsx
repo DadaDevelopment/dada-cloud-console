@@ -19,6 +19,7 @@ const GUIDE_GROUPS: {
       { slug: "databases-postgres", label: "Managed Postgres databases" },
       { slug: "domains-and-https", label: "Custom domains and HTTPS" },
       { slug: "monitoring-metrics-logs-alerts", label: "Monitoring: metrics, logs, alerts" },
+      { slug: "mcp-ai-agents", label: "Control the cloud from an AI agent (MCP)" },
     ],
   },
   {
