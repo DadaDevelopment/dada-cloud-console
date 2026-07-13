@@ -83,6 +83,10 @@ export const apps: Messages = {
   "apps.detail.spec.profile": { ru: "Профиль", en: "Profile" },
   "apps.detail.spec.replicas": { ru: "Реплики", en: "Replicas" },
   "apps.detail.spec.port": { ru: "Порт", en: "Port" },
+  "apps.detail.observability.notDeployed": {
+    ru: "Приложение ещё не задеплоено — метрики и логи появятся после первого успешного деплоя.",
+    en: "App is not deployed yet — metrics and logs will appear after the first successful deploy.",
+  },
 
   "apps.detail.error.notFound": { ru: "Приложение не найдено", en: "App not found" },
   "apps.detail.error.load": { ru: "Не удалось загрузить приложение", en: "Failed to load app" },

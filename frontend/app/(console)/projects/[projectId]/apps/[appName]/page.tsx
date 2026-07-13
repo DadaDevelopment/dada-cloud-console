@@ -371,8 +371,16 @@ export default function AppDetailPage() {
             </div>
           )}
 
-          <FixedMetricsDashboard kind="app" projectId={projectId} envId={envId} appName={appName} />
-          <LogsViewer projectId={projectId} app={appName} />
+          {app.phase === "NotDeployed" ? (
+            <div className="rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 px-4 py-6 text-center text-sm text-gray-500 dark:text-gray-400">
+              {t("apps.detail.observability.notDeployed")}
+            </div>
+          ) : (
+            <>
+              <FixedMetricsDashboard kind="app" projectId={projectId} envId={envId} appName={appName} />
+              <LogsViewer projectId={projectId} app={appName} />
+            </>
+          )}
         </div>
       )}
 
