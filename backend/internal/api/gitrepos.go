@@ -900,28 +900,42 @@ func (h *Handler) ConnectGitRepo(c *gin.Context) {
 		cloneURL = "https://github.com/" + req.RepoFullName + ".git"
 	}
 
-	// Resolve the installation UUID to a real row in this project (GitHub flow).
+	// Resolve the installation to a row visible to this project's org. Accept
+	// EITHER the installation's id (UUID) OR its numeric GitHub installation id —
+	// listGitInstallations surfaces both fields, and callers reasonably pass
+	// whichever they see. Scoped by org (how installations are shared/listed), not
+	// by the row's project_id, so an org-shared installation resolves correctly.
 	var installationID *uuid.UUID
 	if req.InstallationID != "" {
-		instUUID, perr := uuid.Parse(req.InstallationID)
-		if perr != nil {
-			respondError(c, http.StatusBadRequest, "installation_id must be a UUID")
+		var resolved uuid.UUID
+		var qerr error
+		if instUUID, perr := uuid.Parse(req.InstallationID); perr == nil {
+			qerr = h.pool.QueryRow(c.Request.Context(),
+				`SELECT gai.id FROM git_app_installations gai
+				 JOIN projects p ON p.org_id = gai.org_id
+				 WHERE gai.id = $1 AND p.id = $2`,
+				instUUID, projectID,
+			).Scan(&resolved)
+		} else if numeric, nerr := strconv.ParseInt(req.InstallationID, 10, 64); nerr == nil {
+			qerr = h.pool.QueryRow(c.Request.Context(),
+				`SELECT gai.id FROM git_app_installations gai
+				 JOIN projects p ON p.org_id = gai.org_id
+				 WHERE gai.installation_id = $1 AND p.id = $2`,
+				numeric, projectID,
+			).Scan(&resolved)
+		} else {
+			respondError(c, http.StatusBadRequest, "installation_id must be the installation id (UUID) or its numeric GitHub installation id")
 			return
 		}
-		var exists bool
-		err = h.pool.QueryRow(c.Request.Context(),
-			`SELECT EXISTS(SELECT 1 FROM git_app_installations WHERE id = $1 AND project_id = $2)`,
-			instUUID, projectID,
-		).Scan(&exists)
-		if err != nil {
-			respondError(c, http.StatusInternalServerError, "failed to verify installation")
-			return
-		}
-		if !exists {
+		if qerr == pgx.ErrNoRows {
 			respondNotFound(c)
 			return
 		}
-		installationID = &instUUID
+		if qerr != nil {
+			respondError(c, http.StatusInternalServerError, "failed to verify installation")
+			return
+		}
+		installationID = &resolved
 	}
 
 	// GitLab token (optional) — store encrypted.
