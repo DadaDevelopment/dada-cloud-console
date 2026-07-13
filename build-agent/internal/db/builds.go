@@ -126,6 +126,41 @@ func MarkCanceled(ctx context.Context, pool *pgxpool.Pool, id uuid.UUID) (bool, 
 	return tag.RowsAffected() == 1, nil
 }
 
+// ReapStuckBuilds fails builds left in a non-terminal in-flight state
+// (detecting/building/pushing) whose started_at is older than olderThan. These
+// are orphans: the Runner tracking them in-process died (restart/OOM/eviction)
+// before writing a terminal status, and nothing re-claims a non-'queued' build,
+// so the row would hang forever and the UI would show "Building" with no Retry.
+// olderThan is chosen above BuildTimeout so a still-live build (which self-fails
+// at its own timeout) is never reaped out from under itself, and so a brief
+// two-pod overlap during a rolling deploy cannot kill the outgoing pod's build.
+// Returns the reaped ids for logging.
+func ReapStuckBuilds(ctx context.Context, pool *pgxpool.Pool, olderThan time.Duration) ([]uuid.UUID, error) {
+	rows, err := pool.Query(ctx, `
+		UPDATE builds
+		SET    status = 'failed',
+		       error_message = 'build orphaned: build-agent restarted before completion; retry',
+		       finished_at = NOW(), updated_at = NOW()
+		WHERE  status IN ('detecting','building','pushing')
+		  AND  started_at < NOW() - make_interval(secs => $1)
+		RETURNING id
+	`, olderThan.Seconds())
+	if err != nil {
+		return nil, fmt.Errorf("reap stuck builds: %w", err)
+	}
+	defer rows.Close()
+
+	var ids []uuid.UUID
+	for rows.Next() {
+		var id uuid.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("scan reaped build: %w", err)
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
+}
+
 // FinishSuccess pins the immutable image URI and stamps finished_at as part of
 // the pushing→success transition.
 func FinishSuccess(ctx context.Context, pool *pgxpool.Pool, id uuid.UUID, imageURI string) (bool, error) {

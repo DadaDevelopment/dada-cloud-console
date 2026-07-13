@@ -80,6 +80,23 @@ func NewRunner(pool *pgxpool.Pool, cfg *config.Config, publishLog func(buildID, 
 // OnPush implements the webhook nudge: drain the queue right away.
 func (r *Runner) OnPush(ctx context.Context) { r.DrainQueue(ctx) }
 
+// reapGrace pads BuildTimeout so the reaper never races a live build's own
+// timeout or a brief two-pod overlap during a rolling deploy.
+const reapGrace = 2 * time.Minute
+
+// ReapStuck fails orphaned in-flight builds (agent died mid-build). Safe to call
+// on every poll tick: the query only touches rows older than BuildTimeout+grace.
+func (r *Runner) ReapStuck(ctx context.Context) {
+	ids, err := db.ReapStuckBuilds(ctx, r.pool, r.cfg.BuildTimeout+reapGrace)
+	if err != nil {
+		log.Error().Err(err).Msg("reap stuck builds")
+		return
+	}
+	for _, id := range ids {
+		log.Warn().Str("build", id.String()).Msg("orphaned build reaped (failed)")
+	}
+}
+
 // DrainQueue claims and dispatches queued builds until the queue is empty or
 // concurrency is saturated.
 func (r *Runner) DrainQueue(ctx context.Context) {
