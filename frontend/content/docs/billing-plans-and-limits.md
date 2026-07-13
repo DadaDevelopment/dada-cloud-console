@@ -21,7 +21,7 @@ resources are costing — all read-only from inside the console.
 
 ## How to upgrade
 
-Click **View plans**. This opens `https://dada-tuda.ru/pricing` in a new destination — it is
+Click **View plans**. This opens `https://cloud.dada-tuda.ru/pricing` in a new destination — it is
 **not** an in-app checkout. There is no plan-switch button, no payment form, and no downgrade
 button inside the console itself.
 

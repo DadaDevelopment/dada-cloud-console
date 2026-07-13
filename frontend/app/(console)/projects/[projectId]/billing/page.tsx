@@ -9,6 +9,7 @@ import { Spinner } from "@/components/ui/spinner";
 import { Breadcrumb } from "@/components/ui/breadcrumb";
 import { ConsumptionBreakdown } from "@/components/billing/consumption-breakdown";
 import { useT } from "@/lib/i18n/console/context";
+import { marketingHref } from "@/lib/site";
 import { clsx } from "clsx";
 
 const PLAN_DISPLAY_NAMES: Record<string, string> = {
@@ -184,7 +185,7 @@ export default function BillingPage() {
             </p>
           )}
           <Link
-            href="https://dada-tuda.ru/pricing"
+            href={marketingHref("/pricing")}
             target="_blank"
             className="mt-5 inline-flex items-center gap-1.5 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-blue-700"
           >
@@ -211,7 +212,7 @@ export default function BillingPage() {
             {t("billing.alertNearLimit")}
           </p>
           <Link
-            href="https://dada-tuda.ru/pricing"
+            href={marketingHref("/pricing")}
             target="_blank"
             className="mt-5 inline-flex items-center gap-1.5 rounded-lg border border-gray-200 dark:border-gray-700 px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-200 transition-colors hover:bg-gray-50 dark:hover:bg-gray-800"
           >

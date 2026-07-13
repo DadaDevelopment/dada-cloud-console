@@ -22,6 +22,16 @@ export function docsHref(slug: string): string {
   return `${MARKETING_URL}/developer/${slug}`;
 }
 
+/**
+ * marketingHref builds an absolute URL to a marketing-site route (e.g.
+ * "/pricing") on the marketing host. Use from the console, which is a different
+ * origin, so a root-relative link would resolve against console.dada-tuda.ru
+ * instead of the marketing landing.
+ */
+export function marketingHref(path: string): string {
+  return `${MARKETING_URL}${path.startsWith("/") ? path : `/${path}`}`;
+}
+
 // Marketing locale routing: RU is served at the root ("/", "/pricing"), EN at
 // the "/en" prefix ("/en", "/en/pricing"). Keep internal marketing links inside
 // the active locale so navigation doesn't bounce the user back to RU.
