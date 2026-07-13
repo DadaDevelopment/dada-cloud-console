@@ -239,7 +239,7 @@ export const apps: Messages = {
   "apps.config.error.token": { ru: "Не удалось открыть сессию редактора", en: "Failed to open editor session" },
   "apps.config.error.unknown": { ru: "Не удалось сохранить", en: "Save failed" },
   "apps.config.invalid.port": { ru: "Порт должен быть 1..65535", en: "Port must be 1..65535" },
-  "apps.config.invalid.replicas": { ru: "Реплик должно быть 1..10", en: "Replicas must be 1..10" },
+  "apps.config.invalid.replicas": { ru: "Реплик должно быть {min}..10", en: "Replicas must be {min}..10" },
   "apps.config.invalid.image": { ru: "Укажите образ и тег", en: "Image name and tag are required" },
   "apps.config.invalid.resources": { ru: "Заполните CPU и память", en: "CPU and memory are required" },
   "apps.detail.config.title": { ru: "Конфигурация", en: "Configuration" },

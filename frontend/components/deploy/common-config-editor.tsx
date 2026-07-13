@@ -4,6 +4,7 @@ import { valuesApi } from "@/lib/api";
 import { readCommon, patchCommon, type CommonConfig } from "@/lib/values-common";
 import { Spinner } from "@/components/ui/spinner";
 import { useT } from "@/lib/i18n/console/context";
+import { useClaims } from "@/lib/claims";
 
 type WsIncoming =
   | { type: "content"; yaml: string }
@@ -41,6 +42,8 @@ const EMPTY: CommonConfig = {
  */
 export function CommonConfigEditor({ projectId, envId, appName, canEdit }: Props) {
   const { t } = useT();
+  const godMode = !!useClaims()?.platformAdmin;
+  const minReplicas = godMode ? 0 : 1;
   const [cfg, setCfg] = useState<CommonConfig>(EMPTY);
   const [loaded, setLoaded] = useState(false);
   const [status, setStatus] = useState<ConnStatus>("connecting");
@@ -106,7 +109,7 @@ export function CommonConfigEditor({ projectId, envId, appName, canEdit }: Props
     const port = Number(cfg.servicePort);
     if (!Number.isInteger(port) || port < 1 || port > 65535) return t("apps.config.invalid.port");
     const rep = Number(cfg.replicas);
-    if (!Number.isInteger(rep) || rep < 1 || rep > 10) return t("apps.config.invalid.replicas");
+    if (!Number.isInteger(rep) || rep < minReplicas || rep > 10) return t("apps.config.invalid.replicas", { min: String(minReplicas) });
     if (!cfg.imageName.trim() || !cfg.imageTag.trim()) return t("apps.config.invalid.image");
     if (!cfg.reqCpu.trim() || !cfg.reqMemory.trim() || !cfg.limCpu.trim() || !cfg.limMemory.trim()) {
       return t("apps.config.invalid.resources");
@@ -190,7 +193,7 @@ export function CommonConfigEditor({ projectId, envId, appName, canEdit }: Props
             </div>
             <div>
               <label className={label}>{t("apps.config.replicas")}</label>
-              <input className={field} type="number" min={1} max={10} value={cfg.replicas} onChange={(e) => set("replicas", e.target.value)} disabled={disabled} />
+              <input className={field} type="number" min={minReplicas} max={10} value={cfg.replicas} onChange={(e) => set("replicas", e.target.value)} disabled={disabled} />
             </div>
             <div className="sm:col-span-2">
               <label className={label}>{t("apps.config.useDotEnv")}</label>

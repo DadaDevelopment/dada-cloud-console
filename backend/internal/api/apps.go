@@ -372,7 +372,7 @@ func (h *Handler) CreateApp(c *gin.Context) {
 		if req.Port == 0 {
 			req.Port = defaultPortForFramework(req.Framework)
 		}
-		if req.Replicas == 0 {
+		if req.Replicas == 0 && !claims.IsPlatformAdmin() {
 			req.Replicas = 1
 		}
 		if req.Profile == "" {
@@ -390,8 +390,12 @@ func (h *Handler) CreateApp(c *gin.Context) {
 			respondError(c, http.StatusBadRequest, "port must be between 1 and 65535")
 			return
 		}
-		if req.Replicas < 1 || req.Replicas > 10 {
-			respondError(c, http.StatusBadRequest, "replicas must be between 1 and 10")
+		minReplicas := 1
+		if claims.IsPlatformAdmin() {
+			minReplicas = 0
+		}
+		if req.Replicas < minReplicas || req.Replicas > 10 {
+			respondError(c, http.StatusBadRequest, fmt.Sprintf("replicas must be between %d and 10", minReplicas))
 			return
 		}
 		validProfiles := map[string]bool{"small": true, "medium": true, "large": true}
