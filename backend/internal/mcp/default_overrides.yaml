@@ -40,10 +40,10 @@ keep:
   # Operations — async-confirm primitive: mutations return an operation id and
   # the API tells you to poll it (Committed = written, Failed = read the message)
   - getOperation
-  # Logs (diagnose). searchLogs is the cloud (k8s) app log path (OpenSearch,
-  # scoped by app); getAppLogs is VM/compose-only (Portainer, needs a container id)
+  # Logs — one unified tool. searchLogs reads the shared OpenSearch store, scoped
+  # by app (cloud/k8s) OR vm (VM/compose), so it covers both runtimes. getAppLogs
+  # (Portainer container tail, VM-only) is intentionally NOT exposed to the agent.
   - searchLogs
-  - getAppLogs
   # App servers (VMs)
   - listAppServers
   - createAppServer

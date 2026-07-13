@@ -107,7 +107,7 @@ Report which keys changed and the final phase.`,
 		return promptMsg(fmt.Sprintf(`Diagnose app %q in project %q on DADA Cloud.
 
 1. Current phase: call listApps(project=%q) and read the phase for %q.
-2. Runtime logs: call searchLogs(project=%q, app=%q) — this is the cloud (k8s) app log path. For a VM/compose app use getAppLogs with a container id instead.
+2. Runtime logs: call searchLogs(project=%q, app=%q) for a cloud app (for a VM/compose app pass vm=<server name> instead). Add q=<string> to grep.
 3. If it looks deploy/build related, call getBuild for the latest build outcome.
 
 Summarize the root cause and the single most likely fix. Do not mutate anything without asking.`,
@@ -190,8 +190,8 @@ Mutations apply asynchronously; confirm the result by polling the app phase with
 - **Databases** — ` + "`createDatabase`" + `, then ` + "`getDatabaseCredentials`" + ` for the connection.
 - **Domains** — attach custom hostnames with ` + "`addDomainAuthorization`" + ` then ` + "`verifyDomainAuthorization`" + `.
 - **Builds** — ` + "`triggerBuild`" + ` builds from a connected repo; check with ` + "`getBuild`" + `.
-- **Logs** — ` + "`searchLogs`" + ` reads a cloud app's logs (by app name). ` + "`getAppLogs`" + ` is for
-  VM/compose apps only (needs a container id).
+- **Logs** — ` + "`searchLogs`" + ` reads logs from the shared store: pass **app** for a
+  cloud app or **vm** for a VM/compose app, optional **q** to grep. One tool, both runtimes.
 - **Operations** — mutations return an **operation id**; ` + "`getOperation`" + ` polls it
   (**Committed** = written to git, **Failed** = read the message).
 - **App servers (VMs)** — ` + "`listAppServers`" + `, ` + "`createAppServer`" + `.
