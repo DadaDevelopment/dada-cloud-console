@@ -187,7 +187,7 @@ func (h *Handler) GetBillingAccount(c *gin.Context) {
 	now := time.Now().UTC()
 	period := fmt.Sprintf("%d-%02d", now.Year(), now.Month())
 	c.JSON(http.StatusOK, gin.H{
-		"plan":   plan,
+		"plan":   plan.Key,
 		"quotas": plan.Quotas,
 		"usage":  usage,
 		"invoicePreview": gin.H{
