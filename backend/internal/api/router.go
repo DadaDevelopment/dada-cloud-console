@@ -70,6 +70,7 @@ func SetupRouter(pool *pgxpool.Pool, cfg *config.Config) *gin.Engine {
 
 	r := gin.New()
 	r.Use(gin.Recovery())
+	r.Use(metrics.HTTPMiddleware())
 
 	// CORS middleware
 	r.Use(func(c *gin.Context) {
