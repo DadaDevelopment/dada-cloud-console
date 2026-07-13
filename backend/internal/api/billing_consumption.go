@@ -158,13 +158,10 @@ func (h *Handler) consumptionApps(ctx context.Context, projectID uuid.UUID, star
 			CPUCores: cpu,
 			RAMGB:    ram,
 		}
-		if oc, ok := snap.appCost[a.namespace+"/"+a.name]; ok && oc.TotalCost > 0 {
+		if oc, ok := snap.appCost[a.namespace+"/"+a.name]; ok {
 			res.CostRub = snap.pricing.price(oc.CPUCost, oc.RAMCost, oc.PVCost)
-			res.Basis = basisActual
-		} else {
-			res.CostRub = h.estimateCost(estimateFootprintApp, snap.pricing)
-			res.Basis = basisEstimate
 		}
+		res.Basis = basisActual
 		out = append(out, res)
 	}
 	return out, nil

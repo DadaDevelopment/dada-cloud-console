@@ -47,16 +47,16 @@ const billingMonthDays = 30
 // billingMonthlyScale scales a billingCostWindow-worth of cost up to a month.
 var billingMonthlyScale = float64(billingMonthDays) / float64(billingWindowDays)
 
-// Reserved baseline footprints per resource kind, used to ESTIMATE a resource's
-// monthly cost before OpenCost has real usage data for it (a freshly created
-// resource, or one younger than the metrics window, otherwise reads a confusing
-// 0). Per-resource reserved specs are not stored (managed DBs share one Postgres
-// pod; app requests are not persisted), so these are typical-footprint proxies,
+// estimateFootprintDB is the reserved baseline footprint used to ESTIMATE a
+// managed database's monthly cost before OpenCost has usage data for it (a
+// freshly created DB otherwise reads a confusing 0). A managed DB is a real
+// provisioned resource (a schema in the shared Postgres pod reserving storage +
+// compute), so a baseline estimate is fair. Apps are NOT estimated: an app with
+// no data is usually a stopped/idle workload that genuinely costs ~0, and there
+// are many such snapshots, so estimating them would badly inflate the total. The
+// per-resource reserved spec is not stored, so this is a typical-footprint proxy
 // priced at the same unit costs + overhead + margin as real usage. Tunable.
-var (
-	estimateFootprintApp = billingFootprint{vcpu: 0.10, ramGB: 0.25}
-	estimateFootprintDB  = billingFootprint{vcpu: 0.05, ramGB: 0.10, storageGB: 1.0}
-)
+var estimateFootprintDB = billingFootprint{vcpu: 0.05, ramGB: 0.10, storageGB: 1.0}
 
 // billingFootprint is a reserved resource footprint in internal units.
 type billingFootprint struct {
