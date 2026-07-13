@@ -559,9 +559,63 @@ func detectWithToken(ctx context.Context, token, repoFullName, rootDir string) (
 		return frameworkDetection{}, err
 	}
 	if best, ok := bestFrameworkCandidate(cands); ok {
-		return best.detection, nil
+		det := best.detection
+		if port, ok := dockerfileExposePort(ctx, token, owner, repo, rootDir); ok {
+			det.Port = ptrInt(port)
+		}
+		return det, nil
 	}
 	return frameworkDetection{}, nil
+}
+
+// dockerfileExposePort returns the first port declared by an EXPOSE directive in
+// the root Dockerfile, if the repo carries one.
+//
+// When a repo ships its own Dockerfile that Dockerfile is what the build runs,
+// so its EXPOSE is the authoritative listen port and must win over the static
+// per-framework default guess. Without this the wizard mislabels the port for
+// any app whose Dockerfile exposes something other than the framework default
+// (e.g. a Streamlit image with EXPOSE 8501 was being reported as 8080).
+func dockerfileExposePort(ctx context.Context, token, owner, repo, rootDir string) (int, bool) {
+	entries, err := githubListDir(ctx, token, owner, repo, rootDir)
+	if err != nil {
+		return 0, false
+	}
+	entry, ok := findFile(mapFromEntries(entries), "Dockerfile")
+	if !ok {
+		return 0, false
+	}
+	raw, err := githubReadFile(ctx, token, owner, repo, entry.Path)
+	if err != nil {
+		return 0, false
+	}
+	return parseDockerfileExpose(raw)
+}
+
+// parseDockerfileExpose extracts the first numeric port from the first EXPOSE
+// directive in a Dockerfile. Protocol suffixes ("8080/tcp") are stripped and
+// non-literal ports ("EXPOSE ${PORT}") are ignored so callers keep the framework
+// default rather than a bogus value.
+func parseDockerfileExpose(dockerfile string) (int, bool) {
+	for _, line := range strings.Split(dockerfile, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		fields := strings.Fields(line)
+		if len(fields) < 2 || !strings.EqualFold(fields[0], "EXPOSE") {
+			continue
+		}
+		for _, tok := range fields[1:] {
+			if slash := strings.IndexByte(tok, '/'); slash >= 0 {
+				tok = tok[:slash]
+			}
+			if port, err := strconv.Atoi(tok); err == nil && port > 0 && port <= 65535 {
+				return port, true
+			}
+		}
+	}
+	return 0, false
 }
 
 // BuildDetection is the dereferenced, build-time view of frameworkDetection. The
