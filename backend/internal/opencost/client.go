@@ -63,17 +63,22 @@ type computeEnvelope struct {
 }
 
 // Compute calls GET /allocation/compute for the given window, aggregated by the
-// given dimension (e.g. "namespace"), accumulated into a single set. It returns
-// the map keyed by aggregation name. OpenCost injects synthetic keys __idle__,
-// __unallocated__ and __unmounted__; callers filter those out as needed.
+// given dimension (e.g. "namespace", or "namespace,label:dada_io_app"),
+// accumulated into a single set. It returns the map keyed by aggregation name.
+// OpenCost injects synthetic keys __idle__, __unallocated__ and __unmounted__;
+// callers filter those out as needed.
 //
 // window accepts OpenCost duration/date forms: "7d", "30d", "24h", or an
-// RFC3339 range "start,end".
-func (c *Client) Compute(ctx context.Context, window, aggregate string) (map[string]Allocation, error) {
+// RFC3339 range "start,end". filter is an optional OpenCost filter expression
+// (e.g. `namespace:"a","b"`); pass "" for no filter.
+func (c *Client) Compute(ctx context.Context, window, aggregate, filter string) (map[string]Allocation, error) {
 	q := url.Values{}
 	q.Set("window", window)
 	q.Set("aggregate", aggregate)
 	q.Set("accumulate", "true")
+	if filter != "" {
+		q.Set("filter", filter)
+	}
 	u := c.baseURL + "/allocation/compute?" + q.Encode()
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)

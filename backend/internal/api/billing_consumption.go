@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/dada-tuda/console/backend/internal/auth"
@@ -99,11 +100,47 @@ func (h *Handler) computeProjectConsumption(ctx context.Context, projectID uuid.
 	return out, nil
 }
 
+// opencostAppCosts returns each app's real infra cost (raw RUB, no markup) over
+// the window, sourced from the OpenCost Allocation API and keyed by
+// "namespace/appName". Apps are identified by the dada.io/app pod label (stamped
+// by project-defaults), so the key's app segment is the exact console app name.
+// Best-effort: returns an empty map when OpenCost is unset or the query fails, so
+// callers transparently fall back to the metrics-derived estimate.
+func (h *Handler) opencostAppCosts(ctx context.Context, projectID uuid.UUID, start, end time.Time) map[string]float64 {
+	out := map[string]float64{}
+	if h.opencost == nil {
+		return out
+	}
+	nsToEnv, err := h.projectNamespaces(ctx, projectID)
+	if err != nil || len(nsToEnv) == 0 {
+		return out
+	}
+	quoted := make([]string, 0, len(nsToEnv))
+	for ns := range nsToEnv {
+		quoted = append(quoted, `"`+ns+`"`)
+	}
+	filter := "namespace:" + strings.Join(quoted, ",")
+	window := start.Format(time.RFC3339) + "," + end.Format(time.RFC3339)
+
+	allocs, err := h.opencost.Compute(ctx, window, "namespace,label:dada_io_app", filter)
+	if err != nil {
+		log.Warn().Err(err).Str("project", projectID.String()).Msg("billing consumption: opencost app cost query failed")
+		return out
+	}
+	for key, a := range allocs {
+		out[key] = a.TotalCost
+	}
+	return out
+}
+
 // consumptionApps enumerates the project's App resources across its
 // environments and estimates each app's average CPU (cores) and RAM (GB) over
-// the period from Prometheus. Storage is null for apps. Metric failures degrade
-// to nil usage (0 cost), never an error.
+// the period from Prometheus (shown for context). The cost is the app's real
+// OpenCost allocation over the period (CPU+RAM+PV, priced at our tariffs), and
+// falls back to the metrics-derived estimate only when OpenCost cannot attribute
+// the app. Failures degrade to nil usage / 0 cost, never an error.
 func (h *Handler) consumptionApps(ctx context.Context, projectID uuid.UUID, start, end time.Time) ([]consumptionResource, error) {
+	ocCosts := h.opencostAppCosts(ctx, projectID, start, end)
 	rows, err := h.pool.Query(ctx,
 		`SELECT rs.name, e.runtime, e.namespace, COALESCE(rs.summary_json->>'image', '')
 		   FROM resource_snapshots rs
@@ -144,7 +181,11 @@ func (h *Handler) consumptionApps(ctx context.Context, projectID uuid.UUID, star
 			CPUCores: cpu,
 			RAMGB:    ram,
 		}
-		res.CostRub = h.costRub(cpu, ram, nil)
+		if raw, ok := ocCosts[a.namespace+"/"+a.name]; ok {
+			res.CostRub = round2(raw * h.billingMarkup)
+		} else {
+			res.CostRub = h.costRub(cpu, ram, nil)
+		}
 		out = append(out, res)
 	}
 	return out, nil
