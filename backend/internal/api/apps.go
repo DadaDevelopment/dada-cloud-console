@@ -379,19 +379,37 @@ func (h *Handler) CreateApp(c *gin.Context) {
 		return
 	}
 
-	// Check name uniqueness
-	var existing int
+	// Check name uniqueness across the WHOLE Argo instance, not just this
+	// project+env. ArgoCD names each generated Application "<app>-<env>" with no
+	// project segment, so the same app name in the same env under a different
+	// project collides into one Application name and wedges the tenant-apps
+	// ApplicationSet (duplicate-name -> Degraded -> every tenant app stops
+	// reconciling). resource_snapshots reflects git reality (manual and Jenkins
+	// files land there via the git watcher too), so guard on (name, env-name)
+	// globally. See project_appset_name_collision.
+	var ownerProject, ownerEnv string
+	var ownerProjectID uuid.UUID
 	err = h.pool.QueryRow(c.Request.Context(),
-		`SELECT COUNT(*) FROM resource_snapshots
-		 WHERE project_id = $1 AND environment_id = $2 AND kind = 'App' AND name = $3`,
-		projectID, envID, req.Name,
-	).Scan(&existing)
-	if err != nil {
-		respondError(c, http.StatusInternalServerError, "failed to check name uniqueness")
+		`SELECT p.name, e.name, p.id
+		 FROM resource_snapshots rs
+		 JOIN environments e ON e.id = rs.environment_id
+		 JOIN projects p ON p.id = rs.project_id
+		 WHERE rs.kind = 'App' AND rs.name = $1
+		   AND e.name = (SELECT name FROM environments WHERE id = $2)
+		 LIMIT 1`,
+		req.Name, envID,
+	).Scan(&ownerProject, &ownerEnv, &ownerProjectID)
+	if err == nil {
+		if ownerProjectID == projectID {
+			respondError(c, http.StatusConflict, "an app with that name already exists in this environment")
+		} else {
+			respondError(c, http.StatusConflict, fmt.Sprintf(
+				"an app named %q already exists in the %q environment of project %q; app names must be unique per environment across projects",
+				req.Name, ownerEnv, ownerProject))
+		}
 		return
-	}
-	if existing > 0 {
-		respondError(c, http.StatusConflict, "an app with that name already exists in this environment")
+	} else if err != pgx.ErrNoRows {
+		respondError(c, http.StatusInternalServerError, "failed to check name uniqueness")
 		return
 	}
 
