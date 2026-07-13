@@ -40,6 +40,93 @@ type Build struct {
 	CreatedAt     time.Time
 }
 
+// ReclaimBuild is an in-flight build plus the Jenkins references needed to
+// re-attach to its still-running job after an agent restart.
+type ReclaimBuild struct {
+	Build
+	JenkinsQueueID     *int64
+	JenkinsBuildNumber *int
+}
+
+// SetJenkinsQueueID records the Jenkins queue item id for a build. Best-effort:
+// callers treat an error as non-fatal (the build proceeds, it just will not
+// survive an agent restart).
+func SetJenkinsQueueID(ctx context.Context, pool *pgxpool.Pool, id uuid.UUID, queueID int64) error {
+	_, err := pool.Exec(ctx, `UPDATE builds SET jenkins_queue_id = $2, updated_at = NOW() WHERE id = $1`, id, queueID)
+	if err != nil {
+		return fmt.Errorf("set jenkins queue id %s: %w", id, err)
+	}
+	return nil
+}
+
+// SetJenkinsBuildNumber records the resolved Jenkins build number for a build.
+// Best-effort, like SetJenkinsQueueID.
+func SetJenkinsBuildNumber(ctx context.Context, pool *pgxpool.Pool, id uuid.UUID, number int) error {
+	_, err := pool.Exec(ctx, `UPDATE builds SET jenkins_build_number = $2, updated_at = NOW() WHERE id = $1`, id, number)
+	if err != nil {
+		return fmt.Errorf("set jenkins build number %s: %w", id, err)
+	}
+	return nil
+}
+
+// MarkPushing moves a build to pushing from building (or leaves it pushing).
+// Unlike a strict building→pushing Transition it tolerates an already-pushing
+// row so restart reconciliation can re-drive a build that died mid-confirm. It
+// returns false (no error) when the row is no longer in-flight (superseded /
+// canceled), which the caller uses to stop without deploying.
+func MarkPushing(ctx context.Context, pool *pgxpool.Pool, id uuid.UUID) (bool, error) {
+	tag, err := pool.Exec(ctx, `
+		UPDATE builds
+		SET    status = 'pushing', updated_at = NOW()
+		WHERE  id = $1 AND status IN ('building','pushing')
+	`, id)
+	if err != nil {
+		return false, fmt.Errorf("mark pushing %s: %w", id, err)
+	}
+	return tag.RowsAffected() == 1, nil
+}
+
+// CurrentStatus returns a build's current status. Used to tell a shutdown
+// (row still in-flight) from a supersession (row already canceled) when a build
+// context is canceled.
+func CurrentStatus(ctx context.Context, pool *pgxpool.Pool, id uuid.UUID) (string, error) {
+	var status string
+	if err := pool.QueryRow(ctx, `SELECT status FROM builds WHERE id = $1`, id).Scan(&status); err != nil {
+		return "", fmt.Errorf("current status %s: %w", id, err)
+	}
+	return status, nil
+}
+
+// InFlightBuilds returns every non-terminal build together with its Jenkins
+// references, so a freshly started agent can re-attach to jobs the previous
+// instance was tracking. Ordered oldest-first.
+func InFlightBuilds(ctx context.Context, pool *pgxpool.Pool) ([]ReclaimBuild, error) {
+	rows, err := pool.Query(ctx, `
+		SELECT id, git_repo_id, environment_id, app_name, commit_sha, branch,
+		       trigger, status, created_at, jenkins_queue_id, jenkins_build_number
+		FROM   builds
+		WHERE  status IN ('detecting','building','pushing')
+		ORDER  BY started_at ASC NULLS FIRST
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("list in-flight builds: %w", err)
+	}
+	defer rows.Close()
+
+	var out []ReclaimBuild
+	for rows.Next() {
+		var rb ReclaimBuild
+		if err := rows.Scan(
+			&rb.ID, &rb.GitRepoID, &rb.EnvironmentID, &rb.AppName, &rb.CommitSHA, &rb.Branch,
+			&rb.Trigger, &rb.Status, &rb.CreatedAt, &rb.JenkinsQueueID, &rb.JenkinsBuildNumber,
+		); err != nil {
+			return nil, fmt.Errorf("scan in-flight build: %w", err)
+		}
+		out = append(out, rb)
+	}
+	return out, rows.Err()
+}
+
 // ClaimQueued atomically claims the next queued build (one at a time so the
 // in-proc scheduler controls real concurrency) using FOR UPDATE SKIP LOCKED.
 // It moves the build queued→detecting and stamps started_at. Returns (nil, nil)

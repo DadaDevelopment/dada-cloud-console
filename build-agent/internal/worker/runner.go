@@ -159,24 +159,55 @@ func (r *Runner) run(ctx context.Context, b *db.Build) {
 
 	out, err := r.execute(ctx, b, repo, &llog)
 	if err != nil {
-		if errors.Is(err, context.Canceled) || errors.Is(err, errBuildAborted) {
-			llog.Info().Msg("build canceled")
-			r.emit(ctx, b.ID, "build canceled")
-			// supersede already set canceled; if aborted from Jenkins, set it now.
-			if errors.Is(err, errBuildAborted) {
-				_, _ = db.MarkCanceled(ctx, r.pool, b.ID)
-			}
-			return
-		}
-		r.failFromCurrent(ctx, b, err)
-		r.postStatus(ctx, repo, b, "failure", "build failed")
-		metrics.BuildTotal.WithLabelValues("failed").Inc()
+		r.handleBuildError(ctx, b, repo, err, &llog)
 		return
 	}
+	r.finalize(ctx, b, repo, out, start, &llog)
+}
 
-	// pushing → success (pins image_uri + finished_at). Android has no image.
-	if ok, ferr := db.FinishSuccess(ctx, r.pool, b.ID, out.imageURI); ferr != nil || !ok {
+// handleBuildError classifies a build failure. A Jenkins ABORTED and a
+// supersession are genuine cancels. A plain context cancel from agent shutdown
+// is NOT a failure: the Jenkins job keeps running and startup reconciliation
+// re-attaches to it, so the row is left in-flight rather than failed or canceled.
+func (r *Runner) handleBuildError(ctx context.Context, b *db.Build, repo *db.Repo, err error, llog *zerologLogger) {
+	if errors.Is(err, errBuildAborted) {
+		llog.Info().Msg("build canceled (jenkins aborted)")
+		r.emit(ctx, b.ID, "build canceled")
+		_, _ = db.MarkCanceled(ctx, r.pool, b.ID)
+		return
+	}
+	if errors.Is(err, context.Canceled) {
+		// The build context is done, so DB writes on it would fail — use a
+		// detached context. Supersession already marked the row canceled; a plain
+		// shutdown leaves it in-flight for reconciliation on the next start.
+		dctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		defer cancel()
+		if st, serr := db.CurrentStatus(dctx, r.pool, b.ID); serr == nil && st == db.StatusCanceled {
+			r.emit(dctx, b.ID, "build canceled")
+			llog.Info().Msg("build canceled (superseded)")
+		} else {
+			r.emit(dctx, b.ID, "build-agent restarting; jenkins build continues and will be reattached")
+			llog.Info().Msg("build interrupted by shutdown; left in-flight for reconciliation")
+		}
+		return
+	}
+	r.failFromCurrent(ctx, b, err)
+	r.postStatus(ctx, repo, b, "failure", "build failed")
+	metrics.BuildTotal.WithLabelValues("failed").Inc()
+}
+
+// finalize records success and hands off to the deploy path (web) or records
+// artifacts (android). FinishSuccess is a compare-and-set on pushing→success, so
+// when two workers race to reconcile the same build only the winner runs the
+// deploy handoff — the loser sees !ok and stops, preventing a double deploy.
+func (r *Runner) finalize(ctx context.Context, b *db.Build, repo *db.Repo, out buildOutcome, start time.Time, llog *zerologLogger) {
+	ok, ferr := db.FinishSuccess(ctx, r.pool, b.ID, out.imageURI)
+	if ferr != nil {
 		r.fail(ctx, b, db.StatusPushing, fmt.Errorf("finalize success: %w", ferr))
+		return
+	}
+	if !ok {
+		llog.Info().Msg("build already finalized by another worker; skipping deploy handoff")
 		return
 	}
 
@@ -213,6 +244,83 @@ func (r *Runner) run(ctx context.Context, b *db.Build) {
 	metrics.BuildTotal.WithLabelValues("success").Inc()
 	metrics.BuildDuration.WithLabelValues("total").Observe(time.Since(start).Seconds())
 	llog.Info().Str("image", out.imageURI).Int("artifacts", len(out.artifacts)).Msg("build succeeded")
+}
+
+// Reconcile re-attaches to Jenkins builds the previous agent instance was
+// tracking. Called once at startup: a fresh pod has no in-process builds, so
+// every non-terminal row with a Jenkins reference is an orphan whose job may
+// still be running. Rows without any Jenkins reference (never triggered) are
+// left to the time-gated ReapStuck backstop.
+func (r *Runner) Reconcile(ctx context.Context) {
+	builds, err := db.InFlightBuilds(ctx, r.pool)
+	if err != nil {
+		log.Warn().Err(err).Msg("reconcile: list in-flight builds failed")
+		return
+	}
+	for i := range builds {
+		rb := builds[i]
+		if !reconcilable(rb) {
+			continue
+		}
+		buildCtx, release, ok := r.scheduler.Acquire(ctx, rb.ID)
+		if !ok {
+			return // shutting down
+		}
+		metrics.BuildsInflight.Set(float64(r.scheduler.Inflight()))
+		go func(rb db.ReclaimBuild) {
+			defer release()
+			defer metrics.BuildsInflight.Set(float64(r.scheduler.Inflight()))
+			r.reattach(buildCtx, rb)
+		}(rb)
+	}
+}
+
+// reconcilable reports whether an in-flight build carries a Jenkins reference to
+// re-attach to. Builds with neither (never reached Jenkins) are left for the
+// time-gated ReapStuck backstop rather than reconciled.
+func reconcilable(rb db.ReclaimBuild) bool {
+	return rb.JenkinsBuildNumber != nil || rb.JenkinsQueueID != nil
+}
+
+// reattach resumes a single orphaned build: resolve its Jenkins build number
+// (from the persisted number, or by re-resolving the queue item), re-stream the
+// console to completion, and finalize. Reuses the same attach+finalize path as a
+// live build, so a job Jenkins finished during the outage still deploys.
+func (r *Runner) reattach(ctx context.Context, rb db.ReclaimBuild) {
+	start := time.Now()
+	b := &rb.Build
+	llog := log.With().Str("build", b.ID.String()).Str("sha", b.CommitSHA).Logger()
+
+	repo, err := db.LoadRepo(ctx, r.pool, b.GitRepoID)
+	if err != nil {
+		r.fail(ctx, b, b.Status, fmt.Errorf("reattach load repo: %w", err))
+		return
+	}
+
+	number := 0
+	if rb.JenkinsBuildNumber != nil {
+		number = *rb.JenkinsBuildNumber
+	} else {
+		n, rerr := r.waitForBuildNumber(ctx, *rb.JenkinsQueueID)
+		if rerr != nil {
+			llog.Warn().Err(rerr).Msg("reattach: resolve build number failed; leaving for reaper")
+			return
+		}
+		number = n
+		if err := db.SetJenkinsBuildNumber(ctx, r.pool, b.ID, number); err != nil {
+			llog.Warn().Err(err).Msg("persist jenkins build number failed")
+		}
+	}
+
+	llog.Info().Int("number", number).Msg("reattaching to in-flight jenkins build after restart")
+	r.emit(ctx, b.ID, fmt.Sprintf("build-agent restarted; reattached to jenkins build #%d", number))
+
+	out, err := r.attach(ctx, b, repo, number, &llog)
+	if err != nil {
+		r.handleBuildError(ctx, b, repo, err, &llog)
+		return
+	}
+	r.finalize(ctx, b, repo, out, start, &llog)
 }
 
 // execute drives the Jenkins job: detecting (resolve framework + git creds) →
@@ -270,15 +378,28 @@ func (r *Runner) execute(ctx context.Context, b *db.Build, repo *db.Repo, llog *
 	if err != nil {
 		return buildOutcome{}, fmt.Errorf("trigger jenkins build: %w", err)
 	}
+	if err := db.SetJenkinsQueueID(ctx, r.pool, b.ID, queueID); err != nil {
+		llog.Warn().Err(err).Msg("persist jenkins queue id failed")
+	}
 	r.emit(ctx, b.ID, fmt.Sprintf("queued in jenkins (item %d)", queueID))
 
 	number, err := r.waitForBuildNumber(ctx, queueID)
 	if err != nil {
 		return buildOutcome{}, err
 	}
+	if err := db.SetJenkinsBuildNumber(ctx, r.pool, b.ID, number); err != nil {
+		llog.Warn().Err(err).Msg("persist jenkins build number failed; build will not survive an agent restart")
+	}
 	r.emit(ctx, b.ID, fmt.Sprintf("jenkins build #%d started", number))
 
-	// --- log bridge: stream console + parse markers until the build ends ---
+	return r.attach(ctx, b, repo, number, llog)
+}
+
+// attach streams a triggered Jenkins build to completion: bridge the console,
+// map the result, move the row to pushing, and confirm the outputs exist in
+// Nexus. Shared by the live path (execute) and restart reconciliation
+// (reattach), so a build survives an agent restart mid-stream.
+func (r *Runner) attach(ctx context.Context, b *db.Build, repo *db.Repo, number int, llog *zerologLogger) (buildOutcome, error) {
 	out, result, err := r.bridge(ctx, b, number)
 	if err != nil {
 		return buildOutcome{}, err
@@ -292,8 +413,13 @@ func (r *Runner) execute(ctx context.Context, b *db.Build, repo *db.Repo, llog *
 	}
 
 	// building → pushing (Jenkins already pushed; this marks the boundary).
-	if ok, err := db.Transition(ctx, r.pool, b.ID, db.StatusBuilding, db.StatusPushing); err != nil || !ok {
+	// Tolerant of an already-pushing row so a reconciled build that died mid
+	// confirm can finish; a no-op means the row is no longer in-flight
+	// (superseded/canceled) so we stop without deploying.
+	if ok, err := db.MarkPushing(ctx, r.pool, b.ID); err != nil {
 		return buildOutcome{}, fmt.Errorf("transition building→pushing: %w", err)
+	} else if !ok {
+		return buildOutcome{}, errBuildAborted
 	}
 
 	// --- confirm what the markers claimed actually exists in Nexus ---

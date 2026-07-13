@@ -25,6 +25,7 @@ func NewPoller(interval time.Duration, runner *Runner) *Poller {
 // Start runs the poll loop until ctx is canceled.
 func (p *Poller) Start(ctx context.Context) {
 	log.Info().Dur("interval", p.interval).Msg("build poller started")
+	p.runner.Reconcile(ctx)
 	p.runner.ReapStuck(ctx)
 	ticker := time.NewTicker(p.interval)
 	defer ticker.Stop()
