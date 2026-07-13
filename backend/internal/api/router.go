@@ -136,6 +136,7 @@ func SetupRouter(pool *pgxpool.Pool, cfg *config.Config) *gin.Engine {
 			OverridesPath:  cfg.MCPOverridesPath,
 			ResourceURL:    cfg.MCPResourceURL,
 			KeycloakIssuer: cfg.KeycloakIssuer,
+			RequireBearer:  keycloakMode,
 		})
 		if err != nil {
 			log.Fatalf("mcp: failed to initialize: %v", err)
@@ -227,6 +228,9 @@ func SetupRouter(pool *pgxpool.Pool, cfg *config.Config) *gin.Engine {
 
 		// Aggregated log search (Elasticsearch/filebeat proxy, read-only).
 		api.GET("/projects/:projectId/logs", h.SearchLogs)
+
+		// Per-project resource cost (OpenCost Allocation API, read-only).
+		api.GET("/projects/:projectId/cost", h.GetProjectCost)
 
 		// Endpoints (PublicApi CRD)
 		api.GET("/projects/:projectId/environments/:envId/apps/:appName/endpoints", h.ListEndpoints)

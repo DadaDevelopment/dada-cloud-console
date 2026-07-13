@@ -4,6 +4,7 @@ import (
 	"context"
 	"log"
 	"net/http"
+	"strings"
 
 	sdkauth "github.com/modelcontextprotocol/go-sdk/auth"
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
@@ -25,6 +26,11 @@ type Config struct {
 	ResourceURL string
 	// KeycloakIssuer is the Keycloak issuer URL for the protected resource metadata.
 	KeycloakIssuer string
+	// RequireBearer, when true, wraps the MCP transport so a missing/expired
+	// bearer yields a 401 + WWW-Authenticate (RFC 9728) instead of a buried
+	// tool-level error, letting OAuth clients discover the auth server and start
+	// their flow. Set from AUTH_MODE=keycloak; local dev leaves it false.
+	RequireBearer bool
 }
 
 // NewHandler builds the MCP http.Handler from the embedded Swagger spec.
@@ -70,10 +76,17 @@ func NewHandler(specBytes []byte, cfg Config) (http.Handler, error) {
 
 	mcpHandler := sdkmcp.NewStreamableHTTPHandler(func(*http.Request) *sdkmcp.Server { return srv }, nil)
 
+	var transport http.Handler = bearerMiddleware(mcpHandler)
+	if cfg.RequireBearer {
+		transport = sdkauth.RequireBearerToken(expOnlyVerifier, &sdkauth.RequireBearerTokenOptions{
+			ResourceMetadataURL: strings.TrimRight(cfg.ResourceURL, "/") + "/.well-known/oauth-protected-resource",
+		})(transport)
+	}
+
 	mux := http.NewServeMux()
 	mux.Handle("/.well-known/oauth-protected-resource",
 		sdkauth.ProtectedResourceMetadataHandler(resourceMeta))
-	mux.Handle("/", bearerMiddleware(mcpHandler))
+	mux.Handle("/", transport)
 
 	return mux, nil
 }
