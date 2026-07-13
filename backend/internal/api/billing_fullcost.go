@@ -38,6 +38,31 @@ import (
 // accumulates.
 const billingCostWindow = "7d"
 
+// billingWindowDays / billingMonthDays project the window cost to a 30-day month
+// run-rate so consumption reads as a monthly figure ("/мес") consistent with the
+// spec-based estimate, rather than a raw 7-day sum.
+const billingWindowDays = 7
+const billingMonthDays = 30
+
+// billingMonthlyScale scales a billingCostWindow-worth of cost up to a month.
+var billingMonthlyScale = float64(billingMonthDays) / float64(billingWindowDays)
+
+// Reserved baseline footprints per resource kind, used to ESTIMATE a resource's
+// monthly cost before OpenCost has real usage data for it (a freshly created
+// resource, or one younger than the metrics window, otherwise reads a confusing
+// 0). Per-resource reserved specs are not stored (managed DBs share one Postgres
+// pod; app requests are not persisted), so these are typical-footprint proxies,
+// priced at the same unit costs + overhead + margin as real usage. Tunable.
+var (
+	estimateFootprintApp = billingFootprint{vcpu: 0.10, ramGB: 0.25}
+	estimateFootprintDB  = billingFootprint{vcpu: 0.05, ramGB: 0.10, storageGB: 1.0}
+)
+
+// billingFootprint is a reserved resource footprint in internal units.
+type billingFootprint struct {
+	vcpu, ramGB, storageGB float64
+}
+
 // billingSnapshotTTL bounds how long a cluster cost snapshot is reused before a
 // refresh. All OpenCost data feeding consumption is cluster-global (same for
 // every project), so it is fetched once per TTL, not per request/project -- this
@@ -148,7 +173,7 @@ func (h *Handler) buildBillingSnapshot(ctx context.Context) (*billingCostSnapsho
 			userPV += nonNeg(a.PVCost)
 		}
 		if !strings.HasPrefix(ns, "__") {
-			appCost[key] = a
+			appCost[key] = scaleAlloc(a, billingMonthlyScale)
 		}
 	}
 
@@ -168,14 +193,14 @@ func (h *Handler) buildBillingSnapshot(ctx context.Context) (*billingCostSnapsho
 		for pod, a := range pods {
 			switch {
 			case strings.HasPrefix(pod, "postgresql"):
-				snap.postgres.CPUCost += a.CPUCost
-				snap.postgres.RAMCost += a.RAMCost
-				snap.postgres.PVCost += a.PVCost
-				snap.postgres.TotalCost += a.TotalCost
+				snap.postgres.CPUCost += a.CPUCost * billingMonthlyScale
+				snap.postgres.RAMCost += a.RAMCost * billingMonthlyScale
+				snap.postgres.PVCost += a.PVCost * billingMonthlyScale
+				snap.postgres.TotalCost += a.TotalCost * billingMonthlyScale
 			case strings.HasPrefix(pod, "powerdns"):
-				snap.powerdns.CPUCost += a.CPUCost
-				snap.powerdns.RAMCost += a.RAMCost
-				snap.powerdns.PVCost += a.PVCost
+				snap.powerdns.CPUCost += a.CPUCost * billingMonthlyScale
+				snap.powerdns.RAMCost += a.RAMCost * billingMonthlyScale
+				snap.powerdns.PVCost += a.PVCost * billingMonthlyScale
 			}
 		}
 	} else {
@@ -183,6 +208,27 @@ func (h *Handler) buildBillingSnapshot(ctx context.Context) (*billingCostSnapsho
 	}
 
 	return snap, nil
+}
+
+// scaleAlloc returns a copy of an allocation with every cost field multiplied by
+// s (used to project a window cost to a monthly run-rate).
+func scaleAlloc(a opencost.Allocation, s float64) opencost.Allocation {
+	a.CPUCost *= s
+	a.RAMCost *= s
+	a.PVCost *= s
+	a.TotalCost *= s
+	return a
+}
+
+// estimateCost prices a reserved baseline footprint at the elegant per-unit
+// cluster costs (billingUnit, RUB per unit-month) then applies the same per-type
+// overhead + margin as real usage. It is the "ориентировочно" figure shown for a
+// resource OpenCost has no data for yet. Zero when the unit costs are unset.
+func (h *Handler) estimateCost(fp billingFootprint, p consumptionPricing) float64 {
+	cpuRaw := fp.vcpu * h.billingUnit.PerVCPU
+	ramRaw := fp.ramGB * h.billingUnit.PerGBRAM
+	pvRaw := fp.storageGB * h.billingUnit.PerGBStorage
+	return p.price(cpuRaw, ramRaw, pvRaw)
 }
 
 // overheadFactor returns 1 / max(userCost/total, minUtil): how much each raw

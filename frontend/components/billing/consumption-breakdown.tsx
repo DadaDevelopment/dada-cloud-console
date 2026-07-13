@@ -64,9 +64,12 @@ export function ConsumptionBreakdown({ data }: { data: ConsumptionResponse }) {
                   <p className="truncate text-sm font-medium text-gray-900 dark:text-gray-100">{r.name}</p>
                   <p className="mt-0.5 truncate text-xs text-gray-400 dark:text-gray-500">{usageSubtext(r, t)}</p>
                 </div>
-                <span className="shrink-0 text-sm tabular-nums text-gray-700 dark:text-gray-200">
-                  {perMonth(r.cost_rub)}
-                </span>
+                <div className="flex shrink-0 flex-col items-end">
+                  <span className="text-sm tabular-nums text-gray-700 dark:text-gray-200">{perMonth(r.cost_rub)}</span>
+                  <span className={`text-[10px] ${r.basis === "estimate" ? "text-amber-600 dark:text-amber-400" : "text-gray-400 dark:text-gray-500"}`}>
+                    {t(`consumption.basis.${r.basis}`)}
+                  </span>
+                </div>
               </div>
             ))}
             <div className="flex items-center justify-between border-t border-gray-100 dark:border-gray-800 px-5 py-2.5">

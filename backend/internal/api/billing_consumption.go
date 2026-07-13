@@ -26,7 +26,13 @@ type consumptionResource struct {
 	RAMGB     *float64 `json:"ram_gb"`
 	StorageGB *float64 `json:"storage_gb"`
 	CostRub   float64  `json:"cost_rub"`
+	Basis     string   `json:"basis"`
 }
+
+const (
+	basisActual   = "actual"
+	basisEstimate = "estimate"
+)
 
 // projectConsumption is the money-equivalent estimate for one project over the
 // current calendar month. Informational only ("оценка по нашим тарифам"), never
@@ -152,10 +158,12 @@ func (h *Handler) consumptionApps(ctx context.Context, projectID uuid.UUID, star
 			CPUCores: cpu,
 			RAMGB:    ram,
 		}
-		if oc, ok := snap.appCost[a.namespace+"/"+a.name]; ok {
+		if oc, ok := snap.appCost[a.namespace+"/"+a.name]; ok && oc.TotalCost > 0 {
 			res.CostRub = snap.pricing.price(oc.CPUCost, oc.RAMCost, oc.PVCost)
+			res.Basis = basisActual
 		} else {
-			res.CostRub = h.costRub(cpu, ram, nil)
+			res.CostRub = h.estimateCost(estimateFootprintApp, snap.pricing)
+			res.Basis = basisEstimate
 		}
 		out = append(out, res)
 	}
@@ -276,8 +284,10 @@ func (h *Handler) consumptionDatabases(ctx context.Context, projectID uuid.UUID,
 		if totalBytes > 0 && dbBytes > 0 && podCost.TotalCost > 0 {
 			frac := dbBytes / totalBytes
 			res.CostRub = snap.pricing.price(podCost.CPUCost*frac, podCost.RAMCost*frac, podCost.PVCost*frac)
+			res.Basis = basisActual
 		} else {
-			res.CostRub = h.costRub(nil, nil, storageGB)
+			res.CostRub = h.estimateCost(estimateFootprintDB, snap.pricing)
+			res.Basis = basisEstimate
 		}
 		out = append(out, res)
 	}
@@ -323,6 +333,10 @@ func (h *Handler) consumptionDNS(ctx context.Context, projectID uuid.UUID, snap 
 
 	dns := snap.powerdns
 	share := 1.0 / float64(totalZones)
+	basis := basisActual
+	if dns.CPUCost+dns.RAMCost+dns.PVCost <= 0 {
+		basis = basisEstimate
+	}
 
 	out := make([]consumptionResource, 0, len(apexes))
 	for _, apex := range apexes {
@@ -330,6 +344,7 @@ func (h *Handler) consumptionDNS(ctx context.Context, projectID uuid.UUID, snap 
 			Kind:    "dns",
 			Name:    apex,
 			CostRub: snap.pricing.price(dns.CPUCost*share, dns.RAMCost*share, dns.PVCost*share),
+			Basis:   basis,
 		})
 	}
 	return out
@@ -384,6 +399,7 @@ func consumptionJSON(pc projectConsumption) gin.H {
 			"ram_gb":     r.RAMGB,
 			"storage_gb": r.StorageGB,
 			"cost_rub":   r.CostRub,
+			"basis":      r.Basis,
 		})
 	}
 	return gin.H{

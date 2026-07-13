@@ -7,6 +7,8 @@ export const consumption: Messages = {
   "consumption.group.database": { ru: "Базы данных", en: "Databases" },
   "consumption.group.storage": { ru: "Хранилище", en: "Storage" },
   "consumption.group.dns": { ru: "DNS", en: "DNS" },
+  "consumption.basis.actual": { ru: "фактически", en: "actual" },
+  "consumption.basis.estimate": { ru: "ориентировочно", en: "estimated" },
   "consumption.subtotal": { ru: "Подытог", en: "Subtotal" },
   "consumption.total": { ru: "Итого", en: "Total" },
   "consumption.perMonth": { ru: "{amount}/мес", en: "{amount}/mo" },

@@ -1104,6 +1104,7 @@ export interface ConsumptionResource {
   ram_gb: number | null;
   storage_gb: number | null;
   cost_rub: number;
+  basis: "actual" | "estimate";
 }
 
 /**
