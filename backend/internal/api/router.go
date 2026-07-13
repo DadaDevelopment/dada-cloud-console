@@ -10,6 +10,7 @@ import (
 	"github.com/dada-tuda/console/backend/internal/auth"
 	"github.com/dada-tuda/console/backend/internal/config"
 	internalmcp "github.com/dada-tuda/console/backend/internal/mcp"
+	"github.com/dada-tuda/console/backend/internal/metrics"
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -96,8 +97,13 @@ func SetupRouter(pool *pgxpool.Pool, cfg *config.Config) *gin.Engine {
 		r.POST("/api/v1/auth/login", h.Login)
 	}
 
-	// Embedded OpenAPI spec (public — feeds the reflective MCP server).
+	// Embedded OpenAPI spec (public -- feeds the reflective MCP server).
 	r.GET("/openapi.json", ServeOpenAPISpec)
+
+	// Prometheus scrape endpoint. Public on purpose: aggregate state gauges
+	// (operations/domain health), no per-tenant data. Scraped in-cluster by the
+	// kube-prometheus-stack ServiceMonitor; the public ingress does not route it.
+	r.GET("/metrics", gin.WrapH(metrics.Handler()))
 
 	// GitHub App install callback (Setup URL). Public — GitHub redirects an
 	// anonymous browser here after install; trust is the HMAC-signed state, not

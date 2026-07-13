@@ -1,0 +1,48 @@
+{{- if and .Values.backend.enabled .Values.metrics.alerts.enabled }}
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{ include "dada-cloud-console.fullname" . }}-alerts
+  labels:
+    {{- include "dada-cloud-console.labels" . | nindent 4 }}
+    {{- with .Values.metrics.prometheusReleaseLabel }}
+    release: {{ . }}
+    {{- end }}
+spec:
+  groups:
+    - name: dada-cloud-console.resources
+      rules:
+        - alert: DadaOperationFailed
+          expr: sum by (action) (dada_operations_failed_recent) > 0
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "DADA operation {{`{{ $labels.action }}`}} failed"
+            description: >-
+              {{`{{ $value }}`}} {{`{{ $labels.action }}`}} operation(s) reached status=Failed in the
+              last hour. A user create/attach (build, database, bucket, app server, domain)
+              did not complete. Inspect operations.error_message for the reason.
+        - alert: DadaCustomDomainStuck
+          expr: dada_domain_hostname_pending_age_seconds > {{ .Values.metrics.alerts.customDomainStuckSeconds }}
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Custom domain stuck attaching"
+            description: >-
+              A custom hostname has been non-active for {{`{{ $value | humanizeDuration }}`}}.
+              Usual cause: the user's DNS does not point at the public ingress LB, so the
+              ACME HTTP-01 challenge 404s and the Let's Encrypt cert never issues. Verify the
+              A/CNAME record and the challenge state in the app's namespace.
+        - alert: DadaMetricsCollectorFailing
+          expr: increase(dada_metrics_collect_errors_total[15m]) > 3
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "DADA console metrics collector erroring"
+            description: >-
+              The console /metrics collector is failing its state queries; the resource-health
+              alerts above may be blind. Check the backend logs.
+{{- end }}

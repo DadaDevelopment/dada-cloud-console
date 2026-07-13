@@ -57,6 +57,13 @@ backend:
     APP_ENV: production
     PORT: "8080"
     ARGO_CLUSTER_NAME: ""
+    # Custom-domain DNS targets handed to users when they attach a hostname.
+    # A-record for apex domains -> public ingress LB IP; CNAME for subdomains ->
+    # a stable host that A-resolves to the same LB. These MUST track the public
+    # ingress migration (ingress-nginx-pub LB 155.212.223.198); the old cluster
+    # IP 93.189.231.60 is dead and made every custom-domain ACME challenge 404.
+    CUSTOM_DOMAIN_A_TARGET: "155.212.223.198"
+    CUSTOM_DOMAIN_CNAME_TARGET: "cloud.dada-tuda.ru"
     # Identity provider. "local" = HS256 JWT (dev default). "keycloak" = JWKS validation;
     # JWT_SECRET is not required in keycloak mode.
     AUTH_MODE: "keycloak"
@@ -187,7 +194,7 @@ gitopsAgent:
     GITOPS_BOT_EMAIL: "bot@dada-tuda.ru"
     GITOPS_POLL_INTERVAL_DB: "3s"
     GITOPS_POLL_INTERVAL_GIT: "30s"
-    CLUSTER_LB_IP: "93.189.231.60"
+    CLUSTER_LB_IP: "155.212.223.198"
     # Same MLflow registry the backend talks to; agent uses it to resolve
     # <name, version> pins into s3:// source URIs at render time.
     # Empty disables MLflow-pinned operations (they fail with a clear error).
@@ -380,3 +387,21 @@ migrationJob:
     repository: dada-cloud-console-backend
     tag: "latest"
   command: ["./migrate"]
+
+# Observability of the console's own state machine. The backend serves state
+# gauges at /metrics (operations, custom-domain health); a ServiceMonitor
+# scrapes them and a PrometheusRule alerts on failed/stuck resource operations
+# so the platform team hears about breakage (bad build, pending DB, stuck
+# bucket/domain) before a user does. Requires prometheus-operator
+# (kube-prometheus-stack). Disable the whole block if that operator is absent.
+metrics:
+  # PrometheusRule/ServiceMonitor need this label to be adopted by the
+  # cluster's Prometheus (ruleSelector matchLabels). Match the running stack.
+  prometheusReleaseLabel: kube-prometheus-stack-monitoring
+  serviceMonitor:
+    enabled: true
+    interval: 30s
+  alerts:
+    enabled: true
+    # Fire DadaCustomDomainStuck once a hostname stays non-active this long.
+    customDomainStuckSeconds: 1800

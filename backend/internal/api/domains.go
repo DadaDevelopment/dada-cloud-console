@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"crypto/rand"
+	"crypto/tls"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -863,6 +864,70 @@ func VerifyPendingDomains(ctx context.Context, pool *pgxpool.Pool, cfg *config.C
 		verifyAuthorization(ctx, pool, cfg, &pending[i])
 	}
 	return nil
+}
+
+// ReconcilePendingHostnames flips a custom hostname from pending to active once
+// its Let's Encrypt certificate is serving end-to-end. Nothing else updates the
+// row after AttachHostname commits the Ingress to git, so without this a fully
+// working domain shows "pending" forever in the console. The probe is an
+// external TLS handshake to hostname:443 with SNI: it only succeeds when the
+// leaf cert is publicly trusted (LE issued) and valid for the hostname, which
+// proves DNS -> ingress -> cert all resolved. A failed probe leaves the row
+// pending to be retried on the next tick. The UPDATE is guarded on
+// status='pending' so a concurrent detach or failure is not clobbered active.
+func ReconcilePendingHostnames(ctx context.Context, pool *pgxpool.Pool) error {
+	rows, err := pool.Query(ctx,
+		`SELECT id, hostname FROM domain_hostnames WHERE status = 'pending'`)
+	if err != nil {
+		return err
+	}
+	type pendingHost struct {
+		id       uuid.UUID
+		hostname string
+	}
+	var pending []pendingHost
+	for rows.Next() {
+		var p pendingHost
+		if err := rows.Scan(&p.id, &p.hostname); err != nil {
+			rows.Close()
+			return err
+		}
+		pending = append(pending, p)
+	}
+	rows.Close()
+
+	for _, p := range pending {
+		if !hostnameCertLive(ctx, p.hostname) {
+			continue
+		}
+		_, _ = pool.Exec(ctx,
+			`UPDATE domain_hostnames SET status='active', cert_status='active', updated_at=now()
+			  WHERE id=$1 AND status='pending'`, p.id)
+	}
+	return nil
+}
+
+// hostnameCertLive reports whether hostname:443 completes a TLS handshake with a
+// publicly-trusted certificate valid for that hostname. The default (verifying)
+// tls.Config means a self-signed / ingress-default / expired cert fails the
+// handshake, so only a genuinely issued LE cert returns true.
+func hostnameCertLive(ctx context.Context, hostname string) bool {
+	dctx, cancel := context.WithTimeout(ctx, 6*time.Second)
+	defer cancel()
+	dialer := tls.Dialer{
+		NetDialer: &net.Dialer{Timeout: 5 * time.Second},
+		Config:    &tls.Config{ServerName: hostname},
+	}
+	conn, err := dialer.DialContext(dctx, "tcp", hostname+":443")
+	if err != nil {
+		return false
+	}
+	defer conn.Close()
+	state := conn.(*tls.Conn).ConnectionState()
+	if len(state.PeerCertificates) == 0 {
+		return false
+	}
+	return state.PeerCertificates[0].VerifyHostname(hostname) == nil
 }
 
 // ── helpers ──────────────────────────────────────────────────────────────────

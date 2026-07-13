@@ -15,6 +15,7 @@ import (
 	"github.com/dada-tuda/console/backend/internal/billing"
 	"github.com/dada-tuda/console/backend/internal/config"
 	"github.com/dada-tuda/console/backend/internal/db"
+	"github.com/dada-tuda/console/backend/internal/metrics"
 	"github.com/joho/godotenv"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
@@ -66,6 +67,12 @@ func main() {
 
 	// Set up HTTP router
 	router := api.SetupRouter(pool, cfg)
+
+	// Refresh Prometheus state gauges (operations / domain health) served at
+	// /metrics so stuck or failed operations alert the platform team.
+	metricsCtx, metricsCancel := context.WithCancel(context.Background())
+	defer metricsCancel()
+	metrics.StartCollector(metricsCtx, pool, 30*time.Second)
 
 	srv := &http.Server{
 		Addr:    ":" + cfg.Port,
@@ -121,6 +128,9 @@ func main() {
 			case <-ticker.C:
 				if err := api.VerifyPendingDomains(dnsCtx, pool, cfg); err != nil && !errors.Is(err, context.Canceled) {
 					log.Warn().Err(err).Msg("custom-domain DNS verification failed")
+				}
+				if err := api.ReconcilePendingHostnames(dnsCtx, pool); err != nil && !errors.Is(err, context.Canceled) {
+					log.Warn().Err(err).Msg("custom-domain hostname reconcile failed")
 				}
 			}
 		}
