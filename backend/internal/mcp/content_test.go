@@ -66,7 +66,7 @@ func TestPromptsRegistered(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected TextContent, got %T", got.Messages[0].Content)
 	}
-	for _, sub := range []string{"acme", "web", "createApp", "getOperation", "reg/web:1", "3000"} {
+	for _, sub := range []string{"acme", "web", "createApp", "listApps", "reg/web:1", "3000"} {
 		if !strings.Contains(tc.Text, sub) {
 			t.Errorf("deploy-app body missing %q", sub)
 		}

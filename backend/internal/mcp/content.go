@@ -60,13 +60,12 @@ func registerPrompts(srv *sdkmcp.Server) {
 		return promptMsg(fmt.Sprintf(`Deploy app %q into project %q on DADA Cloud. Work step by step, and stop to report if any step errors.
 
 1. Confirm the project exists: call listProjects and check %q is present. If not, ask before calling createProject.
-2. Create the app: call createApp with project=%q, name=%q, image=%q, port=%s. A Helm app requires image and port.
-3. createApp returns an operation id. Poll getOperation until its status is Committed or Failed. On Failed, read the message and stop.
-4. Set environment variables the app needs: call setEnvVar once per variable (project, app, key, value). Secrets are stored encrypted (AES); list current keys with listEnvVars, reveal a value with revealEnvVar.
-5. After env changes, call restartApp so the running pod picks them up, then poll getOperation again.
-6. Verify: call listApps for project %q and confirm app %q reports phase Healthy. If not Healthy, call getAppLogs to see why.
+2. Create the app: call createApp with project=%q, name=%q, image=%q, port=%s. A container app requires image and port.
+3. Set environment variables the app needs: call setEnvVar once per variable (project, app, key, value). Secrets are stored encrypted; list current keys with listEnvVars.
+4. After env changes, call restartApp so the app picks them up.
+5. Verify: poll listApps for project %q until app %q reports phase Healthy (changes apply asynchronously). If it does not become Healthy, call getAppLogs to see why.
 
-Report the final phase and any operation ids.`,
+Report the final phase.`,
 			name, project, project, project, name, image, port, project, name)), nil
 	})
 
@@ -86,10 +85,10 @@ Report the final phase and any operation ids.`,
 		vars := arg(a, "vars", "(the variables the user asked for)")
 		return promptMsg(fmt.Sprintf(`Configure environment for app %q in project %q on DADA Cloud.
 
-1. Inspect current state: call listEnvVars(project=%q, app=%q). Use revealEnvVar for a specific value only when you must compare.
+1. Inspect current state: call listEnvVars(project=%q, app=%q) to see which keys exist.
 2. Apply changes: for each variable in [%s], call setEnvVar(project=%q, app=%q, key, value). setEnvVar creates or updates one key; values are stored encrypted. To remove a key use deleteEnvVar.
-3. Roll out: call restartApp(project=%q, app=%q), then poll getOperation until Committed or Failed.
-4. Verify: call listApps and confirm the app is Healthy; on failure call getAppLogs.
+3. Roll out: call restartApp(project=%q, app=%q).
+4. Verify: poll listApps until the app is Healthy again; on failure call getAppLogs.
 
 Report which keys changed and the final phase.`,
 			app, project, project, app, vars, project, app, project, app)), nil
@@ -98,7 +97,7 @@ Report which keys changed and the final phase.`,
 	srv.AddPrompt(&sdkmcp.Prompt{
 		Name:        "diagnose-app",
 		Title:       "Diagnose a failing app",
-		Description: "Pull status, recent operations and logs for an app and explain what is wrong.",
+		Description: "Pull status, logs and the latest build for an app and explain what is wrong.",
 		Arguments: []*sdkmcp.PromptArgument{
 			{Name: "project", Description: "Project slug", Required: true},
 			{Name: "app", Description: "App name", Required: true},
@@ -110,12 +109,11 @@ Report which keys changed and the final phase.`,
 		return promptMsg(fmt.Sprintf(`Diagnose app %q in project %q on DADA Cloud.
 
 1. Current phase: call listApps(project=%q) and read the phase for %q.
-2. Recent history: call listOperations(project=%q) and look at the latest operations for this app — note any Failed status and its message.
-3. Runtime logs: call getAppLogs(project=%q, app=%q) (use searchLogs for a specific error string).
-4. If deploy-related, call listBuilds / getBuild for the latest build outcome.
+2. Runtime logs: call getAppLogs(project=%q, app=%q) and look for the error.
+3. If it looks deploy/build related, call getBuild for the latest build outcome.
 
 Summarize the root cause and the single most likely fix. Do not mutate anything without asking.`,
-			app, project, project, app, project, project, app)), nil
+			app, project, project, app, project, app)), nil
 	})
 }
 
@@ -182,33 +180,30 @@ func toolIndexMarkdown(tools []GeneratedTool) string {
 const gettingStartedGuide = `# DADA Cloud — getting started
 
 DADA Cloud is a self-service platform. You (an AI agent) drive it through these MCP tools.
-Everything is GitOps-backed: mutations return an **operation id** you poll with ` + "`getOperation`" + `.
+Mutations apply asynchronously; confirm the result by polling the app phase with ` + "`listApps`" + `.
 
 ## Core model
 - **Project** — the tenant boundary. List with ` + "`listProjects`" + `, create with ` + "`createProject`" + `.
-- **App** — a workload in a project. Two kinds:
-  - *Helm app* (container in the cluster): needs an **image** and a **port**.
-  - *Compose app* (on a VM): runs a docker-compose stack.
-  - List with ` + "`listApps`" + `, create with ` + "`createApp`" + `.
-- **Environment variables** — per app, stored **encrypted (AES)**. Manage with
-  ` + "`setEnvVar` / `listEnvVars` / `revealEnvVar` / `deleteEnvVar`" + `. Changes take effect after ` + "`restartApp`" + `.
+- **App** — a container workload in a project: needs an **image** and a **port**.
+  List with ` + "`listApps`" + `, create with ` + "`createApp`" + `.
+- **Environment variables** — per app, stored **encrypted**. Manage with
+  ` + "`listEnvVars` / `setEnvVar` / `deleteEnvVar`" + `. Changes take effect after ` + "`restartApp`" + `.
+- **Databases** — ` + "`createDatabase`" + `, then ` + "`getDatabaseCredentials`" + ` for the connection.
 - **Domains** — attach custom hostnames with ` + "`addDomainAuthorization`" + ` then ` + "`verifyDomainAuthorization`" + `.
-- **Builds** — ` + "`triggerBuild`" + ` builds from a connected repo; watch with ` + "`listBuilds` / `getBuild`" + `.
+- **Builds** — ` + "`triggerBuild`" + ` builds from a connected repo; check with ` + "`getBuild`" + `.
+- **App servers (VMs)** — ` + "`listAppServers`" + `, ` + "`createAppServer`" + `.
 
 ## The golden path (deploy)
 1. ` + "`listProjects`" + ` → pick or ` + "`createProject`" + `.
-2. ` + "`createApp`" + ` (image + port) → get an operation id.
-3. ` + "`getOperation`" + ` until **Committed** (or **Failed** → read the message).
-4. ` + "`setEnvVar`" + ` for each variable the app needs.
-5. ` + "`restartApp`" + ` → ` + "`getOperation`" + ` again.
-6. ` + "`listApps`" + ` → phase should be **Healthy**; if not, ` + "`getAppLogs`" + `.
+2. ` + "`createApp`" + ` (image + port).
+3. ` + "`setEnvVar`" + ` for each variable the app needs.
+4. ` + "`restartApp`" + ` so it picks up the env.
+5. ` + "`listApps`" + ` → poll until phase is **Healthy**; if it does not get there, ` + "`getAppLogs`" + `.
 
-## Operation lifecycle
-Async mutations move: **Pending → Committed → (reconciled) Healthy**, or **Failed**.
-A green ` + "`getOperation`" + ` means the change was written to GitOps, not that the pod is up yet —
-confirm the app phase with ` + "`listApps`" + ` before declaring success.
+Mutations are applied asynchronously, so a successful tool call means the change was
+accepted, not that the app is up yet — always confirm with ` + "`listApps`" + `.
 
 ## Auth
-All tool calls carry your Keycloak (id.dada-tuda.ru) bearer token and run under your
+All tool calls carry your DADA ID (id.dada-tuda.ru) bearer token and run under your
 own permissions — you can only touch projects your token grants a role on.
 `

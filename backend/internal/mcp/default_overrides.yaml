@@ -1,66 +1,47 @@
 # Default MCP tool curation (embedded into the backend binary).
 #
 # The reflective generator emits one tool per backend OpenAPI operation (~130).
-# Most are niche/admin/internal (monitoring internals, mlflow, billing, dns CRUD,
-# ingest/push endpoints, OAuth callbacks) and are noise for an agent — they bloat
-# the tool list every client has to carry. `keep` is an allowlist: only the tools
-# an agent needs for the core "spin up / deploy / configure / diagnose" loop are
-# exposed. New backend operations do NOT leak in.
+# Most are niche/admin/internal (monitoring, mlflow, billing, dns CRUD, ingest
+# push-endpoints, OAuth callbacks, async operation polling, account) and are
+# noise for an agent — they bloat the tool list every client carries. `keep` is
+# an allowlist: only the ~20 tools an agent needs for the core spin-up / deploy /
+# configure / diagnose loop are exposed. New backend operations do NOT leak in.
+#
+# Async note: mutations return an operation id, but the operation* tools are NOT
+# exposed on purpose (kept lean). Confirm results by polling listApps for the
+# app phase instead.
 #
 # To expose the full set, mount a file at MCP_OVERRIDES_PATH with an empty `keep`.
 
 keep:
-  # Account / discovery
-  - getCurrentUser
-  - getAccountSummary
   # Projects
   - listProjects
-  - getProject
   - createProject
-  - ensureDefaultProject
-  - getProjectQuotas
   # Apps
   - listApps
   - createApp
-  - getAppState
   - restartApp
-  - rollbackApp
   - updateAppImage
   - deleteApp
-  - deleteAppImpact
-  # Environment variables
+  # Environment variables (get-all / put / delete)
   - listEnvVars
   - setEnvVar
-  - revealEnvVar
   - deleteEnvVar
   # Databases
   - listDatabases
   - createDatabase
   - getDatabaseCredentials
-  - deleteDatabase
-  # Domains / hostnames
-  - listDomainAuthorizations
+  # Domains
   - addDomainAuthorization
   - verifyDomainAuthorization
-  - listHostnames
-  - attachHostname
-  - detachHostname
   # Builds
-  - listBuilds
-  - getBuild
   - triggerBuild
+  - getBuild
   # Logs (diagnose)
   - getAppLogs
-  - searchLogs
-  # Operations (async result polling)
-  - getOperation
-  - listOperations
-  - retryOperation
   # App servers (VMs)
   - listAppServers
-  - getAppServer
   - createAppServer
-  - getAppServerState
 
 rename: {}
 annotate: {}

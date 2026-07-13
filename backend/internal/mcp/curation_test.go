@@ -37,7 +37,7 @@ func TestDefaultOverridesCurateToolSurface(t *testing.T) {
 	for _, tl := range kept {
 		present[tl.Name] = true
 	}
-	for _, must := range []string{"createApp", "setEnvVar", "listProjects", "getOperation", "getAppLogs", "listApps"} {
+	for _, must := range []string{"createApp", "setEnvVar", "listProjects", "getAppLogs", "listApps"} {
 		if !present[must] {
 			t.Errorf("core tool %q missing after curation", must)
 		}
