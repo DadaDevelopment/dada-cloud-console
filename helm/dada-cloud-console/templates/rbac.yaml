@@ -19,6 +19,17 @@ rules:
     resources:
       - events
       - namespaces
+      - persistentvolumeclaims
+    verbs: ["get", "list", "watch"]
+  # Delete-impact scan lists app-owned Ingresses and cert-manager Certificates so
+  # the blast-radius preview shows raw resources not modelled as platform CRs.
+  - apiGroups: ["networking.k8s.io"]
+    resources:
+      - ingresses
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["cert-manager.io"]
+    resources:
+      - certificates
     verbs: ["get", "list", "watch"]
   # Live-state reconciler reads workload status (replicas/readiness/image) from
   # each environment namespace to mirror it onto App snapshots.
