@@ -45,13 +45,22 @@ func New(baseURL string) *Client {
 // returns costs in the cluster's configured currency (RUB here). Only the
 // fields the cost view needs are decoded.
 type Allocation struct {
-	Name        string  `json:"name"`
-	CPUCost     float64 `json:"cpuCost"`
-	RAMCost     float64 `json:"ramCost"`
-	PVCost      float64 `json:"pvCost"`
-	GPUCost     float64 `json:"gpuCost"`
-	NetworkCost float64 `json:"networkCost"`
-	TotalCost   float64 `json:"totalCost"`
+	Name        string     `json:"name"`
+	CPUCost     float64    `json:"cpuCost"`
+	RAMCost     float64    `json:"ramCost"`
+	PVCost      float64    `json:"pvCost"`
+	GPUCost     float64    `json:"gpuCost"`
+	NetworkCost float64    `json:"networkCost"`
+	TotalCost   float64    `json:"totalCost"`
+	Properties  Properties `json:"properties"`
+}
+
+// Properties carries the identifying metadata OpenCost attaches to an
+// allocation. Only the fields the cost attribution needs are decoded.
+type Properties struct {
+	Namespace string            `json:"namespace"`
+	Pod       string            `json:"pod"`
+	Labels    map[string]string `json:"labels"`
 }
 
 // computeEnvelope is the /allocation/compute response wrapper. data is an array

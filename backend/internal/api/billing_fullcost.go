@@ -143,26 +143,38 @@ func (h *Handler) billingSnapshot(ctx context.Context) *billingCostSnapshot {
 	return snap
 }
 
-// buildBillingSnapshot issues the two cluster-wide OpenCost queries (all apps by
-// dada.io/app; the shared Postgres/PowerDNS pods) and derives the per-type
-// overhead factors from the whole-cluster vs user-namespace split.
+// appLabelKeys are the pod labels, in priority order, an app's console name is
+// matched against. Console-deployed user apps carry dada.io/app; platform/infra
+// apps (installed via GitOps) instead carry the standard app.kubernetes.io/*
+// labels, so keying on dada.io/app alone left every infra app at 0.
+var appLabelKeys = []string{"dada_io_app", "app_kubernetes_io_instance", "app_kubernetes_io_name"}
+
+// buildBillingSnapshot issues ONE cluster-wide OpenCost pod query and, from it,
+// derives everything: per-type overhead factors (whole-cluster vs user-namespace
+// split), per-app cost indexed by every candidate app label, and the shared
+// Postgres/PowerDNS pod costs. Costs are scaled to a monthly run-rate.
 func (h *Handler) buildBillingSnapshot(ctx context.Context) (*billingCostSnapshot, error) {
 	userNS, err := h.userNamespaces(ctx)
 	if err != nil {
 		return nil, err
 	}
 
-	apps, err := h.opencost.Compute(ctx, billingCostWindow, "namespace,label:dada_io_app", "")
+	pods, err := h.opencost.Compute(ctx, billingCostWindow, "pod", "")
 	if err != nil {
 		return nil, err
 	}
 
 	var userCPU, userRAM, userPV, totCPU, totRAM, totPV float64
-	appCost := make(map[string]opencost.Allocation, len(apps))
-	for key, a := range apps {
-		ns := key
-		if i := strings.IndexByte(key, '/'); i >= 0 {
-			ns = key[:i]
+	appCost := make(map[string]opencost.Allocation)
+	snap := &billingCostSnapshot{appCost: appCost, builtAt: time.Now()}
+
+	for _, a := range pods {
+		ns := a.Properties.Namespace
+		if ns == "" || strings.HasPrefix(ns, "__") {
+			totCPU += nonNeg(a.CPUCost)
+			totRAM += nonNeg(a.RAMCost)
+			totPV += nonNeg(a.PVCost)
+			continue
 		}
 		totCPU += nonNeg(a.CPUCost)
 		totRAM += nonNeg(a.RAMCost)
@@ -172,42 +184,43 @@ func (h *Handler) buildBillingSnapshot(ctx context.Context) (*billingCostSnapsho
 			userRAM += nonNeg(a.RAMCost)
 			userPV += nonNeg(a.PVCost)
 		}
-		if !strings.HasPrefix(ns, "__") {
-			appCost[key] = scaleAlloc(a, billingMonthlyScale)
+
+		scaled := scaleAlloc(a, billingMonthlyScale)
+		switch {
+		case strings.HasPrefix(a.Properties.Pod, "postgresql"):
+			snap.postgres = addAlloc(snap.postgres, scaled)
+		case strings.HasPrefix(a.Properties.Pod, "powerdns"):
+			snap.powerdns = addAlloc(snap.powerdns, scaled)
 		}
-	}
 
-	snap := &billingCostSnapshot{
-		pricing: consumptionPricing{
-			fCPU:   overheadFactor(userCPU, totCPU, h.billingMinUtil),
-			fRAM:   overheadFactor(userRAM, totRAM, h.billingMinUtil),
-			fPV:    overheadFactor(userPV, totPV, h.billingMinUtil),
-			margin: h.billingMargin,
-		},
-		appCost: appCost,
-		builtAt: time.Now(),
-	}
-
-	pods, err := h.opencost.Compute(ctx, billingCostWindow, "pod", `namespace:"databases","powerdns"`)
-	if err == nil {
-		for pod, a := range pods {
-			switch {
-			case strings.HasPrefix(pod, "postgresql"):
-				snap.postgres.CPUCost += a.CPUCost * billingMonthlyScale
-				snap.postgres.RAMCost += a.RAMCost * billingMonthlyScale
-				snap.postgres.PVCost += a.PVCost * billingMonthlyScale
-				snap.postgres.TotalCost += a.TotalCost * billingMonthlyScale
-			case strings.HasPrefix(pod, "powerdns"):
-				snap.powerdns.CPUCost += a.CPUCost * billingMonthlyScale
-				snap.powerdns.RAMCost += a.RAMCost * billingMonthlyScale
-				snap.powerdns.PVCost += a.PVCost * billingMonthlyScale
+		seen := map[string]bool{}
+		for _, lk := range appLabelKeys {
+			if v := a.Properties.Labels[lk]; v != "" {
+				key := ns + "/" + v
+				if !seen[key] {
+					appCost[key] = addAlloc(appCost[key], scaled)
+					seen[key] = true
+				}
 			}
 		}
-	} else {
-		log.Warn().Err(err).Msg("billing: shared-pod (postgres/powerdns) cost query failed")
 	}
 
+	snap.pricing = consumptionPricing{
+		fCPU:   overheadFactor(userCPU, totCPU, h.billingMinUtil),
+		fRAM:   overheadFactor(userRAM, totRAM, h.billingMinUtil),
+		fPV:    overheadFactor(userPV, totPV, h.billingMinUtil),
+		margin: h.billingMargin,
+	}
 	return snap, nil
+}
+
+// addAlloc sums the cost fields of two allocations.
+func addAlloc(a, b opencost.Allocation) opencost.Allocation {
+	a.CPUCost += b.CPUCost
+	a.RAMCost += b.RAMCost
+	a.PVCost += b.PVCost
+	a.TotalCost += b.TotalCost
+	return a
 }
 
 // scaleAlloc returns a copy of an allocation with every cost field multiplied by
