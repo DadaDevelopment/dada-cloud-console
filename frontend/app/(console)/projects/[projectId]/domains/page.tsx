@@ -393,7 +393,7 @@ function HostnameAttachSection({
 }) {
   const hasVerifiedApex = verifiedApexes.length > 0;
   const { t } = useT();
-  const [envId, setEnvId] = useState(environments[0]?.id ?? "");
+  const envId = environments[0]?.id ?? "";
   const [apps, setApps] = useState<ResourceSnapshot[]>([]);
   const [appName, setAppName] = useState("");
   const [loadingApps, setLoadingApps] = useState(false);
@@ -409,7 +409,11 @@ function HostnameAttachSection({
     /* eslint-enable react-hooks/set-state-in-effect */
     appsApi
       .list(projectId, envId)
-      .then((d) => setApps(d.apps ?? []))
+      .then((d) => {
+        const list = d.apps ?? [];
+        setApps(list);
+        if (list.length === 1) setAppName(list[0].name);
+      })
       .catch(() => setApps([]))
       .finally(() => setLoadingApps(false));
   }, [projectId, envId]);
@@ -428,39 +432,27 @@ function HostnameAttachSection({
         </div>
       ) : (
         <div className="mt-4 space-y-5">
-          <div className="grid gap-3 sm:grid-cols-2">
-            <div>
-              <label className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-200">{t("domains.hostnames.env")}</label>
-              <select value={envId} onChange={(e) => setEnvId(e.target.value)} className={selectClass}>
-                {environments.map((env) => (
-                  <option key={env.id} value={env.id}>
-                    {env.name} · {env.runtime === "vm" ? t("env.runtime.vm") : t("env.runtime.cloud")}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-200">{t("domains.hostnames.app")}</label>
-              <select
-                value={appName}
-                onChange={(e) => setAppName(e.target.value)}
-                disabled={loadingApps || apps.length === 0}
-                className={selectClass}
-              >
-                <option value="">
-                  {loadingApps
-                    ? t("domains.hostnames.loadingApps")
-                    : apps.length === 0
-                      ? t("domains.hostnames.noApps")
-                      : t("domains.hostnames.selectApp")}
+          <div className="max-w-md">
+            <label className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-200">{t("domains.hostnames.app")}</label>
+            <select
+              value={appName}
+              onChange={(e) => setAppName(e.target.value)}
+              disabled={loadingApps || apps.length === 0}
+              className={selectClass}
+            >
+              <option value="">
+                {loadingApps
+                  ? t("domains.hostnames.loadingApps")
+                  : apps.length === 0
+                    ? t("domains.hostnames.noApps")
+                    : t("domains.hostnames.selectApp")}
+              </option>
+              {apps.map((a) => (
+                <option key={a.id} value={a.name}>
+                  {a.name}
                 </option>
-                {apps.map((a) => (
-                  <option key={a.id} value={a.name}>
-                    {a.name}
-                  </option>
-                ))}
-              </select>
-            </div>
+              ))}
+            </select>
           </div>
 
           {envId && appName && (
