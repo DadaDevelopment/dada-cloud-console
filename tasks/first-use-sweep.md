@@ -47,12 +47,22 @@ So the broker is genuinely unused and correctly at 0.
   **POST /orgs/{org}/projects hangs for personal-org projects** (alexkekiy,
   top.decker) — the group is never created → members 404 "IAM resource not
   found". Shared-"dada"-org projects are already provisioned so they work.
-- STILL OPEN — the fix is USER-SERVICE-SIDE (separate Java repo): why does
-  `POST /orgs/{org}/projects` block >20s for a personal org (org group missing in
-  Keycloak? a sync/lock on first-time org creation?). Being investigated by the
-  dedicated background task. dada-cloud mitigations to weigh: raise the ensure
-  HTTP client timeout if user-service is slow-but-eventual, or make the console
-  create the org group before the project group. NOT rabbitmq.
+- STILL OPEN — PERSISTENT (not transient): user-service up 27m, still timing out
+  on top.decker AND alexkekiy at 22:47:52 (6 timeouts/20min). Reads work
+  (`OrgController#getOrg` GET 200) but the WRITE `POST /orgs/{org}/projects`
+  hangs >20s every time, only for personal orgs.
+- LEADING HYPOTHESIS (for the user-service repo / bg task): user-service's
+  create-project-group write path still awaits the messaging/saga machinery that
+  its own values.yaml now EXCLUDES (`MessagingConfiguration`, `SagaConfig`,
+  `CancelConfig` under spring.autoconfigure.exclude — the same "broker-free"
+  change). A write that publishes/awaits a saga step that can never complete
+  (messaging disabled) would hang forever, while pure reads return fine. i.e. the
+  broker-free migration is INCOMPLETE for write paths. Fix is in spring.user-service
+  (Jenkins job `spring.user-service`), NOT dada-cloud and NOT rabbitmq.
+- dada-cloud mitigations are band-aids only (raising the 20s client timeout won't
+  help an infinite hang); do not ship them until the user-service hang is fixed.
+- Could not manually pre-create the Keycloak groups (admin token via
+  keycloak-0 kcadm/REST failed — service-account creds). Handoff to bg task.
 - Both this session (646f602) AND the prior session (eeb451a) briefly set
   rabbitmq→1 on the same stale comment; both reverted. Final: argo-infra
   `71d7425` sets replicaCount 0 AND rewrites the misleading comment so nobody
