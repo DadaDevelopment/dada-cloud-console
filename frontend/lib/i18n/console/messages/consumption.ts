@@ -6,6 +6,7 @@ export const consumption: Messages = {
   "consumption.group.app": { ru: "Приложения", en: "Applications" },
   "consumption.group.database": { ru: "Базы данных", en: "Databases" },
   "consumption.group.storage": { ru: "Хранилище", en: "Storage" },
+  "consumption.group.dns": { ru: "DNS", en: "DNS" },
   "consumption.subtotal": { ru: "Подытог", en: "Subtotal" },
   "consumption.total": { ru: "Итого", en: "Total" },
   "consumption.perMonth": { ru: "{amount}/мес", en: "{amount}/mo" },

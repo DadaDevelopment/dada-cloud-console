@@ -9,12 +9,13 @@ import { useT } from "@/lib/i18n/console/context";
 
 type Kind = ConsumptionResource["kind"];
 
-const GROUP_ORDER: Kind[] = ["app", "database", "storage"];
+const GROUP_ORDER: Kind[] = ["app", "database", "storage", "dns"];
 
 const KIND_ICON: Record<Kind, IconName> = {
   app: "apps",
   database: "databases",
   storage: "storage",
+  dns: "domains",
 };
 
 /**

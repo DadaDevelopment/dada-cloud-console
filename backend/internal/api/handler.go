@@ -91,6 +91,8 @@ type Handler struct {
 	billingMarkup  float64
 	billingMargin  float64
 	billingMinUtil float64
+	billingSnapMu  sync.Mutex
+	billingSnap    *billingCostSnapshot
 
 	usersvc *userservice.Client
 

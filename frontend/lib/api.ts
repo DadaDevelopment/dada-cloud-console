@@ -1098,7 +1098,7 @@ export const billingApi = {
 
 /** One metered resource row in the consumption estimate. */
 export interface ConsumptionResource {
-  kind: "app" | "database" | "storage";
+  kind: "app" | "database" | "storage" | "dns";
   name: string;
   cpu_cores: number | null;
   ram_gb: number | null;

@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	"github.com/dada-tuda/console/backend/internal/opencost"
@@ -19,21 +20,30 @@ import (
 //
 // overhead_factor_T = 1 / max(userShare_T, minUtilization)
 //
-// where userShare_T = (cost of USER namespaces for type T) / (whole-cluster cost
-// for type T). If users consume all of type T the factor is 1; the less of the
-// cluster users occupy, the more overhead each unit carries. The minUtilization
-// floor caps the factor (1/minUtil) so early-stage, when a few small workloads
-// sit on a big platform, bills do not explode to 30-40x -- the factor stays put
-// at the floor and converges to the true ratio as adoption grows. Because the
-// denominator is the whole cluster (not the head-count of users), the factor is
-// stable: adding a user does not swing existing users' bills.
+// userShare_T = (cost of USER namespaces for type T) / (whole-cluster cost for
+// type T). The minUtilization floor (BILLING_MIN_UTILIZATION, default 0.30) caps
+// the factor at 1/minUtil (~3.33x) so early-stage bills do not explode to the
+// raw 30-40x infra:user ratio; it converges to the true ratio as adoption grows.
+// The denominator is the whole cluster, not the user head-count, so the factor
+// is stable. The margin (BILLING_MARGIN, default 1.4) is the profit lever applied
+// after overhead loading. Both are config (h.billingMinUtil / h.billingMargin),
+// tunable via env without a rebuild.
 //
-// The minUtilization floor (BILLING_MIN_UTILIZATION, default 0.30) caps the
-// factor at 1/minUtil (~3.33x). The margin (BILLING_MARGIN, default 1.4) is the
-// profit lever applied AFTER overhead loading; it replaces the old flat 2.7
-// markup, which conflated overhead and margin. Both come from config
-// (h.billingMinUtil / h.billingMargin) so they are tunable via env without a
-// rebuild.
+// billingCostWindow is the OpenCost window used for consumption pricing. A short
+// duration form ("7d") is used deliberately: a calendar-month RFC3339 range
+// intermittently 500s ("AllocationSetRange has empty AssetSet") over data-less
+// days, and a 30d label aggregation takes ~20s (exceeding the client timeout),
+// whereas 7d returns in ~7s. It captures all currently available history and is
+// cached, so the estimate is a recent-run-rate figure that fills in as data
+// accumulates.
+const billingCostWindow = "7d"
+
+// billingSnapshotTTL bounds how long a cluster cost snapshot is reused before a
+// refresh. All OpenCost data feeding consumption is cluster-global (same for
+// every project), so it is fetched once per TTL, not per request/project -- this
+// is what keeps the billing endpoints from issuing an OpenCost query per project
+// and timing out.
+const billingSnapshotTTL = 60 * time.Second
 
 // consumptionPricing carries the per-type overhead factors (>=1) and the profit
 // margin used to turn a raw OpenCost allocation into a customer-facing price.
@@ -43,51 +53,136 @@ type consumptionPricing struct {
 }
 
 // price applies the per-type overhead factors and the margin to a resource's raw
-// OpenCost per-type costs, rounded to two decimals.
+// OpenCost per-type costs, rounded to two decimals. Negative inputs (OpenCost
+// emits small negative cost adjustments on sparse data) are clamped to zero.
 func (p consumptionPricing) price(cpuCost, ramCost, pvCost float64) float64 {
-	loaded := cpuCost*p.fCPU + ramCost*p.fRAM + pvCost*p.fPV
+	loaded := nonNeg(cpuCost)*p.fCPU + nonNeg(ramCost)*p.fRAM + nonNeg(pvCost)*p.fPV
 	return round2(loaded * p.margin)
 }
 
-// billingPricing derives the current per-type overhead factors from live
-// OpenCost cluster data. User namespaces come from the environments table (every
-// k8s environment namespace); everything else OpenCost reports is shared infra.
-// Best-effort: when OpenCost is unavailable it returns factors of 1 (no overhead
-// loading), so pricing degrades to raw*margin rather than erroring.
-func (h *Handler) billingPricing(ctx context.Context, start, end time.Time) consumptionPricing {
-	p := consumptionPricing{fCPU: 1, fRAM: 1, fPV: 1, margin: h.billingMargin}
+// nonNeg clamps a cost to zero. OpenCost can report small negative costs from
+// cost adjustments over incomplete windows, which must not become negative bills.
+func nonNeg(v float64) float64 {
+	if v < 0 {
+		return 0
+	}
+	return v
+}
+
+// billingCostSnapshot is a cluster-wide, cached view of OpenCost costs from which
+// every project's consumption is computed with no further OpenCost calls: the
+// per-type pricing factors, raw per-app cost keyed "namespace/appName" (the
+// dada.io/app label), and the shared Postgres / PowerDNS pod costs.
+type billingCostSnapshot struct {
+	pricing  consumptionPricing
+	appCost  map[string]opencost.Allocation
+	postgres opencost.Allocation
+	powerdns opencost.Allocation
+	builtAt  time.Time
+}
+
+// emptySnapshot is the safe fallback when OpenCost is unavailable: unit factors,
+// no per-resource costs, so consumption degrades to the metrics/storage fallback
+// rather than erroring.
+func (h *Handler) emptySnapshot() *billingCostSnapshot {
+	return &billingCostSnapshot{
+		pricing: consumptionPricing{fCPU: 1, fRAM: 1, fPV: 1, margin: h.billingMargin},
+		appCost: map[string]opencost.Allocation{},
+	}
+}
+
+// billingSnapshot returns the current cluster cost snapshot, rebuilding it from
+// OpenCost when the cached one is missing or older than the TTL. On a build
+// failure it returns the last good snapshot if any, else an empty one, so the
+// caller never blocks on OpenCost being healthy.
+func (h *Handler) billingSnapshot(ctx context.Context) *billingCostSnapshot {
+	h.billingSnapMu.Lock()
+	defer h.billingSnapMu.Unlock()
+
+	if h.billingSnap != nil && time.Since(h.billingSnap.builtAt) < billingSnapshotTTL {
+		return h.billingSnap
+	}
 	if h.opencost == nil {
-		return p
-	}
-	userNS, err := h.userNamespaces(ctx)
-	if err != nil {
-		log.Warn().Err(err).Msg("billing pricing: user namespace lookup failed; overhead factor defaults to 1")
-		return p
-	}
-	window := start.Format(time.RFC3339) + "," + end.Format(time.RFC3339)
-	allocs, err := h.opencost.Compute(ctx, window, "namespace", "")
-	if err != nil {
-		log.Warn().Err(err).Msg("billing pricing: opencost cluster query failed; overhead factor defaults to 1")
-		return p
+		return h.emptySnapshot()
 	}
 
-	var userCPU, userRAM, userPV float64
-	var totCPU, totRAM, totPV float64
-	for ns, a := range allocs {
-		totCPU += a.CPUCost
-		totRAM += a.RAMCost
-		totPV += a.PVCost
+	snap, err := h.buildBillingSnapshot(ctx)
+	if err != nil {
+		log.Warn().Err(err).Msg("billing: snapshot build failed; using last-good/empty")
+		if h.billingSnap != nil {
+			return h.billingSnap
+		}
+		return h.emptySnapshot()
+	}
+	h.billingSnap = snap
+	return snap
+}
+
+// buildBillingSnapshot issues the two cluster-wide OpenCost queries (all apps by
+// dada.io/app; the shared Postgres/PowerDNS pods) and derives the per-type
+// overhead factors from the whole-cluster vs user-namespace split.
+func (h *Handler) buildBillingSnapshot(ctx context.Context) (*billingCostSnapshot, error) {
+	userNS, err := h.userNamespaces(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	apps, err := h.opencost.Compute(ctx, billingCostWindow, "namespace,label:dada_io_app", "")
+	if err != nil {
+		return nil, err
+	}
+
+	var userCPU, userRAM, userPV, totCPU, totRAM, totPV float64
+	appCost := make(map[string]opencost.Allocation, len(apps))
+	for key, a := range apps {
+		ns := key
+		if i := strings.IndexByte(key, '/'); i >= 0 {
+			ns = key[:i]
+		}
+		totCPU += nonNeg(a.CPUCost)
+		totRAM += nonNeg(a.RAMCost)
+		totPV += nonNeg(a.PVCost)
 		if userNS[ns] {
-			userCPU += a.CPUCost
-			userRAM += a.RAMCost
-			userPV += a.PVCost
+			userCPU += nonNeg(a.CPUCost)
+			userRAM += nonNeg(a.RAMCost)
+			userPV += nonNeg(a.PVCost)
+		}
+		if !strings.HasPrefix(ns, "__") {
+			appCost[key] = a
 		}
 	}
 
-	p.fCPU = overheadFactor(userCPU, totCPU, h.billingMinUtil)
-	p.fRAM = overheadFactor(userRAM, totRAM, h.billingMinUtil)
-	p.fPV = overheadFactor(userPV, totPV, h.billingMinUtil)
-	return p
+	snap := &billingCostSnapshot{
+		pricing: consumptionPricing{
+			fCPU:   overheadFactor(userCPU, totCPU, h.billingMinUtil),
+			fRAM:   overheadFactor(userRAM, totRAM, h.billingMinUtil),
+			fPV:    overheadFactor(userPV, totPV, h.billingMinUtil),
+			margin: h.billingMargin,
+		},
+		appCost: appCost,
+		builtAt: time.Now(),
+	}
+
+	pods, err := h.opencost.Compute(ctx, billingCostWindow, "pod", `namespace:"databases","powerdns"`)
+	if err == nil {
+		for pod, a := range pods {
+			switch {
+			case strings.HasPrefix(pod, "postgresql"):
+				snap.postgres.CPUCost += a.CPUCost
+				snap.postgres.RAMCost += a.RAMCost
+				snap.postgres.PVCost += a.PVCost
+				snap.postgres.TotalCost += a.TotalCost
+			case strings.HasPrefix(pod, "powerdns"):
+				snap.powerdns.CPUCost += a.CPUCost
+				snap.powerdns.RAMCost += a.RAMCost
+				snap.powerdns.PVCost += a.PVCost
+			}
+		}
+	} else {
+		log.Warn().Err(err).Msg("billing: shared-pod (postgres/powerdns) cost query failed")
+	}
+
+	return snap, nil
 }
 
 // overheadFactor returns 1 / max(userCost/total, minUtil): how much each raw
@@ -124,23 +219,4 @@ func (h *Handler) userNamespaces(ctx context.Context) (map[string]bool, error) {
 		out[ns] = true
 	}
 	return out, rows.Err()
-}
-
-// opencostPodCosts returns the raw per-type OpenCost allocation for pods in a
-// namespace over the window, keyed by pod name. Used to price the shared
-// Postgres pod and the PowerDNS pod, whose cost is split across their logical
-// consumers (databases by data size, DNS by active zone). Best-effort: empty on
-// any failure.
-func (h *Handler) opencostPodCosts(ctx context.Context, namespace string, start, end time.Time) map[string]opencost.Allocation {
-	out := map[string]opencost.Allocation{}
-	if h.opencost == nil {
-		return out
-	}
-	window := start.Format(time.RFC3339) + "," + end.Format(time.RFC3339)
-	allocs, err := h.opencost.Compute(ctx, window, "pod", `namespace:"`+namespace+`"`)
-	if err != nil {
-		log.Warn().Err(err).Str("namespace", namespace).Msg("billing consumption: opencost pod cost query failed")
-		return out
-	}
-	return allocs
 }

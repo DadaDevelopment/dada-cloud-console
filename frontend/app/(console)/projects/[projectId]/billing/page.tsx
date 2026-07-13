@@ -197,7 +197,7 @@ export default function BillingPage() {
           <div className="rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-6 shadow-sm">
             <p className="text-xs font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500">{t("billing.invoiceTitle")}</p>
             <p className="mt-2 text-3xl font-bold text-gray-900 dark:text-gray-100">
-              {account.invoicePreview.amount.toLocaleString("ru")} {t("billing.currency.rub")}
+              {(consumption?.total_rub ?? account.invoicePreview.amount).toLocaleString("ru")} {t("billing.currency.rub")}
             </p>
             <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">{account.invoicePreview.period}</p>
             <span className="mt-4 inline-block rounded-full bg-gray-100 dark:bg-gray-800 px-3 py-1 text-xs font-medium text-gray-500 dark:text-gray-400">

@@ -6,11 +6,9 @@ import (
 	"fmt"
 	"math"
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/dada-tuda/console/backend/internal/auth"
-	"github.com/dada-tuda/console/backend/internal/opencost"
 	"github.com/dada-tuda/console/backend/internal/prometheus"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -81,21 +79,21 @@ func (h *Handler) computeProjectConsumption(ctx context.Context, projectID uuid.
 		Resources:   []consumptionResource{},
 	}
 
-	pricing := h.billingPricing(ctx, start, now)
+	snap := h.billingSnapshot(ctx)
 
-	apps, err := h.consumptionApps(ctx, projectID, start, now, pricing)
+	apps, err := h.consumptionApps(ctx, projectID, start, now, snap)
 	if err != nil {
 		return projectConsumption{}, err
 	}
 	out.Resources = append(out.Resources, apps...)
 
-	dbs, err := h.consumptionDatabases(ctx, projectID, start, now, pricing)
+	dbs, err := h.consumptionDatabases(ctx, projectID, snap)
 	if err != nil {
 		return projectConsumption{}, err
 	}
 	out.Resources = append(out.Resources, dbs...)
 
-	dns := h.consumptionDNS(ctx, projectID, start, now, pricing)
+	dns := h.consumptionDNS(ctx, projectID, snap)
 	out.Resources = append(out.Resources, dns...)
 
 	var total float64
@@ -106,44 +104,14 @@ func (h *Handler) computeProjectConsumption(ctx context.Context, projectID uuid.
 	return out, nil
 }
 
-// opencostAppCosts returns each app's raw per-type infra cost (RUB, no markup)
-// over the window, sourced from the OpenCost Allocation API and keyed by
-// "namespace/appName". Apps are identified by the dada.io/app pod label (stamped
-// by project-defaults), so the key's app segment is the exact console app name.
-// Best-effort: returns an empty map when OpenCost is unset or the query fails, so
-// callers transparently fall back to the metrics-derived estimate.
-func (h *Handler) opencostAppCosts(ctx context.Context, projectID uuid.UUID, start, end time.Time) map[string]opencost.Allocation {
-	out := map[string]opencost.Allocation{}
-	if h.opencost == nil {
-		return out
-	}
-	nsToEnv, err := h.projectNamespaces(ctx, projectID)
-	if err != nil || len(nsToEnv) == 0 {
-		return out
-	}
-	quoted := make([]string, 0, len(nsToEnv))
-	for ns := range nsToEnv {
-		quoted = append(quoted, `"`+ns+`"`)
-	}
-	filter := "namespace:" + strings.Join(quoted, ",")
-	window := start.Format(time.RFC3339) + "," + end.Format(time.RFC3339)
-
-	allocs, err := h.opencost.Compute(ctx, window, "namespace,label:dada_io_app", filter)
-	if err != nil {
-		log.Warn().Err(err).Str("project", projectID.String()).Msg("billing consumption: opencost app cost query failed")
-		return out
-	}
-	return allocs
-}
-
 // consumptionApps enumerates the project's App resources across its
 // environments and estimates each app's average CPU (cores) and RAM (GB) over
 // the period from Prometheus (shown for context). The cost is the app's real
-// OpenCost allocation over the period (CPU+RAM+PV, priced at our tariffs), and
-// falls back to the metrics-derived estimate only when OpenCost cannot attribute
-// the app. Failures degrade to nil usage / 0 cost, never an error.
-func (h *Handler) consumptionApps(ctx context.Context, projectID uuid.UUID, start, end time.Time, pricing consumptionPricing) ([]consumptionResource, error) {
-	ocCosts := h.opencostAppCosts(ctx, projectID, start, end)
+// OpenCost allocation from the cached cluster snapshot (CPU+RAM+PV, priced at our
+// tariffs), and falls back to the metrics-derived estimate only when OpenCost
+// cannot attribute the app. Failures degrade to nil usage / 0 cost, never an
+// error.
+func (h *Handler) consumptionApps(ctx context.Context, projectID uuid.UUID, start, end time.Time, snap *billingCostSnapshot) ([]consumptionResource, error) {
 	rows, err := h.pool.Query(ctx,
 		`SELECT rs.name, e.runtime, e.namespace, COALESCE(rs.summary_json->>'image', '')
 		   FROM resource_snapshots rs
@@ -184,8 +152,8 @@ func (h *Handler) consumptionApps(ctx context.Context, projectID uuid.UUID, star
 			CPUCores: cpu,
 			RAMGB:    ram,
 		}
-		if oc, ok := ocCosts[a.namespace+"/"+a.name]; ok {
-			res.CostRub = pricing.price(oc.CPUCost, oc.RAMCost, oc.PVCost)
+		if oc, ok := snap.appCost[a.namespace+"/"+a.name]; ok {
+			res.CostRub = snap.pricing.price(oc.CPUCost, oc.RAMCost, oc.PVCost)
 		} else {
 			res.CostRub = h.costRub(cpu, ram, nil)
 		}
@@ -251,7 +219,7 @@ func (h *Handler) instantScalar(ctx context.Context, expr string, ts time.Time, 
 // proportion to their on-disk size (pg_database_size_bytes), then priced through
 // the same per-type overhead + margin as apps. Best-effort: when the pod cost or
 // sizes are unavailable it falls back to the storage-only estimate.
-func (h *Handler) consumptionDatabases(ctx context.Context, projectID uuid.UUID, start, end time.Time, pricing consumptionPricing) ([]consumptionResource, error) {
+func (h *Handler) consumptionDatabases(ctx context.Context, projectID uuid.UUID, snap *billingCostSnapshot) ([]consumptionResource, error) {
 	rows, err := h.pool.Query(ctx,
 		`SELECT name, summary_json
 		   FROM resource_snapshots
@@ -287,7 +255,7 @@ func (h *Handler) consumptionDatabases(ctx context.Context, projectID uuid.UUID,
 	for _, b := range sizeByDatname {
 		totalBytes += b
 	}
-	podCost := h.postgresPodCost(ctx, start, end)
+	podCost := snap.postgres
 
 	out := make([]consumptionResource, 0, len(dbRows))
 	for _, d := range dbRows {
@@ -307,7 +275,7 @@ func (h *Handler) consumptionDatabases(ctx context.Context, projectID uuid.UUID,
 		}
 		if totalBytes > 0 && dbBytes > 0 && podCost.TotalCost > 0 {
 			frac := dbBytes / totalBytes
-			res.CostRub = pricing.price(podCost.CPUCost*frac, podCost.RAMCost*frac, podCost.PVCost*frac)
+			res.CostRub = snap.pricing.price(podCost.CPUCost*frac, podCost.RAMCost*frac, podCost.PVCost*frac)
 		} else {
 			res.CostRub = h.costRub(nil, nil, storageGB)
 		}
@@ -316,29 +284,13 @@ func (h *Handler) consumptionDatabases(ctx context.Context, projectID uuid.UUID,
 	return out, nil
 }
 
-// postgresPodCost returns the summed raw per-type OpenCost cost of the shared
-// managed-Postgres pod(s) (postgresql-* in the databases namespace) over the
-// window. Zero-value Allocation when OpenCost cannot source it.
-func (h *Handler) postgresPodCost(ctx context.Context, start, end time.Time) opencost.Allocation {
-	var sum opencost.Allocation
-	for pod, a := range h.opencostPodCosts(ctx, "databases", start, end) {
-		if strings.HasPrefix(pod, "postgresql") {
-			sum.CPUCost += a.CPUCost
-			sum.RAMCost += a.RAMCost
-			sum.PVCost += a.PVCost
-			sum.TotalCost += a.TotalCost
-		}
-	}
-	return sum
-}
-
 // consumptionDNS prices the project's managed DNS zones as their share of the
 // shared PowerDNS pod (the two nameservers ns1/ns2). PowerDNS serves every
 // delegated zone from one pod, so its real OpenCost cost is split evenly across
 // all active managed zones cluster-wide; the project pays for the zones it owns,
 // priced through the same per-type overhead + margin. One line item per zone
 // (apex) for transparency. Best-effort: returns nil on any failure.
-func (h *Handler) consumptionDNS(ctx context.Context, projectID uuid.UUID, start, end time.Time, pricing consumptionPricing) []consumptionResource {
+func (h *Handler) consumptionDNS(ctx context.Context, projectID uuid.UUID, snap *billingCostSnapshot) []consumptionResource {
 	rows, err := h.pool.Query(ctx,
 		`SELECT mz.apex FROM managed_zones mz
 		   JOIN domain_authorizations da ON da.id = mz.authorization_id
@@ -369,12 +321,7 @@ func (h *Handler) consumptionDNS(ctx context.Context, projectID uuid.UUID, start
 		return nil
 	}
 
-	var dns opencost.Allocation
-	for _, a := range h.opencostPodCosts(ctx, "powerdns", start, end) {
-		dns.CPUCost += a.CPUCost
-		dns.RAMCost += a.RAMCost
-		dns.PVCost += a.PVCost
-	}
+	dns := snap.powerdns
 	share := 1.0 / float64(totalZones)
 
 	out := make([]consumptionResource, 0, len(apexes))
@@ -382,7 +329,7 @@ func (h *Handler) consumptionDNS(ctx context.Context, projectID uuid.UUID, start
 		out = append(out, consumptionResource{
 			Kind:    "dns",
 			Name:    apex,
-			CostRub: pricing.price(dns.CPUCost*share, dns.RAMCost*share, dns.PVCost*share),
+			CostRub: snap.pricing.price(dns.CPUCost*share, dns.RAMCost*share, dns.PVCost*share),
 		})
 	}
 	return out
