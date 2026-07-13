@@ -60,10 +60,27 @@ export const apps: Messages = {
   "apps.card.synced": { ru: "Синхронизировано {ago}", en: "Synced {ago}" },
 
   "apps.modal.create.title": { ru: "Создать приложение", en: "Create Application" },
-  "apps.modal.create.name.label": { ru: "Имя (имя ресурса Kubernetes)", en: "Name (Kubernetes resource name)" },
+  "apps.modal.create.name.label": { ru: "Имя приложения", en: "App name" },
   "apps.modal.create.name.title": {
     ru: "Только строчные буквы, цифры и дефисы",
     en: "Lowercase letters, numbers, and hyphens only",
+  },
+  "apps.modal.create.name.hint": {
+    ru: "Строчные буквы, цифры и дефисы. Начинается и заканчивается буквой или цифрой.",
+    en: "Lowercase letters, digits and hyphens. Must start and end with a letter or digit.",
+  },
+  "apps.modal.create.name.invalid.required": { ru: "Введите имя", en: "Enter a name" },
+  "apps.modal.create.name.invalid.format": {
+    ru: "Только строчные буквы, цифры и дефисы; начинается и заканчивается буквой или цифрой; до 63 символов",
+    en: "Lowercase letters, digits and hyphens only; must start and end alphanumeric; max 63 chars",
+  },
+  "apps.modal.create.name.invalid.duplicate": {
+    ru: "Приложение с таким именем уже есть в этом окружении",
+    en: "An app with this name already exists in this environment",
+  },
+  "apps.modal.create.image.invalid": {
+    ru: "Образ должен быть в формате image:tag (например, ghcr.io/org/app:v1.0)",
+    en: "Image must be in image:tag format (e.g. ghcr.io/org/app:v1.0)",
   },
   "apps.modal.create.image.label": { ru: "Образ", en: "Image" },
   "apps.modal.create.port.label": { ru: "Порт", en: "Port" },
@@ -72,6 +89,10 @@ export const apps: Messages = {
   "apps.modal.create.submit": { ru: "Создать приложение", en: "Create App" },
   "apps.modal.create.submitting": { ru: "Создание…", en: "Creating…" },
   "apps.error.create": { ru: "Не удалось создать приложение", en: "Failed to create application" },
+  "apps.error.create.duplicateGlobal": {
+    ru: "Приложение с таким именем уже занято в этом окружении (имена уникальны в рамках окружения по всем проектам). Выберите другое имя.",
+    en: "This name is already taken in this environment (names are unique per environment across all projects). Choose another name.",
+  },
 
   "apps.detail.deployments": { ru: "Деплои", en: "Deployments" },
   "apps.detail.settings": { ru: "Настройки", en: "Settings" },

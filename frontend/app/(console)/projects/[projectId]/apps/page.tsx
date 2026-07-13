@@ -27,6 +27,9 @@ interface CreateAppForm {
   profile: string;
 }
 
+const APP_NAME_RE = /^([a-z0-9]|[a-z0-9][a-z0-9-]{0,61}[a-z0-9])$/;
+const APP_IMAGE_RE = /^[a-zA-Z0-9][a-zA-Z0-9._\-/:]*:[a-zA-Z0-9._\-]+$/;
+
 export default function AppsPage() {
   const params = useParams<{ projectId: string }>();
   const projectId = params.projectId;
@@ -101,6 +104,7 @@ export default function AppsPage() {
 
   async function handleSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
+    if (!APP_NAME_RE.test(form.name.trim()) || !APP_IMAGE_RE.test(form.image.trim())) return;
     setSubmitError(null);
     setIsSubmitting(true);
     try {
@@ -116,13 +120,34 @@ export default function AppsPage() {
       const opId = result.operation?.id;
       router.push(`/projects/${projectId}/operations${opId ? `?highlight=${opId}` : ""}`);
     } catch (err) {
-      setSubmitError(err instanceof Error ? err.message : t("apps.error.create"));
+      const raw = err instanceof Error ? err.message : "";
+      let msg = raw || t("apps.error.create");
+      if (/already exists|unique per environment/i.test(raw)) {
+        msg = t("apps.error.create.duplicateGlobal");
+      } else if (/lowercase alphanumeric with hyphens/i.test(raw)) {
+        msg = t("apps.modal.create.name.invalid.format");
+      }
+      setSubmitError(msg);
     } finally {
       setIsSubmitting(false);
     }
   }
 
   const canCreate = canMutate(role);
+
+  const existingNames = new Set((appsByEnv[modalEnvId] ?? []).map((a) => a.name.toLowerCase()));
+  const trimmedName = form.name.trim();
+  const nameError =
+    trimmedName === ""
+      ? null
+      : !APP_NAME_RE.test(trimmedName)
+        ? t("apps.modal.create.name.invalid.format")
+        : existingNames.has(trimmedName.toLowerCase())
+          ? t("apps.modal.create.name.invalid.duplicate")
+          : null;
+  const trimmedImage = form.image.trim();
+  const imageError = trimmedImage !== "" && !APP_IMAGE_RE.test(trimmedImage) ? t("apps.modal.create.image.invalid") : null;
+  const formValid = trimmedName !== "" && !nameError && trimmedImage !== "" && !imageError;
 
   if (isLoadingEnvs) {
     return (
@@ -192,10 +217,19 @@ export default function AppsPage() {
               value={form.name}
               onChange={(e) => handleFormChange("name", e.target.value)}
               placeholder="my-service"
-              pattern="[a-z0-9-]+"
+              aria-invalid={nameError ? true : undefined}
               title={t("apps.modal.create.name.title")}
-              className="mt-1 block w-full rounded-lg border border-gray-300 dark:border-gray-700 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              className={`mt-1 block w-full rounded-lg border px-3 py-2 text-sm text-gray-900 dark:text-gray-100 shadow-sm focus:outline-none focus:ring-1 ${
+                nameError
+                  ? "border-red-400 dark:border-red-700 focus:border-red-500 focus:ring-red-500"
+                  : "border-gray-300 dark:border-gray-700 focus:border-blue-500 focus:ring-blue-500"
+              }`}
             />
+            {nameError ? (
+              <p role="alert" className="mt-1 text-xs text-red-600 dark:text-red-400">{nameError}</p>
+            ) : (
+              <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">{t("apps.modal.create.name.hint")}</p>
+            )}
           </div>
 
           <div>
@@ -206,8 +240,14 @@ export default function AppsPage() {
               value={form.image}
               onChange={(e) => handleFormChange("image", e.target.value)}
               placeholder="ghcr.io/org/service:v1.0.0"
-              className="mt-1 block w-full rounded-lg border border-gray-300 dark:border-gray-700 px-3 py-2 text-sm font-mono text-gray-900 dark:text-gray-100 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              aria-invalid={imageError ? true : undefined}
+              className={`mt-1 block w-full rounded-lg border px-3 py-2 text-sm font-mono text-gray-900 dark:text-gray-100 shadow-sm focus:outline-none focus:ring-1 ${
+                imageError
+                  ? "border-red-400 dark:border-red-700 focus:border-red-500 focus:ring-red-500"
+                  : "border-gray-300 dark:border-gray-700 focus:border-blue-500 focus:ring-blue-500"
+              }`}
             />
+            {imageError && <p role="alert" className="mt-1 text-xs text-red-600 dark:text-red-400">{imageError}</p>}
           </div>
 
           <div className="grid grid-cols-2 gap-3">
@@ -269,7 +309,7 @@ export default function AppsPage() {
             </button>
             <button
               type="submit"
-              disabled={isSubmitting}
+              disabled={isSubmitting || !formValid}
               className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50 transition-colors"
             >
               {isSubmitting ? (
