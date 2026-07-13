@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/dada-tuda/console/backend/internal/auth"
@@ -141,11 +142,17 @@ func SetupRouter(pool *pgxpool.Pool, cfg *config.Config) *gin.Engine {
 		if err != nil {
 			log.Fatalf("mcp: failed to initialize: %v", err)
 		}
-		mcpProxy := gin.WrapH(http.StripPrefix("/mcp", mcpHandler))
-		r.Any("/mcp", func(c *gin.Context) {
-			c.Redirect(http.StatusPermanentRedirect, "/mcp/")
-		})
-		r.Any("/mcp/*path", mcpProxy)
+		mcpServe := func(c *gin.Context) {
+			req := c.Request
+			p := strings.TrimPrefix(req.URL.Path, "/mcp")
+			if p == "" {
+				p = "/"
+			}
+			req.URL.Path = p
+			mcpHandler.ServeHTTP(c.Writer, req)
+		}
+		r.Any("/mcp", mcpServe)
+		r.Any("/mcp/*path", mcpServe)
 		log.Printf("mcp: serving at /mcp (self-proxy -> %s)", selfURL)
 	}
 
