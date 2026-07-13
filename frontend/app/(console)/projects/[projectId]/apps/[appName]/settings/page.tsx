@@ -1,10 +1,12 @@
 "use client";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useParams, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { Breadcrumb } from "@/components/ui/breadcrumb";
 import { useProjectContext } from "@/lib/project-context";
 import { canMutate } from "@/lib/rbac";
+import { customDomainsApi } from "@/lib/api";
+import type { DomainAuthorization } from "@/lib/types";
 import { EnvVarsEditor } from "@/components/deploy/env-vars-editor";
 import { HostnamesManager } from "@/components/deploy/hostnames-manager";
 import { useT } from "@/lib/i18n/console/context";
@@ -20,7 +22,15 @@ export default function AppSettingsPage() {
   const { t } = useT();
 
   const [tab, setTab] = useState<Tab>("env");
+  const [verifiedApexes, setVerifiedApexes] = useState<DomainAuthorization[]>([]);
   const canEdit = canMutate(role);
+
+  useEffect(() => {
+    customDomainsApi
+      .listAuthorizations(projectId)
+      .then((d) => setVerifiedApexes((d.authorizations ?? []).filter((a) => a.status === "verified")))
+      .catch(() => setVerifiedApexes([]));
+  }, [projectId]);
 
   const tabs: { key: Tab; label: string }[] = [
     { key: "env", label: t("apps.settings.tab.env") },
@@ -91,7 +101,7 @@ export default function AppSettingsPage() {
       )}
 
       {tab === "domains" && (
-        <HostnamesManager projectId={projectId} envId={envId} appName={appName} canEdit={canEdit} />
+        <HostnamesManager projectId={projectId} envId={envId} appName={appName} canEdit={canEdit} verifiedApexes={verifiedApexes} />
       )}
     </div>
   );

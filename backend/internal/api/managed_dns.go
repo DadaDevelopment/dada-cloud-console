@@ -151,7 +151,7 @@ func (h *Handler) DelegateAuthorization(c *gin.Context) {
 
 	c.JSON(http.StatusCreated, gin.H{
 		"nameservers": h.cfg.PlatformNameservers,
-		"zone":        mz,
+		"zone":        mz.Apex,
 		"status":      mz.Status,
 	})
 }
@@ -191,7 +191,12 @@ func (h *Handler) GetManagedZone(c *gin.Context) {
 		respondError(c, http.StatusBadGateway, "failed to read zone: "+err.Error())
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"zone": mz, "rrsets": rrsets})
+	c.JSON(http.StatusOK, gin.H{
+		"zone":        mz.Apex,
+		"status":      mz.Status,
+		"nameservers": h.cfg.PlatformNameservers,
+		"rrsets":      rrsetsToView(rrsets),
+	})
 }
 
 // ListManagedRecords lists the live records of a delegated apex from PowerDNS.
@@ -227,7 +232,7 @@ func (h *Handler) ListManagedRecords(c *gin.Context) {
 		respondError(c, http.StatusBadGateway, "failed to read zone: "+err.Error())
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"records": rrsets})
+	c.JSON(http.StatusOK, gin.H{"records": rrsetsToView(rrsets)})
 }
 
 type upsertRecordRequest struct {
@@ -235,6 +240,29 @@ type upsertRecordRequest struct {
 	Type     string   `json:"type"`
 	TTL      int      `json:"ttl"`
 	Contents []string `json:"contents"`
+}
+
+// managedRecordView is the flat record shape the console consumes, matching the
+// upsert request body and the import-preview output. PowerDNS returns rrsets as
+// {name,type,ttl,records:[{content}]}; the console reads {name,type,ttl,contents},
+// so live rrsets are flattened before they leave the API.
+type managedRecordView struct {
+	Name     string   `json:"name"`
+	Type     string   `json:"type"`
+	TTL      int      `json:"ttl"`
+	Contents []string `json:"contents"`
+}
+
+func rrsetsToView(rrsets []pdns.RRSet) []managedRecordView {
+	out := make([]managedRecordView, 0, len(rrsets))
+	for _, rr := range rrsets {
+		contents := make([]string, 0, len(rr.Records))
+		for _, rec := range rr.Records {
+			contents = append(contents, rec.Content)
+		}
+		out = append(out, managedRecordView{Name: rr.Name, Type: rr.Type, TTL: rr.TTL, Contents: contents})
+	}
+	return out
 }
 
 // UpsertManagedRecord replaces one rrset in a delegated apex's zone.

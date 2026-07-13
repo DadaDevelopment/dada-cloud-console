@@ -31,6 +31,10 @@ import type {
   HostnamesResponse,
   AttachHostnameResponse,
   DetachHostnameResponse,
+  ManagedZone,
+  ManagedZoneRecord,
+  DelegateZoneResponse,
+  ZoneImportResult,
   AIModelsResponse,
   AIModelDetailResponse,
   CreateAIModelRequest,
@@ -461,6 +465,61 @@ export const customDomainsApi = {
     ),
 };
 
+/**
+ * Managed DNS via NS delegation (Slice 1 backend). All endpoints are scoped to a
+ * verified apex authorization (authId). Paths mirror the shipped Slice 1 routes
+ * under /domains/authorizations/:authId. Record list / import-preview may return
+ * either a bare array or a { records } wrapper; callers normalize with
+ * normalizeRecords().
+ */
+export const managedDnsApi = {
+  delegate: (projectId: string, authId: string) =>
+    apiFetch<DelegateZoneResponse>(
+      `/api/v1/projects/${projectId}/domains/authorizations/${authId}/delegate`,
+      { method: "POST" }
+    ),
+
+  getZone: (projectId: string, authId: string) =>
+    apiFetch<ManagedZone>(
+      `/api/v1/projects/${projectId}/domains/authorizations/${authId}/zone`
+    ),
+
+  listRecords: (projectId: string, authId: string) =>
+    apiFetch<ManagedZoneRecord[] | { records: ManagedZoneRecord[] }>(
+      `/api/v1/projects/${projectId}/domains/authorizations/${authId}/zone/records`
+    ),
+
+  upsertRecord: (projectId: string, authId: string, record: ManagedZoneRecord) =>
+    apiFetch<ManagedZoneRecord | { record: ManagedZoneRecord }>(
+      `/api/v1/projects/${projectId}/domains/authorizations/${authId}/zone/records`,
+      { method: "POST", body: record }
+    ),
+
+  deleteRecord: (projectId: string, authId: string, name: string, type: string) =>
+    apiFetch<void>(
+      `/api/v1/projects/${projectId}/domains/authorizations/${authId}/zone/records`,
+      { method: "DELETE", body: { name, type } }
+    ),
+
+  importPreview: (projectId: string, authId: string) =>
+    apiFetch<ManagedZoneRecord[] | { records: ManagedZoneRecord[] }>(
+      `/api/v1/projects/${projectId}/domains/authorizations/${authId}/zone/import-preview`
+    ),
+
+  importRecords: (projectId: string, authId: string, records: ManagedZoneRecord[]) =>
+    apiFetch<ZoneImportResult>(
+      `/api/v1/projects/${projectId}/domains/authorizations/${authId}/zone/import`,
+      { method: "POST", body: { records } }
+    ),
+};
+
+/** Normalize a records/import-preview response into a plain record array. */
+export function normalizeRecords(
+  data: ManagedZoneRecord[] | { records: ManagedZoneRecord[] }
+): ManagedZoneRecord[] {
+  return Array.isArray(data) ? data : data.records ?? [];
+}
+
 // Values editor — issues a short-lived WS delegate token from the backend.
 export const valuesApi = {
   // file selects which editable file the session targets:
@@ -567,6 +626,9 @@ export const gitApi = {
 
   installUrl: (projectId: string, provider: string) =>
     apiFetch<{ url: string }>(`/api/v1/projects/${projectId}/git/install-url?provider=${encodeURIComponent(provider)}`),
+
+  githubAuthorizeUrl: (projectId: string) =>
+    apiFetch<{ url: string }>(`/api/v1/projects/${projectId}/git/github/authorize`),
 
   // Existing App installations the project can bind without a reinstall.
   availableInstallations: (projectId: string) =>

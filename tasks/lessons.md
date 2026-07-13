@@ -18,3 +18,20 @@ Rule: before claiming a resource is missing/invisible/not-indexed, (1) grep the 
 the subsystem, (2) query the authoritative store (here: `resource_snapshots` via psql) — a code path
 existing ≠ it's the only path, and "I couldn't easily get DB access" is not license to assume.
 Tag the claim [live] only after the query, else mark HYPOTHESIS.
+
+## 2026-07-13 — Partial-staged commit must build from the COMMITTED tree, not the dirty worktree
+
+Mistake: committed a multi-file feature (S1 managed-DNS) with explicit `git add <path>`
+and left out a co-dependent file (`handler.go` declaring `Handler.pdns` that the
+committed `managed_dns.go` references). Working tree built fine, so I called it green
+and pushed — but the COMMIT itself did not compile. CI built a broken main.
+
+Root cause: `go build` on the dirty worktree proves the worktree, not the commit.
+Explicit-path staging (correct for shared trees, M3) makes it easy to miss a file the
+staged files depend on.
+
+Gate (mechanism, not a lesson line): before pushing a partial/explicit-path commit,
+verify the COMMITTED tree builds — `git stash --keep-index && go build ./... ; git stash pop`
+(or build a fresh `git worktree add` of HEAD). If a concurrent agent owns unstaged files
+(can't stash), reason explicitly about whether the omitted files are build-dependencies of
+the staged ones. Never infer commit-buildability from a dirty-worktree build.

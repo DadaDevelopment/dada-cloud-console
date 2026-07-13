@@ -3,10 +3,13 @@ import { useEffect, useState, FormEvent } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { customDomainsApi } from "@/lib/api";
-import type { DomainHostname } from "@/lib/types";
+import type { DomainAuthorization, DomainHostname } from "@/lib/types";
 import { Spinner } from "@/components/ui/spinner";
 import { PhaseBadge } from "@/components/ui/phase-badge";
+import { ManagedDnsPanel } from "@/components/deploy/managed-dns";
 import { useT } from "@/lib/i18n/console/context";
+
+type ConnectPath = "advanced" | "delegate";
 
 // Level 2 of the Vercel-style model: attach a hostname (apex or subdomain under
 // an already-verified apex authorization) to this specific app + environment.
@@ -33,11 +36,14 @@ interface Props {
   envId: string;
   appName: string;
   canEdit: boolean;
+  verifiedApexes: DomainAuthorization[];
 }
 
-export function HostnamesManager({ projectId, envId, appName, canEdit }: Props) {
+export function HostnamesManager({ projectId, envId, appName, canEdit, verifiedApexes }: Props) {
   const router = useRouter();
   const { t } = useT();
+  const [path, setPath] = useState<ConnectPath>("delegate");
+  const [delegateAuthId, setDelegateAuthId] = useState(verifiedApexes[0]?.id ?? "");
   const [hostnames, setHostnames] = useState<DomainHostname[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -105,8 +111,71 @@ export function HostnamesManager({ projectId, envId, appName, canEdit }: Props) 
     );
   }
 
+  const toggleBtn = (value: ConnectPath, label: string, hint: string) => (
+    <button
+      type="button"
+      onClick={() => setPath(value)}
+      aria-pressed={path === value}
+      className={`flex-1 rounded-lg px-4 py-2.5 text-sm font-medium transition-colors ${
+        path === value
+          ? "bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 shadow-sm"
+          : "text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"
+      }`}
+    >
+      {label}
+      <span className="ml-2 text-xs font-normal text-gray-400 dark:text-gray-500">{hint}</span>
+    </button>
+  );
+
   return (
     <div className="space-y-6">
+      <div>
+        <p className="mb-1.5 text-xs font-medium text-gray-500 dark:text-gray-400">{t("domains.path.toggleLabel")}</p>
+        <div className="flex gap-1 rounded-xl border border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-gray-900 p-1">
+          {toggleBtn("delegate", t("domains.path.delegate"), t("domains.path.delegateHint"))}
+          {toggleBtn("advanced", t("domains.path.advanced"), t("domains.path.advancedHint"))}
+        </div>
+      </div>
+
+      {path === "delegate" ? (
+        verifiedApexes.length === 0 ? (
+          <div className="rounded-lg border border-dashed border-gray-300 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 px-5 py-6 text-sm text-gray-500 dark:text-gray-400">
+            {t("domains.dns.needVerified")}
+          </div>
+        ) : (
+          <div className="space-y-4">
+            {verifiedApexes.length > 1 && (
+              <div>
+                <label className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-200">{t("domains.dns.pickApex")}</label>
+                <select
+                  value={delegateAuthId}
+                  onChange={(e) => setDelegateAuthId(e.target.value)}
+                  className="w-full rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2.5 text-sm text-gray-900 dark:text-gray-100 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/30"
+                >
+                  {verifiedApexes.map((a) => (
+                    <option key={a.id} value={a.id}>
+                      {a.apex_domain}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+            {(() => {
+              const selected = verifiedApexes.find((a) => a.id === delegateAuthId) ?? verifiedApexes[0];
+              return (
+                <ManagedDnsPanel
+                  key={selected.id}
+                  projectId={projectId}
+                  authId={selected.id}
+                  apex={selected.apex_domain}
+                  canEdit={canEdit}
+                />
+              );
+            })()}
+          </div>
+        )
+      ) : (
+      <>
       <div className="rounded-xl border border-gray-200 bg-white px-5 py-6">
         <h2 className="text-lg font-semibold text-gray-900">{t("domains.hm.title")}</h2>
         <p className="mt-1 text-sm text-gray-500">
@@ -226,6 +295,8 @@ export function HostnamesManager({ projectId, envId, appName, canEdit }: Props) 
             </tbody>
           </table>
         </div>
+      )}
+      </>
       )}
     </div>
   );

@@ -312,7 +312,7 @@ export default function ProjectDomainsPage() {
           projectId={projectId}
           environments={environments}
           canEdit={canEdit}
-          hasVerifiedApex={auths.some((a) => a.status === "verified")}
+          verifiedApexes={auths.filter((a) => a.status === "verified")}
         />
       )}
 
@@ -384,13 +384,14 @@ function HostnameAttachSection({
   projectId,
   environments,
   canEdit,
-  hasVerifiedApex,
+  verifiedApexes,
 }: {
   projectId: string;
   environments: Environment[];
   canEdit: boolean;
-  hasVerifiedApex: boolean;
+  verifiedApexes: DomainAuthorization[];
 }) {
+  const hasVerifiedApex = verifiedApexes.length > 0;
   const { t } = useT();
   const [envId, setEnvId] = useState(environments[0]?.id ?? "");
   const [apps, setApps] = useState<ResourceSnapshot[]>([]);
@@ -463,7 +464,7 @@ function HostnameAttachSection({
           </div>
 
           {envId && appName && (
-            <HostnamesManager projectId={projectId} envId={envId} appName={appName} canEdit={canEdit} />
+            <HostnamesManager projectId={projectId} envId={envId} appName={appName} canEdit={canEdit} verifiedApexes={verifiedApexes} />
           )}
         </div>
       )}

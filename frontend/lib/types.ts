@@ -471,6 +471,37 @@ export interface DetachHostnameResponse {
   message: string;
 }
 
+/**
+ * Managed DNS (NS delegation). A verified apex can be delegated to our
+ * nameservers; we then serve the zone and expose a full record editor.
+ */
+export type ManagedZoneStatus = "awaiting_ns" | "active";
+
+export interface ManagedZoneRecord {
+  name: string;
+  type: string;
+  ttl: number;
+  contents: string[];
+}
+
+export interface ManagedZone {
+  zone: string;
+  status: ManagedZoneStatus;
+  nameservers: string[];
+  rrsets?: ManagedZoneRecord[];
+}
+
+export interface DelegateZoneResponse {
+  nameservers: string[];
+  zone: string;
+  status: ManagedZoneStatus;
+}
+
+export interface ZoneImportResult {
+  imported: number;
+  skipped: number;
+}
+
 // AI Studio (v2) ---------------------------------------------------------
 
 export type AIModelSource = "mlflow" | "s3" | "custom";
