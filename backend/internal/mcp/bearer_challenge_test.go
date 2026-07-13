@@ -87,8 +87,15 @@ func TestWellKnownStaysPublic(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("well-known want 200, got %d", rec.Code)
 	}
-	if !strings.Contains(rec.Body.String(), "authorization_servers") {
-		t.Errorf("well-known body unexpected: %s", rec.Body.String())
+	body := rec.Body.String()
+	if !strings.Contains(body, "authorization_servers") {
+		t.Errorf("well-known body unexpected: %s", body)
+	}
+	if !strings.Contains(body, "scopes_supported") || !strings.Contains(body, "deploy:write") {
+		t.Errorf("well-known must advertise scopes_supported incl deploy:write: %s", body)
+	}
+	if strings.Contains(body, "service_account") || strings.Contains(body, "\"admin\"") {
+		t.Errorf("well-known must NOT advertise ungrantable scopes: %s", body)
 	}
 }
 

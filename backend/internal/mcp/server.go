@@ -16,6 +16,18 @@ const (
 	serverVersion = "0.3.0"
 )
 
+// mcpScopesSupported is advertised in the RFC 9728 protected-resource metadata.
+// A spec-compliant MCP client requests exactly this set, so it MUST be a subset
+// of what the dada-mcp Keycloak client can grant (see argo-infra
+// iam-client-scopes.yaml). Without it, Claude Desktop falls back to the AS's
+// full scopes_supported list (phone, address, service_account, ...) which the
+// public client cannot grant -> Keycloak rejects with invalid_scope before the
+// login page renders. Mirrors the console SPA's write set plus refresh + reads.
+var mcpScopesSupported = []string{
+	"openid", "profile", "email", "offline_access",
+	"read", "builds:read", "builds:write", "deploy:write",
+}
+
 // Config holds the runtime config for the embedded MCP server.
 type Config struct {
 	// BackendURL is used for the self-proxy loop (e.g. "http://127.0.0.1:8080").
@@ -95,6 +107,7 @@ func MetadataHandler(cfg Config) http.Handler {
 		Resource:               cfg.ResourceURL,
 		AuthorizationServers:   []string{cfg.KeycloakIssuer},
 		BearerMethodsSupported: []string{"header"},
+		ScopesSupported:        mcpScopesSupported,
 	})
 }
 
