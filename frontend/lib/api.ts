@@ -265,11 +265,23 @@ export const appsApi = {
     port: number;
     replicas: number;
     profile: string;
+    volume?: { path: string; size: string; storage_class?: string };
   }) =>
     apiFetch<CreateAppResponse>(`/api/v1/projects/${projectId}/environments/${envId}/apps`, {
       method: "POST",
       body: data,
     }),
+
+  updateStorage: (
+    projectId: string,
+    envId: string,
+    appName: string,
+    volume: { path: string; size: string; storage_class?: string }
+  ) =>
+    apiFetch<{ operation: Operation; message: string }>(
+      `/api/v1/projects/${projectId}/environments/${envId}/apps/${appName}/storage`,
+      { method: "PUT", body: volume }
+    ),
 
   updateImage: (projectId: string, envId: string, appName: string, image: string) =>
     apiFetch<DeployImageResponse>(

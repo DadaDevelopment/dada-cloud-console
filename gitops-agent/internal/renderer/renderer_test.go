@@ -283,6 +283,43 @@ func TestRenderAppValues(t *testing.T) {
 	}
 }
 
+func TestRenderAppValuesPersistentVolume(t *testing.T) {
+	got, err := renderer.RenderAppValues(renderer.AppSpec{
+		Image:              "ghcr.io/dada-tuda/api-service:v1",
+		Port:               8080,
+		Replicas:           3,
+		Profile:            "small",
+		VolumePath:         "/data",
+		VolumeSize:         "5Gi",
+		VolumeStorageClass: "longhorn-prod",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	for _, want := range []string{
+		"pvc:",
+		"size: 5Gi",
+		"storageClass: longhorn-prod",
+		"path: /data",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("pvc App values missing %q\nFull output:\n%s", want, got)
+		}
+	}
+}
+
+func TestRenderAppValuesNoVolumeOmitsPvc(t *testing.T) {
+	got, err := renderer.RenderAppValues(renderer.AppSpec{
+		Image: "ghcr.io/dada-tuda/api-service:v1", Port: 8080, Replicas: 1, Profile: "small",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if strings.Contains(got, "pvc:") {
+		t.Errorf("expected no pvc block when no volume set\nFull output:\n%s", got)
+	}
+}
+
 func TestRenderAppValuesDigest(t *testing.T) {
 	got, err := renderer.RenderAppValues(renderer.AppSpec{
 		Image:    "nexus.dada-tuda.ru/ggrk52/magic-mirror@sha256:d1aceff1453361656f36ef154a5d7badead284272986e7d3f8148b360f66d1cb",

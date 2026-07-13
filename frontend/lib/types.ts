@@ -333,6 +333,13 @@ export interface OperationsResponse {
   operations: Operation[];
 }
 
+/** Persistent data directory (ReadWriteMany PVC) attached to a Kubernetes app. */
+export interface AppVolume {
+  path: string;
+  size: string;
+  storage_class?: string;
+}
+
 export interface AppSummary {
   image: string;
   port: number;
@@ -340,6 +347,7 @@ export interface AppSummary {
   profile: string;
   status: string;
   message: string;
+  volume?: AppVolume;
 }
 
 export interface AppsResponse {

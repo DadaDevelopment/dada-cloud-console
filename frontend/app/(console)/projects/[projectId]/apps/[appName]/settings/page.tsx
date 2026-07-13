@@ -9,9 +9,10 @@ import { customDomainsApi } from "@/lib/api";
 import type { DomainAuthorization } from "@/lib/types";
 import { EnvVarsEditor } from "@/components/deploy/env-vars-editor";
 import { HostnamesManager } from "@/components/deploy/hostnames-manager";
+import { StorageManager } from "@/components/deploy/storage-manager";
 import { useT } from "@/lib/i18n/console/context";
 
-type Tab = "env" | "git" | "domains";
+type Tab = "env" | "git" | "domains" | "storage";
 
 export default function AppSettingsPage() {
   const params = useParams<{ projectId: string; appName: string }>();
@@ -35,6 +36,7 @@ export default function AppSettingsPage() {
   const tabs: { key: Tab; label: string }[] = [
     { key: "env", label: t("apps.settings.tab.env") },
     { key: "git", label: t("apps.settings.tab.git") },
+    { key: "storage", label: t("apps.settings.tab.storage") },
     { key: "domains", label: t("apps.settings.tab.domains") },
   ];
 
@@ -98,6 +100,10 @@ export default function AppSettingsPage() {
             </Link>
           </div>
         </div>
+      )}
+
+      {tab === "storage" && (
+        <StorageManager projectId={projectId} envId={envId} appName={appName} canEdit={canEdit} />
       )}
 
       {tab === "domains" && (

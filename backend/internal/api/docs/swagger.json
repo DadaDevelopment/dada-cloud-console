@@ -5111,6 +5111,95 @@
                 }
             }
         },
+        "/projects/{projectId}/environments/{envId}/apps/{appName}/storage": {
+            "put": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Attaches a ReadWriteMany persistent data directory to a Kubernetes app, or resizes an existing one (grow-only; storage class is fixed once created). Asynchronous: returns 202 with an operation; poll it until terminal.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "app"
+                ],
+                "summary": "Attach or resize app persistent storage",
+                "operationId": "updateAppStorage",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Project UUID",
+                        "name": "projectId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Environment UUID",
+                        "name": "envId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "App name",
+                        "name": "appName",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Persistent storage specification",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.appVolumeReq"
+                        }
+                    }
+                ],
+                "responses": {
+                    "202": {
+                        "description": "object with the accepted operation",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/projects/{projectId}/environments/{envId}/apps/{appName}/values-token": {
             "post": {
                 "security": [
@@ -9965,6 +10054,20 @@
                 }
             }
         },
+        "internal_api.appVolumeReq": {
+            "type": "object",
+            "properties": {
+                "path": {
+                    "type": "string"
+                },
+                "size": {
+                    "type": "string"
+                },
+                "storage_class": {
+                    "type": "string"
+                }
+            }
+        },
         "internal_api.attachHostnameRequest": {
             "type": "object",
             "properties": {
@@ -10084,6 +10187,9 @@
                 },
                 "replicas": {
                     "type": "integer"
+                },
+                "volume": {
+                    "$ref": "#/definitions/internal_api.appVolumeReq"
                 }
             }
         },

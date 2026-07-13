@@ -110,6 +110,15 @@ type AppSpec struct {
 	// into the app's resources.values.yaml.
 	SecretEnvName string
 
+	// VolumePath, when non-empty, requests a persistent data directory for the app.
+	// It renders a common.pvc block in values.yaml that the workload chart turns into
+	// a ReadWriteMany PersistentVolumeClaim mounted at VolumePath on every replica.
+	// RWX is deliberate: a single shared volume across all pods removes the single-
+	// replica constraint of ReadWriteOnce. VolumeSize is a k8s quantity (e.g. "5Gi").
+	VolumePath         string
+	VolumeSize         string
+	VolumeStorageClass string
+
 	// ResourcesOnly marks a resources-carrier owner app (no workload of its own):
 	// the per-project "service-databases-<project>" / "s3-buckets-<project>" charts
 	// that exist only to own standalone sibling CRs. Such an app has no OCI/git
@@ -208,6 +217,16 @@ type commonResources struct {
 	Limits   map[string]string `yaml:"limits"`
 }
 
+// commonPvc mirrors the optional pvc: block the common chart detects via
+// hasKey .Values "pvc". AccessMode is left empty so the chart's ReadWriteMany
+// default applies.
+type commonPvc struct {
+	Size         string `yaml:"size"`
+	StorageClass string `yaml:"storageClass"`
+	AccessMode   string `yaml:"accessMode,omitempty"`
+	Path         string `yaml:"path"`
+}
+
 type commonValues struct {
 	Image       commonImage     `yaml:"image"`
 	ServicePort int             `yaml:"servicePort,omitempty"`
@@ -215,6 +234,7 @@ type commonValues struct {
 	UseDotEnv   string          `yaml:"useDotEnv"`
 	Resources   commonResources `yaml:"resources"`
 	ExtraEnv    []commonEnvVar  `yaml:"extraEnv,omitempty"`
+	Pvc         *commonPvc      `yaml:"pvc,omitempty"`
 }
 
 type appValuesFile struct {
@@ -264,6 +284,14 @@ func RenderAppValues(spec AppSpec) (string, error) {
 		UseDotEnv:   "false",
 		Resources:   profileResources(spec.Profile),
 	}}
+
+	if spec.VolumePath != "" {
+		values.Common.Pvc = &commonPvc{
+			Size:         spec.VolumeSize,
+			StorageClass: spec.VolumeStorageClass,
+			Path:         spec.VolumePath,
+		}
+	}
 
 	keys := make([]string, 0, len(spec.Env))
 	for k := range spec.Env {

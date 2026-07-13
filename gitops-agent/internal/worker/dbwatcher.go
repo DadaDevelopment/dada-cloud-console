@@ -192,6 +192,8 @@ func (w *DBWatcher) dispatch(ctx context.Context, op db.Operation) error {
 		return w.doDeleteApp(ctx, op)
 	case "DeployImageVersion":
 		return w.doDeployImageVersion(ctx, op)
+	case "UpdateAppStorage":
+		return w.doUpdateAppStorage(ctx, op)
 	case "CreatePublicApi":
 		return w.doCreatePublicApi(ctx, op)
 	case "AttachCustomHostname":
@@ -704,6 +706,11 @@ func (w *DBWatcher) doCreateApp(ctx context.Context, op db.Operation) error {
 		Profile         string `json:"profile"`
 		AppServerName   string `json:"app_server_name"`
 		DefaultHostname string `json:"default_hostname"`
+		Volume          *struct {
+			Path         string `json:"path"`
+			Size         string `json:"size"`
+			StorageClass string `json:"storage_class"`
+		} `json:"volume"`
 	}
 	if err := json.Unmarshal(op.Payload, &p); err != nil {
 		return fmt.Errorf("parse payload: %w", err)
@@ -746,6 +753,11 @@ func (w *DBWatcher) doCreateApp(ctx context.Context, op db.Operation) error {
 		HelmRepoURL:        mgr.RepoURL(),
 		HelmTargetRevision: mgr.Branch(),
 		Env:                env.Plain,
+	}
+	if p.Volume != nil && p.Volume.Path != "" {
+		appSpec.VolumePath = p.Volume.Path
+		appSpec.VolumeSize = p.Volume.Size
+		appSpec.VolumeStorageClass = p.Volume.StorageClass
 	}
 	if env.hasSecret() {
 		appSpec.SecretEnvName = renderer.AppEnvSecretName(p.Name)
@@ -825,10 +837,16 @@ func (w *DBWatcher) doCreateApp(ctx context.Context, op db.Operation) error {
 	}
 
 	// Upsert snapshot so DeployImageVersion can re-render without reading git.
-	summaryJSON, _ := json.Marshal(map[string]any{
+	summary := map[string]any{
 		"image": p.Image, "port": p.Port, "replicas": p.Replicas,
 		"profile": p.Profile, "status": "Pending",
-	})
+	}
+	if p.Volume != nil && p.Volume.Path != "" {
+		summary["volume"] = map[string]any{
+			"path": p.Volume.Path, "size": p.Volume.Size, "storage_class": p.Volume.StorageClass,
+		}
+	}
+	summaryJSON, _ := json.Marshal(summary)
 	return db.UpsertSnapshot(ctx, w.pool,
 		op.ProjectID, op.EnvironmentID,
 		"App", p.Name, "Pending", summaryJSON, time.Now(),
@@ -1376,6 +1394,11 @@ func (w *DBWatcher) doDeployImageVersion(ctx context.Context, op db.Operation) e
 		HelmTargetRevision: mgr.Branch(),
 		Env:                env.Plain,
 	}
+	if vp, vs, vsc := volumeFromSummary(cur); vp != "" {
+		appSpec.VolumePath = vp
+		appSpec.VolumeSize = vs
+		appSpec.VolumeStorageClass = vsc
+	}
 	if env.hasSecret() {
 		appSpec.SecretEnvName = renderer.AppEnvSecretName(p.AppName)
 		for k := range env.Secret {
@@ -1413,6 +1436,141 @@ func (w *DBWatcher) doDeployImageVersion(ctx context.Context, op db.Operation) e
 	}
 
 	cur["image"] = p.Image
+	cur["status"] = "Pending"
+	updatedJSON, _ := json.Marshal(cur)
+	return db.UpsertSnapshot(ctx, w.pool,
+		op.ProjectID, op.EnvironmentID,
+		"App", p.AppName, "Pending", updatedJSON, time.Now(),
+	)
+}
+
+// volumeFromSummary extracts a persistent-directory spec from a resource_snapshot
+// summary_json map. It returns empty strings when no volume is configured.
+func volumeFromSummary(cur map[string]any) (path, size, storageClass string) {
+	v, ok := cur["volume"].(map[string]any)
+	if !ok {
+		return "", "", ""
+	}
+	path, _ = v["path"].(string)
+	size, _ = v["size"].(string)
+	storageClass, _ = v["storage_class"].(string)
+	return path, size, storageClass
+}
+
+// doUpdateAppStorage attaches or resizes an app's persistent data directory. It
+// re-renders app.yaml + values.yaml from the current snapshot (image/port/
+// replicas/profile) with the new common.pvc block, then records the volume in the
+// snapshot so subsequent deploys keep it. The workload chart maps the block to a
+// ReadWriteMany PVC; resizes rely on the storage class allowing volume expansion.
+func (w *DBWatcher) doUpdateAppStorage(ctx context.Context, op db.Operation) error {
+	var p struct {
+		AppName string `json:"app_name"`
+		Volume  struct {
+			Path         string `json:"path"`
+			Size         string `json:"size"`
+			StorageClass string `json:"storage_class"`
+		} `json:"volume"`
+	}
+	if err := json.Unmarshal(op.Payload, &p); err != nil {
+		return fmt.Errorf("parse payload: %w", err)
+	}
+
+	projectName, envName, envNamespace, err := w.projectEnv(ctx, op.ProjectID, op.EnvironmentID)
+	if err != nil {
+		return fmt.Errorf("project/env lookup: %w", err)
+	}
+
+	var summaryRaw []byte
+	if err := w.pool.QueryRow(ctx, `
+		SELECT summary_json FROM resource_snapshots
+		WHERE project_id=$1 AND environment_id=$2 AND kind='App' AND name=$3
+	`, op.ProjectID, op.EnvironmentID, p.AppName).Scan(&summaryRaw); err != nil {
+		return fmt.Errorf("loading app snapshot: %w", err)
+	}
+	var cur map[string]any
+	_ = json.Unmarshal(summaryRaw, &cur)
+
+	imageVal, _ := cur["image"].(string)
+	portVal, _ := cur["port"].(float64)
+	replicasVal, _ := cur["replicas"].(float64)
+	profileVal, _ := cur["profile"].(string)
+	if portVal == 0 {
+		portVal = 8080
+	}
+	if replicasVal == 0 {
+		replicasVal = 1
+	}
+	if profileVal == "" {
+		profileVal = "small"
+	}
+
+	mgr, err := w.managerFor(ctx, op.ProjectID)
+	if err != nil {
+		return err
+	}
+
+	env, err := w.resolveRuntimeEnv(ctx, op.EnvironmentID, p.AppName)
+	if err != nil {
+		return err
+	}
+
+	appSpec := renderer.AppSpec{
+		Name:               p.AppName,
+		Namespace:          envNamespace,
+		ProjectSlug:        projectName,
+		EnvSlug:            envName,
+		Image:              imageVal,
+		Port:               int(portVal),
+		Replicas:           int(replicasVal),
+		Profile:            profileVal,
+		OperationID:        op.ID.String(),
+		HelmRepoURL:        mgr.RepoURL(),
+		HelmTargetRevision: mgr.Branch(),
+		Env:                env.Plain,
+		VolumePath:         p.Volume.Path,
+		VolumeSize:         p.Volume.Size,
+		VolumeStorageClass: p.Volume.StorageClass,
+	}
+	if env.hasSecret() {
+		appSpec.SecretEnvName = renderer.AppEnvSecretName(p.AppName)
+		for k := range env.Secret {
+			appSpec.SecretEnvKeys = append(appSpec.SecretEnvKeys, k)
+		}
+	}
+
+	yaml, err := renderer.RenderApp(appSpec)
+	if err != nil {
+		return err
+	}
+	valuesYAML, err := renderer.RenderAppValues(appSpec)
+	if err != nil {
+		return err
+	}
+
+	gitPath := renderer.AppGitPath(projectName, envName, p.AppName)
+	valuesPath := renderer.AppHelmValuesGitPath(projectName, envName, p.AppName)
+	files := []git.FileChange{
+		{Path: gitPath, Content: yaml},
+		{Path: valuesPath, Content: valuesYAML},
+	}
+	secretFile, err := w.renderEnvSecretFile(mgr, projectName, envName, envNamespace, p.AppName, op.ID.String(), env)
+	if err != nil {
+		return err
+	}
+	if secretFile != nil {
+		files = append(files, *secretFile)
+	}
+	commitMsg := fmt.Sprintf(
+		"[DADA Console] Update storage for app %s\n\nOperation: %s\nProject: %s\nEnvironment: %s\n",
+		p.AppName, op.ID, projectName, envName,
+	)
+	if err := w.commitFilesAndRecord(ctx, op, mgr, gitPath, files, commitMsg); err != nil {
+		return err
+	}
+
+	cur["volume"] = map[string]any{
+		"path": p.Volume.Path, "size": p.Volume.Size, "storage_class": p.Volume.StorageClass,
+	}
 	cur["status"] = "Pending"
 	updatedJSON, _ := json.Marshal(cur)
 	return db.UpsertSnapshot(ctx, w.pool,

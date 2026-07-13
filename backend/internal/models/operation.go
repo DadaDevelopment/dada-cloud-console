@@ -64,14 +64,25 @@ type CreateS3BucketPayload struct {
 	AppRef        string `json:"app_ref,omitempty"`
 }
 
+// AppVolume describes a persistent data directory for a Helm (Kubernetes) app.
+// It maps directly to the workload chart's common.pvc block: a ReadWriteMany
+// PersistentVolumeClaim of Size mounted at Path on every replica. RWX is the
+// only access mode we expose so multi-replica apps can share one volume.
+type AppVolume struct {
+	Path         string `json:"path"`
+	Size         string `json:"size"`
+	StorageClass string `json:"storage_class,omitempty"`
+}
+
 // CreateAppPayload is the typed payload for CreateApp operations.
-// K8s fields: Replicas, Profile. VM fields: AppServerName, EnvVars.
+// K8s fields: Replicas, Profile, Volume. VM fields: AppServerName, EnvVars.
 type CreateAppPayload struct {
 	Name            string            `json:"name"`
 	Image           string            `json:"image"`
 	Port            int               `json:"port"`
 	Replicas        int               `json:"replicas,omitempty"`
 	Profile         string            `json:"profile,omitempty"`
+	Volume          *AppVolume        `json:"volume,omitempty"`
 	AppServerName   string            `json:"app_server_name,omitempty"`
 	EnvVars         map[string]string `json:"env_vars,omitempty"`
 	DefaultHostname string            `json:"default_hostname,omitempty"`
@@ -81,6 +92,13 @@ type CreateAppPayload struct {
 type DeployImageVersionPayload struct {
 	AppName string `json:"app_name"`
 	Image   string `json:"image"`
+}
+
+// UpdateAppStoragePayload is the typed payload for UpdateAppStorage operations:
+// attach or resize the persistent data directory of an existing Helm app.
+type UpdateAppStoragePayload struct {
+	AppName string    `json:"app_name"`
+	Volume  AppVolume `json:"volume"`
 }
 
 // CreateAppServerPayload is the typed payload for CreateAppServer operations.

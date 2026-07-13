@@ -2,8 +2,12 @@ package api
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
+	"regexp"
 	"sort"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/dada-tuda/console/backend/internal/auth"
@@ -147,11 +151,55 @@ func (h *Handler) ListApps(c *gin.Context) {
 }
 
 type createAppRequest struct {
-	Name     string `json:"name"`
-	Image    string `json:"image"`
-	Port     int    `json:"port"`
-	Replicas int    `json:"replicas"`
-	Profile  string `json:"profile"`
+	Name     string        `json:"name"`
+	Image    string        `json:"image"`
+	Port     int           `json:"port"`
+	Replicas int           `json:"replicas"`
+	Profile  string        `json:"profile"`
+	Volume   *appVolumeReq `json:"volume,omitempty"`
+}
+
+// appVolumeReq is the wire form of a persistent data directory request. Empty
+// StorageClass defaults to defaultVolumeStorageClass (a Retain longhorn class).
+type appVolumeReq struct {
+	Path         string `json:"path"`
+	Size         string `json:"size"`
+	StorageClass string `json:"storage_class"`
+}
+
+// defaultVolumeStorageClass is a ReadWriteMany-capable Longhorn class with
+// reclaimPolicy=Retain, so deleting the PVC does not immediately destroy data.
+const defaultVolumeStorageClass = "longhorn-prod"
+
+var volumeSizeRe = regexp.MustCompile(`^[1-9][0-9]*(Mi|Gi|Ti)$`)
+
+// allowedVolumeStorageClasses guards against pointing app data at ephemeral
+// (reclaimPolicy=Delete) classes. Both entries are Retain on beget-prod.
+var allowedVolumeStorageClasses = map[string]bool{
+	"longhorn-prod":          true,
+	"longhorn-stateful-prod": true,
+}
+
+// validateAppVolume normalises and validates a persistent-directory request,
+// returning the typed model payload. A nil request yields a nil volume (no PVC).
+func validateAppVolume(v *appVolumeReq) (*models.AppVolume, error) {
+	if v == nil {
+		return nil, nil
+	}
+	if !strings.HasPrefix(v.Path, "/") || strings.Contains(v.Path, "..") || len(v.Path) < 2 {
+		return nil, fmt.Errorf("volume path must be an absolute path without '..'")
+	}
+	if !volumeSizeRe.MatchString(v.Size) {
+		return nil, fmt.Errorf("volume size must be a quantity like 1Gi, 512Mi or 2Ti")
+	}
+	sc := v.StorageClass
+	if sc == "" {
+		sc = defaultVolumeStorageClass
+	}
+	if !allowedVolumeStorageClasses[sc] {
+		return nil, fmt.Errorf("storage_class must be one of: longhorn-prod, longhorn-stateful-prod")
+	}
+	return &models.AppVolume{Path: v.Path, Size: v.Size, StorageClass: sc}, nil
 }
 
 // CreateApp enqueues an operation to provision a new App CRD.
@@ -301,6 +349,16 @@ func (h *Handler) CreateApp(c *gin.Context) {
 		}
 	}
 
+	appVolume, err := validateAppVolume(req.Volume)
+	if err != nil {
+		respondError(c, http.StatusBadRequest, err.Error())
+		return
+	}
+	if appVolume != nil && isCompose {
+		respondError(c, http.StatusBadRequest, "persistent storage is only supported for Kubernetes apps")
+		return
+	}
+
 	// Check name uniqueness
 	var existing int
 	err = h.pool.QueryRow(c.Request.Context(),
@@ -331,6 +389,7 @@ func (h *Handler) CreateApp(c *gin.Context) {
 		Port:            req.Port,
 		Replicas:        req.Replicas,
 		Profile:         req.Profile,
+		Volume:          appVolume,
 		AppServerName:   appServerName,
 		DefaultHostname: defaultHostname,
 	}
@@ -505,6 +564,157 @@ func (h *Handler) UpdateAppImage(c *gin.Context) {
 	c.JSON(http.StatusAccepted, gin.H{
 		"operation": op,
 		"message":   "Image update queued",
+	})
+}
+
+// quantityBytes converts a restricted k8s quantity (Mi/Gi/Ti, validated by
+// volumeSizeRe) to a byte count for grow-only comparisons. It returns 0 for any
+// value that does not match the expected shape.
+func quantityBytes(q string) int64 {
+	if !volumeSizeRe.MatchString(q) {
+		return 0
+	}
+	unit := q[len(q)-2:]
+	num, err := strconv.ParseInt(q[:len(q)-2], 10, 64)
+	if err != nil {
+		return 0
+	}
+	switch unit {
+	case "Mi":
+		return num * 1024 * 1024
+	case "Gi":
+		return num * 1024 * 1024 * 1024
+	case "Ti":
+		return num * 1024 * 1024 * 1024 * 1024
+	}
+	return 0
+}
+
+// UpdateAppStorage attaches or resizes the persistent data directory of a Helm
+// app. A PersistentVolumeClaim is immutable once created, so an existing volume
+// may only grow and may not change its storage class; the mount path may change.
+//
+// @ID          updateAppStorage
+// @Summary     Attach or resize app persistent storage
+// @Description Attaches a ReadWriteMany persistent data directory to a Kubernetes app, or resizes an existing one (grow-only; storage class is fixed once created). Asynchronous: returns 202 with an operation; poll it until terminal.
+// @Tags        app
+// @Accept      json
+// @Produce     json
+// @Security    BearerAuth
+// @Param       projectId path     string       true "Project UUID"
+// @Param       envId     path     string       true "Environment UUID"
+// @Param       appName   path     string       true "App name"
+// @Param       body      body     appVolumeReq true "Persistent storage specification"
+// @Success     202       {object} map[string]interface{} "object with the accepted operation"
+// @Failure     400       {object} map[string]string
+// @Failure     403       {object} map[string]string
+// @Failure     404       {object} map[string]string
+// @Router      /projects/{projectId}/environments/{envId}/apps/{appName}/storage [put]
+func (h *Handler) UpdateAppStorage(c *gin.Context) {
+	claims, ok := auth.GetClaims(c)
+	if !ok {
+		respondUnauthorized(c)
+		return
+	}
+
+	projectID, err := uuid.Parse(c.Param("projectId"))
+	if err != nil {
+		respondNotFound(c)
+		return
+	}
+	envID, err := uuid.Parse(c.Param("envId"))
+	if err != nil {
+		respondNotFound(c)
+		return
+	}
+	appName := c.Param("appName")
+
+	role, err := h.effectiveRole(c.Request.Context(), claims, projectID)
+	if err == pgx.ErrNoRows {
+		respondNotFound(c)
+		return
+	}
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, "failed to check project membership")
+		return
+	}
+	if !canWrite(role) {
+		respondForbidden(c)
+		return
+	}
+
+	var req appVolumeReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		respondError(c, http.StatusBadRequest, err.Error())
+		return
+	}
+	vol, err := validateAppVolume(&req)
+	if err != nil {
+		respondError(c, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	var summaryRaw []byte
+	err = h.pool.QueryRow(c.Request.Context(),
+		`SELECT summary_json FROM resource_snapshots
+		 WHERE project_id = $1 AND environment_id = $2 AND kind = 'App' AND name = $3`,
+		projectID, envID, appName,
+	).Scan(&summaryRaw)
+	if err == pgx.ErrNoRows {
+		respondNotFound(c)
+		return
+	}
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, "failed to load app")
+		return
+	}
+
+	var cur struct {
+		Volume *models.AppVolume `json:"volume"`
+	}
+	_ = json.Unmarshal(summaryRaw, &cur)
+	if cur.Volume != nil {
+		if cur.Volume.StorageClass != "" && cur.Volume.StorageClass != vol.StorageClass {
+			respondError(c, http.StatusBadRequest, "storage class cannot be changed after the volume is created")
+			return
+		}
+		if quantityBytes(vol.Size) < quantityBytes(cur.Volume.Size) {
+			respondError(c, http.StatusBadRequest, "storage can only be expanded, not shrunk")
+			return
+		}
+	}
+
+	payload := models.UpdateAppStoragePayload{AppName: appName, Volume: *vol}
+	payloadBytes, err := json.Marshal(payload)
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, "failed to marshal payload")
+		return
+	}
+
+	var op models.Operation
+	row := h.pool.QueryRow(c.Request.Context(),
+		`INSERT INTO operations (actor_id, project_id, environment_id, action, resource_kind, resource_name, status, payload)
+		 VALUES ($1, $2, $3, 'UpdateAppStorage', 'App', $4, 'Created', $5)
+		 RETURNING id, actor_id, project_id, environment_id, action, resource_kind, resource_name,
+		           status, payload, validation_result, git_commit, git_path, argo_application,
+		           error_code, error_message, created_at, updated_at`,
+		claims.UserID, projectID, envID, appName, payloadBytes,
+	)
+	if err = scanOperation(row, &op); err != nil {
+		respondError(c, http.StatusInternalServerError, "failed to create operation")
+		return
+	}
+
+	auditMeta, _ := json.Marshal(payload)
+	_, _ = h.pool.Exec(c.Request.Context(),
+		`INSERT INTO audit_events (actor_id, project_id, operation_id, action, resource_kind, resource_name, metadata)
+		 VALUES ($1, $2, $3, 'UpdateAppStorage', 'App', $4, $5)`,
+		claims.UserID, projectID, op.ID, appName, auditMeta,
+	)
+
+	c.JSON(http.StatusAccepted, gin.H{
+		"operation": op,
+		"message":   "Storage update queued",
 	})
 }
 
