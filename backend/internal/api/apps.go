@@ -435,26 +435,24 @@ func (h *Handler) CreateApp(c *gin.Context) {
 	// reconciling). resource_snapshots reflects git reality (manual and Jenkins
 	// files land there via the git watcher too), so guard on (name, env-name)
 	// globally. See project_appset_name_collision.
-	var ownerProject, ownerEnv string
-	var ownerProjectID uuid.UUID
+	// Do NOT disclose which project owns the conflicting name: the owner may be a
+	// different tenant, and leaking its project name to the caller is a
+	// cross-tenant information disclosure. The message is identical whether the
+	// clash is in this project or another one.
+	var exists int
 	err = h.pool.QueryRow(c.Request.Context(),
-		`SELECT p.name, e.name, p.id
+		`SELECT 1
 		 FROM resource_snapshots rs
 		 JOIN environments e ON e.id = rs.environment_id
-		 JOIN projects p ON p.id = rs.project_id
 		 WHERE rs.kind = 'App' AND rs.name = $1
 		   AND e.name = (SELECT name FROM environments WHERE id = $2)
 		 LIMIT 1`,
 		req.Name, envID,
-	).Scan(&ownerProject, &ownerEnv, &ownerProjectID)
+	).Scan(&exists)
 	if err == nil {
-		if ownerProjectID == projectID {
-			respondError(c, http.StatusConflict, "an app with that name already exists in this environment")
-		} else {
-			respondError(c, http.StatusConflict, fmt.Sprintf(
-				"an app named %q already exists in the %q environment of project %q; app names must be unique per environment across projects",
-				req.Name, ownerEnv, ownerProject))
-		}
+		respondError(c, http.StatusConflict, fmt.Sprintf(
+			"the app name %q is already taken in this environment; app names must be unique per environment",
+			req.Name))
 		return
 	} else if err != pgx.ErrNoRows {
 		respondError(c, http.StatusInternalServerError, "failed to check name uniqueness")
