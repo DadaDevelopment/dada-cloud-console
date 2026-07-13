@@ -146,7 +146,15 @@ func SetupRouter(pool *pgxpool.Pool, cfg *config.Config) *gin.Engine {
 			c.Redirect(http.StatusPermanentRedirect, "/mcp/")
 		})
 		r.Any("/mcp/*path", mcpProxy)
-		log.Printf("mcp: serving at /mcp (self-proxy -> %s)", selfURL)
+
+		metaHandler := gin.WrapH(internalmcp.MetadataHandler(internalmcp.Config{
+			ResourceURL:    cfg.MCPResourceURL,
+			KeycloakIssuer: cfg.KeycloakIssuer,
+		}))
+		r.GET("/.well-known/oauth-protected-resource", metaHandler)
+		r.GET("/.well-known/oauth-protected-resource/mcp", metaHandler)
+
+		log.Printf("mcp: serving at /mcp (self-proxy -> %s); RFC 9728 metadata at host root", selfURL)
 	}
 
 	// Internal server-to-server API (ADR-009). user-service calls this when it

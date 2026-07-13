@@ -68,12 +68,6 @@ func NewHandler(specBytes []byte, cfg Config) (http.Handler, error) {
 	log.Printf("mcp: %d tools registered (basePath=%s, backend=%s); %d fallbacks",
 		len(tools), spec.BasePath, cfg.BackendURL, fallbacks)
 
-	resourceMeta := &oauthex.ProtectedResourceMetadata{
-		Resource:               cfg.ResourceURL,
-		AuthorizationServers:   []string{cfg.KeycloakIssuer},
-		BearerMethodsSupported: []string{"header"},
-	}
-
 	mcpHandler := sdkmcp.NewStreamableHTTPHandler(func(*http.Request) *sdkmcp.Server { return srv }, nil)
 
 	var transport http.Handler = bearerMiddleware(mcpHandler)
@@ -84,11 +78,24 @@ func NewHandler(specBytes []byte, cfg Config) (http.Handler, error) {
 	}
 
 	mux := http.NewServeMux()
-	mux.Handle("/.well-known/oauth-protected-resource",
-		sdkauth.ProtectedResourceMetadataHandler(resourceMeta))
+	mux.Handle("/.well-known/oauth-protected-resource", MetadataHandler(cfg))
 	mux.Handle("/", transport)
 
 	return mux, nil
+}
+
+// MetadataHandler returns just the RFC 9728 protected-resource metadata handler.
+// The main handler mounts it under /mcp, but spec-compliant OAuth clients look it
+// up at the HOST ROOT — /.well-known/oauth-protected-resource and the resource-path
+// suffixed /.well-known/oauth-protected-resource/mcp (RFC 9728 section 3.1). Export
+// it so the backend router can serve those host-root paths too; otherwise strict
+// clients (e.g. Claude connectors) 404 on discovery and never reach the auth flow.
+func MetadataHandler(cfg Config) http.Handler {
+	return sdkauth.ProtectedResourceMetadataHandler(&oauthex.ProtectedResourceMetadata{
+		Resource:               cfg.ResourceURL,
+		AuthorizationServers:   []string{cfg.KeycloakIssuer},
+		BearerMethodsSupported: []string{"header"},
+	})
 }
 
 func buildMCPServer(tools []GeneratedTool, backendURL, basePath string) *sdkmcp.Server {
