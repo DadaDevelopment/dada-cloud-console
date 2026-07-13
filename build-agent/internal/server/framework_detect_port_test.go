@@ -13,9 +13,10 @@ import (
 // network). Keys are repo-relative POSIX paths; directory listings are derived
 // from the key set.
 type fakeGitHubContents struct {
-	owner string
-	repo  string
-	files map[string]string
+	owner   string
+	repo    string
+	files   map[string]string
+	errDirs map[string]bool
 }
 
 func (g fakeGitHubContents) prefix() string {
@@ -57,6 +58,9 @@ func (g fakeGitHubContents) roundTrip(t *testing.T) roundTripFunc {
 	return func(req *http.Request) (*http.Response, error) {
 		rest := strings.TrimPrefix(req.URL.Path, g.prefix())
 		rest = strings.Trim(rest, "/")
+		if g.errDirs[rest] {
+			return jsonResponse(t, http.StatusInternalServerError, map[string]string{"error": "boom"}), nil
+		}
 		if raw, ok := g.files[rest]; ok {
 			return jsonResponse(t, http.StatusOK, map[string]any{
 				"type": "file", "name": rest, "path": rest,
@@ -159,6 +163,61 @@ func TestDetectPortDockerfileWinsOverFramework(t *testing.T) {
 			"go.mod":     "module x\ngo 1.22\n",
 			"Dockerfile": "FROM golang\nEXPOSE 2112\n",
 		}, "go", 2112},
+	})
+}
+
+// TestDetectSurvivesFlakySubtree reproduces the "detects nothing" symptom: a
+// repo with a root Dockerfile plus several subdirectories where one
+// subdirectory listing fails (transient 5xx / forbidden). Detection must keep
+// the root candidates instead of aborting the whole scan and returning empty.
+func TestDetectSurvivesFlakySubtree(t *testing.T) {
+	old := githubHTTPClient
+	t.Cleanup(func() { githubHTTPClient = old })
+	fake := fakeGitHubContents{
+		owner: "org", repo: "app",
+		files: map[string]string{
+			"README.md":            "# monorepo",
+			"broken/keep.txt":      "x",
+			"svc/requirements.txt": "fastapi\nuvicorn\n",
+			"svc/main.py":          "from fastapi import FastAPI",
+		},
+		errDirs: map[string]bool{"broken": true},
+	}
+	githubHTTPClient = &http.Client{Transport: fake.roundTrip(t)}
+	det, err := detectWithToken(context.Background(), "tok", "org/app", "")
+	if err != nil {
+		t.Fatalf("detectWithToken aborted on a flaky subtree: %v", err)
+	}
+	if det.Framework == nil {
+		t.Fatal("framework = nil; flaky subdirectory aborted detection instead of skipping only that subtree")
+	}
+	if *det.Framework != "fastapi" {
+		t.Fatalf("framework = %q, want fastapi (from the healthy subtree)", *det.Framework)
+	}
+}
+
+// TestDetectEarlyReturnPrunesSubtree locks the performance contract: once the
+// root directory yields a candidate, the scan stops instead of walking every
+// subtree (which was making detection exceed the wizard's request timeout). A
+// subtree is only scanned when the root has no candidate (monorepo fallback).
+func TestDetectEarlyReturnPrunesSubtree(t *testing.T) {
+	t.Run("root-candidate-wins-no-recursion", func(t *testing.T) {
+		det := detectFakeRepo(t, map[string]string{
+			"Dockerfile":            "FROM python\nEXPOSE 8501\n",
+			"frontend/package.json": pkg(`"next":"14"`, ""),
+		})
+		if det.Framework == nil || *det.Framework != "dockerfile" {
+			t.Fatalf("framework = %v, want dockerfile (root candidate must short-circuit recursion)", det.Framework)
+		}
+	})
+	t.Run("monorepo-fallback-recurses", func(t *testing.T) {
+		det := detectFakeRepo(t, map[string]string{
+			"README.md":                 "# monorepo",
+			"packages/web/package.json": pkg(`"next":"14"`, ""),
+		})
+		if det.Framework == nil || *det.Framework != "nextjs" {
+			t.Fatalf("framework = %v, want nextjs (barren root must recurse into packages)", det.Framework)
+		}
 	})
 }
 

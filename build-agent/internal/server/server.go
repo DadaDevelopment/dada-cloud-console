@@ -13,6 +13,7 @@ import (
 	"path"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/dada-tuda/console/build-agent/internal/config"
@@ -334,6 +335,12 @@ type githubContent struct {
 }
 
 var githubHTTPClient = http.DefaultClient
+
+// githubAPISem bounds concurrent GitHub contents calls so the parallel framework
+// scan cannot open an unbounded number of sockets or trip secondary rate limits.
+// It is held only around a single request, never across recursion, so it cannot
+// deadlock the fan-out.
+var githubAPISem = make(chan struct{}, 8)
 
 type packageManagerSpec struct {
 	name    string
@@ -898,22 +905,50 @@ func scanFrameworkCandidates(ctx context.Context, token, owner, repo, dir string
 	}
 
 	cands := detectCandidatesInDir(ctx, token, owner, repo, dir, depth, entries, localNodePM)
-	if depth >= maxDepth {
+	if depth >= maxDepth || len(cands) > 0 {
 		return cands, nil
 	}
 
+	var (
+		mu sync.Mutex
+		wg sync.WaitGroup
+	)
 	for _, entry := range entries {
-		if entry.Type != "dir" {
+		if entry.Type != "dir" || skipScanDir(entry.Name) {
 			continue
 		}
 		childDir := joinRepoPath(dir, entry.Name)
-		childCands, err := scanFrameworkCandidates(ctx, token, owner, repo, childDir, depth+1, maxDepth, localNodePM)
-		if err != nil {
-			return nil, err
-		}
-		cands = append(cands, childCands...)
+		wg.Add(1)
+		go func(childDir string) {
+			defer wg.Done()
+			childCands, err := scanFrameworkCandidates(ctx, token, owner, repo, childDir, depth+1, maxDepth, localNodePM)
+			if err != nil {
+				log.Warn().Err(err).Str("repo", owner+"/"+repo).Str("dir", childDir).Msg("skip subtree during framework detect: subdirectory listing failed, root candidates preserved")
+				return
+			}
+			mu.Lock()
+			cands = append(cands, childCands...)
+			mu.Unlock()
+		}(childDir)
 	}
+	wg.Wait()
 	return cands, nil
+}
+
+// skipScanDir excludes directories that never hold an application's framework
+// root, keeping the recursive scan (and its GitHub API round-trips) small enough
+// to finish inside the import wizard's request timeout. Hidden directories and
+// common dependency/build/output directories are skipped.
+func skipScanDir(name string) bool {
+	if strings.HasPrefix(name, ".") {
+		return true
+	}
+	switch strings.ToLower(name) {
+	case "node_modules", "vendor", "dist", "build", "out", "target",
+		"coverage", "__pycache__", "venv", "env", "testdata", "tmp", "bin", "obj":
+		return true
+	}
+	return false
 }
 
 func detectCandidatesInDir(ctx context.Context, token, owner, repo, dir string, depth int, entries []githubContent, inheritedNodePM packageManagerSpec) []frameworkCandidate {
@@ -1752,6 +1787,8 @@ func githubAPI(ctx context.Context, token, owner, repo, repoPath string, dst any
 	req.Header.Set("Authorization", "token "+token)
 	req.Header.Set("Accept", "application/vnd.github+json")
 	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
+	githubAPISem <- struct{}{}
+	defer func() { <-githubAPISem }()
 	resp, err := githubHTTPClient.Do(req)
 	if err != nil {
 		return err
