@@ -168,4 +168,45 @@ export const domains: Messages = {
   "domains.dns.confirmDelete": { ru: "Удалить запись {name} {type}?", en: "Delete record {name} {type}?" },
   "domains.dns.protectedNote": { ru: "Системные записи NS/SOA нельзя изменить.", en: "System NS/SOA records cannot be edited." },
   "domains.dns.edit": { ru: "Изменить", en: "Edit" },
+
+  "domains.hostStatus.active": { ru: "Подключено", en: "Connected" },
+  "domains.hostStatus.pending": { ru: "Ожидание DNS/сертификата", en: "Awaiting DNS/certificate" },
+  "domains.hostStatus.failed": { ru: "Ошибка", en: "Failed" },
+
+  "domains.row.pointsTo": { ru: "→ {app}", en: "→ {app}" },
+  "domains.tag.delegated": { ru: "Делегирован", en: "Delegated" },
+
+  "domains.apex.needsVerify": { ru: "Требует подтверждения", en: "Needs verification" },
+  "domains.apex.verifiedIdle": {
+    ru: "Подтверждён — добавьте хост или делегируйте домен",
+    en: "Verified — add a hostname or delegate the domain",
+  },
+
+  "domains.action.addHost": { ru: "Добавить хост", en: "Add hostname" },
+  "domains.action.delegateEdit": { ru: "Настроить DNS", en: "Manage DNS" },
+
+  "domains.edit.recordUnknown": {
+    ru: "Тип записи: {type}. Точное значение показывается при первичном подключении хоста.",
+    en: "Record type: {type}. The exact target is shown when the hostname is first attached.",
+  },
+
+  "domains.funnel.title": { ru: "Добавить домен", en: "Add domain" },
+  "domains.funnel.inputLabel": { ru: "Домен", en: "Domain" },
+  "domains.funnel.inputHelp": {
+    ru: "Введите домен или поддомен, например acme.com или shop.acme.com.",
+    en: "Enter a domain or subdomain, e.g. acme.com or shop.acme.com.",
+  },
+  "domains.funnel.continue": { ru: "Продолжить", en: "Continue" },
+  "domains.funnel.verifyTitle": { ru: "Подтвердите владение доменом {apex}", en: "Verify ownership of {apex}" },
+  "domains.funnel.verifyIntro": {
+    ru: "Добавьте эту TXT-запись у вашего регистратора, затем нажмите «Проверить».",
+    en: "Add this TXT record at your registrar, then click Verify.",
+  },
+  "domains.funnel.verifyPending": {
+    ru: "Домен ещё не подтверждён. Проверяем автоматически каждые 10 с…",
+    en: "Domain not verified yet. Checking automatically every 10s…",
+  },
+  "domains.funnel.pathTitle": { ru: "Как использовать {domain}?", en: "How should {domain} be used?" },
+  "domains.funnel.pointApp": { ru: "Направить на приложение", en: "Point to an app" },
+  "domains.funnel.done": { ru: "Готово", en: "Done" },
 };
