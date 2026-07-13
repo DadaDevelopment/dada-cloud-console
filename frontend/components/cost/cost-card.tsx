@@ -25,14 +25,13 @@ export function CostCard({ projectId }: { projectId: string }) {
 
   useEffect(() => {
     let cancelled = false;
-    setLoading(true);
-    setError(null);
     costApi
       .getProjectCost(projectId, window)
       .then((r) => {
         if (cancelled) return;
         setData(r);
         setUnavailable(false);
+        setError(null);
       })
       .catch((err: unknown) => {
         if (cancelled) return;
@@ -51,6 +50,11 @@ export function CostCard({ projectId }: { projectId: string }) {
     };
   }, [projectId, window, t]);
 
+  function selectWindow(w: string) {
+    setLoading(true);
+    setWindow(w);
+  }
+
   if (unavailable) return null;
 
   return (
@@ -65,7 +69,7 @@ export function CostCard({ projectId }: { projectId: string }) {
             <button
               key={w}
               type="button"
-              onClick={() => setWindow(w)}
+              onClick={() => selectWindow(w)}
               className={`rounded-md px-2.5 py-1 text-xs font-medium transition-colors ${
                 window === w
                   ? "bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 shadow-sm"
