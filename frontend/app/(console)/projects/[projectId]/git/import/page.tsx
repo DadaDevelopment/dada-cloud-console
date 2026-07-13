@@ -184,6 +184,7 @@ export default function GitImportPage() {
   const [frameworkTouched, setFrameworkTouched] = useState(false);
   const [portTouched, setPortTouched] = useState(false);
   const [detecting, setDetecting] = useState(false);
+  const [detectError, setDetectError] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
 
@@ -356,6 +357,7 @@ export default function GitImportPage() {
   const runDetect = useCallback(
     async (repo: GitRemoteRepoCandidate, root: string) => {
       setDetecting(true);
+      setDetectError(false);
       setDetection(null);
       try {
         const d = await gitApi.detect(projectId, repo.installationId, repo.full_name, root || ".");
@@ -371,19 +373,8 @@ export default function GitImportPage() {
         }
         setDetection(d);
       } catch {
-        const emptyDetection = {
-          framework: null,
-          package_manager: null,
-          build_command: null,
-          install_command: null,
-          start_command: null,
-          output_dir: null,
-          port: null,
-        };
-        if (!frameworkTouched && !portTouched) {
-          setPort(8080);
-        }
-        setDetection(emptyDetection);
+        setDetection(null);
+        setDetectError(true);
       } finally {
         setDetecting(false);
       }
@@ -665,6 +656,17 @@ export default function GitImportPage() {
                   {detecting ? (
                     <div className="mt-2 flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400">
                       <Spinner size="sm" /> {t("git.import.detecting")}
+                    </div>
+                  ) : detectError ? (
+                    <div className="mt-2 flex items-center justify-between gap-3 text-sm">
+                      <span className="text-amber-600 dark:text-amber-500">{t("git.import.detectFailed")}</span>
+                      <button
+                        type="button"
+                        onClick={() => selectedRepo && runDetect(selectedRepo, rootDir)}
+                        className="shrink-0 rounded-md border border-gray-300 dark:border-gray-700 px-2 py-1 text-xs font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800"
+                      >
+                        {t("git.import.detectRetry")}
+                      </button>
                     </div>
                   ) : detection ? (
                     <div className="mt-2 space-y-1 text-sm">

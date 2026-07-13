@@ -536,8 +536,8 @@ func (s *Server) handleDetect(w http.ResponseWriter, r *http.Request) {
 
 	det, err := s.detectFramework(r.Context(), id, repo, rootDir)
 	if err != nil {
-		log.Warn().Err(err).Int64("installation", id).Str("repo", repo).Str("root_dir", rootDir).Msg("framework detect fallback")
-		writeJSON(w, frameworkDetection{})
+		log.Warn().Err(err).Int64("installation", id).Str("repo", repo).Str("root_dir", rootDir).Msg("framework detect failed")
+		http.Error(w, "framework detection failed", http.StatusBadGateway)
 		return
 	}
 	writeJSON(w, det)

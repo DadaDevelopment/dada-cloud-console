@@ -158,7 +158,16 @@ func TestHandleInstallationAccountBadID(t *testing.T) {
 	}
 }
 
-func TestHandleDetectNullBestEffort(t *testing.T) {
+// TestHandleDetectErrorReturns502 verifies a detection failure (here the repo
+// tree cannot be read) surfaces as 502 instead of being masked as a 200 empty
+// result, so the wizard can tell "scan failed" from "scanned, no framework".
+func TestHandleDetectErrorReturns502(t *testing.T) {
+	old := githubHTTPClient
+	t.Cleanup(func() { githubHTTPClient = old })
+	githubHTTPClient = &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		return jsonResponse(t, http.StatusNotFound, map[string]string{"error": "not found"}), nil
+	})}
+
 	srv := httptest.NewServer(newTestServer(&fakeApp{}))
 	defer srv.Close()
 	resp, err := srv.Client().Get(srv.URL + "/github/installations/1/detect?repo=org/app&root_dir=.")
@@ -166,15 +175,8 @@ func TestHandleDetectNullBestEffort(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("status = %d, want 200", resp.StatusCode)
-	}
-	var d frameworkDetection
-	if err := json.NewDecoder(resp.Body).Decode(&d); err != nil {
-		t.Fatal(err)
-	}
-	if d.Framework != nil {
-		t.Errorf("framework = %v, want null (best-effort)", *d.Framework)
+	if resp.StatusCode != http.StatusBadGateway {
+		t.Fatalf("status = %d, want 502", resp.StatusCode)
 	}
 }
 

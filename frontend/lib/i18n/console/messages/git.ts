@@ -110,6 +110,8 @@ export const git: Messages = {
   "git.import.detectedFramework": { ru: "Обнаруженный фреймворк", en: "Detected framework" },
   "git.import.detecting": { ru: "Определение…", en: "Detecting…" },
   "git.import.unknownFramework": { ru: "Неизвестно — выберите ниже", en: "Unknown — pick one below" },
+  "git.import.detectFailed": { ru: "Не удалось определить фреймворк", en: "Framework detection failed" },
+  "git.import.detectRetry": { ru: "Повторить", en: "Retry" },
 
   "git.import.appName.label": { ru: "Имя приложения", en: "Application name" },
   "git.import.appName.hint": { ru: "(имя ресурса Kubernetes)", en: "(Kubernetes resource name)" },
