@@ -1,0 +1,115 @@
+// Package notify sends deploy-result emails to the project owner so a build
+// outcome is never silent. It reuses the platform Postbox SMTP credentials.
+//
+// The runner constructs a Notifier ONLY when DEPLOY_NOTIFY_ENABLED is true; a
+// nil *Notifier is a valid no-op, so with the flag off there is no mail path
+// and zero effect on the build pipeline. Sends are best-effort: the caller
+// launches them off the hot path and treats every error as non-fatal.
+package notify
+
+import (
+	"encoding/base64"
+	"fmt"
+	"net/smtp"
+	"strings"
+)
+
+// Notifier holds the SMTP endpoint used for deploy-result mail.
+type Notifier struct {
+	host       string
+	port       int
+	user       string
+	pass       string
+	from       string
+	consoleURL string
+}
+
+// New builds a Notifier. It returns nil when host or from is empty, so a
+// misconfigured deployment degrades to no-op instead of erroring on every build.
+func New(host string, port int, user, pass, from, consoleURL string) *Notifier {
+	if host == "" || from == "" {
+		return nil
+	}
+	return &Notifier{host: host, port: port, user: user, pass: pass, from: from, consoleURL: strings.TrimRight(consoleURL, "/")}
+}
+
+// Compose builds the subject and plaintext body for a build result. Pure: no
+// network, no clock — safe to unit-test. status is "success" or "failure".
+// hostname is the app's public URL when known (success only); reason is the
+// short failure cause. Both may be empty.
+func (n *Notifier) Compose(appName, status, hostname, reason string) (subject, body string) {
+	switch status {
+	case "success":
+		subject = fmt.Sprintf("%s: приложение собрано и развёрнуто", appName)
+		var b strings.Builder
+		fmt.Fprintf(&b, "Приложение %s успешно собрано и развёрнуто.\n\n", appName)
+		if hostname != "" {
+			fmt.Fprintf(&b, "Открыть: https://%s\n\n", hostname)
+		}
+		fmt.Fprintf(&b, "Панель управления: %s\n\n", n.consoleURL)
+		b.WriteString("Пуш в основную ветку автоматически пересобирает и деплоит проект.\n")
+		body = b.String()
+	default:
+		subject = fmt.Sprintf("%s: сборка не удалась", appName)
+		var b strings.Builder
+		fmt.Fprintf(&b, "Сборка приложения %s не завершилась успешно.\n\n", appName)
+		if reason != "" {
+			fmt.Fprintf(&b, "Причина: %s\n\n", reason)
+		}
+		fmt.Fprintf(&b, "Логи сборки и подробности: %s\n\n", n.consoleURL)
+		b.WriteString("Если нужна помощь — ответьте на это письмо.\n")
+		body = b.String()
+	}
+	return subject, body
+}
+
+// Send delivers one message to a single recipient over SMTP with STARTTLS
+// (net/smtp negotiates STARTTLS automatically when the server advertises it, as
+// Postbox does on 587). Returns an error the caller logs and swallows.
+func (n *Notifier) Send(to, subject, body string) error {
+	if n == nil {
+		return nil
+	}
+	if to == "" {
+		return nil
+	}
+	addr := fmt.Sprintf("%s:%d", n.host, n.port)
+	msg := n.render(to, subject, body)
+	var auth smtp.Auth
+	if n.user != "" {
+		auth = smtp.PlainAuth("", n.user, n.pass, n.host)
+	}
+	return smtp.SendMail(addr, auth, n.from, []string{to}, []byte(msg))
+}
+
+// render assembles RFC-5322 headers + UTF-8 body. Pure — unit-tested.
+func (n *Notifier) render(to, subject, body string) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "From: %s\r\n", n.from)
+	fmt.Fprintf(&b, "To: %s\r\n", to)
+	fmt.Fprintf(&b, "Subject: %s\r\n", encodeHeader(subject))
+	b.WriteString("MIME-Version: 1.0\r\n")
+	b.WriteString("Content-Type: text/plain; charset=\"UTF-8\"\r\n")
+	b.WriteString("\r\n")
+	b.WriteString(strings.ReplaceAll(body, "\n", "\r\n"))
+	return b.String()
+}
+
+// encodeHeader RFC-2047 base64-encodes a header value when it contains
+// non-ASCII (the subjects are Russian), so mail clients render Cyrillic
+// correctly instead of mojibake.
+func encodeHeader(s string) string {
+	if isASCII(s) {
+		return s
+	}
+	return "=?UTF-8?B?" + base64.StdEncoding.EncodeToString([]byte(s)) + "?="
+}
+
+func isASCII(s string) bool {
+	for _, r := range s {
+		if r > 127 {
+			return false
+		}
+	}
+	return true
+}

@@ -16,6 +16,7 @@ import (
 	"github.com/dada-tuda/console/build-agent/internal/github"
 	"github.com/dada-tuda/console/build-agent/internal/jenkins"
 	"github.com/dada-tuda/console/build-agent/internal/metrics"
+	"github.com/dada-tuda/console/build-agent/internal/notify"
 	"github.com/dada-tuda/console/build-agent/internal/queue"
 	"github.com/dada-tuda/console/build-agent/internal/registry"
 	"github.com/dada-tuda/console/build-agent/internal/server"
@@ -44,6 +45,7 @@ type Runner struct {
 	jenkins    *jenkins.Client
 	registry   registry.Registry
 	github     github.App
+	notify     *notify.Notifier
 	publishLog func(buildID, line string)
 }
 
@@ -74,6 +76,10 @@ type buildOutcome struct {
 // NewRunner wires a Runner with production dependencies: a Jenkins REST client
 // and a read-only Nexus client. No Kubernetes — Jenkins runs the build.
 func NewRunner(pool *pgxpool.Pool, cfg *config.Config, publishLog func(buildID, line string)) *Runner {
+	var notifier *notify.Notifier
+	if cfg.DeployNotifyEnabled {
+		notifier = notify.New(cfg.SMTPHost, cfg.SMTPPort, cfg.SMTPUser, cfg.SMTPPass, cfg.SMTPFrom, cfg.ConsoleBaseURL)
+	}
 	return &Runner{
 		pool:       pool,
 		cfg:        cfg,
@@ -81,6 +87,7 @@ func NewRunner(pool *pgxpool.Pool, cfg *config.Config, publishLog func(buildID, 
 		jenkins:    jenkins.New(cfg.JenkinsURL, cfg.JenkinsUser, cfg.JenkinsToken),
 		registry:   registry.NewNexus(cfg.NexusDockerHost, cfg.NexusUser, cfg.NexusToken),
 		github:     github.New(cfg.GitHubAppID, cfg.GitHubAppKey),
+		notify:     notifier,
 		publishLog: publishLog,
 	}
 }
@@ -205,6 +212,23 @@ func (r *Runner) handleBuildError(ctx context.Context, b *db.Build, repo *db.Rep
 	r.failFromCurrent(ctx, b, err)
 	r.postStatus(ctx, repo, b, "failure", "build failed")
 	metrics.BuildTotal.WithLabelValues("failed").Inc()
+	r.notifyResult(repo, b, "failure", failureReason(err))
+}
+
+// failureReason trims a build error into a one-line cause for the failure email,
+// capped so a long stack/log tail never bloats the message.
+func failureReason(err error) string {
+	if err == nil {
+		return ""
+	}
+	s := strings.TrimSpace(err.Error())
+	if i := strings.IndexByte(s, '\n'); i >= 0 {
+		s = s[:i]
+	}
+	if len(s) > 200 {
+		s = s[:200] + "…"
+	}
+	return s
 }
 
 // maxBuildAttempts bounds automatic retries of a build that keeps hitting
@@ -285,7 +309,41 @@ func (r *Runner) finalize(ctx context.Context, b *db.Build, repo *db.Repo, out b
 	r.postStatus(ctx, repo, b, "success", "build succeeded")
 	metrics.BuildTotal.WithLabelValues("success").Inc()
 	metrics.BuildDuration.WithLabelValues("total").Observe(time.Since(start).Seconds())
+	r.notifyResult(repo, b, "success", "")
 	llog.Info().Str("image", out.imageURI).Int("artifacts", len(out.artifacts)).Msg("build succeeded")
+}
+
+// notifyResult emails the project owner the build outcome. No-op when the
+// notifier is disabled (nil). Best-effort and off the hot path: it runs in its
+// own goroutine with an independent short-lived context so a slow or failing
+// SMTP server never blocks or fails the build. Every error is logged and
+// swallowed — a missed notification must not affect the pipeline.
+func (r *Runner) notifyResult(repo *db.Repo, b *db.Build, status, reason string) {
+	if r.notify == nil {
+		return
+	}
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		to, err := db.OwnerEmail(ctx, r.pool, repo.ProjectID)
+		if err != nil {
+			log.Warn().Err(err).Str("app", b.AppName).Msg("deploy-notify: owner email lookup failed")
+			return
+		}
+		if to == "" {
+			return
+		}
+		var hostname string
+		if status == "success" {
+			hostname, _ = db.ManagedHostname(ctx, r.pool, b.EnvironmentID, b.AppName)
+		}
+		subject, body := r.notify.Compose(b.AppName, status, hostname, reason)
+		if err := r.notify.Send(to, subject, body); err != nil {
+			log.Warn().Err(err).Str("app", b.AppName).Str("status", status).Msg("deploy-notify: send failed")
+			return
+		}
+		log.Info().Str("app", b.AppName).Str("status", status).Msg("deploy-notify: sent")
+	}()
 }
 
 // ReconcileDeploys drives orphaned successful builds to deployment. A build that

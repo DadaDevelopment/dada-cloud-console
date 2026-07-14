@@ -63,6 +63,14 @@ type Config struct {
 
 	DefaultDomainEnabled bool
 	DefaultDomainBase    string
+
+	DeployNotifyEnabled bool
+	SMTPHost            string
+	SMTPPort            int
+	SMTPUser            string
+	SMTPPass            string
+	SMTPFrom            string
+	ConsoleBaseURL      string
 }
 
 func Load() (*Config, error) {
@@ -111,6 +119,14 @@ func Load() (*Config, error) {
 
 		DefaultDomainEnabled: getEnv("DEFAULT_DOMAIN_ENABLED", "true") == "true",
 		DefaultDomainBase:    getEnv("DEFAULT_DOMAIN_BASE", "dada-tuda.ru"),
+
+		DeployNotifyEnabled: getEnv("DEPLOY_NOTIFY_ENABLED", "false") == "true",
+		SMTPHost:            getEnv("DEPLOY_NOTIFY_SMTP_HOST", ""),
+		SMTPPort:            getEnvInt("DEPLOY_NOTIFY_SMTP_PORT", 587),
+		SMTPUser:            getEnv("DEPLOY_NOTIFY_SMTP_USER", ""),
+		SMTPPass:            getEnv("DEPLOY_NOTIFY_SMTP_PASS", ""),
+		SMTPFrom:            getEnv("DEPLOY_NOTIFY_SMTP_FROM", "development@dada-tuda.ru"),
+		ConsoleBaseURL:      getEnv("CONSOLE_BASE_URL", "https://console.dada-tuda.ru"),
 	}
 
 	if cfg.DatabaseURL == "" {
