@@ -5,6 +5,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // Config holds all application configuration loaded from environment variables.
@@ -139,6 +140,15 @@ type Config struct {
 	// the per-project /cost endpoint. Base URL only, e.g.
 	// http://opencost.opencost.svc.cluster.local:9003. No auth (in-cluster).
 	OpenCostURL string // OPENCOST_URL
+
+	// RedisAddr enables the fail-open cache-aside layer (internal/cache) for
+	// read-heavy endpoints. host:port, empty disables caching. e.g.
+	// dada-cloud-console-redis:6379.
+	RedisAddr string
+
+	// CacheCostTTL is how long a per-project cost response is cached. OpenCost
+	// aggregates slowly-changing data, so seconds of staleness are fine.
+	CacheCostTTL time.Duration
 
 	// Fully-loaded consumption pricing knobs (billing_fullcost.go). BillingMargin
 	// is the profit multiplier applied after infra-overhead loading (default 1.4);
@@ -343,6 +353,8 @@ func Load() (*Config, error) {
 		PrometheusQueryUser:       getEnv("PROMETHEUS_QUERY_USER", ""),
 		PrometheusQueryPass:       getEnv("PROMETHEUS_QUERY_PASS", ""),
 		OpenCostURL:               getEnv("OPENCOST_URL", ""),
+		RedisAddr:                 getEnv("REDIS_ADDR", ""),
+		CacheCostTTL:              time.Duration(getEnvInt64("CACHE_COST_TTL_SECONDS", 60)) * time.Second,
 		BillingMargin:             getEnvFloat("BILLING_MARGIN", 1.4),
 		BillingMinUtilization:     getEnvFloat("BILLING_MIN_UTILIZATION", 0.30),
 		UserMetricsQueryURL:       getEnv("USER_METRICS_QUERY_URL", ""),

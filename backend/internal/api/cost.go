@@ -5,6 +5,8 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/dada-tuda/console/backend/internal/cache"
+	"github.com/dada-tuda/console/backend/internal/opencost"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 )
@@ -40,6 +42,14 @@ type envCost struct {
 // aggregated from the OpenCost Allocation API by Kubernetes namespace. The
 // project->namespace join lives in the console DB (environments table), so the
 // view does not depend on OpenCost reading namespace labels.
+//
+// The OpenCost allocation set is fetched aggregated by namespace with no filter,
+// so it is cluster-wide and identical for every project; only the per-project
+// namespace filter differs. It is therefore cached by window alone (the four
+// allowed values) via the fail-open cache-aside layer, so one OpenCost
+// aggregation serves every project's cost card for CacheCostTTL and caps the
+// tail latency of a slow/cold OpenCost query. A Redis outage falls straight
+// through to OpenCost.
 //
 // @ID          getProjectCost
 // @Summary     Get per-project resource cost
@@ -90,7 +100,11 @@ func (h *Handler) GetProjectCost(c *gin.Context) {
 		return
 	}
 
-	allocs, err := h.opencost.Compute(c.Request.Context(), window, "namespace", "")
+	allocs, err := cache.Fetch(c.Request.Context(), h.cache,
+		"cost:allocs:"+window, h.cfg.CacheCostTTL,
+		func() (map[string]opencost.Allocation, error) {
+			return h.opencost.Compute(c.Request.Context(), window, "namespace", "")
+		})
 	if err != nil {
 		respondError(c, http.StatusServiceUnavailable, "cost data temporarily unavailable")
 		return

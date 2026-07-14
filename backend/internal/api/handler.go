@@ -12,6 +12,7 @@ import (
 	"github.com/dada-tuda/console/backend/internal/billing/costengine"
 	"github.com/dada-tuda/console/backend/internal/billing/pricing"
 	"github.com/dada-tuda/console/backend/internal/buildagent"
+	"github.com/dada-tuda/console/backend/internal/cache"
 	"github.com/dada-tuda/console/backend/internal/cloudtask"
 	"github.com/dada-tuda/console/backend/internal/config"
 	"github.com/dada-tuda/console/backend/internal/dadagent"
@@ -36,6 +37,7 @@ type Handler struct {
 	userMetrics *prometheus.Client // user-telemetry read store (multi-tenant Mimir); == prometheus when USER_METRICS_QUERY_URL unset
 	logsearch   *logsearch.Client  // nil when ELASTICSEARCH_URL unset
 	opencost    *opencost.Client   // nil when OPENCOST_URL unset; per-project cost reads
+	cache       *cache.Cache       // nil when REDIS_ADDR unset; fail-open cache-aside for read-heavy endpoints
 	// Infra stream (in-cluster kube pod logs) — the second /logs source for
 	// native (k8s) apps; nil when ES unset or ELASTICSEARCH_INFRA_LOG_INDEX=off.
 	infraLogsearch *logsearch.Client
@@ -110,6 +112,16 @@ func NewHandler(pool *pgxpool.Pool, cfg *config.Config) *Handler {
 	h.portainer = portainer.New(cfg.PortainerURL, cfg.PortainerAPIToken)
 	h.prometheus = prometheus.New(cfg.PrometheusQueryURL, cfg.PrometheusQueryUser, cfg.PrometheusQueryPass)
 	h.opencost = opencost.New(cfg.OpenCostURL)
+	h.cache = cache.New(cfg.RedisAddr)
+	if h.cache.Enabled() {
+		pingCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		if err := h.cache.Ping(pingCtx); err != nil {
+			log.Printf("cache: redis at %s unreachable at startup, running fail-open (endpoints compute uncached): %v", cfg.RedisAddr, err)
+		} else {
+			log.Printf("cache: redis cache-aside enabled at %s", cfg.RedisAddr)
+		}
+		cancel()
+	}
 	// User-telemetry reads go to the multi-tenant Mimir store (per-tenant
 	// X-Scope-OrgID). When USER_METRICS_QUERY_URL is unset, reuse the plain
 	// Prometheus client so behaviour is unchanged until the Mimir cutover.

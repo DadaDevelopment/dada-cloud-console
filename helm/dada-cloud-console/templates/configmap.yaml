@@ -10,6 +10,12 @@ data:
   PROMETHEUS_QUERY_URL: {{ .Values.global.shared.prometheusQueryUrl | default "" | quote }}
   ELASTICSEARCH_URL: {{ .Values.global.shared.elasticsearchUrl | default "" | quote }}
   OPENCOST_URL: {{ .Values.global.shared.opencostUrl | default "" | quote }}
+{{- if .Values.redis.enabled }}
+  REDIS_ADDR: {{ printf "%s-redis:6379" (include "dada-cloud-console.fullname" .) | quote }}
+{{- end }}
+{{- with .Values.redis.cacheCostTTLSeconds }}
+  CACHE_COST_TTL_SECONDS: {{ . | quote }}
+{{- end }}
   BILLING_MARGIN: {{ .Values.billing.margin | default "1.4" | quote }}
   BILLING_MIN_UTILIZATION: {{ .Values.billing.minUtilization | default "0.30" | quote }}
   CROSSPLANE_SECRET_NAMESPACE: {{ .Values.rbac.crossplaneSecretNamespace | default "crossplane-system" | quote }}

@@ -53,6 +53,24 @@ billing:
   margin: "1.4"
   minUtilization: "0.30"
 
+# Redis-backed fail-open cache-aside for read-heavy endpoints (backend
+# internal/cache). When enabled the backend gets REDIS_ADDR pointed at the
+# in-chart redis Service; when disabled the cache is a no-op passthrough.
+# Ephemeral by design: no persistence (save/appendonly off), allkeys-lru
+# eviction. The cache is a latency optimization, never a source of truth.
+redis:
+  enabled: true
+  image: "redis:7.4-alpine"
+  maxmemory: "128mb"
+  cacheCostTTLSeconds: "60"
+  resources:
+    requests:
+      cpu: "10m"
+      memory: "32Mi"
+    limits:
+      cpu: "200m"
+      memory: "160Mi"
+
 backend:
   enabled: true
   replicaCount: 1
