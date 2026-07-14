@@ -354,7 +354,7 @@ func Load() (*Config, error) {
 		PrometheusQueryPass:       getEnv("PROMETHEUS_QUERY_PASS", ""),
 		OpenCostURL:               getEnv("OPENCOST_URL", ""),
 		RedisAddr:                 getEnv("REDIS_ADDR", ""),
-		CacheCostTTL:              time.Duration(getEnvInt64("CACHE_COST_TTL_SECONDS", 60)) * time.Second,
+		CacheCostTTL:              time.Duration(getEnvInt64("CACHE_COST_TTL_SECONDS", 300)) * time.Second,
 		BillingMargin:             getEnvFloat("BILLING_MARGIN", 1.4),
 		BillingMinUtilization:     getEnvFloat("BILLING_MIN_UTILIZATION", 0.30),
 		UserMetricsQueryURL:       getEnv("USER_METRICS_QUERY_URL", ""),

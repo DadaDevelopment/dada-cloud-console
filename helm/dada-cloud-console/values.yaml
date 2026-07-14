@@ -62,7 +62,7 @@ redis:
   enabled: true
   image: "redis:7.4-alpine"
   maxmemory: "128mb"
-  cacheCostTTLSeconds: "60"
+  cacheCostTTLSeconds: "300"
   resources:
     requests:
       cpu: "10m"
