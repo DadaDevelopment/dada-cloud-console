@@ -13,6 +13,7 @@ const MARKETING_PATHS = new Set([
   "/databases",
   "/storage",
   "/pricing",
+  "/analog-vercel",
   "/developer",
 ]);
 

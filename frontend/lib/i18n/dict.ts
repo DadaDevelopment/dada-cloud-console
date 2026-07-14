@@ -101,6 +101,14 @@ export interface Dict {
     faqTitle: string;
     faq: Faq[];
   };
+  vercelAlt: {
+    heroTitle: string;
+    heroSubtitle: string;
+    featuresTitle: string;
+    features: Feature[];
+    faqTitle: string;
+    faq: Faq[];
+  };
   databases: {
     heroTitle: string;
     heroSubtitle: string;
@@ -265,6 +273,28 @@ const ru: Dict = {
       { q: "Что будет с контейнерами, которые уже работают на сервере?", a: "Discovery покажет их в режиме только чтения. Если решите импортировать — каждый сервис станет отдельным приложением со своими логами и метриками, тома с данными сохранятся." },
       { q: "Можно вести серверы нескольких клиентов в одной панели?", a: "Да, это основной сценарий для агентств: сервер каждого клиента подключается отдельно, а деплой, логи и мониторинг видны из одной панели." },
       { q: "Обязательно переносить сервер, если он уже работает?", a: "Нет. Можно подключить существующий сервер как есть — переносить ничего не нужно. Либо закажите у нас новую VM, если хотите начать с чистого листа." },
+    ],
+  },
+  vercelAlt: {
+    heroTitle: "Аналог Vercel, который работает в России",
+    heroSubtitle:
+      "Vercel и Railway удобны, но оплатить их российской картой и держать данные в РФ не выйдет. Dada Cloud закрывает ровно этот сценарий: подключаете GitHub-репозиторий, пуш — и через минуты живой HTTPS-адрес. Без VPN, оплата рублями, серверы в России.",
+    featuresTitle: "Почему на Dada Cloud переходят с Vercel и Railway",
+    features: [
+      { title: "Оплата рублёвой картой", desc: "Российская карта, счёт и закрывающие документы. Не нужны зарубежная карта, посредники и обходные схемы оплаты подписки." },
+      { title: "Работает без VPN", desc: "И панель, и задеплоенные приложения открываются из России напрямую — ни вам, ни вашим пользователям не нужен VPN, чтобы зайти." },
+      { title: "Данные в России (152-ФЗ)", desc: "Приложения и базы размещаются на серверах в РФ — это то, что требует закон о персональных данных и чего зарубежный хостинг структурно закрыть не может." },
+      { title: "Деплой из GitHub, как вы привыкли", desc: "Тот же флоу, что на Vercel: подключаете репозиторий, пуш в основную ветку — автоматическая пересборка и деплой. Фреймворк определяется сам." },
+      { title: "HTTPS-домен из коробки", desc: "Сразу после деплоя приложение доступно по адресу с валидным TLS-сертификатом. Свой домен подключается в пару шагов, сертификат выпускается автоматически." },
+      { title: "Postgres и хранилище рядом", desc: "Не только фронтенд: управляемый PostgreSQL и S3-хранилище создаются рядом с приложением, строка подключения прокидывается в сервис сама." },
+    ],
+    faqTitle: "Vercel и Россия — частые вопросы",
+    faq: [
+      { q: "Работает ли Vercel в России?", a: "Сам сайт и задеплоенные проекты чаще всего открываются, но оплатить платный тариф российской картой нельзя, а данные хранятся за рубежом — что не соответствует требованиям 152-ФЗ для персональных данных россиян. Dada Cloud решает обе проблемы: оплата рублями и серверы в РФ." },
+      { q: "Чем заменить Vercel для оплаты рублями?", a: "Dada Cloud — российская платформа с тем же сценарием «из GitHub в прод»: оплата рублёвой картой, счёт и закрывающие документы для юрлиц, без зарубежных карт и посредников." },
+      { q: "Нужно ли переписывать проект при переходе с Vercel?", a: "Нет. Вы подключаете тот же GitHub-репозиторий, платформа сама определяет фреймворк и собирает проект. Пуш в основную ветку пересобирает и деплоит приложение автоматически." },
+      { q: "Есть ли база данных, как в связке Vercel + внешний Postgres?", a: "Да. Управляемый PostgreSQL создаётся прямо в платформе рядом с приложением, DATABASE_URL прокидывается в сервис автоматически — отдельный внешний провайдер базы не нужен." },
+      { q: "Данные точно хранятся в России?", a: "Да. Приложения и базы размещаются на серверах в РФ, что соответствует требованиям 152-ФЗ и 242-ФЗ о хранении персональных данных граждан России на территории страны." },
     ],
   },
   databases: {
@@ -445,6 +475,7 @@ const ru: Dict = {
       { label: "Серверы", href: "/cloud-servers" },
       { label: "Базы данных", href: "/databases" },
       { label: "Объектное хранилище", href: "/storage" },
+      { label: "Аналог Vercel", href: "/analog-vercel" },
       { label: "Цены", href: "/pricing" },
     ],
     companyTitle: "Компания",
@@ -579,6 +610,28 @@ const en: Dict = {
       { q: "What happens to containers already running on the server?", a: "Discovery lists them read-only. If you choose to import, each service becomes its own application with its own logs and metrics, and data volumes are preserved." },
       { q: "Can I run multiple clients' servers from one panel?", a: "Yes — that's the main agency scenario: each client's server connects separately, and deploys, logs and monitoring all show up in one panel." },
       { q: "Do I have to migrate my server if it already works?", a: "No. You can connect the existing server as-is — nothing to migrate. Or order a fresh VM from us if you'd rather start clean." },
+    ],
+  },
+  vercelAlt: {
+    heroTitle: "A Vercel alternative that works in Russia",
+    heroSubtitle:
+      "Vercel and Railway are convenient, but you can't pay for them with a Russian card or keep data inside Russia. Dada Cloud covers exactly that: connect a GitHub repo, push, and get a live HTTPS URL in minutes. No VPN, ruble payments, servers in Russia.",
+    featuresTitle: "Why teams move from Vercel and Railway",
+    features: [
+      { title: "Pay with a Russian card", desc: "A Russian card, an invoice and closing documents. No foreign card, intermediaries or workarounds to pay for the subscription." },
+      { title: "Works without a VPN", desc: "Both the panel and your deployed apps open from Russia directly — neither you nor your users need a VPN to reach them." },
+      { title: "Data in Russia (152-FZ)", desc: "Apps and databases run on servers inside Russia — what the personal-data law requires and what foreign hosting structurally can't offer." },
+      { title: "Deploy from GitHub, the way you know", desc: "The same flow as Vercel: connect a repo, push to the main branch, and it rebuilds and deploys automatically. The framework is detected for you." },
+      { title: "HTTPS domain out of the box", desc: "Right after the deploy the app is reachable over a valid TLS certificate. Your own domain connects in a couple of steps, the certificate is issued automatically." },
+      { title: "Postgres and storage alongside", desc: "Not just the frontend: managed PostgreSQL and S3 storage are created next to the app, and the connection string is injected into the service automatically." },
+    ],
+    faqTitle: "Vercel and Russia — FAQ",
+    faq: [
+      { q: "Does Vercel work in Russia?", a: "The site and deployed projects usually open, but you can't pay for a paid plan with a Russian card, and data is stored abroad — which doesn't meet 152-FZ requirements for Russian citizens' personal data. Dada Cloud solves both: ruble payments and servers in Russia." },
+      { q: "What can replace Vercel for ruble payments?", a: "Dada Cloud is a Russian platform with the same GitHub-to-production flow: pay with a Russian card, get an invoice and closing documents for legal entities, no foreign cards or intermediaries." },
+      { q: "Do I have to rewrite my project when moving from Vercel?", a: "No. You connect the same GitHub repo, the platform detects the framework and builds the project. A push to the main branch rebuilds and deploys the app automatically." },
+      { q: "Is there a database, like Vercel plus an external Postgres?", a: "Yes. Managed PostgreSQL is created inside the platform next to the app, and DATABASE_URL is injected into the service automatically — no separate external database provider needed." },
+      { q: "Is data really stored in Russia?", a: "Yes. Apps and databases run on servers in Russia, meeting the 152-FZ and 242-FZ requirements to store Russian citizens' personal data within the country." },
     ],
   },
   databases: {
@@ -759,6 +812,7 @@ const en: Dict = {
       { label: "Servers", href: "/cloud-servers" },
       { label: "Databases", href: "/databases" },
       { label: "Object storage", href: "/storage" },
+      { label: "Vercel alternative", href: "/analog-vercel" },
       { label: "Pricing", href: "/pricing" },
     ],
     companyTitle: "Company",
