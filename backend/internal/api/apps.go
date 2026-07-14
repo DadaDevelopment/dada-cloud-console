@@ -201,6 +201,35 @@ func defaultPortForFramework(framework string) int {
 	return 8080
 }
 
+// datastorePorts are well-known TCP ports that speak a binary protocol, not
+// HTTP: redis 6379, postgres 5432/5433, mysql/mariadb 3306, mssql 1433,
+// mongodb 27017, rabbitmq amqp 5672, kafka 9092, memcached 11211, zookeeper
+// 2181, cockroachdb 26257. An app listening only on one of these cannot answer
+// an HTTP request, so auto-attaching a default surrogate hostname produces a
+// guaranteed 502 and an attack-log-noise magnet (see top-decker redis:latest).
+// Deploys on these ports skip the auto domain; the user gets an internal
+// service instead.
+var datastorePorts = map[int]bool{
+	6379:  true,
+	5432:  true,
+	5433:  true,
+	3306:  true,
+	1433:  true,
+	27017: true,
+	5672:  true,
+	9092:  true,
+	11211: true,
+	2181:  true,
+	26257: true,
+}
+
+// servesHTTP reports whether an app on servicePort should get an auto public
+// hostname. Conservative: only ports known to be non-HTTP datastores are
+// excluded, so ordinary web apps on any other port keep their default domain.
+func servesHTTP(servicePort int) bool {
+	return !datastorePorts[servicePort]
+}
+
 type createAppRequest struct {
 	Name         string        `json:"name"`
 	Image        string        `json:"image"`
@@ -466,7 +495,7 @@ func (h *Handler) CreateApp(c *gin.Context) {
 	}
 
 	var defaultHostname string
-	if !isCompose && h.cfg.DefaultDomainEnabled && h.cfg.DefaultDomainBase != "" {
+	if !isCompose && servesHTTP(req.Port) && h.cfg.DefaultDomainEnabled && h.cfg.DefaultDomainBase != "" {
 		if suffix, sErr := randomHostSuffix(); sErr == nil {
 			defaultHostname = buildDefaultHostname(h.cfg.DefaultDomainBase, req.Name, suffix)
 		}
