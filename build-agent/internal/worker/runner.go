@@ -869,6 +869,19 @@ func (r *Runner) gitCreds(ctx context.Context, repo *db.Repo, b *db.Build) (toke
 			return "", "", fmt.Errorf("github repo missing installation id")
 		}
 		tok, terr := r.github.InstallToken(ctx, repo.InstallationID)
+		if errors.Is(terr, github.ErrInstallationGone) {
+			liveID, lerr := r.liveInstallationForOwner(ctx, repo.RepoFullName)
+			if lerr != nil {
+				return "", "", fmt.Errorf("installation %d revoked and no live installation for %s: %w",
+					repo.InstallationID, repo.RepoFullName, lerr)
+			}
+			log.Warn().Str("repo", repo.RepoFullName).
+				Int64("dead_installation", repo.InstallationID).
+				Int64("live_installation", liveID).
+				Msg("stored installation revoked; re-resolved live installation")
+			repo.InstallationID = liveID
+			tok, terr = r.github.InstallToken(ctx, liveID)
+		}
 		if terr != nil {
 			return "", "", terr
 		}
@@ -891,6 +904,35 @@ func (r *Runner) gitCreds(ctx context.Context, repo *db.Repo, b *db.Build) (toke
 	default:
 		return "", "", fmt.Errorf("unknown provider %q", repo.Provider)
 	}
+}
+
+// liveInstallationForOwner finds this App's current installation id for the owner
+// (org/user) of repoFullName by listing every live installation and matching the
+// account slug case-insensitively.
+//
+// It is the self-heal path for a revoked installation: when a user uninstalls and
+// reinstalls the GitHub App, GitHub mints a NEW installation id, but the app's
+// stored git_repos.installation_id still references the OLD one, whose token mint
+// now 404s (ErrInstallationGone). Left unhandled this silently fails every build
+// and strands the user — the exact activation-cliff class of bug. Re-resolving the
+// live installation here lets the build proceed on the reinstalled App without the
+// user touching anything. Returns an error if the App has no live installation for
+// that owner (a genuine full uninstall, which must surface).
+func (r *Runner) liveInstallationForOwner(ctx context.Context, repoFullName string) (int64, error) {
+	owner, _, ok := strings.Cut(repoFullName, "/")
+	if !ok || owner == "" {
+		return 0, fmt.Errorf("cannot derive owner from repo %q", repoFullName)
+	}
+	installs, err := r.github.ListInstallations(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("list installations: %w", err)
+	}
+	for _, in := range installs {
+		if strings.EqualFold(in.AccountLogin, owner) {
+			return in.InstallationID, nil
+		}
+	}
+	return 0, fmt.Errorf("no live installation for owner %q", owner)
 }
 
 // emit fans a log line out to the WS hub and persists it to builds_logs.

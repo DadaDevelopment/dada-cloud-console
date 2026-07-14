@@ -6,6 +6,7 @@ import (
 	"context"
 	"crypto/rsa"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -17,6 +18,13 @@ import (
 )
 
 const apiBase = "https://api.github.com"
+
+// ErrInstallationGone signals that GitHub no longer knows the installation id we
+// asked to mint a token for (HTTP 404) — the user uninstalled the App, so the id
+// stored on the repo is dead. Callers can catch this (errors.Is) and re-resolve
+// the App's current live installation for the repo's owner instead of failing the
+// build. See runner.gitCreds. This is the recurring reinstall-strands-the-user bug.
+var ErrInstallationGone = errors.New("github installation revoked")
 
 // App is the GitHub App surface build-agent needs.
 type App interface {
@@ -139,6 +147,9 @@ func (c *Client) InstallToken(ctx context.Context, installationID int64) (string
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusCreated {
+		if resp.StatusCode == http.StatusNotFound {
+			return "", fmt.Errorf("install token: %s: %w", readErr(resp), ErrInstallationGone)
+		}
 		return "", fmt.Errorf("install token: %s", readErr(resp))
 	}
 
