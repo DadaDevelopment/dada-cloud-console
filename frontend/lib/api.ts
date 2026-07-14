@@ -74,6 +74,7 @@ import type {
   CloudTaskResponse,
   CreateCloudTaskResponse,
   DeleteImpactResponse,
+  MoveImpactResponse,
 } from "./types";
 
 // Empty string → relative URLs → requests go through the ingress proxy.
@@ -347,6 +348,19 @@ export const appsApi = {
     apiFetch<OperationResponse>(
       `/api/v1/projects/${projectId}/environments/${envId}/apps/${appName}`,
       { method: "DELETE" }
+    ),
+
+  getMoveImpact: (projectId: string, envId: string, appName: string, targetProjectId: string) =>
+    apiFetch<MoveImpactResponse>(
+      `/api/v1/projects/${projectId}/environments/${envId}/apps/${appName}/move-impact?target_project_id=${encodeURIComponent(
+        targetProjectId
+      )}`
+    ),
+
+  move: (projectId: string, envId: string, appName: string, targetProjectId: string) =>
+    apiFetch<OperationResponse>(
+      `/api/v1/projects/${projectId}/environments/${envId}/apps/${appName}/move`,
+      { method: "POST", body: { target_project_id: targetProjectId } }
     ),
 };
 

@@ -117,6 +117,25 @@ func (rv *ResourcesValues) Remove(kind, name string) bool {
 	return removed
 }
 
+// RemoveKind drops every manifest of the given kind, returning how many were
+// removed. Used by MoveApp's stateful guard to defensively strip any
+// ServiceDatabaseV2 entry before copying an app's resources.values.yaml to
+// another project — Phase 1 never carries a stateful child across namespaces.
+func (rv *ResourcesValues) RemoveKind(kind string) int {
+	out := rv.Manifests[:0]
+	removed := 0
+	for i := range rv.Manifests {
+		ek, _ := manifestKey(&rv.Manifests[i])
+		if ek == kind {
+			removed++
+			continue
+		}
+		out = append(out, rv.Manifests[i])
+	}
+	rv.Manifests = out
+	return removed
+}
+
 // Marshal renders the file back to YAML with a top-level "manifests:" key. When
 // the list is empty it emits "manifests: []" so the file is still valid.
 func (rv *ResourcesValues) Marshal() (string, error) {

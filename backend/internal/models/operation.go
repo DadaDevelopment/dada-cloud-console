@@ -146,6 +146,17 @@ type DeleteAppPayload struct {
 // op.ProjectID.
 type DeleteProjectPayload struct{}
 
+// MoveAppPayload is the typed payload for MoveApp operations (ADR-014 Phase 1:
+// stateless move across projects). The source project_id/environment_id are the
+// operation row's own columns; this payload only carries the destination. JSON
+// tags are a hard contract with gitops-agent's doMoveApp worker — do NOT rename
+// them.
+type MoveAppPayload struct {
+	AppName         string    `json:"app_name"`
+	TargetProjectID uuid.UUID `json:"target_project_id"`
+	TargetEnvID     uuid.UUID `json:"target_env_id"`
+}
+
 // DiscoverWorkloadPayload is the typed payload for DiscoverWorkload operations:
 // a read-only inventory of an enrolled VM's running containers/volumes via the
 // Portainer docker proxy (no SSH). EndpointID is the VM's Portainer endpoint.

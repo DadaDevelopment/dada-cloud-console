@@ -170,6 +170,7 @@ func (h *Handler) consoleImpact(ctx context.Context, projectID, envID uuid.UUID,
 		   AND (
 		        summary_json->>'app_ref'             = $3
 		     OR summary_json->>'attached_app'        = $3
+		     OR summary_json->>'app_name'            = $3
 		     OR summary_json->'spec'->>'appRef'       = $3
 		     OR summary_json->'spec'->>'attachedApp'  = $3
 		     OR summary_json->'spec'->>'serviceName'  = $3

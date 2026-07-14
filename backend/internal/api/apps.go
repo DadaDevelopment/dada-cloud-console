@@ -17,19 +17,6 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// ListApps returns all App resources in a project environment.
-//
-// @ID          listApps
-// @Summary     List apps in an environment
-// @Description Returns all App resources (Helm or compose) in a project environment, with their live phase/status. Read-only.
-// @Tags        app
-// @Produce     json
-// @Security    BearerAuth
-// @Param       projectId path     string true "Project UUID"
-// @Param       envId     path     string true "Environment UUID"
-// @Success     200       {object} map[string]interface{} "object with an apps array of ResourceSnapshot"
-// @Failure     401       {object} map[string]string
-// @Failure     404       {object} map[string]string
 // FillRepoFullName injects repo_full_name (from git_repos, keyed by app name)
 // into each app's summary when the snapshot summary does not already carry it.
 // A deployed app's resource-snapshot summary omits the linked repo, so without
@@ -56,6 +43,19 @@ func FillRepoFullName(apps []models.ResourceSnapshot, repoByName map[string]stri
 	}
 }
 
+// ListApps returns all App resources in a project environment.
+//
+// @ID          listApps
+// @Summary     List apps in an environment
+// @Description Returns all App resources (Helm or compose) in a project environment, with their live phase/status. Read-only.
+// @Tags        app
+// @Produce     json
+// @Security    BearerAuth
+// @Param       projectId path     string true "Project UUID"
+// @Param       envId     path     string true "Environment UUID"
+// @Success     200       {object} map[string]interface{} "object with an apps array of ResourceSnapshot"
+// @Failure     401       {object} map[string]string
+// @Failure     404       {object} map[string]string
 // @Router      /projects/{projectId}/environments/{envId}/apps [get]
 func (h *Handler) ListApps(c *gin.Context) {
 	claims, ok := auth.GetClaims(c)

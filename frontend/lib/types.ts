@@ -620,6 +620,30 @@ export interface DeleteImpactResponse {
   clusterOnly: number;
 }
 
+export interface MoveImpactItem {
+  kind: string;
+  name: string;
+  group?: string;
+}
+
+export interface MoveImpactBlocker {
+  kind: string;
+  name: string;
+  reason: string;
+}
+
+export interface MoveImpactResponse {
+  app: string;
+  src_project: string;
+  target_project: string;
+  target_env_id: string;
+  target_namespace: string;
+  movable: MoveImpactItem[];
+  blockers: MoveImpactBlocker[];
+  name_collision: boolean;
+  can_move: boolean;
+}
+
 export interface MLflowModelVersion {
   name: string;
   version: string;

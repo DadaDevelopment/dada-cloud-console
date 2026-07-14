@@ -190,6 +190,8 @@ func (w *DBWatcher) dispatch(ctx context.Context, op db.Operation) error {
 		return w.doCreateApp(ctx, op)
 	case "DeleteApp":
 		return w.doDeleteApp(ctx, op)
+	case "MoveApp":
+		return w.doMoveApp(ctx, op)
 	case "DeleteProject":
 		return w.doDeleteProject(ctx, op)
 	case "DeployImageVersion":
@@ -933,14 +935,16 @@ func (w *DBWatcher) doDeleteApp(ctx context.Context, op db.Operation) error {
 	// PublicApi, S3Bucket, AIModel) so quota/UI state reflects the cascade. The
 	// owning-app link lives under different summary keys depending on the writer:
 	// API writers stamp a top-level app_ref/attached_app; the gitwatcher
-	// reverse-sync stamps the CR spec (spec.appRef / spec.attachedApp /
-	// spec.serviceName). Match any of them, scoped to this project+env.
+	// reverse-sync stamps a top-level app_name; some CRs carry the link in
+	// spec (spec.appRef / spec.attachedApp / spec.serviceName). Match any of
+	// them, scoped to this project+env.
 	_, _ = w.pool.Exec(ctx,
 		`DELETE FROM resource_snapshots
 		 WHERE project_id = $1 AND environment_id = $2 AND kind <> 'App'
 		   AND (
 		        summary_json->>'app_ref'            = $3
 		     OR summary_json->>'attached_app'       = $3
+		     OR summary_json->>'app_name'           = $3
 		     OR summary_json->'spec'->>'appRef'     = $3
 		     OR summary_json->'spec'->>'attachedApp' = $3
 		     OR summary_json->'spec'->>'serviceName' = $3

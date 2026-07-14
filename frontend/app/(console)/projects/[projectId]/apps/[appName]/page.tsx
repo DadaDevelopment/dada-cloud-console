@@ -21,6 +21,7 @@ import { classifyVMResource } from "@/lib/vm-resources";
 import { IngressDetail } from "@/components/resources/ingress-detail";
 import { ServiceDatabaseDetail } from "@/components/resources/service-database-detail";
 import { DeleteImpactModal, deleteImpactTargetKey, type DeleteImpactTarget } from "@/components/resources/delete-impact-modal";
+import { MoveAppModal } from "@/components/resources/move-app-modal";
 
 interface DomainForm {
   fqdn: string;
@@ -68,6 +69,7 @@ export default function AppDetailPage() {
   const [domainSubmitError, setDomainSubmitError] = useState<string | null>(null);
 
   const [deleteTarget, setDeleteTarget] = useState<DeleteImpactTarget | null>(null);
+  const [isMoveModalOpen, setIsMoveModalOpen] = useState(false);
 
   useEffect(() => {
     if (!envId) return;
@@ -174,6 +176,12 @@ export default function AppDetailPage() {
 
   function handleAppDeleted(result: OperationResponse) {
     setDeleteTarget(null);
+    const opId = result.operation?.id;
+    router.push(`/projects/${projectId}/operations${opId ? `?highlight=${opId}` : ""}`);
+  }
+
+  function handleAppMoved(result: OperationResponse) {
+    setIsMoveModalOpen(false);
     const opId = result.operation?.id;
     router.push(`/projects/${projectId}/operations${opId ? `?highlight=${opId}` : ""}`);
   }
@@ -518,12 +526,20 @@ export default function AppDetailPage() {
               <h2 className="text-sm font-semibold text-red-700 dark:text-red-400">{t("apps.dangerZone.title")}</h2>
               <p className="mt-0.5 text-sm text-gray-500 dark:text-gray-400">{t("apps.dangerZone.subtitle")}</p>
             </div>
-            <button
-              onClick={() => setDeleteTarget({ kind: "app", projectId, envId, appName })}
-              className="inline-flex items-center gap-2 rounded-lg border border-red-200 dark:border-red-900 bg-white dark:bg-gray-900 px-3 py-2 text-sm font-medium text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/30 transition-colors shadow-sm"
-            >
-              {t("apps.dangerZone.delete")}
-            </button>
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                onClick={() => setIsMoveModalOpen(true)}
+                className="inline-flex items-center gap-2 rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 px-3 py-2 text-sm font-medium text-gray-700 dark:text-gray-200 hover:border-blue-300 hover:text-blue-600 transition-colors shadow-sm"
+              >
+                {t("moveApp.button")}
+              </button>
+              <button
+                onClick={() => setDeleteTarget({ kind: "app", projectId, envId, appName })}
+                className="inline-flex items-center gap-2 rounded-lg border border-red-200 dark:border-red-900 bg-white dark:bg-gray-900 px-3 py-2 text-sm font-medium text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/30 transition-colors shadow-sm"
+              >
+                {t("apps.dangerZone.delete")}
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -669,6 +685,16 @@ export default function AppDetailPage() {
           target={deleteTarget}
           onClose={() => setDeleteTarget(null)}
           onDeleted={handleAppDeleted}
+        />
+      )}
+
+      {isMoveModalOpen && (
+        <MoveAppModal
+          projectId={projectId}
+          envId={envId}
+          appName={appName}
+          onClose={() => setIsMoveModalOpen(false)}
+          onMoved={handleAppMoved}
         />
       )}
     </div>

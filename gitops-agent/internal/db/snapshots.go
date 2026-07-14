@@ -138,6 +138,54 @@ func DeleteSnapshotByID(ctx context.Context, pool *pgxpool.Pool, id uuid.UUID) e
 	return nil
 }
 
+// AppSnapshotRef identifies one resource_snapshots row by id, kind, and name —
+// used by MoveApp's guard (does a ServiceDatabaseV2 child exist?) and repoint
+// (which rows must move to the target project/environment).
+type AppSnapshotRef struct {
+	ID   uuid.UUID
+	Kind string
+	Name string
+}
+
+// AppMoveSnapshots returns the App row itself plus every child resource_snapshots
+// row owned by appName in (projectID, environmentID). It mirrors doDeleteApp's
+// cascade WHERE clause (owning-app signal: top-level app_ref/attached_app, or CR
+// spec.appRef/spec.attachedApp/spec.serviceName), with the App row added by name
+// match. Used both as MoveApp's defense-in-depth stateful guard (does a
+// ServiceDatabaseV2 entry exist?) and as the exact row set its snapshot-repoint
+// step must move.
+func AppMoveSnapshots(ctx context.Context, pool *pgxpool.Pool, projectID, environmentID uuid.UUID, appName string) ([]AppSnapshotRef, error) {
+	rows, err := pool.Query(ctx, `
+		SELECT id, kind, name FROM resource_snapshots
+		WHERE project_id = $1 AND environment_id = $2
+		  AND (
+		       (kind = 'App' AND name = $3)
+		    OR (kind <> 'App' AND (
+		           summary_json->>'app_ref'             = $3
+		        OR summary_json->>'attached_app'        = $3
+		        OR summary_json->>'app_name'            = $3
+		        OR summary_json->'spec'->>'appRef'       = $3
+		        OR summary_json->'spec'->>'attachedApp'  = $3
+		        OR summary_json->'spec'->>'serviceName'  = $3
+		       ))
+		  )
+	`, projectID, environmentID, appName)
+	if err != nil {
+		return nil, fmt.Errorf("query app move snapshots: %w", err)
+	}
+	defer rows.Close()
+
+	var out []AppSnapshotRef
+	for rows.Next() {
+		var ref AppSnapshotRef
+		if err := rows.Scan(&ref.ID, &ref.Kind, &ref.Name); err != nil {
+			return nil, fmt.Errorf("scan app move snapshot: %w", err)
+		}
+		out = append(out, ref)
+	}
+	return out, rows.Err()
+}
+
 // UpdateLiveStatus mirrors live cluster state onto an existing snapshot of the
 // given kind: it sets phase and merges the given fields into summary_json (jsonb
 // concat preserves git_sha/message etc.). It only touches rows that already
