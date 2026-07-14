@@ -93,18 +93,22 @@ func (w *DBWatcher) doMoveApp(ctx context.Context, op db.Operation) error {
 		return fmt.Errorf("src app snapshot lookup: %w", err)
 	}
 	var desired struct {
-		Image     string         `json:"image"`
-		Framework string         `json:"framework"`
-		Port      int            `json:"port"`
-		Replicas  int            `json:"replicas"`
-		Profile   string         `json:"profile"`
-		Volume    map[string]any `json:"volume"`
+		Image        string         `json:"image"`
+		Framework    string         `json:"framework"`
+		Port         int            `json:"port"`
+		Replicas     int            `json:"replicas"`
+		Profile      string         `json:"profile"`
+		WorkloadType string         `json:"workload_type"`
+		Volume       map[string]any `json:"volume"`
 	}
 	if err := json.Unmarshal(summaryRaw, &desired); err != nil {
 		return fmt.Errorf("parse src app snapshot: %w", err)
 	}
 	if len(desired.Volume) > 0 {
 		return fmt.Errorf("move app %q: has persistent storage attached; Phase 1 cannot move stateful apps (ADR-014 Phase 2)", p.AppName)
+	}
+	if desired.WorkloadType == "StatefulSet" {
+		return fmt.Errorf("move app %q: is a StatefulSet; Phase 1 cannot move stateful apps (ADR-014 Phase 2)", p.AppName)
 	}
 
 	moveSnapshots, err := db.AppMoveSnapshots(ctx, w.pool, op.ProjectID, srcEnvID, p.AppName)

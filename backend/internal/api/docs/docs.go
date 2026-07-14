@@ -10595,6 +10595,9 @@ const docTemplate = `{
                 },
                 "volume": {
                     "$ref": "#/definitions/internal_api.appVolumeReq"
+                },
+                "workload_type": {
+                    "type": "string"
                 }
             }
         },

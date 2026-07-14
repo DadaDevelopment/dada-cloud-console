@@ -25,6 +25,7 @@ interface CreateAppForm {
   port: number;
   replicas: number;
   profile: string;
+  workloadType: string;
 }
 
 const APP_NAME_RE = /^([a-z0-9]|[a-z0-9][a-z0-9-]{0,61}[a-z0-9])$/;
@@ -52,6 +53,7 @@ export default function AppsPage() {
     port: 8080,
     replicas: 1,
     profile: "small",
+    workloadType: "Deployment",
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
@@ -114,9 +116,10 @@ export default function AppsPage() {
         port: form.port,
         replicas: form.replicas,
         profile: form.profile,
+        workload_type: form.workloadType,
       });
       setIsModalOpen(false);
-      setForm({ name: "", image: "", port: 8080, replicas: 1, profile: "small" });
+      setForm({ name: "", image: "", port: 8080, replicas: 1, profile: "small", workloadType: "Deployment" });
       void result;
       router.push(`/projects/${projectId}/apps/${form.name}`);
     } catch (err) {
@@ -288,6 +291,19 @@ export default function AppsPage() {
               <option value="medium">medium</option>
               <option value="large">large</option>
             </select>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-200">{t("apps.modal.create.workloadType.label")}</label>
+            <select
+              value={form.workloadType}
+              onChange={(e) => handleFormChange("workloadType", e.target.value)}
+              className="mt-1 block w-full rounded-lg border border-gray-300 dark:border-gray-700 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+            >
+              <option value="Deployment">{t("apps.modal.create.workloadType.deployment")}</option>
+              <option value="StatefulSet">{t("apps.modal.create.workloadType.statefulset")}</option>
+            </select>
+            <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">{t("apps.modal.create.workloadType.hint")}</p>
           </div>
 
           {submitError && (

@@ -713,6 +713,7 @@ func (w *DBWatcher) doCreateApp(ctx context.Context, op db.Operation) error {
 		Profile         string `json:"profile"`
 		AppServerName   string `json:"app_server_name"`
 		DefaultHostname string `json:"default_hostname"`
+		WorkloadType    string `json:"workload_type"`
 		Volume          *struct {
 			Path         string `json:"path"`
 			Size         string `json:"size"`
@@ -765,6 +766,7 @@ func (w *DBWatcher) doCreateApp(ctx context.Context, op db.Operation) error {
 		HelmRepoURL:        mgr.RepoURL(),
 		HelmTargetRevision: mgr.Branch(),
 		Env:                env.Plain,
+		WorkloadType:       p.WorkloadType,
 	}
 	if p.Volume != nil && p.Volume.Path != "" {
 		appSpec.VolumePath = p.Volume.Path
@@ -854,6 +856,9 @@ func (w *DBWatcher) doCreateApp(ctx context.Context, op db.Operation) error {
 	summary := map[string]any{
 		"image": p.Image, "framework": p.Framework, "port": p.Port, "replicas": p.Replicas,
 		"profile": p.Profile, "status": "Pending", "argo_name": argoName,
+	}
+	if p.WorkloadType != "" {
+		summary["workload_type"] = p.WorkloadType
 	}
 	if p.Volume != nil && p.Volume.Path != "" {
 		summary["volume"] = map[string]any{
@@ -1510,6 +1515,7 @@ func (w *DBWatcher) doDeployImageVersion(ctx context.Context, op db.Operation) e
 		appSpec.VolumeStorageClass = vsc
 	}
 	appSpec.ArgoName, _ = cur["argo_name"].(string)
+	appSpec.WorkloadType, _ = cur["workload_type"].(string)
 	if env.hasSecret() {
 		appSpec.SecretEnvName = renderer.AppEnvSecretName(p.AppName)
 		for k := range env.Secret {
@@ -1568,6 +1574,11 @@ func volumeFromSummary(cur map[string]any) (path, size, storageClass string) {
 	size, _ = v["size"].(string)
 	storageClass, _ = v["storage_class"].(string)
 	return path, size, storageClass
+}
+
+func workloadTypeFromSummary(cur map[string]any) string {
+	wt, _ := cur["workload_type"].(string)
+	return wt
 }
 
 // doUpdateAppStorage attaches or resizes an app's persistent data directory. It
@@ -1642,6 +1653,7 @@ func (w *DBWatcher) doUpdateAppStorage(ctx context.Context, op db.Operation) err
 		HelmRepoURL:        mgr.RepoURL(),
 		HelmTargetRevision: mgr.Branch(),
 		Env:                env.Plain,
+		WorkloadType:       workloadTypeFromSummary(cur),
 		VolumePath:         p.Volume.Path,
 		VolumeSize:         p.Volume.Size,
 		VolumeStorageClass: p.Volume.StorageClass,

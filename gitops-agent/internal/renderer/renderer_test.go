@@ -374,6 +374,29 @@ func TestRenderAppValuesNoVolumeOmitsPvc(t *testing.T) {
 	}
 }
 
+func TestRenderAppValuesWorkloadType(t *testing.T) {
+	got, err := renderer.RenderAppValues(renderer.AppSpec{
+		Image: "ghcr.io/dada-tuda/api-service:v1", Port: 8080, Replicas: 1, Profile: "small",
+		WorkloadType: "StatefulSet",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(got, "workloadType: StatefulSet") {
+		t.Errorf("expected workloadType: StatefulSet in values\nFull output:\n%s", got)
+	}
+
+	def, err := renderer.RenderAppValues(renderer.AppSpec{
+		Image: "ghcr.io/dada-tuda/api-service:v1", Port: 8080, Replicas: 1, Profile: "small",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if strings.Contains(def, "workloadType:") {
+		t.Errorf("expected workloadType omitted when empty (defaults to Deployment)\nFull output:\n%s", def)
+	}
+}
+
 func TestRenderAppValuesDigest(t *testing.T) {
 	got, err := renderer.RenderAppValues(renderer.AppSpec{
 		Image:    "nexus.dada-tuda.ru/ggrk52/magic-mirror@sha256:d1aceff1453361656f36ef154a5d7badead284272986e7d3f8148b360f66d1cb",

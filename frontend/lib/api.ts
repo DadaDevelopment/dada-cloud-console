@@ -274,6 +274,7 @@ export const appsApi = {
     port: number;
     replicas: number;
     profile: string;
+    workload_type?: string;
     volume?: { path: string; size: string; storage_class?: string };
   }) =>
     apiFetch<CreateAppResponse>(`/api/v1/projects/${projectId}/environments/${envId}/apps`, {

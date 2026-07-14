@@ -119,6 +119,7 @@ type AppSpec struct {
 	VolumePath         string
 	VolumeSize         string
 	VolumeStorageClass string
+	WorkloadType       string
 
 	// ResourcesOnly marks a resources-carrier owner app (no workload of its own):
 	// the per-project "service-databases-<project>" / "s3-buckets-<project>" charts
@@ -271,13 +272,14 @@ type commonPvc struct {
 }
 
 type commonValues struct {
-	Image       commonImage     `yaml:"image"`
-	ServicePort int             `yaml:"servicePort,omitempty"`
-	Replicas    int             `yaml:"replicas,omitempty"`
-	UseDotEnv   string          `yaml:"useDotEnv"`
-	Resources   commonResources `yaml:"resources"`
-	ExtraEnv    []commonEnvVar  `yaml:"extraEnv,omitempty"`
-	Pvc         *commonPvc      `yaml:"pvc,omitempty"`
+	Image        commonImage     `yaml:"image"`
+	ServicePort  int             `yaml:"servicePort,omitempty"`
+	Replicas     int             `yaml:"replicas,omitempty"`
+	UseDotEnv    string          `yaml:"useDotEnv"`
+	Resources    commonResources `yaml:"resources"`
+	ExtraEnv     []commonEnvVar  `yaml:"extraEnv,omitempty"`
+	Pvc          *commonPvc      `yaml:"pvc,omitempty"`
+	WorkloadType string          `yaml:"workloadType,omitempty"`
 }
 
 type appValuesFile struct {
@@ -321,11 +323,12 @@ func splitImageRef(image string) (name, tag string) {
 func RenderAppValues(spec AppSpec) (string, error) {
 	name, tag := splitImageRef(spec.Image)
 	values := appValuesFile{Common: commonValues{
-		Image:       commonImage{Name: name, Tag: tag},
-		ServicePort: spec.Port,
-		Replicas:    spec.Replicas,
-		UseDotEnv:   "false",
-		Resources:   profileResources(spec.Profile),
+		Image:        commonImage{Name: name, Tag: tag},
+		ServicePort:  spec.Port,
+		Replicas:     spec.Replicas,
+		UseDotEnv:    "false",
+		Resources:    profileResources(spec.Profile),
+		WorkloadType: spec.WorkloadType,
 	}}
 
 	if spec.VolumePath != "" {

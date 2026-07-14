@@ -84,6 +84,7 @@ type CreateAppPayload struct {
 	Replicas        int               `json:"replicas,omitempty"`
 	Profile         string            `json:"profile,omitempty"`
 	Volume          *AppVolume        `json:"volume,omitempty"`
+	WorkloadType    string            `json:"workload_type,omitempty"`
 	AppServerName   string            `json:"app_server_name,omitempty"`
 	EnvVars         map[string]string `json:"env_vars,omitempty"`
 	DefaultHostname string            `json:"default_hostname,omitempty"`

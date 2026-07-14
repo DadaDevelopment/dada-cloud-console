@@ -202,13 +202,14 @@ func defaultPortForFramework(framework string) int {
 }
 
 type createAppRequest struct {
-	Name      string        `json:"name"`
-	Image     string        `json:"image"`
-	Framework string        `json:"framework"`
-	Port      int           `json:"port"`
-	Replicas  int           `json:"replicas"`
-	Profile   string        `json:"profile"`
-	Volume    *appVolumeReq `json:"volume,omitempty"`
+	Name         string        `json:"name"`
+	Image        string        `json:"image"`
+	Framework    string        `json:"framework"`
+	Port         int           `json:"port"`
+	Replicas     int           `json:"replicas"`
+	Profile      string        `json:"profile"`
+	WorkloadType string        `json:"workload_type"`
+	Volume       *appVolumeReq `json:"volume,omitempty"`
 }
 
 // appVolumeReq is the wire form of a persistent data directory request. Empty
@@ -415,6 +416,14 @@ func (h *Handler) CreateApp(c *gin.Context) {
 			respondError(c, http.StatusBadRequest, "profile must be one of: small, medium, large")
 			return
 		}
+		validWorkloadTypes := map[string]bool{"": true, "Deployment": true, "StatefulSet": true}
+		if !validWorkloadTypes[req.WorkloadType] {
+			respondError(c, http.StatusBadRequest, "workload_type must be one of: Deployment, StatefulSet")
+			return
+		}
+	} else if req.WorkloadType != "" {
+		respondError(c, http.StatusBadRequest, "workload_type is only supported for Kubernetes apps")
+		return
 	}
 
 	appVolume, err := validateAppVolume(req.Volume)
@@ -471,6 +480,7 @@ func (h *Handler) CreateApp(c *gin.Context) {
 		Port:            req.Port,
 		Replicas:        req.Replicas,
 		Profile:         req.Profile,
+		WorkloadType:    req.WorkloadType,
 		Volume:          appVolume,
 		AppServerName:   appServerName,
 		DefaultHostname: defaultHostname,

@@ -86,6 +86,13 @@ export const apps: Messages = {
   "apps.modal.create.port.label": { ru: "Порт", en: "Port" },
   "apps.modal.create.replicas.label": { ru: "Реплики", en: "Replicas" },
   "apps.modal.create.profile.label": { ru: "Профиль", en: "Profile" },
+  "apps.modal.create.workloadType.label": { ru: "Тип нагрузки", en: "Workload type" },
+  "apps.modal.create.workloadType.deployment": { ru: "Deployment (без состояния)", en: "Deployment (stateless)" },
+  "apps.modal.create.workloadType.statefulset": { ru: "StatefulSet (с состоянием)", en: "StatefulSet (stateful)" },
+  "apps.modal.create.workloadType.hint": {
+    ru: "StatefulSet даёт стабильные имена подов и персональный диск на реплику (том — RWO). Deployment — общий том RWX.",
+    en: "StatefulSet gives stable pod identity and a per-replica disk (RWO volume). Deployment uses a shared RWX volume.",
+  },
   "apps.modal.create.submit": { ru: "Создать приложение", en: "Create App" },
   "apps.modal.create.submitting": { ru: "Создание…", en: "Creating…" },
   "apps.error.create": { ru: "Не удалось создать приложение", en: "Failed to create application" },
