@@ -23,6 +23,19 @@ spec:
               {{`{{ $value }}`}} {{`{{ $labels.action }}`}} operation(s) reached status=Failed in the
               last hour. A user create/attach (build, database, bucket, app server, domain)
               did not complete. Inspect operations.error_message for the reason.
+        - alert: DadaBuildFailed
+          expr: dada_builds_failed_recent > 0
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "DADA user-app build(s) failing"
+            description: >-
+              {{`{{ $value }}`}} user-app build(s) reached status=failed in the last hour.
+              The build is the first activation step; while it is red the user's app cannot
+              deploy and they see nothing — this is the activation cliff that stranded early
+              signups unnoticed. Inspect builds.error_message and the Jenkins dada-build
+              console for the cause, then reach out to unblock the user.
         - alert: DadaCustomDomainStuck
           expr: dada_domain_hostname_pending_age_seconds > {{ .Values.metrics.alerts.customDomainStuckSeconds }}
           for: 10m
