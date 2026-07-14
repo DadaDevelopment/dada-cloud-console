@@ -203,8 +203,8 @@ export const apps: Messages = {
     en: "No repository is connected to this app yet.",
   },
   "apps.deployments.unavailable": {
-    ru: "Подсистема сборки и деплоя не настроена в этом окружении. Подключите репозиторий и задеплойте build-agent для включения сборок из исходников.",
-    en: "The build & deploy subsystem is not configured in this environment yet. Connect a repository and deploy the build-agent to enable source builds.",
+    ru: "Сборка из исходного кода пока недоступна в этом окружении. Мы её настраиваем — попробуйте чуть позже.",
+    en: "Building from source isn't available in this environment yet. We're setting it up — please try again shortly.",
   },
   "apps.deployments.unavailable.link": { ru: "Управление Git и сборками", en: "Manage Git & Builds" },
   "apps.deployments.section.deployments": { ru: "Деплои", en: "Deployments" },

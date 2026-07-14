@@ -97,8 +97,8 @@ export const git: Messages = {
   "git.import.importButton": { ru: "Импорт", en: "Import" },
 
   "git.import.reposUnavailable": {
-    ru: "Подсистема сборки не настроена в этой среде — репозитории недоступны. Попробуйте снова после деплоя build-agent.",
-    en: "The build subsystem is not configured in this environment yet, so repositories can't be listed. Try again once the build-agent is deployed.",
+    ru: "Сборка временно недоступна в этой среде, поэтому список репозиториев не загрузился. Мы уже разбираемся — попробуйте чуть позже.",
+    en: "Builds are temporarily unavailable in this environment, so repositories couldn't be loaded. We're on it — please try again shortly.",
   },
   "git.import.noRepos": {
     ru: "В этом аккаунте нет доступных репозиториев.",
@@ -151,8 +151,8 @@ export const git: Messages = {
     en: "Failed to load installations",
   },
   "git.import.unavailable": {
-    ru: "Git-интеграция пока недоступна — подсистема сборки (build-agent) не задеплоена в этой среде.",
-    en: "Git integration isn't available yet — the build subsystem (build-agent) is not deployed in this environment.",
+    ru: "Подключение репозиториев временно недоступно в этой среде. Мы уже чиним — попробуйте чуть позже.",
+    en: "Connecting repositories is temporarily unavailable in this environment. We're fixing it — please try again shortly.",
   },
   "git.import.error.startInstall": { ru: "Не удалось начать установку", en: "Failed to start install" },
   "git.import.error.loadRepos": { ru: "Не удалось загрузить репозитории", en: "Failed to load repositories" },
