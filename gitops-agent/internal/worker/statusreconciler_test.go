@@ -68,6 +68,33 @@ func TestDesiredReplicas(t *testing.T) {
 	}
 }
 
+func TestReplicasOrDefault(t *testing.T) {
+	if got := replicasOrDefault(ptr32(3)); got != 3 {
+		t.Fatalf("explicit = %d, want 3", got)
+	}
+	if got := replicasOrDefault(nil); got != 1 {
+		t.Fatalf("nil = %d, want default 1", got)
+	}
+	if got := replicasOrDefault(ptr32(0)); got != 0 {
+		t.Fatalf("explicit zero = %d, want 0", got)
+	}
+}
+
+// appKeyFromMeta must match a StatefulSet/DaemonSet by the same rules as a
+// Deployment: label > argocd instance (env-stripped) > name minus -deploy.
+func TestAppKeyFromMeta(t *testing.T) {
+	envNames := map[string]bool{"prod": true}
+	if got := appKeyFromMeta(map[string]string{"argocd.argoproj.io/instance": "mimir-prod"}, "mimir", envNames); got != "mimir" {
+		t.Fatalf("sts instance strip = %q, want mimir", got)
+	}
+	if got := appKeyFromMeta(map[string]string{"dada.io/app": "fluent-bit"}, "fluent-bit", envNames); got != "fluent-bit" {
+		t.Fatalf("ds label = %q, want fluent-bit", got)
+	}
+	if got := appKeyFromMeta(nil, "kubelet-eviction", envNames); got != "kubelet-eviction" {
+		t.Fatalf("bare name = %q, want kubelet-eviction", got)
+	}
+}
+
 func TestPrimaryImage(t *testing.T) {
 	d := &appsv1.Deployment{Spec: appsv1.DeploymentSpec{Template: corev1.PodTemplateSpec{
 		ObjectMeta: metav1.ObjectMeta{},

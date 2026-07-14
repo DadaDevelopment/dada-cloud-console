@@ -37,6 +37,7 @@ rules:
     resources:
       - deployments
       - statefulsets
+      - daemonsets
     verbs: ["get", "list", "watch"]
   # AIModel live status comes from KServe InferenceService readiness.
   - apiGroups: ["serving.kserve.io"]

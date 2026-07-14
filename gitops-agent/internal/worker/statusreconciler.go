@@ -12,6 +12,7 @@ import (
 	"github.com/dada-tuda/console/gitops-agent/internal/git"
 	dadak8s "github.com/dada-tuda/console/gitops-agent/internal/k8s"
 	appsv1 "k8s.io/api/apps/v1"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -322,28 +323,25 @@ func (r *StatusReconciler) reconcile(ctx context.Context) map[snapKey]bool {
 		return nil
 	}
 
-	// One cluster-wide list: covers both env namespaces and override namespaces
-	// (e.g. dada-agent in argocd-prod). Unlabelled deployments fall back to name.
-	deps, err := r.client.AppsV1().Deployments("").List(ctx, metav1.ListOptions{})
-	if err != nil {
-		log.Warn().Err(err).Msg("status-reconciler: list deployments")
-		return nil
-	}
-
+	// One cluster-wide list per workload kind: covers both env namespaces and
+	// override namespaces (e.g. dada-agent in argocd-prod). Beyond Deployments we
+	// also mirror StatefulSets and DaemonSets so a legitimate chart whose primary
+	// workload is not a Deployment (fluent-bit DaemonSet, keycloak/mimir/jira
+	// StatefulSet, any GitHub/Docker image) reports its real live phase instead of
+	// being frozen at the git-watcher's "Unknown". Still strictly read-only.
 	agg := map[snapKey]*liveApp{}
-	for i := range deps.Items {
-		d := &deps.Items[i]
-		app := appKey(d, envNames)
+	acc := func(labels map[string]string, name, ns string, desired, ready int32, containers []corev1.Container) {
+		app := appKeyFromMeta(labels, name, envNames)
 		if app == "" {
-			continue
+			return
 		}
 		var envID uuid.UUID
-		if id, ok := envByNs[d.Namespace]; ok {
-			envID = id // deployment sits in its env's namespace (normal case)
+		if id, ok := envByNs[ns]; ok {
+			envID = id // workload sits in its env's namespace (normal case)
 		} else if ids := appEnvs[app]; len(ids) == 1 {
 			envID = ids[0] // namespace override, unambiguous app name
 		} else {
-			continue // not an app namespace, and name absent/ambiguous → skip
+			return // not an app namespace, and name absent/ambiguous → skip
 		}
 		k := snapKey{envID, app}
 		la := agg[k]
@@ -351,10 +349,39 @@ func (r *StatusReconciler) reconcile(ctx context.Context) map[snapKey]bool {
 			la = &liveApp{}
 			agg[k] = la
 		}
-		la.desired += desiredReplicas(d)
-		la.ready += d.Status.ReadyReplicas
+		la.desired += desired
+		la.ready += ready
 		if la.image == "" {
-			la.image = primaryImage(d)
+			la.image = imageFromContainers(containers)
+		}
+	}
+
+	if deps, err := r.client.AppsV1().Deployments("").List(ctx, metav1.ListOptions{}); err != nil {
+		log.Warn().Err(err).Msg("status-reconciler: list deployments")
+	} else {
+		for i := range deps.Items {
+			d := &deps.Items[i]
+			acc(d.Labels, d.Name, d.Namespace, desiredReplicas(d), d.Status.ReadyReplicas, d.Spec.Template.Spec.Containers)
+		}
+	}
+
+	if sts, err := r.client.AppsV1().StatefulSets("").List(ctx, metav1.ListOptions{}); err != nil {
+		log.Warn().Err(err).Msg("status-reconciler: list statefulsets")
+	} else {
+		for i := range sts.Items {
+			s := &sts.Items[i]
+			acc(s.Labels, s.Name, s.Namespace, replicasOrDefault(s.Spec.Replicas), s.Status.ReadyReplicas, s.Spec.Template.Spec.Containers)
+		}
+	}
+
+	// DaemonSet desired count is node-driven (DesiredNumberScheduled), not a
+	// spec.replicas; a DS matching zero nodes reads Stopped, which is honest.
+	if dss, err := r.client.AppsV1().DaemonSets("").List(ctx, metav1.ListOptions{}); err != nil {
+		log.Warn().Err(err).Msg("status-reconciler: list daemonsets")
+	} else {
+		for i := range dss.Items {
+			ds := &dss.Items[i]
+			acc(ds.Labels, ds.Name, ds.Namespace, ds.Status.DesiredNumberScheduled, ds.Status.NumberReady, ds.Spec.Template.Spec.Containers)
 		}
 	}
 
@@ -396,15 +423,21 @@ func (r *StatusReconciler) reconcile(ctx context.Context) map[snapKey]bool {
 //
 // Unmatched keys simply find no snapshot row and no-op, so a wrong guess is harmless.
 func appKey(d *appsv1.Deployment, envNames map[string]bool) string {
-	if v := d.Labels[appLabel]; v != "" {
+	return appKeyFromMeta(d.Labels, d.Name, envNames)
+}
+
+// appKeyFromMeta is the workload-kind-agnostic core of appKey: it takes only the
+// labels and name so it works for Deployments, StatefulSets, and DaemonSets alike.
+func appKeyFromMeta(labels map[string]string, name string, envNames map[string]bool) string {
+	if v := labels[appLabel]; v != "" {
 		return v
 	}
-	if inst := d.Labels["argocd.argoproj.io/instance"]; inst != "" {
+	if inst := labels["argocd.argoproj.io/instance"]; inst != "" {
 		if app := stripEnvSuffix(inst, envNames); app != "" {
 			return app
 		}
 	}
-	return strings.TrimSuffix(d.Name, "-deploy")
+	return strings.TrimSuffix(name, "-deploy")
 }
 
 // stripEnvSuffix turns "cloud-console-prod" → "cloud-console" when the trailing
@@ -419,22 +452,33 @@ func stripEnvSuffix(instance string, envNames map[string]bool) string {
 }
 
 func desiredReplicas(d *appsv1.Deployment) int32 {
-	if d.Spec.Replicas != nil {
-		return *d.Spec.Replicas
+	return replicasOrDefault(d.Spec.Replicas)
+}
+
+// replicasOrDefault mirrors the k8s controller default: a nil spec.replicas means
+// 1. Shared by Deployment and StatefulSet (both use *int32 spec.replicas).
+func replicasOrDefault(replicas *int32) int32 {
+	if replicas != nil {
+		return *replicas
 	}
-	return 1 // k8s default when unset
+	return 1
 }
 
 func primaryImage(d *appsv1.Deployment) string {
-	for _, c := range d.Spec.Template.Spec.Containers {
-		// Skip well-known logging sidecar so the card shows the app image.
+	return imageFromContainers(d.Spec.Template.Spec.Containers)
+}
+
+// imageFromContainers returns the app image for a pod template, skipping the
+// well-known logging sidecar so the card shows the app image, not the collector.
+func imageFromContainers(cs []corev1.Container) string {
+	for _, c := range cs {
 		if c.Name == "fluent-container" {
 			continue
 		}
 		return c.Image
 	}
-	if len(d.Spec.Template.Spec.Containers) > 0 {
-		return d.Spec.Template.Spec.Containers[0].Image
+	if len(cs) > 0 {
+		return cs[0].Image
 	}
 	return ""
 }
