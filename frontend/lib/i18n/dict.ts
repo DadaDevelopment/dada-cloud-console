@@ -41,6 +41,24 @@ type Step = { num: string; title: string; desc: string };
 type Scenario = { tag: string; title: string; desc: string };
 type Proof = { quote: string; author: string };
 type PricingTeaser = { name: string; price: string; tagline: string; bullets: string[]; highlight?: boolean };
+type MappingRow = { from: string; to: string; note: string };
+type MigrateGuide = {
+  heroTitle: string;
+  heroSubtitle: string;
+  stepsTitle: string;
+  stepsSubtitle: string;
+  steps: Step[];
+  mappingTitle: string;
+  mappingSubtitle: string;
+  mapping: MappingRow[];
+  notesTitle: string;
+  notes: Feature[];
+  faqTitle: string;
+  faq: Faq[];
+  ctaTitle: string;
+  ctaSubtitle: string;
+  ctaButton: string;
+};
 
 export interface Dict {
   nav: {
@@ -118,6 +136,7 @@ export interface Dict {
   flyIoAlt: AltPage;
   vibeCodingAlt: AltPage;
   telegramBotAlt: AltPage;
+  migrateVercel: MigrateGuide;
   databases: {
     heroTitle: string;
     heroSubtitle: string;
@@ -307,6 +326,43 @@ const ru: Dict = {
       { q: "Есть ли база данных, как в связке Vercel + внешний Postgres?", a: "Да. Управляемый PostgreSQL создаётся прямо в платформе рядом с приложением, DATABASE_URL прокидывается в сервис автоматически — отдельный внешний провайдер базы не нужен." },
       { q: "Данные точно хранятся в России?", a: "Да. Приложения и базы размещаются на серверах в РФ, что соответствует требованиям 152-ФЗ и 242-ФЗ о хранении персональных данных граждан России на территории страны." },
     ],
+  },
+  migrateVercel: {
+    heroTitle: "Переезд с Vercel на Dada Cloud: пошаговый гайд",
+    heroSubtitle:
+      "Если Vercel уже не принимает оплату российской картой и вы решили перенести проект — вот конкретные шаги для существующего репозитория: что переносится само, что нужно перепроверить руками, и куда в Dada Cloud делись настройки из vercel.json.",
+    stepsTitle: "5 шагов миграции",
+    stepsSubtitle: "Код переписывать не нужно — переносится конфигурация деплоя.",
+    steps: [
+      { num: "01", title: "Подключите репозиторий", desc: "В консоли: Проекты → Git → Подключить. Тот же GitHub-репозиторий, что был на Vercel, доступ через GitHub App, ключи руками вставлять не нужно." },
+      { num: "02", title: "Проверьте автоопределение фреймворка", desc: "Dada определяет фреймворк (Next.js, Vite, статика и другие) по репозиторию и сама подставляет команду сборки, команду запуска и папку вывода. Если детект ошибся или в проекте свой Dockerfile — на этом же экране framework, build command, start command и output dir переопределяются вручную." },
+      { num: "03", title: "Перенесите переменные окружения", desc: "Значения из Vercel Project Settings → Environment Variables скопируйте в Dada: настройки приложения → переменные окружения. Поддерживаются области build-time, runtime и secret; автоматического импорта из Vercel нет, переносится руками один раз." },
+      { num: "04", title: "Подключите домен", desc: "Добавьте домен во вкладке Domains: apex подтверждается TXT-записью, поддомен — CNAME на адрес приложения. Проверка владения сейчас ручная (кнопка «проверить»), после подтверждения сертификат Let's Encrypt выпускается автоматически." },
+      { num: "05", title: "Запушьте и проверьте сборку", desc: "Пуш в основную ветку — автоматическая пересборка и деплой. Лог сборки виден в интерфейсе, при ошибке причина видна сразу, пересобрать можно без нового PR." },
+    ],
+    mappingTitle: "Что было в Vercel и куда это переехало в Dada Cloud",
+    mappingSubtitle: "Честно про то, что переносится 1:1, а что — нет.",
+    mapping: [
+      { from: "vercel.json (build, rewrites, headers)", to: "Framework override + build/start command в Git Import", note: "Настройки сборки переносятся 1:1. Отдельного конфиг-файла для rewrites и custom headers в Dada Cloud нет — такие правила нужно перенести в код приложения (например, next.config.js для Next.js)." },
+      { from: "Environment Variables", to: "Настройки приложения → Переменные окружения", note: "Области видимости build/runtime/secret сохраняются, значения переносятся руками." },
+      { from: "Custom Domain + автоматический TLS", to: "Domains → добавить домен", note: "Сертификат Let's Encrypt выпускается автоматически после подтверждения владения доменом." },
+      { from: "Vercel Postgres / внешняя БД", to: "Managed PostgreSQL рядом с приложением", note: "DATABASE_URL прокидывается в сервис автоматически, отдельный внешний провайдер базы не нужен." },
+    ],
+    notesTitle: "Что учесть до переезда",
+    notes: [
+      { title: "Rewrites и headers из vercel.json", desc: "Готового переноса конфиг-файла нет — правила редиректов и заголовков переносятся в код самого фреймворка (например, next.config.js)." },
+      { title: "Нет preview-деплоя на каждый PR", desc: "В отличие от Vercel Preview Deployments, у приложения один прод-адрес, который обновляется пушем в основную ветку." },
+    ],
+    faqTitle: "Частые вопросы про переезд с Vercel",
+    faq: [
+      { q: "Заработает ли мой Next.js-проект без изменений?", a: "В большинстве случаев да — Dada определяет Next.js автоматически и использует стандартную команду сборки и запуска. Если в проекте были rewrites/headers в vercel.json, эти правила нужно перенести в код (например, next.config.js) — готового 1:1 переноса такого конфига нет." },
+      { q: "Нужна ли карта для оплаты?", a: "Нет, если хватает бесплатного тарифа (1 приложение, 1 база, 1 домен). Платные тарифы оплачиваются российской картой, счётом или по договору с закрывающими документами для юрлиц — зарубежная карта не нужна." },
+      { q: "Куда переносить переменные окружения из Vercel?", a: "В настройки приложения → «Переменные окружения» в Dada Cloud, скопировав значения из Vercel Project Settings вручную — автоматического импорта из Vercel нет." },
+      { q: "Поддерживается ли свой домен и HTTPS?", a: "Да. Домен подключается во вкладке Domains (apex — TXT-запись, поддомен — CNAME), сертификат Let's Encrypt выпускается автоматически после подтверждения владения." },
+    ],
+    ctaTitle: "Перенесите проект за один пуш",
+    ctaSubtitle: "Подключите тот же GitHub-репозиторий и получите рабочий адрес за минуты — оплата рублями, серверы в РФ.",
+    ctaButton: "Начать миграцию",
   },
   herokuAlt: {
     heroTitle: "Аналог Heroku для России",
@@ -668,6 +724,7 @@ const ru: Dict = {
       { label: "Аналог Fly.io", href: "/analog-fly-io" },
       { label: "Деплой из v0 / Lovable / Bolt", href: "/deploy-vibe-coding" },
       { label: "Хостинг Telegram-бота", href: "/hosting-telegram-bot" },
+      { label: "Переезд с Vercel", href: "/migrate-vercel" },
       { label: "Цены", href: "/pricing" },
     ],
     companyTitle: "Компания",
@@ -829,6 +886,43 @@ const en: Dict = {
       { q: "Is there a database, like Vercel plus an external Postgres?", a: "Yes. Managed PostgreSQL is created inside the platform next to the app, and DATABASE_URL is injected into the service automatically — no separate external database provider needed." },
       { q: "Is data really stored in Russia?", a: "Yes. Apps and databases run on servers in Russia, meeting the 152-FZ and 242-FZ requirements to store Russian citizens' personal data within the country." },
     ],
+  },
+  migrateVercel: {
+    heroTitle: "Moving from Vercel to Dada Cloud: a step-by-step guide",
+    heroSubtitle:
+      "If Vercel no longer takes a Russian card and you've decided to move the project — here are the concrete steps for an existing repo: what carries over automatically, what you need to check by hand, and where your vercel.json settings ended up in Dada Cloud.",
+    stepsTitle: "5 steps to migrate",
+    stepsSubtitle: "No code rewrite needed — it's the deploy configuration that moves.",
+    steps: [
+      { num: "01", title: "Connect the repo", desc: "In the console: Projects -> Git -> Connect. The same GitHub repo you had on Vercel, access via the GitHub App, no keys to paste by hand." },
+      { num: "02", title: "Check the framework auto-detect", desc: "Dada detects the framework (Next.js, Vite, static and others) from the repo and fills in the build command, start command and output directory. If detection is wrong or the project has its own Dockerfile, the same screen lets you override the framework, build command, start command and output dir manually." },
+      { num: "03", title: "Move the environment variables", desc: "Copy values from Vercel Project Settings -> Environment Variables into Dada: app settings -> environment variables. Build-time, runtime and secret scopes are supported; there's no automatic import from Vercel, so this is a one-time manual copy." },
+      { num: "04", title: "Connect the domain", desc: "Add the domain in the Domains tab: an apex domain is verified with a TXT record, a subdomain with a CNAME to the app's address. Ownership verification is currently manual (a \"verify\" button); once verified, the Let's Encrypt certificate is issued automatically." },
+      { num: "05", title: "Push and check the build", desc: "A push to the main branch triggers an automatic rebuild and deploy. The build log is visible in the console, so a failure is easy to diagnose and retry without opening a new PR." },
+    ],
+    mappingTitle: "What was in Vercel, and where it moved in Dada Cloud",
+    mappingSubtitle: "An honest map of what carries over 1:1, and what doesn't.",
+    mapping: [
+      { from: "vercel.json (build, rewrites, headers)", to: "Framework override + build/start command in Git Import", note: "Build settings carry over 1:1. There's no separate config file for rewrites and custom headers in Dada Cloud — those rules need to move into the framework's own code (e.g. next.config.js for Next.js)." },
+      { from: "Environment Variables", to: "App settings -> Environment variables", note: "Build/runtime/secret scopes are preserved; values are copied over by hand." },
+      { from: "Custom Domain + automatic TLS", to: "Domains -> add a domain", note: "The Let's Encrypt certificate is issued automatically once domain ownership is verified." },
+      { from: "Vercel Postgres / an external database", to: "Managed PostgreSQL next to the app", note: "DATABASE_URL is injected into the service automatically — no separate external database provider needed." },
+    ],
+    notesTitle: "Before you migrate",
+    notes: [
+      { title: "Rewrites and headers from vercel.json", desc: "There's no ready-made import for the config file — redirect and header rules move into the framework's own code (e.g. next.config.js)." },
+      { title: "No preview deploy per pull request", desc: "Unlike Vercel Preview Deployments, an app has one production address that updates on a push to the main branch." },
+    ],
+    faqTitle: "Migrating from Vercel — FAQ",
+    faq: [
+      { q: "Will my Next.js project work without changes?", a: "In most cases yes — Dada detects Next.js automatically and uses the standard build and start commands. If the project used rewrites/headers in vercel.json, those rules need to move into code (e.g. next.config.js) — there's no ready-made 1:1 import for that config." },
+      { q: "Do I need a card to pay?", a: "No, if the free plan (1 app, 1 database, 1 domain) covers you. Paid plans are billed with a Russian card, an invoice, or a contract with closing documents for legal entities — no foreign card needed." },
+      { q: "Where do I move the environment variables from Vercel?", a: "Into app settings -> \"Environment variables\" in Dada Cloud, copying values from Vercel Project Settings by hand — there's no automatic import from Vercel." },
+      { q: "Is a custom domain with HTTPS supported?", a: "Yes. Add the domain in the Domains tab (apex via a TXT record, subdomain via CNAME); the Let's Encrypt certificate is issued automatically once ownership is verified." },
+    ],
+    ctaTitle: "Migrate the project in one push",
+    ctaSubtitle: "Connect the same GitHub repo and get a working address in minutes — ruble payments, servers in Russia.",
+    ctaButton: "Start the migration",
   },
   herokuAlt: {
     heroTitle: "A Heroku alternative for Russia",
@@ -1190,6 +1284,7 @@ const en: Dict = {
       { label: "Fly.io alternative", href: "/analog-fly-io" },
       { label: "Deploy from v0 / Lovable / Bolt", href: "/deploy-vibe-coding" },
       { label: "Telegram bot hosting", href: "/hosting-telegram-bot" },
+      { label: "Migrate from Vercel", href: "/migrate-vercel" },
       { label: "Pricing", href: "/pricing" },
     ],
     companyTitle: "Company",
