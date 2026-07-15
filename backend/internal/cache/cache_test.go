@@ -59,6 +59,35 @@ func TestFetchHitThenMiss(t *testing.T) {
 	}
 }
 
+func TestStoreThenFetchHits(t *testing.T) {
+	mr, err := miniredis.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer mr.Close()
+	c := New(mr.Addr())
+	defer c.Close()
+
+	Store(context.Background(), c, "cost:allocs:30d", time.Minute, payload{N: 99, S: "warmed"})
+
+	calls := 0
+	v, err := Fetch(context.Background(), c, "cost:allocs:30d", time.Minute, func() (payload, error) {
+		calls++
+		return payload{}, nil
+	})
+	if err != nil || v.N != 99 || v.S != "warmed" {
+		t.Fatalf("expected warmed value from Store, got %+v err %v", v, err)
+	}
+	if calls != 0 {
+		t.Fatalf("Fetch must hit the warmed entry without computing; got calls=%d", calls)
+	}
+}
+
+func TestStoreNilCacheNoPanic(t *testing.T) {
+	var c *Cache
+	Store(context.Background(), c, "k", time.Minute, payload{N: 1})
+}
+
 func TestFetchExpiryRecomputes(t *testing.T) {
 	mr, err := miniredis.Run()
 	if err != nil {

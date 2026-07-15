@@ -4,11 +4,13 @@ import (
 	"context"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/dada-tuda/console/backend/internal/cache"
 	"github.com/dada-tuda/console/backend/internal/opencost"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/rs/zerolog/log"
 )
 
 // costCurrency is the currency the on-cluster OpenCost custom pricing is
@@ -100,11 +102,7 @@ func (h *Handler) GetProjectCost(c *gin.Context) {
 		return
 	}
 
-	allocs, err := cache.Fetch(c.Request.Context(), h.cache,
-		"cost:allocs:"+window, h.cfg.CacheCostTTL,
-		func() (map[string]opencost.Allocation, error) {
-			return h.opencost.Compute(c.Request.Context(), window, "namespace", "")
-		})
+	allocs, err := h.clusterAllocsByWindow(c.Request.Context(), window)
 	if err != nil {
 		respondError(c, http.StatusServiceUnavailable, "cost data temporarily unavailable")
 		return
@@ -137,6 +135,55 @@ func (h *Handler) GetProjectCost(c *gin.Context) {
 		"pv":             totalPV,
 		"by_environment": breakdown,
 	})
+}
+
+// clusterAllocsByWindow returns the cluster-wide OpenCost allocation set for a
+// window, served from the cache-aside layer. The set is identical for every
+// project (aggregated by namespace, no filter), so one entry per window backs
+// every project's cost card. Kept warm by StartCostCacheWarmer so a request
+// almost never pays OpenCost's cold ~14s 30d aggregation.
+func (h *Handler) clusterAllocsByWindow(ctx context.Context, window string) (map[string]opencost.Allocation, error) {
+	return cache.Fetch(ctx, h.cache,
+		"cost:allocs:"+window, h.cfg.CacheCostTTL,
+		func() (map[string]opencost.Allocation, error) {
+			return h.opencost.Compute(ctx, window, "namespace", "")
+		})
+}
+
+// StartCostCacheWarmer refreshes the cost cache for every allowed window on an
+// interval so the expensive OpenCost aggregation is paid by this background loop,
+// never by a user request. It also keeps OpenCost's own compute cache warm.
+// No-op unless both OpenCost and the Redis cache are configured; interval must be
+// shorter than CacheCostTTL so the entries never expire between refreshes.
+func (h *Handler) StartCostCacheWarmer(ctx context.Context, interval time.Duration) {
+	if h.opencost == nil || !h.cache.Enabled() {
+		return
+	}
+	warm := func() {
+		for w := range allowedCostWindows {
+			wctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+			allocs, err := h.opencost.Compute(wctx, w, "namespace", "")
+			cancel()
+			if err != nil {
+				log.Warn().Err(err).Str("window", w).Msg("cost warmer: OpenCost compute failed")
+				continue
+			}
+			cache.Store(ctx, h.cache, "cost:allocs:"+w, h.cfg.CacheCostTTL, allocs)
+		}
+	}
+	warm()
+	go func() {
+		t := time.NewTicker(interval)
+		defer t.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-t.C:
+				warm()
+			}
+		}
+	}()
 }
 
 // projectNamespaces returns the k8s namespaces of a project's environments,

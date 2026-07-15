@@ -75,7 +75,7 @@ func monthStart(now time.Time) time.Time {
 // an error for missing/failed metrics — a resource whose usage cannot be sourced
 // simply contributes 0 (logged at warn). The only errors are hard DB failures on
 // the resource enumeration itself.
-func (h *Handler) computeProjectConsumption(ctx context.Context, projectID uuid.UUID) (projectConsumption, error) {
+func (h *Handler) computeProjectConsumption(ctx context.Context, projectID uuid.UUID, withUsage bool) (projectConsumption, error) {
 	now := time.Now().UTC()
 	start := monthStart(now)
 
@@ -87,7 +87,7 @@ func (h *Handler) computeProjectConsumption(ctx context.Context, projectID uuid.
 
 	snap := h.billingSnapshot(ctx)
 
-	apps, err := h.consumptionApps(ctx, projectID, start, now, snap)
+	apps, err := h.consumptionApps(ctx, projectID, start, now, snap, withUsage)
 	if err != nil {
 		return projectConsumption{}, err
 	}
@@ -117,7 +117,7 @@ func (h *Handler) computeProjectConsumption(ctx context.Context, projectID uuid.
 // tariffs), and falls back to the metrics-derived estimate only when OpenCost
 // cannot attribute the app. Failures degrade to nil usage / 0 cost, never an
 // error.
-func (h *Handler) consumptionApps(ctx context.Context, projectID uuid.UUID, start, end time.Time, snap *billingCostSnapshot) ([]consumptionResource, error) {
+func (h *Handler) consumptionApps(ctx context.Context, projectID uuid.UUID, start, end time.Time, snap *billingCostSnapshot, withUsage bool) ([]consumptionResource, error) {
 	rows, err := h.pool.Query(ctx,
 		`SELECT rs.name, e.runtime, e.namespace, COALESCE(rs.summary_json->>'image', '')
 		   FROM resource_snapshots rs
@@ -151,12 +151,12 @@ func (h *Handler) consumptionApps(ctx context.Context, projectID uuid.UUID, star
 
 	out := make([]consumptionResource, 0, len(appRows))
 	for _, a := range appRows {
-		cpu, ram := h.appAvgUsage(ctx, a.runtime, a.namespace, a.image, a.name, start, end)
 		res := consumptionResource{
-			Kind:     "app",
-			Name:     a.name,
-			CPUCores: cpu,
-			RAMGB:    ram,
+			Kind: "app",
+			Name: a.name,
+		}
+		if withUsage {
+			res.CPUCores, res.RAMGB = h.appAvgUsage(ctx, a.runtime, a.namespace, a.image, a.name, start, end)
 		}
 		if oc, ok := snap.appCost[a.namespace+"/"+a.name]; ok {
 			res.CostRub = snap.pricing.price(oc.CPUCost, oc.RAMCost, oc.PVCost)
@@ -434,7 +434,7 @@ func (h *Handler) GetProjectConsumption(c *gin.Context) {
 	if !h.requireProjectMember(c, projectID) {
 		return
 	}
-	pc, err := h.computeProjectConsumption(c.Request.Context(), projectID)
+	pc, err := h.computeProjectConsumption(c.Request.Context(), projectID, true)
 	if err != nil {
 		respondError(c, http.StatusInternalServerError, "failed to compute consumption")
 		return
@@ -478,7 +478,7 @@ func (h *Handler) GetAccountSummary(c *gin.Context) {
 
 	var spend float64
 	for _, pid := range projectIDs {
-		pc, err := h.computeProjectConsumption(ctx, pid)
+		pc, err := h.computeProjectConsumption(ctx, pid, false)
 		if err != nil {
 			log.Warn().Err(err).Str("project", pid.String()).Msg("billing account summary: project consumption failed")
 			continue

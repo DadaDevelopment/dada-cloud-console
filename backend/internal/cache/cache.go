@@ -107,6 +107,17 @@ func Fetch[T any](ctx context.Context, c *Cache, key string, ttl time.Duration, 
 	return v, nil
 }
 
+// Store writes v under key with ttl, bypassing the read side. Used by proactive
+// cache warmers that compute a value on a schedule and populate the cache so
+// user requests always hit. No-op on a disabled cache; a Redis error is
+// swallowed (the value is recomputed on the next warm tick or request).
+func Store[T any](ctx context.Context, c *Cache, key string, ttl time.Duration, v T) {
+	if !c.Enabled() {
+		return
+	}
+	set(ctx, c, key, ttl, v)
+}
+
 func get[T any](ctx context.Context, c *Cache, key string) (T, bool) {
 	var zero T
 	rctx, cancel := context.WithTimeout(ctx, c.opTimeout)
