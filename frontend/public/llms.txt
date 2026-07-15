@@ -68,6 +68,20 @@
 - Members and roles: https://cloud.dada-tuda.ru/developer/members-and-roles
 - Billing, plans, and limits: https://cloud.dada-tuda.ru/developer/billing-plans-and-limits
 
+## Сравнения и сценарии (аналоги и use-cases)
+
+Российская платформа с оплатой рублёвой картой и серверами в РФ (152-ФЗ) для сценариев, где зарубежный хостинг нельзя оплатить российской картой. В отличие от фронтенд-ориентированных аналогов, DADA Cloud деплоит полноценный бэкенд с управляемым PostgreSQL и своими серверами (App Servers), а не только статику.
+
+- Аналог Heroku для России (деплой из GitHub, оплата рублями): https://cloud.dada-tuda.ru/analog-heroku
+- Аналог Vercel для России (бэкенд + Postgres, а не только фронтенд): https://cloud.dada-tuda.ru/analog-vercel
+- Аналог Railway для России: https://cloud.dada-tuda.ru/analog-railway
+- Аналог Render для России: https://cloud.dada-tuda.ru/analog-render
+- Аналог Netlify для России: https://cloud.dada-tuda.ru/analog-netlify
+- Аналог DigitalOcean для России (App Servers как Droplet + managed Postgres): https://cloud.dada-tuda.ru/analog-digitalocean
+- Аналог Fly.io для России (оплата рублём напрямую, без платёжных посредников): https://cloud.dada-tuda.ru/analog-fly-io
+- Куда задеплоить проект из v0 / Lovable / Cursor / Bolt (экспорт в GitHub → деплой рублём): https://cloud.dada-tuda.ru/deploy-vibe-coding
+- Хостинг для Telegram-бота в России (бот 24/7 из GitHub, Postgres для состояния): https://cloud.dada-tuda.ru/hosting-telegram-bot
+
 ## Частые вопросы (FAQ)
 
 - Нужно ли знать DevOps или настраивать серверы? — Нет. Вы подключаете GitHub-репозиторий, платформа сама собирает, деплоит и обслуживает бэкенд; инфраструктура скрыта за интерфейсом.
