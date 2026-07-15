@@ -166,6 +166,7 @@ export interface Dict {
     resources: { label: string; href: string }[];
     rights: string;
     legal: string;
+    legalLinks: { label: string; href: string }[];
   };
 }
 
@@ -685,6 +686,10 @@ const ru: Dict = {
     ],
     rights: "Все права защищены.",
     legal: "DADA Cloud — облачная платформа.",
+    legalLinks: [
+      { label: "Политика конфиденциальности", href: "/privacy" },
+      { label: "Пользовательское соглашение", href: "/terms" },
+    ],
   },
 };
 
@@ -1203,6 +1208,10 @@ const en: Dict = {
     ],
     rights: "All rights reserved.",
     legal: "DADA Cloud — a cloud platform.",
+    legalLinks: [
+      { label: "Privacy Policy", href: "/privacy" },
+      { label: "Terms of Use", href: "/terms" },
+    ],
   },
 };
 

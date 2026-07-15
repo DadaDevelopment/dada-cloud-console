@@ -23,6 +23,8 @@ const MARKETING_PATHS = new Set([
   "/deploy-vibe-coding",
   "/hosting-telegram-bot",
   "/developer",
+  "/privacy",
+  "/terms",
 ]);
 
 export function MarketingFooter() {
@@ -77,7 +79,13 @@ export function MarketingFooter() {
           <span>
             © 2026 DADA Cloud. {t.footer.rights}
           </span>
-          <span>{t.footer.legal}</span>
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+            {t.footer.legalLinks.map((l) => (
+              <Link key={l.href} href={href(l.href)} className="transition-colors hover:text-white">
+                {l.label}
+              </Link>
+            ))}
+          </div>
         </div>
       </div>
     </footer>
