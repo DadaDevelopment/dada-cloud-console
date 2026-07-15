@@ -1,10 +1,21 @@
 "use client";
-import { useEffect, useRef } from "react";
-import { useRouter } from "next/navigation";
+import { Suspense, useEffect, useRef } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useAuth } from "@/lib/auth";
 import { startRegister } from "@/lib/register-redirect";
 
 const AUTH_MODE = process.env.NEXT_PUBLIC_AUTH_MODE;
+
+/**
+ * Only accepts in-app paths ("/foo") as a returnTo target, rejecting
+ * protocol-relative ("//evil.com") or absolute URLs to avoid an open redirect
+ * via a query param an attacker fully controls.
+ */
+function sanitizeReturnTo(value: string | null): string {
+  if (!value) return "/projects";
+  if (!value.startsWith("/") || value.startsWith("//")) return "/projects";
+  return value;
+}
 
 /**
  * Sign-up entry point. Sends unauthenticated visitors straight to Keycloak's
@@ -12,24 +23,30 @@ const AUTH_MODE = process.env.NEXT_PUBLIC_AUTH_MODE;
  * bare `/login` route lands on. Already-authenticated users are bounced to the
  * console.
  *
+ * Accepts an optional `returnTo` (or `next`) query param naming where to land
+ * after signup/login — e.g. `/deploy?repo=...` for the one-click deploy flow.
+ * Defaults to `/projects`.
+ *
  * In non-OIDC (local dev) mode there is no Keycloak registration flow, so this
  * falls back to the login route.
  */
 function OidcRegisterPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { isLoading, token } = useAuth();
   const startedRef = useRef(false);
+  const returnTo = sanitizeReturnTo(searchParams.get("returnTo") ?? searchParams.get("next"));
 
   useEffect(() => {
     if (isLoading) return;
     if (token) {
-      router.replace("/projects");
+      router.replace(returnTo);
       return;
     }
     if (startedRef.current) return;
     startedRef.current = true;
-    void startRegister();
-  }, [isLoading, token, router]);
+    void startRegister(returnTo);
+  }, [isLoading, token, router, returnTo]);
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-gray-50">
@@ -60,6 +77,12 @@ function LocalRegisterRedirect() {
 }
 
 export default function RegisterPage() {
-  if (AUTH_MODE === "oidc") return <OidcRegisterPage />;
+  if (AUTH_MODE === "oidc") {
+    return (
+      <Suspense fallback={<div className="min-h-screen bg-gray-50" />}>
+        <OidcRegisterPage />
+      </Suspense>
+    );
+  }
   return <LocalRegisterRedirect />;
 }

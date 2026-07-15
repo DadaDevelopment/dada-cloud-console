@@ -1,5 +1,5 @@
 "use client";
-import { useCallback, useEffect, useState, FormEvent } from "react";
+import { useCallback, useEffect, useRef, useState, FormEvent } from "react";
 import { useParams, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { gitApi, buildsApi } from "@/lib/api";
@@ -367,6 +367,9 @@ export default function GitImportPage() {
     return () => window.clearTimeout(timer);
   }, [installations, loadRepos]);
 
+  const repoParam = searchParams.get("repo");
+  const repoPrefillDone = useRef(false);
+
   async function handleConnectProvider(provider: "github" | "gitlab", forceInstall = false) {
     setInstallError(null);
     setConnectingProvider(provider);
@@ -427,20 +430,34 @@ export default function GitImportPage() {
     [frameworkTouched, portTouched, projectId]
   );
 
-  function pickRepo(repo: GitRemoteRepoCandidate) {
-    setBuild(null);
-    setDeployError(null);
-    setSelectedRepo(repo);
-    setRepoPickerOpen(false);
-    setBranch(repo.default_branch || "main");
-    setRootDir(".");
-    setAppName(toKubeName(repo.full_name.split("/").pop() || ""));
-    setFrameworkOverride("");
-    setFrameworkTouched(false);
-    setPortTouched(false);
-    setPort(8080);
-    void runDetect(repo, ".");
-  }
+  const pickRepo = useCallback(
+    (repo: GitRemoteRepoCandidate) => {
+      setBuild(null);
+      setDeployError(null);
+      setSelectedRepo(repo);
+      setRepoPickerOpen(false);
+      setBranch(repo.default_branch || "main");
+      setRootDir(".");
+      setAppName(toKubeName(repo.full_name.split("/").pop() || ""));
+      setFrameworkOverride("");
+      setFrameworkTouched(false);
+      setPortTouched(false);
+      setPort(8080);
+      void runDetect(repo, ".");
+    },
+    [runDetect]
+  );
+
+  useEffect(() => {
+    if (repoPrefillDone.current) return;
+    if (!repoParam || selectedRepo || deploying) return;
+    if (remoteRepos.length === 0) return;
+    const match = remoteRepos.find((r) => r.full_name.toLowerCase() === repoParam.toLowerCase());
+    if (!match) return;
+    repoPrefillDone.current = true;
+    const timer = window.setTimeout(() => pickRepo(match), 0);
+    return () => window.clearTimeout(timer);
+  }, [repoParam, selectedRepo, deploying, remoteRepos, pickRepo]);
 
   async function handleSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
