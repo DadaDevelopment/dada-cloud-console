@@ -9,6 +9,8 @@ import { ThemeProvider } from "@/lib/theme/context";
 import { TopBar } from "@/components/shell/top-bar";
 import { ProjectNav } from "@/components/shell/project-nav";
 import { CommandPalette } from "@/components/shell/command-palette";
+import { ConsoleErrorBoundary } from "@/components/shell/console-error-boundary";
+import { SupportButton } from "@/components/shell/support-button";
 
 function ConsoleShell({ children }: { children: React.ReactNode }) {
   const { projectId } = useProjectContext();
@@ -59,11 +61,14 @@ function ConsoleShell({ children }: { children: React.ReactNode }) {
           </>
         )}
         <main className="flex-1 overflow-y-auto bg-white dark:bg-gray-950">
-          <div className="p-4 sm:p-6 lg:p-8">{children}</div>
+          <div className="p-4 sm:p-6 lg:p-8">
+            <ConsoleErrorBoundary>{children}</ConsoleErrorBoundary>
+          </div>
         </main>
       </div>
       {/* key forces the palette to mount/open when the top-bar button is clicked */}
       <CommandPalette key={paletteOpenSignal} initialOpen={paletteOpenSignal > 0} />
+      <SupportButton />
     </div>
   );
 }

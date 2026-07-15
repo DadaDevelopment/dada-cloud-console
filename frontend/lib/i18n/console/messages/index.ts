@@ -23,6 +23,7 @@ import { cost } from "./cost";
 import { resources } from "./resources";
 import { deleteImpact } from "./delete-impact";
 import { moveApp } from "./move-app";
+import { feedback } from "./feedback";
 
 /**
  * Flat key→{ru,en} map for the whole console. Each screen owns a namespace
@@ -55,4 +56,5 @@ export const messages: Messages = {
   ...resources,
   ...deleteImpact,
   ...moveApp,
+  ...feedback,
 };
