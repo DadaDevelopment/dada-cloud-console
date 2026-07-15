@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState, FormEvent } from "react";
+import { useEffect, useRef, useState, FormEvent } from "react";
 import { useParams, useSearchParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { appsApi, endpointsApi, envVarsApi, customDomainsApi } from "@/lib/api";
@@ -72,6 +72,9 @@ export default function AppDetailPage() {
   const [deleteTarget, setDeleteTarget] = useState<DeleteImpactTarget | null>(null);
   const [isMoveModalOpen, setIsMoveModalOpen] = useState(false);
 
+  const prevPhaseRef = useRef<string | undefined>(undefined);
+  const deployGoalFiredRef = useRef(false);
+
   useEffect(() => {
     if (!envId) return;
 
@@ -88,7 +91,24 @@ export default function AppDetailPage() {
             setApp(found);
             setError(null);
             setIsLoading(false);
-            const settled = TERMINAL.has((found.phase ?? "").toLowerCase());
+            const phase = (found.phase ?? "").toLowerCase();
+            const SUCCESS = new Set(["ready", "healthy", "running"]);
+            const prev = prevPhaseRef.current;
+            if (
+              !deployGoalFiredRef.current &&
+              prev !== undefined &&
+              !SUCCESS.has(prev) &&
+              SUCCESS.has(phase)
+            ) {
+              deployGoalFiredRef.current = true;
+              (window as { ym?: (id: number, action: string, target: string) => void }).ym?.(
+                110158915,
+                "reachGoal",
+                "deploy_success",
+              );
+            }
+            prevPhaseRef.current = phase;
+            const settled = TERMINAL.has(phase);
             if (!settled && attempt < 40) {
               timer = setTimeout(() => loadApp(attempt + 1), 3000);
             }
