@@ -42,6 +42,38 @@ type Scenario = { tag: string; title: string; desc: string };
 type Proof = { quote: string; author: string };
 type PricingTeaser = { name: string; price: string; tagline: string; bullets: string[]; highlight?: boolean };
 type MappingRow = { from: string; to: string; note: string };
+type StatusService = { id: string; name: string };
+type StatusRadar = {
+  heroTitle: string;
+  heroSubtitle: string;
+  vantageLabel: string;
+  updatedLabel: string;
+  loadingText: string;
+  errorText: string;
+  reachableLabel: string;
+  unreachableLabel: string;
+  unknownLabel: string;
+  tableHeaders: {
+    service: string;
+    availability: string;
+    httpStatus: string;
+    latency: string;
+    tls: string;
+  };
+  services: StatusService[];
+  disclaimerTitle: string;
+  disclaimer: string;
+  paymentTitle: string;
+  paymentText: string;
+  ctaPrimaryLabel: string;
+  ctaSecondaryLabel: string;
+  ctaTitle: string;
+  ctaSubtitle: string;
+  faqTitle: string;
+  faq: Faq[];
+  datasetName: string;
+  datasetDescription: string;
+};
 type MigrateGuide = {
   heroTitle: string;
   heroSubtitle: string;
@@ -137,6 +169,7 @@ export interface Dict {
   vibeCodingAlt: AltPage;
   telegramBotAlt: AltPage;
   migrateVercel: MigrateGuide;
+  statusRadar: StatusRadar;
   databases: {
     heroTitle: string;
     heroSubtitle: string;
@@ -363,6 +396,52 @@ const ru: Dict = {
     ctaTitle: "Перенесите проект за один пуш",
     ctaSubtitle: "Подключите тот же GitHub-репозиторий и получите рабочий адрес за минуты — оплата рублями, серверы в РФ.",
     ctaButton: "Начать миграцию",
+  },
+  statusRadar: {
+    heroTitle: "Доступность Vercel, Railway и других из России - проверка с нашего сервера",
+    heroSubtitle:
+      "Каждые несколько минут мы проверяем, отвечают ли Vercel, Railway, Render, Netlify, Heroku и Fly.io с сервера в России, и публикуем сырые результаты ниже. Это не официальный статус сервисов, а только наши собственные измерения с одной точки подключения в РФ.",
+    vantageLabel: "Точка измерения:",
+    updatedLabel: "Обновлено:",
+    loadingText: "Данные обновляются...",
+    errorText: "Не удалось получить свежие данные с монитора - таблица обновится автоматически. Это не значит, что перечисленные сервисы недоступны.",
+    reachableLabel: "Отвечает",
+    unreachableLabel: "Не отвечает",
+    unknownLabel: "Нет данных",
+    tableHeaders: {
+      service: "Сервис",
+      availability: "Доступность",
+      httpStatus: "HTTP статус",
+      latency: "Задержка, мс",
+      tls: "TLS",
+    },
+    services: [
+      { id: "vercel", name: "Vercel" },
+      { id: "railway", name: "Railway" },
+      { id: "render", name: "Render" },
+      { id: "netlify", name: "Netlify" },
+      { id: "heroku", name: "Heroku" },
+      { id: "fly", name: "Fly.io" },
+    ],
+    disclaimerTitle: "Это не официальный статус сервисов",
+    disclaimer:
+      "Все показатели на этой странице зафиксированы нашим собственным монитором с сервера в РФ (dada-cloud, beget-prod) и отражают доступность только с этой конкретной точки сети. Мы не утверждаем, что перечисленные сервисы не работают - возможна временная блокировка на уровне провайдера, DNS или маршрутизации именно для российских IP-адресов, а не сбой на стороне сервиса. За официальным статусом обращайтесь на status-страницу самого провайдера.",
+    paymentTitle: "Карта РФ и оплата - отдельная история",
+    paymentText:
+      "Даже когда сервис технически отвечает, по отзывам RU-разработчиков оплата зарубежных PaaS российской картой на Vercel, Railway и похожих платформах часто отклоняется банком-эквайером или самим провайдером - независимо от того, доступен сайт в моменте или нет. Если карта не проходит, перенос проекта на платформу с оплатой в рублях снимает вопрос полностью.",
+    ctaPrimaryLabel: "Как перенести проект с Vercel",
+    ctaSecondaryLabel: "Развернуть проект в Dada Cloud",
+    ctaTitle: "Не ждите, пока починят - разверните проект там, где доступность из России не вопрос",
+    ctaSubtitle: "Dada Cloud - платформа на серверах в РФ: оплата рублём, тот же поток из GitHub в прод, без вопроса «а откроется ли сегодня».",
+    faqTitle: "Вопросы про доступность зарубежных PaaS из России",
+    faq: [
+      { q: "Почему Vercel иногда не открывается из России?", a: "Однозначной причины нет: это может быть временная сетевая блокировка для RU-диапазонов, проблема с DNS или маршрутизацией у провайдера, а не отказ самого сервиса. Наш монитор фиксирует доступность с одной точки в РФ, а не официальный статус Vercel." },
+      { q: "Railway или Render точно недоступны из России?", a: "Мы измеряем HTTP-ответ и TLS-хендшейк с нашего сервера каждые несколько минут и публикуем сырые данные выше. Это не официальный статус - для полной картины проверяйте status-страницу самого провайдера." },
+      { q: "Что делать, если сервис недоступен, а проект уже в проде?", a: "Коротко - ждать и проверять снова. Долгосрочно - перенести деплой на платформу с серверами в РФ, чтобы доступность не зависела от того, пропускает ли сеть трафик к зарубежному провайдеру именно сегодня." },
+      { q: "Это официальная status-страница Vercel, Railway или Render?", a: "Нет. Это независимый монитор Dada Cloud, который проверяет доступность перечисленных сервисов с нашего сервера в России. За официальным статусом обращайтесь на status-страницу самого провайдера." },
+    ],
+    datasetName: "RU Vantage Status Radar - доступность зарубежных PaaS из России",
+    datasetDescription: "Периодические измерения HTTP-доступности, TLS-хендшейка и задержки для Vercel, Railway, Render, Netlify, Heroku и Fly.io, снятые с сервера в России.",
   },
   herokuAlt: {
     heroTitle: "Аналог Heroku для России",
@@ -725,6 +804,7 @@ const ru: Dict = {
       { label: "Деплой из v0 / Lovable / Bolt", href: "/deploy-vibe-coding" },
       { label: "Хостинг Telegram-бота", href: "/hosting-telegram-bot" },
       { label: "Переезд с Vercel", href: "/migrate-vercel" },
+      { label: "Доступность Vercel/Railway из России", href: "/status" },
       { label: "Цены", href: "/pricing" },
     ],
     companyTitle: "Компания",
@@ -923,6 +1003,52 @@ const en: Dict = {
     ctaTitle: "Migrate the project in one push",
     ctaSubtitle: "Connect the same GitHub repo and get a working address in minutes — ruble payments, servers in Russia.",
     ctaButton: "Start the migration",
+  },
+  statusRadar: {
+    heroTitle: "Vercel, Railway and other PaaS availability from Russia - checked from our own server",
+    heroSubtitle:
+      "Every few minutes we check whether Vercel, Railway, Render, Netlify, Heroku and Fly.io respond from a server located in Russia, and publish the raw results below. This is not the official status of any of these services - only our own measurements from one network vantage point in Russia.",
+    vantageLabel: "Vantage point:",
+    updatedLabel: "Updated:",
+    loadingText: "Data is updating...",
+    errorText: "Could not fetch fresh data from the monitor right now - the table will refresh automatically. This does not mean the listed services are down.",
+    reachableLabel: "Reachable",
+    unreachableLabel: "Unreachable",
+    unknownLabel: "No data",
+    tableHeaders: {
+      service: "Service",
+      availability: "Availability",
+      httpStatus: "HTTP status",
+      latency: "Latency, ms",
+      tls: "TLS",
+    },
+    services: [
+      { id: "vercel", name: "Vercel" },
+      { id: "railway", name: "Railway" },
+      { id: "render", name: "Render" },
+      { id: "netlify", name: "Netlify" },
+      { id: "heroku", name: "Heroku" },
+      { id: "fly", name: "Fly.io" },
+    ],
+    disclaimerTitle: "This is not an official status page",
+    disclaimer:
+      "Every number on this page is captured by our own monitor running on a server in Russia (dada-cloud, beget-prod), and reflects reachability only from that specific network vantage point. We are not claiming that the listed services are down - a temporary block at the provider, DNS, or routing level specifically for Russian IP ranges is a common cause, not a failure on the service's side. For the official status, check the provider's own status page.",
+    paymentTitle: "A Russian card and billing is a separate story",
+    paymentText:
+      "Even when a service is technically reachable, RU developers commonly report that paying for Vercel, Railway and similar PaaS with a Russian card gets declined by the acquiring bank or the provider itself - independent of whether the site is up at that moment. If the card doesn't go through, moving the project to a platform billed in rubles removes the question entirely.",
+    ctaPrimaryLabel: "How to migrate a project from Vercel",
+    ctaSecondaryLabel: "Deploy a project on Dada Cloud",
+    ctaTitle: "Don't wait for it to get fixed - deploy where availability from Russia isn't a question",
+    ctaSubtitle: "Dada Cloud runs on servers in Russia: ruble payments, the same GitHub-to-production flow, no \"will it load today\" guessing.",
+    faqTitle: "Questions about foreign PaaS availability from Russia",
+    faq: [
+      { q: "Why does Vercel sometimes not open from Russia?", a: "There is no single cause: it can be a temporary network block for RU ranges, a DNS issue, or provider-side routing rather than an outage of the service itself. Our monitor records reachability from one point in Russia, not Vercel's official status." },
+      { q: "Are Railway or Render definitely unreachable from Russia?", a: "We measure the HTTP response and TLS handshake from our server every few minutes and publish the raw data above. This is not an official status - check the provider's own status page for the full picture." },
+      { q: "What should I do if a service is unreachable and my project is already in production?", a: "Short term - wait and check again. Long term - move the deployment to a platform with servers in Russia so availability doesn't depend on whether the network lets traffic through to a foreign provider on any given day." },
+      { q: "Is this the official Vercel, Railway or Render status page?", a: "No. This is an independent Dada Cloud monitor that checks the availability of the listed services from our server in Russia. For the official status, check the provider's own status page." },
+    ],
+    datasetName: "RU Vantage Status Radar - foreign PaaS availability from Russia",
+    datasetDescription: "Periodic measurements of HTTP reachability, TLS handshake and latency for Vercel, Railway, Render, Netlify, Heroku and Fly.io, taken from a server in Russia.",
   },
   herokuAlt: {
     heroTitle: "A Heroku alternative for Russia",
@@ -1285,6 +1411,7 @@ const en: Dict = {
       { label: "Deploy from v0 / Lovable / Bolt", href: "/deploy-vibe-coding" },
       { label: "Telegram bot hosting", href: "/hosting-telegram-bot" },
       { label: "Migrate from Vercel", href: "/migrate-vercel" },
+      { label: "Vercel/Railway status from Russia", href: "/status" },
       { label: "Pricing", href: "/pricing" },
     ],
     companyTitle: "Company",

@@ -23,6 +23,7 @@ const STATIC_ROUTES: Array<{ path: string; priority: number; changeFrequency: Me
   { path: "/deploy-vibe-coding", priority: 0.9, changeFrequency: "monthly" },
   { path: "/hosting-telegram-bot", priority: 0.9, changeFrequency: "monthly" },
   { path: "/migrate-vercel", priority: 0.8, changeFrequency: "monthly" },
+  { path: "/status", priority: 0.8, changeFrequency: "hourly" },
   { path: "/cloud-servers", priority: 0.8, changeFrequency: "monthly" },
   { path: "/databases", priority: 0.8, changeFrequency: "monthly" },
   { path: "/storage", priority: 0.7, changeFrequency: "monthly" },

@@ -23,6 +23,7 @@ const MARKETING_PATHS = new Set([
   "/deploy-vibe-coding",
   "/hosting-telegram-bot",
   "/migrate-vercel",
+  "/status",
   "/developer",
   "/privacy",
   "/terms",
