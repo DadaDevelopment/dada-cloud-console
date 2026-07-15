@@ -113,6 +113,8 @@ export interface Dict {
   herokuAlt: AltPage;
   railwayAlt: AltPage;
   renderAlt: AltPage;
+  netlifyAlt: AltPage;
+  digitaloceanAlt: AltPage;
   databases: {
     heroTitle: string;
     heroSubtitle: string;
@@ -365,6 +367,50 @@ const ru: Dict = {
       { q: "Нужно ли переписывать проект при переходе с Render?", a: "Нет. Вы подключаете тот же GitHub-репозиторий, платформа сама определяет фреймворк и собирает проект. Пуш в основную ветку пересобирает и деплоит приложение автоматически." },
       { q: "Есть ли аналог Render PostgreSQL?", a: "Да. Управляемый PostgreSQL создаётся рядом с приложением, DATABASE_URL прокидывается в сервис автоматически — отдельный внешний провайдер не нужен." },
       { q: "Будут ли сервисы «засыпать», как на бесплатном Render?", a: "Нет. Приложение остаётся запущенным и отвечает без холодного старта на первый запрос." },
+    ],
+  },
+  netlifyAlt: {
+    heroTitle: "Аналог Netlify в России",
+    heroSubtitle:
+      "Netlify удобен для деплоя сайтов из GitHub, но в России его админка и часть сайтов не открываются без VPN, а оплатить тариф российской картой не выйдет. Dada Cloud даёт тот же путь: подключаете репозиторий, пуш — и через минуты живой HTTPS-адрес. Оплата рублями, серверы в России, открывается без VPN.",
+    featuresTitle: "Почему переходят с Netlify на Dada Cloud",
+    features: [
+      { title: "Оплата рублёвой картой", desc: "Российская карта, счёт и закрывающие документы для юрлиц. Не нужны зарубежная карта и посредники." },
+      { title: "Деплой из GitHub, как в Netlify", desc: "Подключаете репозиторий, пуш в основную ветку — автоматическая пересборка и деплой. Фреймворк (Next.js, статика, SPA) определяется сам." },
+      { title: "Открывается без VPN", desc: "В отличие от Netlify, панель и задеплоенные сайты доступны из России напрямую, без обходных путей." },
+      { title: "HTTPS-домен из коробки", desc: "Сразу после деплоя сайт доступен по адресу с валидным TLS-сертификатом. Свой домен подключается в пару шагов." },
+      { title: "Managed PostgreSQL рядом", desc: "У Netlify нет своей базы — нужен внешний провайдер. Здесь управляемый PostgreSQL создаётся рядом, DATABASE_URL прокидывается в сервис сам." },
+      { title: "Данные в России (152-ФЗ)", desc: "Сайты и базы размещаются на серверах в РФ — то, что требует закон о персональных данных." },
+    ],
+    faqTitle: "Замена Netlify в России — частые вопросы",
+    faq: [
+      { q: "Работает ли Netlify в России?", a: "Часто нет: админка и часть задеплоенных сайтов не открываются без VPN, а оплатить тариф российской картой нельзя. Данные при этом хранятся за рубежом — что не соответствует 152-ФЗ. Dada Cloud решает это: доступ без VPN, оплата рублями и серверы в РФ." },
+      { q: "Чем заменить Netlify с оплатой рублями?", a: "Dada Cloud — российская платформа с тем же сценарием «из GitHub в прод»: оплата рублёвой картой, счёт и закрывающие документы для юрлиц, без зарубежных карт." },
+      { q: "Можно ли задеплоить Next.js или статический сайт?", a: "Да. Платформа сама определяет фреймворк (Next.js, статика, SPA) и собирает проект. Пуш в основную ветку пересобирает и деплоит сайт автоматически." },
+      { q: "Есть ли база данных, которой нет в Netlify?", a: "Да. Управляемый PostgreSQL создаётся рядом с приложением, DATABASE_URL прокидывается в сервис автоматически — отдельный внешний провайдер не нужен." },
+      { q: "Нужен ли VPN, чтобы зайти в панель?", a: "Нет. Панель и сайты открываются из России напрямую, VPN не требуется." },
+    ],
+  },
+  digitaloceanAlt: {
+    heroTitle: "Аналог DigitalOcean в России",
+    heroSubtitle:
+      "DigitalOcean ограничил регистрацию и оплату для России, а российской картой оплатить не выйдет. Dada Cloud даёт то же самое: свои серверы (App Servers), деплой приложений из GitHub и managed PostgreSQL. Оплата рублями, документы для юрлиц, серверы в России.",
+    featuresTitle: "Почему переходят с DigitalOcean на Dada Cloud",
+    features: [
+      { title: "Оплата рублёвой картой", desc: "Российская карта, счёт и закрывающие документы для юрлиц. Не нужны зарубежная карта и посредники." },
+      { title: "Свои серверы (App Servers)", desc: "Аналог Droplet: разворачиваете VM под свои задачи — MySQL, Redis, любые контейнеры и сервисы." },
+      { title: "Деплой из GitHub", desc: "Аналог App Platform: подключаете репозиторий, пуш в основную ветку — автоматическая сборка и деплой, фреймворк определяется сам." },
+      { title: "Managed PostgreSQL", desc: "Аналог DO Managed Databases: управляемый PostgreSQL создаётся рядом с приложением, DATABASE_URL прокидывается в сервис автоматически." },
+      { title: "Регистрация без ограничений для РФ", desc: "В отличие от DigitalOcean, доступ и оплата из России открыты — без обходных схем и посредников." },
+      { title: "Данные в России (152-ФЗ)", desc: "Приложения, серверы и базы размещаются в РФ — то, что требует закон о персональных данных." },
+    ],
+    faqTitle: "Замена DigitalOcean в России — частые вопросы",
+    faq: [
+      { q: "Работает ли DigitalOcean в России?", a: "DigitalOcean ограничил регистрацию и оплату для российских пользователей, а оплатить российской картой нельзя. Данные хранятся за рубежом — что не соответствует 152-ФЗ. Dada Cloud решает это: доступ и оплата из РФ, серверы в России." },
+      { q: "Есть ли аналог Droplet?", a: "Да. App Servers — это ваши виртуальные серверы, на которых можно поднять MySQL, Redis, контейнеры и любые сервисы, как на Droplet." },
+      { q: "Есть ли аналог App Platform?", a: "Да. Приложение деплоится прямо из GitHub: пуш в основную ветку — автоматическая пересборка и деплой, фреймворк определяется сам." },
+      { q: "Есть ли управляемая база, как DO Managed Databases?", a: "Да. Управляемый PostgreSQL создаётся рядом с приложением, DATABASE_URL прокидывается в сервис автоматически — отдельный провайдер не нужен." },
+      { q: "Как оплачивать в рублях?", a: "Оплата рублёвой картой, для юрлиц — счёт и закрывающие документы. Зарубежные карты и посредники не нужны." },
     ],
   },
   databases: {
@@ -771,6 +817,50 @@ const en: Dict = {
       { q: "Do I have to rewrite my project when moving from Render?", a: "No. You connect the same GitHub repo, the platform detects the framework and builds it. A push to the main branch rebuilds and deploys automatically." },
       { q: "Is there a Render PostgreSQL equivalent?", a: "Yes. Managed PostgreSQL is created next to the app and DATABASE_URL is injected automatically — no separate external provider needed." },
       { q: "Will services sleep like Render's free tier?", a: "No. The app stays running and responds without a cold start on the first request." },
+    ],
+  },
+  netlifyAlt: {
+    heroTitle: "Netlify alternative for Russia",
+    heroSubtitle:
+      "Netlify is handy for deploying sites from GitHub, but in Russia its dashboard and some sites won't open without a VPN, and you can't pay with a Russian card. Dada Cloud gives you the same path: connect a repo, push, and get a live HTTPS URL in minutes. Pay in rubles, servers in Russia, opens without a VPN.",
+    featuresTitle: "Why teams move from Netlify to Dada Cloud",
+    features: [
+      { title: "Pay with a Russian card", desc: "Russian card, invoice and closing documents for legal entities. No foreign card or intermediaries." },
+      { title: "Deploy from GitHub, like Netlify", desc: "Connect a repo, push to the main branch — automatic rebuild and deploy. The framework (Next.js, static, SPA) is detected for you." },
+      { title: "Opens without a VPN", desc: "Unlike Netlify, the dashboard and deployed sites are reachable from Russia directly, with no workarounds." },
+      { title: "HTTPS domain out of the box", desc: "Right after the deploy the site is reachable over a valid TLS certificate. Your own domain connects in a couple of steps." },
+      { title: "Managed PostgreSQL alongside", desc: "Netlify has no built-in database — you need an external provider. Here managed PostgreSQL is created next to the app and DATABASE_URL is injected automatically." },
+      { title: "Data in Russia (152-FZ)", desc: "Sites and databases run on servers inside Russia — what the personal-data law requires." },
+    ],
+    faqTitle: "Replacing Netlify in Russia — FAQ",
+    faq: [
+      { q: "Does Netlify work in Russia?", a: "Often not: the dashboard and some deployed sites won't open without a VPN, and you can't pay with a Russian card. Data is stored abroad — which doesn't meet 152-FZ. Dada Cloud solves it: access without a VPN, ruble payments and servers in Russia." },
+      { q: "What can replace Netlify with ruble payments?", a: "Dada Cloud is a Russian platform with the same GitHub-to-production flow: pay with a Russian card, get an invoice and closing documents for legal entities, no foreign cards." },
+      { q: "Can I deploy Next.js or a static site?", a: "Yes. The platform detects the framework (Next.js, static, SPA) and builds it. A push to the main branch rebuilds and deploys automatically." },
+      { q: "Is there a database that Netlify lacks?", a: "Yes. Managed PostgreSQL is created next to the app and DATABASE_URL is injected automatically — no separate external provider needed." },
+      { q: "Do I need a VPN to reach the dashboard?", a: "No. The dashboard and sites open from Russia directly, no VPN required." },
+    ],
+  },
+  digitaloceanAlt: {
+    heroTitle: "DigitalOcean alternative for Russia",
+    heroSubtitle:
+      "DigitalOcean restricted signups and payments for Russia, and you can't pay with a Russian card. Dada Cloud gives you the same building blocks: your own servers (App Servers), app deploys from GitHub and managed PostgreSQL. Pay in rubles, documents for legal entities, servers in Russia.",
+    featuresTitle: "Why teams move from DigitalOcean to Dada Cloud",
+    features: [
+      { title: "Pay with a Russian card", desc: "Russian card, invoice and closing documents for legal entities. No foreign card or intermediaries." },
+      { title: "Your own servers (App Servers)", desc: "A Droplet equivalent: spin up a VM for your workloads — MySQL, Redis, any containers and services." },
+      { title: "Deploy from GitHub", desc: "An App Platform equivalent: connect a repo, push to the main branch — automatic build and deploy, framework detected for you." },
+      { title: "Managed PostgreSQL", desc: "A DO Managed Databases equivalent: managed PostgreSQL is created next to the app and DATABASE_URL is injected automatically." },
+      { title: "Signups open for Russia", desc: "Unlike DigitalOcean, access and payment from Russia are open — no workarounds or intermediaries." },
+      { title: "Data in Russia (152-FZ)", desc: "Apps, servers and databases run inside Russia — what the personal-data law requires." },
+    ],
+    faqTitle: "Replacing DigitalOcean in Russia — FAQ",
+    faq: [
+      { q: "Does DigitalOcean work in Russia?", a: "DigitalOcean restricted signups and payments for Russian users, and you can't pay with a Russian card. Data is stored abroad — which doesn't meet 152-FZ. Dada Cloud solves it: access and payment from Russia, servers inside the country." },
+      { q: "Is there a Droplet equivalent?", a: "Yes. App Servers are your virtual servers where you can run MySQL, Redis, containers and any services, just like a Droplet." },
+      { q: "Is there an App Platform equivalent?", a: "Yes. Apps deploy straight from GitHub: a push to the main branch triggers an automatic rebuild and deploy, framework detected for you." },
+      { q: "Is there a managed database like DO Managed Databases?", a: "Yes. Managed PostgreSQL is created next to the app and DATABASE_URL is injected automatically — no separate provider needed." },
+      { q: "How do I pay in rubles?", a: "Pay with a Russian card; for legal entities there's an invoice and closing documents. No foreign cards or intermediaries." },
     ],
   },
   databases: {
