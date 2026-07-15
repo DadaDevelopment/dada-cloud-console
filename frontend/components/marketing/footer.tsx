@@ -17,6 +17,8 @@ const MARKETING_PATHS = new Set([
   "/analog-heroku",
   "/analog-railway",
   "/analog-render",
+  "/analog-netlify",
+  "/analog-digitalocean",
   "/developer",
 ]);
 
