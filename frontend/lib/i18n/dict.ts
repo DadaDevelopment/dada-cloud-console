@@ -112,6 +112,7 @@ export interface Dict {
   vercelAlt: AltPage;
   herokuAlt: AltPage;
   railwayAlt: AltPage;
+  renderAlt: AltPage;
   databases: {
     heroTitle: string;
     heroSubtitle: string;
@@ -344,6 +345,28 @@ const ru: Dict = {
       { q: "Чем цена отличается от usage-billing Railway?", a: "Тарифы фиксированы в рублях, а не считаются по usage в долларах — расходы предсказуемы и не зависят от курса валют." },
     ],
   },
+  renderAlt: {
+    heroTitle: "Аналог Render в России",
+    heroSubtitle:
+      "Render удобен для деплоя веб-сервисов и баз, но оплатить его российской картой не выйдет, а данные лежат за границей. Dada Cloud даёт тот же путь: подключаете GitHub-репозиторий, пуш — и через минуты живой HTTPS-адрес с managed PostgreSQL рядом. Оплата рублями, серверы в России, без VPN.",
+    featuresTitle: "Почему переходят с Render на Dada Cloud",
+    features: [
+      { title: "Оплата рублёвой картой", desc: "Российская карта, счёт и закрывающие документы для юрлиц. Не нужны зарубежная карта и посредники." },
+      { title: "Деплой из GitHub, как в Render", desc: "Подключаете репозиторий, пуш в основную ветку — автоматическая пересборка и деплой. Фреймворк определяется сам." },
+      { title: "Managed PostgreSQL рядом", desc: "Как Render PostgreSQL: управляемая база создаётся рядом с приложением, DATABASE_URL прокидывается в сервис автоматически." },
+      { title: "Приложения не «засыпают»", desc: "В отличие от бесплатного тарифа Render, приложение остаётся живым и отвечает без задержки на первый запрос." },
+      { title: "Данные в России (152-ФЗ)", desc: "Приложения и базы размещаются на серверах в РФ — то, что требует закон о персональных данных." },
+      { title: "HTTPS-домен из коробки", desc: "Сразу после деплоя приложение доступно по адресу с валидным TLS-сертификатом. Свой домен подключается в пару шагов." },
+    ],
+    faqTitle: "Замена Render в России — частые вопросы",
+    faq: [
+      { q: "Работает ли Render в России?", a: "Панель и задеплоенные сервисы обычно открываются, но оплатить тариф российской картой нельзя, а данные хранятся за рубежом — что не соответствует 152-ФЗ. Dada Cloud решает обе проблемы: оплата рублями и серверы в РФ." },
+      { q: "Чем заменить Render с оплатой рублями?", a: "Dada Cloud — российская платформа с тем же сценарием «из GitHub в прод»: оплата рублёвой картой, счёт и закрывающие документы для юрлиц, без зарубежных карт." },
+      { q: "Нужно ли переписывать проект при переходе с Render?", a: "Нет. Вы подключаете тот же GitHub-репозиторий, платформа сама определяет фреймворк и собирает проект. Пуш в основную ветку пересобирает и деплоит приложение автоматически." },
+      { q: "Есть ли аналог Render PostgreSQL?", a: "Да. Управляемый PostgreSQL создаётся рядом с приложением, DATABASE_URL прокидывается в сервис автоматически — отдельный внешний провайдер не нужен." },
+      { q: "Будут ли сервисы «засыпать», как на бесплатном Render?", a: "Нет. Приложение остаётся запущенным и отвечает без холодного старта на первый запрос." },
+    ],
+  },
   databases: {
     heroTitle: "Управляемый PostgreSQL",
     heroSubtitle:
@@ -525,6 +548,7 @@ const ru: Dict = {
       { label: "Аналог Vercel", href: "/analog-vercel" },
       { label: "Аналог Heroku", href: "/analog-heroku" },
       { label: "Аналог Railway", href: "/analog-railway" },
+      { label: "Аналог Render", href: "/analog-render" },
       { label: "Цены", href: "/pricing" },
     ],
     companyTitle: "Компания",
@@ -727,6 +751,28 @@ const en: Dict = {
       { q: "How is pricing different from Railway's usage-billing?", a: "Plans are fixed in rubles rather than metered in dollars — costs are predictable and independent of the exchange rate." },
     ],
   },
+  renderAlt: {
+    heroTitle: "A Render alternative for Russia",
+    heroSubtitle:
+      "Render is convenient for deploying web services and databases, but you can't pay with a Russian card and data sits abroad. Dada Cloud gives you the same flow: connect a GitHub repo, push, and get a live HTTPS URL with managed PostgreSQL alongside in minutes. Ruble payments, servers in Russia, no VPN.",
+    featuresTitle: "Why teams move from Render to Dada Cloud",
+    features: [
+      { title: "Pay with a Russian card", desc: "A Russian card, an invoice and closing documents for legal entities. No foreign card or intermediaries." },
+      { title: "Deploy from GitHub, like Render", desc: "Connect a repo, push to the main branch — automatic rebuild and deploy. The framework is detected for you." },
+      { title: "Managed PostgreSQL alongside", desc: "Like Render PostgreSQL: a managed database is created next to the app and DATABASE_URL is injected automatically." },
+      { title: "Apps don't sleep", desc: "Unlike Render's free tier, your app stays alive and responds without a delay on the first request." },
+      { title: "Data in Russia (152-FZ)", desc: "Apps and databases run on servers inside Russia — what the personal-data law requires." },
+      { title: "HTTPS domain out of the box", desc: "Right after the deploy the app is reachable over a valid TLS certificate. Your own domain connects in a couple of steps." },
+    ],
+    faqTitle: "Replacing Render in Russia — FAQ",
+    faq: [
+      { q: "Does Render work in Russia?", a: "The panel and deployed services usually open, but you can't pay with a Russian card and data is stored abroad — which doesn't meet 152-FZ. Dada Cloud solves both: ruble payments and servers in Russia." },
+      { q: "What can replace Render with ruble payments?", a: "Dada Cloud is a Russian platform with the same GitHub-to-production flow: pay with a Russian card, get an invoice and closing documents for legal entities, no foreign cards." },
+      { q: "Do I have to rewrite my project when moving from Render?", a: "No. You connect the same GitHub repo, the platform detects the framework and builds it. A push to the main branch rebuilds and deploys automatically." },
+      { q: "Is there a Render PostgreSQL equivalent?", a: "Yes. Managed PostgreSQL is created next to the app and DATABASE_URL is injected automatically — no separate external provider needed." },
+      { q: "Will services sleep like Render's free tier?", a: "No. The app stays running and responds without a cold start on the first request." },
+    ],
+  },
   databases: {
     heroTitle: "Managed PostgreSQL",
     heroSubtitle:
@@ -908,6 +954,7 @@ const en: Dict = {
       { label: "Vercel alternative", href: "/analog-vercel" },
       { label: "Heroku alternative", href: "/analog-heroku" },
       { label: "Railway alternative", href: "/analog-railway" },
+      { label: "Render alternative", href: "/analog-render" },
       { label: "Pricing", href: "/pricing" },
     ],
     companyTitle: "Company",
