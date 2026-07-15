@@ -1,0 +1,47 @@
+*{margin:0;padding:0;box-sizing:border-box;font-family:-apple-system,"Segoe UI",Inter,Roboto,Arial,sans-serif}
+html,body{width:1080px;height:1920px;overflow:hidden}
+.slide{width:1080px;height:1920px;padding:80px 72px;display:flex;flex-direction:column;position:relative;color:#fff}
+.brandrow{display:flex;align-items:center;gap:18px}
+.logo{width:64px;height:64px;border-radius:16px;background:#2563eb;display:flex;align-items:center;justify-content:center;box-shadow:0 8px 24px rgba(0,0,0,.25)}
+.logo svg{width:40px;height:40px}
+.brandname{font-size:34px;font-weight:800;letter-spacing:-.5px}
+.title{font-size:82px;line-height:1.04;font-weight:800;letter-spacing:-1.5px;margin-top:70px}
+.subtitle{font-size:38px;line-height:1.32;font-weight:500;opacity:.9;margin-top:28px;max-width:900px}
+.mockwrap{margin-top:auto;margin-bottom:20px}
+.browser{background:#fff;border-radius:28px;box-shadow:0 40px 90px rgba(0,0,0,.35);overflow:hidden}
+.bchrome{height:74px;background:#f1f3f6;display:flex;align-items:center;gap:12px;padding:0 28px;border-bottom:1px solid #e5e7eb}
+.dot{width:16px;height:16px;border-radius:50%}
+.urlbar{margin-left:18px;flex:1;height:44px;background:#fff;border:1px solid #e5e7eb;border-radius:22px;display:flex;align-items:center;padding:0 22px;color:#64748b;font-size:26px}
+.body{padding:44px 48px;color:#0f172a}
+.foot{position:absolute;bottom:44px;left:0;width:1080px;text-align:center;font-size:30px;opacity:.85;font-weight:600}
+/* console card bits */
+.card{border:1px solid #e5e7eb;border-radius:20px;padding:36px 40px;background:#fff;box-shadow:0 2px 8px rgba(0,0,0,.04)}
+.cardhd{display:flex;justify-content:space-between;align-items:center;font-size:32px;font-weight:700;color:#0f172a}
+.muted{color:#64748b;font-weight:600;font-size:26px}
+.bar{height:12px;border-radius:8px;background:#e5e7eb;margin:26px 0 30px;overflow:hidden}
+.bar>i{display:block;height:100%;width:34%;background:#2563eb;border-radius:8px}
+.step{display:flex;align-items:center;gap:20px;font-size:32px;padding:14px 0;color:#0f172a}
+.ck{width:38px;height:38px;border-radius:50%;flex:0 0 38px;display:flex;align-items:center;justify-content:center}
+.ck.done{background:#16a34a;color:#fff;font-size:24px}
+.ck.todo{border:2px solid #cbd5e1}
+.done-txt{color:#94a3b8;text-decoration:line-through}
+.actions{display:flex;gap:24px;margin-top:34px}
+.act{flex:1;border:1px solid #e5e7eb;border-radius:18px;padding:30px}
+.act h4{font-size:30px;color:#0f172a;margin-bottom:10px}
+.act p{font-size:24px;color:#64748b;line-height:1.35;margin-bottom:22px;min-height:66px}
+.btn{display:block;text-align:center;background:#2563eb;color:#fff;border-radius:14px;padding:20px;font-size:28px;font-weight:700}
+.pills{display:flex;flex-wrap:wrap;gap:18px;margin-top:48px}
+.pill{background:rgba(255,255,255,.15);border:1px solid rgba(255,255,255,.28);border-radius:999px;padding:16px 32px;font-size:31px;font-weight:600}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:22px}
+.gcard{border:1px solid #e5e7eb;border-radius:16px;padding:26px 28px;display:flex;gap:20px;align-items:center}
+.gi{width:60px;height:60px;border-radius:13px;background:#eef2ff;display:flex;align-items:center;justify-content:center;font-size:30px;flex:0 0 60px}
+.gcard b{font-size:30px;color:#0f172a;display:block;margin-bottom:4px}
+.gcard span{font-size:24px;color:#64748b}
+.cmp{width:100%;border-collapse:collapse}
+.cmp th,.cmp td{padding:26px 20px;text-align:left;font-size:30px;border-bottom:1px solid #eef2f6}
+.cmp th{font-size:26px;color:#64748b;font-weight:700}
+.cmp th.c,.cmp td.c{text-align:center}
+.cmp td:first-child{color:#0f172a;font-weight:600}
+.yes{color:#16a34a;font-weight:800;font-size:38px}
+.no{color:#cbd5e1;font-weight:800;font-size:38px}
+.cmp .brandcol{color:#2563eb;font-weight:800}
