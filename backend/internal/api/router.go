@@ -102,6 +102,13 @@ func SetupRouter(pool *pgxpool.Pool, cfg *config.Config) *gin.Engine {
 	// Embedded OpenAPI spec (public -- feeds the reflective MCP server).
 	r.GET("/openapi.json", ServeOpenAPISpec)
 
+	// Status Radar (RU-vantage competitor availability probe, powers the
+	// /status acquisition landing). Public on purpose -- measured data about
+	// third-party public homepages, not tenant data; registered outside
+	// /api/v1 like /health and /metrics, so it is also outside the auth
+	// middleware and the OpenAPI coverage gate.
+	r.GET("/api/public/status", h.PublicStatusRadar)
+
 	// Prometheus scrape endpoint. Public on purpose: aggregate state gauges
 	// (operations/domain health), no per-tenant data. Scraped in-cluster by the
 	// kube-prometheus-stack ServiceMonitor; the public ingress does not route it.
