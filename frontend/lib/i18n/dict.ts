@@ -9,6 +9,14 @@ export const DEFAULT_LOCALE: Locale = "ru";
 
 type Feature = { title: string; desc: string };
 type Faq = { q: string; a: string };
+type AltPage = {
+  heroTitle: string;
+  heroSubtitle: string;
+  featuresTitle: string;
+  features: Feature[];
+  faqTitle: string;
+  faq: Faq[];
+};
 type Plan = {
   key: string;
   name: string;
@@ -101,14 +109,9 @@ export interface Dict {
     faqTitle: string;
     faq: Faq[];
   };
-  vercelAlt: {
-    heroTitle: string;
-    heroSubtitle: string;
-    featuresTitle: string;
-    features: Feature[];
-    faqTitle: string;
-    faq: Faq[];
-  };
+  vercelAlt: AltPage;
+  herokuAlt: AltPage;
+  railwayAlt: AltPage;
   databases: {
     heroTitle: string;
     heroSubtitle: string;
@@ -297,6 +300,50 @@ const ru: Dict = {
       { q: "Данные точно хранятся в России?", a: "Да. Приложения и базы размещаются на серверах в РФ, что соответствует требованиям 152-ФЗ и 242-ФЗ о хранении персональных данных граждан России на территории страны." },
     ],
   },
+  herokuAlt: {
+    heroTitle: "Аналог Heroku для России",
+    heroSubtitle:
+      "Heroku убил бесплатный тариф, а платный не оплатить российской картой. Dada Cloud даёт тот же путь «git push → живое приложение»: подключаете GitHub-репозиторий, пуш — и через минуты HTTPS-адрес. Оплата рублями, серверы в России, без VPN.",
+    featuresTitle: "Почему разработчики переезжают с Heroku на Dada Cloud",
+    features: [
+      { title: "Оплата рублёвой картой", desc: "Российская карта, счёт и закрывающие документы для юрлиц. Не нужны зарубежная карта и посредники, чтобы оплатить хостинг." },
+      { title: "Деплой из GitHub без Procfile-магии", desc: "Подключаете репозиторий, пуш в основную ветку — платформа сама определяет фреймворк, собирает и деплоит. Buildpack'и настраивать не нужно." },
+      { title: "Managed PostgreSQL рядом", desc: "Аналог Heroku Postgres: управляемая база создаётся рядом с приложением, DATABASE_URL прокидывается в сервис автоматически." },
+      { title: "Приложения не «засыпают»", desc: "В отличие от бесплатных dyno, приложение остаётся живым и отвечает без задержки на первый запрос." },
+      { title: "Данные в России (152-ФЗ)", desc: "Приложения и базы размещаются на серверах в РФ — то, что требует закон о персональных данных и чего Heroku структурно не даёт." },
+      { title: "HTTPS-домен из коробки", desc: "Сразу после деплоя приложение доступно по адресу с валидным TLS-сертификатом. Свой домен подключается в пару шагов." },
+    ],
+    faqTitle: "Замена Heroku в России — частые вопросы",
+    faq: [
+      { q: "Работает ли Heroku в России сейчас?", a: "Бесплатных тарифов у Heroku больше нет, а платные нельзя оплатить российской картой. Данные хранятся за рубежом, что не соответствует 152-ФЗ. Dada Cloud закрывает оба вопроса: оплата рублями и серверы в РФ." },
+      { q: "Чем заменить Heroku с оплатой рублями?", a: "Dada Cloud — российская платформа с тем же сценарием «git push → прод»: оплата рублёвой картой, счёт и закрывающие документы, без зарубежных карт и посредников." },
+      { q: "Нужно ли переписывать приложение при переходе с Heroku?", a: "Нет. Вы подключаете тот же GitHub-репозиторий, платформа сама определяет фреймворк и собирает проект. Procfile и buildpack'и настраивать не требуется." },
+      { q: "Есть ли аналог Heroku Postgres?", a: "Да. Управляемый PostgreSQL создаётся прямо в платформе рядом с приложением, а строка подключения DATABASE_URL прокидывается в сервис автоматически." },
+      { q: "Будут ли приложения «засыпать», как бесплатные dyno?", a: "Нет. Приложение остаётся запущенным и отвечает без холодного старта на первый запрос." },
+    ],
+  },
+  railwayAlt: {
+    heroTitle: "Аналог Railway, который работает в России",
+    heroSubtitle:
+      "Railway удобен, но для оплаты нужна зарубежная карта, а данные лежат за границей. Dada Cloud повторяет тот же опыт: подключаете GitHub-репозиторий, пуш — и через минуты живой HTTPS-адрес с базой рядом. Оплата рублями, серверы в России, без VPN.",
+    featuresTitle: "Почему переходят с Railway на Dada Cloud",
+    features: [
+      { title: "Оплата рублёвой картой", desc: "Российская карта, счёт и закрывающие документы. Не нужны зарубежная карта, посредники и обходные схемы оплаты по usage-billing." },
+      { title: "Деплой из GitHub, как в Railway", desc: "Подключаете репозиторий, пуш в основную ветку — автоматическая пересборка и деплой. Фреймворк определяется сам." },
+      { title: "PostgreSQL и хранилище рядом", desc: "Как в Railway: управляемый PostgreSQL и S3-хранилище создаются рядом с приложением, строка подключения прокидывается в сервис автоматически." },
+      { title: "Работает без VPN", desc: "И панель, и задеплоенные приложения открываются из России напрямую — ни вам, ни вашим пользователям не нужен VPN." },
+      { title: "Данные в России (152-ФЗ)", desc: "Приложения и базы размещаются на серверах в РФ — то, что требует закон о персональных данных." },
+      { title: "Предсказуемая цена в рублях", desc: "Тарифы в рублях вместо usage-billing в долларах — расходы понятны заранее и не привязаны к курсу." },
+    ],
+    faqTitle: "Замена Railway в России — частые вопросы",
+    faq: [
+      { q: "Работает ли Railway в России?", a: "Панель и задеплоенные проекты обычно открываются, но оплатить тариф российской картой нельзя, а данные хранятся за рубежом — что не соответствует 152-ФЗ. Dada Cloud решает обе проблемы: оплата рублями и серверы в РФ." },
+      { q: "Чем заменить Railway для оплаты рублями?", a: "Dada Cloud — российская платформа с тем же сценарием «из GitHub в прод»: оплата рублёвой картой, счёт и закрывающие документы для юрлиц, без зарубежных карт." },
+      { q: "Нужно ли переписывать проект при переходе с Railway?", a: "Нет. Вы подключаете тот же GitHub-репозиторий, платформа сама определяет фреймворк и собирает проект. Пуш в основную ветку пересобирает и деплоит приложение автоматически." },
+      { q: "Есть ли база данных, как плагин Postgres в Railway?", a: "Да. Управляемый PostgreSQL создаётся рядом с приложением, DATABASE_URL прокидывается в сервис автоматически — отдельный внешний провайдер не нужен." },
+      { q: "Чем цена отличается от usage-billing Railway?", a: "Тарифы фиксированы в рублях, а не считаются по usage в долларах — расходы предсказуемы и не зависят от курса валют." },
+    ],
+  },
   databases: {
     heroTitle: "Управляемый PostgreSQL",
     heroSubtitle:
@@ -476,6 +523,8 @@ const ru: Dict = {
       { label: "Базы данных", href: "/databases" },
       { label: "Объектное хранилище", href: "/storage" },
       { label: "Аналог Vercel", href: "/analog-vercel" },
+      { label: "Аналог Heroku", href: "/analog-heroku" },
+      { label: "Аналог Railway", href: "/analog-railway" },
       { label: "Цены", href: "/pricing" },
     ],
     companyTitle: "Компания",
@@ -632,6 +681,50 @@ const en: Dict = {
       { q: "Do I have to rewrite my project when moving from Vercel?", a: "No. You connect the same GitHub repo, the platform detects the framework and builds the project. A push to the main branch rebuilds and deploys the app automatically." },
       { q: "Is there a database, like Vercel plus an external Postgres?", a: "Yes. Managed PostgreSQL is created inside the platform next to the app, and DATABASE_URL is injected into the service automatically — no separate external database provider needed." },
       { q: "Is data really stored in Russia?", a: "Yes. Apps and databases run on servers in Russia, meeting the 152-FZ and 242-FZ requirements to store Russian citizens' personal data within the country." },
+    ],
+  },
+  herokuAlt: {
+    heroTitle: "A Heroku alternative for Russia",
+    heroSubtitle:
+      "Heroku killed its free tier and its paid plans can't be paid with a Russian card. Dada Cloud gives you the same git-push-to-live-app flow: connect a GitHub repo, push, and get an HTTPS URL in minutes. Ruble payments, servers in Russia, no VPN.",
+    featuresTitle: "Why developers move from Heroku to Dada Cloud",
+    features: [
+      { title: "Pay with a Russian card", desc: "A Russian card, an invoice and closing documents for legal entities. No foreign card or intermediaries to pay for hosting." },
+      { title: "Deploy from GitHub, no Procfile magic", desc: "Connect a repo, push to the main branch — the platform detects the framework, builds and deploys. No buildpacks to configure." },
+      { title: "Managed PostgreSQL alongside", desc: "Like Heroku Postgres: a managed database is created next to the app and DATABASE_URL is injected into the service automatically." },
+      { title: "Apps don't sleep", desc: "Unlike free dynos, your app stays alive and responds without a cold start on the first request." },
+      { title: "Data in Russia (152-FZ)", desc: "Apps and databases run on servers inside Russia — what the personal-data law requires and what Heroku structurally can't offer." },
+      { title: "HTTPS domain out of the box", desc: "Right after the deploy the app is reachable over a valid TLS certificate. Your own domain connects in a couple of steps." },
+    ],
+    faqTitle: "Replacing Heroku in Russia — FAQ",
+    faq: [
+      { q: "Does Heroku work in Russia now?", a: "Heroku no longer offers free tiers, and paid plans can't be paid with a Russian card. Data is stored abroad, which doesn't meet 152-FZ. Dada Cloud covers both: ruble payments and servers in Russia." },
+      { q: "What can replace Heroku with ruble payments?", a: "Dada Cloud is a Russian platform with the same git-push-to-production flow: pay with a Russian card, get an invoice and closing documents, no foreign cards or intermediaries." },
+      { q: "Do I have to rewrite my app when moving from Heroku?", a: "No. You connect the same GitHub repo, the platform detects the framework and builds the project. No Procfile or buildpacks to configure." },
+      { q: "Is there a Heroku Postgres equivalent?", a: "Yes. Managed PostgreSQL is created inside the platform next to the app, and the DATABASE_URL connection string is injected into the service automatically." },
+      { q: "Will apps sleep like free dynos?", a: "No. The app stays running and responds without a cold start on the first request." },
+    ],
+  },
+  railwayAlt: {
+    heroTitle: "A Railway alternative that works in Russia",
+    heroSubtitle:
+      "Railway is convenient, but paying for it needs a foreign card and data sits abroad. Dada Cloud reproduces the same experience: connect a GitHub repo, push, and get a live HTTPS URL with a database alongside in minutes. Ruble payments, servers in Russia, no VPN.",
+    featuresTitle: "Why teams move from Railway to Dada Cloud",
+    features: [
+      { title: "Pay with a Russian card", desc: "A Russian card, an invoice and closing documents. No foreign card, intermediaries or usage-billing workarounds." },
+      { title: "Deploy from GitHub, like Railway", desc: "Connect a repo, push to the main branch — automatic rebuild and deploy. The framework is detected for you." },
+      { title: "PostgreSQL and storage alongside", desc: "Like Railway: managed PostgreSQL and S3 storage are created next to the app, and the connection string is injected automatically." },
+      { title: "Works without a VPN", desc: "Both the panel and your deployed apps open from Russia directly — neither you nor your users need a VPN." },
+      { title: "Data in Russia (152-FZ)", desc: "Apps and databases run on servers inside Russia — what the personal-data law requires." },
+      { title: "Predictable pricing in rubles", desc: "Ruble plans instead of dollar usage-billing — costs are known upfront and not tied to the exchange rate." },
+    ],
+    faqTitle: "Replacing Railway in Russia — FAQ",
+    faq: [
+      { q: "Does Railway work in Russia?", a: "The panel and deployed projects usually open, but you can't pay with a Russian card and data is stored abroad — which doesn't meet 152-FZ. Dada Cloud solves both: ruble payments and servers in Russia." },
+      { q: "What can replace Railway for ruble payments?", a: "Dada Cloud is a Russian platform with the same GitHub-to-production flow: pay with a Russian card, get an invoice and closing documents for legal entities, no foreign cards." },
+      { q: "Do I have to rewrite my project when moving from Railway?", a: "No. You connect the same GitHub repo, the platform detects the framework and builds it. A push to the main branch rebuilds and deploys automatically." },
+      { q: "Is there a database, like the Railway Postgres plugin?", a: "Yes. Managed PostgreSQL is created next to the app and DATABASE_URL is injected automatically — no separate external provider needed." },
+      { q: "How is pricing different from Railway's usage-billing?", a: "Plans are fixed in rubles rather than metered in dollars — costs are predictable and independent of the exchange rate." },
     ],
   },
   databases: {
@@ -813,6 +906,8 @@ const en: Dict = {
       { label: "Databases", href: "/databases" },
       { label: "Object storage", href: "/storage" },
       { label: "Vercel alternative", href: "/analog-vercel" },
+      { label: "Heroku alternative", href: "/analog-heroku" },
+      { label: "Railway alternative", href: "/analog-railway" },
       { label: "Pricing", href: "/pricing" },
     ],
     companyTitle: "Company",
