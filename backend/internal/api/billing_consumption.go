@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/dada-tuda/console/backend/internal/auth"
+	"github.com/dada-tuda/console/backend/internal/cache"
 	"github.com/dada-tuda/console/backend/internal/prometheus"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -167,14 +168,36 @@ func (h *Handler) consumptionApps(ctx context.Context, projectID uuid.UUID, star
 	return out, nil
 }
 
+// appUsage is the cached per-app usage average (nil dimensions preserved).
+type appUsage struct {
+	CPU *float64 `json:"cpu"`
+	RAM *float64 `json:"ram"`
+}
+
 // appAvgUsage returns the average CPU (cores) and RAM (GB) for one app over the
-// window, mirroring GetAppMetrics' PromQL: k8s apps scope by namespace+image,
-// compose/VM apps by the docker-compose service label (== app name). Any
-// missing/failed query yields nil for that dimension (0 cost, warn logged).
+// window. It caches the reusable unit -- the two Prometheus subqueries -- not
+// the endpoint, keyed by (billing month, runtime, namespace, image, app). The
+// key deliberately omits the exact window end (which moves every second) and
+// uses the billing month instead, so repeat views within CacheCostTTL reuse one
+// result instead of each firing a fresh pair of avg_over_time subqueries. A
+// monthly average barely moves over the TTL, so the staleness is immaterial.
 func (h *Handler) appAvgUsage(ctx context.Context, runtime, namespace, image, appName string, start, end time.Time) (*float64, *float64) {
 	if h.prometheus == nil {
 		return nil, nil
 	}
+	key := fmt.Sprintf("usage:%s:%s:%s:%s:%s", start.Format("2006-01"), runtime, namespace, image, appName)
+	u, _ := cache.Fetch(ctx, h.cache, key, h.cfg.CacheCostTTL, func() (appUsage, error) {
+		cpu, ram := h.computeAppAvgUsage(ctx, runtime, namespace, image, appName, start, end)
+		return appUsage{CPU: cpu, RAM: ram}, nil
+	})
+	return u.CPU, u.RAM
+}
+
+// computeAppAvgUsage runs the two Prometheus subqueries behind appAvgUsage,
+// mirroring GetAppMetrics' PromQL: k8s apps scope by namespace+image, compose/VM
+// apps by the docker-compose service label (== app name). Any missing/failed
+// query yields nil for that dimension (0 cost, warn logged).
+func (h *Handler) computeAppAvgUsage(ctx context.Context, runtime, namespace, image, appName string, start, end time.Time) (*float64, *float64) {
 	window := fmt.Sprintf("%ds", int(end.Sub(start).Seconds()))
 	var cpuExpr, ramExpr string
 	if runtime == "k8s" && namespace != "" && image != "" {
