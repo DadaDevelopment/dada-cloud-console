@@ -388,14 +388,20 @@ func (r *StatusReconciler) reconcile(ctx context.Context) map[snapKey]bool {
 	updated := 0
 	for k, la := range agg {
 		phase := livePhase(la)
-		patch, _ := json.Marshal(map[string]any{
+		patchFields := map[string]any{
 			"status":      phase,
 			"image":       la.image,
 			"replicas":    la.desired,
 			"ready":       la.ready,
 			"live_source": "k8s",
 			"live_at":     time.Now().UTC().Format(time.RFC3339),
-		})
+		}
+		if hostname, err := db.PrimaryHostname(ctx, r.pool, k.env, k.app, r.cfg.DefaultDomainBase); err != nil {
+			log.Warn().Err(err).Str("app", k.app).Msg("status-reconciler: primary hostname lookup")
+		} else if hostname != "" {
+			patchFields["url"] = "https://" + hostname
+		}
+		patch, _ := json.Marshal(patchFields)
 		n, err := db.UpdateLiveStatus(ctx, r.pool, k.env, "App", k.app, phase, patch)
 		if err != nil {
 			log.Error().Err(err).Str("app", k.app).Msg("status-reconciler: update snapshot")

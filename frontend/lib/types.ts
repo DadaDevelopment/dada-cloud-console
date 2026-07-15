@@ -372,6 +372,7 @@ export interface AppSummary {
   status: string;
   message: string;
   volume?: AppVolume;
+  url?: string;
 }
 
 export interface AppsResponse {

@@ -3,10 +3,12 @@ package db
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -205,4 +207,32 @@ func UpdateLiveStatus(ctx context.Context, pool *pgxpool.Pool,
 		return 0, fmt.Errorf("update live status: %w", err)
 	}
 	return tag.RowsAffected(), nil
+}
+
+// PrimaryHostname returns the hostname to surface on an app's card, or ""
+// if the app has none yet (domain_hostnames row not created, or still
+// pending). Preference order: an active custom domain over an active
+// surrogate (rows whose hostname ends in domainBase are surrogates), then
+// falls back to any row at all so a pending domain still surfaces something.
+func PrimaryHostname(ctx context.Context, pool *pgxpool.Pool,
+	environmentID uuid.UUID, appName, domainBase string,
+) (string, error) {
+	var hostname string
+	err := pool.QueryRow(ctx, `
+		SELECT hostname
+		FROM domain_hostnames
+		WHERE environment_id = $1 AND app_name = $2
+		ORDER BY
+			(status = 'active') DESC,
+			(right(hostname, length($3::text)) <> $3::text) DESC,
+			created_at ASC
+		LIMIT 1
+	`, environmentID, appName, domainBase).Scan(&hostname)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return "", nil
+		}
+		return "", fmt.Errorf("primary hostname: %w", err)
+	}
+	return hostname, nil
 }

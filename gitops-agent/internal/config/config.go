@@ -54,6 +54,12 @@ type Config struct {
 	// hostnames: the ingress-nginx-pub load-balancer IP that serves them.
 	DefaultDomainDNSTarget string
 
+	// DefaultDomainBase is the suffix of an auto-created surrogate hostname
+	// (e.g. <app>-<hash>.dada-tuda.ru). Mirrors the console backend's
+	// DEFAULT_DOMAIN_BASE so the status reconciler can tell a surrogate apart
+	// from a user-owned custom domain when picking which hostname to surface.
+	DefaultDomainBase string
+
 	// DefaultDomainTLSSecret, when set, makes managed default-domain Ingresses
 	// reference a shared wildcard TLS secret (requires that secret to be
 	// replicated into every app namespace). Empty (the default) makes each
@@ -138,6 +144,7 @@ func Load() (*Config, error) {
 		PreviewEnvTTL:           previewTTL,
 		DefaultDomainTLSSecret:  getEnv("GITOPS_DEFAULT_DOMAIN_TLS_SECRET", ""),
 		DefaultDomainDNSTarget:  getEnv("GITOPS_DEFAULT_DOMAIN_DNS_TARGET", "155.212.223.198"),
+		DefaultDomainBase:       getEnv("DEFAULT_DOMAIN_BASE", "dada-tuda.ru"),
 
 		OrphanGCEnabled:  getEnv("GITOPS_ORPHAN_GC_ENABLED", "true") == "true",
 		OrphanMarkAfter:  orphanMark,

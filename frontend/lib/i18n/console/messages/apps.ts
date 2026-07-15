@@ -58,6 +58,7 @@ export const apps: Messages = {
 
   "apps.card.replicas": { ru: "{count} реплик", en: "{count} replicas" },
   "apps.card.synced": { ru: "Синхронизировано {ago}", en: "Synced {ago}" },
+  "apps.card.openUrl": { ru: "Открыть {hostname}", en: "Open {hostname}" },
 
   "apps.modal.create.title": { ru: "Создать приложение", en: "Create Application" },
   "apps.modal.create.name.label": { ru: "Имя приложения", en: "App name" },

@@ -31,6 +31,15 @@ interface CreateAppForm {
 const APP_NAME_RE = /^([a-z0-9]|[a-z0-9][a-z0-9-]{0,61}[a-z0-9])$/;
 const APP_IMAGE_RE = /^[a-zA-Z0-9][a-zA-Z0-9._\-/:]*:[a-zA-Z0-9._\-]+$/;
 
+/** Bare host of a live-app URL, for a compact link label ("Open <host>"). */
+function appHostname(url: string): string {
+  try {
+    return new URL(url).host;
+  } catch {
+    return url;
+  }
+}
+
 export default function AppsPage() {
   const params = useParams<{ projectId: string }>();
   const projectId = params.projectId;
@@ -452,6 +461,18 @@ function EnvBlock({ env, projectId, apps, infra, canCreate, onCreate, t }: EnvBl
                 <p className="mt-2 text-xs text-gray-400 dark:text-gray-500">
                   {t("apps.card.synced", { ago: timeAgo(app.last_synced_at) })}
                 </p>
+                {summary.url && (
+                  <a
+                    href={summary.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    onClick={(e) => e.stopPropagation()}
+                    className="mt-2 inline-flex items-center gap-1.5 truncate text-xs font-medium text-blue-600 hover:text-blue-700 hover:underline dark:text-blue-400 dark:hover:text-blue-300"
+                  >
+                    <Globe className="h-3.5 w-3.5 shrink-0" />
+                    {t("apps.card.openUrl", { hostname: appHostname(summary.url) })}
+                  </a>
+                )}
                 <MetricSparkline projectId={projectId} envId={env.id} appName={app.name} />
               </Link>
             );
