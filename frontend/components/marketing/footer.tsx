@@ -19,6 +19,9 @@ const MARKETING_PATHS = new Set([
   "/analog-render",
   "/analog-netlify",
   "/analog-digitalocean",
+  "/analog-fly-io",
+  "/deploy-vibe-coding",
+  "/hosting-telegram-bot",
   "/developer",
 ]);
 

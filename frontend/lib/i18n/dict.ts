@@ -115,6 +115,9 @@ export interface Dict {
   renderAlt: AltPage;
   netlifyAlt: AltPage;
   digitaloceanAlt: AltPage;
+  flyIoAlt: AltPage;
+  vibeCodingAlt: AltPage;
+  telegramBotAlt: AltPage;
   databases: {
     heroTitle: string;
     heroSubtitle: string;
@@ -284,11 +287,11 @@ const ru: Dict = {
   vercelAlt: {
     heroTitle: "Аналог Vercel, который работает в России",
     heroSubtitle:
-      "Vercel и Railway удобны, но оплатить их российской картой и держать данные в РФ не выйдет. Dada Cloud закрывает ровно этот сценарий: подключаете GitHub-репозиторий, пуш — и через минуты живой HTTPS-адрес. Без VPN, оплата рублями, серверы в России.",
+      "Vercel удобен, но у части российских провайдеров сайты на его адресах перестают открываться без VPN, оплатить тариф российской картой нельзя, а данные лежат за рубежом. Dada Cloud закрывает ровно этот сценарий: подключаете GitHub-репозиторий, пуш — и через минуты живой HTTPS-адрес, который открывается в России напрямую. Без VPN, оплата рублями, серверы в РФ.",
     featuresTitle: "Почему на Dada Cloud переходят с Vercel и Railway",
     features: [
+      { title: "Сайт открывается в России без VPN", desc: "Часть российских провайдеров режет диапазоны адресов Vercel — сайт на своём домене периодически недоступен без VPN. На Dada Cloud приложение отдаётся с серверов в РФ и открывается напрямую, вам и вашим пользователям VPN не нужен." },
       { title: "Оплата рублёвой картой", desc: "Российская карта, счёт и закрывающие документы. Не нужны зарубежная карта, посредники и обходные схемы оплаты подписки." },
-      { title: "Работает без VPN", desc: "И панель, и задеплоенные приложения открываются из России напрямую — ни вам, ни вашим пользователям не нужен VPN, чтобы зайти." },
       { title: "Данные в России (152-ФЗ)", desc: "Приложения и базы размещаются на серверах в РФ — это то, что требует закон о персональных данных и чего зарубежный хостинг структурно закрыть не может." },
       { title: "Деплой из GitHub, как вы привыкли", desc: "Тот же флоу, что на Vercel: подключаете репозиторий, пуш в основную ветку — автоматическая пересборка и деплой. Фреймворк определяется сам." },
       { title: "HTTPS-домен из коробки", desc: "Сразу после деплоя приложение доступно по адресу с валидным TLS-сертификатом. Свой домен подключается в пару шагов, сертификат выпускается автоматически." },
@@ -296,7 +299,8 @@ const ru: Dict = {
     ],
     faqTitle: "Vercel и Россия — частые вопросы",
     faq: [
-      { q: "Работает ли Vercel в России?", a: "Сам сайт и задеплоенные проекты чаще всего открываются, но оплатить платный тариф российской картой нельзя, а данные хранятся за рубежом — что не соответствует требованиям 152-ФЗ для персональных данных россиян. Dada Cloud решает обе проблемы: оплата рублями и серверы в РФ." },
+      { q: "Работает ли Vercel в России?", a: "С оговорками. У части российских провайдеров сайты на адресах Vercel периодически не открываются без VPN, оплатить платный тариф российской картой нельзя, а данные хранятся за рубежом — что не соответствует требованиям 152-ФЗ для персональных данных россиян. Dada Cloud решает всё это: сайт открывается из России напрямую, оплата рублями, серверы в РФ." },
+      { q: "Почему сайт на Vercel не открывается в России?", a: "Часть российских интернет-провайдеров блокирует диапазоны IP-адресов Vercel, поэтому сайт на своём домене может периодически не открываться у российских пользователей без VPN — это внешняя блокировка на стороне провайдеров, а не настройка Vercel. На Dada Cloud приложение размещается на серверах в РФ и открывается напрямую, без VPN." },
       { q: "Чем заменить Vercel для оплаты рублями?", a: "Dada Cloud — российская платформа с тем же сценарием «из GitHub в прод»: оплата рублёвой картой, счёт и закрывающие документы для юрлиц, без зарубежных карт и посредников." },
       { q: "Нужно ли переписывать проект при переходе с Vercel?", a: "Нет. Вы подключаете тот же GitHub-репозиторий, платформа сама определяет фреймворк и собирает проект. Пуш в основную ветку пересобирает и деплоит приложение автоматически." },
       { q: "Есть ли база данных, как в связке Vercel + внешний Postgres?", a: "Да. Управляемый PostgreSQL создаётся прямо в платформе рядом с приложением, DATABASE_URL прокидывается в сервис автоматически — отдельный внешний провайдер базы не нужен." },
@@ -411,6 +415,69 @@ const ru: Dict = {
       { q: "Есть ли аналог App Platform?", a: "Да. Приложение деплоится прямо из GitHub: пуш в основную ветку — автоматическая пересборка и деплой, фреймворк определяется сам." },
       { q: "Есть ли управляемая база, как DO Managed Databases?", a: "Да. Управляемый PostgreSQL создаётся рядом с приложением, DATABASE_URL прокидывается в сервис автоматически — отдельный провайдер не нужен." },
       { q: "Как оплачивать в рублях?", a: "Оплата рублёвой картой, для юрлиц — счёт и закрывающие документы. Зарубежные карты и посредники не нужны." },
+    ],
+  },
+  flyIoAlt: {
+    heroTitle: "Аналог Fly.io для России",
+    heroSubtitle:
+      "Fly.io нельзя оплатить российской картой — вокруг этого выросла целая индустрия платёжных посредников с наценкой. Dada Cloud даёт тот же путь «git push → живое приложение»: подключаете GitHub-репозиторий, пуш — и через минуты HTTPS-адрес с managed PostgreSQL рядом. Оплата рублями напрямую, без посредников, серверы в России.",
+    featuresTitle: "Почему переходят с Fly.io на Dada Cloud",
+    features: [
+      { title: "Оплата рублёвой картой напрямую", desc: "Российская карта, счёт и закрывающие документы для юрлиц. Не нужны зарубежная карта и платёжные посредники с наценкой." },
+      { title: "Деплой из GitHub", desc: "Подключаете репозиторий, пуш в основную ветку — автоматическая сборка и деплой, фреймворк определяется сам." },
+      { title: "Managed PostgreSQL рядом", desc: "Управляемый PostgreSQL создаётся рядом с приложением, DATABASE_URL прокидывается в сервис автоматически." },
+      { title: "Живой HTTPS за минуты", desc: "Каждое приложение получает HTTPS-адрес сразу, свой домен подключается в пару шагов." },
+      { title: "Данные в России (152-ФЗ)", desc: "Приложения и базы размещаются на серверах в РФ — то, что требует закон о персональных данных." },
+      { title: "Без обходных схем", desc: "Регистрация и оплата из России открыты напрямую — без VPN, посредников и зарубежных карт." },
+    ],
+    faqTitle: "Замена Fly.io в России — частые вопросы",
+    faq: [
+      { q: "Работает ли Fly.io в России?", a: "Сам сервис доступен, но оплатить его российской картой нельзя — приходится пользоваться платёжными посредниками с наценкой. Данные хранятся за рубежом, что не соответствует 152-ФЗ. Dada Cloud решает оба вопроса: прямая оплата рублём и серверы в РФ." },
+      { q: "Сколько стоит оплатить Fly.io из РФ через посредников?", a: "Посредники берут комиссию сверх счёта Fly.io плюс курсовую наценку. Dada Cloud вы оплачиваете рублёвой картой напрямую, без комиссии посредника: Free — 0 ₽, Startup — 990 ₽/мес, Business — 2 900 ₽/мес." },
+      { q: "Чем заменить Fly.io с оплатой рублями?", a: "Dada Cloud — российская платформа с тем же сценарием «git push → прод»: оплата рублёвой картой, счёт и закрывающие документы, managed PostgreSQL рядом, серверы в РФ." },
+      { q: "Такой же ли простой деплой?", a: "Да. Подключаете GitHub-репозиторий, пуш в основную ветку — сборка и деплой происходят автоматически, отдельная настройка окружения не нужна." },
+    ],
+  },
+  vibeCodingAlt: {
+    heroTitle: "Куда задеплоить проект из v0, Lovable, Cursor или Bolt",
+    heroSubtitle:
+      "Собрали приложение в v0, Lovable, Bolt, Cursor или Replit? Эти инструменты и зарубежный хостинг не принимают российские карты. Экспортируйте код в GitHub — и разверните его в Dada Cloud тем же git push. Оплата рублёвой картой, серверы в России, без VPN и зарубежных карт.",
+    featuresTitle: "Почему AI-проекты деплоят в Dada Cloud",
+    features: [
+      { title: "Тот же код из GitHub", desc: "AI-инструмент сгенерировал репозиторий — подключаете его и деплоите как есть, без переписывания под другую платформу." },
+      { title: "Оплата рублёвой картой", desc: "Российская карта, счёт и закрывающие документы. Не нужны зарубежная карта, VPN и посредники, которых требуют v0, Lovable и Bolt." },
+      { title: "Managed PostgreSQL рядом", desc: "Приложению нужна база? Управляемый PostgreSQL создаётся рядом, DATABASE_URL прокидывается в сервис автоматически." },
+      { title: "Живой HTTPS за минуты", desc: "Пуш в основную ветку — автоматическая сборка, деплой и рабочий HTTPS-адрес. Фреймворк (Next.js, Vite, Node) определяется сам." },
+      { title: "Данные в России (152-ФЗ)", desc: "Приложение и база размещаются на серверах в РФ — то, что требует закон о персональных данных пользователей." },
+      { title: "Без Vercel/Netlify-привязки", desc: "Не нужно держать оплату зарубежного хостинга ради пары ссылок — весь проект живёт на одной российской платформе." },
+    ],
+    faqTitle: "Деплой AI-проектов — частые вопросы",
+    faq: [
+      { q: "Как задеплоить проект из v0, Lovable или Bolt?", a: "Экспортируйте сгенерированный код в GitHub-репозиторий, подключите его к Dada Cloud и запустите деплой. Пуш в основную ветку собирает и разворачивает приложение автоматически." },
+      { q: "Почему нельзя оплатить деплой этих инструментов российской картой?", a: "v0, Lovable, Bolt, Cursor и Replit используют зарубежный биллинг и не принимают карты российских банков. Dada Cloud принимает рублёвую карту напрямую." },
+      { q: "Нужен ли VPN?", a: "Нет. Регистрация, оплата и работа с Dada Cloud доступны из России напрямую, без VPN и обходных схем." },
+      { q: "Есть ли база данных для приложения?", a: "Да. Управляемый PostgreSQL создаётся рядом с приложением, строка подключения прокидывается в сервис автоматически." },
+    ],
+  },
+  telegramBotAlt: {
+    heroTitle: "Хостинг для Telegram-бота в России",
+    heroSubtitle:
+      "Разместите Telegram-бота с деплоем из GitHub: пуш в основную ветку — и бот работает 24/7. Оплата рублёвой картой, серверы в России, без карты зарубежного банка и без VPN. Managed PostgreSQL для состояния бота — рядом.",
+    featuresTitle: "Почему Telegram-ботов размещают в Dada Cloud",
+    features: [
+      { title: "Деплой бота из GitHub", desc: "Подключаете репозиторий с ботом, пуш в основную ветку — автоматическая сборка и запуск. Python, Node, любой стек." },
+      { title: "Работает 24/7", desc: "Бот запущен как постоянный процесс, а не как засыпающая функция — long polling и webhook работают без простоев." },
+      { title: "Managed PostgreSQL для состояния", desc: "Состояние диалогов и данные пользователей бота — в управляемом PostgreSQL рядом, DATABASE_URL прокидывается автоматически." },
+      { title: "Оплата рублёвой картой", desc: "Российская карта, счёт и закрывающие документы. Не нужны зарубежная карта и посредники, как у Railway и Render." },
+      { title: "Данные пользователей в России (152-ФЗ)", desc: "Данные пользователей бота хранятся на серверах в РФ — то, что требует закон о персональных данных." },
+      { title: "Логи и мониторинг", desc: "Смотрите логи бота и метрики прямо в панели — видно, что бот жив и как отвечает." },
+    ],
+    faqTitle: "Хостинг Telegram-бота — частые вопросы",
+    faq: [
+      { q: "Где разместить Telegram-бота из России?", a: "В Dada Cloud: подключаете GitHub-репозиторий с ботом, пуш в основную ветку — бот собирается и запускается автоматически, работает круглосуточно. Оплата рублём, серверы в РФ." },
+      { q: "Почему Railway и Render неудобны для оплаты из РФ?", a: "Они используют зарубежный биллинг и не принимают карты российских банков — нужны посредники или карта другой страны. Dada Cloud принимает рублёвую карту напрямую." },
+      { q: "Бот будет работать круглосуточно?", a: "Да. Бот запускается как постоянный процесс и работает 24/7 — и long polling, и webhook поддерживаются без засыпания." },
+      { q: "Можно хранить данные пользователей бота?", a: "Да, в managed PostgreSQL рядом с ботом. Данные размещаются на серверах в России, что соответствует 152-ФЗ." },
     ],
   },
   databases: {
@@ -597,6 +664,9 @@ const ru: Dict = {
       { label: "Аналог Render", href: "/analog-render" },
       { label: "Аналог Netlify", href: "/analog-netlify" },
       { label: "Аналог DigitalOcean", href: "/analog-digitalocean" },
+      { label: "Аналог Fly.io", href: "/analog-fly-io" },
+      { label: "Деплой из v0 / Lovable / Bolt", href: "/deploy-vibe-coding" },
+      { label: "Хостинг Telegram-бота", href: "/hosting-telegram-bot" },
       { label: "Цены", href: "/pricing" },
     ],
     companyTitle: "Компания",
@@ -865,6 +935,69 @@ const en: Dict = {
       { q: "How do I pay in rubles?", a: "Pay with a Russian card; for legal entities there's an invoice and closing documents. No foreign cards or intermediaries." },
     ],
   },
+  flyIoAlt: {
+    heroTitle: "Fly.io alternative for Russia",
+    heroSubtitle:
+      "Fly.io can't be paid for with a Russian card — a whole industry of payment intermediaries with markups exists just to solve that. Dada Cloud gives you the same path: connect a GitHub repo, push, and get a live HTTPS address with managed PostgreSQL next to it in minutes. Pay in rubles directly, no intermediaries, servers in Russia.",
+    featuresTitle: "Why teams move from Fly.io to Dada Cloud",
+    features: [
+      { title: "Pay with a Russian card directly", desc: "Russian card, invoice and closing documents for legal entities. No foreign card and no payment intermediaries taking a markup." },
+      { title: "Deploy from GitHub", desc: "Connect a repo, push to the main branch — automatic build and deploy, framework detected for you." },
+      { title: "Managed PostgreSQL next to it", desc: "Managed PostgreSQL is created next to the app and DATABASE_URL is injected into the service automatically." },
+      { title: "Live HTTPS in minutes", desc: "Every app gets an HTTPS address right away; a custom domain is a couple of steps." },
+      { title: "Data in Russia (152-FZ)", desc: "Apps and databases run on servers inside Russia — what the personal-data law requires." },
+      { title: "No workarounds", desc: "Signup and payment from Russia are open directly — no VPN, intermediaries or foreign cards." },
+    ],
+    faqTitle: "Replacing Fly.io in Russia — FAQ",
+    faq: [
+      { q: "Does Fly.io work in Russia?", a: "The service is reachable, but you can't pay for it with a Russian card — people use payment intermediaries with a markup. Data is stored abroad, which doesn't meet 152-FZ. Dada Cloud solves both: direct ruble payment and servers inside Russia." },
+      { q: "How much does paying for Fly.io from Russia cost via intermediaries?", a: "Intermediaries add a fee on top of the Fly.io bill plus an exchange markup. With Dada Cloud you pay with a Russian card directly, no intermediary fee: Free — 0 RUB, Startup — 990 RUB/mo, Business — 2900 RUB/mo." },
+      { q: "How do I replace Fly.io with ruble billing?", a: "Dada Cloud is a Russian platform with the same git push to prod flow: pay with a Russian card, invoice and closing documents, managed PostgreSQL next to the app, servers in Russia." },
+      { q: "Is the deploy just as simple?", a: "Yes. Connect a GitHub repo, push to the main branch — build and deploy happen automatically, no separate environment setup needed." },
+    ],
+  },
+  vibeCodingAlt: {
+    heroTitle: "Where to deploy a project from v0, Lovable, Cursor or Bolt",
+    heroSubtitle:
+      "Built an app in v0, Lovable, Bolt, Cursor or Replit? Those tools and foreign hosting don't accept Russian cards. Export the code to GitHub and deploy it to Dada Cloud with the same git push. Pay with a Russian card, servers in Russia, no VPN and no foreign cards.",
+    featuresTitle: "Why AI-built projects deploy on Dada Cloud",
+    features: [
+      { title: "The same code from GitHub", desc: "The AI tool generated a repo — connect it and deploy as is, no rewriting for another platform." },
+      { title: "Pay with a Russian card", desc: "Russian card, invoice and closing documents. No foreign card, VPN or intermediaries that v0, Lovable and Bolt require." },
+      { title: "Managed PostgreSQL next to it", desc: "App needs a database? Managed PostgreSQL is created next to it and DATABASE_URL is injected automatically." },
+      { title: "Live HTTPS in minutes", desc: "A push to the main branch triggers an automatic build, deploy and a working HTTPS address. Framework (Next.js, Vite, Node) is detected for you." },
+      { title: "Data in Russia (152-FZ)", desc: "The app and its database run on servers inside Russia — what the personal-data law requires." },
+      { title: "No Vercel/Netlify lock-in", desc: "No need to keep a foreign hosting subscription for a couple of links — the whole project lives on one Russian platform." },
+    ],
+    faqTitle: "Deploying AI-built projects — FAQ",
+    faq: [
+      { q: "How do I deploy a project from v0, Lovable or Bolt?", a: "Export the generated code to a GitHub repo, connect it to Dada Cloud and start a deploy. A push to the main branch builds and deploys the app automatically." },
+      { q: "Why can't I pay for these tools with a Russian card?", a: "v0, Lovable, Bolt, Cursor and Replit use foreign billing and don't accept Russian bank cards. Dada Cloud accepts a Russian card directly." },
+      { q: "Do I need a VPN?", a: "No. Signing up, paying and working with Dada Cloud are available from Russia directly, without a VPN or workarounds." },
+      { q: "Is there a database for the app?", a: "Yes. Managed PostgreSQL is created next to the app and the connection string is injected into the service automatically." },
+    ],
+  },
+  telegramBotAlt: {
+    heroTitle: "Hosting for a Telegram bot in Russia",
+    heroSubtitle:
+      "Host a Telegram bot with a deploy from GitHub: push to the main branch and the bot runs 24/7. Pay with a Russian card, servers in Russia, no foreign-bank card and no VPN. Managed PostgreSQL for the bot's state, right next to it.",
+    featuresTitle: "Why Telegram bots are hosted on Dada Cloud",
+    features: [
+      { title: "Deploy the bot from GitHub", desc: "Connect the repo with your bot, push to the main branch — automatic build and start. Python, Node, any stack." },
+      { title: "Runs 24/7", desc: "The bot runs as a persistent process, not a sleeping function — long polling and webhooks work without downtime." },
+      { title: "Managed PostgreSQL for state", desc: "Conversation state and bot user data live in managed PostgreSQL next to it, with DATABASE_URL injected automatically." },
+      { title: "Pay with a Russian card", desc: "Russian card, invoice and closing documents. No foreign card or intermediaries like Railway and Render need." },
+      { title: "User data in Russia (152-FZ)", desc: "Bot user data is stored on servers inside Russia — what the personal-data law requires." },
+      { title: "Logs and monitoring", desc: "View the bot's logs and metrics right in the panel — see that the bot is alive and how it responds." },
+    ],
+    faqTitle: "Telegram bot hosting — FAQ",
+    faq: [
+      { q: "Where do I host a Telegram bot from Russia?", a: "On Dada Cloud: connect a GitHub repo with the bot, push to the main branch — the bot builds and starts automatically and runs around the clock. Pay in rubles, servers in Russia." },
+      { q: "Why are Railway and Render inconvenient to pay for from Russia?", a: "They use foreign billing and don't accept Russian bank cards — you need intermediaries or a card from another country. Dada Cloud accepts a Russian card directly." },
+      { q: "Will the bot run around the clock?", a: "Yes. The bot runs as a persistent process 24/7 — both long polling and webhooks are supported without sleeping." },
+      { q: "Can I store bot user data?", a: "Yes, in managed PostgreSQL next to the bot. Data is stored on servers in Russia, which meets 152-FZ." },
+    ],
+  },
   databases: {
     heroTitle: "Managed PostgreSQL",
     heroSubtitle:
@@ -1049,6 +1182,9 @@ const en: Dict = {
       { label: "Render alternative", href: "/analog-render" },
       { label: "Netlify alternative", href: "/analog-netlify" },
       { label: "DigitalOcean alternative", href: "/analog-digitalocean" },
+      { label: "Fly.io alternative", href: "/analog-fly-io" },
+      { label: "Deploy from v0 / Lovable / Bolt", href: "/deploy-vibe-coding" },
+      { label: "Telegram bot hosting", href: "/hosting-telegram-bot" },
       { label: "Pricing", href: "/pricing" },
     ],
     companyTitle: "Company",
