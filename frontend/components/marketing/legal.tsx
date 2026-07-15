@@ -150,7 +150,7 @@ const termsRu: LegalDocData = {
       heading: "6. Приостановление и прекращение",
       body: [
         "Мы вправе ограничить или прекратить доступ к сервису при нарушении настоящего Соглашения или закона, по возможности предварительно уведомив пользователя.",
-        "Вы можете прекратить использование сервиса и удалить аккаунт в любой момент.",
+        `Вы можете прекратить использование сервиса в любой момент. Для удаления аккаунта и связанных данных направьте запрос на ${CONTACT}.`,
       ],
     },
     {
@@ -288,7 +288,7 @@ const termsEn: LegalDocData = {
       heading: "6. Suspension and termination",
       body: [
         "We may limit or terminate access to the service upon violation of these Terms or the law, giving prior notice where possible.",
-        "You may stop using the service and delete your account at any time.",
+        `You may stop using the service at any time. To delete your account and associated data, send a request to ${CONTACT}.`,
       ],
     },
     {
