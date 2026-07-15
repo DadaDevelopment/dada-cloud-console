@@ -60,7 +60,7 @@ export function MarketingHeader() {
                 {t.nav.login}
               </Link>
               <Link
-                href={consoleHref("/login")}
+                href={consoleHref("/register")}
                 className="rounded-md bg-blue-600 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-blue-700"
               >
                 {t.nav.register}
@@ -94,7 +94,7 @@ export function MarketingHeader() {
           <div className="flex items-center justify-between gap-3 pt-3">
             <LangToggle />
             <Link
-              href={consoleHref(token ? "/projects" : "/login")}
+              href={consoleHref(token ? "/projects" : "/register")}
               onClick={() => setOpen(false)}
               className="flex-1 rounded-md bg-blue-600 px-4 py-2 text-center text-sm font-semibold text-white"
             >

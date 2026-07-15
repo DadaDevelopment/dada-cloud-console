@@ -40,7 +40,7 @@ export default function HomePage() {
             <p className="mt-6 max-w-2xl text-lg text-white/70 sm:text-xl">{t.home.heroSubtitle}</p>
             <div className="mt-9 flex flex-wrap gap-3">
               <Link
-                href={consoleHref("/login")}
+                href={consoleHref("/register")}
                 className="inline-flex items-center gap-2 rounded-md bg-blue-600 px-7 py-3 text-sm font-semibold text-white transition-colors hover:bg-blue-700"
               >
                 <GitBranch className="h-4 w-4" />
