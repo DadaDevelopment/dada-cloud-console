@@ -127,6 +127,8 @@ export const apps: Messages = {
   "apps.domains.addFirst": { ru: "Добавить первый домен →", en: "Add first domain →" },
   "apps.domains.auth": { ru: "auth: {scheme}", en: "auth: {scheme}" },
   "apps.domains.swagger": { ru: " · swagger", en: " · swagger" },
+  "apps.domains.managedDefault": { ru: "Домен по умолчанию", en: "Default domain" },
+  "apps.domains.custom": { ru: "Свой домен", en: "Custom domain" },
 
   "apps.modal.image.title": { ru: "Деплой нового образа", en: "Deploy New Image" },
   "apps.modal.image.label": { ru: "Новый тег образа", en: "New Image Tag" },

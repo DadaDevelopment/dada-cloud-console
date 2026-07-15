@@ -2,8 +2,8 @@
 import { useEffect, useState, FormEvent } from "react";
 import { useParams, useSearchParams, useRouter } from "next/navigation";
 import Link from "next/link";
-import { appsApi, endpointsApi, envVarsApi } from "@/lib/api";
-import type { ResourceSnapshot, AppVolume, OperationResponse } from "@/lib/types";
+import { appsApi, endpointsApi, envVarsApi, customDomainsApi } from "@/lib/api";
+import type { ResourceSnapshot, AppVolume, OperationResponse, DomainHostname } from "@/lib/types";
 import { Modal } from "@/components/ui/modal";
 import { Spinner } from "@/components/ui/spinner";
 import { Breadcrumb } from "@/components/ui/breadcrumb";
@@ -56,6 +56,7 @@ export default function AppDetailPage() {
 
   const [endpoints, setEndpoints] = useState<ResourceSnapshot[]>([]);
   const [isLoadingEndpoints, setIsLoadingEndpoints] = useState(true);
+  const [hostnames, setHostnames] = useState<DomainHostname[]>([]);
   const [envCount, setEnvCount] = useState<number | null>(null);
 
   const [isImageModalOpen, setIsImageModalOpen] = useState(false);
@@ -111,6 +112,11 @@ export default function AppDetailPage() {
       .then((data) => setEndpoints(data.endpoints ?? []))
       .catch(() => setEndpoints([]))
       .finally(() => setIsLoadingEndpoints(false));
+
+    customDomainsApi
+      .listHostnames(projectId, envId, appName)
+      .then((data) => setHostnames(data.hostnames ?? []))
+      .catch(() => setHostnames([]));
 
     envVarsApi
       .list(projectId, envId, appName)
@@ -462,7 +468,7 @@ export default function AppDetailPage() {
 
         {isLoadingEndpoints ? (
           <div className="flex h-20 items-center justify-center"><Spinner /></div>
-        ) : endpoints.length === 0 ? (
+        ) : endpoints.length === 0 && hostnames.length === 0 ? (
           <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-gray-300 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 py-10">
             <svg className="mb-2 h-8 w-8 text-gray-300 dark:text-gray-700" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9" />
@@ -477,6 +483,27 @@ export default function AppDetailPage() {
           </div>
         ) : (
           <div className="space-y-3">
+            {hostnames.map((hn) => (
+              <div key={hn.id} className="flex items-center justify-between rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 px-5 py-4 shadow-sm">
+                <div className="flex items-center gap-4">
+                  <Globe className="h-5 w-5 text-gray-400 dark:text-gray-500 shrink-0" />
+                  <div>
+                    <a
+                      href={`https:${"/".repeat(2)}${hn.hostname}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="font-mono text-sm font-medium text-blue-600 dark:text-blue-400 hover:underline"
+                    >
+                      {hn.hostname}
+                    </a>
+                    <p className="text-xs text-gray-400 dark:text-gray-500">
+                      {hn.managed ? t("apps.domains.managedDefault") : t("apps.domains.custom")}
+                    </p>
+                  </div>
+                </div>
+                <PhaseBadge phase={hn.status === "active" ? "Ready" : hn.status === "failed" ? "Failed" : "Pending"} />
+              </div>
+            ))}
             {endpoints.map((ep) => {
               const epSummary = ep.summary_json as {
                 fqdn?: string;
