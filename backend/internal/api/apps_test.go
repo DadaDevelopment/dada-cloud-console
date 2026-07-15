@@ -69,3 +69,36 @@ func TestFillRepoFullName(t *testing.T) {
 		t.Errorf("empty-summary: repo_full_name = %q, want acme/svc", got)
 	}
 }
+
+func TestSuppressNonHTTPURL(t *testing.T) {
+	apps := []models.ResourceSnapshot{
+		{Name: "top-decker-redis", SummaryJSON: json.RawMessage(`{"port":6379,"url":"https://myredis-c1e9e9.dada-tuda.ru","status":"Ready"}`)},
+		{Name: "web-app", SummaryJSON: json.RawMessage(`{"port":8080,"url":"https://web-a1b2c3.dada-tuda.ru","status":"Ready"}`)},
+		{Name: "no-port-known", SummaryJSON: json.RawMessage(`{"url":"https://legacy-app.dada-tuda.ru","status":"Ready"}`)},
+		{Name: "no-url-yet", SummaryJSON: json.RawMessage(`{"port":6379,"status":"Provisioning"}`)},
+		{Name: "empty-summary", SummaryJSON: nil},
+	}
+	api.SuppressNonHTTPURL(apps)
+
+	get := func(raw json.RawMessage) (string, bool) {
+		var m map[string]any
+		_ = json.Unmarshal(raw, &m)
+		s, ok := m["url"].(string)
+		return s, ok
+	}
+	if _, ok := get(apps[0].SummaryJSON); ok {
+		t.Errorf("top-decker-redis: url should be suppressed for datastore port 6379")
+	}
+	if got, ok := get(apps[1].SummaryJSON); !ok || got != "https://web-a1b2c3.dada-tuda.ru" {
+		t.Errorf("web-app: url = %q, ok=%v, want unchanged HTTP url", got, ok)
+	}
+	if got, ok := get(apps[2].SummaryJSON); !ok || got != "https://legacy-app.dada-tuda.ru" {
+		t.Errorf("no-port-known: url = %q, ok=%v, want unchanged (ambiguous port must not regress)", got, ok)
+	}
+	if _, ok := get(apps[3].SummaryJSON); ok {
+		t.Errorf("no-url-yet: should still have no url key")
+	}
+	if apps[4].SummaryJSON != nil {
+		t.Errorf("empty-summary: should stay untouched")
+	}
+}

@@ -43,6 +43,40 @@ func FillRepoFullName(apps []models.ResourceSnapshot, repoByName map[string]stri
 	}
 }
 
+// SuppressNonHTTPURL blanks the summary "url" field for apps whose stored
+// port fails servesHTTP (the same gate CreateApp uses to skip the auto
+// surrogate domain). A resource_snapshots row can carry a stale "url" set by
+// the status reconciler before the port was known to be a datastore port, or
+// from before servesHTTP existed; showing that URL as the app's live
+// endpoint is always wrong for a raw-TCP service (nginx cannot speak HTTP to
+// redis/postgres/etc, guaranteed 502). Ambiguous cases (no numeric "port" in
+// the summary) are left untouched so ordinary web apps never regress.
+func SuppressNonHTTPURL(apps []models.ResourceSnapshot) {
+	for i := range apps {
+		if len(apps[i].SummaryJSON) == 0 {
+			continue
+		}
+		var m map[string]any
+		if err := json.Unmarshal(apps[i].SummaryJSON, &m); err != nil {
+			continue
+		}
+		if _, hasURL := m["url"]; !hasURL {
+			continue
+		}
+		portVal, ok := m["port"].(float64)
+		if !ok {
+			continue
+		}
+		if servesHTTP(int(portVal)) {
+			continue
+		}
+		delete(m, "url")
+		if b, err := json.Marshal(m); err == nil {
+			apps[i].SummaryJSON = b
+		}
+	}
+}
+
 // ListApps returns all App resources in a project environment.
 //
 // @ID          listApps
@@ -176,6 +210,7 @@ func (h *Handler) ListApps(c *gin.Context) {
 	}
 
 	FillRepoFullName(apps, repoByName)
+	SuppressNonHTTPURL(apps)
 
 	sort.Slice(apps, func(i, j int) bool { return apps[i].Name < apps[j].Name })
 
