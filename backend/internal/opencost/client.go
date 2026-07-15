@@ -28,16 +28,26 @@ type Client struct {
 	httpClient *http.Client
 }
 
-// New creates a read-only OpenCost client. Returns nil when baseURL is empty so
-// callers can treat the cost feature as disabled. baseURL is the API root
-// (e.g. http://opencost.opencost.svc.cluster.local:9003), not an /allocation path.
+// New creates a read-only OpenCost client with a 20s timeout, sized for the
+// user-facing request path (fail fast rather than hang a browser). Returns nil
+// when baseURL is empty so callers can treat the cost feature as disabled.
+// baseURL is the API root (e.g. http://opencost.opencost.svc.cluster.local:9003),
+// not an /allocation path.
 func New(baseURL string) *Client {
+	return NewWithTimeout(baseURL, 20*time.Second)
+}
+
+// NewWithTimeout is New with an explicit HTTP timeout. Used by the background
+// cost-cache warmer, which must tolerate OpenCost's cold ETL-warmup aggregation
+// (a fresh 30d compute can exceed 20s) so it can populate the cache off the user
+// path. Returns nil when baseURL is empty.
+func NewWithTimeout(baseURL string, timeout time.Duration) *Client {
 	if baseURL == "" {
 		return nil
 	}
 	return &Client{
 		baseURL:    strings.TrimRight(baseURL, "/"),
-		httpClient: &http.Client{Timeout: 20 * time.Second},
+		httpClient: &http.Client{Timeout: timeout},
 	}
 }
 

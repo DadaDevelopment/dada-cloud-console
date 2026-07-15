@@ -155,14 +155,20 @@ func (h *Handler) clusterAllocsByWindow(ctx context.Context, window string) (map
 // never by a user request. It also keeps OpenCost's own compute cache warm.
 // No-op unless both OpenCost and the Redis cache are configured; interval must be
 // shorter than CacheCostTTL so the entries never expire between refreshes.
+//
+// It uses a dedicated patient OpenCost client (120s) rather than the user-facing
+// one (20s): a cold aggregation while OpenCost's ETL is still warming up can
+// exceed 20s, and the warmer must be able to complete it so the cache gets
+// populated off the user path. Users keep the 20s fail-fast client.
 func (h *Handler) StartCostCacheWarmer(ctx context.Context, interval time.Duration) {
 	if h.opencost == nil || !h.cache.Enabled() {
 		return
 	}
+	warmClient := opencost.NewWithTimeout(h.cfg.OpenCostURL, 120*time.Second)
 	warm := func() {
 		for w := range allowedCostWindows {
-			wctx, cancel := context.WithTimeout(ctx, 30*time.Second)
-			allocs, err := h.opencost.Compute(wctx, w, "namespace", "")
+			wctx, cancel := context.WithTimeout(ctx, 120*time.Second)
+			allocs, err := warmClient.Compute(wctx, w, "namespace", "")
 			cancel()
 			if err != nil {
 				log.Warn().Err(err).Str("window", w).Msg("cost warmer: OpenCost compute failed")
