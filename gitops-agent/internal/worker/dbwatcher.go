@@ -17,6 +17,7 @@ import (
 	"github.com/dada-tuda/console/gitops-agent/internal/mlflow"
 	"github.com/dada-tuda/console/gitops-agent/internal/renderer"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rs/zerolog/log"
 	"gopkg.in/yaml.v3"
@@ -1022,38 +1023,67 @@ func (w *DBWatcher) doDeleteProject(ctx context.Context, op db.Operation) error 
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck
 
-	if _, err := tx.Exec(ctx,
-		`UPDATE git_commits SET operation_id = NULL WHERE operation_id IN (SELECT id FROM operations WHERE project_id = $1)`,
-		op.ProjectID,
-	); err != nil {
-		return fmt.Errorf("detach git_commits: %w", err)
-	}
-	if _, err := tx.Exec(ctx,
-		`UPDATE environments SET parent_env_id = NULL WHERE project_id = $1`,
-		op.ProjectID,
-	); err != nil {
-		return fmt.Errorf("detach preview parent_env_id: %w", err)
-	}
-	if _, err := tx.Exec(ctx, `DELETE FROM audit_events WHERE project_id = $1`, op.ProjectID); err != nil {
-		return fmt.Errorf("delete audit_events: %w", err)
-	}
-	if _, err := tx.Exec(ctx, `DELETE FROM db_backups WHERE project_id = $1`, op.ProjectID); err != nil {
-		return fmt.Errorf("delete db_backups: %w", err)
-	}
-	if _, err := tx.Exec(ctx, `DELETE FROM resource_snapshots WHERE project_id = $1`, op.ProjectID); err != nil {
-		return fmt.Errorf("delete resource_snapshots: %w", err)
-	}
-	if _, err := tx.Exec(ctx, `DELETE FROM operations WHERE project_id = $1`, op.ProjectID); err != nil {
-		return fmt.Errorf("delete operations: %w", err)
-	}
-	if _, err := tx.Exec(ctx, `DELETE FROM projects WHERE id = $1`, op.ProjectID); err != nil {
-		return fmt.Errorf("delete project: %w", err)
+	if err := wipeProjectRows(ctx, tx, op.ProjectID); err != nil {
+		return err
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return fmt.Errorf("commit project wipe tx: %w", err)
 	}
 
 	log.Info().Str("project", slug).Str("project_id", op.ProjectID.String()).Msg("db-watcher: deleted project")
+	return nil
+}
+
+// wipeProjectRows deletes every DB row a project owns, in FK-safe order, inside
+// the caller's transaction. Tables that FK-reference project_id or
+// environment_id with ON DELETE CASCADE are reaped by the final projects delete
+// (environments cascade in turn); this function only handles the FKs Postgres
+// will NOT cascade: git_commits.operation_id and environments.parent_env_id are
+// detached, and the operations-referencing rows without ON DELETE CASCADE
+// (deployments.operation_id, domain_hostnames.operation_id) plus the direct
+// project/operation rows are deleted explicitly before the operations row they
+// point at. Missing any operation_id child here re-triggers
+// deployments_operation_id_fkey (SQLSTATE 23503) on the operations delete.
+func wipeProjectRows(ctx context.Context, tx pgx.Tx, projectID uuid.UUID) error {
+	if _, err := tx.Exec(ctx,
+		`UPDATE git_commits SET operation_id = NULL WHERE operation_id IN (SELECT id FROM operations WHERE project_id = $1)`,
+		projectID,
+	); err != nil {
+		return fmt.Errorf("detach git_commits: %w", err)
+	}
+	if _, err := tx.Exec(ctx,
+		`UPDATE environments SET parent_env_id = NULL WHERE project_id = $1`,
+		projectID,
+	); err != nil {
+		return fmt.Errorf("detach preview parent_env_id: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `DELETE FROM audit_events WHERE project_id = $1`, projectID); err != nil {
+		return fmt.Errorf("delete audit_events: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `DELETE FROM db_backups WHERE project_id = $1`, projectID); err != nil {
+		return fmt.Errorf("delete db_backups: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `DELETE FROM resource_snapshots WHERE project_id = $1`, projectID); err != nil {
+		return fmt.Errorf("delete resource_snapshots: %w", err)
+	}
+	if _, err := tx.Exec(ctx,
+		`DELETE FROM deployments WHERE environment_id IN (SELECT id FROM environments WHERE project_id = $1)`,
+		projectID,
+	); err != nil {
+		return fmt.Errorf("delete deployments: %w", err)
+	}
+	if _, err := tx.Exec(ctx,
+		`DELETE FROM domain_hostnames WHERE environment_id IN (SELECT id FROM environments WHERE project_id = $1)`,
+		projectID,
+	); err != nil {
+		return fmt.Errorf("delete domain_hostnames: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `DELETE FROM operations WHERE project_id = $1`, projectID); err != nil {
+		return fmt.Errorf("delete operations: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `DELETE FROM projects WHERE id = $1`, projectID); err != nil {
+		return fmt.Errorf("delete project: %w", err)
+	}
 	return nil
 }
 
