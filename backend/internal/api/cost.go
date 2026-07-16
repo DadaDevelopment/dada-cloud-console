@@ -160,6 +160,11 @@ func (h *Handler) clusterAllocsByWindow(ctx context.Context, window string) (map
 // one (20s): a cold aggregation while OpenCost's ETL is still warming up can
 // exceed 20s, and the warmer must be able to complete it so the cache gets
 // populated off the user path. Users keep the 20s fail-fast client.
+//
+// The initial warm runs INSIDE the goroutine, never synchronously: a cold or
+// slow OpenCost made a synchronous first warm block boot ~76s across windows,
+// past the liveness probe budget, crash-looping the backend (nginx 503 for every
+// authed user). Do NOT move the first warm() back onto the startup path.
 func (h *Handler) StartCostCacheWarmer(ctx context.Context, interval time.Duration) {
 	if h.opencost == nil || !h.cache.Enabled() {
 		return
@@ -177,8 +182,8 @@ func (h *Handler) StartCostCacheWarmer(ctx context.Context, interval time.Durati
 			cache.Store(ctx, h.cache, "cost:allocs:"+w, h.cfg.CacheCostTTL, allocs)
 		}
 	}
-	warm()
 	go func() {
+		warm()
 		t := time.NewTicker(interval)
 		defer t.Stop()
 		for {
