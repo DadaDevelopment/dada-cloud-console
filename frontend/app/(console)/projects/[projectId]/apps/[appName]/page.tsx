@@ -72,7 +72,6 @@ export default function AppDetailPage() {
   const [deleteTarget, setDeleteTarget] = useState<DeleteImpactTarget | null>(null);
   const [isMoveModalOpen, setIsMoveModalOpen] = useState(false);
 
-  const prevPhaseRef = useRef<string | undefined>(undefined);
   const deployGoalFiredRef = useRef(false);
 
   useEffect(() => {
@@ -93,21 +92,26 @@ export default function AppDetailPage() {
             setIsLoading(false);
             const phase = (found.phase ?? "").toLowerCase();
             const SUCCESS = new Set(["ready", "healthy", "running"]);
-            const prev = prevPhaseRef.current;
-            if (
-              !deployGoalFiredRef.current &&
-              prev !== undefined &&
-              !SUCCESS.has(prev) &&
-              SUCCESS.has(phase)
-            ) {
+            if (!deployGoalFiredRef.current && SUCCESS.has(phase)) {
+              const deployGoalKey = `dada_deploy_goal:${projectId}:${appName}`;
+              let alreadyFired = false;
+              try {
+                alreadyFired = typeof window !== "undefined" && window.localStorage.getItem(deployGoalKey) === "1";
+              } catch {
+                alreadyFired = false;
+              }
               deployGoalFiredRef.current = true;
-              (window as { ym?: (id: number, action: string, target: string) => void }).ym?.(
-                110158915,
-                "reachGoal",
-                "deploy_success",
-              );
+              if (!alreadyFired) {
+                try {
+                  window.localStorage.setItem(deployGoalKey, "1");
+                } catch {}
+                (window as { ym?: (id: number, action: string, target: string) => void }).ym?.(
+                  110158915,
+                  "reachGoal",
+                  "deploy_success",
+                );
+              }
             }
-            prevPhaseRef.current = phase;
             const settled = TERMINAL.has(phase);
             if (!settled && attempt < 40) {
               timer = setTimeout(() => loadApp(attempt + 1), 3000);
