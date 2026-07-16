@@ -1,6 +1,9 @@
 package api
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
 
 func TestNormalizeDomain(t *testing.T) {
 	cases := map[string]string{
@@ -43,5 +46,25 @@ func TestIsValidDomain(t *testing.T) {
 func TestTxtChallenge(t *testing.T) {
 	if got := txtChallengeValue("abc123"); got != "dada-domain-verify=abc123" {
 		t.Errorf("txtChallengeValue = %q", got)
+	}
+}
+
+func TestHostnamePendingExpired(t *testing.T) {
+	now := time.Date(2026, 7, 16, 0, 0, 0, 0, time.UTC)
+	cases := []struct {
+		name    string
+		created time.Time
+		want    bool
+	}{
+		{"fresh attach stays pending", now.Add(-5 * time.Minute), false},
+		{"slow but real DNS cutover stays pending", now.Add(-12 * time.Hour), false},
+		{"just under window stays pending", now.Add(-hostnamePendingFailAfter + time.Minute), false},
+		{"just over window fails", now.Add(-hostnamePendingFailAfter - time.Minute), true},
+		{"long-orphaned row fails", now.Add(-24 * 24 * time.Hour), true},
+	}
+	for _, c := range cases {
+		if got := hostnamePendingExpired(c.created, now); got != c.want {
+			t.Errorf("%s: hostnamePendingExpired = %v, want %v", c.name, got, c.want)
+		}
 	}
 }

@@ -19,6 +19,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/rs/zerolog/log"
 )
 
 // Custom domains (Vercel-style two-level model). Level 1: a project proves
@@ -866,29 +867,52 @@ func VerifyPendingDomains(ctx context.Context, pool *pgxpool.Pool, cfg *config.C
 	return nil
 }
 
+// hostnamePendingFailAfter bounds how long a custom hostname may sit pending
+// before it is declared failed. A genuine attach (user points DNS at our LB,
+// cert-manager solves HTTP-01) completes in minutes to a few hours, so anything
+// still pending after this window is not "attaching", it is stuck for a reason
+// that will not clear on its own: the owning app was retired, or its Ingress was
+// dropped from git out-of-band (e.g. a hand-written "retire app" commit that
+// bypassed DetachHostname, leaving this row orphaned). Without a terminal state
+// such a row probes a never-issued cert forever and pins
+// dada_domain_hostname_pending_age_seconds high, firing DadaCustomDomainStuck
+// indefinitely. Failing it clears the alert (the gauge counts only status
+// 'pending'), keeps the row visible in the console, and lets the user re-attach
+// to retry. Deliberately generous so a slow-but-real DNS cutover is never failed.
+const hostnamePendingFailAfter = 48 * time.Hour
+
+// hostnamePendingExpired reports whether a hostname that has been pending since
+// createdAt has exceeded the attach window as of now and should be failed.
+func hostnamePendingExpired(createdAt, now time.Time) bool {
+	return now.Sub(createdAt) > hostnamePendingFailAfter
+}
+
 // ReconcilePendingHostnames flips a custom hostname from pending to active once
-// its Let's Encrypt certificate is serving end-to-end. Nothing else updates the
-// row after AttachHostname commits the Ingress to git, so without this a fully
+// its Let's Encrypt certificate is serving end-to-end, and fails hostnames that
+// have been pending past hostnamePendingFailAfter. Nothing else updates the row
+// after AttachHostname commits the Ingress to git, so without this a fully
 // working domain shows "pending" forever in the console. The probe is an
 // external TLS handshake to hostname:443 with SNI: it only succeeds when the
 // leaf cert is publicly trusted (LE issued) and valid for the hostname, which
-// proves DNS -> ingress -> cert all resolved. A failed probe leaves the row
-// pending to be retried on the next tick. The UPDATE is guarded on
-// status='pending' so a concurrent detach or failure is not clobbered active.
+// proves DNS -> ingress -> cert all resolved. A failed probe within the window
+// leaves the row pending to be retried on the next tick; past the window the row
+// is marked failed. Both UPDATEs are guarded on status='pending' so a concurrent
+// detach or a row that just went active is never clobbered.
 func ReconcilePendingHostnames(ctx context.Context, pool *pgxpool.Pool) error {
 	rows, err := pool.Query(ctx,
-		`SELECT id, hostname FROM domain_hostnames WHERE status = 'pending'`)
+		`SELECT id, hostname, created_at FROM domain_hostnames WHERE status = 'pending'`)
 	if err != nil {
 		return err
 	}
 	type pendingHost struct {
-		id       uuid.UUID
-		hostname string
+		id        uuid.UUID
+		hostname  string
+		createdAt time.Time
 	}
 	var pending []pendingHost
 	for rows.Next() {
 		var p pendingHost
-		if err := rows.Scan(&p.id, &p.hostname); err != nil {
+		if err := rows.Scan(&p.id, &p.hostname, &p.createdAt); err != nil {
 			rows.Close()
 			return err
 		}
@@ -897,12 +921,23 @@ func ReconcilePendingHostnames(ctx context.Context, pool *pgxpool.Pool) error {
 	rows.Close()
 
 	for _, p := range pending {
-		if !hostnameCertLive(ctx, p.hostname) {
+		if hostnameCertLive(ctx, p.hostname) {
+			_, _ = pool.Exec(ctx,
+				`UPDATE domain_hostnames SET status='active', cert_status='active', updated_at=now()
+				  WHERE id=$1 AND status='pending'`, p.id)
 			continue
 		}
-		_, _ = pool.Exec(ctx,
-			`UPDATE domain_hostnames SET status='active', cert_status='active', updated_at=now()
-			  WHERE id=$1 AND status='pending'`, p.id)
+		if hostnamePendingExpired(p.createdAt, time.Now()) {
+			ct, err := pool.Exec(ctx,
+				`UPDATE domain_hostnames SET status='failed', cert_status='failed', updated_at=now()
+				  WHERE id=$1 AND status='pending'`, p.id)
+			if err == nil && ct.RowsAffected() > 0 {
+				log.Warn().
+					Str("hostname", p.hostname).
+					Dur("pending_for", time.Since(p.createdAt)).
+					Msg("custom hostname failed: pending past attach window (app retired or Ingress missing) — re-attach to retry")
+			}
+		}
 	}
 	return nil
 }
