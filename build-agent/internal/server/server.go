@@ -1784,7 +1784,9 @@ func githubAPI(ctx context.Context, token, owner, repo, repoPath string, dst any
 	if err != nil {
 		return err
 	}
-	req.Header.Set("Authorization", "token "+token)
+	if token != "" {
+		req.Header.Set("Authorization", "token "+token)
+	}
 	req.Header.Set("Accept", "application/vnd.github+json")
 	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
 	githubAPISem <- struct{}{}

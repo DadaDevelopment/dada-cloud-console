@@ -43,6 +43,30 @@ export const overview: Messages = {
   },
   "overview.card.domain.cta": { ru: "Добавить домен", en: "Add domain" },
 
+  "overview.templates.title": { ru: "Разверните шаблон — GitHub не нужен", en: "Deploy a template — no GitHub needed" },
+  "overview.templates.hint": {
+    ru: "Готовое приложение из нашего репозитория. Один клик — сборка и запуск, без подключения аккаунта.",
+    en: "A ready app from our repository. One click builds and runs it, no account connection.",
+  },
+  "overview.templates.deploying": { ru: "Разворачиваем…", en: "Deploying…" },
+  "overview.templates.error": { ru: "Не удалось развернуть шаблон", en: "Failed to deploy template" },
+  "overview.templates.nextjs.title": { ru: "Next.js стартер", en: "Next.js starter" },
+  "overview.templates.nextjs.hint": {
+    ru: "Веб-приложение на Next.js с готовой страницей.",
+    en: "A Next.js web app with a ready page.",
+  },
+  "overview.templates.fastapi.title": { ru: "FastAPI стартер", en: "FastAPI starter" },
+  "overview.templates.fastapi.hint": {
+    ru: "Python-бэкенд на FastAPI с примером эндпоинта.",
+    en: "A Python FastAPI backend with a sample endpoint.",
+  },
+  "overview.templates.static.title": { ru: "Статический сайт", en: "Static site" },
+  "overview.templates.static.hint": {
+    ru: "Статический сайт на HTML и CSS.",
+    en: "A static HTML and CSS site.",
+  },
+  "overview.templates.cta": { ru: "Развернуть", en: "Deploy" },
+
   "overview.section.more": { ru: "Ещё в проекте", en: "More in project" },
 
   "overview.secondary.monitoring.hint": { ru: "Логи и метрики", en: "Logs and metrics" },

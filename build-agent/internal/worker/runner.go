@@ -919,12 +919,15 @@ func imageDigest(uri string) string {
 
 // gitCreds returns a clone token and the authenticated clone URL. GitHub uses a
 // per-build App installation token; GitLab uses the decrypted stored PAT. For a
-// fork-unsafe build no token is injected (the clone stays anonymous).
+// fork-unsafe build no token is injected (the clone stays anonymous). A GitHub
+// repo linked without an installation id (a public template deploy that skipped
+// the OAuth wall) also clones anonymously: no token, plain clone URL. GitHub
+// allows unauthenticated HTTPS clone of any public repo, so this needs no creds.
 func (r *Runner) gitCreds(ctx context.Context, repo *db.Repo, b *db.Build) (token, cloneURL string, err error) {
 	switch repo.Provider {
 	case "github":
 		if repo.InstallationID == 0 {
-			return "", "", fmt.Errorf("github repo missing installation id")
+			return "", repo.CloneURL, nil
 		}
 		tok, terr := r.github.InstallToken(ctx, repo.InstallationID)
 		if errors.Is(terr, github.ErrInstallationGone) {
