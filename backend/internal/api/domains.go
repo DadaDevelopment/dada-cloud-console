@@ -887,32 +887,74 @@ func hostnamePendingExpired(createdAt, now time.Time) bool {
 	return now.Sub(createdAt) > hostnamePendingFailAfter
 }
 
-// ReconcilePendingHostnames flips a custom hostname from pending to active once
-// its Let's Encrypt certificate is serving end-to-end, and fails hostnames that
-// have been pending past hostnamePendingFailAfter. Nothing else updates the row
-// after AttachHostname commits the Ingress to git, so without this a fully
-// working domain shows "pending" forever in the console. The probe is an
-// external TLS handshake to hostname:443 with SNI: it only succeeds when the
-// leaf cert is publicly trusted (LE issued) and valid for the hostname, which
-// proves DNS -> ingress -> cert all resolved. A failed probe within the window
-// leaves the row pending to be retried on the next tick; past the window the row
-// is marked failed. Both UPDATEs are guarded on status='pending' so a concurrent
-// detach or a row that just went active is never clobbered.
-func ReconcilePendingHostnames(ctx context.Context, pool *pgxpool.Pool) error {
+// hostnameDNSStuckAfter bounds how long a managed (surrogate) hostname may sit
+// pending with its A record unresolved before ReconcilePendingHostnames treats
+// the original DNS write as lost and re-issues it. A genuine write is visible
+// in public DNS within seconds to low minutes, so anything still unresolved
+// past this window is not "propagating", it is a write that never landed --
+// e.g. dropped during a Beget-API egress block window. Long enough that
+// ordinary propagation lag never triggers a spurious re-issue.
+const hostnameDNSStuckAfter = 4 * time.Minute
+
+// hostnameReissueCooldown bounds how often a single hostname may be re-issued.
+// The failure mode this guards against is itself caused by egress pressure on
+// the Beget API, so a stuck row must not be re-driven every reconcile tick --
+// that would add to the exact load that caused the record to be lost. One
+// re-issue per cooldown window is enough to recover once the block clears
+// without turning the reconciler into a hammer.
+const hostnameReissueCooldown = 15 * time.Minute
+
+// hostnameDNSLookupTimeout bounds each verify-resolve check.
+const hostnameDNSLookupTimeout = 3 * time.Second
+
+// reissueActorID is the fixed system-user id (see migration 010_system_user.sql)
+// used as actor_id for operations the reconciler enqueues on its own, with no
+// human actor behind them.
+var reissueActorID = uuid.MustParse("00000000-0000-0000-0000-000000000000")
+
+// ReconcilePendingHostnames flips a hostname from pending to active once its
+// Let's Encrypt certificate is serving end-to-end, fails hostnames that have
+// been pending past hostnamePendingFailAfter, and -- for managed (surrogate)
+// hostnames only -- re-issues the DNS write when the A record itself never
+// resolved within hostnameDNSStuckAfter. Nothing else updates the row after
+// AttachHostname/CreateApp commits the Ingress (and, for managed rows, the
+// PublicApi DNS composite) to git, so without this a fully working domain
+// shows "pending" forever in the console, and a managed hostname whose DNS
+// write was dropped (e.g. a Beget-API egress block at write time) stays
+// NXDOMAIN forever with no auto-recovery.
+//
+// The cert probe is an external TLS handshake to hostname:443 with SNI: it
+// only succeeds when the leaf cert is publicly trusted (LE issued) and valid
+// for the hostname, which proves DNS -> ingress -> cert all resolved. A failed
+// probe within the attach window leaves the row pending to be retried on the
+// next tick; past the window the row is marked failed. Both UPDATEs are
+// guarded on status='pending' so a concurrent detach or a row that just went
+// active is never clobbered.
+func ReconcilePendingHostnames(ctx context.Context, pool *pgxpool.Pool, cfg *config.Config) error {
 	rows, err := pool.Query(ctx,
-		`SELECT id, hostname, created_at FROM domain_hostnames WHERE status = 'pending'`)
+		`SELECT dh.id, dh.hostname, dh.created_at, dh.managed, dh.environment_id, dh.app_name,
+		        dh.last_reissue_at, e.project_id
+		   FROM domain_hostnames dh
+		   JOIN environments e ON e.id = dh.environment_id
+		  WHERE dh.status = 'pending'`)
 	if err != nil {
 		return err
 	}
 	type pendingHost struct {
-		id        uuid.UUID
-		hostname  string
-		createdAt time.Time
+		id            uuid.UUID
+		hostname      string
+		createdAt     time.Time
+		managed       bool
+		environmentID uuid.UUID
+		appName       string
+		lastReissue   *time.Time
+		projectID     uuid.UUID
 	}
 	var pending []pendingHost
 	for rows.Next() {
 		var p pendingHost
-		if err := rows.Scan(&p.id, &p.hostname, &p.createdAt); err != nil {
+		if err := rows.Scan(&p.id, &p.hostname, &p.createdAt, &p.managed, &p.environmentID,
+			&p.appName, &p.lastReissue, &p.projectID); err != nil {
 			rows.Close()
 			return err
 		}
@@ -920,6 +962,7 @@ func ReconcilePendingHostnames(ctx context.Context, pool *pgxpool.Pool) error {
 	}
 	rows.Close()
 
+	now := time.Now()
 	for _, p := range pending {
 		if hostnameCertLive(ctx, p.hostname) {
 			_, _ = pool.Exec(ctx,
@@ -927,7 +970,7 @@ func ReconcilePendingHostnames(ctx context.Context, pool *pgxpool.Pool) error {
 				  WHERE id=$1 AND status='pending'`, p.id)
 			continue
 		}
-		if hostnamePendingExpired(p.createdAt, time.Now()) {
+		if hostnamePendingExpired(p.createdAt, now) {
 			ct, err := pool.Exec(ctx,
 				`UPDATE domain_hostnames SET status='failed', cert_status='failed', updated_at=now()
 				  WHERE id=$1 AND status='pending'`, p.id)
@@ -935,11 +978,90 @@ func ReconcilePendingHostnames(ctx context.Context, pool *pgxpool.Pool) error {
 				log.Warn().
 					Str("hostname", p.hostname).
 					Dur("pending_for", time.Since(p.createdAt)).
-					Msg("custom hostname failed: pending past attach window (app retired or Ingress missing) — re-attach to retry")
+					Msg("hostname failed: pending past attach window (app retired or Ingress missing) -- re-attach to retry")
 			}
+			continue
 		}
+		if !p.managed || cfg == nil || cfg.ClusterLBIP == "" {
+			continue
+		}
+		if now.Sub(p.createdAt) <= hostnameDNSStuckAfter {
+			continue
+		}
+		if p.lastReissue != nil && now.Sub(*p.lastReissue) <= hostnameReissueCooldown {
+			continue
+		}
+		if hostnameDNSResolved(ctx, p.hostname, cfg.ClusterLBIP) {
+			continue
+		}
+		if err := reissueDefaultDomainDNS(ctx, pool, p.projectID, p.environmentID, p.appName, p.hostname); err != nil {
+			log.Warn().Err(err).Str("hostname", p.hostname).Msg("failed to re-issue DNS write for stuck managed hostname")
+			continue
+		}
+		log.Warn().
+			Str("hostname", p.hostname).
+			Dur("pending_for", time.Since(p.createdAt)).
+			Msg("managed hostname A record unresolved past window -- re-issued DNS write")
 	}
 	return nil
+}
+
+// hostnameDNSResolved reports whether hostname's A record currently resolves
+// to target. Used to distinguish "DNS write landed, cert issuance is just
+// still in flight" from "the DNS write was never published (or was lost)" for
+// managed hostnames, which is the case ReconcilePendingHostnames can recover
+// from by re-issuing the write.
+func hostnameDNSResolved(parent context.Context, hostname, target string) bool {
+	ctx, cancel := context.WithTimeout(parent, hostnameDNSLookupTimeout)
+	defer cancel()
+	var resolver net.Resolver
+	ips, err := resolver.LookupIP(ctx, "ip4", hostname)
+	if err != nil {
+		return false
+	}
+	for _, ip := range ips {
+		if ip.String() == target {
+			return true
+		}
+	}
+	return false
+}
+
+// reissueDefaultDomainDNS re-drives the DNS write for a managed hostname whose
+// A record never landed. It enqueues the same AttachDefaultDomain operation
+// gitops-agent's doAttachDefaultDomain already handles to backfill a surrogate
+// domain onto an existing app: a fresh operation id re-renders the hostname's
+// Ingress and DNS-only PublicApi composite into git with a new
+// dada.io/operation label, producing a real commit so Argo/Crossplane observe
+// drift and re-attempt the Beget changeRecords call. The existing pending
+// domain_hostnames row is left as-is; only last_reissue_at is bumped, so the
+// next reconcile tick's cooldown check prevents re-issuing again before
+// hostnameReissueCooldown elapses.
+func reissueDefaultDomainDNS(ctx context.Context, pool *pgxpool.Pool, projectID, environmentID uuid.UUID, appName, hostname string) error {
+	payload, err := json.Marshal(models.AttachCustomHostnamePayload{AppName: appName, Hostname: hostname})
+	if err != nil {
+		return err
+	}
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+
+	if _, err := tx.Exec(ctx,
+		`INSERT INTO operations (actor_id, project_id, environment_id, action, resource_kind, resource_name, status, payload)
+		 VALUES ($1, $2, $3, 'AttachDefaultDomain', 'App', $4, 'Created', $5)`,
+		reissueActorID, projectID, environmentID, appName, payload,
+	); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx,
+		`UPDATE domain_hostnames SET last_reissue_at = now() WHERE hostname = $1 AND status = 'pending'`,
+		hostname,
+	); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
 }
 
 // hostnameCertLive reports whether hostname:443 completes a TLS handshake with a
