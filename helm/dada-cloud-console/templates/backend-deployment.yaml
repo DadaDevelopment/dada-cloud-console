@@ -37,6 +37,13 @@ spec:
                 name: {{ include "dada-cloud-console.fullname" . }}-config
             - secretRef:
                 name: {{ default (printf "%s-backend" (include "dada-cloud-console.fullname" .)) .Values.backend.existingSecret }}
+          startupProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 5
+            timeoutSeconds: 2
+            failureThreshold: 30
           readinessProbe:
             httpGet:
               path: /ready
