@@ -99,6 +99,7 @@ type Handler struct {
 	usersvc *userservice.Client
 
 	groupsEnsured sync.Map
+	groupsAttempt sync.Map
 
 	pdns *pdns.Client
 }

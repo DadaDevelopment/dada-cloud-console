@@ -207,6 +207,12 @@ func (h *Handler) CreateProject(c *gin.Context) {
 	})
 }
 
+// ensureProjectGroupsGap is the minimum spacing between user-service group-sync
+// attempts for one project. A failed sync records only its attempt time (not
+// success), so without this gap every EnsureDefaultProject/list call would spawn
+// a fresh sync goroutine and stampede user-service.
+const ensureProjectGroupsGap = 90 * time.Second
+
 func (h *Handler) ensureProjectGroupsAsync(org, projectID, slug, displayName, ownerSub string) {
 	if h.usersvc == nil {
 		return
@@ -214,6 +220,12 @@ func (h *Handler) ensureProjectGroupsAsync(org, projectID, slug, displayName, ow
 	if _, done := h.groupsEnsured.Load(projectID); done {
 		return
 	}
+	if last, ok := h.groupsAttempt.Load(projectID); ok {
+		if t, _ := last.(time.Time); time.Since(t) < ensureProjectGroupsGap {
+			return
+		}
+	}
+	h.groupsAttempt.Store(projectID, time.Now())
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
 		defer cancel()
