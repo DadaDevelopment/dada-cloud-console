@@ -39,8 +39,6 @@ spec:
   namespace: {{ .Namespace }}
   engine: postgresql
   database: {{ .Database }}
-  external:
-    enabled: {{ .ExternalEnabled }}
   backup:
     enabled: {{ .BackupEnabled }}
     frequency: {{ .BackupSchedule }}

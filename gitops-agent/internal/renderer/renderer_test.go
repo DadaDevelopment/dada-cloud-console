@@ -131,7 +131,6 @@ func TestRenderServiceDatabase(t *testing.T) {
 		"namespace: alpha-prod",
 		"engine: postgresql",
 		"database: myapp_db",
-		"external:",
 		"enabled: true",
 		"frequency: daily",
 		"retention: 14d",
