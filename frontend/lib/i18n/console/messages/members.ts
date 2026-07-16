@@ -19,6 +19,15 @@ export const members: Messages = {
 
   "members.empty": { ru: "Участников пока нет.", en: "No members yet." },
 
+  "members.provisioning.title": {
+    ru: "Доступы для проекта ещё настраиваются",
+    en: "Project access is still being set up",
+  },
+  "members.provisioning.body": {
+    ru: "Список участников появится, как только завершится подготовка проекта. Обычно это занимает меньше минуты — обновите страницу чуть позже.",
+    en: "The member list will appear once the project finishes provisioning. This usually takes under a minute — refresh shortly.",
+  },
+
   "members.modal.title": { ru: "Добавить участника", en: "Add member" },
   "members.modal.email.label": { ru: "Email", en: "Email" },
   "members.modal.email.placeholder": { ru: "teammate@company.com", en: "teammate@company.com" },

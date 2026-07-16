@@ -40,6 +40,7 @@ export default function MembersPage() {
   const [members, setMembers] = useState<Member[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [notProvisioned, setNotProvisioned] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
 
@@ -55,7 +56,14 @@ export default function MembersPage() {
       const data = await userServiceApi.listProjectMembers(projectId);
       setMembers(data.members ?? []);
       setError(null);
+      setNotProvisioned(false);
     } catch (err) {
+      if ((err as { status?: number }).status === 404) {
+        setMembers([]);
+        setError(null);
+        setNotProvisioned(true);
+        return;
+      }
       const msg = err instanceof Error ? err.message : t("members.error.load");
       for (let attempt = 0; attempt < 2; attempt++) {
         try {
@@ -63,9 +71,15 @@ export default function MembersPage() {
           const data = await userServiceApi.listProjectMembers(projectId);
           setMembers(data.members ?? []);
           setError(null);
+          setNotProvisioned(false);
           return;
         } catch (retryErr) {
-          void retryErr;
+          if ((retryErr as { status?: number }).status === 404) {
+            setMembers([]);
+            setError(null);
+            setNotProvisioned(true);
+            return;
+          }
         }
       }
       setError(msg);
@@ -218,6 +232,11 @@ export default function MembersPage() {
 
       {error ? (
         <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">{error}</div>
+      ) : notProvisioned ? (
+        <div className="rounded-lg border border-blue-200 dark:border-blue-900 bg-blue-50 dark:bg-blue-950/30 p-4">
+          <p className="text-sm font-medium text-blue-800 dark:text-blue-300">{t("members.provisioning.title")}</p>
+          <p className="mt-1 text-sm text-blue-700 dark:text-blue-400">{t("members.provisioning.body")}</p>
+        </div>
       ) : (
         <>
           {actionError && (

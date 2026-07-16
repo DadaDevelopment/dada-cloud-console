@@ -206,5 +206,9 @@ func NewHandler(pool *pgxpool.Pool, cfg *config.Config) *Handler {
 	// (Kanister disabled), so tests and local dev never spawn it.
 	h.StartBackupReconciler(context.Background())
 
+	// Heal projects whose user-service IAM groups were never provisioned. No-op
+	// when group sync is disabled (h.usersvc nil).
+	h.StartProjectGroupReconciler(context.Background())
+
 	return h
 }
