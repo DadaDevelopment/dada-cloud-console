@@ -15,6 +15,25 @@ interface LogLine {
   text: string;
 }
 
+const NOISE_PATTERNS: RegExp[] = [
+  /^\s*>\s*git\b/i,
+  /^Checking out Revision\b/i,
+  /^Cloning the remote Git repository/i,
+  /^Cloning repository/i,
+  /^Fetching (without tags|upstream changes)/i,
+  /^Commit message:/i,
+  /^Revision\s+[0-9a-f]{7,40}\b/i,
+  /\[WARNING\].*(label option is deprecated|deprecated)/i,
+  /pod.?template/i,
+  /^Created Pod:/i,
+  /^Still waiting to schedule task/i,
+  /^Agent .* is provisioned from/i,
+];
+
+function isBuildNoise(text: string): boolean {
+  return NOISE_PATTERNS.some((re) => re.test(text));
+}
+
 export function BuildLogViewer({ projectId, buildId }: { projectId: string; buildId: string }) {
   const [lines, setLines] = useState<LogLine[]>([]);
   const [status, setStatus] = useState<ConnStatus>("connecting");
@@ -23,6 +42,7 @@ export function BuildLogViewer({ projectId, buildId }: { projectId: string; buil
   const bottomRef = useRef<HTMLDivElement | null>(null);
 
   const append = useCallback((kind: BuildLogFrame["type"], text: string) => {
+    if (kind !== "error" && isBuildNoise(text)) return;
     setLines((prev) => [...prev, { id: ++counter.current, kind, text }]);
   }, []);
 

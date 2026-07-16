@@ -43,6 +43,10 @@ function draftKey(projectId: string) {
   return `dada.import-draft.${projectId}`;
 }
 
+function pendingRepoKey(projectId: string) {
+  return `dada.import-pending-repo.${projectId}`;
+}
+
 function saveDraft(projectId: string, d: WizardDraft) {
   try {
     sessionStorage.setItem(draftKey(projectId), JSON.stringify(d));
@@ -443,21 +447,44 @@ export default function GitImportPage() {
       setFrameworkTouched(false);
       setPortTouched(false);
       setPort(8080);
+      try {
+        sessionStorage.removeItem(pendingRepoKey(projectId));
+      } catch {}
       void runDetect(repo, ".");
     },
-    [runDetect]
+    [runDetect, projectId]
   );
+
+  const [pendingRepo, setPendingRepo] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (repoParam) {
+      try {
+        sessionStorage.setItem(pendingRepoKey(projectId), repoParam);
+      } catch {}
+      const timer = window.setTimeout(() => setPendingRepo(repoParam), 0);
+      return () => window.clearTimeout(timer);
+    }
+    const timer = window.setTimeout(() => {
+      let stored: string | null = null;
+      try {
+        stored = sessionStorage.getItem(pendingRepoKey(projectId));
+      } catch {}
+      if (stored) setPendingRepo(stored);
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [repoParam, projectId]);
 
   useEffect(() => {
     if (repoPrefillDone.current) return;
-    if (!repoParam || selectedRepo || deploying) return;
+    if (!pendingRepo || selectedRepo || deploying) return;
     if (remoteRepos.length === 0) return;
-    const match = remoteRepos.find((r) => r.full_name.toLowerCase() === repoParam.toLowerCase());
+    const match = remoteRepos.find((r) => r.full_name.toLowerCase() === pendingRepo.toLowerCase());
     if (!match) return;
     repoPrefillDone.current = true;
     const timer = window.setTimeout(() => pickRepo(match), 0);
     return () => window.clearTimeout(timer);
-  }, [repoParam, selectedRepo, deploying, remoteRepos, pickRepo]);
+  }, [pendingRepo, selectedRepo, deploying, remoteRepos, pickRepo]);
 
   async function handleSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();

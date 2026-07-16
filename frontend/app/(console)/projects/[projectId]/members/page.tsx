@@ -54,7 +54,7 @@ export default function MembersPage() {
     setActionError(null);
     try {
       const data = await userServiceApi.listProjectMembers(projectId);
-      setMembers(data.members ?? []);
+      setMembers((data.members ?? []).filter((m) => m.principal_type !== "service_account"));
       setError(null);
       setNotProvisioned(false);
     } catch (err) {
@@ -69,7 +69,7 @@ export default function MembersPage() {
         try {
           await new Promise((r) => setTimeout(r, 1500 * (attempt + 1)));
           const data = await userServiceApi.listProjectMembers(projectId);
-          setMembers(data.members ?? []);
+          setMembers((data.members ?? []).filter((m) => m.principal_type !== "service_account"));
           setError(null);
           setNotProvisioned(false);
           return;
