@@ -147,6 +147,14 @@ type DeleteAppPayload struct {
 // op.ProjectID.
 type DeleteProjectPayload struct{}
 
+// CreateProjectPayload is the typed payload for CreateProject operations. Empty
+// on purpose: the worker resolves the project row (name, display name, owner
+// type, default environment) from op.ProjectID and renders project.yaml (+ KC
+// group CRs) the same way BootstrapProjects does at agent startup, so a
+// project created at runtime gets its project-defaults manifest — and the
+// nexus-cred secret ArgoCD derives from it — without waiting for a restart.
+type CreateProjectPayload struct{}
+
 // MoveAppPayload is the typed payload for MoveApp operations (ADR-014 Phase 1:
 // stateless move across projects). The source project_id/environment_id are the
 // operation row's own columns; this payload only carries the destination. JSON

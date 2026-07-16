@@ -48,6 +48,24 @@ func ListProjects(ctx context.Context, pool *pgxpool.Pool) ([]Project, error) {
 	return result, rows.Err()
 }
 
+// GetProjectByID returns a single project from the catalog, for callers that
+// already know its id (e.g. the CreateProject operation handler).
+func GetProjectByID(ctx context.Context, pool *pgxpool.Pool, id uuid.UUID) (Project, error) {
+	var p Project
+	err := pool.QueryRow(ctx, `
+		SELECT id, name, display_name, owner_type, default_environment, quotas, created_at, updated_at
+		FROM projects
+		WHERE id = $1
+	`, id).Scan(
+		&p.ID, &p.Name, &p.DisplayName, &p.OwnerType, &p.DefaultEnvironment,
+		&p.Quotas, &p.CreatedAt, &p.UpdatedAt,
+	)
+	if err != nil {
+		return Project{}, fmt.Errorf("get project %s: %w", id, err)
+	}
+	return p, nil
+}
+
 // ProjectMember links a username to a role within a project.
 type ProjectMember struct {
 	Username string

@@ -269,6 +269,17 @@ func (h *Handler) insertProject(ctx context.Context, ownerID uuid.UUID, slug, di
 		return uuid.Nil, uuid.Nil, err
 	}
 
+	payloadBytes, err := json.Marshal(models.CreateProjectPayload{})
+	if err != nil {
+		return uuid.Nil, uuid.Nil, err
+	}
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO operations (actor_id, project_id, environment_id, action, resource_kind, resource_name, status, payload)
+		VALUES ($1, $2, $3, 'CreateProject', 'Project', $4, 'Created', $5)
+	`, ownerID, projectID, envID, slug, payloadBytes); err != nil {
+		return uuid.Nil, uuid.Nil, err
+	}
+
 	if err := tx.Commit(ctx); err != nil {
 		return uuid.Nil, uuid.Nil, err
 	}
