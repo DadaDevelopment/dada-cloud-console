@@ -156,11 +156,12 @@ func (h *Handler) CreateEndpoint(c *gin.Context) {
 		return
 	}
 
+	req.FQDN = normalizeDomain(req.FQDN)
 	if req.FQDN == "" {
 		respondError(c, http.StatusBadRequest, "fqdn is required")
 		return
 	}
-	if !strings.Contains(req.FQDN, ".") {
+	if !isValidDomain(req.FQDN) {
 		respondError(c, http.StatusBadRequest, "fqdn must be a valid domain name")
 		return
 	}
