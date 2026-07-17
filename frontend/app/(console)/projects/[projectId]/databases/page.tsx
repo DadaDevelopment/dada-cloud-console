@@ -19,11 +19,26 @@ import { useT } from "@/lib/i18n/console/context";
 interface CreateDbForm {
   name: string;
   database: string;
-  app_ref: string;
   backup_enabled: boolean;
   backup_schedule: string;
   backup_retention: string;
   external_enabled: boolean;
+}
+
+/**
+ * Generates a unique-enough resource name + derived PostgreSQL identifier so
+ * the create form never forces the user to invent one. The random suffix is
+ * shared between both so the pair reads as one database.
+ */
+function generateDbNames(): { name: string; database: string } {
+  const suffix = (
+    typeof crypto !== "undefined" && "randomUUID" in crypto
+      ? crypto.randomUUID()
+      : Math.random().toString(36).slice(2)
+  )
+    .replace(/-/g, "")
+    .slice(0, 8);
+  return { name: `db-${suffix}`, database: `db_${suffix}` };
 }
 
 function fmtBytes(v: number): string {
@@ -46,17 +61,21 @@ export default function DatabasesPage() {
   const [error, setError] = useState<string | null>(null);
 
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const [form, setForm] = useState<CreateDbForm>({
-    name: "",
-    database: "",
-    app_ref: "",
-    backup_enabled: true,
+  const [form, setForm] = useState<CreateDbForm>(() => ({
+    ...generateDbNames(),
+    backup_enabled: false,
     backup_schedule: "daily",
     backup_retention: "7d",
     external_enabled: false,
-  });
+  }));
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
+
+  function openCreateModal() {
+    setForm((prev) => ({ ...prev, ...generateDbNames() }));
+    setSubmitError(null);
+    setIsModalOpen(true);
+  }
 
   useEffect(() => {
     /* eslint-disable react-hooks/set-state-in-effect */
@@ -87,14 +106,14 @@ export default function DatabasesPage() {
       await databasesApi.create(projectId, selectedEnvId, {
         name: form.name,
         database: form.database,
-        app_ref: form.app_ref,
+        app_ref: "",
         backup_enabled: form.backup_enabled,
         backup_schedule: form.backup_schedule,
         backup_retention: form.backup_retention,
         external_enabled: form.external_enabled,
       });
       setIsModalOpen(false);
-      setForm({ name: "", database: "", app_ref: "", backup_enabled: true, backup_schedule: "daily", backup_retention: "7d", external_enabled: false });
+      setForm({ ...generateDbNames(), backup_enabled: false, backup_schedule: "daily", backup_retention: "7d", external_enabled: false });
       setRefreshTick((v) => v + 1);
     } catch (err) {
       setSubmitError(err instanceof Error ? err.message : t("databases.error.create"));
@@ -129,7 +148,7 @@ export default function DatabasesPage() {
         </div>
         {canCreate && (
         <button
-          onClick={() => setIsModalOpen(true)}
+          onClick={openCreateModal}
           disabled={!selectedEnvId}
           className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50 transition-colors"
         >
@@ -160,7 +179,7 @@ export default function DatabasesPage() {
             description={t("databases.empty.description")}
             cta={
               canCreate
-                ? { label: t("databases.empty.create"), onClick: () => setIsModalOpen(true), disabled: !selectedEnvId }
+                ? { label: t("databases.empty.create"), onClick: openCreateModal, disabled: !selectedEnvId }
                 : undefined
             }
             steps={[t("databases.empty.step1"), t("databases.empty.step2"), t("databases.empty.step3")]}
@@ -221,7 +240,6 @@ export default function DatabasesPage() {
               required
               value={form.name}
               onChange={(e) => handleFormChange("name", e.target.value)}
-              placeholder="my-app-db"
               pattern="[a-z0-9-]+"
               title={t("databases.modal.name.validation")}
               className="mt-1 block w-full rounded-lg border border-gray-300 dark:border-gray-700 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
@@ -230,35 +248,16 @@ export default function DatabasesPage() {
 
           <div>
             <label className="block text-sm font-medium text-gray-700 dark:text-gray-200">
-              {t("databases.modal.pgName.label")}
+              {t("databases.modal.pgName.label")}{" "}
+              <span className="text-gray-400 dark:text-gray-500 font-normal">({t("databases.modal.pgName.hint")})</span>
             </label>
             <input
               type="text"
               required
               value={form.database}
               onChange={(e) => handleFormChange("database", e.target.value)}
-              placeholder="myappdb"
               className="mt-1 block w-full rounded-lg border border-gray-300 dark:border-gray-700 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
             />
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-200">
-              {t("databases.modal.appRef.label")}{" "}
-              <span className="text-gray-400 dark:text-gray-500 font-normal">({t("databases.modal.appRef.hint")})</span>
-            </label>
-            <input
-              type="text"
-              value={form.app_ref}
-              onChange={(e) => handleFormChange("app_ref", e.target.value)}
-              placeholder="my-app"
-              pattern="[a-z0-9-]*"
-              title={t("databases.modal.name.validation")}
-              className="mt-1 block w-full rounded-lg border border-gray-300 dark:border-gray-700 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-            />
-            <p className="mt-1 text-xs text-gray-400 dark:text-gray-500">
-              {t("databases.modal.appRef.help")}
-            </p>
           </div>
 
           <div className="flex items-center justify-between rounded-lg border border-gray-200 dark:border-gray-800 px-4 py-3">

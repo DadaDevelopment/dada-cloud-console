@@ -29,21 +29,13 @@ export const databases: Messages = {
 
   "databases.modal.title": { ru: "Создать базу данных", en: "Create Database" },
   "databases.modal.name.label": { ru: "Имя базы данных", en: "Database Name" },
-  "databases.modal.name.hint": { ru: "(строчные буквы, цифры и дефисы)", en: "(lowercase letters, digits and hyphens)" },
+  "databases.modal.name.hint": { ru: "(сгенерировано автоматически, можно изменить)", en: "(auto-generated, you can edit it)" },
   "databases.modal.name.validation": {
     ru: "Только строчные буквы, цифры и дефисы",
     en: "Lowercase letters, numbers, and hyphens only",
   },
   "databases.modal.pgName.label": { ru: "Имя базы PostgreSQL", en: "PostgreSQL DB Name" },
-  "databases.modal.appRef.label": { ru: "Ссылка на приложение", en: "App Reference" },
-  "databases.modal.appRef.hint": {
-    ru: "(необязательно — оставьте пустым для базы данных уровня окружения)",
-    en: "(optional — leave empty for an environment-level database)",
-  },
-  "databases.modal.appRef.help": {
-    ru: "Привязать к чарту приложения или оставить пустым для самостоятельной базы данных.",
-    en: "Bind to an app's chart, or leave empty to provision a standalone database your apps can reference.",
-  },
+  "databases.modal.pgName.hint": { ru: "(сгенерировано автоматически)", en: "(auto-generated)" },
   "databases.modal.backups.title": { ru: "Включить резервные копии", en: "Enable Backups" },
   "databases.modal.backups.subtitle": { ru: "Автоматические плановые резервные копии", en: "Automatic scheduled backups" },
   "databases.modal.schedule.label": { ru: "Расписание", en: "Backup Schedule" },
