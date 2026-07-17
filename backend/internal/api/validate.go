@@ -7,7 +7,7 @@ import (
 
 var (
 	reKubeName = regexp.MustCompile(`^[a-z0-9][a-z0-9\-]{0,61}[a-z0-9]$|^[a-z0-9]$`)
-	rePgName   = regexp.MustCompile(`^[a-z][a-z0-9_]{0,62}$`)
+	rePgName   = regexp.MustCompile(`^[a-z]([a-z0-9\-]{0,61}[a-z0-9])?$`)
 )
 
 func validateKubeName(name string) error {
@@ -17,9 +17,17 @@ func validateKubeName(name string) error {
 	return nil
 }
 
+// validatePgName requires a name that is simultaneously a valid PostgreSQL
+// identifier and a valid RFC 1123 subdomain. The managed-database CRD
+// (ServiceDatabaseV2) carries the k8s track's `database` field verbatim into
+// a Crossplane composed resource name, which k8s requires to be RFC 1123 (no
+// underscores). Hyphens satisfy both worlds -- a hyphenated identifier is
+// legal PostgreSQL as long as it stays quoted, which the provisioning path
+// already does -- so hyphens are accepted and underscores are not, on both
+// the k8s and VM/compose tracks, keeping one rule for both.
 func validatePgName(name string) error {
 	if !rePgName.MatchString(name) {
-		return fmt.Errorf("database name must start with lowercase letter, alphanumeric+underscore, max 63 chars")
+		return fmt.Errorf("database name must start with a lowercase letter and contain only lowercase letters, numbers and hyphens, max 63 chars")
 	}
 	return nil
 }

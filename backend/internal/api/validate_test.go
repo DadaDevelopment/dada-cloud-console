@@ -20,15 +20,16 @@ func TestValidateKubeName(t *testing.T) {
 }
 
 func TestValidatePgName(t *testing.T) {
-	valid := []string{"codexlb", "profi_db", "my_database_1", "a"}
+	valid := []string{"codexlb", "profi-db", "my-database-1", "a", "mlflow-v2"}
 	for _, name := range valid {
 		if err := validatePgName(name); err != nil {
 			t.Errorf("validatePgName(%q) unexpected error: %v", name, err)
 		}
 	}
 
-	invalid := []string{"", "1startswithdigit", "has-hyphen", "has space", "UpperCase",
-		"toolongname_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}
+	invalid := []string{"", "1startswithdigit", "has_underscore", "has space", "UpperCase",
+		"-leading", "trailing-",
+		"toolongname-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}
 	for _, name := range invalid {
 		if err := validatePgName(name); err == nil {
 			t.Errorf("validatePgName(%q) expected error, got nil", name)

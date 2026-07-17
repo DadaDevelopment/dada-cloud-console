@@ -27,8 +27,11 @@ interface CreateDbForm {
 
 /**
  * Generates a unique-enough resource name + derived PostgreSQL identifier so
- * the create form never forces the user to invent one. The random suffix is
- * shared between both so the pair reads as one database.
+ * the create form never forces the user to invent one. Both use the same
+ * hyphenated shape (letters, digits, hyphens only, no underscores): the
+ * backend requires that on the PostgreSQL name too, since the k8s track
+ * carries it verbatim into a Crossplane composed resource name that must be
+ * a valid RFC 1123 subdomain.
  */
 function generateDbNames(): { name: string; database: string } {
   const suffix = (
@@ -38,7 +41,7 @@ function generateDbNames(): { name: string; database: string } {
   )
     .replace(/-/g, "")
     .slice(0, 8);
-  return { name: `db-${suffix}`, database: `db_${suffix}` };
+  return { name: `db-${suffix}`, database: `db-${suffix}` };
 }
 
 function fmtBytes(v: number): string {
@@ -256,6 +259,8 @@ export default function DatabasesPage() {
               required
               value={form.database}
               onChange={(e) => handleFormChange("database", e.target.value)}
+              pattern="[a-z][a-z0-9-]*"
+              title={t("databases.modal.name.validation")}
               className="mt-1 block w-full rounded-lg border border-gray-300 dark:border-gray-700 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
             />
           </div>
