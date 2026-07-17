@@ -793,6 +793,9 @@ func TestFQDNToName(t *testing.T) {
 	cases := []struct{ in, want string }{
 		{"api.gamma.dada-tuda.ru", "api-gamma-dada-tuda-ru"},
 		{"console.dada-tuda.ru", "console-dada-tuda-ru"},
+		{"ggrk52.ru.", "ggrk52-ru"},
+		{"GGRK52.RU.", "ggrk52-ru"},
+		{" ggrk52.ru ", "ggrk52-ru"},
 	}
 	for _, c := range cases {
 		if got := renderer.FQDNToName(c.in); got != c.want {

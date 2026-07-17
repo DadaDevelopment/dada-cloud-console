@@ -851,7 +851,13 @@ func PublicApiResourcesValuesGitPath(projectSlug, envSlug, appName string) strin
 	return AppResourcesValuesGitPath(projectSlug, envSlug, appName)
 }
 
+// FQDNToName turns a hostname into an RFC 1123 resource name by replacing dots
+// with dashes. The input is lowercased and stripped of surrounding whitespace
+// and dots first: a canonical FQDN carries a trailing dot ("ggrk52.ru."), and
+// replacing that dot verbatim would yield a trailing dash ("ggrk52-ru-") that
+// k8s rejects as an invalid metadata.name.
 func FQDNToName(fqdn string) string {
+	fqdn = strings.Trim(strings.ToLower(strings.TrimSpace(fqdn)), ".")
 	return strings.ReplaceAll(fqdn, ".", "-")
 }
 
