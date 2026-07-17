@@ -2,6 +2,7 @@ package api
 
 import (
 	"sort"
+	"strings"
 	"testing"
 
 	"github.com/dada-tuda/console/backend/internal/auth"
@@ -141,7 +142,7 @@ func TestDecodeGroups(t *testing.T) {
 // TestParseScope checks scopes come from the native space-delimited `scope`
 // claim (standard OIDC), not a custom array.
 func TestParseScope(t *testing.T) {
-	c := &auth.Claims{Scope: "read metrics:write logs:write deploy:write builds:read builds:write admin"}
+	c := &auth.Claims{Scope: strings.Join(auth.AllScopes, " ")}
 	for _, s := range auth.AllScopes {
 		if !c.HasScope(s) {
 			t.Errorf("HasScope(%q) = false, want true", s)
