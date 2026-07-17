@@ -77,7 +77,70 @@ func SuppressNonHTTPURL(apps []models.ResourceSnapshot) {
 	}
 }
 
+// GitRepoRow is one git_repos row plus its latest build status — the inputs
+// SynthesizeGitRepoApps needs to decide whether to surface a NotDeployed
+// placeholder app for a repo that has no live snapshot yet.
+type GitRepoRow struct {
+	ID           uuid.UUID
+	Name         string
+	Repo         string
+	Profile      string
+	Replicas     int
+	Port         int
+	Updated      time.Time
+	LatestStatus string
+}
+
+// SynthesizeGitRepoApps appends a NotDeployed placeholder app for each git_repos
+// row not already represented by a live snapshot (name absent from seen). A repo
+// whose latest build was canceled is skipped so a canceled first deploy leaves
+// no visible app — the connect+build+deploy flow then reads as atomic. Failed
+// builds are kept so the user can still see and retry them. It returns the
+// extended app slice and a name→repo map covering every row (used to backfill
+// repo_full_name on deployed apps, independent of which placeholders are shown).
+func SynthesizeGitRepoApps(apps []models.ResourceSnapshot, rows []GitRepoRow, seen map[string]struct{}, projectID, envID uuid.UUID) ([]models.ResourceSnapshot, map[string]string) {
+	repoByName := make(map[string]string, len(rows))
+	for _, r := range rows {
+		if r.Repo != "" {
+			repoByName[r.Name] = r.Repo
+		}
+		if _, ok := seen[r.Name]; ok {
+			continue
+		}
+		if r.LatestStatus == "canceled" {
+			continue
+		}
+		summary, _ := json.Marshal(map[string]any{
+			"image":          r.Repo,
+			"profile":        r.Profile,
+			"replicas":       r.Replicas,
+			"port":           r.Port,
+			"repo_full_name": r.Repo,
+			"source":         "git",
+		})
+		envRef := envID
+		apps = append(apps, models.ResourceSnapshot{
+			ID:            r.ID,
+			ProjectID:     projectID,
+			EnvironmentID: &envRef,
+			Kind:          "App",
+			Name:          r.Name,
+			Phase:         "NotDeployed",
+			SummaryJSON:   summary,
+			LastSyncedAt:  r.Updated,
+		})
+		seen[r.Name] = struct{}{}
+	}
+	return apps, repoByName
+}
+
 // ListApps returns all App resources in a project environment.
+//
+// Apps come from two sources: live resource_snapshots (deployed workloads) and
+// git_repos rows synthesized as NotDeployed placeholders. A placeholder whose
+// latest build was canceled is omitted so a canceled first deploy leaves no
+// visible app — the connect+build+deploy flow then reads as atomic (either the
+// app deploys or nothing lingers). Failed builds are kept so the user can retry.
 //
 // @ID          listApps
 // @Summary     List apps in an environment
@@ -157,57 +220,31 @@ func (h *Handler) ListApps(c *gin.Context) {
 		seen[a.Name] = struct{}{}
 	}
 	grows, gerr := h.pool.Query(c.Request.Context(),
-		`SELECT id, app_name, repo_full_name,
-		        COALESCE(profile, 'small'), COALESCE(replicas, 1), COALESCE(port, 8080),
-		        updated_at
-		 FROM git_repos
-		 WHERE project_id = $1 AND environment_id = $2`,
+		`SELECT gr.id, gr.app_name, gr.repo_full_name,
+		        COALESCE(gr.profile, 'small'), COALESCE(gr.replicas, 1), COALESCE(gr.port, 8080),
+		        gr.updated_at, COALESCE(lb.status, '')
+		 FROM git_repos gr
+		 LEFT JOIN LATERAL (
+		     SELECT status FROM builds b
+		     WHERE b.git_repo_id = gr.id
+		     ORDER BY b.created_at DESC
+		     LIMIT 1
+		 ) lb ON true
+		 WHERE gr.project_id = $1 AND gr.environment_id = $2`,
 		projectID, envID,
 	)
-	repoByName := make(map[string]string)
+	var gitRows []GitRepoRow
 	if gerr == nil {
 		defer grows.Close()
 		for grows.Next() {
-			var (
-				id       uuid.UUID
-				name     string
-				repo     string
-				profile  string
-				replicas int
-				port     int
-				updated  time.Time
-			)
-			if scanErr := grows.Scan(&id, &name, &repo, &profile, &replicas, &port, &updated); scanErr != nil {
+			var r GitRepoRow
+			if scanErr := grows.Scan(&r.ID, &r.Name, &r.Repo, &r.Profile, &r.Replicas, &r.Port, &r.Updated, &r.LatestStatus); scanErr != nil {
 				continue
 			}
-			if repo != "" {
-				repoByName[name] = repo
-			}
-			if _, ok := seen[name]; ok {
-				continue
-			}
-			summary, _ := json.Marshal(map[string]any{
-				"image":          repo,
-				"profile":        profile,
-				"replicas":       replicas,
-				"port":           port,
-				"repo_full_name": repo,
-				"source":         "git",
-			})
-			envRef := envID
-			apps = append(apps, models.ResourceSnapshot{
-				ID:            id,
-				ProjectID:     projectID,
-				EnvironmentID: &envRef,
-				Kind:          "App",
-				Name:          name,
-				Phase:         "NotDeployed",
-				SummaryJSON:   summary,
-				LastSyncedAt:  updated,
-			})
-			seen[name] = struct{}{}
+			gitRows = append(gitRows, r)
 		}
 	}
+	apps, repoByName := SynthesizeGitRepoApps(apps, gitRows, seen, projectID, envID)
 
 	FillRepoFullName(apps, repoByName)
 	SuppressNonHTTPURL(apps)

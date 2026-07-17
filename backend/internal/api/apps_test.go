@@ -6,6 +6,7 @@ import (
 
 	"github.com/dada-tuda/console/backend/internal/api"
 	"github.com/dada-tuda/console/backend/internal/models"
+	"github.com/google/uuid"
 )
 
 func TestValidateImage(t *testing.T) {
@@ -68,6 +69,62 @@ func TestFillRepoFullName(t *testing.T) {
 	if got := get(apps[3].SummaryJSON); got != "acme/svc" {
 		t.Errorf("empty-summary: repo_full_name = %q, want acme/svc", got)
 	}
+}
+
+func TestSynthesizeGitRepoApps(t *testing.T) {
+	projectID := uuid.New()
+	envID := uuid.New()
+
+	apps := []models.ResourceSnapshot{{Name: "deployed", Kind: "App", Phase: "Ready"}}
+	seen := map[string]struct{}{"deployed": {}}
+
+	rows := []api.GitRepoRow{
+		{ID: uuid.New(), Name: "deployed", Repo: "acme/deployed", Profile: "small", Replicas: 1, Port: 8080, LatestStatus: "success"},
+		{ID: uuid.New(), Name: "linked-no-build", Repo: "acme/linked", Profile: "small", Replicas: 1, Port: 3000, LatestStatus: ""},
+		{ID: uuid.New(), Name: "building", Repo: "acme/building", Profile: "small", Replicas: 1, Port: 3000, LatestStatus: "building"},
+		{ID: uuid.New(), Name: "failed-first", Repo: "acme/failed", Profile: "small", Replicas: 1, Port: 3000, LatestStatus: "failed"},
+		{ID: uuid.New(), Name: "canceled-ghost", Repo: "acme/canceled", Profile: "small", Replicas: 1, Port: 3000, LatestStatus: "canceled"},
+	}
+
+	out, repoByName := api.SynthesizeGitRepoApps(apps, rows, seen, projectID, envID)
+
+	names := map[string]models.ResourceSnapshot{}
+	for _, a := range out {
+		names[a.Name] = a
+	}
+
+	if _, ok := names["canceled-ghost"]; ok {
+		t.Errorf("canceled first deploy must leave no visible app; canceled-ghost placeholder was synthesized")
+	}
+	for _, want := range []string{"linked-no-build", "building", "failed-first"} {
+		a, ok := names[want]
+		if !ok {
+			t.Errorf("%s: expected a NotDeployed placeholder (only canceled must be hidden)", want)
+			continue
+		}
+		if a.Phase != "NotDeployed" {
+			t.Errorf("%s: phase = %q, want NotDeployed", want, a.Phase)
+		}
+	}
+	if got := countName(out, "deployed"); got != 1 {
+		t.Errorf("deployed: appears %d times, want 1 (a live snapshot must not be duplicated by synth)", got)
+	}
+	if repoByName["canceled-ghost"] != "acme/canceled" {
+		t.Errorf("repoByName[canceled-ghost] = %q, want acme/canceled; must be set even when the placeholder is skipped", repoByName["canceled-ghost"])
+	}
+	if repoByName["deployed"] != "acme/deployed" {
+		t.Errorf("repoByName[deployed] = %q, want acme/deployed", repoByName["deployed"])
+	}
+}
+
+func countName(apps []models.ResourceSnapshot, name string) int {
+	n := 0
+	for _, a := range apps {
+		if a.Name == name {
+			n++
+		}
+	}
+	return n
 }
 
 func TestSuppressNonHTTPURL(t *testing.T) {
