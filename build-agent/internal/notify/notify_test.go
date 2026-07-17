@@ -25,15 +25,16 @@ func TestNewNilOnMissingConfig(t *testing.T) {
 
 func TestComposeSuccess(t *testing.T) {
 	n := testNotifier()
-	subject, body := n.Compose("a2ahub-landing", "success", "a2ahub-landing-00db4c.dada-tuda.ru", "")
+	subject, body := n.Compose("a2ahub-landing", "success", "a2ahub-landing-00db4c.dada-tuda.ru", "", "proj-1", "build-1")
 	if !strings.Contains(subject, "a2ahub-landing") {
 		t.Errorf("subject missing app name: %q", subject)
 	}
 	if !strings.Contains(body, "https://a2ahub-landing-00db4c.dada-tuda.ru") {
 		t.Errorf("success body missing app URL: %q", body)
 	}
-	if !strings.Contains(body, "https://console.dada-tuda.ru") {
-		t.Errorf("success body missing console link: %q", body)
+	wantLink := "https://console.dada-tuda.ru/projects/proj-1/apps/a2ahub-landing/builds/build-1"
+	if !strings.Contains(body, wantLink) {
+		t.Errorf("success body missing build deep link: %q", body)
 	}
 }
 
@@ -41,7 +42,7 @@ func TestComposeSuccess(t *testing.T) {
 // with no dangling "https://" for a missing host.
 func TestComposeSuccessNoHostname(t *testing.T) {
 	n := testNotifier()
-	_, body := n.Compose("myredis", "success", "", "")
+	_, body := n.Compose("myredis", "success", "", "", "proj-1", "build-1")
 	if strings.Contains(body, "https://\n") || strings.Contains(body, "Открыть:") {
 		t.Errorf("no-hostname success must omit the open link: %q", body)
 	}
@@ -49,12 +50,16 @@ func TestComposeSuccessNoHostname(t *testing.T) {
 
 func TestComposeFailure(t *testing.T) {
 	n := testNotifier()
-	subject, body := n.Compose("myapp", "failure", "", "npm ci exited 1")
+	subject, body := n.Compose("myapp", "failure", "", "npm ci exited 1", "proj-1", "build-1")
 	if !strings.Contains(subject, "не удалась") {
 		t.Errorf("failure subject wrong: %q", subject)
 	}
 	if !strings.Contains(body, "npm ci exited 1") {
 		t.Errorf("failure body missing reason: %q", body)
+	}
+	wantLink := "https://console.dada-tuda.ru/projects/proj-1/apps/myapp/builds/build-1"
+	if !strings.Contains(body, wantLink) {
+		t.Errorf("failure body missing build deep link: %q", body)
 	}
 }
 

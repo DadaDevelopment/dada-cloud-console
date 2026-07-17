@@ -337,7 +337,7 @@ func (r *Runner) notifyResult(repo *db.Repo, b *db.Build, status, reason string)
 		if status == "success" {
 			hostname, _ = db.ManagedHostname(ctx, r.pool, b.EnvironmentID, b.AppName)
 		}
-		subject, body := r.notify.Compose(b.AppName, status, hostname, reason)
+		subject, body := r.notify.Compose(b.AppName, status, hostname, reason, repo.ProjectID.String(), b.ID.String())
 		if err := r.notify.Send(to, subject, body); err != nil {
 			log.Warn().Err(err).Str("app", b.AppName).Str("status", status).Msg("deploy-notify: send failed")
 			return

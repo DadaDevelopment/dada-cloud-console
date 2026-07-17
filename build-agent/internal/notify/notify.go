@@ -33,11 +33,21 @@ func New(host string, port int, user, pass, from, consoleURL string) *Notifier {
 	return &Notifier{host: host, port: port, user: user, pass: pass, from: from, consoleURL: strings.TrimRight(consoleURL, "/")}
 }
 
+// buildURL builds a deep link straight to one build's log page in the
+// console, so a deploy-result email lands the reader on that build's own
+// logs instead of the bare dashboard. projectID/appName/buildID are all
+// known at the runner call site.
+func (n *Notifier) buildURL(projectID, appName, buildID string) string {
+	return fmt.Sprintf("%s/projects/%s/apps/%s/builds/%s", n.consoleURL, projectID, appName, buildID)
+}
+
 // Compose builds the subject and plaintext body for a build result. Pure: no
 // network, no clock — safe to unit-test. status is "success" or "failure".
 // hostname is the app's public URL when known (success only); reason is the
-// short failure cause. Both may be empty.
-func (n *Notifier) Compose(appName, status, hostname, reason string) (subject, body string) {
+// short failure cause; projectID/buildID identify the build for the deep
+// link. hostname and reason may be empty.
+func (n *Notifier) Compose(appName, status, hostname, reason, projectID, buildID string) (subject, body string) {
+	buildLink := n.buildURL(projectID, appName, buildID)
 	switch status {
 	case "success":
 		subject = fmt.Sprintf("%s: приложение собрано и развёрнуто", appName)
@@ -46,7 +56,7 @@ func (n *Notifier) Compose(appName, status, hostname, reason string) (subject, b
 		if hostname != "" {
 			fmt.Fprintf(&b, "Открыть: https://%s\n\n", hostname)
 		}
-		fmt.Fprintf(&b, "Панель управления: %s\n\n", n.consoleURL)
+		fmt.Fprintf(&b, "Логи сборки: %s\n\n", buildLink)
 		b.WriteString("Пуш в основную ветку автоматически пересобирает и деплоит проект.\n")
 		body = b.String()
 	default:
@@ -56,7 +66,7 @@ func (n *Notifier) Compose(appName, status, hostname, reason string) (subject, b
 		if reason != "" {
 			fmt.Fprintf(&b, "Причина: %s\n\n", reason)
 		}
-		fmt.Fprintf(&b, "Логи сборки и подробности: %s\n\n", n.consoleURL)
+		fmt.Fprintf(&b, "Логи сборки и подробности: %s\n\n", buildLink)
 		b.WriteString("Если нужна помощь — ответьте на это письмо.\n")
 		body = b.String()
 	}
