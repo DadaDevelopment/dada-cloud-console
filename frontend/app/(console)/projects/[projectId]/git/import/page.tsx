@@ -393,7 +393,12 @@ export default function GitImportPage() {
           await refreshInstallations(false);
           return;
         }
-        const { url } = await gitApi.githubAuthorizeUrl(projectId);
+        // No installation is bindable for this org. The OAuth-only authorize
+        // shortcut can never help here — it proves identity but creates no
+        // installation, so a user who has never installed the App anywhere
+        // would authorize repeatedly and land back on this same empty state.
+        // Send them to the real App install picker instead.
+        const { url } = await gitApi.installUrl(projectId, provider);
         window.location.href = url;
         return;
       }
