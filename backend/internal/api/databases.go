@@ -288,6 +288,13 @@ func (h *Handler) CreateServiceDatabase(c *gin.Context) {
 	_ = h.pool.QueryRow(c.Request.Context(),
 		`SELECT runtime FROM environments WHERE id = $1`, envID).Scan(&runtime)
 
+	if runtime != "vm" {
+		if err := validateKubeName(req.Database); err != nil {
+			respondError(c, http.StatusBadRequest, "database name must be lowercase alphanumeric with hyphens only (no underscores) for a managed database: "+err.Error())
+			return
+		}
+	}
+
 	engine := ""
 	if runtime == "vm" {
 		engine = "postgres"
