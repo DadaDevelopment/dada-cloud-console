@@ -35,8 +35,9 @@ type Build struct {
 	Branch        string
 	Trigger       string // push | pr | manual | rollback
 	Status        string
-	ImageURI      string // pinned on success: harbor.../<proj>/<app>@sha256:<digest>
-	ForkUnsafe    bool   // fork-PR safety: never inject secrets when true
+	ImageURI      string     // pinned on success: harbor.../<proj>/<app>@sha256:<digest>
+	ForkUnsafe    bool       // fork-PR safety: never inject secrets when true
+	TriggeredBy   *uuid.UUID // human who triggered a manual build; nil for push/webhook
 	CreatedAt     time.Time
 }
 
@@ -103,7 +104,7 @@ func CurrentStatus(ctx context.Context, pool *pgxpool.Pool, id uuid.UUID) (strin
 func InFlightBuilds(ctx context.Context, pool *pgxpool.Pool) ([]ReclaimBuild, error) {
 	rows, err := pool.Query(ctx, `
 		SELECT id, git_repo_id, environment_id, app_name, commit_sha, branch,
-		       trigger, status, created_at, jenkins_queue_id, jenkins_build_number
+		       trigger, status, triggered_by, created_at, jenkins_queue_id, jenkins_build_number
 		FROM   builds
 		WHERE  status IN ('detecting','building','pushing')
 		ORDER  BY started_at ASC NULLS FIRST
@@ -118,7 +119,7 @@ func InFlightBuilds(ctx context.Context, pool *pgxpool.Pool) ([]ReclaimBuild, er
 		var rb ReclaimBuild
 		if err := rows.Scan(
 			&rb.ID, &rb.GitRepoID, &rb.EnvironmentID, &rb.AppName, &rb.CommitSHA, &rb.Branch,
-			&rb.Trigger, &rb.Status, &rb.CreatedAt, &rb.JenkinsQueueID, &rb.JenkinsBuildNumber,
+			&rb.Trigger, &rb.Status, &rb.TriggeredBy, &rb.CreatedAt, &rb.JenkinsQueueID, &rb.JenkinsBuildNumber,
 		); err != nil {
 			return nil, fmt.Errorf("scan in-flight build: %w", err)
 		}
@@ -141,11 +142,11 @@ func InFlightBuilds(ctx context.Context, pool *pgxpool.Pool) ([]ReclaimBuild, er
 func SuccessBuildsMissingDeploy(ctx context.Context, pool *pgxpool.Pool) ([]Build, error) {
 	rows, err := pool.Query(ctx, `
 		SELECT id, git_repo_id, environment_id, app_name, commit_sha,
-		       branch, trigger, status, image_uri, created_at
+		       branch, trigger, status, image_uri, triggered_by, created_at
 		FROM (
 			SELECT DISTINCT ON (b.git_repo_id, b.branch)
 			       b.id, b.git_repo_id, b.environment_id, b.app_name, b.commit_sha,
-			       b.branch, b.trigger, b.status, b.image_uri, b.created_at
+			       b.branch, b.trigger, b.status, b.image_uri, b.triggered_by, b.created_at
 			FROM   builds b
 			WHERE  b.status = 'success' AND b.image_uri IS NOT NULL AND b.image_uri <> ''
 			  AND  b.created_at > NOW() - make_interval(days => 7)
@@ -163,7 +164,7 @@ func SuccessBuildsMissingDeploy(ctx context.Context, pool *pgxpool.Pool) ([]Buil
 		var b Build
 		if err := rows.Scan(
 			&b.ID, &b.GitRepoID, &b.EnvironmentID, &b.AppName, &b.CommitSHA,
-			&b.Branch, &b.Trigger, &b.Status, &b.ImageURI, &b.CreatedAt,
+			&b.Branch, &b.Trigger, &b.Status, &b.ImageURI, &b.TriggeredBy, &b.CreatedAt,
 		); err != nil {
 			return nil, fmt.Errorf("scan missing-deploy build: %w", err)
 		}
@@ -211,13 +212,13 @@ func ClaimQueued(ctx context.Context, pool *pgxpool.Pool) (*Build, error) {
 			FOR UPDATE SKIP LOCKED
 		)
 		RETURNING id, git_repo_id, environment_id, app_name,
-		          commit_sha, branch, trigger, status, created_at
+		          commit_sha, branch, trigger, status, triggered_by, created_at
 	`)
 
 	var b Build
 	if err := row.Scan(
 		&b.ID, &b.GitRepoID, &b.EnvironmentID, &b.AppName,
-		&b.CommitSHA, &b.Branch, &b.Trigger, &b.Status, &b.CreatedAt,
+		&b.CommitSHA, &b.Branch, &b.Trigger, &b.Status, &b.TriggeredBy, &b.CreatedAt,
 	); err != nil {
 		if err == pgx.ErrNoRows {
 			return nil, nil // empty queue

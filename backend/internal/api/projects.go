@@ -314,6 +314,18 @@ func defaultProjectSlug(username string) string {
 
 var nonSlugChars = regexp.MustCompile(`[^a-z0-9]+`)
 
+// defaultProjectDisplayName builds a human-readable display_name for an
+// auto-provisioned personal project, e.g. "goleva.giftdev's project". Every
+// auto-provisioned project used to share the literal "Default", which read as
+// dozens of indistinguishable rows in admin-facing lists (038 backfills those).
+func defaultProjectDisplayName(username string) string {
+	username = strings.TrimSpace(username)
+	if username == "" {
+		return "Default"
+	}
+	return username + "'s project"
+}
+
 // EnsureDefaultProject returns the caller's default project, creating it when they
 // have none. Idempotent: the console calls it on first load so the user always lands
 // inside a project instead of an empty overview.
@@ -384,7 +396,8 @@ func (h *Handler) EnsureDefaultProject(c *gin.Context) {
 	}
 	personalOrg := claims.Username
 	slug = defaultProjectSlug(claims.Username)
-	pid, envID, err = h.insertProject(ctx, claims.UserID, slug, "Default", personalOrg, "prod")
+	displayName = defaultProjectDisplayName(claims.Username)
+	pid, envID, err = h.insertProject(ctx, claims.UserID, slug, displayName, personalOrg, "prod")
 	if err != nil {
 		if isUniqueViolation(err) {
 			// Slug already taken (race or pre-existing row not visible via claims):
@@ -395,7 +408,7 @@ func (h *Handler) EnsureDefaultProject(c *gin.Context) {
 				  FROM projects p WHERE p.name = $1
 			`, slug).Scan(&pid, &org, &envID); e == nil {
 				if org != "" {
-					h.ensureProjectGroupsAsync(org, pid.String(), slug, "Default", claims.Subject)
+					h.ensureProjectGroupsAsync(org, pid.String(), slug, displayName, claims.Subject)
 				}
 				c.JSON(http.StatusOK, gin.H{
 					"project_id":             pid,
@@ -409,7 +422,7 @@ func (h *Handler) EnsureDefaultProject(c *gin.Context) {
 		respondError(c, http.StatusInternalServerError, "failed to create default project")
 		return
 	}
-	h.ensureProjectGroupsAsync(personalOrg, pid.String(), slug, "Default", claims.Subject)
+	h.ensureProjectGroupsAsync(personalOrg, pid.String(), slug, displayName, claims.Subject)
 	c.JSON(http.StatusCreated, gin.H{
 		"project_id":             pid,
 		"default_environment_id": envID,

@@ -54,7 +54,7 @@ func (h *Handler) ListAdminApprovals(c *gin.Context) {
 		SELECT o.id, o.actor_id, o.project_id, o.environment_id, o.action, o.resource_kind, o.resource_name,
 		       o.status, o.payload, o.validation_result, o.git_commit, o.git_path, o.argo_application,
 		       o.error_code, o.error_message, o.created_at, o.updated_at,
-		       p.name, COALESCE(u.display_name, u.username)
+		       p.name, COALESCE(p.display_name, ''), COALESCE(u.display_name, u.username)
 		FROM operations o
 		JOIN projects p   ON p.id = o.project_id
 		LEFT JOIN users u ON u.id = o.actor_id
@@ -72,15 +72,16 @@ func (h *Handler) ListAdminApprovals(c *gin.Context) {
 	defer rows.Close()
 
 	type approvalRow struct {
-		Operation   models.Operation `json:"operation"`
-		ProjectName string           `json:"project_name"`
-		RequestedBy string           `json:"requested_by"`
+		Operation          models.Operation `json:"operation"`
+		ProjectName        string           `json:"project_name"`
+		ProjectDisplayName string           `json:"project_display_name"`
+		RequestedBy        string           `json:"requested_by"`
 	}
 
 	out := []approvalRow{}
 	for rows.Next() {
 		var op models.Operation
-		var projectName string
+		var projectName, projectDisplayName string
 		var requestedBy *string
 		var gitCommit, gitPath, argoApp, errorCode, errorMessage *string
 		var envID *uuid.UUID
@@ -90,7 +91,7 @@ func (h *Handler) ListAdminApprovals(c *gin.Context) {
 			&op.Status, &op.Payload, &op.ValidationResult,
 			&gitCommit, &gitPath, &argoApp,
 			&errorCode, &errorMessage, &op.CreatedAt, &op.UpdatedAt,
-			&projectName, &requestedBy,
+			&projectName, &projectDisplayName, &requestedBy,
 		); err != nil {
 			respondError(c, http.StatusInternalServerError, "failed to scan approval")
 			return
@@ -115,7 +116,7 @@ func (h *Handler) ListAdminApprovals(c *gin.Context) {
 		if requestedBy != nil {
 			rb = *requestedBy
 		}
-		out = append(out, approvalRow{Operation: op, ProjectName: projectName, RequestedBy: rb})
+		out = append(out, approvalRow{Operation: op, ProjectName: projectName, ProjectDisplayName: projectDisplayName, RequestedBy: rb})
 	}
 
 	c.JSON(http.StatusOK, gin.H{"approvals": out})
@@ -269,13 +270,15 @@ func (h *Handler) RejectOperation(c *gin.Context) {
 // record enriched with the actor's email and the project's display name so
 // the frontend never has to make a second round trip.
 type auditEventRow struct {
-	ID           uuid.UUID `json:"id"`
-	CreatedAt    time.Time `json:"created_at"`
-	ActorEmail   string    `json:"actor_email"`
-	Action       string    `json:"action"`
-	ResourceKind string    `json:"resource_kind"`
-	ResourceName string    `json:"resource_name"`
-	ProjectName  string    `json:"project_name"`
+	ID           uuid.UUID  `json:"id"`
+	CreatedAt    time.Time  `json:"created_at"`
+	ActorEmail   string     `json:"actor_email"`
+	Action       string     `json:"action"`
+	ResourceKind string     `json:"resource_kind"`
+	ResourceName string     `json:"resource_name"`
+	ProjectID    *uuid.UUID `json:"project_id,omitempty"`
+	ProjectName  string     `json:"project_name"`
+	ProjectSlug  string     `json:"project_slug,omitempty"`
 }
 
 const (
@@ -350,7 +353,7 @@ func (h *Handler) ListAuditEvents(c *gin.Context) {
 
 	rows, err := h.pool.Query(c.Request.Context(), `
 		SELECT a.id, a.created_at, u.email, a.action, a.resource_kind, a.resource_name,
-		       COALESCE(p.display_name, '')
+		       p.id, COALESCE(p.display_name, ''), COALESCE(p.name, '')
 		FROM audit_events a
 		JOIN users u        ON u.id = a.actor_id
 		LEFT JOIN projects p ON p.id = a.project_id
@@ -370,7 +373,7 @@ func (h *Handler) ListAuditEvents(c *gin.Context) {
 	for rows.Next() {
 		var e auditEventRow
 		var resourceKind, resourceName *string
-		if err := rows.Scan(&e.ID, &e.CreatedAt, &e.ActorEmail, &e.Action, &resourceKind, &resourceName, &e.ProjectName); err != nil {
+		if err := rows.Scan(&e.ID, &e.CreatedAt, &e.ActorEmail, &e.Action, &resourceKind, &resourceName, &e.ProjectID, &e.ProjectName, &e.ProjectSlug); err != nil {
 			respondError(c, http.StatusInternalServerError, "failed to scan audit event")
 			return
 		}

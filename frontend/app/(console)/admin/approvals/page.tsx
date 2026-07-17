@@ -106,7 +106,11 @@ export default function ApprovalsPage() {
       key: "project",
       header: t("approvals.col.project"),
       sortValue: (r) => r.project_name,
-      render: (r) => <span className="font-mono text-gray-900 dark:text-gray-100">{r.project_name}</span>,
+      render: (r) => (
+        <span className="font-mono text-gray-900 dark:text-gray-100">
+          {r.project_display_name ? `${r.project_display_name} (${r.project_name})` : r.project_name}
+        </span>
+      ),
     },
     {
       key: "resource",

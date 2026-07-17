@@ -1,5 +1,6 @@
 "use client";
 import { useCallback, useEffect, useState } from "react";
+import Link from "next/link";
 import { adminApi } from "@/lib/api";
 import type { AuditEvent } from "@/lib/types";
 import { Breadcrumb } from "@/components/ui/breadcrumb";
@@ -11,6 +12,27 @@ const REFRESH_MS = 30_000;
 
 function formatUTC(iso: string): string {
   return new Date(iso).toISOString().replace("T", " ").replace(/\.\d+Z$/, " UTC");
+}
+
+function resourceHref(projectId: string, kind: string, name: string): string | null {
+  const base = `/projects/${projectId}`;
+  switch (kind) {
+    case "App":
+    case "GitRepo":
+      return `${base}/apps/${encodeURIComponent(name)}`;
+    case "Build":
+      return `${base}/apps/${encodeURIComponent(name)}/builds`;
+    case "ServiceDatabase":
+      return `${base}/databases/${encodeURIComponent(name)}`;
+    case "AppServer":
+      return `${base}/app-servers/${encodeURIComponent(name)}`;
+    case "S3Bucket":
+      return `${base}/storage/${encodeURIComponent(name)}`;
+    case "AIModel":
+      return `${base}/models/${encodeURIComponent(name)}`;
+    default:
+      return null;
+  }
 }
 
 export default function AuditPage() {
@@ -89,14 +111,32 @@ export default function AuditPage() {
     {
       key: "resource",
       header: t("audit.col.resource"),
-      render: (r) => (
-        <span className="text-gray-600 dark:text-gray-400">
-          {r.resource_kind ? <span className="mr-1 text-xs text-gray-400 dark:text-gray-500">{r.resource_kind}</span> : null}
-          {r.resource_name || "—"}
-        </span>
-      ),
+      render: (r) => {
+        const href = r.project_id && r.resource_name ? resourceHref(r.project_id, r.resource_kind, r.resource_name) : null;
+        return (
+          <span className="text-gray-600 dark:text-gray-400">
+            {r.resource_kind ? <span className="mr-1 text-xs text-gray-400 dark:text-gray-500">{r.resource_kind}</span> : null}
+            {href ? (
+              <Link href={href} className="text-blue-600 hover:underline dark:text-blue-400">{r.resource_name}</Link>
+            ) : (
+              r.resource_name || "—"
+            )}
+          </span>
+        );
+      },
     },
-    { key: "project", header: t("audit.col.project"), render: (r) => <span className="font-mono text-gray-700 dark:text-gray-200">{r.project_name || "—"}</span> },
+    {
+      key: "project",
+      header: t("audit.col.project"),
+      render: (r) => {
+        const label = r.project_name ? `${r.project_name} (${r.project_slug || "—"})` : r.project_slug || "—";
+        return r.project_id ? (
+          <Link href={`/projects/${r.project_id}`} className="font-mono text-blue-600 hover:underline dark:text-blue-400">{label}</Link>
+        ) : (
+          <span className="font-mono text-gray-700 dark:text-gray-200">{label}</span>
+        );
+      },
+    },
   ];
 
   if (forbidden) {

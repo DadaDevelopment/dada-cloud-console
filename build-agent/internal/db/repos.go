@@ -37,6 +37,11 @@ type Repo struct {
 
 	// GitHub App installation (numeric id from git_app_installations).
 	InstallationID int64
+
+	// CreatedBy is the human who connected this repo via ConnectGitRepo, used to
+	// attribute the first-build CreateApp audit row when the triggering push
+	// itself has no user in the loop (nil for repos connected before 037).
+	CreatedBy *uuid.UUID
 }
 
 const repoSelect = `
@@ -45,7 +50,7 @@ const repoSelect = `
 	       COALESCE(r.webhook_secret, ''), r.production_branch, r.root_dir,
 	       COALESCE(r.framework_override, ''), r.auto_deploy,
 	       r.port, r.replicas, r.profile,
-	       COALESCE(i.installation_id, 0)
+	       COALESCE(i.installation_id, 0), r.created_by
 	FROM   git_repos r
 	JOIN   projects p     ON p.id = r.project_id
 	JOIN   environments e ON e.id = r.environment_id
@@ -59,7 +64,7 @@ func scanRepo(row pgx.Row) (*Repo, error) {
 		&rp.Provider, &rp.RepoFullName, &rp.CloneURL, &rp.TokenEncrypted,
 		&rp.WebhookSecret, &rp.ProductionBranch, &rp.RootDir,
 		&rp.FrameworkOverride, &rp.AutoDeploy,
-		&rp.Port, &rp.Replicas, &rp.Profile, &rp.InstallationID,
+		&rp.Port, &rp.Replicas, &rp.Profile, &rp.InstallationID, &rp.CreatedBy,
 	); err != nil {
 		return nil, err
 	}

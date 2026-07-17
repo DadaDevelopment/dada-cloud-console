@@ -175,12 +175,14 @@ func HandoffDeploy(ctx context.Context, pool *pgxpool.Pool, b *Build, repo *Repo
 		return uuid.Nil, fmt.Errorf("marshal %s payload: %w", action, err)
 	}
 
+	actor := handoffActor(b, repo, action)
+
 	var opID uuid.UUID
 	if err := tx.QueryRow(ctx, `
 		INSERT INTO operations (actor_id, project_id, environment_id, action, resource_kind, resource_name, status, payload)
 		VALUES ($1, $2, $3, $4, 'App', $5, 'Created', $6)
 		RETURNING id
-	`, SystemUserID, repo.ProjectID, b.EnvironmentID, action, b.AppName, payload).Scan(&opID); err != nil {
+	`, actor, repo.ProjectID, b.EnvironmentID, action, b.AppName, payload).Scan(&opID); err != nil {
 		return uuid.Nil, fmt.Errorf("insert operation: %w", err)
 	}
 
@@ -192,8 +194,26 @@ func HandoffDeploy(ctx context.Context, pool *pgxpool.Pool, b *Build, repo *Repo
 		return uuid.Nil, fmt.Errorf("commit deploy: %w", err)
 	}
 
-	optionalDeploySideEffects(ctx, pool, b, repo, opID, action, payload, defaultHostname)
+	optionalDeploySideEffects(ctx, pool, b, repo, opID, action, payload, defaultHostname, actor)
 	return opID, nil
+}
+
+// handoffActor picks who the CreateApp/DeployImageVersion operation and audit
+// row should be attributed to. A manual build (triggered_by set) always wins —
+// that is a real console click. Otherwise, for the first build that
+// materializes the app (CreateApp), fall back to whoever connected the repo
+// (git_repos.created_by): the push itself has no user in the loop, but a human
+// caused this pipeline to exist. Anything left over (push-triggered redeploys
+// of an already-existing app, or repos connected before 037 with no
+// created_by) is genuinely system-initiated.
+func handoffActor(b *Build, repo *Repo, action string) uuid.UUID {
+	if b.TriggeredBy != nil {
+		return *b.TriggeredBy
+	}
+	if action == "CreateApp" && repo.CreatedBy != nil {
+		return *repo.CreatedBy
+	}
+	return SystemUserID
 }
 
 // optionalDeploySideEffects records the audit event and the surrogate default
@@ -203,11 +223,11 @@ func HandoffDeploy(ctx context.Context, pool *pgxpool.Pool, b *Build, repo *Repo
 // already succeeded. Inside the deploy tx a single failing INSERT would poison
 // the whole transaction and drop the operation, leaving a successful build
 // stuck NotDeployed.
-func optionalDeploySideEffects(ctx context.Context, pool *pgxpool.Pool, b *Build, repo *Repo, opID uuid.UUID, action string, payload []byte, defaultHostname string) {
+func optionalDeploySideEffects(ctx context.Context, pool *pgxpool.Pool, b *Build, repo *Repo, opID uuid.UUID, action string, payload []byte, defaultHostname string, actor uuid.UUID) {
 	if _, err := pool.Exec(ctx, `
 		INSERT INTO audit_events (actor_id, project_id, operation_id, action, resource_kind, resource_name, metadata)
 		VALUES ($1, $2, $3, $4, 'App', $5, $6)
-	`, SystemUserID, repo.ProjectID, opID, action, b.AppName, payload); err != nil {
+	`, actor, repo.ProjectID, opID, action, b.AppName, payload); err != nil {
 		log.Warn().Err(err).Str("app", b.AppName).Str("operation", opID.String()).Msg("deploy audit event insert failed (deploy already committed)")
 	}
 
