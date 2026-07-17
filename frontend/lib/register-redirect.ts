@@ -1,6 +1,16 @@
 import { UserManager, WebStorageStateStore } from "oidc-client-ts";
 
 /**
+ * localStorage key marking "a registration flow is in flight". Set right
+ * before the redirect to Keycloak's `prompt=create` form and consumed by
+ * `/callback` on return, so the callback can tell a completed sign-up apart
+ * from a plain login and fire the `registration_complete` Metrika goal at
+ * the moment that actually matters — not just on reaching the /register
+ * page, which is all the existing page-view goal can see.
+ */
+export const PENDING_REGISTRATION_KEY = "dada_pending_registration";
+
+/**
  * Kicks off the Keycloak sign-UP flow (registration form) instead of the
  * default sign-in form.
  *
@@ -32,6 +42,10 @@ export function startRegister(returnTo = "/projects"): Promise<void> {
     scope: "openid profile email builds:write deploy:write",
     userStore: new WebStorageStateStore({ store: window.localStorage }),
   });
+
+  try {
+    window.localStorage.setItem(PENDING_REGISTRATION_KEY, String(Date.now()));
+  } catch {}
 
   return userManager.signinRedirect({
     state: returnTo,
