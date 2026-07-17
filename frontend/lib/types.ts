@@ -679,6 +679,7 @@ export interface RevealAPIKeyResponse {
 export interface PendingApproval {
   operation: Operation;
   project_name: string;
+  project_display_name?: string;
   requested_by: string;
 }
 
@@ -693,7 +694,9 @@ export interface AuditEvent {
   action: string;
   resource_kind: string;
   resource_name: string;
+  project_id?: string;
   project_name: string;
+  project_slug?: string;
 }
 
 export interface AuditEventsResponse {
@@ -701,6 +704,80 @@ export interface AuditEventsResponse {
   total: number;
   limit: number;
   offset: number;
+}
+
+export interface AdminOverviewUsers {
+  total: number;
+  new_24h: number;
+  new_7d: number;
+  new_30d: number;
+  active_48h: number;
+}
+
+export interface AdminOverviewApps {
+  total: number;
+  by_phase: Record<string, number>;
+}
+
+export interface AdminOverviewProjects {
+  total: number;
+  apps: AdminOverviewApps;
+  databases: number;
+}
+
+export interface AdminOverviewBuilds {
+  last_7d_success: number;
+  last_7d_failed: number;
+  last_7d_canceled: number;
+  last_24h: number;
+}
+
+export interface AdminOverviewDomains {
+  active: number;
+  pending: number;
+  failed: number;
+}
+
+export interface AdminOverviewProjectCost {
+  project_id: string;
+  project_name: string;
+  cost_7d: number;
+  cost_30d: number;
+}
+
+export interface AdminOverviewMoney {
+  available: boolean;
+  note?: string;
+  currency?: string;
+  total_7d?: number;
+  total_30d?: number;
+  top?: AdminOverviewProjectCost[];
+}
+
+export interface AdminOverviewNotReadyApp {
+  name: string;
+  project_name: string;
+  phase: string;
+  owner_email: string;
+}
+
+export interface AdminOverviewDayPoint {
+  date: string;
+  signups: number;
+  build_success: number;
+  build_failed: number;
+  new_apps: number;
+}
+
+export interface AdminOverviewResponse {
+  users: AdminOverviewUsers;
+  projects: AdminOverviewProjects;
+  builds: AdminOverviewBuilds;
+  domains: AdminOverviewDomains;
+  money: AdminOverviewMoney;
+  not_ready: AdminOverviewNotReadyApp[];
+  dynamics: AdminOverviewDayPoint[];
+  dynamics_days: number;
 }
 
 // Vercel-flow — Git / Build / Deploy / Env / Domain types --------------------

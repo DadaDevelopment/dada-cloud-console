@@ -47,6 +47,7 @@ import type {
   RevealAPIKeyResponse,
   PendingApprovalsResponse,
   AuditEventsResponse,
+  AdminOverviewResponse,
   AppState,
   AppServerState,
   ImportRequest,
@@ -675,6 +676,8 @@ export const adminApi = {
     q.set("offset", String(params.offset ?? 0));
     return apiFetch<AuditEventsResponse>(`/api/v1/admin/audit?${q.toString()}`);
   },
+  getOverview: (days = 14) =>
+    apiFetch<AdminOverviewResponse>(`/api/v1/admin/overview?days=${days}`),
 };
 
 // Vercel-flow API clients -------------------------------------------------------

@@ -381,6 +381,7 @@ func SetupRouter(pool *pgxpool.Pool, cfg *config.Config) *gin.Engine {
 			api.POST("/admin/operations/:opId/approve", h.ApproveOperation)
 			api.POST("/admin/operations/:opId/reject", h.RejectOperation)
 			api.GET("/admin/audit", h.ListAuditEvents)
+			api.GET("/admin/overview", h.GetAdminOverview)
 
 			// Inference proxy (playground only — production traffic goes via PublicApi ingress).
 			api.POST("/projects/:projectId/environments/:envId/models/:name/infer", h.ProxyInference)

@@ -1,0 +1,509 @@
+package api
+
+import (
+	"context"
+	"net/http"
+	"strconv"
+	"time"
+
+	"github.com/dada-tuda/console/backend/internal/auth"
+	"github.com/gin-gonic/gin"
+	"github.com/rs/zerolog/log"
+)
+
+const (
+	overviewDynamicsDefaultDays = 14
+	overviewDynamicsMaxDays     = 90
+	overviewTopProjectsLimit    = 5
+	overviewServiceAccountLike  = "service-account-%"
+)
+
+type overviewUsers struct {
+	Total     int `json:"total"`
+	New24h    int `json:"new_24h"`
+	New7d     int `json:"new_7d"`
+	New30d    int `json:"new_30d"`
+	Active48h int `json:"active_48h"`
+}
+
+type overviewApps struct {
+	Total   int            `json:"total"`
+	ByPhase map[string]int `json:"by_phase"`
+}
+
+type overviewProjects struct {
+	Total     int          `json:"total"`
+	Apps      overviewApps `json:"apps"`
+	Databases int          `json:"databases"`
+}
+
+type overviewBuilds struct {
+	Last7dSuccess  int `json:"last_7d_success"`
+	Last7dFailed   int `json:"last_7d_failed"`
+	Last7dCanceled int `json:"last_7d_canceled"`
+	Last24h        int `json:"last_24h"`
+}
+
+type overviewDomains struct {
+	Active  int `json:"active"`
+	Pending int `json:"pending"`
+	Failed  int `json:"failed"`
+}
+
+type overviewProjectCost struct {
+	ProjectID   string  `json:"project_id"`
+	ProjectName string  `json:"project_name"`
+	Cost7d      float64 `json:"cost_7d"`
+	Cost30d     float64 `json:"cost_30d"`
+}
+
+type overviewMoney struct {
+	Available bool                  `json:"available"`
+	Note      string                `json:"note,omitempty"`
+	Currency  string                `json:"currency,omitempty"`
+	Total7d   float64               `json:"total_7d,omitempty"`
+	Total30d  float64               `json:"total_30d,omitempty"`
+	Top       []overviewProjectCost `json:"top,omitempty"`
+}
+
+type overviewDayPoint struct {
+	Date         string `json:"date"`
+	Signups      int    `json:"signups"`
+	BuildSuccess int    `json:"build_success"`
+	BuildFailed  int    `json:"build_failed"`
+	NewApps      int    `json:"new_apps"`
+}
+
+// GetAdminOverview returns a single aggregate snapshot of platform state for the
+// god-admin dashboard: user growth, project/app/database counts, build health,
+// domain health, a best-effort cost breakdown, and a per-day dynamics series.
+// Platform-admin only (/platform-admins group, same gate as /admin/audit).
+//
+// Money is best-effort: an OpenCost outage never fails the request (see
+// cost.go's fail-open cache-aside pattern and the cost-warmer boot-block
+// postmortem) — money.available is false and the rest of the payload is still
+// returned.
+//
+// @ID          getAdminOverview
+// @Summary     Platform state overview (platform-admin only)
+// @Description Returns a single aggregate snapshot of platform state: user growth, project/app/database counts, build health over the last 7 days, domain health, a best-effort cost breakdown by project (OpenCost), and a per-day dynamics series. Platform-admin only (/platform-admins group); every other caller gets 403.
+// @Tags        admin
+// @Produce     json
+// @Security    BearerAuth
+// @Param       days query    int false "Length of the dynamics series in days (default 14, max 90)"
+// @Success     200 {object} map[string]interface{}
+// @Failure     401 {object} map[string]string
+// @Failure     403 {object} map[string]string
+// @Router      /admin/overview [get]
+func (h *Handler) GetAdminOverview(c *gin.Context) {
+	claims, ok := auth.GetClaims(c)
+	if !ok {
+		respondUnauthorized(c)
+		return
+	}
+	if !isGod(claims) {
+		respondForbidden(c)
+		return
+	}
+
+	days := overviewDynamicsDefaultDays
+	if v, err := strconv.Atoi(c.Query("days")); err == nil && v > 0 {
+		days = v
+	}
+	if days > overviewDynamicsMaxDays {
+		days = overviewDynamicsMaxDays
+	}
+
+	ctx := c.Request.Context()
+
+	users, err := h.overviewUsers(ctx)
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, "failed to aggregate users")
+		return
+	}
+	projects, err := h.overviewProjects(ctx)
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, "failed to aggregate projects")
+		return
+	}
+	builds, err := h.overviewBuilds(ctx)
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, "failed to aggregate builds")
+		return
+	}
+	domains, err := h.overviewDomains(ctx)
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, "failed to aggregate domains")
+		return
+	}
+	notReady, err := h.overviewNotReadyApps(ctx)
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, "failed to list not-ready apps")
+		return
+	}
+	dynamics, err := h.overviewDynamics(ctx, days)
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, "failed to aggregate dynamics")
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"users":         users,
+		"projects":      projects,
+		"builds":        builds,
+		"domains":       domains,
+		"money":         h.overviewMoney(ctx),
+		"not_ready":     notReady,
+		"dynamics":      dynamics,
+		"dynamics_days": days,
+	})
+}
+
+func (h *Handler) overviewUsers(ctx context.Context) (overviewUsers, error) {
+	var out overviewUsers
+	err := h.pool.QueryRow(ctx, `
+		SELECT
+			count(*),
+			count(*) FILTER (WHERE created_at >= now() - interval '24 hours'),
+			count(*) FILTER (WHERE created_at >= now() - interval '7 days'),
+			count(*) FILTER (WHERE created_at >= now() - interval '30 days')
+		FROM users
+		WHERE username NOT LIKE $1`,
+		overviewServiceAccountLike,
+	).Scan(&out.Total, &out.New24h, &out.New7d, &out.New30d)
+	if err != nil {
+		return out, err
+	}
+
+	err = h.pool.QueryRow(ctx, `
+		SELECT count(DISTINCT a.actor_id)
+		FROM audit_events a
+		JOIN users u ON u.id = a.actor_id
+		WHERE a.created_at >= now() - interval '48 hours'
+		  AND u.username NOT LIKE $1`,
+		overviewServiceAccountLike,
+	).Scan(&out.Active48h)
+	return out, err
+}
+
+func (h *Handler) overviewProjects(ctx context.Context) (overviewProjects, error) {
+	var out overviewProjects
+	out.Apps.ByPhase = map[string]int{}
+
+	if err := h.pool.QueryRow(ctx, `SELECT count(*) FROM projects`).Scan(&out.Total); err != nil {
+		return out, err
+	}
+
+	rows, err := h.pool.Query(ctx, `
+		SELECT phase, count(*)
+		FROM resource_snapshots
+		WHERE kind = 'App'
+		GROUP BY phase`,
+	)
+	if err != nil {
+		return out, err
+	}
+	for rows.Next() {
+		var phase string
+		var n int
+		if scanErr := rows.Scan(&phase, &n); scanErr != nil {
+			rows.Close()
+			return out, scanErr
+		}
+		if phase == "" {
+			phase = "Unknown"
+		}
+		out.Apps.ByPhase[phase] = n
+		out.Apps.Total += n
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return out, err
+	}
+
+	if err := h.pool.QueryRow(ctx, `
+		SELECT count(*) FROM resource_snapshots
+		WHERE kind IN ('ServiceDatabase', 'ServiceDatabaseV2')`,
+	).Scan(&out.Databases); err != nil {
+		return out, err
+	}
+
+	return out, nil
+}
+
+func (h *Handler) overviewBuilds(ctx context.Context) (overviewBuilds, error) {
+	var out overviewBuilds
+	err := h.pool.QueryRow(ctx, `
+		SELECT
+			count(*) FILTER (WHERE status = 'success'  AND created_at >= now() - interval '7 days'),
+			count(*) FILTER (WHERE status = 'failed'   AND created_at >= now() - interval '7 days'),
+			count(*) FILTER (WHERE status = 'canceled' AND created_at >= now() - interval '7 days'),
+			count(*) FILTER (WHERE created_at >= now() - interval '24 hours')
+		FROM builds`,
+	).Scan(&out.Last7dSuccess, &out.Last7dFailed, &out.Last7dCanceled, &out.Last24h)
+	return out, err
+}
+
+func (h *Handler) overviewDomains(ctx context.Context) (overviewDomains, error) {
+	var out overviewDomains
+	err := h.pool.QueryRow(ctx, `
+		SELECT
+			count(*) FILTER (WHERE status = 'active'),
+			count(*) FILTER (WHERE status = 'pending'),
+			count(*) FILTER (WHERE status = 'failed')
+		FROM domain_hostnames`,
+	).Scan(&out.Active, &out.Pending, &out.Failed)
+	return out, err
+}
+
+type overviewNotReadyApp struct {
+	Name        string `json:"name"`
+	ProjectName string `json:"project_name"`
+	Phase       string `json:"phase"`
+	OwnerEmail  string `json:"owner_email"`
+}
+
+// overviewNotReadyApps lists live App snapshots not in the Ready phase, capped
+// so a platform-wide incident cannot balloon the payload. Orphaned rows
+// (soft-deleted by the gitops-agent GC) are excluded — they are gone, not broken.
+func (h *Handler) overviewNotReadyApps(ctx context.Context) ([]overviewNotReadyApp, error) {
+	rows, err := h.pool.Query(ctx, `
+		SELECT rs.name, p.display_name, rs.phase, COALESCE(u.email, '')
+		FROM resource_snapshots rs
+		JOIN projects p     ON p.id = rs.project_id
+		LEFT JOIN users u   ON u.id = p.owner_id
+		WHERE rs.kind = 'App'
+		  AND rs.phase NOT IN ('Ready', 'Orphaned')
+		ORDER BY rs.last_synced_at DESC
+		LIMIT 100`,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := []overviewNotReadyApp{}
+	for rows.Next() {
+		var a overviewNotReadyApp
+		if err := rows.Scan(&a.Name, &a.ProjectName, &a.Phase, &a.OwnerEmail); err != nil {
+			return nil, err
+		}
+		out = append(out, a)
+	}
+	return out, rows.Err()
+}
+
+// overviewMoney returns a best-effort per-project cost breakdown from the same
+// cached OpenCost allocation set the per-project cost card reads (cost.go). It
+// never fails the overview request: a missing OpenCost client or a failed
+// aggregation degrades to money.available=false with a note.
+func (h *Handler) overviewMoney(ctx context.Context) overviewMoney {
+	if h.opencost == nil {
+		return overviewMoney{Available: false, Note: "OpenCost not configured"}
+	}
+
+	nsToProject, err := h.allNamespaceProjects(ctx)
+	if err != nil {
+		log.Warn().Err(err).Msg("admin overview: failed to load namespace->project map")
+		return overviewMoney{Available: false, Note: "cost data temporarily unavailable"}
+	}
+
+	allocs7d, err7 := h.clusterAllocsByWindow(ctx, "7d")
+	allocs30d, err30 := h.clusterAllocsByWindow(ctx, "30d")
+	if err7 != nil || err30 != nil {
+		log.Warn().Err(err7).Err(err30).Msg("admin overview: OpenCost aggregation failed")
+		return overviewMoney{Available: false, Note: "cost data temporarily unavailable"}
+	}
+
+	type acc struct {
+		name          string
+		cost7, cost30 float64
+	}
+	byProject := map[string]*acc{}
+	var total7, total30 float64
+
+	for ns, pr := range nsToProject {
+		a := byProject[pr.id]
+		if a == nil {
+			a = &acc{name: pr.name}
+			byProject[pr.id] = a
+		}
+		a.cost7 += allocs7d[ns].TotalCost
+		a.cost30 += allocs30d[ns].TotalCost
+	}
+	for _, a := range allocs7d {
+		total7 += a.TotalCost
+	}
+	for _, a := range allocs30d {
+		total30 += a.TotalCost
+	}
+
+	top := make([]overviewProjectCost, 0, len(byProject))
+	for id, a := range byProject {
+		top = append(top, overviewProjectCost{ProjectID: id, ProjectName: a.name, Cost7d: a.cost7, Cost30d: a.cost30})
+	}
+	sortProjectCostsDesc(top)
+	if len(top) > overviewTopProjectsLimit {
+		top = top[:overviewTopProjectsLimit]
+	}
+
+	return overviewMoney{
+		Available: true,
+		Currency:  costCurrency,
+		Total7d:   total7,
+		Total30d:  total30,
+		Top:       top,
+	}
+}
+
+func sortProjectCostsDesc(v []overviewProjectCost) {
+	for i := 1; i < len(v); i++ {
+		j := i
+		for j > 0 && v[j-1].Cost30d < v[j].Cost30d {
+			v[j-1], v[j] = v[j], v[j-1]
+			j--
+		}
+	}
+}
+
+type overviewProjectRef struct {
+	id   string
+	name string
+}
+
+// allNamespaceProjects maps every k8s environment namespace on the platform to
+// its owning project, mirroring projectNamespaces (cost.go) but across all
+// projects instead of one, so cluster-wide OpenCost allocations can be
+// attributed without a per-project query loop.
+func (h *Handler) allNamespaceProjects(ctx context.Context) (map[string]overviewProjectRef, error) {
+	rows, err := h.pool.Query(ctx, `
+		SELECT e.namespace, p.id, p.display_name
+		FROM environments e
+		JOIN projects p ON p.id = e.project_id
+		WHERE e.runtime = 'k8s' AND e.namespace <> ''`,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make(map[string]overviewProjectRef)
+	for rows.Next() {
+		var ns, id, name string
+		if err := rows.Scan(&ns, &id, &name); err != nil {
+			return nil, err
+		}
+		out[ns] = overviewProjectRef{id: id, name: name}
+	}
+	return out, rows.Err()
+}
+
+// overviewDynamics returns a per-day series for the last `days` days: signups,
+// builds split success/failed, and apps first seen (a proxy for "new app
+// created" — resource_snapshots has no created_at, so the earliest
+// last_synced_at per (project,env,name) stands in for it).
+func (h *Handler) overviewDynamics(ctx context.Context, days int) ([]overviewDayPoint, error) {
+	since := time.Now().AddDate(0, 0, -days+1)
+
+	byDate := make(map[string]*overviewDayPoint)
+	dates := make([]string, 0, days)
+	for i := 0; i < days; i++ {
+		d := since.AddDate(0, 0, i).Format("2006-01-02")
+		dates = append(dates, d)
+		byDate[d] = &overviewDayPoint{Date: d}
+	}
+
+	signupRows, err := h.pool.Query(ctx, `
+		SELECT to_char(created_at, 'YYYY-MM-DD'), count(*)
+		FROM users
+		WHERE created_at >= $1 AND username NOT LIKE $2
+		GROUP BY 1`,
+		since, overviewServiceAccountLike,
+	)
+	if err != nil {
+		return nil, err
+	}
+	for signupRows.Next() {
+		var d string
+		var n int
+		if err := signupRows.Scan(&d, &n); err != nil {
+			signupRows.Close()
+			return nil, err
+		}
+		if p, ok := byDate[d]; ok {
+			p.Signups = n
+		}
+	}
+	signupRows.Close()
+	if err := signupRows.Err(); err != nil {
+		return nil, err
+	}
+
+	buildRows, err := h.pool.Query(ctx, `
+		SELECT to_char(created_at, 'YYYY-MM-DD'), status, count(*)
+		FROM builds
+		WHERE created_at >= $1 AND status IN ('success', 'failed')
+		GROUP BY 1, 2`,
+		since,
+	)
+	if err != nil {
+		return nil, err
+	}
+	for buildRows.Next() {
+		var d, status string
+		var n int
+		if err := buildRows.Scan(&d, &status, &n); err != nil {
+			buildRows.Close()
+			return nil, err
+		}
+		p, ok := byDate[d]
+		if !ok {
+			continue
+		}
+		if status == "success" {
+			p.BuildSuccess = n
+		} else {
+			p.BuildFailed = n
+		}
+	}
+	buildRows.Close()
+	if err := buildRows.Err(); err != nil {
+		return nil, err
+	}
+
+	appRows, err := h.pool.Query(ctx, `
+		SELECT to_char(first_seen, 'YYYY-MM-DD'), count(*)
+		FROM (
+			SELECT project_id, environment_id, name, min(last_synced_at) AS first_seen
+			FROM resource_snapshots
+			WHERE kind = 'App'
+			GROUP BY project_id, environment_id, name
+		) firsts
+		WHERE first_seen >= $1
+		GROUP BY 1`,
+		since,
+	)
+	if err != nil {
+		return nil, err
+	}
+	for appRows.Next() {
+		var d string
+		var n int
+		if err := appRows.Scan(&d, &n); err != nil {
+			appRows.Close()
+			return nil, err
+		}
+		if p, ok := byDate[d]; ok {
+			p.NewApps = n
+		}
+	}
+	appRows.Close()
+	if err := appRows.Err(); err != nil {
+		return nil, err
+	}
+
+	out := make([]overviewDayPoint, 0, days)
+	for _, d := range dates {
+		out = append(out, *byDate[d])
+	}
+	return out, nil
+}

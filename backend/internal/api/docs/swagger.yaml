@@ -698,6 +698,44 @@ paths:
       summary: Reject an operation awaiting approval
       tags:
       - admin
+  /admin/overview:
+    get:
+      description: 'Returns a single aggregate snapshot of platform state: user growth,
+        project/app/database counts, build health over the last 7 days, domain health,
+        a best-effort cost breakdown by project (OpenCost), and a per-day dynamics
+        series. Platform-admin only (/platform-admins group); every other caller gets
+        403.'
+      operationId: getAdminOverview
+      parameters:
+      - description: Length of the dynamics series in days (default 14, max 90)
+        in: query
+        name: days
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Platform state overview (platform-admin only)
+      tags:
+      - admin
   /auth/login:
     post:
       consumes:

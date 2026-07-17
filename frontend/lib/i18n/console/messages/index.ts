@@ -17,6 +17,7 @@ import { appServers } from "./app-servers";
 import { aiStudio } from "./ai-studio";
 import { approvals } from "./approvals";
 import { audit } from "./audit";
+import { adminOverview } from "./admin-overview";
 import { cloudTasks } from "./cloud-tasks";
 import { billing } from "./billing";
 import { consumption } from "./consumption";
@@ -51,6 +52,7 @@ export const messages: Messages = {
   ...aiStudio,
   ...approvals,
   ...audit,
+  ...adminOverview,
   ...cloudTasks,
   ...billing,
   ...consumption,
