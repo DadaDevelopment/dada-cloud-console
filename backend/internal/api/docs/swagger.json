@@ -8,6 +8,77 @@
     },
     "basePath": "/api/v1",
     "paths": {
+        "/admin/audit": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Returns audit_events rows joined with the actor's email and the project's display name, newest first. Filters by exact action and a case-insensitive email substring. Platform-admin only (/platform-admins group); every other caller gets 403.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin"
+                ],
+                "summary": "List audit events (platform-admin only)",
+                "operationId": "listAuditEvents",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Exact audit_events.action value",
+                        "name": "action",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Case-insensitive substring match on the actor's email",
+                        "name": "user",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Max rows to return (default 50, max 200)",
+                        "name": "limit",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Rows to skip",
+                        "name": "offset",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "object with an events array and a total count",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/admin/operations": {
             "get": {
                 "security": [
@@ -243,7 +314,7 @@
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/internal_api.loginRequest"
+                            "$ref": "#/definitions/api.loginRequest"
                         }
                     }
                 ],
@@ -410,7 +481,7 @@
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/github_com_dada-tuda_console_backend_internal_billing_pricing.Need"
+                            "$ref": "#/definitions/pricing.Need"
                         }
                     }
                 ],
@@ -820,7 +891,7 @@
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/internal_api.createProjectRequest"
+                            "$ref": "#/definitions/api.createProjectRequest"
                         }
                     }
                 ],
@@ -1114,7 +1185,7 @@
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/internal_api.createAppServerRequest"
+                            "$ref": "#/definitions/api.createAppServerRequest"
                         }
                     }
                 ],
@@ -1404,7 +1475,7 @@
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/internal_api.importComposeStackRequest"
+                            "$ref": "#/definitions/api.importComposeStackRequest"
                         }
                     }
                 ],
@@ -2726,7 +2797,7 @@
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/internal_api.addDomainAuthorizationRequest"
+                            "$ref": "#/definitions/api.addDomainAuthorizationRequest"
                         }
                     }
                 ],
@@ -3081,7 +3152,7 @@
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/internal_api.importZoneRequest"
+                            "$ref": "#/definitions/api.importZoneRequest"
                         }
                     }
                 ],
@@ -3309,7 +3380,7 @@
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/internal_api.upsertRecordRequest"
+                            "$ref": "#/definitions/api.upsertRecordRequest"
                         }
                     }
                 ],
@@ -3547,7 +3618,7 @@
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/internal_api.createAppRequest"
+                            "$ref": "#/definitions/api.createAppRequest"
                         }
                     }
                 ],
@@ -4017,7 +4088,7 @@
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/internal_api.createCloudTaskRequest"
+                            "$ref": "#/definitions/api.createCloudTaskRequest"
                         }
                     }
                 ],
@@ -4120,7 +4191,7 @@
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/internal_api.DeleteImpact"
+                            "$ref": "#/definitions/api.DeleteImpact"
                         }
                     },
                     "401": {
@@ -4325,7 +4396,7 @@
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/internal_api.createEndpointRequest"
+                            "$ref": "#/definitions/api.createEndpointRequest"
                         }
                     }
                 ],
@@ -4589,7 +4660,7 @@
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/internal_api.setEnvVarRequest"
+                            "$ref": "#/definitions/api.setEnvVarRequest"
                         }
                     }
                 ],
@@ -4812,7 +4883,7 @@
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/internal_api.attachHostnameRequest"
+                            "$ref": "#/definitions/api.attachHostnameRequest"
                         }
                     }
                 ],
@@ -4993,7 +5064,7 @@
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/internal_api.updateAppImageRequest"
+                            "$ref": "#/definitions/api.updateAppImageRequest"
                         }
                     }
                 ],
@@ -5273,7 +5344,7 @@
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/internal_api.moveAppRequest"
+                            "$ref": "#/definitions/api.moveAppRequest"
                         }
                     }
                 ],
@@ -5381,7 +5452,7 @@
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/internal_api.MoveImpact"
+                            "$ref": "#/definitions/api.MoveImpact"
                         }
                     },
                     "400": {
@@ -5701,7 +5772,7 @@
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/internal_api.appVolumeReq"
+                            "$ref": "#/definitions/api.appVolumeReq"
                         }
                     }
                 ],
@@ -5934,7 +6005,7 @@
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/internal_api.createServiceDatabaseRequest"
+                            "$ref": "#/definitions/api.createServiceDatabaseRequest"
                         }
                     }
                 ],
@@ -6363,7 +6434,7 @@
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/internal_api.restoreDatabaseRequest"
+                            "$ref": "#/definitions/api.restoreDatabaseRequest"
                         }
                     }
                 ],
@@ -6524,7 +6595,7 @@
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/internal_api.createIngressRequest"
+                            "$ref": "#/definitions/api.createIngressRequest"
                         }
                     }
                 ],
@@ -6665,7 +6736,7 @@
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/internal_api.createAIModelRequest"
+                            "$ref": "#/definitions/api.createAIModelRequest"
                         }
                     }
                 ],
@@ -7426,7 +7497,7 @@
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/internal_api.createMonitoringRequest"
+                            "$ref": "#/definitions/api.createMonitoringRequest"
                         }
                     }
                 ],
@@ -8252,7 +8323,7 @@
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/internal_api.saveDashboardRequest"
+                            "$ref": "#/definitions/api.saveDashboardRequest"
                         }
                     }
                 ],
@@ -9035,7 +9106,7 @@
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/internal_api.connectGitRepoRequest"
+                            "$ref": "#/definitions/api.connectGitRepoRequest"
                         }
                     }
                 ],
@@ -9249,7 +9320,7 @@
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/internal_api.createS3BucketRequest"
+                            "$ref": "#/definitions/api.createS3BucketRequest"
                         }
                     }
                 ],
@@ -9606,7 +9677,7 @@
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/internal_api.bindInstallationRequest"
+                            "$ref": "#/definitions/api.bindInstallationRequest"
                         }
                     }
                 ],
@@ -9614,7 +9685,7 @@
                     "201": {
                         "description": "Created",
                         "schema": {
-                            "$ref": "#/definitions/internal_api.gitInstallation"
+                            "$ref": "#/definitions/api.gitInstallation"
                         }
                     },
                     "400": {
@@ -10068,7 +10139,7 @@
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/internal_api.ingestLogsRequest"
+                            "$ref": "#/definitions/api.ingestLogsRequest"
                         }
                     }
                 ],
@@ -10186,7 +10257,7 @@
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/internal_api.ingestMetricsRequest"
+                            "$ref": "#/definitions/api.ingestMetricsRequest"
                         }
                     }
                 ],
@@ -10514,82 +10585,7 @@
         }
     },
     "definitions": {
-        "github_com_dada-tuda_console_backend_internal_billing_pricing.Need": {
-            "type": "object",
-            "properties": {
-                "apps": {
-                    "type": "integer"
-                },
-                "databases": {
-                    "type": "integer"
-                },
-                "domains": {
-                    "type": "integer"
-                },
-                "members": {
-                    "type": "integer"
-                },
-                "storageGB": {
-                    "type": "integer"
-                }
-            }
-        },
-        "github_com_dada-tuda_console_backend_internal_models.AIModelAuthMode": {
-            "type": "string",
-            "enum": [
-                "apikey",
-                "jwt",
-                "public"
-            ],
-            "x-enum-varnames": [
-                "AIModelAuthAPIKey",
-                "AIModelAuthJWT",
-                "AIModelAuthPublic"
-            ]
-        },
-        "github_com_dada-tuda_console_backend_internal_models.AIModelSource": {
-            "type": "string",
-            "enum": [
-                "mlflow",
-                "s3",
-                "custom"
-            ],
-            "x-enum-varnames": [
-                "AIModelSourceMLflow",
-                "AIModelSourceS3",
-                "AIModelSourceCustom"
-            ]
-        },
-        "github_com_dada-tuda_console_backend_internal_models.ImportServiceSpec": {
-            "type": "object",
-            "properties": {
-                "container_name": {
-                    "type": "string"
-                },
-                "image": {
-                    "type": "string"
-                },
-                "include": {
-                    "type": "boolean"
-                },
-                "ports": {
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    }
-                },
-                "service_name": {
-                    "type": "string"
-                },
-                "volumes": {
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    }
-                }
-            }
-        },
-        "internal_api.DeleteImpact": {
+        "api.DeleteImpact": {
             "type": "object",
             "properties": {
                 "app": {
@@ -10604,7 +10600,7 @@
                 "items": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/internal_api.ImpactItem"
+                        "$ref": "#/definitions/api.ImpactItem"
                     }
                 },
                 "namespace": {
@@ -10612,7 +10608,7 @@
                 }
             }
         },
-        "internal_api.ImpactItem": {
+        "api.ImpactItem": {
             "type": "object",
             "properties": {
                 "group": {
@@ -10629,7 +10625,7 @@
                 }
             }
         },
-        "internal_api.MoveBlockerItem": {
+        "api.MoveBlockerItem": {
             "type": "object",
             "properties": {
                 "kind": {
@@ -10643,7 +10639,7 @@
                 }
             }
         },
-        "internal_api.MoveImpact": {
+        "api.MoveImpact": {
             "type": "object",
             "properties": {
                 "app": {
@@ -10652,7 +10648,7 @@
                 "blockers": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/internal_api.MoveBlockerItem"
+                        "$ref": "#/definitions/api.MoveBlockerItem"
                     }
                 },
                 "can_move": {
@@ -10661,7 +10657,7 @@
                 "movable": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/internal_api.MoveMovableItem"
+                        "$ref": "#/definitions/api.MoveMovableItem"
                     }
                 },
                 "name_collision": {
@@ -10681,7 +10677,7 @@
                 }
             }
         },
-        "internal_api.MoveMovableItem": {
+        "api.MoveMovableItem": {
             "type": "object",
             "properties": {
                 "group": {
@@ -10695,7 +10691,7 @@
                 }
             }
         },
-        "internal_api.addDomainAuthorizationRequest": {
+        "api.addDomainAuthorizationRequest": {
             "type": "object",
             "properties": {
                 "apex_domain": {
@@ -10703,7 +10699,7 @@
                 }
             }
         },
-        "internal_api.appVolumeReq": {
+        "api.appVolumeReq": {
             "type": "object",
             "properties": {
                 "path": {
@@ -10717,7 +10713,7 @@
                 }
             }
         },
-        "internal_api.attachHostnameRequest": {
+        "api.attachHostnameRequest": {
             "type": "object",
             "properties": {
                 "hostname": {
@@ -10725,7 +10721,7 @@
                 }
             }
         },
-        "internal_api.bindInstallationRequest": {
+        "api.bindInstallationRequest": {
             "type": "object",
             "properties": {
                 "installation_id": {
@@ -10734,7 +10730,7 @@
                 }
             }
         },
-        "internal_api.connectGitRepoRequest": {
+        "api.connectGitRepoRequest": {
             "type": "object",
             "properties": {
                 "app_name": {
@@ -10781,7 +10777,7 @@
                 }
             }
         },
-        "internal_api.createAIModelRequest": {
+        "api.createAIModelRequest": {
             "type": "object",
             "properties": {
                 "artifact_uri": {
@@ -10791,7 +10787,7 @@
                     "type": "string"
                 },
                 "auth_mode": {
-                    "$ref": "#/definitions/github_com_dada-tuda_console_backend_internal_models.AIModelAuthMode"
+                    "$ref": "#/definitions/models.AIModelAuthMode"
                 },
                 "container_image": {
                     "type": "string"
@@ -10812,14 +10808,14 @@
                     "type": "string"
                 },
                 "source": {
-                    "$ref": "#/definitions/github_com_dada-tuda_console_backend_internal_models.AIModelSource"
+                    "$ref": "#/definitions/models.AIModelSource"
                 },
                 "version": {
                     "type": "string"
                 }
             }
         },
-        "internal_api.createAppRequest": {
+        "api.createAppRequest": {
             "type": "object",
             "properties": {
                 "framework": {
@@ -10841,14 +10837,14 @@
                     "type": "integer"
                 },
                 "volume": {
-                    "$ref": "#/definitions/internal_api.appVolumeReq"
+                    "$ref": "#/definitions/api.appVolumeReq"
                 },
                 "workload_type": {
                     "type": "string"
                 }
             }
         },
-        "internal_api.createAppServerRequest": {
+        "api.createAppServerRequest": {
             "type": "object",
             "properties": {
                 "flavor": {
@@ -10885,7 +10881,7 @@
                 }
             }
         },
-        "internal_api.createCloudTaskRequest": {
+        "api.createCloudTaskRequest": {
             "type": "object",
             "properties": {
                 "task_type": {
@@ -10893,7 +10889,7 @@
                 }
             }
         },
-        "internal_api.createEndpointRequest": {
+        "api.createEndpointRequest": {
             "type": "object",
             "properties": {
                 "auth_enabled": {
@@ -10922,7 +10918,7 @@
                 }
             }
         },
-        "internal_api.createIngressRequest": {
+        "api.createIngressRequest": {
             "type": "object",
             "properties": {
                 "aliases": {
@@ -10943,7 +10939,7 @@
                 "rules": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/internal_api.ingressRuleReq"
+                        "$ref": "#/definitions/api.ingressRuleReq"
                     }
                 },
                 "ssl_redirect": {
@@ -10968,7 +10964,7 @@
                 }
             }
         },
-        "internal_api.createMonitoringRequest": {
+        "api.createMonitoringRequest": {
             "type": "object",
             "properties": {
                 "name": {
@@ -10976,7 +10972,7 @@
                 }
             }
         },
-        "internal_api.createProjectRequest": {
+        "api.createProjectRequest": {
             "type": "object",
             "required": [
                 "slug"
@@ -11000,7 +10996,7 @@
                 }
             }
         },
-        "internal_api.createS3BucketRequest": {
+        "api.createS3BucketRequest": {
             "type": "object",
             "properties": {
                 "app_ref": {
@@ -11027,7 +11023,7 @@
                 }
             }
         },
-        "internal_api.createServiceDatabaseRequest": {
+        "api.createServiceDatabaseRequest": {
             "type": "object",
             "properties": {
                 "app_ref": {
@@ -11050,7 +11046,7 @@
                 }
             }
         },
-        "internal_api.gitInstallation": {
+        "api.gitInstallation": {
             "type": "object",
             "properties": {
                 "account_login": {
@@ -11077,7 +11073,7 @@
                 }
             }
         },
-        "internal_api.importComposeStackRequest": {
+        "api.importComposeStackRequest": {
             "type": "object",
             "properties": {
                 "ack_secrets_in_git": {
@@ -11095,12 +11091,12 @@
                 "services": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/github_com_dada-tuda_console_backend_internal_models.ImportServiceSpec"
+                        "$ref": "#/definitions/models.ImportServiceSpec"
                     }
                 }
             }
         },
-        "internal_api.importRecord": {
+        "api.importRecord": {
             "type": "object",
             "properties": {
                 "contents": {
@@ -11120,18 +11116,18 @@
                 }
             }
         },
-        "internal_api.importZoneRequest": {
+        "api.importZoneRequest": {
             "type": "object",
             "properties": {
                 "records": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/internal_api.importRecord"
+                        "$ref": "#/definitions/api.importRecord"
                     }
                 }
             }
         },
-        "internal_api.ingestLogsRequest": {
+        "api.ingestLogsRequest": {
             "type": "object",
             "properties": {
                 "level": {
@@ -11145,7 +11141,7 @@
                 }
             }
         },
-        "internal_api.ingestMetricsRequest": {
+        "api.ingestMetricsRequest": {
             "type": "object",
             "properties": {
                 "metrics": {
@@ -11163,7 +11159,7 @@
                 }
             }
         },
-        "internal_api.ingressRuleReq": {
+        "api.ingressRuleReq": {
             "type": "object",
             "properties": {
                 "app": {
@@ -11177,7 +11173,7 @@
                 }
             }
         },
-        "internal_api.loginRequest": {
+        "api.loginRequest": {
             "type": "object",
             "required": [
                 "password"
@@ -11194,7 +11190,7 @@
                 }
             }
         },
-        "internal_api.moveAppRequest": {
+        "api.moveAppRequest": {
             "type": "object",
             "properties": {
                 "target_project_id": {
@@ -11202,7 +11198,7 @@
                 }
             }
         },
-        "internal_api.restoreDatabaseRequest": {
+        "api.restoreDatabaseRequest": {
             "type": "object",
             "properties": {
                 "backup_id": {
@@ -11210,21 +11206,10 @@
                 }
             }
         },
-        "internal_api.saveDashboardRequest": {
-            "type": "object",
-            "properties": {
-                "config": {
-                    "type": "array",
-                    "items": {
-                        "type": "integer"
-                    }
-                },
-                "version": {
-                    "type": "integer"
-                }
-            }
+        "api.saveDashboardRequest": {
+            "type": "object"
         },
-        "internal_api.setEnvVarRequest": {
+        "api.setEnvVarRequest": {
             "type": "object",
             "properties": {
                 "is_secret": {
@@ -11238,7 +11223,7 @@
                 }
             }
         },
-        "internal_api.updateAppImageRequest": {
+        "api.updateAppImageRequest": {
             "type": "object",
             "properties": {
                 "image": {
@@ -11246,7 +11231,7 @@
                 }
             }
         },
-        "internal_api.upsertRecordRequest": {
+        "api.upsertRecordRequest": {
             "type": "object",
             "properties": {
                 "contents": {
@@ -11263,6 +11248,81 @@
                 },
                 "type": {
                     "type": "string"
+                }
+            }
+        },
+        "models.AIModelAuthMode": {
+            "type": "string",
+            "enum": [
+                "apikey",
+                "jwt",
+                "public"
+            ],
+            "x-enum-varnames": [
+                "AIModelAuthAPIKey",
+                "AIModelAuthJWT",
+                "AIModelAuthPublic"
+            ]
+        },
+        "models.AIModelSource": {
+            "type": "string",
+            "enum": [
+                "mlflow",
+                "s3",
+                "custom"
+            ],
+            "x-enum-varnames": [
+                "AIModelSourceMLflow",
+                "AIModelSourceS3",
+                "AIModelSourceCustom"
+            ]
+        },
+        "models.ImportServiceSpec": {
+            "type": "object",
+            "properties": {
+                "container_name": {
+                    "type": "string"
+                },
+                "image": {
+                    "type": "string"
+                },
+                "include": {
+                    "type": "boolean"
+                },
+                "ports": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "service_name": {
+                    "type": "string"
+                },
+                "volumes": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                }
+            }
+        },
+        "pricing.Need": {
+            "type": "object",
+            "properties": {
+                "apps": {
+                    "type": "integer"
+                },
+                "databases": {
+                    "type": "integer"
+                },
+                "domains": {
+                    "type": "integer"
+                },
+                "members": {
+                    "type": "integer"
+                },
+                "storageGB": {
+                    "type": "integer"
                 }
             }
         }

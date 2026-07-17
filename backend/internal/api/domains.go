@@ -556,6 +556,7 @@ func (h *Handler) AttachHostname(c *gin.Context) {
 		 VALUES ($1, $2, $3, 'AttachCustomHostname', 'CustomDomain', $4, $5)`,
 		claims.UserID, projectID, op.ID, hostname, auditMeta,
 	)
+	h.notifyAuditEvent(claims, projectID, "AttachCustomHostname", hostname)
 
 	c.JSON(http.StatusAccepted, gin.H{
 		"operation": op,

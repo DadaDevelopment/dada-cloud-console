@@ -199,6 +199,14 @@ func (h *Handler) CreateProject(c *gin.Context) {
 		role = models.MemberRoleOwner
 	}
 	h.ensureProjectGroupsAsync(org, projectID.String(), slug, displayName, claims.Subject)
+
+	_, _ = h.pool.Exec(c.Request.Context(),
+		`INSERT INTO audit_events (actor_id, project_id, action, resource_kind, resource_name)
+		 VALUES ($1, $2, 'CreateProject', 'Project', $3)`,
+		claims.UserID, projectID, slug,
+	)
+	h.notifyAuditEvent(claims, projectID, "CreateProject", slug)
+
 	c.JSON(http.StatusCreated, gin.H{
 		"project_id":             projectID,
 		"default_environment_id": envID,

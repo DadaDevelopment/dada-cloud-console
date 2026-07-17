@@ -1,58 +1,6 @@
 basePath: /api/v1
 definitions:
-  github_com_dada-tuda_console_backend_internal_billing_pricing.Need:
-    properties:
-      apps:
-        type: integer
-      databases:
-        type: integer
-      domains:
-        type: integer
-      members:
-        type: integer
-      storageGB:
-        type: integer
-    type: object
-  github_com_dada-tuda_console_backend_internal_models.AIModelAuthMode:
-    enum:
-    - apikey
-    - jwt
-    - public
-    type: string
-    x-enum-varnames:
-    - AIModelAuthAPIKey
-    - AIModelAuthJWT
-    - AIModelAuthPublic
-  github_com_dada-tuda_console_backend_internal_models.AIModelSource:
-    enum:
-    - mlflow
-    - s3
-    - custom
-    type: string
-    x-enum-varnames:
-    - AIModelSourceMLflow
-    - AIModelSourceS3
-    - AIModelSourceCustom
-  github_com_dada-tuda_console_backend_internal_models.ImportServiceSpec:
-    properties:
-      container_name:
-        type: string
-      image:
-        type: string
-      include:
-        type: boolean
-      ports:
-        items:
-          type: string
-        type: array
-      service_name:
-        type: string
-      volumes:
-        items:
-          type: string
-        type: array
-    type: object
-  internal_api.DeleteImpact:
+  api.DeleteImpact:
     properties:
       app:
         type: string
@@ -62,12 +10,12 @@ definitions:
         type: boolean
       items:
         items:
-          $ref: '#/definitions/internal_api.ImpactItem'
+          $ref: '#/definitions/api.ImpactItem'
         type: array
       namespace:
         type: string
     type: object
-  internal_api.ImpactItem:
+  api.ImpactItem:
     properties:
       group:
         type: string
@@ -78,12 +26,55 @@ definitions:
       source:
         type: string
     type: object
-  internal_api.addDomainAuthorizationRequest:
+  api.MoveBlockerItem:
+    properties:
+      kind:
+        type: string
+      name:
+        type: string
+      reason:
+        type: string
+    type: object
+  api.MoveImpact:
+    properties:
+      app:
+        type: string
+      blockers:
+        items:
+          $ref: '#/definitions/api.MoveBlockerItem'
+        type: array
+      can_move:
+        type: boolean
+      movable:
+        items:
+          $ref: '#/definitions/api.MoveMovableItem'
+        type: array
+      name_collision:
+        type: boolean
+      src_project:
+        type: string
+      target_env_id:
+        type: string
+      target_namespace:
+        type: string
+      target_project:
+        type: string
+    type: object
+  api.MoveMovableItem:
+    properties:
+      group:
+        type: string
+      kind:
+        type: string
+      name:
+        type: string
+    type: object
+  api.addDomainAuthorizationRequest:
     properties:
       apex_domain:
         type: string
     type: object
-  internal_api.appVolumeReq:
+  api.appVolumeReq:
     properties:
       path:
         type: string
@@ -92,18 +83,18 @@ definitions:
       storage_class:
         type: string
     type: object
-  internal_api.attachHostnameRequest:
+  api.attachHostnameRequest:
     properties:
       hostname:
         type: string
     type: object
-  internal_api.bindInstallationRequest:
+  api.bindInstallationRequest:
     properties:
       installation_id:
         description: numeric GitHub installation id
         type: string
     type: object
-  internal_api.connectGitRepoRequest:
+  api.connectGitRepoRequest:
     properties:
       app_name:
         type: string
@@ -138,14 +129,14 @@ definitions:
           Ignored for GitHub.'
         type: string
     type: object
-  internal_api.createAIModelRequest:
+  api.createAIModelRequest:
     properties:
       artifact_uri:
         type: string
       attached_app_name:
         type: string
       auth_mode:
-        $ref: '#/definitions/github_com_dada-tuda_console_backend_internal_models.AIModelAuthMode'
+        $ref: '#/definitions/models.AIModelAuthMode'
       container_image:
         type: string
       mlflow_name:
@@ -159,11 +150,11 @@ definitions:
       profile:
         type: string
       source:
-        $ref: '#/definitions/github_com_dada-tuda_console_backend_internal_models.AIModelSource'
+        $ref: '#/definitions/models.AIModelSource'
       version:
         type: string
     type: object
-  internal_api.createAppRequest:
+  api.createAppRequest:
     properties:
       framework:
         type: string
@@ -178,11 +169,11 @@ definitions:
       replicas:
         type: integer
       volume:
-        $ref: '#/definitions/internal_api.appVolumeReq'
+        $ref: '#/definitions/api.appVolumeReq'
       workload_type:
         type: string
     type: object
-  internal_api.createAppServerRequest:
+  api.createAppServerRequest:
     properties:
       flavor:
         type: string
@@ -207,12 +198,12 @@ definitions:
         description: Manual-mode fields (connecting a pre-existing VM over SSH).
         type: string
     type: object
-  internal_api.createCloudTaskRequest:
+  api.createCloudTaskRequest:
     properties:
       task_type:
         type: string
     type: object
-  internal_api.createEndpointRequest:
+  api.createEndpointRequest:
     properties:
       auth_enabled:
         type: boolean
@@ -231,7 +222,7 @@ definitions:
       swagger_title:
         type: string
     type: object
-  internal_api.createIngressRequest:
+  api.createIngressRequest:
     properties:
       aliases:
         items:
@@ -245,7 +236,7 @@ definitions:
         type: string
       rules:
         items:
-          $ref: '#/definitions/internal_api.ingressRuleReq'
+          $ref: '#/definitions/api.ingressRuleReq'
         type: array
       ssl_redirect:
         type: boolean
@@ -261,12 +252,12 @@ definitions:
             type: string
         type: object
     type: object
-  internal_api.createMonitoringRequest:
+  api.createMonitoringRequest:
     properties:
       name:
         type: string
     type: object
-  internal_api.createProjectRequest:
+  api.createProjectRequest:
     properties:
       default_environment:
         description: DefaultEnvironment names the first environment; defaults to "prod".
@@ -285,7 +276,7 @@ definitions:
     required:
     - slug
     type: object
-  internal_api.createS3BucketRequest:
+  api.createS3BucketRequest:
     properties:
       app_ref:
         description: AppRef optionally binds the bucket to an app's chart. Empty =
@@ -304,7 +295,7 @@ definitions:
       region:
         type: string
     type: object
-  internal_api.createServiceDatabaseRequest:
+  api.createServiceDatabaseRequest:
     properties:
       app_ref:
         type: string
@@ -319,7 +310,7 @@ definitions:
       name:
         type: string
     type: object
-  internal_api.gitInstallation:
+  api.gitInstallation:
     properties:
       account_login:
         type: string
@@ -337,7 +328,7 @@ definitions:
       provider:
         type: string
     type: object
-  internal_api.importComposeStackRequest:
+  api.importComposeStackRequest:
     properties:
       ack_secrets_in_git:
         type: boolean
@@ -349,10 +340,10 @@ definitions:
         type: object
       services:
         items:
-          $ref: '#/definitions/github_com_dada-tuda_console_backend_internal_models.ImportServiceSpec'
+          $ref: '#/definitions/models.ImportServiceSpec'
         type: array
     type: object
-  internal_api.importRecord:
+  api.importRecord:
     properties:
       contents:
         items:
@@ -365,14 +356,14 @@ definitions:
       type:
         type: string
     type: object
-  internal_api.importZoneRequest:
+  api.importZoneRequest:
     properties:
       records:
         items:
-          $ref: '#/definitions/internal_api.importRecord'
+          $ref: '#/definitions/api.importRecord'
         type: array
     type: object
-  internal_api.ingestLogsRequest:
+  api.ingestLogsRequest:
     properties:
       level:
         type: string
@@ -381,7 +372,7 @@ definitions:
       source:
         type: string
     type: object
-  internal_api.ingestMetricsRequest:
+  api.ingestMetricsRequest:
     properties:
       metrics:
         additionalProperties:
@@ -393,7 +384,7 @@ definitions:
       timestamp:
         type: string
     type: object
-  internal_api.ingressRuleReq:
+  api.ingressRuleReq:
     properties:
       app:
         type: string
@@ -402,7 +393,7 @@ definitions:
       port:
         type: integer
     type: object
-  internal_api.loginRequest:
+  api.loginRequest:
     properties:
       email:
         type: string
@@ -413,21 +404,19 @@ definitions:
     required:
     - password
     type: object
-  internal_api.restoreDatabaseRequest:
+  api.moveAppRequest:
+    properties:
+      target_project_id:
+        type: string
+    type: object
+  api.restoreDatabaseRequest:
     properties:
       backup_id:
         type: string
     type: object
-  internal_api.saveDashboardRequest:
-    properties:
-      config:
-        items:
-          type: integer
-        type: array
-      version:
-        type: integer
+  api.saveDashboardRequest:
     type: object
-  internal_api.setEnvVarRequest:
+  api.setEnvVarRequest:
     properties:
       is_secret:
         type: boolean
@@ -436,12 +425,12 @@ definitions:
       value:
         type: string
     type: object
-  internal_api.updateAppImageRequest:
+  api.updateAppImageRequest:
     properties:
       image:
         type: string
     type: object
-  internal_api.upsertRecordRequest:
+  api.upsertRecordRequest:
     properties:
       contents:
         items:
@@ -454,6 +443,58 @@ definitions:
       type:
         type: string
     type: object
+  models.AIModelAuthMode:
+    enum:
+    - apikey
+    - jwt
+    - public
+    type: string
+    x-enum-varnames:
+    - AIModelAuthAPIKey
+    - AIModelAuthJWT
+    - AIModelAuthPublic
+  models.AIModelSource:
+    enum:
+    - mlflow
+    - s3
+    - custom
+    type: string
+    x-enum-varnames:
+    - AIModelSourceMLflow
+    - AIModelSourceS3
+    - AIModelSourceCustom
+  models.ImportServiceSpec:
+    properties:
+      container_name:
+        type: string
+      image:
+        type: string
+      include:
+        type: boolean
+      ports:
+        items:
+          type: string
+        type: array
+      service_name:
+        type: string
+      volumes:
+        items:
+          type: string
+        type: array
+    type: object
+  pricing.Need:
+    properties:
+      apps:
+        type: integer
+      databases:
+        type: integer
+      domains:
+        type: integer
+      members:
+        type: integer
+      storageGB:
+        type: integer
+    type: object
 info:
   contact: {}
   description: |-
@@ -462,6 +503,55 @@ info:
   title: DADA Cloud Console API
   version: "1.0"
 paths:
+  /admin/audit:
+    get:
+      description: Returns audit_events rows joined with the actor's email and the
+        project's display name, newest first. Filters by exact action and a case-insensitive
+        email substring. Platform-admin only (/platform-admins group); every other
+        caller gets 403.
+      operationId: listAuditEvents
+      parameters:
+      - description: Exact audit_events.action value
+        in: query
+        name: action
+        type: string
+      - description: Case-insensitive substring match on the actor's email
+        in: query
+        name: user
+        type: string
+      - description: Max rows to return (default 50, max 200)
+        in: query
+        name: limit
+        type: integer
+      - description: Rows to skip
+        in: query
+        name: offset
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: object with an events array and a total count
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: List audit events (platform-admin only)
+      tags:
+      - admin
   /admin/operations:
     get:
       description: Returns operations in the WaitingForApproval state across all projects
@@ -622,7 +712,7 @@ paths:
         name: body
         required: true
         schema:
-          $ref: '#/definitions/internal_api.loginRequest'
+          $ref: '#/definitions/api.loginRequest'
       produces:
       - application/json
       responses:
@@ -734,7 +824,7 @@ paths:
         name: body
         required: true
         schema:
-          $ref: '#/definitions/github_com_dada-tuda_console_backend_internal_billing_pricing.Need'
+          $ref: '#/definitions/pricing.Need'
       produces:
       - application/json
       responses:
@@ -1018,7 +1108,7 @@ paths:
         name: body
         required: true
         schema:
-          $ref: '#/definitions/internal_api.createProjectRequest'
+          $ref: '#/definitions/api.createProjectRequest'
       produces:
       - application/json
       responses:
@@ -1193,7 +1283,7 @@ paths:
         name: body
         required: true
         schema:
-          $ref: '#/definitions/internal_api.createAppServerRequest'
+          $ref: '#/definitions/api.createAppServerRequest'
       produces:
       - application/json
       responses:
@@ -1396,7 +1486,7 @@ paths:
         name: body
         required: true
         schema:
-          $ref: '#/definitions/internal_api.importComposeStackRequest'
+          $ref: '#/definitions/api.importComposeStackRequest'
       produces:
       - application/json
       responses:
@@ -2288,7 +2378,7 @@ paths:
         name: body
         required: true
         schema:
-          $ref: '#/definitions/internal_api.addDomainAuthorizationRequest'
+          $ref: '#/definitions/api.addDomainAuthorizationRequest'
       produces:
       - application/json
       responses:
@@ -2525,7 +2615,7 @@ paths:
         name: body
         required: true
         schema:
-          $ref: '#/definitions/internal_api.importZoneRequest'
+          $ref: '#/definitions/api.importZoneRequest'
       produces:
       - application/json
       responses:
@@ -2739,7 +2829,7 @@ paths:
         name: body
         required: true
         schema:
-          $ref: '#/definitions/internal_api.upsertRecordRequest'
+          $ref: '#/definitions/api.upsertRecordRequest'
       produces:
       - application/json
       responses:
@@ -2843,7 +2933,7 @@ paths:
         name: body
         required: true
         schema:
-          $ref: '#/definitions/internal_api.createAppRequest'
+          $ref: '#/definitions/api.createAppRequest'
       produces:
       - application/json
       responses:
@@ -3165,7 +3255,7 @@ paths:
         name: body
         required: true
         schema:
-          $ref: '#/definitions/internal_api.createCloudTaskRequest'
+          $ref: '#/definitions/api.createCloudTaskRequest'
       produces:
       - application/json
       responses:
@@ -3238,7 +3328,7 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/internal_api.DeleteImpact'
+            $ref: '#/definitions/api.DeleteImpact'
         "401":
           description: Unauthorized
           schema:
@@ -3377,7 +3467,7 @@ paths:
         name: body
         required: true
         schema:
-          $ref: '#/definitions/internal_api.createEndpointRequest'
+          $ref: '#/definitions/api.createEndpointRequest'
       produces:
       - application/json
       responses:
@@ -3603,7 +3693,7 @@ paths:
         name: body
         required: true
         schema:
-          $ref: '#/definitions/internal_api.setEnvVarRequest'
+          $ref: '#/definitions/api.setEnvVarRequest'
       produces:
       - application/json
       responses:
@@ -3708,7 +3798,7 @@ paths:
         name: body
         required: true
         schema:
-          $ref: '#/definitions/internal_api.attachHostnameRequest'
+          $ref: '#/definitions/api.attachHostnameRequest'
       produces:
       - application/json
       responses:
@@ -3829,7 +3919,7 @@ paths:
         name: body
         required: true
         schema:
-          $ref: '#/definitions/internal_api.updateAppImageRequest'
+          $ref: '#/definitions/api.updateAppImageRequest'
       produces:
       - application/json
       responses:
@@ -3992,6 +4082,138 @@ paths:
       summary: Get container resource metrics for an app
       tags:
       - app
+  /projects/{projectId}/environments/{envId}/apps/{appName}/move:
+    post:
+      consumes:
+      - application/json
+      description: 'Destructive-ish, asynchronous: re-homes a stateless app (no persistent
+        volume, no attached database) into another project''s environment. Requires
+        write access on both the source and target project. Call move-impact first;
+        returns 409 with the blocking reasons if the app is not movable. Returns 202
+        with an operation; poll it until terminal.'
+      operationId: moveApp
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      - description: Environment UUID
+        in: path
+        name: envId
+        required: true
+        type: string
+      - description: App name
+        in: path
+        name: appName
+        required: true
+        type: string
+      - description: Destination project
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/api.moveAppRequest'
+      produces:
+      - application/json
+      responses:
+        "202":
+          description: object with the accepted operation
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "409":
+          description: blockers preventing the move
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Move an app to another project
+      tags:
+      - apps
+  /projects/{projectId}/environments/{envId}/apps/{appName}/move-impact:
+    get:
+      description: 'Phase 1 (stateless move): classifies the app''s children into
+        movable resources and blockers (persistent volume, attached ServiceDatabaseV2),
+        and flags a name collision in the target project. can_move is false whenever
+        any blocker or collision is present.'
+      operationId: moveAppImpact
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      - description: Environment UUID
+        in: path
+        name: envId
+        required: true
+        type: string
+      - description: App name
+        in: path
+        name: appName
+        required: true
+        type: string
+      - description: Destination project UUID
+        in: query
+        name: target_project_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/api.MoveImpact'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Preview the impact of moving an app to another project
+      tags:
+      - apps
   /projects/{projectId}/environments/{envId}/apps/{appName}/restart:
     post:
       description: 'Recreates the compose app''s containers from the current compose.yaml
@@ -4186,7 +4408,7 @@ paths:
         name: body
         required: true
         schema:
-          $ref: '#/definitions/internal_api.appVolumeReq'
+          $ref: '#/definitions/api.appVolumeReq'
       produces:
       - application/json
       responses:
@@ -4348,7 +4570,7 @@ paths:
         name: body
         required: true
         schema:
-          $ref: '#/definitions/internal_api.createServiceDatabaseRequest'
+          $ref: '#/definitions/api.createServiceDatabaseRequest'
       produces:
       - application/json
       responses:
@@ -4647,7 +4869,7 @@ paths:
         name: body
         required: true
         schema:
-          $ref: '#/definitions/internal_api.restoreDatabaseRequest'
+          $ref: '#/definitions/api.restoreDatabaseRequest'
       produces:
       - application/json
       responses:
@@ -4758,7 +4980,7 @@ paths:
         name: body
         required: true
         schema:
-          $ref: '#/definitions/internal_api.createIngressRequest'
+          $ref: '#/definitions/api.createIngressRequest'
       produces:
       - application/json
       responses:
@@ -4856,7 +5078,7 @@ paths:
         name: body
         required: true
         schema:
-          $ref: '#/definitions/internal_api.createAIModelRequest'
+          $ref: '#/definitions/api.createAIModelRequest'
       produces:
       - application/json
       responses:
@@ -5384,7 +5606,7 @@ paths:
         name: body
         required: true
         schema:
-          $ref: '#/definitions/internal_api.createMonitoringRequest'
+          $ref: '#/definitions/api.createMonitoringRequest'
       produces:
       - application/json
       responses:
@@ -5776,7 +5998,7 @@ paths:
         name: body
         required: true
         schema:
-          $ref: '#/definitions/internal_api.saveDashboardRequest'
+          $ref: '#/definitions/api.saveDashboardRequest'
       produces:
       - application/json
       responses:
@@ -6482,7 +6704,7 @@ paths:
         name: body
         required: true
         schema:
-          $ref: '#/definitions/internal_api.connectGitRepoRequest'
+          $ref: '#/definitions/api.connectGitRepoRequest'
       produces:
       - application/json
       responses:
@@ -6626,7 +6848,7 @@ paths:
         name: body
         required: true
         schema:
-          $ref: '#/definitions/internal_api.createS3BucketRequest'
+          $ref: '#/definitions/api.createS3BucketRequest'
       produces:
       - application/json
       responses:
@@ -6870,14 +7092,14 @@ paths:
         name: body
         required: true
         schema:
-          $ref: '#/definitions/internal_api.bindInstallationRequest'
+          $ref: '#/definitions/api.bindInstallationRequest'
       produces:
       - application/json
       responses:
         "201":
           description: Created
           schema:
-            $ref: '#/definitions/internal_api.gitInstallation'
+            $ref: '#/definitions/api.gitInstallation'
         "400":
           description: Bad Request
           schema:
@@ -7187,7 +7409,7 @@ paths:
         name: body
         required: true
         schema:
-          $ref: '#/definitions/internal_api.ingestLogsRequest'
+          $ref: '#/definitions/api.ingestLogsRequest'
       produces:
       - application/json
       responses:
@@ -7267,7 +7489,7 @@ paths:
         name: body
         required: true
         schema:
-          $ref: '#/definitions/internal_api.ingestMetricsRequest'
+          $ref: '#/definitions/api.ingestMetricsRequest'
       produces:
       - application/json
       responses:

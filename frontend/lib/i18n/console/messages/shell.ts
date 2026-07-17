@@ -37,6 +37,7 @@ export const shell: Messages = {
 
   "shell.account.label": { ru: "Меню аккаунта", en: "Account menu" },
   "shell.account.approvals": { ru: "Согласования", en: "Approvals" },
+  "shell.account.audit": { ru: "Журнал аудита", en: "Audit log" },
   "shell.account.signOut": { ru: "Выйти", en: "Sign out" },
   "shell.account.fallbackName": { ru: "Аккаунт", en: "Account" },
 

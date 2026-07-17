@@ -614,6 +614,7 @@ func (h *Handler) CreateApp(c *gin.Context) {
 		 VALUES ($1, $2, $3, 'CreateApp', 'App', $4, $5)`,
 		claims.UserID, projectID, op.ID, req.Name, auditMeta,
 	)
+	h.notifyAuditEvent(claims, projectID, "CreateApp", req.Name)
 
 	if defaultHostname != "" {
 		_, dhErr := h.pool.Exec(c.Request.Context(),

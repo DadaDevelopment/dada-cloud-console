@@ -46,6 +46,7 @@ import type {
   MLflowModelVersion,
   RevealAPIKeyResponse,
   PendingApprovalsResponse,
+  AuditEventsResponse,
   AppState,
   AppServerState,
   ImportRequest,
@@ -666,6 +667,14 @@ export const adminApi = {
       method: "POST",
       body: { reason },
     }),
+  listAuditEvents: (params: { action?: string; user?: string; limit?: number; offset?: number } = {}) => {
+    const q = new URLSearchParams();
+    if (params.action) q.set("action", params.action);
+    if (params.user) q.set("user", params.user);
+    q.set("limit", String(params.limit ?? 50));
+    q.set("offset", String(params.offset ?? 0));
+    return apiFetch<AuditEventsResponse>(`/api/v1/admin/audit?${q.toString()}`);
+  },
 };
 
 // Vercel-flow API clients -------------------------------------------------------

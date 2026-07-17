@@ -356,6 +356,13 @@ func (h *Handler) DeleteApp(c *gin.Context) {
 		return
 	}
 
+	_, _ = h.pool.Exec(c.Request.Context(),
+		`INSERT INTO audit_events (actor_id, project_id, operation_id, action, resource_kind, resource_name)
+		 VALUES ($1, $2, $3, 'DeleteApp', 'App', $4)`,
+		claims.UserID, projectID, op.ID, appName,
+	)
+	h.notifyAuditEvent(claims, projectID, "DeleteApp", appName)
+
 	c.JSON(http.StatusAccepted, gin.H{"operation": op, "message": "App deletion queued"})
 }
 

@@ -19,6 +19,7 @@ import (
 	"github.com/dada-tuda/console/backend/internal/grafana"
 	"github.com/dada-tuda/console/backend/internal/logsearch"
 	"github.com/dada-tuda/console/backend/internal/mlflow"
+	"github.com/dada-tuda/console/backend/internal/notify"
 	"github.com/dada-tuda/console/backend/internal/opencost"
 	"github.com/dada-tuda/console/backend/internal/pdns"
 	"github.com/dada-tuda/console/backend/internal/portainer"
@@ -102,6 +103,10 @@ type Handler struct {
 	groupsAttempt sync.Map
 
 	pdns *pdns.Client
+
+	auditNotifier    *notify.Notifier
+	auditNotifyEmail string
+	auditRateLimiter auditNotifyLimiter
 }
 
 // NewHandler constructs a Handler with the given dependencies.
@@ -176,6 +181,8 @@ func NewHandler(pool *pgxpool.Pool, cfg *config.Config) *Handler {
 		log.Printf("iam: project-group sync to user-service ENABLED")
 	}
 	h.pdns = pdns.NewClient(cfg.PowerDNSAPIURL, cfg.PowerDNSAPIKey, 15*time.Second)
+	h.auditNotifier = notify.New(cfg.SMTPHost, cfg.SMTPPort, cfg.SMTPUser, cfg.SMTPPass, cfg.SMTPFrom)
+	h.auditNotifyEmail = cfg.AuditNotifyEmail
 	h.counters = cloudtask.NewCounterResolver()
 	h.s3creds = cloudtask.NewS3CredentialsResolver(cfg.CrossplaneSecretNamespace)
 	h.dbcreds = cloudtask.NewDBCredentialsResolver()

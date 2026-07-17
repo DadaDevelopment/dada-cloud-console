@@ -259,6 +259,8 @@ type Config struct {
 	// Empty disables the feature outright — no SMTP dial is attempted.
 	SignupNotifyEmail string // SIGNUP_NOTIFY_EMAIL
 
+	AuditNotifyEmail string // AUDIT_NOTIFY_EMAIL
+
 	// Embedded MCP server. Served at /mcp (Streamable HTTP transport).
 	// MCPEnabled defaults to true. Set MCP_ENABLED=false to disable.
 	// MCPSelfURL is the loopback URL the MCP proxy uses to call backend
@@ -388,6 +390,7 @@ func Load() (*Config, error) {
 		SMTPPass:                  getEnv("SMTP_PASS", ""),
 		SMTPFrom:                  getEnv("SMTP_FROM", ""),
 		SignupNotifyEmail:         getEnv("SIGNUP_NOTIFY_EMAIL", "alexkekiy@icloud.com"),
+		AuditNotifyEmail:          getEnv("AUDIT_NOTIFY_EMAIL", "alexkekiy@icloud.com"),
 		MCPEnabled:                getEnv("MCP_ENABLED", "true") == "true",
 		MCPSelfURL:                getEnv("MCP_SELF_URL", ""),
 		MCPOverridesPath:          getEnv("MCP_OVERRIDES_PATH", "overrides.yaml"),

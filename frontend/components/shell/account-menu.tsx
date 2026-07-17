@@ -80,6 +80,11 @@ export function AccountMenu() {
                 {t("shell.account.approvals")}
               </Link>
             )}
+            {showApprovals && (
+              <Link role="menuitem" href="/admin/audit" onClick={() => setOpen(false)} className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 dark:text-gray-200 dark:hover:bg-gray-800">
+                {t("shell.account.audit")}
+              </Link>
+            )}
           </div>
           <div className="border-t border-gray-100 py-1 dark:border-gray-800">
             <button

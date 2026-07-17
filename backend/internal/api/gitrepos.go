@@ -989,6 +989,7 @@ func (h *Handler) ConnectGitRepo(c *gin.Context) {
 		 VALUES ($1, $2, 'ConnectGitRepo', 'GitRepo', $3)`,
 		claims.UserID, projectID, req.AppName,
 	)
+	h.notifyAuditEvent(claims, projectID, "ConnectGitRepo", req.AppName)
 
 	c.JSON(http.StatusCreated, gin.H{"repos": []gitRepo{r}})
 }

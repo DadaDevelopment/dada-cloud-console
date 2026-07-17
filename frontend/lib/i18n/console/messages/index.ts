@@ -16,6 +16,7 @@ import { models } from "./models";
 import { appServers } from "./app-servers";
 import { aiStudio } from "./ai-studio";
 import { approvals } from "./approvals";
+import { audit } from "./audit";
 import { cloudTasks } from "./cloud-tasks";
 import { billing } from "./billing";
 import { consumption } from "./consumption";
@@ -49,6 +50,7 @@ export const messages: Messages = {
   ...appServers,
   ...aiStudio,
   ...approvals,
+  ...audit,
   ...cloudTasks,
   ...billing,
   ...consumption,

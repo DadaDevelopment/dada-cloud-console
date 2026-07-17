@@ -279,6 +279,7 @@ func (h *Handler) TriggerBuild(c *gin.Context) {
 		 VALUES ($1, $2, 'TriggerBuild', 'Build', $3)`,
 		claims.UserID, projectID, appName,
 	)
+	h.notifyAuditEvent(claims, projectID, "TriggerBuild", appName)
 
 	c.JSON(http.StatusAccepted, gin.H{"build": b})
 }

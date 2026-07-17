@@ -353,6 +353,7 @@ func (h *Handler) CreateServiceDatabase(c *gin.Context) {
 		 VALUES ($1, $2, $3, 'CreateServiceDatabase', 'ServiceDatabaseV2', $4, $5)`,
 		claims.UserID, projectID, op.ID, req.Name, auditMeta,
 	)
+	h.notifyAuditEvent(claims, projectID, "CreateServiceDatabase", req.Name)
 
 	c.JSON(http.StatusAccepted, gin.H{
 		"operation": op,

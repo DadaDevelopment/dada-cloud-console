@@ -4,6 +4,9 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strconv"
+	"strings"
+	"time"
 
 	"github.com/dada-tuda/console/backend/internal/auth"
 	"github.com/dada-tuda/console/backend/internal/models"
@@ -260,4 +263,125 @@ func (h *Handler) RejectOperation(c *gin.Context) {
 		return
 	}
 	h.approvalDecision(c, models.OperationStatusCancelled, body.Reason)
+}
+
+// auditEventRow is one row of the god-admin audit dashboard: an audit_events
+// record enriched with the actor's email and the project's display name so
+// the frontend never has to make a second round trip.
+type auditEventRow struct {
+	ID           uuid.UUID `json:"id"`
+	CreatedAt    time.Time `json:"created_at"`
+	ActorEmail   string    `json:"actor_email"`
+	Action       string    `json:"action"`
+	ResourceKind string    `json:"resource_kind"`
+	ResourceName string    `json:"resource_name"`
+	ProjectName  string    `json:"project_name"`
+}
+
+const (
+	auditEventsDefaultLimit = 50
+	auditEventsMaxLimit     = 200
+)
+
+// ListAuditEvents returns a paginated, filterable view of audit_events for the
+// god-admin dashboard. Platform-admin only (/orgs/*/... membership does not
+// grant access — this is the hidden staff group, ADR-009 §4).
+//
+// @ID          listAuditEvents
+// @Summary     List audit events (platform-admin only)
+// @Description Returns audit_events rows joined with the actor's email and the project's display name, newest first. Filters by exact action and a case-insensitive email substring. Platform-admin only (/platform-admins group); every other caller gets 403.
+// @Tags        admin
+// @Produce     json
+// @Security    BearerAuth
+// @Param       action query    string false "Exact audit_events.action value"
+// @Param       user   query    string false "Case-insensitive substring match on the actor's email"
+// @Param       limit  query    int    false "Max rows to return (default 50, max 200)"
+// @Param       offset query    int    false "Rows to skip"
+// @Success     200 {object} map[string]interface{} "object with an events array and a total count"
+// @Failure     401 {object} map[string]string
+// @Failure     403 {object} map[string]string
+// @Router      /admin/audit [get]
+func (h *Handler) ListAuditEvents(c *gin.Context) {
+	claims, ok := auth.GetClaims(c)
+	if !ok {
+		respondUnauthorized(c)
+		return
+	}
+	if !isGod(claims) {
+		respondForbidden(c)
+		return
+	}
+
+	action := strings.TrimSpace(c.Query("action"))
+	userSubstr := strings.TrimSpace(c.Query("user"))
+
+	limit := auditEventsDefaultLimit
+	if v, err := strconv.Atoi(c.Query("limit")); err == nil && v > 0 {
+		limit = v
+	}
+	if limit > auditEventsMaxLimit {
+		limit = auditEventsMaxLimit
+	}
+	offset := 0
+	if v, err := strconv.Atoi(c.Query("offset")); err == nil && v >= 0 {
+		offset = v
+	}
+
+	var actionFilter, userFilter *string
+	if action != "" {
+		actionFilter = &action
+	}
+	if userSubstr != "" {
+		userFilter = &userSubstr
+	}
+
+	var total int
+	if err := h.pool.QueryRow(c.Request.Context(), `
+		SELECT count(*)
+		FROM audit_events a
+		JOIN users u ON u.id = a.actor_id
+		WHERE ($1::text IS NULL OR a.action = $1)
+		  AND ($2::text IS NULL OR u.email ILIKE '%' || $2 || '%')`,
+		actionFilter, userFilter,
+	).Scan(&total); err != nil {
+		respondError(c, http.StatusInternalServerError, "failed to count audit events")
+		return
+	}
+
+	rows, err := h.pool.Query(c.Request.Context(), `
+		SELECT a.id, a.created_at, u.email, a.action, a.resource_kind, a.resource_name,
+		       COALESCE(p.display_name, '')
+		FROM audit_events a
+		JOIN users u        ON u.id = a.actor_id
+		LEFT JOIN projects p ON p.id = a.project_id
+		WHERE ($1::text IS NULL OR a.action = $1)
+		  AND ($2::text IS NULL OR u.email ILIKE '%' || $2 || '%')
+		ORDER BY a.created_at DESC
+		LIMIT $3 OFFSET $4`,
+		actionFilter, userFilter, limit, offset,
+	)
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, "failed to list audit events")
+		return
+	}
+	defer rows.Close()
+
+	out := []auditEventRow{}
+	for rows.Next() {
+		var e auditEventRow
+		var resourceKind, resourceName *string
+		if err := rows.Scan(&e.ID, &e.CreatedAt, &e.ActorEmail, &e.Action, &resourceKind, &resourceName, &e.ProjectName); err != nil {
+			respondError(c, http.StatusInternalServerError, "failed to scan audit event")
+			return
+		}
+		if resourceKind != nil {
+			e.ResourceKind = *resourceKind
+		}
+		if resourceName != nil {
+			e.ResourceName = *resourceName
+		}
+		out = append(out, e)
+	}
+
+	c.JSON(http.StatusOK, gin.H{"events": out, "total": total, "limit": limit, "offset": offset})
 }

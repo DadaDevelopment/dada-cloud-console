@@ -15,6 +15,77 @@ const docTemplate = `{
     "host": "{{.Host}}",
     "basePath": "{{.BasePath}}",
     "paths": {
+        "/admin/audit": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Returns audit_events rows joined with the actor's email and the project's display name, newest first. Filters by exact action and a case-insensitive email substring. Platform-admin only (/platform-admins group); every other caller gets 403.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin"
+                ],
+                "summary": "List audit events (platform-admin only)",
+                "operationId": "listAuditEvents",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Exact audit_events.action value",
+                        "name": "action",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Case-insensitive substring match on the actor's email",
+                        "name": "user",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Max rows to return (default 50, max 200)",
+                        "name": "limit",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Rows to skip",
+                        "name": "offset",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "object with an events array and a total count",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/admin/operations": {
             "get": {
                 "security": [
@@ -250,7 +321,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/internal_api.loginRequest"
+                            "$ref": "#/definitions/api.loginRequest"
                         }
                     }
                 ],
@@ -417,7 +488,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/github_com_dada-tuda_console_backend_internal_billing_pricing.Need"
+                            "$ref": "#/definitions/pricing.Need"
                         }
                     }
                 ],
@@ -827,7 +898,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/internal_api.createProjectRequest"
+                            "$ref": "#/definitions/api.createProjectRequest"
                         }
                     }
                 ],
@@ -1121,7 +1192,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/internal_api.createAppServerRequest"
+                            "$ref": "#/definitions/api.createAppServerRequest"
                         }
                     }
                 ],
@@ -1411,7 +1482,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/internal_api.importComposeStackRequest"
+                            "$ref": "#/definitions/api.importComposeStackRequest"
                         }
                     }
                 ],
@@ -2733,7 +2804,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/internal_api.addDomainAuthorizationRequest"
+                            "$ref": "#/definitions/api.addDomainAuthorizationRequest"
                         }
                     }
                 ],
@@ -3088,7 +3159,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/internal_api.importZoneRequest"
+                            "$ref": "#/definitions/api.importZoneRequest"
                         }
                     }
                 ],
@@ -3316,7 +3387,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/internal_api.upsertRecordRequest"
+                            "$ref": "#/definitions/api.upsertRecordRequest"
                         }
                     }
                 ],
@@ -3554,7 +3625,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/internal_api.createAppRequest"
+                            "$ref": "#/definitions/api.createAppRequest"
                         }
                     }
                 ],
@@ -4024,7 +4095,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/internal_api.createCloudTaskRequest"
+                            "$ref": "#/definitions/api.createCloudTaskRequest"
                         }
                     }
                 ],
@@ -4127,7 +4198,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/internal_api.DeleteImpact"
+                            "$ref": "#/definitions/api.DeleteImpact"
                         }
                     },
                     "401": {
@@ -4332,7 +4403,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/internal_api.createEndpointRequest"
+                            "$ref": "#/definitions/api.createEndpointRequest"
                         }
                     }
                 ],
@@ -4596,7 +4667,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/internal_api.setEnvVarRequest"
+                            "$ref": "#/definitions/api.setEnvVarRequest"
                         }
                     }
                 ],
@@ -4819,7 +4890,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/internal_api.attachHostnameRequest"
+                            "$ref": "#/definitions/api.attachHostnameRequest"
                         }
                     }
                 ],
@@ -5000,7 +5071,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/internal_api.updateAppImageRequest"
+                            "$ref": "#/definitions/api.updateAppImageRequest"
                         }
                     }
                 ],
@@ -5223,6 +5294,194 @@ const docTemplate = `{
                     },
                     "503": {
                         "description": "Service Unavailable",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/projects/{projectId}/environments/{envId}/apps/{appName}/move": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Destructive-ish, asynchronous: re-homes a stateless app (no persistent volume, no attached database) into another project's environment. Requires write access on both the source and target project. Call move-impact first; returns 409 with the blocking reasons if the app is not movable. Returns 202 with an operation; poll it until terminal.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "apps"
+                ],
+                "summary": "Move an app to another project",
+                "operationId": "moveApp",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Project UUID",
+                        "name": "projectId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Environment UUID",
+                        "name": "envId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "App name",
+                        "name": "appName",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Destination project",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/api.moveAppRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "202": {
+                        "description": "object with the accepted operation",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "409": {
+                        "description": "blockers preventing the move",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/projects/{projectId}/environments/{envId}/apps/{appName}/move-impact": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Phase 1 (stateless move): classifies the app's children into movable resources and blockers (persistent volume, attached ServiceDatabaseV2), and flags a name collision in the target project. can_move is false whenever any blocker or collision is present.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "apps"
+                ],
+                "summary": "Preview the impact of moving an app to another project",
+                "operationId": "moveAppImpact",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Project UUID",
+                        "name": "projectId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Environment UUID",
+                        "name": "envId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "App name",
+                        "name": "appName",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Destination project UUID",
+                        "name": "target_project_id",
+                        "in": "query",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/api.MoveImpact"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
                         "schema": {
                             "type": "object",
                             "additionalProperties": {
@@ -5520,7 +5779,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/internal_api.appVolumeReq"
+                            "$ref": "#/definitions/api.appVolumeReq"
                         }
                     }
                 ],
@@ -5753,7 +6012,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/internal_api.createServiceDatabaseRequest"
+                            "$ref": "#/definitions/api.createServiceDatabaseRequest"
                         }
                     }
                 ],
@@ -6182,7 +6441,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/internal_api.restoreDatabaseRequest"
+                            "$ref": "#/definitions/api.restoreDatabaseRequest"
                         }
                     }
                 ],
@@ -6343,7 +6602,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/internal_api.createIngressRequest"
+                            "$ref": "#/definitions/api.createIngressRequest"
                         }
                     }
                 ],
@@ -6484,7 +6743,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/internal_api.createAIModelRequest"
+                            "$ref": "#/definitions/api.createAIModelRequest"
                         }
                     }
                 ],
@@ -7245,7 +7504,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/internal_api.createMonitoringRequest"
+                            "$ref": "#/definitions/api.createMonitoringRequest"
                         }
                     }
                 ],
@@ -8071,7 +8330,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/internal_api.saveDashboardRequest"
+                            "$ref": "#/definitions/api.saveDashboardRequest"
                         }
                     }
                 ],
@@ -8854,7 +9113,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/internal_api.connectGitRepoRequest"
+                            "$ref": "#/definitions/api.connectGitRepoRequest"
                         }
                     }
                 ],
@@ -9068,7 +9327,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/internal_api.createS3BucketRequest"
+                            "$ref": "#/definitions/api.createS3BucketRequest"
                         }
                     }
                 ],
@@ -9425,7 +9684,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/internal_api.bindInstallationRequest"
+                            "$ref": "#/definitions/api.bindInstallationRequest"
                         }
                     }
                 ],
@@ -9433,7 +9692,7 @@ const docTemplate = `{
                     "201": {
                         "description": "Created",
                         "schema": {
-                            "$ref": "#/definitions/internal_api.gitInstallation"
+                            "$ref": "#/definitions/api.gitInstallation"
                         }
                     },
                     "400": {
@@ -9887,7 +10146,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/internal_api.ingestLogsRequest"
+                            "$ref": "#/definitions/api.ingestLogsRequest"
                         }
                     }
                 ],
@@ -10005,7 +10264,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/internal_api.ingestMetricsRequest"
+                            "$ref": "#/definitions/api.ingestMetricsRequest"
                         }
                     }
                 ],
@@ -10333,82 +10592,7 @@ const docTemplate = `{
         }
     },
     "definitions": {
-        "github_com_dada-tuda_console_backend_internal_billing_pricing.Need": {
-            "type": "object",
-            "properties": {
-                "apps": {
-                    "type": "integer"
-                },
-                "databases": {
-                    "type": "integer"
-                },
-                "domains": {
-                    "type": "integer"
-                },
-                "members": {
-                    "type": "integer"
-                },
-                "storageGB": {
-                    "type": "integer"
-                }
-            }
-        },
-        "github_com_dada-tuda_console_backend_internal_models.AIModelAuthMode": {
-            "type": "string",
-            "enum": [
-                "apikey",
-                "jwt",
-                "public"
-            ],
-            "x-enum-varnames": [
-                "AIModelAuthAPIKey",
-                "AIModelAuthJWT",
-                "AIModelAuthPublic"
-            ]
-        },
-        "github_com_dada-tuda_console_backend_internal_models.AIModelSource": {
-            "type": "string",
-            "enum": [
-                "mlflow",
-                "s3",
-                "custom"
-            ],
-            "x-enum-varnames": [
-                "AIModelSourceMLflow",
-                "AIModelSourceS3",
-                "AIModelSourceCustom"
-            ]
-        },
-        "github_com_dada-tuda_console_backend_internal_models.ImportServiceSpec": {
-            "type": "object",
-            "properties": {
-                "container_name": {
-                    "type": "string"
-                },
-                "image": {
-                    "type": "string"
-                },
-                "include": {
-                    "type": "boolean"
-                },
-                "ports": {
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    }
-                },
-                "service_name": {
-                    "type": "string"
-                },
-                "volumes": {
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    }
-                }
-            }
-        },
-        "internal_api.DeleteImpact": {
+        "api.DeleteImpact": {
             "type": "object",
             "properties": {
                 "app": {
@@ -10423,7 +10607,7 @@ const docTemplate = `{
                 "items": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/internal_api.ImpactItem"
+                        "$ref": "#/definitions/api.ImpactItem"
                     }
                 },
                 "namespace": {
@@ -10431,7 +10615,7 @@ const docTemplate = `{
                 }
             }
         },
-        "internal_api.ImpactItem": {
+        "api.ImpactItem": {
             "type": "object",
             "properties": {
                 "group": {
@@ -10448,7 +10632,73 @@ const docTemplate = `{
                 }
             }
         },
-        "internal_api.addDomainAuthorizationRequest": {
+        "api.MoveBlockerItem": {
+            "type": "object",
+            "properties": {
+                "kind": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "reason": {
+                    "type": "string"
+                }
+            }
+        },
+        "api.MoveImpact": {
+            "type": "object",
+            "properties": {
+                "app": {
+                    "type": "string"
+                },
+                "blockers": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/api.MoveBlockerItem"
+                    }
+                },
+                "can_move": {
+                    "type": "boolean"
+                },
+                "movable": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/api.MoveMovableItem"
+                    }
+                },
+                "name_collision": {
+                    "type": "boolean"
+                },
+                "src_project": {
+                    "type": "string"
+                },
+                "target_env_id": {
+                    "type": "string"
+                },
+                "target_namespace": {
+                    "type": "string"
+                },
+                "target_project": {
+                    "type": "string"
+                }
+            }
+        },
+        "api.MoveMovableItem": {
+            "type": "object",
+            "properties": {
+                "group": {
+                    "type": "string"
+                },
+                "kind": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                }
+            }
+        },
+        "api.addDomainAuthorizationRequest": {
             "type": "object",
             "properties": {
                 "apex_domain": {
@@ -10456,7 +10706,7 @@ const docTemplate = `{
                 }
             }
         },
-        "internal_api.appVolumeReq": {
+        "api.appVolumeReq": {
             "type": "object",
             "properties": {
                 "path": {
@@ -10470,7 +10720,7 @@ const docTemplate = `{
                 }
             }
         },
-        "internal_api.attachHostnameRequest": {
+        "api.attachHostnameRequest": {
             "type": "object",
             "properties": {
                 "hostname": {
@@ -10478,7 +10728,7 @@ const docTemplate = `{
                 }
             }
         },
-        "internal_api.bindInstallationRequest": {
+        "api.bindInstallationRequest": {
             "type": "object",
             "properties": {
                 "installation_id": {
@@ -10487,7 +10737,7 @@ const docTemplate = `{
                 }
             }
         },
-        "internal_api.connectGitRepoRequest": {
+        "api.connectGitRepoRequest": {
             "type": "object",
             "properties": {
                 "app_name": {
@@ -10534,7 +10784,7 @@ const docTemplate = `{
                 }
             }
         },
-        "internal_api.createAIModelRequest": {
+        "api.createAIModelRequest": {
             "type": "object",
             "properties": {
                 "artifact_uri": {
@@ -10544,7 +10794,7 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "auth_mode": {
-                    "$ref": "#/definitions/github_com_dada-tuda_console_backend_internal_models.AIModelAuthMode"
+                    "$ref": "#/definitions/models.AIModelAuthMode"
                 },
                 "container_image": {
                     "type": "string"
@@ -10565,14 +10815,14 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "source": {
-                    "$ref": "#/definitions/github_com_dada-tuda_console_backend_internal_models.AIModelSource"
+                    "$ref": "#/definitions/models.AIModelSource"
                 },
                 "version": {
                     "type": "string"
                 }
             }
         },
-        "internal_api.createAppRequest": {
+        "api.createAppRequest": {
             "type": "object",
             "properties": {
                 "framework": {
@@ -10594,14 +10844,14 @@ const docTemplate = `{
                     "type": "integer"
                 },
                 "volume": {
-                    "$ref": "#/definitions/internal_api.appVolumeReq"
+                    "$ref": "#/definitions/api.appVolumeReq"
                 },
                 "workload_type": {
                     "type": "string"
                 }
             }
         },
-        "internal_api.createAppServerRequest": {
+        "api.createAppServerRequest": {
             "type": "object",
             "properties": {
                 "flavor": {
@@ -10638,7 +10888,7 @@ const docTemplate = `{
                 }
             }
         },
-        "internal_api.createCloudTaskRequest": {
+        "api.createCloudTaskRequest": {
             "type": "object",
             "properties": {
                 "task_type": {
@@ -10646,7 +10896,7 @@ const docTemplate = `{
                 }
             }
         },
-        "internal_api.createEndpointRequest": {
+        "api.createEndpointRequest": {
             "type": "object",
             "properties": {
                 "auth_enabled": {
@@ -10675,7 +10925,7 @@ const docTemplate = `{
                 }
             }
         },
-        "internal_api.createIngressRequest": {
+        "api.createIngressRequest": {
             "type": "object",
             "properties": {
                 "aliases": {
@@ -10696,7 +10946,7 @@ const docTemplate = `{
                 "rules": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/internal_api.ingressRuleReq"
+                        "$ref": "#/definitions/api.ingressRuleReq"
                     }
                 },
                 "ssl_redirect": {
@@ -10721,7 +10971,7 @@ const docTemplate = `{
                 }
             }
         },
-        "internal_api.createMonitoringRequest": {
+        "api.createMonitoringRequest": {
             "type": "object",
             "properties": {
                 "name": {
@@ -10729,7 +10979,7 @@ const docTemplate = `{
                 }
             }
         },
-        "internal_api.createProjectRequest": {
+        "api.createProjectRequest": {
             "type": "object",
             "required": [
                 "slug"
@@ -10753,7 +11003,7 @@ const docTemplate = `{
                 }
             }
         },
-        "internal_api.createS3BucketRequest": {
+        "api.createS3BucketRequest": {
             "type": "object",
             "properties": {
                 "app_ref": {
@@ -10780,7 +11030,7 @@ const docTemplate = `{
                 }
             }
         },
-        "internal_api.createServiceDatabaseRequest": {
+        "api.createServiceDatabaseRequest": {
             "type": "object",
             "properties": {
                 "app_ref": {
@@ -10803,7 +11053,7 @@ const docTemplate = `{
                 }
             }
         },
-        "internal_api.gitInstallation": {
+        "api.gitInstallation": {
             "type": "object",
             "properties": {
                 "account_login": {
@@ -10830,7 +11080,7 @@ const docTemplate = `{
                 }
             }
         },
-        "internal_api.importComposeStackRequest": {
+        "api.importComposeStackRequest": {
             "type": "object",
             "properties": {
                 "ack_secrets_in_git": {
@@ -10848,12 +11098,12 @@ const docTemplate = `{
                 "services": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/github_com_dada-tuda_console_backend_internal_models.ImportServiceSpec"
+                        "$ref": "#/definitions/models.ImportServiceSpec"
                     }
                 }
             }
         },
-        "internal_api.importRecord": {
+        "api.importRecord": {
             "type": "object",
             "properties": {
                 "contents": {
@@ -10873,18 +11123,18 @@ const docTemplate = `{
                 }
             }
         },
-        "internal_api.importZoneRequest": {
+        "api.importZoneRequest": {
             "type": "object",
             "properties": {
                 "records": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/internal_api.importRecord"
+                        "$ref": "#/definitions/api.importRecord"
                     }
                 }
             }
         },
-        "internal_api.ingestLogsRequest": {
+        "api.ingestLogsRequest": {
             "type": "object",
             "properties": {
                 "level": {
@@ -10898,7 +11148,7 @@ const docTemplate = `{
                 }
             }
         },
-        "internal_api.ingestMetricsRequest": {
+        "api.ingestMetricsRequest": {
             "type": "object",
             "properties": {
                 "metrics": {
@@ -10916,7 +11166,7 @@ const docTemplate = `{
                 }
             }
         },
-        "internal_api.ingressRuleReq": {
+        "api.ingressRuleReq": {
             "type": "object",
             "properties": {
                 "app": {
@@ -10930,7 +11180,7 @@ const docTemplate = `{
                 }
             }
         },
-        "internal_api.loginRequest": {
+        "api.loginRequest": {
             "type": "object",
             "required": [
                 "password"
@@ -10947,7 +11197,15 @@ const docTemplate = `{
                 }
             }
         },
-        "internal_api.restoreDatabaseRequest": {
+        "api.moveAppRequest": {
+            "type": "object",
+            "properties": {
+                "target_project_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "api.restoreDatabaseRequest": {
             "type": "object",
             "properties": {
                 "backup_id": {
@@ -10955,21 +11213,10 @@ const docTemplate = `{
                 }
             }
         },
-        "internal_api.saveDashboardRequest": {
-            "type": "object",
-            "properties": {
-                "config": {
-                    "type": "array",
-                    "items": {
-                        "type": "integer"
-                    }
-                },
-                "version": {
-                    "type": "integer"
-                }
-            }
+        "api.saveDashboardRequest": {
+            "type": "object"
         },
-        "internal_api.setEnvVarRequest": {
+        "api.setEnvVarRequest": {
             "type": "object",
             "properties": {
                 "is_secret": {
@@ -10983,7 +11230,7 @@ const docTemplate = `{
                 }
             }
         },
-        "internal_api.updateAppImageRequest": {
+        "api.updateAppImageRequest": {
             "type": "object",
             "properties": {
                 "image": {
@@ -10991,7 +11238,7 @@ const docTemplate = `{
                 }
             }
         },
-        "internal_api.upsertRecordRequest": {
+        "api.upsertRecordRequest": {
             "type": "object",
             "properties": {
                 "contents": {
@@ -11008,6 +11255,81 @@ const docTemplate = `{
                 },
                 "type": {
                     "type": "string"
+                }
+            }
+        },
+        "models.AIModelAuthMode": {
+            "type": "string",
+            "enum": [
+                "apikey",
+                "jwt",
+                "public"
+            ],
+            "x-enum-varnames": [
+                "AIModelAuthAPIKey",
+                "AIModelAuthJWT",
+                "AIModelAuthPublic"
+            ]
+        },
+        "models.AIModelSource": {
+            "type": "string",
+            "enum": [
+                "mlflow",
+                "s3",
+                "custom"
+            ],
+            "x-enum-varnames": [
+                "AIModelSourceMLflow",
+                "AIModelSourceS3",
+                "AIModelSourceCustom"
+            ]
+        },
+        "models.ImportServiceSpec": {
+            "type": "object",
+            "properties": {
+                "container_name": {
+                    "type": "string"
+                },
+                "image": {
+                    "type": "string"
+                },
+                "include": {
+                    "type": "boolean"
+                },
+                "ports": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "service_name": {
+                    "type": "string"
+                },
+                "volumes": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                }
+            }
+        },
+        "pricing.Need": {
+            "type": "object",
+            "properties": {
+                "apps": {
+                    "type": "integer"
+                },
+                "databases": {
+                    "type": "integer"
+                },
+                "domains": {
+                    "type": "integer"
+                },
+                "members": {
+                    "type": "integer"
+                },
+                "storageGB": {
+                    "type": "integer"
                 }
             }
         }

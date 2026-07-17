@@ -47,6 +47,21 @@ func ComposeSignup(email, username, createdAtUTC string, totalUsers int) (subjec
 	return subject, b.String()
 }
 
+// ComposeAudit builds the subject and plaintext body for a significant-action
+// owner notification: one email per curated audit_events row (app/project/db
+// create, git connect, build trigger, domain attach, app delete).
+func ComposeAudit(action, actorEmail, resourceName, projectName, createdAtUTC string) (subject, body string) {
+	subject = fmt.Sprintf("Dada Cloud: %s — %s", action, actorEmail)
+	var b strings.Builder
+	fmt.Fprintf(&b, "Значимое событие в Dada Cloud.\n\n")
+	fmt.Fprintf(&b, "Пользователь: %s\n", actorEmail)
+	fmt.Fprintf(&b, "Действие: %s\n", action)
+	fmt.Fprintf(&b, "Ресурс: %s\n", resourceName)
+	fmt.Fprintf(&b, "Проект: %s\n", projectName)
+	fmt.Fprintf(&b, "Время: %s (UTC)\n", createdAtUTC)
+	return subject, b.String()
+}
+
 // Send delivers one message to a single recipient over SMTP with STARTTLS
 // (net/smtp negotiates STARTTLS automatically when the server advertises it,
 // as Postbox does on 587). Returns an error the caller logs and swallows.

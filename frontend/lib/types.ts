@@ -686,6 +686,23 @@ export interface PendingApprovalsResponse {
   approvals: PendingApproval[];
 }
 
+export interface AuditEvent {
+  id: string;
+  created_at: string;
+  actor_email: string;
+  action: string;
+  resource_kind: string;
+  resource_name: string;
+  project_name: string;
+}
+
+export interface AuditEventsResponse {
+  events: AuditEvent[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
 // Vercel-flow — Git / Build / Deploy / Env / Domain types --------------------
 
 export type BuildStatus =
