@@ -920,10 +920,15 @@ func (w *DBWatcher) doCreateApp(ctx context.Context, op db.Operation) error {
 }
 
 // doDeleteApp removes an app's entire git folder in one commit: app.yaml,
-// values.yaml, and resources.values.yaml. This is safe under ADR 0005 because
-// resources is now a values file (ignoreMissingValueFiles), not a path source,
-// so ArgoCD prunes cleanly with no wedge. Missing files are skipped silently by
-// RemoveAndPush. Also clears the app's own snapshot AND every child resource
+// values.yaml, and resources.values.yaml. Removing app.yaml drops the app from
+// the tenant-apps ApplicationSet generator, so ArgoCD tears the Application down
+// (resources-finalizer). That finalizer must re-render helm/app to prune, but
+// values.yaml is gone in the same commit, so it renders on chart defaults: the
+// prune render only stays valid because helm/common now quotes the image
+// (`image: ":"` on empty name/tag) instead of emitting a bare `image: :` that
+// broke YAML parsing and wedged the Application in Terminating forever. Do NOT
+// reintroduce an unquoted image in the chart. Missing files are skipped silently
+// by RemoveAndPush. Also clears the app's own snapshot AND every child resource
 // snapshot bound to it (ServiceDatabaseV2 / PublicApi / S3Bucket / AIModel), and
 // revokes any AIModel API keys bound to the app, so quota/read APIs reflect the
 // deletion immediately.
