@@ -12,6 +12,7 @@ import (
 	"github.com/dada-tuda/console/backend/internal/config"
 	internalmcp "github.com/dada-tuda/console/backend/internal/mcp"
 	"github.com/dada-tuda/console/backend/internal/metrics"
+	"github.com/dada-tuda/console/backend/internal/notify"
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -40,10 +41,15 @@ func authMiddleware(pool *pgxpool.Pool, cfg *config.Config) gin.HandlerFunc {
 		panic(fmt.Sprintf("auth: build keycloak verifier: %v", err))
 	}
 
+	signupNotifier := notify.New(cfg.SMTPHost, cfg.SMTPPort, cfg.SMTPUser, cfg.SMTPPass, cfg.SMTPFrom)
+
 	resolver := func(c *gin.Context, kc *auth.KeycloakClaims) (*auth.Claims, error) {
-		id, err := auth.ResolveUser(c.Request.Context(), pool, kc)
+		id, created, err := auth.ResolveUser(c.Request.Context(), pool, kc)
 		if err != nil {
 			return nil, err
+		}
+		if created {
+			notifySignup(pool, signupNotifier, cfg.SignupNotifyEmail, kc)
 		}
 		// Authorization is decoded from the native Keycloak claims (group paths +
 		// scope). The /platform-admins staff god-mode is handled inside the claim

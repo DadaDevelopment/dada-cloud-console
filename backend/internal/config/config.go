@@ -246,12 +246,18 @@ type Config struct {
 	UserServiceURL string // USER_SERVICE_URL
 
 	// SMTP for the Email contact point (shared with IAM invitations). Wired into
-	// Grafana's email contact point settings at provision time.
+	// Grafana's email contact point settings at provision time. Also the relay
+	// used for the new-signup owner notification (SignupNotifyEmail).
 	SMTPHost string // SMTP_HOST
 	SMTPPort int    // SMTP_PORT (default 587)
 	SMTPUser string // SMTP_USER
 	SMTPPass string // SMTP_PASS
 	SMTPFrom string // SMTP_FROM
+
+	// SignupNotifyEmail receives one email per brand-new local user row (first
+	// Keycloak-provisioned login, never a repeat login or a service account).
+	// Empty disables the feature outright — no SMTP dial is attempted.
+	SignupNotifyEmail string // SIGNUP_NOTIFY_EMAIL
 
 	// Embedded MCP server. Served at /mcp (Streamable HTTP transport).
 	// MCPEnabled defaults to true. Set MCP_ENABLED=false to disable.
@@ -381,6 +387,7 @@ func Load() (*Config, error) {
 		SMTPUser:                  getEnv("SMTP_USER", ""),
 		SMTPPass:                  getEnv("SMTP_PASS", ""),
 		SMTPFrom:                  getEnv("SMTP_FROM", ""),
+		SignupNotifyEmail:         getEnv("SIGNUP_NOTIFY_EMAIL", "alexkekiy@icloud.com"),
 		MCPEnabled:                getEnv("MCP_ENABLED", "true") == "true",
 		MCPSelfURL:                getEnv("MCP_SELF_URL", ""),
 		MCPOverridesPath:          getEnv("MCP_OVERRIDES_PATH", "overrides.yaml"),

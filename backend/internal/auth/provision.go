@@ -33,9 +33,13 @@ var _ querier = (*pgxpool.Pool)(nil)
 // password_hash is set to '' for OIDC-provisioned rows. The login handler's
 // bcrypt compare against an empty hash always fails, so these rows can never log
 // in via /auth/login — exactly the intent (login is via Keycloak in this mode).
-func ResolveUser(ctx context.Context, db querier, kc *KeycloakClaims) (uuid.UUID, error) {
+// ResolveUser returns the resolved local user id and whether this call is the
+// row's first-ever provisioning (a fresh INSERT, not a refresh of an existing
+// row or a legacy-account link). Callers use the created flag to fire
+// signup-only side effects exactly once.
+func ResolveUser(ctx context.Context, db querier, kc *KeycloakClaims) (id uuid.UUID, created bool, err error) {
 	if kc == nil || kc.Subject == "" {
-		return uuid.Nil, fmt.Errorf("keycloak claims missing subject")
+		return uuid.Nil, false, fmt.Errorf("keycloak claims missing subject")
 	}
 
 	username := kc.PreferredUsername
@@ -53,6 +57,9 @@ func ResolveUser(ctx context.Context, db querier, kc *KeycloakClaims) (uuid.UUID
 		displayName = username
 	}
 
+	// xmax = 0 is the standard Postgres tell for "this RETURNING row came from the
+	// INSERT branch of the upsert, not the ON CONFLICT UPDATE branch" — a fresh
+	// row has no prior transaction ID in its xmax.
 	const upsertBySub = `
 		INSERT INTO users (keycloak_sub, username, email, display_name, password_hash)
 		VALUES ($1, $2, $3, $4, '')
@@ -60,16 +67,16 @@ func ResolveUser(ctx context.Context, db querier, kc *KeycloakClaims) (uuid.UUID
 		    SET email = EXCLUDED.email,
 		        display_name = EXCLUDED.display_name,
 		        updated_at = now()
-		RETURNING id`
+		RETURNING id, (xmax = 0) AS inserted`
 
-	var id uuid.UUID
-	err := db.QueryRow(ctx, upsertBySub, kc.Subject, username, email, displayName).Scan(&id)
+	err = db.QueryRow(ctx, upsertBySub, kc.Subject, username, email, displayName).Scan(&id, &created)
 	if err == nil {
-		return id, nil
+		return id, created, nil
 	}
 
 	// A username/email UNIQUE collision means a legacy local row already exists.
-	// Link it to this Keycloak identity instead of crashing.
+	// Link it to this Keycloak identity instead of crashing. This is never a
+	// fresh signup — the row predates this Keycloak identity.
 	if isUniqueViolation(err) {
 		const linkExisting = `
 			UPDATE users
@@ -79,12 +86,12 @@ func ResolveUser(ctx context.Context, db querier, kc *KeycloakClaims) (uuid.UUID
 			WHERE username = $3 OR email = $4
 			RETURNING id`
 		if lerr := db.QueryRow(ctx, linkExisting, kc.Subject, displayName, username, email).Scan(&id); lerr != nil {
-			return uuid.Nil, fmt.Errorf("link existing user to keycloak sub: %w", lerr)
+			return uuid.Nil, false, fmt.Errorf("link existing user to keycloak sub: %w", lerr)
 		}
-		return id, nil
+		return id, false, nil
 	}
 
-	return uuid.Nil, fmt.Errorf("resolve keycloak user: %w", err)
+	return uuid.Nil, false, fmt.Errorf("resolve keycloak user: %w", err)
 }
 
 // isUniqueViolation reports whether err is a Postgres unique-constraint

@@ -145,6 +145,16 @@ backend:
     # METRIKA_OAUTH_TOKEN intentionally NOT wired: the metrika-instrumentor skill
     # resolves the Metrika OAuth token itself inside the agent workspace, so the
     # backend resolver no longer reads it. Leave unset.
+    # SMTP relay for outbound mail (non-secret half; SMTP_PASS is in
+    # backend.secret below). Also used for the new-signup owner notification.
+    SMTP_HOST: ""
+    SMTP_PORT: "587"
+    SMTP_USER: ""
+    SMTP_FROM: ""
+    # Recipient for the new-user-signup email (fires once per fresh Keycloak
+    # provisioning, never on repeat logins or service accounts). Empty disables
+    # the feature outright.
+    SIGNUP_NOTIFY_EMAIL: ""
   existingSecret: ""
   # Service-unique secrets only. Shared keys (DB_URL, GITOPS_VALUES_TOKEN_SECRET,
   # PORTAINER_API_TOKEN) come from global.shared via the Secret template.
@@ -170,6 +180,12 @@ backend:
     # managed-DNS endpoints (503). In prod this is patched out-of-git into Secret
     # dada-cloud-console-backend, like the DadaAgent secrets above.
     POWERDNS_API_KEY: ""
+    # SMTP password (Postbox, same credential as Keycloak's own mail). Empty
+    # disables SMTP send outright (notify.New requires host+from, not pass, but
+    # Postbox requires auth so an empty pass just fails cleanly, logged only).
+    # In prod this is patched out-of-git into Secret dada-cloud-console-backend,
+    # copied from the keycloak-smtp-secret password (never duplicated in git).
+    SMTP_PASS: ""
   persistence:
     enabled: true
     size: 5Gi
