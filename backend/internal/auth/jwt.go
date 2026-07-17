@@ -49,6 +49,7 @@ type Claims struct {
 var AllScopes = []string{
 	"read", "metrics:write", "logs:write", "deploy:write",
 	"builds:read", "builds:write", "admin",
+	"ai:chat", "ai:embeddings",
 }
 
 // roleRank ranks the four roles for decode-time max-merging when a single scope
