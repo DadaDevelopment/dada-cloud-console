@@ -13,6 +13,7 @@ import { Breadcrumb } from "@/components/ui/breadcrumb";
 import { useProjectContext } from "@/lib/project-context";
 import { canMutate } from "@/lib/rbac";
 import { useT } from "@/lib/i18n/console/context";
+import { TemplateDeployCards } from "@/components/console/template-deploy-cards";
 import { timeAgo } from "@/lib/format";
 import { Search, Lock, Plus } from "lucide-react";
 
@@ -665,26 +666,37 @@ export default function GitImportPage() {
               <Spinner />
             </div>
           ) : installations.length === 0 ? (
-            <div className="rounded-xl border border-dashed border-gray-300 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 p-8 text-center">
-              <p className="text-sm font-medium text-gray-600 dark:text-gray-400">{t("git.import.noAccounts.title")}</p>
-              <p className="mt-1 text-xs text-gray-400 dark:text-gray-500">{t("git.import.noAccounts.hint")}</p>
-              <div className="mt-4 flex justify-center gap-3">
-                <button
-                  onClick={() => handleConnectProvider("github")}
-                  disabled={connectingProvider !== null}
-                  className="rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  {t("git.import.connectGitHub")}
-                </button>
-                <button
-                  onClick={() => handleConnectProvider("gitlab")}
-                  disabled={connectingProvider !== null}
-                  className="rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  {t("git.import.connectGitLab")}
-                </button>
+            <>
+              <div className="rounded-xl border border-dashed border-gray-300 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 p-8 text-center">
+                <p className="text-sm font-medium text-gray-600 dark:text-gray-400">{t("git.import.noAccounts.title")}</p>
+                <p className="mt-1 text-xs text-gray-400 dark:text-gray-500">{t("git.import.noAccounts.hint")}</p>
+                <div className="mt-4 flex justify-center gap-3">
+                  <button
+                    onClick={() => handleConnectProvider("github")}
+                    disabled={connectingProvider !== null}
+                    className="rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {t("git.import.connectGitHub")}
+                  </button>
+                  <button
+                    onClick={() => handleConnectProvider("gitlab")}
+                    disabled={connectingProvider !== null}
+                    className="rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {t("git.import.connectGitLab")}
+                  </button>
+                </div>
               </div>
-            </div>
+
+              <div className="mt-6">
+                <div className="mb-4 flex items-center gap-3">
+                  <div className="h-px flex-1 bg-gray-200 dark:bg-gray-800" />
+                  <span className="text-xs font-medium uppercase tracking-wide text-gray-400 dark:text-gray-500">{t("git.import.orTemplate")}</span>
+                  <div className="h-px flex-1 bg-gray-200 dark:bg-gray-800" />
+                </div>
+                <TemplateDeployCards projectId={projectId} envId={envId || null} />
+              </div>
+            </>
           ) : selectedRepo && !repoPickerOpen ? (
             // Compact selected-repo bar.
             <div className="flex items-center justify-between gap-3 rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 px-4 py-3 shadow-sm">

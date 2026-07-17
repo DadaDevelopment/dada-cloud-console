@@ -15,6 +15,7 @@ import { PhaseBadge } from "@/components/ui/phase-badge";
 import { MetricSparkline } from "@/components/metrics/fixed-metrics-dashboard";
 import { EmptyState } from "@/components/ui/empty-state";
 import { DeployChooser } from "@/components/deploy/deploy-chooser";
+import { TemplateDeployCards } from "@/components/console/template-deploy-cards";
 import { useT } from "@/lib/i18n/console/context";
 import { Globe, Database } from "lucide-react";
 import { classifyVMResource, extractIngressSpec, extractDatabaseSpec } from "@/lib/vm-resources";
@@ -397,16 +398,24 @@ function EnvBlock({ env, projectId, apps, infra, canCreate, onCreate, t }: EnvBl
       </div>
 
       {apps.length === 0 ? (
-        <EmptyState
-          title={t("apps.empty.title")}
-          description={env.runtime === "vm" ? t("apps.empty.vm.description") : t("apps.empty.k8s.description")}
-          action={
-            env.runtime === "vm"
-              ? { label: t("apps.empty.vm.action"), href: `/projects/${projectId}/app-servers` }
-              : { label: t("apps.empty.k8s.action"), href: `/projects/${projectId}/git/import?envId=${env.id}` }
-          }
-          secondary={{ label: t("common.learnMore"), href: docsHref("applications-deploy-from-github") }}
-        />
+        <>
+          <EmptyState
+            title={t("apps.empty.title")}
+            description={env.runtime === "vm" ? t("apps.empty.vm.description") : t("apps.empty.k8s.description")}
+            action={
+              env.runtime === "vm"
+                ? { label: t("apps.empty.vm.action"), href: `/projects/${projectId}/app-servers` }
+                : { label: t("apps.empty.k8s.action"), href: `/projects/${projectId}/git/import?envId=${env.id}` }
+            }
+            secondary={{ label: t("common.learnMore"), href: docsHref("applications-deploy-from-github") }}
+          />
+          {env.runtime !== "vm" && (
+            <div className="mt-6">
+              <p className="mb-3 text-center text-sm text-gray-500 dark:text-gray-400">{t("apps.empty.k8s.orTemplate")}</p>
+              <TemplateDeployCards projectId={projectId} envId={env.id} />
+            </div>
+          )}
+        </>
       ) : (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {apps.map((app) => {

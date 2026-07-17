@@ -55,6 +55,7 @@ export const apps: Messages = {
   },
   "apps.empty.k8s.action": { ru: "Деплой из Git", en: "Deploy from Git" },
   "apps.empty.vm.action": { ru: "Открыть App Servers", en: "Open App Servers" },
+  "apps.empty.k8s.orTemplate": { ru: "или разверните готовый шаблон, GitHub не нужен", en: "or deploy a template, no GitHub needed" },
 
   "apps.card.replicas": { ru: "{count} реплик", en: "{count} replicas" },
   "apps.card.synced": { ru: "Синхронизировано {ago}", en: "Synced {ago}" },

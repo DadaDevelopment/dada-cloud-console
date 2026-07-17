@@ -1,15 +1,8 @@
 "use client";
 import { useEffect, useState } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { useParams } from "next/navigation";
 import Link from "next/link";
-import {
-  projectsApi,
-  appsApi,
-  databasesApi,
-  customDomainsApi,
-  gitApi,
-  buildsApi,
-} from "@/lib/api";
+import { projectsApi, appsApi, databasesApi, customDomainsApi } from "@/lib/api";
 import type { Project, Environment } from "@/lib/types";
 import { StateChip } from "@/components/ui/state-chip";
 import { Spinner } from "@/components/ui/spinner";
@@ -18,37 +11,18 @@ import { ResourceIcon } from "@/components/shell/icons";
 import type { IconName } from "@/lib/resources";
 import { useT } from "@/lib/i18n/console/context";
 import { CostCard } from "@/components/cost/cost-card";
+import { TemplateDeployCards } from "@/components/console/template-deploy-cards";
 
 type Counts = { apps: number; appsReady: number; dbs: number; domainsVerified: number; domainsPending: number };
-
-type Template = { key: string; repo_full_name: string; port: number };
-
-const TEMPLATES: Template[] = [
-  { key: "nextjs", repo_full_name: "DadaDevelopment/dada-nextjs-starter", port: 3000 },
-  { key: "fastapi", repo_full_name: "DadaDevelopment/dada-fastapi-starter", port: 8000 },
-  { key: "static", repo_full_name: "DadaDevelopment/dada-static-starter", port: 8080 },
-];
-
-function toKubeName(s: string): string {
-  return s
-    .toLowerCase()
-    .replace(/[^a-z0-9-]+/g, "-")
-    .replace(/-+/g, "-")
-    .replace(/^-|-$/g, "")
-    .slice(0, 63);
-}
 
 export default function ProjectOverviewPage() {
   const params = useParams<{ projectId: string }>();
   const projectId = params.projectId;
   const { t } = useT();
-  const router = useRouter();
 
   const [project, setProject] = useState<Project | null>(null);
   const [counts, setCounts] = useState<Counts | null>(null);
   const [envId, setEnvId] = useState<string | null>(null);
-  const [deployingKey, setDeployingKey] = useState<string | null>(null);
-  const [templateError, setTemplateError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -118,35 +92,6 @@ export default function ProjectOverviewPage() {
   const checklistDone = checklist.filter((i) => i.done).length;
   const checklistComplete = checklistDone === checklist.length;
   const showTemplates = !c || c.apps === 0;
-
-  async function deployTemplate(tpl: Template) {
-    if (!envId || deployingKey) return;
-    setTemplateError(null);
-    setDeployingKey(tpl.key);
-    const appName = toKubeName(`${tpl.key}-${Math.random().toString(36).slice(2, 8)}`);
-    try {
-      try {
-        await gitApi.linkRepo(projectId, envId, {
-          installation_id: "",
-          repo_full_name: tpl.repo_full_name,
-          app_name: appName,
-          production_branch: "main",
-          root_dir: ".",
-          auto_deploy: false,
-          port: tpl.port,
-          profile: "small",
-        });
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : t("overview.templates.error");
-        if (!/409|already/i.test(msg)) throw new Error(msg);
-      }
-      await buildsApi.trigger(projectId, envId, appName);
-      router.push(`/projects/${projectId}/apps/${appName}/deployments?envId=${envId}`);
-    } catch (err) {
-      setTemplateError(err instanceof Error ? err.message : t("overview.templates.error"));
-      setDeployingKey(null);
-    }
-  }
 
   return (
     <div>
@@ -234,30 +179,7 @@ export default function ProjectOverviewPage() {
       )}
 
       {showTemplates && (
-        <div className="mb-8 rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-5 shadow-sm">
-          <div className="mb-1">
-            <h2 className="text-sm font-semibold text-gray-900 dark:text-gray-100">{t("overview.templates.title")}</h2>
-            <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">{t("overview.templates.hint")}</p>
-          </div>
-          {templateError && (
-            <div className="mt-3 rounded-lg border border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-950/40 px-3 py-2 text-sm text-red-700 dark:text-red-300">
-              {templateError}
-            </div>
-          )}
-          <div className="mt-4 grid gap-4 sm:grid-cols-3">
-            {TEMPLATES.map((tpl) => (
-              <TemplateCard
-                key={tpl.key}
-                title={t(`overview.templates.${tpl.key}.title`)}
-                hint={t(`overview.templates.${tpl.key}.hint`)}
-                cta={deployingKey === tpl.key ? t("overview.templates.deploying") : t("overview.templates.cta")}
-                busy={deployingKey === tpl.key}
-                disabled={!!deployingKey || !envId}
-                onClick={() => deployTemplate(tpl)}
-              />
-            ))}
-          </div>
-        </div>
+        <TemplateDeployCards projectId={projectId} envId={envId} className="mb-8" />
       )}
 
       <div className="mb-8 grid gap-4 sm:grid-cols-3">
@@ -337,41 +259,6 @@ function ActionCard({
       >
         {cta}
       </Link>
-    </div>
-  );
-}
-
-function TemplateCard({
-  title,
-  hint,
-  cta,
-  busy,
-  disabled,
-  onClick,
-}: {
-  title: string;
-  hint: string;
-  cta: string;
-  busy: boolean;
-  disabled: boolean;
-  onClick: () => void;
-}) {
-  return (
-    <div className="flex flex-col rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-5 shadow-sm">
-      <div className="mb-4 flex h-10 w-10 items-center justify-center rounded-lg bg-blue-100 dark:bg-blue-950/40 text-blue-600 dark:text-blue-400">
-        <ResourceIcon name="apps" className="h-5 w-5" />
-      </div>
-      <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">{title}</p>
-      <p className="mt-1 flex-1 text-sm text-gray-500 dark:text-gray-400">{hint}</p>
-      <button
-        type="button"
-        onClick={onClick}
-        disabled={disabled}
-        className="mt-4 inline-flex items-center justify-center gap-1.5 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
-      >
-        {busy && <Spinner size="sm" />}
-        {cta}
-      </button>
     </div>
   );
 }
