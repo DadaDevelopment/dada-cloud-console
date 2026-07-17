@@ -103,14 +103,6 @@ type Config struct {
 	// "<bucket>-s3-credentials" from it to reveal object-storage keys on demand.
 	CrossplaneSecretNamespace string // CROSSPLANE_SECRET_NAMESPACE
 
-	// Public endpoint for externally-exposed managed databases (MVP TCP
-	// passthrough of the shared Postgres). When a database opts into external
-	// access (spec.external.enabled) and the composition has not published its own
-	// external endpoint, the reveal handler surfaces this host:port so clients can
-	// connect from outside the cluster. Empty disables the config-derived fallback.
-	ExternalDBHost string // EXTERNAL_DB_HOST
-	ExternalDBPort string // EXTERNAL_DB_PORT (default 5432)
-
 	// Per-database backup/restore via Kanister ActionSets. The console creates
 	// ActionSets referencing the shared blueprint + profile against the managed
 	// Postgres StatefulSet. Scheduling is opt-in (off by default) so deploying the
@@ -339,8 +331,6 @@ func Load() (*Config, error) {
 		NexusUser:                 getEnv("NEXUS_USER", ""),
 		NexusToken:                getEnv("NEXUS_TOKEN", ""),
 		CrossplaneSecretNamespace: getEnv("CROSSPLANE_SECRET_NAMESPACE", "crossplane-system"),
-		ExternalDBHost:            getEnv("EXTERNAL_DB_HOST", ""),
-		ExternalDBPort:            getEnv("EXTERNAL_DB_PORT", "5432"),
 		DBBackupNamespace:         getEnv("DB_BACKUP_NAMESPACE", "databases"),
 		DBBackupStatefulSet:       getEnv("DB_BACKUP_STATEFULSET", "postgresql"),
 		DBBackupProfile:           getEnv("DB_BACKUP_PROFILE", "dada-db-backups"),

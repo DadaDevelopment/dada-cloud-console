@@ -95,15 +95,6 @@ export const databases: Messages = {
     ru: "Публичная точка доступа. Ограничьте доступ и используйте только TLS.",
     en: "Public endpoint. Restrict access and connect over TLS only.",
   },
-  "databases.modal.external.title": { ru: "Публичный доступ", en: "Public access" },
-  "databases.modal.external.subtitle": {
-    ru: "Разрешить подключение к базе данных извне платформы",
-    en: "Allow connecting to the database from outside the platform",
-  },
-  "databases.modal.external.warning": {
-    ru: "База данных станет доступна из интернета. Изоляция обеспечивается логином/паролем и allow-list прокси. Включайте только при необходимости.",
-    en: "The database will be reachable from the internet. Isolation is enforced by login/password and a proxy allow-list. Enable only when needed.",
-  },
   "databases.detail.backups": { ru: "Резервные копии", en: "Backups" },
   "databases.detail.backup.field.status": { ru: "Статус", en: "Status" },
   "databases.detail.backup.enabled": { ru: "Включено", en: "Enabled" },

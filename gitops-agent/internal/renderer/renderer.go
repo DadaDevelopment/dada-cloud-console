@@ -22,7 +22,6 @@ type ServiceDatabaseSpec struct {
 	BackupEnabled   bool
 	BackupSchedule  string
 	BackupRetention string
-	ExternalEnabled bool
 	OperationID     string
 }
 

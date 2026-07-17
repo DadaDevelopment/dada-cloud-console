@@ -112,7 +112,6 @@ func TestRenderServiceDatabase(t *testing.T) {
 		BackupEnabled:   true,
 		BackupSchedule:  "daily",
 		BackupRetention: "14d",
-		ExternalEnabled: true,
 		OperationID:     "op-123",
 	}
 	got, err := renderer.RenderServiceDatabase(spec)

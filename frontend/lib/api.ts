@@ -224,7 +224,6 @@ export const databasesApi = {
   create: (projectId: string, envId: string, data: {
     name: string; database: string; app_ref: string;
     backup_enabled: boolean; backup_schedule: string; backup_retention: string;
-    external_enabled?: boolean;
   }) =>
     apiFetch<CreateDatabaseResponse>(`/api/v1/projects/${projectId}/environments/${envId}/databases`, {
       method: "POST", body: data,

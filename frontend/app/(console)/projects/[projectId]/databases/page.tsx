@@ -22,7 +22,6 @@ interface CreateDbForm {
   backup_enabled: boolean;
   backup_schedule: string;
   backup_retention: string;
-  external_enabled: boolean;
 }
 
 /**
@@ -69,7 +68,6 @@ export default function DatabasesPage() {
     backup_enabled: false,
     backup_schedule: "daily",
     backup_retention: "7d",
-    external_enabled: false,
   }));
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
@@ -113,10 +111,9 @@ export default function DatabasesPage() {
         backup_enabled: form.backup_enabled,
         backup_schedule: form.backup_schedule,
         backup_retention: form.backup_retention,
-        external_enabled: form.external_enabled,
       });
       setIsModalOpen(false);
-      setForm({ ...generateDbNames(), backup_enabled: false, backup_schedule: "daily", backup_retention: "7d", external_enabled: false });
+      setForm({ ...generateDbNames(), backup_enabled: false, backup_schedule: "daily", backup_retention: "7d" });
       setRefreshTick((v) => v + 1);
     } catch (err) {
       setSubmitError(err instanceof Error ? err.message : t("databases.error.create"));
@@ -313,33 +310,6 @@ export default function DatabasesPage() {
                 </select>
               </div>
             </div>
-          )}
-
-          <div className="flex items-center justify-between rounded-lg border border-gray-200 dark:border-gray-800 px-4 py-3">
-            <div>
-              <p className="text-sm font-medium text-gray-700 dark:text-gray-200">{t("databases.modal.external.title")}</p>
-              <p className="text-xs text-gray-400 dark:text-gray-500">{t("databases.modal.external.subtitle")}</p>
-            </div>
-            <button
-              type="button"
-              onClick={() => handleFormChange("external_enabled", !form.external_enabled)}
-              className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 ${
-                form.external_enabled ? "bg-blue-600" : "bg-gray-200 dark:bg-gray-700"
-              }`}
-              role="switch"
-              aria-checked={form.external_enabled}
-            >
-              <span
-                className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${
-                  form.external_enabled ? "translate-x-6" : "translate-x-1"
-                }`}
-              />
-            </button>
-          </div>
-          {form.external_enabled && (
-            <p className="rounded-lg bg-amber-50 dark:bg-amber-950/30 px-3 py-2 text-xs text-amber-700 dark:text-amber-400">
-              {t("databases.modal.external.warning")}
-            </p>
           )}
 
           {submitError && (

@@ -605,7 +605,6 @@ func (w *DBWatcher) doCreateServiceDatabase(ctx context.Context, op db.Operation
 		BackupEnabled   bool   `json:"backup_enabled"`
 		BackupSchedule  string `json:"backup_schedule"`
 		BackupRetention string `json:"backup_retention"`
-		ExternalEnabled bool   `json:"external_enabled"`
 	}
 	if err := json.Unmarshal(op.Payload, &p); err != nil {
 		return fmt.Errorf("parse payload: %w", err)
@@ -630,7 +629,6 @@ func (w *DBWatcher) doCreateServiceDatabase(ctx context.Context, op db.Operation
 		BackupEnabled:   p.BackupEnabled,
 		BackupSchedule:  defaultIfEmpty(p.BackupSchedule, "daily"),
 		BackupRetention: defaultIfEmpty(p.BackupRetention, "14d"),
-		ExternalEnabled: p.ExternalEnabled,
 		OperationID:     op.ID.String(),
 	})
 	if err != nil {

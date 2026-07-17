@@ -10798,9 +10798,6 @@ const docTemplate = `{
                 "database": {
                     "type": "string"
                 },
-                "external_enabled": {
-                    "type": "boolean"
-                },
                 "name": {
                     "type": "string"
                 }
