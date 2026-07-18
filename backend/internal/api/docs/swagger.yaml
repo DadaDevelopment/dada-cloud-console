@@ -612,6 +612,43 @@ paths:
       summary: List audit events (platform-admin only)
       tags:
       - admin
+  /admin/costs:
+    get:
+      description: 'Returns a client -> project -> resource cost tree: OpenCost proportions
+        scaled to the real hardware bill (cost), our own consumption-pricing formula
+        applied to the same usage (revenue), and their difference (margin). Platform-admin
+        only (/platform-admins group); every other caller gets 403.'
+      operationId: getAdminCosts
+      parameters:
+      - description: 'Window length in days: 7 or 30 (default 30)'
+        in: query
+        name: days
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Platform cost/revenue/margin drilldown (platform-admin only)
+      tags:
+      - admin
   /admin/operations:
     get:
       description: Returns operations in the WaitingForApproval state across all projects

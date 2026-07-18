@@ -780,6 +780,56 @@ export interface AdminOverviewResponse {
   dynamics_days: number;
 }
 
+export interface AdminCostResource {
+  name: string;
+  kind: string;
+  cpu_cost: number;
+  ram_cost: number;
+  pv_cost: number;
+  total_cost: number;
+}
+
+export interface AdminCostProject {
+  project_id: string;
+  project_name: string;
+  cost: number;
+  revenue: number;
+  margin: number;
+  resources: AdminCostResource[];
+}
+
+export interface AdminCostClient {
+  client_id: string;
+  client_name: string;
+  cost: number;
+  revenue: number;
+  margin: number;
+  projects: AdminCostProject[];
+}
+
+export interface AdminCostLossMaker {
+  client_name: string;
+  margin: number;
+}
+
+export interface AdminCostsResponse {
+  available: boolean;
+  note?: string;
+  days: number;
+  window: string;
+  currency: string;
+  hardware_source?: string;
+  hardware_total_cost?: number;
+  opencost_raw_total?: number;
+  scale_factor?: number;
+  total_cost?: number;
+  total_revenue?: number;
+  total_margin?: number;
+  unallocated?: AdminCostResource;
+  top_loss_makers?: AdminCostLossMaker[];
+  clients?: AdminCostClient[];
+}
+
 // Vercel-flow — Git / Build / Deploy / Env / Domain types --------------------
 
 export type BuildStatus =

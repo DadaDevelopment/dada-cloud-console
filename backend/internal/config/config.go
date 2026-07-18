@@ -149,6 +149,16 @@ type Config struct {
 	BillingMargin         float64 // BILLING_MARGIN
 	BillingMinUtilization float64 // BILLING_MIN_UTILIZATION
 
+	// HardwareMonthlyCostRUB is the real monthly hosting bill (all Beget nodes
+	// backing the cluster), used by the god-admin cost drilldown as the ground
+	// truth total that OpenCost's per-namespace proportions get scaled onto —
+	// OpenCost's own custom pricing is a modeled unit-cost table, not an actual
+	// invoice. Zero (default) means no real total is configured: the drilldown
+	// falls back to OpenCost's raw totals (scale factor 1) and flags the
+	// response accordingly. No Beget billing API integration exists yet (see
+	// admin_costs.go); operators fill this in manually until one is built.
+	HardwareMonthlyCostRUB float64 // HARDWARE_MONTHLY_COST_RUB
+
 	// User-telemetry read store (multi-tenant Grafana Mimir). The monitoring
 	// product (user-pushed metrics) reads from here with a per-tenant
 	// X-Scope-OrgID header; infra/container/db metrics keep reading the plain
@@ -368,6 +378,7 @@ func Load() (*Config, error) {
 		CacheCostTTL:              time.Duration(getEnvInt64("CACHE_COST_TTL_SECONDS", 300)) * time.Second,
 		BillingMargin:             getEnvFloat("BILLING_MARGIN", 1.4),
 		BillingMinUtilization:     getEnvFloat("BILLING_MIN_UTILIZATION", 0.30),
+		HardwareMonthlyCostRUB:    getEnvFloat("HARDWARE_MONTHLY_COST_RUB", 0),
 		UserMetricsQueryURL:       getEnv("USER_METRICS_QUERY_URL", ""),
 		UserMetricsQueryUser:      getEnv("USER_METRICS_QUERY_USER", ""),
 		UserMetricsQueryPass:      getEnv("USER_METRICS_QUERY_PASS", ""),

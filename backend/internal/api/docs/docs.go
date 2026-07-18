@@ -86,6 +86,59 @@ const docTemplate = `{
                 }
             }
         },
+        "/admin/costs": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Returns a client -\u003e project -\u003e resource cost tree: OpenCost proportions scaled to the real hardware bill (cost), our own consumption-pricing formula applied to the same usage (revenue), and their difference (margin). Platform-admin only (/platform-admins group); every other caller gets 403.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin"
+                ],
+                "summary": "Platform cost/revenue/margin drilldown (platform-admin only)",
+                "operationId": "getAdminCosts",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Window length in days: 7 or 30 (default 30)",
+                        "name": "days",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/admin/operations": {
             "get": {
                 "security": [

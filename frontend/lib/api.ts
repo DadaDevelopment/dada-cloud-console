@@ -48,6 +48,7 @@ import type {
   PendingApprovalsResponse,
   AuditEventsResponse,
   AdminOverviewResponse,
+  AdminCostsResponse,
   AppState,
   AppServerState,
   ImportRequest,
@@ -700,6 +701,8 @@ export const adminApi = {
   },
   getOverview: (days = 14) =>
     apiFetch<AdminOverviewResponse>(`/api/v1/admin/overview?days=${days}`),
+  getCosts: (days: 7 | 30 = 30) =>
+    apiFetch<AdminCostsResponse>(`/api/v1/admin/costs?days=${days}`),
 };
 
 // Vercel-flow API clients -------------------------------------------------------
