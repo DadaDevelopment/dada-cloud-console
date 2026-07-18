@@ -177,6 +177,38 @@ func (h *Handler) seedEnvVar(ctx context.Context, envID uuid.UUID, appName, key,
 	return err
 }
 
+// seedOptimisticDatabaseSnapshot writes a Pending ServiceDatabaseV2 snapshot row inside the
+// create transaction, so a newly ordered database is visible in every read surface (overview
+// badge, list page, MCP) the instant the API returns 202 -- before the gitops worker claims the
+// operation, pushes to git and seeds the row itself. The worker's later UpsertSnapshot and the
+// status reconciler advance this same row in place to its live phase; DBWatcher.poll deletes it
+// if the create operation fails. Callers therefore only ever observe closed, valid states.
+func seedOptimisticDatabaseSnapshot(ctx context.Context, tx pgx.Tx, projectID, envID uuid.UUID, name, database, appRef string) error {
+	summary, err := json.Marshal(map[string]any{
+		"name":        name,
+		"kind":        "ServiceDatabaseV2",
+		"app_ref":     appRef,
+		"database":    database,
+		"status":      "Pending",
+		"live_source": "create-optimistic",
+		"spec": map[string]any{
+			"appRef":   appRef,
+			"database": database,
+		},
+	})
+	if err != nil {
+		return err
+	}
+	_, err = tx.Exec(ctx,
+		`INSERT INTO resource_snapshots
+			(project_id, environment_id, kind, name, phase, summary_json, last_synced_at)
+		 VALUES ($1, $2, 'ServiceDatabaseV2', $3, 'Pending', $4, now())
+		 ON CONFLICT (project_id, environment_id, kind, name) DO NOTHING`,
+		projectID, envID, name, summary,
+	)
+	return err
+}
+
 // CreateServiceDatabase enqueues an operation to provision a new ServiceDatabase CRD.
 //
 // @ID          createDatabase
@@ -331,9 +363,15 @@ func (h *Handler) CreateServiceDatabase(c *gin.Context) {
 		return
 	}
 
-	// Insert Operation
+	tx, err := h.pool.Begin(c.Request.Context())
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, "failed to create operation")
+		return
+	}
+	defer func() { _ = tx.Rollback(c.Request.Context()) }()
+
 	var op models.Operation
-	row := h.pool.QueryRow(c.Request.Context(),
+	row := tx.QueryRow(c.Request.Context(),
 		`INSERT INTO operations (actor_id, project_id, environment_id, action, resource_kind, resource_name, status, payload)
 		 VALUES ($1, $2, $3, 'CreateServiceDatabase', 'ServiceDatabaseV2', $4, 'Created', $5)
 		 RETURNING id, actor_id, project_id, environment_id, action, resource_kind, resource_name,
@@ -342,6 +380,16 @@ func (h *Handler) CreateServiceDatabase(c *gin.Context) {
 		claims.UserID, projectID, envID, req.Name, payloadBytes,
 	)
 	if err = scanOperation(row, &op); err != nil {
+		respondError(c, http.StatusInternalServerError, "failed to create operation")
+		return
+	}
+
+	if err = seedOptimisticDatabaseSnapshot(c.Request.Context(), tx, projectID, envID, req.Name, req.Database, req.AppRef); err != nil {
+		respondError(c, http.StatusInternalServerError, "failed to create operation")
+		return
+	}
+
+	if err = tx.Commit(c.Request.Context()); err != nil {
 		respondError(c, http.StatusInternalServerError, "failed to create operation")
 		return
 	}

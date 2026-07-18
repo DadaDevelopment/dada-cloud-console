@@ -95,6 +95,22 @@ export default function DatabasesPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId, selectedEnvId, isLoadingEnvs, environments.length, refreshTick]);
 
+  useEffect(() => {
+    if (!selectedEnvId) return;
+    const settling = databases.some((d) => {
+      const p = (d.phase ?? "").toLowerCase();
+      return p !== "ready" && p !== "failed";
+    });
+    if (!settling) return;
+    const id = setTimeout(() => {
+      databasesApi
+        .list(projectId, selectedEnvId)
+        .then((data) => setDatabases(data.databases ?? []))
+        .catch(() => undefined);
+    }, 4000);
+    return () => clearTimeout(id);
+  }, [databases, projectId, selectedEnvId]);
+
   function handleFormChange(field: keyof CreateDbForm, value: string | boolean) {
     setForm((prev) => ({ ...prev, [field]: value }));
   }

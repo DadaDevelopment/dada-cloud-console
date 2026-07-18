@@ -219,7 +219,21 @@ func (w *DBWatcher) poll(ctx context.Context) {
 		if err := w.dispatch(ctx, op); err != nil {
 			log.Error().Err(err).Str("op", op.ID.String()).Str("action", op.Action).Msg("operation failed")
 			_ = db.MarkFailed(ctx, w.pool, op.ID, "PROCESSING_ERROR", err.Error())
+			w.cleanupFailedOptimisticSnapshot(ctx, op)
 		}
+	}
+}
+
+// cleanupFailedOptimisticSnapshot removes the Pending snapshot row the API seeds at
+// create time when the operation later fails terminally: a database that never
+// provisioned must disappear from the console instead of lingering as Pending, so
+// readers only ever move between valid states. No-op for any other action.
+func (w *DBWatcher) cleanupFailedOptimisticSnapshot(ctx context.Context, op db.Operation) {
+	if op.Action != "CreateServiceDatabase" {
+		return
+	}
+	if _, err := db.DeleteSnapshot(ctx, w.pool, op.ProjectID, op.EnvironmentID, "ServiceDatabaseV2", op.ResourceName); err != nil {
+		log.Error().Err(err).Str("op", op.ID.String()).Msg("cleanup optimistic snapshot")
 	}
 }
 
