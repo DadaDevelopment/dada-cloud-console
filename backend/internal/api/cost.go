@@ -211,6 +211,7 @@ func (h *Handler) StartCostCacheWarmer(ctx context.Context, interval time.Durati
 			cache.Store(ctx, h.cache, "cost:admin:pod:"+w, h.cfg.CacheCostTTL, podAllocs)
 		}
 		h.warmBillingSnapshot(ctx, warmClient)
+		h.warmProjectConsumptions(ctx)
 	}
 	go func() {
 		warm()

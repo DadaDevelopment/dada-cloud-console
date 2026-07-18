@@ -397,6 +397,76 @@ func datnameFromSummary(summaryJSON []byte) string {
 	return datname
 }
 
+// projectConsumptionCacheTTL bounds how long a project's no-usage consumption
+// total is reused before recompute. Shares billingSnapshotTTL's class: the
+// figure only moves as fast as the underlying OpenCost snapshot it is priced
+// from, so a shorter TTL would just recompute the same number.
+const projectConsumptionCacheTTL = billingSnapshotTTL
+
+// projectConsumptionCacheKey is the cache-aside key for one project's
+// no-usage consumption total (the variant summed by GetAccountSummary and
+// pre-populated by the background warmer).
+func projectConsumptionCacheKey(projectID uuid.UUID) string {
+	return "billing:consumption:" + projectID.String()
+}
+
+// projectConsumptionCached serves the no-usage consumption total for one
+// project from the cache-aside layer, falling through to
+// computeProjectConsumption on a miss. GetAccountSummary calls this instead
+// of computeProjectConsumption directly so a god caller summing every project
+// on the platform reads N warm cache hits instead of recomputing N times per
+// request; the background warmer (warmProjectConsumptions) keeps every
+// project's entry populated so misses are rare.
+func (h *Handler) projectConsumptionCached(ctx context.Context, projectID uuid.UUID) (projectConsumption, error) {
+	return cache.Fetch(ctx, h.cache, projectConsumptionCacheKey(projectID), projectConsumptionCacheTTL,
+		func() (projectConsumption, error) { return h.computeProjectConsumption(ctx, projectID, false) })
+}
+
+// warmProjectConsumptions proactively recomputes and stores the no-usage
+// consumption total for every project on the platform, called from the
+// background cost-cache warmer (cost.go). It reads exclusively from data the
+// warmer has already made warm (billingSnapshot, dbSizesByDatname), so this
+// is cheap in-memory/DB work with no live OpenCost calls of its own. A
+// per-project deadline keeps one slow project from starving the rest.
+func (h *Handler) warmProjectConsumptions(ctx context.Context) {
+	ids, err := h.allProjectIDs(ctx)
+	if err != nil {
+		log.Warn().Err(err).Msg("cost warmer: list projects for consumption warm failed")
+		return
+	}
+	for _, pid := range ids {
+		pctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		pc, err := h.computeProjectConsumption(pctx, pid, false)
+		cancel()
+		if err != nil {
+			log.Warn().Err(err).Str("project", pid.String()).Msg("cost warmer: project consumption warm failed")
+			continue
+		}
+		cache.Store(ctx, h.cache, projectConsumptionCacheKey(pid), projectConsumptionCacheTTL, pc)
+	}
+}
+
+// allProjectIDs returns every project UUID on the platform, for the
+// background warmer to iterate (unlike readableProjectIDs, no caller scoping:
+// the warmer pre-populates the shared cache every request reads from,
+// regardless of which caller ends up summing which subset).
+func (h *Handler) allProjectIDs(ctx context.Context) ([]uuid.UUID, error) {
+	rows, err := h.pool.Query(ctx, `SELECT id FROM projects`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var ids []uuid.UUID
+	for rows.Next() {
+		var id uuid.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
+}
+
 // dbSizesByDatname returns the live pg_database_size_bytes keyed by datname.
 // Best-effort: returns an empty map when Prometheus is unset or the query fails.
 func (h *Handler) dbSizesByDatname(ctx context.Context) map[string]float64 {
@@ -525,7 +595,7 @@ func (h *Handler) GetAccountSummary(c *gin.Context) {
 			log.Warn().Int("total_projects", len(projectIDs)).Msg("billing account summary: budget exceeded, spend is partial")
 			break
 		}
-		pc, err := h.computeProjectConsumption(budgetCtx, pid, false)
+		pc, err := h.projectConsumptionCached(budgetCtx, pid)
 		if err != nil {
 			log.Warn().Err(err).Str("project", pid.String()).Msg("billing account summary: project consumption failed")
 			continue
