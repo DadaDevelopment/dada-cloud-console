@@ -177,34 +177,33 @@ func (h *Handler) seedEnvVar(ctx context.Context, envID uuid.UUID, appName, key,
 	return err
 }
 
-// seedOptimisticDatabaseSnapshot writes a Pending ServiceDatabaseV2 snapshot row inside the
-// create transaction, so a newly ordered database is visible in every read surface (overview
-// badge, list page, MCP) the instant the API returns 202 -- before the gitops worker claims the
-// operation, pushes to git and seeds the row itself. The worker's later UpsertSnapshot and the
-// status reconciler advance this same row in place to its live phase; DBWatcher.poll deletes it
-// if the create operation fails. Callers therefore only ever observe closed, valid states.
-func seedOptimisticDatabaseSnapshot(ctx context.Context, tx pgx.Tx, projectID, envID uuid.UUID, name, database, appRef string) error {
-	summary, err := json.Marshal(map[string]any{
-		"name":        name,
-		"kind":        "ServiceDatabaseV2",
-		"app_ref":     appRef,
-		"database":    database,
-		"status":      "Pending",
-		"live_source": "create-optimistic",
-		"spec": map[string]any{
-			"appRef":   appRef,
-			"database": database,
-		},
-	})
+// seedOptimisticSnapshot writes a Pending resource_snapshots row inside a create transaction, so
+// a newly ordered resource (database, app, endpoint, bucket, model) is visible in every read
+// surface (overview badge, list page, MCP) the instant the API returns 202 -- before the gitops
+// worker claims the operation, pushes to git and seeds the row itself. The worker's later
+// UpsertSnapshot and the status reconciler advance this same row in place to its live phase;
+// DBWatcher.cleanupFailedOptimisticSnapshot deletes it if the create operation fails. Callers
+// therefore only ever observe closed, valid states. live_source=create-optimistic is stamped so
+// the row is identifiable; ON CONFLICT DO NOTHING keeps it idempotent and never clobbers a
+// concurrent worker write.
+func seedOptimisticSnapshot(ctx context.Context, tx pgx.Tx, projectID, envID uuid.UUID, kind, name string, summary map[string]any) error {
+	if summary == nil {
+		summary = map[string]any{}
+	}
+	summary["live_source"] = "create-optimistic"
+	if _, ok := summary["status"]; !ok {
+		summary["status"] = "Pending"
+	}
+	raw, err := json.Marshal(summary)
 	if err != nil {
 		return err
 	}
 	_, err = tx.Exec(ctx,
 		`INSERT INTO resource_snapshots
 			(project_id, environment_id, kind, name, phase, summary_json, last_synced_at)
-		 VALUES ($1, $2, 'ServiceDatabaseV2', $3, 'Pending', $4, now())
+		 VALUES ($1, $2, $3, $4, 'Pending', $5, now())
 		 ON CONFLICT (project_id, environment_id, kind, name) DO NOTHING`,
-		projectID, envID, name, summary,
+		projectID, envID, kind, name, raw,
 	)
 	return err
 }
@@ -384,7 +383,16 @@ func (h *Handler) CreateServiceDatabase(c *gin.Context) {
 		return
 	}
 
-	if err = seedOptimisticDatabaseSnapshot(c.Request.Context(), tx, projectID, envID, req.Name, req.Database, req.AppRef); err != nil {
+	if err = seedOptimisticSnapshot(c.Request.Context(), tx, projectID, envID, "ServiceDatabaseV2", req.Name, map[string]any{
+		"name":     req.Name,
+		"kind":     "ServiceDatabaseV2",
+		"app_ref":  req.AppRef,
+		"database": req.Database,
+		"spec": map[string]any{
+			"appRef":   req.AppRef,
+			"database": req.Database,
+		},
+	}); err != nil {
 		respondError(c, http.StatusInternalServerError, "failed to create operation")
 		return
 	}

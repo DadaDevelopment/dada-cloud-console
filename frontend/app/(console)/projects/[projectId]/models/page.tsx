@@ -17,6 +17,7 @@ import { Spinner } from "@/components/ui/spinner";
 import { Breadcrumb } from "@/components/ui/breadcrumb";
 import { useProjectContext } from "@/lib/project-context";
 import { canMutate } from "@/lib/rbac";
+import { isSettling } from "@/lib/phase";
 import { timeAgo } from "@/lib/format";
 import { PhaseBadge } from "@/components/ui/phase-badge";
 import { useT } from "@/lib/i18n/console/context";
@@ -69,7 +70,7 @@ export default function ModelsPage() {
   const search = useSearchParams();
   const { t } = useT();
 
-  const { project, selectedEnv, role, loading: isLoadingEnvs } = useProjectContext();
+  const { project, selectedEnv, role, environments, loading: isLoadingEnvs } = useProjectContext();
   const selectedEnvId = selectedEnv?.id ?? "";
   const [models, setModels] = useState<ResourceSnapshot[]>([]);
   const [quotas, setQuotas] = useState<QuotaUsageResponse | null>(null);
@@ -102,7 +103,7 @@ export default function ModelsPage() {
   useEffect(() => {
     /* eslint-disable react-hooks/set-state-in-effect */
     if (!selectedEnvId) {
-      if (!isLoadingEnvs) setIsLoadingModels(false);
+      if (!isLoadingEnvs && environments.length === 0) setIsLoadingModels(false);
       return;
     }
     setIsLoadingModels(true);
@@ -114,7 +115,19 @@ export default function ModelsPage() {
       .catch((err) => setError(err instanceof Error ? err.message : t("models.error.load")))
       .finally(() => setIsLoadingModels(false));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [projectId, selectedEnvId, isLoadingEnvs]);
+  }, [projectId, selectedEnvId, isLoadingEnvs, environments.length]);
+
+  useEffect(() => {
+    if (!selectedEnvId) return;
+    if (!isSettling(models)) return;
+    const id = setTimeout(() => {
+      aiModelsApi
+        .list(projectId, selectedEnvId)
+        .then((data) => setModels(data.models ?? []))
+        .catch(() => undefined);
+    }, 4000);
+    return () => clearTimeout(id);
+  }, [models, projectId, selectedEnvId]);
 
   function update<K extends keyof CreateForm>(k: K, v: CreateForm[K]) {
     setForm((prev) => ({ ...prev, [k]: v }));
@@ -161,7 +174,7 @@ export default function ModelsPage() {
   const selectedProfile = PROFILES.find((p) => p.name === form.profile);
   const gpuRequiresApproval = !!selectedProfile?.gpu && (quotas?.quotas?.gpu_model_max ?? 0) === 0;
 
-  if (isLoadingEnvs) {
+  if (isLoadingEnvs || (!selectedEnvId && environments.length > 0)) {
     return <div className="flex h-64 items-center justify-center"><Spinner size="lg" /></div>;
   }
 

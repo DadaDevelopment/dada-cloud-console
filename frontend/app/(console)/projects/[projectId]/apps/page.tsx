@@ -10,6 +10,7 @@ import { Spinner } from "@/components/ui/spinner";
 import { Breadcrumb } from "@/components/ui/breadcrumb";
 import { useProjectContext } from "@/lib/project-context";
 import { canMutate } from "@/lib/rbac";
+import { isSettling } from "@/lib/phase";
 import { timeAgo } from "@/lib/format";
 import { PhaseBadge } from "@/components/ui/phase-badge";
 import { MetricSparkline } from "@/components/metrics/fixed-metrics-dashboard";
@@ -98,6 +99,24 @@ export default function AppsPage() {
     ).then((entries) => setInfraByEnv(Object.fromEntries(entries)));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId, environments, isLoadingEnvs]);
+
+  useEffect(() => {
+    if (environments.length === 0) return;
+    if (!isSettling(Object.values(appsByEnv).flat())) return;
+    const id = setTimeout(() => {
+      Promise.all(
+        environments.map((env) =>
+          appsApi
+            .list(projectId, env.id)
+            .then((d) => [env.id, d.apps ?? []] as const)
+            .catch(() => [env.id, [] as ResourceSnapshot[]] as const)
+        )
+      )
+        .then((entries) => setAppsByEnv(Object.fromEntries(entries)))
+        .catch(() => undefined);
+    }, 4000);
+    return () => clearTimeout(id);
+  }, [appsByEnv, environments, projectId]);
 
   function handleFormChange(field: keyof CreateAppForm, value: string | number) {
     setForm((prev) => ({ ...prev, [field]: value }));

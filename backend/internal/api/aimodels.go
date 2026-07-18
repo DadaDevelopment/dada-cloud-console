@@ -842,8 +842,15 @@ func (h *Handler) insertAIModelOperation(c *gin.Context, actorID, projectID, env
 		respondError(c, http.StatusInternalServerError, "failed to marshal payload")
 		return models.Operation{}, err
 	}
+	tx, err := h.pool.Begin(c.Request.Context())
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, "failed to create operation")
+		return models.Operation{}, err
+	}
+	defer func() { _ = tx.Rollback(c.Request.Context()) }()
+
 	var op models.Operation
-	row := h.pool.QueryRow(c.Request.Context(),
+	row := tx.QueryRow(c.Request.Context(),
 		`INSERT INTO operations (actor_id, project_id, environment_id, action, resource_kind, resource_name, status, payload)
 		 VALUES ($1, $2, $3, $4, 'AIModel', $5, $6, $7)
 		 RETURNING id, actor_id, project_id, environment_id, action, resource_kind, resource_name,
@@ -855,6 +862,19 @@ func (h *Handler) insertAIModelOperation(c *gin.Context, actorID, projectID, env
 		respondError(c, http.StatusInternalServerError, "failed to create operation")
 		return models.Operation{}, err
 	}
+
+	if action == "CreateAIModel" {
+		if err := seedOptimisticSnapshot(c.Request.Context(), tx, projectID, envID, "AIModel", resourceName, nil); err != nil {
+			respondError(c, http.StatusInternalServerError, "failed to create operation")
+			return models.Operation{}, err
+		}
+	}
+
+	if err := tx.Commit(c.Request.Context()); err != nil {
+		respondError(c, http.StatusInternalServerError, "failed to create operation")
+		return models.Operation{}, err
+	}
+
 	auditMeta, _ := json.Marshal(payload)
 	_, _ = h.pool.Exec(c.Request.Context(),
 		`INSERT INTO audit_events (actor_id, project_id, operation_id, action, resource_kind, resource_name, metadata)

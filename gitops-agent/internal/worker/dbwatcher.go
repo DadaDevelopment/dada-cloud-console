@@ -224,15 +224,27 @@ func (w *DBWatcher) poll(ctx context.Context) {
 	}
 }
 
+// optimisticSnapshotKindByAction maps each create action to the resource_snapshots
+// kind the API seeds optimistically at request time, so a create whose operation
+// fails terminally can have that Pending row removed.
+var optimisticSnapshotKindByAction = map[string]string{
+	"CreateServiceDatabase": "ServiceDatabaseV2",
+	"CreateApp":             "App",
+	"CreatePublicApi":       "PublicApi",
+	"CreateS3Bucket":        "S3Bucket",
+	"CreateAIModel":         "AIModel",
+}
+
 // cleanupFailedOptimisticSnapshot removes the Pending snapshot row the API seeds at
-// create time when the operation later fails terminally: a database that never
+// create time when the operation later fails terminally: a resource that never
 // provisioned must disappear from the console instead of lingering as Pending, so
-// readers only ever move between valid states. No-op for any other action.
+// readers only ever move between valid states. No-op for any non-create action.
 func (w *DBWatcher) cleanupFailedOptimisticSnapshot(ctx context.Context, op db.Operation) {
-	if op.Action != "CreateServiceDatabase" {
+	kind, ok := optimisticSnapshotKindByAction[op.Action]
+	if !ok {
 		return
 	}
-	if _, err := db.DeleteSnapshot(ctx, w.pool, op.ProjectID, op.EnvironmentID, "ServiceDatabaseV2", op.ResourceName); err != nil {
+	if _, err := db.DeleteSnapshot(ctx, w.pool, op.ProjectID, op.EnvironmentID, kind, op.ResourceName); err != nil {
 		log.Error().Err(err).Str("op", op.ID.String()).Msg("cleanup optimistic snapshot")
 	}
 }

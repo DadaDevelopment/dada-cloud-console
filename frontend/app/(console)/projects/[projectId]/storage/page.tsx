@@ -10,6 +10,7 @@ import { Spinner } from "@/components/ui/spinner";
 import { Breadcrumb } from "@/components/ui/breadcrumb";
 import { useProjectContext } from "@/lib/project-context";
 import { canMutate } from "@/lib/rbac";
+import { isSettling } from "@/lib/phase";
 import { timeAgo } from "@/lib/format";
 import { PhaseBadge } from "@/components/ui/phase-badge";
 import { ResourceZeroState } from "@/components/ui/resource-zero-state";
@@ -42,7 +43,7 @@ export default function StoragePage() {
   const [refreshTick, setRefreshTick] = useState(0);
   const { t } = useT();
 
-  const { project, selectedEnv, role, loading: isLoadingEnvs } = useProjectContext();
+  const { project, selectedEnv, role, environments, loading: isLoadingEnvs } = useProjectContext();
   const selectedEnvId = selectedEnv?.id ?? "";
   const [buckets, setBuckets] = useState<ResourceSnapshot[]>([]);
   const [isLoadingBuckets, setIsLoadingBuckets] = useState(true);
@@ -56,7 +57,7 @@ export default function StoragePage() {
   useEffect(() => {
     /* eslint-disable react-hooks/set-state-in-effect */
     if (!selectedEnvId) {
-      if (!isLoadingEnvs) setIsLoadingBuckets(false);
+      if (!isLoadingEnvs && environments.length === 0) setIsLoadingBuckets(false);
       return;
     }
     setIsLoadingBuckets(true);
@@ -68,7 +69,19 @@ export default function StoragePage() {
       .catch((err) => setError(err instanceof Error ? err.message : t("storage.error.load")))
       .finally(() => setIsLoadingBuckets(false));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [projectId, selectedEnvId, isLoadingEnvs, refreshTick]);
+  }, [projectId, selectedEnvId, isLoadingEnvs, environments.length, refreshTick]);
+
+  useEffect(() => {
+    if (!selectedEnvId) return;
+    if (!isSettling(buckets)) return;
+    const id = setTimeout(() => {
+      s3bucketsApi
+        .list(projectId, selectedEnvId)
+        .then((data) => setBuckets(data.buckets ?? []))
+        .catch(() => undefined);
+    }, 4000);
+    return () => clearTimeout(id);
+  }, [buckets, projectId, selectedEnvId]);
 
   function handleFormChange(field: keyof CreateBucketForm, value: string | boolean) {
     setForm((prev) => ({ ...prev, [field]: value }));
@@ -100,7 +113,7 @@ export default function StoragePage() {
 
   const canCreate = canMutate(role);
 
-  if (isLoadingEnvs) {
+  if (isLoadingEnvs || (!selectedEnvId && environments.length > 0)) {
     return (
       <div className="flex h-64 items-center justify-center">
         <Spinner size="lg" />

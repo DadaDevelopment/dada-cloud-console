@@ -594,9 +594,15 @@ func (h *Handler) CreateApp(c *gin.Context) {
 		return
 	}
 
-	// Insert Operation
+	tx, err := h.pool.Begin(c.Request.Context())
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, "failed to create operation")
+		return
+	}
+	defer func() { _ = tx.Rollback(c.Request.Context()) }()
+
 	var op models.Operation
-	row := h.pool.QueryRow(c.Request.Context(),
+	row := tx.QueryRow(c.Request.Context(),
 		`INSERT INTO operations (actor_id, project_id, environment_id, action, resource_kind, resource_name, status, payload)
 		 VALUES ($1, $2, $3, 'CreateApp', 'App', $4, 'Created', $5)
 		 RETURNING id, actor_id, project_id, environment_id, action, resource_kind, resource_name,
@@ -605,6 +611,20 @@ func (h *Handler) CreateApp(c *gin.Context) {
 		claims.UserID, projectID, envID, req.Name, payloadBytes,
 	)
 	if err = scanOperation(row, &op); err != nil {
+		respondError(c, http.StatusInternalServerError, "failed to create operation")
+		return
+	}
+
+	if err = seedOptimisticSnapshot(c.Request.Context(), tx, projectID, envID, "App", req.Name, map[string]any{
+		"profile":  req.Profile,
+		"replicas": req.Replicas,
+		"port":     req.Port,
+	}); err != nil {
+		respondError(c, http.StatusInternalServerError, "failed to create operation")
+		return
+	}
+
+	if err = tx.Commit(c.Request.Context()); err != nil {
 		respondError(c, http.StatusInternalServerError, "failed to create operation")
 		return
 	}

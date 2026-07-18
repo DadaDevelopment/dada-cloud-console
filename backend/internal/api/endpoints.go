@@ -230,8 +230,15 @@ func (h *Handler) CreateEndpoint(c *gin.Context) {
 		return
 	}
 
+	tx, err := h.pool.Begin(c.Request.Context())
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, "failed to create operation")
+		return
+	}
+	defer func() { _ = tx.Rollback(c.Request.Context()) }()
+
 	var op models.Operation
-	err = scanOperation(h.pool.QueryRow(c.Request.Context(),
+	err = scanOperation(tx.QueryRow(c.Request.Context(),
 		`INSERT INTO operations (actor_id, project_id, environment_id, action, resource_kind, resource_name, status, payload)
 		 VALUES ($1, $2, $3, 'CreatePublicApi', 'PublicApi', $4, 'Created', $5)
 		 RETURNING id, actor_id, project_id, environment_id, action, resource_kind, resource_name,
@@ -240,6 +247,16 @@ func (h *Handler) CreateEndpoint(c *gin.Context) {
 		claims.UserID, projectID, envID, publicApiName, payloadBytes,
 	), &op)
 	if err != nil {
+		respondError(c, http.StatusInternalServerError, "failed to create operation")
+		return
+	}
+
+	if err = seedOptimisticSnapshot(c.Request.Context(), tx, projectID, envID, "PublicApi", publicApiName, nil); err != nil {
+		respondError(c, http.StatusInternalServerError, "failed to create operation")
+		return
+	}
+
+	if err = tx.Commit(c.Request.Context()); err != nil {
 		respondError(c, http.StatusInternalServerError, "failed to create operation")
 		return
 	}

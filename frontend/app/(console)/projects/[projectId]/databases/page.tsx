@@ -15,6 +15,7 @@ import { PhaseBadge } from "@/components/ui/phase-badge";
 import { ResourceZeroState } from "@/components/ui/resource-zero-state";
 import { Database } from "lucide-react";
 import { useT } from "@/lib/i18n/console/context";
+import { isSettling } from "@/lib/phase";
 
 interface CreateDbForm {
   name: string;
@@ -97,11 +98,7 @@ export default function DatabasesPage() {
 
   useEffect(() => {
     if (!selectedEnvId) return;
-    const settling = databases.some((d) => {
-      const p = (d.phase ?? "").toLowerCase();
-      return p !== "ready" && p !== "failed";
-    });
-    if (!settling) return;
+    if (!isSettling(databases)) return;
     const id = setTimeout(() => {
       databasesApi
         .list(projectId, selectedEnvId)
