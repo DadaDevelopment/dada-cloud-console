@@ -371,7 +371,9 @@ export const appsApi = {
 /** CI deploy tokens ("deploy hooks") — lets an external CI push a new image without console access. */
 export const deployHooksApi = {
   list: (projectId: string, envId: string, appName: string) =>
-    apiFetch<DeployHook[]>(`/api/v1/projects/${projectId}/environments/${envId}/apps/${appName}/deploy-hooks`),
+    apiFetch<{ deploy_hooks: DeployHook[] } | DeployHook[]>(
+      `/api/v1/projects/${projectId}/environments/${envId}/apps/${appName}/deploy-hooks`
+    ).then((r) => (Array.isArray(r) ? r : r?.deploy_hooks ?? [])),
 
   create: (projectId: string, envId: string, appName: string, name?: string) =>
     apiFetch<DeployHookCreated>(
