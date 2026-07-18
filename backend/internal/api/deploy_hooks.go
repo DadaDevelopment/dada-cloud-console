@@ -260,6 +260,7 @@ func (h *Handler) CreateDeployHook(c *gin.Context) {
 		 VALUES ($1, $2, 'CreateDeployHook', 'App', $3, $4)`,
 		claims.UserID, projectID, appName, auditMeta,
 	)
+	h.notifyDeployHook(projectID, "CreateDeployHook", appName, actorLabelFromClaims(claims))
 
 	baseURL := strings.TrimRight(h.cfg.PublicBaseURL, "/")
 	c.JSON(http.StatusCreated, createDeployHookResponse{
@@ -428,6 +429,7 @@ func (h *Handler) DeleteDeployHook(c *gin.Context) {
 		 VALUES ($1, $2, 'RevokeDeployHook', 'App', $3, $4)`,
 		claims.UserID, projectID, appName, revokeMeta,
 	)
+	h.notifyDeployHook(projectID, "RevokeDeployHook", appName, actorLabelFromClaims(claims))
 
 	c.Status(http.StatusNoContent)
 }
@@ -526,6 +528,7 @@ func (h *Handler) DeployTrigger(c *gin.Context) {
 		 VALUES ($1, $2, $3, 'DeployImageVersion', 'App', $4, $5)`,
 		actorID, hook.ProjectID, op.ID, hook.AppName, auditMeta,
 	)
+	h.notifyDeployHook(hook.ProjectID, "DeployImageVersion", hook.AppName, "CI (deploy-hook)")
 
 	_, _ = h.pool.Exec(c.Request.Context(),
 		`UPDATE app_deploy_hooks SET last_used_at = now() WHERE id = $1`, hook.ID,

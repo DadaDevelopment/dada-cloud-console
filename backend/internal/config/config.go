@@ -261,6 +261,14 @@ type Config struct {
 
 	AuditNotifyEmail string // AUDIT_NOTIFY_EMAIL
 
+	// DeployHookNotifyEmail receives one email per deploy-hook create/revoke/
+	// trigger event, in addition to the audit_events row already written.
+	// Empty in this struct means "resolve to SMTPFrom at handler-init" (the
+	// caller does that, since SMTPFrom is what actually sends the mail) — so
+	// the out-of-the-box behaviour is development@ notifying itself, with no
+	// new prod secret required.
+	DeployHookNotifyEmail string // DEPLOY_HOOK_NOTIFY_EMAIL
+
 	// Embedded MCP server. Served at /mcp (Streamable HTTP transport).
 	// MCPEnabled defaults to true. Set MCP_ENABLED=false to disable.
 	// MCPSelfURL is the loopback URL the MCP proxy uses to call backend
@@ -396,6 +404,7 @@ func Load() (*Config, error) {
 		SMTPFrom:                  getEnv("SMTP_FROM", ""),
 		SignupNotifyEmail:         getEnv("SIGNUP_NOTIFY_EMAIL", "alexkekiy@icloud.com"),
 		AuditNotifyEmail:          getEnv("AUDIT_NOTIFY_EMAIL", "alexkekiy@icloud.com"),
+		DeployHookNotifyEmail:     getEnv("DEPLOY_HOOK_NOTIFY_EMAIL", ""),
 		MCPEnabled:                getEnv("MCP_ENABLED", "true") == "true",
 		MCPSelfURL:                getEnv("MCP_SELF_URL", ""),
 		MCPOverridesPath:          getEnv("MCP_OVERRIDES_PATH", "overrides.yaml"),

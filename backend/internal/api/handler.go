@@ -104,9 +104,10 @@ type Handler struct {
 
 	pdns *pdns.Client
 
-	auditNotifier    *notify.Notifier
-	auditNotifyEmail string
-	auditRateLimiter auditNotifyLimiter
+	auditNotifier         *notify.Notifier
+	auditNotifyEmail      string
+	auditRateLimiter      auditNotifyLimiter
+	deployHookNotifyEmail string
 }
 
 // NewHandler constructs a Handler with the given dependencies.
@@ -183,6 +184,10 @@ func NewHandler(pool *pgxpool.Pool, cfg *config.Config) *Handler {
 	h.pdns = pdns.NewClient(cfg.PowerDNSAPIURL, cfg.PowerDNSAPIKey, 15*time.Second)
 	h.auditNotifier = notify.New(cfg.SMTPHost, cfg.SMTPPort, cfg.SMTPUser, cfg.SMTPPass, cfg.SMTPFrom)
 	h.auditNotifyEmail = cfg.AuditNotifyEmail
+	h.deployHookNotifyEmail = cfg.DeployHookNotifyEmail
+	if h.deployHookNotifyEmail == "" {
+		h.deployHookNotifyEmail = cfg.SMTPFrom
+	}
 	h.counters = cloudtask.NewCounterResolver()
 	h.s3creds = cloudtask.NewS3CredentialsResolver(cfg.CrossplaneSecretNamespace)
 	h.dbcreds = cloudtask.NewDBCredentialsResolver()

@@ -107,3 +107,56 @@ func (h *Handler) notifyAuditEvent(claims *auth.Claims, projectID uuid.UUID, act
 		}
 	}()
 }
+
+// notifyDeployHook fires the deploy-hook lane email (separate recipient from
+// notifyAuditEvent's owner lane, typically the same ops mailbox as SMTPFrom)
+// for a deploy-hook create/revoke/trigger event. Unlike notifyAuditEvent this
+// has no JWT claims to gate on: the DeployTrigger caller is CI authenticated
+// by the deploy-hook token itself, so actorLabel is a caller-supplied string
+// (an email, a username, or "CI (deploy-hook)") rather than something read
+// off auth.Claims. Every failure is logged and swallowed — mail must never
+// affect the deploy.
+func (h *Handler) notifyDeployHook(projectID uuid.UUID, action, appName, actorLabel string) {
+	if h.auditNotifier == nil || h.deployHookNotifyEmail == "" {
+		return
+	}
+	if !h.auditRateLimiter.allow() {
+		log.Printf("deploy-hook notify: rate limit exceeded (%d/%s), dropping email for action=%s app=%s", auditNotifyBurst, auditNotifyWindow, action, appName)
+		return
+	}
+
+	createdAtUTC := time.Now().UTC().Format(time.RFC3339)
+	pool := h.pool
+	notifier := h.auditNotifier
+	to := h.deployHookNotifyEmail
+
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+
+		projectName := projectID.String()
+		var name string
+		if err := pool.QueryRow(ctx, "SELECT name FROM projects WHERE id = $1", projectID).Scan(&name); err == nil && name != "" {
+			projectName = name
+		}
+
+		subject, body := notify.ComposeAudit(action, actorLabel, appName, projectName, createdAtUTC)
+		if err := notifier.Send(to, subject, body); err != nil {
+			log.Printf("deploy-hook notify: send to %s failed: %v", to, err)
+		}
+	}()
+}
+
+// actorLabelFromClaims picks a human-readable actor label for deploy-hook
+// notifications from a JWT-authenticated caller (CreateDeployHook,
+// DeleteDeployHook), preferring email over username the same way
+// notifyAuditEvent does.
+func actorLabelFromClaims(claims *auth.Claims) string {
+	if claims == nil {
+		return ""
+	}
+	if claims.Email != "" {
+		return claims.Email
+	}
+	return claims.Username
+}
