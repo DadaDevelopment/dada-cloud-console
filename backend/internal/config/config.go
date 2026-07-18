@@ -142,6 +142,14 @@ type Config struct {
 	// aggregates slowly-changing data, so seconds of staleness are fine.
 	CacheCostTTL time.Duration
 
+	// CostWarmTimeout bounds each background cost-cache-warmer OpenCost/Mimir
+	// call (per window, admin pod compute, billing snapshot). It is patient by
+	// design: the warmer runs off the user request path, so it can afford to
+	// wait out a slow/throttled Mimir instead of failing every tick like the
+	// user-facing 20s client must. Raise via COST_WARM_TIMEOUT_SECONDS if
+	// upstream Mimir/OpenCost latency grows past the default.
+	CostWarmTimeout time.Duration
+
 	// CacheMetricsTTL bounds how long an analytics/observability response
 	// (metric panels, resource health) is served from Redis before recompute.
 	// Short by design: the charts tolerate a few seconds of staleness, and the
@@ -405,6 +413,7 @@ func Load() (*Config, error) {
 		OpenCostURL:               getEnv("OPENCOST_URL", ""),
 		RedisAddr:                 getEnv("REDIS_ADDR", ""),
 		CacheCostTTL:              time.Duration(getEnvInt64("CACHE_COST_TTL_SECONDS", 300)) * time.Second,
+		CostWarmTimeout:           time.Duration(getEnvInt64("COST_WARM_TIMEOUT_SECONDS", 240)) * time.Second,
 		CacheMetricsTTL:           time.Duration(getEnvInt64("CACHE_METRICS_TTL_SECONDS", 20)) * time.Second,
 		CacheLogsTTL:              time.Duration(getEnvInt64("CACHE_LOGS_TTL_SECONDS", 10)) * time.Second,
 		BillingMargin:             getEnvFloat("BILLING_MARGIN", 1.4),

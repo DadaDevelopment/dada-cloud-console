@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/dada-tuda/console/backend/internal/cache"
@@ -175,10 +176,16 @@ func (h *Handler) clusterAllocsByWindow(ctx context.Context, window string) (map
 // No-op unless both OpenCost and the Redis cache are configured; interval must be
 // shorter than CacheCostTTL so the entries never expire between refreshes.
 //
-// It uses a dedicated patient OpenCost client (120s) rather than the user-facing
-// one (20s): a cold aggregation while OpenCost's ETL is still warming up can
-// exceed 20s, and the warmer must be able to complete it so the cache gets
+// It uses a dedicated patient OpenCost client (CostWarmTimeout, default 240s)
+// rather than the user-facing one (20s): OpenCost's own allocation/compute call
+// slows down under Mimir CPU throttling (observed 34s at 1d window, >60s at
+// 7d/30d), and the warmer must be able to ride that out so the cache gets
 // populated off the user path. Users keep the 20s fail-fast client.
+//
+// Every window/step below runs SEQUENTIALLY in this one goroutine (a plain for
+// loop, no per-window goroutine fan-out) so slow OpenCost/Mimir windows do not
+// pile parallel load onto an already-throttled upstream and compound each
+// other's latency.
 //
 // The initial warm runs INSIDE the goroutine, never synchronously: a cold or
 // slow OpenCost made a synchronous first warm block boot ~76s across windows,
@@ -188,30 +195,62 @@ func (h *Handler) StartCostCacheWarmer(ctx context.Context, interval time.Durati
 	if h.opencost == nil || !h.cache.Enabled() {
 		return
 	}
-	warmClient := opencost.NewWithTimeout(h.cfg.OpenCostURL, 120*time.Second)
+	warmClient := opencost.NewWithTimeout(h.cfg.OpenCostURL, h.cfg.CostWarmTimeout)
+	var warming atomic.Bool
 	warm := func() {
+		if !warming.CompareAndSwap(false, true) {
+			log.Warn().Msg("cost warmer: previous tick still running, skipping this tick")
+			return
+		}
+		defer warming.Store(false)
+
+		start := time.Now()
+		windowDurations := make(map[string]time.Duration, len(allowedCostWindows)+len(adminCostsWindows))
+		okWindows, failedWindows := 0, 0
+
 		for w := range allowedCostWindows {
-			wctx, cancel := context.WithTimeout(ctx, 120*time.Second)
+			wStart := time.Now()
+			wctx, cancel := context.WithTimeout(ctx, h.cfg.CostWarmTimeout)
 			allocs, err := warmClient.Compute(wctx, w, "namespace", "")
 			cancel()
 			if err != nil {
-				log.Warn().Err(err).Str("window", w).Msg("cost warmer: OpenCost compute failed")
+				failedWindows++
+				log.Warn().Err(err).Str("window", w).Dur("elapsed", time.Since(wStart)).Msg("cost warmer: OpenCost compute failed")
 				continue
 			}
 			cache.Store(ctx, h.cache, "cost:allocs:"+w, h.cfg.CacheCostTTL, allocs)
+			okWindows++
+			windowDurations["allocs:"+w] = time.Since(wStart)
 		}
 		for _, w := range adminCostsWindows {
-			wctx, cancel := context.WithTimeout(ctx, 120*time.Second)
+			wStart := time.Now()
+			wctx, cancel := context.WithTimeout(ctx, h.cfg.CostWarmTimeout)
 			podAllocs, err := warmClient.Compute(wctx, w, "pod", "")
 			cancel()
 			if err != nil {
-				log.Warn().Err(err).Str("window", w).Msg("cost warmer: OpenCost admin pod compute failed")
+				failedWindows++
+				log.Warn().Err(err).Str("window", w).Dur("elapsed", time.Since(wStart)).Msg("cost warmer: OpenCost admin pod compute failed")
 				continue
 			}
 			cache.Store(ctx, h.cache, "cost:admin:pod:"+w, h.cfg.CacheCostTTL, podAllocs)
+			okWindows++
+			windowDurations["admin:pod:"+w] = time.Since(wStart)
 		}
+
+		snapStart := time.Now()
 		h.warmBillingSnapshot(ctx, warmClient)
+		windowDurations["billing:snapshot"] = time.Since(snapStart)
+
+		pcStart := time.Now()
 		h.warmProjectConsumptions(ctx)
+		windowDurations["project:consumptions"] = time.Since(pcStart)
+
+		log.Info().
+			Dur("total", time.Since(start)).
+			Int("ok_windows", okWindows).
+			Int("failed_windows", failedWindows).
+			Interface("durations", windowDurations).
+			Msg("cost warmer: tick complete")
 	}
 	go func() {
 		warm()

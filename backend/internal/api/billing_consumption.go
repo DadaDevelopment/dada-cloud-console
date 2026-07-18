@@ -427,7 +427,9 @@ func (h *Handler) projectConsumptionCached(ctx context.Context, projectID uuid.U
 // background cost-cache warmer (cost.go). It reads exclusively from data the
 // warmer has already made warm (billingSnapshot, dbSizesByDatname), so this
 // is cheap in-memory/DB work with no live OpenCost calls of its own. A
-// per-project deadline keeps one slow project from starving the rest.
+// per-project deadline (generous, this runs off the warmer's own patient
+// budget, not the request path) keeps one stuck project from hanging the
+// whole warm tick indefinitely.
 func (h *Handler) warmProjectConsumptions(ctx context.Context) {
 	ids, err := h.allProjectIDs(ctx)
 	if err != nil {
@@ -435,7 +437,7 @@ func (h *Handler) warmProjectConsumptions(ctx context.Context) {
 		return
 	}
 	for _, pid := range ids {
-		pctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		pctx, cancel := context.WithTimeout(ctx, 60*time.Second)
 		pc, err := h.computeProjectConsumption(pctx, pid, false)
 		cancel()
 		if err != nil {
