@@ -56,7 +56,7 @@ export default function DatabasesPage() {
   const [refreshTick, setRefreshTick] = useState(0);
   const { t } = useT();
 
-  const { project, selectedEnv, role, loading: isLoadingEnvs } = useProjectContext();
+  const { project, selectedEnv, role, environments, loading: isLoadingEnvs } = useProjectContext();
   const selectedEnvId = selectedEnv?.id ?? "";
   const [databases, setDatabases] = useState<ResourceSnapshot[]>([]);
   const [isLoadingDbs, setIsLoadingDbs] = useState(true);
@@ -81,7 +81,7 @@ export default function DatabasesPage() {
   useEffect(() => {
     /* eslint-disable react-hooks/set-state-in-effect */
     if (!selectedEnvId) {
-      if (!isLoadingEnvs) setIsLoadingDbs(false);
+      if (!isLoadingEnvs && environments.length === 0) setIsLoadingDbs(false);
       return;
     }
     setIsLoadingDbs(true);
@@ -93,7 +93,7 @@ export default function DatabasesPage() {
       .catch((err) => setError(err instanceof Error ? err.message : t("databases.error.load")))
       .finally(() => setIsLoadingDbs(false));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [projectId, selectedEnvId, isLoadingEnvs, refreshTick]);
+  }, [projectId, selectedEnvId, isLoadingEnvs, environments.length, refreshTick]);
 
   function handleFormChange(field: keyof CreateDbForm, value: string | boolean) {
     setForm((prev) => ({ ...prev, [field]: value }));
@@ -124,7 +124,7 @@ export default function DatabasesPage() {
 
   const canCreate = canMutate(role);
 
-  if (isLoadingEnvs) {
+  if (isLoadingEnvs || (!selectedEnvId && environments.length > 0)) {
     return (
       <div className="flex h-64 items-center justify-center">
         <Spinner size="lg" />
