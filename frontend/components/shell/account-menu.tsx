@@ -5,12 +5,22 @@ import Link from "next/link";
 import { useAuth } from "@/lib/auth";
 import { useProjectContext } from "@/lib/project-context";
 import { canApprove, roleColors } from "@/lib/rbac";
+import { adminApi } from "@/lib/api";
 import { useT } from "@/lib/i18n/console/context";
 
 /**
  * Top-right account menu. Consolidates identity, the project role badge, global
  * cross-project destinations (AI Studio, Approvals — the latter admin-only) and
  * sign-out, which previously lived as a bare link in the sidebar footer.
+ *
+ * Platform-admin (Overview/Audit) is a SEPARATE dimension from project role:
+ * it is the hidden /platform-admins Keycloak group, not project Owner/Admin,
+ * and those pages 403 anyone else. Deriving visibility from project role (as
+ * Approvals below correctly does — ListAdminApprovals really is scoped to any
+ * project Owner/Admin) previously mis-gated Overview/Audit too and could leave
+ * a real platform-admin with no visible entry point if their project-role
+ * claims didn't happen to read Owner in this session. Probing the actual
+ * admin-gated endpoint once removes that indirection entirely.
  */
 export function AccountMenu() {
   const router = useRouter();
@@ -20,8 +30,20 @@ export function AccountMenu() {
   // Role is project-scoped; outside a project fall back to "admin anywhere"
   // so org admins can still reach global approvals from the projects list.
   const showApprovals = canApprove(role) || projects.some((p) => canApprove(p.role));
+  const [isPlatformAdmin, setIsPlatformAdmin] = useState(false);
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    adminApi
+      .listAuditEvents({ limit: 1 })
+      .then(() => { if (!cancelled) setIsPlatformAdmin(true); })
+      .catch(() => { if (!cancelled) setIsPlatformAdmin(false); });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     if (!open) return;
@@ -80,15 +102,18 @@ export function AccountMenu() {
                 {t("shell.account.approvals")}
               </Link>
             )}
-            {showApprovals && (
-              <Link role="menuitem" href="/admin/audit" onClick={() => setOpen(false)} className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 dark:text-gray-200 dark:hover:bg-gray-800">
-                {t("shell.account.audit")}
-              </Link>
-            )}
-            {showApprovals && (
-              <Link role="menuitem" href="/admin" onClick={() => setOpen(false)} className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 dark:text-gray-200 dark:hover:bg-gray-800">
-                {t("shell.account.overview")}
-              </Link>
+            {isPlatformAdmin && (
+              <>
+                <p className="px-4 pb-1 pt-2 text-xs font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500">
+                  {t("shell.nav.admin")}
+                </p>
+                <Link role="menuitem" href="/admin" onClick={() => setOpen(false)} className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 dark:text-gray-200 dark:hover:bg-gray-800">
+                  {t("shell.account.overview")}
+                </Link>
+                <Link role="menuitem" href="/admin/audit" onClick={() => setOpen(false)} className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 dark:text-gray-200 dark:hover:bg-gray-800">
+                  {t("shell.account.audit")}
+                </Link>
+              </>
             )}
           </div>
           <div className="border-t border-gray-100 py-1 dark:border-gray-800">

@@ -4,6 +4,7 @@ import Link from "next/link";
 import { adminApi } from "@/lib/api";
 import type { AuditEvent } from "@/lib/types";
 import { Breadcrumb } from "@/components/ui/breadcrumb";
+import { AdminTabs } from "@/components/console/admin-tabs";
 import { DataTable, type Column } from "@/components/ui/data-table";
 import { useT } from "@/lib/i18n/console/context";
 
@@ -159,7 +160,7 @@ export default function AuditPage() {
 
   return (
     <div>
-      <div className="mb-8 flex flex-wrap items-start justify-between gap-3">
+      <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
         <div>
           <Breadcrumb
             items={[
@@ -181,6 +182,8 @@ export default function AuditPage() {
           {t("common.refresh")}
         </button>
       </div>
+
+      <AdminTabs active="audit" />
 
       {error && (
         <div className="mb-6 rounded-lg border border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-950/40 px-4 py-3 text-sm text-red-700 dark:text-red-400">{error}</div>

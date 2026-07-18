@@ -1,9 +1,9 @@
 "use client";
 import { useCallback, useEffect, useState } from "react";
-import Link from "next/link";
 import { adminApi } from "@/lib/api";
 import type { AdminOverviewResponse } from "@/lib/types";
 import { Breadcrumb } from "@/components/ui/breadcrumb";
+import { AdminTabs } from "@/components/console/admin-tabs";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { DataTable, type Column } from "@/components/ui/data-table";
 import { StateChip } from "@/components/ui/state-chip";
@@ -141,27 +141,21 @@ export default function AdminOverviewPage() {
 
   return (
     <div>
-      <div className="mb-8 flex flex-wrap items-start justify-between gap-3">
+      <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
         <div>
           {crumb}
           <h1 className="mt-2 text-2xl font-bold text-gray-900 dark:text-gray-100">{t("adminOverview.title")}</h1>
           <p className="mt-0.5 text-sm text-gray-500 dark:text-gray-400">{t("adminOverview.subtitle")}</p>
         </div>
-        <div className="flex items-center gap-2">
-          <Link
-            href="/admin/audit"
-            className="inline-flex items-center gap-2 rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 px-3 py-1.5 text-sm font-medium text-gray-700 dark:text-gray-200 hover:border-blue-300 hover:text-blue-600 transition-colors shadow-sm"
-          >
-            {t("adminOverview.linkAudit")}
-          </Link>
-          <button
-            onClick={() => load()}
-            className="inline-flex items-center gap-2 rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 px-3 py-1.5 text-sm font-medium text-gray-700 dark:text-gray-200 hover:border-blue-300 hover:text-blue-600 transition-colors shadow-sm"
-          >
-            {t("common.refresh")}
-          </button>
-        </div>
+        <button
+          onClick={() => load()}
+          className="inline-flex items-center gap-2 rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 px-3 py-1.5 text-sm font-medium text-gray-700 dark:text-gray-200 hover:border-blue-300 hover:text-blue-600 transition-colors shadow-sm"
+        >
+          {t("common.refresh")}
+        </button>
       </div>
+
+      <AdminTabs active="overview" />
 
       {error && (
         <div className="mb-6 rounded-lg border border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-950/40 px-4 py-3 text-sm text-red-700 dark:text-red-400">{error}</div>
