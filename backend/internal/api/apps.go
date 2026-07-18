@@ -324,22 +324,24 @@ type appVolumeReq struct {
 // defaultVolumeStorageClass is a ReadWriteMany-capable Longhorn class with
 // reclaimPolicy=Retain, so deleting the PVC does not immediately destroy data.
 //
-// It intentionally defaults to a 2-replica class. beget-prod runs three Longhorn
-// nodes with strict replica anti-affinity while chronic disk pressure keeps one
-// node below the schedulable floor at any given moment, so a 3-replica volume can
-// never reliably place its third replica: the Longhorn Volume reports
-// Scheduled=False (ReplicaSchedulingFailure) and refuses to attach, wedging the
-// pod in ContainerCreating for the lifetime of the pressure. A 2-replica volume
-// fits the two schedulable nodes and attaches cleanly. The 3-replica classes stay
-// allowed below so existing volumes can still be resized.
+// It defaults to the 1-replica longhorn-dev class. beget-prod runs three Longhorn
+// nodes with strict node anti-affinity under chronic disk pressure that keeps two
+// or more nodes below the schedulable floor at once, so any multi-replica volume
+// cannot place its extra replicas: the Longhorn Volume reports Scheduled=False
+// (ReplicaSchedulingFailure) and refuses to attach, wedging the pod in
+// ContainerCreating for the lifetime of the pressure. A single replica needs only
+// one schedulable node and attaches cleanly (and halves dev-tier disk use). The
+// tradeoff is no redundancy -- a node rotation/fault loses the volume -- accepted
+// for the dev tier; the 3-replica classes stay allowed below for stateful/prod
+// data and for resizing existing volumes.
 const defaultVolumeStorageClass = "longhorn-dev"
 
 var volumeSizeRe = regexp.MustCompile(`^[1-9][0-9]*(Mi|Gi|Ti)$`)
 
 // allowedVolumeStorageClasses guards against pointing app data at ephemeral
 // (reclaimPolicy=Delete) classes. All entries are Retain on beget-prod.
-// longhorn-dev is the 2-replica default (see defaultVolumeStorageClass); the
-// 3-replica classes remain selectable for back-compat with existing volumes.
+// longhorn-dev is the 1-replica default (see defaultVolumeStorageClass); the
+// 3-replica classes remain selectable for stateful/prod data and existing volumes.
 var allowedVolumeStorageClasses = map[string]bool{
 	"longhorn-dev":           true,
 	"longhorn-prod":          true,
