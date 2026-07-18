@@ -8,8 +8,6 @@ metadata:
     app.kubernetes.io/component: backend
 spec:
   replicas: {{ .Values.backend.replicaCount }}
-  strategy:
-    type: Recreate
   selector:
     matchLabels:
       {{- include "dada-cloud-console.selectorLabels" . | nindent 6 }}
