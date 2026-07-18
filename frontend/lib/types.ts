@@ -812,6 +812,12 @@ export interface AdminCostLossMaker {
   margin: number;
 }
 
+export interface AdminCostHardwareGroup {
+  name: string;
+  node_count: number;
+  price_month_rub: number;
+}
+
 export interface AdminCostsResponse {
   available: boolean;
   note?: string;
@@ -820,6 +826,7 @@ export interface AdminCostsResponse {
   currency: string;
   hardware_source?: string;
   hardware_total_cost?: number;
+  hardware?: AdminCostHardwareGroup[];
   opencost_raw_total?: number;
   scale_factor?: number;
   total_cost?: number;

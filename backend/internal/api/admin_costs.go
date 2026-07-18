@@ -6,8 +6,10 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/dada-tuda/console/backend/internal/auth"
+	"github.com/dada-tuda/console/backend/internal/beget"
 	"github.com/dada-tuda/console/backend/internal/cache"
 	"github.com/dada-tuda/console/backend/internal/opencost"
 	"github.com/gin-gonic/gin"
@@ -48,12 +50,12 @@ type adminCostProject struct {
 }
 
 type adminCostClient struct {
-	ClientID   string              `json:"client_id"`
-	ClientName string              `json:"client_name"`
-	Cost       float64             `json:"cost"`
-	Revenue    float64             `json:"revenue"`
-	Margin     float64             `json:"margin"`
-	Projects   []adminCostProject  `json:"projects"`
+	ClientID   string             `json:"client_id"`
+	ClientName string             `json:"client_name"`
+	Cost       float64            `json:"cost"`
+	Revenue    float64            `json:"revenue"`
+	Margin     float64            `json:"margin"`
+	Projects   []adminCostProject `json:"projects"`
 }
 
 type adminCostLossMaker struct {
@@ -153,9 +155,9 @@ func (h *Handler) GetAdminCosts(c *gin.Context) {
 	revenueByNS := h.adminRevenueByNamespace(ctx)
 
 	rawTotal, unallocatedRaw := adminCostsRawTotal(podAllocs)
-	hardwareTotal, hardwareSource := h.resolveHardwareCost(days)
+	hardwareTotal, hardwareSource, hardwareBreakdown := h.resolveHardwareCost(ctx, days)
 	scale := 1.0
-	if hardwareSource == "beget_manual_config" && rawTotal > 0 {
+	if (hardwareSource == "beget_api" || hardwareSource == "beget_manual_config") && rawTotal > 0 {
 		scale = hardwareTotal / rawTotal
 	} else {
 		hardwareTotal = rawTotal
@@ -225,6 +227,7 @@ func (h *Handler) GetAdminCosts(c *gin.Context) {
 		"currency":            costCurrency,
 		"hardware_source":     hardwareSource,
 		"hardware_total_cost": round2(hardwareTotal),
+		"hardware":            hardwareBreakdown,
 		"opencost_raw_total":  round2(rawTotal),
 		"scale_factor":        round2(scale),
 		"total_cost":          round2(totalCost),
@@ -384,18 +387,71 @@ func adminCostsRawTotal(podAllocs map[string]opencost.Allocation) (namespacedTot
 	return namespacedTotal + unallocatedTotal, unallocatedTotal
 }
 
-// resolveHardwareCost returns the real hardware spend for a `days`-day window
-// and how it was sourced. When HARDWARE_MONTHLY_COST_RUB is configured
-// (operator-supplied, no live Beget billing API integration exists yet -- see
-// admin_costs.go doc comment) it is linearly scaled to the window; otherwise
-// the caller falls back to OpenCost's own raw total (source "opencost_only",
-// scale factor 1) so the response still has a number instead of hanging on
-// money the platform does not yet have wired up.
-func (h *Handler) resolveHardwareCost(days int) (float64, string) {
-	if h.cfg.HardwareMonthlyCostRUB <= 0 {
-		return 0, "opencost_only"
+// adminCostHardwareGroup is one line of the hardware-cost breakdown: the
+// cluster control plane or one worker node pool, with Beget's own computed
+// monthly price for every node in the group combined (not per-node).
+type adminCostHardwareGroup struct {
+	Name          string  `json:"name"`
+	NodeCount     int     `json:"node_count"`
+	PriceMonthRUB float64 `json:"price_month_rub"`
+}
+
+// resolveHardwareCost returns the real hardware spend for a `days`-day
+// window, how it was sourced, and (when available) a per-node-pool
+// breakdown. Fail-open chain, most authoritative first:
+//
+//  1. beget_api -- live GET /v1/k8s/cluster against api.beget.com
+//     (internal/beget), cached 24h. Beget computes master + per-worker-group
+//     price_month itself; this is the real invoice, not a model.
+//  2. beget_manual_config -- HARDWARE_MONTHLY_COST_RUB, operator-typed
+//     fallback for when the token or API is unavailable.
+//  3. opencost_only -- OpenCost's own raw total (scale factor 1), so the
+//     response always has a number instead of hanging on money the platform
+//     cannot currently source.
+//
+// Both 1 and 2 are linearly scaled from a full month to the requested
+// window; the breakdown figures stay at their natural monthly value (they
+// are informational, not summed into anything else).
+func (h *Handler) resolveHardwareCost(ctx context.Context, days int) (float64, string, []adminCostHardwareGroup) {
+	if total, breakdown, ok := h.begetHardwareCost(ctx); ok {
+		return total * float64(days) / billingMonthDays, "beget_api", breakdown
 	}
-	return h.cfg.HardwareMonthlyCostRUB * float64(days) / billingMonthDays, "beget_manual_config"
+	if h.cfg.HardwareMonthlyCostRUB > 0 {
+		return h.cfg.HardwareMonthlyCostRUB * float64(days) / billingMonthDays, "beget_manual_config", nil
+	}
+	return 0, "opencost_only", nil
+}
+
+// begetHardwareCost fetches the configured cluster's live price_month total
+// from the Beget managed-Kubernetes billing API (24h cache -- Beget's own
+// pricing changes on the timescale of tariff updates, not requests). Returns
+// ok=false on any failure (nil client, network error, cluster not found)
+// so resolveHardwareCost falls through to the next source; a Beget outage
+// must never surface as a 5xx here.
+func (h *Handler) begetHardwareCost(ctx context.Context) (float64, []adminCostHardwareGroup, bool) {
+	if h.beget == nil {
+		return 0, nil, false
+	}
+	clusters, err := cache.Fetch(ctx, h.cache, "beget:clusters", 24*time.Hour,
+		func() ([]beget.Cluster, error) { return h.beget.ListClusters(ctx) })
+	if err != nil {
+		log.Warn().Err(err).Msg("admin costs: beget cluster list failed, falling back")
+		return 0, nil, false
+	}
+	cl, ok := beget.FindClusterBySlug(clusters, h.cfg.BegetK8SClusterSlug)
+	if !ok {
+		log.Warn().Str("slug", h.cfg.BegetK8SClusterSlug).Msg("admin costs: beget token cannot see configured cluster slug, falling back")
+		return 0, nil, false
+	}
+	breakdown := []adminCostHardwareGroup{
+		{Name: "control plane", NodeCount: cl.MasterNodeCount, PriceMonthRUB: round2(cl.MasterPriceRUB)},
+	}
+	for _, wg := range cl.WorkerGroups {
+		breakdown = append(breakdown, adminCostHardwareGroup{
+			Name: wg.DisplayName, NodeCount: wg.NodeCount, PriceMonthRUB: round2(wg.PriceMonth),
+		})
+	}
+	return cl.TotalMonthlyRUB(), breakdown, true
 }
 
 // adminRevenueByNamespace prices every project namespace's app allocations

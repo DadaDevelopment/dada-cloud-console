@@ -28,6 +28,10 @@ export const adminCosts: Messages = {
   "adminCosts.kpi.margin": { ru: "Маржа", en: "Margin" },
   "adminCosts.kpi.unallocated": { ru: "Не распределено / простой", en: "Unallocated / idle" },
 
+  "adminCosts.hardwareSource.beget_api": {
+    ru: "реальный счёт (Beget, автоматически)",
+    en: "real bill (Beget, live)",
+  },
   "adminCosts.hardwareSource.beget_manual_config": {
     ru: "реальный счёт (задан вручную)",
     en: "real bill (manually configured)",
@@ -40,6 +44,9 @@ export const adminCosts: Messages = {
     ru: "Задайте HARDWARE_MONTHLY_COST_RUB, чтобы привязать пропорции OpenCost к реальному счёту за железо.",
     en: "Set HARDWARE_MONTHLY_COST_RUB to anchor OpenCost's proportions to the real hardware bill.",
   },
+
+  "adminCosts.hardware.title": { ru: "Состав счёта за железо", en: "Hardware bill breakdown" },
+  "adminCosts.hardware.nodeCount": { ru: "узлов: {count}", en: "{count} node(s)" },
 
   "adminCosts.lossMakers.title": { ru: "Топ убыточных клиентов", en: "Top loss-makers" },
   "adminCosts.lossMakers.empty": { ru: "Убыточных клиентов нет", en: "No loss-making clients" },

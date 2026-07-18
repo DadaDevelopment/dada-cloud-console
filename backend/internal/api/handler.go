@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/dada-tuda/console/backend/internal/auth"
+	"github.com/dada-tuda/console/backend/internal/beget"
 	"github.com/dada-tuda/console/backend/internal/billing"
 	"github.com/dada-tuda/console/backend/internal/billing/costengine"
 	"github.com/dada-tuda/console/backend/internal/billing/pricing"
@@ -38,6 +39,7 @@ type Handler struct {
 	userMetrics *prometheus.Client // user-telemetry read store (multi-tenant Mimir); == prometheus when USER_METRICS_QUERY_URL unset
 	logsearch   *logsearch.Client  // nil when ELASTICSEARCH_URL unset
 	opencost    *opencost.Client   // nil when OPENCOST_URL unset; per-project cost reads
+	beget       *beget.Client      // nil when BEGET_K8S_TOKEN unset; real hardware-cost source for admin_costs.go
 	cache       *cache.Cache       // nil when REDIS_ADDR unset; fail-open cache-aside for read-heavy endpoints
 	// Infra stream (in-cluster kube pod logs) — the second /logs source for
 	// native (k8s) apps; nil when ES unset or ELASTICSEARCH_INFRA_LOG_INDEX=off.
@@ -119,6 +121,7 @@ func NewHandler(pool *pgxpool.Pool, cfg *config.Config) *Handler {
 	h.portainer = portainer.New(cfg.PortainerURL, cfg.PortainerAPIToken)
 	h.prometheus = prometheus.New(cfg.PrometheusQueryURL, cfg.PrometheusQueryUser, cfg.PrometheusQueryPass)
 	h.opencost = opencost.New(cfg.OpenCostURL)
+	h.beget = beget.New(cfg.BegetK8SToken)
 	h.cache = cache.New(cfg.RedisAddr)
 	if h.cache.Enabled() {
 		pingCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)

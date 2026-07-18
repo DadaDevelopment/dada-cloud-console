@@ -159,6 +159,20 @@ type Config struct {
 	// admin_costs.go); operators fill this in manually until one is built.
 	HardwareMonthlyCostRUB float64 // HARDWARE_MONTHLY_COST_RUB
 
+	// BegetK8SToken authenticates the read-only Beget managed-Kubernetes
+	// billing client (internal/beget) against api.beget.com. Same bearer JWT
+	// as the Terraform bootstrap credential (beget-credentials secret,
+	// crossplane-system) -- copied into this app's own secret, never shared
+	// live off the same value. Empty disables the beget_api hardware-cost
+	// source; the drilldown falls back to HardwareMonthlyCostRUB, then
+	// OpenCost's own raw total.
+	BegetK8SToken string // BEGET_K8S_TOKEN
+	// BegetK8SClusterSlug picks which Beget-managed cluster's price_month
+	// figures back GetAdminCosts when multiple clusters are visible to the
+	// token (the prod console cluster and the separate ArgoCD mgmt cluster
+	// both are). Defaults to the prod cluster's slug.
+	BegetK8SClusterSlug string // BEGET_K8S_CLUSTER_SLUG
+
 	// User-telemetry read store (multi-tenant Grafana Mimir). The monitoring
 	// product (user-pushed metrics) reads from here with a per-tenant
 	// X-Scope-OrgID header; infra/container/db metrics keep reading the plain
@@ -379,6 +393,8 @@ func Load() (*Config, error) {
 		BillingMargin:             getEnvFloat("BILLING_MARGIN", 1.4),
 		BillingMinUtilization:     getEnvFloat("BILLING_MIN_UTILIZATION", 0.30),
 		HardwareMonthlyCostRUB:    getEnvFloat("HARDWARE_MONTHLY_COST_RUB", 0),
+		BegetK8SToken:             getEnv("BEGET_K8S_TOKEN", ""),
+		BegetK8SClusterSlug:       getEnv("BEGET_K8S_CLUSTER_SLUG", "d5c373"),
 		UserMetricsQueryURL:       getEnv("USER_METRICS_QUERY_URL", ""),
 		UserMetricsQueryUser:      getEnv("USER_METRICS_QUERY_USER", ""),
 		UserMetricsQueryPass:      getEnv("USER_METRICS_QUERY_PASS", ""),
