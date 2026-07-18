@@ -49,7 +49,16 @@ def agentName = "kubeagent-${env.JOB_BASE_NAME}-${env.BUILD_NUMBER}-${UUID.rando
 // deploy — when main is pushed more often than a build takes (~11 min), every
 // build was superseded (NOT_BUILT) before its GitOps write-back ran, so nothing
 // ever deployed. Queueing lets each build finish + write back its tag in order.
-properties([disableConcurrentBuilds()])
+properties([
+        disableConcurrentBuilds(),
+        parameters([
+                booleanParam(
+                        name: 'RUN_E2E_AUTHED',
+                        defaultValue: false,
+                        description: 'Run the authenticated + mutating Playwright e2e (provisions a real DB) against the disposable e2e project. Needs the e2e-console-user + e2e-project-id credentials.'
+                )
+        ])
+])
 
 podTemplate(
         cloud: 'self-managed',
@@ -560,6 +569,39 @@ spec:
                                     echo "Wrote ${resolvedTag} -> ${ARGO_VALUES_PATH} on ${ARGO_BRANCH}"
                                 fi
                             """
+                        }
+                    }
+
+                    runStage('E2E smoke') {
+                        container('node-builder') {
+                            dir('frontend') {
+                                catchError(buildResult: 'UNSTABLE', stageResult: 'FAILURE', message: 'e2e smoke failed (non-blocking; runs against the currently-live console)') {
+                                    sh '''
+                                        set -eux
+                                        npx playwright install --with-deps chromium
+                                        E2E_BASE_URL=https://console.dada-tuda.ru npx playwright test --project=smoke
+                                    '''
+                                }
+                            }
+                        }
+                    }
+
+                    if (params.RUN_E2E_AUTHED) {
+                        runStage('E2E authed') {
+                            container('node-builder') {
+                                dir('frontend') {
+                                    withCredentials([
+                                            usernamePassword(credentialsId: 'e2e-console-user', usernameVariable: 'E2E_USER', passwordVariable: 'E2E_PASS'),
+                                            string(credentialsId: 'e2e-project-id', variable: 'E2E_PROJECT_ID')
+                                    ]) {
+                                        sh '''
+                                            set -eu
+                                            npx playwright install --with-deps chromium
+                                            E2E_BASE_URL=https://console.dada-tuda.ru E2E_MUTATE=1 npx playwright test --project=setup --project=authed
+                                        '''
+                                    }
+                                }
+                            }
                         }
                     }
                 } else {
