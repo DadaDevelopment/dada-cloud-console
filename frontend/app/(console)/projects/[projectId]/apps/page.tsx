@@ -1,6 +1,6 @@
 "use client";
-import { useEffect, useState, FormEvent } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { useEffect, useRef, useState, FormEvent } from "react";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { appsApi } from "@/lib/api";
 import { docsHref } from "@/lib/site";
@@ -45,6 +45,7 @@ export default function AppsPage() {
   const params = useParams<{ projectId: string }>();
   const projectId = params.projectId;
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { t } = useT();
 
   const { project, environments, role, loading: isLoadingEnvs } = useProjectContext();
@@ -70,7 +71,6 @@ export default function AppsPage() {
 
   useEffect(() => {
     if (environments.length === 0) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect -- fetch-on-mount pattern; clears loading once env resolution settles.
       if (!isLoadingEnvs) setIsLoadingApps(false);
       return;
     }
@@ -113,6 +113,17 @@ export default function AppsPage() {
     setChooserEnvId(envId);
     setChooserOpen(true);
   }
+
+  const deployImageParamHandledRef = useRef(false);
+
+  useEffect(() => {
+    if (deployImageParamHandledRef.current) return;
+    if (isLoadingEnvs) return;
+    if (searchParams.get("deploy") !== "image") return;
+    deployImageParamHandledRef.current = true;
+    const targetEnvId = searchParams.get("envId") || environments[0]?.id || "";
+    if (targetEnvId && canMutate(role)) openCreate(targetEnvId);
+  }, [searchParams, isLoadingEnvs, environments, role]);
 
   async function handleSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();

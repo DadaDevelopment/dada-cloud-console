@@ -662,6 +662,15 @@ export default function GitImportPage() {
         <section className="space-y-3">
           <SectionHeader n={1} label={t("git.import.section.source")} done={!!selectedRepo} active={!selectedRepo} />
 
+          {!selectedRepo && (
+            <Link
+              href={`/projects/${projectId}/apps?deploy=image${envId ? `&envId=${envId}` : ""}`}
+              className="block text-sm font-medium text-blue-600 dark:text-blue-400 hover:underline"
+            >
+              {t("deployHooks.wizard.cta")}
+            </Link>
+          )}
+
           {installError && (
             <div className="rounded-lg border border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-950/40 px-4 py-3 text-sm text-red-700 dark:text-red-300">{installError}</div>
           )}

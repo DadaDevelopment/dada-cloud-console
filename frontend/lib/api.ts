@@ -77,6 +77,8 @@ import type {
   CreateCloudTaskResponse,
   DeleteImpactResponse,
   MoveImpactResponse,
+  DeployHook,
+  DeployHookCreated,
 } from "./types";
 
 // Empty string → relative URLs → requests go through the ingress proxy.
@@ -363,6 +365,24 @@ export const appsApi = {
     apiFetch<OperationResponse>(
       `/api/v1/projects/${projectId}/environments/${envId}/apps/${appName}/move`,
       { method: "POST", body: { target_project_id: targetProjectId } }
+    ),
+};
+
+/** CI deploy tokens ("deploy hooks") — lets an external CI push a new image without console access. */
+export const deployHooksApi = {
+  list: (projectId: string, envId: string, appName: string) =>
+    apiFetch<DeployHook[]>(`/api/v1/projects/${projectId}/environments/${envId}/apps/${appName}/deploy-hooks`),
+
+  create: (projectId: string, envId: string, appName: string, name?: string) =>
+    apiFetch<DeployHookCreated>(
+      `/api/v1/projects/${projectId}/environments/${envId}/apps/${appName}/deploy-hooks`,
+      { method: "POST", body: { name } }
+    ),
+
+  revoke: (projectId: string, envId: string, appName: string, hookId: string) =>
+    apiFetch<void>(
+      `/api/v1/projects/${projectId}/environments/${envId}/apps/${appName}/deploy-hooks/${hookId}`,
+      { method: "DELETE" }
     ),
 };
 

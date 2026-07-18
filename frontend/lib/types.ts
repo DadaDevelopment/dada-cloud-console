@@ -948,6 +948,27 @@ export interface DomainsResponse {
   domains: AppDomain[];
 }
 
+/** A CI deploy token issued for an app. The plaintext token is never included here — only at creation time, via `DeployHookCreated`. */
+export interface DeployHook {
+  id: string;
+  name: string;
+  token_prefix: string;
+  created_at: string;
+  last_used_at: string | null;
+  revoked_at: string | null;
+}
+
+/** Returned once, immediately after `POST .../deploy-hooks` — the only time the plaintext token is ever visible. */
+export interface DeployHookCreated {
+  id: string;
+  name: string;
+  token: string;
+  token_prefix: string;
+  base_url: string;
+  deploy_url: string;
+  created_at: string;
+}
+
 // Monitoring (Grafana-backed observability apps) -----------------------------
 
 export interface MonitoringApp {

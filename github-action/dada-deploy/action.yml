@@ -1,0 +1,44 @@
+name: 'Deploy to Dada Cloud'
+description: 'Deploy a prebuilt container image to a Dada Cloud app using a deploy-hook token.'
+author: 'Dada Cloud'
+branding:
+  icon: 'upload-cloud'
+  color: 'purple'
+
+inputs:
+  token:
+    description: 'Dada deploy-hook token (dadadh_...). Store it as a repository secret, never inline.'
+    required: true
+  image:
+    description: 'Full image reference to deploy, e.g. ghcr.io/acme/api:1.4.2 or registry/name@sha256:...'
+    required: true
+  base-url:
+    description: 'Dada Cloud API base URL.'
+    required: false
+    default: 'https://console.dada-tuda.ru'
+  wait:
+    description: 'Poll until the deploy operation reaches a terminal state and fail the job if it did not succeed.'
+    required: false
+    default: 'false'
+  timeout:
+    description: 'Max seconds to wait when wait=true.'
+    required: false
+    default: '300'
+
+outputs:
+  operation-id:
+    description: 'The id of the enqueued deploy operation.'
+    value: ${{ steps.deploy.outputs.operation-id }}
+
+runs:
+  using: 'composite'
+  steps:
+    - id: deploy
+      shell: bash
+      run: ${{ github.action_path }}/entrypoint.sh
+      env:
+        INPUT_TOKEN: ${{ inputs.token }}
+        INPUT_IMAGE: ${{ inputs.image }}
+        INPUT_BASE_URL: ${{ inputs.base-url }}
+        INPUT_WAIT: ${{ inputs.wait }}
+        INPUT_TIMEOUT: ${{ inputs.timeout }}

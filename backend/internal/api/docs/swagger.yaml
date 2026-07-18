@@ -203,6 +203,28 @@ definitions:
       task_type:
         type: string
     type: object
+  api.createDeployHookRequest:
+    properties:
+      name:
+        type: string
+    type: object
+  api.createDeployHookResponse:
+    properties:
+      base_url:
+        type: string
+      created_at:
+        type: string
+      deploy_url:
+        type: string
+      id:
+        type: string
+      name:
+        type: string
+      token:
+        type: string
+      token_prefix:
+        type: string
+    type: object
   api.createEndpointRequest:
     properties:
       auth_enabled:
@@ -308,6 +330,31 @@ definitions:
       database:
         type: string
       name:
+        type: string
+    type: object
+  api.deployOperationStatusResponse:
+    properties:
+      error_code:
+        type: string
+      error_message:
+        type: string
+      ok:
+        type: boolean
+      status:
+        type: string
+      terminal:
+        type: boolean
+    type: object
+  api.deployTriggerRequest:
+    properties:
+      image:
+        type: string
+    type: object
+  api.deployTriggerResponse:
+    properties:
+      message:
+        type: string
+      operation_id:
         type: string
     type: object
   api.gitInstallation:
@@ -882,6 +929,86 @@ paths:
       summary: Recommend a billing plan
       tags:
       - billing
+  /deploy:
+    post:
+      consumes:
+      - application/json
+      description: 'Authenticates with a deploy-hook token instead of a Keycloak session:
+        pass it as "Authorization: Bearer <token>" or "X-Dada-Deploy-Token: <token>".
+        The token is scoped to one app (minted via POST .../deploy-hooks) and enqueues
+        the same DeployImageVersion operation PATCH .../apps/{appName}/image does.
+        Asynchronous: returns 202 with the operation id; poll GET /api/v1/deploy/operations/{operationId}
+        (same token) until terminal.'
+      operationId: deployTrigger
+      parameters:
+      - description: New image reference
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/api.deployTriggerRequest'
+      produces:
+      - application/json
+      responses:
+        "202":
+          description: Accepted
+          schema:
+            $ref: '#/definitions/api.deployTriggerResponse'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Trigger a deploy with a deploy-hook token
+      tags:
+      - deploy-hook
+  /deploy/operations/{operationId}:
+    get:
+      description: Authenticates with the same deploy-hook token as POST /api/v1/deploy.
+        Returns a compact status view; poll until terminal=true. The operation must
+        belong to the token's own app -- any other operation id is rejected as 404.
+      operationId: getDeployOperation
+      parameters:
+      - description: Operation UUID
+        in: path
+        name: operationId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/api.deployOperationStatusResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Poll a deploy triggered with a deploy-hook token
+      tags:
+      - deploy-hook
   /git/github/oauth/callback:
     get:
       description: Public endpoint GitHub redirects to after user authorization. Consumes
@@ -3384,6 +3511,165 @@ paths:
       summary: Preview the blast radius of deleting an app
       tags:
       - apps
+  /projects/{projectId}/environments/{envId}/apps/{appName}/deploy-hooks:
+    get:
+      description: Lists deploy-hook tokens created for this app (including revoked
+        ones). Never returns the plaintext token or its hash -- only the id, label,
+        token_prefix and lifecycle timestamps.
+      operationId: listDeployHooks
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      - description: Environment UUID
+        in: path
+        name: envId
+        required: true
+        type: string
+      - description: App name
+        in: path
+        name: appName
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: object with deploy_hooks array
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: List deploy-hook tokens for an app
+      tags:
+      - deploy-hook
+    post:
+      consumes:
+      - application/json
+      description: 'Mints a revocable bearer token scoped to one app. External CI
+        presents it to POST /api/v1/deploy (as "Authorization: Bearer <token>" or
+        "X-Dada-Deploy-Token: <token>") to trigger the same deploy as PATCH .../apps/{appName}/image,
+        without a Keycloak session. The plaintext token is returned ONLY in this response
+        -- store it now, it cannot be retrieved again.'
+      operationId: createDeployHook
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      - description: Environment UUID
+        in: path
+        name: envId
+        required: true
+        type: string
+      - description: App name
+        in: path
+        name: appName
+        required: true
+        type: string
+      - description: Optional label for the hook
+        in: body
+        name: body
+        schema:
+          $ref: '#/definitions/api.createDeployHookRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/api.createDeployHookResponse'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Create a deploy-hook token for an app
+      tags:
+      - deploy-hook
+  /projects/{projectId}/environments/{envId}/apps/{appName}/deploy-hooks/{hookId}:
+    delete:
+      description: Revokes a deploy-hook token. The token stops working immediately;
+        already-queued deploys it triggered are unaffected.
+      operationId: deleteDeployHook
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      - description: Environment UUID
+        in: path
+        name: envId
+        required: true
+        type: string
+      - description: App name
+        in: path
+        name: appName
+        required: true
+        type: string
+      - description: Deploy-hook UUID
+        in: path
+        name: hookId
+        required: true
+        type: string
+      responses:
+        "204":
+          description: no content
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Revoke a deploy-hook token
+      tags:
+      - deploy-hook
   /projects/{projectId}/environments/{envId}/apps/{appName}/deployments:
     get:
       description: Returns the deployment history for an app in an environment, most

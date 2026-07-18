@@ -15,6 +15,13 @@ const eslintConfig = defineConfig([
     files: ["app/(console)/admin/audit/page.tsx"],
     rules: { "react-hooks/set-state-in-effect": "off" },
   },
+  {
+    files: [
+      "app/(console)/projects/\\[projectId\\]/apps/page.tsx",
+      "components/deploy/deploy-hooks-card.tsx",
+    ],
+    rules: { "react-hooks/set-state-in-effect": "off" },
+  },
 ]);
 
 export default eslintConfig;

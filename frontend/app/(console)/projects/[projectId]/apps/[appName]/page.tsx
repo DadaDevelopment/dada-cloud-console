@@ -15,6 +15,7 @@ import { FixedMetricsDashboard } from "@/components/metrics/fixed-metrics-dashbo
 import { LogsViewer } from "@/components/logs-viewer";
 import { PhaseBadge } from "@/components/ui/phase-badge";
 import { CloudTaskPanel } from "@/components/cloud-task/cloud-task-panel";
+import { DeployHooksCard } from "@/components/deploy/deploy-hooks-card";
 import { useT } from "@/lib/i18n/console/context";
 import { Globe, Database } from "lucide-react";
 import { classifyVMResource } from "@/lib/vm-resources";
@@ -465,6 +466,17 @@ export default function AppDetailPage() {
           envId={envId ?? ""}
           appName={appName}
           appKind={isCompose ? "compose" : "web"}
+          canMutate={canMutate(role)}
+        />
+      </div>
+      )}
+
+      {!isResource && (
+      <div className="mt-10">
+        <DeployHooksCard
+          projectId={projectId}
+          envId={envId ?? ""}
+          appName={appName}
           canMutate={canMutate(role)}
         />
       </div>

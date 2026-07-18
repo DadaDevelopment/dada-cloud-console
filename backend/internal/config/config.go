@@ -298,6 +298,11 @@ type Config struct {
 
 	BillingEnabled          bool  // BILLING_ENABLED (default false) — guards metering ticker; billing endpoints always load plans read-only
 	BillingMeterIntervalSec int64 // BILLING_METER_INTERVAL_SECS (default 3600)
+
+	// PublicBaseURL is the console's own public origin. Used to build absolute
+	// URLs handed back to the caller, e.g. the deploy-hook consumption endpoint
+	// (POST {PublicBaseURL}/api/v1/deploy) shown once when a deploy hook is created.
+	PublicBaseURL string // PUBLIC_BASE_URL
 }
 
 // Load reads configuration from environment variables.
@@ -407,6 +412,7 @@ func Load() (*Config, error) {
 		MetrikaOAuthToken:         getEnv("METRIKA_OAUTH_TOKEN", ""),
 		BillingEnabled:            getEnv("BILLING_ENABLED", "false") == "true",
 		BillingMeterIntervalSec:   getEnvInt64("BILLING_METER_INTERVAL_SECS", 3600),
+		PublicBaseURL:             getEnv("PUBLIC_BASE_URL", "https://console.dada-tuda.ru"),
 	}
 
 	if cfg.DBURL == "" {

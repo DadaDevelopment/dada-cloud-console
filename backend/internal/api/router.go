@@ -138,6 +138,15 @@ func SetupRouter(pool *pgxpool.Pool, cfg *config.Config) *gin.Engine {
 		log.Printf("cloud-task: dadagent webhook disabled (keycloak verifier: %v)", err)
 	}
 
+	// Deploy-hook consumption routes. Public on purpose: authenticated by a
+	// revocable per-app bearer token (app_deploy_hooks.token_hash) resolved
+	// inside the handler, not the Keycloak user JWT middleware -- this is how
+	// external CI (e.g. GitHub Actions) deploys a prebuilt image without a
+	// console session. Management (mint/list/revoke) stays inside the JWT
+	// group above, under .../apps/:appName/deploy-hooks.
+	r.POST("/api/v1/deploy", h.DeployTrigger)
+	r.GET("/api/v1/deploy/operations/:operationId", h.GetDeployOperation)
+
 	// Embedded MCP server at /mcp (Streamable HTTP transport).
 	// Each tool call self-proxies to cfg.MCPSelfURL/api/v1/... so auth and all
 	// middleware apply unchanged. Disabled via MCP_ENABLED=false.
@@ -252,6 +261,13 @@ func SetupRouter(pool *pgxpool.Pool, cfg *config.Config) *gin.Engine {
 		api.GET("/projects/:projectId/environments/:envId/apps/:appName/state", h.GetAppState)
 		api.GET("/projects/:projectId/environments/:envId/apps/:appName/logs", h.GetAppLogs)
 		api.GET("/projects/:projectId/environments/:envId/apps/:appName/metrics", h.GetAppMetrics)
+
+		// Deploy-hook tokens (revocable bearer credential for external CI --
+		// see the token-authenticated /api/v1/deploy* routes registered outside
+		// this JWT group, near the dadagent webhook, below).
+		api.POST("/projects/:projectId/environments/:envId/apps/:appName/deploy-hooks", h.CreateDeployHook)
+		api.GET("/projects/:projectId/environments/:envId/apps/:appName/deploy-hooks", h.ListDeployHooks)
+		api.DELETE("/projects/:projectId/environments/:envId/apps/:appName/deploy-hooks/:hookId", h.DeleteDeployHook)
 
 		// Cloud tasks (DadaAgent integration).
 		api.GET("/projects/:projectId/environments/:envId/apps/:appName/cloud-tasks", h.ListCloudTasks)
