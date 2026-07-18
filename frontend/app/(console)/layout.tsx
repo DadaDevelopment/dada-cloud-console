@@ -10,6 +10,7 @@ import { TopBar } from "@/components/shell/top-bar";
 import { ProjectNav } from "@/components/shell/project-nav";
 import { CommandPalette } from "@/components/shell/command-palette";
 import { ConsoleErrorBoundary } from "@/components/shell/console-error-boundary";
+import { GlobalErrorReporter } from "@/components/shell/global-error-reporter";
 import { SupportButton } from "@/components/shell/support-button";
 
 function ConsoleShell({ children }: { children: React.ReactNode }) {
@@ -101,6 +102,7 @@ export default function ConsoleLayout({ children }: { children: React.ReactNode 
       <ThemeProvider>
         <ConsoleLangProvider>
           <ProjectProvider>
+            <GlobalErrorReporter />
             <ConsoleShell>{children}</ConsoleShell>
           </ProjectProvider>
         </ConsoleLangProvider>

@@ -565,6 +565,35 @@ const docTemplate = `{
                 }
             }
         },
+        "/client-errors": {
+            "post": {
+                "description": "Records a browser-side error (React error boundary or an unhandled window error/rejection) into the server logs. Unauthenticated; the browser posts message/stack/url. Always returns 204.",
+                "consumes": [
+                    "application/json"
+                ],
+                "tags": [
+                    "telemetry"
+                ],
+                "summary": "Report a client-side crash",
+                "operationId": "reportClientError",
+                "parameters": [
+                    {
+                        "description": "Client error",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/api.clientErrorReport"
+                        }
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "no content"
+                    }
+                }
+            }
+        },
         "/deploy": {
             "post": {
                 "description": "Authenticates with a deploy-hook token instead of a Keycloak session: pass it as \"Authorization: Bearer \u003ctoken\u003e\" or \"X-Dada-Deploy-Token: \u003ctoken\u003e\". The token is scoped to one app (minted via POST .../deploy-hooks) and enqueues the same DeployImageVersion operation PATCH .../apps/{appName}/image does. Asynchronous: returns 202 with the operation id; poll GET /api/v1/deploy/operations/{operationId} (same token) until terminal.",
@@ -11126,6 +11155,26 @@ const docTemplate = `{
             "properties": {
                 "installation_id": {
                     "description": "numeric GitHub installation id",
+                    "type": "string"
+                }
+            }
+        },
+        "api.clientErrorReport": {
+            "type": "object",
+            "properties": {
+                "component_stack": {
+                    "type": "string"
+                },
+                "kind": {
+                    "type": "string"
+                },
+                "message": {
+                    "type": "string"
+                },
+                "stack": {
+                    "type": "string"
+                },
+                "url": {
                     "type": "string"
                 }
             }

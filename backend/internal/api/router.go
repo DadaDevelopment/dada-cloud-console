@@ -147,6 +147,8 @@ func SetupRouter(pool *pgxpool.Pool, cfg *config.Config) *gin.Engine {
 	r.POST("/api/v1/deploy", h.DeployTrigger)
 	r.GET("/api/v1/deploy/operations/:operationId", h.GetDeployOperation)
 
+	r.POST("/api/v1/client-errors", h.ReportClientError)
+
 	// Embedded MCP server at /mcp (Streamable HTTP transport).
 	// Each tool call self-proxies to cfg.MCPSelfURL/api/v1/... so auth and all
 	// middleware apply unchanged. Disabled via MCP_ENABLED=false.

@@ -4,6 +4,7 @@ import { Component, type ReactNode } from "react";
 import { usePathname } from "next/navigation";
 import { useT } from "@/lib/i18n/console/context";
 import { Button } from "@/components/ui/button";
+import { reportClientError } from "@/lib/report-error";
 
 const SUPPORT_EMAIL = "development@dada-tuda.ru";
 
@@ -59,6 +60,13 @@ export class ConsoleErrorBoundary extends Component<{ children: ReactNode }, Con
 
   componentDidCatch(error: Error, info: { componentStack: string }) {
     console.error("ConsoleErrorBoundary caught an error", error, info.componentStack);
+    reportClientError({
+      message: error?.message || String(error),
+      stack: error?.stack,
+      componentStack: info?.componentStack,
+      kind: "react",
+      url: typeof window !== "undefined" ? window.location.href : undefined,
+    });
   }
 
   handleReload = () => {

@@ -94,6 +94,19 @@ definitions:
         description: numeric GitHub installation id
         type: string
     type: object
+  api.clientErrorReport:
+    properties:
+      component_stack:
+        type: string
+      kind:
+        type: string
+      message:
+        type: string
+      stack:
+        type: string
+      url:
+        type: string
+    type: object
   api.connectGitRepoRequest:
     properties:
       app_name:
@@ -929,6 +942,27 @@ paths:
       summary: Recommend a billing plan
       tags:
       - billing
+  /client-errors:
+    post:
+      consumes:
+      - application/json
+      description: Records a browser-side error (React error boundary or an unhandled
+        window error/rejection) into the server logs. Unauthenticated; the browser
+        posts message/stack/url. Always returns 204.
+      operationId: reportClientError
+      parameters:
+      - description: Client error
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/api.clientErrorReport'
+      responses:
+        "204":
+          description: no content
+      summary: Report a client-side crash
+      tags:
+      - telemetry
   /deploy:
     post:
       consumes:
