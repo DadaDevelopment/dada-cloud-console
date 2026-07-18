@@ -116,31 +116,27 @@ func (h *Handler) emptySnapshot() *billingCostSnapshot {
 	}
 }
 
-// billingSnapshot returns the current cluster cost snapshot, rebuilding it from
-// OpenCost when the cached one is missing or older than the TTL. On a build
-// failure it returns the last good snapshot if any, else an empty one, so the
-// caller never blocks on OpenCost being healthy.
-func (h *Handler) billingSnapshot(ctx context.Context) *billingCostSnapshot {
+// billingSnapshot returns the current cluster cost snapshot straight from
+// memory, falling back to an empty snapshot when the warmer has not
+// populated one yet (cold boot). It NEVER rebuilds live: every caller of this
+// method is on a request path (GetAccountSummary's per-project loop,
+// adminRevenueByNamespace) or the warmer's own per-project sub-loop
+// (warmProjectConsumptions), and a stale/missing snapshot triggering its own
+// synchronous OpenCost call here was the actual root cause of a single
+// project appearing to "hang": whichever project happened to be first to see
+// a stale snapshot paid the full cost of a live OpenCost rebuild attempt
+// (bounded only by whatever context deadline its caller passed), burning that
+// caller's entire time budget whenever OpenCost was slow or degraded. The
+// live rebuild now happens exclusively in warmBillingSnapshot, on the
+// warmer's own schedule with its own patient client and bounded timeout.
+func (h *Handler) billingSnapshot() *billingCostSnapshot {
 	h.billingSnapMu.Lock()
 	defer h.billingSnapMu.Unlock()
 
-	if h.billingSnap != nil && time.Since(h.billingSnap.builtAt) < billingSnapshotTTL {
+	if h.billingSnap != nil {
 		return h.billingSnap
 	}
-	if h.opencost == nil {
-		return h.emptySnapshot()
-	}
-
-	snap, err := h.buildBillingSnapshot(ctx, h.opencost)
-	if err != nil {
-		log.Warn().Err(err).Msg("billing: snapshot build failed; using last-good/empty")
-		if h.billingSnap != nil {
-			return h.billingSnap
-		}
-		return h.emptySnapshot()
-	}
-	h.billingSnap = snap
-	return snap
+	return h.emptySnapshot()
 }
 
 // warmBillingSnapshot rebuilds the billing snapshot with the given (patient)

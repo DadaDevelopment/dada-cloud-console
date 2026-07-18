@@ -242,13 +242,16 @@ func (h *Handler) StartCostCacheWarmer(ctx context.Context, interval time.Durati
 		windowDurations["billing:snapshot"] = time.Since(snapStart)
 
 		pcStart := time.Now()
-		h.warmProjectConsumptions(ctx)
+		okProjects, failedProjects, failedProjectIDs := h.warmProjectConsumptions(ctx)
 		windowDurations["project:consumptions"] = time.Since(pcStart)
 
 		log.Info().
 			Dur("total", time.Since(start)).
 			Int("ok_windows", okWindows).
 			Int("failed_windows", failedWindows).
+			Int("ok_projects", okProjects).
+			Int("failed_projects", failedProjects).
+			Strs("failed_project_ids", failedProjectIDs).
 			Interface("durations", windowDurations).
 			Msg("cost warmer: tick complete")
 	}

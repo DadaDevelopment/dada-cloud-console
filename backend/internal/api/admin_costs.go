@@ -521,7 +521,7 @@ func (h *Handler) begetHardwareCost(ctx context.Context) (float64, []adminCostHa
 // see billingSnapshot).
 func (h *Handler) adminRevenueByNamespace(ctx context.Context) map[string]float64 {
 	out := map[string]float64{}
-	snap := h.billingSnapshot(ctx)
+	snap := h.billingSnapshot()
 	for key, alloc := range snap.appCost {
 		ns := key
 		if i := strings.IndexByte(key, '/'); i >= 0 {

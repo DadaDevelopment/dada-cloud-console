@@ -44,6 +44,16 @@ const (
 // than the request hanging.
 const accountSummaryBudget = 5 * time.Second
 
+// accountSummaryPerProjectBudget caps how long GetAccountSummary's loop will
+// wait on any single project's consumption lookup. Defense in depth on top of
+// accountSummaryBudget: with billingSnapshot now serving from cache only (see
+// billing_fullcost.go), a project's own work is a few fast DB/Redis round
+// trips and should never approach this, but nothing about a single pathological
+// project (locked row, dead connection, whatever) should be able to consume
+// the entire shared accountSummaryBudget and starve every other project in
+// the same request the way one previously could.
+const accountSummaryPerProjectBudget = 800 * time.Millisecond
+
 // projectConsumption is the money-equivalent estimate for one project over the
 // current calendar month. Informational only ("оценка по нашим тарифам"), never
 // a bill.
@@ -95,7 +105,7 @@ func (h *Handler) computeProjectConsumption(ctx context.Context, projectID uuid.
 		Resources:   []consumptionResource{},
 	}
 
-	snap := h.billingSnapshot(ctx)
+	snap := h.billingSnapshot()
 
 	apps, err := h.consumptionApps(ctx, projectID, start, now, snap, withUsage)
 	if err != nil {
@@ -424,28 +434,32 @@ func (h *Handler) projectConsumptionCached(ctx context.Context, projectID uuid.U
 
 // warmProjectConsumptions proactively recomputes and stores the no-usage
 // consumption total for every project on the platform, called from the
-// background cost-cache warmer (cost.go). It reads exclusively from data the
-// warmer has already made warm (billingSnapshot, dbSizesByDatname), so this
-// is cheap in-memory/DB work with no live OpenCost calls of its own. A
-// per-project deadline (generous, this runs off the warmer's own patient
-// budget, not the request path) keeps one stuck project from hanging the
-// whole warm tick indefinitely.
-func (h *Handler) warmProjectConsumptions(ctx context.Context) {
+// background cost-cache warmer (cost.go). billingSnapshot now serves from
+// memory only (see billing_fullcost.go) and never blocks on OpenCost, so a
+// project's remaining work here is a handful of fast DB/Redis round trips; the
+// per-project deadline is sized for that, not for tolerating a live upstream
+// call. It returns per-tick counts and the IDs that failed so the caller
+// (cost.go) can log which specific projects did not warm.
+func (h *Handler) warmProjectConsumptions(ctx context.Context) (ok, failed int, failedProjectIDs []string) {
 	ids, err := h.allProjectIDs(ctx)
 	if err != nil {
 		log.Warn().Err(err).Msg("cost warmer: list projects for consumption warm failed")
-		return
+		return 0, 0, nil
 	}
 	for _, pid := range ids {
-		pctx, cancel := context.WithTimeout(ctx, 60*time.Second)
+		pctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 		pc, err := h.computeProjectConsumption(pctx, pid, false)
 		cancel()
 		if err != nil {
+			failed++
+			failedProjectIDs = append(failedProjectIDs, pid.String())
 			log.Warn().Err(err).Str("project", pid.String()).Msg("cost warmer: project consumption warm failed")
 			continue
 		}
 		cache.Store(ctx, h.cache, projectConsumptionCacheKey(pid), projectConsumptionCacheTTL, pc)
+		ok++
 	}
+	return ok, failed, failedProjectIDs
 }
 
 // allProjectIDs returns every project UUID on the platform, for the
@@ -597,9 +611,12 @@ func (h *Handler) GetAccountSummary(c *gin.Context) {
 			log.Warn().Int("total_projects", len(projectIDs)).Msg("billing account summary: budget exceeded, spend is partial")
 			break
 		}
-		pc, err := h.projectConsumptionCached(budgetCtx, pid)
+		pctx, pcancel := context.WithTimeout(budgetCtx, accountSummaryPerProjectBudget)
+		pc, err := h.projectConsumptionCached(pctx, pid)
+		pcancel()
 		if err != nil {
-			log.Warn().Err(err).Str("project", pid.String()).Msg("billing account summary: project consumption failed")
+			partial = true
+			log.Warn().Err(err).Str("project", pid.String()).Msg("billing account summary: project consumption failed, skipping")
 			continue
 		}
 		spend += pc.TotalRub
