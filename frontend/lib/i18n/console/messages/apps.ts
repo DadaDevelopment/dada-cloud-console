@@ -31,8 +31,8 @@ export const apps: Messages = {
   "apps.deploy.fromGit.desc": { ru: "Подключите репозиторий — сборка и деплой при каждом push.", en: "Connect a repo — build & deploy on every push." },
   "apps.deploy.fromImage.title": { ru: "Из образа", en: "From image" },
   "apps.deploy.fromImage.desc": { ru: "Задеплойте готовый Docker-образ из реестра.", en: "Deploy a prebuilt Docker image from a registry." },
-  "apps.deploy.fromCompose.title": { ru: "Из Compose", en: "From Compose" },
-  "apps.deploy.fromCompose.desc": { ru: "Подключите сервер и разверните docker-compose стек через App Servers.", en: "Connect a server and deploy a docker-compose stack via App Servers." },
+  "apps.deploy.fromCompose.title": { ru: "Из Compose (VM)", en: "From Compose (VM)" },
+  "apps.deploy.fromCompose.desc": { ru: "Для docker-compose приложений на вашей VM (App Server). Облачным приложениям не нужно — деплойте из GitHub или образа.", en: "For docker-compose apps on your own VM (App Server). Not needed for cloud apps — use GitHub or image instead." },
   "apps.deploy.continue": { ru: "Продолжить", en: "Continue" },
   "apps.env.count": { ru: "{count} прил.", en: "{count} apps" },
 

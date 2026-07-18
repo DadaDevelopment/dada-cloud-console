@@ -24,8 +24,8 @@ export const appServers: Messages = {
 
   "appServers.empty.title": { ru: "Пока нет ни одной VM", en: "No VMs yet" },
   "appServers.empty.body": {
-    ru: "Закажите managed-VM у нас или подключите свой сервер по SSH — платформа развернёт агент и возьмёт хост под управление.",
-    en: "Order a managed VM from us or connect your own server over SSH — the platform installs an agent and brings the host under management.",
+    ru: "App Servers нужны только для docker-compose приложений на выделенной VM. Облачным (k8s) приложениям сервер не нужен — они деплоятся из GitHub или образа. Чтобы добавить VM: закажите managed-VM у нас или подключите свой сервер по SSH.",
+    en: "App Servers are only for docker-compose apps on a dedicated VM. Cloud (k8s) apps need no server — they deploy from GitHub or an image. To add a VM: order a managed VM from us or connect your own over SSH.",
   },
   "appServers.empty.provision": { ru: "Добавить VM", en: "Add VM" },
   "appServers.empty.step1": { ru: "Закажите новую VM или укажите доступ к своей по SSH", en: "Order a new VM or provide SSH access to your own" },
