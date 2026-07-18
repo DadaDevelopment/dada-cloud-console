@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/dada-tuda/console/backend/internal/cache"
 	"github.com/dada-tuda/console/backend/internal/prometheus"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -274,7 +275,12 @@ func (h *Handler) GetAppServerMetrics(c *gin.Context) {
 	}
 
 	start, end, step := parseRange(c)
-	c.JSON(http.StatusOK, h.runMetricSpecs(c.Request.Context(), vmMetricSpecs, serverName, projectID.String(), start, end, step))
+	key := "metrics:vm:" + projectID.String() + ":" + serverName + ":" + c.Request.URL.RawQuery
+	resp, _ := cache.Fetch(c.Request.Context(), h.cache, key, h.cfg.CacheMetricsTTL,
+		func() (gin.H, error) {
+			return h.runMetricSpecs(c.Request.Context(), vmMetricSpecs, serverName, projectID.String(), start, end, step), nil
+		})
+	c.JSON(http.StatusOK, resp)
 }
 
 // GetAppMetrics returns container resource metrics (CPU/RAM) for a compose app
@@ -340,9 +346,13 @@ func (h *Handler) GetAppMetrics(c *gin.Context) {
 	start, end, step := parseRange(c)
 	// k8s apps: scope by namespace + image (cAdvisor labels). Compose/VM apps:
 	// fall back to the docker-compose project label.
-	if runtime == "k8s" && namespace != "" && image != "" {
-		c.JSON(http.StatusOK, h.runK8sContainerMetrics(c.Request.Context(), namespace, image, start, end, step))
-		return
-	}
-	c.JSON(http.StatusOK, h.runMetricSpecs(c.Request.Context(), containerMetricSpecs, appName, projectID.String(), start, end, step))
+	key := "metrics:app:" + projectID.String() + ":" + envID.String() + ":" + appName + ":" + c.Request.URL.RawQuery
+	resp, _ := cache.Fetch(c.Request.Context(), h.cache, key, h.cfg.CacheMetricsTTL,
+		func() (gin.H, error) {
+			if runtime == "k8s" && namespace != "" && image != "" {
+				return h.runK8sContainerMetrics(c.Request.Context(), namespace, image, start, end, step), nil
+			}
+			return h.runMetricSpecs(c.Request.Context(), containerMetricSpecs, appName, projectID.String(), start, end, step), nil
+		})
+	c.JSON(http.StatusOK, resp)
 }

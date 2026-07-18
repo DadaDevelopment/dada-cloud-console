@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/dada-tuda/console/backend/internal/cache"
 	"github.com/dada-tuda/console/backend/internal/logsearch"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -116,61 +117,69 @@ func (h *Handler) SearchLogs(c *gin.Context) {
 	q := c.Query("q")
 	sinceTime := time.Now().Add(-since)
 
-	var (
-		wg       sync.WaitGroup
-		userRes  *logsearch.SearchResult
-		userErr  error
-		infraRes *logsearch.SearchResult
-	)
+	key := "logs:search:" + projectID.String() + ":" + c.Request.URL.RawQuery
+	result, err := cache.Fetch(ctx, h.cache, key, h.cfg.CacheLogsTTL,
+		func() (*logsearch.SearchResult, error) {
+			var (
+				wg       sync.WaitGroup
+				userRes  *logsearch.SearchResult
+				userErr  error
+				infraRes *logsearch.SearchResult
+			)
 
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		userRes, userErr = h.logsearch.Search(ctx, logsearch.SearchOpts{
-			VMName: vm,
-			App:    app,
-			Query:  q,
-			Since:  sinceTime,
-			Size:   size,
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				userRes, userErr = h.logsearch.Search(ctx, logsearch.SearchOpts{
+					VMName: vm,
+					App:    app,
+					Query:  q,
+					Since:  sinceTime,
+					Size:   size,
+				})
+			}()
+
+			if app != "" && h.infraLogsearch != nil {
+				wg.Add(1)
+				go func() {
+					defer wg.Done()
+					namespaces, nsErr := h.k8sAppNamespaces(ctx, projectID, app)
+					if nsErr != nil {
+						log.Warn().Err(nsErr).Str("app", app).Msg("logs: resolving k8s namespaces")
+						return
+					}
+					if len(namespaces) == 0 {
+						return
+					}
+					infra, infraErr := h.infraLogsearch.Search(ctx, logsearch.SearchOpts{
+						KubeApp:        app,
+						KubeNamespaces: namespaces,
+						Query:          q,
+						Since:          sinceTime,
+						Size:           size,
+					})
+					if infraErr != nil {
+						log.Warn().Err(infraErr).Str("app", app).Msg("logs: infra stream search")
+						return
+					}
+					infraRes = infra
+				}()
+			}
+
+			wg.Wait()
+
+			if userErr != nil {
+				return nil, userErr
+			}
+			res := userRes
+			if infraRes != nil {
+				res = mergeLogResults(res, infraRes, size)
+			}
+			return res, nil
 		})
-	}()
-
-	if app != "" && h.infraLogsearch != nil {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			namespaces, nsErr := h.k8sAppNamespaces(ctx, projectID, app)
-			if nsErr != nil {
-				log.Warn().Err(nsErr).Str("app", app).Msg("logs: resolving k8s namespaces")
-				return
-			}
-			if len(namespaces) == 0 {
-				return
-			}
-			infra, infraErr := h.infraLogsearch.Search(ctx, logsearch.SearchOpts{
-				KubeApp:        app,
-				KubeNamespaces: namespaces,
-				Query:          q,
-				Since:          sinceTime,
-				Size:           size,
-			})
-			if infraErr != nil {
-				log.Warn().Err(infraErr).Str("app", app).Msg("logs: infra stream search")
-				return
-			}
-			infraRes = infra
-		}()
-	}
-
-	wg.Wait()
-
-	if userErr != nil {
-		respondError(c, http.StatusBadGateway, "log search failed: "+userErr.Error())
+	if err != nil {
+		respondError(c, http.StatusBadGateway, "log search failed: "+err.Error())
 		return
-	}
-	result := userRes
-	if infraRes != nil {
-		result = mergeLogResults(result, infraRes, size)
 	}
 
 	if result.Entries == nil {

@@ -9,9 +9,11 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/dada-tuda/console/backend/internal/auth"
+	"github.com/dada-tuda/console/backend/internal/cache"
 	"github.com/dada-tuda/console/backend/internal/grafanaembed"
 	"github.com/dada-tuda/console/backend/internal/logsearch"
 	"github.com/dada-tuda/console/backend/internal/models"
@@ -228,10 +230,15 @@ func (h *Handler) GetMonitoringHealth(c *gin.Context) {
 	if !ok {
 		return
 	}
-	orgID := h.monitoringOrgLabel(c.Request.Context(), app.ProjectID)
-	tenant := monitoringReadTenant(app.ProjectID, orgID)
-	cfg := h.loadHealthConfig(c.Request.Context(), app.ID)
-	status := h.computeHealth(c.Request.Context(), app, orgID, tenant, source, cfg)
+	ctx := c.Request.Context()
+	key := "health:mon:" + app.ID.String() + ":" + source
+	status, _ := cache.Fetch(ctx, h.cache, key, h.cfg.CacheMetricsTTL,
+		func() (models.HealthStatus, error) {
+			orgID := h.monitoringOrgLabel(ctx, app.ProjectID)
+			tenant := monitoringReadTenant(app.ProjectID, orgID)
+			cfg := h.loadHealthConfig(ctx, app.ID)
+			return h.computeHealth(ctx, app, orgID, tenant, source, cfg), nil
+		})
 	c.JSON(http.StatusOK, status)
 }
 
@@ -645,6 +652,28 @@ func (h *Handler) GetMonitoringMetrics(c *gin.Context) {
 
 	start, end, step := parseRange(c)
 
+	key := "metrics:mon:" + app.ID.String() + ":" + c.Request.URL.RawQuery
+	resp, _ := cache.Fetch(ctx, h.cache, key, h.cfg.CacheMetricsTTL,
+		func() (gin.H, error) {
+			return h.computeMonitoringMetrics(ctx, sel, tenant, groupBy, rateMode, agg, start, end, step), nil
+		})
+	c.JSON(http.StatusOK, resp)
+}
+
+// monitoringMetricsConcurrency bounds how many per-metric range queries a single
+// dashboard load fans out to Mimir at once. A resource dashboard discovers N
+// metric names and then reads a range series for each; issuing them serially made
+// the response O(N) upstream round-trips. Fanning out with a small fixed ceiling
+// collapses that to roughly one round-trip of wall-clock while keeping the
+// per-request load on Mimir bounded.
+const monitoringMetricsConcurrency = 6
+
+// computeMonitoringMetrics discovers the resource's metric names in the window
+// and reads one aggregated range series per name. The per-name range queries run
+// concurrently (bounded by monitoringMetricsConcurrency) since they are
+// independent; the first upstream error is recorded in live_error while the rest
+// of the panels still return, matching the serial version's partial-result shape.
+func (h *Handler) computeMonitoringMetrics(ctx context.Context, sel, tenant, groupBy, rateMode, agg string, start, end time.Time, step time.Duration) gin.H {
 	// Discover metric names present in the requested window. last_over_time keeps a
 	// metric whose newest sample is older than the instant-query staleness window
 	// (5m) but still inside the range, so sparsely-written custom metrics surface.
@@ -665,50 +694,68 @@ func (h *Handler) GetMonitoringMetrics(c *gin.Context) {
 	}
 	rw := fmt.Sprintf("%ds", int(rateWindow.Seconds()))
 
-	metrics := gin.H{}
-	var liveErr string
+	var (
+		mu      sync.Mutex
+		wg      sync.WaitGroup
+		metrics = gin.H{}
+		liveErr string
+		sem     = make(chan struct{}, monitoringMetricsConcurrency)
+	)
 	for _, name := range names {
-		counter := isCounterName(name)
-		switch rateMode {
-		case "on":
-			counter = true
-		case "off":
-			counter = false
-		}
+		wg.Add(1)
+		sem <- struct{}{}
+		go func(name string) {
+			defer wg.Done()
+			defer func() { <-sem }()
 
-		var inner string
-		if counter {
-			inner = fmt.Sprintf("rate(%s%s[%s])", name, sel, rw)
-		} else {
-			inner = fmt.Sprintf("%s%s", name, sel)
-		}
-
-		expr := aggExpr(agg, groupBy, inner, counter)
-
-		result, err := h.userMetrics.QueryRange(ctx, expr, start, end, step, tenant)
-		if err != nil {
-			if liveErr == "" {
-				liveErr = err.Error()
+			counter := isCounterName(name)
+			switch rateMode {
+			case "on":
+				counter = true
+			case "off":
+				counter = false
 			}
-			continue
-		}
-		series := make([]gin.H, 0, len(result))
-		for _, s := range result {
-			label := ""
-			if groupBy != "" {
-				label = s.Metric[groupBy]
+
+			var inner string
+			if counter {
+				inner = fmt.Sprintf("rate(%s%s[%s])", name, sel, rw)
+			} else {
+				inner = fmt.Sprintf("%s%s", name, sel)
 			}
-			series = append(series, gin.H{"label": label, "points": s.Points})
-		}
-		sort.Slice(series, func(i, j int) bool {
-			return series[i]["label"].(string) < series[j]["label"].(string)
-		})
-		kind := "gauge"
-		if counter {
-			kind = "counter"
-		}
-		metrics[name] = gin.H{"unit": "", "kind": kind, "series": series}
+
+			expr := aggExpr(agg, groupBy, inner, counter)
+
+			result, err := h.userMetrics.QueryRange(ctx, expr, start, end, step, tenant)
+			if err != nil {
+				mu.Lock()
+				if liveErr == "" {
+					liveErr = err.Error()
+				}
+				mu.Unlock()
+				return
+			}
+			series := make([]gin.H, 0, len(result))
+			for _, s := range result {
+				label := ""
+				if groupBy != "" {
+					label = s.Metric[groupBy]
+				}
+				series = append(series, gin.H{"label": label, "points": s.Points})
+			}
+			sort.Slice(series, func(i, j int) bool {
+				return series[i]["label"].(string) < series[j]["label"].(string)
+			})
+			kind := "gauge"
+			if counter {
+				kind = "counter"
+			}
+			mu.Lock()
+			metrics[name] = gin.H{"unit": "", "kind": kind, "series": series}
+			mu.Unlock()
+		}(name)
 	}
+	wg.Wait()
+
 	resp := gin.H{
 		"range":   end.Sub(start).String(),
 		"step":    step.String(),
@@ -718,7 +765,7 @@ func (h *Handler) GetMonitoringMetrics(c *gin.Context) {
 	if liveErr != "" {
 		resp["live_error"] = liveErr
 	}
-	c.JSON(http.StatusOK, resp)
+	return resp
 }
 
 // GetMonitoringLogs reads back the resource's app logs (dada-app-logs-*), scoped
@@ -768,15 +815,20 @@ func (h *Handler) GetMonitoringLogs(c *gin.Context) {
 	case "7d":
 		since = 7 * 24 * time.Hour
 	}
-	res, err := h.appLogsearch.Search(c.Request.Context(), logsearch.SearchOpts{
-		ProjectID:     labels["project_id"],
-		MonitoringApp: labels["monitoring_app"],
-		Source:        labels["source"],
-		Query:         c.Query("q"),
-		Level:         c.Query("level"),
-		Since:         time.Now().Add(-since),
-		Size:          300,
-	})
+	ctx := c.Request.Context()
+	key := "logs:mon:" + app.ID.String() + ":" + c.Request.URL.RawQuery
+	res, err := cache.Fetch(ctx, h.cache, key, h.cfg.CacheLogsTTL,
+		func() (*logsearch.SearchResult, error) {
+			return h.appLogsearch.Search(ctx, logsearch.SearchOpts{
+				ProjectID:     labels["project_id"],
+				MonitoringApp: labels["monitoring_app"],
+				Source:        labels["source"],
+				Query:         c.Query("q"),
+				Level:         c.Query("level"),
+				Since:         time.Now().Add(-since),
+				Size:          300,
+			})
+		})
 	if err != nil {
 		respondError(c, http.StatusBadGateway, "log search failed: "+err.Error())
 		return

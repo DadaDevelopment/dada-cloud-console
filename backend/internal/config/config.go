@@ -142,6 +142,19 @@ type Config struct {
 	// aggregates slowly-changing data, so seconds of staleness are fine.
 	CacheCostTTL time.Duration
 
+	// CacheMetricsTTL bounds how long an analytics/observability response
+	// (metric panels, resource health) is served from Redis before recompute.
+	// Short by design: the charts tolerate a few seconds of staleness, and the
+	// cache exists to collapse the N sequential Mimir/Prometheus round-trips a
+	// dashboard load fans out into a single upstream hit per window.
+	CacheMetricsTTL time.Duration
+
+	// CacheLogsTTL bounds how long an aggregated log-search response is served
+	// from Redis. Shorter than CacheMetricsTTL because tailing logs expect fresher
+	// results; still enough to absorb a burst of dashboard refreshes off one
+	// OpenSearch query.
+	CacheLogsTTL time.Duration
+
 	// Fully-loaded consumption pricing knobs (billing_fullcost.go). BillingMargin
 	// is the profit multiplier applied after infra-overhead loading (default 1.4);
 	// BillingMinUtilization floors the per-type user share so the overhead factor
@@ -392,6 +405,8 @@ func Load() (*Config, error) {
 		OpenCostURL:               getEnv("OPENCOST_URL", ""),
 		RedisAddr:                 getEnv("REDIS_ADDR", ""),
 		CacheCostTTL:              time.Duration(getEnvInt64("CACHE_COST_TTL_SECONDS", 300)) * time.Second,
+		CacheMetricsTTL:           time.Duration(getEnvInt64("CACHE_METRICS_TTL_SECONDS", 20)) * time.Second,
+		CacheLogsTTL:              time.Duration(getEnvInt64("CACHE_LOGS_TTL_SECONDS", 10)) * time.Second,
 		BillingMargin:             getEnvFloat("BILLING_MARGIN", 1.4),
 		BillingMinUtilization:     getEnvFloat("BILLING_MIN_UTILIZATION", 0.30),
 		HardwareMonthlyCostRUB:    getEnvFloat("HARDWARE_MONTHLY_COST_RUB", 0),
