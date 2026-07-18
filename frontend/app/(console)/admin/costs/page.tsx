@@ -191,9 +191,9 @@ export default function AdminCostsPage() {
           <CardContent className="p-4 pt-0">
             <ul className="grid grid-cols-1 gap-1.5 sm:grid-cols-2 lg:grid-cols-3">
               {(data?.hardware ?? []).map((g) => (
-                <li key={g.name} className="flex items-center justify-between rounded-md border border-gray-100 dark:border-gray-800/60 px-3 py-2 text-sm">
+                <li key={`${g.cluster}/${g.name}`} className="flex items-center justify-between rounded-md border border-gray-100 dark:border-gray-800/60 px-3 py-2 text-sm">
                   <span className="truncate text-gray-700 dark:text-gray-200">
-                    {g.name}
+                    {g.cluster ? `${g.cluster} / ${g.name}` : g.name}
                     <span className="ml-1.5 text-xs text-gray-400 dark:text-gray-500">
                       {t("adminCosts.hardware.nodeCount", { count: g.node_count })}
                     </span>

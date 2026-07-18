@@ -108,29 +108,42 @@ type RequestOptions = {
   baseUrl?: string;
 };
 
+function raceAbort<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
+  if (signal.aborted) {
+    return Promise.reject(new DOMException("Aborted", "AbortError"));
+  }
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = () => reject(new DOMException("Aborted", "AbortError"));
+    signal.addEventListener("abort", onAbort, { once: true });
+    promise.then(resolve, reject).finally(() => signal.removeEventListener("abort", onAbort));
+  });
+}
+
 export async function apiFetch<T>(
   path: string,
   options: RequestOptions = {}
 ): Promise<T> {
   const { method = "GET", body, token, baseUrl } = options;
 
-  const bearerToken = token ?? await getToken();
-
-  const headers: Record<string, string> = {
-    "Content-Type": "application/json",
-  };
-
-  if (bearerToken) {
-    headers["Authorization"] = `Bearer ${bearerToken}`;
-  }
-
   // Hard timeout so a hung request (e.g. a stuck SSO silent-refresh that never
   // resolves the bearer token) surfaces as an error instead of an infinite
-  // spinner. 30s is well above any healthy API call.
+  // spinner. 30s is well above any healthy API call. Covers getToken() too --
+  // it is the exact "stuck SSO silent-refresh" case this guard is for, and
+  // fetch()'s AbortSignal only takes effect once fetch() itself is called.
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 30_000);
   let res: Response;
   try {
+    const bearerToken = token ?? await raceAbort(getToken(), controller.signal);
+
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+    };
+
+    if (bearerToken) {
+      headers["Authorization"] = `Bearer ${bearerToken}`;
+    }
+
     res = await fetch(`${baseUrl ?? API_BASE_URL}${path}`, {
       method,
       headers,

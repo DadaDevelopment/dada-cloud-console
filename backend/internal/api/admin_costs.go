@@ -392,6 +392,7 @@ func adminCostsRawTotal(podAllocs map[string]opencost.Allocation) (namespacedTot
 // monthly price for every node in the group combined (not per-node).
 type adminCostHardwareGroup struct {
 	Name          string  `json:"name"`
+	Cluster       string  `json:"cluster"`
 	NodeCount     int     `json:"node_count"`
 	PriceMonthRUB float64 `json:"price_month_rub"`
 }
@@ -422,10 +423,13 @@ func (h *Handler) resolveHardwareCost(ctx context.Context, days int) (float64, s
 	return 0, "opencost_only", nil
 }
 
-// begetHardwareCost fetches the configured cluster's live price_month total
-// from the Beget managed-Kubernetes billing API (24h cache -- Beget's own
-// pricing changes on the timescale of tariff updates, not requests). Returns
-// ok=false on any failure (nil client, network error, cluster not found)
+// begetHardwareCost fetches the live price_month total across every Beget
+// managed-Kubernetes cluster selected by BegetK8SClusterSlug (24h cache --
+// Beget's own pricing changes on the timescale of tariff updates, not
+// requests), summed into one hardware bill. The platform runs on more than
+// one Beget cluster (prod console cluster + the separate ArgoCD mgmt
+// cluster), so an empty slug selects all of them by default. Returns
+// ok=false on any failure (nil client, network error, no cluster matched)
 // so resolveHardwareCost falls through to the next source; a Beget outage
 // must never surface as a 5xx here.
 func (h *Handler) begetHardwareCost(ctx context.Context) (float64, []adminCostHardwareGroup, bool) {
@@ -438,20 +442,25 @@ func (h *Handler) begetHardwareCost(ctx context.Context) (float64, []adminCostHa
 		log.Warn().Err(err).Msg("admin costs: beget cluster list failed, falling back")
 		return 0, nil, false
 	}
-	cl, ok := beget.FindClusterBySlug(clusters, h.cfg.BegetK8SClusterSlug)
-	if !ok {
-		log.Warn().Str("slug", h.cfg.BegetK8SClusterSlug).Msg("admin costs: beget token cannot see configured cluster slug, falling back")
+	selected := beget.SelectClusters(clusters, h.cfg.BegetK8SClusterSlug)
+	if len(selected) == 0 {
+		log.Warn().Str("slug", h.cfg.BegetK8SClusterSlug).Msg("admin costs: beget token cannot see any configured cluster slug, falling back")
 		return 0, nil, false
 	}
-	breakdown := []adminCostHardwareGroup{
-		{Name: "control plane", NodeCount: cl.MasterNodeCount, PriceMonthRUB: round2(cl.MasterPriceRUB)},
-	}
-	for _, wg := range cl.WorkerGroups {
+	var total float64
+	breakdown := make([]adminCostHardwareGroup, 0, len(selected)*2)
+	for _, cl := range selected {
+		total += cl.TotalMonthlyRUB()
 		breakdown = append(breakdown, adminCostHardwareGroup{
-			Name: wg.DisplayName, NodeCount: wg.NodeCount, PriceMonthRUB: round2(wg.PriceMonth),
+			Name: "control plane", Cluster: cl.Slug, NodeCount: cl.MasterNodeCount, PriceMonthRUB: round2(cl.MasterPriceRUB),
 		})
+		for _, wg := range cl.WorkerGroups {
+			breakdown = append(breakdown, adminCostHardwareGroup{
+				Name: wg.DisplayName, Cluster: cl.Slug, NodeCount: wg.NodeCount, PriceMonthRUB: round2(wg.PriceMonth),
+			})
+		}
 	}
-	return cl.TotalMonthlyRUB(), breakdown, true
+	return total, breakdown, true
 }
 
 // adminRevenueByNamespace prices every project namespace's app allocations

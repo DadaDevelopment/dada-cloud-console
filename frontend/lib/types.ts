@@ -814,6 +814,7 @@ export interface AdminCostLossMaker {
 
 export interface AdminCostHardwareGroup {
   name: string;
+  cluster: string;
   node_count: number;
   price_month_rub: number;
 }

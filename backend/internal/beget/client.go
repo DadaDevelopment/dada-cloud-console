@@ -158,13 +158,26 @@ func (c *Client) ListClusters(ctx context.Context) ([]Cluster, error) {
 	return out, nil
 }
 
-// FindClusterBySlug returns the cluster whose slug matches (case-insensitive),
-// or ok=false when the token cannot see a cluster with that slug.
-func FindClusterBySlug(clusters []Cluster, slug string) (Cluster, bool) {
-	for _, cl := range clusters {
-		if strings.EqualFold(cl.Slug, slug) {
-			return cl, true
+// SelectClusters filters clusters down to the ones named in slugCSV, a
+// comma-separated list of slugs (case-insensitive, whitespace-tolerant). An
+// empty/blank slugCSV selects every cluster the token can see -- the platform
+// runs on more than one Beget-managed cluster, so "sum all of them" is the
+// useful default for the hardware-cost drilldown.
+func SelectClusters(clusters []Cluster, slugCSV string) []Cluster {
+	if strings.TrimSpace(slugCSV) == "" {
+		return clusters
+	}
+	want := map[string]bool{}
+	for _, s := range strings.Split(slugCSV, ",") {
+		if s = strings.TrimSpace(s); s != "" {
+			want[strings.ToLower(s)] = true
 		}
 	}
-	return Cluster{}, false
+	out := make([]Cluster, 0, len(clusters))
+	for _, cl := range clusters {
+		if want[strings.ToLower(cl.Slug)] {
+			out = append(out, cl)
+		}
+	}
+	return out
 }

@@ -167,10 +167,12 @@ type Config struct {
 	// source; the drilldown falls back to HardwareMonthlyCostRUB, then
 	// OpenCost's own raw total.
 	BegetK8SToken string // BEGET_K8S_TOKEN
-	// BegetK8SClusterSlug picks which Beget-managed cluster's price_month
-	// figures back GetAdminCosts when multiple clusters are visible to the
-	// token (the prod console cluster and the separate ArgoCD mgmt cluster
-	// both are). Defaults to the prod cluster's slug.
+	// BegetK8SClusterSlug picks which Beget-managed cluster(s) price_month
+	// figures back GetAdminCosts: a comma-separated list of slugs, or empty
+	// to sum every cluster the token can see. The platform runs on more than
+	// one Beget-managed cluster (the prod console cluster and the separate
+	// ArgoCD mgmt cluster), and the hardware bill should cover all of them by
+	// default.
 	BegetK8SClusterSlug string // BEGET_K8S_CLUSTER_SLUG
 
 	// User-telemetry read store (multi-tenant Grafana Mimir). The monitoring
@@ -394,7 +396,7 @@ func Load() (*Config, error) {
 		BillingMinUtilization:     getEnvFloat("BILLING_MIN_UTILIZATION", 0.30),
 		HardwareMonthlyCostRUB:    getEnvFloat("HARDWARE_MONTHLY_COST_RUB", 0),
 		BegetK8SToken:             getEnv("BEGET_K8S_TOKEN", ""),
-		BegetK8SClusterSlug:       getEnv("BEGET_K8S_CLUSTER_SLUG", "d5c373"),
+		BegetK8SClusterSlug:       getEnv("BEGET_K8S_CLUSTER_SLUG", ""),
 		UserMetricsQueryURL:       getEnv("USER_METRICS_QUERY_URL", ""),
 		UserMetricsQueryUser:      getEnv("USER_METRICS_QUERY_USER", ""),
 		UserMetricsQueryPass:      getEnv("USER_METRICS_QUERY_PASS", ""),
