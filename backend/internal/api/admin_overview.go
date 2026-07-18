@@ -8,13 +8,11 @@ import (
 
 	"github.com/dada-tuda/console/backend/internal/auth"
 	"github.com/gin-gonic/gin"
-	"github.com/rs/zerolog/log"
 )
 
 const (
 	overviewDynamicsDefaultDays = 14
 	overviewDynamicsMaxDays     = 90
-	overviewTopProjectsLimit    = 5
 	overviewServiceAccountLike  = "service-account-%"
 )
 
@@ -50,20 +48,15 @@ type overviewDomains struct {
 	Failed  int `json:"failed"`
 }
 
-type overviewProjectCost struct {
-	ProjectID   string  `json:"project_id"`
-	ProjectName string  `json:"project_name"`
-	Cost7d      float64 `json:"cost_7d"`
-	Cost30d     float64 `json:"cost_30d"`
-}
-
 type overviewMoney struct {
-	Available bool                  `json:"available"`
-	Note      string                `json:"note,omitempty"`
-	Currency  string                `json:"currency,omitempty"`
-	Total7d   float64               `json:"total_7d,omitempty"`
-	Total30d  float64               `json:"total_30d,omitempty"`
-	Top       []overviewProjectCost `json:"top,omitempty"`
+	Available     bool                 `json:"available"`
+	Note          string               `json:"note,omitempty"`
+	Currency      string               `json:"currency,omitempty"`
+	Days          int                  `json:"days,omitempty"`
+	HardwareTotal float64              `json:"hardware_total,omitempty"`
+	RevenueTotal  float64              `json:"revenue_total,omitempty"`
+	MarginTotal   float64              `json:"margin_total,omitempty"`
+	TopLossMakers []adminCostLossMaker `json:"top_loss_makers,omitempty"`
 }
 
 type overviewDayPoint struct {
@@ -293,108 +286,38 @@ func (h *Handler) overviewNotReadyApps(ctx context.Context) ([]overviewNotReadyA
 	return out, rows.Err()
 }
 
-// overviewMoney returns a best-effort per-project cost breakdown from the same
-// cached OpenCost allocation set the per-project cost card reads (cost.go). It
-// never fails the overview request: a missing OpenCost client or a failed
-// aggregation degrades to money.available=false with a note.
+// overviewMoney returns the same platform business economics as
+// /admin/costs (hardware spend, revenue, margin, top loss-makers), reusing
+// buildAdminCostSummary (admin_costs.go) over the shared cached snapshot so
+// this second call costs no extra OpenCost/Beget round-trip. The overview
+// card intentionally shows business numbers (real hardware bill, revenue,
+// margin), not raw per-project OpenCost allocation crumbs -- owners read
+// "Деньги" as P&L, not a resource-usage debug view. Never fails the overview
+// request: any degradation in buildAdminCostSummary yields
+// money.available=false with a note.
 func (h *Handler) overviewMoney(ctx context.Context) overviewMoney {
 	if h.opencost == nil {
 		return overviewMoney{Available: false, Note: "OpenCost not configured"}
 	}
 
-	nsToProject, err := h.allNamespaceProjects(ctx)
-	if err != nil {
-		log.Warn().Err(err).Msg("admin overview: failed to load namespace->project map")
-		return overviewMoney{Available: false, Note: "cost data temporarily unavailable"}
-	}
-
-	allocs7d, err7 := h.clusterAllocsByWindow(ctx, "7d")
-	allocs30d, err30 := h.clusterAllocsByWindow(ctx, "30d")
-	if err7 != nil || err30 != nil {
-		log.Warn().Err(err7).Err(err30).Msg("admin overview: OpenCost aggregation failed")
-		return overviewMoney{Available: false, Note: "cost data temporarily unavailable"}
-	}
-
-	type acc struct {
-		name          string
-		cost7, cost30 float64
-	}
-	byProject := map[string]*acc{}
-	var total7, total30 float64
-
-	for ns, pr := range nsToProject {
-		a := byProject[pr.id]
-		if a == nil {
-			a = &acc{name: pr.name}
-			byProject[pr.id] = a
+	summary := h.buildAdminCostSummary(ctx, 30)
+	if !summary.Available {
+		note := summary.Note
+		if note == "" {
+			note = "cost data temporarily unavailable"
 		}
-		a.cost7 += allocs7d[ns].TotalCost
-		a.cost30 += allocs30d[ns].TotalCost
-	}
-	for _, a := range allocs7d {
-		total7 += a.TotalCost
-	}
-	for _, a := range allocs30d {
-		total30 += a.TotalCost
-	}
-
-	top := make([]overviewProjectCost, 0, len(byProject))
-	for id, a := range byProject {
-		top = append(top, overviewProjectCost{ProjectID: id, ProjectName: a.name, Cost7d: a.cost7, Cost30d: a.cost30})
-	}
-	sortProjectCostsDesc(top)
-	if len(top) > overviewTopProjectsLimit {
-		top = top[:overviewTopProjectsLimit]
+		return overviewMoney{Available: false, Note: note}
 	}
 
 	return overviewMoney{
-		Available: true,
-		Currency:  costCurrency,
-		Total7d:   total7,
-		Total30d:  total30,
-		Top:       top,
+		Available:     true,
+		Currency:      costCurrency,
+		Days:          summary.Days,
+		HardwareTotal: round2(summary.HardwareTotal),
+		RevenueTotal:  round2(summary.TotalRevenue),
+		MarginTotal:   round2(summary.TotalRevenue - summary.HardwareTotal),
+		TopLossMakers: summary.TopLossMakers,
 	}
-}
-
-func sortProjectCostsDesc(v []overviewProjectCost) {
-	for i := 1; i < len(v); i++ {
-		j := i
-		for j > 0 && v[j-1].Cost30d < v[j].Cost30d {
-			v[j-1], v[j] = v[j], v[j-1]
-			j--
-		}
-	}
-}
-
-type overviewProjectRef struct {
-	id   string
-	name string
-}
-
-// allNamespaceProjects maps every k8s environment namespace on the platform to
-// its owning project, mirroring projectNamespaces (cost.go) but across all
-// projects instead of one, so cluster-wide OpenCost allocations can be
-// attributed without a per-project query loop.
-func (h *Handler) allNamespaceProjects(ctx context.Context) (map[string]overviewProjectRef, error) {
-	rows, err := h.pool.Query(ctx, `
-		SELECT e.namespace, p.id, p.display_name
-		FROM environments e
-		JOIN projects p ON p.id = e.project_id
-		WHERE e.runtime = 'k8s' AND e.namespace <> ''`,
-	)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	out := make(map[string]overviewProjectRef)
-	for rows.Next() {
-		var ns, id, name string
-		if err := rows.Scan(&ns, &id, &name); err != nil {
-			return nil, err
-		}
-		out[ns] = overviewProjectRef{id: id, name: name}
-	}
-	return out, rows.Err()
 }
 
 // overviewDynamics returns a per-day series for the last `days` days: signups,

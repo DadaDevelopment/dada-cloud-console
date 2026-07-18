@@ -35,6 +35,15 @@ const (
 	basisEstimate = "estimate"
 )
 
+// accountSummaryBudget is the hard wall-clock cap GetAccountSummary spends
+// summing consumption across every project the caller can read. A god caller
+// (platform-admins) can read every project on the platform, so this loops
+// over N projects instead of one; costRequestBudget (cost.go, 2s) is sized
+// for a single OpenCost read and is too tight here. Projects not reached
+// within the budget are skipped and the response is marked partial rather
+// than the request hanging.
+const accountSummaryBudget = 5 * time.Second
+
 // projectConsumption is the money-equivalent estimate for one project over the
 // current calendar month. Informational only ("оценка по нашим тарифам"), never
 // a bill.
@@ -391,21 +400,27 @@ func datnameFromSummary(summaryJSON []byte) string {
 // dbSizesByDatname returns the live pg_database_size_bytes keyed by datname.
 // Best-effort: returns an empty map when Prometheus is unset or the query fails.
 func (h *Handler) dbSizesByDatname(ctx context.Context) map[string]float64 {
-	out := map[string]float64{}
 	if h.prometheus == nil {
-		return out
+		return map[string]float64{}
 	}
+	out, _ := cache.Fetch(ctx, h.cache, "billing:dbsizes", h.cfg.CacheCostTTL,
+		func() (map[string]float64, error) { return h.queryDBSizesByDatname(ctx) })
+	return out
+}
+
+func (h *Handler) queryDBSizesByDatname(ctx context.Context) (map[string]float64, error) {
+	out := map[string]float64{}
 	samples, err := h.prometheus.QueryInstant(ctx, "pg_database_size_bytes", time.Time{}, "")
 	if err != nil {
 		log.Warn().Err(err).Msg("billing consumption: pg_database_size query failed")
-		return out
+		return out, nil
 	}
 	for _, s := range samples {
 		if dn := s.Metric["datname"]; dn != "" {
 			out[dn] = s.Point.V
 		}
 	}
-	return out
+	return out, nil
 }
 
 // consumptionJSON renders a projectConsumption as the frozen response contract.
@@ -499,9 +514,18 @@ func (h *Handler) GetAccountSummary(c *gin.Context) {
 		return
 	}
 
+	budgetCtx, cancel := context.WithTimeout(ctx, accountSummaryBudget)
+	defer cancel()
+
 	var spend float64
+	partial := false
 	for _, pid := range projectIDs {
-		pc, err := h.computeProjectConsumption(ctx, pid, false)
+		if budgetCtx.Err() != nil {
+			partial = true
+			log.Warn().Int("total_projects", len(projectIDs)).Msg("billing account summary: budget exceeded, spend is partial")
+			break
+		}
+		pc, err := h.computeProjectConsumption(budgetCtx, pid, false)
 		if err != nil {
 			log.Warn().Err(err).Str("project", pid.String()).Msg("billing account summary: project consumption failed")
 			continue
@@ -513,8 +537,8 @@ func (h *Handler) GetAccountSummary(c *gin.Context) {
 		"currency":         "RUB",
 		"plan":             planName,
 		"period_spend_rub": round2(spend),
-		// balance_rub is hardcoded 0: YooKassa-backed prepaid balance lands later.
-		"balance_rub": 0,
+		"balance_rub":      0,
+		"partial":          partial,
 	})
 }
 

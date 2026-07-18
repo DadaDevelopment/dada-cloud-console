@@ -16,9 +16,15 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
-// adminCostsTopLossLimit bounds the top-loss-makers summary the same way
-// overviewTopProjectsLimit bounds the overview's top-cost list.
+// adminCostsTopLossLimit bounds the top-loss-makers summary shown on both the
+// admin costs page and the overview money card.
 const adminCostsTopLossLimit = 5
+
+// adminCostsWindows are the two window values /admin/costs (and the money
+// card that reuses its aggregates) accept, mirrored here so the background
+// cost-cache warmer (cost.go) can pre-populate both pod-level aggregations
+// off the user request path.
+var adminCostsWindows = []string{"7d", "30d"}
 
 // platformClientID / platformClientName is the pseudo-client every namespace
 // not owned by a project (argocd, monitoring, databases, opensearch, ...)
@@ -111,45 +117,89 @@ func (h *Handler) GetAdminCosts(c *gin.Context) {
 	if v, err := strconv.Atoi(c.Query("days")); err == nil && (v == 7 || v == 30) {
 		days = v
 	}
-	window := strconv.Itoa(days) + "d"
 
-	ctx := c.Request.Context()
-
-	if h.opencost == nil {
+	summary := h.buildAdminCostSummary(c.Request.Context(), days)
+	if !summary.Available {
 		c.JSON(http.StatusOK, gin.H{
 			"available": false,
-			"note":      "OpenCost not configured",
-			"days":      days,
-			"window":    window,
+			"note":      summary.Note,
+			"days":      summary.Days,
+			"window":    summary.Window,
 			"currency":  costCurrency,
 		})
 		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"available":           true,
+		"days":                summary.Days,
+		"window":              summary.Window,
+		"currency":            costCurrency,
+		"hardware_source":     summary.HardwareSource,
+		"hardware_total_cost": round2(summary.HardwareTotal),
+		"hardware":            summary.HardwareBreakdown,
+		"opencost_raw_total":  round2(summary.RawTotal),
+		"scale_factor":        round2(summary.Scale),
+		"total_cost":          round2(summary.TotalCost),
+		"total_revenue":       round2(summary.TotalRevenue),
+		"total_margin":        round2(summary.TotalRevenue - summary.TotalCost),
+		"unallocated":         summary.Unallocated,
+		"top_loss_makers":     summary.TopLossMakers,
+		"clients":             summary.Clients,
+	})
+}
+
+// adminCostSummary is the fully-computed client -> project -> resource
+// economics tree plus its aggregates, shared between GetAdminCosts (full
+// tree) and overviewMoney (admin_overview.go: just the business totals for
+// the "Деньги" card). Building it is pure in-memory work over the cached
+// OpenCost/DB/Beget snapshots (adminCostPodAllocs, adminCostNamespaceOwners,
+// adminRevenueByNamespace, resolveHardwareCost all read-through the shared
+// cache), so computing it twice per overview request is cheap.
+type adminCostSummary struct {
+	Available         bool
+	Note              string
+	Days              int
+	Window            string
+	HardwareSource    string
+	HardwareTotal     float64
+	HardwareBreakdown []adminCostHardwareGroup
+	RawTotal          float64
+	Scale             float64
+	TotalCost         float64
+	TotalRevenue      float64
+	Unallocated       adminCostResource
+	TopLossMakers     []adminCostLossMaker
+	Clients           []*adminCostClient
+}
+
+// buildAdminCostSummary computes the platform cost/revenue/margin economics
+// for a `days`-day window. Fail-open: any missing dependency (OpenCost
+// unconfigured, aggregation failure, namespace-owner lookup failure) yields
+// Available=false with Note set, never an error -- callers on both the admin
+// costs page and the overview money card must degrade gracefully instead of
+// failing the whole request.
+func (h *Handler) buildAdminCostSummary(ctx context.Context, days int) adminCostSummary {
+	window := strconv.Itoa(days) + "d"
+	out := adminCostSummary{Days: days, Window: window}
+
+	if h.opencost == nil {
+		out.Note = "OpenCost not configured"
+		return out
 	}
 
 	podAllocs, err := h.adminCostPodAllocs(ctx, window)
 	if err != nil {
 		log.Warn().Err(err).Msg("admin costs: OpenCost pod aggregation failed")
-		c.JSON(http.StatusOK, gin.H{
-			"available": false,
-			"note":      "cost data temporarily unavailable",
-			"days":      days,
-			"window":    window,
-			"currency":  costCurrency,
-		})
-		return
+		out.Note = "cost data temporarily unavailable"
+		return out
 	}
 
 	nsMap, err := h.adminCostNamespaceOwners(ctx)
 	if err != nil {
 		log.Warn().Err(err).Msg("admin costs: failed to load namespace->owner map")
-		c.JSON(http.StatusOK, gin.H{
-			"available": false,
-			"note":      "cost data temporarily unavailable",
-			"days":      days,
-			"window":    window,
-			"currency":  costCurrency,
-		})
-		return
+		out.Note = "cost data temporarily unavailable"
+		return out
 	}
 
 	revenueByNS := h.adminRevenueByNamespace(ctx)
@@ -220,23 +270,18 @@ func (h *Handler) GetAdminCosts(c *gin.Context) {
 	}
 	totalCost += unallocated.TotalCost
 
-	c.JSON(http.StatusOK, gin.H{
-		"available":           true,
-		"days":                days,
-		"window":              window,
-		"currency":            costCurrency,
-		"hardware_source":     hardwareSource,
-		"hardware_total_cost": round2(hardwareTotal),
-		"hardware":            hardwareBreakdown,
-		"opencost_raw_total":  round2(rawTotal),
-		"scale_factor":        round2(scale),
-		"total_cost":          round2(totalCost),
-		"total_revenue":       round2(totalRevenue),
-		"total_margin":        round2(totalRevenue - totalCost),
-		"unallocated":         unallocated,
-		"top_loss_makers":     lossMakers,
-		"clients":             clients,
-	})
+	out.Available = true
+	out.HardwareSource = hardwareSource
+	out.HardwareTotal = hardwareTotal
+	out.HardwareBreakdown = hardwareBreakdown
+	out.RawTotal = rawTotal
+	out.Scale = scale
+	out.TotalCost = totalCost
+	out.TotalRevenue = totalRevenue
+	out.Unallocated = unallocated
+	out.TopLossMakers = lossMakers
+	out.Clients = clients
+	return out
 }
 
 // add records one pod allocation's scaled cost under client -> project ->
@@ -285,10 +330,12 @@ func adminCostProjectIndex(cl *adminCostClient, projectID string) int {
 // set for a window, cached like clusterAllocsByWindow (cost.go) but keyed
 // separately since the aggregation level differs ("pod" vs "namespace").
 func (h *Handler) adminCostPodAllocs(ctx context.Context, window string) (map[string]opencost.Allocation, error) {
-	return cache.Fetch(ctx, h.cache,
+	bctx, cancel := withCostBudget(ctx)
+	defer cancel()
+	return cache.Fetch(bctx, h.cache,
 		"cost:admin:pod:"+window, h.cfg.CacheCostTTL,
 		func() (map[string]opencost.Allocation, error) {
-			return h.opencost.Compute(ctx, window, "pod", "")
+			return h.opencost.Compute(bctx, window, "pod", "")
 		})
 }
 
@@ -299,8 +346,8 @@ type adminCostOwner struct {
 }
 
 // adminCostNamespaceOwners maps every project namespace to its project and
-// owning user, mirroring allNamespaceProjects (admin_overview.go) plus the
-// owner join the cost drilldown needs to group projects into clients.
+// owning user, plus the owner join the cost drilldown needs to group
+// projects into clients.
 func (h *Handler) adminCostNamespaceOwners(ctx context.Context) (map[string]adminCostOwner, error) {
 	rows, err := h.pool.Query(ctx, `
 		SELECT e.namespace, p.id, p.display_name,

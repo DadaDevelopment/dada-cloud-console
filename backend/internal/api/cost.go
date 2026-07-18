@@ -19,6 +19,23 @@ import (
 // console owns the label.
 const costCurrency = "RUB"
 
+// costRequestBudget is the hard wall-clock cap a user-facing request may
+// spend waiting on cost data (OpenCost/Mimir aggregations, DB fan-out over
+// cached snapshots). Every cost-reading handler is expected to serve from a
+// snapshot that a background warmer refreshes well inside this budget; the
+// budget exists so a cold/miss cache degrades to a fast "stale" response
+// instead of hanging the request on a live 20s OpenCost call. The background
+// warmer itself uses its own patient client/context and is not subject to
+// this budget.
+const costRequestBudget = 2 * time.Second
+
+// withCostBudget derives a context capped at costRequestBudget from a request
+// context, for use around any cache.Fetch call that might fall through to a
+// live OpenCost/Mimir/Prometheus query on a cache miss.
+func withCostBudget(ctx context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(ctx, costRequestBudget)
+}
+
 // allowedCostWindows whitelists the OpenCost window values the UI may request.
 // Restricting to a fixed set keeps the value out of any injection surface and
 // bounds the query cost. Note the on-cluster Prometheus retains only ~7d, so
@@ -143,10 +160,12 @@ func (h *Handler) GetProjectCost(c *gin.Context) {
 // every project's cost card. Kept warm by StartCostCacheWarmer so a request
 // almost never pays OpenCost's cold ~14s 30d aggregation.
 func (h *Handler) clusterAllocsByWindow(ctx context.Context, window string) (map[string]opencost.Allocation, error) {
-	return cache.Fetch(ctx, h.cache,
+	bctx, cancel := withCostBudget(ctx)
+	defer cancel()
+	return cache.Fetch(bctx, h.cache,
 		"cost:allocs:"+window, h.cfg.CacheCostTTL,
 		func() (map[string]opencost.Allocation, error) {
-			return h.opencost.Compute(ctx, window, "namespace", "")
+			return h.opencost.Compute(bctx, window, "namespace", "")
 		})
 }
 
@@ -181,6 +200,17 @@ func (h *Handler) StartCostCacheWarmer(ctx context.Context, interval time.Durati
 			}
 			cache.Store(ctx, h.cache, "cost:allocs:"+w, h.cfg.CacheCostTTL, allocs)
 		}
+		for _, w := range adminCostsWindows {
+			wctx, cancel := context.WithTimeout(ctx, 120*time.Second)
+			podAllocs, err := warmClient.Compute(wctx, w, "pod", "")
+			cancel()
+			if err != nil {
+				log.Warn().Err(err).Str("window", w).Msg("cost warmer: OpenCost admin pod compute failed")
+				continue
+			}
+			cache.Store(ctx, h.cache, "cost:admin:pod:"+w, h.cfg.CacheCostTTL, podAllocs)
+		}
+		h.warmBillingSnapshot(ctx, warmClient)
 	}
 	go func() {
 		warm()

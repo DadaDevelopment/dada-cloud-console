@@ -738,20 +738,15 @@ export interface AdminOverviewDomains {
   failed: number;
 }
 
-export interface AdminOverviewProjectCost {
-  project_id: string;
-  project_name: string;
-  cost_7d: number;
-  cost_30d: number;
-}
-
 export interface AdminOverviewMoney {
   available: boolean;
   note?: string;
   currency?: string;
-  total_7d?: number;
-  total_30d?: number;
-  top?: AdminOverviewProjectCost[];
+  days?: number;
+  hardware_total?: number;
+  revenue_total?: number;
+  margin_total?: number;
+  top_loss_makers?: AdminCostLossMaker[];
 }
 
 export interface AdminOverviewNotReadyApp {

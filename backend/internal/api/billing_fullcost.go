@@ -68,7 +68,7 @@ type billingFootprint struct {
 // every project), so it is fetched once per TTL, not per request/project -- this
 // is what keeps the billing endpoints from issuing an OpenCost query per project
 // and timing out.
-const billingSnapshotTTL = 60 * time.Second
+const billingSnapshotTTL = 4 * time.Minute
 
 // consumptionPricing carries the per-type overhead factors (>=1) and the profit
 // margin used to turn a raw OpenCost allocation into a customer-facing price.
@@ -131,7 +131,7 @@ func (h *Handler) billingSnapshot(ctx context.Context) *billingCostSnapshot {
 		return h.emptySnapshot()
 	}
 
-	snap, err := h.buildBillingSnapshot(ctx)
+	snap, err := h.buildBillingSnapshot(ctx, h.opencost)
 	if err != nil {
 		log.Warn().Err(err).Msg("billing: snapshot build failed; using last-good/empty")
 		if h.billingSnap != nil {
@@ -141,6 +141,22 @@ func (h *Handler) billingSnapshot(ctx context.Context) *billingCostSnapshot {
 	}
 	h.billingSnap = snap
 	return snap
+}
+
+// warmBillingSnapshot rebuilds the billing snapshot with the given (patient)
+// OpenCost client and stores it, called from the background cost-cache
+// warmer (cost.go) so a request almost never pays the ~7s cold
+// buildBillingSnapshot query itself. Best-effort: a failure is logged and the
+// last-good snapshot (if any) is left in place.
+func (h *Handler) warmBillingSnapshot(ctx context.Context, client *opencost.Client) {
+	snap, err := h.buildBillingSnapshot(ctx, client)
+	if err != nil {
+		log.Warn().Err(err).Msg("cost warmer: billing snapshot build failed")
+		return
+	}
+	h.billingSnapMu.Lock()
+	h.billingSnap = snap
+	h.billingSnapMu.Unlock()
 }
 
 // appLabelKeys are the pod labels, in priority order, an app's console name is
@@ -153,13 +169,13 @@ var appLabelKeys = []string{"dada_io_app", "app_kubernetes_io_instance", "app_ku
 // derives everything: per-type overhead factors (whole-cluster vs user-namespace
 // split), per-app cost indexed by every candidate app label, and the shared
 // Postgres/PowerDNS pod costs. Costs are scaled to a monthly run-rate.
-func (h *Handler) buildBillingSnapshot(ctx context.Context) (*billingCostSnapshot, error) {
+func (h *Handler) buildBillingSnapshot(ctx context.Context, client *opencost.Client) (*billingCostSnapshot, error) {
 	userNS, err := h.userNamespaces(ctx)
 	if err != nil {
 		return nil, err
 	}
 
-	pods, err := h.opencost.Compute(ctx, billingCostWindow, "pod", "")
+	pods, err := client.Compute(ctx, billingCostWindow, "pod", "")
 	if err != nil {
 		return nil, err
 	}

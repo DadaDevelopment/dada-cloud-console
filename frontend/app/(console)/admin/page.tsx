@@ -224,25 +224,33 @@ export default function AdminOverviewPage() {
               <p className="text-sm text-amber-600 dark:text-amber-400">{t("adminOverview.money.unavailable")}</p>
             ) : (
               <>
-                <div className="mb-3 grid grid-cols-2 gap-3">
+                <div className="mb-3 grid grid-cols-3 gap-3">
                   <div>
-                    <p className="text-xs text-gray-500 dark:text-gray-400">{t("adminOverview.money.total7d")}</p>
-                    <p className="text-lg font-semibold text-gray-900 dark:text-gray-100">{data ? formatMoney(data.money.total_7d ?? 0, data.money.currency) : "—"}</p>
+                    <p className="text-xs text-gray-500 dark:text-gray-400">{t("adminOverview.money.hardware")}</p>
+                    <p className="text-lg font-semibold text-gray-900 dark:text-gray-100">{data ? formatMoney(data.money.hardware_total ?? 0, data.money.currency) : "—"}</p>
                   </div>
                   <div>
-                    <p className="text-xs text-gray-500 dark:text-gray-400">{t("adminOverview.money.total30d")}</p>
-                    <p className="text-lg font-semibold text-gray-900 dark:text-gray-100">{data ? formatMoney(data.money.total_30d ?? 0, data.money.currency) : "—"}</p>
+                    <p className="text-xs text-gray-500 dark:text-gray-400">{t("adminOverview.money.revenue")}</p>
+                    <p className="text-lg font-semibold text-gray-900 dark:text-gray-100">{data ? formatMoney(data.money.revenue_total ?? 0, data.money.currency) : "—"}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-gray-500 dark:text-gray-400">{t("adminOverview.money.margin")}</p>
+                    <p className={`text-lg font-semibold ${(data?.money.margin_total ?? 0) < 0 ? "text-red-600 dark:text-red-400" : "text-gray-900 dark:text-gray-100"}`}>
+                      {data ? formatMoney(data.money.margin_total ?? 0, data.money.currency) : "—"}
+                    </p>
                   </div>
                 </div>
                 <p className="mb-2 text-xs font-medium text-gray-500 dark:text-gray-400">{t("adminOverview.money.top")}</p>
-                {(data?.money.top ?? []).length === 0 ? (
+                {(data?.money.top_loss_makers ?? []).length === 0 ? (
                   <p className="text-xs text-gray-400 dark:text-gray-500">{t("adminOverview.money.empty")}</p>
                 ) : (
                   <ul className="space-y-1.5">
-                    {(data?.money.top ?? []).map((p) => (
-                      <li key={p.project_id} className="flex items-center justify-between text-sm">
-                        <span className="truncate text-gray-700 dark:text-gray-200">{p.project_name}</span>
-                        <span className="font-mono text-xs text-gray-500 dark:text-gray-400">{formatMoney(p.cost_30d, data?.money.currency)}</span>
+                    {(data?.money.top_loss_makers ?? []).map((c) => (
+                      <li key={c.client_name} className="flex items-center justify-between text-sm">
+                        <span className="truncate text-gray-700 dark:text-gray-200">{c.client_name}</span>
+                        <span className={`font-mono text-xs ${c.margin < 0 ? "text-red-600 dark:text-red-400" : "text-gray-500 dark:text-gray-400"}`}>
+                          {formatMoney(c.margin, data?.money.currency)}
+                        </span>
                       </li>
                     ))}
                   </ul>

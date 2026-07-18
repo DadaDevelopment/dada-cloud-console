@@ -36,9 +36,10 @@ export const adminOverview: Messages = {
   "adminOverview.chart.buildsFailed": { ru: "ошибки", en: "failed" },
 
   "adminOverview.money.title": { ru: "Деньги", en: "Money" },
-  "adminOverview.money.total7d": { ru: "Всего за 7д", en: "Total, 7d" },
-  "adminOverview.money.total30d": { ru: "Всего за 30д", en: "Total, 30d" },
-  "adminOverview.money.top": { ru: "Топ-5 проектов по затратам (30д)", en: "Top 5 projects by cost (30d)" },
+  "adminOverview.money.hardware": { ru: "Железо (30д)", en: "Hardware (30d)" },
+  "adminOverview.money.revenue": { ru: "Выручка (30д)", en: "Revenue (30d)" },
+  "adminOverview.money.margin": { ru: "Маржа (30д)", en: "Margin (30d)" },
+  "adminOverview.money.top": { ru: "Клиенты с наименьшей маржой", en: "Clients with the lowest margin" },
   "adminOverview.money.unavailable": {
     ru: "Данные по затратам временно недоступны (OpenCost).",
     en: "Cost data temporarily unavailable (OpenCost).",
