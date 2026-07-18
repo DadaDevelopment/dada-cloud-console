@@ -16,18 +16,24 @@ import "fmt"
 // The Metrika OAuth token is intentionally absent: the metrika-instrumentor
 // skill resolves it itself from the cluster secret, so the cloud never passes it.
 type ResolverCfg struct {
-	CounterID   string
-	ProjectType string
-	Archetype   string
+	CounterID     string
+	ProjectType   string
+	Archetype     string
+	PublicBaseURL string
 }
 
 // Entry is one curated cloud-task: which agent skill runs, where it surfaces,
 // and how the cloud resolves its params server-side.
+//
+// NeedsCounter marks a task that requires a resolved YandexMetrikaCounter; only
+// those pay the counter-resolution dependency in the handler, so counter-free
+// tasks (e.g. github-actions-deploy-setup) are not gated behind a Metrika CR.
 type Entry struct {
 	TaskType      string
 	SkillID       string
 	Label         string
 	Summary       string
+	NeedsCounter  bool
 	AppliesTo     func(kind string) bool
 	ResolveParams func(cfg ResolverCfg) (map[string]any, error)
 }
@@ -39,11 +45,12 @@ func isWeb(kind string) bool { return kind == "web" || kind == "App" || kind == 
 func Catalog() []Entry {
 	return []Entry{
 		{
-			TaskType:  "yandex-metrika-goals",
-			SkillID:   "yandex-metrika-goals",
-			Label:     "Yandex Metrika + goals",
-			Summary:   "Wire Yandex Metrika counter and conversion goals into the app, open a PR.",
-			AppliesTo: isWeb,
+			TaskType:     "yandex-metrika-goals",
+			SkillID:      "yandex-metrika-goals",
+			Label:        "Yandex Metrika + goals",
+			Summary:      "Wire Yandex Metrika counter and conversion goals into the app, open a PR.",
+			NeedsCounter: true,
+			AppliesTo:    isWeb,
 			ResolveParams: func(cfg ResolverCfg) (map[string]any, error) {
 				if cfg.CounterID == "" {
 					return nil, fmt.Errorf("YandexMetrikaCounter counterId not resolved")
@@ -60,6 +67,25 @@ func Catalog() []Entry {
 					params["archetype"] = cfg.Archetype
 				}
 				return params, nil
+			},
+		},
+		{
+			TaskType:  "github-actions-deploy-setup",
+			SkillID:   "github-actions-deploy-setup",
+			Label:     "Deploy from GitHub Actions",
+			Summary:   "Add a Dada Cloud deploy step to the repo's existing GitHub Actions workflow, open a PR.",
+			AppliesTo: isWeb,
+			ResolveParams: func(cfg ResolverCfg) (map[string]any, error) {
+				base := cfg.PublicBaseURL
+				if base == "" {
+					base = "https://console.dada-tuda.ru"
+				}
+				return map[string]any{
+					"deployUrl":  base + "/api/v1/deploy",
+					"action":     "dada-tuda/deploy-action@v1",
+					"secretName": "DADA_DEPLOY_TOKEN",
+					"imageHint":  "ghcr.io/OWNER/REPO:${{ github.sha }}",
+				}, nil
 			},
 		},
 	}

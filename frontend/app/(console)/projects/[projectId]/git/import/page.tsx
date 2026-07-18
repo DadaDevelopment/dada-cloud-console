@@ -15,6 +15,8 @@ import { canMutate } from "@/lib/rbac";
 import { useT } from "@/lib/i18n/console/context";
 import { TemplateDeployCards } from "@/components/console/template-deploy-cards";
 import { timeAgo } from "@/lib/format";
+import { CopyButton } from "@/components/ui/copy-button";
+import { githubActionsStep, deployCurl } from "@/lib/deploy-snippet";
 import { Search, Lock, Plus } from "lucide-react";
 
 type FrameworkPreset = { id: string; label: string; port: number };
@@ -234,6 +236,7 @@ export default function GitImportPage() {
   const [portTouched, setPortTouched] = useState(false);
   const [detecting, setDetecting] = useState(false);
   const [detectError, setDetectError] = useState(false);
+  const [ghaGuideOpen, setGhaGuideOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
 
@@ -650,6 +653,7 @@ export default function GitImportPage() {
 
   const q = repoQuery.trim().toLowerCase();
   const filteredRepos = q ? remoteRepos.filter((r) => r.full_name.toLowerCase().includes(q)) : remoteRepos;
+  const ciWorkflows = detection?.ci_workflows ?? [];
 
   return (
     <div className="max-w-2xl">
@@ -830,6 +834,70 @@ export default function GitImportPage() {
         {selectedRepo && (
           <section className="space-y-4">
             <SectionHeader n={2} label={t("git.import.section.configure")} done={deploying} active={!deploying} />
+
+            {ciWorkflows.length > 0 && (
+              <div className="space-y-3 rounded-lg border border-blue-200 dark:border-blue-900 bg-blue-50 dark:bg-blue-950/30 p-4">
+                <div>
+                  <p className="text-sm font-medium text-blue-800 dark:text-blue-200">{t("deployHooks.wizard.gha.title")}</p>
+                  <p className="mt-1 text-sm text-blue-700 dark:text-blue-300">
+                    {t("deployHooks.wizard.gha.body", { n: ciWorkflows.length })}
+                  </p>
+                  <p className="mt-1 font-mono text-xs text-blue-600 dark:text-blue-400">{ciWorkflows.join(", ")}</p>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-4">
+                  <button
+                    type="button"
+                    onClick={() => setGhaGuideOpen((v) => !v)}
+                    className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700 transition-colors"
+                  >
+                    {ghaGuideOpen ? t("deployHooks.wizard.gha.hideGuide") : t("deployHooks.wizard.gha.showGuide")}
+                  </button>
+
+                  <div>
+                    <button
+                      type="button"
+                      disabled
+                      className="rounded-lg border border-blue-300 dark:border-blue-800 bg-white dark:bg-gray-900 px-3 py-1.5 text-sm font-medium text-blue-700 dark:text-blue-300 opacity-50 cursor-not-allowed"
+                    >
+                      {t("deployHooks.wizard.gha.agentCta")}
+                    </button>
+                    <p className="mt-1 text-xs text-blue-600 dark:text-blue-400">{t("deployHooks.wizard.gha.agentSoon")}</p>
+                  </div>
+                </div>
+
+                {ghaGuideOpen && (
+                  <div className="space-y-3 border-t border-blue-200 dark:border-blue-900 pt-3">
+                    <ol className="list-decimal space-y-1 pl-5 text-sm text-blue-800 dark:text-blue-200">
+                      <li>{t("deployHooks.wizard.gha.step1")}</li>
+                      <li>{t("deployHooks.wizard.gha.step2")}</li>
+                      <li>{t("deployHooks.wizard.gha.step3")}</li>
+                      <li>{t("deployHooks.wizard.gha.step4")}</li>
+                    </ol>
+
+                    <div className="relative">
+                      <pre className="overflow-x-auto rounded-lg border border-gray-800 bg-gray-900 p-3 pr-20 font-mono text-xs text-gray-100">
+                        {githubActionsStep()}
+                      </pre>
+                      <div className="absolute right-2 top-2">
+                        <CopyButton value={githubActionsStep()} label={t("common.copy")} />
+                      </div>
+                    </div>
+
+                    <p className="text-xs text-blue-700 dark:text-blue-300">{t("deployHooks.wizard.gha.curlAlt")}</p>
+                    <div className="relative">
+                      <pre className="overflow-x-auto rounded-lg border border-gray-800 bg-gray-900 p-3 pr-20 font-mono text-xs text-gray-100">
+                        {deployCurl("https://console.dada-tuda.ru")}
+                      </pre>
+                      <div className="absolute right-2 top-2">
+                        <CopyButton value={deployCurl("https://console.dada-tuda.ru")} label={t("common.copy")} />
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
             <form onSubmit={handleSubmit} className="space-y-5">
               <fieldset disabled={deploying} className="space-y-5 disabled:opacity-60">
                 <div className="rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 px-4 py-3">

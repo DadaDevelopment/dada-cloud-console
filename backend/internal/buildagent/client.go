@@ -152,9 +152,10 @@ type FrameworkDetection struct {
 	PackageManager *string `json:"package_manager"`
 	BuildCommand   *string `json:"build_command"`
 	InstallCommand *string `json:"install_command"`
-	StartCommand   *string `json:"start_command"`
-	OutputDir      *string `json:"output_dir"`
-	Port           *int    `json:"port"`
+	StartCommand   *string  `json:"start_command"`
+	OutputDir      *string  `json:"output_dir"`
+	Port           *int     `json:"port"`
+	CIWorkflows    []string `json:"ci_workflows,omitempty"`
 }
 
 // DetectFramework proxies GET /github/detect on the agent.

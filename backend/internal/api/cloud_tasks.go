@@ -99,15 +99,19 @@ func (h *Handler) CreateCloudTask(c *gin.Context) {
 		respondError(c, http.StatusBadGateway, "failed to mint install token")
 		return
 	}
-	counterID, err := h.counters.Resolve(c.Request.Context(), appName)
-	if err != nil {
-		respondError(c, http.StatusFailedDependency, err.Error())
-		return
+	cfg := cloudtask.ResolverCfg{
+		ProjectType:   "front",
+		PublicBaseURL: h.cfg.PublicBaseURL,
 	}
-	params, err := entry.ResolveParams(cloudtask.ResolverCfg{
-		CounterID:   counterID,
-		ProjectType: "front",
-	})
+	if entry.NeedsCounter {
+		counterID, err := h.counters.Resolve(c.Request.Context(), appName)
+		if err != nil {
+			respondError(c, http.StatusFailedDependency, err.Error())
+			return
+		}
+		cfg.CounterID = counterID
+	}
+	params, err := entry.ResolveParams(cfg)
 	if err != nil {
 		respondError(c, http.StatusFailedDependency, err.Error())
 		return

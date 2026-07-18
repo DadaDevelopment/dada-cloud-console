@@ -855,6 +855,8 @@ export interface FrameworkDetection {
   start_command: string | null;
   output_dir: string | null;
   port: number | null;
+  /** `.github/workflows/*.{yml,yaml}` filenames found in the repo, omitted/empty when none. */
+  ci_workflows?: string[] | null;
 }
 
 export interface Build {

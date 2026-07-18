@@ -321,9 +321,10 @@ type frameworkDetection struct {
 	PackageManager *string `json:"package_manager"`
 	BuildCommand   *string `json:"build_command"`
 	InstallCommand *string `json:"install_command"`
-	StartCommand   *string `json:"start_command"`
-	OutputDir      *string `json:"output_dir"`
-	Port           *int    `json:"port"`
+	StartCommand   *string  `json:"start_command"`
+	OutputDir      *string  `json:"output_dir"`
+	Port           *int     `json:"port"`
+	CIWorkflows    []string `json:"ci_workflows,omitempty"`
 }
 
 type githubContent struct {
@@ -561,6 +562,8 @@ func detectWithToken(ctx context.Context, token, repoFullName, rootDir string) (
 	}
 	owner, repo := parts[0], parts[1]
 
+	ci := listCIWorkflows(ctx, token, owner, repo)
+
 	cands, err := scanFrameworkCandidates(ctx, token, owner, repo, rootDir, 0, 2, packageManagerSpec{})
 	if err != nil {
 		return frameworkDetection{}, err
@@ -570,9 +573,32 @@ func detectWithToken(ctx context.Context, token, repoFullName, rootDir string) (
 		if port, ok := resolveExplicitPort(ctx, token, owner, repo, rootDir, derefString(det.Framework)); ok {
 			det.Port = ptrInt(port)
 		}
+		det.CIWorkflows = ci
 		return det, nil
 	}
-	return frameworkDetection{}, nil
+	return frameworkDetection{CIWorkflows: ci}, nil
+}
+
+// listCIWorkflows returns the GitHub Actions workflow file names under
+// .github/workflows for the repo. Workflows always live at the repo root, so
+// this ignores a monorepo rootDir. A missing directory yields nil (not an
+// error): most repos simply have no workflows, and detection must not fail on
+// that. The wizard uses a non-empty result to offer a deploy-from-CI path.
+func listCIWorkflows(ctx context.Context, token, owner, repo string) []string {
+	entries, err := githubListDir(ctx, token, owner, repo, ".github/workflows")
+	if err != nil {
+		return nil
+	}
+	var out []string
+	for _, e := range entries {
+		if e.Type != "file" {
+			continue
+		}
+		if strings.HasSuffix(e.Name, ".yml") || strings.HasSuffix(e.Name, ".yaml") {
+			out = append(out, e.Name)
+		}
+	}
+	return out
 }
 
 // resolveExplicitPort finds the port the app actually binds by reading the

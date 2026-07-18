@@ -58,4 +58,34 @@ export const deployHooks: Messages = {
     ru: "Уже собираете образы в своём CI? Деплой из готового образа →",
     en: "Already build images in your own CI? Deploy a prebuilt image →",
   },
+
+  "deployHooks.wizard.gha.title": { ru: "Обнаружен GitHub Actions", en: "GitHub Actions detected" },
+  "deployHooks.wizard.gha.body": {
+    ru: "Найдено {n} workflow. Можно деплоить прямо из вашего CI — мы не будем пересобирать.",
+    en: "Found {n} workflow(s). You can deploy straight from your CI instead of us rebuilding.",
+  },
+  "deployHooks.wizard.gha.showGuide": { ru: "Показать гайд", en: "Show guide" },
+  "deployHooks.wizard.gha.hideGuide": { ru: "Скрыть гайд", en: "Hide guide" },
+  "deployHooks.wizard.gha.step1": {
+    ru: "Создайте приложение кнопкой ниже",
+    en: "Create the app using the button below",
+  },
+  "deployHooks.wizard.gha.step2": {
+    ru: "В приложении → Deploy from CI создайте токен",
+    en: "In the app → Deploy from CI, create a token",
+  },
+  "deployHooks.wizard.gha.step3": {
+    ru: "Добавьте его в GitHub → Settings → Secrets как DADA_DEPLOY_TOKEN",
+    en: "Add it to GitHub → Settings → Secrets as DADA_DEPLOY_TOKEN",
+  },
+  "deployHooks.wizard.gha.step4": {
+    ru: "Вставьте этот шаг в свой workflow",
+    en: "Paste this step into your workflow",
+  },
+  "deployHooks.wizard.gha.curlAlt": { ru: "или без action, через curl", en: "or plain curl" },
+  "deployHooks.wizard.gha.agentCta": { ru: "Доверить агенту", en: "Let an agent do it" },
+  "deployHooks.wizard.gha.agentSoon": {
+    ru: "скоро — агент откроет PR с готовым шагом",
+    en: "coming soon — an agent will open a PR with the step",
+  },
 };

@@ -7,25 +7,7 @@ import { useT } from "@/lib/i18n/console/context";
 import { CopyButton } from "@/components/ui/copy-button";
 import { Spinner } from "@/components/ui/spinner";
 import { timeAgo } from "@/lib/format";
-
-function githubActionsSnippet(): string {
-  return [
-    "- name: Deploy to Dada Cloud",
-    "  uses: dada-tuda/deploy-action@v1",
-    "  with:",
-    "    token: ${{ secrets.DADA_DEPLOY_TOKEN }}",
-    "    image: ghcr.io/OWNER/REPO:${{ github.sha }}",
-  ].join("\n");
-}
-
-function curlSnippet(baseUrl: string): string {
-  return [
-    `curl -fsS -X POST ${baseUrl}/api/v1/deploy \\`,
-    `  -H "Authorization: Bearer $DADA_DEPLOY_TOKEN" \\`,
-    `  -H "Content-Type: application/json" \\`,
-    `  -d '{"image":"ghcr.io/OWNER/REPO:'"$GITHUB_SHA"'"}'`,
-  ].join("\n");
-}
+import { githubActionsStep, deployCurl } from "@/lib/deploy-snippet";
 
 /**
  * "Deploy from CI" card on the app detail page. Manages deploy-hook tokens that let
@@ -176,10 +158,10 @@ export function DeployHooksCard({
             <p className="mt-1 text-xs text-amber-700 dark:text-amber-400">{t("deployHooks.snippet.actionHint")}</p>
             <div className="relative mt-1.5">
               <pre className="overflow-x-auto rounded-lg border border-gray-800 bg-gray-900 p-3 pr-20 font-mono text-xs text-gray-100">
-                {githubActionsSnippet()}
+                {githubActionsStep()}
               </pre>
               <div className="absolute right-2 top-2">
-                <CopyButton value={githubActionsSnippet()} label={t("common.copy")} />
+                <CopyButton value={githubActionsStep()} label={t("common.copy")} />
               </div>
             </div>
           </div>
@@ -191,10 +173,10 @@ export function DeployHooksCard({
             <p className="mt-1 text-xs text-amber-700 dark:text-amber-400">{t("deployHooks.snippet.curlHint")}</p>
             <div className="relative mt-1.5">
               <pre className="overflow-x-auto rounded-lg border border-gray-800 bg-gray-900 p-3 pr-20 font-mono text-xs text-gray-100">
-                {curlSnippet(justCreated.base_url)}
+                {deployCurl(justCreated.base_url)}
               </pre>
               <div className="absolute right-2 top-2">
-                <CopyButton value={curlSnippet(justCreated.base_url)} label={t("common.copy")} />
+                <CopyButton value={deployCurl(justCreated.base_url)} label={t("common.copy")} />
               </div>
             </div>
           </div>
