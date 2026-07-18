@@ -887,10 +887,10 @@ export default function GitImportPage() {
                     <p className="text-xs text-blue-700 dark:text-blue-300">{t("deployHooks.wizard.gha.actionAlt")}</p>
                     <div className="relative">
                       <pre className="overflow-x-auto rounded-lg border border-gray-800 bg-gray-900 p-3 pr-20 font-mono text-xs text-gray-100">
-                        {githubActionsStep()}
+                        {githubActionsStep("https://console.dada-tuda.ru")}
                       </pre>
                       <div className="absolute right-2 top-2">
-                        <CopyButton value={githubActionsStep()} label={t("common.copy")} />
+                        <CopyButton value={githubActionsStep("https://console.dada-tuda.ru")} label={t("common.copy")} />
                       </div>
                     </div>
                   </div>

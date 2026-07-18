@@ -173,10 +173,10 @@ export function DeployHooksCard({
             <p className="mt-1 text-xs text-amber-700 dark:text-amber-400">{t("deployHooks.snippet.actionHint")}</p>
             <div className="relative mt-1.5">
               <pre className="overflow-x-auto rounded-lg border border-gray-800 bg-gray-900 p-3 pr-20 font-mono text-xs text-gray-100">
-                {githubActionsStep()}
+                {githubActionsStep(justCreated.base_url)}
               </pre>
               <div className="absolute right-2 top-2">
-                <CopyButton value={githubActionsStep()} label={t("common.copy")} />
+                <CopyButton value={githubActionsStep(justCreated.base_url)} label={t("common.copy")} />
               </div>
             </div>
           </div>
