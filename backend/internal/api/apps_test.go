@@ -18,12 +18,15 @@ func TestValidateImage(t *testing.T) {
 		"ghcr.io/MyOrg/my-app:v1.0",          // uppercase org (GitHub Container Registry)
 		"registry.example.com:5000/app:v1.0", // registry with port
 		"MYAPP:latest",                       // uppercase image name
+		"ghcr.io/dada-tuda/app@sha256:a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f90", // digest-pinned
 	}
 	bad := []string{
 		"",
 		"no-tag",
 		"has space:v1",
 		"image with spaces:v1",
+		"ghcr.io/org/app@sha256:short",     // digest too short
+		"ghcr.io/org/app@sha256:",          // empty digest
 	}
 	for _, img := range good {
 		if err := api.ValidateImage(img); err != nil {

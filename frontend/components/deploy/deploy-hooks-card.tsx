@@ -153,21 +153,6 @@ export function DeployHooksCard({
 
           <div className="mt-4">
             <p className="text-xs font-semibold uppercase tracking-wide text-amber-800 dark:text-amber-400">
-              {t("deployHooks.snippet.actionTitle")}
-            </p>
-            <p className="mt-1 text-xs text-amber-700 dark:text-amber-400">{t("deployHooks.snippet.actionHint")}</p>
-            <div className="relative mt-1.5">
-              <pre className="overflow-x-auto rounded-lg border border-gray-800 bg-gray-900 p-3 pr-20 font-mono text-xs text-gray-100">
-                {githubActionsStep()}
-              </pre>
-              <div className="absolute right-2 top-2">
-                <CopyButton value={githubActionsStep()} label={t("common.copy")} />
-              </div>
-            </div>
-          </div>
-
-          <div className="mt-4">
-            <p className="text-xs font-semibold uppercase tracking-wide text-amber-800 dark:text-amber-400">
               {t("deployHooks.snippet.curlTitle")}
             </p>
             <p className="mt-1 text-xs text-amber-700 dark:text-amber-400">{t("deployHooks.snippet.curlHint")}</p>
@@ -177,6 +162,21 @@ export function DeployHooksCard({
               </pre>
               <div className="absolute right-2 top-2">
                 <CopyButton value={deployCurl(justCreated.base_url)} label={t("common.copy")} />
+              </div>
+            </div>
+          </div>
+
+          <div className="mt-4">
+            <p className="text-xs font-semibold uppercase tracking-wide text-amber-800 dark:text-amber-400">
+              {t("deployHooks.snippet.actionTitle")}
+            </p>
+            <p className="mt-1 text-xs text-amber-700 dark:text-amber-400">{t("deployHooks.snippet.actionHint")}</p>
+            <div className="relative mt-1.5">
+              <pre className="overflow-x-auto rounded-lg border border-gray-800 bg-gray-900 p-3 pr-20 font-mono text-xs text-gray-100">
+                {githubActionsStep()}
+              </pre>
+              <div className="absolute right-2 top-2">
+                <CopyButton value={githubActionsStep()} label={t("common.copy")} />
               </div>
             </div>
           </div>

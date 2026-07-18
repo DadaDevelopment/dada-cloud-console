@@ -46,7 +46,7 @@ op_id="$(json_field "$body" operation_id)"
 [ -n "$op_id" ] || op_id="$(json_field "$body" operationId)"
 [ -n "$op_id" ] || fail "deploy accepted but no operation id in response: $body"
 
-echo "operation-id=$op_id" >> "$GITHUB_OUTPUT"
+echo "operation-id=$op_id" >> "${GITHUB_OUTPUT:-/dev/null}"
 echo "::notice::Deploy queued for $IMAGE (operation $op_id)"
 
 if [ "$WAIT" != "true" ]; then

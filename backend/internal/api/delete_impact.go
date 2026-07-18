@@ -363,6 +363,12 @@ func (h *Handler) DeleteApp(c *gin.Context) {
 	)
 	h.notifyAuditEvent(claims, projectID, "DeleteApp", appName)
 
+	_, _ = h.pool.Exec(c.Request.Context(),
+		`UPDATE app_deploy_hooks SET revoked_at = now()
+		 WHERE project_id = $1 AND environment_id = $2 AND app_name = $3 AND revoked_at IS NULL`,
+		projectID, envID, appName,
+	)
+
 	c.JSON(http.StatusAccepted, gin.H{"operation": op, "message": "App deletion queued"})
 }
 

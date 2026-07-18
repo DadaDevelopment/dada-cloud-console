@@ -17,7 +17,7 @@ inputs:
     required: false
     default: 'https://console.dada-tuda.ru'
   wait:
-    description: 'Poll until the deploy operation reaches a terminal state and fail the job if it did not succeed.'
+    description: 'Poll until the deploy operation is accepted and committed to gitops (manifests written), failing the job if that step fails. Note: this confirms the deploy was accepted, not that the new image is live and healthy - live rollout status is tracked in the console.'
     required: false
     default: 'false'
   timeout:

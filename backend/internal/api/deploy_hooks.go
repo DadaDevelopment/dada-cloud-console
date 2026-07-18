@@ -406,24 +406,27 @@ func (h *Handler) DeleteDeployHook(c *gin.Context) {
 		return
 	}
 
-	tag, err := h.pool.Exec(c.Request.Context(),
+	var tokenPrefix string
+	err = h.pool.QueryRow(c.Request.Context(),
 		`UPDATE app_deploy_hooks SET revoked_at = now()
-		 WHERE id = $1 AND project_id = $2 AND environment_id = $3 AND app_name = $4 AND revoked_at IS NULL`,
+		 WHERE id = $1 AND project_id = $2 AND environment_id = $3 AND app_name = $4 AND revoked_at IS NULL
+		 RETURNING token_prefix`,
 		hookID, projectID, envID, appName,
-	)
+	).Scan(&tokenPrefix)
+	if err == pgx.ErrNoRows {
+		respondNotFound(c)
+		return
+	}
 	if err != nil {
 		respondError(c, http.StatusInternalServerError, "failed to revoke deploy hook")
 		return
 	}
-	if tag.RowsAffected() == 0 {
-		respondNotFound(c)
-		return
-	}
 
+	revokeMeta, _ := json.Marshal(gin.H{"hook_id": hookID, "token_prefix": tokenPrefix})
 	_, _ = h.pool.Exec(c.Request.Context(),
-		`INSERT INTO audit_events (actor_id, project_id, action, resource_kind, resource_name)
-		 VALUES ($1, $2, 'RevokeDeployHook', 'App', $3)`,
-		claims.UserID, projectID, appName,
+		`INSERT INTO audit_events (actor_id, project_id, action, resource_kind, resource_name, metadata)
+		 VALUES ($1, $2, 'RevokeDeployHook', 'App', $3, $4)`,
+		claims.UserID, projectID, appName, revokeMeta,
 	)
 
 	c.Status(http.StatusNoContent)
@@ -576,7 +579,8 @@ func (h *Handler) GetDeployOperation(c *gin.Context) {
 		        status, payload, validation_result, git_commit, git_path, argo_application,
 		        error_code, error_message, created_at, updated_at
 		 FROM operations
-		 WHERE id = $1 AND project_id = $2 AND environment_id = $3 AND resource_name = $4`,
+		 WHERE id = $1 AND project_id = $2 AND environment_id = $3 AND resource_name = $4
+		       AND resource_kind = 'App' AND action = 'DeployImageVersion'`,
 		operationID, hook.ProjectID, hook.EnvironmentID, hook.AppName,
 	)
 	if err := scanOperation(row, &op); err == pgx.ErrNoRows {

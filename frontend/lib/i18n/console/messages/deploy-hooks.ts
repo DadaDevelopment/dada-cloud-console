@@ -9,7 +9,6 @@ export const deployHooks: Messages = {
   },
   "deployHooks.create": { ru: "Создать токен", en: "Create token" },
   "deployHooks.creating": { ru: "Создание…", en: "Creating…" },
-  "deployHooks.name.label": { ru: "Название", en: "Name" },
   "deployHooks.name.placeholder": { ru: "например, github-actions", en: "e.g. github-actions" },
 
   "deployHooks.empty": {
@@ -39,15 +38,15 @@ export const deployHooks: Messages = {
   },
   "deployHooks.created.done": { ru: "Готово, я сохранил токен", en: "Done, I saved the token" },
 
-  "deployHooks.snippet.actionTitle": { ru: "GitHub Actions", en: "GitHub Actions" },
-  "deployHooks.snippet.actionHint": {
-    ru: "Добавьте этот шаг в свой workflow:",
-    en: "Add this step to your workflow:",
-  },
-  "deployHooks.snippet.curlTitle": { ru: "Или просто curl", en: "Or plain curl" },
+  "deployHooks.snippet.curlTitle": { ru: "Через curl (работает сразу)", en: "With curl (works today)" },
   "deployHooks.snippet.curlHint": {
-    ru: "Без зависимостей — вызовите это из любого CI:",
-    en: "Zero dependencies — call this from any CI:",
+    ru: "Без зависимостей — вставьте этот шаг в свой workflow:",
+    en: "Zero dependencies — add this step to your workflow:",
+  },
+  "deployHooks.snippet.actionTitle": { ru: "Или короче — GitHub Action", en: "Or shorter — GitHub Action" },
+  "deployHooks.snippet.actionHint": {
+    ru: "То же самое одним шагом:",
+    en: "The same, as a single step:",
   },
   "deployHooks.snippet.secretHint": {
     ru: "Сохраните токен как секрет репозитория с именем DADA_DEPLOY_TOKEN.",
@@ -82,7 +81,7 @@ export const deployHooks: Messages = {
     ru: "Вставьте этот шаг в свой workflow",
     en: "Paste this step into your workflow",
   },
-  "deployHooks.wizard.gha.curlAlt": { ru: "или без action, через curl", en: "or plain curl" },
+  "deployHooks.wizard.gha.actionAlt": { ru: "или короче — GitHub Action", en: "or shorter — GitHub Action" },
   "deployHooks.wizard.gha.agentCta": { ru: "Доверить агенту", en: "Let an agent do it" },
   "deployHooks.wizard.gha.agentSoon": {
     ru: "скоро — агент откроет PR с готовым шагом",

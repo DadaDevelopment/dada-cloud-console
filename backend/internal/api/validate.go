@@ -32,15 +32,17 @@ func validatePgName(name string) error {
 	return nil
 }
 
-// reImage permits registry:port/org/image:tag and mixed-case org names (e.g. ghcr.io/MyOrg/app:v1).
+// reImage permits registry:port/org/image:tag and mixed-case org names (e.g. ghcr.io/MyOrg/app:v1),
+// as well as the digest-pinned form registry/org/image@sha256:<64 hex> used by immutable CI deploys.
 // Rules: starts with alphanumeric; path may contain letters, digits, dots, hyphens, slashes, colons
-// (to allow registry:port); must end with :tag where tag is alphanumeric with dots/hyphens; no spaces.
-var reImage = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._\-/:]*:[a-zA-Z0-9._\-]+$`)
+// (to allow registry:port); must end with either :tag (alphanumeric with dots/hyphens) or
+// @sha256:<64 hex>; no spaces. The gitops renderer (splitImageRef) resolves both forms.
+var reImage = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._\-/:]*(:[a-zA-Z0-9._\-]+|@sha256:[a-fA-F0-9]{64})$`)
 
-// ValidateImage checks that an image string is in image:tag format (registry/org/name:tag).
+// ValidateImage checks that an image string is in image:tag or image@sha256:digest format.
 func ValidateImage(image string) error {
 	if !reImage.MatchString(image) {
-		return fmt.Errorf("image must be in image:tag format (e.g. ghcr.io/org/app:v1.0)")
+		return fmt.Errorf("image must be in image:tag or image@sha256:digest format (e.g. ghcr.io/org/app:v1.0)")
 	}
 	return nil
 }
