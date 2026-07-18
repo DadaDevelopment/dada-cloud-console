@@ -18,7 +18,27 @@ Nothing here interprets the user's `.github/*.yml`. We never parse or run their
 pipeline (that is a full GHA-runner reimplementation — explicitly rejected). We
 accept the image they already build and re-pin it.
 
-## Next: detect existing GitHub Actions + offer the agent
+## Shipped (2nd change): detection + wizard callout
+
+`build-agent detectWithToken` now lists `.github/workflows/*.{yml,yaml}` via the
+existing install token + `githubListDir` and returns `ci_workflows`. It flows
+through `backend/internal/buildagent/client.go` `FrameworkDetection` to the
+frontend type. The git-import wizard shows a Section-2 callout when
+`detection.ci_workflows` is non-empty: an inline **guide** (deploy step + curl +
+token setup, shared `frontend/lib/deploy-snippet.ts`) that works today, plus a
+**disabled** "Let an agent do it" CTA. Backend is wired for the agent path:
+`cloudtask.Entry{TaskType:"github-actions-deploy-setup"}` + a `NeedsCounter`
+gate so counter-free tasks stop 424-ing on a missing YandexMetrikaCounter.
+
+**Only remaining piece: the agent-side skill** `github-actions-deploy-setup`
+(lives in the dada-agent repo, not this monorepo). It receives the scoped
+install token + `repo.full_name` + params (`deployUrl`, `action`, `secretName`,
+`imageHint`) and must open a PR appending the `dada-deploy` step to the user's
+workflow. When it ships, enable the wizard's agent button (drop the disabled
+state) and, since the cloud-task endpoint is per-app, trigger it from the
+app-page Deploy-from-CI card where the app already exists.
+
+### Design notes (as built)
 
 ### Which wizard step
 
