@@ -88,8 +88,9 @@ export function DeleteImpactModal({ target, onClose, onDeleted }: DeleteImpactMo
     }
   }
 
-  const clusterOnlyItems = (impact?.items ?? []).filter((item) => item.source === "cluster-only");
-  const grouped = impact ? groupItems(impact.items) : null;
+  const items = impact?.items ?? [];
+  const clusterOnlyItems = items.filter((item) => item.source === "cluster-only");
+  const grouped = impact ? groupItems(items) : null;
   const confirmDisabled = confirmName !== expectedName || isSubmitting || isLoading;
 
   return (
@@ -129,7 +130,7 @@ export function DeleteImpactModal({ target, onClose, onDeleted }: DeleteImpactMo
               </div>
             )}
 
-            {impact && impact.items.length === 0 ? (
+            {impact && items.length === 0 ? (
               <p className="text-sm text-gray-500 dark:text-gray-400">{t("deleteImpact.empty")}</p>
             ) : (
               grouped && (

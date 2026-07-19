@@ -36,6 +36,17 @@ type DeleteImpact struct {
 	ClusterScan bool         `json:"cluster_scan"`
 }
 
+// withNonNilItems guarantees Items is a non-nil slice so it JSON-encodes as
+// `"items": []` rather than `"items": null`. A nil slice is the default when a
+// scan finds nothing, and the console delete modal iterates Items during render:
+// a null there throws "null is not an object" and crashes the whole page.
+func (d DeleteImpact) withNonNilItems() DeleteImpact {
+	if d.Items == nil {
+		d.Items = []ImpactItem{}
+	}
+	return d
+}
+
 const (
 	impactSourceConsole     = "console"
 	impactSourceClusterOnly = "cluster-only"
@@ -227,7 +238,7 @@ func (h *Handler) appDeleteImpact(ctx context.Context, projectID, envID uuid.UUI
 			impact.ClusterOnly++
 		}
 	}
-	return impact, nil
+	return impact.withNonNilItems(), nil
 }
 
 // DeleteAppImpact previews the blast radius of deleting an app: console-tracked
