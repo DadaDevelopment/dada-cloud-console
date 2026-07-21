@@ -298,6 +298,7 @@ export const appsApi = {
     profile: string;
     workload_type?: string;
     volume?: { path: string; size: string; storage_class?: string };
+    worker?: boolean;
   }) =>
     apiFetch<CreateAppResponse>(`/api/v1/projects/${projectId}/environments/${envId}/apps`, {
       method: "POST",

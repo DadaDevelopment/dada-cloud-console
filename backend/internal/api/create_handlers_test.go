@@ -146,6 +146,46 @@ func TestCreateApp_SeedsDefaultHostname(t *testing.T) {
 	}
 }
 
+// TestCreateApp_WorkerSkipsDefaultHostname proves the worker flag durably blocks
+// the auto public domain a long-poll bot (no HTTP server) would otherwise get:
+// no domain_hostnames row is inserted, and the flag is stamped into the seeded
+// optimistic snapshot summary so BackfillMissingDefaultDomains also stays away
+// from it once gitops-agent replaces that snapshot (see appNeedsDefaultDomain).
+func TestCreateApp_WorkerSkipsDefaultHostname(t *testing.T) {
+	pool := testOptimisticPool(t)
+	h := &Handler{pool: pool, cfg: &config.Config{DefaultDomainEnabled: true, DefaultDomainBase: "example.test"}}
+	projectID, envID := seedOptimisticFixture(t, pool)
+	claims := godClaims(seedUser(t, pool))
+	name := "app-" + uuid.NewString()[:8]
+
+	c, rec := newCreateCtx(t, `{"name":"`+name+`","image":"nginx:latest","port":8080,"worker":true}`, params(projectID, envID), claims)
+	h.CreateApp(c)
+	assertOptimisticSeeded(t, pool, rec, projectID, envID, "App", name)
+
+	var count int
+	if err := pool.QueryRow(context.Background(),
+		`SELECT count(*) FROM domain_hostnames WHERE environment_id = $1 AND app_name = $2`,
+		envID, name,
+	).Scan(&count); err != nil {
+		t.Fatalf("query domain_hostnames: %v", err)
+	}
+	if count != 0 {
+		t.Fatalf("domain_hostnames rows for worker app = %d, want 0", count)
+	}
+
+	var worker bool
+	if err := pool.QueryRow(context.Background(),
+		`SELECT (summary_json->>'worker')::boolean FROM resource_snapshots
+		 WHERE project_id = $1 AND environment_id = $2 AND kind = 'App' AND name = $3`,
+		projectID, envID, name,
+	).Scan(&worker); err != nil {
+		t.Fatalf("query snapshot summary: %v", err)
+	}
+	if !worker {
+		t.Fatalf("snapshot summary_json.worker = false, want true")
+	}
+}
+
 func TestCreateS3Bucket_SeedsOptimisticSnapshot(t *testing.T) {
 	pool := testOptimisticPool(t)
 	h := &Handler{pool: pool, cfg: &config.Config{}}

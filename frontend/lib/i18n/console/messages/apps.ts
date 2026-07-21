@@ -86,6 +86,15 @@ export const apps: Messages = {
   },
   "apps.modal.create.image.label": { ru: "Образ", en: "Image" },
   "apps.modal.create.port.label": { ru: "Порт", en: "Port" },
+  "apps.modal.create.port.workerHint": {
+    ru: "Не нужен для фонового воркера — публичный адрес не выдаётся",
+    en: "Not needed for a background worker — no public address is issued",
+  },
+  "apps.modal.create.worker.label": { ru: "Фоновый воркер (бот без HTTP)", en: "Background worker (no HTTP)" },
+  "apps.modal.create.worker.hint": {
+    ru: "Для long-poll ботов и очередей без входящего HTTP-трафика: приложение не получит публичный домен.",
+    en: "For long-poll bots and queue workers with no incoming HTTP traffic: the app will not get a public domain.",
+  },
   "apps.modal.create.replicas.label": { ru: "Реплики", en: "Replicas" },
   "apps.modal.create.profile.label": { ru: "Профиль", en: "Profile" },
   "apps.modal.create.workloadType.label": { ru: "Тип нагрузки", en: "Workload type" },

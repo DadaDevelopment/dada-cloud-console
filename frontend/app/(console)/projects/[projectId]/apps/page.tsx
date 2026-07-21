@@ -28,6 +28,7 @@ interface CreateAppForm {
   replicas: number;
   profile: string;
   workloadType: string;
+  worker: boolean;
 }
 
 const APP_NAME_RE = /^([a-z0-9]|[a-z0-9][a-z0-9-]{0,61}[a-z0-9])$/;
@@ -66,6 +67,7 @@ export default function AppsPage() {
     replicas: 1,
     profile: "small",
     workloadType: "Deployment",
+    worker: false,
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
@@ -118,7 +120,7 @@ export default function AppsPage() {
     return () => clearTimeout(id);
   }, [appsByEnv, environments, projectId]);
 
-  function handleFormChange(field: keyof CreateAppForm, value: string | number) {
+  function handleFormChange(field: keyof CreateAppForm, value: string | number | boolean) {
     setForm((prev) => ({ ...prev, [field]: value }));
   }
 
@@ -157,9 +159,10 @@ export default function AppsPage() {
         replicas: form.replicas,
         profile: form.profile,
         workload_type: form.workloadType,
+        worker: form.worker,
       });
       setIsModalOpen(false);
-      setForm({ name: "", image: "", port: 8080, replicas: 1, profile: "small", workloadType: "Deployment" });
+      setForm({ name: "", image: "", port: 8080, replicas: 1, profile: "small", workloadType: "Deployment", worker: false });
       void result;
       router.push(`/projects/${projectId}/apps/${form.name}`);
     } catch (err) {
@@ -177,6 +180,8 @@ export default function AppsPage() {
   }
 
   const canCreate = canMutate(role);
+  const modalEnv = environments.find((e) => e.id === modalEnvId);
+  const modalIsVM = modalEnv?.runtime === "vm";
 
   const existingNames = new Set((appsByEnv[modalEnvId] ?? []).map((a) => a.name.toLowerCase()));
   const trimmedName = form.name.trim();
@@ -293,18 +298,37 @@ export default function AppsPage() {
             {imageError && <p role="alert" className="mt-1 text-xs text-red-600 dark:text-red-400">{imageError}</p>}
           </div>
 
+          {!modalIsVM && (
+            <div className="rounded-lg border border-gray-200 dark:border-gray-700 px-3 py-2.5">
+              <label className="flex items-start gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={form.worker}
+                  onChange={(e) => handleFormChange("worker", e.target.checked)}
+                  className="mt-0.5 h-4 w-4 rounded border-gray-300 dark:border-gray-600 text-blue-600 focus:ring-blue-500"
+                />
+                <span className="font-medium text-gray-700 dark:text-gray-200">{t("apps.modal.create.worker.label")}</span>
+              </label>
+              <p className="mt-1 pl-6 text-xs text-gray-500 dark:text-gray-400">{t("apps.modal.create.worker.hint")}</p>
+            </div>
+          )}
+
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="block text-sm font-medium text-gray-700 dark:text-gray-200">{t("apps.modal.create.port.label")}</label>
               <input
                 type="number"
-                required
+                required={!form.worker}
+                disabled={form.worker}
                 min={1}
                 max={65535}
                 value={form.port}
                 onChange={(e) => handleFormChange("port", parseInt(e.target.value, 10))}
-                className="mt-1 block w-full rounded-lg border border-gray-300 dark:border-gray-700 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                className="mt-1 block w-full rounded-lg border border-gray-300 dark:border-gray-700 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:opacity-50 disabled:bg-gray-100 dark:disabled:bg-gray-800"
               />
+              {form.worker && (
+                <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">{t("apps.modal.create.port.workerHint")}</p>
+              )}
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 dark:text-gray-200">{t("apps.modal.create.replicas.label")}</label>

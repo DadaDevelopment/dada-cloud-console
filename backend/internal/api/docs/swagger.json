@@ -11673,6 +11673,9 @@
                 "volume": {
                     "$ref": "#/definitions/internal_api.appVolumeReq"
                 },
+                "worker": {
+                    "type": "boolean"
+                },
                 "workload_type": {
                     "type": "string"
                 }

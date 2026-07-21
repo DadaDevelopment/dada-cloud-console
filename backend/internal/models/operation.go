@@ -87,6 +87,7 @@ type CreateAppPayload struct {
 	AppServerName   string            `json:"app_server_name,omitempty"`
 	EnvVars         map[string]string `json:"env_vars,omitempty"`
 	DefaultHostname string            `json:"default_hostname,omitempty"`
+	Worker          bool              `json:"worker,omitempty"`
 }
 
 // DeployImageVersionPayload is the typed payload for DeployImageVersion operations.

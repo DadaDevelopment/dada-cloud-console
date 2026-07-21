@@ -790,6 +790,7 @@ func (w *DBWatcher) doCreateApp(ctx context.Context, op db.Operation) error {
 			Size         string `json:"size"`
 			StorageClass string `json:"storage_class"`
 		} `json:"volume"`
+		Worker bool `json:"worker"`
 	}
 	if err := json.Unmarshal(op.Payload, &p); err != nil {
 		return fmt.Errorf("parse payload: %w", err)
@@ -930,6 +931,9 @@ func (w *DBWatcher) doCreateApp(ctx context.Context, op db.Operation) error {
 	}
 	if p.WorkloadType != "" {
 		summary["workload_type"] = p.WorkloadType
+	}
+	if p.Worker {
+		summary["worker"] = true
 	}
 	if p.Volume != nil && p.Volume.Path != "" {
 		summary["volume"] = map[string]any{

@@ -1085,7 +1085,18 @@ const defaultDomainBackfillGrace = 5 * time.Minute
 // 13 platform infra apps (opensearch, keycloak-config, ...) and rendered
 // public Ingress manifests for them, so portless snapshots are excluded
 // outright rather than guessed at.
+//
+// A worker app (summary["worker"] == true) is excluded regardless of port: it
+// is a long-poll/background process (e.g. a Telegram bot) with no HTTP server
+// to answer a public request, so an auto domain would only ever 502. CreateApp
+// stamps "worker" into the snapshot gitops-agent's doCreateApp writes (see
+// dbwatcher.go), and every later live-status update merges into that
+// summary_json rather than replacing it, so the flag survives for the
+// lifetime of the app.
 func appNeedsDefaultDomain(summary map[string]any) bool {
+	if worker, _ := summary["worker"].(bool); worker {
+		return false
+	}
 	port, _ := summary["port"].(float64)
 	if port <= 0 {
 		return false

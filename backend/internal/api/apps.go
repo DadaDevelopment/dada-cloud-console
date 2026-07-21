@@ -311,6 +311,7 @@ type createAppRequest struct {
 	Profile      string        `json:"profile"`
 	WorkloadType string        `json:"workload_type"`
 	Volume       *appVolumeReq `json:"volume,omitempty"`
+	Worker       bool          `json:"worker"`
 }
 
 // appVolumeReq is the wire form of a persistent data directory request. Empty
@@ -524,9 +525,15 @@ func (h *Handler) CreateApp(c *gin.Context) {
 			respondError(c, http.StatusBadRequest, "workload_type must be one of: Deployment, StatefulSet")
 			return
 		}
-	} else if req.WorkloadType != "" {
-		respondError(c, http.StatusBadRequest, "workload_type is only supported for Kubernetes apps")
-		return
+	} else {
+		if req.WorkloadType != "" {
+			respondError(c, http.StatusBadRequest, "workload_type is only supported for Kubernetes apps")
+			return
+		}
+		if req.Worker {
+			respondError(c, http.StatusBadRequest, "worker is only supported for Kubernetes apps")
+			return
+		}
 	}
 
 	appVolume, err := validateAppVolume(req.Volume)
@@ -569,7 +576,7 @@ func (h *Handler) CreateApp(c *gin.Context) {
 	}
 
 	var defaultHostname string
-	if !isCompose && servesHTTP(req.Port) && h.cfg.DefaultDomainEnabled && h.cfg.DefaultDomainBase != "" {
+	if !isCompose && !req.Worker && servesHTTP(req.Port) && h.cfg.DefaultDomainEnabled && h.cfg.DefaultDomainBase != "" {
 		if suffix, sErr := randomHostSuffix(); sErr == nil {
 			defaultHostname = buildDefaultHostname(h.cfg.DefaultDomainBase, req.Name, suffix)
 		}
@@ -587,6 +594,7 @@ func (h *Handler) CreateApp(c *gin.Context) {
 		Volume:          appVolume,
 		AppServerName:   appServerName,
 		DefaultHostname: defaultHostname,
+		Worker:          req.Worker,
 	}
 	payloadBytes, err := json.Marshal(payload)
 	if err != nil {
@@ -615,11 +623,15 @@ func (h *Handler) CreateApp(c *gin.Context) {
 		return
 	}
 
-	if err = seedOptimisticSnapshot(c.Request.Context(), tx, projectID, envID, "App", req.Name, map[string]any{
+	optimisticSummary := map[string]any{
 		"profile":  req.Profile,
 		"replicas": req.Replicas,
 		"port":     req.Port,
-	}); err != nil {
+	}
+	if req.Worker {
+		optimisticSummary["worker"] = true
+	}
+	if err = seedOptimisticSnapshot(c.Request.Context(), tx, projectID, envID, "App", req.Name, optimisticSummary); err != nil {
 		respondError(c, http.StatusInternalServerError, "failed to create operation")
 		return
 	}

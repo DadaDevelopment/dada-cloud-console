@@ -82,6 +82,8 @@ func TestAppNeedsDefaultDomain(t *testing.T) {
 		{"missing port excluded (hand-maintained infra snapshot)", map[string]any{"framework": "node"}, false},
 		{"missing port and framework excluded", map[string]any{}, false},
 		{"zero port excluded even with framework", map[string]any{"port": float64(0), "framework": "react"}, false},
+		{"worker app excluded even with http port", map[string]any{"port": float64(8080), "worker": true}, false},
+		{"worker false leaves ordinary app included", map[string]any{"port": float64(8080), "worker": false}, true},
 	}
 	for _, c := range cases {
 		if got := appNeedsDefaultDomain(c.summary); got != c.want {
