@@ -1078,14 +1078,17 @@ const defaultDomainBackfillGrace = 5 * time.Minute
 
 // appNeedsDefaultDomain reports whether an App resource_snapshot's summary_json
 // describes an HTTP-serving app that CreateApp would have assigned a default
-// hostname to. Mirrors the servesHTTP gate CreateApp itself uses, falling back
-// to defaultPortForFramework when the stored port is missing or zero (a
-// snapshot recovered by manual repair may omit it).
+// hostname to. Requires an explicit positive port: every app created through
+// CreateApp records its port in the snapshot summary, while snapshots synced
+// from hand-maintained gitops trees (platform/example/legacy projects) carry
+// no port at all. Falling back to a framework-default port here once matched
+// 13 platform infra apps (opensearch, keycloak-config, ...) and rendered
+// public Ingress manifests for them, so portless snapshots are excluded
+// outright rather than guessed at.
 func appNeedsDefaultDomain(summary map[string]any) bool {
 	port, _ := summary["port"].(float64)
-	if port == 0 {
-		framework, _ := summary["framework"].(string)
-		port = float64(defaultPortForFramework(framework))
+	if port <= 0 {
+		return false
 	}
 	return servesHTTP(int(port))
 }

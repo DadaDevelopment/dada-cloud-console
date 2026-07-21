@@ -79,9 +79,9 @@ func TestAppNeedsDefaultDomain(t *testing.T) {
 		{"js app on default vite port", map[string]any{"port": float64(5173), "framework": "vite"}, true},
 		{"redis datastore port excluded", map[string]any{"port": float64(6379)}, false},
 		{"postgres datastore port excluded", map[string]any{"port": float64(5432)}, false},
-		{"missing port falls back to framework default (node)", map[string]any{"framework": "node"}, true},
-		{"missing port and framework falls back to 8080", map[string]any{}, true},
-		{"zero port falls back like missing", map[string]any{"port": float64(0), "framework": "react"}, true},
+		{"missing port excluded (hand-maintained infra snapshot)", map[string]any{"framework": "node"}, false},
+		{"missing port and framework excluded", map[string]any{}, false},
+		{"zero port excluded even with framework", map[string]any{"port": float64(0), "framework": "react"}, false},
 	}
 	for _, c := range cases {
 		if got := appNeedsDefaultDomain(c.summary); got != c.want {
