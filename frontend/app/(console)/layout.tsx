@@ -12,7 +12,6 @@ import { CommandPalette } from "@/components/shell/command-palette";
 import { ConsoleErrorBoundary } from "@/components/shell/console-error-boundary";
 import { GlobalErrorReporter } from "@/components/shell/global-error-reporter";
 import { SupportButton } from "@/components/shell/support-button";
-import { FeedbackWidget } from "@/components/shell/feedback-widget";
 
 function ConsoleShell({ children }: { children: React.ReactNode }) {
   const { projectId } = useProjectContext();
@@ -71,7 +70,6 @@ function ConsoleShell({ children }: { children: React.ReactNode }) {
       {/* key forces the palette to mount/open when the top-bar button is clicked */}
       <CommandPalette key={paletteOpenSignal} initialOpen={paletteOpenSignal > 0} />
       <SupportButton />
-      <FeedbackWidget />
     </div>
   );
 }
