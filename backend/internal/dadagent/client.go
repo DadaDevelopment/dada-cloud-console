@@ -91,6 +91,91 @@ func (c *Client) SubmitIntent(ctx context.Context, in IntentRequest) (SubmitResu
 	return SubmitResult{WorkflowID: out.Workflow.WorkflowID}, nil
 }
 
+// AutofixRequest is the cloud-side shape of the agent's AutofixBody: launch a
+// run that root-causes a reported crash/500/alert and opens a PR.
+type AutofixRequest struct {
+	RepoFullName  string `json:"repo_full_name"`
+	InstallToken  string `json:"install_token"`
+	Error         string `json:"error"`
+	DefaultBranch string `json:"default_branch,omitempty"`
+	Agent         string `json:"agent,omitempty"`
+	CallbackURL   string `json:"callback_url,omitempty"`
+}
+
+// AutofixResult is the trimmed-down response from POST /v1/runs/autofix.
+type AutofixResult struct {
+	RunID  string
+	Status string
+}
+
+// Autofix launches an auto-fix run at POST /v1/runs/autofix.
+func (c *Client) Autofix(ctx context.Context, in AutofixRequest) (AutofixResult, error) {
+	b, _ := json.Marshal(in)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/v1/runs/autofix", bytes.NewReader(b))
+	if err != nil {
+		return AutofixResult{}, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if err := c.auth(ctx, req); err != nil {
+		return AutofixResult{}, err
+	}
+	resp, err := c.hc.Do(req)
+	if err != nil {
+		return AutofixResult{}, fmt.Errorf("dadagent autofix: %w", err)
+	}
+	defer resp.Body.Close()
+	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if resp.StatusCode >= 400 {
+		return AutofixResult{}, fmt.Errorf("dadagent autofix: status %d: %s", resp.StatusCode, string(raw))
+	}
+	var out struct {
+		RunID  string `json:"run_id"`
+		Status string `json:"status"`
+	}
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return AutofixResult{}, err
+	}
+	return AutofixResult{RunID: out.RunID, Status: out.Status}, nil
+}
+
+// RunInfo is the trimmed-down response from GET /v1/runs/{run_id}: just enough
+// to learn the agent-assigned cloud_task_id used for webhook correlation.
+type RunInfo struct {
+	CloudTaskID string
+	Status      string
+}
+
+// GetRun reads back a run at GET /v1/runs/{run_id}. Used right after Autofix to
+// learn the run's agent-assigned cloud_task_id: the callback webhook for a
+// runs-based launch carries cloud_task_id (never intent_id), so the caller must
+// read it back once to have a key to persist and later match the webhook on.
+func (c *Client) GetRun(ctx context.Context, runID string) (RunInfo, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/v1/runs/"+runID, nil)
+	if err != nil {
+		return RunInfo{}, err
+	}
+	if err := c.auth(ctx, req); err != nil {
+		return RunInfo{}, err
+	}
+	resp, err := c.hc.Do(req)
+	if err != nil {
+		return RunInfo{}, fmt.Errorf("dadagent get run: %w", err)
+	}
+	defer resp.Body.Close()
+	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if resp.StatusCode >= 400 {
+		return RunInfo{}, fmt.Errorf("dadagent get run: status %d: %s", resp.StatusCode, string(raw))
+	}
+	var out struct {
+		CloudTaskID string `json:"cloud_task_id"`
+		Status      string `json:"status"`
+	}
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return RunInfo{}, err
+	}
+	return RunInfo{CloudTaskID: out.CloudTaskID, Status: out.Status}, nil
+}
+
 // ExecuteIntent triggers execution at POST /v1/agentsync/intents/{id}/execute.
 func (c *Client) ExecuteIntent(ctx context.Context, intentID string) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/v1/agentsync/intents/"+intentID+"/execute", nil)

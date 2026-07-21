@@ -37,10 +37,14 @@ func scanCloudTask(row pgx.Row) (models.CloudTask, error) {
 	return t, nil
 }
 
+// insertCloudTask records a fired cloud task. IntentID is stored as NULL
+// instead of an empty string when empty, so a partial-unique-index collision
+// can never happen between rows whose caller has no correlation key yet (e.g.
+// an autofix run inserted before its GetRun readback resolved one).
 func (h *Handler) insertCloudTask(ctx context.Context, in cloudTaskInsert) (models.CloudTask, error) {
 	row := h.pool.QueryRow(ctx,
 		`INSERT INTO cloud_tasks (project_id, environment_id, app_name, git_repo_id, task_type, intent_id, workflow_id, actor_id)
-		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING `+cloudTaskCols,
+		 VALUES ($1,$2,$3,$4,$5,NULLIF($6,''),$7,$8) RETURNING `+cloudTaskCols,
 		in.ProjectID, in.EnvironmentID, in.AppName, in.GitRepoID, in.TaskType, in.IntentID, in.WorkflowID, in.ActorID)
 	return scanCloudTask(row)
 }

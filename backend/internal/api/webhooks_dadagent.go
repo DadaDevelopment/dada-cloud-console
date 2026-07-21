@@ -47,6 +47,17 @@ func mapAgentStatus(event, status string) string {
 	}
 }
 
+// correlationKey picks the cloud_tasks lookup key from a callback: intent_id
+// for the legacy agentsync-intent flow, falling back to cloud_task_id for the
+// runs-based flow (autofix and any future /v1/runs skill), which always sends
+// intent_id as null since it has no LangGraph workflow behind it.
+func correlationKey(cb dadaAgentCallback) string {
+	if cb.IntentID != "" {
+		return cb.IntentID
+	}
+	return cb.CloudTaskID
+}
+
 // hasClient reports whether the agent client appears under resource_access.
 func hasClient(claims *auth.KeycloakClaims, client string) bool {
 	for _, c := range claims.ResourceAccessClients {
@@ -89,15 +100,16 @@ func (h *Handler) dadaAgentWebhook(c *gin.Context, verifier tokenVerifier) {
 		respondError(c, http.StatusBadRequest, err.Error())
 		return
 	}
-	if cb.IntentID == "" {
-		respondError(c, http.StatusBadRequest, "missing intent_id")
+	key := correlationKey(cb)
+	if key == "" {
+		respondError(c, http.StatusBadRequest, "missing intent_id or cloud_task_id")
 		return
 	}
 	var artifactsJSON []byte
 	if len(cb.Artifacts) > 0 {
 		artifactsJSON, _ = json.Marshal(cb.Artifacts)
 	}
-	if err := h.updateCloudTaskByIntent(c.Request.Context(), cb.IntentID,
+	if err := h.updateCloudTaskByIntent(c.Request.Context(), key,
 		mapAgentStatus(cb.Event, cb.Status), cb.PRURL, artifactsJSON, cb.Error); err != nil {
 		respondError(c, http.StatusInternalServerError, "update failed")
 		return

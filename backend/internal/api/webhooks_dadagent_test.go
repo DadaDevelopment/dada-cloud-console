@@ -72,6 +72,32 @@ func TestDadaAgentWebhook_NilVerifier_503(t *testing.T) {
 	}
 }
 
+func TestDadaAgentWebhook_MissingCorrelationKey_400(t *testing.T) {
+	h := &Handler{}
+	c, rec := newWebhookCtx(t, "Bearer ok", `{"event":"completed"}`)
+	h.dadaAgentWebhook(c, fakeVerifier{claims: &auth.KeycloakClaims{Azp: "dada-agent"}})
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("code=%d want 400", rec.Code)
+	}
+}
+
+func TestCorrelationKey(t *testing.T) {
+	cases := []struct {
+		name string
+		cb   dadaAgentCallback
+		want string
+	}{
+		{"intent_id wins when both present", dadaAgentCallback{IntentID: "int-1", CloudTaskID: "run-2"}, "int-1"},
+		{"falls back to cloud_task_id", dadaAgentCallback{CloudTaskID: "run-2"}, "run-2"},
+		{"both empty", dadaAgentCallback{}, ""},
+	}
+	for _, tc := range cases {
+		if got := correlationKey(tc.cb); got != tc.want {
+			t.Fatalf("%s: correlationKey=%q want %q", tc.name, got, tc.want)
+		}
+	}
+}
+
 func TestMapAgentStatus(t *testing.T) {
 	cases := []struct {
 		event, status, want string
