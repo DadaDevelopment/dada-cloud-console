@@ -190,6 +190,11 @@ export const api = {
 };
 
 // Typed API functions
+export const feedbackApi = {
+  submit: (message: string, route: string) =>
+    apiFetch<{ status: string }>("/api/v1/feedback", { method: "POST", body: { message, route } }),
+};
+
 export const authApi = {
   login: (username: string, password: string) =>
     apiFetch<LoginResponse>("/api/v1/auth/login", { method: "POST", body: { username, password } }),

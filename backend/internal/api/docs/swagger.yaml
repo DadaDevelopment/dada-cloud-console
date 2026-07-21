@@ -485,6 +485,13 @@ definitions:
       value:
         type: string
     type: object
+  api.submitFeedbackRequest:
+    properties:
+      message:
+        type: string
+      route:
+        type: string
+    type: object
   api.updateAppImageRequest:
     properties:
       image:
@@ -1080,6 +1087,41 @@ paths:
       summary: Poll a deploy triggered with a deploy-hook token
       tags:
       - deploy-hook
+  /feedback:
+    post:
+      consumes:
+      - application/json
+      description: Records a short feedback message with the console route it was
+        sent from. Works with or without a bearer token; if present, the caller's
+        identity is attached.
+      operationId: submitFeedback
+      parameters:
+      - description: Feedback message
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/api.submitFeedbackRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Submit in-product feedback
+      tags:
+      - feedback
   /git/github/oauth/callback:
     get:
       description: Public endpoint GitHub redirects to after user authorization. Consumes

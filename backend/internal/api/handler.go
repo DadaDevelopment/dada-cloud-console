@@ -26,6 +26,7 @@ import (
 	"github.com/dada-tuda/console/backend/internal/portainer"
 	"github.com/dada-tuda/console/backend/internal/prometheus"
 	"github.com/dada-tuda/console/backend/internal/userservice"
+	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -110,6 +111,15 @@ type Handler struct {
 	auditNotifyEmail      string
 	auditRateLimiter      auditNotifyLimiter
 	deployHookNotifyEmail string
+
+	optionalAuth func(c *gin.Context) (*auth.Claims, bool)
+}
+
+func (h *Handler) optionalClaims(c *gin.Context) (*auth.Claims, bool) {
+	if h.optionalAuth != nil {
+		return h.optionalAuth(c)
+	}
+	return auth.GetClaims(c)
 }
 
 // NewHandler constructs a Handler with the given dependencies.

@@ -68,6 +68,58 @@ func authMiddleware(pool *pgxpool.Pool, cfg *config.Config) gin.HandlerFunc {
 	return auth.KeycloakMiddleware(verifier, resolver)
 }
 
+func optionalAuthResolver(pool *pgxpool.Pool, cfg *config.Config) func(c *gin.Context) (*auth.Claims, bool) {
+	extractBearer := func(c *gin.Context) string {
+		h := c.GetHeader("Authorization")
+		parts := strings.SplitN(h, " ", 2)
+		if len(parts) != 2 || !strings.EqualFold(parts[0], "bearer") {
+			return ""
+		}
+		return parts[1]
+	}
+
+	if cfg.AuthMode != "keycloak" {
+		return func(c *gin.Context) (*auth.Claims, bool) {
+			token := extractBearer(c)
+			if token == "" {
+				return nil, false
+			}
+			claims, err := auth.ValidateToken(token, cfg.JWTSecret)
+			if err != nil {
+				return nil, false
+			}
+			return claims, true
+		}
+	}
+
+	verifier, err := auth.NewKeycloakVerifier(
+		context.Background(),
+		cfg.KeycloakIssuer,
+		cfg.KeycloakVerifyAud,
+		cfg.KeycloakAudience,
+		cfg.KeycloakRolesClient,
+	)
+	if err != nil {
+		return func(c *gin.Context) (*auth.Claims, bool) { return nil, false }
+	}
+
+	return func(c *gin.Context) (*auth.Claims, bool) {
+		token := extractBearer(c)
+		if token == "" {
+			return nil, false
+		}
+		kc, verr := verifier.Verify(c.Request.Context(), token)
+		if verr != nil {
+			return nil, false
+		}
+		id, _, rerr := auth.ResolveUser(c.Request.Context(), pool, kc)
+		if rerr != nil {
+			return nil, false
+		}
+		return &auth.Claims{UserID: id, Groups: kc.Groups}, true
+	}
+}
+
 // SetupRouter configures and returns the Gin engine with all API routes registered.
 func SetupRouter(pool *pgxpool.Pool, cfg *config.Config) *gin.Engine {
 	if !cfg.DevMode {
@@ -91,6 +143,7 @@ func SetupRouter(pool *pgxpool.Pool, cfg *config.Config) *gin.Engine {
 	})
 
 	h := NewHandler(pool, cfg)
+	h.optionalAuth = optionalAuthResolver(pool, cfg)
 
 	keycloakMode := cfg.AuthMode == "keycloak"
 
@@ -148,6 +201,8 @@ func SetupRouter(pool *pgxpool.Pool, cfg *config.Config) *gin.Engine {
 	r.GET("/api/v1/deploy/operations/:operationId", h.GetDeployOperation)
 
 	r.POST("/api/v1/client-errors", h.ReportClientError)
+
+	r.POST("/api/v1/feedback", h.SubmitFeedback)
 
 	// Embedded MCP server at /mcp (Streamable HTTP transport).
 	// Each tool call self-proxies to cfg.MCPSelfURL/api/v1/... so auth and all

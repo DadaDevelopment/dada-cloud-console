@@ -750,6 +750,58 @@
                 }
             }
         },
+        "/feedback": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Records a short feedback message with the console route it was sent from. Works with or without a bearer token; if present, the caller's identity is attached.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "feedback"
+                ],
+                "summary": "Submit in-product feedback",
+                "operationId": "submitFeedback",
+                "parameters": [
+                    {
+                        "description": "Feedback message",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/api.submitFeedbackRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/git/github/oauth/callback": {
             "get": {
                 "description": "Public endpoint GitHub redirects to after user authorization. Consumes the one-time state, exchanges the code, binds the user's installations, redirects to the wizard.",
@@ -11787,6 +11839,17 @@
                     "type": "string"
                 },
                 "value": {
+                    "type": "string"
+                }
+            }
+        },
+        "api.submitFeedbackRequest": {
+            "type": "object",
+            "properties": {
+                "message": {
+                    "type": "string"
+                },
+                "route": {
                     "type": "string"
                 }
             }
