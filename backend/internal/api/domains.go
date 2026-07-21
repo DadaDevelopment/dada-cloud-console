@@ -1065,6 +1065,139 @@ func reissueDefaultDomainDNS(ctx context.Context, pool *pgxpool.Pool, projectID,
 	return tx.Commit(ctx)
 }
 
+// defaultDomainBackfillGrace is how long a freshly-touched App snapshot is left
+// alone before BackfillMissingDefaultDomains will consider its missing
+// domain_hostnames row abandoned rather than "CreateApp is still mid-flight".
+// CreateApp writes the App snapshot and the domain_hostnames row from the same
+// request handler, so under normal operation the row appears within
+// milliseconds; this window only needs to clear worst-case request latency,
+// not gitops-agent's async git commit (that commit is what actually renders
+// the Ingress/DNS files and can legitimately take longer, but it never removes
+// the domain_hostnames row CreateApp already inserted).
+const defaultDomainBackfillGrace = 5 * time.Minute
+
+// appNeedsDefaultDomain reports whether an App resource_snapshot's summary_json
+// describes an HTTP-serving app that CreateApp would have assigned a default
+// hostname to. Mirrors the servesHTTP gate CreateApp itself uses, falling back
+// to defaultPortForFramework when the stored port is missing or zero (a
+// snapshot recovered by manual repair may omit it).
+func appNeedsDefaultDomain(summary map[string]any) bool {
+	port, _ := summary["port"].(float64)
+	if port == 0 {
+		framework, _ := summary["framework"].(string)
+		port = float64(defaultPortForFramework(framework))
+	}
+	return servesHTTP(int(port))
+}
+
+// BackfillMissingDefaultDomains finds HTTP-serving Kubernetes apps that have no
+// domain_hostnames row at all and re-drives default-domain provisioning for
+// them via the same AttachDefaultDomain operation the manual re-attach path
+// uses (doAttachDefaultDomain in gitops-agent is idempotent: it upserts the
+// Ingress/DNS manifest block, so running it against an app that already has
+// working ingress files is harmless drift-correction, not a duplicate).
+//
+// This closes the one-time-provisioning gap in CreateApp: if the domain step
+// fails to leave a row behind -- the CreateApp request's own INSERT failing
+// after the operation already committed (see the best-effort insert in
+// CreateApp), or an app being recovered by hand straight into git without
+// going through the API -- nothing else ever notices, since
+// ReconcilePendingHostnames only walks EXISTING domain_hostnames rows. A
+// missing row therefore stayed domain-less forever until this ran.
+func BackfillMissingDefaultDomains(ctx context.Context, pool *pgxpool.Pool, cfg *config.Config) error {
+	if cfg == nil || !cfg.DefaultDomainEnabled || cfg.DefaultDomainBase == "" {
+		return nil
+	}
+	rows, err := pool.Query(ctx,
+		`SELECT rs.project_id, rs.environment_id, rs.name, rs.summary_json
+		   FROM resource_snapshots rs
+		   JOIN environments e ON e.id = rs.environment_id
+		  WHERE rs.kind = 'App'
+		    AND rs.environment_id IS NOT NULL
+		    AND e.runtime = $1
+		    AND rs.last_synced_at < NOW() - ($2 * INTERVAL '1 second')
+		    AND NOT EXISTS (
+		        SELECT 1 FROM domain_hostnames dh
+		         WHERE dh.environment_id = rs.environment_id AND dh.app_name = rs.name
+		    )`,
+		models.EnvironmentRuntimeK8s, defaultDomainBackfillGrace.Seconds(),
+	)
+	if err != nil {
+		return err
+	}
+	type appRow struct {
+		projectID     uuid.UUID
+		environmentID uuid.UUID
+		name          string
+		summaryRaw    []byte
+	}
+	var apps []appRow
+	for rows.Next() {
+		var a appRow
+		if err := rows.Scan(&a.projectID, &a.environmentID, &a.name, &a.summaryRaw); err != nil {
+			rows.Close()
+			return err
+		}
+		apps = append(apps, a)
+	}
+	rows.Close()
+
+	for _, a := range apps {
+		var summary map[string]any
+		_ = json.Unmarshal(a.summaryRaw, &summary)
+		if !appNeedsDefaultDomain(summary) {
+			continue
+		}
+		suffix, sErr := randomHostSuffix()
+		if sErr != nil {
+			log.Warn().Err(sErr).Str("app", a.name).Msg("backfill default domain: suffix generation failed")
+			continue
+		}
+		hostname := buildDefaultHostname(cfg.DefaultDomainBase, a.name, suffix)
+		if err := enqueueDefaultDomainBackfill(ctx, pool, a.projectID, a.environmentID, a.name, hostname); err != nil {
+			log.Warn().Err(err).Str("app", a.name).Str("hostname", hostname).
+				Msg("backfill default domain: enqueue failed")
+			continue
+		}
+		log.Warn().Str("app", a.name).Str("hostname", hostname).
+			Msg("backfilled missing default domain for app with no domain_hostnames row")
+	}
+	return nil
+}
+
+// enqueueDefaultDomainBackfill inserts the domain_hostnames row CreateApp would
+// normally have inserted plus the AttachDefaultDomain operation that renders it,
+// in one transaction so the row and its provisioning operation never diverge.
+func enqueueDefaultDomainBackfill(ctx context.Context, pool *pgxpool.Pool, projectID, environmentID uuid.UUID, appName, hostname string) error {
+	payload, err := json.Marshal(models.AttachCustomHostnamePayload{AppName: appName, Hostname: hostname})
+	if err != nil {
+		return err
+	}
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	var opID uuid.UUID
+	if err := tx.QueryRow(ctx,
+		`INSERT INTO operations (actor_id, project_id, environment_id, action, resource_kind, resource_name, status, payload)
+		 VALUES ($1, $2, $3, 'AttachDefaultDomain', 'App', $4, 'Created', $5)
+		 RETURNING id`,
+		reissueActorID, projectID, environmentID, appName, payload,
+	).Scan(&opID); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx,
+		`INSERT INTO domain_hostnames (authorization_id, environment_id, app_name, hostname, record_type, status, cert_status, operation_id, managed)
+		 VALUES (NULL, $1, $2, $3, 'CNAME', 'pending', 'pending', $4, true)`,
+		environmentID, appName, hostname, opID,
+	); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
 // hostnameCertLive reports whether hostname:443 completes a TLS handshake with a
 // publicly-trusted certificate valid for that hostname. The default (verifying)
 // tls.Config means a self-signed / ingress-default / expired cert fails the

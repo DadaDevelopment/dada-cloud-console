@@ -68,3 +68,30 @@ func TestHostnamePendingExpired(t *testing.T) {
 		}
 	}
 }
+
+func TestAppNeedsDefaultDomain(t *testing.T) {
+	cases := []struct {
+		name    string
+		summary map[string]any
+		want    bool
+	}{
+		{"ordinary http app on 8080", map[string]any{"port": float64(8080)}, true},
+		{"js app on default vite port", map[string]any{"port": float64(5173), "framework": "vite"}, true},
+		{"redis datastore port excluded", map[string]any{"port": float64(6379)}, false},
+		{"postgres datastore port excluded", map[string]any{"port": float64(5432)}, false},
+		{"missing port falls back to framework default (node)", map[string]any{"framework": "node"}, true},
+		{"missing port and framework falls back to 8080", map[string]any{}, true},
+		{"zero port falls back like missing", map[string]any{"port": float64(0), "framework": "react"}, true},
+	}
+	for _, c := range cases {
+		if got := appNeedsDefaultDomain(c.summary); got != c.want {
+			t.Errorf("%s: appNeedsDefaultDomain(%v) = %v, want %v", c.name, c.summary, got, c.want)
+		}
+	}
+}
+
+func TestBackfillMissingDefaultDomainsDisabledConfig(t *testing.T) {
+	if err := BackfillMissingDefaultDomains(nil, nil, nil); err != nil {
+		t.Errorf("nil cfg should short-circuit without touching pool, got err: %v", err)
+	}
+}

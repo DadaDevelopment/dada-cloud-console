@@ -135,6 +135,9 @@ func main() {
 				if err := api.PollPendingDelegations(dnsCtx, pool, cfg); err != nil && !errors.Is(err, context.Canceled) {
 					log.Warn().Err(err).Msg("managed-dns delegation poll failed")
 				}
+				if err := api.BackfillMissingDefaultDomains(dnsCtx, pool, cfg); err != nil && !errors.Is(err, context.Canceled) {
+					log.Warn().Err(err).Msg("default-domain backfill failed")
+				}
 			}
 		}
 	}()
