@@ -315,6 +315,12 @@ export const appsApi = {
       { method: "PUT", body: volume }
     ),
 
+  updateProfile: (projectId: string, envId: string, appName: string, profile: string) =>
+    apiFetch<{ operation: Operation; message: string }>(
+      `/api/v1/projects/${projectId}/environments/${envId}/apps/${appName}/profile`,
+      { method: "PATCH", body: { profile } }
+    ),
+
   updateImage: (projectId: string, envId: string, appName: string, image: string) =>
     apiFetch<DeployImageResponse>(
       `/api/v1/projects/${projectId}/environments/${envId}/apps/${appName}/image`,

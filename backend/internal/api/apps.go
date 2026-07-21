@@ -783,6 +783,174 @@ func (h *Handler) UpdateAppImage(c *gin.Context) {
 	})
 }
 
+type updateAppProfileRequest struct {
+	Profile string `json:"profile"`
+}
+
+var validAppProfiles = map[string]bool{"small": true, "medium": true, "large": true}
+
+// UpdateAppProfile resizes an app's CPU/memory profile. It writes the new
+// profile into the app's resource_snapshots.summary_json (the field the
+// renderer reads on every re-deploy) and enqueues the same DeployImageVersion
+// operation UpdateAppImage uses, keeping the current image, so gitops-agent
+// re-renders the workload chart with the new profile's requests/limits.
+//
+// @ID          updateAppProfile
+// @Summary     Resize an app's CPU/memory profile
+// @Description Changes an app's resource profile (small, medium, or large) and redeploys it with the new CPU/memory limits. Asynchronous: returns 202 with an operation; poll the operation until terminal.
+// @Tags        app
+// @Accept      json
+// @Produce     json
+// @Security    BearerAuth
+// @Param       projectId path     string                  true "Project UUID"
+// @Param       envId     path     string                  true "Environment UUID"
+// @Param       appName   path     string                  true "App name"
+// @Param       body      body     updateAppProfileRequest true "New resource profile"
+// @Success     202       {object} map[string]interface{} "object with the accepted operation"
+// @Failure     400       {object} map[string]string
+// @Failure     403       {object} map[string]string
+// @Failure     404       {object} map[string]string
+// @Router      /projects/{projectId}/environments/{envId}/apps/{appName}/profile [patch]
+func (h *Handler) UpdateAppProfile(c *gin.Context) {
+	claims, ok := auth.GetClaims(c)
+	if !ok {
+		respondUnauthorized(c)
+		return
+	}
+
+	projectID, err := uuid.Parse(c.Param("projectId"))
+	if err != nil {
+		respondNotFound(c)
+		return
+	}
+	envID, err := uuid.Parse(c.Param("envId"))
+	if err != nil {
+		respondNotFound(c)
+		return
+	}
+	appName := c.Param("appName")
+
+	role, err := h.effectiveRole(c.Request.Context(), claims, projectID)
+	if err == pgx.ErrNoRows {
+		respondNotFound(c)
+		return
+	}
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, "failed to check project membership")
+		return
+	}
+	if !canWrite(role) {
+		respondForbidden(c)
+		return
+	}
+
+	var req updateAppProfileRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		respondError(c, http.StatusBadRequest, err.Error())
+		return
+	}
+	if !validAppProfiles[req.Profile] {
+		respondError(c, http.StatusBadRequest, "profile must be one of: small, medium, large")
+		return
+	}
+
+	tx, err := h.pool.Begin(c.Request.Context())
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, "failed to create operation")
+		return
+	}
+	defer func() { _ = tx.Rollback(c.Request.Context()) }()
+
+	var summaryRaw []byte
+	err = tx.QueryRow(c.Request.Context(),
+		`SELECT summary_json FROM resource_snapshots
+		 WHERE project_id = $1 AND environment_id = $2 AND kind = 'App' AND name = $3
+		 FOR UPDATE`,
+		projectID, envID, appName,
+	).Scan(&summaryRaw)
+	if err == pgx.ErrNoRows {
+		respondNotFound(c)
+		return
+	}
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, "failed to load app")
+		return
+	}
+
+	var cur map[string]any
+	_ = json.Unmarshal(summaryRaw, &cur)
+	if cur == nil {
+		cur = map[string]any{}
+	}
+	image, _ := cur["image"].(string)
+	if image == "" {
+		respondError(c, http.StatusBadRequest, "app has no deployed image to resize")
+		return
+	}
+
+	cur["profile"] = req.Profile
+	updatedJSON, err := json.Marshal(cur)
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, "failed to marshal snapshot")
+		return
+	}
+	if _, err = tx.Exec(c.Request.Context(),
+		`UPDATE resource_snapshots SET summary_json = $1
+		 WHERE project_id = $2 AND environment_id = $3 AND kind = 'App' AND name = $4`,
+		updatedJSON, projectID, envID, appName,
+	); err != nil {
+		respondError(c, http.StatusInternalServerError, "failed to update app profile")
+		return
+	}
+
+	if _, err = tx.Exec(c.Request.Context(),
+		`UPDATE git_repos SET profile = $1
+		 WHERE project_id = $2 AND environment_id = $3 AND app_name = $4`,
+		req.Profile, projectID, envID, appName,
+	); err != nil {
+		respondError(c, http.StatusInternalServerError, "failed to update app profile")
+		return
+	}
+
+	payload := models.DeployImageVersionPayload{AppName: appName, Image: image}
+	payloadBytes, err := json.Marshal(payload)
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, "failed to marshal payload")
+		return
+	}
+
+	var op models.Operation
+	row := tx.QueryRow(c.Request.Context(),
+		`INSERT INTO operations (actor_id, project_id, environment_id, action, resource_kind, resource_name, status, payload)
+		 VALUES ($1, $2, $3, 'DeployImageVersion', 'App', $4, 'Created', $5)
+		 RETURNING id, actor_id, project_id, environment_id, action, resource_kind, resource_name,
+		           status, payload, validation_result, git_commit, git_path, argo_application,
+		           error_code, error_message, created_at, updated_at`,
+		claims.UserID, projectID, envID, appName, payloadBytes,
+	)
+	if err = scanOperation(row, &op); err != nil {
+		respondError(c, http.StatusInternalServerError, "failed to create operation")
+		return
+	}
+
+	if err = tx.Commit(c.Request.Context()); err != nil {
+		respondError(c, http.StatusInternalServerError, "failed to create operation")
+		return
+	}
+
+	auditMeta, _ := json.Marshal(payload)
+	_, _ = h.pool.Exec(c.Request.Context(),
+		`INSERT INTO audit_events (actor_id, project_id, operation_id, action, resource_kind, resource_name, metadata)
+		 VALUES ($1, $2, $3, 'UpdateAppProfile', 'App', $4, $5)`,
+		claims.UserID, projectID, op.ID, appName, auditMeta,
+	)
+
+	c.JSON(http.StatusAccepted, gin.H{
+		"operation": op,
+		"message":   "Profile update queued",
+	})
+}
+
 // quantityBytes converts a restricted k8s quantity (Mi/Gi/Ti, validated by
 // volumeSizeRe) to a byte count for grow-only comparisons. It returns 0 for any
 // value that does not match the expected shape.

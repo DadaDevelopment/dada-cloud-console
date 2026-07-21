@@ -339,6 +339,22 @@ export const apps: Messages = {
     ru: "Класс хранилища нельзя изменить после создания. Размер только увеличивается. Изменение вызывает передеплой (перезапуск подов).",
     en: "Storage class is fixed after creation. Size can only grow. Changes trigger a redeploy (pod restart).",
   },
+  "apps.resources.title": { ru: "Ресурсы", en: "Resources" },
+  "apps.resources.subtitle": {
+    ru: "Размер CPU/RAM для этого приложения. Изменение вызывает передеплой (перезапуск подов).",
+    en: "CPU/RAM size for this app. Changing it triggers a redeploy (pod restart).",
+  },
+  "apps.resources.current": { ru: "Текущий план", en: "Current plan" },
+  "apps.resources.none": { ru: "Неизвестно", en: "Unknown" },
+  "apps.resources.plan": { ru: "План", en: "Plan" },
+  "apps.resources.save": { ru: "Сохранить", en: "Save" },
+  "apps.resources.warnRestart": {
+    ru: "Приложение будет перезапущено с новым размером. Кратковременный простой возможен.",
+    en: "The app will restart with the new size. Brief downtime may occur.",
+  },
+  "apps.resources.queued": { ru: "Изменение размера поставлено в очередь", en: "Resize queued" },
+  "apps.resources.error": { ru: "Не удалось изменить размер", en: "Resize failed" },
+  "apps.settings.tab.resources": { ru: "Ресурсы", en: "Resources" },
   "apps.settings.git.title": { ru: "Исходный репозиторий", en: "Source repository" },
   "apps.settings.git.subtitle": {
     ru: "Подключите Git-репозиторий, чтобы пуши автоматически собирали и деплоили приложение.",

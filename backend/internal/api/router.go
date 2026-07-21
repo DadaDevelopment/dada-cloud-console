@@ -306,6 +306,7 @@ func SetupRouter(pool *pgxpool.Pool, cfg *config.Config) *gin.Engine {
 		api.GET("/projects/:projectId/environments/:envId/infra", h.ListInfra)
 		api.POST("/projects/:projectId/environments/:envId/apps", h.CreateApp)
 		api.PATCH("/projects/:projectId/environments/:envId/apps/:appName/image", h.UpdateAppImage)
+		api.PATCH("/projects/:projectId/environments/:envId/apps/:appName/profile", h.UpdateAppProfile)
 		api.PUT("/projects/:projectId/environments/:envId/apps/:appName/storage", h.UpdateAppStorage)
 		api.POST("/projects/:projectId/environments/:envId/apps/:appName/rollback", h.RollbackApp)
 		api.POST("/projects/:projectId/environments/:envId/apps/:appName/restart", h.RestartApp)
