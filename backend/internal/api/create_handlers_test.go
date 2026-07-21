@@ -123,6 +123,29 @@ func TestCreateApp_SeedsOptimisticSnapshot(t *testing.T) {
 	assertOptimisticSeeded(t, pool, rec, projectID, envID, "App", name)
 }
 
+func TestCreateApp_SeedsDefaultHostname(t *testing.T) {
+	pool := testOptimisticPool(t)
+	h := &Handler{pool: pool, cfg: &config.Config{DefaultDomainEnabled: true, DefaultDomainBase: "example.test"}}
+	projectID, envID := seedOptimisticFixture(t, pool)
+	claims := godClaims(seedUser(t, pool))
+	name := "app-" + uuid.NewString()[:8]
+
+	c, rec := newCreateCtx(t, `{"name":"`+name+`","image":"nginx:latest","port":8080}`, params(projectID, envID), claims)
+	h.CreateApp(c)
+	assertOptimisticSeeded(t, pool, rec, projectID, envID, "App", name)
+
+	var count int
+	if err := pool.QueryRow(context.Background(),
+		`SELECT count(*) FROM domain_hostnames WHERE environment_id = $1 AND app_name = $2`,
+		envID, name,
+	).Scan(&count); err != nil {
+		t.Fatalf("query domain_hostnames: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("domain_hostnames rows for app = %d, want 1", count)
+	}
+}
+
 func TestCreateS3Bucket_SeedsOptimisticSnapshot(t *testing.T) {
 	pool := testOptimisticPool(t)
 	h := &Handler{pool: pool, cfg: &config.Config{}}

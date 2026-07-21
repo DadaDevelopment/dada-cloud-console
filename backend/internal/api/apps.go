@@ -624,6 +624,18 @@ func (h *Handler) CreateApp(c *gin.Context) {
 		return
 	}
 
+	if defaultHostname != "" {
+		if _, err = tx.Exec(c.Request.Context(),
+			`INSERT INTO domain_hostnames (authorization_id, environment_id, app_name, hostname, record_type, status, cert_status, operation_id, managed)
+			 VALUES (NULL, $1, $2, $3, 'CNAME', 'pending', 'pending', $4, true)
+			 ON CONFLICT (hostname) DO NOTHING`,
+			envID, req.Name, defaultHostname, op.ID,
+		); err != nil {
+			respondError(c, http.StatusInternalServerError, "failed to record default hostname")
+			return
+		}
+	}
+
 	if err = tx.Commit(c.Request.Context()); err != nil {
 		respondError(c, http.StatusInternalServerError, "failed to create operation")
 		return
@@ -637,18 +649,6 @@ func (h *Handler) CreateApp(c *gin.Context) {
 		claims.UserID, projectID, op.ID, req.Name, auditMeta,
 	)
 	h.notifyAuditEvent(claims, projectID, "CreateApp", req.Name)
-
-	if defaultHostname != "" {
-		_, dhErr := h.pool.Exec(c.Request.Context(),
-			`INSERT INTO domain_hostnames (authorization_id, environment_id, app_name, hostname, record_type, status, cert_status, operation_id, managed)
-			 VALUES (NULL, $1, $2, $3, 'CNAME', 'pending', 'pending', $4, true)`,
-			envID, req.Name, defaultHostname, op.ID,
-		)
-		if dhErr != nil {
-			respondError(c, http.StatusInternalServerError, "failed to record default hostname")
-			return
-		}
-	}
 
 	c.JSON(http.StatusAccepted, gin.H{
 		"operation":        op,
