@@ -10,10 +10,11 @@ import type { DomainAuthorization } from "@/lib/types";
 import { EnvVarsEditor } from "@/components/deploy/env-vars-editor";
 import { HostnamesManager } from "@/components/deploy/hostnames-manager";
 import { StorageManager } from "@/components/deploy/storage-manager";
+import { ResourceManager } from "@/components/deploy/resource-manager";
 import { CommonConfigEditor } from "@/components/deploy/common-config-editor";
 import { useT } from "@/lib/i18n/console/context";
 
-type Tab = "env" | "config" | "git" | "domains" | "storage";
+type Tab = "env" | "config" | "git" | "domains" | "storage" | "resources";
 
 export default function AppSettingsPage() {
   const params = useParams<{ projectId: string; appName: string }>();
@@ -25,7 +26,7 @@ export default function AppSettingsPage() {
 
   const initialTab = ((): Tab => {
     const q = searchParams.get("tab");
-    return q === "config" || q === "git" || q === "domains" || q === "storage" ? q : "env";
+    return q === "config" || q === "git" || q === "domains" || q === "storage" || q === "resources" ? q : "env";
   })();
   const [tab, setTab] = useState<Tab>(initialTab);
   const [verifiedApexes, setVerifiedApexes] = useState<DomainAuthorization[]>([]);
@@ -43,6 +44,7 @@ export default function AppSettingsPage() {
     { key: "config", label: t("apps.settings.tab.config") },
     { key: "git", label: t("apps.settings.tab.git") },
     { key: "storage", label: t("apps.settings.tab.storage") },
+    { key: "resources", label: t("apps.settings.tab.resources") },
     { key: "domains", label: t("apps.settings.tab.domains") },
   ];
 
@@ -114,6 +116,10 @@ export default function AppSettingsPage() {
 
       {tab === "storage" && (
         <StorageManager projectId={projectId} envId={envId} appName={appName} canEdit={canEdit} />
+      )}
+
+      {tab === "resources" && (
+        <ResourceManager projectId={projectId} envId={envId} appName={appName} canEdit={canEdit} />
       )}
 
       {tab === "domains" && (
