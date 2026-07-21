@@ -11,10 +11,12 @@ export function ProductHero({
   title,
   subtitle,
   badge,
+  ctaHref,
 }: {
   title: string;
   subtitle: string;
   badge?: string;
+  ctaHref?: string;
 }) {
   const { t, locale } = useLang();
   return (
@@ -32,7 +34,7 @@ export function ProductHero({
           <p className="mt-5 max-w-2xl text-lg text-white/70">{subtitle}</p>
           <div className="mt-8 flex flex-wrap gap-3">
             <Link
-              href={consoleHref("/register")}
+              href={consoleHref(ctaHref ?? "/register")}
               className="rounded-md bg-blue-600 px-6 py-3 text-sm font-semibold text-white transition-colors hover:bg-blue-700"
             >
               {t.common.createAccount}
@@ -114,7 +116,7 @@ export function FaqList({ title, items }: { title: string; items: { q: string; a
   );
 }
 
-export function CtaBand() {
+export function CtaBand({ ctaHref }: { ctaHref?: string } = {}) {
   const { t } = useLang();
   return (
     <section className="mkt-hero-gradient">
@@ -124,7 +126,7 @@ export function CtaBand() {
         </h2>
         <p className="mx-auto mt-4 max-w-xl text-lg text-white/70">{t.home.ctaSubtitle}</p>
         <Link
-          href={consoleHref("/register")}
+          href={consoleHref(ctaHref ?? "/register")}
           className="mt-8 inline-block rounded-md bg-blue-600 px-8 py-3 text-sm font-semibold text-white transition-colors hover:bg-blue-700"
         >
           {t.common.createAccount}

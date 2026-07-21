@@ -1,19 +1,20 @@
 import type { Metadata } from "next";
 
 const SITE_URL = "https://cloud.dada-tuda.ru";
-const TITLE = "How to deploy a v0, Lovable, Bolt or Cursor project — Dada Cloud";
+const TITLE = "Deploy your Lovable, Bolt or v0 app from Russia — Dada Cloud";
 const DESCRIPTION =
-  "Built an app in v0, Lovable, Bolt or Cursor? Export the code to GitHub and deploy it with the same git push to Dada Cloud: a live HTTPS URL in minutes, pay with a Russian card, servers in Russia, no VPN or foreign card needed.";
+  "Vibe-coded an app with Lovable, Bolt or v0? Deploy it in one click from Russia: a live HTTPS URL in minutes, free tier, no card required, pay in rubles when you need more.";
 
 export const metadata: Metadata = {
   title: TITLE,
   description: DESCRIPTION,
   keywords: [
-    "deploy v0 project",
-    "deploy lovable app",
+    "lovable hosting russia",
+    "deploy app from russia",
     "deploy bolt.new project",
+    "deploy v0 project",
     "hosting for vibe coding apps",
-    "deploy ai generated app russia",
+    "deploy replit project russia",
   ],
   alternates: {
     canonical: "/en/deploy-vibe-coding",
@@ -31,7 +32,7 @@ export const metadata: Metadata = {
     description: DESCRIPTION,
     locale: "en_US",
     alternateLocale: ["ru_RU"],
-    images: [{ url: "/og.png", width: 1200, height: 630, alt: "DADA Cloud — deploy v0, Lovable, Bolt, Cursor projects" }],
+    images: [{ url: "/og.png", width: 1200, height: 630, alt: "DADA Cloud — hosting for Lovable, Bolt and v0 apps" }],
   },
   twitter: {
     card: "summary_large_image",

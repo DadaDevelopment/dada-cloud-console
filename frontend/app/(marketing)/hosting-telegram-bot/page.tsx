@@ -9,10 +9,14 @@ export default function TelegramBotHostingPage() {
   return (
     <>
       <FaqJsonLd path="/hosting-telegram-bot" items={t.telegramBotAlt.faq} />
-      <ProductHero title={t.telegramBotAlt.heroTitle} subtitle={t.telegramBotAlt.heroSubtitle} />
+      <ProductHero
+        title={t.telegramBotAlt.heroTitle}
+        subtitle={t.telegramBotAlt.heroSubtitle}
+        ctaHref="/register?utm_source=door_a"
+      />
       <FeatureGrid title={t.telegramBotAlt.featuresTitle} features={t.telegramBotAlt.features} />
       <FaqList title={t.telegramBotAlt.faqTitle} items={t.telegramBotAlt.faq} />
-      <CtaBand />
+      <CtaBand ctaHref="/register?utm_source=door_a" />
     </>
   );
 }

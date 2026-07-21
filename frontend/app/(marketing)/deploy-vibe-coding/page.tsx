@@ -9,10 +9,14 @@ export default function VibeCodingDeployPage() {
   return (
     <>
       <FaqJsonLd path="/deploy-vibe-coding" items={t.vibeCodingAlt.faq} />
-      <ProductHero title={t.vibeCodingAlt.heroTitle} subtitle={t.vibeCodingAlt.heroSubtitle} />
+      <ProductHero
+        title={t.vibeCodingAlt.heroTitle}
+        subtitle={t.vibeCodingAlt.heroSubtitle}
+        ctaHref="/register?utm_source=door_b"
+      />
       <FeatureGrid title={t.vibeCodingAlt.featuresTitle} features={t.vibeCodingAlt.features} />
       <FaqList title={t.vibeCodingAlt.faqTitle} items={t.vibeCodingAlt.faq} />
-      <CtaBand />
+      <CtaBand ctaHref="/register?utm_source=door_b" />
     </>
   );
 }
