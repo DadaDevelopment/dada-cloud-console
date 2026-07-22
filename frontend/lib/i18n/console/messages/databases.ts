@@ -121,8 +121,11 @@ export const databases: Messages = {
   "databases.backups.column.kind": { ru: "Тип", en: "Kind" },
   "databases.backups.column.size": { ru: "Размер", en: "Size" },
   "databases.backups.restore": { ru: "Восстановить", en: "Restore" },
+  "databases.backups.download": { ru: "Скачать", en: "Download" },
+  "databases.backups.downloading": { ru: "Подготовка…", en: "Preparing…" },
   "databases.backups.error": { ru: "Не удалось загрузить резервные копии", en: "Failed to load backups" },
   "databases.backups.createError": { ru: "Не удалось создать резервную копию", en: "Failed to create backup" },
+  "databases.backups.downloadError": { ru: "Не удалось скачать резервную копию", en: "Failed to download backup" },
 
   "databases.backups.status.ready": { ru: "Готова", en: "Ready" },
   "databases.backups.status.running": { ru: "Выполняется", en: "Running" },

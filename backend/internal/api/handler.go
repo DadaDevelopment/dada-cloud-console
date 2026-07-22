@@ -84,6 +84,11 @@ type Handler struct {
 	// with a clear "not configured" error.
 	kanister cloudtask.KanisterClient
 
+	// dbBackupPresigner mints presigned GET URLs to download a database backup's
+	// dump straight from the Kanister dump bucket. Never nil: disabled when the
+	// dump-bucket S3 access is unconfigured (download handler returns 503).
+	dbBackupPresigner cloudtask.DBBackupPresigner
+
 	// billingPlans is the full plan catalog loaded once at startup from the
 	// embedded plans.yaml. Always populated (the embedded file is compiled in);
 	// handlers degrade gracefully if somehow empty.
@@ -205,6 +210,10 @@ func NewHandler(pool *pgxpool.Pool, cfg *config.Config) *Handler {
 	h.s3creds = cloudtask.NewS3CredentialsResolver(cfg.CrossplaneSecretNamespace)
 	h.dbcreds = cloudtask.NewDBCredentialsResolver()
 	h.kanister = cloudtask.NewKanisterClient()
+	h.dbBackupPresigner = cloudtask.NewDBBackupPresigner(
+		cfg.DBBackupS3Endpoint, cfg.DBBackupS3Bucket, cfg.DBBackupS3Region,
+		cfg.DBBackupS3AccessKey, cfg.DBBackupS3SecretKey, cfg.DBBackupS3Insecure,
+	)
 
 	plans, err := billing.LoadPlans("")
 	if err != nil {

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/dada-tuda/console/backend/internal/auth"
@@ -349,4 +350,95 @@ func (h *Handler) RestoreServiceDatabase(c *gin.Context) {
 		claims.UserID, projectID, op.ID, name, auditMeta,
 	)
 	c.JSON(http.StatusAccepted, gin.H{"operation": op, "message": "ServiceDatabase restore queued"})
+}
+
+// dbBackupDownloadTTL bounds how long a presigned backup-download URL stays
+// valid. Short: the browser follows it immediately after the JSON response.
+const dbBackupDownloadTTL = 5 * time.Minute
+
+// DownloadDBBackup issues a short-lived presigned URL to download a Ready
+// backup's dump straight from object storage.
+//
+// @ID          downloadDatabaseBackup
+// @Summary     Download a database backup
+// @Description Returns a short-lived presigned URL to download a Ready per-database logical backup (the pg_dump artifact) directly from object storage; the dump bytes never transit the API. Requires write access and every download is audited. 409 while the backup is not Ready, 503 when dump-bucket access is not configured.
+// @Tags        database
+// @Produce     json
+// @Security    BearerAuth
+// @Param       projectId path     string true "Project UUID"
+// @Param       envId     path     string true "Environment UUID"
+// @Param       name      path     string true "Database resource name"
+// @Param       backupId  path     string true "Backup UUID"
+// @Success     200       {object} map[string]interface{} "object with a presigned download url and its expiry"
+// @Failure     400       {object} map[string]string
+// @Failure     401       {object} map[string]string
+// @Failure     403       {object} map[string]string
+// @Failure     404       {object} map[string]string
+// @Failure     409       {object} map[string]string
+// @Failure     503       {object} map[string]string
+// @Router      /projects/{projectId}/environments/{envId}/databases/{name}/backups/{backupId}/download [get]
+func (h *Handler) DownloadDBBackup(c *gin.Context) {
+	claims, ok := auth.GetClaims(c)
+	if !ok {
+		respondUnauthorized(c)
+		return
+	}
+	projectID, envID, ok := h.parseProjectEnv(c)
+	if !ok {
+		return
+	}
+	if _, err := h.requireWriter(c, claims.UserID, projectID); err != nil {
+		return
+	}
+	name := c.Param("name")
+	backupID, err := uuid.Parse(c.Param("backupId"))
+	if err != nil {
+		respondError(c, http.StatusBadRequest, "invalid backup id")
+		return
+	}
+	if !h.dbBackupPresigner.Enabled() {
+		respondError(c, http.StatusServiceUnavailable, "backup download is not configured for this environment")
+		return
+	}
+
+	var backup models.DBBackup
+	err = scanDBBackup(h.pool.QueryRow(c.Request.Context(),
+		dbBackupSelect+` WHERE id = $1 AND project_id = $2 AND environment_id = $3 AND resource_name = $4`,
+		backupID, projectID, envID, name), &backup)
+	if err == pgx.ErrNoRows {
+		respondNotFound(c)
+		return
+	}
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, "failed to look up backup")
+		return
+	}
+	if backup.Status != models.DBBackupStatusReady {
+		respondError(c, http.StatusConflict, "backup is not ready to download")
+		return
+	}
+
+	objectKey := backup.DumpPath
+	if pfx := strings.Trim(h.cfg.DBBackupS3Prefix, "/"); pfx != "" {
+		objectKey = pfx + "/" + strings.TrimPrefix(backup.DumpPath, "/")
+	}
+	filename := fmt.Sprintf("%s-%s.dump", backup.DatabaseName, backupID.String()[:8])
+	downloadURL, err := h.dbBackupPresigner.PresignGet(c.Request.Context(), objectKey, filename, dbBackupDownloadTTL)
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, "failed to prepare download")
+		return
+	}
+
+	auditMeta, _ := json.Marshal(map[string]any{"backup_id": backup.ID.String()})
+	_, _ = h.pool.Exec(c.Request.Context(),
+		`INSERT INTO audit_events (actor_id, project_id, action, resource_kind, resource_name, metadata)
+		 VALUES ($1, $2, 'DownloadServiceDatabaseBackup', 'ServiceDatabaseV2', $3, $4)`,
+		claims.UserID, projectID, name, auditMeta,
+	)
+
+	c.JSON(http.StatusOK, gin.H{
+		"url":        downloadURL,
+		"filename":   filename,
+		"expires_at": time.Now().Add(dbBackupDownloadTTL).UTC(),
+	})
 }

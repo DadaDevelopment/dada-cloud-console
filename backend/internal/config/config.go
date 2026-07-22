@@ -114,6 +114,23 @@ type Config struct {
 	DBBackupRetentionDays   int    // DB_BACKUP_RETENTION_DAYS
 	DBBackupScheduleEnabled bool   // DB_BACKUP_SCHEDULE_ENABLED (opt-in scheduled backups)
 
+	// S3 access to the Kanister dump bucket, used to presign short-lived
+	// download URLs for backup dumps so the bytes are pulled straight from
+	// object storage (never through the API). Must match the bucket/endpoint the
+	// DB_BACKUP_PROFILE writes to. Empty endpoint/bucket/keys disables backup
+	// downloads (503).
+	DBBackupS3Endpoint  string // DB_BACKUP_S3_ENDPOINT (host[:port], no scheme)
+	DBBackupS3Bucket    string // DB_BACKUP_S3_BUCKET
+	DBBackupS3Region    string // DB_BACKUP_S3_REGION
+	DBBackupS3AccessKey string // DB_BACKUP_S3_ACCESS_KEY
+	DBBackupS3SecretKey string // DB_BACKUP_S3_SECRET_KEY
+	DBBackupS3Insecure  bool   // DB_BACKUP_S3_INSECURE (plain http; default https)
+	// DBBackupS3Prefix is the Kanister Profile's location.prefix. kando prepends
+	// it to the dump path on push, so the object key for a direct presigned
+	// download is prefix + "/" + db_backups.dump_path. Must match the configured
+	// DB_BACKUP_PROFILE's prefix.
+	DBBackupS3Prefix string // DB_BACKUP_S3_PREFIX
+
 	// Portainer live-state proxy (read-only). Both must be set to enable the VM
 	// /state and /logs endpoints. Same values the portainer-agent uses.
 	PortainerURL      string // PORTAINER_URL
@@ -405,6 +422,13 @@ func Load() (*Config, error) {
 		DBBackupBlueprint:         getEnv("DB_BACKUP_BLUEPRINT", "postgres-logical-db-blueprint"),
 		DBBackupRetentionDays:     int(getEnvInt64("DB_BACKUP_RETENTION_DAYS", 14)),
 		DBBackupScheduleEnabled:   getEnv("DB_BACKUP_SCHEDULE_ENABLED", "false") == "true",
+		DBBackupS3Endpoint:        getEnv("DB_BACKUP_S3_ENDPOINT", ""),
+		DBBackupS3Bucket:          getEnv("DB_BACKUP_S3_BUCKET", ""),
+		DBBackupS3Region:          getEnv("DB_BACKUP_S3_REGION", "us-east-1"),
+		DBBackupS3AccessKey:       getEnv("DB_BACKUP_S3_ACCESS_KEY", ""),
+		DBBackupS3SecretKey:       getEnv("DB_BACKUP_S3_SECRET_KEY", ""),
+		DBBackupS3Insecure:        getEnv("DB_BACKUP_S3_INSECURE", "false") == "true",
+		DBBackupS3Prefix:          getEnv("DB_BACKUP_S3_PREFIX", "k10/postgresql-logical"),
 		PortainerURL:              getEnv("PORTAINER_URL", ""),
 		PortainerAPIToken:         getEnv("PORTAINER_API_TOKEN", ""),
 		PrometheusQueryURL:        getEnv("PROMETHEUS_QUERY_URL", ""),

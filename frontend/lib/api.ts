@@ -12,6 +12,7 @@ import type {
   CreateDatabaseResponse,
   DBBackup,
   DBBackupsResponse,
+  DBBackupDownloadResponse,
   S3BucketsResponse,
   CreateS3BucketResponse,
   S3BucketCredentialsResponse,
@@ -273,6 +274,11 @@ export const databasesApi = {
     apiFetch<OperationResponse>(
       `/api/v1/projects/${projectId}/environments/${envId}/databases/${name}/restore`,
       { method: "POST", body: { backup_id: backupId } }
+    ),
+
+  downloadBackup: (projectId: string, envId: string, name: string, backupId: string) =>
+    apiFetch<DBBackupDownloadResponse>(
+      `/api/v1/projects/${projectId}/environments/${envId}/databases/${name}/backups/${backupId}/download`
     ),
 
   credentials: (projectId: string, envId: string, name: string) =>

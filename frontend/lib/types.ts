@@ -325,6 +325,12 @@ export interface DBBackupsResponse {
   backups: DBBackup[];
 }
 
+export interface DBBackupDownloadResponse {
+  url: string;
+  filename: string;
+  expires_at: string;
+}
+
 export interface DatabaseCredentialsResponse {
   host: string;
   port: string;

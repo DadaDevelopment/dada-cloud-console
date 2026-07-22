@@ -134,6 +134,7 @@ export default function DatabaseDetailPage() {
   const [isBackupsLoading, setIsBackupsLoading] = useState(false);
   const [backupsError, setBackupsError] = useState<string | null>(null);
   const [isCreatingBackup, setIsCreatingBackup] = useState(false);
+  const [downloadingBackupId, setDownloadingBackupId] = useState<string | null>(null);
 
   const [restoreTarget, setRestoreTarget] = useState<DBBackup | null>(null);
   const [restoreConfirmName, setRestoreConfirmName] = useState("");
@@ -228,6 +229,19 @@ export default function DatabaseDetailPage() {
       setBackupsError(err instanceof Error ? err.message : t("databases.backups.createError"));
     } finally {
       setIsCreatingBackup(false);
+    }
+  }
+
+  async function handleDownloadBackup(b: DBBackup) {
+    setDownloadingBackupId(b.id);
+    setBackupsError(null);
+    try {
+      const { url } = await databasesApi.downloadBackup(projectId, envId, name, b.id);
+      window.location.assign(url);
+    } catch (err) {
+      setBackupsError(err instanceof Error ? err.message : t("databases.backups.downloadError"));
+    } finally {
+      setDownloadingBackupId(null);
     }
   }
 
@@ -496,12 +510,21 @@ export default function DatabaseDetailPage() {
                       </td>
                       <td className="px-5 py-3 text-right">
                         {b.status === "Ready" && (
-                          <button
-                            onClick={() => openRestore(b)}
-                            className="text-xs font-medium text-blue-600 dark:text-blue-400 hover:text-blue-700"
-                          >
-                            {t("databases.backups.restore")}
-                          </button>
+                          <div className="flex items-center justify-end gap-4">
+                            <button
+                              onClick={() => handleDownloadBackup(b)}
+                              disabled={downloadingBackupId === b.id}
+                              className="text-xs font-medium text-blue-600 dark:text-blue-400 hover:text-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+                            >
+                              {downloadingBackupId === b.id ? t("databases.backups.downloading") : t("databases.backups.download")}
+                            </button>
+                            <button
+                              onClick={() => openRestore(b)}
+                              className="text-xs font-medium text-blue-600 dark:text-blue-400 hover:text-blue-700"
+                            >
+                              {t("databases.backups.restore")}
+                            </button>
+                          </div>
                         )}
                       </td>
                     </tr>
