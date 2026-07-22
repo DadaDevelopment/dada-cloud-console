@@ -2,6 +2,7 @@
 import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import { logsApi, monitoringApi } from "@/lib/api";
 import type { LogEntry } from "@/lib/types";
+import { AnsiText } from "@/components/ansi-text";
 import { Spinner } from "@/components/ui/spinner";
 import { useT } from "@/lib/i18n/console/context";
 
@@ -171,16 +172,21 @@ export function LogsViewer({
         <div className="max-h-[28rem] overflow-auto px-5 pb-4">
           <div className="rounded-lg bg-gray-900 p-3 font-mono text-xs leading-relaxed text-gray-100">
             {entries.map((e, i) => (
-              <div key={i} className="flex gap-2 whitespace-pre-wrap break-all py-0.5">
-                <span className="shrink-0 text-gray-500">{fmtTime(e.timestamp)}</span>
+              <div
+                key={i}
+                className="flex items-start gap-2 whitespace-pre-wrap break-words rounded px-1 py-0.5 hover:bg-white/[0.04]"
+              >
+                <span className="shrink-0 select-none text-gray-500">{fmtTime(e.timestamp)}</span>
                 {e.stream && (
                   <span
-                    className={`shrink-0 ${e.stream === "stderr" ? "text-red-400" : "text-green-400"}`}
+                    className={`shrink-0 select-none ${e.stream === "stderr" ? "text-red-400" : "text-green-400"}`}
                   >
                     {e.stream}
                   </span>
                 )}
-                <span>{e.message}</span>
+                <span className="min-w-0 flex-1">
+                  <AnsiText value={e.message} />
+                </span>
               </div>
             ))}
             <div ref={bottomRef} />

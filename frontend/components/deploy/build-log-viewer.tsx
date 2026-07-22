@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { buildsApi } from "@/lib/api";
 import type { BuildLogFrame } from "@/lib/types";
 import { Spinner } from "@/components/ui/spinner";
+import { AnsiText } from "@/components/ansi-text";
 
 // Connection status mirrors the values-editor lifecycle so the UX matches the
 // existing WS surface (values/page.tsx). The build-agent issues a short-lived
@@ -119,13 +120,13 @@ export function BuildLogViewer({ projectId, buildId }: { projectId: string; buil
               key={l.id}
               className={
                 l.kind === "error"
-                  ? "text-red-400"
+                  ? "whitespace-pre-wrap break-words text-red-400"
                   : l.kind === "status"
-                    ? "text-blue-300"
-                    : "text-gray-300"
+                    ? "whitespace-pre-wrap break-words text-blue-300"
+                    : "whitespace-pre-wrap break-words text-gray-300"
               }
             >
-              {l.kind === "status" ? `▸ ${l.text}` : l.text}
+              {l.kind === "status" ? <>▸ {l.text}</> : <AnsiText value={l.text} />}
             </div>
           ))
         )}
