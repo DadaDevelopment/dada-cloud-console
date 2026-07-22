@@ -243,7 +243,17 @@ func (c *Client) buildQuery(opts SearchOpts) map[string]any {
 		filters = append(filters, termOneOf("source", opts.Source))
 	}
 	if opts.Level != "" {
-		filters = append(filters, termOneOf("level", opts.Level))
+		filters = append(filters, map[string]any{
+			"bool": map[string]any{
+				"should": []map[string]any{
+					{"term": map[string]any{"app.level.keyword": opts.Level}},
+					{"term": map[string]any{"app.level": opts.Level}},
+					{"term": map[string]any{"level.keyword": opts.Level}},
+					{"term": map[string]any{"level": opts.Level}},
+				},
+				"minimum_should_match": 1,
+			},
+		})
 	}
 
 	rng := map[string]any{}
