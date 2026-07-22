@@ -235,5 +235,10 @@ func NewHandler(pool *pgxpool.Pool, cfg *config.Config) *Handler {
 	// when group sync is disabled (h.usersvc nil).
 	h.StartProjectGroupReconciler(context.Background())
 
+	// Silent-crash watcher (P1-2b): emails a project owner when their app is
+	// stuck CrashLoopBackOff/OOMKilled/ImagePullBackOff. No-op off-cluster or
+	// when SMTP is unconfigured.
+	h.StartAppHealthWatcher(context.Background())
+
 	return h
 }

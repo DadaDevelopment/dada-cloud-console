@@ -62,6 +62,28 @@ func ComposeAudit(action, actorEmail, resourceName, projectName, createdAtUTC st
 	return subject, b.String()
 }
 
+// ComposeAppAlert builds the subject and plaintext body for a silent-crash
+// alert: the owner's app is stuck in CrashLoopBackOff/OOMKilled/ImagePullBackOff
+// and would otherwise go unnoticed until the owner happens to open the
+// console. logExcerpt is the best-effort last lines of the crashed container's
+// log (may be empty when the cluster read failed or there was nothing to
+// read); consoleLink deep-links straight to the app in the console.
+func ComposeAppAlert(appName, reason, podName, logExcerpt, consoleLink string) (subject, body string) {
+	subject = fmt.Sprintf("Dada Cloud: %s не работает (%s)", appName, reason)
+	var b strings.Builder
+	fmt.Fprintf(&b, "Приложение %s перезапускается и, похоже, не поднимается.\n\n", appName)
+	fmt.Fprintf(&b, "Причина: %s\n", reason)
+	fmt.Fprintf(&b, "Под: %s\n\n", podName)
+	if logExcerpt != "" {
+		b.WriteString("Последние строки лога:\n")
+		b.WriteString(logExcerpt)
+		b.WriteString("\n\n")
+	}
+	fmt.Fprintf(&b, "Открыть в консоли: %s\n\n", consoleLink)
+	b.WriteString("Это письмо приходит не чаще раза в 24 часа на приложение.\n")
+	return subject, b.String()
+}
+
 // Send delivers one message to a single recipient over SMTP with STARTTLS
 // (net/smtp negotiates STARTTLS automatically when the server advertises it,
 // as Postbox does on 587). Returns an error the caller logs and swallows.
