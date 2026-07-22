@@ -28,6 +28,12 @@ export interface TemplateDeployCardsProps {
   envId: string | null;
   /** Denser layout for secondary placements (apps empty state, git import wall). */
   compact?: boolean;
+  /**
+   * Prominent first-run treatment: bigger card, bigger heading, activation
+   * copy. Used where this is the primary onramp (empty-project overview,
+   * apps empty state) rather than a secondary option next to Git.
+   */
+  hero?: boolean;
   className?: string;
 }
 
@@ -36,8 +42,11 @@ export interface TemplateDeployCardsProps {
  * directly, skipping the git-account connect flow entirely. Shared across the
  * project overview, the apps empty state, and the git-import OAuth wall so the
  * option is reachable everywhere a user would otherwise hit the GitHub gate.
+ * `hero` swaps in the activation-focused heading copy and a larger card for
+ * the placements where this is the primary onramp; the git-import wall keeps
+ * the default heading since Git is already the primary action there.
  */
-export function TemplateDeployCards({ projectId, envId, compact, className }: TemplateDeployCardsProps) {
+export function TemplateDeployCards({ projectId, envId, compact, hero, className }: TemplateDeployCardsProps) {
   const { t } = useT();
   const router = useRouter();
   const [deployingKey, setDeployingKey] = useState<string | null>(null);
@@ -76,8 +85,24 @@ export function TemplateDeployCards({ projectId, envId, compact, className }: Te
     <>
       {!compact && (
         <div className="mb-1">
-          <h2 className="text-sm font-semibold text-gray-900 dark:text-gray-100">{t("overview.templates.title")}</h2>
-          <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">{t("overview.templates.hint")}</p>
+          <h2
+            className={
+              hero
+                ? "text-lg font-bold text-gray-900 dark:text-gray-100 sm:text-xl"
+                : "text-sm font-semibold text-gray-900 dark:text-gray-100"
+            }
+          >
+            {hero ? t("overview.templates.heroTitle") : t("overview.templates.title")}
+          </h2>
+          <p
+            className={
+              hero
+                ? "mt-2 text-sm text-gray-600 dark:text-gray-300 sm:text-base"
+                : "mt-1 text-sm text-gray-500 dark:text-gray-400"
+            }
+          >
+            {hero ? t("overview.templates.heroHint") : t("overview.templates.hint")}
+          </p>
         </div>
       )}
       {templateError && (
@@ -105,8 +130,12 @@ export function TemplateDeployCards({ projectId, envId, compact, className }: Te
     return <div className={className}>{body}</div>;
   }
 
+  const containerClass = hero
+    ? "rounded-2xl border-2 border-blue-200 dark:border-blue-900/60 bg-gradient-to-br from-blue-50 to-white dark:from-blue-950/20 dark:to-gray-900 p-6 shadow-sm sm:p-8"
+    : "rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-5 shadow-sm";
+
   return (
-    <div className={`rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-5 shadow-sm ${className ?? ""}`}>
+    <div className={`${containerClass} ${className ?? ""}`}>
       {body}
     </div>
   );

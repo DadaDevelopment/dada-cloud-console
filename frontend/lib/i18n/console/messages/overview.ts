@@ -48,6 +48,14 @@ export const overview: Messages = {
     ru: "Готовое приложение из нашего репозитория. Один клик — сборка и запуск, без подключения аккаунта.",
     en: "A ready app from our repository. One click builds and runs it, no account connection.",
   },
+  "overview.templates.heroTitle": {
+    ru: "Начни здесь — задеплой первое приложение за 1 клик",
+    en: "Start here — deploy your first app in one click",
+  },
+  "overview.templates.heroHint": {
+    ru: "Готовое приложение соберётся и запустится за пару минут — без GitHub и без настройки. Просто чтобы увидеть платформу в деле.",
+    en: "A ready-made app builds and runs in a couple of minutes — no GitHub, no setup. Just to see the platform in action.",
+  },
   "overview.templates.deploying": { ru: "Разворачиваем…", en: "Deploying…" },
   "overview.templates.error": { ru: "Не удалось развернуть шаблон", en: "Failed to deploy template" },
   "overview.templates.nextjs.title": { ru: "Next.js стартер", en: "Next.js starter" },

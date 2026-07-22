@@ -135,6 +135,10 @@ export default function ProjectOverviewPage() {
 
       <CostCard projectId={projectId} />
 
+      {showTemplates && (
+        <TemplateDeployCards projectId={projectId} envId={envId} hero className="mb-8" />
+      )}
+
       {!checklistComplete && (
         <div className="mb-8 rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-5 shadow-sm">
           <div className="mb-3 flex items-center justify-between">
@@ -176,10 +180,6 @@ export default function ProjectOverviewPage() {
             ))}
           </ul>
         </div>
-      )}
-
-      {showTemplates && (
-        <TemplateDeployCards projectId={projectId} envId={envId} className="mb-8" />
       )}
 
       <div className="mb-8 grid gap-4 sm:grid-cols-3">

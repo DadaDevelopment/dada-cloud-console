@@ -453,8 +453,11 @@ function EnvBlock({ env, projectId, apps, infra, canCreate, onCreate, t }: EnvBl
 
       {apps.length === 0 ? (
         <>
+          {env.runtime !== "vm" && (
+            <TemplateDeployCards projectId={projectId} envId={env.id} hero className="mb-6" />
+          )}
           <EmptyState
-            title={t("apps.empty.title")}
+            title={env.runtime === "vm" ? t("apps.empty.title") : t("apps.empty.k8s.gitTitle")}
             description={env.runtime === "vm" ? t("apps.empty.vm.description") : t("apps.empty.k8s.description")}
             action={
               env.runtime === "vm"
@@ -463,12 +466,6 @@ function EnvBlock({ env, projectId, apps, infra, canCreate, onCreate, t }: EnvBl
             }
             secondary={{ label: t("common.learnMore"), href: docsHref("applications-deploy-from-github") }}
           />
-          {env.runtime !== "vm" && (
-            <div className="mt-6">
-              <p className="mb-3 text-center text-sm text-gray-500 dark:text-gray-400">{t("apps.empty.k8s.orTemplate")}</p>
-              <TemplateDeployCards projectId={projectId} envId={env.id} />
-            </div>
-          )}
         </>
       ) : (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
