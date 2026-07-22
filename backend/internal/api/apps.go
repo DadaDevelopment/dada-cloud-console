@@ -339,6 +339,13 @@ const defaultVolumeStorageClass = "longhorn-dev"
 
 var volumeSizeRe = regexp.MustCompile(`^[1-9][0-9]*(Mi|Gi|Ti)$`)
 
+// maxVolumeSize caps a per-app persistent volume at the same ceiling the
+// per-tenant default-limits LimitRange enforces (type=PersistentVolumeClaim
+// max.storage=10Gi, argo-infra). Rejecting an oversized request here turns a
+// silent, retry-looping Argo apply failure (PVC forbidden at admission) into an
+// immediate, clear API error.
+const maxVolumeSize = "10Gi"
+
 // allowedVolumeStorageClasses guards against pointing app data at ephemeral
 // (reclaimPolicy=Delete) classes. All entries are Retain on beget-prod.
 // longhorn-dev is the 1-replica default (see defaultVolumeStorageClass); the
@@ -360,6 +367,9 @@ func validateAppVolume(v *appVolumeReq) (*models.AppVolume, error) {
 	}
 	if !volumeSizeRe.MatchString(v.Size) {
 		return nil, fmt.Errorf("volume size must be a quantity like 1Gi, 512Mi or 2Ti")
+	}
+	if quantityBytes(v.Size) > quantityBytes(maxVolumeSize) {
+		return nil, fmt.Errorf("volume size must not exceed %s per app", maxVolumeSize)
 	}
 	sc := v.StorageClass
 	if sc == "" {
