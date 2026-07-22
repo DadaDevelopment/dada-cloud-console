@@ -168,6 +168,11 @@ export interface Dict {
   flyIoAlt: AltPage;
   vibeCodingAlt: AltPage;
   telegramBotAlt: AltPage;
+  fastapiAlt: AltPage;
+  flaskAlt: AltPage;
+  djangoAlt: AltPage;
+  streamlitAlt: AltPage;
+  vkBotAlt: AltPage;
   migrateVercel: MigrateGuide;
   statusRadar: StatusRadar;
   databases: {
@@ -616,6 +621,116 @@ const ru: Dict = {
       { q: "Что будет, если бот упадёт с ошибкой?", a: "Процесс перезапустится автоматически, вручную поднимать бота не нужно." },
       { q: "Есть бесплатный хостинг для бота на aiogram?", a: "Да. Подключаете репозиторий с ботом на aiogram, python-telegram-bot или другом стеке и запускаете его на бесплатном тарифе, без привязки карты." },
       { q: "Можно хранить данные пользователей бота?", a: "Да, в managed PostgreSQL рядом с ботом. Данные размещаются на серверах в России, что соответствует 152-ФЗ." },
+    ],
+  },
+  fastapiAlt: {
+    heroTitle: "Хостинг FastAPI без Docker и настройки сервера",
+    heroSubtitle:
+      "Написали API на FastAPI, а дальше непонятно: сервер, uvicorn, nginx, домен? Подключите репозиторий - Dada Cloud сама увидит FastAPI в requirements.txt, соберёт приложение и запустит. HTTPS-домен выдаётся сразу. Упало - поднимется само. Бесплатный тариф, серверы в России.",
+    featuresTitle: "Почему FastAPI деплоят в Dada Cloud",
+    features: [
+      { title: "Автоопределение FastAPI", desc: "Платформа находит fastapi в requirements.txt или pyproject.toml и собирает приложение сама. Dockerfile писать не нужно." },
+      { title: "Порт подхватывается из кода", desc: "Если в проекте есть uvicorn.run с портом - платформа его вычитает. Нет - возьмёт стандартный 8000. Главное, чтобы приложение слушало 0.0.0.0 и порт из переменной PORT." },
+      { title: "HTTPS-домен сразу", desc: "После деплоя API доступен по адресу вида имя.dada-tuda.ru с работающим сертификатом. Свой домен подключается за пару минут." },
+      { title: "PostgreSQL рядом", desc: "База создаётся в один клик, строка подключения DATABASE_URL появляется в переменных окружения сама." },
+      { title: "Упало - поднимется само", desc: "Если процесс упал с ошибкой, платформа перезапустит его автоматически." },
+      { title: "Бесплатный тариф для старта", desc: "Первое приложение можно держать бесплатно, без привязки карты." },
+    ],
+    faqTitle: "Хостинг FastAPI - частые вопросы",
+    faq: [
+      { q: "Куда задеплоить FastAPI, если я не умею настраивать сервер?", a: "В Dada Cloud: подключаете репозиторий, платформа сама определяет FastAPI, собирает и запускает приложение. Сервер, nginx и сертификаты настраивать не нужно." },
+      { q: "Нужен ли Dockerfile?", a: "Нет. Достаточно requirements.txt или pyproject.toml с fastapi - платформа соберёт приложение сама. Если Dockerfile всё же есть, он будет использован." },
+      { q: "На каком порту должно работать приложение?", a: "Приложение должно слушать 0.0.0.0 и порт из переменной окружения PORT, которую передаёт платформа. Если порт задан в uvicorn.run в коде, платформа его вычитает сама, по умолчанию - 8000." },
+      { q: "Как подключить базу данных?", a: "Создаёте managed PostgreSQL рядом с приложением - DATABASE_URL появится в переменных окружения автоматически, руками собирать строку подключения не нужно." },
+      { q: "Есть бесплатный хостинг для FastAPI?", a: "Да, первое приложение с PostgreSQL и доменом можно держать на бесплатном тарифе без привязки карты." },
+    ],
+  },
+  flaskAlt: {
+    heroTitle: "Хостинг Flask-приложения без сервера и nginx",
+    heroSubtitle:
+      "Сделали сайт или API на Flask, а деплоить некуда? Подключите репозиторий - Dada Cloud увидит flask в requirements.txt, соберёт и запустит приложение, выдаст HTTPS-домен. Упало - поднимется само. Бесплатный тариф, серверы в России.",
+    featuresTitle: "Почему Flask деплоят в Dada Cloud",
+    features: [
+      { title: "Автоопределение Flask", desc: "Платформа находит flask в requirements.txt или setup.py и собирает приложение без Dockerfile." },
+      { title: "Порт из кода или стандартный", desc: "Порт вычитывается из app.run в коде, по умолчанию - 5000. Приложение должно слушать 0.0.0.0 и порт из переменной PORT." },
+      { title: "HTTPS-домен сразу", desc: "Приложение получает адрес вида имя.dada-tuda.ru с сертификатом. Свой домен подключается за пару минут." },
+      { title: "PostgreSQL рядом", desc: "Managed-база в один клик, DATABASE_URL прокидывается в приложение сам." },
+      { title: "Упало - поднимется само", desc: "Процесс перезапускается автоматически после падения - следить руками не нужно." },
+      { title: "Бесплатный тариф для старта", desc: "Первое приложение можно держать бесплатно, без привязки карты." },
+    ],
+    faqTitle: "Хостинг Flask - частые вопросы",
+    faq: [
+      { q: "Куда задеплоить Flask-приложение бесплатно?", a: "В Dada Cloud: подключаете репозиторий, платформа сама собирает и запускает приложение на бесплатном тарифе, без привязки карты." },
+      { q: "Нужен ли Dockerfile или gunicorn-конфиг?", a: "Нет. Достаточно requirements.txt с flask - платформа соберёт и запустит приложение сама. Есть свой Dockerfile - будет использован он." },
+      { q: "На каком порту запускать Flask?", a: "Слушайте 0.0.0.0 и порт из переменной окружения PORT. Если порт задан в app.run в коде, платформа его вычитает, по умолчанию - 5000." },
+      { q: "Как хранить данные?", a: "Создайте managed PostgreSQL рядом - DATABASE_URL появится в переменных окружения приложения автоматически." },
+      { q: "Что будет, если приложение упадёт?", a: "Платформа перезапустит процесс автоматически. Логи видны в панели - можно понять, что случилось." },
+    ],
+  },
+  djangoAlt: {
+    heroTitle: "Хостинг Django без своего сервера",
+    heroSubtitle:
+      "Django-проект готов, а разбираться в серверах, wsgi и nginx не хочется? Подключите репозиторий - Dada Cloud увидит django в requirements.txt, соберёт проект и запустит. PostgreSQL создаётся рядом, HTTPS-домен выдаётся сразу. Бесплатный тариф, серверы в России.",
+    featuresTitle: "Почему Django деплоят в Dada Cloud",
+    features: [
+      { title: "Автоопределение Django", desc: "Платформа находит django в requirements.txt и собирает проект сама - без Dockerfile и настройки wsgi-сервера вручную." },
+      { title: "PostgreSQL для проекта", desc: "Managed-база создаётся рядом, DATABASE_URL появляется в переменных окружения - остаётся указать её в settings.py." },
+      { title: "HTTPS-домен сразу", desc: "Проект получает адрес вида имя.dada-tuda.ru с сертификатом. Не забудьте добавить его в ALLOWED_HOSTS." },
+      { title: "Порт-контракт простой", desc: "Приложение должно слушать 0.0.0.0 и порт из переменной PORT, по умолчанию - 8000." },
+      { title: "Упало - поднимется само", desc: "Процесс перезапускается автоматически после падения." },
+      { title: "Бесплатный тариф для старта", desc: "Первый проект можно держать бесплатно, без привязки карты." },
+    ],
+    faqTitle: "Хостинг Django - частые вопросы",
+    faq: [
+      { q: "Куда задеплоить Django-проект, если не разбираюсь в серверах?", a: "В Dada Cloud: подключаете репозиторий, платформа сама определяет Django, собирает и запускает проект. Настраивать сервер, wsgi и nginx не нужно." },
+      { q: "Как подключить базу данных к Django?", a: "Создайте managed PostgreSQL рядом с проектом - платформа прокинет DATABASE_URL в переменные окружения, останется прочитать её в settings.py (например через dj-database-url)." },
+      { q: "Что с ALLOWED_HOSTS и портом?", a: "Добавьте выданный домен в ALLOWED_HOSTS, а приложение запускайте на 0.0.0.0 и порту из переменной окружения PORT (по умолчанию 8000)." },
+      { q: "Как запускать миграции?", a: "Как привыкли - manage.py migrate при старте приложения или вручную. Платформа не вмешивается в ваш код запуска." },
+      { q: "Есть бесплатный хостинг для Django?", a: "Да, первый проект с PostgreSQL и доменом можно держать на бесплатном тарифе без привязки карты." },
+    ],
+  },
+  streamlitAlt: {
+    heroTitle: "Хостинг Streamlit-приложения в России",
+    heroSubtitle:
+      "Собрали дашборд или демо на Streamlit, а Streamlit Cloud из России работает через раз? Задеплойте в Dada Cloud: добавьте Dockerfile из пяти строк - платформа соберёт и запустит приложение, выдаст HTTPS-домен. Бесплатный тариф, серверы в России.",
+    featuresTitle: "Почему Streamlit деплоят в Dada Cloud",
+    features: [
+      { title: "Dockerfile из пяти строк", desc: "Streamlit пока не определяется автоматически, поэтому нужен маленький Dockerfile - готовый шаблон в FAQ ниже, скопируйте и закоммитьте." },
+      { title: "HTTPS-домен сразу", desc: "Дашборд получает адрес вида имя.dada-tuda.ru с сертификатом - можно сразу показать коллегам или клиенту." },
+      { title: "Работает из России", desc: "Серверы в РФ: не нужен VPN ни вам, ни тем, кому вы отправите ссылку. Оплата рублями, когда вырастете из бесплатного тарифа." },
+      { title: "PostgreSQL рядом", desc: "Если дашборду нужны данные - managed-база создаётся в один клик, DATABASE_URL прокидывается сам." },
+      { title: "Упало - поднимется само", desc: "Процесс перезапускается автоматически после падения." },
+      { title: "Бесплатный тариф для старта", desc: "Первое приложение можно держать бесплатно, без привязки карты." },
+    ],
+    faqTitle: "Хостинг Streamlit - частые вопросы",
+    faq: [
+      { q: "Какой Dockerfile нужен для Streamlit?", a: "Пять строк: FROM python:3.12-slim, затем COPY . ., RUN pip install -r requirements.txt, EXPOSE 8501 и CMD streamlit run app.py --server.address 0.0.0.0 --server.port 8501. Закоммитьте его в корень репозитория - платформа соберёт образ сама." },
+      { q: "Почему не Streamlit Cloud?", a: "Из России Streamlit Cloud доступен нестабильно, а ссылки на дашборд могут не открываться у коллег. Здесь серверы в РФ - ссылка работает у всех без VPN." },
+      { q: "Можно подключить данные?", a: "Да: создайте managed PostgreSQL рядом - DATABASE_URL появится в переменных окружения, читайте её в приложении как обычно." },
+      { q: "Что будет, если дашборд упадёт?", a: "Платформа перезапустит процесс автоматически, логи видны в панели." },
+      { q: "Есть бесплатный вариант?", a: "Да, первое приложение можно держать на бесплатном тарифе без привязки карты." },
+    ],
+  },
+  vkBotAlt: {
+    heroTitle: "Хостинг бота ВКонтакте за пару минут",
+    heroSubtitle:
+      "Написали бота для сообщества ВК, а держать его негде? Подключите репозиторий - Dada Cloud соберёт и запустит бота, выдаст HTTPS-адрес для Callback API. Упал - поднимется сам. Бесплатный тариф, серверы в России.",
+    featuresTitle: "Почему боты ВК живут в Dada Cloud",
+    features: [
+      { title: "Готовый HTTPS-адрес для Callback API", desc: "ВК присылает события только на HTTPS-адрес - платформа выдаёт его сразу после деплоя, сертификат уже настроен." },
+      { title: "Автосборка без Docker", desc: "Бот на Flask, FastAPI или aiohttp определяется и собирается автоматически - Dockerfile не нужен." },
+      { title: "Работает круглосуточно", desc: "Бот - постоянный процесс, а не спящая функция. Упал с ошибкой - перезапустится сам." },
+      { title: "PostgreSQL для пользователей", desc: "Подписчики, настройки, история - в managed-базе рядом, DATABASE_URL прокидывается сам." },
+      { title: "Данные в России (152-ФЗ)", desc: "Данные пользователей сообщества хранятся на серверах в РФ - это требование закона о персональных данных." },
+      { title: "Бесплатный тариф для старта", desc: "Первого бота можно держать бесплатно, без привязки карты." },
+    ],
+    faqTitle: "Хостинг бота ВК - частые вопросы",
+    faq: [
+      { q: "Как подключить бота к Callback API?", a: "Задеплойте бота - получите HTTPS-адрес вида имя.dada-tuda.ru. Укажите его в настройках сообщества ВК как адрес Callback API, верните строку подтверждения из своего кода - и события пойдут в бота." },
+      { q: "На каком порту должен работать бот?", a: "Бот должен слушать 0.0.0.0 и порт из переменной окружения PORT, которую передаёт платформа. Иначе ВК не достучится до бота." },
+      { q: "Подойдёт бот на Python?", a: "Да. Бот на Flask, FastAPI или aiohttp платформа определит и соберёт сама, без Dockerfile. Для других стеков достаточно добавить Dockerfile." },
+      { q: "Где хранить пользователей и настройки?", a: "В managed PostgreSQL рядом с ботом - DATABASE_URL появится в переменных окружения автоматически. Данные хранятся в России, что соответствует 152-ФЗ." },
+      { q: "Есть бесплатный хостинг для бота ВК?", a: "Да, первого бота можно держать на бесплатном тарифе без привязки карты." },
     ],
   },
   databases: {
@@ -1225,6 +1340,116 @@ const en: Dict = {
       { q: "What happens if the bot crashes?", a: "The process restarts automatically, you don't need to bring it back up by hand." },
       { q: "Is there free hosting for an aiogram bot?", a: "Yes. Connect the repo with your bot on aiogram, python-telegram-bot or any other stack and run it on the free tier, no card required." },
       { q: "Can I store the bot's user data?", a: "Yes, in managed PostgreSQL right next to the bot. Data is stored on servers in Russia, which meets 152-FZ." },
+    ],
+  },
+  fastapiAlt: {
+    heroTitle: "FastAPI hosting without Docker or server setup",
+    heroSubtitle:
+      "You built an API with FastAPI - now what: a server, uvicorn, nginx, a domain? Connect your repo and Dada Cloud detects FastAPI in requirements.txt, builds the app and runs it. An HTTPS domain is issued right away. If it crashes, it restarts itself. Free tier, servers in Russia.",
+    featuresTitle: "Why FastAPI apps run on Dada Cloud",
+    features: [
+      { title: "FastAPI auto-detection", desc: "The platform finds fastapi in requirements.txt or pyproject.toml and builds the app itself. No Dockerfile needed." },
+      { title: "Port read from your code", desc: "If uvicorn.run sets a port, the platform picks it up; otherwise it defaults to 8000. Your app must listen on 0.0.0.0 and the PORT env variable." },
+      { title: "HTTPS domain right away", desc: "After deploy the API is live at name.dada-tuda.ru with a working certificate. A custom domain takes a couple of minutes." },
+      { title: "PostgreSQL next door", desc: "A managed database is one click away, with DATABASE_URL injected into your environment automatically." },
+      { title: "Crashes restart themselves", desc: "If the process dies, the platform restarts it automatically." },
+      { title: "Free tier to start", desc: "Your first app can run for free, no card required." },
+    ],
+    faqTitle: "FastAPI hosting - FAQ",
+    faq: [
+      { q: "Where do I deploy FastAPI if I can't configure servers?", a: "On Dada Cloud: connect the repo, the platform detects FastAPI, builds and runs the app. No server, nginx or certificates to configure." },
+      { q: "Do I need a Dockerfile?", a: "No. requirements.txt or pyproject.toml with fastapi is enough. If you do have a Dockerfile, it will be used." },
+      { q: "What port should the app listen on?", a: "Listen on 0.0.0.0 and the PORT env variable the platform injects. If your code sets a port in uvicorn.run, it is picked up automatically; the default is 8000." },
+      { q: "How do I add a database?", a: "Create a managed PostgreSQL next to the app - DATABASE_URL appears in the environment automatically." },
+      { q: "Is there free FastAPI hosting?", a: "Yes - the first app with PostgreSQL and a domain runs on the free tier, no card required." },
+    ],
+  },
+  flaskAlt: {
+    heroTitle: "Flask hosting without a server or nginx",
+    heroSubtitle:
+      "Built a site or API with Flask and have nowhere to deploy it? Connect your repo - Dada Cloud detects flask in requirements.txt, builds and runs the app, and issues an HTTPS domain. If it crashes, it restarts itself. Free tier, servers in Russia.",
+    featuresTitle: "Why Flask apps run on Dada Cloud",
+    features: [
+      { title: "Flask auto-detection", desc: "The platform finds flask in requirements.txt or setup.py and builds the app without a Dockerfile." },
+      { title: "Port from code or default", desc: "The port is read from app.run in your code, defaulting to 5000. The app must listen on 0.0.0.0 and the PORT env variable." },
+      { title: "HTTPS domain right away", desc: "The app gets a name.dada-tuda.ru address with a certificate. A custom domain takes a couple of minutes." },
+      { title: "PostgreSQL next door", desc: "A managed database in one click, DATABASE_URL wired into the app automatically." },
+      { title: "Crashes restart themselves", desc: "The process restarts automatically after a failure." },
+      { title: "Free tier to start", desc: "Your first app can run for free, no card required." },
+    ],
+    faqTitle: "Flask hosting - FAQ",
+    faq: [
+      { q: "Where can I deploy a Flask app for free?", a: "On Dada Cloud: connect the repo and the platform builds and runs the app on the free tier, no card required." },
+      { q: "Do I need a Dockerfile or gunicorn config?", a: "No. requirements.txt with flask is enough - the platform builds and runs the app itself. If you have your own Dockerfile, it is used instead." },
+      { q: "What port should Flask use?", a: "Listen on 0.0.0.0 and the PORT env variable. If app.run sets a port in code, it is picked up; the default is 5000." },
+      { q: "How do I store data?", a: "Create a managed PostgreSQL next to the app - DATABASE_URL appears in the app's environment automatically." },
+      { q: "What happens if the app crashes?", a: "The platform restarts the process automatically. Logs are visible in the panel so you can see what happened." },
+    ],
+  },
+  djangoAlt: {
+    heroTitle: "Django hosting without your own server",
+    heroSubtitle:
+      "Your Django project is ready, but you don't want to deal with servers, wsgi and nginx? Connect the repo - Dada Cloud detects django in requirements.txt, builds the project and runs it. PostgreSQL is created next to it, an HTTPS domain is issued right away. Free tier, servers in Russia.",
+    featuresTitle: "Why Django projects run on Dada Cloud",
+    features: [
+      { title: "Django auto-detection", desc: "The platform finds django in requirements.txt and builds the project itself - no Dockerfile, no manual wsgi setup." },
+      { title: "PostgreSQL for the project", desc: "A managed database is created next door, DATABASE_URL appears in the environment - point settings.py at it." },
+      { title: "HTTPS domain right away", desc: "The project gets a name.dada-tuda.ru address with a certificate. Remember to add it to ALLOWED_HOSTS." },
+      { title: "Simple port contract", desc: "The app must listen on 0.0.0.0 and the PORT env variable, defaulting to 8000." },
+      { title: "Crashes restart themselves", desc: "The process restarts automatically after a failure." },
+      { title: "Free tier to start", desc: "Your first project can run for free, no card required." },
+    ],
+    faqTitle: "Django hosting - FAQ",
+    faq: [
+      { q: "Where do I deploy Django if I don't know servers?", a: "On Dada Cloud: connect the repo, the platform detects Django, builds and runs the project. No server, wsgi or nginx to configure." },
+      { q: "How do I connect a database to Django?", a: "Create a managed PostgreSQL next to the project - the platform injects DATABASE_URL into the environment; read it in settings.py (for example with dj-database-url)." },
+      { q: "What about ALLOWED_HOSTS and the port?", a: "Add the issued domain to ALLOWED_HOSTS and run the app on 0.0.0.0 with the PORT env variable (default 8000)." },
+      { q: "How do I run migrations?", a: "The way you always do - manage.py migrate on start or manually. The platform does not interfere with your start command." },
+      { q: "Is there free Django hosting?", a: "Yes - the first project with PostgreSQL and a domain runs on the free tier, no card required." },
+    ],
+  },
+  streamlitAlt: {
+    heroTitle: "Streamlit hosting in Russia",
+    heroSubtitle:
+      "Built a dashboard or demo with Streamlit, but Streamlit Cloud barely works from Russia? Deploy to Dada Cloud: add a five-line Dockerfile - the platform builds and runs the app and issues an HTTPS domain. Free tier, servers in Russia.",
+    featuresTitle: "Why Streamlit apps run on Dada Cloud",
+    features: [
+      { title: "A five-line Dockerfile", desc: "Streamlit is not auto-detected yet, so a small Dockerfile is needed - a ready template is in the FAQ below, copy and commit it." },
+      { title: "HTTPS domain right away", desc: "The dashboard gets a name.dada-tuda.ru address with a certificate - share it with colleagues or a client immediately." },
+      { title: "Works from Russia", desc: "Servers in Russia: no VPN needed for you or anyone you send the link to. Pay in rubles when you outgrow the free tier." },
+      { title: "PostgreSQL next door", desc: "If the dashboard needs data, a managed database is one click away with DATABASE_URL wired in." },
+      { title: "Crashes restart themselves", desc: "The process restarts automatically after a failure." },
+      { title: "Free tier to start", desc: "Your first app can run for free, no card required." },
+    ],
+    faqTitle: "Streamlit hosting - FAQ",
+    faq: [
+      { q: "What Dockerfile does Streamlit need?", a: "Five lines: FROM python:3.12-slim, then COPY . ., RUN pip install -r requirements.txt, EXPOSE 8501 and CMD streamlit run app.py --server.address 0.0.0.0 --server.port 8501. Commit it to the repo root - the platform builds the image itself." },
+      { q: "Why not Streamlit Cloud?", a: "From Russia Streamlit Cloud is unstable and dashboard links may not open for your colleagues. Here the servers are in Russia - the link works for everyone without a VPN." },
+      { q: "Can I connect data?", a: "Yes: create a managed PostgreSQL next door - DATABASE_URL appears in the environment, read it in the app as usual." },
+      { q: "What if the dashboard crashes?", a: "The platform restarts the process automatically; logs are visible in the panel." },
+      { q: "Is there a free option?", a: "Yes, the first app runs on the free tier, no card required." },
+    ],
+  },
+  vkBotAlt: {
+    heroTitle: "VK bot hosting in a couple of minutes",
+    heroSubtitle:
+      "Wrote a bot for a VK community and have nowhere to run it? Connect the repo - Dada Cloud builds and runs the bot and issues an HTTPS address for the Callback API. If it crashes, it restarts itself. Free tier, servers in Russia.",
+    featuresTitle: "Why VK bots live on Dada Cloud",
+    features: [
+      { title: "Ready HTTPS address for Callback API", desc: "VK only sends events to an HTTPS address - the platform issues one right after deploy, certificate included." },
+      { title: "Auto-build without Docker", desc: "A bot on Flask, FastAPI or aiohttp is detected and built automatically - no Dockerfile needed." },
+      { title: "Runs around the clock", desc: "The bot is a persistent process, not a sleeping function. If it crashes, it restarts itself." },
+      { title: "PostgreSQL for your users", desc: "Subscribers, settings, history - in a managed database next door, DATABASE_URL wired in automatically." },
+      { title: "Data in Russia (152-FZ)", desc: "Community user data is stored on servers inside Russia - what the personal-data law requires." },
+      { title: "Free tier to start", desc: "Your first bot can run for free, no card required." },
+    ],
+    faqTitle: "VK bot hosting - FAQ",
+    faq: [
+      { q: "How do I connect the bot to the Callback API?", a: "Deploy the bot and get an HTTPS address like name.dada-tuda.ru. Set it as the Callback API address in your VK community settings, return the confirmation string from your code - and events start flowing." },
+      { q: "What port should the bot listen on?", a: "Listen on 0.0.0.0 and the PORT env variable the platform injects. Otherwise VK cannot reach the bot." },
+      { q: "Will a Python bot work?", a: "Yes. A bot on Flask, FastAPI or aiohttp is detected and built automatically, no Dockerfile. For other stacks just add a Dockerfile." },
+      { q: "Where do I store users and settings?", a: "In managed PostgreSQL next to the bot - DATABASE_URL appears in the environment automatically. Data is stored in Russia, which meets 152-FZ." },
+      { q: "Is there free VK bot hosting?", a: "Yes, the first bot runs on the free tier, no card required." },
     ],
   },
   databases: {
