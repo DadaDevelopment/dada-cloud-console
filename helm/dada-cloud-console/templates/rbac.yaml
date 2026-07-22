@@ -21,6 +21,16 @@ rules:
       - namespaces
       - persistentvolumeclaims
     verbs: ["get", "list", "watch"]
+  # App-health watcher scans user-app pods for crashloop/OOM and mails the
+  # owner the tail of the previous container log.
+  - apiGroups: [""]
+    resources:
+      - pods
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources:
+      - pods/log
+    verbs: ["get"]
   # Delete-impact scan lists app-owned Ingresses and cert-manager Certificates so
   # the blast-radius preview shows raw resources not modelled as platform CRs.
   - apiGroups: ["networking.k8s.io"]
