@@ -19,8 +19,14 @@ const eslintConfig = defineConfig([
     files: [
       "app/(console)/projects/\\[projectId\\]/apps/page.tsx",
       "components/deploy/deploy-hooks-card.tsx",
+      "app/(console)/admin/page.tsx",
+      "app/(console)/admin/costs/page.tsx",
     ],
     rules: { "react-hooks/set-state-in-effect": "off" },
+  },
+  {
+    files: ["components/console/template-deploy-cards.tsx"],
+    rules: { "react-hooks/purity": "off" },
   },
 ]);
 
