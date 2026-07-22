@@ -7,6 +7,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -16,6 +17,7 @@ import (
 	"github.com/dada-tuda/console/backend/internal/auth"
 	"github.com/dada-tuda/console/backend/internal/dadagent"
 	gh "github.com/dada-tuda/console/backend/internal/github"
+	"github.com/dada-tuda/console/backend/internal/logsearch"
 )
 
 type autofixRequest struct {
@@ -111,11 +113,14 @@ func (h *Handler) TriggerAutofix(c *gin.Context) {
 		return
 	}
 
+	logs := h.fetchAutofixLogs(c.Request.Context(), projectID, envID, appName)
+
 	res, err := h.dadagent.Autofix(c.Request.Context(), dadagent.AutofixRequest{
 		RepoFullName: repo,
 		InstallToken: token,
 		Error:        errText,
 		CallbackURL:  h.cfg.CloudTaskCallbackURL,
+		Logs:         logs,
 	})
 	if err != nil {
 		log.Printf("autofix: app %s (project %s) launch failed: %v", appName, projectID, err)
@@ -183,4 +188,53 @@ func (h *Handler) latestFailedBuildSummary(ctx context.Context, envID uuid.UUID,
 		return "", err
 	}
 	return formatBuildFailureSummary(branch, commitSHA, commitMessage, finishedAt), nil
+}
+
+// fetchAutofixLogs pulls the last hour of ERROR-level runtime logs for an app
+// to hand the auto-fix agent real crash context instead of just a build-fail
+// summary. Best-effort only: OpenSearch/Elasticsearch is a known recurring
+// outage point, and log context is a nice-to-have, not a blocker -- any
+// failure (no infra client configured, no k8s namespaces resolved, search
+// error) returns "" so the caller falls back to the existing build-fail
+// summary behavior.
+func (h *Handler) fetchAutofixLogs(ctx context.Context, projectID, envID uuid.UUID, appName string) string {
+	if h.infraLogsearch == nil {
+		return ""
+	}
+	namespaces, err := h.k8sAppNamespaces(ctx, projectID, appName)
+	if err != nil {
+		log.Printf("autofix: app %s (project %s): resolving k8s namespaces for log context: %v", appName, projectID, err)
+		return ""
+	}
+	if len(namespaces) == 0 {
+		return ""
+	}
+	res, err := h.infraLogsearch.Search(ctx, logsearch.SearchOpts{
+		KubeApp:        appName,
+		KubeNamespaces: namespaces,
+		Level:          "ERROR",
+		Since:          time.Now().Add(-time.Hour),
+		Size:           50,
+	})
+	if err != nil {
+		log.Printf("autofix: app %s (project %s): log context search failed: %v", appName, projectID, err)
+		return ""
+	}
+	return formatAutofixLogs(res.Entries)
+}
+
+// formatAutofixLogs renders log entries newest-first into a plain-text block
+// for the agent prompt.
+func formatAutofixLogs(entries []logsearch.LogEntry) string {
+	if len(entries) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	for _, e := range entries {
+		b.WriteString(e.Timestamp)
+		b.WriteString(" ")
+		b.WriteString(e.Message)
+		b.WriteString("\n")
+	}
+	return b.String()
 }

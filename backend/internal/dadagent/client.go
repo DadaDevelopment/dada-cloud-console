@@ -100,6 +100,7 @@ type AutofixRequest struct {
 	DefaultBranch string `json:"default_branch,omitempty"`
 	Agent         string `json:"agent,omitempty"`
 	CallbackURL   string `json:"callback_url,omitempty"`
+	Logs          string `json:"logs,omitempty"`
 }
 
 // AutofixResult is the trimmed-down response from POST /v1/runs/autofix.
