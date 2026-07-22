@@ -214,6 +214,7 @@ export default function GitImportPage() {
   const [loadingInstalls, setLoadingInstalls] = useState(true);
   const [installError, setInstallError] = useState<string | null>(null);
   const [connectingProvider, setConnectingProvider] = useState<"github" | "gitlab" | null>(null);
+  const [installUrl, setInstallUrl] = useState<string | null>(null);
 
   const [remoteRepos, setRemoteRepos] = useState<GitRemoteRepoCandidate[]>([]);
   const [loadingRepos, setLoadingRepos] = useState(false);
@@ -292,6 +293,20 @@ export default function GitImportPage() {
     /* eslint-enable react-hooks/set-state-in-effect */
     void refreshInstallations(allowed);
   }, [projectId, envId, isLoadingEnvs, allowed, refreshInstallations]);
+
+  useEffect(() => {
+    if (!allowed || loadingInstalls || installUrl) return;
+    let cancelled = false;
+    gitApi
+      .installUrl(projectId, "github")
+      .then(({ url }) => {
+        if (!cancelled) setInstallUrl(url);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [allowed, loadingInstalls, projectId, installUrl]);
 
   const loadRepos = useCallback(
     async (installs: GitInstallation[]) => {
@@ -380,13 +395,14 @@ export default function GitImportPage() {
 
   async function handleConnectProvider(provider: "github" | "gitlab", forceInstall = false) {
     setInstallError(null);
+
+    if (provider === "github" && forceInstall && installUrl) {
+      window.location.href = installUrl;
+      return;
+    }
+
     setConnectingProvider(provider);
     try {
-      // Initial connect binds an already-installed org/user without a GitHub
-      // round-trip. "Add another account" (forceInstall) skips that shortcut and
-      // always opens GitHub's install picker so the user can grant a *new*
-      // account/org — otherwise the existing binding short-circuits the redirect
-      // and a second account can never be added.
       if (provider === "github" && !forceInstall) {
         const { installations: avail } = await gitApi.availableInstallations(projectId);
         const list = avail ?? [];
@@ -396,16 +412,13 @@ export default function GitImportPage() {
           await refreshInstallations(false);
           return;
         }
-        // No installation is bindable for this org. The OAuth-only authorize
-        // shortcut can never help here — it proves identity but creates no
-        // installation, so a user who has never installed the App anywhere
-        // would authorize repeatedly and land back on this same empty state.
-        // Send them to the real App install picker instead.
-        const { url } = await gitApi.installUrl(projectId, provider);
+        const url = installUrl ?? (await gitApi.installUrl(projectId, provider)).url;
+        setInstallUrl(url);
         window.location.href = url;
         return;
       }
       const { url } = await gitApi.installUrl(projectId, provider);
+      if (provider === "github") setInstallUrl(url);
       window.location.href = url;
     } catch (err) {
       const msg = err instanceof Error ? err.message : t("git.import.error.startInstall");
@@ -704,6 +717,14 @@ export default function GitImportPage() {
                     {t("git.import.connectGitLab")}
                   </button>
                 </div>
+                {installUrl && (
+                  <a
+                    href={installUrl}
+                    className="mt-3 inline-block text-xs font-medium text-blue-600 dark:text-blue-400 hover:underline"
+                  >
+                    {t("git.import.openGithub")}
+                  </a>
+                )}
               </div>
 
               <div className="mt-6">
@@ -759,6 +780,14 @@ export default function GitImportPage() {
                     </button>
                   )}
                 </div>
+                {!deploying && installUrl && (
+                  <a
+                    href={installUrl}
+                    className="self-end text-xs font-medium text-blue-600 dark:text-blue-400 hover:underline"
+                  >
+                    {t("git.import.openGithub")}
+                  </a>
+                )}
                 <div className="relative flex-1">
                   <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400 dark:text-gray-500" />
                   <input

@@ -86,6 +86,10 @@ export const git: Messages = {
   "git.import.connectGitLab": { ru: "Подключить GitLab", en: "Connect GitLab" },
   "git.import.connectAnotherGitHub": { ru: "Подключить ещё один аккаунт GitHub", en: "Connect another GitHub account" },
   "git.import.connectAnotherGitLab": { ru: "Подключить ещё один GitLab", en: "Connect another GitLab" },
+  "git.import.openGithub": {
+    ru: "Ничего не произошло? Открыть GitHub →",
+    en: "Nothing happened? Open GitHub →",
+  },
   "git.import.orTemplate": { ru: "или без GitHub", en: "or without GitHub" },
 
   "git.import.select": { ru: "Выбрать →", en: "Select →" },
