@@ -57,12 +57,16 @@ spec:
               port: {{ default 8090 .Values.gitopsAgent.webhookPort }}
             initialDelaySeconds: 10
             periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 6
           livenessProbe:
             httpGet:
               path: /healthz
               port: {{ default 8090 .Values.gitopsAgent.webhookPort }}
             initialDelaySeconds: 30
             periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 6
           resources:
             {{- toYaml .Values.gitopsAgent.resources | nindent 12 }}
       volumes:
