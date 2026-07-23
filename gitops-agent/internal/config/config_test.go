@@ -1,6 +1,9 @@
 package config
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
 
 func TestLoadUsesLegacySecretEnvFallbacks(t *testing.T) {
 	t.Setenv("DATABASE_URL", "")
@@ -27,3 +30,32 @@ func TestLoadUsesLegacySecretEnvFallbacks(t *testing.T) {
 	}
 }
 
+func TestLoadDefaultsPreviewReapInterval(t *testing.T) {
+	t.Setenv("DATABASE_URL", "postgres://x")
+	t.Setenv("GITOPS_DEFAULT_REPO_URL", "https://example.com/repo.git")
+	t.Setenv("GITOPS_PREVIEW_REAP_INTERVAL", "")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	if cfg.PreviewReapInterval != 10*time.Minute {
+		t.Fatalf("cfg.PreviewReapInterval = %v, want %v", cfg.PreviewReapInterval, 10*time.Minute)
+	}
+}
+
+func TestLoadParsesPreviewReapInterval(t *testing.T) {
+	t.Setenv("DATABASE_URL", "postgres://x")
+	t.Setenv("GITOPS_DEFAULT_REPO_URL", "https://example.com/repo.git")
+	t.Setenv("GITOPS_PREVIEW_REAP_INTERVAL", "2m")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	if cfg.PreviewReapInterval != 2*time.Minute {
+		t.Fatalf("cfg.PreviewReapInterval = %v, want %v", cfg.PreviewReapInterval, 2*time.Minute)
+	}
+}

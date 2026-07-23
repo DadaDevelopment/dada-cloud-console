@@ -81,6 +81,10 @@ type Config struct {
 	// reaper enqueues its teardown. Written to environments.expires_at on creation.
 	PreviewEnvTTL time.Duration
 
+	// PreviewReapInterval is how often the TTL reaper scans for expired preview
+	// environments and enqueues their teardown (DeletePreviewEnv).
+	PreviewReapInterval time.Duration
+
 	// OrphanGC garbage-collects App snapshots that no DeleteApp op ever cleaned
 	// up — rows left behind when an app is re-homed/renamed between projects and
 	// the incremental git-watcher missed the delete side of the diff. A k8s App
@@ -106,6 +110,10 @@ func Load() (*Config, error) {
 	previewTTL, err := time.ParseDuration(getEnv("GITOPS_PREVIEW_ENV_TTL", "168h"))
 	if err != nil {
 		return nil, fmt.Errorf("GITOPS_PREVIEW_ENV_TTL: %w", err)
+	}
+	previewReapInterval, err := time.ParseDuration(getEnv("GITOPS_PREVIEW_REAP_INTERVAL", "10m"))
+	if err != nil {
+		return nil, fmt.Errorf("GITOPS_PREVIEW_REAP_INTERVAL: %w", err)
 	}
 	statusInterval, err := time.ParseDuration(getEnv("GITOPS_POLL_INTERVAL_STATUS", "30s"))
 	if err != nil {
@@ -142,6 +150,7 @@ func Load() (*Config, error) {
 		MLflowAuthHeader:        getEnv("MLFLOW_AUTH_HEADER", ""),
 		ValuesTokenSecret:       getEnv("GITOPS_VALUES_TOKEN_SECRET", ""),
 		PreviewEnvTTL:           previewTTL,
+		PreviewReapInterval:     previewReapInterval,
 		DefaultDomainTLSSecret:  getEnv("GITOPS_DEFAULT_DOMAIN_TLS_SECRET", ""),
 		DefaultDomainDNSTarget:  getEnv("GITOPS_DEFAULT_DOMAIN_DNS_TARGET", "155.212.223.198"),
 		DefaultDomainBase:       getEnv("DEFAULT_DOMAIN_BASE", "dada-tuda.ru"),

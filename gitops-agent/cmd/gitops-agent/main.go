@@ -46,6 +46,7 @@ func main() {
 
 	dbw := worker.NewDBWatcher(pool, cfg)
 	gitw := worker.NewGitWatcher(pool, cfg, defaultMgr)
+	reaper := worker.NewReaper(pool, cfg)
 
 	if err := dbw.BootstrapProjects(ctx); err != nil {
 		log.Fatal().Err(err).Msg("bootstrapping project manifests")
@@ -53,6 +54,7 @@ func main() {
 
 	go dbw.Start(ctx)
 	go gitw.Start(ctx)
+	go reaper.Start(ctx)
 
 	// Live-state reconciler: mirror k8s Deployment status onto App snapshots so
 	// the console shows real phase/image/replicas instead of git's "Unknown".
