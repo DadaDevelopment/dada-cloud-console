@@ -71,6 +71,13 @@ type Config struct {
 	SMTPPass            string
 	SMTPFrom            string
 	ConsoleBaseURL      string
+
+	SourceUploadS3Endpoint  string
+	SourceUploadS3Bucket    string
+	SourceUploadS3Region    string
+	SourceUploadS3AccessKey string
+	SourceUploadS3SecretKey string
+	SourceUploadS3Insecure  bool
 }
 
 func Load() (*Config, error) {
@@ -127,6 +134,13 @@ func Load() (*Config, error) {
 		SMTPPass:            getEnv("DEPLOY_NOTIFY_SMTP_PASS", ""),
 		SMTPFrom:            getEnv("DEPLOY_NOTIFY_SMTP_FROM", "development@dada-tuda.ru"),
 		ConsoleBaseURL:      getEnv("CONSOLE_BASE_URL", "https://console.dada-tuda.ru"),
+
+		SourceUploadS3Endpoint:  getEnv("SOURCE_UPLOAD_S3_ENDPOINT", ""),
+		SourceUploadS3Bucket:    getEnv("SOURCE_UPLOAD_S3_BUCKET", ""),
+		SourceUploadS3Region:    getEnv("SOURCE_UPLOAD_S3_REGION", "us-east-1"),
+		SourceUploadS3AccessKey: getEnv("SOURCE_UPLOAD_S3_ACCESS_KEY", ""),
+		SourceUploadS3SecretKey: getEnv("SOURCE_UPLOAD_S3_SECRET_KEY", ""),
+		SourceUploadS3Insecure:  getEnv("SOURCE_UPLOAD_S3_INSECURE", "false") == "true",
 	}
 
 	if cfg.DatabaseURL == "" {

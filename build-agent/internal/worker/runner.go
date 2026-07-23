@@ -39,14 +39,15 @@ var errBuildAborted = errors.New("jenkins build aborted")
 // the queue draining loop. Jenkins owns the actual build + push; this is the
 // pure-pull control plane (ADR-010).
 type Runner struct {
-	pool       *pgxpool.Pool
-	cfg        *config.Config
-	scheduler  *queue.Scheduler
-	jenkins    *jenkins.Client
-	registry   registry.Registry
-	github     github.App
-	notify     *notify.Notifier
-	publishLog func(buildID, line string)
+	pool           *pgxpool.Pool
+	cfg            *config.Config
+	scheduler      *queue.Scheduler
+	jenkins        *jenkins.Client
+	registry       registry.Registry
+	github         github.App
+	notify         *notify.Notifier
+	archivePresign ArchivePresigner
+	publishLog     func(buildID, line string)
 }
 
 // capturedArtifact is one Android output parsed from a console marker.
@@ -81,13 +82,15 @@ func NewRunner(pool *pgxpool.Pool, cfg *config.Config, publishLog func(buildID, 
 		notifier = notify.New(cfg.SMTPHost, cfg.SMTPPort, cfg.SMTPUser, cfg.SMTPPass, cfg.SMTPFrom, cfg.ConsoleBaseURL)
 	}
 	return &Runner{
-		pool:       pool,
-		cfg:        cfg,
-		scheduler:  queue.New(cfg.MaxConcurrent),
-		jenkins:    jenkins.New(cfg.JenkinsURL, cfg.JenkinsUser, cfg.JenkinsToken),
-		registry:   registry.NewNexus(cfg.NexusDockerHost, cfg.NexusUser, cfg.NexusToken),
-		github:     github.New(cfg.GitHubAppID, cfg.GitHubAppKey),
-		notify:     notifier,
+		pool:      pool,
+		cfg:       cfg,
+		scheduler: queue.New(cfg.MaxConcurrent),
+		jenkins:   jenkins.New(cfg.JenkinsURL, cfg.JenkinsUser, cfg.JenkinsToken),
+		registry:  registry.NewNexus(cfg.NexusDockerHost, cfg.NexusUser, cfg.NexusToken),
+		github:    github.New(cfg.GitHubAppID, cfg.GitHubAppKey),
+		notify:    notifier,
+		archivePresign: NewArchivePresigner(cfg.SourceUploadS3Endpoint, cfg.SourceUploadS3Region,
+			cfg.SourceUploadS3AccessKey, cfg.SourceUploadS3SecretKey, cfg.SourceUploadS3Insecure),
 		publishLog: publishLog,
 	}
 }
@@ -530,13 +533,20 @@ func (r *Runner) execute(ctx context.Context, b *db.Build, repo *db.Repo, llog *
 
 	// --- building: trigger the job, resolve its build number ---
 	params := map[string]string{
-		"repo":         cloneURL,
 		"branch":       b.Branch,
 		"framework":    string(framework),
 		"buildType":    "debug",
 		"env":          b.EnvironmentID.String(),
 		"project_slug": repo.ProjectSlug,
 		"app_name":     repo.AppName,
+	}
+	if repo.Provider == "archive" {
+		params["archive_url"] = cloneURL
+		if _, key, perr := parseS3URL(repo.CloneURL); perr == nil {
+			params["branch"] = archiveUploadBranch(key)
+		}
+	} else {
+		params["repo"] = cloneURL
 	}
 
 	// Detected framework/port propagated into the deploy handoff (see buildOutcome).
@@ -962,6 +972,19 @@ func (r *Runner) gitCreds(ctx context.Context, repo *db.Repo, b *db.Build) (toke
 			return tok, repo.CloneURL, nil
 		}
 		return tok, injectToken(repo.CloneURL, "oauth2", tok), nil
+	case "archive":
+		if !r.archivePresign.Enabled() {
+			return "", "", fmt.Errorf("archive presign not configured")
+		}
+		bucket, key, perr := parseS3URL(repo.CloneURL)
+		if perr != nil {
+			return "", "", perr
+		}
+		u, perr := r.archivePresign.PresignGet(ctx, bucket, key, archivePresignTTL)
+		if perr != nil {
+			return "", "", fmt.Errorf("presign archive url: %w", perr)
+		}
+		return "", u, nil
 	default:
 		return "", "", fmt.Errorf("unknown provider %q", repo.Provider)
 	}
