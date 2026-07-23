@@ -17,6 +17,7 @@ import { MetricSparkline } from "@/components/metrics/fixed-metrics-dashboard";
 import { EmptyState } from "@/components/ui/empty-state";
 import { DeployChooser } from "@/components/deploy/deploy-chooser";
 import { TemplateDeployCards } from "@/components/console/template-deploy-cards";
+import { UploadDeployCard } from "@/components/deploy/upload-deploy";
 import { useT } from "@/lib/i18n/console/context";
 import { Globe, Database } from "lucide-react";
 import { classifyVMResource, extractIngressSpec, extractDatabaseSpec } from "@/lib/vm-resources";
@@ -454,7 +455,10 @@ function EnvBlock({ env, projectId, apps, infra, canCreate, onCreate, t }: EnvBl
       {apps.length === 0 ? (
         <>
           {env.runtime !== "vm" && (
-            <TemplateDeployCards projectId={projectId} envId={env.id} hero className="mb-6" />
+            <div className="mb-6 grid gap-4 lg:grid-cols-2">
+              <TemplateDeployCards projectId={projectId} envId={env.id} hero />
+              <UploadDeployCard projectId={projectId} envId={env.id} hero />
+            </div>
           )}
           <EmptyState
             title={env.runtime === "vm" ? t("apps.empty.title") : t("apps.empty.k8s.gitTitle")}

@@ -18,6 +18,7 @@ import type {
   S3BucketCredentialsResponse,
   DatabaseCredentialsResponse,
   AppsResponse,
+  UploadSourceArchiveResponse,
   InfraResponse,
   AppServersResponse,
   CostResponse,
@@ -175,6 +176,58 @@ export async function apiFetch<T>(
   return res.json() as Promise<T>;
 }
 
+const UPLOAD_TIMEOUT_MS = 10 * 60 * 1000;
+
+/**
+ * Multipart upload with progress reporting. fetch() has no reliable upload-progress
+ * event, so this goes through XMLHttpRequest instead. Same bearer auth as apiFetch,
+ * but no Content-Type header is set — the browser fills in the multipart boundary.
+ * Timeout is a full 10 minutes (vs apiFetch's 30s) since a 100MB archive over a slow
+ * uplink legitimately takes a while.
+ */
+export function apiUpload<T>(
+  path: string,
+  formData: FormData,
+  onProgress?: (percent: number) => void
+): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    getToken().then((bearerToken) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open("POST", `${API_BASE_URL}${path}`);
+      xhr.timeout = UPLOAD_TIMEOUT_MS;
+      if (bearerToken) {
+        xhr.setRequestHeader("Authorization", `Bearer ${bearerToken}`);
+      }
+      if (onProgress) {
+        xhr.upload.onprogress = (e) => {
+          if (e.lengthComputable) {
+            onProgress(Math.round((e.loaded / e.total) * 100));
+          }
+        };
+      }
+      xhr.onload = () => {
+        let body: unknown;
+        try {
+          body = xhr.responseText ? JSON.parse(xhr.responseText) : undefined;
+        } catch {
+          body = undefined;
+        }
+        if (xhr.status >= 200 && xhr.status < 300) {
+          resolve(body as T);
+          return;
+        }
+        const message = (body as { error?: string } | undefined)?.error ?? xhr.statusText ?? "Upload failed";
+        const apiError = new Error(message) as Error & { status?: number };
+        apiError.status = xhr.status;
+        reject(apiError);
+      };
+      xhr.onerror = () => reject(new Error("Upload failed. Check your connection and try again."));
+      xhr.ontimeout = () => reject(new Error("Upload timed out. Try again."));
+      xhr.send(formData);
+    }, reject);
+  });
+}
+
 // Convenience helpers
 export const api = {
   get: <T>(path: string, token?: string) =>
@@ -310,6 +363,22 @@ export const appsApi = {
       method: "POST",
       body: data,
     }),
+
+  uploadSourceArchive: (
+    projectId: string,
+    envId: string,
+    appName: string,
+    file: File,
+    onProgress?: (percent: number) => void
+  ) => {
+    const formData = new FormData();
+    formData.append("archive", file);
+    return apiUpload<UploadSourceArchiveResponse>(
+      `/api/v1/projects/${projectId}/environments/${envId}/apps/${appName}/source-archive`,
+      formData,
+      onProgress
+    );
+  },
 
   updateStorage: (
     projectId: string,

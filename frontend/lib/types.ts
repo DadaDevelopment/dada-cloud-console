@@ -421,6 +421,12 @@ export interface DeployImageResponse {
   message: string;
 }
 
+export interface UploadSourceArchiveResponse {
+  artifact_uri: string;
+  detected: { framework: string; port: number };
+  build: Build;
+}
+
 export interface EndpointSummary {
   app_name: string;
   fqdn: string;

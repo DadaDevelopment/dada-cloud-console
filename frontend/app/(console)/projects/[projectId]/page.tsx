@@ -12,6 +12,7 @@ import type { IconName } from "@/lib/resources";
 import { useT } from "@/lib/i18n/console/context";
 import { CostCard } from "@/components/cost/cost-card";
 import { TemplateDeployCards } from "@/components/console/template-deploy-cards";
+import { UploadDeployCard } from "@/components/deploy/upload-deploy";
 
 type Counts = { apps: number; appsReady: number; dbs: number; domainsVerified: number; domainsPending: number };
 
@@ -136,7 +137,10 @@ export default function ProjectOverviewPage() {
       <CostCard projectId={projectId} />
 
       {showTemplates && (
-        <TemplateDeployCards projectId={projectId} envId={envId} hero className="mb-8" />
+        <div className="mb-8 grid gap-4 lg:grid-cols-2">
+          <TemplateDeployCards projectId={projectId} envId={envId} hero />
+          <UploadDeployCard projectId={projectId} envId={envId} hero />
+        </div>
       )}
 
       {!checklistComplete && (

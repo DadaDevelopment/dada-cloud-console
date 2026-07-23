@@ -1,13 +1,14 @@
 "use client";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { GitBranch, Package, Boxes } from "lucide-react";
+import { GitBranch, Package, Boxes, UploadCloud } from "lucide-react";
 import { Modal } from "@/components/ui/modal";
 import { Button } from "@/components/ui/button";
+import { UploadDeployCard } from "@/components/deploy/upload-deploy";
 import type { Environment } from "@/lib/types";
 import { useT } from "@/lib/i18n/console/context";
 
-type DeployKind = "git" | "image" | "compose";
+type DeployKind = "git" | "image" | "compose" | "upload";
 
 /**
  * Unified deploy entry point: one wizard step that picks the target environment
@@ -49,7 +50,7 @@ export function DeployChooser({
       router.push(`/projects/${projectId}/git/import?envId=${envId}`);
     } else if (kind === "compose") {
       router.push(`/projects/${projectId}/app-servers`);
-    } else {
+    } else if (kind === "image") {
       onPickImage(envId);
     }
   }
@@ -57,6 +58,7 @@ export function DeployChooser({
   const cards: { key: DeployKind; icon: React.ReactNode; title: string; desc: string }[] = [
     { key: "git", icon: <GitBranch className="h-5 w-5" />, title: t("apps.deploy.fromGit.title"), desc: t("apps.deploy.fromGit.desc") },
     { key: "image", icon: <Package className="h-5 w-5" />, title: t("apps.deploy.fromImage.title"), desc: t("apps.deploy.fromImage.desc") },
+    { key: "upload", icon: <UploadCloud className="h-5 w-5" />, title: t("apps.deploy.fromUpload.title"), desc: t("apps.deploy.fromUpload.desc") },
     { key: "compose", icon: <Boxes className="h-5 w-5" />, title: t("apps.deploy.fromCompose.title"), desc: t("apps.deploy.fromCompose.desc") },
   ];
 
@@ -82,7 +84,7 @@ export function DeployChooser({
 
         <div>
           <span className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-200">{t("apps.deploy.chooseSource")}</span>
-          <div className="grid gap-3 sm:grid-cols-3">
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
             {cards.map((c) => {
               const active = kind === c.key;
               return (
@@ -107,14 +109,18 @@ export function DeployChooser({
           </div>
         </div>
 
-        <div className="flex justify-end gap-3 pt-1">
-          <Button variant="ghost" onClick={onClose}>
-            {t("common.cancel")}
-          </Button>
-          <Button onClick={proceed} disabled={kind !== "compose" && !envId}>
-            {t("apps.deploy.continue")}
-          </Button>
-        </div>
+        {kind === "upload" ? (
+          <UploadDeployCard projectId={projectId} envId={envId || null} compact />
+        ) : (
+          <div className="flex justify-end gap-3 pt-1">
+            <Button variant="ghost" onClick={onClose}>
+              {t("common.cancel")}
+            </Button>
+            <Button onClick={proceed} disabled={kind !== "compose" && !envId}>
+              {t("apps.deploy.continue")}
+            </Button>
+          </div>
+        )}
       </div>
     </Modal>
   );
