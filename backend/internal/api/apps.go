@@ -866,6 +866,9 @@ func (h *Handler) UpdateAppProfile(c *gin.Context) {
 		respondForbidden(c)
 		return
 	}
+	if !h.requireK8sRuntime(c, projectID, envID) {
+		return
+	}
 
 	var req updateAppProfileRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -1189,6 +1192,9 @@ func (h *Handler) RollbackApp(c *gin.Context) {
 		respondNotFound(c)
 		return
 	}
+	if !h.requireVMRuntime(c, projectID, envID) {
+		return
+	}
 
 	payloadBytes, _ := json.Marshal(map[string]string{"app_name": appName})
 
@@ -1282,6 +1288,9 @@ func (h *Handler) AdoptApp(c *gin.Context) {
 		respondNotFound(c)
 		return
 	}
+	if !h.requireVMRuntime(c, projectID, envID) {
+		return
+	}
 
 	payloadBytes, _ := json.Marshal(map[string]string{"source_app": appName})
 
@@ -1370,6 +1379,9 @@ func (h *Handler) RestartApp(c *gin.Context) {
 	}
 	if count == 0 {
 		respondNotFound(c)
+		return
+	}
+	if !h.requireVMRuntime(c, projectID, envID) {
 		return
 	}
 

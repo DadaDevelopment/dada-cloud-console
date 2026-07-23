@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/dada-tuda/console/backend/internal/auth"
+	"github.com/dada-tuda/console/backend/internal/models"
 	"github.com/dada-tuda/console/backend/internal/wstoken"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -87,20 +88,26 @@ func (h *Handler) GetValuesToken(c *gin.Context) {
 		return
 	}
 
-	// Resolve project slug and env slug — the token carries slugs, not UUIDs,
-	// because the gitops-agent path helpers use slugs.
+	// Resolve project slug, env slug and runtime — the token carries slugs, not
+	// UUIDs (the gitops-agent path helpers use slugs); the runtime decides which
+	// config file this app is allowed to edit.
 	var projectSlug, envSlug string
+	var runtime models.EnvironmentRuntime
 	err = h.pool.QueryRow(c.Request.Context(), `
-		SELECT p.name, e.name
+		SELECT p.name, e.name, e.runtime
 		FROM projects p JOIN environments e ON e.project_id = p.id
 		WHERE p.id = $1 AND e.id = $2
-	`, projectID, envID).Scan(&projectSlug, &envSlug)
+	`, projectID, envID).Scan(&projectSlug, &envSlug, &runtime)
 	if err == pgx.ErrNoRows {
 		respondNotFound(c)
 		return
 	}
 	if err != nil {
 		respondError(c, http.StatusInternalServerError, "failed to resolve project/environment")
+		return
+	}
+	if !valuesFileAllowedForRuntime(runtime, file) {
+		respondError(c, http.StatusBadRequest, valuesFileRuntimeMsg(runtime))
 		return
 	}
 
