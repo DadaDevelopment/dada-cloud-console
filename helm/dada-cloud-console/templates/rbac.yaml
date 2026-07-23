@@ -21,6 +21,12 @@ rules:
       - namespaces
       - persistentvolumeclaims
     verbs: ["get", "list", "watch"]
+  # Preview gate resolves each app's Service port before reverse-proxying the
+  # live preview (*.pv.dada-tuda.ru) to it.
+  - apiGroups: [""]
+    resources:
+      - services
+    verbs: ["get", "list", "watch"]
   # App-health watcher scans user-app pods for crashloop/OOM and mails the
   # owner the tail of the previous container log.
   - apiGroups: [""]

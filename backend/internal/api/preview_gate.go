@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -248,7 +249,15 @@ func (g *PreviewGate) resolve(ctx context.Context, label string) (previewTarget,
 	}
 
 	rows, err := g.pool.Query(ctx, `
-		SELECT e.id, e.namespace, COALESCE(rs.summary_json->>'url', '')
+		SELECT e.id, e.namespace, COALESCE(rs.summary_json->>'url', ''),
+		       COALESCE((
+		           SELECT pa.summary_json->'spec'->'upstream'->>'servicePort'
+		           FROM resource_snapshots pa
+		           WHERE pa.environment_id = e.id AND pa.kind = 'PublicApi'
+		             AND pa.summary_json->>'app_name' = $2
+		             AND pa.summary_json->'spec'->'upstream'->>'serviceName' = $2 || '-service'
+		           LIMIT 1
+		       ), '')
 		FROM environments e
 		JOIN resource_snapshots rs
 		  ON rs.environment_id = e.id AND rs.kind = 'App' AND rs.name = $2
@@ -259,16 +268,16 @@ func (g *PreviewGate) resolve(ctx context.Context, label string) (previewTarget,
 	}
 	defer rows.Close()
 
-	var namespace, appURL string
+	var namespace, appURL, snapshotPort string
 	found := false
 	for rows.Next() {
 		var id uuid.UUID
-		var ns, u string
-		if scanErr := rows.Scan(&id, &ns, &u); scanErr != nil {
+		var ns, u, sp string
+		if scanErr := rows.Scan(&id, &ns, &u, &sp); scanErr != nil {
 			return previewTarget{}, scanErr
 		}
 		if hmac.Equal([]byte(previewMAC(app, id, g.cfg.PreviewHostSecret)), []byte(mac12)) {
-			namespace, appURL, found = ns, u, true
+			namespace, appURL, snapshotPort, found = ns, u, sp, true
 			break
 		}
 	}
@@ -279,7 +288,7 @@ func (g *PreviewGate) resolve(ctx context.Context, label string) (previewTarget,
 		return previewTarget{}, fmt.Errorf("no environment matches preview label %q", label)
 	}
 
-	port, err := g.servicePort(ctx, namespace, app)
+	port, err := g.servicePort(ctx, namespace, app, snapshotPort)
 	if err != nil {
 		return previewTarget{}, err
 	}
@@ -303,10 +312,12 @@ func (g *PreviewGate) resolve(ctx context.Context, label string) (previewTarget,
 	return t, nil
 }
 
-// servicePort reads the app Service's first port from the cluster; without a
-// cluster client (or when the Service is missing) it falls back to the stored
-// git_repos port and then 8080.
-func (g *PreviewGate) servicePort(ctx context.Context, namespace, app string) (int, error) {
+// servicePort resolves the app Service's port. Priority: the live cluster
+// Service (authoritative, needs RBAC), then the PublicApi snapshot's
+// spec.upstream.servicePort already fetched by resolve (covers every app with
+// a platform-managed domain even without cluster RBAC), then the stored
+// git_repos port, then 8080.
+func (g *PreviewGate) servicePort(ctx context.Context, namespace, app, snapshotPort string) (int, error) {
 	if g.clientset != nil {
 		svc, err := g.clientset.CoreV1().Services(namespace).Get(ctx, app+"-service", metav1.GetOptions{})
 		if err == nil && len(svc.Spec.Ports) > 0 {
@@ -315,6 +326,9 @@ func (g *PreviewGate) servicePort(ctx context.Context, namespace, app string) (i
 		if err != nil {
 			log.Debug().Err(err).Str("namespace", namespace).Str("app", app).Msg("preview gate: service lookup failed, using stored port")
 		}
+	}
+	if p, convErr := strconv.Atoi(snapshotPort); convErr == nil && p > 0 {
+		return p, nil
 	}
 	var port int
 	err := g.pool.QueryRow(ctx,
