@@ -73,25 +73,81 @@ func pvNameForPVC(ctx context.Context, r CommandRunner, cfg MoveConfig, pvc stri
 		"get", "pvc", pvc, "-o", "jsonpath={.spec.volumeName}")
 }
 
-// Run triggers a Longhorn snapshot+backup for each source volume and waits for
-// the backup to be present in the backup target.
+// moveSnapshotName is the deterministic Longhorn Snapshot/Backup CR name for a
+// volume in this move, so the step is idempotent (apply, not create).
+func moveSnapshotName(cfg MoveConfig, v VolumeSpec) string {
+	return "dbmove-" + cfg.App + "-" + v.PVCName
+}
+
+// snapshotYAML renders a Longhorn Snapshot CR that forces a fresh snapshot of the
+// source volume. The Longhorn volume name equals the source PV name.
+func snapshotYAML(srcPV, name string) string {
+	return fmt.Sprintf(`apiVersion: longhorn.io/v1beta2
+kind: Snapshot
+metadata:
+  name: %s
+  namespace: longhorn-system
+spec:
+  volume: %s
+  createSnapshot: true
+`, name, srcPV)
+}
+
+// backupYAML renders a Longhorn Backup CR that backs the named snapshot up to the
+// backup target.
+func backupYAML(name, snapName string) string {
+	return fmt.Sprintf(`apiVersion: longhorn.io/v1beta2
+kind: Backup
+metadata:
+  name: %s
+  namespace: longhorn-system
+spec:
+  snapshotName: %s
+`, name, snapName)
+}
+
+// Run forces a fresh snapshot+backup of each source volume so volume-copy restores
+// the post-scale-down state instead of a stale daily backup, then waits for each
+// backup to complete.
 func (s *longhornBackupStep) Run(ctx context.Context, r CommandRunner, dryRun bool) error {
 	for _, v := range s.cfg.Volumes {
+		name := moveSnapshotName(s.cfg, v)
 		if dryRun {
-			fmt.Printf("[dry-run] longhorn snapshot+backup of PV bound to %s\n", v.PVCName)
+			fmt.Printf("[dry-run] longhorn snapshot %s + backup of PV bound to %s\n", name, v.PVCName)
 			continue
 		}
 		pv, err := pvNameForPVC(ctx, r, s.cfg, v.PVCName)
 		if err != nil || pv == "" {
 			return fmt.Errorf("resolve PV for %s: %w\noutput: %s", v.PVCName, err, pv)
 		}
-		out, err := r.Run(ctx, "kubectl", "--context", s.cfg.BegetContext, "-n", "longhorn-system",
-			"create", "-f", "-")
-		if err != nil {
-			return fmt.Errorf("longhorn backup %s: %w\noutput: %s", pv, err, out)
+		if out, serr := runWithStdin(ctx, r, snapshotYAML(pv, name), "kubectl", "--context", s.cfg.BegetContext, "apply", "-f", "-"); serr != nil {
+			return fmt.Errorf("create snapshot %s: %w\noutput: %s", name, serr, out)
+		}
+		if out, berr := runWithStdin(ctx, r, backupYAML(name, name), "kubectl", "--context", s.cfg.BegetContext, "apply", "-f", "-"); berr != nil {
+			return fmt.Errorf("create backup %s: %w\noutput: %s", name, berr, out)
+		}
+		if werr := waitBackupComplete(ctx, r, s.cfg.BegetContext, name, 15*time.Minute); werr != nil {
+			return werr
 		}
 	}
 	return nil
+}
+
+// waitBackupComplete polls a Longhorn Backup CR until status.state is Completed.
+func waitBackupComplete(ctx context.Context, r CommandRunner, kctx, name string, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		out, err := r.Run(ctx, "kubectl", "--context", kctx, "-n", "longhorn-system",
+			"get", "backup", name, "-o", "jsonpath={.status.state}")
+		if err == nil && out == "Completed" {
+			return nil
+		}
+		if err == nil && out == "Error" {
+			return fmt.Errorf("longhorn backup %s entered Error state", name)
+		}
+		time.Sleep(10 * time.Second)
+	}
+	return fmt.Errorf("longhorn backup %s did not complete in %s", name, timeout)
 }
 
 const longhornBackupTarget = "s3://25f4da9f5cfe-dada-tuda-s3@ru1/"

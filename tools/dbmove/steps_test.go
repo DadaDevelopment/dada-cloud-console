@@ -323,3 +323,30 @@ func TestCopySecretsApplyErrorIncludesCommandOutput(t *testing.T) {
 		t.Fatalf("error must include command output, got: %v", err)
 	}
 }
+
+func TestLonghornBackupSnapshotAndBackupYAML(t *testing.T) {
+	snap := snapshotYAML("pvc-abc", "dbmove-n8n-n8n-data")
+	for _, want := range []string{"kind: Snapshot", "volume: pvc-abc", "createSnapshot: true", "name: dbmove-n8n-n8n-data"} {
+		if !strings.Contains(snap, want) {
+			t.Fatalf("snapshot yaml missing %q:\n%s", want, snap)
+		}
+	}
+	bak := backupYAML("dbmove-n8n-n8n-data", "dbmove-n8n-n8n-data")
+	for _, want := range []string{"kind: Backup", "snapshotName: dbmove-n8n-n8n-data"} {
+		if !strings.Contains(bak, want) {
+			t.Fatalf("backup yaml missing %q:\n%s", want, bak)
+		}
+	}
+}
+
+func TestLonghornBackupDryRunNoCalls(t *testing.T) {
+	cfg, _ := LoadConfig("configs/n8n.yaml")
+	fr := newFakeRunner()
+	s := &longhornBackupStep{cfg: cfg}
+	if err := s.Run(context.Background(), fr, true); err != nil {
+		t.Fatalf("dry-run: %v", err)
+	}
+	if len(fr.calls) != 0 {
+		t.Fatalf("dry-run must make zero calls, got: %v", fr.calls)
+	}
+}
