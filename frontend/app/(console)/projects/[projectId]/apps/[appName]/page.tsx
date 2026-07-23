@@ -437,7 +437,7 @@ export default function AppDetailPage() {
 
       {!isResource && summary.url && (
         <div className="mb-6">
-          <AppPreviewPane url={summary.url} />
+          <AppPreviewPane url={summary.url} defaultOpen />
         </div>
       )}
 
