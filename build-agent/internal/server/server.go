@@ -348,14 +348,14 @@ func (s *Server) openOrSyncPreviewEnv(ctx context.Context, repo *db.Repo, ev *pu
 	}
 
 	previewEnv, err := db.EnsurePreviewEnv(ctx, s.pool, repo.ProjectID, repo.ID, repo.EnvironmentID,
-		repo.ProjectSlug, repo.AppName, prNumber, headBranch, s.cfg.PreviewEnvTTL)
+		repo.ProjectSlug, repo.AppName, prNumber, headBranch, s.cfg.PreviewEnvTTL, s.cfg.EncryptionKey)
 	if err != nil {
 		log.Error().Err(err).Str("repo", repo.RepoFullName).Int("pr", prNumber).Msg("pull_request webhook: ensure preview env")
 		return false
 	}
 
 	if _, err := db.InsertCreatePreviewEnvOp(ctx, s.pool, db.SystemUserID, repo.ProjectID, previewEnv.ID,
-		previewEnv.Name, previewEnv.Namespace, repo.ID, prNumber, headBranch, repo.EnvironmentID); err != nil {
+		previewEnv.Name, previewEnv.Namespace, repo.ID, prNumber, headBranch, repo.EnvironmentID, repo.AppName); err != nil {
 		log.Error().Err(err).Str("repo", repo.RepoFullName).Int("pr", prNumber).Msg("pull_request webhook: enqueue CreatePreviewEnv")
 	}
 

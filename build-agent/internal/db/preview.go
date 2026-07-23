@@ -13,6 +13,29 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
+// previewDBNameUnsafe / previewDatabaseName mirror gitops-agent's
+// renderer.PreviewDatabaseName (gitops-agent/internal/renderer/renderer.go)
+// byte for byte: build-agent computes the same per-preview database name
+// synchronously here (to rewrite DATABASE_URL before gitops-agent's async
+// CreatePreviewEnv operation even runs), and the two must never disagree
+// about what the preview database is called.
+var previewDBNameUnsafe = regexp.MustCompile(`[^a-z0-9-]+`)
+
+func previewDatabaseName(parentDatabase string, prNumber int) string {
+	suffix := fmt.Sprintf("-pr%d", prNumber)
+	base := strings.ToLower(parentDatabase)
+	base = previewDBNameUnsafe.ReplaceAllString(base, "-")
+	for strings.Contains(base, "--") {
+		base = strings.ReplaceAll(base, "--", "-")
+	}
+	base = strings.Trim(base, "-")
+	max := 63 - len(suffix)
+	if len(base) > max {
+		base = strings.TrimRight(base[:max], "-")
+	}
+	return base + suffix
+}
+
 // PreviewEnv is the ephemeral (PR) environment row needed to target a preview
 // build/deploy and to build the operations payload for gitops-agent.
 type PreviewEnv struct {
@@ -62,7 +85,11 @@ func truncateLabel(s string, max int) string {
 // both lowercased and capped at the 63-byte Kubernetes DNS-label limit.
 // expiresAt is set to now+ttl; on a repeat call (synchronize) it is bumped the
 // same way via ON CONFLICT DO UPDATE.
-func EnsurePreviewEnv(ctx context.Context, pool *pgxpool.Pool, projectID, gitRepoID, parentEnvID uuid.UUID, projectSlug, appName string, prNumber int, headBranch string, ttl time.Duration) (PreviewEnv, error) {
+//
+// encryptionKey (GITOPS_ENCRYPTION_KEY) is used to decrypt/rewrite/re-encrypt
+// any copied DATABASE_URL that points at a managed database this app owns in
+// the parent environment — see copyPreviewEnvVars.
+func EnsurePreviewEnv(ctx context.Context, pool *pgxpool.Pool, projectID, gitRepoID, parentEnvID uuid.UUID, projectSlug, appName string, prNumber int, headBranch string, ttl time.Duration, encryptionKey string) (PreviewEnv, error) {
 	envName := truncateLabel(previewLabel(fmt.Sprintf("pr-%d-%s", prNumber, appName)), 63)
 	namespace := truncateLabel(previewLabel(fmt.Sprintf("%s-pr-%d-%s", projectSlug, prNumber, appName)), 63)
 	expiresAt := time.Now().Add(ttl)
@@ -88,11 +115,46 @@ func EnsurePreviewEnv(ctx context.Context, pool *pgxpool.Pool, projectID, gitRep
 		return PreviewEnv{}, fmt.Errorf("ensure preview env: %w", err)
 	}
 
-	if err := copyPreviewEnvVars(ctx, pool, envID, parentEnvID); err != nil {
+	dbRewrites, err := previewDatabaseRewrites(ctx, pool, projectID, parentEnvID, appName, prNumber)
+	if err != nil {
+		return PreviewEnv{}, err
+	}
+
+	if err := copyPreviewEnvVars(ctx, pool, envID, parentEnvID, encryptionKey, dbRewrites); err != nil {
 		return PreviewEnv{}, err
 	}
 
 	return PreviewEnv{ID: envID, Name: envName, Namespace: namespace}, nil
+}
+
+// previewDatabaseRewrites finds every ServiceDatabaseV2 appName owns in the
+// parent environment and derives this preview's own database name for each
+// (previewDatabaseName). Returns an empty (non-nil) map when the app has no
+// managed database — the common case, and copyPreviewEnvVars treats an empty
+// map as "plain verbatim copy, no decrypt needed".
+func previewDatabaseRewrites(ctx context.Context, pool *pgxpool.Pool, projectID, parentEnvID uuid.UUID, appName string, prNumber int) (map[string]string, error) {
+	rows, err := pool.Query(ctx, `
+		SELECT summary_json->>'database'
+		FROM resource_snapshots
+		WHERE project_id = $1 AND environment_id = $2 AND kind = 'ServiceDatabaseV2'
+		AND summary_json->>'app_ref' = $3
+	`, projectID, parentEnvID, appName)
+	if err != nil {
+		return nil, fmt.Errorf("query parent service databases: %w", err)
+	}
+	defer rows.Close()
+	rewrites := map[string]string{}
+	for rows.Next() {
+		var database string
+		if err := rows.Scan(&database); err != nil {
+			return nil, fmt.Errorf("scan parent service database: %w", err)
+		}
+		if database == "" {
+			continue
+		}
+		rewrites[database] = previewDatabaseName(database, prNumber)
+	}
+	return rewrites, rows.Err()
 }
 
 // copyPreviewEnvVars seeds previewEnvID's env_vars from parentEnvID's env_vars,
@@ -103,7 +165,21 @@ func EnsurePreviewEnv(ctx context.Context, pool *pgxpool.Pool, projectID, gitRep
 // copyPreviewEnvVars (gitops-agent/internal/worker/preview.go) byte for byte so
 // the synchronous webhook insert and the async idempotent re-run it enqueues
 // can never disagree about the preview env's shape.
-func copyPreviewEnvVars(ctx context.Context, pool *pgxpool.Pool, previewEnvID, parentEnvID uuid.UUID) error {
+//
+// When dbRewrites is empty this is a pure ciphertext copy (no decrypt needed).
+// When non-empty (parentDatabase -> previewDatabase) every value is decrypted,
+// scanned for a "/<parentDatabase>" path segment (the shape a DATABASE_URL
+// takes), rewritten to the preview's own database, and re-encrypted before
+// insert — the P0 fix so a preview stops sharing the parent's live connection
+// string.
+func copyPreviewEnvVars(ctx context.Context, pool *pgxpool.Pool, previewEnvID, parentEnvID uuid.UUID, encryptionKey string, dbRewrites map[string]string) error {
+	if len(dbRewrites) == 0 {
+		return copyPreviewEnvVarsVerbatim(ctx, pool, previewEnvID, parentEnvID)
+	}
+	return copyPreviewEnvVarsRewritten(ctx, pool, previewEnvID, parentEnvID, encryptionKey, dbRewrites)
+}
+
+func copyPreviewEnvVarsVerbatim(ctx context.Context, pool *pgxpool.Pool, previewEnvID, parentEnvID uuid.UUID) error {
 	if _, err := pool.Exec(ctx, `
 		INSERT INTO env_vars
 			(environment_id, app_name, key, value_encrypted, is_secret, scope)
@@ -139,6 +215,116 @@ func copyPreviewEnvVars(ctx context.Context, pool *pgxpool.Pool, previewEnvID, p
 		return fmt.Errorf("copy preview-only overrides: %w", err)
 	}
 	return nil
+}
+
+// previewCopyRow is one env_vars row about to be inserted for the preview
+// environment, decrypted so its value can be rewritten in Go before it goes
+// back into the database re-encrypted.
+type previewCopyRow struct {
+	appName  string
+	key      string
+	enc      []byte
+	isSecret bool
+	scope    string
+}
+
+func copyPreviewEnvVarsRewritten(ctx context.Context, pool *pgxpool.Pool, previewEnvID, parentEnvID uuid.UUID, encryptionKey string, dbRewrites map[string]string) error {
+	var rows []previewCopyRow
+
+	mergedRows, err := pool.Query(ctx, `
+		SELECT e.app_name, e.key,
+		       COALESCE(o.value_encrypted, e.value_encrypted),
+		       COALESCE(o.is_secret, e.is_secret),
+		       e.scope
+		FROM env_vars e
+		LEFT JOIN preview_env_overrides o
+			ON o.environment_id = e.environment_id
+			AND o.app_name = e.app_name
+			AND o.key = e.key
+		WHERE e.environment_id = $1
+	`, parentEnvID)
+	if err != nil {
+		return fmt.Errorf("query parent env_vars: %w", err)
+	}
+	for mergedRows.Next() {
+		var r previewCopyRow
+		if err := mergedRows.Scan(&r.appName, &r.key, &r.enc, &r.isSecret, &r.scope); err != nil {
+			mergedRows.Close()
+			return fmt.Errorf("scan env_var: %w", err)
+		}
+		rows = append(rows, r)
+	}
+	if err := mergedRows.Err(); err != nil {
+		mergedRows.Close()
+		return fmt.Errorf("iterate parent env_vars: %w", err)
+	}
+	mergedRows.Close()
+
+	overrideOnlyRows, err := pool.Query(ctx, `
+		SELECT o.app_name, o.key, o.value_encrypted, o.is_secret
+		FROM preview_env_overrides o
+		WHERE o.environment_id = $1
+		AND NOT EXISTS (
+			SELECT 1 FROM env_vars e
+			WHERE e.environment_id = o.environment_id
+			AND e.app_name = o.app_name
+			AND e.key = o.key
+		)
+	`, parentEnvID)
+	if err != nil {
+		return fmt.Errorf("query override-only env_vars: %w", err)
+	}
+	for overrideOnlyRows.Next() {
+		r := previewCopyRow{scope: "runtime"}
+		if err := overrideOnlyRows.Scan(&r.appName, &r.key, &r.enc, &r.isSecret); err != nil {
+			overrideOnlyRows.Close()
+			return fmt.Errorf("scan override-only env_var: %w", err)
+		}
+		rows = append(rows, r)
+	}
+	if err := overrideOnlyRows.Err(); err != nil {
+		overrideOnlyRows.Close()
+		return fmt.Errorf("iterate override-only env_vars: %w", err)
+	}
+	overrideOnlyRows.Close()
+
+	for _, r := range rows {
+		plain, err := DecryptToken(encryptionKey, r.enc)
+		if err != nil {
+			return fmt.Errorf("decrypt env_var %s/%s: %w", r.appName, r.key, err)
+		}
+		rewritten := rewriteDatabaseNames(plain, dbRewrites)
+		outEnc := r.enc
+		if rewritten != plain {
+			outEnc, err = EncryptToken(encryptionKey, rewritten)
+			if err != nil {
+				return fmt.Errorf("encrypt env_var %s/%s: %w", r.appName, r.key, err)
+			}
+		}
+		if _, err := pool.Exec(ctx, `
+			INSERT INTO env_vars (environment_id, app_name, key, value_encrypted, is_secret, scope)
+			VALUES ($1, $2, $3, $4, $5, $6)
+			ON CONFLICT (environment_id, app_name, key) DO NOTHING
+		`, previewEnvID, r.appName, r.key, outEnc, r.isSecret, r.scope); err != nil {
+			return fmt.Errorf("insert preview env_var %s/%s: %w", r.appName, r.key, err)
+		}
+	}
+	return nil
+}
+
+// rewriteDatabaseNames replaces every "/<old>" path segment in value (the
+// shape a database name takes at the end of a DATABASE_URL / DSN) with
+// "/<new>" for each (old, new) pair in rewrites. A value with no match is
+// returned unchanged.
+func rewriteDatabaseNames(value string, rewrites map[string]string) string {
+	for old, next := range rewrites {
+		if old == "" || next == "" || old == next {
+			continue
+		}
+		re := regexp.MustCompile(`/` + regexp.QuoteMeta(old) + `(\?|$)`)
+		value = re.ReplaceAllString(value, "/"+next+"$1")
+	}
+	return value
 }
 
 // BumpPreviewEnvExpiry pushes a preview environment's TTL out from now, used on
@@ -196,6 +382,7 @@ type createPreviewEnvPayload struct {
 	PRNumber    int    `json:"pr_number"`
 	HeadBranch  string `json:"head_branch"`
 	ParentEnvID string `json:"parent_env_id"`
+	AppName     string `json:"app_name"`
 }
 
 // deletePreviewEnvPayload mirrors backend models.DeletePreviewEnvPayload. JSON
@@ -210,7 +397,9 @@ type deletePreviewEnvPayload struct {
 // gitops-agent render the preview namespace's git-side policy file (and
 // idempotently re-run the same environments upsert EnsurePreviewEnv already
 // did synchronously). actor is SystemUserID for a webhook-driven PR event.
-func InsertCreatePreviewEnvOp(ctx context.Context, pool *pgxpool.Pool, actor, projectID, envID uuid.UUID, envName, namespace string, gitRepoID uuid.UUID, prNumber int, headBranch string, parentEnvID uuid.UUID) (uuid.UUID, error) {
+// appName lets gitops-agent find the parent's ServiceDatabaseV2 (if any) and
+// provision this preview's own copy of it (see doCreatePreviewEnv).
+func InsertCreatePreviewEnvOp(ctx context.Context, pool *pgxpool.Pool, actor, projectID, envID uuid.UUID, envName, namespace string, gitRepoID uuid.UUID, prNumber int, headBranch string, parentEnvID uuid.UUID, appName string) (uuid.UUID, error) {
 	payload, err := json.Marshal(createPreviewEnvPayload{
 		EnvName:     envName,
 		Namespace:   namespace,
@@ -218,6 +407,7 @@ func InsertCreatePreviewEnvOp(ctx context.Context, pool *pgxpool.Pool, actor, pr
 		PRNumber:    prNumber,
 		HeadBranch:  headBranch,
 		ParentEnvID: parentEnvID.String(),
+		AppName:     appName,
 	})
 	if err != nil {
 		return uuid.Nil, fmt.Errorf("marshal CreatePreviewEnv payload: %w", err)

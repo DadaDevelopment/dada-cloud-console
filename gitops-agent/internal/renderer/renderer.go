@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"fmt"
+	"regexp"
 	"sort"
 	"strings"
 	"text/template"
@@ -50,6 +51,85 @@ func RenderServiceDatabase(spec ServiceDatabaseSpec) (string, error) {
 		return "", fmt.Errorf("rendering ServiceDatabase: %w", err)
 	}
 	return buf.String(), nil
+}
+
+// PreviewDatabaseSpec holds parameters for a raw provider-sql Database manifest
+// backing a PR preview's own logical database. Unlike RenderServiceDatabase this
+// does NOT go through the ServiceDatabaseV2 composite (which always mints a
+// brand-new PG role/password): a preview reuses the PARENT app's existing role
+// (Owner) so a copied-and-rewritten DATABASE_URL keeps the same user/password
+// and only the database-name path segment changes. deletionPolicy is Delete
+// (not the platform default Orphan) so tearing down the preview env actually
+// drops the throwaway database instead of leaking it in the shared cluster.
+type PreviewDatabaseSpec struct {
+	Name        string
+	Owner       string
+	ProjectSlug string
+	EnvSlug     string
+	OperationID string
+}
+
+var previewDatabaseTmpl = template.Must(template.New("previewdb").Parse(`apiVersion: postgresql.sql.crossplane.io/v1alpha1
+kind: Database
+metadata:
+  name: {{ .Name }}
+  labels:
+    dada.io/project: {{ .ProjectSlug }}
+    dada.io/environment: {{ .EnvSlug }}
+    dada.io/operation: {{ .OperationID }}
+spec:
+  deletionPolicy: Delete
+  providerConfigRef:
+    name: postgresql-prod
+  forProvider:
+    owner: {{ .Owner }}
+`))
+
+func RenderPreviewDatabase(spec PreviewDatabaseSpec) (string, error) {
+	var buf bytes.Buffer
+	if err := previewDatabaseTmpl.Execute(&buf, spec); err != nil {
+		return "", fmt.Errorf("rendering preview database: %w", err)
+	}
+	return buf.String(), nil
+}
+
+// PreviewDatabaseOwnerRole returns the PG role that owns a ServiceDatabaseV2's
+// logical database — "svc-<CR name>", per the servicedatabasev2-postgresql-k10
+// composition (helm/common/templates/servicedatabase.yaml + the crossplane
+// composition template, both in dada-argo). A preview's Database reuses this
+// role directly instead of provisioning its own, so it needs no writeConnectionSecretToRef
+// of its own and no wait for a fresh secret to land.
+func PreviewDatabaseOwnerRole(parentServiceDatabaseName string) string {
+	return "svc-" + parentServiceDatabaseName
+}
+
+var previewDBNameUnsafe = regexp.MustCompile(`[^a-z0-9-]+`)
+
+// PreviewDatabaseName derives a per-preview logical database name from the
+// parent app's database name and the PR number: lowercased, every run of
+// characters outside [a-z0-9-] collapsed to a single '-', trimmed, then
+// "-pr<N>" appended, capped at the 63-byte Kubernetes DNS-label limit (the
+// Database CR's metadata.name IS the PG database name for provider-sql, and
+// that name also has to be a valid k8s object name).
+//
+// build-agent/internal/db/preview.go's previewDatabaseName MUST mirror this
+// function byte-for-byte: build-agent computes the same name synchronously
+// (to rewrite DATABASE_URL before gitops-agent's async CreatePreviewEnv
+// operation even runs) and the two must never disagree about what the
+// preview database is called.
+func PreviewDatabaseName(parentDatabase string, prNumber int) string {
+	suffix := fmt.Sprintf("-pr%d", prNumber)
+	base := strings.ToLower(parentDatabase)
+	base = previewDBNameUnsafe.ReplaceAllString(base, "-")
+	for strings.Contains(base, "--") {
+		base = strings.ReplaceAll(base, "--", "-")
+	}
+	base = strings.Trim(base, "-")
+	max := 63 - len(suffix)
+	if len(base) > max {
+		base = strings.TrimRight(base[:max], "-")
+	}
+	return base + suffix
 }
 
 // StandaloneOwnerApp builds the per-project chart that owns standalone

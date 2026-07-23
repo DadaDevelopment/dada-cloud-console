@@ -4,9 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"time"
 
+	"github.com/dada-tuda/console/gitops-agent/internal/crypto"
 	"github.com/dada-tuda/console/gitops-agent/internal/db"
+	"github.com/dada-tuda/console/gitops-agent/internal/git"
 	"github.com/dada-tuda/console/gitops-agent/internal/renderer"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -37,11 +40,24 @@ var previewLimitRange = renderer.LimitRangeSpec{
 // migration 014. Steps:
 //  1. insert/ensure the environments row (type=preview, is_ephemeral, namespace,
 //     git_repo_id, pr_number, pr_head_branch, parent_env_id, expires_at).
-//  2. render a tight namespace policy (ResourceQuota + LimitRange) into git.
-//  3. copy env_vars from parent_env_id into the new environment_id.
+//  2. look up the parent app's ServiceDatabaseV2(s) (if any) and derive the
+//     preview's own per-preview logical database name(s) from them.
+//  3. copy env_vars from parent_env_id into the new environment_id, rewriting
+//     any DATABASE_URL-shaped value that points at a parent database found in
+//     step 2 to the preview's own database (P0 fix: previews of a singleton app
+//     used to inherit the SAME parent DATABASE_URL verbatim, so every preview
+//     past the first collided on the app's own advisory lock / unique
+//     constraints against the shared database and CrashLooped).
+//  4. render a tight namespace policy (ResourceQuota + LimitRange) into git,
+//     plus — for every database found in step 2 — a raw provider-sql Database
+//     CR owned by the PARENT's existing PG role (so it needs no secret of its
+//     own and the rewritten DATABASE_URL's user/password stay valid), upserted
+//     into the preview app's resources.values.yaml so the existing preview
+//     teardown (removing that file) also prunes the database via Argo.
 //
 // Field names in the payload MUST match what the backend writes:
-// env_name, namespace, git_repo_id, pr_number, head_branch, parent_env_id.
+// env_name, namespace, git_repo_id, pr_number, head_branch, parent_env_id,
+// app_name.
 func (w *DBWatcher) doCreatePreviewEnv(ctx context.Context, op db.Operation) error {
 	var p struct {
 		EnvName     string  `json:"env_name"`
@@ -50,6 +66,7 @@ func (w *DBWatcher) doCreatePreviewEnv(ctx context.Context, op db.Operation) err
 		PRNumber    *int    `json:"pr_number"`
 		HeadBranch  string  `json:"head_branch"`
 		ParentEnvID *string `json:"parent_env_id"`
+		AppName     string  `json:"app_name"`
 	}
 	if err := json.Unmarshal(op.Payload, &p); err != nil {
 		return fmt.Errorf("parse payload: %w", err)
@@ -92,10 +109,26 @@ func (w *DBWatcher) doCreatePreviewEnv(ctx context.Context, op db.Operation) err
 		return fmt.Errorf("insert preview environment: %w", err)
 	}
 
-	// Copy env_vars from the parent environment so the preview inherits config.
-	// Values stay encrypted (ciphertext copied verbatim — no decrypt needed).
+	// Find the parent app's ServiceDatabaseV2(s) (if any) and derive this
+	// preview's own database name(s) from them. Empty when the app has no
+	// managed database, or the payload is missing app_name/pr_number (older
+	// callers) — copyPreviewEnvVars then falls back to its plain verbatim copy.
+	var previewDBs []previewDatabaseInfo
+	if parentEnvID != nil && p.AppName != "" && p.PRNumber != nil {
+		previewDBs, err = w.parentServiceDatabases(ctx, op.ProjectID, *parentEnvID, p.AppName, *p.PRNumber)
+		if err != nil {
+			return err
+		}
+	}
+	dbRewrites := make(map[string]string, len(previewDBs))
+	for _, d := range previewDBs {
+		dbRewrites[d.ParentDatabase] = d.PreviewDatabase
+	}
+
+	// Copy env_vars from the parent environment so the preview inherits config,
+	// rewriting any DATABASE_URL pointing at a database from previewDBs.
 	if parentEnvID != nil {
-		if err := copyPreviewEnvVars(ctx, w.pool, envID, *parentEnvID); err != nil {
+		if err := copyPreviewEnvVars(ctx, w.pool, envID, *parentEnvID, w.cfg.EncryptionKey, dbRewrites); err != nil {
 			return err
 		}
 	}
@@ -117,13 +150,111 @@ func (w *DBWatcher) doCreatePreviewEnv(ctx context.Context, op db.Operation) err
 		return err
 	}
 	policyPath := renderer.NamespacePolicyGitPath(p.Namespace)
+	files := []git.FileChange{{Path: policyPath, Content: policyYAML}}
+
+	// For every parent database found, provision the preview's own Database CR
+	// (owned by the parent's existing PG role) into the preview app's
+	// resources.values.yaml, auto-creating that app's stub if it does not exist
+	// yet (the real deploy that follows fills it in properly).
+	if len(previewDBs) > 0 {
+		projectName, _, _, err := w.projectEnv(ctx, op.ProjectID, &envID)
+		if err != nil {
+			return fmt.Errorf("project/env lookup: %w", err)
+		}
+		appFiles, err := w.ensureAppExists(mgr, projectName, p.EnvName, p.AppName, p.Namespace, op.ID.String())
+		if err != nil {
+			return err
+		}
+		files = append(files, appFiles...)
+		if len(appFiles) > 0 {
+			summaryJSON, _ := json.Marshal(map[string]any{"name": p.AppName, "kind": "App"})
+			if err := db.UpsertSnapshot(ctx, w.pool, op.ProjectID, &envID, "App", p.AppName, "Pending", summaryJSON, time.Now()); err != nil {
+				log.Warn().Err(err).Str("app", p.AppName).Msg("upsert preview owner app snapshot")
+			}
+		}
+
+		var dbYAMLs []string
+		for _, d := range previewDBs {
+			dbYAML, err := renderer.RenderPreviewDatabase(renderer.PreviewDatabaseSpec{
+				Name:        d.PreviewDatabase,
+				Owner:       renderer.PreviewDatabaseOwnerRole(d.ParentServiceDatabaseName),
+				ProjectSlug: projectName,
+				EnvSlug:     p.EnvName,
+				OperationID: op.ID.String(),
+			})
+			if err != nil {
+				return err
+			}
+			dbYAMLs = append(dbYAMLs, dbYAML)
+
+			summaryJSON, _ := json.Marshal(map[string]any{
+				"name":     d.PreviewDatabase,
+				"kind":     "ServiceDatabaseV2",
+				"app_ref":  p.AppName,
+				"database": d.PreviewDatabase,
+				"status":   "Pending",
+				"preview":  true,
+			})
+			if err := db.UpsertSnapshot(ctx, w.pool, op.ProjectID, &envID, "ServiceDatabaseV2", d.PreviewDatabase, "Pending", summaryJSON, time.Now()); err != nil {
+				log.Warn().Err(err).Str("db", d.PreviewDatabase).Msg("upsert preview database snapshot")
+			}
+		}
+		valuesPath := renderer.AppResourcesValuesGitPath(projectName, p.EnvName, p.AppName)
+		manifestFile, err := upsertManifestsFile(mgr, valuesPath, dbYAMLs...)
+		if err != nil {
+			return err
+		}
+		files = append(files, manifestFile)
+	}
+
 	commitMsg := fmt.Sprintf(
 		"[DADA Console] Create preview env %s (PR #%s)\n\nOperation: %s\nProject: %s\nNamespace: %s\n",
 		p.EnvName, prNumberStr(p.PRNumber), op.ID, op.ProjectID, p.Namespace,
 	)
 	log.Info().Str("env", p.EnvName).Str("ns", p.Namespace).Str("env_id", envID.String()).
-		Msg("provisioned preview environment")
-	return w.commitAndRecord(ctx, op, mgr, policyPath, policyYAML, commitMsg)
+		Int("preview_databases", len(previewDBs)).Msg("provisioned preview environment")
+	return w.commitFilesAndRecord(ctx, op, mgr, policyPath, files, commitMsg)
+}
+
+// previewDatabaseInfo pairs a parent app's ServiceDatabaseV2 with the derived
+// name of this preview's own copy of it.
+type previewDatabaseInfo struct {
+	ParentServiceDatabaseName string
+	ParentDatabase            string
+	PreviewDatabase           string
+}
+
+// parentServiceDatabases finds every ServiceDatabaseV2 the given app owns in
+// the parent environment and derives this preview's own database name for
+// each (renderer.PreviewDatabaseName). Returns an empty slice (not an error)
+// when the app has no managed database — the common case.
+func (w *DBWatcher) parentServiceDatabases(ctx context.Context, projectID, parentEnvID uuid.UUID, appName string, prNumber int) ([]previewDatabaseInfo, error) {
+	rows, err := w.pool.Query(ctx, `
+		SELECT name, summary_json->>'database'
+		FROM resource_snapshots
+		WHERE project_id = $1 AND environment_id = $2 AND kind = 'ServiceDatabaseV2'
+		AND summary_json->>'app_ref' = $3
+	`, projectID, parentEnvID, appName)
+	if err != nil {
+		return nil, fmt.Errorf("query parent service databases: %w", err)
+	}
+	defer rows.Close()
+	var out []previewDatabaseInfo
+	for rows.Next() {
+		var name, database string
+		if err := rows.Scan(&name, &database); err != nil {
+			return nil, fmt.Errorf("scan parent service database: %w", err)
+		}
+		if database == "" {
+			continue
+		}
+		out = append(out, previewDatabaseInfo{
+			ParentServiceDatabaseName: name,
+			ParentDatabase:            database,
+			PreviewDatabase:           renderer.PreviewDatabaseName(database, prNumber),
+		})
+	}
+	return out, rows.Err()
 }
 
 // copyPreviewEnvVars seeds previewEnvID's env_vars from parentEnvID's env_vars,
@@ -134,7 +265,22 @@ func (w *DBWatcher) doCreatePreviewEnv(ctx context.Context, op db.Operation) err
 // build-agent's EnsurePreviewEnv (build-agent/internal/db/preview.go) byte for
 // byte so the synchronous webhook insert and this async idempotent re-run can
 // never disagree about the preview env's shape.
-func copyPreviewEnvVars(ctx context.Context, pool *pgxpool.Pool, previewEnvID, parentEnvID uuid.UUID) error {
+//
+// When dbRewrites is empty this is a pure ciphertext copy (no decrypt needed —
+// the common case, most previews have no managed database). When dbRewrites is
+// non-empty (parentDatabase -> previewDatabase) every value is decrypted,
+// scanned for a "/<parentDatabase>" path segment (the shape a DATABASE_URL
+// takes), rewritten to the preview's own database, and re-encrypted before
+// insert — the P0 fix so a preview stops sharing the parent's live connection
+// string (and therefore its advisory locks / unique constraints).
+func copyPreviewEnvVars(ctx context.Context, pool *pgxpool.Pool, previewEnvID, parentEnvID uuid.UUID, encryptionKey string, dbRewrites map[string]string) error {
+	if len(dbRewrites) == 0 {
+		return copyPreviewEnvVarsVerbatim(ctx, pool, previewEnvID, parentEnvID)
+	}
+	return copyPreviewEnvVarsRewritten(ctx, pool, previewEnvID, parentEnvID, encryptionKey, dbRewrites)
+}
+
+func copyPreviewEnvVarsVerbatim(ctx context.Context, pool *pgxpool.Pool, previewEnvID, parentEnvID uuid.UUID) error {
 	if _, err := pool.Exec(ctx, `
 		INSERT INTO env_vars
 			(environment_id, app_name, key, value_encrypted, is_secret, scope)
@@ -170,6 +316,118 @@ func copyPreviewEnvVars(ctx context.Context, pool *pgxpool.Pool, previewEnvID, p
 		return fmt.Errorf("copy preview-only overrides: %w", err)
 	}
 	return nil
+}
+
+// previewCopyRow is one env_vars row about to be inserted for the preview
+// environment, decrypted so its value can be rewritten in Go before it goes
+// back into the database re-encrypted.
+type previewCopyRow struct {
+	appName  string
+	key      string
+	enc      []byte
+	isSecret bool
+	scope    string
+}
+
+func copyPreviewEnvVarsRewritten(ctx context.Context, pool *pgxpool.Pool, previewEnvID, parentEnvID uuid.UUID, encryptionKey string, dbRewrites map[string]string) error {
+	var rows []previewCopyRow
+
+	mergedRows, err := pool.Query(ctx, `
+		SELECT e.app_name, e.key,
+		       COALESCE(o.value_encrypted, e.value_encrypted),
+		       COALESCE(o.is_secret, e.is_secret),
+		       e.scope
+		FROM env_vars e
+		LEFT JOIN preview_env_overrides o
+			ON o.environment_id = e.environment_id
+			AND o.app_name = e.app_name
+			AND o.key = e.key
+		WHERE e.environment_id = $1
+	`, parentEnvID)
+	if err != nil {
+		return fmt.Errorf("query parent env_vars: %w", err)
+	}
+	for mergedRows.Next() {
+		var r previewCopyRow
+		if err := mergedRows.Scan(&r.appName, &r.key, &r.enc, &r.isSecret, &r.scope); err != nil {
+			mergedRows.Close()
+			return fmt.Errorf("scan env_var: %w", err)
+		}
+		rows = append(rows, r)
+	}
+	if err := mergedRows.Err(); err != nil {
+		mergedRows.Close()
+		return fmt.Errorf("iterate parent env_vars: %w", err)
+	}
+	mergedRows.Close()
+
+	overrideOnlyRows, err := pool.Query(ctx, `
+		SELECT o.app_name, o.key, o.value_encrypted, o.is_secret
+		FROM preview_env_overrides o
+		WHERE o.environment_id = $1
+		AND NOT EXISTS (
+			SELECT 1 FROM env_vars e
+			WHERE e.environment_id = o.environment_id
+			AND e.app_name = o.app_name
+			AND e.key = o.key
+		)
+	`, parentEnvID)
+	if err != nil {
+		return fmt.Errorf("query override-only env_vars: %w", err)
+	}
+	for overrideOnlyRows.Next() {
+		r := previewCopyRow{scope: "runtime"}
+		if err := overrideOnlyRows.Scan(&r.appName, &r.key, &r.enc, &r.isSecret); err != nil {
+			overrideOnlyRows.Close()
+			return fmt.Errorf("scan override-only env_var: %w", err)
+		}
+		rows = append(rows, r)
+	}
+	if err := overrideOnlyRows.Err(); err != nil {
+		overrideOnlyRows.Close()
+		return fmt.Errorf("iterate override-only env_vars: %w", err)
+	}
+	overrideOnlyRows.Close()
+
+	for _, r := range rows {
+		plain, err := crypto.DecryptToken(encryptionKey, r.enc)
+		if err != nil {
+			return fmt.Errorf("decrypt env_var %s/%s: %w", r.appName, r.key, err)
+		}
+		rewritten := rewriteDatabaseNames(plain, dbRewrites)
+		outEnc := r.enc
+		if rewritten != plain {
+			outEnc, err = crypto.EncryptToken(encryptionKey, rewritten)
+			if err != nil {
+				return fmt.Errorf("encrypt env_var %s/%s: %w", r.appName, r.key, err)
+			}
+		}
+		if _, err := pool.Exec(ctx, `
+			INSERT INTO env_vars (environment_id, app_name, key, value_encrypted, is_secret, scope)
+			VALUES ($1, $2, $3, $4, $5, $6)
+			ON CONFLICT (environment_id, app_name, key) DO NOTHING
+		`, previewEnvID, r.appName, r.key, outEnc, r.isSecret, r.scope); err != nil {
+			return fmt.Errorf("insert preview env_var %s/%s: %w", r.appName, r.key, err)
+		}
+	}
+	return nil
+}
+
+// rewriteDatabaseNames replaces every "/<old>" path segment in value (the
+// shape a database name takes at the end of a DATABASE_URL / DSN) with
+// "/<new>" for each (old, new) pair in rewrites. A value with no match is
+// returned unchanged. Kept a pure string function (no regexp precompilation)
+// since rewrites is always tiny (one entry per managed database an app has,
+// almost always 0 or 1).
+func rewriteDatabaseNames(value string, rewrites map[string]string) string {
+	for old, next := range rewrites {
+		if old == "" || next == "" || old == next {
+			continue
+		}
+		re := regexp.MustCompile(`/` + regexp.QuoteMeta(old) + `(\?|$)`)
+		value = re.ReplaceAllString(value, "/"+next+"$1")
+	}
+	return value
 }
 
 // doDeletePreviewEnv tears down a preview environment: for each app in the env it
