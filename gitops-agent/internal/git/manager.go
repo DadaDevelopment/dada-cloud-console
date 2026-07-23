@@ -177,6 +177,10 @@ func (m *Manager) writeFilesCommitPush(files []FileChange, commitMessage, author
 		return "", err
 	}
 
+	if err := m.resetToRemoteHead(repo, wt); err != nil {
+		return "", err
+	}
+
 	for _, file := range files {
 		absPath := filepath.Join(m.path, file.Path)
 		if err := os.MkdirAll(filepath.Dir(absPath), 0o755); err != nil {
@@ -212,6 +216,36 @@ func (m *Manager) writeFilesCommitPush(files []FileChange, commitMessage, author
 	}
 
 	return hash.String(), nil
+}
+
+// resetToRemoteHead fetches the tracked branch and hard-resets the worktree,
+// index, and local branch to the freshly fetched remote HEAD. go-git's
+// wt.Commit commits the ENTIRE index, so any stale staged edit left in the
+// long-lived PVC clone would silently ride along with an unrelated commit and
+// roll back files nobody touched (incident 2026-07-23: bootstrap commit
+// reverted prod image pins). Every commit therefore starts from a worktree
+// that is bit-for-bit identical to the remote branch.
+func (m *Manager) resetToRemoteHead(repo *gogit.Repository, wt *gogit.Worktree) error {
+	if err := repo.Fetch(&gogit.FetchOptions{
+		Auth:       m.auth(),
+		RemoteName: "origin",
+		RefSpecs: []config.RefSpec{
+			config.RefSpec(fmt.Sprintf("+refs/heads/%s:refs/remotes/origin/%s", m.cfg.Branch, m.cfg.Branch)),
+		},
+		Force: true,
+	}); err != nil && err != gogit.NoErrAlreadyUpToDate {
+		return fmt.Errorf("fetch before commit: %w", err)
+	}
+
+	ref, err := repo.Reference(plumbing.NewRemoteReferenceName("origin", m.cfg.Branch), true)
+	if err != nil {
+		return fmt.Errorf("resolving remote HEAD before commit: %w", err)
+	}
+
+	if err := wt.Reset(&gogit.ResetOptions{Mode: gogit.HardReset, Commit: ref.Hash()}); err != nil {
+		return fmt.Errorf("hard reset to remote HEAD %s: %w", ref.Hash(), err)
+	}
+	return nil
 }
 
 // RemoteHEAD returns the current remote HEAD SHA without modifying the local clone.
@@ -450,6 +484,9 @@ func (m *Manager) PreviousFileContent(relativePath string) (string, error) {
 }
 
 func (m *Manager) auth() *http.BasicAuth {
+	if m.cfg.Username == "" && m.cfg.Token == "" {
+		return nil
+	}
 	return &http.BasicAuth{Username: m.cfg.Username, Password: m.cfg.Token}
 }
 
