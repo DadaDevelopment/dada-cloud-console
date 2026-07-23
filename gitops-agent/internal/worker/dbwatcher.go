@@ -305,6 +305,10 @@ func (w *DBWatcher) dispatch(ctx context.Context, op db.Operation) error {
 		return w.doAdoptComposeStack(ctx, op)
 	case "RollbackStack":
 		return w.doRollbackStack(ctx, op)
+	case "UpdateComposeConfig":
+		return w.doUpdateComposeConfig(ctx, op)
+	case "UpdateComposeVolume":
+		return w.doUpdateComposeVolume(ctx, op)
 	default:
 		return fmt.Errorf("unknown action: %s", op.Action)
 	}
@@ -1560,6 +1564,101 @@ func (w *DBWatcher) updateComposeAppImage(ctx context.Context, op db.Operation, 
 		desired = map[string]any{}
 	}
 	desired["image"] = image
+	cur["desired"] = desired
+	cur["runtime"] = "compose"
+	cur["status"] = "Pending"
+	updatedJSON, _ := json.Marshal(cur)
+	if err := db.UpsertSnapshot(ctx, w.pool,
+		op.ProjectID, op.EnvironmentID, "App", appName, "Pending", updatedJSON, time.Now(),
+	); err != nil {
+		return err
+	}
+	return w.renderEnvAggregate(ctx, op, op.ProjectID, op.EnvironmentID)
+}
+
+// doUpdateComposeConfig patches a compose (VM) app's desired service spec (image
+// + published ports) in the snapshot and re-assembles the environment's
+// aggregate stack. For an adopted app it also patches the verbatim compose block
+// so the change survives (that block takes precedence over the flat fields).
+func (w *DBWatcher) doUpdateComposeConfig(ctx context.Context, op db.Operation) error {
+	var p struct {
+		AppName string   `json:"app_name"`
+		Image   string   `json:"image"`
+		Ports   []string `json:"ports"`
+	}
+	if err := json.Unmarshal(op.Payload, &p); err != nil {
+		return fmt.Errorf("parse payload: %w", err)
+	}
+	cur, err := w.loadComposeSnapshot(ctx, op, p.AppName)
+	if err != nil {
+		return err
+	}
+	desired := composeDesiredMap(cur)
+	if p.Image != "" {
+		desired["image"] = p.Image
+	}
+	desired["ports"] = p.Ports
+	if compose, ok := desired["compose"].(map[string]any); ok && compose != nil {
+		if p.Image != "" {
+			compose["image"] = p.Image
+		}
+		compose["ports"] = p.Ports
+		desired["compose"] = compose
+	}
+	return w.saveComposeSnapshotAndRender(ctx, op, p.AppName, cur, desired)
+}
+
+// doUpdateComposeVolume sets a compose (VM) app service's named-volume mounts on
+// desired.volumes and re-assembles the aggregate; RenderAggregateCompose
+// re-derives the external-volume pins so existing data is preserved.
+func (w *DBWatcher) doUpdateComposeVolume(ctx context.Context, op db.Operation) error {
+	var p struct {
+		AppName string   `json:"app_name"`
+		Volumes []string `json:"volumes"`
+	}
+	if err := json.Unmarshal(op.Payload, &p); err != nil {
+		return fmt.Errorf("parse payload: %w", err)
+	}
+	cur, err := w.loadComposeSnapshot(ctx, op, p.AppName)
+	if err != nil {
+		return err
+	}
+	desired := composeDesiredMap(cur)
+	desired["volumes"] = p.Volumes
+	if compose, ok := desired["compose"].(map[string]any); ok && compose != nil {
+		compose["volumes"] = p.Volumes
+		desired["compose"] = compose
+	}
+	return w.saveComposeSnapshotAndRender(ctx, op, p.AppName, cur, desired)
+}
+
+// loadComposeSnapshot reads an app's summary_json into a mutable map.
+func (w *DBWatcher) loadComposeSnapshot(ctx context.Context, op db.Operation, appName string) (map[string]any, error) {
+	var summaryRaw []byte
+	if err := w.pool.QueryRow(ctx, `
+		SELECT summary_json FROM resource_snapshots
+		WHERE project_id=$1 AND environment_id=$2 AND kind='App' AND name=$3
+	`, op.ProjectID, op.EnvironmentID, appName).Scan(&summaryRaw); err != nil {
+		return nil, fmt.Errorf("loading app snapshot: %w", err)
+	}
+	cur := map[string]any{}
+	_ = json.Unmarshal(summaryRaw, &cur)
+	return cur, nil
+}
+
+// composeDesiredMap returns the mutable desired.* block of a snapshot map,
+// initialising it when absent.
+func composeDesiredMap(cur map[string]any) map[string]any {
+	desired, _ := cur["desired"].(map[string]any)
+	if desired == nil {
+		desired = map[string]any{}
+	}
+	return desired
+}
+
+// saveComposeSnapshotAndRender persists the patched desired block on the app
+// snapshot (marking it Pending/compose) and re-renders the environment stack.
+func (w *DBWatcher) saveComposeSnapshotAndRender(ctx context.Context, op db.Operation, appName string, cur, desired map[string]any) error {
 	cur["desired"] = desired
 	cur["runtime"] = "compose"
 	cur["status"] = "Pending"

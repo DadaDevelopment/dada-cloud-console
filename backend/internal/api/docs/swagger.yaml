@@ -546,6 +546,22 @@ definitions:
       profile:
         type: string
     type: object
+  api.updateComposeConfigRequest:
+    properties:
+      image:
+        type: string
+      ports:
+        items:
+          type: string
+        type: array
+    type: object
+  api.updateComposeVolumeRequest:
+    properties:
+      volumes:
+        items:
+          type: string
+        type: array
+    type: object
   api.uploadSourceDetect:
     properties:
       framework:
@@ -3722,6 +3738,140 @@ paths:
       summary: Fire a DadaAgent cloud task for an app
       tags:
       - cloud-tasks
+  /projects/{projectId}/environments/{envId}/apps/{appName}/compose-config:
+    patch:
+      consumes:
+      - application/json
+      description: 'Patches the image and published ports of a compose (VM) app''s
+        service in the environment''s aggregate stack. VM (compose) apps only. Asynchronous:
+        returns 202 with an operation; poll until terminal.'
+      operationId: updateComposeConfig
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      - description: Environment UUID
+        in: path
+        name: envId
+        required: true
+        type: string
+      - description: App name
+        in: path
+        name: appName
+        required: true
+        type: string
+      - description: Compose service config
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/api.updateComposeConfigRequest'
+      produces:
+      - application/json
+      responses:
+        "202":
+          description: object with the accepted operation
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Update a compose app's service config
+      tags:
+      - app
+  /projects/{projectId}/environments/{envId}/apps/{appName}/compose-volume:
+    put:
+      consumes:
+      - application/json
+      description: 'Sets the named-volume mounts (source:target) of a compose (VM)
+        app''s service and redeploys the stack. VM (compose) apps only. Asynchronous:
+        returns 202 with an operation; poll until terminal.'
+      operationId: updateComposeVolume
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      - description: Environment UUID
+        in: path
+        name: envId
+        required: true
+        type: string
+      - description: App name
+        in: path
+        name: appName
+        required: true
+        type: string
+      - description: Compose volume mounts
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/api.updateComposeVolumeRequest'
+      produces:
+      - application/json
+      responses:
+        "202":
+          description: object with the accepted operation
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Update a compose app's named-volume mounts
+      tags:
+      - app
   /projects/{projectId}/environments/{envId}/apps/{appName}/delete-impact:
     get:
       description: Merges console-tracked child resources with a live cluster scan

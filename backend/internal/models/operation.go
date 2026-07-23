@@ -108,6 +108,29 @@ type UpdateAppStoragePayload struct {
 	Volume  AppVolume `json:"volume"`
 }
 
+// UpdateComposeConfigPayload is the typed payload for UpdateComposeConfig
+// operations: patch the desired service spec of a compose (VM) app. The worker
+// merges the image/ports into the app snapshot's desired.* block (and, for an
+// adopted app, its verbatim compose block, which takes precedence) then
+// re-renders the environment's aggregate stack. This is the compose analogue of
+// the Helm values common.* editor; the source of truth is the DB snapshot, not
+// a git file.
+type UpdateComposeConfigPayload struct {
+	AppName string   `json:"app_name"`
+	Image   string   `json:"image"`
+	Ports   []string `json:"ports,omitempty"`
+}
+
+// UpdateComposeVolumePayload is the typed payload for UpdateComposeVolume
+// operations: set the named-volume mounts of a compose (VM) app's service. The
+// worker writes them to desired.volumes and re-renders the aggregate; the
+// aggregate renderer re-derives the external-volume pins so existing data is
+// preserved.
+type UpdateComposeVolumePayload struct {
+	AppName string   `json:"app_name"`
+	Volumes []string `json:"volumes"`
+}
+
 // CreateAppServerPayload is the typed payload for CreateAppServer operations.
 //
 // Mode selects the provisioning path:

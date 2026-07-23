@@ -1410,3 +1410,237 @@ func (h *Handler) RestartApp(c *gin.Context) {
 
 	c.JSON(http.StatusAccepted, gin.H{"operation": op, "message": "restart queued"})
 }
+
+type updateComposeConfigRequest struct {
+	Image string   `json:"image"`
+	Ports []string `json:"ports"`
+}
+
+// UpdateComposeConfig patches the desired service spec (image + published ports)
+// of a compose (VM) app. It is the compose analogue of the Helm values editor:
+// the source of truth is the app's resource_snapshots.desired block, so the
+// change is applied by the gitops-agent worker (patch snapshot -> re-render the
+// environment's aggregate stack), not by editing a git file directly.
+//
+// @ID          updateComposeConfig
+// @Summary     Update a compose app's service config
+// @Description Patches the image and published ports of a compose (VM) app's service in the environment's aggregate stack. VM (compose) apps only. Asynchronous: returns 202 with an operation; poll until terminal.
+// @Tags        app
+// @Accept      json
+// @Produce     json
+// @Security    BearerAuth
+// @Param       projectId path     string                     true "Project UUID"
+// @Param       envId     path     string                     true "Environment UUID"
+// @Param       appName   path     string                     true "App name"
+// @Param       body      body     updateComposeConfigRequest true "Compose service config"
+// @Success     202       {object} map[string]interface{} "object with the accepted operation"
+// @Failure     400       {object} map[string]string
+// @Failure     401       {object} map[string]string
+// @Failure     403       {object} map[string]string
+// @Failure     404       {object} map[string]string
+// @Router      /projects/{projectId}/environments/{envId}/apps/{appName}/compose-config [patch]
+func (h *Handler) UpdateComposeConfig(c *gin.Context) {
+	claims, ok := auth.GetClaims(c)
+	if !ok {
+		respondUnauthorized(c)
+		return
+	}
+	projectID, err := uuid.Parse(c.Param("projectId"))
+	if err != nil {
+		respondNotFound(c)
+		return
+	}
+	envID, err := uuid.Parse(c.Param("envId"))
+	if err != nil {
+		respondNotFound(c)
+		return
+	}
+	appName := c.Param("appName")
+
+	role, err := h.effectiveRole(c.Request.Context(), claims, projectID)
+	if err == pgx.ErrNoRows {
+		respondNotFound(c)
+		return
+	}
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, "failed to check project membership")
+		return
+	}
+	if !canWrite(role) {
+		respondForbidden(c)
+		return
+	}
+	if !h.requireVMRuntime(c, projectID, envID) {
+		return
+	}
+
+	var req updateComposeConfigRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		respondError(c, http.StatusBadRequest, err.Error())
+		return
+	}
+	req.Image = strings.TrimSpace(req.Image)
+	if req.Image == "" {
+		respondError(c, http.StatusBadRequest, "image is required")
+		return
+	}
+
+	var count int
+	if err := h.pool.QueryRow(c.Request.Context(),
+		`SELECT COUNT(*) FROM resource_snapshots
+		 WHERE project_id = $1 AND environment_id = $2 AND kind = 'App' AND name = $3`,
+		projectID, envID, appName,
+	).Scan(&count); err != nil {
+		respondError(c, http.StatusInternalServerError, "failed to check app existence")
+		return
+	}
+	if count == 0 {
+		respondNotFound(c)
+		return
+	}
+
+	payloadBytes, _ := json.Marshal(models.UpdateComposeConfigPayload{
+		AppName: appName,
+		Image:   req.Image,
+		Ports:   req.Ports,
+	})
+
+	var op models.Operation
+	row := h.pool.QueryRow(c.Request.Context(),
+		`INSERT INTO operations (actor_id, project_id, environment_id, action, resource_kind, resource_name, status, payload)
+		 VALUES ($1, $2, $3, 'UpdateComposeConfig', 'App', $4, 'Created', $5)
+		 RETURNING id, actor_id, project_id, environment_id, action, resource_kind, resource_name,
+		           status, payload, validation_result, git_commit, git_path, argo_application,
+		           error_code, error_message, created_at, updated_at`,
+		claims.UserID, projectID, envID, appName, payloadBytes,
+	)
+	if err := scanOperation(row, &op); err != nil {
+		respondError(c, http.StatusInternalServerError, "failed to create operation")
+		return
+	}
+
+	auditMeta, _ := json.Marshal(map[string]string{"app_name": appName, "image": req.Image})
+	_, _ = h.pool.Exec(c.Request.Context(),
+		`INSERT INTO audit_events (actor_id, project_id, operation_id, action, resource_kind, resource_name, metadata)
+		 VALUES ($1, $2, $3, 'UpdateComposeConfig', 'App', $4, $5)`,
+		claims.UserID, projectID, op.ID, appName, auditMeta,
+	)
+
+	c.JSON(http.StatusAccepted, gin.H{"operation": op, "message": "compose config update queued"})
+}
+
+type updateComposeVolumeRequest struct {
+	Volumes []string `json:"volumes"`
+}
+
+// UpdateComposeVolume sets the named-volume mounts of a compose (VM) app's
+// service. Like the config editor it patches the app's desired block and defers
+// to the gitops-agent worker, which re-renders the aggregate stack and
+// re-derives the external-volume pins so existing data is preserved.
+//
+// @ID          updateComposeVolume
+// @Summary     Update a compose app's named-volume mounts
+// @Description Sets the named-volume mounts (source:target) of a compose (VM) app's service and redeploys the stack. VM (compose) apps only. Asynchronous: returns 202 with an operation; poll until terminal.
+// @Tags        app
+// @Accept      json
+// @Produce     json
+// @Security    BearerAuth
+// @Param       projectId path     string                     true "Project UUID"
+// @Param       envId     path     string                     true "Environment UUID"
+// @Param       appName   path     string                     true "App name"
+// @Param       body      body     updateComposeVolumeRequest true "Compose volume mounts"
+// @Success     202       {object} map[string]interface{} "object with the accepted operation"
+// @Failure     400       {object} map[string]string
+// @Failure     401       {object} map[string]string
+// @Failure     403       {object} map[string]string
+// @Failure     404       {object} map[string]string
+// @Router      /projects/{projectId}/environments/{envId}/apps/{appName}/compose-volume [put]
+func (h *Handler) UpdateComposeVolume(c *gin.Context) {
+	claims, ok := auth.GetClaims(c)
+	if !ok {
+		respondUnauthorized(c)
+		return
+	}
+	projectID, err := uuid.Parse(c.Param("projectId"))
+	if err != nil {
+		respondNotFound(c)
+		return
+	}
+	envID, err := uuid.Parse(c.Param("envId"))
+	if err != nil {
+		respondNotFound(c)
+		return
+	}
+	appName := c.Param("appName")
+
+	role, err := h.effectiveRole(c.Request.Context(), claims, projectID)
+	if err == pgx.ErrNoRows {
+		respondNotFound(c)
+		return
+	}
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, "failed to check project membership")
+		return
+	}
+	if !canWrite(role) {
+		respondForbidden(c)
+		return
+	}
+	if !h.requireVMRuntime(c, projectID, envID) {
+		return
+	}
+
+	var req updateComposeVolumeRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		respondError(c, http.StatusBadRequest, err.Error())
+		return
+	}
+	for _, v := range req.Volumes {
+		if !strings.Contains(v, ":") || strings.HasPrefix(strings.TrimSpace(v), "/") || strings.HasPrefix(strings.TrimSpace(v), ".") {
+			respondError(c, http.StatusBadRequest, "each volume must be a named mount in source:target form (bind mounts are not allowed)")
+			return
+		}
+	}
+
+	var count int
+	if err := h.pool.QueryRow(c.Request.Context(),
+		`SELECT COUNT(*) FROM resource_snapshots
+		 WHERE project_id = $1 AND environment_id = $2 AND kind = 'App' AND name = $3`,
+		projectID, envID, appName,
+	).Scan(&count); err != nil {
+		respondError(c, http.StatusInternalServerError, "failed to check app existence")
+		return
+	}
+	if count == 0 {
+		respondNotFound(c)
+		return
+	}
+
+	payloadBytes, _ := json.Marshal(models.UpdateComposeVolumePayload{
+		AppName: appName,
+		Volumes: req.Volumes,
+	})
+
+	var op models.Operation
+	row := h.pool.QueryRow(c.Request.Context(),
+		`INSERT INTO operations (actor_id, project_id, environment_id, action, resource_kind, resource_name, status, payload)
+		 VALUES ($1, $2, $3, 'UpdateComposeVolume', 'App', $4, 'Created', $5)
+		 RETURNING id, actor_id, project_id, environment_id, action, resource_kind, resource_name,
+		           status, payload, validation_result, git_commit, git_path, argo_application,
+		           error_code, error_message, created_at, updated_at`,
+		claims.UserID, projectID, envID, appName, payloadBytes,
+	)
+	if err := scanOperation(row, &op); err != nil {
+		respondError(c, http.StatusInternalServerError, "failed to create operation")
+		return
+	}
+
+	auditMeta, _ := json.Marshal(map[string]string{"app_name": appName})
+	_, _ = h.pool.Exec(c.Request.Context(),
+		`INSERT INTO audit_events (actor_id, project_id, operation_id, action, resource_kind, resource_name, metadata)
+		 VALUES ($1, $2, $3, 'UpdateComposeVolume', 'App', $4, $5)`,
+		claims.UserID, projectID, op.ID, appName, auditMeta,
+	)
+
+	c.JSON(http.StatusAccepted, gin.H{"operation": op, "message": "compose volume update queued"})
+}
