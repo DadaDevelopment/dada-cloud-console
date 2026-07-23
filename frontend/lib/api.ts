@@ -1177,6 +1177,12 @@ export const cloudTasksApi = {
       { method: "POST", body: { task_type: taskType } },
     ),
 
+  triggerAutofix: (projectId: string, envId: string, appName: string, error: string) =>
+    apiFetch<CreateCloudTaskResponse>(
+      `/api/v1/projects/${projectId}/environments/${envId}/apps/${appName}/autofix`,
+      { method: "POST", body: { error } },
+    ),
+
   get: (projectId: string, taskId: string) =>
     apiFetch<CloudTaskResponse>(`/api/v1/projects/${projectId}/cloud-tasks/${taskId}`),
 

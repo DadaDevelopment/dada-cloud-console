@@ -258,6 +258,9 @@ export const apps: Messages = {
   "apps.deployments.rollingBack": { ru: "Откат…", en: "Rolling back…" },
   "apps.deployments.cancelBuild": { ru: "Отменить", en: "Cancel" },
   "apps.deployments.cancelingBuild": { ru: "Отмена…", en: "Canceling…" },
+  "apps.deployments.autofix": { ru: "Исправить с AI", en: "Auto-fix with AI" },
+  "apps.deployments.autofixing": { ru: "Запуск…", en: "Starting…" },
+  "apps.deployments.error.autofix": { ru: "Не удалось запустить авто-исправление", en: "Failed to start auto-fix" },
   "apps.deployments.logs": { ru: "Логи →", en: "Logs →" },
 
   "apps.settings.crumb": { ru: "Настройки", en: "Settings" },
