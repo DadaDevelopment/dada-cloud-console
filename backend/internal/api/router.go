@@ -379,6 +379,7 @@ func SetupRouter(pool *pgxpool.Pool, cfg *config.Config) *gin.Engine {
 		// Builds (imperative — no operations). Scope-gated per ADR-009 vocabulary.
 		api.GET("/projects/:projectId/environments/:envId/apps/:appName/builds", auth.RequireScope("builds:read"), h.ListBuilds)
 		api.POST("/projects/:projectId/environments/:envId/apps/:appName/builds", auth.RequireScope("builds:write"), h.TriggerBuild)
+		api.POST("/projects/:projectId/environments/:envId/apps/:appName/source-archive", auth.RequireScope("builds:write"), h.UploadSourceArchive)
 		api.GET("/projects/:projectId/builds/:buildId", auth.RequireScope("builds:read"), h.GetBuild)
 		api.POST("/projects/:projectId/builds/:buildId/cancel", auth.RequireScope("builds:write"), h.CancelBuild)
 		api.POST("/projects/:projectId/builds/:buildId/logs-token", auth.RequireScope("builds:read"), h.GetBuildLogsToken)

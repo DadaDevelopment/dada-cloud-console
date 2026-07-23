@@ -131,6 +131,19 @@ type Config struct {
 	// DB_BACKUP_PROFILE's prefix.
 	DBBackupS3Prefix string // DB_BACKUP_S3_PREFIX
 
+	// S3 access for upload-deploy (docs/plans/2026-07-23-upload-deploy.md):
+	// where UploadSourceArchive stores the uploaded archive bytes, keyed
+	// "source-uploads/<projectID>/<appName>/<uploadID>.<ext>". build-agent
+	// reads the same env-var family to presign a GET against the same
+	// object (build-agent/internal/worker/archivesource.go). Empty
+	// endpoint/bucket/keys disables uploads (503).
+	SourceUploadS3Endpoint  string
+	SourceUploadS3Bucket    string
+	SourceUploadS3Region    string
+	SourceUploadS3AccessKey string
+	SourceUploadS3SecretKey string
+	SourceUploadS3Insecure  bool
+
 	// Portainer live-state proxy (read-only). Both must be set to enable the VM
 	// /state and /logs endpoints. Same values the portainer-agent uses.
 	PortainerURL      string // PORTAINER_URL
@@ -429,6 +442,12 @@ func Load() (*Config, error) {
 		DBBackupS3SecretKey:       getEnv("DB_BACKUP_S3_SECRET_KEY", ""),
 		DBBackupS3Insecure:        getEnv("DB_BACKUP_S3_INSECURE", "false") == "true",
 		DBBackupS3Prefix:          getEnv("DB_BACKUP_S3_PREFIX", "k10/postgresql-logical"),
+		SourceUploadS3Endpoint:    getEnv("SOURCE_UPLOAD_S3_ENDPOINT", ""),
+		SourceUploadS3Bucket:      getEnv("SOURCE_UPLOAD_S3_BUCKET", ""),
+		SourceUploadS3Region:      getEnv("SOURCE_UPLOAD_S3_REGION", "us-east-1"),
+		SourceUploadS3AccessKey:   getEnv("SOURCE_UPLOAD_S3_ACCESS_KEY", ""),
+		SourceUploadS3SecretKey:   getEnv("SOURCE_UPLOAD_S3_SECRET_KEY", ""),
+		SourceUploadS3Insecure:    getEnv("SOURCE_UPLOAD_S3_INSECURE", "false") == "true",
 		PortainerURL:              getEnv("PORTAINER_URL", ""),
 		PortainerAPIToken:         getEnv("PORTAINER_API_TOKEN", ""),
 		PrometheusQueryURL:        getEnv("PROMETHEUS_QUERY_URL", ""),

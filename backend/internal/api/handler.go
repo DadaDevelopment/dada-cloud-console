@@ -89,6 +89,11 @@ type Handler struct {
 	// dump-bucket S3 access is unconfigured (download handler returns 503).
 	dbBackupPresigner cloudtask.DBBackupPresigner
 
+	// sourceUploader stores an uploaded source archive for upload-deploy
+	// (UploadSourceArchive). Never nil: disabled when SOURCE_UPLOAD_S3_* is
+	// unconfigured (upload handler returns 503).
+	sourceUploader cloudtask.SourceUploader
+
 	// billingPlans is the full plan catalog loaded once at startup from the
 	// embedded plans.yaml. Always populated (the embedded file is compiled in);
 	// handlers degrade gracefully if somehow empty.
@@ -213,6 +218,10 @@ func NewHandler(pool *pgxpool.Pool, cfg *config.Config) *Handler {
 	h.dbBackupPresigner = cloudtask.NewDBBackupPresigner(
 		cfg.DBBackupS3Endpoint, cfg.DBBackupS3Bucket, cfg.DBBackupS3Region,
 		cfg.DBBackupS3AccessKey, cfg.DBBackupS3SecretKey, cfg.DBBackupS3Insecure,
+	)
+	h.sourceUploader = cloudtask.NewSourceUploader(
+		cfg.SourceUploadS3Endpoint, cfg.SourceUploadS3Bucket, cfg.SourceUploadS3Region,
+		cfg.SourceUploadS3AccessKey, cfg.SourceUploadS3SecretKey, cfg.SourceUploadS3Insecure,
 	)
 
 	plans, err := billing.LoadPlans("")

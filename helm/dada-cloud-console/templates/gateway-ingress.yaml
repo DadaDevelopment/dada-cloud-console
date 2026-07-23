@@ -13,7 +13,7 @@ metadata:
     app.kubernetes.io/component: gateway
   annotations:
     # OTLP batches + log bodies; allow a generous request size.
-    nginx.ingress.kubernetes.io/proxy-body-size: "16m"
+    nginx.ingress.kubernetes.io/proxy-body-size: "110m"
     {{- range $key, $value := .Values.gateway.ingress.annotations }}
     {{ $key }}: {{ $value | quote }}
     {{- end }}
