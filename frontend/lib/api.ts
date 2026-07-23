@@ -391,6 +391,28 @@ export const appsApi = {
       { method: "PUT", body: volume }
     ),
 
+  updateComposeConfig: (
+    projectId: string,
+    envId: string,
+    appName: string,
+    body: { image: string; ports: string[] }
+  ) =>
+    apiFetch<{ operation: Operation; message: string }>(
+      `/api/v1/projects/${projectId}/environments/${envId}/apps/${appName}/compose-config`,
+      { method: "PATCH", body }
+    ),
+
+  updateComposeVolume: (
+    projectId: string,
+    envId: string,
+    appName: string,
+    body: { volumes: string[] }
+  ) =>
+    apiFetch<{ operation: Operation; message: string }>(
+      `/api/v1/projects/${projectId}/environments/${envId}/apps/${appName}/compose-volume`,
+      { method: "PUT", body }
+    ),
+
   updateProfile: (projectId: string, envId: string, appName: string, profile: string) =>
     apiFetch<{ operation: Operation; message: string }>(
       `/api/v1/projects/${projectId}/environments/${envId}/apps/${appName}/profile`,

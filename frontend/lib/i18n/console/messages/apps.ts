@@ -220,6 +220,47 @@ export const apps: Messages = {
   "apps.compose.pane.save": { ru: "Сохранить и передеплоить", en: "Save & redeploy" },
   "apps.compose.pane.saving": { ru: "Сохранение…", en: "Saving…" },
 
+  "apps.compose.config.title": { ru: "Образ и порты", en: "Image & ports" },
+  "apps.compose.config.subtitle": {
+    ru: "Образ контейнера и порты compose-приложения. Сохранение коммитит изменения в git и передеплоивает стек.",
+    en: "Container image and ports for this compose app. Saving commits to git and redeploys the stack.",
+  },
+  "apps.compose.config.imageHint": {
+    ru: "Полный образ с тегом, например nginx:1.27 или ghcr.io/org/app:v1",
+    en: "Full image with a tag, e.g. nginx:1.27 or ghcr.io/org/app:v1",
+  },
+  "apps.compose.config.ports.label": { ru: "Порты", en: "Ports" },
+  "apps.compose.config.ports.hint": {
+    ru: "host:container, например 8080:80. Можно оставить пустым, если публичный порт не нужен.",
+    en: "host:container, e.g. 8080:80. Leave empty if no public port is needed.",
+  },
+  "apps.compose.config.invalid.image": { ru: "Укажите образ", en: "Image is required" },
+  "apps.compose.config.invalid.port": { ru: "Порт должен быть в виде 8080:80 или 80", en: "Port must look like 8080:80 or 80" },
+  "apps.compose.config.queued": { ru: "Конфигурация обновлена, передеплой запущен", en: "Config updated, redeploy queued" },
+  "apps.compose.config.error": { ru: "Не удалось обновить конфигурацию", en: "Failed to update config" },
+
+  "apps.compose.volume.title": { ru: "Тома", en: "Volumes" },
+  "apps.compose.volume.subtitle": { ru: "Именованные Docker-тома этого приложения.", en: "Named Docker volumes for this app." },
+  "apps.compose.volume.note": {
+    ru: "Это именованные тома Docker, а не пути на диске. Существующие данные сохраняются при передеплое.",
+    en: "These are named Docker volumes, not disk paths. Existing data is preserved on redeploy.",
+  },
+  "apps.compose.volume.hint": {
+    ru: "Формат source:target, например data:/var/lib/data. Bind-пути (начинающиеся с / или .) не поддерживаются.",
+    en: "Format is source:target, e.g. data:/var/lib/data. Bind paths (starting with / or .) are not supported.",
+  },
+  "apps.compose.volume.empty": { ru: "Тома не заданы", en: "No volumes configured" },
+  "apps.compose.volume.invalid.format": {
+    ru: "Каждый том должен быть в формате source:target",
+    en: "Each volume must be in source:target form",
+  },
+  "apps.compose.volume.invalid.bind": {
+    ru: "Bind-монтирования не поддерживаются — используйте именованный том (не начинается с / или .)",
+    en: "Bind mounts are not supported — use a named volume (must not start with / or .)",
+  },
+  "apps.compose.volume.queued": { ru: "Тома обновлены, передеплой запущен", en: "Volumes updated, redeploy queued" },
+  "apps.compose.volume.error": { ru: "Не удалось обновить тома", en: "Failed to update volumes" },
+
   "apps.deployments.crumb": { ru: "Деплои", en: "Deployments" },
   "apps.deployments.heading.suffix": { ru: "/ deployments", en: "/ deployments" },
   "apps.deployments.trigger": { ru: "Запустить сборку", en: "Trigger build" },

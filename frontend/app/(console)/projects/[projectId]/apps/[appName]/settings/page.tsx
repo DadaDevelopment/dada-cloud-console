@@ -12,6 +12,8 @@ import { HostnamesManager } from "@/components/deploy/hostnames-manager";
 import { StorageManager } from "@/components/deploy/storage-manager";
 import { ResourceManager } from "@/components/deploy/resource-manager";
 import { CommonConfigEditor } from "@/components/deploy/common-config-editor";
+import { ComposeConfigEditor } from "@/components/deploy/compose-config-editor";
+import { ComposeVolumeEditor } from "@/components/deploy/compose-volume-editor";
 import { useT } from "@/lib/i18n/console/context";
 
 type Tab = "env" | "config" | "git" | "domains" | "storage" | "resources";
@@ -20,8 +22,10 @@ export default function AppSettingsPage() {
   const params = useParams<{ projectId: string; appName: string }>();
   const { projectId, appName } = params;
   const searchParams = useSearchParams();
-  const { selectedEnv, role } = useProjectContext();
+  const { environments, selectedEnv, role } = useProjectContext();
   const envId = searchParams.get("envId") || selectedEnv?.id || "";
+  const activeEnv = environments.find((e) => e.id === envId) ?? selectedEnv;
+  const isVM = activeEnv?.runtime === "vm";
   const { t } = useT();
 
   const initialTab = ((): Tab => {
@@ -39,14 +43,24 @@ export default function AppSettingsPage() {
       .catch(() => setVerifiedApexes([]));
   }, [projectId]);
 
-  const tabs: { key: Tab; label: string }[] = [
-    { key: "env", label: t("apps.settings.tab.env") },
-    { key: "config", label: t("apps.settings.tab.config") },
-    { key: "git", label: t("apps.settings.tab.git") },
-    { key: "storage", label: t("apps.settings.tab.storage") },
-    { key: "resources", label: t("apps.settings.tab.resources") },
-    { key: "domains", label: t("apps.settings.tab.domains") },
-  ];
+  const validTabsForVM: Tab[] = ["env", "config", "storage", "git"];
+  const effectiveTab: Tab = isVM && !validTabsForVM.includes(tab) ? "env" : tab;
+
+  const tabs: { key: Tab; label: string }[] = isVM
+    ? [
+        { key: "env", label: t("apps.settings.tab.env") },
+        { key: "config", label: t("apps.settings.tab.config") },
+        { key: "storage", label: t("apps.settings.tab.storage") },
+        { key: "git", label: t("apps.settings.tab.git") },
+      ]
+    : [
+        { key: "env", label: t("apps.settings.tab.env") },
+        { key: "config", label: t("apps.settings.tab.config") },
+        { key: "git", label: t("apps.settings.tab.git") },
+        { key: "storage", label: t("apps.settings.tab.storage") },
+        { key: "resources", label: t("apps.settings.tab.resources") },
+        { key: "domains", label: t("apps.settings.tab.domains") },
+      ];
 
   return (
     <div>
@@ -72,7 +86,7 @@ export default function AppSettingsPage() {
               key={t.key}
               onClick={() => setTab(t.key)}
               className={`border-b-2 pb-3 text-sm font-medium transition-colors ${
-                tab === t.key
+                effectiveTab === t.key
                   ? "border-blue-600 text-blue-600 dark:text-blue-400"
                   : "border-transparent text-gray-500 dark:text-gray-400 hover:border-gray-300 dark:hover:border-gray-700 hover:text-gray-700 dark:hover:text-gray-200"
               }`}
@@ -83,11 +97,11 @@ export default function AppSettingsPage() {
         </nav>
       </div>
 
-      {tab === "env" && (
+      {effectiveTab === "env" && (
         <EnvVarsEditor projectId={projectId} envId={envId} appName={appName} canEdit={canEdit} />
       )}
 
-      {tab === "git" && (
+      {effectiveTab === "git" && (
         <div className="rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 px-5 py-6">
           <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">{t("apps.settings.git.title")}</h2>
           <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
@@ -110,19 +124,27 @@ export default function AppSettingsPage() {
         </div>
       )}
 
-      {tab === "config" && (
-        <CommonConfigEditor projectId={projectId} envId={envId} appName={appName} canEdit={canEdit} />
+      {effectiveTab === "config" && (
+        isVM ? (
+          <ComposeConfigEditor projectId={projectId} envId={envId} appName={appName} canEdit={canEdit} />
+        ) : (
+          <CommonConfigEditor projectId={projectId} envId={envId} appName={appName} canEdit={canEdit} />
+        )
       )}
 
-      {tab === "storage" && (
-        <StorageManager projectId={projectId} envId={envId} appName={appName} canEdit={canEdit} />
+      {effectiveTab === "storage" && (
+        isVM ? (
+          <ComposeVolumeEditor projectId={projectId} envId={envId} appName={appName} canEdit={canEdit} />
+        ) : (
+          <StorageManager projectId={projectId} envId={envId} appName={appName} canEdit={canEdit} />
+        )
       )}
 
-      {tab === "resources" && (
+      {effectiveTab === "resources" && !isVM && (
         <ResourceManager projectId={projectId} envId={envId} appName={appName} canEdit={canEdit} />
       )}
 
-      {tab === "domains" && (
+      {effectiveTab === "domains" && !isVM && (
         <HostnamesManager projectId={projectId} envId={envId} appName={appName} canEdit={canEdit} verifiedApexes={verifiedApexes} />
       )}
     </div>
