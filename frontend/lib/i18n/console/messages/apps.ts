@@ -73,6 +73,9 @@ export const apps: Messages = {
   "apps.card.agent": { ru: "Агент", en: "Agent" },
   "apps.card.prPreview": { ru: "PR #{pr}", en: "PR #{pr}" },
   "apps.card.preview": { ru: "Превью", en: "Preview" },
+  "apps.card.settings": { ru: "Настройки", en: "Settings" },
+  "apps.card.syncedLabel": { ru: "Синхронизировано", en: "Synced" },
+  "apps.row.noUrl": { ru: "У приложения пока нет URL", en: "The app has no URL yet" },
 
   "apps.modal.create.title": { ru: "Создать приложение", en: "Create Application" },
   "apps.modal.create.name.label": { ru: "Имя приложения", en: "App name" },
