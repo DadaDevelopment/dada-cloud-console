@@ -28,6 +28,7 @@ import { MoveAppModal } from "@/components/resources/move-app-modal";
 interface PreviewRow {
   env: Environment;
   url?: string;
+  previewUrl?: string;
 }
 
 function formatExpiresIn(expiresAt: string, t: (key: string, vars?: Record<string, string | number>) => string): string {
@@ -94,7 +95,7 @@ export default function AppDetailPage() {
   const [previewDeleteTarget, setPreviewDeleteTarget] = useState<Environment | null>(null);
   const [previewDeleting, setPreviewDeleting] = useState(false);
   const [previewDeleteError, setPreviewDeleteError] = useState<string | null>(null);
-  const [activePreview, setActivePreview] = useState<{ url: string; label: string } | null>(null);
+  const [activePreview, setActivePreview] = useState<{ url: string; openUrl?: string; label: string } | null>(null);
 
   const deployGoalFiredRef = useRef(false);
 
@@ -188,8 +189,8 @@ export default function AppDetailPage() {
           .then((data) => {
             const found = (data.apps ?? []).find((a) => a.name === appName);
             if (!found) return null;
-            const s = found.summary_json as { url?: string };
-            return { env, url: s.url } as PreviewRow;
+            const s = found.summary_json as { url?: string; preview_url?: string };
+            return { env, url: s.url, previewUrl: s.preview_url } as PreviewRow;
           })
           .catch(() => null)
       )
@@ -324,7 +325,7 @@ export default function AppDetailPage() {
     );
   }
 
-  const summary = app.summary_json as { image?: string; port?: number; replicas?: number; profile?: string; runtime?: string; volume?: AppVolume; repo_full_name?: string; url?: string };
+  const summary = app.summary_json as { image?: string; port?: number; replicas?: number; profile?: string; runtime?: string; volume?: AppVolume; repo_full_name?: string; url?: string; preview_url?: string };
   const isCompose = summary.runtime === "compose";
   const resType = classifyVMResource(app);
   const isResource = resType !== "app";
@@ -437,7 +438,7 @@ export default function AppDetailPage() {
 
       {!isResource && summary.url && (
         <div className="mb-6">
-          <AppPreviewPane url={summary.url} defaultOpen />
+          <AppPreviewPane url={summary.preview_url ?? summary.url} openUrl={summary.url} defaultOpen />
         </div>
       )}
 
@@ -527,7 +528,7 @@ export default function AppDetailPage() {
           <p className="text-sm text-gray-400 dark:text-gray-500">{t("previews.subtitle")}</p>
         </div>
         <div className="space-y-3">
-          {previewRows.map(({ env, url }) => (
+          {previewRows.map(({ env, url, previewUrl }) => (
             <div
               key={env.id}
               className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 px-5 py-4 shadow-sm"
@@ -555,7 +556,7 @@ export default function AppDetailPage() {
                   <>
                     <button
                       type="button"
-                      onClick={() => setActivePreview({ url, label: t("previews.pr", { n: env.pr_number ?? "?" }) })}
+                      onClick={() => setActivePreview({ url: previewUrl ?? url, openUrl: url, label: t("previews.pr", { n: env.pr_number ?? "?" }) })}
                       className="rounded-lg border border-gray-200 dark:border-gray-800 px-3 py-1.5 text-xs font-medium text-gray-700 dark:text-gray-200 hover:border-blue-300 hover:text-blue-600 transition-colors"
                     >
                       {t("previews.openPreview")}
@@ -585,7 +586,7 @@ export default function AppDetailPage() {
         </div>
         {activePreview && (
           <div className="mt-4">
-            <AppPreviewPane key={activePreview.url} url={activePreview.url} title={activePreview.label} defaultOpen />
+            <AppPreviewPane key={activePreview.url} url={activePreview.url} openUrl={activePreview.openUrl} title={activePreview.label} defaultOpen />
           </div>
         )}
       </div>

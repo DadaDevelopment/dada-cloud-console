@@ -15,6 +15,7 @@ const VIEWPORT_WIDTH: Record<Viewport, string> = {
 
 interface AppPreviewPaneProps {
   url: string;
+  openUrl?: string;
   title?: string;
   defaultOpen?: boolean;
 }
@@ -23,8 +24,14 @@ interface AppPreviewPaneProps {
  * Claude-Code-style embedded live preview: a sandboxed iframe for a deployed
  * app's URL, gated by a server-side frame-check (X-Frame-Options / CSP
  * frame-ancestors) so a blocking app shows a fallback instead of a dead frame.
+ *
+ * `url` is the iframe source — the backend hands out a preview-gate URL
+ * (*.pv.dada-tuda.ru) with frame-blocking headers scrubbed, so the check
+ * passes for any app. `openUrl` is the app's real address used for the
+ * "open in new tab" links; it defaults to `url`.
  */
-export function AppPreviewPane({ url, title, defaultOpen = false }: AppPreviewPaneProps) {
+export function AppPreviewPane({ url, openUrl, title, defaultOpen = false }: AppPreviewPaneProps) {
+  const externalUrl = openUrl ?? url;
   const { t } = useT();
   const [open, setOpen] = useState(defaultOpen);
   const [viewport, setViewport] = useState<Viewport>("full");
@@ -121,7 +128,7 @@ export function AppPreviewPane({ url, title, defaultOpen = false }: AppPreviewPa
                 {t("previewPane.reload")}
               </button>
               <a
-                href={url}
+                href={externalUrl}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 dark:border-gray-800 px-2.5 py-1.5 text-xs font-medium text-gray-600 dark:text-gray-300 hover:border-blue-300 hover:text-blue-600 transition-colors"
@@ -142,7 +149,7 @@ export function AppPreviewPane({ url, title, defaultOpen = false }: AppPreviewPa
               <p className="text-sm font-medium text-gray-700 dark:text-gray-200">{t("previewPane.blocked.title")}</p>
               <p className="max-w-sm text-xs text-gray-400 dark:text-gray-500">{t("previewPane.blocked.body")}</p>
               <a
-                href={url}
+                href={externalUrl}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="inline-flex items-center gap-1.5 text-sm font-medium text-blue-600 dark:text-blue-400 hover:underline"

@@ -52,6 +52,9 @@ type Config struct {
 	DefaultDomainEnabled bool
 	DefaultDomainBase    string
 
+	PreviewHostBase   string
+	PreviewHostSecret string
+
 	AIStudioEnabled  bool
 	MLflowBaseURL    string
 	MLflowAuthHeader string // optional, forwarded as-is on every request
@@ -408,6 +411,8 @@ func Load() (*Config, error) {
 		PlatformNameservers:       splitList(getEnv("PLATFORM_NAMESERVERS", "ns1.dada-tuda.ru,ns2.dada-tuda.ru")),
 		DefaultDomainEnabled:      getEnv("DEFAULT_DOMAIN_ENABLED", "true") == "true",
 		DefaultDomainBase:         getEnv("DEFAULT_DOMAIN_BASE", "dada-tuda.ru"),
+		PreviewHostBase:           getEnv("PREVIEW_HOST_BASE", "pv.dada-tuda.ru"),
+		PreviewHostSecret:         getEnv("PREVIEW_HOST_SECRET", getEnv("JWT_SECRET", "")),
 		AuthMode:                  getEnv("AUTH_MODE", "local"),
 		KeycloakIssuer:            getEnv("KEYCLOAK_ISSUER", "https://id.dada-tuda.ru/realms/master"),
 		KeycloakVerifyAud:         getEnv("KEYCLOAK_VERIFY_AUD", "false") == "true",

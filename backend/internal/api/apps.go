@@ -248,6 +248,7 @@ func (h *Handler) ListApps(c *gin.Context) {
 
 	FillRepoFullName(apps, repoByName)
 	SuppressNonHTTPURL(apps)
+	EnrichPreviewURL(apps, envID, h.cfg)
 
 	sort.Slice(apps, func(i, j int) bool { return apps[i].Name < apps[j].Name })
 

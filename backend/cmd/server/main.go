@@ -67,6 +67,7 @@ func main() {
 
 	// Set up HTTP router
 	router := api.SetupRouter(pool, cfg)
+	handler := api.NewPreviewGate(pool, cfg, router)
 
 	// Refresh Prometheus state gauges (operations / domain health) served at
 	// /metrics so stuck or failed operations alert the platform team.
@@ -76,7 +77,7 @@ func main() {
 
 	srv := &http.Server{
 		Addr:    ":" + cfg.Port,
-		Handler: router,
+		Handler: handler,
 	}
 
 	// Graceful shutdown
