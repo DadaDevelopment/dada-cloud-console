@@ -7,12 +7,30 @@ import (
 	"os"
 )
 
+// validateFlags rejects combining --only and --from. --from starts the plan
+// partway through by ID and --only restricts the plan to a single ID; if both
+// are set and the ID a caller passed to --only never comes at or after --from
+// in the ordered plan, the loop below skips every step and exits 0 with
+// nothing run. Erroring out up front is simpler than defining a precedence
+// rule between the two.
+func validateFlags(only, from string) error {
+	if only != "" && from != "" {
+		return fmt.Errorf("--only and --from are mutually exclusive")
+	}
+	return nil
+}
+
 func main() {
 	cfgPath := flag.String("config", "", "path to move config yaml")
 	execute := flag.Bool("execute", false, "actually run (default is dry-run)")
 	only := flag.String("only", "", "run only the step with this ID")
 	from := flag.String("from", "", "start at the step with this ID")
 	flag.Parse()
+
+	if err := validateFlags(*only, *from); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(2)
+	}
 
 	cfg, err := LoadConfig(*cfgPath)
 	if err != nil {

@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"gopkg.in/yaml.v3"
 )
 
 type safetyDumpStep struct{ cfg MoveConfig }
@@ -52,8 +54,8 @@ func (s *safetyDumpStep) Run(ctx context.Context, r CommandRunner, dryRun bool) 
 		fmt.Printf("[dry-run] would create backup ActionSet:\n%s\n", y)
 		return nil
 	}
-	if _, err := runWithStdin(ctx, r, y, "kubectl", "--context", s.cfg.BegetContext, "create", "-f", "-"); err != nil {
-		return fmt.Errorf("create backup actionset: %w", err)
+	if out, err := runWithStdin(ctx, r, y, "kubectl", "--context", s.cfg.BegetContext, "create", "-f", "-"); err != nil {
+		return fmt.Errorf("create backup actionset: %w\noutput: %s", err, out)
 	}
 	return waitActionSet(ctx, r, s.cfg.BegetContext, s.cfg.App, 15*time.Minute)
 }
@@ -81,11 +83,12 @@ func (s *longhornBackupStep) Run(ctx context.Context, r CommandRunner, dryRun bo
 		}
 		pv, err := pvNameForPVC(ctx, r, s.cfg, v.PVCName)
 		if err != nil || pv == "" {
-			return fmt.Errorf("resolve PV for %s: %w", v.PVCName, err)
+			return fmt.Errorf("resolve PV for %s: %w\noutput: %s", v.PVCName, err, pv)
 		}
-		if _, err := r.Run(ctx, "kubectl", "--context", s.cfg.BegetContext, "-n", "longhorn-system",
-			"create", "-f", "-"); err != nil {
-			return fmt.Errorf("longhorn backup %s: %w", pv, err)
+		out, err := r.Run(ctx, "kubectl", "--context", s.cfg.BegetContext, "-n", "longhorn-system",
+			"create", "-f", "-")
+		if err != nil {
+			return fmt.Errorf("longhorn backup %s: %w\noutput: %s", pv, err, out)
 		}
 	}
 	return nil
@@ -182,9 +185,10 @@ func (s *scaleDownStep) Run(ctx context.Context, r CommandRunner, dryRun bool) e
 			fmt.Printf("[dry-run] scale deploy/%s to 0 in %s\n", d, s.cfg.SrcNamespace)
 			continue
 		}
-		if _, err := r.Run(ctx, "kubectl", "--context", s.cfg.BegetContext, "-n", s.cfg.SrcNamespace,
-			"scale", "deploy", d, "--replicas=0"); err != nil {
-			return fmt.Errorf("scale %s to 0: %w", d, err)
+		out, err := r.Run(ctx, "kubectl", "--context", s.cfg.BegetContext, "-n", s.cfg.SrcNamespace,
+			"scale", "deploy", d, "--replicas=0")
+		if err != nil {
+			return fmt.Errorf("scale %s to 0: %w\noutput: %s", d, err, out)
 		}
 	}
 	return nil
@@ -202,21 +206,21 @@ func (s *volumeCopyStep) Describe() string {
 
 // Run restores the source volume's latest backup into a fresh RWX Longhorn volume
 // and materializes a static PV + target-ns PVC bound to it. The source PVC/PV are
-// left untouched (Retain) as rollback.
+// left untouched (Retain) as rollback. dryRun is checked first, before any
+// cluster read, so a plain (non-execute) run never shells out to kubectl.
 func (s *volumeCopyStep) Run(ctx context.Context, r CommandRunner, dryRun bool) error {
+	if dryRun {
+		fmt.Printf("[dry-run] restore backup of %s (PV <source-PV>) -> RWX volume %s -> PV+PVC %s in %s\n",
+			s.vol.PVCName, longhornVolumeName(s.cfg, s.vol), s.vol.PVCName, s.cfg.TargetNamespace)
+		return nil
+	}
 	srcPV, err := pvNameForPVC(ctx, r, s.cfg, s.vol.PVCName)
 	if err != nil || srcPV == "" {
-		if dryRun {
-			srcPV = "<source-PV>"
-		} else {
-			return fmt.Errorf("resolve source PV for %s: %w", s.vol.PVCName, err)
-		}
+		return fmt.Errorf("resolve source PV for %s: %w\noutput: %s", s.vol.PVCName, err, srcPV)
 	}
-	sizeBytes := "2147483648"
-	if dryRun {
-		fmt.Printf("[dry-run] restore backup of %s (PV %s) -> RWX volume %s -> PV+PVC %s in %s\n",
-			s.vol.PVCName, srcPV, longhornVolumeName(s.cfg, s.vol), s.vol.PVCName, s.cfg.TargetNamespace)
-		return nil
+	sizeBytes, err := pvcSizeForPVC(ctx, r, s.cfg, s.vol.PVCName)
+	if err != nil || sizeBytes == "" {
+		return fmt.Errorf("resolve size for %s: %w\noutput: %s", s.vol.PVCName, err, sizeBytes)
 	}
 	backupName, err := latestBackupForPV(ctx, r, s.cfg, srcPV)
 	if err != nil {
@@ -227,11 +231,18 @@ func (s *volumeCopyStep) Run(ctx context.Context, r CommandRunner, dryRun bool) 
 		restorePVYAML(s.cfg, s.vol, sizeBytes),
 		restorePVCYAML(s.cfg, s.vol, sizeBytes),
 	} {
-		if _, err := runWithStdin(ctx, r, y, "kubectl", "--context", s.cfg.BegetContext, "apply", "-f", "-"); err != nil {
-			return fmt.Errorf("apply restore manifest for %s: %w", s.vol.PVCName, err)
+		if out, err := runWithStdin(ctx, r, y, "kubectl", "--context", s.cfg.BegetContext, "apply", "-f", "-"); err != nil {
+			return fmt.Errorf("apply restore manifest for %s: %w\noutput: %s", s.vol.PVCName, err, out)
 		}
 	}
 	return waitVolumeHealthy(ctx, r, s.cfg.BegetContext, longhornVolumeName(s.cfg, s.vol), 10*time.Minute)
+}
+
+// pvcSizeForPVC returns the requested storage quantity string for a source
+// PVC, mirroring pvNameForPVC.
+func pvcSizeForPVC(ctx context.Context, r CommandRunner, cfg MoveConfig, pvc string) (string, error) {
+	return r.Run(ctx, "kubectl", "--context", cfg.BegetContext, "-n", cfg.SrcNamespace,
+		"get", "pvc", pvc, "-o", "jsonpath={.spec.resources.requests.storage}")
 }
 
 // latestBackupForPV returns the newest completed Longhorn backup name for a PV.
@@ -239,7 +250,7 @@ func latestBackupForPV(ctx context.Context, r CommandRunner, cfg MoveConfig, pv 
 	out, err := r.Run(ctx, "kubectl", "--context", cfg.BegetContext, "-n", "longhorn-system",
 		"get", "backupvolume", pv, "-o", "jsonpath={.status.lastBackupName}")
 	if err != nil || out == "" {
-		return "", fmt.Errorf("no backup found for PV %s: %w", pv, err)
+		return "", fmt.Errorf("no backup found for PV %s: %w\noutput: %s", pv, err, out)
 	}
 	return out, nil
 }
@@ -277,50 +288,47 @@ func (s *copySecretsStep) Run(ctx context.Context, r CommandRunner, dryRun bool)
 		raw, err := r.Run(ctx, "kubectl", "--context", s.cfg.BegetContext, "-n", s.cfg.SrcNamespace,
 			"get", "secret", name, "-o", "yaml")
 		if err != nil {
-			return fmt.Errorf("get secret %s: %w", name, err)
+			return fmt.Errorf("get secret %s: %w\noutput: %s", name, err, raw)
 		}
-		cleaned := restampSecretNamespace(raw, s.cfg.TargetNamespace)
-		if _, err := runWithStdin(ctx, r, cleaned, "kubectl", "--context", s.cfg.BegetContext,
-			"-n", s.cfg.TargetNamespace, "apply", "-f", "-"); err != nil {
-			return fmt.Errorf("apply secret %s to %s: %w", name, s.cfg.TargetNamespace, err)
+		cleaned, err := restampSecretNamespace(raw, s.cfg.TargetNamespace)
+		if err != nil {
+			return fmt.Errorf("restamp secret %s: %w", name, err)
+		}
+		out, err := runWithStdin(ctx, r, cleaned, "kubectl", "--context", s.cfg.BegetContext,
+			"-n", s.cfg.TargetNamespace, "apply", "-f", "-")
+		if err != nil {
+			return fmt.Errorf("apply secret %s to %s: %w\noutput: %s", name, s.cfg.TargetNamespace, err, out)
 		}
 	}
 	return nil
 }
 
 // restampSecretNamespace rewrites metadata.namespace and drops server-managed
-// keys (resourceVersion, uid, creationTimestamp, ownerReferences, status) so the
-// secret applies cleanly into dstNS. It is a line-level transform to avoid a YAML
-// dependency on the exact server output shape.
-func restampSecretNamespace(raw, dstNS string) string {
-	var out []string
-	skipBlock := false
-	for _, line := range strings.Split(raw, "\n") {
-		trimmed := strings.TrimSpace(line)
-		if strings.HasPrefix(trimmed, "namespace:") && !strings.HasPrefix(line, "    ") {
-			out = append(out, "  namespace: "+dstNS)
-			continue
-		}
-		if strings.HasPrefix(trimmed, "ownerReferences:") || trimmed == "status: {}" || strings.HasPrefix(trimmed, "status:") {
-			skipBlock = strings.HasPrefix(trimmed, "ownerReferences:")
-			if !skipBlock {
-				continue
-			}
-			continue
-		}
-		if skipBlock {
-			if strings.HasPrefix(line, "  ") && (strings.HasPrefix(trimmed, "-") || strings.HasPrefix(line, "    ")) {
-				continue
-			}
-			skipBlock = false
-		}
-		if strings.HasPrefix(trimmed, "resourceVersion:") || strings.HasPrefix(trimmed, "uid:") ||
-			strings.HasPrefix(trimmed, "creationTimestamp:") || strings.HasPrefix(trimmed, "generation:") {
-			continue
-		}
-		out = append(out, line)
+// metadata (resourceVersion, uid, creationTimestamp, generation,
+// ownerReferences, managedFields) plus the top-level status, so the secret
+// applies cleanly into dstNS. It round-trips through yaml.v3 rather than
+// scanning lines, so it only ever touches metadata/status and never data or
+// stringData, however those happen to be keyed.
+func restampSecretNamespace(raw, dstNS string) (string, error) {
+	var doc map[string]any
+	if err := yaml.Unmarshal([]byte(raw), &doc); err != nil {
+		return "", fmt.Errorf("parse secret yaml: %w", err)
 	}
-	return strings.Join(out, "\n")
+	meta, _ := doc["metadata"].(map[string]any)
+	if meta == nil {
+		meta = map[string]any{}
+	}
+	meta["namespace"] = dstNS
+	for _, k := range []string{"resourceVersion", "uid", "creationTimestamp", "generation", "ownerReferences", "managedFields"} {
+		delete(meta, k)
+	}
+	doc["metadata"] = meta
+	delete(doc, "status")
+	out, err := yaml.Marshal(doc)
+	if err != nil {
+		return "", fmt.Errorf("marshal secret yaml: %w", err)
+	}
+	return string(out), nil
 }
 
 type folderMoveStep struct{ cfg MoveConfig }
@@ -357,18 +365,18 @@ func (s *folderMoveStep) Run(ctx context.Context, r CommandRunner, dryRun bool) 
 		fmt.Printf("[dry-run] git commit -m 'move %s -> %s'\n", s.cfg.App, s.cfg.TargetProject)
 		return nil
 	}
-	if _, err := git("mv", src, dst); err != nil {
-		return fmt.Errorf("git mv %s -> %s: %w", src, dst, err)
+	if out, err := git("mv", src, dst); err != nil {
+		return fmt.Errorf("git mv %s -> %s: %w\noutput: %s", src, dst, err, out)
 	}
 	if err := applyFolderLiteralEdits(s.cfg, filepath.Join(repo, dst)); err != nil {
 		return err
 	}
-	if _, err := git("add", "-A"); err != nil {
-		return err
+	if out, err := git("add", "-A"); err != nil {
+		return fmt.Errorf("git add -A: %w\noutput: %s", err, out)
 	}
 	msg := fmt.Sprintf("chore(move): %s %s -> %s (dbmove)", s.cfg.App, s.cfg.SrcProject, s.cfg.TargetProject)
-	if _, err := git("commit", "-m", msg); err != nil {
-		return fmt.Errorf("git commit: %w", err)
+	if out, err := git("commit", "-m", msg); err != nil {
+		return fmt.Errorf("git commit: %w\noutput: %s", err, out)
 	}
 	return nil
 }
@@ -418,10 +426,21 @@ func (s *verifyStep) Describe() string {
 
 const verifyRowCountSQL = "select coalesce(sum(n_live_tup), 0) from pg_stat_user_tables"
 
-// psqlProbeOverrides renders the kubectl run pod override JSON that injects
-// cfg.DBCredSecret via envFrom into the probe container.
+// psqlProbeOverrides renders the kubectl run pod override JSON that maps
+// cfg.DBCredSecret's endpoint/port/username/password keys onto the probe
+// container's PGHOST/PGPORT/PGUSER/PGPASSWORD env vars via secretKeyRef.
+// envFrom would instead inject the secret's own lowercase key names, which
+// psql (reading PG*) never sees, so it would always fall back to a local
+// socket connection.
 func psqlProbeOverrides(cfg MoveConfig) string {
-	return fmt.Sprintf(`{"apiVersion":"v1","spec":{"containers":[{"name":"dbmove-probe","image":"postgres:16-alpine","envFrom":[{"secretRef":{"name":%q}}]}]}}`, cfg.DBCredSecret)
+	env := fmt.Sprintf(
+		`[{"name":"PGHOST","valueFrom":{"secretKeyRef":{"name":%q,"key":"endpoint"}}},`+
+			`{"name":"PGPORT","valueFrom":{"secretKeyRef":{"name":%q,"key":"port"}}},`+
+			`{"name":"PGUSER","valueFrom":{"secretKeyRef":{"name":%q,"key":"username"}}},`+
+			`{"name":"PGPASSWORD","valueFrom":{"secretKeyRef":{"name":%q,"key":"password"}}}]`,
+		cfg.DBCredSecret, cfg.DBCredSecret, cfg.DBCredSecret, cfg.DBCredSecret,
+	)
+	return fmt.Sprintf(`{"apiVersion":"v1","spec":{"containers":[{"name":"dbmove-probe","image":"postgres:16-alpine","env":%s}]}}`, env)
 }
 
 // shellQuote wraps s in single quotes, escaping embedded single quotes, so it
@@ -482,24 +501,24 @@ func (s *verifyStep) Run(ctx context.Context, r CommandRunner, dryRun bool) erro
 	}
 	one, err := r.Run(ctx, "kubectl", psqlProbeArgs(s.cfg, "select 1")...)
 	if err != nil {
-		return fmt.Errorf("verify probe select 1: %w", err)
+		return fmt.Errorf("verify probe select 1: %w\noutput: %s", err, one)
 	}
 	if strings.TrimSpace(one) != "1" {
 		return fmt.Errorf("verify probe select 1 = %q, want 1", strings.TrimSpace(one))
 	}
 	rows, err := r.Run(ctx, "kubectl", psqlProbeArgs(s.cfg, verifyRowCountSQL)...)
 	if err != nil {
-		return fmt.Errorf("verify probe row count: %w", err)
+		return fmt.Errorf("verify probe row count: %w\noutput: %s", err, rows)
 	}
 	fmt.Printf("verify: %s live row count = %s\n", s.cfg.DBDatname, strings.TrimSpace(rows))
 	for _, v := range s.cfg.Volumes {
 		srcSum, err := r.Run(ctx, "kubectl", sha256ManifestArgs(s.cfg.BegetContext, s.cfg.SrcNamespace, v.PVCName)...)
 		if err != nil {
-			return fmt.Errorf("source manifest for %s: %w", v.PVCName, err)
+			return fmt.Errorf("source manifest for %s: %w\noutput: %s", v.PVCName, err, srcSum)
 		}
 		dstSum, err := r.Run(ctx, "kubectl", sha256ManifestArgs(s.cfg.BegetContext, s.cfg.TargetNamespace, v.PVCName)...)
 		if err != nil {
-			return fmt.Errorf("target manifest for %s: %w", v.PVCName, err)
+			return fmt.Errorf("target manifest for %s: %w\noutput: %s", v.PVCName, err, dstSum)
 		}
 		if srcSum != dstSum {
 			return fmt.Errorf("sha256 manifest mismatch for %s:\nsource:\n%s\ntarget:\n%s", v.PVCName, srcSum, dstSum)
@@ -561,11 +580,11 @@ func (s *teardownStep) Run(ctx context.Context, r CommandRunner, dryRun bool) er
 	case dryRun:
 		fmt.Printf("[dry-run] would run console-DB reattribution:\n%s\n", sql)
 	default:
-		_, err := r.Run(ctx, "kubectl", "--context", s.cfg.BegetContext, "-n", consoleTeardownNamespace,
+		out, err := r.Run(ctx, "kubectl", "--context", s.cfg.BegetContext, "-n", consoleTeardownNamespace,
 			"exec", "deploy/"+consoleTeardownDeployment, "--", "sh", "-lc",
 			`psql "$DB_URL" -tAc `+shellQuote(sql))
 		if err != nil {
-			fmt.Printf("console-DB reattribution unreachable (%v); run manually:\n%s\n", err, sql)
+			fmt.Printf("console-DB reattribution unreachable (%v)\noutput: %s\nrun manually:\n%s\n", err, out, sql)
 		} else {
 			fmt.Println("console-DB reattribution applied")
 		}
