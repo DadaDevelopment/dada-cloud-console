@@ -546,6 +546,9 @@ const ru: Dict = {
       { q: "Можно ли задеплоить Next.js или статический сайт?", a: "Да. Платформа сама определяет фреймворк (Next.js, статика, SPA) и собирает проект. Пуш в основную ветку пересобирает и деплоит сайт автоматически." },
       { q: "Есть ли база данных, которой нет в Netlify?", a: "Да. Управляемый PostgreSQL создаётся рядом с приложением, DATABASE_URL прокидывается в сервис автоматически — отдельный внешний провайдер не нужен." },
       { q: "Нужен ли VPN, чтобы зайти в панель?", a: "Нет. Панель и сайты открываются из России напрямую, VPN не требуется." },
+      { q: "Почему не проходит оплата Netlify российской картой?", a: "Netlify выставляет счета через зарубежный платёжный процессинг, а он не принимает карты российских банков — после отключения российских банков от Visa и Mastercard такие платежи не проходят на стороне платёжной системы, вне зависимости от лимита карты или ввода данных." },
+      { q: "Можно ли оплатить Netlify виртуальной картой или через посредника?", a: "Часть пользователей пользуется виртуальными картами зарубежных банков или сервисами-посредниками, которые принимают оплату в рублях и платят Netlify от своего имени. У этого есть риски: комиссия сверх счёта (обычно ощутимая), карта или аккаунт-посредник могут перестать работать без предупреждения, а закрывающих документов для юрлица через посредника обычно нет." },
+      { q: "Чем Dada Cloud отличается для тех, кто ищет замену Netlify из-за оплаты?", a: "Оплата российской рублёвой картой напрямую, без посредников и комиссий сверху. Для юрлиц — счёт и закрывающие документы. Сценарий деплоя похож на Netlify: подключили GitHub-репозиторий, пуш в основную ветку — и приложение в проде." },
     ],
   },
   digitaloceanAlt: {
@@ -633,6 +636,9 @@ const ru: Dict = {
       { q: "Что будет, если бот упадёт с ошибкой?", a: "Процесс перезапустится автоматически, вручную поднимать бота не нужно." },
       { q: "Есть бесплатный хостинг для бота на aiogram?", a: "Да. Подключаете репозиторий с ботом на aiogram, python-telegram-bot или другом стеке и запускаете его на бесплатном тарифе, без привязки карты." },
       { q: "Можно хранить данные пользователей бота?", a: "Да, в managed PostgreSQL рядом с ботом. Данные размещаются на серверах в России, что соответствует 152-ФЗ." },
+      { q: "Сколько стоит хостинг телеграм-бота?", a: "Первого бота можно держать на бесплатном тарифе Free без привязки карты. Когда боту понадобится больше ресурсов, доступны платные тарифы с оплатой рублёвой картой: Startup — 990 ₽/мес, Business — 2 900 ₽/мес." },
+      { q: "Нужно ли арендовать отдельный сервер (VPS) для бота?", a: "Нет. Подключаете репозиторий с ботом — платформа сама собирает и запускает процесс, следит за перезапуском при падении. Отдельно арендовать и настраивать сервер не нужно." },
+      { q: "Бесплатный тариф — это навсегда или пробный период?", a: "Это отдельный уровень тарифной сетки, а не ограниченный по времени пробный период. Ограничение бесплатного тарифа — в объёме ресурсов, а не в сроке действия. Если боту понадобится больше, переходите на платный тариф." },
     ],
   },
   fastapiAlt: {
@@ -1298,6 +1304,9 @@ const en: Dict = {
       { q: "Can I deploy Next.js or a static site?", a: "Yes. The platform detects the framework (Next.js, static, SPA) and builds it. A push to the main branch rebuilds and deploys automatically." },
       { q: "Is there a database that Netlify lacks?", a: "Yes. Managed PostgreSQL is created next to the app and DATABASE_URL is injected automatically — no separate external provider needed." },
       { q: "Do I need a VPN to reach the dashboard?", a: "No. The dashboard and sites open from Russia directly, no VPN required." },
+      { q: "Why doesn't a Russian card work for paying Netlify?", a: "Netlify bills through a foreign payment processor, and it doesn't accept cards from Russian banks — after Russian banks were cut off from Visa and Mastercard, these payments fail on the payment system's side, regardless of card limit or how the details were entered." },
+      { q: "Can I pay Netlify with a virtual card or through an intermediary?", a: "Some people use virtual cards from foreign banks or intermediary services that take rubles and pay Netlify on their behalf. There are risks: a markup on top of the bill (usually significant), the card or intermediary account can stop working without notice, and closing documents for a legal entity are usually not available through an intermediary." },
+      { q: "How is Dada Cloud different for people looking to replace Netlify because of payments?", a: "Pay with a Russian ruble card directly, no intermediaries or markups. For legal entities there's an invoice and closing documents. The deploy flow is similar to Netlify: connect a GitHub repo, push to the main branch, and the app is live." },
     ],
   },
   digitaloceanAlt: {
@@ -1385,6 +1394,9 @@ const en: Dict = {
       { q: "What happens if the bot crashes?", a: "The process restarts automatically, you don't need to bring it back up by hand." },
       { q: "Is there free hosting for an aiogram bot?", a: "Yes. Connect the repo with your bot on aiogram, python-telegram-bot or any other stack and run it on the free tier, no card required." },
       { q: "Can I store the bot's user data?", a: "Yes, in managed PostgreSQL right next to the bot. Data is stored on servers in Russia, which meets 152-FZ." },
+      { q: "How much does hosting a Telegram bot cost?", a: "Your first bot can run on the free Free tier, no card required. When the bot needs more resources, paid tiers are available with a Russian card: Startup — 990 RUB/mo, Business — 2900 RUB/mo." },
+      { q: "Do I need to rent a separate server (VPS) for the bot?", a: "No. Connect the repo with your bot — the platform builds and starts the process for you and restarts it if it crashes. You don't need to rent and configure a server separately." },
+      { q: "Is the free tier permanent or just a trial?", a: "It's a separate tier of the pricing plan, not a time-limited trial. The free tier's limit is on resources, not on how long you can use it. If the bot needs more, move to a paid tier." },
     ],
   },
   fastapiAlt: {
