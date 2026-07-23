@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -88,7 +89,63 @@ func (s *copySecretsStep) ID() string { return "copy-secrets" }
 func (s *copySecretsStep) Describe() string {
 	return "copy out-of-band secrets to target ns"
 }
-func (s *copySecretsStep) Run(context.Context, CommandRunner, bool) error { return nil }
+
+// Run copies each out-of-band secret verbatim into the target namespace,
+// re-stamping metadata.namespace and stripping server-managed fields.
+func (s *copySecretsStep) Run(ctx context.Context, r CommandRunner, dryRun bool) error {
+	for _, name := range s.cfg.OOBSecrets {
+		if dryRun {
+			fmt.Printf("[dry-run] would copy secret %s: %s -> %s\n", name, s.cfg.SrcNamespace, s.cfg.TargetNamespace)
+			continue
+		}
+		raw, err := r.Run(ctx, "kubectl", "--context", s.cfg.BegetContext, "-n", s.cfg.SrcNamespace,
+			"get", "secret", name, "-o", "yaml")
+		if err != nil {
+			return fmt.Errorf("get secret %s: %w", name, err)
+		}
+		cleaned := restampSecretNamespace(raw, s.cfg.TargetNamespace)
+		if _, err := runWithStdin(ctx, r, cleaned, "kubectl", "--context", s.cfg.BegetContext,
+			"-n", s.cfg.TargetNamespace, "apply", "-f", "-"); err != nil {
+			return fmt.Errorf("apply secret %s to %s: %w", name, s.cfg.TargetNamespace, err)
+		}
+	}
+	return nil
+}
+
+// restampSecretNamespace rewrites metadata.namespace and drops server-managed
+// keys (resourceVersion, uid, creationTimestamp, ownerReferences, status) so the
+// secret applies cleanly into dstNS. It is a line-level transform to avoid a YAML
+// dependency on the exact server output shape.
+func restampSecretNamespace(raw, dstNS string) string {
+	var out []string
+	skipBlock := false
+	for _, line := range strings.Split(raw, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "namespace:") && !strings.HasPrefix(line, "    ") {
+			out = append(out, "  namespace: "+dstNS)
+			continue
+		}
+		if strings.HasPrefix(trimmed, "ownerReferences:") || trimmed == "status: {}" || strings.HasPrefix(trimmed, "status:") {
+			skipBlock = strings.HasPrefix(trimmed, "ownerReferences:")
+			if !skipBlock {
+				continue
+			}
+			continue
+		}
+		if skipBlock {
+			if strings.HasPrefix(line, "  ") && (strings.HasPrefix(trimmed, "-") || strings.HasPrefix(line, "    ")) {
+				continue
+			}
+			skipBlock = false
+		}
+		if strings.HasPrefix(trimmed, "resourceVersion:") || strings.HasPrefix(trimmed, "uid:") ||
+			strings.HasPrefix(trimmed, "creationTimestamp:") || strings.HasPrefix(trimmed, "generation:") {
+			continue
+		}
+		out = append(out, line)
+	}
+	return strings.Join(out, "\n")
+}
 
 type folderMoveStep struct{ cfg MoveConfig }
 
