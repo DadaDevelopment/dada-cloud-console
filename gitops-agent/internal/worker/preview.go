@@ -109,9 +109,10 @@ func (w *DBWatcher) doCreatePreviewEnv(ctx context.Context, op db.Operation) err
 	// Render a tight namespace policy (ResourceQuota + LimitRange) for the preview
 	// namespace, reusing the namespace_policy renderer.
 	policyYAML, err := renderer.RenderNamespacePolicy(renderer.NamespacePolicySpec{
-		Namespace:     p.Namespace,
-		LimitRange:    previewLimitRange,
-		ResourceQuota: previewResourceQuota,
+		Namespace:      p.Namespace,
+		LimitRange:     previewLimitRange,
+		ResourceQuota:  previewResourceQuota,
+		RegistrySecret: &renderer.RegistrySecretSpec{Enabled: true},
 	})
 	if err != nil {
 		return err

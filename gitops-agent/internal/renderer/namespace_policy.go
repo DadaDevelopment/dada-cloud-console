@@ -24,11 +24,19 @@ type ResourceQuotaSpec struct {
 	Pods           string `yaml:"pods"`
 }
 
+// RegistrySecretSpec toggles rendering of the internal-registry image pull
+// secret by the namespace-policy chart. Only the enabled flag is written here;
+// registry host and credentials merge in from the chart's default values.
+type RegistrySecretSpec struct {
+	Enabled bool `yaml:"enabled"`
+}
+
 // NamespacePolicySpec holds parameters for a namespace-policy manifest.
 type NamespacePolicySpec struct {
-	Namespace     string            `yaml:"namespace"`
-	LimitRange    LimitRangeSpec    `yaml:"limitRange"`
-	ResourceQuota ResourceQuotaSpec `yaml:"resourceQuota"`
+	Namespace      string              `yaml:"namespace"`
+	LimitRange     LimitRangeSpec      `yaml:"limitRange"`
+	ResourceQuota  ResourceQuotaSpec   `yaml:"resourceQuota"`
+	RegistrySecret *RegistrySecretSpec `yaml:"registrySecret,omitempty"`
 }
 
 func RenderNamespacePolicy(spec NamespacePolicySpec) (string, error) {

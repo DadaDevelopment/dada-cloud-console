@@ -868,15 +868,15 @@ func (w *DBWatcher) doCreateApp(ctx context.Context, op db.Operation) error {
 		{Path: gitPath, Content: yaml},
 		{Path: valuesPath, Content: valuesYAML},
 	}
-	secretFile, err := w.renderEnvSecretFile(mgr, projectName, envName, envNamespace, p.Name, op.ID.String(), env)
-	if err != nil {
-		return err
-	}
-	if secretFile != nil {
-		files = append(files, *secretFile)
-	}
-
-	if p.DefaultHostname != "" {
+	if p.DefaultHostname == "" {
+		secretFile, err := w.renderEnvSecretFile(mgr, projectName, envName, envNamespace, p.Name, op.ID.String(), env)
+		if err != nil {
+			return err
+		}
+		if secretFile != nil {
+			files = append(files, *secretFile)
+		}
+	} else {
 		ingressYAML, iErr := renderer.RenderCustomIngress(renderer.CustomIngressSpec{
 			Name:              renderer.FQDNToName(p.DefaultHostname),
 			Namespace:         envNamespace,
@@ -908,8 +908,24 @@ func (w *DBWatcher) doCreateApp(ctx context.Context, op db.Operation) error {
 		if err := mgr.EnsureCloned(); err != nil {
 			return err
 		}
+		crYAMLs := make([]string, 0, 3)
+		if env.hasSecret() {
+			secretYAML, sErr := renderer.RenderAppEnvSecret(renderer.AppEnvSecretSpec{
+				Name:        renderer.AppEnvSecretName(p.Name),
+				Namespace:   envNamespace,
+				ProjectSlug: projectName,
+				EnvSlug:     envName,
+				OperationID: op.ID.String(),
+				Data:        env.Secret,
+			})
+			if sErr != nil {
+				return sErr
+			}
+			crYAMLs = append(crYAMLs, secretYAML)
+		}
+		crYAMLs = append(crYAMLs, ingressYAML, dnsYAML)
 		resValuesPath := renderer.AppResourcesValuesGitPath(projectName, envName, p.Name)
-		manifestFile, mErr := upsertManifestsFile(mgr, resValuesPath, ingressYAML, dnsYAML)
+		manifestFile, mErr := upsertManifestsFile(mgr, resValuesPath, crYAMLs...)
 		if mErr != nil {
 			return mErr
 		}
