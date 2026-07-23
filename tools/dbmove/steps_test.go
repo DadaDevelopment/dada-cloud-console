@@ -67,3 +67,26 @@ func TestRestampSecretNamespaceRewritesNS(t *testing.T) {
 		t.Fatalf("data lost:\n%s", got)
 	}
 }
+
+func TestDestFolderRel(t *testing.T) {
+	cfg, _ := LoadConfig("configs/n8n.yaml")
+	got := destFolderRel(cfg)
+	want := "clusters/beget-prod/projects/platform/environments/prod/apps/n8n"
+	if got != want {
+		t.Fatalf("dest folder = %q, want %q", got, want)
+	}
+}
+
+func TestFolderMoveDryRunNoGit(t *testing.T) {
+	cfg, _ := LoadConfig("configs/telemost-bot.yaml")
+	fr := newFakeRunner()
+	s := &folderMoveStep{cfg: cfg}
+	if err := s.Run(context.Background(), fr, true); err != nil {
+		t.Fatalf("dry-run: %v", err)
+	}
+	for _, c := range fr.calls {
+		if strings.Contains(strings.Join(c, " "), "git mv") {
+			t.Fatalf("dry-run must not git mv")
+		}
+	}
+}

@@ -3,6 +3,8 @@ package main
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 )
@@ -153,7 +155,85 @@ func (s *folderMoveStep) ID() string { return "folder-move" }
 func (s *folderMoveStep) Describe() string {
 	return "relocate argo-infra app folder"
 }
-func (s *folderMoveStep) Run(context.Context, CommandRunner, bool) error { return nil }
+
+// destFolderRel returns the target app folder path (source project/env swapped
+// for target project/env).
+func destFolderRel(cfg MoveConfig) string {
+	src := fmt.Sprintf("projects/%s/environments/%s", cfg.SrcProject, cfg.SrcEnv)
+	dst := fmt.Sprintf("projects/%s/environments/%s", cfg.TargetProject, cfg.TargetEnv)
+	return strings.Replace(cfg.AppFolderRel, src, dst, 1)
+}
+
+// Run relocates the app folder in argo-infra and applies namespace/access-mode
+// literal edits, then commits. Idempotent: if the source folder is already gone
+// and the dest exists, it is treated as done.
+func (s *folderMoveStep) Run(ctx context.Context, r CommandRunner, dryRun bool) error {
+	repo := s.cfg.ArgoInfraPath
+	src := s.cfg.AppFolderRel
+	dst := destFolderRel(s.cfg)
+	git := func(args ...string) (string, error) {
+		return r.Run(ctx, "git", append([]string{"-C", repo}, args...)...)
+	}
+	if dryRun {
+		fmt.Printf("[dry-run] git -C %s mv %s %s\n", repo, src, dst)
+		fmt.Printf("[dry-run] edit %s/resources.values.yaml namespace/project literals -> %s / %s\n", dst, s.cfg.TargetNamespace, s.cfg.TargetProject)
+		if len(s.cfg.Volumes) > 0 {
+			fmt.Printf("[dry-run] edit %s/chart/templates/{deployment,worker}.yaml ReadWriteOnce -> ReadWriteMany\n", dst)
+		}
+		fmt.Printf("[dry-run] git commit -m 'move %s -> %s'\n", s.cfg.App, s.cfg.TargetProject)
+		return nil
+	}
+	if _, err := git("mv", src, dst); err != nil {
+		return fmt.Errorf("git mv %s -> %s: %w", src, dst, err)
+	}
+	if err := applyFolderLiteralEdits(s.cfg, filepath.Join(repo, dst)); err != nil {
+		return err
+	}
+	if _, err := git("add", "-A"); err != nil {
+		return err
+	}
+	msg := fmt.Sprintf("chore(move): %s %s -> %s (dbmove)", s.cfg.App, s.cfg.SrcProject, s.cfg.TargetProject)
+	if _, err := git("commit", "-m", msg); err != nil {
+		return fmt.Errorf("git commit: %w", err)
+	}
+	return nil
+}
+
+// applyFolderLiteralEdits rewrites namespace/project literals in
+// resources.values.yaml and, when volumes are present, RWO->RWX in the chart
+// PVC templates. Best-effort per file: a missing file is skipped (telemost has
+// no resources.values.yaml / chart).
+func applyFolderLiteralEdits(cfg MoveConfig, absFolder string) error {
+	rv := filepath.Join(absFolder, "resources.values.yaml")
+	if err := rewriteFile(rv, func(s string) string {
+		s = strings.ReplaceAll(s, "namespace: "+cfg.SrcNamespace, "namespace: "+cfg.TargetNamespace)
+		s = strings.ReplaceAll(s, "dada.io/project: "+cfg.SrcProject, "dada.io/project: "+cfg.TargetProject)
+		return s
+	}); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	if len(cfg.Volumes) > 0 {
+		for _, tpl := range []string{"chart/templates/deployment.yaml", "chart/templates/worker.yaml"} {
+			p := filepath.Join(absFolder, tpl)
+			if err := rewriteFile(p, func(s string) string {
+				return strings.ReplaceAll(s, "- ReadWriteOnce", "- ReadWriteMany")
+			}); err != nil && !os.IsNotExist(err) {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// rewriteFile applies fn to a file's contents in place; returns os.ErrNotExist
+// (wrapped) when the file is absent so callers can skip.
+func rewriteFile(path string, fn func(string) string) error {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, []byte(fn(string(b))), 0o644)
+}
 
 type verifyStep struct{ cfg MoveConfig }
 
