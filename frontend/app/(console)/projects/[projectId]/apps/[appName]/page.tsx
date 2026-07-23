@@ -446,8 +446,6 @@ export default function AppDetailPage() {
           {resType === "ingress" && <IngressDetail app={app} />}
           {resType === "database" && <ServiceDatabaseDetail app={app} />}
           <ComposeStatePanel projectId={projectId} envId={envId} appName={appName} />
-          <FixedMetricsDashboard kind="app" projectId={projectId} envId={envId} appName={appName} />
-          <LogsViewer projectId={projectId} app={appName} />
         </div>
       ) : (
         <div className="space-y-6">
@@ -519,40 +517,7 @@ export default function AppDetailPage() {
             </div>
           )}
 
-          {app.phase === "NotDeployed" ? (
-            <div className="rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 px-4 py-6 text-center text-sm text-gray-500 dark:text-gray-400">
-              {t("apps.detail.observability.notDeployed")}
-            </div>
-          ) : (
-            <>
-              <FixedMetricsDashboard kind="app" projectId={projectId} envId={envId} appName={appName} />
-              <LogsViewer projectId={projectId} app={appName} />
-            </>
-          )}
         </div>
-      )}
-
-      {!isResource && (
-      <div className="mt-10">
-        <CloudTaskPanel
-          projectId={projectId}
-          envId={envId ?? ""}
-          appName={appName}
-          appKind={isCompose ? "compose" : "web"}
-          canMutate={canMutate(role)}
-        />
-      </div>
-      )}
-
-      {!isResource && (
-      <div className="mt-10">
-        <DeployHooksCard
-          projectId={projectId}
-          envId={envId ?? ""}
-          appName={appName}
-          canMutate={canMutate(role)}
-        />
-      </div>
       )}
 
       {!isResource && previewRows.length > 0 && (
@@ -623,6 +588,40 @@ export default function AppDetailPage() {
             <AppPreviewPane key={activePreview.url} url={activePreview.url} title={activePreview.label} defaultOpen />
           </div>
         )}
+      </div>
+      )}
+
+      {!isResource && (
+      <div className="mt-10">
+        <CloudTaskPanel
+          projectId={projectId}
+          envId={envId ?? ""}
+          appName={appName}
+          appKind={isCompose ? "compose" : "web"}
+          canMutate={canMutate(role)}
+        />
+      </div>
+      )}
+
+      {!isCompose && app.phase === "NotDeployed" ? (
+        <div className="mt-10 rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 px-4 py-6 text-center text-sm text-gray-500 dark:text-gray-400">
+          {t("apps.detail.observability.notDeployed")}
+        </div>
+      ) : (
+        <div className="mt-10 space-y-6">
+          <FixedMetricsDashboard kind="app" projectId={projectId} envId={envId} appName={appName} />
+          <LogsViewer projectId={projectId} app={appName} />
+        </div>
+      )}
+
+      {!isResource && (
+      <div className="mt-10">
+        <DeployHooksCard
+          projectId={projectId}
+          envId={envId ?? ""}
+          appName={appName}
+          canMutate={canMutate(role)}
+        />
       </div>
       )}
 
