@@ -415,7 +415,98 @@ func (s *verifyStep) ID() string { return "verify" }
 func (s *verifyStep) Describe() string {
 	return "verify target healthy"
 }
-func (s *verifyStep) Run(context.Context, CommandRunner, bool) error { return nil }
+
+const verifyRowCountSQL = "select coalesce(sum(n_live_tup), 0) from pg_stat_user_tables"
+
+// psqlProbeOverrides renders the kubectl run pod override JSON that injects
+// cfg.DBCredSecret via envFrom into the probe container.
+func psqlProbeOverrides(cfg MoveConfig) string {
+	return fmt.Sprintf(`{"apiVersion":"v1","spec":{"containers":[{"name":"dbmove-probe","image":"postgres:16-alpine","envFrom":[{"secretRef":{"name":%q}}]}]}}`, cfg.DBCredSecret)
+}
+
+// shellQuote wraps s in single quotes, escaping embedded single quotes, so it
+// is safe to splice into a `sh -lc` command line.
+func shellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+}
+
+// psqlProbeArgs builds a one-shot psql probe pod command in the target ns using
+// the redelivered <app>-db-credentials secret.
+func psqlProbeArgs(cfg MoveConfig, sql string) []string {
+	return []string{
+		"--context", cfg.BegetContext, "-n", cfg.TargetNamespace,
+		"run", "dbmove-probe", "--rm", "-i", "--restart=Never",
+		"--image", "postgres:16-alpine",
+		"--overrides", psqlProbeOverrides(cfg),
+		"--command", "--", "sh", "-lc",
+		"PGPASSWORD=$PGPASSWORD psql -h $PGHOST -p $PGPORT -U $PGUSER -d " + cfg.DBDatname + " -tAc " + shellQuote(sql),
+	}
+}
+
+// manifestPodName is unique per PVC so sequential source/target probes in the
+// same namespace never collide.
+func manifestPodName(pvc string) string { return "dbmove-manifest-" + pvc }
+
+// volumeManifestOverrides renders the kubectl run pod override JSON that
+// read-only mounts pvc at /data in the manifest container.
+func volumeManifestOverrides(pvc string) string {
+	name := manifestPodName(pvc)
+	return fmt.Sprintf(`{"apiVersion":"v1","spec":{"containers":[{"name":%q,"image":"busybox:1.36","volumeMounts":[{"name":"data","mountPath":"/data","readOnly":true}]}],"volumes":[{"name":"data","persistentVolumeClaim":{"claimName":%q,"readOnly":true}}]}}`, name, pvc)
+}
+
+// sha256ManifestArgs builds a one-shot pod command that prints a sorted
+// sha256sum manifest of every regular file under pvc's mount, in ns.
+func sha256ManifestArgs(kctx, ns, pvc string) []string {
+	return []string{
+		"--context", kctx, "-n", ns,
+		"run", manifestPodName(pvc), "--rm", "-i", "--restart=Never",
+		"--image", "busybox:1.36",
+		"--overrides", volumeManifestOverrides(pvc),
+		"--command", "--", "sh", "-lc",
+		"find /data -type f | sort | xargs -r sha256sum",
+	}
+}
+
+// Run probes the redelivered target creds with select 1 and a live row-count,
+// then, for volumes, compares a sha256 file manifest against the still-retained
+// source PVC. The source is unwritten since scale-down, so a live read of it
+// now doubles as the pre-move manifest without needing separately captured
+// state. Returns error on a select-1 failure or a manifest mismatch.
+func (s *verifyStep) Run(ctx context.Context, r CommandRunner, dryRun bool) error {
+	if dryRun {
+		fmt.Printf("[dry-run] would probe select 1 + row count in %s via secret %s\n", s.cfg.TargetNamespace, s.cfg.DBCredSecret)
+		for _, v := range s.cfg.Volumes {
+			fmt.Printf("[dry-run] would sha256-compare %s: %s vs %s\n", v.PVCName, s.cfg.SrcNamespace, s.cfg.TargetNamespace)
+		}
+		return nil
+	}
+	one, err := r.Run(ctx, "kubectl", psqlProbeArgs(s.cfg, "select 1")...)
+	if err != nil {
+		return fmt.Errorf("verify probe select 1: %w", err)
+	}
+	if strings.TrimSpace(one) != "1" {
+		return fmt.Errorf("verify probe select 1 = %q, want 1", strings.TrimSpace(one))
+	}
+	rows, err := r.Run(ctx, "kubectl", psqlProbeArgs(s.cfg, verifyRowCountSQL)...)
+	if err != nil {
+		return fmt.Errorf("verify probe row count: %w", err)
+	}
+	fmt.Printf("verify: %s live row count = %s\n", s.cfg.DBDatname, strings.TrimSpace(rows))
+	for _, v := range s.cfg.Volumes {
+		srcSum, err := r.Run(ctx, "kubectl", sha256ManifestArgs(s.cfg.BegetContext, s.cfg.SrcNamespace, v.PVCName)...)
+		if err != nil {
+			return fmt.Errorf("source manifest for %s: %w", v.PVCName, err)
+		}
+		dstSum, err := r.Run(ctx, "kubectl", sha256ManifestArgs(s.cfg.BegetContext, s.cfg.TargetNamespace, v.PVCName)...)
+		if err != nil {
+			return fmt.Errorf("target manifest for %s: %w", v.PVCName, err)
+		}
+		if srcSum != dstSum {
+			return fmt.Errorf("sha256 manifest mismatch for %s:\nsource:\n%s\ntarget:\n%s", v.PVCName, srcSum, dstSum)
+		}
+	}
+	return nil
+}
 
 type teardownStep struct{ cfg MoveConfig }
 
@@ -423,4 +514,65 @@ func (s *teardownStep) ID() string { return "teardown" }
 func (s *teardownStep) Describe() string {
 	return "reattribute snapshot; keep source retained"
 }
-func (s *teardownStep) Run(context.Context, CommandRunner, bool) error { return nil }
+
+const (
+	consoleTeardownNamespace  = "platform-prod"
+	consoleTeardownDeployment = "dada-cloud-console-backend"
+)
+
+// sqlQuote wraps s as a single-quoted SQL string literal, doubling embedded
+// single quotes per standard SQL escaping (distinct from shellQuote's shell
+// escaping rule).
+func sqlQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", "''") + "'"
+}
+
+// teardownReattributeSQL moves the App's resource_snapshots row (schema:
+// resource_snapshots(project_id, environment_id, kind, name), unique per
+// project_id+environment_id+kind+name) from its source project/environment to
+// the one it was just relocated into.
+func teardownReattributeSQL(cfg MoveConfig) string {
+	return fmt.Sprintf(
+		"UPDATE resource_snapshots SET project_id = (SELECT id FROM projects WHERE name = %s), environment_id = (SELECT e.id FROM environments e JOIN projects p ON p.id = e.project_id WHERE p.name = %s AND e.name = %s) WHERE kind = 'App' AND name = %s AND project_id = (SELECT id FROM projects WHERE name = %s);",
+		sqlQuote(cfg.TargetProject), sqlQuote(cfg.TargetProject), sqlQuote(cfg.TargetEnv), sqlQuote(cfg.App), sqlQuote(cfg.SrcProject),
+	)
+}
+
+// reclaimChecklist lists the retained source resources a human clears out in a
+// later, separately gated pass once the target has run cleanly.
+func reclaimChecklist(cfg MoveConfig) []string {
+	lines := []string{
+		"source namespace " + cfg.SrcNamespace + " (workloads scaled to 0, nothing deleted)",
+		"safety dump dumps/dbmove/" + cfg.DBDatname + "/db-move-" + cfg.DBDatname + ".dump (kept in the backup target)",
+	}
+	for _, v := range cfg.Volumes {
+		lines = append(lines, "source PV behind "+cfg.SrcNamespace+"/"+v.PVCName+" (Retain; restored copy is "+longhornVolumeName(cfg, v)+")")
+	}
+	return lines
+}
+
+// Run attempts an idempotent console-DB reattribution of the resource_snapshots
+// row via the live console backend pod's own DB_URL; if that is unreachable it
+// prints the manual SQL instead. It always prints the retained-source reclaim
+// checklist and never deletes anything.
+func (s *teardownStep) Run(ctx context.Context, r CommandRunner, dryRun bool) error {
+	sql := teardownReattributeSQL(s.cfg)
+	switch {
+	case dryRun:
+		fmt.Printf("[dry-run] would run console-DB reattribution:\n%s\n", sql)
+	default:
+		_, err := r.Run(ctx, "kubectl", "--context", s.cfg.BegetContext, "-n", consoleTeardownNamespace,
+			"exec", "deploy/"+consoleTeardownDeployment, "--", "sh", "-lc",
+			`psql "$DB_URL" -tAc `+shellQuote(sql))
+		if err != nil {
+			fmt.Printf("console-DB reattribution unreachable (%v); run manually:\n%s\n", err, sql)
+		} else {
+			fmt.Println("console-DB reattribution applied")
+		}
+	}
+	fmt.Println("retained source (reclaim later, separate gated pass):")
+	for _, line := range reclaimChecklist(s.cfg) {
+		fmt.Println("  - " + line)
+	}
+	return nil
+}

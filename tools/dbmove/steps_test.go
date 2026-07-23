@@ -128,3 +128,14 @@ func TestScaleDownTargetsAllDeployments(t *testing.T) {
 		t.Fatalf("want 3 scale-to-0 calls, got %d", scaled)
 	}
 }
+
+func TestVerifyProbeUsesTargetCreds(t *testing.T) {
+	cfg, _ := LoadConfig("configs/telemost-bot.yaml")
+	got := psqlProbeArgs(cfg, "select 1")
+	j := strings.Join(got, " ")
+	for _, want := range []string{"--context 83.222.27.62:26443", "-n internal-prod", "run", "dbmove-probe", "select 1"} {
+		if !strings.Contains(j, want) {
+			t.Fatalf("probe args missing %q: %v", want, got)
+		}
+	}
+}
