@@ -98,6 +98,90 @@ func ListGCAppSnapshots(ctx context.Context, pool *pgxpool.Pool) ([]GCAppSnapsho
 	return out, rows.Err()
 }
 
+// GCChildSnapshot is one child resource snapshot (PublicApi, Ingress,
+// ServiceDatabaseV2, S3Bucket, AIModel) considered by the orphan GC, with the
+// signals the sweep needs precomputed: ParentExists (a non-Orphaned App snapshot
+// in the same project+env claims it via any owning-link key) and SearchTerms
+// (the snapshot name plus git-native spellings like the dotted fqdn — a
+// PublicApi/Ingress snapshot is named after the DASHED fqdn while git manifests
+// carry the dotted form, so a name-only scan would miss a live git-backed
+// domain).
+type GCChildSnapshot struct {
+	ID           uuid.UUID
+	ProjectID    uuid.UUID
+	EnvID        uuid.UUID
+	ProjectSlug  string
+	EnvSlug      string
+	Kind         string
+	Name         string
+	Phase        string
+	LastSyncedAt time.Time
+	OrphanedAt   *time.Time
+	ParentExists bool
+	SearchTerms  []string
+}
+
+// ListGCChildSnapshots returns every child snapshot of the given kinds in a
+// k8s-runtime environment. The parent-link predicate mirrors doDeleteApp's
+// cascade WHERE clause (dbwatcher.go), including the spec.upstream.serviceName
+// = "<app>-service" match that covers PublicApi rows whose app_name was
+// corrupted by the pre-faf5bb5 status reconciler. A parent that is itself
+// phase=Orphaned does not count: children of a soft-deleted app must start
+// their own mark/purge clock instead of being kept alive by a row that is
+// already on its way out.
+func ListGCChildSnapshots(ctx context.Context, pool *pgxpool.Pool, kinds []string) ([]GCChildSnapshot, error) {
+	rows, err := pool.Query(ctx, `
+		SELECT rs.id, rs.project_id, rs.environment_id, p.name, e.name,
+		       rs.kind, rs.name, rs.phase, rs.last_synced_at,
+		       (rs.summary_json->>'orphaned_at')::timestamptz,
+		       EXISTS (
+		           SELECT 1 FROM resource_snapshots a
+		           WHERE a.project_id = rs.project_id
+		             AND a.environment_id = rs.environment_id
+		             AND a.kind = 'App' AND a.phase <> 'Orphaned'
+		             AND (
+		                  rs.summary_json->>'app_ref'             = a.name
+		               OR rs.summary_json->>'attached_app'        = a.name
+		               OR rs.summary_json->>'app_name'            = a.name
+		               OR rs.summary_json->'spec'->>'appRef'       = a.name
+		               OR rs.summary_json->'spec'->>'attachedApp'  = a.name
+		               OR rs.summary_json->'spec'->>'serviceName'  = a.name
+		               OR rs.summary_json->'spec'->'upstream'->>'serviceName' = a.name || '-service'
+		             )
+		       ),
+		       COALESCE(rs.summary_json->'spec'->'dns'->>'fqdn', ''),
+		       COALESCE(rs.summary_json->'spec'->'rules'->0->>'host', '')
+		FROM resource_snapshots rs
+		JOIN projects p     ON p.id = rs.project_id
+		JOIN environments e ON e.id = rs.environment_id
+		WHERE rs.kind = ANY($1) AND e.runtime = 'k8s'
+	`, kinds)
+	if err != nil {
+		return nil, fmt.Errorf("list gc child snapshots: %w", err)
+	}
+	defer rows.Close()
+
+	var out []GCChildSnapshot
+	for rows.Next() {
+		var s GCChildSnapshot
+		var fqdn, host string
+		if err := rows.Scan(&s.ID, &s.ProjectID, &s.EnvID, &s.ProjectSlug, &s.EnvSlug,
+			&s.Kind, &s.Name, &s.Phase, &s.LastSyncedAt, &s.OrphanedAt,
+			&s.ParentExists, &fqdn, &host); err != nil {
+			return nil, fmt.Errorf("scan gc child snapshot: %w", err)
+		}
+		s.SearchTerms = append(s.SearchTerms, s.Name)
+		if fqdn != "" {
+			s.SearchTerms = append(s.SearchTerms, fqdn)
+		}
+		if host != "" {
+			s.SearchTerms = append(s.SearchTerms, host)
+		}
+		out = append(out, s)
+	}
+	return out, rows.Err()
+}
+
 // MarkSnapshotOrphaned soft-deletes a snapshot: phase=Orphaned and an orphaned_at
 // stamp the purge stage measures its grace from. Idempotent — orphaned_at is only
 // set when absent, so the purge clock starts once and isn't reset each tick.
@@ -169,6 +253,7 @@ func AppMoveSnapshots(ctx context.Context, pool *pgxpool.Pool, projectID, enviro
 		        OR summary_json->'spec'->>'appRef'       = $3
 		        OR summary_json->'spec'->>'attachedApp'  = $3
 		        OR summary_json->'spec'->>'serviceName'  = $3
+		        OR summary_json->'spec'->'upstream'->>'serviceName' = $3 || '-service'
 		       ))
 		  )
 	`, projectID, environmentID, appName)

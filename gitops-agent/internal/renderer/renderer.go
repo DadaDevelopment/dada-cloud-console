@@ -435,9 +435,17 @@ func AppServiceName(appName string) string {
 // regardless of the numeric port (5173, 8080, …), which varies per app.
 const DefaultAppServicePortName = "http"
 
+// EnvBaseGitPath is the root of everything an environment owns in git: app
+// folders, standalone resource manifests, compose/env files. The orphan GC
+// scans this whole subtree when testing whether a child resource is still
+// git-backed, so it must stay the common ancestor of every per-env path below.
+func EnvBaseGitPath(projectSlug, envSlug string) string {
+	return fmt.Sprintf("clusters/beget-prod/projects/%s/environments/%s",
+		projectSlug, envSlug)
+}
+
 func AppBaseGitPath(projectSlug, envSlug, appName string) string {
-	return fmt.Sprintf("clusters/beget-prod/projects/%s/environments/%s/apps/%s",
-		projectSlug, envSlug, appName)
+	return fmt.Sprintf("%s/apps/%s", EnvBaseGitPath(projectSlug, envSlug), appName)
 }
 
 func AppGitPath(projectSlug, envSlug, appName string) string {

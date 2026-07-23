@@ -2,14 +2,19 @@ package worker
 
 import (
 	"context"
+	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/dada-tuda/console/gitops-agent/internal/crypto"
 	"github.com/dada-tuda/console/gitops-agent/internal/db"
 	"github.com/dada-tuda/console/gitops-agent/internal/git"
 	"github.com/dada-tuda/console/gitops-agent/internal/renderer"
+
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 
 	"github.com/google/uuid"
 	"github.com/rs/zerolog/log"
@@ -102,6 +107,186 @@ func (r *StatusReconciler) reconcileOrphans(ctx context.Context, live map[snapKe
 		log.Info().Int("marked", marked).Int("cleared", cleared).Int("purged", purged).
 			Msg("orphan-gc: swept app snapshots")
 	}
+
+	r.reconcileChildOrphans(ctx, repos, now)
+}
+
+// gcChildKinds are the child snapshot kinds the orphan GC reconciles: exactly
+// the set doDeleteApp cascades. Other mirrored kinds (Secret, Client, Realm,
+// KC/infra objects) are deliberately excluded — their git home is the infra
+// repo (dada-argo), not the per-project tenant tree this GC can verify, so a
+// git-absence test against the tenant tree would mislabel live infra rows.
+var gcChildKinds = []string{"PublicApi", "Ingress", "ServiceDatabaseV2", "S3Bucket", "AIModel"}
+
+// reconcileChildOrphans is the child-kind counterpart of the App sweep above:
+// it garbage-collects PublicApi/Ingress/ServiceDatabaseV2/S3Bucket/AIModel
+// snapshots stranded when the DeleteApp cascade missed them (its Execs ignore
+// errors) or a watcher re-upserted a row during the Argo teardown window — the
+// nextjs-fhvx20 incident: orphan PublicApi+Ingress rows polluted delete-impact
+// previews for 5 days until manual DB surgery.
+//
+// A child should exist while ANY of three signals holds:
+//   - a non-Orphaned App snapshot in the same project+env claims it
+//     (ParentExists, computed in SQL by the doDeleteApp owning-link predicate);
+//   - its name (or git-native spelling, e.g. dotted fqdn) appears anywhere in
+//     the environment's git subtree;
+//   - the backing cluster object is live (per-kind cluster-wide LIST).
+//
+// Uncertainty never prunes, same as the App sweep: an unresolvable repo or a
+// failed kind LIST makes the row unverifiable (gcDecide's gitVerifiable=false
+// path), so it is left untouched. The same two-stage mark/purge grace and the
+// same repos cache (one clone per project per sweep) are reused.
+func (r *StatusReconciler) reconcileChildOrphans(ctx context.Context, repos map[uuid.UUID]*git.Manager, now time.Time) {
+	snaps, err := db.ListGCChildSnapshots(ctx, r.pool, gcChildKinds)
+	if err != nil {
+		log.Error().Err(err).Msg("orphan-gc: list child snapshots")
+		return
+	}
+	if len(snaps) == 0 {
+		return
+	}
+
+	liveNames := r.childLiveNames(ctx)
+	treeCache := map[string]string{}
+	var marked, cleared, purged int
+
+	for _, s := range snaps {
+		mgr, resolved := repos[s.ProjectID]
+		if !resolved {
+			mgr = r.gcRepo(ctx, s.ProjectID)
+			repos[s.ProjectID] = mgr
+		}
+
+		liveSet, kindListable := liveNames[s.Kind]
+		nameInTree := mgr != nil && anyTermIn(
+			treeContent(filepath.Join(mgr.LocalPath(), renderer.EnvBaseGitPath(s.ProjectSlug, s.EnvSlug)), treeCache),
+			s.SearchTerms,
+		)
+		liveBacked, gitBacked, verifiable := childGCSignals(
+			s.ParentExists, kindListable, kindListable && liveSet[s.Name],
+			mgr != nil, nameInTree,
+		)
+
+		switch gcDecide(liveBacked, gitBacked, verifiable, s.Phase, s.LastSyncedAt, s.OrphanedAt, now, r.cfg.OrphanMarkAfter, r.cfg.OrphanPurgeAfter) {
+		case gcClear:
+			if err := db.ClearSnapshotOrphan(ctx, r.pool, s.ID); err != nil {
+				log.Error().Err(err).Str("kind", s.Kind).Str("name", s.Name).Msg("orphan-gc: clear child")
+				continue
+			}
+			cleared++
+		case gcMark:
+			if err := db.MarkSnapshotOrphaned(ctx, r.pool, s.ID, now); err != nil {
+				log.Error().Err(err).Str("kind", s.Kind).Str("name", s.Name).Msg("orphan-gc: mark child")
+				continue
+			}
+			log.Info().Str("project", s.ProjectSlug).Str("env", s.EnvSlug).
+				Str("kind", s.Kind).Str("name", s.Name).
+				Msg("orphan-gc: marked child orphaned (no parent app, no git manifest, not live)")
+			marked++
+		case gcPurge:
+			if err := db.DeleteSnapshotByID(ctx, r.pool, s.ID); err != nil {
+				log.Error().Err(err).Str("kind", s.Kind).Str("name", s.Name).Msg("orphan-gc: purge child")
+				continue
+			}
+			log.Info().Str("project", s.ProjectSlug).Str("env", s.EnvSlug).
+				Str("kind", s.Kind).Str("name", s.Name).
+				Msg("orphan-gc: purged orphaned child snapshot")
+			purged++
+		case gcNone:
+		}
+	}
+
+	if marked+cleared+purged > 0 {
+		log.Info().Int("marked", marked).Int("cleared", cleared).Int("purged", purged).
+			Msg("orphan-gc: swept child snapshots")
+	}
+}
+
+// childGCSignals folds the child-specific evidence into the three inputs
+// gcDecide already understands. The key move: cluster listability is folded
+// into the verifiability bit — death requires proving BOTH git-absence AND
+// cluster-absence, so a failed kind LIST must park the row exactly like an
+// unresolvable repo does. Aliveness (parent/live/git hits) short-circuits in
+// gcDecide before verifiability is consulted, so a live row is still cleared
+// even when the other signal source is down.
+func childGCSignals(parentExists, kindListable, clusterLive, repoResolved, nameInTree bool) (liveBacked, gitBacked, verifiable bool) {
+	return parentExists || (kindListable && clusterLive),
+		repoResolved && nameInTree,
+		repoResolved && kindListable
+}
+
+// childLiveNames lists the cluster objects backing each GC'd child kind and
+// returns kind → set of live object names. A kind absent from the map means
+// its LIST failed this sweep — callers must treat its rows as unverifiable,
+// never as cluster-absent. All five CRs/objects are cluster-scoped or listed
+// across all namespaces in one call, and snapshot names equal object names
+// (the same match rule the status reconcilers use).
+func (r *StatusReconciler) childLiveNames(ctx context.Context) map[string]map[string]bool {
+	out := map[string]map[string]bool{}
+
+	crds := map[string]schema.GroupVersionResource{
+		"PublicApi":         pgvr("publicapis"),
+		"ServiceDatabaseV2": pgvr("servicedatabasesv2"),
+		"S3Bucket":          pgvr("s3buckets"),
+		"AIModel":           inferenceServiceGVR,
+	}
+	for kind, gvr := range crds {
+		list, err := r.clients.Dynamic.Resource(gvr).Namespace("").List(ctx, metav1.ListOptions{})
+		if err != nil {
+			log.Warn().Err(err).Str("kind", kind).Msg("orphan-gc: list cluster objects (kind skipped)")
+			continue
+		}
+		set := make(map[string]bool, len(list.Items))
+		for i := range list.Items {
+			set[list.Items[i].GetName()] = true
+		}
+		out[kind] = set
+	}
+
+	ings, err := r.client.NetworkingV1().Ingresses("").List(ctx, metav1.ListOptions{})
+	if err != nil {
+		log.Warn().Err(err).Msg("orphan-gc: list ingresses (kind skipped)")
+	} else {
+		set := make(map[string]bool, len(ings.Items))
+		for i := range ings.Items {
+			set[ings.Items[i].Name] = true
+		}
+		out["Ingress"] = set
+	}
+	return out
+}
+
+// treeContent returns the concatenated contents of every file under root,
+// cached per root for the duration of one sweep. A missing or unreadable root
+// yields "" — the caller's git-backed test then simply fails, which is safe
+// because verifiability is decided by repo resolution, not by this scan.
+func treeContent(root string, cache map[string]string) string {
+	if v, ok := cache[root]; ok {
+		return v
+	}
+	var sb strings.Builder
+	_ = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return nil
+		}
+		if b, readErr := os.ReadFile(path); readErr == nil {
+			sb.Write(b)
+			sb.WriteByte('\n')
+		}
+		return nil
+	})
+	cache[root] = sb.String()
+	return cache[root]
+}
+
+// anyTermIn reports whether any non-empty search term occurs in content.
+func anyTermIn(content string, terms []string) bool {
+	for _, t := range terms {
+		if t != "" && strings.Contains(content, t) {
+			return true
+		}
+	}
+	return false
 }
 
 // gcAction is one orphan-GC decision for a single App snapshot.
