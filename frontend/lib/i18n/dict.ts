@@ -16,6 +16,15 @@ type AltPage = {
   features: Feature[];
   faqTitle: string;
   faq: Faq[];
+  howtoTitle?: string;
+  howtoSubtitle?: string;
+  howtoSteps?: Step[];
+  mappingTitle?: string;
+  mappingSubtitle?: string;
+  mapping?: MappingRow[];
+  notPortableTitle?: string;
+  notPortableSubtitle?: string;
+  notPortable?: Feature[];
 };
 type Plan = {
   key: string;
@@ -502,6 +511,30 @@ const ru: Dict = {
       { q: "Нужно ли переписывать проект при переходе с Railway?", a: "Нет. Вы подключаете тот же GitHub-репозиторий, платформа сама определяет фреймворк и собирает проект. Пуш в основную ветку пересобирает и деплоит приложение автоматически." },
       { q: "Есть ли база данных, как плагин Postgres в Railway?", a: "Да. Управляемый PostgreSQL создаётся рядом с приложением, DATABASE_URL прокидывается в сервис автоматически — отдельный внешний провайдер не нужен." },
       { q: "Чем цена отличается от usage-billing Railway?", a: "Тарифы фиксированы в рублях, а не считаются по usage в долларах — расходы предсказуемы и не зависят от курса валют." },
+    ],
+    howtoTitle: "Как переехать с Railway на Dada Cloud",
+    howtoSubtitle: "Код переписывать не нужно — переносится конфигурация деплоя, шесть шагов.",
+    howtoSteps: [
+      { num: "01", title: "Подключите репозиторий или загрузите архив", desc: "В консоли: Проекты → Git → Подключить, тот же GitHub-репозиторий, что был в Railway, доступ через GitHub App. Репозитория нет или не хочется его заводить — задеплойте прямо из zip или tar.gz без git." },
+      { num: "02", title: "Проверьте автоопределение фреймворка", desc: "Dada определяет фреймворк по манифестам в репозитории (package.json, requirements.txt, Dockerfile) и сама подставляет команду сборки и порт — как в Railway. Если детект ошибся, framework, build command и start command переопределяются вручную на том же экране." },
+      { num: "03", title: "Перенесите переменные окружения", desc: "Значения из Railway → Variables скопируйте в настройки приложения → переменные окружения. Можно задать отдельное значение только для preview-окружения — как Railway Environments, только на уровне переменной." },
+      { num: "04", title: "Создайте базу PostgreSQL", desc: "Как плагин Postgres в Railway: managed PostgreSQL создаётся рядом с приложением, DATABASE_URL прокидывается в сервис автоматически, отдельный внешний провайдер не нужен." },
+      { num: "05", title: "Запушьте в основную ветку", desc: "Пуш в main — автоматическая пересборка и деплой, как push-to-deploy в Railway. Лог сборки виден в интерфейсе, при ошибке причина видна сразу." },
+      { num: "06", title: "Подключите домен", desc: "Сразу после деплоя приложение доступно по адресу вида имя-хэш.dada-tuda.ru с HTTPS. Свой домен добавляется во вкладке Domains: apex — TXT-запись, поддомен — CNAME, сертификат Let's Encrypt выпускается автоматически после подтверждения." },
+    ],
+    mappingTitle: "Что было в Railway и куда это переехало в Dada Cloud",
+    mappingSubtitle: "Сервис за сервисом — что переносится напрямую, а что называется иначе.",
+    mapping: [
+      { from: "Railway Service (из GitHub)", to: "Приложение (App) в Dada Cloud", note: "Тот же принцип: один сервис в репозитории = одно приложение с автосборкой по пушу." },
+      { from: "Railway Postgres plugin", to: "Managed PostgreSQL рядом с приложением", note: "DATABASE_URL прокидывается в сервис автоматически, без ручного связывания." },
+      { from: "Railway Environment (production/staging)", to: "Environment проекта + preview-override переменных", note: "Прод-окружение одно на проект; отдельные значения переменных для preview задаются точечно, без полного клона окружения." },
+      { from: "Usage-billing в долларах", to: "Фиксированные тарифы в рублях", note: "Оплата российской картой, счётом или по договору с закрывающими документами." },
+    ],
+    notPortableTitle: "Что не переносится напрямую",
+    notPortableSubtitle: "Честно о разнице, чтобы не было сюрпризов после переезда.",
+    notPortable: [
+      { title: "Redis и другие плагины Railway", desc: "Managed Redis, как отдельный плагин в один клик, в Dada Cloud нет. Redis и другие сервисы разворачиваются как обычное приложение на App Server (VM) — своими руками, не в один клик." },
+      { title: "Приватная сеть между сервисами Railway", desc: "Готового аналога приватной сети Railway между сервисами одного проекта нет — взаимодействие между приложениями строится через их публичные HTTPS-адреса." },
     ],
   },
   renderAlt: {
@@ -1260,6 +1293,30 @@ const en: Dict = {
       { q: "Do I have to rewrite my project when moving from Railway?", a: "No. You connect the same GitHub repo, the platform detects the framework and builds it. A push to the main branch rebuilds and deploys automatically." },
       { q: "Is there a database, like the Railway Postgres plugin?", a: "Yes. Managed PostgreSQL is created next to the app and DATABASE_URL is injected automatically — no separate external provider needed." },
       { q: "How is pricing different from Railway's usage-billing?", a: "Plans are fixed in rubles rather than metered in dollars — costs are predictable and independent of the exchange rate." },
+    ],
+    howtoTitle: "How to move from Railway to Dada Cloud",
+    howtoSubtitle: "No need to rewrite code — you're moving deploy configuration, six steps.",
+    howtoSteps: [
+      { num: "01", title: "Connect a repo or upload an archive", desc: "In the console: Projects → Git → Connect, the same GitHub repo you had on Railway, access via a GitHub App. No repo, or don't want to set one up — deploy straight from a zip or tar.gz without git." },
+      { num: "02", title: "Check the framework autodetect", desc: "Dada detects the framework from manifests in the repo (package.json, requirements.txt, Dockerfile) and fills in the build command and port for you — same as Railway. If detection is off, framework, build command and start command can be overridden on the same screen." },
+      { num: "03", title: "Move over your environment variables", desc: "Copy values from Railway → Variables into the app's settings → environment variables. You can set a separate value for the preview environment only — like Railway Environments, but at the variable level." },
+      { num: "04", title: "Create a PostgreSQL database", desc: "Like the Postgres plugin in Railway: managed PostgreSQL is created next to the app, DATABASE_URL is injected into the service automatically, no separate external provider needed." },
+      { num: "05", title: "Push to the main branch", desc: "A push to main triggers an automatic rebuild and deploy, same push-to-deploy as Railway. The build log is visible in the console, and errors are immediately visible." },
+      { num: "06", title: "Connect a domain", desc: "Right after deploy the app is reachable at a name-hash.dada-tuda.ru address over HTTPS. Your own domain is added under the Domains tab: apex via a TXT record, subdomain via CNAME, with a Let's Encrypt certificate issued automatically after verification." },
+    ],
+    mappingTitle: "What Railway had and where it moved to in Dada Cloud",
+    mappingSubtitle: "Service by service — what carries over directly and what's named differently.",
+    mapping: [
+      { from: "Railway Service (from GitHub)", to: "App in Dada Cloud", note: "Same principle: one service in the repo equals one app with auto-build on push." },
+      { from: "Railway Postgres plugin", to: "Managed PostgreSQL next to the app", note: "DATABASE_URL is injected into the service automatically, no manual linking." },
+      { from: "Railway Environment (production/staging)", to: "Project environment + preview variable overrides", note: "One production environment per project; individual variable values for preview are set per-variable, not as a full environment clone." },
+      { from: "Dollar usage-billing", to: "Fixed ruble plans", note: "Pay by Russian card, invoice, or contract with closing documents." },
+    ],
+    notPortableTitle: "What doesn't move over directly",
+    notPortableSubtitle: "Being upfront about the differences so there are no surprises after the move.",
+    notPortable: [
+      { title: "Redis and other Railway plugins", desc: "There's no one-click managed Redis plugin like Railway's. Redis and other services run as a regular app on an App Server (VM) — set up by hand, not one click." },
+      { title: "Railway's private networking between services", desc: "There's no ready equivalent of Railway's private network between services in one project — apps talk to each other over their public HTTPS addresses." },
     ],
   },
   renderAlt: {
