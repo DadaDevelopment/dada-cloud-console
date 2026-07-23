@@ -43,7 +43,7 @@ export default function AppSettingsPage() {
       .catch(() => setVerifiedApexes([]));
   }, [projectId]);
 
-  const validTabsForVM: Tab[] = ["env", "config", "storage", "git"];
+  const validTabsForVM: Tab[] = ["env", "config", "storage", "domains", "git"];
   const effectiveTab: Tab = isVM && !validTabsForVM.includes(tab) ? "env" : tab;
 
   const tabs: { key: Tab; label: string }[] = isVM
@@ -51,6 +51,7 @@ export default function AppSettingsPage() {
         { key: "env", label: t("apps.settings.tab.env") },
         { key: "config", label: t("apps.settings.tab.config") },
         { key: "storage", label: t("apps.settings.tab.storage") },
+        { key: "domains", label: t("apps.settings.tab.domains") },
         { key: "git", label: t("apps.settings.tab.git") },
       ]
     : [
@@ -144,7 +145,7 @@ export default function AppSettingsPage() {
         <ResourceManager projectId={projectId} envId={envId} appName={appName} canEdit={canEdit} />
       )}
 
-      {effectiveTab === "domains" && !isVM && (
+      {effectiveTab === "domains" && (
         <HostnamesManager projectId={projectId} envId={envId} appName={appName} canEdit={canEdit} verifiedApexes={verifiedApexes} />
       )}
     </div>

@@ -51,6 +51,59 @@ func TestRenderNginxConf_ReproducesFindata(t *testing.T) {
 	}
 }
 
+// A custom domain (ExtraHost) attached to an ingress must SERVE traffic to its
+// own app:port with its own cert, alongside (not instead of) the canonical
+// Host -- unlike Aliases, which only 301-redirect to Host.
+func TestRenderNginxConf_ExtraHost(t *testing.T) {
+	conf := RenderNginxConf(VMIngressSpec{
+		Host:        "fin-data.pro",
+		SSLRedirect: true,
+		TLS: VMIngressTLS{
+			Enabled:    true,
+			MinVersion: "1.2",
+			CertPath:   "/etc/nginx/certs/live/fin-data.pro/fullchain.pem",
+			KeyPath:    "/etc/nginx/certs/live/fin-data.pro/privkey.pem",
+		},
+		Rules: []VMIngressRule{{Path: "/", App: "frontend", Port: 5173}},
+		ExtraHosts: []VMExtraHost{
+			{
+				Host:     "custom.example.com",
+				CertPath: "/etc/nginx/certs/live/custom.example.com/fullchain.pem",
+				KeyPath:  "/etc/nginx/certs/live/custom.example.com/privkey.pem",
+				App:      "custom-app",
+				Port:     9000,
+			},
+		},
+	})
+	for _, w := range []string{
+		"server_name fin-data.pro;",
+		"proxy_pass http://frontend:5173;",
+		"server_name custom.example.com;",
+		"ssl_certificate /etc/nginx/certs/live/custom.example.com/fullchain.pem;",
+		"ssl_certificate_key /etc/nginx/certs/live/custom.example.com/privkey.pem;",
+		"proxy_pass http://custom-app:9000;",
+	} {
+		if !strings.Contains(conf, w) {
+			t.Errorf("generated nginx conf missing %q\n---\n%s", w, conf)
+		}
+	}
+
+	i := strings.Index(conf, "server_name custom.example.com;\n\n")
+	if i < 0 {
+		t.Fatalf("extra host must get a serving 443 block (server_name followed by a blank line, not folded into the 80 redirect):\n%s", conf)
+	}
+	block := conf[i:]
+	if end := strings.Index(block, "\n}\n"); end >= 0 {
+		block = block[:end]
+	}
+	if strings.Contains(block, "return 301") {
+		t.Errorf("extra host 443 block must SERVE, not redirect:\n%s", block)
+	}
+	if !strings.Contains(block, "proxy_pass http://custom-app:9000;") {
+		t.Errorf("extra host 443 block must proxy to its own app:port:\n%s", block)
+	}
+}
+
 func TestRenderNginxConf_MinVersion13(t *testing.T) {
 	conf := RenderNginxConf(VMIngressSpec{Host: "x", TLS: VMIngressTLS{Enabled: true, MinVersion: "1.3"}})
 	if !strings.Contains(conf, "ssl_protocols TLSv1.3;") || strings.Contains(conf, "TLSv1.2") {

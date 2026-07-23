@@ -509,6 +509,30 @@ func (h *Handler) AttachHostname(c *gin.Context) {
 		recordType = "A"
 	}
 
+	dnsTarget := h.recordTarget(recordType)
+	dnsNote := ""
+	var envRuntime models.EnvironmentRuntime
+	var appServerID *uuid.UUID
+	if err := h.pool.QueryRow(c.Request.Context(),
+		`SELECT runtime, app_server_id FROM environments WHERE id = $1 AND project_id = $2`,
+		envID, projectID,
+	).Scan(&envRuntime, &appServerID); err == nil && envRuntime == models.EnvironmentRuntimeVM {
+		recordType = "A"
+		dnsTarget = ""
+		dnsNote = "no VM host assigned to this environment yet; DNS target pending"
+		if appServerID != nil {
+			var vmIP *string
+			if err := h.pool.QueryRow(c.Request.Context(),
+				`SELECT vm_ip FROM app_servers WHERE id = $1`, *appServerID,
+			).Scan(&vmIP); err == nil && vmIP != nil && *vmIP != "" {
+				dnsTarget = *vmIP
+				dnsNote = ""
+			} else {
+				dnsNote = "VM host has no public IP recorded yet; DNS target pending"
+			}
+		}
+	}
+
 	payload := models.AttachCustomHostnamePayload{AppName: appName, Hostname: hostname}
 	payloadBytes, err := json.Marshal(payload)
 	if err != nil {
@@ -558,15 +582,20 @@ func (h *Handler) AttachHostname(c *gin.Context) {
 	)
 	h.notifyAuditEvent(claims, projectID, "AttachCustomHostname", hostname)
 
+	dnsRecord := gin.H{
+		"type":   recordType,
+		"host":   hostname,
+		"target": dnsTarget,
+	}
+	if dnsNote != "" {
+		dnsRecord["note"] = dnsNote
+	}
+
 	c.JSON(http.StatusAccepted, gin.H{
-		"operation": op,
-		"hostname":  hn,
-		"dns_record": gin.H{
-			"type":   recordType,
-			"host":   hostname,
-			"target": h.recordTarget(recordType),
-		},
-		"message": "Hostname attachment queued",
+		"operation":  op,
+		"hostname":   hn,
+		"dns_record": dnsRecord,
+		"message":    "Hostname attachment queued",
 	})
 }
 

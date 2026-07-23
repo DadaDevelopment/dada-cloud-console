@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"os"
 	"sort"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/dada-tuda/console/gitops-agent/internal/config"
@@ -575,8 +577,10 @@ func (w *DBWatcher) doCreateIngress(ctx context.Context, op db.Operation) error 
 			"enabled":     p.TLS.Enabled,
 			"min_version": p.TLS.MinVersion,
 			"cert_path":   p.TLS.CertPath,
+			"key_path":    p.TLS.KeyPath,
 		},
-		"rules": p.Rules,
+		"rules":        p.Rules,
+		"custom_hosts": []any{},
 	}
 	summaryJSON := composeAppSummary(
 		composeDesired{Compose: block},
@@ -2043,6 +2047,14 @@ func (w *DBWatcher) doAttachCustomHostname(ctx context.Context, op db.Operation)
 		return fmt.Errorf("parse payload: %w", err)
 	}
 
+	var runtime string
+	if err := w.pool.QueryRow(ctx, `SELECT runtime FROM environments WHERE id = $1`, op.EnvironmentID).Scan(&runtime); err != nil {
+		return fmt.Errorf("load env runtime: %w", err)
+	}
+	if runtime == "vm" {
+		return w.doAttachCustomHostnameCompose(ctx, op, p.AppName, p.Hostname)
+	}
+
 	projectName, envName, envNamespace, err := w.projectEnv(ctx, op.ProjectID, op.EnvironmentID)
 	if err != nil {
 		return fmt.Errorf("project/env lookup: %w", err)
@@ -2088,6 +2100,61 @@ func (w *DBWatcher) doAttachCustomHostname(ctx context.Context, op db.Operation)
 		p.Hostname, p.AppName, op.ID, projectName, envName,
 	)
 	return w.commitFilesAndRecord(ctx, op, mgr, valuesPath, files, commitMsg)
+}
+
+// doAttachCustomHostnameCompose is the VM-runtime branch of doAttachCustomHostname:
+// on a compose environment a custom domain is an ADDITIONAL serving vhost on the
+// env's managed ingress App (renderer.VMExtraHost), not a k8s Ingress CR. It
+// reconstructs the ingress's VMIngressSpec from the meta doCreateIngress
+// persisted, appends this hostname to custom_hosts (idempotent by host), and
+// re-renders + re-assembles the stack via rebuildIngressCompose. BYO-cert: this
+// only wires the vhost — the operator (or their own certbot) must place the
+// cert at the conventional path (certPathForHost/keyPathForHost) on the VM
+// before nginx will actually serve it.
+func (w *DBWatcher) doAttachCustomHostnameCompose(ctx context.Context, op db.Operation, appName, hostname string) error {
+	ingressName, ingressRaw, err := w.findManagedIngress(ctx, op)
+	if err != nil {
+		return err
+	}
+	var envelope struct {
+		Ingress ingressMetaSnapshot `json:"ingress"`
+	}
+	if err := json.Unmarshal(ingressRaw, &envelope); err != nil {
+		return fmt.Errorf("parse ingress snapshot: %w", err)
+	}
+
+	var appRaw []byte
+	if err := w.pool.QueryRow(ctx, `
+		SELECT summary_json FROM resource_snapshots
+		WHERE project_id=$1 AND environment_id=$2 AND kind='App' AND name=$3
+	`, op.ProjectID, op.EnvironmentID, appName).Scan(&appRaw); err != nil {
+		return fmt.Errorf("loading app snapshot: %w", err)
+	}
+	var appSummary struct {
+		Desired struct {
+			Ports []string `json:"ports"`
+		} `json:"desired"`
+	}
+	_ = json.Unmarshal(appRaw, &appSummary)
+	port := 80
+	if len(appSummary.Desired.Ports) > 0 {
+		if p := containerPortFromPortString(appSummary.Desired.Ports[0]); p > 0 {
+			port = p
+		}
+	}
+
+	customHosts := envelope.Ingress.CustomHosts
+	found := false
+	for _, ch := range customHosts {
+		if ch.Host == hostname {
+			found = true
+			break
+		}
+	}
+	if !found {
+		customHosts = append(customHosts, ingressCustomHost{Host: hostname, App: appName, Port: port})
+	}
+	return w.rebuildIngressCompose(ctx, op, ingressName, envelope.Ingress, customHosts)
 }
 
 // doAttachDefaultDomain backfills a managed surrogate domain onto an existing
@@ -2189,6 +2256,14 @@ func (w *DBWatcher) doDetachCustomHostname(ctx context.Context, op db.Operation)
 		return fmt.Errorf("parse payload: %w", err)
 	}
 
+	var runtime string
+	if err := w.pool.QueryRow(ctx, `SELECT runtime FROM environments WHERE id = $1`, op.EnvironmentID).Scan(&runtime); err != nil {
+		return fmt.Errorf("load env runtime: %w", err)
+	}
+	if runtime == "vm" {
+		return w.doDetachCustomHostnameCompose(ctx, op, p.Hostname)
+	}
+
 	projectName, envName, _, err := w.projectEnv(ctx, op.ProjectID, op.EnvironmentID)
 	if err != nil {
 		return fmt.Errorf("project/env lookup: %w", err)
@@ -2224,6 +2299,206 @@ func (w *DBWatcher) doDetachCustomHostname(ctx context.Context, op db.Operation)
 			valuesPath, commitMsg, w.cfg.BotName, w.cfg.BotEmail, &opID, "agent")
 	}
 	return db.MarkCommitted(ctx, w.pool, op.ID, sha, valuesPath)
+}
+
+// doDetachCustomHostnameCompose is the VM-runtime mirror of doDetachCustomHostname:
+// it drops the {host==hostname} entry from the managed ingress's custom_hosts
+// and re-renders + re-assembles via rebuildIngressCompose (the same rebuild
+// path doAttachCustomHostnameCompose uses). A hostname not present is a no-op
+// (idempotent detach).
+func (w *DBWatcher) doDetachCustomHostnameCompose(ctx context.Context, op db.Operation, hostname string) error {
+	ingressName, ingressRaw, err := w.findManagedIngress(ctx, op)
+	if err != nil {
+		return err
+	}
+	var envelope struct {
+		Ingress ingressMetaSnapshot `json:"ingress"`
+	}
+	if err := json.Unmarshal(ingressRaw, &envelope); err != nil {
+		return fmt.Errorf("parse ingress snapshot: %w", err)
+	}
+
+	customHosts := make([]ingressCustomHost, 0, len(envelope.Ingress.CustomHosts))
+	for _, ch := range envelope.Ingress.CustomHosts {
+		if ch.Host != hostname {
+			customHosts = append(customHosts, ch)
+		}
+	}
+	return w.rebuildIngressCompose(ctx, op, ingressName, envelope.Ingress, customHosts)
+}
+
+// findManagedIngress locates the environment's managed nginx ingress App (the
+// one doCreateIngress created, marked managed=ingress) — custom-domain
+// attach/detach on a VM env has nothing to route through without it.
+func (w *DBWatcher) findManagedIngress(ctx context.Context, op db.Operation) (name string, raw []byte, err error) {
+	err = w.pool.QueryRow(ctx, `
+		SELECT name, summary_json FROM resource_snapshots
+		WHERE project_id=$1 AND environment_id=$2 AND kind='App' AND summary_json->>'managed'='ingress'
+		LIMIT 1
+	`, op.ProjectID, op.EnvironmentID).Scan(&name, &raw)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", nil, fmt.Errorf("environment has no managed ingress; create one before attaching a domain")
+	}
+	if err != nil {
+		return "", nil, fmt.Errorf("loading ingress snapshot: %w", err)
+	}
+	return name, raw, nil
+}
+
+// ingressMetaSnapshot mirrors the "ingress" meta object doCreateIngress persists
+// on a managed-ingress App snapshot — the source of truth
+// doAttachCustomHostnameCompose/doDetachCustomHostnameCompose reconstruct a
+// renderer.VMIngressSpec from whenever a custom domain is attached or detached.
+type ingressMetaSnapshot struct {
+	Host        string   `json:"host"`
+	Aliases     []string `json:"aliases"`
+	SSLRedirect bool     `json:"ssl_redirect"`
+	BasicAuth   bool     `json:"basic_auth"`
+	TLS         struct {
+		Enabled    bool   `json:"enabled"`
+		MinVersion string `json:"min_version"`
+		CertPath   string `json:"cert_path"`
+		KeyPath    string `json:"key_path"`
+	} `json:"tls"`
+	Rules []struct {
+		Path string `json:"path"`
+		App  string `json:"app"`
+		Port int    `json:"port"`
+	} `json:"rules"`
+	CustomHosts []ingressCustomHost `json:"custom_hosts"`
+}
+
+// ingressCustomHost is one BYO-cert custom domain routed straight to App:Port,
+// attached to a managed ingress alongside its canonical Host.
+type ingressCustomHost struct {
+	Host string `json:"host"`
+	App  string `json:"app"`
+	Port int    `json:"port"`
+}
+
+// certPathForHost / keyPathForHost apply the BYO-cert convention documented to
+// VM operators: place the cert at the certbot layout under the ingress's
+// already-mounted /etc/nginx/certs (host /etc/letsencrypt), keyed by hostname.
+// Attaching a domain only wires the vhost; it is inert until the operator puts
+// the cert there.
+func certPathForHost(hostname string) string {
+	return "/etc/nginx/certs/live/" + hostname + "/fullchain.pem"
+}
+
+func keyPathForHost(hostname string) string {
+	return "/etc/nginx/certs/live/" + hostname + "/privkey.pem"
+}
+
+// deriveIngressKeyPath recovers a key path for an ingress snapshot created
+// before key_path was persisted (see doCreateIngress): certbot's layout keeps
+// fullchain.pem and privkey.pem side by side, so the common case is a plain
+// suffix swap; anything else falls back to appending ".key".
+func deriveIngressKeyPath(certPath string) string {
+	if strings.HasSuffix(certPath, "fullchain.pem") {
+		return strings.TrimSuffix(certPath, "fullchain.pem") + "privkey.pem"
+	}
+	return certPath + ".key"
+}
+
+// containerPortFromPortString extracts the container-side port from a compose
+// ports entry ("<host>:<container>" or a bare "<container>"), the shape
+// composeDesired.Ports stores. 0 means unparseable/absent.
+func containerPortFromPortString(s string) int {
+	s = strings.SplitN(s, "/", 2)[0]
+	parts := strings.SplitN(s, ":", 2)
+	n, err := strconv.Atoi(parts[len(parts)-1])
+	if err != nil {
+		return 0
+	}
+	return n
+}
+
+// rebuildIngressCompose re-renders a managed ingress's nginx conf from its
+// reconstructed VMIngressSpec (canonical host + rules, unchanged) plus the
+// given custom_hosts as ExtraHosts, then re-assembles the environment stack.
+// Shared by doAttachCustomHostnameCompose and doDetachCustomHostnameCompose —
+// only the custom_hosts list they pass in differs.
+//
+// TLS is forced enabled: once any custom host exists the ingress needs the
+// /etc/nginx/certs mount regardless of the canonical host's original setting.
+//
+// KNOWN GAP (fail-safe): doCreateIngress persists basic_auth only as a bool, not
+// the auth_basic_user_file path, so a rebuild cannot carry the protection into
+// the re-rendered spec. Rather than silently drop it (turning a password-gated
+// site public) or mount a guessed path (crashing nginx for every domain), this
+// refuses the operation when meta.BasicAuth is set, leaving the ingress
+// untouched. Closing the gap needs a real basic_auth path field in the meta.
+func (w *DBWatcher) rebuildIngressCompose(ctx context.Context, op db.Operation, ingressName string, meta ingressMetaSnapshot, customHosts []ingressCustomHost) error {
+	if meta.BasicAuth {
+		return fmt.Errorf("ingress %q has basic auth configured; attaching or detaching a custom domain would re-render the nginx conf and drop that protection (the auth_basic_user_file path is not persisted) — not supported until the path is stored in the ingress meta", ingressName)
+	}
+
+	keyPath := meta.TLS.KeyPath
+	if keyPath == "" {
+		keyPath = deriveIngressKeyPath(meta.TLS.CertPath)
+	}
+
+	spec := renderer.VMIngressSpec{
+		Host:        meta.Host,
+		Aliases:     meta.Aliases,
+		SSLRedirect: meta.SSLRedirect,
+		TLS: renderer.VMIngressTLS{
+			Enabled:    true,
+			MinVersion: meta.TLS.MinVersion,
+			CertPath:   meta.TLS.CertPath,
+			KeyPath:    keyPath,
+		},
+	}
+	depsSet := map[string]bool{}
+	for _, r := range meta.Rules {
+		spec.Rules = append(spec.Rules, renderer.VMIngressRule{Path: r.Path, App: r.App, Port: r.Port})
+		if r.App != "" {
+			depsSet[r.App] = true
+		}
+	}
+	for _, ch := range customHosts {
+		spec.ExtraHosts = append(spec.ExtraHosts, renderer.VMExtraHost{
+			Host:     ch.Host,
+			CertPath: certPathForHost(ch.Host),
+			KeyPath:  keyPathForHost(ch.Host),
+			App:      ch.App,
+			Port:     ch.Port,
+		})
+		if ch.App != "" {
+			depsSet[ch.App] = true
+		}
+	}
+	deps := make([]string, 0, len(depsSet))
+	for a := range depsSet {
+		deps = append(deps, a)
+	}
+	sort.Strings(deps)
+	block := ingressComposeBlock(spec, deps)
+
+	newIngressMeta := map[string]any{
+		"host":         meta.Host,
+		"aliases":      meta.Aliases,
+		"ssl_redirect": meta.SSLRedirect,
+		"basic_auth":   meta.BasicAuth,
+		"tls": map[string]any{
+			"enabled":     true,
+			"min_version": meta.TLS.MinVersion,
+			"cert_path":   meta.TLS.CertPath,
+			"key_path":    keyPath,
+		},
+		"rules":        meta.Rules,
+		"custom_hosts": customHosts,
+	}
+	summaryJSON := composeAppSummary(
+		composeDesired{Compose: block},
+		map[string]any{"managed": "ingress", "host": meta.Host, "ingress": newIngressMeta},
+	)
+	if err := db.UpsertSnapshot(ctx, w.pool,
+		op.ProjectID, op.EnvironmentID, "App", ingressName, "Pending", summaryJSON, time.Now(),
+	); err != nil {
+		return err
+	}
+	return w.renderEnvAggregate(ctx, op, op.ProjectID, op.EnvironmentID)
 }
 
 func (w *DBWatcher) doSetNamespacePolicy(ctx context.Context, op db.Operation) error {

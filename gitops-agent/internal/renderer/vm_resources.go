@@ -41,6 +41,19 @@ type VMIngressSpec struct {
 	TLS         VMIngressTLS // 443 + certs
 	BasicAuth   string       // auth_basic_user_file path; empty = no basic auth
 	Rules       []VMIngressRule
+	ExtraHosts  []VMExtraHost // additional serving vhosts (custom domains), each with its own cert
+}
+
+// VMExtraHost is an additional serving vhost on the same Ingress, alongside its
+// canonical Host — a custom domain routed straight to App:Port with its own
+// BYO cert. Unlike Aliases, an ExtraHost SERVES traffic; it never redirects to
+// Host.
+type VMExtraHost struct {
+	Host     string // server_name, e.g. "custom.example.com"
+	CertPath string // in-container cert path for this host
+	KeyPath  string // in-container key path for this host
+	App      string // target compose service name
+	Port     int    // target container port
 }
 
 func sslProtocols(minVersion string) string {
@@ -89,6 +102,13 @@ func RenderNginxConf(spec VMIngressSpec) string {
 		fmt.Fprintf(&b, "    location %s {\n        proxy_pass http://%s:%d;\n%s\n    }\n\n", r.Path, r.App, r.Port, nginxProxyHeaders)
 	}
 	b.WriteString("}\n")
+
+	for _, h := range spec.ExtraHosts {
+		fmt.Fprintf(&b, "\nserver {\n    listen 80;\n    server_name %s;\n    return 301 https://%s$request_uri;\n}\n\n", h.Host, h.Host)
+		fmt.Fprintf(&b, "server {\n    listen 443 ssl http2;\n    server_name %s;\n\n", h.Host)
+		fmt.Fprintf(&b, "    ssl_certificate %s;\n    ssl_certificate_key %s;\n    ssl_protocols %s;\n    ssl_ciphers HIGH:!aNULL:!MD5;\n\n", h.CertPath, h.KeyPath, proto)
+		fmt.Fprintf(&b, "    location / {\n        proxy_pass http://%s:%d;\n%s\n    }\n}\n", h.App, h.Port, nginxProxyHeaders)
+	}
 	return b.String()
 }
 
