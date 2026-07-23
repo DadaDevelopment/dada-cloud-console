@@ -2,7 +2,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useParams, useSearchParams, useRouter } from "next/navigation";
 import Link from "next/link";
-import { buildsApi, deploymentsApi } from "@/lib/api";
+import { buildsApi, cloudTasksApi, deploymentsApi } from "@/lib/api";
 import type { Build, Deployment } from "@/lib/types";
 import { Spinner } from "@/components/ui/spinner";
 import { Breadcrumb } from "@/components/ui/breadcrumb";
@@ -145,6 +145,20 @@ export default function AppDeploymentsPage() {
     }
   }
 
+  async function handleAutofix(build: Build) {
+    setActionId(build.id);
+    setError(null);
+    try {
+      const shaOrId = build.commit_sha ? build.commit_sha.slice(0, 12) : build.id.slice(0, 12);
+      const summary = `Build failed on branch ${build.branch} (${shaOrId})${build.commit_message ? `: ${build.commit_message}` : ""}`;
+      await cloudTasksApi.triggerAutofix(projectId, envId, appName, summary);
+      router.push(`/projects/${projectId}/apps/${appName}${envId ? `?envId=${envId}` : ""}#agent`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t("apps.deployments.error.autofix"));
+      setActionId(null);
+    }
+  }
+
   function DeployActions({ dep }: { dep: Deployment }) {
     if (!canDeploy) return null;
     return dep.is_current ? (
@@ -273,6 +287,15 @@ export default function AppDeploymentsPage() {
                             className="rounded-lg border border-gray-300 dark:border-gray-700 px-3 py-1.5 text-xs font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-50"
                           >
                             {actionId === b.id ? t("apps.deployments.cancelingBuild") : t("apps.deployments.cancelBuild")}
+                          </button>
+                        )}
+                        {canDeploy && b.status === "failed" && (
+                          <button
+                            onClick={() => handleAutofix(b)}
+                            disabled={actionId === b.id}
+                            className="rounded-lg border border-blue-300 dark:border-blue-800 px-3 py-1.5 text-xs font-medium text-blue-700 dark:text-blue-300 hover:bg-blue-50 dark:hover:bg-blue-950/40 disabled:opacity-50"
+                          >
+                            {actionId === b.id ? t("apps.deployments.autofixing") : t("apps.deployments.autofix")}
                           </button>
                         )}
                         {dep && <DeployActions dep={dep} />}
