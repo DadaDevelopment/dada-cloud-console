@@ -19,7 +19,8 @@ import { DeployChooser } from "@/components/deploy/deploy-chooser";
 import { TemplateDeployCards } from "@/components/console/template-deploy-cards";
 import { UploadDeployCard } from "@/components/deploy/upload-deploy";
 import { useT } from "@/lib/i18n/console/context";
-import { Globe, Database, GitPullRequest } from "lucide-react";
+import { Globe, Database, GitPullRequest, Eye } from "lucide-react";
+import { AppPreviewPane } from "@/components/app-preview-pane";
 import { classifyVMResource, extractIngressSpec, extractDatabaseSpec } from "@/lib/vm-resources";
 
 interface CreateAppForm {
@@ -443,6 +444,7 @@ interface EnvBlockProps {
 }
 
 function EnvBlock({ env, projectId, apps, infra, previews, canCreate, onCreate, t }: EnvBlockProps) {
+  const [openPreviewAppId, setOpenPreviewAppId] = useState<string | null>(null);
   return (
     <section>
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3 border-b border-gray-100 dark:border-gray-800 pb-3">
@@ -500,8 +502,8 @@ function EnvBlock({ env, projectId, apps, infra, previews, canCreate, onCreate, 
                   ? `${db?.engine ?? ""}${db?.version ? " " + db.version : ""}`
                   : summary.image ?? "—";
             return (
+              <div key={app.id}>
               <Link
-                key={app.id}
                 href={appHref}
                 className="flex flex-wrap items-center gap-x-6 gap-y-3 rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 px-5 py-4 shadow-sm hover:border-blue-200 hover:shadow-md transition-all"
               >
@@ -576,15 +578,32 @@ function EnvBlock({ env, projectId, apps, infra, previews, canCreate, onCreate, 
 
                 <div className="flex shrink-0 items-center gap-2" onClick={(e) => e.stopPropagation()}>
                   {summary.url && (
-                    <a
-                      href={summary.url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 dark:border-gray-800 px-3 py-1.5 text-xs font-medium text-blue-600 dark:text-blue-400 hover:border-blue-300 transition-colors"
-                    >
-                      <Globe className="h-3.5 w-3.5 shrink-0" />
-                      {t("apps.card.openUrl", { hostname: appHostname(summary.url) })}
-                    </a>
+                    <>
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.preventDefault();
+                          setOpenPreviewAppId((cur) => (cur === app.id ? null : app.id));
+                        }}
+                        className={`inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors ${
+                          openPreviewAppId === app.id
+                            ? "border-blue-300 bg-blue-50 dark:bg-blue-950/40 text-blue-600 dark:text-blue-400"
+                            : "border-gray-200 dark:border-gray-800 text-gray-600 dark:text-gray-300 hover:border-blue-300 hover:text-blue-600"
+                        }`}
+                      >
+                        <Eye className="h-3.5 w-3.5 shrink-0" />
+                        {t("apps.card.preview")}
+                      </button>
+                      <a
+                        href={summary.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 dark:border-gray-800 px-3 py-1.5 text-xs font-medium text-blue-600 dark:text-blue-400 hover:border-blue-300 transition-colors"
+                      >
+                        <Globe className="h-3.5 w-3.5 shrink-0" />
+                        {t("apps.card.openUrl", { hostname: appHostname(summary.url) })}
+                      </a>
+                    </>
                   )}
                   <a
                     href={`${appHref}#logs`}
@@ -602,6 +621,12 @@ function EnvBlock({ env, projectId, apps, infra, previews, canCreate, onCreate, 
                   )}
                 </div>
               </Link>
+              {openPreviewAppId === app.id && summary.url && (
+                <div className="mt-2">
+                  <AppPreviewPane key={summary.url} url={summary.url} title={app.name} defaultOpen />
+                </div>
+              )}
+              </div>
             );
           })}
         </div>
