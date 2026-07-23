@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 
 	"github.com/dada-tuda/console/gitops-agent/internal/db"
 	"github.com/dada-tuda/console/gitops-agent/internal/git"
@@ -28,7 +29,11 @@ const pgUniqueViolation = "23505"
 //     slug/env/namespace (payload.TargetProjectID, payload.TargetEnvID).
 //  2. Guard: reload the src App snapshot and its children; abort if a volume or
 //     an attached ServiceDatabaseV2 is present.
-//  3. Render the app under the dst git path — app.yaml, values.yaml, and a
+//  3. Write the app under the dst git path — app.yaml re-rendered for the new
+//     location, values.yaml carried VERBATIM from src (so servicePort, ingress,
+//     useDotEnv, resources — everything the running app needs, not just the
+//     summary_json subset — survive the move; app.yaml holds the only
+//     location-specific identity, so values.yaml needs no rewrite), and a
 //     resources.values.yaml carried over from src (its PublicApi/domain entries
 //     verbatim, its Secret regenerated from decrypted env_vars, any
 //     ServiceDatabaseV2 entry defensively stripped).
@@ -161,7 +166,8 @@ func (w *DBWatcher) doMoveApp(ctx context.Context, op db.Operation) error {
 	if err != nil {
 		return err
 	}
-	valuesYAML, err := renderer.RenderAppValues(appSpec)
+	srcValuesPath := renderer.AppHelmValuesGitPath(srcProjectSlug, srcEnvName, p.AppName)
+	valuesYAML, err := loadAppValuesVerbatim(mgr, srcValuesPath, appSpec)
 	if err != nil {
 		return err
 	}
@@ -259,6 +265,29 @@ func (w *DBWatcher) doMoveApp(ctx context.Context, op db.Operation) error {
 	return nil
 }
 
+// loadAppValuesVerbatim returns the app's source values.yaml exactly as it lives
+// in git. A move must preserve every field the running app depends on —
+// servicePort, ingress, useDotEnv, resources, extraEnv, workloadType — not just
+// the handful re-derivable from resource_snapshots.summary_json (image, port,
+// replicas, profile). Re-rendering from that partial summary silently dropped
+// servicePort and the ingress block, so a moved PublicApi app fell back to the
+// chart's default service port and 502'd on its live URL.
+//
+// values.yaml carries no project/environment/namespace/argoName identity — that
+// all lives in app.yaml — so the file is location-independent and safe to
+// transplant byte-for-byte to the target. Only when the source file is genuinely
+// absent (a pre-values.yaml app) does it fall back to re-rendering from the spec.
+func loadAppValuesVerbatim(mgr *git.Manager, srcValuesPath string, fallback renderer.AppSpec) (string, error) {
+	content, err := mgr.ReadFile(srcValuesPath)
+	if errors.Is(err, os.ErrNotExist) {
+		return renderer.RenderAppValues(fallback)
+	}
+	if err != nil {
+		return "", fmt.Errorf("read src values.yaml: %w", err)
+	}
+	return content, nil
+}
+
 // repointMovedAppSnapshots re-parents the App row and every child
 // resource_snapshots row (the exact set db.AppMoveSnapshots returned pre-move)
 // onto the target project/environment. Per row it falls back to deleting the
@@ -266,6 +295,13 @@ func (w *DBWatcher) doMoveApp(ctx context.Context, op db.Operation) error {
 // (kind,name) — the unique_violation path on (project_id,environment_id,kind,
 // name) — so a partial prior run (crash between commit and repoint) can be
 // safely re-driven to completion.
+//
+// Each row's UPDATE runs inside its own savepoint (a pgx nested transaction) so a
+// unique-constraint hit rolls back only that one statement. Without the savepoint
+// the failed UPDATE puts the whole transaction into the aborted state (SQLSTATE
+// 25P02), and the very DELETE meant to resolve the duplicate then fails with
+// "current transaction is aborted" — which is how a partial move once scattered
+// an app's snapshots half in the source project and half in the target.
 func (w *DBWatcher) repointMovedAppSnapshots(ctx context.Context, srcProjectID, srcEnvID, dstProjectID, dstEnvID uuid.UUID, appName string) error {
 	refs, err := db.AppMoveSnapshots(ctx, w.pool, srcProjectID, srcEnvID, appName)
 	if err != nil {
@@ -282,13 +318,21 @@ func (w *DBWatcher) repointMovedAppSnapshots(ctx context.Context, srcProjectID, 
 	defer func() { _ = tx.Rollback(ctx) }()
 
 	for _, ref := range refs {
-		_, err := tx.Exec(ctx,
+		sp, err := tx.Begin(ctx)
+		if err != nil {
+			return fmt.Errorf("begin repoint savepoint %s/%s: %w", ref.Kind, ref.Name, err)
+		}
+		_, err = sp.Exec(ctx,
 			`UPDATE resource_snapshots SET project_id = $1, environment_id = $2, last_synced_at = NOW() WHERE id = $3`,
 			dstProjectID, dstEnvID, ref.ID,
 		)
 		if err == nil {
+			if err := sp.Commit(ctx); err != nil {
+				return fmt.Errorf("release repoint savepoint %s/%s: %w", ref.Kind, ref.Name, err)
+			}
 			continue
 		}
+		_ = sp.Rollback(ctx)
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.Code == pgUniqueViolation {
 			if _, derr := tx.Exec(ctx, `DELETE FROM resource_snapshots WHERE id = $1`, ref.ID); derr != nil {

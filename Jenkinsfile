@@ -3,6 +3,12 @@ def NODE_VERSION = '20'
 
 def GO_BUILDER_IMAGE   = "golang:${GO_VERSION}-alpine"
 def NODE_BUILDER_IMAGE = "node:${NODE_VERSION}-bookworm"
+// System deps + browsers preinstalled — kills the per-build ~90s
+// `playwright install --with-deps` (apt + browser download) in the e2e stages.
+// Tag MUST stay in lockstep with @playwright/test in frontend/package-lock.json;
+// on drift the in-stage `npx playwright install chromium` downloads the matching
+// browser (no apt) as a slow-but-green fallback until this tag is bumped.
+def PLAYWRIGHT_IMAGE   = 'mcr.microsoft.com/playwright:v1.61.1-noble'
 // docker:24, not docker:29 — docker:29-dind's embedded BuildKit "session"
 // healthcheck fatally kills dockerd on heavy builds ("only one connection
 // allowed" → dind SIGTERM → pod OOM/abort). docker:24 is the in-repo-proven-good
@@ -205,6 +211,25 @@ spec:
         - name: build-cache
           mountPath: /tmp/.cache/npm
           subPath: npm
+
+    - name: playwright
+      image: ${PLAYWRIGHT_IMAGE}
+      command: ['cat']
+      tty: true
+      workingDir: /home/jenkins/agent
+      env:
+        - name: HOME
+          value: /tmp
+      resources:
+        requests:
+          cpu: "50m"
+          memory: "256Mi"
+        limits:
+          cpu: "1000m"
+          memory: "1536Mi"
+      volumeMounts:
+        - name: workspace-volume
+          mountPath: /home/jenkins/agent
 
     - name: docker
       image: ${DOCKER_CLI_IMAGE}
@@ -573,12 +598,12 @@ spec:
                     }
 
                     runStage('E2E smoke') {
-                        container('node-builder') {
+                        container('playwright') {
                             dir('frontend') {
                                 catchError(buildResult: 'UNSTABLE', stageResult: 'FAILURE', message: 'e2e smoke failed (non-blocking; runs against the currently-live console)') {
                                     sh '''
                                         set -eux
-                                        npx playwright install --with-deps chromium
+                                        npx playwright install chromium
                                         E2E_BASE_URL=https://console.dada-tuda.ru npx playwright test --project=smoke
                                     '''
                                 }
@@ -588,7 +613,7 @@ spec:
 
                     if (params.RUN_E2E_AUTHED) {
                         runStage('E2E authed') {
-                            container('node-builder') {
+                            container('playwright') {
                                 dir('frontend') {
                                     withCredentials([
                                             usernamePassword(credentialsId: 'e2e-console-user', usernameVariable: 'E2E_USER', passwordVariable: 'E2E_PASS'),
@@ -596,7 +621,7 @@ spec:
                                     ]) {
                                         sh '''
                                             set -eu
-                                            npx playwright install --with-deps chromium
+                                            npx playwright install chromium
                                             E2E_BASE_URL=https://console.dada-tuda.ru E2E_MUTATE=1 npx playwright test --project=setup --project=authed
                                         '''
                                     }
