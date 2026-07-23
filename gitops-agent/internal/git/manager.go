@@ -40,6 +40,11 @@ type Commit struct {
 	When    time.Time
 	// Files changed in this commit (paths relative to repo root).
 	Files []string
+	// Deleted holds the subset of Files that were removed in this commit
+	// (present in the parent tree, absent at this commit). Consumers use it to
+	// skip removed paths — e.g. so a DeleteProject that git-rm's a project tree
+	// does not auto-recreate the project it just deleted.
+	Deleted map[string]bool
 }
 
 // Manager owns a local clone of one remote repository.
@@ -272,7 +277,7 @@ func (m *Manager) CommitsSince(fromSHA string) ([]Commit, error) {
 			return fmt.Errorf("stop") // sentinel to stop iteration
 		}
 
-		files, ferr := changedFiles(c)
+		files, deleted, ferr := changedFiles(c)
 		if ferr != nil {
 			return ferr
 		}
@@ -284,6 +289,7 @@ func (m *Manager) CommitsSince(fromSHA string) ([]Commit, error) {
 			Email:   c.Author.Email,
 			When:    c.Author.When,
 			Files:   files,
+			Deleted: deleted,
 		})
 		return nil
 	})
@@ -455,28 +461,29 @@ func isNonFastForward(err error) bool {
 	return strings.Contains(s, "non-fast-forward") || strings.Contains(s, "rejected")
 }
 
-func changedFiles(c *object.Commit) ([]string, error) {
+func changedFiles(c *object.Commit) ([]string, map[string]bool, error) {
+	deleted := map[string]bool{}
 	if c.NumParents() == 0 {
 		// Initial commit — list all files in the tree.
 		var files []string
 		tree, err := c.Tree()
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		tree.Files().ForEach(func(f *object.File) error {
 			files = append(files, f.Name)
 			return nil
 		})
-		return files, nil
+		return files, deleted, nil
 	}
 
 	parent, err := c.Parents().Next()
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	patch, err := parent.Patch(c)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	seen := map[string]bool{}
@@ -487,13 +494,16 @@ func changedFiles(c *object.Commit) ([]string, error) {
 		} else if from != nil && !seen[from.Path()] {
 			seen[from.Path()] = true
 		}
+		if to == nil && from != nil {
+			deleted[from.Path()] = true
+		}
 	}
 
 	files := make([]string, 0, len(seen))
 	for p := range seen {
 		files = append(files, p)
 	}
-	return files, nil
+	return files, deleted, nil
 }
 
 func repoSlug(repoURL string) string {

@@ -204,8 +204,29 @@ func (w *GitWatcher) syncRepo(ctx context.Context, mgr *git.Manager) error {
 	return db.SetSyncState(ctx, w.pool, mgr.RepoURL(), mgr.Branch(), newSHA)
 }
 
+// syncablePaths returns the commit's changed paths that the git watcher should
+// sync into the DB: additions and modifications only. Paths removed in the
+// commit are dropped so a DeleteProject — which git-rm's
+// clusters/<cluster>/projects/<slug>/** — never reaches resolveOrCreateProjectEnv
+// for a removed app.yaml, which would auto-recreate (UpsertProject) the project
+// the delete just wiped and respawn it as a ghost minutes later. Git is the
+// source of truth for add/modify; a removal must not resurrect a project.
+func syncablePaths(c git.Commit) []string {
+	if len(c.Deleted) == 0 {
+		return c.Files
+	}
+	paths := make([]string, 0, len(c.Files))
+	for _, p := range c.Files {
+		if c.Deleted[p] {
+			continue
+		}
+		paths = append(paths, p)
+	}
+	return paths
+}
+
 func (w *GitWatcher) processCommit(ctx context.Context, mgr *git.Manager, c git.Commit) {
-	for _, filePath := range c.Files {
+	for _, filePath := range syncablePaths(c) {
 		if m := namespacePolicyPathRe.FindStringSubmatch(filePath); m != nil {
 			w.syncNamespacePolicyFile(ctx, mgr, filePath, m[1], c)
 			continue
