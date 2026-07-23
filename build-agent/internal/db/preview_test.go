@@ -77,3 +77,44 @@ func TestRewriteDatabaseNames(t *testing.T) {
 		t.Errorf("rewriteDatabaseNames with empty rewrites = %q, want unchanged", got)
 	}
 }
+
+// TestSelectOwnedDatabases_WatcherSyncedStandaloneDB is the P0 regression
+// case for the fonbet-value/odds-research live incident, at the pure-function
+// level (mirrors gitops-agent's TestParentServiceDatabases_WatcherSyncedStandaloneDB
+// in gitops-agent/internal/worker/preview_env_vars_test.go, which exercises
+// the same selectOwnedDatabases logic end to end against a real Postgres;
+// build-agent has no live-pg test harness, so this covers the identical
+// ownership-matching rule selectOwnedDatabases implements). A standalone
+// ServiceDatabaseV2 (spec.appRef pointing at its own CR name "fonbet-db", not
+// at any App) is only found by scanning the consuming app's decrypted env
+// vars for a "/<database-name>" path segment.
+func TestSelectOwnedDatabases_WatcherSyncedStandaloneDB(t *testing.T) {
+	candidates := []serviceDatabaseCandidate{
+		{Name: "fonbet-db", Database: "odds-research"},
+	}
+	envVarValues := []string{
+		"postgresql://svc-fonbet-db:s3cr3t@postgresql.databases.svc.cluster.local:5432/odds-research?sslmode=disable",
+	}
+	got := selectOwnedDatabases(envVarValues, candidates)
+	if len(got) != 1 {
+		t.Fatalf("selectOwnedDatabases returned %d entries, want 1 (got %+v)", len(got), got)
+	}
+	if got[0].Database != "odds-research" {
+		t.Errorf("Database = %q, want %q", got[0].Database, "odds-research")
+	}
+}
+
+// TestSelectOwnedDatabases_NoMatchingEnvVar proves the zero-match case falls
+// through unchanged: an app with no env var referencing any of the project's
+// managed databases owns nothing, so previewDatabaseRewrites yields no
+// rewrites and copyPreviewEnvVars stays on its verbatim path.
+func TestSelectOwnedDatabases_NoMatchingEnvVar(t *testing.T) {
+	candidates := []serviceDatabaseCandidate{
+		{Name: "fonbet-db", Database: "odds-research"},
+	}
+	envVarValues := []string{"some-unrelated-value"}
+	got := selectOwnedDatabases(envVarValues, candidates)
+	if len(got) != 0 {
+		t.Fatalf("selectOwnedDatabases returned %d entries, want 0 (got %+v)", len(got), got)
+	}
+}

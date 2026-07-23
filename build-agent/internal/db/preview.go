@@ -115,7 +115,7 @@ func EnsurePreviewEnv(ctx context.Context, pool *pgxpool.Pool, projectID, gitRep
 		return PreviewEnv{}, fmt.Errorf("ensure preview env: %w", err)
 	}
 
-	dbRewrites, err := previewDatabaseRewrites(ctx, pool, projectID, parentEnvID, appName, prNumber)
+	dbRewrites, err := previewDatabaseRewrites(ctx, pool, projectID, parentEnvID, appName, prNumber, encryptionKey)
 	if err != nil {
 		return PreviewEnv{}, err
 	}
@@ -127,34 +127,136 @@ func EnsurePreviewEnv(ctx context.Context, pool *pgxpool.Pool, projectID, gitRep
 	return PreviewEnv{ID: envID, Name: envName, Namespace: namespace}, nil
 }
 
-// previewDatabaseRewrites finds every ServiceDatabaseV2 appName owns in the
-// parent environment and derives this preview's own database name for each
-// (previewDatabaseName). Returns an empty (non-nil) map when the app has no
-// managed database — the common case, and copyPreviewEnvVars treats an empty
-// map as "plain verbatim copy, no decrypt needed".
-func previewDatabaseRewrites(ctx context.Context, pool *pgxpool.Pool, projectID, parentEnvID uuid.UUID, appName string, prNumber int) (map[string]string, error) {
+// serviceDatabaseCandidate is a project's ServiceDatabaseV2 as read off its
+// resource_snapshots row: its CR name and its logical database name, resolved
+// regardless of which writer produced the snapshot. Fresh API/preview-writer
+// rows stamp the database name at the top level (summary_json->>'database');
+// watcher-synced rows ("Synced from git") only carry it nested at
+// summary_json->'spec'->>'database'. Mirrors gitops-agent's
+// serviceDatabaseCandidate (gitops-agent/internal/worker/preview.go) byte for
+// byte.
+type serviceDatabaseCandidate struct {
+	Name     string
+	Database string
+}
+
+// projectServiceDatabases fetches every ServiceDatabaseV2 snapshot in a
+// (project, environment) with no app_ref filter. Ownership of a candidate by
+// a given app is decided separately (see appOwnedDatabases) — app_ref cannot
+// be trusted for this: it is absent entirely on watcher-synced snapshots, and
+// a standalone database (spec.appRef pointing at its own CR name, wired to
+// its actual consuming app only via that app's APP_DATABASE_URL env var)
+// never names its consuming app anywhere in the CR itself. A project
+// environment has at most a handful of managed databases, so scanning all of
+// them is cheap.
+func projectServiceDatabases(ctx context.Context, pool *pgxpool.Pool, projectID, environmentID uuid.UUID) ([]serviceDatabaseCandidate, error) {
 	rows, err := pool.Query(ctx, `
-		SELECT summary_json->>'database'
+		SELECT name, COALESCE(NULLIF(summary_json->>'database', ''), summary_json->'spec'->>'database')
 		FROM resource_snapshots
 		WHERE project_id = $1 AND environment_id = $2 AND kind = 'ServiceDatabaseV2'
-		AND summary_json->>'app_ref' = $3
-	`, projectID, parentEnvID, appName)
+	`, projectID, environmentID)
 	if err != nil {
-		return nil, fmt.Errorf("query parent service databases: %w", err)
+		return nil, fmt.Errorf("query project service databases: %w", err)
 	}
 	defer rows.Close()
-	rewrites := map[string]string{}
+	var out []serviceDatabaseCandidate
 	for rows.Next() {
-		var database string
-		if err := rows.Scan(&database); err != nil {
-			return nil, fmt.Errorf("scan parent service database: %w", err)
+		var name string
+		var database *string
+		if err := rows.Scan(&name, &database); err != nil {
+			return nil, fmt.Errorf("scan project service database: %w", err)
 		}
-		if database == "" {
+		if database == nil || *database == "" {
 			continue
 		}
-		rewrites[database] = previewDatabaseName(database, prNumber)
+		out = append(out, serviceDatabaseCandidate{Name: name, Database: *database})
 	}
-	return rewrites, rows.Err()
+	return out, rows.Err()
+}
+
+// selectOwnedDatabases returns the candidates that appear as a "/<database>"
+// path segment in at least one of envVarValues — the identical match
+// rewriteDatabaseNames uses to rewrite a DATABASE_URL, so "this app owns that
+// database" and "that value gets rewritten" can never disagree. Pure (no
+// DB/crypto), so it is unit-testable on its own. Mirrors gitops-agent's
+// selectOwnedDatabases byte for byte.
+func selectOwnedDatabases(envVarValues []string, candidates []serviceDatabaseCandidate) []serviceDatabaseCandidate {
+	var owned []serviceDatabaseCandidate
+	for _, c := range candidates {
+		for _, v := range envVarValues {
+			if databaseSegmentMatch(v, c.Database) {
+				owned = append(owned, c)
+				break
+			}
+		}
+	}
+	return owned
+}
+
+// appOwnedDatabases decrypts every env_var appName has on the parent
+// environment (a matching preview_env_overrides row wins over env_vars, the
+// same precedence copyPreviewEnvVarsRewritten uses) and returns the
+// candidates appName owns per selectOwnedDatabases. This is the only way a
+// standalone ServiceDatabaseV2 (spec.appRef pointing at itself, not attached
+// to any App) is ever found — its owning app is encoded solely in that app's
+// APP_DATABASE_URL env var, never in the database CR's own summary_json.
+func appOwnedDatabases(ctx context.Context, pool *pgxpool.Pool, parentEnvID uuid.UUID, appName, encryptionKey string, candidates []serviceDatabaseCandidate) ([]serviceDatabaseCandidate, error) {
+	rows, err := pool.Query(ctx, `
+		SELECT COALESCE(o.value_encrypted, e.value_encrypted)
+		FROM env_vars e
+		LEFT JOIN preview_env_overrides o
+			ON o.environment_id = e.environment_id
+			AND o.app_name = e.app_name
+			AND o.key = e.key
+		WHERE e.environment_id = $1 AND e.app_name = $2
+	`, parentEnvID, appName)
+	if err != nil {
+		return nil, fmt.Errorf("query app env_vars for database ownership: %w", err)
+	}
+	defer rows.Close()
+	var values []string
+	for rows.Next() {
+		var enc []byte
+		if err := rows.Scan(&enc); err != nil {
+			return nil, fmt.Errorf("scan env_var for database ownership: %w", err)
+		}
+		plain, err := DecryptToken(encryptionKey, enc)
+		if err != nil {
+			return nil, fmt.Errorf("decrypt env_var for database ownership: %w", err)
+		}
+		values = append(values, plain)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return selectOwnedDatabases(values, candidates), nil
+}
+
+// previewDatabaseRewrites finds every ServiceDatabaseV2 in the parent
+// environment that appName actually owns (per appOwnedDatabases's env-var
+// scan, not app_ref — see projectServiceDatabases for why) and derives this
+// preview's own database name for each (previewDatabaseName). Returns an
+// empty (non-nil) map when the parent environment has no managed databases at
+// all — the common case — without needing to decrypt anything, and
+// copyPreviewEnvVars treats an empty map as "plain verbatim copy, no decrypt
+// needed".
+func previewDatabaseRewrites(ctx context.Context, pool *pgxpool.Pool, projectID, parentEnvID uuid.UUID, appName string, prNumber int, encryptionKey string) (map[string]string, error) {
+	candidates, err := projectServiceDatabases(ctx, pool, projectID, parentEnvID)
+	if err != nil {
+		return nil, err
+	}
+	rewrites := map[string]string{}
+	if len(candidates) == 0 {
+		return rewrites, nil
+	}
+	owned, err := appOwnedDatabases(ctx, pool, parentEnvID, appName, encryptionKey, candidates)
+	if err != nil {
+		return nil, err
+	}
+	for _, c := range owned {
+		rewrites[c.Database] = previewDatabaseName(c.Database, prNumber)
+	}
+	return rewrites, nil
 }
 
 // copyPreviewEnvVars seeds previewEnvID's env_vars from parentEnvID's env_vars,
@@ -312,6 +414,24 @@ func copyPreviewEnvVarsRewritten(ctx context.Context, pool *pgxpool.Pool, previe
 	return nil
 }
 
+// databaseSegmentRegex matches a "/<database>" path segment at the end of a
+// DATABASE_URL / DSN (optionally followed by a query string) — the shared
+// shape both the ownership scan (databaseSegmentMatch) and the rewrite
+// (rewriteDatabaseNames) key off, so "this app owns that database" and "that
+// value gets rewritten" can never disagree.
+func databaseSegmentRegex(database string) *regexp.Regexp {
+	return regexp.MustCompile(`/` + regexp.QuoteMeta(database) + `(\?|$)`)
+}
+
+// databaseSegmentMatch reports whether value contains a "/<database>" path
+// segment.
+func databaseSegmentMatch(value, database string) bool {
+	if database == "" {
+		return false
+	}
+	return databaseSegmentRegex(database).MatchString(value)
+}
+
 // rewriteDatabaseNames replaces every "/<old>" path segment in value (the
 // shape a database name takes at the end of a DATABASE_URL / DSN) with
 // "/<new>" for each (old, new) pair in rewrites. A value with no match is
@@ -321,8 +441,7 @@ func rewriteDatabaseNames(value string, rewrites map[string]string) string {
 		if old == "" || next == "" || old == next {
 			continue
 		}
-		re := regexp.MustCompile(`/` + regexp.QuoteMeta(old) + `(\?|$)`)
-		value = re.ReplaceAllString(value, "/"+next+"$1")
+		value = databaseSegmentRegex(old).ReplaceAllString(value, "/"+next+"$1")
 	}
 	return value
 }

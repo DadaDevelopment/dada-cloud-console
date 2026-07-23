@@ -2,9 +2,11 @@ package worker
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"testing"
 
+	"github.com/dada-tuda/console/gitops-agent/internal/config"
 	"github.com/dada-tuda/console/gitops-agent/internal/crypto"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -223,6 +225,150 @@ func TestCopyPreviewEnvVars_RewritesDatabaseURL(t *testing.T) {
 	}
 	if parentGot != dbURL {
 		t.Errorf("parent DATABASE_URL = %q, want unchanged %q (copy must not mutate the parent)", parentGot, dbURL)
+	}
+}
+
+// TestParentServiceDatabases_WatcherSyncedStandaloneDB is the P0 regression
+// test for the fonbet-value/odds-research live incident: a watcher-synced
+// ServiceDatabaseV2 snapshot ("fonbet-db") carries no top-level
+// app_ref/database keys at all, only nested spec.appRef (pointing at its own
+// CR name — a standalone database, not attached to any App) and
+// spec.database. The only place its real owner ("fonbet-value") is recorded
+// is that app's APP_DATABASE_URL env var, which contains a "/odds-research"
+// path segment. parentServiceDatabases must find it via that env var scan,
+// not via app_ref (which can never match this shape).
+func TestParentServiceDatabases_WatcherSyncedStandaloneDB(t *testing.T) {
+	dsn := os.Getenv("TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("TEST_DATABASE_URL not set; skipping DB integration test")
+	}
+
+	ctx := context.Background()
+	pool, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	defer pool.Close()
+
+	applyMigrations(t, ctx, pool)
+
+	projectID := uuid.New()
+	exec(t, ctx, pool,
+		`INSERT INTO projects (id, name, display_name) VALUES ($1, $2, 'Test')`,
+		projectID, "p-"+projectID.String()[:8])
+
+	parentID := uuid.New()
+	exec(t, ctx, pool,
+		`INSERT INTO environments (id, project_id, name, namespace, type)
+		 VALUES ($1, $2, 'prod', $3, 'prod')`,
+		parentID, projectID, "ns-parent-"+parentID.String()[:8])
+
+	summary := map[string]any{
+		"name": "fonbet-db",
+		"kind": "ServiceDatabaseV2",
+		"spec": map[string]any{
+			"appRef":   "fonbet-db",
+			"database": "odds-research",
+		},
+	}
+	summaryJSON, err := json.Marshal(summary)
+	if err != nil {
+		t.Fatalf("marshal summary: %v", err)
+	}
+	exec(t, ctx, pool,
+		`INSERT INTO resource_snapshots (project_id, environment_id, kind, name, phase, summary_json, last_synced_at)
+		 VALUES ($1, $2, 'ServiceDatabaseV2', 'fonbet-db', 'Synced', $3, NOW())`,
+		projectID, parentID, summaryJSON)
+
+	dbURL := "postgresql://svc-fonbet-db:s3cr3t@postgresql.databases.svc.cluster.local:5432/odds-research?sslmode=disable"
+	dbURLEnc, err := crypto.EncryptToken(testEncryptionKey, dbURL)
+	if err != nil {
+		t.Fatalf("encrypt APP_DATABASE_URL: %v", err)
+	}
+	exec(t, ctx, pool,
+		`INSERT INTO env_vars (environment_id, app_name, key, value_encrypted, is_secret, scope)
+		 VALUES ($1, 'fonbet-value', 'APP_DATABASE_URL', $2, TRUE, 'runtime')`,
+		parentID, dbURLEnc)
+
+	w := &DBWatcher{pool: pool, cfg: &config.Config{EncryptionKey: testEncryptionKey}}
+	got, err := w.parentServiceDatabases(ctx, projectID, parentID, "fonbet-value", 7)
+	if err != nil {
+		t.Fatalf("parentServiceDatabases: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("parentServiceDatabases returned %d entries, want 1 (got %+v)", len(got), got)
+	}
+	if got[0].ParentDatabase != "odds-research" {
+		t.Errorf("ParentDatabase = %q, want %q", got[0].ParentDatabase, "odds-research")
+	}
+	if got[0].PreviewDatabase != "odds-research-pr7" {
+		t.Errorf("PreviewDatabase = %q, want %q", got[0].PreviewDatabase, "odds-research-pr7")
+	}
+}
+
+// TestParentServiceDatabases_NoMatchingEnvVar proves the zero-match case falls
+// through unchanged: an app with no env var referencing any of the project's
+// managed databases gets no rewrites, so doCreatePreviewEnv's verbatim
+// env-var copy path stays untouched.
+func TestParentServiceDatabases_NoMatchingEnvVar(t *testing.T) {
+	dsn := os.Getenv("TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("TEST_DATABASE_URL not set; skipping DB integration test")
+	}
+
+	ctx := context.Background()
+	pool, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	defer pool.Close()
+
+	applyMigrations(t, ctx, pool)
+
+	projectID := uuid.New()
+	exec(t, ctx, pool,
+		`INSERT INTO projects (id, name, display_name) VALUES ($1, $2, 'Test')`,
+		projectID, "p-"+projectID.String()[:8])
+
+	parentID := uuid.New()
+	exec(t, ctx, pool,
+		`INSERT INTO environments (id, project_id, name, namespace, type)
+		 VALUES ($1, $2, 'prod', $3, 'prod')`,
+		parentID, projectID, "ns-parent-"+parentID.String()[:8])
+
+	summary := map[string]any{
+		"name": "fonbet-db",
+		"kind": "ServiceDatabaseV2",
+		"spec": map[string]any{
+			"appRef":   "fonbet-db",
+			"database": "odds-research",
+		},
+	}
+	summaryJSON, err := json.Marshal(summary)
+	if err != nil {
+		t.Fatalf("marshal summary: %v", err)
+	}
+	exec(t, ctx, pool,
+		`INSERT INTO resource_snapshots (project_id, environment_id, kind, name, phase, summary_json, last_synced_at)
+		 VALUES ($1, $2, 'ServiceDatabaseV2', 'fonbet-db', 'Synced', $3, NOW())`,
+		projectID, parentID, summaryJSON)
+
+	unrelatedEnc, err := crypto.EncryptToken(testEncryptionKey, "some-unrelated-value")
+	if err != nil {
+		t.Fatalf("encrypt env var: %v", err)
+	}
+	exec(t, ctx, pool,
+		`INSERT INTO env_vars (environment_id, app_name, key, value_encrypted, is_secret, scope)
+		 VALUES ($1, 'other-app', 'APP_NORMAL', $2, FALSE, 'runtime')`,
+		parentID, unrelatedEnc)
+
+	w := &DBWatcher{pool: pool, cfg: &config.Config{EncryptionKey: testEncryptionKey}}
+	got, err := w.parentServiceDatabases(ctx, projectID, parentID, "other-app", 9)
+	if err != nil {
+		t.Fatalf("parentServiceDatabases: %v", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("parentServiceDatabases returned %d entries, want 0 (got %+v)", len(got), got)
 	}
 }
 
