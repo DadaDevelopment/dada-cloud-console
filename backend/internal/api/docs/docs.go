@@ -4127,6 +4127,121 @@ const docTemplate = `{
                 }
             }
         },
+        "/projects/{projectId}/environments/{envId}/apps/{appName}/autofix": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Launches a DadaAgent auto-fix run against the app's linked repo: root-causes the supplied error (or the app's latest failed build when omitted), opens a PR, and reports back via the existing DadaAgent webhook. Write role required.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "cloud-tasks"
+                ],
+                "summary": "Auto-fix a reported issue with AI",
+                "operationId": "triggerAutofix",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Project UUID",
+                        "name": "projectId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Environment UUID",
+                        "name": "envId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "App name",
+                        "name": "appName",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Error/failure context to fix; falls back to the latest failed build when omitted",
+                        "name": "body",
+                        "in": "body",
+                        "schema": {
+                            "$ref": "#/definitions/api.autofixRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "202": {
+                        "description": "object with the created cloud_task",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "502": {
+                        "description": "Bad Gateway",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/projects/{projectId}/environments/{envId}/apps/{appName}/builds": {
             "get": {
                 "security": [
@@ -5147,7 +5262,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Creates or updates a single environment variable for an app. The value is always stored AES-GCM encrypted. Requires write access.",
+                "description": "Creates or updates a single environment variable for an app. The value is always stored AES-GCM encrypted. Requires write access. When preview_override is true, writes a preview-only override instead (see preview_env_overrides).",
                 "consumes": [
                     "application/json"
                 ],
@@ -5241,7 +5356,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Removes a single environment variable from an app. Requires write access.",
+                "description": "Removes a single environment variable from an app. Requires write access. Pass preview_override=true to delete a preview-only override instead.",
                 "produces": [
                     "application/json"
                 ],
@@ -5278,6 +5393,12 @@ const docTemplate = `{
                         "name": "key",
                         "in": "path",
                         "required": true
+                    },
+                    {
+                        "type": "boolean",
+                        "description": "Delete the preview-only override instead of the base env var",
+                        "name": "preview_override",
+                        "in": "query"
                     }
                 ],
                 "responses": {
@@ -6262,6 +6383,110 @@ const docTemplate = `{
                 }
             }
         },
+        "/projects/{projectId}/environments/{envId}/apps/{appName}/source-archive": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Uploads a zip/tar.gz of an app's source (max 100MB), detects framework/port from manifest files, stores it in object storage, and queues a build. The app must already exist. Requires write access.",
+                "consumes": [
+                    "multipart/form-data"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "build"
+                ],
+                "summary": "Deploy from an uploaded source archive",
+                "operationId": "uploadSourceArchive",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Project UUID",
+                        "name": "projectId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Environment UUID",
+                        "name": "envId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "App name",
+                        "name": "appName",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "file",
+                        "description": "Source archive (.zip or .tar.gz), max 100MB",
+                        "name": "archive",
+                        "in": "formData",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "202": {
+                        "description": "Accepted",
+                        "schema": {
+                            "$ref": "#/definitions/api.uploadSourceResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "413": {
+                        "description": "Request Entity Too Large",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/projects/{projectId}/environments/{envId}/apps/{appName}/state": {
             "get": {
                 "security": [
@@ -6889,6 +7114,117 @@ const docTemplate = `{
                     },
                     "404": {
                         "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/projects/{projectId}/environments/{envId}/databases/{name}/backups/{backupId}/download": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Returns a short-lived presigned URL to download a Ready per-database logical backup (the pg_dump artifact) directly from object storage; the dump bytes never transit the API. Requires write access and every download is audited. 409 while the backup is not Ready, 503 when dump-bucket access is not configured.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "database"
+                ],
+                "summary": "Download a database backup",
+                "operationId": "downloadDatabaseBackup",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Project UUID",
+                        "name": "projectId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Environment UUID",
+                        "name": "envId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Database resource name",
+                        "name": "name",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Backup UUID",
+                        "name": "backupId",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "object with a presigned download url and its expiry",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
                         "schema": {
                             "type": "object",
                             "additionalProperties": {
@@ -9630,6 +9966,76 @@ const docTemplate = `{
                 }
             }
         },
+        "/projects/{projectId}/environments/{envId}/preview": {
+            "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Tears down an ephemeral (PR) environment: queues a DeletePreviewEnv operation that removes the namespace and its git-rendered manifests. Returns 404 if the environment is not ephemeral. Requires write access.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "environment"
+                ],
+                "summary": "Delete a preview environment",
+                "operationId": "deletePreviewEnvironment",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Project UUID",
+                        "name": "projectId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Environment UUID",
+                        "name": "envId",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "202": {
+                        "description": "object with the accepted operation",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/projects/{projectId}/environments/{envId}/repos": {
             "get": {
                 "security": [
@@ -11344,11 +11750,72 @@ const docTemplate = `{
                 }
             }
         },
+        "api.autofixRequest": {
+            "type": "object",
+            "properties": {
+                "error": {
+                    "type": "string"
+                }
+            }
+        },
         "api.bindInstallationRequest": {
             "type": "object",
             "properties": {
                 "installation_id": {
                     "description": "numeric GitHub installation id",
+                    "type": "string"
+                }
+            }
+        },
+        "api.build": {
+            "type": "object",
+            "properties": {
+                "app_name": {
+                    "type": "string"
+                },
+                "branch": {
+                    "type": "string"
+                },
+                "commit_message": {
+                    "type": "string"
+                },
+                "commit_sha": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "environment_id": {
+                    "type": "string"
+                },
+                "finished_at": {
+                    "type": "string"
+                },
+                "git_repo_id": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "image_uri": {
+                    "type": "string"
+                },
+                "logs_ref": {
+                    "type": "string"
+                },
+                "pr_number": {
+                    "type": "integer"
+                },
+                "started_at": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "trigger": {
+                    "type": "string"
+                },
+                "updated_at": {
                     "type": "string"
                 }
             }
@@ -11481,6 +11948,9 @@ const docTemplate = `{
                 },
                 "volume": {
                     "$ref": "#/definitions/api.appVolumeReq"
+                },
+                "worker": {
+                    "type": "boolean"
                 },
                 "workload_type": {
                     "type": "string"
@@ -11931,6 +12401,9 @@ const docTemplate = `{
                 "is_secret": {
                     "type": "boolean"
                 },
+                "preview_override": {
+                    "type": "boolean"
+                },
                 "scope": {
                     "type": "string"
                 },
@@ -11963,6 +12436,31 @@ const docTemplate = `{
             "properties": {
                 "profile": {
                     "type": "string"
+                }
+            }
+        },
+        "api.uploadSourceDetect": {
+            "type": "object",
+            "properties": {
+                "framework": {
+                    "type": "string"
+                },
+                "port": {
+                    "type": "integer"
+                }
+            }
+        },
+        "api.uploadSourceResponse": {
+            "type": "object",
+            "properties": {
+                "artifact_uri": {
+                    "type": "string"
+                },
+                "build": {
+                    "$ref": "#/definitions/api.build"
+                },
+                "detected": {
+                    "$ref": "#/definitions/api.uploadSourceDetect"
                 }
             }
         },

@@ -88,10 +88,50 @@ definitions:
       hostname:
         type: string
     type: object
+  api.autofixRequest:
+    properties:
+      error:
+        type: string
+    type: object
   api.bindInstallationRequest:
     properties:
       installation_id:
         description: numeric GitHub installation id
+        type: string
+    type: object
+  api.build:
+    properties:
+      app_name:
+        type: string
+      branch:
+        type: string
+      commit_message:
+        type: string
+      commit_sha:
+        type: string
+      created_at:
+        type: string
+      environment_id:
+        type: string
+      finished_at:
+        type: string
+      git_repo_id:
+        type: string
+      id:
+        type: string
+      image_uri:
+        type: string
+      logs_ref:
+        type: string
+      pr_number:
+        type: integer
+      started_at:
+        type: string
+      status:
+        type: string
+      trigger:
+        type: string
+      updated_at:
         type: string
     type: object
   api.clientErrorReport:
@@ -183,6 +223,8 @@ definitions:
         type: integer
       volume:
         $ref: '#/definitions/api.appVolumeReq'
+      worker:
+        type: boolean
       workload_type:
         type: string
     type: object
@@ -480,6 +522,8 @@ definitions:
     properties:
       is_secret:
         type: boolean
+      preview_override:
+        type: boolean
       scope:
         type: string
       value:
@@ -501,6 +545,22 @@ definitions:
     properties:
       profile:
         type: string
+    type: object
+  api.uploadSourceDetect:
+    properties:
+      framework:
+        type: string
+      port:
+        type: integer
+    type: object
+  api.uploadSourceResponse:
+    properties:
+      artifact_uri:
+        type: string
+      build:
+        $ref: '#/definitions/api.build'
+      detected:
+        $ref: '#/definitions/api.uploadSourceDetect'
     type: object
   api.upsertRecordRequest:
     properties:
@@ -3362,6 +3422,86 @@ paths:
       summary: Adopt a compose app into per-service Applications
       tags:
       - app
+  /projects/{projectId}/environments/{envId}/apps/{appName}/autofix:
+    post:
+      consumes:
+      - application/json
+      description: 'Launches a DadaAgent auto-fix run against the app''s linked repo:
+        root-causes the supplied error (or the app''s latest failed build when omitted),
+        opens a PR, and reports back via the existing DadaAgent webhook. Write role
+        required.'
+      operationId: triggerAutofix
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      - description: Environment UUID
+        in: path
+        name: envId
+        required: true
+        type: string
+      - description: App name
+        in: path
+        name: appName
+        required: true
+        type: string
+      - description: Error/failure context to fix; falls back to the latest failed
+          build when omitted
+        in: body
+        name: body
+        schema:
+          $ref: '#/definitions/api.autofixRequest'
+      produces:
+      - application/json
+      responses:
+        "202":
+          description: object with the created cloud_task
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "502":
+          description: Bad Gateway
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "503":
+          description: Service Unavailable
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Auto-fix a reported issue with AI
+      tags:
+      - cloud-tasks
   /projects/{projectId}/environments/{envId}/apps/{appName}/builds:
     get:
       description: Returns the build history for an app in an environment, most recent
@@ -3996,7 +4136,7 @@ paths:
   /projects/{projectId}/environments/{envId}/apps/{appName}/env/{key}:
     delete:
       description: Removes a single environment variable from an app. Requires write
-        access.
+        access. Pass preview_override=true to delete a preview-only override instead.
       operationId: deleteEnvVar
       parameters:
       - description: Project UUID
@@ -4019,6 +4159,10 @@ paths:
         name: key
         required: true
         type: string
+      - description: Delete the preview-only override instead of the base env var
+        in: query
+        name: preview_override
+        type: boolean
       produces:
       - application/json
       responses:
@@ -4107,7 +4251,8 @@ paths:
       consumes:
       - application/json
       description: Creates or updates a single environment variable for an app. The
-        value is always stored AES-GCM encrypted. Requires write access.
+        value is always stored AES-GCM encrypted. Requires write access. When preview_override
+        is true, writes a preview-only override instead (see preview_env_overrides).
       operationId: setEnvVar
       parameters:
       - description: Project UUID
@@ -4823,6 +4968,77 @@ paths:
       summary: Roll a compose app back to its previous version
       tags:
       - app
+  /projects/{projectId}/environments/{envId}/apps/{appName}/source-archive:
+    post:
+      consumes:
+      - multipart/form-data
+      description: Uploads a zip/tar.gz of an app's source (max 100MB), detects framework/port
+        from manifest files, stores it in object storage, and queues a build. The
+        app must already exist. Requires write access.
+      operationId: uploadSourceArchive
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      - description: Environment UUID
+        in: path
+        name: envId
+        required: true
+        type: string
+      - description: App name
+        in: path
+        name: appName
+        required: true
+        type: string
+      - description: Source archive (.zip or .tar.gz), max 100MB
+        in: formData
+        name: archive
+        required: true
+        type: file
+      produces:
+      - application/json
+      responses:
+        "202":
+          description: Accepted
+          schema:
+            $ref: '#/definitions/api.uploadSourceResponse'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "413":
+          description: Request Entity Too Large
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "503":
+          description: Service Unavailable
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Deploy from an uploaded source archive
+      tags:
+      - build
   /projects/{projectId}/environments/{envId}/apps/{appName}/state:
     get:
       description: Returns the live Docker Compose stack + container state for a VM
@@ -5268,6 +5484,83 @@ paths:
       security:
       - BearerAuth: []
       summary: Back up a managed database now
+      tags:
+      - database
+  /projects/{projectId}/environments/{envId}/databases/{name}/backups/{backupId}/download:
+    get:
+      description: Returns a short-lived presigned URL to download a Ready per-database
+        logical backup (the pg_dump artifact) directly from object storage; the dump
+        bytes never transit the API. Requires write access and every download is audited.
+        409 while the backup is not Ready, 503 when dump-bucket access is not configured.
+      operationId: downloadDatabaseBackup
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      - description: Environment UUID
+        in: path
+        name: envId
+        required: true
+        type: string
+      - description: Database resource name
+        in: path
+        name: name
+        required: true
+        type: string
+      - description: Backup UUID
+        in: path
+        name: backupId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: object with a presigned download url and its expiry
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "409":
+          description: Conflict
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "503":
+          description: Service Unavailable
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Download a database backup
       tags:
       - database
   /projects/{projectId}/environments/{envId}/databases/{name}/credentials:
@@ -7143,6 +7436,54 @@ paths:
       summary: Set an environment's namespace LimitRange + ResourceQuota
       tags:
       - project
+  /projects/{projectId}/environments/{envId}/preview:
+    delete:
+      description: 'Tears down an ephemeral (PR) environment: queues a DeletePreviewEnv
+        operation that removes the namespace and its git-rendered manifests. Returns
+        404 if the environment is not ephemeral. Requires write access.'
+      operationId: deletePreviewEnvironment
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      - description: Environment UUID
+        in: path
+        name: envId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "202":
+          description: object with the accepted operation
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Delete a preview environment
+      tags:
+      - environment
   /projects/{projectId}/environments/{envId}/repos:
     get:
       description: Returns the git repositories linked to apps in the given environment.

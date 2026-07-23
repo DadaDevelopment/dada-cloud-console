@@ -88,18 +88,57 @@ func EnsurePreviewEnv(ctx context.Context, pool *pgxpool.Pool, projectID, gitRep
 		return PreviewEnv{}, fmt.Errorf("ensure preview env: %w", err)
 	}
 
-	if _, err := pool.Exec(ctx, `
-		INSERT INTO env_vars
-			(environment_id, app_name, key, value_encrypted, is_secret, scope)
-		SELECT $1, app_name, key, value_encrypted, is_secret, scope
-		FROM env_vars
-		WHERE environment_id = $2
-		ON CONFLICT (environment_id, app_name, key) DO NOTHING
-	`, envID, parentEnvID); err != nil {
-		return PreviewEnv{}, fmt.Errorf("copy parent env_vars: %w", err)
+	if err := copyPreviewEnvVars(ctx, pool, envID, parentEnvID); err != nil {
+		return PreviewEnv{}, err
 	}
 
 	return PreviewEnv{ID: envID, Name: envName, Namespace: namespace}, nil
+}
+
+// copyPreviewEnvVars seeds previewEnvID's env_vars from parentEnvID's env_vars,
+// preferring the value/is_secret of any matching row in parentEnvID's
+// preview_env_overrides (a key present there wins over the inherited value for
+// that same key), then copies override-only keys (no env_vars counterpart on
+// the parent) in as ordinary runtime vars. Mirrors gitops-agent's
+// copyPreviewEnvVars (gitops-agent/internal/worker/preview.go) byte for byte so
+// the synchronous webhook insert and the async idempotent re-run it enqueues
+// can never disagree about the preview env's shape.
+func copyPreviewEnvVars(ctx context.Context, pool *pgxpool.Pool, previewEnvID, parentEnvID uuid.UUID) error {
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO env_vars
+			(environment_id, app_name, key, value_encrypted, is_secret, scope)
+		SELECT $1, e.app_name, e.key,
+		       COALESCE(o.value_encrypted, e.value_encrypted),
+		       COALESCE(o.is_secret, e.is_secret),
+		       e.scope
+		FROM env_vars e
+		LEFT JOIN preview_env_overrides o
+			ON o.environment_id = e.environment_id
+			AND o.app_name = e.app_name
+			AND o.key = e.key
+		WHERE e.environment_id = $2
+		ON CONFLICT (environment_id, app_name, key) DO NOTHING
+	`, previewEnvID, parentEnvID); err != nil {
+		return fmt.Errorf("copy parent env_vars: %w", err)
+	}
+
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO env_vars
+			(environment_id, app_name, key, value_encrypted, is_secret, scope)
+		SELECT $1, o.app_name, o.key, o.value_encrypted, o.is_secret, 'runtime'
+		FROM preview_env_overrides o
+		WHERE o.environment_id = $2
+		AND NOT EXISTS (
+			SELECT 1 FROM env_vars e
+			WHERE e.environment_id = o.environment_id
+			AND e.app_name = o.app_name
+			AND e.key = o.key
+		)
+		ON CONFLICT (environment_id, app_name, key) DO NOTHING
+	`, previewEnvID, parentEnvID); err != nil {
+		return fmt.Errorf("copy preview-only overrides: %w", err)
+	}
+	return nil
 }
 
 // BumpPreviewEnvExpiry pushes a preview environment's TTL out from now, used on
