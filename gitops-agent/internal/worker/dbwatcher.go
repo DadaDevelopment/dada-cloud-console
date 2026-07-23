@@ -973,9 +973,11 @@ func (w *DBWatcher) doCreateApp(ctx context.Context, op db.Operation) error {
 // broke YAML parsing and wedged the Application in Terminating forever. Do NOT
 // reintroduce an unquoted image in the chart. Missing files are skipped silently
 // by RemoveAndPush. Also clears the app's own snapshot AND every child resource
-// snapshot bound to it (ServiceDatabaseV2 / PublicApi / S3Bucket / AIModel), and
-// revokes any AIModel API keys bound to the app, so quota/read APIs reflect the
-// deletion immediately.
+// snapshot bound to it (ServiceDatabaseV2 / PublicApi / S3Bucket / AIModel),
+// revokes any AIModel API keys bound to the app, and drops the app's git_repos
+// link (unless a PR preview environment still references it), so quota/read
+// APIs reflect the deletion immediately and ListApps stops synthesizing a
+// NotDeployed placeholder for the dead app.
 func (w *DBWatcher) doDeleteApp(ctx context.Context, op db.Operation) error {
 	var p struct {
 		Name string `json:"name"`
@@ -1037,8 +1039,12 @@ func (w *DBWatcher) doDeleteApp(ctx context.Context, op db.Operation) error {
 	// owning-app link lives under different summary keys depending on the writer:
 	// API writers stamp a top-level app_ref/attached_app; the gitwatcher
 	// reverse-sync stamps a top-level app_name; some CRs carry the link in
-	// spec (spec.appRef / spec.attachedApp / spec.serviceName). Match any of
-	// them, scoped to this project+env.
+	// spec (spec.appRef / spec.attachedApp / spec.serviceName). PublicApi rows
+	// can carry a CORRUPTED app_name (the status reconciler used to stamp the
+	// raw ArgoCD instance label "<app>-<env>-<hash>"), so they are additionally
+	// matched by spec.upstream.serviceName = "<app>-service" — the ClusterIP
+	// name renderer.ServiceName generates deterministically. Match any of them,
+	// scoped to this project+env.
 	_, _ = w.pool.Exec(ctx,
 		`DELETE FROM resource_snapshots
 		 WHERE project_id = $1 AND environment_id = $2 AND kind <> 'App'
@@ -1049,6 +1055,7 @@ func (w *DBWatcher) doDeleteApp(ctx context.Context, op db.Operation) error {
 		     OR summary_json->'spec'->>'appRef'     = $3
 		     OR summary_json->'spec'->>'attachedApp' = $3
 		     OR summary_json->'spec'->>'serviceName' = $3
+		     OR summary_json->'spec'->'upstream'->>'serviceName' = $3 || '-service'
 		   )`,
 		op.ProjectID, op.EnvironmentID, p.Name,
 	)
@@ -1056,6 +1063,18 @@ func (w *DBWatcher) doDeleteApp(ctx context.Context, op db.Operation) error {
 	_, _ = w.pool.Exec(ctx,
 		`DELETE FROM resource_snapshots
 		 WHERE project_id = $1 AND environment_id = $2 AND kind = 'App' AND name = $3`,
+		op.ProjectID, op.EnvironmentID, p.Name,
+	)
+	// Drop the app's git link, else ListApps keeps synthesizing a NotDeployed
+	// placeholder forever and the app resurfaces as an undeletable phantom.
+	// Guarded on preview environments: environments.git_repo_id is ON DELETE
+	// CASCADE, so removing the row while a PR preview still references it would
+	// silently delete environment rows and leak their live namespaces. In that
+	// case the link is left in place; preview teardown owns the cleanup.
+	_, _ = w.pool.Exec(ctx,
+		`DELETE FROM git_repos gr
+		 WHERE gr.project_id = $1 AND gr.environment_id = $2 AND gr.app_name = $3
+		   AND NOT EXISTS (SELECT 1 FROM environments e WHERE e.git_repo_id = gr.id)`,
 		op.ProjectID, op.EnvironmentID, p.Name,
 	)
 

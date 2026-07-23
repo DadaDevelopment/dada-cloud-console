@@ -235,8 +235,10 @@ func (r *StatusReconciler) reconcilePublicApis(ctx context.Context) {
 			"live_source": "crossplane",
 			"live_at":     time.Now().UTC().Format(time.RFC3339),
 		}
-		if app := stripEnvSuffix(cr.GetLabels()["argocd.argoproj.io/instance"], envNames); app != "" {
-			fields["app_name"] = app
+		if inst := cr.GetLabels()["argocd.argoproj.io/instance"]; inst != "" {
+			if app := stripEnvSuffix(inst, envNames); app != "" && app != inst {
+				fields["app_name"] = app
+			}
 		}
 		patch, _ := json.Marshal(fields)
 		n, err := db.UpdateLiveStatus(ctx, r.pool, ids[0], "PublicApi", name, phase, patch)
@@ -447,11 +449,20 @@ func appKeyFromMeta(labels map[string]string, name string, envNames map[string]b
 }
 
 // stripEnvSuffix turns "cloud-console-prod" → "cloud-console" when the trailing
-// token is a known environment name; otherwise returns the input unchanged.
+// token is a known environment name. Tenant ArgoCD Applications are named
+// "<app>-<env>-<hash>" (collision-proofed by the ApplicationSet), so when the
+// LAST token is not an env name but the one BEFORE it is, both are stripped:
+// "nextjs-fhvx20-prod-3e0c7967" → "nextjs-fhvx20". Otherwise returns the input
+// unchanged. Callers that persist the result must treat an unchanged return as
+// "no app derived" — stamping the raw instance label corrupts app_name and
+// breaks both the Domains-tab filter and the DeleteApp child cascade.
 func stripEnvSuffix(instance string, envNames map[string]bool) string {
 	if i := strings.LastIndex(instance, "-"); i > 0 {
 		if envNames[instance[i+1:]] {
 			return instance[:i]
+		}
+		if j := strings.LastIndex(instance[:i], "-"); j > 0 && envNames[instance[j+1:i]] {
+			return instance[:j]
 		}
 	}
 	return instance

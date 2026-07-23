@@ -301,6 +301,12 @@ func (h *Handler) DeleteAppImpact(c *gin.Context) {
 // doDeleteApp does the actual git removal + snapshot cascade; see
 // gitops-agent/internal/worker/dbwatcher.go.
 //
+// The existence gate accepts EITHER an App snapshot OR a git_repos row: a
+// deleted app whose repo link survived resurfaces in ListApps as a NotDeployed
+// placeholder (SynthesizeGitRepoApps), and that phantom must be deletable too —
+// otherwise the UI delete dialog dead-ends on 404. doDeleteApp is a safe no-op
+// on git when the files are already gone (RemoveAndPush skips missing paths).
+//
 // @ID          deleteApp
 // @Summary     Delete an app
 // @Description Destructive, asynchronous: enqueues a DeleteApp operation that removes the app's git folder (app.yaml/values.yaml/resources.values.yaml) and every child resource it owns. Call the delete-impact endpoint first to preview the blast radius. Returns 202 with an operation; poll it until terminal.
@@ -339,7 +345,8 @@ func (h *Handler) DeleteApp(c *gin.Context) {
 
 	var exists bool
 	if err := h.pool.QueryRow(c.Request.Context(),
-		`SELECT EXISTS(SELECT 1 FROM resource_snapshots WHERE project_id = $1 AND environment_id = $2 AND kind = 'App' AND name = $3)`,
+		`SELECT EXISTS(SELECT 1 FROM resource_snapshots WHERE project_id = $1 AND environment_id = $2 AND kind = 'App' AND name = $3)
+		     OR EXISTS(SELECT 1 FROM git_repos WHERE project_id = $1 AND environment_id = $2 AND app_name = $3)`,
 		projectID, envID, appName,
 	).Scan(&exists); err != nil {
 		respondError(c, http.StatusInternalServerError, "failed to look up app")

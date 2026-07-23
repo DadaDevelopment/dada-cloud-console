@@ -95,6 +95,27 @@ func TestAppKeyFromMeta(t *testing.T) {
 	}
 }
 
+// stripEnvSuffix must handle both infra Applications ("<app>-<env>") and tenant
+// Applications ("<app>-<env>-<hash>", the ApplicationSet's collision-proofed
+// name). An unstrippable label comes back unchanged so callers can detect
+// "no app derived" and skip stamping app_name.
+func TestStripEnvSuffix(t *testing.T) {
+	envNames := map[string]bool{"prod": true}
+	cases := []struct{ in, want string }{
+		{"cloud-console-prod", "cloud-console"},
+		{"nextjs-fhvx20-prod-3e0c7967", "nextjs-fhvx20"},
+		{"my-prod-app-prod-3e0c7967", "my-prod-app"},
+		{"no-env-here", "no-env-here"},
+		{"prod", "prod"},
+		{"", ""},
+	}
+	for _, c := range cases {
+		if got := stripEnvSuffix(c.in, envNames); got != c.want {
+			t.Errorf("stripEnvSuffix(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}
+
 func TestPrimaryImage(t *testing.T) {
 	d := &appsv1.Deployment{Spec: appsv1.DeploymentSpec{Template: corev1.PodTemplateSpec{
 		ObjectMeta: metav1.ObjectMeta{},
