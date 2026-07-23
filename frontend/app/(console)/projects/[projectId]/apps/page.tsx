@@ -472,12 +472,13 @@ function EnvBlock({ env, projectId, apps, infra, canCreate, onCreate, t }: EnvBl
           />
         </>
       ) : (
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="flex flex-col gap-3">
           {apps.map((app) => {
             const summary = app.summary_json as unknown as AppSummary;
             const resType = classifyVMResource(app);
             const ing = resType === "ingress" ? extractIngressSpec(app) : null;
             const db = resType === "database" ? extractDatabaseSpec(app) : null;
+            const appHref = `/projects/${projectId}/apps/${app.name}?envId=${env.id}`;
             const subtitle =
               resType === "ingress"
                 ? ing?.host ?? summary.image ?? "—"
@@ -487,33 +488,34 @@ function EnvBlock({ env, projectId, apps, infra, canCreate, onCreate, t }: EnvBl
             return (
               <Link
                 key={app.id}
-                href={`/projects/${projectId}/apps/${app.name}?envId=${env.id}`}
-                className="rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-5 shadow-sm hover:border-blue-200 hover:shadow-md transition-all"
+                href={appHref}
+                className="flex flex-wrap items-center gap-x-6 gap-y-3 rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 px-5 py-4 shadow-sm hover:border-blue-200 hover:shadow-md transition-all"
               >
-                <div className="mb-3 flex items-start justify-between gap-2">
-                  <div className="flex min-w-0 flex-1 items-start gap-2.5">
-                    {resType === "ingress" && (
-                      <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-blue-50 dark:bg-blue-950/40 text-blue-600 dark:text-blue-400">
-                        <Globe className="h-4 w-4" />
-                      </span>
-                    )}
-                    {resType === "database" && (
-                      <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-violet-50 dark:bg-violet-950/40 text-violet-600 dark:text-violet-400">
-                        <Database className="h-4 w-4" />
-                      </span>
-                    )}
-                    <div className="min-w-0">
+                <div className="flex min-w-0 flex-1 basis-60 items-center gap-3">
+                  {resType === "ingress" && (
+                    <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-blue-50 dark:bg-blue-950/40 text-blue-600 dark:text-blue-400">
+                      <Globe className="h-4 w-4" />
+                    </span>
+                  )}
+                  {resType === "database" && (
+                    <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-violet-50 dark:bg-violet-950/40 text-violet-600 dark:text-violet-400">
+                      <Database className="h-4 w-4" />
+                    </span>
+                  )}
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2">
                       <p className="font-mono text-sm font-semibold text-gray-900 dark:text-gray-100 truncate">{app.name}</p>
-                      <p className="mt-0.5 truncate font-mono text-xs text-gray-400 dark:text-gray-500">{subtitle}</p>
+                      <PhaseBadge phase={app.phase} />
                     </div>
+                    <p className="mt-0.5 truncate font-mono text-xs text-gray-400 dark:text-gray-500">{subtitle}</p>
                   </div>
-                  <PhaseBadge phase={app.phase} />
                 </div>
-                <div className="flex items-center gap-3 text-xs text-gray-400 dark:text-gray-500">
+
+                <div className="hidden lg:flex items-center gap-3 text-xs text-gray-400 dark:text-gray-500">
                   {resType === "ingress" ? (
                     <span>{t("resources.card.routes", { count: String(ing?.rules?.length ?? 0) })}</span>
                   ) : resType === "database" ? (
-                    <span className="truncate font-mono">{db?.volume || db?.database || "—"}</span>
+                    <span className="max-w-40 truncate font-mono">{db?.volume || db?.database || "—"}</span>
                   ) : (
                     <>
                       <span>{summary.profile ?? "small"}</span>
@@ -521,23 +523,41 @@ function EnvBlock({ env, projectId, apps, infra, canCreate, onCreate, t }: EnvBl
                       <span>{t("apps.card.replicas", { count: String(summary.replicas ?? 1) })}</span>
                     </>
                   )}
+                  <span>·</span>
+                  <span>{t("apps.card.synced", { ago: timeAgo(app.last_synced_at) })}</span>
                 </div>
-                <p className="mt-2 text-xs text-gray-400 dark:text-gray-500">
-                  {t("apps.card.synced", { ago: timeAgo(app.last_synced_at) })}
-                </p>
-                {summary.url && (
+
+                <div className="hidden xl:block">
+                  <MetricSparkline projectId={projectId} envId={env.id} appName={app.name} />
+                </div>
+
+                <div className="flex shrink-0 items-center gap-2" onClick={(e) => e.stopPropagation()}>
+                  {summary.url && (
+                    <a
+                      href={summary.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 dark:border-gray-800 px-3 py-1.5 text-xs font-medium text-blue-600 dark:text-blue-400 hover:border-blue-300 transition-colors"
+                    >
+                      <Globe className="h-3.5 w-3.5 shrink-0" />
+                      {t("apps.card.openUrl", { hostname: appHostname(summary.url) })}
+                    </a>
+                  )}
                   <a
-                    href={summary.url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    onClick={(e) => e.stopPropagation()}
-                    className="mt-2 inline-flex items-center gap-1.5 truncate text-xs font-medium text-blue-600 hover:text-blue-700 hover:underline dark:text-blue-400 dark:hover:text-blue-300"
+                    href={`${appHref}#logs`}
+                    className="rounded-lg border border-gray-200 dark:border-gray-800 px-3 py-1.5 text-xs font-medium text-gray-600 dark:text-gray-300 hover:border-blue-300 hover:text-blue-600 transition-colors"
                   >
-                    <Globe className="h-3.5 w-3.5 shrink-0" />
-                    {t("apps.card.openUrl", { hostname: appHostname(summary.url) })}
+                    {t("apps.logs.title")}
                   </a>
-                )}
-                <MetricSparkline projectId={projectId} envId={env.id} appName={app.name} />
+                  {resType === "app" && (
+                    <a
+                      href={`${appHref}#agent`}
+                      className="rounded-lg border border-gray-200 dark:border-gray-800 px-3 py-1.5 text-xs font-medium text-gray-600 dark:text-gray-300 hover:border-blue-300 hover:text-blue-600 transition-colors"
+                    >
+                      {t("apps.card.agent")}
+                    </a>
+                  )}
+                </div>
               </Link>
             );
           })}

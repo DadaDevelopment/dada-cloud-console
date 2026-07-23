@@ -592,7 +592,7 @@ export default function AppDetailPage() {
       )}
 
       {!isResource && (
-      <div className="mt-10">
+      <div id="agent" className="mt-10 scroll-mt-20">
         <CloudTaskPanel
           projectId={projectId}
           envId={envId ?? ""}
@@ -608,7 +608,7 @@ export default function AppDetailPage() {
           {t("apps.detail.observability.notDeployed")}
         </div>
       ) : (
-        <div className="mt-10 space-y-6">
+        <div id="logs" className="mt-10 scroll-mt-20 space-y-6">
           <FixedMetricsDashboard kind="app" projectId={projectId} envId={envId} appName={appName} />
           <LogsViewer projectId={projectId} app={appName} />
         </div>
