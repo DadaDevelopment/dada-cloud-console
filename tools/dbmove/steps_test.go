@@ -90,3 +90,41 @@ func TestFolderMoveDryRunNoGit(t *testing.T) {
 		}
 	}
 }
+
+func TestRestoreVolumeYAMLIsRWXFromBackup(t *testing.T) {
+	cfg, _ := LoadConfig("configs/n8n.yaml")
+	y := restoreVolumeYAML(cfg, VolumeSpec{PVCName: "n8n-data"}, "pvc-src-123", "backup-abc", "2147483648")
+	for _, want := range []string{"kind: Volume", "accessMode: rwx", "backup=backup-abc", "volume=pvc-src-123", "n8n-n8n-data-moved"} {
+		if !strings.Contains(y, want) {
+			t.Fatalf("restore Volume CR missing %q:\n%s", want, y)
+		}
+	}
+}
+
+func TestRestorePVCYAMLIsRWXInTargetNS(t *testing.T) {
+	cfg, _ := LoadConfig("configs/n8n.yaml")
+	y := restorePVCYAML(cfg, VolumeSpec{PVCName: "n8n-data"}, "2147483648")
+	for _, want := range []string{"kind: PersistentVolumeClaim", "namespace: platform-prod", "name: n8n-data", "ReadWriteMany", "volumeName: n8n-n8n-data-moved-pv"} {
+		if !strings.Contains(y, want) {
+			t.Fatalf("restore PVC missing %q:\n%s", want, y)
+		}
+	}
+}
+
+func TestScaleDownTargetsAllDeployments(t *testing.T) {
+	cfg, _ := LoadConfig("configs/n8n.yaml")
+	fr := newFakeRunner()
+	s := &scaleDownStep{cfg: cfg}
+	if err := s.Run(context.Background(), fr, false); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	var scaled int
+	for _, c := range fr.calls {
+		if strings.Contains(strings.Join(c, " "), "scale deploy") && strings.Contains(strings.Join(c, " "), "--replicas=0") {
+			scaled++
+		}
+	}
+	if scaled != 3 {
+		t.Fatalf("want 3 scale-to-0 calls, got %d", scaled)
+	}
+}

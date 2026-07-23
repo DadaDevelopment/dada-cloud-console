@@ -64,7 +64,108 @@ func (s *longhornBackupStep) ID() string { return "longhorn-backup" }
 func (s *longhornBackupStep) Describe() string {
 	return "longhorn backup of source volumes"
 }
-func (s *longhornBackupStep) Run(context.Context, CommandRunner, bool) error { return nil }
+
+// pvNameForPVC returns the bound PV name for a source PVC.
+func pvNameForPVC(ctx context.Context, r CommandRunner, cfg MoveConfig, pvc string) (string, error) {
+	return r.Run(ctx, "kubectl", "--context", cfg.BegetContext, "-n", cfg.SrcNamespace,
+		"get", "pvc", pvc, "-o", "jsonpath={.spec.volumeName}")
+}
+
+// Run triggers a Longhorn snapshot+backup for each source volume and waits for
+// the backup to be present in the backup target.
+func (s *longhornBackupStep) Run(ctx context.Context, r CommandRunner, dryRun bool) error {
+	for _, v := range s.cfg.Volumes {
+		if dryRun {
+			fmt.Printf("[dry-run] longhorn snapshot+backup of PV bound to %s\n", v.PVCName)
+			continue
+		}
+		pv, err := pvNameForPVC(ctx, r, s.cfg, v.PVCName)
+		if err != nil || pv == "" {
+			return fmt.Errorf("resolve PV for %s: %w", v.PVCName, err)
+		}
+		if _, err := r.Run(ctx, "kubectl", "--context", s.cfg.BegetContext, "-n", "longhorn-system",
+			"create", "-f", "-"); err != nil {
+			return fmt.Errorf("longhorn backup %s: %w", pv, err)
+		}
+	}
+	return nil
+}
+
+const longhornBackupTarget = "s3://25f4da9f5cfe-dada-tuda-s3@ru1/"
+
+// longhornVolumeName is the fresh RWX volume created from the source backup.
+func longhornVolumeName(cfg MoveConfig, v VolumeSpec) string {
+	return cfg.App + "-" + v.PVCName + "-moved"
+}
+
+// restoreVolumeYAML renders the Longhorn Volume CR that restores a source PV's
+// backup into a fresh RWX volume. srcPV is the source PVC's bound PV name;
+// backupName is the latest completed backup for that PV; sizeBytes is its size.
+func restoreVolumeYAML(cfg MoveConfig, v VolumeSpec, srcPV, backupName, sizeBytes string) string {
+	name := longhornVolumeName(cfg, v)
+	fromBackup := fmt.Sprintf("%s?backup=%s&volume=%s", longhornBackupTarget, backupName, srcPV)
+	return fmt.Sprintf(`apiVersion: longhorn.io/v1beta2
+kind: Volume
+metadata:
+  name: %s
+  namespace: longhorn-system
+spec:
+  fromBackup: %q
+  accessMode: rwx
+  dataEngine: v1
+  numberOfReplicas: 2
+  size: %q
+`, name, fromBackup, sizeBytes)
+}
+
+// restorePVYAML renders a static RWX/Retain PV bound to the restored Longhorn
+// volume (mirrors the proven fonbet-value-restored-pv csi block).
+func restorePVYAML(cfg MoveConfig, v VolumeSpec, sizeBytes string) string {
+	vol := longhornVolumeName(cfg, v)
+	return fmt.Sprintf(`apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: %s-pv
+spec:
+  accessModes:
+    - ReadWriteMany
+  capacity:
+    storage: %s
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: longhorn-prod
+  volumeMode: Filesystem
+  csi:
+    driver: driver.longhorn.io
+    fsType: ext4
+    volumeHandle: %s
+    volumeAttributes:
+      dataLocality: disabled
+      fsType: ext4
+      numberOfReplicas: "2"
+      share: "true"
+      staleReplicaTimeout: "30"
+      unmapMarkSnapChainRemoved: "ignored"
+`, vol, sizeBytes, vol)
+}
+
+// restorePVCYAML renders a target-ns PVC that statically binds the restored PV.
+func restorePVCYAML(cfg MoveConfig, v VolumeSpec, sizeBytes string) string {
+	vol := longhornVolumeName(cfg, v)
+	return fmt.Sprintf(`apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: %s
+  namespace: %s
+spec:
+  accessModes:
+    - ReadWriteMany
+  storageClassName: longhorn-prod
+  volumeName: %s-pv
+  resources:
+    requests:
+      storage: %s
+`, v.PVCName, cfg.TargetNamespace, vol, sizeBytes)
+}
 
 type scaleDownStep struct{ cfg MoveConfig }
 
@@ -72,7 +173,22 @@ func (s *scaleDownStep) ID() string { return "scale-down" }
 func (s *scaleDownStep) Describe() string {
 	return "scale source workloads to 0"
 }
-func (s *scaleDownStep) Run(context.Context, CommandRunner, bool) error { return nil }
+
+// Run scales each configured deployment to 0 in the source namespace so the
+// source volumes detach and a Longhorn snapshot is crash-consistent.
+func (s *scaleDownStep) Run(ctx context.Context, r CommandRunner, dryRun bool) error {
+	for _, d := range s.cfg.ScaleDeployments {
+		if dryRun {
+			fmt.Printf("[dry-run] scale deploy/%s to 0 in %s\n", d, s.cfg.SrcNamespace)
+			continue
+		}
+		if _, err := r.Run(ctx, "kubectl", "--context", s.cfg.BegetContext, "-n", s.cfg.SrcNamespace,
+			"scale", "deploy", d, "--replicas=0"); err != nil {
+			return fmt.Errorf("scale %s to 0: %w", d, err)
+		}
+	}
+	return nil
+}
 
 type volumeCopyStep struct {
 	cfg MoveConfig
@@ -83,7 +199,65 @@ func (s *volumeCopyStep) ID() string { return "volume-copy:" + s.vol.PVCName }
 func (s *volumeCopyStep) Describe() string {
 	return "copy " + s.vol.PVCName + " into fresh RWX PVC"
 }
-func (s *volumeCopyStep) Run(context.Context, CommandRunner, bool) error { return nil }
+
+// Run restores the source volume's latest backup into a fresh RWX Longhorn volume
+// and materializes a static PV + target-ns PVC bound to it. The source PVC/PV are
+// left untouched (Retain) as rollback.
+func (s *volumeCopyStep) Run(ctx context.Context, r CommandRunner, dryRun bool) error {
+	srcPV, err := pvNameForPVC(ctx, r, s.cfg, s.vol.PVCName)
+	if err != nil || srcPV == "" {
+		if dryRun {
+			srcPV = "<source-PV>"
+		} else {
+			return fmt.Errorf("resolve source PV for %s: %w", s.vol.PVCName, err)
+		}
+	}
+	sizeBytes := "2147483648"
+	if dryRun {
+		fmt.Printf("[dry-run] restore backup of %s (PV %s) -> RWX volume %s -> PV+PVC %s in %s\n",
+			s.vol.PVCName, srcPV, longhornVolumeName(s.cfg, s.vol), s.vol.PVCName, s.cfg.TargetNamespace)
+		return nil
+	}
+	backupName, err := latestBackupForPV(ctx, r, s.cfg, srcPV)
+	if err != nil {
+		return err
+	}
+	for _, y := range []string{
+		restoreVolumeYAML(s.cfg, s.vol, srcPV, backupName, sizeBytes),
+		restorePVYAML(s.cfg, s.vol, sizeBytes),
+		restorePVCYAML(s.cfg, s.vol, sizeBytes),
+	} {
+		if _, err := runWithStdin(ctx, r, y, "kubectl", "--context", s.cfg.BegetContext, "apply", "-f", "-"); err != nil {
+			return fmt.Errorf("apply restore manifest for %s: %w", s.vol.PVCName, err)
+		}
+	}
+	return waitVolumeHealthy(ctx, r, s.cfg.BegetContext, longhornVolumeName(s.cfg, s.vol), 10*time.Minute)
+}
+
+// latestBackupForPV returns the newest completed Longhorn backup name for a PV.
+func latestBackupForPV(ctx context.Context, r CommandRunner, cfg MoveConfig, pv string) (string, error) {
+	out, err := r.Run(ctx, "kubectl", "--context", cfg.BegetContext, "-n", "longhorn-system",
+		"get", "backupvolume", pv, "-o", "jsonpath={.status.lastBackupName}")
+	if err != nil || out == "" {
+		return "", fmt.Errorf("no backup found for PV %s: %w", pv, err)
+	}
+	return out, nil
+}
+
+// waitVolumeHealthy polls a Longhorn volume until it is detached+healthy (restore
+// complete) or times out.
+func waitVolumeHealthy(ctx context.Context, r CommandRunner, kctx, vol string, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		out, err := r.Run(ctx, "kubectl", "--context", kctx, "-n", "longhorn-system",
+			"get", "volume", vol, "-o", "jsonpath={.status.robustness}")
+		if err == nil && out == "healthy" {
+			return nil
+		}
+		time.Sleep(10 * time.Second)
+	}
+	return fmt.Errorf("restored volume %s not healthy in %s", vol, timeout)
+}
 
 type copySecretsStep struct{ cfg MoveConfig }
 
