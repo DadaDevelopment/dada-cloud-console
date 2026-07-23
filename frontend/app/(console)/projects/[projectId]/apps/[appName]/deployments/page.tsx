@@ -255,6 +255,11 @@ export default function AppDeploymentsPage() {
                           <span className="inline-flex items-center rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600 dark:bg-slate-800 dark:text-slate-300">
                             {b.trigger}
                           </span>
+                          {b.pr_number != null && (
+                            <span className="inline-flex items-center rounded-full bg-purple-100 px-2 py-0.5 text-xs font-medium text-purple-700 dark:bg-purple-950/40 dark:text-purple-300">
+                              {t("previews.pr", { n: b.pr_number })}
+                            </span>
+                          )}
                         </div>
                         {b.commit_message && <p className="mt-1 truncate text-sm text-gray-700 dark:text-gray-200">{b.commit_message}</p>}
                         {image && <p className="mt-1 truncate font-mono text-xs text-gray-400 dark:text-gray-500">{image}</p>}

@@ -28,6 +28,7 @@ import { deleteImpact } from "./delete-impact";
 import { moveApp } from "./move-app";
 import { feedback } from "./feedback";
 import { deployHooks } from "./deploy-hooks";
+import { previews } from "./previews";
 
 /**
  * Flat key→{ru,en} map for the whole console. Each screen owns a namespace
@@ -65,4 +66,5 @@ export const messages: Messages = {
   ...moveApp,
   ...feedback,
   ...deployHooks,
+  ...previews,
 };

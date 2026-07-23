@@ -1,9 +1,9 @@
 "use client";
-import { useEffect, useRef, useState, FormEvent } from "react";
+import { useCallback, useEffect, useRef, useState, FormEvent } from "react";
 import { useParams, useSearchParams, useRouter } from "next/navigation";
 import Link from "next/link";
-import { appsApi, endpointsApi, envVarsApi, customDomainsApi } from "@/lib/api";
-import type { ResourceSnapshot, AppVolume, OperationResponse, DomainHostname } from "@/lib/types";
+import { appsApi, endpointsApi, envVarsApi, customDomainsApi, previewsApi } from "@/lib/api";
+import type { ResourceSnapshot, AppVolume, OperationResponse, DomainHostname, Environment } from "@/lib/types";
 import { Modal } from "@/components/ui/modal";
 import { Spinner } from "@/components/ui/spinner";
 import { Breadcrumb } from "@/components/ui/breadcrumb";
@@ -16,13 +16,30 @@ import { LogsViewer } from "@/components/logs-viewer";
 import { PhaseBadge } from "@/components/ui/phase-badge";
 import { CloudTaskPanel } from "@/components/cloud-task/cloud-task-panel";
 import { DeployHooksCard } from "@/components/deploy/deploy-hooks-card";
+import { AppPreviewPane } from "@/components/app-preview-pane";
 import { useT } from "@/lib/i18n/console/context";
-import { Globe, Database } from "lucide-react";
+import { Globe, Database, GitPullRequest } from "lucide-react";
 import { classifyVMResource } from "@/lib/vm-resources";
 import { IngressDetail } from "@/components/resources/ingress-detail";
 import { ServiceDatabaseDetail } from "@/components/resources/service-database-detail";
 import { DeleteImpactModal, deleteImpactTargetKey, type DeleteImpactTarget } from "@/components/resources/delete-impact-modal";
 import { MoveAppModal } from "@/components/resources/move-app-modal";
+
+interface PreviewRow {
+  env: Environment;
+  url?: string;
+}
+
+function formatExpiresIn(expiresAt: string, t: (key: string, vars?: Record<string, string | number>) => string): string {
+  const diffMs = new Date(expiresAt).getTime() - Date.now();
+  if (diffMs <= 0) return t("previews.expiresIn.expired");
+  const mins = Math.floor(diffMs / 60000);
+  if (mins < 60) return t("previews.expiresIn.minutes", { n: mins });
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return t("previews.expiresIn.hours", { n: hours });
+  const days = Math.floor(hours / 24);
+  return t("previews.expiresIn.days", { n: days });
+}
 
 interface DomainForm {
   fqdn: string;
@@ -47,7 +64,7 @@ export default function AppDetailPage() {
   const searchParams = useSearchParams();
   const router = useRouter();
   const { projectId, appName } = params;
-  const { role, selectedEnv } = useProjectContext();
+  const { role, selectedEnv, environments } = useProjectContext();
   const { t } = useT();
   const envId = searchParams.get("envId") || selectedEnv?.id || "";
 
@@ -72,6 +89,12 @@ export default function AppDetailPage() {
 
   const [deleteTarget, setDeleteTarget] = useState<DeleteImpactTarget | null>(null);
   const [isMoveModalOpen, setIsMoveModalOpen] = useState(false);
+
+  const [previewRows, setPreviewRows] = useState<PreviewRow[]>([]);
+  const [previewDeleteTarget, setPreviewDeleteTarget] = useState<Environment | null>(null);
+  const [previewDeleting, setPreviewDeleting] = useState(false);
+  const [previewDeleteError, setPreviewDeleteError] = useState<string | null>(null);
+  const [activePreview, setActivePreview] = useState<{ url: string; label: string } | null>(null);
 
   const deployGoalFiredRef = useRef(false);
 
@@ -155,6 +178,35 @@ export default function AppDetailPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId, appName, envId]);
 
+  const loadPreviews = useCallback(() => {
+    const ephemeral = environments.filter((e) => e.is_ephemeral);
+    let cancelled = false;
+    Promise.all(
+      ephemeral.map((env) =>
+        appsApi
+          .list(projectId, env.id)
+          .then((data) => {
+            const found = (data.apps ?? []).find((a) => a.name === appName);
+            if (!found) return null;
+            const s = found.summary_json as { url?: string };
+            return { env, url: s.url } as PreviewRow;
+          })
+          .catch(() => null)
+      )
+    ).then((rows) => {
+      if (cancelled) return;
+      setPreviewRows(rows.filter((r): r is PreviewRow => r !== null));
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId, appName, environments]);
+
+  useEffect(() => {
+    const cleanup = loadPreviews();
+    return cleanup;
+  }, [loadPreviews]);
+
   async function handleImageUpdate(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setImageSubmitError(null);
@@ -217,6 +269,21 @@ export default function AppDetailPage() {
     router.push(`/projects/${projectId}/operations${opId ? `?highlight=${opId}` : ""}`);
   }
 
+  async function handlePreviewDelete() {
+    if (!previewDeleteTarget) return;
+    setPreviewDeleting(true);
+    setPreviewDeleteError(null);
+    try {
+      await previewsApi.delete(projectId, previewDeleteTarget.id);
+      setPreviewDeleteTarget(null);
+      loadPreviews();
+    } catch (err) {
+      setPreviewDeleteError(err instanceof Error ? err.message : t("previews.error.delete"));
+    } finally {
+      setPreviewDeleting(false);
+    }
+  }
+
   async function handleDomainCreate(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setDomainSubmitError(null);
@@ -257,7 +324,7 @@ export default function AppDetailPage() {
     );
   }
 
-  const summary = app.summary_json as { image?: string; port?: number; replicas?: number; profile?: string; runtime?: string; volume?: AppVolume; repo_full_name?: string };
+  const summary = app.summary_json as { image?: string; port?: number; replicas?: number; profile?: string; runtime?: string; volume?: AppVolume; repo_full_name?: string; url?: string };
   const isCompose = summary.runtime === "compose";
   const resType = classifyVMResource(app);
   const isResource = resType !== "app";
@@ -367,6 +434,12 @@ export default function AppDetailPage() {
           )}
         </div>
       </div>
+
+      {!isResource && summary.url && (
+        <div className="mb-6">
+          <AppPreviewPane url={summary.url} />
+        </div>
+      )}
 
       {isCompose ? (
         <div className="space-y-6">
@@ -479,6 +552,77 @@ export default function AppDetailPage() {
           appName={appName}
           canMutate={canMutate(role)}
         />
+      </div>
+      )}
+
+      {!isResource && previewRows.length > 0 && (
+      <div className="mt-10">
+        <div className="mb-4">
+          <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">{t("previews.title")}</h2>
+          <p className="text-sm text-gray-400 dark:text-gray-500">{t("previews.subtitle")}</p>
+        </div>
+        <div className="space-y-3">
+          {previewRows.map(({ env, url }) => (
+            <div
+              key={env.id}
+              className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 px-5 py-4 shadow-sm"
+            >
+              <div className="flex min-w-0 items-center gap-3">
+                <GitPullRequest className="h-5 w-5 shrink-0 text-gray-400 dark:text-gray-500" />
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-sm font-semibold text-gray-900 dark:text-gray-100">
+                      {t("previews.pr", { n: env.pr_number ?? "?" })}
+                    </span>
+                    {env.pr_head_branch && (
+                      <span className="truncate font-mono text-xs text-gray-400 dark:text-gray-500">
+                        {t("previews.branch", { branch: env.pr_head_branch })}
+                      </span>
+                    )}
+                  </div>
+                  <p className="mt-0.5 text-xs text-gray-400 dark:text-gray-500">
+                    {env.expires_at ? t("previews.expiresIn", { time: formatExpiresIn(env.expires_at, t) }) : null}
+                  </p>
+                </div>
+              </div>
+              <div className="flex shrink-0 items-center gap-2">
+                {url && (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => setActivePreview({ url, label: t("previews.pr", { n: env.pr_number ?? "?" }) })}
+                      className="rounded-lg border border-gray-200 dark:border-gray-800 px-3 py-1.5 text-xs font-medium text-gray-700 dark:text-gray-200 hover:border-blue-300 hover:text-blue-600 transition-colors"
+                    >
+                      {t("previews.openPreview")}
+                    </button>
+                    <a
+                      href={url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="rounded-lg border border-gray-200 dark:border-gray-800 px-3 py-1.5 text-xs font-medium text-gray-700 dark:text-gray-200 hover:border-blue-300 hover:text-blue-600 transition-colors"
+                    >
+                      {t("previews.openUrl")}
+                    </a>
+                  </>
+                )}
+                {canMutate(role) && (
+                  <button
+                    type="button"
+                    onClick={() => { setPreviewDeleteError(null); setPreviewDeleteTarget(env); }}
+                    className="rounded-lg border border-red-200 dark:border-red-900 px-3 py-1.5 text-xs font-medium text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/30 transition-colors"
+                  >
+                    {t("previews.delete")}
+                  </button>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+        {activePreview && (
+          <div className="mt-4">
+            <AppPreviewPane key={activePreview.url} url={activePreview.url} title={activePreview.label} defaultOpen />
+          </div>
+        )}
       </div>
       )}
 
@@ -760,6 +904,31 @@ export default function AppDetailPage() {
           onMoved={handleAppMoved}
         />
       )}
+
+      <Modal
+        isOpen={!!previewDeleteTarget}
+        onClose={() => { setPreviewDeleteTarget(null); setPreviewDeleteError(null); }}
+        title={t("previews.delete.confirm.title")}
+      >
+        <div className="space-y-4">
+          <p className="text-sm text-gray-700 dark:text-gray-200">
+            {t("previews.delete.confirm.body", { n: previewDeleteTarget?.pr_number ?? "?" })}
+          </p>
+          {previewDeleteError && (
+            <div className="rounded-lg border border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-950/40 px-4 py-3 text-sm text-red-700 dark:text-red-300">{previewDeleteError}</div>
+          )}
+          <div className="flex justify-end gap-3 pt-2">
+            <button type="button" onClick={() => { setPreviewDeleteTarget(null); setPreviewDeleteError(null); }}
+              className="rounded-lg px-4 py-2 text-sm font-medium text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors">
+              {t("common.cancel")}
+            </button>
+            <button type="button" onClick={handlePreviewDelete} disabled={previewDeleting}
+              className="inline-flex items-center gap-2 rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-50 transition-colors">
+              {previewDeleting ? <><Spinner size="sm" /> {t("previews.deleting")}</> : t("previews.delete")}
+            </button>
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 }

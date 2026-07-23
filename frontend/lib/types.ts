@@ -66,6 +66,10 @@ export interface Environment {
   runtime: "k8s" | "vm";
   app_server_id?: string;
   created_at: string;
+  is_ephemeral?: boolean;
+  pr_number?: number | null;
+  pr_head_branch?: string | null;
+  expires_at?: string | null;
 }
 
 export type AppServerStatus =

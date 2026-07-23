@@ -965,6 +965,15 @@ export const appDomainsApi = {
     ),
 };
 
+/** Preview (ephemeral, PR-scoped) environments — tear-down is the only console-facing action. */
+export const previewsApi = {
+  delete: (projectId: string, envId: string) =>
+    apiFetch<OperationResponse>(
+      `/api/v1/projects/${projectId}/environments/${envId}/preview`,
+      { method: "DELETE" }
+    ),
+};
+
 export const monitoringApi = {
   base: (projectId: string, envId: string) =>
     `/api/v1/projects/${projectId}/environments/${envId}/monitoring`,
