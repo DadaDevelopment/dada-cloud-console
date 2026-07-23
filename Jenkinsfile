@@ -50,7 +50,7 @@ def agentName = "kubeagent-${env.JOB_BASE_NAME}-${env.BUILD_NUMBER}-${UUID.rando
 // build was superseded (NOT_BUILT) before its GitOps write-back ran, so nothing
 // ever deployed. Queueing lets each build finish + write back its tag in order.
 properties([
-        disableConcurrentBuilds(),
+        disableConcurrentBuilds(abortPrevious: true),
         parameters([
                 booleanParam(
                         name: 'RUN_E2E_AUTHED',
