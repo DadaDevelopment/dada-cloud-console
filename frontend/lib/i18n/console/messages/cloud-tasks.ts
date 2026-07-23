@@ -9,6 +9,7 @@ export const cloudTasks: Messages = {
   "cloudTasks.loadFailed": { ru: "Не удалось загрузить задачи", en: "Failed to load tasks" },
   "cloudTasks.runFailed": { ru: "Не удалось запустить задачу", en: "Failed to run task" },
   "cloudTasks.label.metrika": { ru: "Yandex Metrika + цели", en: "Yandex Metrika + goals" },
+  "cloudTasks.label.autofix": { ru: "Auto-fix: агент чинит приложение", en: "Auto-fix: agent repairs the app" },
   "cloudTasks.status.running": { ru: "Выполняется", en: "Running" },
   "cloudTasks.status.completed": { ru: "Готово", en: "Completed" },
   "cloudTasks.status.failed": { ru: "Ошибка", en: "Failed" },

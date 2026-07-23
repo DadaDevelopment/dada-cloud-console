@@ -9,6 +9,11 @@ const CATALOG: { taskType: string; labelKey: string; appliesTo: (k: string) => b
   { taskType: "yandex-metrika-goals", labelKey: "cloudTasks.label.metrika", appliesTo: (k) => k === "web" || k === "App" },
 ];
 
+const TASK_LABEL_KEYS: Record<string, string> = {
+  "yandex-metrika-goals": "cloudTasks.label.metrika",
+  autofix: "cloudTasks.label.autofix",
+};
+
 /**
  * CloudTaskPanel renders the agent-task chips for an app plus a live status card
  * per fired task. Running tasks are polled every 3s until they settle.
@@ -79,7 +84,9 @@ export function CloudTaskPanel(props: {
         {tasks.map((task) => (
           <li key={task.id} className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
             <div className="flex items-center justify-between">
-              <span className="text-sm font-medium text-gray-900">{task.task_type}</span>
+              <span className="text-sm font-medium text-gray-900">
+                {TASK_LABEL_KEYS[task.task_type] ? t(TASK_LABEL_KEYS[task.task_type]) : task.task_type}
+              </span>
               <StatusBadge status={task.status} label={t(`cloudTasks.status.${task.status}`)} />
             </div>
             {task.error && <p className="mt-1 text-xs text-red-600">{task.error}</p>}
