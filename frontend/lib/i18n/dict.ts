@@ -74,6 +74,17 @@ type StatusRadar = {
   datasetName: string;
   datasetDescription: string;
 };
+type UploadDeployPage = {
+  heroTitle: string;
+  heroSubtitle: string;
+  stepsTitle: string;
+  stepsSubtitle: string;
+  steps: Step[];
+  featuresTitle: string;
+  features: Feature[];
+  faqTitle: string;
+  faq: Faq[];
+};
 type MigrateGuide = {
   heroTitle: string;
   heroSubtitle: string;
@@ -173,6 +184,7 @@ export interface Dict {
   djangoAlt: AltPage;
   streamlitAlt: AltPage;
   vkBotAlt: AltPage;
+  uploadDeployAlt: UploadDeployPage;
   migrateVercel: MigrateGuide;
   statusRadar: StatusRadar;
   databases: {
@@ -731,6 +743,39 @@ const ru: Dict = {
       { q: "Подойдёт бот на Python?", a: "Да. Бот на Flask, FastAPI или aiohttp платформа определит и соберёт сама, без Dockerfile. Для других стеков достаточно добавить Dockerfile." },
       { q: "Где хранить пользователей и настройки?", a: "В managed PostgreSQL рядом с ботом - DATABASE_URL появится в переменных окружения автоматически. Данные хранятся в России, что соответствует 152-ФЗ." },
       { q: "Есть бесплатный хостинг для бота ВК?", a: "Да, первого бота можно держать на бесплатном тарифе без привязки карты." },
+    ],
+  },
+  uploadDeployAlt: {
+    heroTitle: "Деплой без git: залей zip - получи рабочий адрес",
+    heroSubtitle:
+      "Не хочется разбираться с git и GitHub? Заархивируйте проект в zip или tar.gz (до 100MB) и перетащите его в консоль Dada Cloud. Платформа сама найдёт Dockerfile, package.json или requirements.txt, соберёт приложение и запустит его - живой HTTPS-адрес появится за 1-2 минуты. Экспорт из Lovable, Bolt или v0 тоже подходит, просто заархивируйте папку экспорта.",
+    stepsTitle: "Как задеплоить из архива",
+    stepsSubtitle: "Четыре шага от папки на компьютере до рабочего адреса",
+    steps: [
+      { num: "01", title: "Создайте приложение в консоли", desc: "Укажите имя приложения в проекте - это займёт секунду, образ можно не выбирать: платформа заменит его после загрузки архива." },
+      { num: "02", title: "Заархивируйте проект", desc: "Соберите папку с проектом (или экспорт из Lovable, Bolt или v0) в zip или tar.gz - до 100MB." },
+      { num: "03", title: "Перетащите архив в консоль", desc: "На странице приложения перетащите файл в область загрузки или выберите его вручную - платформа определит фреймворк и порт по манифестам внутри." },
+      { num: "04", title: "Получите рабочий адрес", desc: "Сборка занимает обычно 1-2 минуты, после чего приложение доступно по HTTPS-адресу вида имя-хэш.dada-tuda.ru." },
+    ],
+    featuresTitle: "Как работает деплой без git",
+    features: [
+      { title: "Просто zip или tar.gz", desc: "Заархивируйте проект целиком - или экспорт из Lovable, Bolt, v0 - и перетащите архив в консоль. Размер - до 100MB." },
+      { title: "Автоопределение фреймворка", desc: "Платформа ищет Dockerfile, package.json (Next.js, Vite, React) или requirements.txt и pyproject.toml (FastAPI, Flask, Django, Streamlit) и собирает приложение без ручной настройки." },
+      { title: "Живой HTTPS-адрес за 1-2 минуты", desc: "После загрузки архива запускается сборка - обычно 1-2 минуты - и приложение получает рабочий адрес вида имя-хэш.dada-tuda.ru с сертификатом." },
+      { title: "Свой Dockerfile - тоже ок", desc: "Если в архиве есть Dockerfile, платформа использует его и берёт порт из EXPOSE. Без Dockerfile хватит requirements.txt или package.json с распознаваемым фреймворком." },
+      { title: "GitHub не нужен", desc: "Не нужно создавать репозиторий, настраивать доступ или разбираться в git - деплой идёт прямо из локальной папки или экспорта конструктора." },
+      { title: "Бесплатный тариф для старта", desc: "Первое приложение можно держать бесплатно, без привязки карты." },
+    ],
+    faqTitle: "Деплой без git - частые вопросы",
+    faq: [
+      { q: "Нужен ли git или GitHub, чтобы задеплоить проект?", a: "Нет. Заархивируйте проект в zip или tar.gz и загрузите архив в консоли - платформа соберёт и запустит приложение без репозитория." },
+      { q: "Какие форматы архива и какой лимит размера?", a: "Zip или tar.gz, до 100MB." },
+      { q: "Как платформа определяет фреймворк?", a: "Ищет Dockerfile (и порт в EXPOSE), package.json с next, vite или react-scripts, или requirements.txt и pyproject.toml с fastapi, flask, django или streamlit." },
+      { q: "На каком порту должно слушать приложение?", a: "0.0.0.0 и порт из переменной окружения PORT. Если в архиве есть Dockerfile с EXPOSE, платформа возьмёт порт оттуда." },
+      { q: "Можно загрузить экспорт из Lovable, Bolt или v0?", a: "Да - заархивируйте папку экспорта в zip и загрузите как обычный проект." },
+      { q: "Что если мой фреймворк не распознаётся автоматически?", a: "Добавьте в архив Dockerfile с EXPOSE нужного порта - платформа соберёт приложение по нему." },
+      { q: "Нужно ли сначала создавать приложение в консоли?", a: "Да - сначала создаётся приложение с именем, а затем в него загружается архив с кодом. Это два быстрых шага на одной странице." },
+      { q: "Это бесплатно?", a: "Да, первое приложение можно держать на бесплатном тарифе без привязки карты." },
     ],
   },
   databases: {
@@ -1450,6 +1495,39 @@ const en: Dict = {
       { q: "Will a Python bot work?", a: "Yes. A bot on Flask, FastAPI or aiohttp is detected and built automatically, no Dockerfile. For other stacks just add a Dockerfile." },
       { q: "Where do I store users and settings?", a: "In managed PostgreSQL next to the bot - DATABASE_URL appears in the environment automatically. Data is stored in Russia, which meets 152-FZ." },
       { q: "Is there free VK bot hosting?", a: "Yes, the first bot runs on the free tier, no card required." },
+    ],
+  },
+  uploadDeployAlt: {
+    heroTitle: "Deploy without git: upload a zip, get a live URL",
+    heroSubtitle:
+      "Don't want to deal with git and GitHub? Zip your project as zip or tar.gz (up to 100MB) and drop it into the Dada Cloud console. The platform finds your Dockerfile, package.json or requirements.txt, builds the app and runs it - a live HTTPS address appears in 1-2 minutes. Exports from Lovable, Bolt or v0 work too - just zip the export folder.",
+    stepsTitle: "How to deploy from an archive",
+    stepsSubtitle: "Four steps from a folder on your computer to a live address",
+    steps: [
+      { num: "01", title: "Create the app in the console", desc: "Name your app in the project - it takes a second, the image doesn't matter yet: the platform replaces it once you upload the archive." },
+      { num: "02", title: "Zip your project", desc: "Package the project folder (or a Lovable, Bolt or v0 export) as zip or tar.gz - up to 100MB." },
+      { num: "03", title: "Drop the archive into the console", desc: "On the app page, drag the file into the upload area or pick it manually - the platform detects the framework and port from the manifests inside." },
+      { num: "04", title: "Get a live address", desc: "The build usually takes 1-2 minutes, then the app is live at an HTTPS address like name-hash.dada-tuda.ru." },
+    ],
+    featuresTitle: "How deploy without git works",
+    features: [
+      { title: "Just a zip or tar.gz", desc: "Zip the whole project - or an export from Lovable, Bolt, v0 - and drop the archive into the console. Up to 100MB." },
+      { title: "Framework auto-detection", desc: "The platform looks for a Dockerfile, package.json (Next.js, Vite, React) or requirements.txt and pyproject.toml (FastAPI, Flask, Django, Streamlit) and builds the app without manual setup." },
+      { title: "Live HTTPS address in 1-2 minutes", desc: "After you upload the archive a build kicks off - usually 1-2 minutes - and the app gets a working address like name-hash.dada-tuda.ru with a certificate." },
+      { title: "Your own Dockerfile works too", desc: "If the archive has a Dockerfile, the platform uses it and reads the port from EXPOSE. Without one, requirements.txt or package.json with a recognized framework is enough." },
+      { title: "No GitHub needed", desc: "No repo to create, no access to configure, no git to learn - deploy straight from a local folder or a builder export." },
+      { title: "Free tier to start", desc: "Your first app can run for free, no card required." },
+    ],
+    faqTitle: "Deploy without git - FAQ",
+    faq: [
+      { q: "Do I need git or GitHub to deploy a project?", a: "No. Zip the project as zip or tar.gz and upload it in the console - the platform builds and runs the app without a repo." },
+      { q: "What archive formats and size limit?", a: "Zip or tar.gz, up to 100MB." },
+      { q: "How does the platform detect my framework?", a: "It looks for a Dockerfile (port from EXPOSE), package.json with next, vite or react-scripts, or requirements.txt and pyproject.toml with fastapi, flask, django or streamlit." },
+      { q: "What port should my app listen on?", a: "0.0.0.0 and the PORT environment variable. If the archive has a Dockerfile with EXPOSE, the platform reads the port from there." },
+      { q: "Can I upload a Lovable, Bolt or v0 export?", a: "Yes - zip the export folder and upload it like any other project." },
+      { q: "What if my framework isn't auto-detected?", a: "Add a Dockerfile to the archive with EXPOSE set to the right port - the platform builds from that." },
+      { q: "Do I need to create the app first?", a: "Yes - first the app is created with a name, then the archive with the code is uploaded into it. Two quick steps on one page." },
+      { q: "Is it free?", a: "Yes, your first app can run on the free tier, no card required." },
     ],
   },
   databases: {

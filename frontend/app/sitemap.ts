@@ -21,6 +21,7 @@ const STATIC_ROUTES: Array<{ path: string; priority: number; changeFrequency: Me
   { path: "/analog-digitalocean", priority: 0.9, changeFrequency: "monthly" },
   { path: "/analog-fly-io", priority: 0.9, changeFrequency: "monthly" },
   { path: "/deploy-vibe-coding", priority: 0.9, changeFrequency: "monthly" },
+  { path: "/deploy-without-git", priority: 0.9, changeFrequency: "monthly" },
   { path: "/hosting-telegram-bot", priority: 0.9, changeFrequency: "monthly" },
   { path: "/hosting-fastapi", priority: 0.8, changeFrequency: "monthly" },
   { path: "/hosting-flask", priority: 0.8, changeFrequency: "monthly" },
