@@ -1,6 +1,10 @@
 package main
 
-import "context"
+import (
+	"context"
+	"fmt"
+	"time"
+)
 
 type safetyDumpStep struct{ cfg MoveConfig }
 
@@ -8,7 +12,48 @@ func (s *safetyDumpStep) ID() string { return "safety-dump" }
 func (s *safetyDumpStep) Describe() string {
 	return "safety pg_dump of " + s.cfg.DBDatname
 }
-func (s *safetyDumpStep) Run(context.Context, CommandRunner, bool) error { return nil }
+
+// backupActionSetYAML renders a Kanister backup ActionSet for the shared
+// Postgres StatefulSet, keyed to cfg.DBDatname. dumpPath mirrors the backend
+// convention dumps/<scope>/<db>/<name>.dump under the profile prefix.
+func backupActionSetYAML(cfg MoveConfig, name string) string {
+	return fmt.Sprintf(`apiVersion: cr.kanister.io/v1alpha1
+kind: ActionSet
+metadata:
+  generateName: db-move-backup-
+  namespace: databases
+  labels:
+    dada.io/dbmove: %q
+spec:
+  actions:
+    - name: backup
+      blueprint: postgres-logical-db-blueprint
+      object:
+        kind: StatefulSet
+        name: postgresql
+        namespace: databases
+      profile:
+        name: dada-db-backups
+        namespace: databases
+      options:
+        database: %s
+        dumpPath: dumps/dbmove/%s/%s.dump
+`, cfg.App, cfg.DBDatname, cfg.DBDatname, name)
+}
+
+// Run creates the backup ActionSet and waits for completion (skipped on dry-run).
+func (s *safetyDumpStep) Run(ctx context.Context, r CommandRunner, dryRun bool) error {
+	name := "db-move-" + s.cfg.DBDatname
+	y := backupActionSetYAML(s.cfg, name)
+	if dryRun {
+		fmt.Printf("[dry-run] would create backup ActionSet:\n%s\n", y)
+		return nil
+	}
+	if _, err := runWithStdin(ctx, r, y, "kubectl", "--context", s.cfg.BegetContext, "create", "-f", "-"); err != nil {
+		return fmt.Errorf("create backup actionset: %w", err)
+	}
+	return waitActionSet(ctx, r, s.cfg.BegetContext, s.cfg.App, 15*time.Minute)
+}
 
 type longhornBackupStep struct{ cfg MoveConfig }
 

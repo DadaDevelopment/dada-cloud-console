@@ -2,8 +2,10 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"os/exec"
 	"strings"
+	"time"
 )
 
 // CommandRunner runs an external command and returns combined stdout.
@@ -50,4 +52,39 @@ func (f *fakeRunner) Run(_ context.Context, name string, args ...string) (string
 		}
 	}
 	return "", nil
+}
+
+// runWithStdin runs a command feeding stdin, returning combined output.
+func runWithStdin(ctx context.Context, r CommandRunner, stdin string, name string, args ...string) (string, error) {
+	if er, ok := r.(execRunner); ok {
+		return er.runStdin(ctx, stdin, name, args...)
+	}
+	full := append([]string{name}, args...)
+	return r.Run(ctx, full[0], full[1:]...)
+}
+
+// runStdin executes name+args feeding stdin, returning trimmed combined output.
+func (execRunner) runStdin(ctx context.Context, stdin string, name string, args ...string) (string, error) {
+	cmd := exec.CommandContext(ctx, name, args...)
+	cmd.Stdin = strings.NewReader(stdin)
+	out, err := cmd.CombinedOutput()
+	return strings.TrimRight(string(out), "\n"), err
+}
+
+// waitActionSet polls the newest dbmove-labelled ActionSet until complete or timeout.
+func waitActionSet(ctx context.Context, r CommandRunner, kctx, app string, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		out, err := r.Run(ctx, "kubectl", "--context", kctx, "-n", "databases", "get", "actionset",
+			"-l", "dada.io/dbmove="+app, "--sort-by=.metadata.creationTimestamp",
+			"-o", "jsonpath={.items[-1:].status.state}")
+		if err == nil && strings.Contains(out, "complete") {
+			return nil
+		}
+		if err == nil && strings.Contains(out, "failed") {
+			return fmt.Errorf("backup actionset failed for %s", app)
+		}
+		time.Sleep(10 * time.Second)
+	}
+	return fmt.Errorf("backup actionset for %s did not complete in %s", app, timeout)
 }
