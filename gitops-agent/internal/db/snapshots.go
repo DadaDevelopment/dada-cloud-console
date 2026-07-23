@@ -210,10 +210,15 @@ func UpdateLiveStatus(ctx context.Context, pool *pgxpool.Pool,
 }
 
 // PrimaryHostname returns the hostname to surface on an app's card, or ""
-// if the app has none yet (domain_hostnames row not created, or still
-// pending). Preference order: an active custom domain over an active
-// surrogate (rows whose hostname ends in domainBase are surrogates), then
-// falls back to any row at all so a pending domain still surfaces something.
+// if the app has none. Preference order within domain_hostnames: an active
+// custom domain over an active surrogate (rows whose hostname ends in
+// domainBase are surrogates), then any row at all so a pending domain still
+// surfaces something. When the app has no domain_hostnames row whatsoever, it
+// falls back to the fqdn of a PublicApi snapshot in the same environment
+// tagged with this app_name: domains that entered the platform straight
+// through git (hand-recovered apps, manifests committed outside the console
+// API) exist only as PublicApi snapshots, and without this fallback such an
+// app never gets a url even though its domain is live.
 func PrimaryHostname(ctx context.Context, pool *pgxpool.Pool,
 	environmentID uuid.UUID, appName, domainBase string,
 ) (string, error) {
@@ -228,11 +233,26 @@ func PrimaryHostname(ctx context.Context, pool *pgxpool.Pool,
 			created_at ASC
 		LIMIT 1
 	`, environmentID, appName, domainBase).Scan(&hostname)
+	if err == nil {
+		return hostname, nil
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return "", fmt.Errorf("primary hostname: %w", err)
+	}
+	err = pool.QueryRow(ctx, `
+		SELECT summary_json->'spec'->'dns'->>'fqdn'
+		FROM resource_snapshots
+		WHERE environment_id = $1 AND kind = 'PublicApi'
+		  AND summary_json->>'app_name' = $2
+		  AND COALESCE(summary_json->'spec'->'dns'->>'fqdn', '') <> ''
+		ORDER BY (name = $2) DESC, name ASC
+		LIMIT 1
+	`, environmentID, appName).Scan(&hostname)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return "", nil
 		}
-		return "", fmt.Errorf("primary hostname: %w", err)
+		return "", fmt.Errorf("primary hostname publicapi fallback: %w", err)
 	}
 	return hostname, nil
 }
