@@ -1,0 +1,24 @@
+app: n8n
+begetContext: "83.222.27.62:26443"
+mgmtContext: "e7b608-client-super-admin@e7b608-client"
+srcProject: example-project
+srcEnv: prod
+srcNamespace: example-project-prod
+targetProject: platform
+targetEnv: prod
+dbDatname: n8n
+dbCredSecret: n8n-db-credentials
+argoInfraPath: /Users/alex/IdeaProjects/argo-infra
+appFolderRel: clusters/beget-prod/projects/example-project/environments/prod/apps/n8n
+volumes:
+  - pvcName: n8n-data
+    mountedBy: n8n
+  - pvcName: n8n-worker-data
+    mountedBy: n8n-worker
+oobSecrets:
+  - n8n-runtime
+  - n8n-smtp
+scaleDeployments:
+  - n8n
+  - n8n-runners
+  - n8n-worker

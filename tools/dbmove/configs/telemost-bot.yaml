@@ -1,0 +1,18 @@
+app: telemost-bot
+begetContext: "83.222.27.62:26443"
+mgmtContext: "e7b608-client-super-admin@e7b608-client"
+srcProject: example-project
+srcEnv: prod
+srcNamespace: example-project-prod
+targetProject: internal
+targetEnv: prod
+dbDatname: telemostbot
+dbCredSecret: telemost-bot-db-credentials
+argoInfraPath: /Users/alex/IdeaProjects/argo-infra
+appFolderRel: clusters/beget-prod/projects/example-project/environments/prod/apps/telemost-bot
+volumes: []
+oobSecrets:
+  - telemost-bot-llm-keys
+  - telemost-bot-keycloak
+scaleDeployments:
+  - telemost-bot-deploy
