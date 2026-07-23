@@ -330,6 +330,12 @@ export const apps: Messages = {
   "apps.env.error.revealForbidden": { ru: "Нет прав на просмотр секретов.", en: "You don't have permission to reveal secrets." },
   "apps.env.error.save": { ru: "Не удалось сохранить", en: "Failed to save" },
   "apps.env.error.delete": { ru: "Не удалось удалить", en: "Failed to delete" },
+  "apps.env.previewOverride.label": { ru: "Только для preview", en: "Preview-only override" },
+  "apps.env.previewOverride.hint": {
+    ru: "Значение применяется только в PR preview-окружениях, заменяет основное",
+    en: "Applies only in PR preview environments, overriding the base value",
+  },
+  "apps.env.previewOverride.badge": { ru: "preview", en: "preview" },
 
   "apps.detail.config.title": { ru: "Конфигурация", en: "Configuration" },
   "apps.detail.config.env": { ru: "Переменные окружения", en: "Environment variables" },

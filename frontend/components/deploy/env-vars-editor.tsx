@@ -14,10 +14,22 @@ interface EditState {
   value: string;
   is_secret: boolean;
   scope: Scope;
+  preview_override: boolean;
   editingExisting: boolean;
 }
 
-const EMPTY: EditState = { key: "", value: "", is_secret: true, scope: "both", editingExisting: false };
+const EMPTY: EditState = {
+  key: "",
+  value: "",
+  is_secret: true,
+  scope: "both",
+  preview_override: false,
+  editingExisting: false,
+};
+
+function rowKey(v: EnvVar): string {
+  return `${v.key}:${v.preview_override ? "p" : "b"}`;
+}
 
 export function EnvVarsEditor({
   projectId,
@@ -61,11 +73,12 @@ export function EnvVarsEditor({
     void load(); // eslint-disable-line react-hooks/set-state-in-effect
   }, [load]);
 
-  async function handleReveal(key: string) {
-    setRevealing(key);
+  async function handleReveal(v: EnvVar) {
+    const rk = rowKey(v);
+    setRevealing(rk);
     try {
-      const { value } = await envVarsApi.reveal(projectId, envId, appName, key);
-      setRevealed((prev) => ({ ...prev, [key]: value }));
+      const { value } = await envVarsApi.reveal(projectId, envId, appName, v.key, v.preview_override);
+      setRevealed((prev) => ({ ...prev, [rk]: value }));
     } catch (err) {
       const msg = err instanceof Error ? err.message : t("apps.env.error.reveal");
       setError(/403|forbidden|permission/i.test(msg) ? t("apps.env.error.revealForbidden") : msg);
@@ -81,7 +94,14 @@ export function EnvVarsEditor({
   }
 
   function openEdit(v: EnvVar) {
-    setForm({ key: v.key, value: "", is_secret: v.is_secret, scope: v.scope, editingExisting: true });
+    setForm({
+      key: v.key,
+      value: "",
+      is_secret: v.is_secret,
+      scope: v.scope,
+      preview_override: v.preview_override ?? false,
+      editingExisting: true,
+    });
     setSubmitError(null);
     setModalOpen(true);
   }
@@ -95,11 +115,12 @@ export function EnvVarsEditor({
         value: form.value,
         is_secret: form.is_secret,
         scope: form.scope,
+        preview_override: form.preview_override,
       });
       setModalOpen(false);
       setRevealed((prev) => {
         const next = { ...prev };
-        delete next[form.key];
+        delete next[`${form.key}:${form.preview_override ? "p" : "b"}`];
         return next;
       });
       await load();
@@ -110,11 +131,12 @@ export function EnvVarsEditor({
     }
   }
 
-  async function handleDelete(key: string) {
-    if (!window.confirm(t("apps.env.confirmDelete", { key }))) return;
-    setDeleting(key);
+  async function handleDelete(v: EnvVar) {
+    if (!window.confirm(t("apps.env.confirmDelete", { key: v.key }))) return;
+    const rk = rowKey(v);
+    setDeleting(rk);
     try {
-      await envVarsApi.remove(projectId, envId, appName, key);
+      await envVarsApi.remove(projectId, envId, appName, v.key, v.preview_override);
       await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : t("apps.env.error.delete"));
@@ -167,26 +189,28 @@ export function EnvVarsEditor({
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
-              {vars.map((v) => (
-                <tr key={v.id} className="bg-white dark:bg-gray-950">
+              {vars.map((v) => {
+                const rk = rowKey(v);
+                return (
+                <tr key={rk} className="bg-white dark:bg-gray-950">
                   <td className="px-4 py-3 font-mono font-medium text-gray-900 dark:text-gray-100">{v.key}</td>
                   <td className="px-4 py-3">
                     {v.is_secret ? (
-                      revealed[v.key] !== undefined ? (
+                      revealed[rk] !== undefined ? (
                         <span className="inline-flex items-center gap-2">
-                          <code className="rounded bg-gray-100 px-2 py-0.5 font-mono text-xs text-gray-800">{revealed[v.key]}</code>
-                          <CopyButton value={revealed[v.key]} />
+                          <code className="rounded bg-gray-100 px-2 py-0.5 font-mono text-xs text-gray-800">{revealed[rk]}</code>
+                          <CopyButton value={revealed[rk]} />
                         </span>
                       ) : (
                         <span className="inline-flex items-center gap-2">
                           <span className="font-mono text-gray-400">••••••••</span>
                           {canEdit && (
                             <button
-                              onClick={() => handleReveal(v.key)}
-                              disabled={revealing === v.key}
+                              onClick={() => handleReveal(v)}
+                              disabled={revealing === rk}
                               className="text-xs text-blue-600 hover:text-blue-700 disabled:opacity-50"
                             >
-                              {revealing === v.key ? t("apps.env.revealing") : t("apps.env.reveal")}
+                              {revealing === rk ? t("apps.env.revealing") : t("apps.env.reveal")}
                             </button>
                           )}
                         </span>
@@ -199,9 +223,15 @@ export function EnvVarsEditor({
                     )}
                   </td>
                   <td className="px-4 py-3">
-                    <span className="inline-flex items-center rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600">
-                      {v.scope}
-                    </span>
+                    {v.preview_override ? (
+                      <span className="inline-flex items-center rounded-full bg-violet-50 px-2 py-0.5 text-xs font-medium text-violet-700 ring-1 ring-violet-600/20">
+                        {t("apps.env.previewOverride.badge")}
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600">
+                        {v.scope}
+                      </span>
+                    )}
                     {v.is_secret && (
                       <span className="ml-1.5 inline-flex items-center rounded-full bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-700 ring-1 ring-amber-600/20">
                         {t("apps.env.secret")}
@@ -215,17 +245,18 @@ export function EnvVarsEditor({
                           {t("apps.env.edit")}
                         </button>
                         <button
-                          onClick={() => handleDelete(v.key)}
-                          disabled={deleting === v.key}
+                          onClick={() => handleDelete(v)}
+                          disabled={deleting === rk}
                           className="text-xs text-red-600 hover:text-red-700 disabled:opacity-50"
                         >
-                          {deleting === v.key ? t("apps.env.deleting") : t("apps.env.delete")}
+                          {deleting === rk ? t("apps.env.deleting") : t("apps.env.delete")}
                         </button>
                       </div>
                     </td>
                   )}
                 </tr>
-              ))}
+                );
+              })}
             </tbody>
           </table>
         </div>
@@ -297,6 +328,24 @@ export function EnvVarsEditor({
               aria-checked={form.is_secret}
             >
               <span className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${form.is_secret ? "translate-x-6" : "translate-x-1"}`} />
+            </button>
+          </div>
+
+          <div className="flex items-center justify-between rounded-lg border border-gray-200 dark:border-gray-800 px-4 py-3">
+            <div>
+              <p className="text-sm font-medium text-gray-700 dark:text-gray-200">{t("apps.env.previewOverride.label")}</p>
+              <p className="text-xs text-gray-500 dark:text-gray-400">{t("apps.env.previewOverride.hint")}</p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setForm((f) => ({ ...f, preview_override: !f.preview_override }))}
+              className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 ${
+                form.preview_override ? "bg-blue-600" : "bg-gray-200"
+              }`}
+              role="switch"
+              aria-checked={form.preview_override}
+            >
+              <span className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${form.preview_override ? "translate-x-6" : "translate-x-1"}`} />
             </button>
           </div>
 

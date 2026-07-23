@@ -939,21 +939,38 @@ export const envVarsApi = {
     envId: string,
     appName: string,
     key: string,
-    data: { value: string; is_secret: boolean; scope: "build" | "runtime" | "both" }
+    data: {
+      value: string;
+      is_secret: boolean;
+      scope: "build" | "runtime" | "both";
+      preview_override?: boolean;
+    }
   ) =>
     apiFetch<OperationResponse>(
       `/api/v1/projects/${projectId}/environments/${envId}/apps/${appName}/env/${encodeURIComponent(key)}`,
       { method: "PUT", body: data }
     ),
 
-  reveal: (projectId: string, envId: string, appName: string, key: string) =>
-    apiFetch<{ value: string }>(
-      `/api/v1/projects/${projectId}/environments/${envId}/apps/${appName}/env/${encodeURIComponent(key)}?reveal=true`
+  reveal: (
+    projectId: string,
+    envId: string,
+    appName: string,
+    key: string,
+    previewOverride?: boolean
+  ) =>
+    apiFetch<{ value: string; preview_override?: boolean }>(
+      `/api/v1/projects/${projectId}/environments/${envId}/apps/${appName}/env/${encodeURIComponent(key)}?reveal=true${previewOverride ? "&preview_override=true" : ""}`
     ),
 
-  remove: (projectId: string, envId: string, appName: string, key: string) =>
+  remove: (
+    projectId: string,
+    envId: string,
+    appName: string,
+    key: string,
+    previewOverride?: boolean
+  ) =>
     apiFetch<OperationResponse>(
-      `/api/v1/projects/${projectId}/environments/${envId}/apps/${appName}/env/${encodeURIComponent(key)}`,
+      `/api/v1/projects/${projectId}/environments/${envId}/apps/${appName}/env/${encodeURIComponent(key)}${previewOverride ? "?preview_override=true" : ""}`,
       { method: "DELETE" }
     ),
 };

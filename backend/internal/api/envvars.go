@@ -323,6 +323,7 @@ func (h *Handler) SetEnvVar(c *gin.Context) {
 // @Param       appName   path     string true "App name"
 // @Param       key       path     string true "Variable key"
 // @Param       reveal    query    bool   true "Must be true to reveal"
+// @Param       preview_override query bool  false "Reveal the preview-only override instead of the base env var"
 // @Success     200       {object} map[string]string "object with the decrypted value"
 // @Failure     400       {object} map[string]string
 // @Failure     403       {object} map[string]string
@@ -375,9 +376,14 @@ func (h *Handler) RevealEnvVar(c *gin.Context) {
 		return
 	}
 
+	table := "env_vars"
+	if c.Query("preview_override") == "true" {
+		table = "preview_env_overrides"
+	}
+
 	var encrypted []byte
 	err = h.pool.QueryRow(c.Request.Context(),
-		`SELECT value_encrypted FROM env_vars
+		`SELECT value_encrypted FROM `+table+`
 		 WHERE environment_id = $1 AND app_name = $2 AND key = $3`,
 		envID, appName, key,
 	).Scan(&encrypted)
@@ -396,7 +402,7 @@ func (h *Handler) RevealEnvVar(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"value": string(plain)})
+	c.JSON(http.StatusOK, gin.H{"value": string(plain), "preview_override": table == "preview_env_overrides"})
 }
 
 // DeleteEnvVar removes a single environment variable. When preview_override=true

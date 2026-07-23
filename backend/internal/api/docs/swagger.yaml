@@ -4215,6 +4215,10 @@ paths:
         name: reveal
         required: true
         type: boolean
+      - description: Reveal the preview-only override instead of the base env var
+        in: query
+        name: preview_override
+        type: boolean
       produces:
       - application/json
       responses:

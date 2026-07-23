@@ -5215,6 +5215,12 @@ const docTemplate = `{
                         "name": "reveal",
                         "in": "query",
                         "required": true
+                    },
+                    {
+                        "type": "boolean",
+                        "description": "Reveal the preview-only override instead of the base env var",
+                        "name": "preview_override",
+                        "in": "query"
                     }
                 ],
                 "responses": {
