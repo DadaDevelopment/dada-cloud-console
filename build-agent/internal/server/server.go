@@ -132,13 +132,38 @@ type pushEvent struct {
 	} `json:"head_commit"`
 }
 
+// pullRequestEvent is the subset of a GitHub pull_request webhook payload
+// build-agent consumes for preview deployments (opened, reopened,
+// synchronize, closed).
+type pullRequestEvent struct {
+	Action     string `json:"action"`
+	Number     int    `json:"number"`
+	Repository struct {
+		FullName string `json:"full_name"`
+	} `json:"repository"`
+	PullRequest struct {
+		Title string `json:"title"`
+		Head  struct {
+			SHA  string `json:"sha"`
+			Ref  string `json:"ref"`
+			Repo struct {
+				FullName string `json:"full_name"`
+			} `json:"repo"`
+		} `json:"head"`
+		Base struct {
+			Repo struct {
+				FullName string `json:"full_name"`
+			} `json:"repo"`
+		} `json:"base"`
+	} `json:"pull_request"`
+}
+
 // githubWebhook is the "nudge" trigger. It verifies the HMAC (per-repo secret
 // when configured, else the global app secret), idempotently enqueues a build
 // for every git_repos linked to the pushed repo+branch, then nudges the queue
-// and returns 200 fast.
-//
-// TODO(wave-3): pull_request events (open/sync/close) for preview envs +
-// fork-PR safety flag (head.repo != base → fork_unsafe, inject no secrets).
+// and returns 200 fast. pull_request events are routed to
+// handlePullRequestWebhook for preview deployments; every other event is
+// accepted but not acted on.
 func (s *Server) githubWebhook(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -157,8 +182,11 @@ func (s *Server) githubWebhook(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		return
 	}
+	if event == "pull_request" {
+		s.handlePullRequestWebhook(w, r, body)
+		return
+	}
 	if event != "push" {
-		// pull_request and other events are accepted but not yet acted on.
 		w.WriteHeader(http.StatusOK)
 		return
 	}
@@ -202,6 +230,181 @@ func (s *Server) githubWebhook(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.WriteHeader(http.StatusOK)
+}
+
+// handlePullRequestWebhook drives preview deployments off GitHub pull_request
+// events, gated behind cfg.PreviewEnvsEnabled (BUILD_PREVIEW_ENVS_ENABLED,
+// default off).
+//
+// opened/reopened/synchronize: resolve every git_repos row for the PR's
+// repository, verify each per-repo HMAC, skip a repo with auto-deploy off,
+// reject a fork PR (head.repo != base.repo) with a commit-status error and no
+// build, enforce the project's preview_env_max quota for a PR that does not
+// already have a preview environment, then ensure the preview environment and
+// enqueue a build against it.
+//
+// closed: find the PR's preview environment (if any) and enqueue its teardown.
+// A PR with no preview environment (never opened one, or already torn down)
+// is a no-op 200, not an error - idempotent like the push path.
+func (s *Server) handlePullRequestWebhook(w http.ResponseWriter, r *http.Request, body []byte) {
+	if s.cfg == nil || !s.cfg.PreviewEnvsEnabled {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
+	var ev pullRequestEvent
+	if err := json.Unmarshal(body, &ev); err != nil {
+		http.Error(w, "bad payload", http.StatusBadRequest)
+		return
+	}
+	switch ev.Action {
+	case "opened", "reopened", "synchronize", "closed":
+	default:
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+	if s.pool == nil || ev.Repository.FullName == "" {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
+	ctx := r.Context()
+	repos, rerr := db.ResolveReposByFullName(ctx, s.pool, ev.Repository.FullName)
+	if rerr != nil {
+		log.Error().Err(rerr).Msg("pull_request webhook: resolve repos")
+		http.Error(w, "resolve error", http.StatusInternalServerError)
+		return
+	}
+
+	sig := r.Header.Get("X-Hub-Signature-256")
+	enqueued := 0
+	for _, repo := range repos {
+		if !s.verifyWebhook(repo.WebhookSecret, body, sig) {
+			log.Warn().Str("repo", repo.RepoFullName).Msg("pull_request webhook: invalid signature")
+			continue
+		}
+		if ev.Action == "closed" {
+			s.closePreviewEnv(ctx, repo, ev.Number)
+			continue
+		}
+		if !repo.AutoDeploy {
+			continue
+		}
+		if s.openOrSyncPreviewEnv(ctx, repo, &ev) {
+			enqueued++
+		}
+	}
+
+	if enqueued > 0 && s.nudger != nil {
+		go s.nudger.OnPush(context.Background())
+	}
+	w.WriteHeader(http.StatusOK)
+}
+
+// openOrSyncPreviewEnv handles opened/reopened/synchronize for one git_repos
+// row: fork-check, quota-check (only for a PR that has no preview env yet),
+// EnsurePreviewEnv, enqueue the CreatePreviewEnv operation, then enqueue the
+// preview build. Returns true when a build was enqueued.
+func (s *Server) openOrSyncPreviewEnv(ctx context.Context, repo *db.Repo, ev *pullRequestEvent) bool {
+	headSHA := ev.PullRequest.Head.SHA
+	headBranch := ev.PullRequest.Head.Ref
+	headRepo := ev.PullRequest.Head.Repo.FullName
+	baseRepo := ev.PullRequest.Base.Repo.FullName
+	prNumber := ev.Number
+
+	if headRepo != "" && baseRepo != "" && headRepo != baseRepo {
+		s.postPRStatus(ctx, repo, headSHA, "error", "preview builds for forks are disabled")
+		log.Info().Str("repo", repo.RepoFullName).Int("pr", prNumber).
+			Msg("pull_request webhook: fork PR skipped (preview builds disabled for forks)")
+		return false
+	}
+	if headSHA == "" {
+		log.Warn().Str("repo", repo.RepoFullName).Int("pr", prNumber).Msg("pull_request webhook: missing head sha")
+		return false
+	}
+
+	existing, err := db.FindPreviewEnvByPR(ctx, s.pool, repo.ID, prNumber)
+	if err != nil {
+		log.Error().Err(err).Str("repo", repo.RepoFullName).Int("pr", prNumber).Msg("pull_request webhook: find preview env")
+		return false
+	}
+	if existing == nil {
+		count, cerr := db.CountActivePreviewEnvs(ctx, s.pool, repo.ProjectID)
+		if cerr != nil {
+			log.Error().Err(cerr).Str("repo", repo.RepoFullName).Msg("pull_request webhook: count preview envs")
+			return false
+		}
+		max, merr := db.PreviewEnvMax(ctx, s.pool, repo.ProjectID)
+		if merr != nil {
+			log.Error().Err(merr).Str("repo", repo.RepoFullName).Msg("pull_request webhook: preview env quota")
+			return false
+		}
+		if count >= max {
+			s.postPRStatus(ctx, repo, headSHA, "failure", "preview environment quota exceeded for this project")
+			log.Warn().Str("repo", repo.RepoFullName).Int("pr", prNumber).Int("count", count).Int("max", max).
+				Msg("pull_request webhook: preview env quota exceeded")
+			return false
+		}
+	}
+
+	previewEnv, err := db.EnsurePreviewEnv(ctx, s.pool, repo.ProjectID, repo.ID, repo.EnvironmentID,
+		repo.ProjectSlug, repo.AppName, prNumber, headBranch, s.cfg.PreviewEnvTTL)
+	if err != nil {
+		log.Error().Err(err).Str("repo", repo.RepoFullName).Int("pr", prNumber).Msg("pull_request webhook: ensure preview env")
+		return false
+	}
+
+	if _, err := db.InsertCreatePreviewEnvOp(ctx, s.pool, db.SystemUserID, repo.ProjectID, previewEnv.ID,
+		previewEnv.Name, previewEnv.Namespace, repo.ID, prNumber, headBranch, repo.EnvironmentID); err != nil {
+		log.Error().Err(err).Str("repo", repo.RepoFullName).Int("pr", prNumber).Msg("pull_request webhook: enqueue CreatePreviewEnv")
+	}
+
+	if ev.Action == "synchronize" {
+		if err := db.BumpPreviewEnvExpiry(ctx, s.pool, previewEnv.ID, s.cfg.PreviewEnvTTL); err != nil {
+			log.Warn().Err(err).Str("repo", repo.RepoFullName).Int("pr", prNumber).Msg("pull_request webhook: bump preview env expiry")
+		}
+	}
+
+	if _, err := db.InsertPreviewBuild(ctx, s.pool, repo.ID, previewEnv.ID, repo.AppName,
+		headSHA, ev.PullRequest.Title, headBranch, prNumber, false); err != nil {
+		if err == db.ErrBuildShaTaken {
+			log.Info().Str("repo", repo.RepoFullName).Int("pr", prNumber).Str("sha", headSHA).
+				Msg("pull_request webhook: sha already has a build row on this repo, skipping preview build")
+			return false
+		}
+		log.Error().Err(err).Str("repo", repo.RepoFullName).Int("pr", prNumber).Msg("pull_request webhook: enqueue preview build")
+		return false
+	}
+	return true
+}
+
+// closePreviewEnv tears down a PR's preview environment by enqueueing the
+// DeletePreviewEnv operation. A PR with no preview environment is a silent
+// no-op so repeated "closed" deliveries stay idempotent.
+func (s *Server) closePreviewEnv(ctx context.Context, repo *db.Repo, prNumber int) {
+	previewEnv, err := db.FindPreviewEnvByPR(ctx, s.pool, repo.ID, prNumber)
+	if err != nil {
+		log.Error().Err(err).Str("repo", repo.RepoFullName).Int("pr", prNumber).Msg("pull_request webhook: find preview env on close")
+		return
+	}
+	if previewEnv == nil {
+		return
+	}
+	if _, err := db.InsertDeletePreviewEnvOp(ctx, s.pool, db.SystemUserID, repo.ProjectID, previewEnv.ID, previewEnv.Namespace); err != nil {
+		log.Error().Err(err).Str("repo", repo.RepoFullName).Int("pr", prNumber).Msg("pull_request webhook: enqueue DeletePreviewEnv")
+	}
+}
+
+// postPRStatus posts a GitHub commit status for a PR's head sha. App is not
+// always configured (e.g. in tests or a GitLab-only deployment), in which case
+// this is a no-op.
+func (s *Server) postPRStatus(ctx context.Context, repo *db.Repo, sha, state, desc string) {
+	if s.gh == nil || repo.Provider != "github" || repo.InstallationID == 0 || sha == "" {
+		return
+	}
+	if err := s.gh.PostStatus(ctx, repo.InstallationID, repo.RepoFullName, sha, state, "", desc); err != nil {
+		log.Warn().Err(err).Str("repo", repo.RepoFullName).Str("sha", sha).Msg("pull_request webhook: post status")
+	}
 }
 
 // handleInstallationEvent prunes stale installation rows when GitHub reports the
@@ -317,10 +520,10 @@ func (s *Server) handleOAuthExchange(w http.ResponseWriter, r *http.Request) {
 
 // frameworkDetection mirrors the backend/frontend FrameworkDetection shape.
 type frameworkDetection struct {
-	Framework      *string `json:"framework"`
-	PackageManager *string `json:"package_manager"`
-	BuildCommand   *string `json:"build_command"`
-	InstallCommand *string `json:"install_command"`
+	Framework      *string  `json:"framework"`
+	PackageManager *string  `json:"package_manager"`
+	BuildCommand   *string  `json:"build_command"`
+	InstallCommand *string  `json:"install_command"`
 	StartCommand   *string  `json:"start_command"`
 	OutputDir      *string  `json:"output_dir"`
 	Port           *int     `json:"port"`

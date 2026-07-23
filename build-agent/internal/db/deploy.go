@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"strings"
 
 	"github.com/google/uuid"
@@ -72,6 +73,50 @@ func buildDefaultHostname(base, name, suffix string) string {
 		label = strings.TrimRight(label[:maxLabel], "-")
 	}
 	return fmt.Sprintf("%s-%s.%s", label, suffix, base)
+}
+
+// branchUnsafe matches every byte that is not a lowercase DNS-label character,
+// used by sanitizeBranch to turn an arbitrary git branch name into a safe
+// hostname label.
+var branchUnsafe = regexp.MustCompile(`[^a-z0-9-]+`)
+
+// sanitizeBranch turns a git branch name into a DNS-label-safe fragment:
+// lowercase, every byte outside [a-z0-9] becomes '-', repeated '-' collapse to
+// one, and leading/trailing '-' are trimmed. A branch left empty by this
+// process (e.g. one made entirely of non-ASCII characters) falls back to
+// "branch" so buildPreviewHostname never emits a malformed "--<hex4>" host.
+func sanitizeBranch(branch string) string {
+	s := strings.ToLower(branch)
+	s = branchUnsafe.ReplaceAllString(s, "-")
+	for strings.Contains(s, "--") {
+		s = strings.ReplaceAll(s, "--", "-")
+	}
+	s = strings.Trim(s, "-")
+	if s == "" {
+		return "branch"
+	}
+	return s
+}
+
+// buildPreviewHostname builds the per-branch preview hostname
+// "<app>-git-<branch>-<hex4>.<base>" (Vercel-style). Unlike buildDefaultHostname,
+// which truncates the app-name label, this truncates the (already-sanitized)
+// branch label when the full host would exceed the 63-byte DNS-label limit; the
+// app name and the "-git-"/suffix scaffolding are never shortened, only the
+// branch fragment, and never by appending a suffix of its own (same
+// no-extra-suffix rule as buildDefaultHostname).
+func buildPreviewHostname(base, name, branch, suffix string) string {
+	branch = sanitizeBranch(branch)
+	prefix := fmt.Sprintf("%s-git-", name)
+	fixed := len(prefix) + 1 + len(suffix)
+	maxBranch := 63 - fixed
+	if maxBranch < 1 {
+		maxBranch = 1
+	}
+	if len(branch) > maxBranch {
+		branch = strings.TrimRight(branch[:maxBranch], "-")
+	}
+	return fmt.Sprintf("%s%s-%s.%s", prefix, branch, suffix, base)
 }
 
 // HandoffDeploy is the success-path deploy handoff (plan §4, invariant 2). It is
@@ -158,7 +203,12 @@ func HandoffDeploy(ctx context.Context, pool *pgxpool.Pool, b *Build, repo *Repo
 		`, b.EnvironmentID, b.AppName).Scan(&hasManagedDomain)
 		if dd.Enabled && dd.Base != "" && !hasManagedDomain {
 			if suffix, sErr := randomHostSuffix(); sErr == nil {
-				defaultHostname = buildDefaultHostname(dd.Base, b.AppName, suffix)
+				isEphemeral, headBranch, pErr := EnvPreviewInfo(ctx, tx, b.EnvironmentID)
+				if pErr == nil && isEphemeral && headBranch != "" {
+					defaultHostname = buildPreviewHostname(dd.Base, b.AppName, headBranch, suffix)
+				} else {
+					defaultHostname = buildDefaultHostname(dd.Base, b.AppName, suffix)
+				}
 			}
 		}
 		payload, err = json.Marshal(createAppPayload{

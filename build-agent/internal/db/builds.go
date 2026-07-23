@@ -36,6 +36,7 @@ type Build struct {
 	Trigger       string // push | pr | manual | rollback
 	Status        string
 	ImageURI      string     // pinned on success: harbor.../<proj>/<app>@sha256:<digest>
+	PRNumber      *int       // set for trigger='pr' builds (preview deployments); nil otherwise
 	ForkUnsafe    bool       // fork-PR safety: never inject secrets when true
 	TriggeredBy   *uuid.UUID // human who triggered a manual build; nil for push/webhook
 	CreatedAt     time.Time
@@ -104,7 +105,8 @@ func CurrentStatus(ctx context.Context, pool *pgxpool.Pool, id uuid.UUID) (strin
 func InFlightBuilds(ctx context.Context, pool *pgxpool.Pool) ([]ReclaimBuild, error) {
 	rows, err := pool.Query(ctx, `
 		SELECT id, git_repo_id, environment_id, app_name, commit_sha, branch,
-		       trigger, status, triggered_by, created_at, jenkins_queue_id, jenkins_build_number
+		       trigger, status, pr_number, fork_unsafe, triggered_by, created_at,
+		       jenkins_queue_id, jenkins_build_number
 		FROM   builds
 		WHERE  status IN ('detecting','building','pushing')
 		ORDER  BY started_at ASC NULLS FIRST
@@ -119,7 +121,8 @@ func InFlightBuilds(ctx context.Context, pool *pgxpool.Pool) ([]ReclaimBuild, er
 		var rb ReclaimBuild
 		if err := rows.Scan(
 			&rb.ID, &rb.GitRepoID, &rb.EnvironmentID, &rb.AppName, &rb.CommitSHA, &rb.Branch,
-			&rb.Trigger, &rb.Status, &rb.TriggeredBy, &rb.CreatedAt, &rb.JenkinsQueueID, &rb.JenkinsBuildNumber,
+			&rb.Trigger, &rb.Status, &rb.PRNumber, &rb.ForkUnsafe, &rb.TriggeredBy, &rb.CreatedAt,
+			&rb.JenkinsQueueID, &rb.JenkinsBuildNumber,
 		); err != nil {
 			return nil, fmt.Errorf("scan in-flight build: %w", err)
 		}
@@ -142,11 +145,11 @@ func InFlightBuilds(ctx context.Context, pool *pgxpool.Pool) ([]ReclaimBuild, er
 func SuccessBuildsMissingDeploy(ctx context.Context, pool *pgxpool.Pool) ([]Build, error) {
 	rows, err := pool.Query(ctx, `
 		SELECT id, git_repo_id, environment_id, app_name, commit_sha,
-		       branch, trigger, status, image_uri, triggered_by, created_at
+		       branch, trigger, status, image_uri, pr_number, fork_unsafe, triggered_by, created_at
 		FROM (
 			SELECT DISTINCT ON (b.git_repo_id, b.branch)
 			       b.id, b.git_repo_id, b.environment_id, b.app_name, b.commit_sha,
-			       b.branch, b.trigger, b.status, b.image_uri, b.triggered_by, b.created_at
+			       b.branch, b.trigger, b.status, b.image_uri, b.pr_number, b.fork_unsafe, b.triggered_by, b.created_at
 			FROM   builds b
 			WHERE  b.status = 'success' AND b.image_uri IS NOT NULL AND b.image_uri <> ''
 			  AND  b.created_at > NOW() - make_interval(days => 7)
@@ -164,7 +167,7 @@ func SuccessBuildsMissingDeploy(ctx context.Context, pool *pgxpool.Pool) ([]Buil
 		var b Build
 		if err := rows.Scan(
 			&b.ID, &b.GitRepoID, &b.EnvironmentID, &b.AppName, &b.CommitSHA,
-			&b.Branch, &b.Trigger, &b.Status, &b.ImageURI, &b.TriggeredBy, &b.CreatedAt,
+			&b.Branch, &b.Trigger, &b.Status, &b.ImageURI, &b.PRNumber, &b.ForkUnsafe, &b.TriggeredBy, &b.CreatedAt,
 		); err != nil {
 			return nil, fmt.Errorf("scan missing-deploy build: %w", err)
 		}
@@ -212,13 +215,13 @@ func ClaimQueued(ctx context.Context, pool *pgxpool.Pool) (*Build, error) {
 			FOR UPDATE SKIP LOCKED
 		)
 		RETURNING id, git_repo_id, environment_id, app_name,
-		          commit_sha, branch, trigger, status, triggered_by, created_at
+		          commit_sha, branch, trigger, status, pr_number, fork_unsafe, triggered_by, created_at
 	`)
 
 	var b Build
 	if err := row.Scan(
 		&b.ID, &b.GitRepoID, &b.EnvironmentID, &b.AppName,
-		&b.CommitSHA, &b.Branch, &b.Trigger, &b.Status, &b.TriggeredBy, &b.CreatedAt,
+		&b.CommitSHA, &b.Branch, &b.Trigger, &b.Status, &b.PRNumber, &b.ForkUnsafe, &b.TriggeredBy, &b.CreatedAt,
 	); err != nil {
 		if err == pgx.ErrNoRows {
 			return nil, nil // empty queue
@@ -393,6 +396,36 @@ func InsertBuildFromWebhook(ctx context.Context, pool *pgxpool.Pool, gitRepoID, 
 	`, gitRepoID, envID, appName, commitSHA, commitMessage, branch, trigger).Scan(&id)
 	if err != nil {
 		return uuid.Nil, fmt.Errorf("insert build: %w", err)
+	}
+	return id, nil
+}
+
+// ErrBuildShaTaken is returned by InsertPreviewBuild when the commit has
+// already been built on this repo under a different (non-PR) trigger. builds
+// has a UNIQUE(git_repo_id, commit_sha) constraint shared by every trigger, so
+// a SHA that already landed a push/manual build row can never get a second,
+// PR-scoped build row for the same commit. This is expected when a branch was
+// pushed to the production branch and later opened as a PR from the same SHA;
+// the caller should log this at info level and skip the PR build gracefully
+// rather than treat it as a failure.
+var ErrBuildShaTaken = fmt.Errorf("commit sha already has a build row on this repo")
+
+// InsertPreviewBuild idempotently enqueues a preview (trigger='pr') build
+// against a preview environment. It never updates an existing row for the same
+// (git_repo_id, commit_sha) - see ErrBuildShaTaken.
+func InsertPreviewBuild(ctx context.Context, pool *pgxpool.Pool, gitRepoID, previewEnvID uuid.UUID, appName, commitSHA, commitMessage, branch string, prNumber int, forkUnsafe bool) (uuid.UUID, error) {
+	var id uuid.UUID
+	err := pool.QueryRow(ctx, `
+		INSERT INTO builds (git_repo_id, environment_id, app_name, commit_sha, commit_message, branch, trigger, pr_number, fork_unsafe, status)
+		VALUES ($1, $2, $3, $4, $5, $6, 'pr', $7, $8, 'queued')
+		ON CONFLICT (git_repo_id, commit_sha) DO NOTHING
+		RETURNING id
+	`, gitRepoID, previewEnvID, appName, commitSHA, commitMessage, branch, prNumber, forkUnsafe).Scan(&id)
+	if err == pgx.ErrNoRows {
+		return uuid.Nil, ErrBuildShaTaken
+	}
+	if err != nil {
+		return uuid.Nil, fmt.Errorf("insert preview build: %w", err)
 	}
 	return id, nil
 }
