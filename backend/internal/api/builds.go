@@ -24,6 +24,7 @@ type build struct {
 	Branch        string     `json:"branch"`
 	ImageURI      *string    `json:"image_uri,omitempty"`
 	LogsRef       *string    `json:"logs_ref,omitempty"`
+	PRNumber      *int       `json:"pr_number,omitempty"`
 	StartedAt     *time.Time `json:"started_at,omitempty"`
 	FinishedAt    *time.Time `json:"finished_at,omitempty"`
 	CreatedAt     time.Time  `json:"created_at"`
@@ -31,14 +32,14 @@ type build struct {
 }
 
 const buildSelectCols = `id, git_repo_id, environment_id, app_name, status, trigger,
-		commit_sha, commit_message, branch, image_uri, logs_ref,
+		commit_sha, commit_message, branch, image_uri, logs_ref, pr_number,
 		started_at, finished_at, created_at, updated_at`
 
 func scanBuild(s interface {
 	Scan(dest ...any) error
 }, b *build) error {
 	return s.Scan(&b.ID, &b.GitRepoID, &b.EnvironmentID, &b.AppName, &b.Status, &b.Trigger,
-		&b.CommitSHA, &b.CommitMessage, &b.Branch, &b.ImageURI, &b.LogsRef,
+		&b.CommitSHA, &b.CommitMessage, &b.Branch, &b.ImageURI, &b.LogsRef, &b.PRNumber,
 		&b.StartedAt, &b.FinishedAt, &b.CreatedAt, &b.UpdatedAt)
 }
 

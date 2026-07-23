@@ -9953,6 +9953,76 @@
                 }
             }
         },
+        "/projects/{projectId}/environments/{envId}/preview": {
+            "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Tears down an ephemeral (PR) environment: queues a DeletePreviewEnv operation that removes the namespace and its git-rendered manifests. Returns 404 if the environment is not ephemeral. Requires write access.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "environment"
+                ],
+                "summary": "Delete a preview environment",
+                "operationId": "deletePreviewEnvironment",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Project UUID",
+                        "name": "projectId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Environment UUID",
+                        "name": "envId",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "202": {
+                        "description": "object with the accepted operation",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/projects/{projectId}/environments/{envId}/repos": {
             "get": {
                 "security": [
@@ -11794,6 +11864,9 @@
                 },
                 "logs_ref": {
                     "type": "string"
+                },
+                "pr_number": {
+                    "type": "integer"
                 },
                 "started_at": {
                     "type": "string"

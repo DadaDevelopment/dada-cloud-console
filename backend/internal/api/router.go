@@ -390,6 +390,7 @@ func SetupRouter(pool *pgxpool.Pool, cfg *config.Config) *gin.Engine {
 		api.GET("/projects/:projectId/environments/:envId/apps/:appName/deployments", h.ListDeployments)
 		api.POST("/projects/:projectId/deployments/:deploymentId/rollback", auth.RequireScope("deploy:write"), h.RollbackDeployment)
 		api.POST("/projects/:projectId/deployments/:deploymentId/promote", auth.RequireScope("deploy:write"), h.PromoteDeployment)
+		api.DELETE("/projects/:projectId/environments/:envId/preview", auth.RequireScope("deploy:write"), h.DeletePreviewEnvironment)
 		// Env vars (always encrypted at rest; reveal is write-gated).
 		api.GET("/projects/:projectId/environments/:envId/apps/:appName/env", h.ListEnvVars)
 		api.PUT("/projects/:projectId/environments/:envId/apps/:appName/env/:key", h.SetEnvVar)

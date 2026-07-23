@@ -48,6 +48,10 @@ type Environment struct {
 	AppServerID   *uuid.UUID         `json:"app_server_id,omitempty" db:"app_server_id"`
 	LimitRange    json.RawMessage    `json:"limit_range"             db:"limit_range"`
 	ResourceQuota json.RawMessage    `json:"resource_quota"          db:"resource_quota"`
+	IsEphemeral   bool               `json:"is_ephemeral"            db:"is_ephemeral"`
+	PRNumber      *int               `json:"pr_number,omitempty"     db:"pr_number"`
+	PRHeadBranch  *string            `json:"pr_head_branch,omitempty" db:"pr_head_branch"`
+	ExpiresAt     *time.Time         `json:"expires_at,omitempty"    db:"expires_at"`
 	CreatedAt     time.Time          `json:"created_at"              db:"created_at"`
 	UpdatedAt     time.Time          `json:"updated_at"              db:"updated_at"`
 }
