@@ -19,7 +19,7 @@ import { DeployChooser } from "@/components/deploy/deploy-chooser";
 import { TemplateDeployCards } from "@/components/console/template-deploy-cards";
 import { UploadDeployCard } from "@/components/deploy/upload-deploy";
 import { useT } from "@/lib/i18n/console/context";
-import { Globe, Database } from "lucide-react";
+import { Globe, Database, GitPullRequest } from "lucide-react";
 import { classifyVMResource, extractIngressSpec, extractDatabaseSpec } from "@/lib/vm-resources";
 
 interface CreateAppForm {
@@ -232,13 +232,21 @@ export default function AppsPage() {
         </div>
       ) : (
         <div className="space-y-10">
-          {environments.map((env) => (
+          {environments.filter((env) => !env.is_ephemeral).map((env) => (
             <EnvBlock
               key={env.id}
               env={env}
               projectId={projectId}
               apps={appsByEnv[env.id] ?? []}
               infra={infraByEnv[env.id] ?? []}
+              previews={environments
+                .filter((pe) => pe.is_ephemeral && pe.pr_number != null)
+                .map((pe) => ({
+                  env: pe,
+                  url: (appsByEnv[pe.id] ?? [])
+                    .map((a) => (a.summary_json as unknown as AppSummary).url)
+                    .find(Boolean),
+                }))}
               canCreate={canCreate}
               onCreate={() => openChooser(env.id)}
               t={t}
@@ -418,17 +426,23 @@ export default function AppsPage() {
   );
 }
 
+interface EnvPreviewChip {
+  env: Environment;
+  url?: string;
+}
+
 interface EnvBlockProps {
   env: Environment;
   projectId: string;
   apps: ResourceSnapshot[];
   infra: ResourceSnapshot[];
+  previews: EnvPreviewChip[];
   canCreate: boolean;
   onCreate: () => void;
   t: (key: string, vars?: Record<string, string>) => string;
 }
 
-function EnvBlock({ env, projectId, apps, infra, canCreate, onCreate, t }: EnvBlockProps) {
+function EnvBlock({ env, projectId, apps, infra, previews, canCreate, onCreate, t }: EnvBlockProps) {
   return (
     <section>
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3 border-b border-gray-100 dark:border-gray-800 pb-3">
@@ -510,6 +524,35 @@ function EnvBlock({ env, projectId, apps, infra, canCreate, onCreate, t }: EnvBl
                     <p className="mt-0.5 truncate font-mono text-xs text-gray-400 dark:text-gray-500">{subtitle}</p>
                   </div>
                 </div>
+
+                {previews.some((p) => p.env.name === `pr-${p.env.pr_number}-${app.name}`) && (
+                  <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
+                    {previews
+                      .filter((p) => p.env.name === `pr-${p.env.pr_number}-${app.name}`)
+                      .map((p) =>
+                        p.url ? (
+                          <a
+                            key={p.env.id}
+                            href={p.url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center gap-1.5 rounded-full bg-purple-50 dark:bg-purple-950/40 px-2.5 py-1 text-xs font-medium text-purple-700 dark:text-purple-300 hover:bg-purple-100 dark:hover:bg-purple-950/60 transition-colors"
+                          >
+                            <GitPullRequest className="h-3.5 w-3.5" />
+                            {t("apps.card.prPreview", { pr: String(p.env.pr_number) })}
+                          </a>
+                        ) : (
+                          <span
+                            key={p.env.id}
+                            className="inline-flex items-center gap-1.5 rounded-full bg-purple-50 dark:bg-purple-950/40 px-2.5 py-1 text-xs font-medium text-purple-700 dark:text-purple-300"
+                          >
+                            <GitPullRequest className="h-3.5 w-3.5" />
+                            {t("apps.card.prPreview", { pr: String(p.env.pr_number) })}
+                          </span>
+                        ),
+                      )}
+                  </div>
+                )}
 
                 <div className="hidden lg:flex items-center gap-3 text-xs text-gray-400 dark:text-gray-500">
                   {resType === "ingress" ? (

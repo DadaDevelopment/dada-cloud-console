@@ -71,6 +71,7 @@ export const apps: Messages = {
   "apps.card.synced": { ru: "Синхронизировано {ago}", en: "Synced {ago}" },
   "apps.card.openUrl": { ru: "Открыть {hostname}", en: "Open {hostname}" },
   "apps.card.agent": { ru: "Агент", en: "Agent" },
+  "apps.card.prPreview": { ru: "PR #{pr}", en: "PR #{pr}" },
 
   "apps.modal.create.title": { ru: "Создать приложение", en: "Create Application" },
   "apps.modal.create.name.label": { ru: "Имя приложения", en: "App name" },
