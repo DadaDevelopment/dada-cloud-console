@@ -945,6 +945,8 @@ export interface Build {
   finished_at?: string;
   created_at: string;
   updated_at: string;
+  error_message?: string;
+  fail_reason?: string;
 }
 
 export interface BuildLogFrame {

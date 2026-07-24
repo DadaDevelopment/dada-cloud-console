@@ -3,7 +3,9 @@
 import { useEffect, useState } from "react";
 import { useT } from "@/lib/i18n/console/context";
 import { Spinner } from "@/components/ui/spinner";
-import { ChevronDown, ExternalLink, RefreshCw, Smartphone, Tablet, Maximize2 } from "lucide-react";
+import { AlertTriangle, ChevronDown, ExternalLink, RefreshCw, Smartphone, Tablet, Maximize2 } from "lucide-react";
+
+const GATEWAY_ERROR_STATUSES = new Set([502, 503, 504]);
 
 type Viewport = "mobile" | "tablet" | "full";
 
@@ -37,10 +39,13 @@ export function AppPreviewPane({ url, openUrl, title, defaultOpen = false }: App
   const [viewport, setViewport] = useState<Viewport>("full");
   const [reloadKey, setReloadKey] = useState(0);
   const [embeddable, setEmbeddable] = useState<boolean | null>(null);
+  const [checkStatus, setCheckStatus] = useState<number | null>(null);
   const checking = open && embeddable === null;
+  const gatewayError = checkStatus !== null && GATEWAY_ERROR_STATUSES.has(checkStatus);
 
   function handleReload() {
     setEmbeddable(null);
+    setCheckStatus(null);
     setReloadKey((k) => k + 1);
   }
 
@@ -49,12 +54,16 @@ export function AppPreviewPane({ url, openUrl, title, defaultOpen = false }: App
     let cancelled = false;
     fetch(`/api/frame-check?url=${encodeURIComponent(url)}`)
       .then((res) => res.json())
-      .then((data: { embeddable?: boolean }) => {
+      .then((data: { embeddable?: boolean; status?: number }) => {
         if (cancelled) return;
         setEmbeddable(data.embeddable ?? false);
+        setCheckStatus(typeof data.status === "number" ? data.status : null);
       })
       .catch(() => {
-        if (!cancelled) setEmbeddable(false);
+        if (!cancelled) {
+          setEmbeddable(false);
+          setCheckStatus(null);
+        }
       });
     return () => {
       cancelled = true;
@@ -143,6 +152,21 @@ export function AppPreviewPane({ url, openUrl, title, defaultOpen = false }: App
             <div className="flex h-64 items-center justify-center rounded-lg border border-gray-100 dark:border-gray-800 bg-gray-50 dark:bg-gray-950">
               <Spinner />
               <span className="ml-2 text-sm text-gray-400 dark:text-gray-500">{t("previewPane.checking")}</span>
+            </div>
+          ) : gatewayError ? (
+            <div className="flex flex-col items-center justify-center gap-3 rounded-lg border border-dashed border-amber-300 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/30 py-12 text-center">
+              <AlertTriangle className="h-6 w-6 text-amber-500 dark:text-amber-400" />
+              <p className="text-sm font-medium text-amber-800 dark:text-amber-200">{t("previewPane.gatewayError.title")}</p>
+              <p className="max-w-sm text-xs text-amber-700 dark:text-amber-300">{t("previewPane.gatewayError.body")}</p>
+              <a
+                href={externalUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1.5 text-sm font-medium text-amber-700 dark:text-amber-300 hover:underline"
+              >
+                <ExternalLink className="h-4 w-4" />
+                {t("previewPane.openNewTab")}
+              </a>
             </div>
           ) : embeddable === false ? (
             <div className="flex flex-col items-center justify-center gap-3 rounded-lg border border-dashed border-gray-300 dark:border-gray-700 bg-gray-50 dark:bg-gray-950 py-12 text-center">

@@ -280,15 +280,16 @@ func RequeueForRetry(ctx context.Context, pool *pgxpool.Pool, id uuid.UUID, reas
 	return tag.RowsAffected() == 1, nil
 }
 
-// MarkFailed moves a build to failed, recording the error message and
-// finished_at. Compare-and-set on `from` so it loses cleanly against a concurrent
-// cancel/supersede. Returns true when it changed a row.
-func MarkFailed(ctx context.Context, pool *pgxpool.Pool, id uuid.UUID, from, errMsg string) (bool, error) {
+// MarkFailedWithReason moves a build to failed, recording the error message,
+// the classified fail_reason code (empty when the failure was not
+// classified), and finished_at. Compare-and-set on `from` so it loses cleanly
+// against a concurrent cancel/supersede. Returns true when it changed a row.
+func MarkFailedWithReason(ctx context.Context, pool *pgxpool.Pool, id uuid.UUID, from, errMsg, failReason string) (bool, error) {
 	tag, err := pool.Exec(ctx, `
 		UPDATE builds
-		SET    status = 'failed', error_message = $3, finished_at = NOW(), updated_at = NOW()
+		SET    status = 'failed', error_message = $3, fail_reason = NULLIF($4, ''), finished_at = NOW(), updated_at = NOW()
 		WHERE  id = $1 AND status = $2
-	`, id, from, errMsg)
+	`, id, from, errMsg, failReason)
 	if err != nil {
 		return false, fmt.Errorf("mark failed %s: %w", id, err)
 	}

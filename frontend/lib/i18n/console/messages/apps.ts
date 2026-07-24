@@ -201,6 +201,11 @@ export const apps: Messages = {
   "apps.builds.error.load": { ru: "Не удалось загрузить сборку", en: "Failed to load build" },
   "apps.builds.error.cancel": { ru: "Не удалось отменить", en: "Failed to cancel" },
   "apps.builds.error.notCancelable": { ru: "Эту сборку больше нельзя отменить.", en: "This build can no longer be canceled." },
+  "apps.builds.fail.heading": { ru: "Сборка не удалась", en: "Build failed" },
+  "apps.builds.fail.noDockerfile.hint": {
+    ru: "В репозитории нет Dockerfile — добавьте его в корень (подойдёт и имя dockerfile).",
+    en: "The repository has no Dockerfile — add one to the repo root (the name dockerfile also works).",
+  },
 
   "apps.compose.crumb": { ru: "compose", en: "compose" },
   "apps.compose.heading.suffix": { ru: "/ compose", en: "/ compose" },

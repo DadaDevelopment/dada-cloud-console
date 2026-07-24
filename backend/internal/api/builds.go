@@ -29,18 +29,20 @@ type build struct {
 	FinishedAt    *time.Time `json:"finished_at,omitempty"`
 	CreatedAt     time.Time  `json:"created_at"`
 	UpdatedAt     time.Time  `json:"updated_at"`
+	ErrorMessage  *string    `json:"error_message,omitempty"`
+	FailReason    *string    `json:"fail_reason,omitempty"`
 }
 
 const buildSelectCols = `id, git_repo_id, environment_id, app_name, status, trigger,
 		commit_sha, commit_message, branch, image_uri, logs_ref, pr_number,
-		started_at, finished_at, created_at, updated_at`
+		started_at, finished_at, created_at, updated_at, error_message, fail_reason`
 
 func scanBuild(s interface {
 	Scan(dest ...any) error
 }, b *build) error {
 	return s.Scan(&b.ID, &b.GitRepoID, &b.EnvironmentID, &b.AppName, &b.Status, &b.Trigger,
 		&b.CommitSHA, &b.CommitMessage, &b.Branch, &b.ImageURI, &b.LogsRef, &b.PRNumber,
-		&b.StartedAt, &b.FinishedAt, &b.CreatedAt, &b.UpdatedAt)
+		&b.StartedAt, &b.FinishedAt, &b.CreatedAt, &b.UpdatedAt, &b.ErrorMessage, &b.FailReason)
 }
 
 // ListBuilds returns the builds for an app in an environment.

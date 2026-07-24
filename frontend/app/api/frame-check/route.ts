@@ -65,9 +65,9 @@ export async function GET(request: NextRequest) {
     const xfo = res.headers.get("x-frame-options");
     const csp = res.headers.get("content-security-policy");
     const embeddable = !xfoBlocks(xfo) && !cspBlocks(csp);
-    return NextResponse.json({ embeddable });
+    return NextResponse.json({ embeddable, status: res.status });
   } catch {
-    return NextResponse.json({ embeddable: false });
+    return NextResponse.json({ embeddable: false, status: 0 });
   } finally {
     clearTimeout(timer);
   }

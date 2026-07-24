@@ -37,4 +37,9 @@ export const previews: Messages = {
     ru: "Приложение отправляет заголовки, которые запрещают показывать его во встроенном окне. Откройте в новой вкладке.",
     en: "The app sends headers that forbid showing it in an embedded frame. Open it in a new tab instead.",
   },
+  "previewPane.gatewayError.title": { ru: "Приложение не отвечает по HTTP", en: "The app is not responding over HTTP" },
+  "previewPane.gatewayError.body": {
+    ru: "Это бот без веб-сервера? Пересоздайте приложение в worker-режиме — ему не нужен домен.",
+    en: "Is this a bot with no web server? Recreate the app as a background worker — it does not need a domain.",
+  },
 };

@@ -118,6 +118,17 @@ export default function BuildDetailPage() {
             <div className="mb-4 rounded-lg border border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-950/40 px-4 py-3 text-sm text-red-700 dark:text-red-300">{error}</div>
           )}
 
+          {build.status === "failed" && (build.fail_reason || build.error_message) && (
+            <div className="mb-4 rounded-lg border border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-950/40 px-4 py-3 text-sm text-red-700 dark:text-red-300">
+              <p className="font-medium">{t("apps.builds.fail.heading")}</p>
+              {build.fail_reason === "no_dockerfile" ? (
+                <p className="mt-1">{t("apps.builds.fail.noDockerfile.hint")}</p>
+              ) : build.error_message ? (
+                <p className="mt-1 whitespace-pre-wrap break-words font-mono text-xs">{build.error_message}</p>
+              ) : null}
+            </div>
+          )}
+
           <BuildLogViewer projectId={projectId} buildId={buildId} />
         </>
       ) : null}

@@ -34,6 +34,53 @@ const logPoll = 2 * time.Second
 // existing canceled state instead of failed.
 var errBuildAborted = errors.New("jenkins build aborted")
 
+// classifiedFailure wraps a jenkins FAILURE result with a machine-readable
+// code and a human detail line, so the console can point at a specific,
+// actionable cause instead of a bare "result FAILURE".
+type classifiedFailure struct {
+	code   string
+	detail string
+	err    error
+}
+
+func (c *classifiedFailure) Error() string { return c.err.Error() }
+func (c *classifiedFailure) Unwrap() error { return c.err }
+
+// buildFailNoDockerfile marks a build that failed because the repo has no
+// Dockerfile and the pipeline had no template for the detected framework.
+const buildFailNoDockerfile = "no_dockerfile"
+
+// buildFailDockerfileBuild marks a build that failed inside the docker
+// build/buildx step (a bad Dockerfile, missing base image, failed RUN, etc).
+const buildFailDockerfileBuild = "dockerfile_build_failed"
+
+// classifyFailure scans a completed Jenkins build's full console text for
+// known failure signatures and returns a stable code plus a one-line detail
+// pulled from the matching console line. Returns an empty code when nothing
+// recognized matched, so the caller falls back to the generic message.
+func classifyFailure(console string) (code string, detail string) {
+	lines := strings.Split(console, "\n")
+	for _, raw := range lines {
+		line := stripLogTimestamp(strings.TrimSpace(raw))
+		if strings.Contains(line, "has no template and repo ships no Dockerfile") {
+			return buildFailNoDockerfile, line
+		}
+	}
+	for _, raw := range lines {
+		line := stripLogTimestamp(strings.TrimSpace(raw))
+		if strings.Contains(line, "ERROR: failed to solve") {
+			return buildFailDockerfileBuild, line
+		}
+		if strings.Contains(line, "docker build") && strings.Contains(line, "exit code") && !strings.Contains(line, "exit code 0") {
+			return buildFailDockerfileBuild, line
+		}
+		if strings.Contains(line, "buildx") && strings.Contains(line, "exit code") && !strings.Contains(line, "exit code 0") {
+			return buildFailDockerfileBuild, line
+		}
+	}
+	return "", ""
+}
+
 // Runner drives one build through the state machine by orchestrating Jenkins
 // (trigger → poll → log-bridge) and confirming outputs against Nexus. It owns
 // the queue draining loop. Jenkins owns the actual build + push; this is the
@@ -619,7 +666,13 @@ func (r *Runner) attach(ctx context.Context, b *db.Build, repo *db.Repo, number 
 	case "ABORTED":
 		return buildOutcome{}, errBuildAborted
 	default: // FAILURE or anything non-success
-		return buildOutcome{}, fmt.Errorf("jenkins build #%d result %s", number, result)
+		console := r.fetchFullConsole(ctx, number)
+		code, detail := classifyFailure(console)
+		return buildOutcome{}, &classifiedFailure{
+			code:   code,
+			detail: detail,
+			err:    fmt.Errorf("jenkins build #%d result %s", number, result),
+		}
 	}
 
 	// building → pushing (Jenkins already pushed; this marks the boundary).
@@ -737,6 +790,17 @@ func (r *Runner) bridge(ctx context.Context, b *db.Build, number int) (buildOutc
 // emit — it is a safety net to recover output markers the live stream raced past
 // when the build finished. Bounded so a misbehaving stream can't loop forever.
 func (r *Runner) parseFullConsole(ctx context.Context, number int, out *buildOutcome) {
+	console := r.fetchFullConsole(ctx, number)
+	for _, line := range strings.Split(console, "\n") {
+		parseMarker(strings.TrimRight(line, "\r"), out)
+	}
+}
+
+// fetchFullConsole re-reads the entire Jenkins console (from offset 0, following
+// progressiveText pagination), bounded so a misbehaving stream can't loop
+// forever. Returns whatever was read so far if a page fetch fails; an empty
+// string is a valid (if unhelpful) result and callers must tolerate it.
+func (r *Runner) fetchFullConsole(ctx context.Context, number int) string {
 	var (
 		sb     strings.Builder
 		offset int64
@@ -744,7 +808,7 @@ func (r *Runner) parseFullConsole(ctx context.Context, number int, out *buildOut
 	for i := 0; i < 2000; i++ {
 		text, next, more, err := r.jenkins.ProgressiveText(ctx, r.cfg.JenkinsJob, number, offset)
 		if err != nil {
-			return
+			break
 		}
 		sb.WriteString(text)
 		if next == offset && !more {
@@ -755,9 +819,7 @@ func (r *Runner) parseFullConsole(ctx context.Context, number int, out *buildOut
 			break
 		}
 	}
-	for _, line := range strings.Split(sb.String(), "\n") {
-		parseMarker(strings.TrimRight(line, "\r"), out)
-	}
+	return sb.String()
 }
 
 // flushLines splits pending console text on newlines, emits each complete line
@@ -1040,14 +1102,14 @@ func (r *Runner) postStatus(ctx context.Context, repo *db.Repo, b *db.Build, sta
 	}
 }
 
-// fail moves a build to failed from a known phase, recording the error message.
+// fail moves a build to failed from a known phase, recording the error message
+// and, when the failure was classified, the fail_reason code.
 func (r *Runner) fail(ctx context.Context, b *db.Build, from string, cause error) {
-	msg := ""
+	msg, reason := failureMessageAndReason(cause)
 	if cause != nil {
-		msg = cause.Error()
 		log.Error().Err(cause).Str("build", b.ID.String()).Str("from", from).Msg("build failed")
 	}
-	if _, err := db.MarkFailed(ctx, r.pool, b.ID, from, msg); err != nil {
+	if _, err := db.MarkFailedWithReason(ctx, r.pool, b.ID, from, msg, reason); err != nil {
 		log.Error().Err(err).Str("build", b.ID.String()).Msg("mark failed")
 	}
 	r.emit(ctx, b.ID, "BUILD FAILED: "+msg)
@@ -1056,17 +1118,35 @@ func (r *Runner) fail(ctx context.Context, b *db.Build, from string, cause error
 // failFromCurrent marks the build failed regardless of which phase it died in by
 // trying each non-terminal phase (compare-and-set, only one wins).
 func (r *Runner) failFromCurrent(ctx context.Context, b *db.Build, cause error) {
-	msg := ""
+	msg, reason := failureMessageAndReason(cause)
 	if cause != nil {
-		msg = cause.Error()
 		log.Error().Err(cause).Str("build", b.ID.String()).Msg("build failed")
 	}
 	for _, from := range []string{db.StatusBuilding, db.StatusPushing, db.StatusDetecting} {
-		if ok, _ := db.MarkFailed(ctx, r.pool, b.ID, from, msg); ok {
+		if ok, _ := db.MarkFailedWithReason(ctx, r.pool, b.ID, from, msg, reason); ok {
 			break
 		}
 	}
 	r.emit(ctx, b.ID, "BUILD FAILED: "+msg)
+}
+
+// failureMessageAndReason extracts the error_message text and fail_reason code
+// to persist for a build failure. A classified failure gets "code: detail"
+// (detail trimmed to its first line); anything else keeps the plain error
+// text and an empty reason code.
+func failureMessageAndReason(cause error) (msg string, reason string) {
+	if cause == nil {
+		return "", ""
+	}
+	var cf *classifiedFailure
+	if errors.As(cause, &cf) && cf.code != "" {
+		detail := cf.detail
+		if i := strings.IndexByte(detail, '\n'); i >= 0 {
+			detail = detail[:i]
+		}
+		return cf.code + ": " + detail, cf.code
+	}
+	return cause.Error(), ""
 }
 
 // Supersede cancels an in-flight build (newer commit on same repo+branch).

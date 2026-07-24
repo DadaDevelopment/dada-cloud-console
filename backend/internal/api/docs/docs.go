@@ -11990,6 +11990,12 @@ const docTemplate = `{
                 "environment_id": {
                     "type": "string"
                 },
+                "error_message": {
+                    "type": "string"
+                },
+                "fail_reason": {
+                    "type": "string"
+                },
                 "finished_at": {
                     "type": "string"
                 },
