@@ -20,11 +20,26 @@ import (
 // admin costs page and the overview money card.
 const adminCostsTopLossLimit = 5
 
-// adminCostsWindows are the two window values /admin/costs (and the money
-// card that reuses its aggregates) accept, mirrored here so the background
-// cost-cache warmer (cost.go) can pre-populate both pod-level aggregations
-// off the user request path.
-var adminCostsWindows = []string{"7d", "30d"}
+// adminCostSampleWindow is the SHORT OpenCost window the platform-economics
+// view samples per-pod allocations over. A wide aggregate=pod window (7d/30d)
+// fetches a multi-megabyte per-pod set from CPU-throttled Mimir (measured
+// 38-85s+, intermittently truncating the response body -> the client decodes
+// "unexpected end of JSON input"), so the cache never populated and the page
+// failed open with "cost data temporarily unavailable". The 24h sample returns
+// in ~7s / ~3MB. Per-client/project cost PROPORTIONS are window-agnostic, so
+// buildAdminCostSummary scales the sample up to the reporting window with no
+// loss of economic meaning. Do NOT widen this back to the reporting window.
+const adminCostSampleWindow = "24h"
+
+// adminCostSampleDays is adminCostSampleWindow expressed in days, the divisor
+// that grosses a sample-window cost up to the reporting window.
+const adminCostSampleDays = 1.0
+
+// adminCostsWindows is the set of admin pod-allocation windows the background
+// cost-cache warmer (cost.go) pre-populates off the user request path. Only the
+// short sample window is fetched from OpenCost now; the 7d/30d reporting toggle
+// is a pure scale factor applied on read, not a second heavy aggregation.
+var adminCostsWindows = []string{adminCostSampleWindow}
 
 // platformClientID / platformClientName is the pseudo-client every namespace
 // not owned by a project (argocd, monitoring, databases, opensearch, ...)
@@ -174,11 +189,13 @@ type adminCostSummary struct {
 }
 
 // buildAdminCostSummary computes the platform cost/revenue/margin economics
-// for a `days`-day window. Fail-open: any missing dependency (OpenCost
-// unconfigured, aggregation failure, namespace-owner lookup failure) yields
-// Available=false with Note set, never an error -- callers on both the admin
-// costs page and the overview money card must degrade gracefully instead of
-// failing the whole request.
+// for a `days`-day window. Per-pod allocations are SAMPLED from OpenCost over
+// the short adminCostSampleWindow (a wide aggregate=pod window is too slow and
+// truncates) and scaled to `days`; see adminCostSampleWindow. Fail-open: any
+// missing dependency (OpenCost unconfigured, aggregation failure, namespace-
+// owner lookup failure) yields Available=false with Note set, never an error --
+// callers on both the admin costs page and the overview money card must degrade
+// gracefully instead of failing the whole request.
 func (h *Handler) buildAdminCostSummary(ctx context.Context, days int) adminCostSummary {
 	window := strconv.Itoa(days) + "d"
 	out := adminCostSummary{Days: days, Window: window}
@@ -188,7 +205,7 @@ func (h *Handler) buildAdminCostSummary(ctx context.Context, days int) adminCost
 		return out
 	}
 
-	podAllocs, err := h.adminCostPodAllocs(ctx, window)
+	podAllocs, err := h.adminCostPodAllocs(ctx, adminCostSampleWindow)
 	if err != nil {
 		log.Warn().Err(err).Msg("admin costs: OpenCost pod aggregation failed")
 		out.Note = "cost data temporarily unavailable"
@@ -206,11 +223,11 @@ func (h *Handler) buildAdminCostSummary(ctx context.Context, days int) adminCost
 
 	rawTotal, unallocatedRaw := adminCostsRawTotal(podAllocs)
 	hardwareTotal, hardwareSource, hardwareBreakdown := h.resolveHardwareCost(ctx, days)
-	scale := 1.0
+	scale := float64(days) / adminCostSampleDays
 	if (hardwareSource == "beget_api" || hardwareSource == "beget_manual_config") && rawTotal > 0 {
 		scale = hardwareTotal / rawTotal
 	} else {
-		hardwareTotal = rawTotal
+		hardwareTotal = rawTotal * scale
 	}
 
 	acc := &adminCostsAccumulator{

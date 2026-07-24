@@ -30,18 +30,20 @@ import (
 // tunable via env without a rebuild.
 //
 // billingCostWindow is the OpenCost window used for consumption pricing. A short
-// duration form ("7d") is used deliberately: a calendar-month RFC3339 range
+// duration form is used deliberately: a calendar-month RFC3339 range
 // intermittently 500s ("AllocationSetRange has empty AssetSet") over data-less
-// days, and a 30d label aggregation takes ~20s (exceeding the client timeout),
-// whereas 7d returns in ~7s. It captures all currently available history and is
-// cached, so the estimate is a recent-run-rate figure that fills in as data
-// accumulates.
-const billingCostWindow = "7d"
+// days, and a wide aggregate=pod window fetches a multi-megabyte per-pod set
+// from CPU-throttled Mimir (measured 38-85s+, intermittently TRUNCATING the
+// response so the client decodes "unexpected end of JSON input" and the snapshot
+// never builds). "24h" returns in ~7s / ~3MB. It captures the current run rate
+// and is cached + scaled to a month, so the estimate fills in as data
+// accumulates. Do NOT widen this back to 7d/30d.
+const billingCostWindow = "24h"
 
 // billingWindowDays / billingMonthDays project the window cost to a 30-day month
 // run-rate so consumption reads as a monthly figure ("/мес") consistent with the
-// spec-based estimate, rather than a raw 7-day sum.
-const billingWindowDays = 7
+// spec-based estimate, rather than a raw sample-window sum.
+const billingWindowDays = 1
 const billingMonthDays = 30
 
 // billingMonthlyScale scales a billingCostWindow-worth of cost up to a month.
