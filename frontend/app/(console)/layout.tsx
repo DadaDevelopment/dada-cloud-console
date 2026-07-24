@@ -12,13 +12,19 @@ import { CommandPalette } from "@/components/shell/command-palette";
 import { ConsoleErrorBoundary } from "@/components/shell/console-error-boundary";
 import { GlobalErrorReporter } from "@/components/shell/global-error-reporter";
 import { SupportButton } from "@/components/shell/support-button";
+import { AgentChatPanel } from "@/components/agent-chat-panel";
+import { useT } from "@/lib/i18n/console/context";
+import { Bot } from "lucide-react";
 
 function ConsoleShell({ children }: { children: React.ReactNode }) {
   const { projectId } = useProjectContext();
+  const { t } = useT();
   const pathname = usePathname();
   const [paletteOpenSignal, setPaletteOpenSignal] = useState(0);
   // Mobile-only drawer state; on lg+ the sidebar is always visible.
   const [navOpen, setNavOpen] = useState(false);
+  // Agent chat panel is collapsed by default on every viewport.
+  const [chatOpen, setChatOpen] = useState(false);
 
   // Navigating (tapping a sidebar link) closes the drawer.
   useEffect(() => {
@@ -66,6 +72,25 @@ function ConsoleShell({ children }: { children: React.ReactNode }) {
             <ConsoleErrorBoundary>{children}</ConsoleErrorBoundary>
           </div>
         </main>
+        {chatOpen && (
+          <div
+            className="absolute inset-0 z-30 bg-black/50 lg:hidden"
+            onClick={() => setChatOpen(false)}
+            aria-hidden="true"
+          />
+        )}
+        {!chatOpen && (
+          <button
+            type="button"
+            onClick={() => setChatOpen(true)}
+            title={t("agentChat.open")}
+            aria-label={t("agentChat.open")}
+            className="fixed bottom-5 right-5 z-40 flex h-11 w-11 items-center justify-center rounded-full bg-blue-600 text-white shadow-lg transition-colors hover:bg-blue-700"
+          >
+            <Bot className="h-5 w-5" />
+          </button>
+        )}
+        <AgentChatPanel open={chatOpen} onClose={() => setChatOpen(false)} />
       </div>
       {/* key forces the palette to mount/open when the top-bar button is clicked */}
       <CommandPalette key={paletteOpenSignal} initialOpen={paletteOpenSignal > 0} />

@@ -74,6 +74,17 @@ definitions:
       apex_domain:
         type: string
     type: object
+  api.agentChatRequest:
+    properties:
+      appName:
+        type: string
+      envId:
+        type: string
+      message:
+        type: string
+      projectId:
+        type: string
+    type: object
   api.appVolumeReq:
     properties:
       path:
@@ -925,6 +936,47 @@ paths:
       summary: Platform state overview (platform-admin only)
       tags:
       - admin
+  /agent/chat:
+    post:
+      consumes:
+      - application/json
+      description: 'Streams Server-Sent Events for a single chat turn. Phase-1 is
+        an echo stub with no LLM call: it tokenizes the input message and streams
+        it back word by word, then emits a done event. Sending the literal message
+        "__slowtest__" instead streams a 75s heartbeat run to prove the endpoint survives
+        the ingress proxy-read-timeout.'
+      operationId: agentChat
+      parameters:
+      - description: Chat turn
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/api.agentChatRequest'
+      produces:
+      - text/event-stream
+      responses:
+        "200":
+          description: text/event-stream
+          schema:
+            type: string
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Stream a chat turn with the console agent (phase-1 skeleton)
+      tags:
+      - agent
   /auth/login:
     post:
       consumes:

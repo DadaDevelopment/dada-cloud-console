@@ -478,6 +478,8 @@ func SetupRouter(pool *pgxpool.Pool, cfg *config.Config) *gin.Engine {
 		// Informational real-consumption + money-equivalent (always on, viewer+).
 		api.GET("/projects/:projectId/billing/consumption", h.GetProjectConsumption)
 		api.GET("/billing/account/summary", h.GetAccountSummary)
+
+		api.POST("/agent/chat", h.AgentChat)
 	}
 
 	// Device-facing monitoring ingest. Separate group so a scoped dmon_ key

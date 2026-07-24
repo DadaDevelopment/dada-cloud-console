@@ -95,7 +95,7 @@ export function setTokenGetter(fn: TokenGetter | null): void {
   _tokenGetter = fn;
 }
 
-async function getToken(): Promise<string | null> {
+export async function getToken(): Promise<string | null> {
   if (_tokenGetter) return _tokenGetter();
   if (typeof window === "undefined") return null;
   return localStorage.getItem("dada_token");

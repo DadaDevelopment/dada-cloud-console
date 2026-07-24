@@ -406,6 +406,64 @@ const docTemplate = `{
                 }
             }
         },
+        "/agent/chat": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Streams Server-Sent Events for a single chat turn. Phase-1 is an echo stub with no LLM call: it tokenizes the input message and streams it back word by word, then emits a done event. Sending the literal message \"__slowtest__\" instead streams a 75s heartbeat run to prove the endpoint survives the ingress proxy-read-timeout.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "text/event-stream"
+                ],
+                "tags": [
+                    "agent"
+                ],
+                "summary": "Stream a chat turn with the console agent (phase-1 skeleton)",
+                "operationId": "agentChat",
+                "parameters": [
+                    {
+                        "description": "Chat turn",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/api.agentChatRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "text/event-stream",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/auth/login": {
             "post": {
                 "description": "Authenticates a user by username or email plus password and returns a JWT bearer token. Public endpoint — no authentication required. Use the returned token as the Authorization: Bearer header for every other endpoint.",
@@ -11926,6 +11984,23 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "apex_domain": {
+                    "type": "string"
+                }
+            }
+        },
+        "api.agentChatRequest": {
+            "type": "object",
+            "properties": {
+                "appName": {
+                    "type": "string"
+                },
+                "envId": {
+                    "type": "string"
+                },
+                "message": {
+                    "type": "string"
+                },
+                "projectId": {
                     "type": "string"
                 }
             }

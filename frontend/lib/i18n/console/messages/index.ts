@@ -29,6 +29,7 @@ import { moveApp } from "./move-app";
 import { feedback } from "./feedback";
 import { deployHooks } from "./deploy-hooks";
 import { previews } from "./previews";
+import { agentChat } from "./agent-chat";
 
 /**
  * Flat key→{ru,en} map for the whole console. Each screen owns a namespace
@@ -67,4 +68,5 @@ export const messages: Messages = {
   ...feedback,
   ...deployHooks,
   ...previews,
+  ...agentChat,
 };
