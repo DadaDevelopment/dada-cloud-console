@@ -8,6 +8,11 @@ metadata:
     app.kubernetes.io/component: frontend
 spec:
   replicas: {{ .Values.frontend.replicaCount }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
   selector:
     matchLabels:
       {{- include "dada-cloud-console.selectorLabels" . | nindent 6 }}
@@ -30,6 +35,10 @@ spec:
           ports:
             - name: http
               containerPort: {{ .Values.frontend.service.port }}
+          lifecycle:
+            preStop:
+              exec:
+                command: ["/bin/sleep", "8"]
           envFrom:
             - configMapRef:
                 name: {{ include "dada-cloud-console.fullname" . }}-config
