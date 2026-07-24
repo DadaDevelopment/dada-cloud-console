@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/dada-tuda/console/backend/internal/agentchat"
 	"github.com/dada-tuda/console/backend/internal/auth"
 	"github.com/dada-tuda/console/backend/internal/beget"
 	"github.com/dada-tuda/console/backend/internal/billing"
@@ -18,6 +19,7 @@ import (
 	"github.com/dada-tuda/console/backend/internal/config"
 	"github.com/dada-tuda/console/backend/internal/dadagent"
 	"github.com/dada-tuda/console/backend/internal/grafana"
+	"github.com/dada-tuda/console/backend/internal/llmchat"
 	"github.com/dada-tuda/console/backend/internal/logsearch"
 	"github.com/dada-tuda/console/backend/internal/mlflow"
 	"github.com/dada-tuda/console/backend/internal/notify"
@@ -123,6 +125,9 @@ type Handler struct {
 	deployHookNotifyEmail string
 
 	optionalAuth func(c *gin.Context) (*auth.Claims, bool)
+
+	agentChatLLM   *llmchat.Client
+	agentChatTools *agentchat.Toolset
 }
 
 func (h *Handler) optionalClaims(c *gin.Context) (*auth.Claims, bool) {
@@ -257,6 +262,22 @@ func NewHandler(pool *pgxpool.Pool, cfg *config.Config) *Handler {
 	// stuck CrashLoopBackOff/OOMKilled/ImagePullBackOff. No-op off-cluster or
 	// when SMTP is unconfigured.
 	h.StartAppHealthWatcher(context.Background())
+
+	h.agentChatLLM = llmchat.New(cfg.AgentChatGatewayURL, cfg.AgentChatGatewayKey, cfg.AgentChatModel)
+	selfURL := cfg.MCPSelfURL
+	if selfURL == "" {
+		selfURL = "http://127.0.0.1:" + cfg.Port
+	}
+	if toolset, tsErr := agentchat.BuildToolset(EmbeddedSpec(), selfURL); tsErr != nil {
+		log.Printf("agent-chat: failed to build toolset: %v", tsErr)
+	} else {
+		h.agentChatTools = toolset
+	}
+	if h.agentChatLLM.Configured() {
+		log.Printf("agent-chat: gateway configured at %s, model %s", cfg.AgentChatGatewayURL, cfg.AgentChatModel)
+	} else {
+		log.Printf("agent-chat: gateway not configured (AGENT_CHAT_GATEWAY_URL/KEY unset); endpoint answers with a friendly error")
+	}
 
 	return h
 }

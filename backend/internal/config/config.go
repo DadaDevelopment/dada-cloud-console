@@ -360,6 +360,16 @@ type Config struct {
 	MCPOverridesPath string // MCP_OVERRIDES_PATH (default "overrides.yaml")
 	MCPResourceURL   string // MCP_RESOURCE_URL (default "https://console.dada-tuda.ru/mcp")
 
+	// In-console agent chat (P1-3d phase 2). AgentChatGatewayURL/Key point at
+	// the ADR-015 LiteLLM gateway; empty URL or key means the feature is not
+	// configured and the chat endpoint answers with a friendly SSE error
+	// instead of attempting a call. AgentChatDailyMsgCap is a per-user-per-day
+	// count of user turns (agent_chat_messages rows with role='user').
+	AgentChatGatewayURL  string // AGENT_CHAT_GATEWAY_URL
+	AgentChatGatewayKey  string // AGENT_CHAT_GATEWAY_KEY
+	AgentChatModel       string // AGENT_CHAT_MODEL (default "claude")
+	AgentChatDailyMsgCap int64  // AGENT_CHAT_DAILY_MSG_CAP (default 50)
+
 	// DadaAgent cloud-task integration (ADR-cloud-task). The console fires
 	// autonomous agent tasks from an app chip: it mints a short-lived GitHub App
 	// install token + a Keycloak client-credentials token, submits + executes a
@@ -510,6 +520,10 @@ func Load() (*Config, error) {
 		MCPSelfURL:                getEnv("MCP_SELF_URL", ""),
 		MCPOverridesPath:          getEnv("MCP_OVERRIDES_PATH", "overrides.yaml"),
 		MCPResourceURL:            getEnv("MCP_RESOURCE_URL", "https://console.dada-tuda.ru/mcp"),
+		AgentChatGatewayURL:       getEnv("AGENT_CHAT_GATEWAY_URL", "http://ai-gateway-service.argocd-prod.svc.cluster.local"),
+		AgentChatGatewayKey:       getEnv("AGENT_CHAT_GATEWAY_KEY", ""),
+		AgentChatModel:            getEnv("AGENT_CHAT_MODEL", "claude"),
+		AgentChatDailyMsgCap:      getEnvInt64("AGENT_CHAT_DAILY_MSG_CAP", 50),
 		DadaAgentBaseURL:          getEnv("DADA_AGENT_BASE_URL", ""),
 		KeycloakTokenURL:          getEnv("KEYCLOAK_TOKEN_URL", ""),
 		CloudAgentClientID:        getEnv("CLOUD_AGENT_CLIENT_ID", ""),
