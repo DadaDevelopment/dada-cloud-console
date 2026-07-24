@@ -3,6 +3,7 @@ package worker
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"regexp"
 	"time"
@@ -12,6 +13,7 @@ import (
 	"github.com/dada-tuda/console/gitops-agent/internal/git"
 	"github.com/dada-tuda/console/gitops-agent/internal/renderer"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rs/zerolog/log"
 )
@@ -167,7 +169,10 @@ func (w *DBWatcher) doCreatePreviewEnv(ctx context.Context, op db.Operation) err
 		}
 		files = append(files, appFiles...)
 		if len(appFiles) > 0 {
-			summaryJSON, _ := json.Marshal(map[string]any{"name": p.AppName, "kind": "App"})
+			summaryJSON, err := w.previewOwnerAppSnapshot(ctx, op.ProjectID, parentEnvID, gitRepoID, p.AppName, p.EnvName)
+			if err != nil {
+				return fmt.Errorf("build preview owner app snapshot: %w", err)
+			}
 			if err := db.UpsertSnapshot(ctx, w.pool, op.ProjectID, &envID, "App", p.AppName, "Pending", summaryJSON, time.Now()); err != nil {
 				log.Warn().Err(err).Str("app", p.AppName).Msg("upsert preview owner app snapshot")
 			}
@@ -214,6 +219,73 @@ func (w *DBWatcher) doCreatePreviewEnv(ctx context.Context, op db.Operation) err
 	log.Info().Str("env", p.EnvName).Str("ns", p.Namespace).Str("env_id", envID.String()).
 		Int("preview_databases", len(previewDBs)).Msg("provisioned preview environment")
 	return w.commitFilesAndRecord(ctx, op, mgr, policyPath, files, commitMsg)
+}
+
+// previewOwnerAppSnapshot builds the App resource_snapshot for a preview's
+// resources-carrier owner app (see ensureAppExists). A DB-owning app's first
+// build lands on build-agent's HandoffDeploy, which routes to CreateApp vs.
+// DeployImageVersion by checking whether an App snapshot already exists here.
+// The old bare {"name","kind":"App"} stub made that check true while carrying
+// none of the real app spec, so the first build fell onto DeployImageVersion,
+// which reads a missing "profile" as the "small" default (256Mi) and
+// OOMKilled every DB-owning preview (fonbet-value live incident).
+//
+// This copies the parent environment's own App snapshot verbatim instead, so
+// the preview inherits image/port/replicas/profile/volume from the real app,
+// then overrides the two fields that must never be copied verbatim:
+//   - status, reset to "Pending" for the not-yet-deployed preview.
+//   - argo_name, recomputed for (appName, previewEnvName) via ScopedArgoName.
+//     The parent's argo_name is scoped to the PARENT's env name, so copying it
+//     verbatim would make the preview's App CR request the exact same ArgoCD
+//     Application the parent already owns (spec.argoName is emitted and used
+//     as-is, see renderer.RenderApp) -- an immediate collision, not a
+//     "non-scoped name" risk, but just as fatal.
+//
+// Falls back to the old bare stub when there is no parent env, or the parent
+// has no App snapshot of its own (never deployed yet / first-ever app).
+func (w *DBWatcher) previewOwnerAppSnapshot(ctx context.Context, projectID uuid.UUID, parentEnvID, gitRepoID *uuid.UUID, appName, previewEnvName string) ([]byte, error) {
+	stub := func() ([]byte, error) {
+		return json.Marshal(map[string]any{"name": appName, "kind": "App"})
+	}
+	if parentEnvID == nil {
+		return stub()
+	}
+
+	var parentRaw []byte
+	err := w.pool.QueryRow(ctx, `
+		SELECT summary_json FROM resource_snapshots
+		WHERE project_id = $1 AND environment_id = $2 AND kind = 'App' AND name = $3
+	`, projectID, *parentEnvID, appName).Scan(&parentRaw)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return stub()
+	}
+	if err != nil {
+		return nil, fmt.Errorf("load parent app snapshot: %w", err)
+	}
+
+	var cur map[string]any
+	if err := json.Unmarshal(parentRaw, &cur); err != nil || cur == nil {
+		return stub()
+	}
+
+	cur["name"] = appName
+	cur["kind"] = "App"
+	cur["status"] = "Pending"
+	cur["argo_name"] = renderer.ScopedArgoName(appName, previewEnvName, projectID.String())
+
+	profileVal, _ := cur["profile"].(string)
+	if profileVal == "" && gitRepoID != nil {
+		var repoProfile string
+		if perr := w.pool.QueryRow(ctx, `SELECT profile FROM git_repos WHERE id = $1`, *gitRepoID).Scan(&repoProfile); perr == nil && repoProfile != "" {
+			profileVal = repoProfile
+		}
+	}
+	if profileVal == "" {
+		profileVal = "small"
+	}
+	cur["profile"] = profileVal
+
+	return json.Marshal(cur)
 }
 
 // previewDatabaseInfo pairs a parent app's ServiceDatabaseV2 with the derived

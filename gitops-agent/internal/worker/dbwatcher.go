@@ -1726,7 +1726,7 @@ func (w *DBWatcher) doDeployImageVersion(ctx context.Context, op db.Operation) e
 		replicasVal = 1
 	}
 	if profileVal == "" {
-		profileVal = "small"
+		profileVal = w.appProfileFallback(ctx, op.EnvironmentID)
 	}
 
 	mgr, err := w.managerFor(ctx, op.ProjectID)
@@ -1808,6 +1808,29 @@ func (w *DBWatcher) doDeployImageVersion(ctx context.Context, op db.Operation) e
 		op.ProjectID, op.EnvironmentID,
 		"App", p.AppName, "Pending", updatedJSON, time.Now(),
 	)
+}
+
+// appProfileFallback resolves the resource profile for an environment whose App
+// snapshot carries no "profile" (the stale-stub case a spec-less App snapshot
+// used to leave behind, see previewOwnerAppSnapshot). It looks up the git_repos
+// row the environment was connected from -- for a preview env this is the
+// PARENT app's repo, via environments.git_repo_id -- and falls back to "small"
+// only when no such repo is linked or the lookup fails, matching the prior
+// hardcoded default.
+func (w *DBWatcher) appProfileFallback(ctx context.Context, environmentID *uuid.UUID) string {
+	if environmentID == nil {
+		return "small"
+	}
+	var profile string
+	err := w.pool.QueryRow(ctx, `
+		SELECT gr.profile FROM environments e
+		JOIN git_repos gr ON gr.id = e.git_repo_id
+		WHERE e.id = $1
+	`, *environmentID).Scan(&profile)
+	if err != nil || profile == "" {
+		return "small"
+	}
+	return profile
 }
 
 // volumeFromSummary extracts a persistent-directory spec from a resource_snapshot

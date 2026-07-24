@@ -166,12 +166,12 @@ func HandoffDeploy(ctx context.Context, pool *pgxpool.Pool, b *Build, repo *Repo
 		return uuid.Nil, fmt.Errorf("insert deployment: %w", err)
 	}
 
-	// Does the app already exist in this environment?
 	var appExists bool
 	if err := tx.QueryRow(ctx, `
 		SELECT EXISTS(
 			SELECT 1 FROM resource_snapshots
 			WHERE environment_id = $1 AND kind = 'App' AND name = $2
+			  AND summary_json ? 'image'
 		)
 	`, b.EnvironmentID, b.AppName).Scan(&appExists); err != nil {
 		return uuid.Nil, fmt.Errorf("check app existence: %w", err)
