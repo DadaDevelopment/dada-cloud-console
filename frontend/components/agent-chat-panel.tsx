@@ -2,17 +2,21 @@
 
 import { useEffect, useRef, useState } from "react";
 import { usePathname } from "next/navigation";
-import { X, Send, Bot, Loader2 } from "lucide-react";
+import { X, Send, Bot, Loader2, Wrench, AlertTriangle } from "lucide-react";
 import { useT } from "@/lib/i18n/console/context";
 import { useProjectContext } from "@/lib/project-context";
 import { getToken } from "@/lib/api";
 
-interface ChatMessage {
-  id: string;
-  role: "user" | "assistant";
-  content: string;
-  pending?: boolean;
-}
+type ChatMessage =
+  | { id: string; kind: "message"; role: "user" | "assistant"; content: string; pending?: boolean }
+  | { id: string; kind: "tool_call"; name: string }
+  | { id: string; kind: "error"; code: string; message: string };
+
+const AGENT_ERROR_CODE_KEYS: Record<string, string> = {
+  not_configured: "agentChat.error.notConfigured",
+  daily_cap: "agentChat.error.dailyCap",
+  upstream: "agentChat.error.upstream",
+};
 
 function appNameFromPath(pathname: string): string | undefined {
   const segs = pathname.split("/").filter(Boolean);
@@ -24,9 +28,33 @@ function newId(): string {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
 }
 
+interface StreamChatHandlers {
+  onToken: (chunk: string) => void;
+  onToolCall: (name: string) => void;
+  onError: (code: string, message: string) => void;
+}
+
+function parseToolCallData(data: string): string | null {
+  try {
+    const parsed = JSON.parse(data) as { name?: string };
+    return parsed.name ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function parseErrorData(data: string): { code: string; message: string } {
+  try {
+    const parsed = JSON.parse(data) as { code?: string; message?: string };
+    return { code: parsed.code ?? "upstream", message: parsed.message ?? "" };
+  } catch {
+    return { code: "upstream", message: "" };
+  }
+}
+
 async function streamChat(
   body: { message: string; projectId?: string; envId?: string; appName?: string },
-  onToken: (chunk: string) => void
+  handlers: StreamChatHandlers
 ): Promise<void> {
   const token = await getToken();
   const res = await fetch("/api/v1/agent/chat", {
@@ -62,7 +90,15 @@ async function streamChat(
       }
       if (line.startsWith("data:")) {
         const data = line.slice("data:".length).trim();
-        if (currentEvent === "token") onToken(data);
+        if (currentEvent === "token") handlers.onToken(data);
+        if (currentEvent === "tool_call") {
+          const name = parseToolCallData(data);
+          if (name) handlers.onToolCall(name);
+        }
+        if (currentEvent === "error") {
+          const { code, message } = parseErrorData(data);
+          handlers.onError(code, message);
+        }
         if (currentEvent === "done") return;
       }
     }
@@ -102,31 +138,54 @@ export function AgentChatPanel({ open, onClose }: AgentChatPanelProps) {
     const text = input.trim();
     if (!text || sending) return;
 
-    const userMsg: ChatMessage = { id: newId(), role: "user", content: text };
-    const assistantId = newId();
-    const assistantMsg: ChatMessage = { id: assistantId, role: "assistant", content: "", pending: true };
+    const userMsg: ChatMessage = { id: newId(), kind: "message", role: "user", content: text };
+    let assistantId = newId();
+    const assistantMsg: ChatMessage = { id: assistantId, kind: "message", role: "assistant", content: "", pending: true };
 
     setMessages((prev) => [...prev, userMsg, assistantMsg]);
     setInput("");
     setSending(true);
 
+    let sawError = false;
+
     try {
       await streamChat(
         { message: text, projectId: projectId ?? undefined, envId: selectedEnv?.id, appName },
-        (chunk) => {
-          setMessages((prev) =>
-            prev.map((m) => (m.id === assistantId ? { ...m, content: m.content + chunk, pending: false } : m))
-          );
+        {
+          onToken: (chunk) => {
+            setMessages((prev) =>
+              prev.map((m) =>
+                m.id === assistantId && m.kind === "message" ? { ...m, content: m.content + chunk, pending: false } : m
+              )
+            );
+          },
+          onToolCall: (name) => {
+            const nextAssistantId = newId();
+            setMessages((prev) => [
+              ...prev,
+              { id: newId(), kind: "tool_call", name },
+              { id: nextAssistantId, kind: "message", role: "assistant", content: "", pending: true },
+            ]);
+            assistantId = nextAssistantId;
+          },
+          onError: (code, message) => {
+            sawError = true;
+            const key = AGENT_ERROR_CODE_KEYS[code];
+            const displayMessage = key ? t(key) : message || t("agentChat.errorGeneric");
+            setMessages((prev) => [...prev, { id: newId(), kind: "error", code, message: displayMessage }]);
+          },
         }
       );
-      setMessages((prev) => prev.map((m) => (m.id === assistantId ? { ...m, pending: false } : m)));
     } catch {
-      setMessages((prev) =>
-        prev.map((m) =>
-          m.id === assistantId ? { ...m, content: t("agentChat.errorGeneric"), pending: false } : m
-        )
-      );
+      if (!sawError) {
+        setMessages((prev) => [...prev, { id: newId(), kind: "error", code: "upstream", message: t("agentChat.errorGeneric") }]);
+      }
     } finally {
+      setMessages((prev) =>
+        prev
+          .map((m) => (m.kind === "message" ? { ...m, pending: false } : m))
+          .filter((m) => !(m.kind === "message" && m.role === "assistant" && m.content === ""))
+      );
       setSending(false);
     }
   }
@@ -163,25 +222,47 @@ export function AgentChatPanel({ open, onClose }: AgentChatPanelProps) {
         {messages.length === 0 && (
           <p className="text-sm text-gray-400 dark:text-gray-500">{t("agentChat.emptyState")}</p>
         )}
-        {messages.map((m) => (
-          <div key={m.id} className={`flex ${m.role === "user" ? "justify-end" : "justify-start"}`}>
-            <div
-              className={`max-w-[85%] whitespace-pre-wrap rounded-2xl px-3 py-2 text-sm ${
-                m.role === "user"
-                  ? "bg-blue-600 text-white"
-                  : "bg-gray-100 text-gray-800 dark:bg-gray-900 dark:text-gray-200"
-              }`}
-            >
-              {m.content}
-              {m.pending && m.content === "" && (
-                <span className="inline-flex items-center gap-1 text-gray-400 dark:text-gray-500">
-                  <Loader2 className="h-3 w-3 animate-spin" />
-                  {t("agentChat.thinking")}
-                </span>
-              )}
+        {messages.map((m) => {
+          if (m.kind === "tool_call") {
+            return (
+              <div key={m.id} className="flex justify-start">
+                <div className="inline-flex items-center gap-1.5 rounded-full bg-gray-50 px-2.5 py-1 text-xs text-gray-500 dark:bg-gray-900/60 dark:text-gray-400">
+                  <Wrench className="h-3 w-3" />
+                  {t("agentChat.toolCall", { name: m.name })}
+                </div>
+              </div>
+            );
+          }
+          if (m.kind === "error") {
+            return (
+              <div key={m.id} className="flex justify-start">
+                <div className="flex max-w-[85%] items-start gap-2 rounded-2xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/40 dark:text-red-300">
+                  <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                  <span>{m.message}</span>
+                </div>
+              </div>
+            );
+          }
+          return (
+            <div key={m.id} className={`flex ${m.role === "user" ? "justify-end" : "justify-start"}`}>
+              <div
+                className={`max-w-[85%] whitespace-pre-wrap rounded-2xl px-3 py-2 text-sm ${
+                  m.role === "user"
+                    ? "bg-blue-600 text-white"
+                    : "bg-gray-100 text-gray-800 dark:bg-gray-900 dark:text-gray-200"
+                }`}
+              >
+                {m.content}
+                {m.pending && m.content === "" && (
+                  <span className="inline-flex items-center gap-1 text-gray-400 dark:text-gray-500">
+                    <Loader2 className="h-3 w-3 animate-spin" />
+                    {t("agentChat.thinking")}
+                  </span>
+                )}
+              </div>
             </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
 
       <div className="border-t border-gray-100 p-3 dark:border-gray-800">

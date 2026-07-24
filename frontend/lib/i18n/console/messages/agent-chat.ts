@@ -16,4 +16,17 @@ export const agentChat: Messages = {
     en: "Could not get a response. Please try again.",
   },
   "agentChat.thinking": { ru: "Печатает…", en: "Thinking…" },
+  "agentChat.toolCall": { ru: "Вызван инструмент: {name}", en: "Used tool: {name}" },
+  "agentChat.error.notConfigured": {
+    ru: "Агент пока не настроен на этом сервере.",
+    en: "The agent is not configured on this server yet.",
+  },
+  "agentChat.error.dailyCap": {
+    ru: "Достигнут дневной лимит запросов к агенту. Попробуйте завтра.",
+    en: "Daily agent request limit reached. Please try again tomorrow.",
+  },
+  "agentChat.error.upstream": {
+    ru: "Агент временно недоступен. Попробуйте ещё раз чуть позже.",
+    en: "The agent is temporarily unavailable. Please try again shortly.",
+  },
 };
