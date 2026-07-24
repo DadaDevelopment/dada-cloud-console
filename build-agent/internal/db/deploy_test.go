@@ -78,3 +78,67 @@ func TestBuildPreviewHostnameUnicodeBranch(t *testing.T) {
 		t.Errorf("buildPreviewHostname(unicode) = %q, want %q", got, want)
 	}
 }
+
+func TestBuildPreviewHostnameFullFQDNFitsK8sLabel(t *testing.T) {
+	branch := "codex-v0-9-matching-dataset-elo-586435-some-more-descriptive-branch-name-text"
+	got := buildPreviewHostname("dada-tuda.ru", "fonbet-value", branch, "ab12")
+	if len(got) > 63 {
+		t.Errorf("full fqdn %q is %d bytes, want <= 63 (gitops FQDNToName turns the WHOLE fqdn into a k8s resource name, dots->dashes, so this must fit the DNS-1123 label limit, not just the leading label)", got, len(got))
+	}
+	if !strings.HasSuffix(got, ".dada-tuda.ru") {
+		t.Errorf("hostname %q lost the base domain", got)
+	}
+}
+
+func TestBuildPreviewHostnameLongBranchIsDeterministic(t *testing.T) {
+	branch := strings.Repeat("y", 100)
+	got1 := buildPreviewHostname("dada-tuda.ru", "fonbet-value", branch, "ab12")
+	got2 := buildPreviewHostname("dada-tuda.ru", "fonbet-value", branch, "ab12")
+	if got1 != got2 {
+		t.Errorf("buildPreviewHostname is not deterministic: %q != %q", got1, got2)
+	}
+	if len(got1) > 63 {
+		t.Errorf("full fqdn %q is %d bytes, want <= 63", got1, len(got1))
+	}
+}
+
+func TestBuildPreviewHostnameDistinctLongBranchesDontCollide(t *testing.T) {
+	base := strings.Repeat("z", 90)
+	branchA := base + "-alpha-suffix-one"
+	branchB := base + "-beta-suffix-two"
+	gotA := buildPreviewHostname("dada-tuda.ru", "fonbet-value", branchA, "ab12")
+	gotB := buildPreviewHostname("dada-tuda.ru", "fonbet-value", branchB, "ab12")
+	if gotA == gotB {
+		t.Errorf("distinct long branches collided onto the same hostname: %q", gotA)
+	}
+	if len(gotA) > 63 || len(gotB) > 63 {
+		t.Errorf("full fqdn exceeds 63 bytes: %q (%d) / %q (%d)", gotA, len(gotA), gotB, len(gotB))
+	}
+}
+
+func TestBuildPreviewHostnameShortBranchUnchanged(t *testing.T) {
+	got := buildPreviewHostname("dada-tuda.ru", "myapp", "feature/foo-bar", "ab12")
+	want := "myapp-git-feature-foo-bar-ab12.dada-tuda.ru"
+	if got != want {
+		t.Errorf("short-branch hostname changed behavior: buildPreviewHostname = %q, want %q", got, want)
+	}
+}
+
+func TestBuildDefaultHostnameFullFQDNFitsK8sLabel(t *testing.T) {
+	longName := strings.Repeat("w", 80)
+	got := buildDefaultHostname("dada-tuda.ru", longName, "ab12")
+	if len(got) > 63 {
+		t.Errorf("full fqdn %q is %d bytes, want <= 63", got, len(got))
+	}
+	if !strings.HasSuffix(got, ".dada-tuda.ru") {
+		t.Errorf("hostname %q lost the base domain", got)
+	}
+}
+
+func TestBuildDefaultHostnameShortNameUnchanged(t *testing.T) {
+	got := buildDefaultHostname("dada-tuda.ru", "myapp", "ab12")
+	want := "myapp-ab12.dada-tuda.ru"
+	if got != want {
+		t.Errorf("short-name hostname changed behavior: buildDefaultHostname = %q, want %q", got, want)
+	}
+}

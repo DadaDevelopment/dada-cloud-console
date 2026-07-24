@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"crypto/tls"
 	"encoding/hex"
 	"encoding/json"
@@ -1282,12 +1283,49 @@ func randomHostSuffix() (string, error) {
 	return hex.EncodeToString(b), nil
 }
 
-func buildDefaultHostname(base, name, suffix string) string {
-	label := name
-	maxLabel := 63 - 1 - len(suffix)
-	if len(label) > maxLabel {
-		label = strings.TrimRight(label[:maxLabel], "-")
+// hashFragment returns the first 4 hex characters of sha256(s), the same
+// deterministic-suffix idiom as gitops-agent's ScopedArgoName and build-agent's
+// buildDefaultHostname/buildPreviewHostname (internal/db/deploy.go) — kept
+// byte-for-byte identical here since backend and build-agent are separate Go
+// modules and cannot share the helper directly.
+func hashFragment(s string) string {
+	sum := sha256.Sum256([]byte(s))
+	return hex.EncodeToString(sum[:])[:4]
+}
+
+// capFragment shrinks a variable hostname fragment (here, the app-name label)
+// so that fixedLen+len(result) never exceeds 63 — the DNS-1123 label limit
+// gitops-agent's FQDNToName applies to the FULL fqdn (dots become dashes, so
+// the whole hostname becomes a k8s resource name, not just its first
+// dot-separated label). fixedLen is the byte length of every other part of
+// the final hostname. When the untouched fragment already fits, it is
+// returned unchanged so short/existing hostnames stay byte-for-byte identical
+// to before this cap existed. Otherwise the fragment is truncated and a short
+// deterministic hash of the FULL untouched fragment is appended, so distinct
+// long fragments never collide once truncated to the same prefix.
+func capFragment(fragment string, fixedLen int) string {
+	if fixedLen+len(fragment) <= 63 {
+		return fragment
 	}
+	hash := hashFragment(fragment)
+	maxFrag := 63 - fixedLen - 1 - len(hash)
+	if maxFrag < 0 {
+		maxFrag = 0
+	}
+	trimmed := fragment
+	if len(trimmed) > maxFrag {
+		trimmed = trimmed[:maxFrag]
+	}
+	trimmed = strings.TrimRight(trimmed, "-")
+	if trimmed == "" {
+		return hash
+	}
+	return trimmed + "-" + hash
+}
+
+func buildDefaultHostname(base, name, suffix string) string {
+	fixedLen := 1 + len(suffix) + 1 + len(base)
+	label := capFragment(name, fixedLen)
 	return fmt.Sprintf("%s-%s.%s", label, suffix, base)
 }
 

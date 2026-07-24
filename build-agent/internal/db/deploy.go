@@ -3,6 +3,7 @@ package db
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -66,12 +67,49 @@ func randomHostSuffix() (string, error) {
 	return hex.EncodeToString(b), nil
 }
 
-func buildDefaultHostname(base, name, suffix string) string {
-	label := name
-	maxLabel := 63 - 1 - len(suffix)
-	if len(label) > maxLabel {
-		label = strings.TrimRight(label[:maxLabel], "-")
+// hashFragment returns the first 4 hex characters of sha256(s), the same
+// deterministic-suffix idiom as gitops-agent's ScopedArgoName. Two distinct
+// long fragments that truncate to the same prefix still get distinct hashes,
+// so capFragment never collides two different apps/branches onto one hostname.
+func hashFragment(s string) string {
+	sum := sha256.Sum256([]byte(s))
+	return hex.EncodeToString(sum[:])[:4]
+}
+
+// capFragment shrinks a variable hostname fragment (app name or branch) so
+// that fixedLen+len(result) never exceeds 63 — the DNS-1123 label limit that
+// gitops-agent's FQDNToName applies to the FULL fqdn (dots become dashes, so
+// the whole hostname, not just its first dot-separated label, becomes a k8s
+// resource name). fixedLen is the byte length of every other part of the
+// final hostname (separators, suffix, base domain). When the untouched
+// fragment already fits, it is returned unchanged so short/existing hostnames
+// are byte-for-byte identical to before this cap existed. Otherwise the
+// fragment is truncated and a short deterministic hash of the FULL untouched
+// fragment is appended, so distinct long fragments never collide once
+// truncated to the same prefix.
+func capFragment(fragment string, fixedLen int) string {
+	if fixedLen+len(fragment) <= 63 {
+		return fragment
 	}
+	hash := hashFragment(fragment)
+	maxFrag := 63 - fixedLen - 1 - len(hash)
+	if maxFrag < 0 {
+		maxFrag = 0
+	}
+	trimmed := fragment
+	if len(trimmed) > maxFrag {
+		trimmed = trimmed[:maxFrag]
+	}
+	trimmed = strings.TrimRight(trimmed, "-")
+	if trimmed == "" {
+		return hash
+	}
+	return trimmed + "-" + hash
+}
+
+func buildDefaultHostname(base, name, suffix string) string {
+	fixedLen := 1 + len(suffix) + 1 + len(base)
+	label := capFragment(name, fixedLen)
 	return fmt.Sprintf("%s-%s.%s", label, suffix, base)
 }
 
@@ -100,22 +138,19 @@ func sanitizeBranch(branch string) string {
 
 // buildPreviewHostname builds the per-branch preview hostname
 // "<app>-git-<branch>-<hex4>.<base>" (Vercel-style). Unlike buildDefaultHostname,
-// which truncates the app-name label, this truncates the (already-sanitized)
-// branch label when the full host would exceed the 63-byte DNS-label limit; the
+// which shrinks the app-name fragment, this shrinks the (already-sanitized)
+// branch fragment via capFragment when the FULL hostname (app + "-git-" +
+// branch + suffix + "." + base) would exceed 63 bytes — gitops-agent's
+// FQDNToName turns the whole fqdn into a k8s resource name, so the cap must
+// cover the base domain too, not just the leading dot-separated label. The
 // app name and the "-git-"/suffix scaffolding are never shortened, only the
-// branch fragment, and never by appending a suffix of its own (same
-// no-extra-suffix rule as buildDefaultHostname).
+// branch fragment, which gets a short deterministic hash appended when it had
+// to be truncated (see capFragment).
 func buildPreviewHostname(base, name, branch, suffix string) string {
 	branch = sanitizeBranch(branch)
 	prefix := fmt.Sprintf("%s-git-", name)
-	fixed := len(prefix) + 1 + len(suffix)
-	maxBranch := 63 - fixed
-	if maxBranch < 1 {
-		maxBranch = 1
-	}
-	if len(branch) > maxBranch {
-		branch = strings.TrimRight(branch[:maxBranch], "-")
-	}
+	fixedLen := len(prefix) + 1 + len(suffix) + 1 + len(base)
+	branch = capFragment(branch, fixedLen)
 	return fmt.Sprintf("%s%s-%s.%s", prefix, branch, suffix, base)
 }
 
