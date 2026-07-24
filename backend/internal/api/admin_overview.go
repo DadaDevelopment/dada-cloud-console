@@ -256,9 +256,28 @@ type overviewNotReadyApp struct {
 	OwnerEmail  string `json:"owner_email"`
 }
 
-// overviewNotReadyApps lists live App snapshots not in the Ready phase, capped
-// so a platform-wide incident cannot balloon the payload. Orphaned rows
-// (soft-deleted by the gitops-agent GC) are excluded — they are gone, not broken.
+// overviewNotReadyApps lists apps the platform can currently PROVE are broken:
+// a real workload the gitops-agent status reconciler observes live and reports
+// as not-ready. The panel deliberately excludes three classes that a naive
+// "phase != Ready" filter swept in and made the board cry wolf:
+//
+//   - Deliberately-off apps. A k8s snapshot with desired replicas 0 is written
+//     phase=Stopped, not broken. Excluded.
+//   - Apps with no live workload at all (live_source != 'k8s'): orphan-GC-cleared
+//     platform infra that renders no Deployment, and never-deployed shells whose
+//     snapshot froze at git-watcher create-time (Unknown/Pending). No workload
+//     means nothing to be "not ready" — the platform has no health signal to
+//     assert breakage from.
+//   - Stale ghost snapshots left behind by a move/rename. The app's healthy twin
+//     lives under the new environment and gets its last_synced_at bumped every
+//     reconcile tick (30s); the abandoned old-env row keeps a k8s live_source but
+//     freezes at Pending because no workload matches it there anymore. A live
+//     signal older than the freshness window is not current truth, so it drops.
+//
+// A genuinely crashlooping app keeps a matching Deployment, so the reconciler
+// re-stamps its last_synced_at every 30s — freshness can never hide a real
+// outage, only surface a stale ghost. Capped so a platform-wide incident cannot
+// balloon the payload.
 func (h *Handler) overviewNotReadyApps(ctx context.Context) ([]overviewNotReadyApp, error) {
 	rows, err := h.pool.Query(ctx, `
 		SELECT rs.name, p.display_name, rs.phase, COALESCE(u.email, '')
@@ -266,7 +285,9 @@ func (h *Handler) overviewNotReadyApps(ctx context.Context) ([]overviewNotReadyA
 		JOIN projects p     ON p.id = rs.project_id
 		LEFT JOIN users u   ON u.id = p.owner_id
 		WHERE rs.kind = 'App'
-		  AND rs.phase NOT IN ('Ready', 'Orphaned')
+		  AND rs.summary_json->>'live_source' = 'k8s'
+		  AND rs.phase NOT IN ('Ready', 'Stopped', 'Orphaned')
+		  AND rs.last_synced_at > now() - interval '10 minutes'
 		ORDER BY rs.last_synced_at DESC
 		LIMIT 100`,
 	)
