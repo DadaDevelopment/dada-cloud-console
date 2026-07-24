@@ -31,6 +31,7 @@ type DBBackupPresigner interface {
 	Enabled() bool
 	PresignGet(ctx context.Context, objectKey, downloadFilename string, ttl time.Duration) (string, error)
 	PutObject(ctx context.Context, objectKey string, r io.Reader, size int64, contentType string) error
+	DeleteOldObjects(ctx context.Context, prefix string, olderThan time.Duration) (int, error)
 }
 
 // minioDBBackupPresigner presigns against the dump bucket with static keys.
@@ -82,6 +83,36 @@ func (p *minioDBBackupPresigner) PutObject(ctx context.Context, objectKey string
 	return nil
 }
 
+// DeleteOldObjects lists everything under prefix and removes objects last
+// modified more than olderThan ago, e.g. sweeping expired volume-export
+// tarballs. It keeps going past per-object delete errors so one bad key does
+// not block the rest of the sweep, and returns the count of objects actually
+// removed alongside the first error encountered (if any).
+func (p *minioDBBackupPresigner) DeleteOldObjects(ctx context.Context, prefix string, olderThan time.Duration) (int, error) {
+	cutoff := time.Now().Add(-olderThan)
+	deleted := 0
+	var firstErr error
+	for obj := range p.client.ListObjects(ctx, p.bucket, minio.ListObjectsOptions{Prefix: prefix, Recursive: true}) {
+		if obj.Err != nil {
+			if firstErr == nil {
+				firstErr = obj.Err
+			}
+			continue
+		}
+		if obj.LastModified.IsZero() || !obj.LastModified.Before(cutoff) {
+			continue
+		}
+		if err := p.client.RemoveObject(ctx, p.bucket, obj.Key, minio.RemoveObjectOptions{}); err != nil {
+			if firstErr == nil {
+				firstErr = err
+			}
+			continue
+		}
+		deleted++
+	}
+	return deleted, firstErr
+}
+
 // disabledDBBackupPresigner is returned when the dump-bucket S3 access is not
 // configured; every PresignGet fails identically.
 type disabledDBBackupPresigner struct{ err error }
@@ -100,4 +131,8 @@ func (d disabledDBBackupPresigner) PutObject(context.Context, string, io.Reader,
 		return fmt.Errorf("backup download not configured: %w", d.err)
 	}
 	return fmt.Errorf("backup download not configured")
+}
+
+func (d disabledDBBackupPresigner) DeleteOldObjects(context.Context, string, time.Duration) (int, error) {
+	return 0, nil
 }

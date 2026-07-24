@@ -13,7 +13,18 @@ import (
 const (
 	backupReconcileInterval = 30 * time.Second
 	scheduledBackupEvery    = 24 * time.Hour
+
+	volumeExportRetention   = 24 * time.Hour
+	volumeExportSweepEvery  = 10 * time.Minute
+	volumeExportSweepPrefix = "volexports/"
 )
+
+// lastVolumeExportSweep throttles sweepVolumeExports to at most one run per
+// volumeExportSweepEvery. It is process-local (not shared across replicas):
+// the advisory lock already serializes each tick within a pod, but the sweep
+// itself is idempotent, so each pod sweeping independently every 10 minutes
+// is harmless.
+var lastVolumeExportSweep time.Time
 
 // StartBackupReconciler launches the background loop that advances in-flight
 // backup/restore ActionSets, enforces retention, and (opt-in) takes scheduled
@@ -35,6 +46,7 @@ func (h *Handler) StartBackupReconciler(ctx context.Context) {
 					h.reconcileBackups(ctx)
 					h.reconcileRestores(ctx)
 					h.expireBackups(ctx)
+					h.sweepVolumeExports(ctx)
 					if h.cfg.DBBackupScheduleEnabled {
 						h.runScheduledBackups(ctx)
 					}
@@ -154,6 +166,30 @@ func (h *Handler) expireBackups(ctx context.Context) {
 		}
 		_, _ = h.pool.Exec(ctx,
 			`UPDATE db_backups SET status = 'Deleted', updated_at = NOW() WHERE id = $1`, it.id)
+	}
+}
+
+// sweepVolumeExports deletes volume-export tarballs older than
+// volumeExportRetention from the dump bucket. Volume exports (unlike DB
+// backups) have no row to track expiry against, so this walks the S3 prefix
+// directly instead of reading from Postgres. Throttled to at most once per
+// volumeExportSweepEvery per pod; a no-op when the presigner is disabled.
+func (h *Handler) sweepVolumeExports(ctx context.Context) {
+	if !h.dbBackupPresigner.Enabled() {
+		return
+	}
+	if !lastVolumeExportSweep.IsZero() && time.Since(lastVolumeExportSweep) < volumeExportSweepEvery {
+		return
+	}
+	lastVolumeExportSweep = time.Now()
+
+	deleted, err := h.dbBackupPresigner.DeleteOldObjects(ctx, volumeExportSweepPrefix, volumeExportRetention)
+	if err != nil {
+		log.Printf("volume-export sweep: %v (deleted %d before error)", err, deleted)
+		return
+	}
+	if deleted > 0 {
+		log.Printf("volume-export sweep: deleted %d expired object(s)", deleted)
 	}
 }
 

@@ -40,6 +40,10 @@ func (fakeEnabledDBBackupPresigner) PutObject(context.Context, string, io.Reader
 	return nil
 }
 
+func (fakeEnabledDBBackupPresigner) DeleteOldObjects(context.Context, string, time.Duration) (int, error) {
+	return 0, nil
+}
+
 func testVolumeExportPool(t *testing.T) *pgxpool.Pool {
 	t.Helper()
 	dsn := os.Getenv("TEST_DATABASE_URL")

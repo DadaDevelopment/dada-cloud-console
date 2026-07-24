@@ -27,6 +27,13 @@ func TestDBBackupPresignerDisabled(t *testing.T) {
 			if err := p.PutObject(context.Background(), "volexports/x/y/z.tar.gz", strings.NewReader("x"), 1, "application/gzip"); err == nil {
 				t.Fatal("expected error from disabled presigner PutObject")
 			}
+			deleted, err := p.DeleteOldObjects(context.Background(), "volexports/", 24*time.Hour)
+			if err != nil {
+				t.Fatalf("expected disabled presigner DeleteOldObjects to be a no-op, got error: %v", err)
+			}
+			if deleted != 0 {
+				t.Fatalf("expected disabled presigner DeleteOldObjects to delete 0, got %d", deleted)
+			}
 		})
 	}
 }
