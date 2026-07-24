@@ -22,6 +22,16 @@ import (
 // single version in history — there is nothing to roll back to.
 var ErrNoPreviousVersion = errors.New("no previous version to roll back to")
 
+// ErrHistoryRewritten is returned by CommitsSince when the stored cursor SHA is
+// no longer an ancestor of the current HEAD — the remote history was rewritten
+// (reset, force-push, or rebase) since the last sync. Walking history in this
+// state would replay every commit back to the repo root instead of stopping at
+// the cursor, re-running historical adds (incident 2026-07-23: a rewritten
+// clone replayed history and resurrected 13 deleted projects). Callers must not
+// attempt to process any commits when this error is returned; they should
+// adopt the new HEAD as the cursor instead.
+var ErrHistoryRewritten = errors.New("remote history rewritten since last sync cursor")
+
 // RepoConfig holds credentials for a specific remote repository.
 type RepoConfig struct {
 	RepoURL   string
@@ -299,6 +309,16 @@ func (m *Manager) CommitsSince(fromSHA string) ([]Commit, error) {
 		return nil, err
 	}
 
+	if fromSHA != "" {
+		rewritten, err := historyRewritten(repo, fromSHA, head.Hash())
+		if err != nil {
+			return nil, err
+		}
+		if rewritten {
+			return nil, ErrHistoryRewritten
+		}
+	}
+
 	logOpts := &gogit.LogOptions{From: head.Hash()}
 	iter, err := repo.Log(logOpts)
 	if err != nil {
@@ -336,6 +356,24 @@ func (m *Manager) CommitsSince(fromSHA string) ([]Commit, error) {
 		commits[i], commits[j] = commits[j], commits[i]
 	}
 	return commits, nil
+}
+
+// LocalHEAD returns the current local clone's HEAD SHA without fetching.
+// Callers that just ran CommitsSince (which pulls first) can use this to learn
+// the new tip after an ErrHistoryRewritten result.
+func (m *Manager) LocalHEAD() (string, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	repo, err := gogit.PlainOpen(m.path)
+	if err != nil {
+		return "", fmt.Errorf("opening repo: %w", err)
+	}
+	head, err := repo.Head()
+	if err != nil {
+		return "", err
+	}
+	return head.Hash().String(), nil
 }
 
 // ReadFile returns the content of a file in the current worktree.
@@ -488,6 +526,29 @@ func (m *Manager) auth() *http.BasicAuth {
 		return nil
 	}
 	return &http.BasicAuth{Username: m.cfg.Username, Password: m.cfg.Token}
+}
+
+// historyRewritten reports whether fromSHA is no longer reachable as an
+// ancestor of headHash — i.e. the branch was reset, force-pushed, or rebased
+// since fromSHA was recorded as the sync cursor. A commit that no longer
+// exists in the repo (pruned by gc after an orphaning rewrite) also counts as
+// rewritten.
+func historyRewritten(repo *gogit.Repository, fromSHA string, headHash plumbing.Hash) (bool, error) {
+	fromCommit, err := repo.CommitObject(plumbing.NewHash(fromSHA))
+	if err != nil {
+		return true, nil
+	}
+
+	headCommit, err := repo.CommitObject(headHash)
+	if err != nil {
+		return false, fmt.Errorf("loading HEAD commit: %w", err)
+	}
+
+	isAncestor, err := fromCommit.IsAncestor(headCommit)
+	if err != nil {
+		return false, fmt.Errorf("checking ancestry of cursor %s: %w", fromSHA, err)
+	}
+	return !isAncestor, nil
 }
 
 func isNonFastForward(err error) bool {

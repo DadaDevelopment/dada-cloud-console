@@ -3,6 +3,7 @@ package worker
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"regexp"
 	"strings"
@@ -187,6 +188,9 @@ func (w *GitWatcher) syncRepo(ctx context.Context, mgr *git.Manager) error {
 
 	commits, err := mgr.CommitsSince(lastSHA)
 	if err != nil {
+		if errors.Is(err, git.ErrHistoryRewritten) {
+			return w.adoptRewrittenHistory(ctx, mgr, lastSHA)
+		}
 		return err
 	}
 	if len(commits) == 0 {
@@ -202,6 +206,31 @@ func (w *GitWatcher) syncRepo(ctx context.Context, mgr *git.Manager) error {
 	// Advance sync state to the latest commit.
 	newSHA := commits[len(commits)-1].SHA
 	return db.SetSyncState(ctx, w.pool, mgr.RepoURL(), mgr.Branch(), newSHA)
+}
+
+// adoptRewrittenHistory handles a CommitsSince ErrHistoryRewritten result: the
+// stored cursor is no longer an ancestor of the current HEAD, meaning the
+// remote branch was reset, force-pushed, or rebased since the last sync.
+// Walking history from the new HEAD back to the repo root and replaying every
+// historical commit would re-run add/upsert side effects long since
+// superseded — including resurrecting projects a later commit deleted
+// (incident 2026-07-23). Instead the cursor is fast-forwarded to the new HEAD
+// with zero commits processed, so the watcher resumes cleanly from the new
+// line of history rather than replaying or wedging forever.
+func (w *GitWatcher) adoptRewrittenHistory(ctx context.Context, mgr *git.Manager, lastSHA string) error {
+	newHEAD, err := mgr.LocalHEAD()
+	if err != nil {
+		return fmt.Errorf("resolving new HEAD after history rewrite: %w", err)
+	}
+
+	log.Error().
+		Str("repo", mgr.RepoURL()).
+		Str("branch", mgr.Branch()).
+		Str("stored_cursor", lastSHA).
+		Str("new_head", newHEAD).
+		Msg("git-watcher: remote history rewritten since last sync — adopting new HEAD without replaying commits")
+
+	return db.SetSyncState(ctx, w.pool, mgr.RepoURL(), mgr.Branch(), newHEAD)
 }
 
 // syncablePaths returns the commit's changed paths that the git watcher should
