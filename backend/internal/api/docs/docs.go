@@ -413,7 +413,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Streams Server-Sent Events for a single chat turn. Phase-1 is an echo stub with no LLM call: it tokenizes the input message and streams it back word by word, then emits a done event. Sending the literal message \"__slowtest__\" instead streams a 75s heartbeat run to prove the endpoint survives the ingress proxy-read-timeout.",
+                "description": "Streams Server-Sent Events for a single chat turn. Runs a server-side ReAct loop against the ADR-015 LLM gateway, grounding answers with a curated read-only subset of the console's own API (plus create_support_ticket) executed under the caller's own bearer. Emits token events (assistant text deltas), tool_call events (tool name only), an error event on a friendly failure (gateway not configured, daily cap reached, upstream error), and a final done event. Sending the literal message \"__slowtest__\" instead streams a 75s heartbeat run to prove the endpoint survives the ingress proxy-read-timeout.",
                 "consumes": [
                     "application/json"
                 ],
@@ -423,7 +423,7 @@ const docTemplate = `{
                 "tags": [
                     "agent"
                 ],
-                "summary": "Stream a chat turn with the console agent (phase-1 skeleton)",
+                "summary": "Stream a chat turn with the console agent",
                 "operationId": "agentChat",
                 "parameters": [
                     {
@@ -432,7 +432,65 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.agentChatRequest"
+                            "$ref": "#/definitions/internal_api.agentChatRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "text/event-stream",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/agent/chat/confirm": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Resumes a chat turn that interrupted on a write-tool call (see the confirm_request SSE event from POST /agent/chat). On approve, executes the tool for real under this request's own bearer (RBAC re-checked by the self-proxy), appends the result, and continues the ReAct loop to a final answer — which may itself interrupt again on a further write call. On reject, appends a decline notice and continues without executing anything. Streams Server-Sent Events like /agent/chat; an error event with a code (not_found/forbidden/expired/conflict) is emitted instead of an HTTP error status once the stream has started.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "text/event-stream"
+                ],
+                "tags": [
+                    "agent"
+                ],
+                "summary": "Approve or reject a pending agent write action",
+                "operationId": "agentChatConfirm",
+                "parameters": [
+                    {
+                        "description": "Confirm decision",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.agentChatConfirmRequest"
                         }
                     }
                 ],
@@ -485,7 +543,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.loginRequest"
+                            "$ref": "#/definitions/internal_api.loginRequest"
                         }
                     }
                 ],
@@ -652,7 +710,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/pricing.Need"
+                            "$ref": "#/definitions/github_com_dada-tuda_console_backend_internal_billing_pricing.Need"
                         }
                     }
                 ],
@@ -694,7 +752,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.clientErrorReport"
+                            "$ref": "#/definitions/internal_api.clientErrorReport"
                         }
                     }
                 ],
@@ -726,7 +784,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.deployTriggerRequest"
+                            "$ref": "#/definitions/internal_api.deployTriggerRequest"
                         }
                     }
                 ],
@@ -734,7 +792,7 @@ const docTemplate = `{
                     "202": {
                         "description": "Accepted",
                         "schema": {
-                            "$ref": "#/definitions/api.deployTriggerResponse"
+                            "$ref": "#/definitions/internal_api.deployTriggerResponse"
                         }
                     },
                     "400": {
@@ -791,7 +849,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/api.deployOperationStatusResponse"
+                            "$ref": "#/definitions/internal_api.deployOperationStatusResponse"
                         }
                     },
                     "401": {
@@ -841,7 +899,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.submitFeedbackRequest"
+                            "$ref": "#/definitions/internal_api.submitFeedbackRequest"
                         }
                     }
                 ],
@@ -1253,7 +1311,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.createProjectRequest"
+                            "$ref": "#/definitions/internal_api.createProjectRequest"
                         }
                     }
                 ],
@@ -1547,7 +1605,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.createAppServerRequest"
+                            "$ref": "#/definitions/internal_api.createAppServerRequest"
                         }
                     }
                 ],
@@ -1837,7 +1895,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.importComposeStackRequest"
+                            "$ref": "#/definitions/internal_api.importComposeStackRequest"
                         }
                     }
                 ],
@@ -3159,7 +3217,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.addDomainAuthorizationRequest"
+                            "$ref": "#/definitions/internal_api.addDomainAuthorizationRequest"
                         }
                     }
                 ],
@@ -3514,7 +3572,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.importZoneRequest"
+                            "$ref": "#/definitions/internal_api.importZoneRequest"
                         }
                     }
                 ],
@@ -3742,7 +3800,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.upsertRecordRequest"
+                            "$ref": "#/definitions/internal_api.upsertRecordRequest"
                         }
                     }
                 ],
@@ -3980,7 +4038,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.createAppRequest"
+                            "$ref": "#/definitions/internal_api.createAppRequest"
                         }
                     }
                 ],
@@ -4231,7 +4289,7 @@ const docTemplate = `{
                         "name": "body",
                         "in": "body",
                         "schema": {
-                            "$ref": "#/definitions/api.autofixRequest"
+                            "$ref": "#/definitions/internal_api.autofixRequest"
                         }
                     }
                 ],
@@ -4565,7 +4623,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.createCloudTaskRequest"
+                            "$ref": "#/definitions/internal_api.createCloudTaskRequest"
                         }
                     }
                 ],
@@ -4672,7 +4730,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.updateComposeConfigRequest"
+                            "$ref": "#/definitions/internal_api.updateComposeConfigRequest"
                         }
                     }
                 ],
@@ -4770,7 +4828,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.updateComposeVolumeRequest"
+                            "$ref": "#/definitions/internal_api.updateComposeVolumeRequest"
                         }
                     }
                 ],
@@ -4864,7 +4922,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/api.DeleteImpact"
+                            "$ref": "#/definitions/internal_api.DeleteImpact"
                         }
                     },
                     "401": {
@@ -5000,7 +5058,7 @@ const docTemplate = `{
                         "name": "body",
                         "in": "body",
                         "schema": {
-                            "$ref": "#/definitions/api.createDeployHookRequest"
+                            "$ref": "#/definitions/internal_api.createDeployHookRequest"
                         }
                     }
                 ],
@@ -5008,7 +5066,7 @@ const docTemplate = `{
                     "201": {
                         "description": "Created",
                         "schema": {
-                            "$ref": "#/definitions/api.createDeployHookResponse"
+                            "$ref": "#/definitions/internal_api.createDeployHookResponse"
                         }
                     },
                     "400": {
@@ -5299,7 +5357,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.createEndpointRequest"
+                            "$ref": "#/definitions/internal_api.createEndpointRequest"
                         }
                     }
                 ],
@@ -5569,7 +5627,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.setEnvVarRequest"
+                            "$ref": "#/definitions/internal_api.setEnvVarRequest"
                         }
                     }
                 ],
@@ -5798,7 +5856,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.attachHostnameRequest"
+                            "$ref": "#/definitions/internal_api.attachHostnameRequest"
                         }
                     }
                 ],
@@ -5979,7 +6037,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.updateAppImageRequest"
+                            "$ref": "#/definitions/internal_api.updateAppImageRequest"
                         }
                     }
                 ],
@@ -6259,7 +6317,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.moveAppRequest"
+                            "$ref": "#/definitions/internal_api.moveAppRequest"
                         }
                     }
                 ],
@@ -6367,7 +6425,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/api.MoveImpact"
+                            "$ref": "#/definitions/internal_api.MoveImpact"
                         }
                     },
                     "400": {
@@ -6447,7 +6505,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.updateAppProfileRequest"
+                            "$ref": "#/definitions/internal_api.updateAppProfileRequest"
                         }
                     }
                 ],
@@ -6696,7 +6754,7 @@ const docTemplate = `{
                     "202": {
                         "description": "Accepted",
                         "schema": {
-                            "$ref": "#/definitions/api.uploadSourceResponse"
+                            "$ref": "#/definitions/internal_api.uploadSourceResponse"
                         }
                     },
                     "400": {
@@ -6880,7 +6938,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.appVolumeReq"
+                            "$ref": "#/definitions/internal_api.appVolumeReq"
                         }
                     }
                 ],
@@ -7113,7 +7171,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.createServiceDatabaseRequest"
+                            "$ref": "#/definitions/internal_api.createServiceDatabaseRequest"
                         }
                     }
                 ],
@@ -7653,7 +7711,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.restoreDatabaseRequest"
+                            "$ref": "#/definitions/internal_api.restoreDatabaseRequest"
                         }
                     }
                 ],
@@ -7814,7 +7872,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.createIngressRequest"
+                            "$ref": "#/definitions/internal_api.createIngressRequest"
                         }
                     }
                 ],
@@ -7955,7 +8013,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.createAIModelRequest"
+                            "$ref": "#/definitions/internal_api.createAIModelRequest"
                         }
                     }
                 ],
@@ -8716,7 +8774,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.createMonitoringRequest"
+                            "$ref": "#/definitions/internal_api.createMonitoringRequest"
                         }
                     }
                 ],
@@ -9542,7 +9600,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.saveDashboardRequest"
+                            "$ref": "#/definitions/internal_api.saveDashboardRequest"
                         }
                     }
                 ],
@@ -10395,7 +10453,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.connectGitRepoRequest"
+                            "$ref": "#/definitions/internal_api.connectGitRepoRequest"
                         }
                     }
                 ],
@@ -10609,7 +10667,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.createS3BucketRequest"
+                            "$ref": "#/definitions/internal_api.createS3BucketRequest"
                         }
                     }
                 ],
@@ -10966,7 +11024,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.bindInstallationRequest"
+                            "$ref": "#/definitions/internal_api.bindInstallationRequest"
                         }
                     }
                 ],
@@ -10974,7 +11032,7 @@ const docTemplate = `{
                     "201": {
                         "description": "Created",
                         "schema": {
-                            "$ref": "#/definitions/api.gitInstallation"
+                            "$ref": "#/definitions/internal_api.gitInstallation"
                         }
                     },
                     "400": {
@@ -11428,7 +11486,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.ingestLogsRequest"
+                            "$ref": "#/definitions/internal_api.ingestLogsRequest"
                         }
                     }
                 ],
@@ -11546,7 +11604,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.ingestMetricsRequest"
+                            "$ref": "#/definitions/internal_api.ingestMetricsRequest"
                         }
                     }
                 ],
@@ -11874,7 +11932,82 @@ const docTemplate = `{
         }
     },
     "definitions": {
-        "api.DeleteImpact": {
+        "github_com_dada-tuda_console_backend_internal_billing_pricing.Need": {
+            "type": "object",
+            "properties": {
+                "apps": {
+                    "type": "integer"
+                },
+                "databases": {
+                    "type": "integer"
+                },
+                "domains": {
+                    "type": "integer"
+                },
+                "members": {
+                    "type": "integer"
+                },
+                "storageGB": {
+                    "type": "integer"
+                }
+            }
+        },
+        "github_com_dada-tuda_console_backend_internal_models.AIModelAuthMode": {
+            "type": "string",
+            "enum": [
+                "apikey",
+                "jwt",
+                "public"
+            ],
+            "x-enum-varnames": [
+                "AIModelAuthAPIKey",
+                "AIModelAuthJWT",
+                "AIModelAuthPublic"
+            ]
+        },
+        "github_com_dada-tuda_console_backend_internal_models.AIModelSource": {
+            "type": "string",
+            "enum": [
+                "mlflow",
+                "s3",
+                "custom"
+            ],
+            "x-enum-varnames": [
+                "AIModelSourceMLflow",
+                "AIModelSourceS3",
+                "AIModelSourceCustom"
+            ]
+        },
+        "github_com_dada-tuda_console_backend_internal_models.ImportServiceSpec": {
+            "type": "object",
+            "properties": {
+                "container_name": {
+                    "type": "string"
+                },
+                "image": {
+                    "type": "string"
+                },
+                "include": {
+                    "type": "boolean"
+                },
+                "ports": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "service_name": {
+                    "type": "string"
+                },
+                "volumes": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                }
+            }
+        },
+        "internal_api.DeleteImpact": {
             "type": "object",
             "properties": {
                 "app": {
@@ -11889,7 +12022,7 @@ const docTemplate = `{
                 "items": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/api.ImpactItem"
+                        "$ref": "#/definitions/internal_api.ImpactItem"
                     }
                 },
                 "namespace": {
@@ -11897,7 +12030,7 @@ const docTemplate = `{
                 }
             }
         },
-        "api.ImpactItem": {
+        "internal_api.ImpactItem": {
             "type": "object",
             "properties": {
                 "group": {
@@ -11914,7 +12047,7 @@ const docTemplate = `{
                 }
             }
         },
-        "api.MoveBlockerItem": {
+        "internal_api.MoveBlockerItem": {
             "type": "object",
             "properties": {
                 "kind": {
@@ -11928,7 +12061,7 @@ const docTemplate = `{
                 }
             }
         },
-        "api.MoveImpact": {
+        "internal_api.MoveImpact": {
             "type": "object",
             "properties": {
                 "app": {
@@ -11937,7 +12070,7 @@ const docTemplate = `{
                 "blockers": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/api.MoveBlockerItem"
+                        "$ref": "#/definitions/internal_api.MoveBlockerItem"
                     }
                 },
                 "can_move": {
@@ -11946,7 +12079,7 @@ const docTemplate = `{
                 "movable": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/api.MoveMovableItem"
+                        "$ref": "#/definitions/internal_api.MoveMovableItem"
                     }
                 },
                 "name_collision": {
@@ -11966,7 +12099,7 @@ const docTemplate = `{
                 }
             }
         },
-        "api.MoveMovableItem": {
+        "internal_api.MoveMovableItem": {
             "type": "object",
             "properties": {
                 "group": {
@@ -11980,7 +12113,7 @@ const docTemplate = `{
                 }
             }
         },
-        "api.addDomainAuthorizationRequest": {
+        "internal_api.addDomainAuthorizationRequest": {
             "type": "object",
             "properties": {
                 "apex_domain": {
@@ -11988,7 +12121,18 @@ const docTemplate = `{
                 }
             }
         },
-        "api.agentChatRequest": {
+        "internal_api.agentChatConfirmRequest": {
+            "type": "object",
+            "properties": {
+                "action_id": {
+                    "type": "string"
+                },
+                "decision": {
+                    "type": "string"
+                }
+            }
+        },
+        "internal_api.agentChatRequest": {
             "type": "object",
             "properties": {
                 "appName": {
@@ -12005,7 +12149,7 @@ const docTemplate = `{
                 }
             }
         },
-        "api.appVolumeReq": {
+        "internal_api.appVolumeReq": {
             "type": "object",
             "properties": {
                 "path": {
@@ -12019,7 +12163,7 @@ const docTemplate = `{
                 }
             }
         },
-        "api.attachHostnameRequest": {
+        "internal_api.attachHostnameRequest": {
             "type": "object",
             "properties": {
                 "hostname": {
@@ -12027,7 +12171,7 @@ const docTemplate = `{
                 }
             }
         },
-        "api.autofixRequest": {
+        "internal_api.autofixRequest": {
             "type": "object",
             "properties": {
                 "error": {
@@ -12035,7 +12179,7 @@ const docTemplate = `{
                 }
             }
         },
-        "api.bindInstallationRequest": {
+        "internal_api.bindInstallationRequest": {
             "type": "object",
             "properties": {
                 "installation_id": {
@@ -12044,7 +12188,7 @@ const docTemplate = `{
                 }
             }
         },
-        "api.build": {
+        "internal_api.build": {
             "type": "object",
             "properties": {
                 "app_name": {
@@ -12103,7 +12247,7 @@ const docTemplate = `{
                 }
             }
         },
-        "api.clientErrorReport": {
+        "internal_api.clientErrorReport": {
             "type": "object",
             "properties": {
                 "component_stack": {
@@ -12123,7 +12267,7 @@ const docTemplate = `{
                 }
             }
         },
-        "api.connectGitRepoRequest": {
+        "internal_api.connectGitRepoRequest": {
             "type": "object",
             "properties": {
                 "app_name": {
@@ -12170,7 +12314,7 @@ const docTemplate = `{
                 }
             }
         },
-        "api.createAIModelRequest": {
+        "internal_api.createAIModelRequest": {
             "type": "object",
             "properties": {
                 "artifact_uri": {
@@ -12180,7 +12324,7 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "auth_mode": {
-                    "$ref": "#/definitions/models.AIModelAuthMode"
+                    "$ref": "#/definitions/github_com_dada-tuda_console_backend_internal_models.AIModelAuthMode"
                 },
                 "container_image": {
                     "type": "string"
@@ -12201,14 +12345,14 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "source": {
-                    "$ref": "#/definitions/models.AIModelSource"
+                    "$ref": "#/definitions/github_com_dada-tuda_console_backend_internal_models.AIModelSource"
                 },
                 "version": {
                     "type": "string"
                 }
             }
         },
-        "api.createAppRequest": {
+        "internal_api.createAppRequest": {
             "type": "object",
             "properties": {
                 "framework": {
@@ -12230,7 +12374,7 @@ const docTemplate = `{
                     "type": "integer"
                 },
                 "volume": {
-                    "$ref": "#/definitions/api.appVolumeReq"
+                    "$ref": "#/definitions/internal_api.appVolumeReq"
                 },
                 "worker": {
                     "type": "boolean"
@@ -12240,7 +12384,7 @@ const docTemplate = `{
                 }
             }
         },
-        "api.createAppServerRequest": {
+        "internal_api.createAppServerRequest": {
             "type": "object",
             "properties": {
                 "flavor": {
@@ -12277,7 +12421,7 @@ const docTemplate = `{
                 }
             }
         },
-        "api.createCloudTaskRequest": {
+        "internal_api.createCloudTaskRequest": {
             "type": "object",
             "properties": {
                 "task_type": {
@@ -12285,7 +12429,7 @@ const docTemplate = `{
                 }
             }
         },
-        "api.createDeployHookRequest": {
+        "internal_api.createDeployHookRequest": {
             "type": "object",
             "properties": {
                 "name": {
@@ -12293,7 +12437,7 @@ const docTemplate = `{
                 }
             }
         },
-        "api.createDeployHookResponse": {
+        "internal_api.createDeployHookResponse": {
             "type": "object",
             "properties": {
                 "base_url": {
@@ -12319,7 +12463,7 @@ const docTemplate = `{
                 }
             }
         },
-        "api.createEndpointRequest": {
+        "internal_api.createEndpointRequest": {
             "type": "object",
             "properties": {
                 "auth_enabled": {
@@ -12348,7 +12492,7 @@ const docTemplate = `{
                 }
             }
         },
-        "api.createIngressRequest": {
+        "internal_api.createIngressRequest": {
             "type": "object",
             "properties": {
                 "aliases": {
@@ -12369,7 +12513,7 @@ const docTemplate = `{
                 "rules": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/api.ingressRuleReq"
+                        "$ref": "#/definitions/internal_api.ingressRuleReq"
                     }
                 },
                 "ssl_redirect": {
@@ -12394,7 +12538,7 @@ const docTemplate = `{
                 }
             }
         },
-        "api.createMonitoringRequest": {
+        "internal_api.createMonitoringRequest": {
             "type": "object",
             "properties": {
                 "name": {
@@ -12402,7 +12546,7 @@ const docTemplate = `{
                 }
             }
         },
-        "api.createProjectRequest": {
+        "internal_api.createProjectRequest": {
             "type": "object",
             "required": [
                 "slug"
@@ -12426,7 +12570,7 @@ const docTemplate = `{
                 }
             }
         },
-        "api.createS3BucketRequest": {
+        "internal_api.createS3BucketRequest": {
             "type": "object",
             "properties": {
                 "app_ref": {
@@ -12453,7 +12597,7 @@ const docTemplate = `{
                 }
             }
         },
-        "api.createServiceDatabaseRequest": {
+        "internal_api.createServiceDatabaseRequest": {
             "type": "object",
             "properties": {
                 "app_ref": {
@@ -12476,7 +12620,7 @@ const docTemplate = `{
                 }
             }
         },
-        "api.deployOperationStatusResponse": {
+        "internal_api.deployOperationStatusResponse": {
             "type": "object",
             "properties": {
                 "error_code": {
@@ -12496,7 +12640,7 @@ const docTemplate = `{
                 }
             }
         },
-        "api.deployTriggerRequest": {
+        "internal_api.deployTriggerRequest": {
             "type": "object",
             "properties": {
                 "image": {
@@ -12504,7 +12648,7 @@ const docTemplate = `{
                 }
             }
         },
-        "api.deployTriggerResponse": {
+        "internal_api.deployTriggerResponse": {
             "type": "object",
             "properties": {
                 "message": {
@@ -12515,7 +12659,7 @@ const docTemplate = `{
                 }
             }
         },
-        "api.gitInstallation": {
+        "internal_api.gitInstallation": {
             "type": "object",
             "properties": {
                 "account_login": {
@@ -12542,7 +12686,7 @@ const docTemplate = `{
                 }
             }
         },
-        "api.importComposeStackRequest": {
+        "internal_api.importComposeStackRequest": {
             "type": "object",
             "properties": {
                 "ack_secrets_in_git": {
@@ -12560,12 +12704,12 @@ const docTemplate = `{
                 "services": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/models.ImportServiceSpec"
+                        "$ref": "#/definitions/github_com_dada-tuda_console_backend_internal_models.ImportServiceSpec"
                     }
                 }
             }
         },
-        "api.importRecord": {
+        "internal_api.importRecord": {
             "type": "object",
             "properties": {
                 "contents": {
@@ -12585,18 +12729,18 @@ const docTemplate = `{
                 }
             }
         },
-        "api.importZoneRequest": {
+        "internal_api.importZoneRequest": {
             "type": "object",
             "properties": {
                 "records": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/api.importRecord"
+                        "$ref": "#/definitions/internal_api.importRecord"
                     }
                 }
             }
         },
-        "api.ingestLogsRequest": {
+        "internal_api.ingestLogsRequest": {
             "type": "object",
             "properties": {
                 "level": {
@@ -12610,14 +12754,13 @@ const docTemplate = `{
                 }
             }
         },
-        "api.ingestMetricsRequest": {
+        "internal_api.ingestMetricsRequest": {
             "type": "object",
             "properties": {
                 "metrics": {
                     "type": "object",
                     "additionalProperties": {
-                        "type": "number",
-                        "format": "float64"
+                        "type": "number"
                     }
                 },
                 "source": {
@@ -12628,7 +12771,7 @@ const docTemplate = `{
                 }
             }
         },
-        "api.ingressRuleReq": {
+        "internal_api.ingressRuleReq": {
             "type": "object",
             "properties": {
                 "app": {
@@ -12642,7 +12785,7 @@ const docTemplate = `{
                 }
             }
         },
-        "api.loginRequest": {
+        "internal_api.loginRequest": {
             "type": "object",
             "required": [
                 "password"
@@ -12659,7 +12802,7 @@ const docTemplate = `{
                 }
             }
         },
-        "api.moveAppRequest": {
+        "internal_api.moveAppRequest": {
             "type": "object",
             "properties": {
                 "target_project_id": {
@@ -12667,7 +12810,7 @@ const docTemplate = `{
                 }
             }
         },
-        "api.restoreDatabaseRequest": {
+        "internal_api.restoreDatabaseRequest": {
             "type": "object",
             "properties": {
                 "backup_id": {
@@ -12675,10 +12818,21 @@ const docTemplate = `{
                 }
             }
         },
-        "api.saveDashboardRequest": {
-            "type": "object"
+        "internal_api.saveDashboardRequest": {
+            "type": "object",
+            "properties": {
+                "config": {
+                    "type": "array",
+                    "items": {
+                        "type": "integer"
+                    }
+                },
+                "version": {
+                    "type": "integer"
+                }
+            }
         },
-        "api.setEnvVarRequest": {
+        "internal_api.setEnvVarRequest": {
             "type": "object",
             "properties": {
                 "is_secret": {
@@ -12695,7 +12849,7 @@ const docTemplate = `{
                 }
             }
         },
-        "api.submitFeedbackRequest": {
+        "internal_api.submitFeedbackRequest": {
             "type": "object",
             "properties": {
                 "message": {
@@ -12706,7 +12860,7 @@ const docTemplate = `{
                 }
             }
         },
-        "api.updateAppImageRequest": {
+        "internal_api.updateAppImageRequest": {
             "type": "object",
             "properties": {
                 "image": {
@@ -12714,7 +12868,7 @@ const docTemplate = `{
                 }
             }
         },
-        "api.updateAppProfileRequest": {
+        "internal_api.updateAppProfileRequest": {
             "type": "object",
             "properties": {
                 "profile": {
@@ -12722,7 +12876,7 @@ const docTemplate = `{
                 }
             }
         },
-        "api.updateComposeConfigRequest": {
+        "internal_api.updateComposeConfigRequest": {
             "type": "object",
             "properties": {
                 "image": {
@@ -12736,7 +12890,7 @@ const docTemplate = `{
                 }
             }
         },
-        "api.updateComposeVolumeRequest": {
+        "internal_api.updateComposeVolumeRequest": {
             "type": "object",
             "properties": {
                 "volumes": {
@@ -12747,7 +12901,7 @@ const docTemplate = `{
                 }
             }
         },
-        "api.uploadSourceDetect": {
+        "internal_api.uploadSourceDetect": {
             "type": "object",
             "properties": {
                 "framework": {
@@ -12758,21 +12912,21 @@ const docTemplate = `{
                 }
             }
         },
-        "api.uploadSourceResponse": {
+        "internal_api.uploadSourceResponse": {
             "type": "object",
             "properties": {
                 "artifact_uri": {
                     "type": "string"
                 },
                 "build": {
-                    "$ref": "#/definitions/api.build"
+                    "$ref": "#/definitions/internal_api.build"
                 },
                 "detected": {
-                    "$ref": "#/definitions/api.uploadSourceDetect"
+                    "$ref": "#/definitions/internal_api.uploadSourceDetect"
                 }
             }
         },
-        "api.upsertRecordRequest": {
+        "internal_api.upsertRecordRequest": {
             "type": "object",
             "properties": {
                 "contents": {
@@ -12789,81 +12943,6 @@ const docTemplate = `{
                 },
                 "type": {
                     "type": "string"
-                }
-            }
-        },
-        "models.AIModelAuthMode": {
-            "type": "string",
-            "enum": [
-                "apikey",
-                "jwt",
-                "public"
-            ],
-            "x-enum-varnames": [
-                "AIModelAuthAPIKey",
-                "AIModelAuthJWT",
-                "AIModelAuthPublic"
-            ]
-        },
-        "models.AIModelSource": {
-            "type": "string",
-            "enum": [
-                "mlflow",
-                "s3",
-                "custom"
-            ],
-            "x-enum-varnames": [
-                "AIModelSourceMLflow",
-                "AIModelSourceS3",
-                "AIModelSourceCustom"
-            ]
-        },
-        "models.ImportServiceSpec": {
-            "type": "object",
-            "properties": {
-                "container_name": {
-                    "type": "string"
-                },
-                "image": {
-                    "type": "string"
-                },
-                "include": {
-                    "type": "boolean"
-                },
-                "ports": {
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    }
-                },
-                "service_name": {
-                    "type": "string"
-                },
-                "volumes": {
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    }
-                }
-            }
-        },
-        "pricing.Need": {
-            "type": "object",
-            "properties": {
-                "apps": {
-                    "type": "integer"
-                },
-                "databases": {
-                    "type": "integer"
-                },
-                "domains": {
-                    "type": "integer"
-                },
-                "members": {
-                    "type": "integer"
-                },
-                "storageGB": {
-                    "type": "integer"
                 }
             }
         }

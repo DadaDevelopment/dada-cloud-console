@@ -19,6 +19,14 @@ var keepTools = []string{
 	"listOperations", "getOperation",
 	"searchLogs", "getProjectCost", "getCurrentUser",
 	"submitFeedback",
+	"deleteAppImpact", "deleteProjectImpact", "moveAppImpact",
+}
+
+var writeKeepTools = []string{
+	"restartApp", "triggerBuild", "deployTrigger", "cancelBuild", "retryOperation",
+	"setEnvVar", "deleteEnvVar",
+	"rollbackApp", "rollbackDeployment", "promoteDeployment", "updateAppImage",
+	"updateAppProfile", "updateAppStorage",
 }
 
 var denyTools = map[string]bool{
@@ -35,6 +43,7 @@ const supportTicketRoute = "agent-chat"
 type Toolset struct {
 	Defs     []llmchat.ToolDef
 	handlers map[string]internalmcp.ToolHandler
+	writeSet map[string]bool
 }
 
 func BuildToolset(specBytes []byte, backendURL string) (*Toolset, error) {
@@ -45,12 +54,17 @@ func BuildToolset(specBytes []byte, backendURL string) (*Toolset, error) {
 
 	all := internalmcp.GenerateTools(spec)
 	ov := &internalmcp.Overrides{
-		Keep:   keepTools,
+		Keep:   append(append([]string{}, keepTools...), writeKeepTools...),
 		Rename: map[string]string{"submitFeedback": SupportTicketTool},
 	}
 	curated := internalmcp.ApplyOverrides(all, ov)
 
-	ts := &Toolset{handlers: map[string]internalmcp.ToolHandler{}}
+	writeSet := make(map[string]bool, len(writeKeepTools))
+	for _, name := range writeKeepTools {
+		writeSet[name] = true
+	}
+
+	ts := &Toolset{handlers: map[string]internalmcp.ToolHandler{}, writeSet: writeSet}
 	for _, t := range curated {
 		if denyTools[t.Name] {
 			continue
@@ -71,6 +85,10 @@ func BuildToolset(specBytes []byte, backendURL string) (*Toolset, error) {
 func (ts *Toolset) Has(name string) bool {
 	_, ok := ts.handlers[name]
 	return ok
+}
+
+func (ts *Toolset) IsWrite(name string) bool {
+	return ts.writeSet[name]
 }
 
 func (ts *Toolset) Execute(ctx context.Context, bearer, name, argsJSON string) (text string, isError bool) {

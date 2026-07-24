@@ -480,6 +480,7 @@ func SetupRouter(pool *pgxpool.Pool, cfg *config.Config) *gin.Engine {
 		api.GET("/billing/account/summary", h.GetAccountSummary)
 
 		api.POST("/agent/chat", h.AgentChat)
+		api.POST("/agent/chat/confirm", h.AgentChatConfirm)
 	}
 
 	// Device-facing monitoring ingest. Separate group so a scoped dmon_ key

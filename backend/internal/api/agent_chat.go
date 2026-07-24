@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
@@ -20,6 +21,9 @@ const agentChatSlowTestDuration = 75 * time.Second
 const agentChatSlowTestHeartbeat = 10 * time.Second
 const agentChatHistoryLimit = 20
 const agentChatToolResultMaxLen = 2000
+const agentChatPendingActionTTL = 5 * time.Minute
+
+const agentChatConfirmDeclineMessage = "user declined this action"
 
 type agentChatRequest struct {
 	Message   string `json:"message"`
@@ -116,6 +120,132 @@ func (h *Handler) agentChatHistory(ctx context.Context, userSub string, projectI
 		out = append(out, llmchat.Message{Role: role, Content: content})
 	}
 	return out
+}
+
+type agentChatConfirmRequest struct {
+	ActionID string `json:"action_id"`
+	Decision string `json:"decision"`
+}
+
+type agentChatPendingRow struct {
+	id               uuid.UUID
+	userSub          string
+	orgID            string
+	projectID        *uuid.UUID
+	envID            *uuid.UUID
+	toolName         string
+	argsJSON         string
+	toolCallID       string
+	messagesSnapshot []llmchat.Message
+	toolCallCount    int
+	writeCallCount   int
+	status           string
+	expiresAt        time.Time
+}
+
+func (h *Handler) agentChatInsertPendingAction(ctx context.Context, userSub, orgID string, projectID, envID *uuid.UUID, pending *agentchat.PendingWrite) (uuid.UUID, error) {
+	snapshot, err := json.Marshal(pending.Messages)
+	if err != nil {
+		return uuid.Nil, fmt.Errorf("marshal messages snapshot: %w", err)
+	}
+	args := strings.TrimSpace(pending.ArgsJSON)
+	if args == "" {
+		args = "{}"
+	}
+
+	var orgArg any
+	if orgID != "" {
+		orgArg = orgID
+	}
+
+	var actionID uuid.UUID
+	err = h.pool.QueryRow(ctx,
+		`INSERT INTO agent_chat_pending_actions
+			(user_sub, org_id, project_id, env_id, tool_name, args_json, tool_call_id,
+			 messages_snapshot, tool_call_count, write_call_count, status, expires_at)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'pending', $11)
+		 RETURNING id`,
+		userSub, orgArg, projectID, envID, pending.ToolName, args, pending.ToolCallID,
+		snapshot, pending.ToolCallCount, pending.WriteCallCount, time.Now().Add(agentChatPendingActionTTL),
+	).Scan(&actionID)
+	if err != nil {
+		return uuid.Nil, err
+	}
+	return actionID, nil
+}
+
+func (h *Handler) agentChatLoadPendingAction(ctx context.Context, actionID uuid.UUID) (*agentChatPendingRow, error) {
+	var row agentChatPendingRow
+	var orgID *string
+	var snapshotRaw []byte
+	err := h.pool.QueryRow(ctx,
+		`SELECT id, user_sub, org_id, project_id, env_id, tool_name, args_json, tool_call_id,
+		        messages_snapshot, tool_call_count, write_call_count, status, expires_at
+		   FROM agent_chat_pending_actions WHERE id = $1`,
+		actionID,
+	).Scan(&row.id, &row.userSub, &orgID, &row.projectID, &row.envID, &row.toolName, &row.argsJSON,
+		&row.toolCallID, &snapshotRaw, &row.toolCallCount, &row.writeCallCount, &row.status, &row.expiresAt)
+	if err != nil {
+		return nil, err
+	}
+	if orgID != nil {
+		row.orgID = *orgID
+	}
+	if err := json.Unmarshal(snapshotRaw, &row.messagesSnapshot); err != nil {
+		return nil, fmt.Errorf("unmarshal messages snapshot: %w", err)
+	}
+	return &row, nil
+}
+
+func (h *Handler) agentChatConsumePendingAction(ctx context.Context, actionID uuid.UUID, newStatus string) (bool, error) {
+	tag, err := h.pool.Exec(ctx,
+		`UPDATE agent_chat_pending_actions SET status = $1 WHERE id = $2 AND status = 'pending'`,
+		newStatus, actionID,
+	)
+	if err != nil {
+		return false, err
+	}
+	return tag.RowsAffected() > 0, nil
+}
+
+func agentChatConfirmSummary(toolName, argsJSON string) string {
+	args := map[string]any{}
+	if strings.TrimSpace(argsJSON) != "" {
+		_ = json.Unmarshal([]byte(argsJSON), &args)
+	}
+	appName, _ := args["appName"].(string)
+	key, _ := args["key"].(string)
+
+	switch toolName {
+	case "restartApp":
+		return fmt.Sprintf("Restart app %s", appName)
+	case "rollbackApp":
+		return fmt.Sprintf("Roll back app %s to its previous version", appName)
+	case "rollbackDeployment":
+		return "Roll back the deployment"
+	case "promoteDeployment":
+		return "Promote the deployment"
+	case "triggerBuild":
+		return fmt.Sprintf("Trigger a new build for app %s", appName)
+	case "cancelBuild":
+		return "Cancel the build"
+	case "deployTrigger":
+		return fmt.Sprintf("Trigger a deploy for app %s", appName)
+	case "retryOperation":
+		return "Retry the operation"
+	case "setEnvVar":
+		return fmt.Sprintf("Set env var %s on app %s", key, appName)
+	case "deleteEnvVar":
+		return fmt.Sprintf("Delete env var %s on app %s", key, appName)
+	case "updateAppImage":
+		return fmt.Sprintf("Update the image for app %s", appName)
+	case "updateAppProfile":
+		return fmt.Sprintf("Update the resource profile for app %s", appName)
+	case "updateAppStorage":
+		return fmt.Sprintf("Update storage for app %s", appName)
+	default:
+		return fmt.Sprintf("Run %s", toolName)
+	}
 }
 
 func agentChatSystemPrompt(req agentChatRequest) string {
@@ -236,7 +366,7 @@ func (h *Handler) AgentChat(c *gin.Context) {
 		},
 	}
 
-	assistantText, toolLog, err := agentchat.RunTurn(ctx, h.agentChatLLM, h.agentChatTools, bearer, systemPrompt, history, message, emit)
+	assistantText, toolLog, pending, err := agentchat.RunTurn(ctx, h.agentChatLLM, h.agentChatTools, bearer, systemPrompt, history, message, emit)
 	if err != nil {
 		writeSSEEvent(c, flusher, "error", fmt.Sprintf(`{"code":"upstream","message":%q}`, "agent could not complete this turn, please try again"))
 		writeSSEEvent(c, flusher, "done", `{"ok":false}`)
@@ -247,8 +377,185 @@ func (h *Handler) AgentChat(c *gin.Context) {
 		toolName := t.Name
 		h.agentChatInsertMessage(ctx, userSub, orgID, projectID, envID, "tool", truncateForTranscript(t.Result, agentChatToolResultMaxLen), &toolName)
 	}
+
+	if pending != nil {
+		h.agentChatEmitConfirmRequest(c, flusher, ctx, userSub, orgID, projectID, envID, pending)
+		return
+	}
+
 	if assistantText != "" {
 		h.agentChatInsertMessage(ctx, userSub, orgID, projectID, envID, "assistant", assistantText, nil)
+	}
+
+	writeSSEEvent(c, flusher, "done", `{"ok":true}`)
+}
+
+func (h *Handler) agentChatEmitConfirmRequest(c *gin.Context, flusher http.Flusher, ctx context.Context, userSub, orgID string, projectID, envID *uuid.UUID, pending *agentchat.PendingWrite) {
+	actionID, err := h.agentChatInsertPendingAction(ctx, userSub, orgID, projectID, envID, pending)
+	if err != nil {
+		log.Printf("agent-chat: failed to persist pending action: %v", err)
+		writeSSEEvent(c, flusher, "error", `{"code":"upstream","message":"agent could not prepare this action for confirmation, please try again"}`)
+		writeSSEEvent(c, flusher, "done", `{"ok":false}`)
+		return
+	}
+
+	summary := agentChatConfirmSummary(pending.ToolName, pending.ArgsJSON)
+	payload, _ := json.Marshal(map[string]any{
+		"action_id": actionID,
+		"tool_name": pending.ToolName,
+		"args":      json.RawMessage(nonEmptyJSON(pending.ArgsJSON)),
+		"summary":   summary,
+	})
+	h.agentChatInsertMessage(ctx, userSub, orgID, projectID, envID, "confirm_request", summary, &pending.ToolName)
+
+	writeSSEEvent(c, flusher, "confirm_request", string(payload))
+	writeSSEEvent(c, flusher, "done", `{"ok":true,"awaiting_confirm":true}`)
+}
+
+func nonEmptyJSON(s string) string {
+	if strings.TrimSpace(s) == "" {
+		return "{}"
+	}
+	return s
+}
+
+// @ID          agentChatConfirm
+// @Summary     Approve or reject a pending agent write action
+// @Description Resumes a chat turn that interrupted on a write-tool call (see the confirm_request SSE event from POST /agent/chat). On approve, executes the tool for real under this request's own bearer (RBAC re-checked by the self-proxy), appends the result, and continues the ReAct loop to a final answer — which may itself interrupt again on a further write call. On reject, appends a decline notice and continues without executing anything. Streams Server-Sent Events like /agent/chat; an error event with a code (not_found/forbidden/expired/conflict) is emitted instead of an HTTP error status once the stream has started.
+// @Tags        agent
+// @Accept      json
+// @Produce     text/event-stream
+// @Security    BearerAuth
+// @Param       body body     agentChatConfirmRequest true "Confirm decision"
+// @Success     200  {string} string "text/event-stream"
+// @Failure     400  {object} map[string]string
+// @Failure     401  {object} map[string]string
+// @Router      /agent/chat/confirm [post]
+func (h *Handler) AgentChatConfirm(c *gin.Context) {
+	claims, ok := auth.GetClaims(c)
+	if !ok {
+		respondUnauthorized(c)
+		return
+	}
+
+	var req agentChatConfirmRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		respondError(c, http.StatusBadRequest, err.Error())
+		return
+	}
+	actionID, err := uuid.Parse(strings.TrimSpace(req.ActionID))
+	if err != nil {
+		respondError(c, http.StatusBadRequest, "action_id must be a valid UUID")
+		return
+	}
+	decision := strings.TrimSpace(req.Decision)
+	if decision != "approve" && decision != "reject" {
+		respondError(c, http.StatusBadRequest, "decision must be \"approve\" or \"reject\"")
+		return
+	}
+
+	flusher, ok := c.Writer.(http.Flusher)
+	if !ok {
+		respondError(c, http.StatusInternalServerError, "streaming unsupported")
+		return
+	}
+
+	c.Header("Content-Type", "text/event-stream")
+	c.Header("Cache-Control", "no-cache")
+	c.Header("Connection", "keep-alive")
+	c.Header("X-Accel-Buffering", "no")
+	c.Status(http.StatusOK)
+	flusher.Flush()
+
+	ctx := c.Request.Context()
+	userSub := claims.UserID.String()
+
+	row, err := h.agentChatLoadPendingAction(ctx, actionID)
+	if err != nil {
+		writeSSEEvent(c, flusher, "error", `{"code":"not_found","message":"this action was not found"}`)
+		writeSSEEvent(c, flusher, "done", `{"ok":false}`)
+		return
+	}
+	if row.userSub != userSub {
+		writeSSEEvent(c, flusher, "error", `{"code":"forbidden","message":"this action does not belong to you"}`)
+		writeSSEEvent(c, flusher, "done", `{"ok":false}`)
+		return
+	}
+	if row.status != "pending" {
+		writeSSEEvent(c, flusher, "error", `{"code":"conflict","message":"this action was already confirmed or rejected"}`)
+		writeSSEEvent(c, flusher, "done", `{"ok":false}`)
+		return
+	}
+	if time.Now().After(row.expiresAt) {
+		_, _ = h.agentChatConsumePendingAction(ctx, actionID, "expired")
+		writeSSEEvent(c, flusher, "error", `{"code":"expired","message":"this action has expired, please ask again"}`)
+		writeSSEEvent(c, flusher, "done", `{"ok":false}`)
+		return
+	}
+
+	newStatus := "rejected"
+	if decision == "approve" {
+		newStatus = "approved"
+	}
+	consumed, err := h.agentChatConsumePendingAction(ctx, actionID, newStatus)
+	if err != nil {
+		writeSSEEvent(c, flusher, "error", `{"code":"upstream","message":"could not record your decision, please try again"}`)
+		writeSSEEvent(c, flusher, "done", `{"ok":false}`)
+		return
+	}
+	if !consumed {
+		writeSSEEvent(c, flusher, "error", `{"code":"conflict","message":"this action was already confirmed or rejected"}`)
+		writeSSEEvent(c, flusher, "done", `{"ok":false}`)
+		return
+	}
+
+	h.agentChatInsertMessage(ctx, userSub, row.orgID, row.projectID, row.envID, "confirm_result", decision, &row.toolName)
+
+	messages := append([]llmchat.Message{}, row.messagesSnapshot...)
+	toolCallCount := row.toolCallCount
+	writeCallCount := row.writeCallCount
+
+	bearer := c.GetHeader("Authorization")
+
+	if decision == "approve" {
+		text, _ := h.agentChatTools.Execute(ctx, bearer, row.toolName, row.argsJSON)
+		toolName := row.toolName
+		h.agentChatInsertMessage(ctx, userSub, row.orgID, row.projectID, row.envID, "tool", truncateForTranscript(text, agentChatToolResultMaxLen), &toolName)
+		messages = append(messages, llmchat.Message{Role: "tool", ToolCallID: row.toolCallID, Content: text})
+		toolCallCount++
+		writeCallCount++
+	} else {
+		messages = append(messages, llmchat.Message{Role: "tool", ToolCallID: row.toolCallID, Content: agentChatConfirmDeclineMessage})
+	}
+
+	emit := agentchat.Emitter{
+		Token: func(text string) {
+			writeSSEEvent(c, flusher, "token", text)
+		},
+		ToolCall: func(name string) {
+			writeSSEEvent(c, flusher, "tool_call", fmt.Sprintf(`{"name":%q}`, name))
+		},
+	}
+
+	assistantText, toolLog, nextPending, err := agentchat.ResumeTurn(ctx, h.agentChatLLM, h.agentChatTools, bearer, messages, toolCallCount, writeCallCount, emit)
+	if err != nil {
+		writeSSEEvent(c, flusher, "error", `{"code":"upstream","message":"agent could not complete this turn, please try again"}`)
+		writeSSEEvent(c, flusher, "done", `{"ok":false}`)
+		return
+	}
+
+	for _, t := range toolLog {
+		toolName := t.Name
+		h.agentChatInsertMessage(ctx, userSub, row.orgID, row.projectID, row.envID, "tool", truncateForTranscript(t.Result, agentChatToolResultMaxLen), &toolName)
+	}
+
+	if nextPending != nil {
+		h.agentChatEmitConfirmRequest(c, flusher, ctx, userSub, row.orgID, row.projectID, row.envID, nextPending)
+		return
+	}
+
+	if assistantText != "" {
+		h.agentChatInsertMessage(ctx, userSub, row.orgID, row.projectID, row.envID, "assistant", assistantText, nil)
 	}
 
 	writeSSEEvent(c, flusher, "done", `{"ok":true}`)
