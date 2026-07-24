@@ -54,6 +54,11 @@ const buildFailNoDockerfile = "no_dockerfile"
 // build/buildx step (a bad Dockerfile, missing base image, failed RUN, etc).
 const buildFailDockerfileBuild = "dockerfile_build_failed"
 
+// buildFailGeneric marks a failure that matched no specific signature but
+// still produced an ERROR line in the Jenkins console; the detail carries
+// that line so the user sees the real cause instead of a bare result code.
+const buildFailGeneric = "build_failed"
+
 // classifyFailure scans a completed Jenkins build's full console text for
 // known failure signatures and returns a stable code plus a one-line detail
 // pulled from the matching console line. Returns an empty code when nothing
@@ -77,6 +82,16 @@ func classifyFailure(console string) (code string, detail string) {
 		if strings.Contains(line, "buildx") && strings.Contains(line, "exit code") && !strings.Contains(line, "exit code 0") {
 			return buildFailDockerfileBuild, line
 		}
+	}
+	lastError := ""
+	for _, raw := range lines {
+		line := stripLogTimestamp(strings.TrimSpace(raw))
+		if strings.HasPrefix(line, "ERROR: ") {
+			lastError = strings.TrimPrefix(line, "ERROR: ")
+		}
+	}
+	if lastError != "" {
+		return buildFailGeneric, lastError
 	}
 	return "", ""
 }
