@@ -24,6 +24,9 @@ func TestDBBackupPresignerDisabled(t *testing.T) {
 			if _, err := p.PresignGet(context.Background(), "dumps/x/y/z.dump", "z.dump", time.Minute); err == nil {
 				t.Fatal("expected error from disabled presigner")
 			}
+			if err := p.PutObject(context.Background(), "volexports/x/y/z.tar.gz", strings.NewReader("x"), 1, "application/gzip"); err == nil {
+				t.Fatal("expected error from disabled presigner PutObject")
+			}
 		})
 	}
 }

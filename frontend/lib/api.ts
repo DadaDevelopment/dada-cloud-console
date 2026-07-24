@@ -86,7 +86,7 @@ import type {
 
 // Empty string → relative URLs → requests go through the ingress proxy.
 // Override with NEXT_PUBLIC_API_URL at build time only for non-prod targets.
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? "";
+export const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? "";
 
 type TokenGetter = () => Promise<string | null>;
 let _tokenGetter: TokenGetter | null = null;

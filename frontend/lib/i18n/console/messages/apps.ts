@@ -419,6 +419,14 @@ export const apps: Messages = {
     ru: "Класс хранилища нельзя изменить после создания. Размер только увеличивается. Изменение вызывает передеплой (перезапуск подов).",
     en: "Storage class is fixed after creation. Size can only grow. Changes trigger a redeploy (pod restart).",
   },
+  "apps.storage.export.button": { ru: "Скачать содержимое волюма", en: "Export volume" },
+  "apps.storage.export.busy": {
+    ru: "Готовим архив... это может занять несколько минут",
+    en: "Preparing archive... this may take a few minutes",
+  },
+  "apps.storage.export.ready": { ru: "Архив готов", en: "Archive ready" },
+  "apps.storage.export.link": { ru: "Скачать архив", en: "Download archive" },
+  "apps.storage.export.error": { ru: "Не удалось экспортировать том", en: "Failed to export volume" },
   "apps.resources.title": { ru: "Ресурсы", en: "Resources" },
   "apps.resources.subtitle": {
     ru: "Размер CPU/RAM для этого приложения. Изменение вызывает передеплой (перезапуск подов).",

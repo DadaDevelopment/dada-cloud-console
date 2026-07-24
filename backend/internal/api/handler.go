@@ -96,6 +96,11 @@ type Handler struct {
 	// unconfigured (upload handler returns 503).
 	sourceUploader cloudtask.SourceUploader
 
+	// podTarExporter execs a live tar.gz of an app's PVC directory out of a
+	// running pod (ExportAppVolume). Never nil: off-cluster it is disabled
+	// (Enabled() == false) and the export handler returns 503.
+	podTarExporter cloudtask.PodTarExporter
+
 	// billingPlans is the full plan catalog loaded once at startup from the
 	// embedded plans.yaml. Always populated (the embedded file is compiled in);
 	// handlers degrade gracefully if somehow empty.
@@ -228,6 +233,7 @@ func NewHandler(pool *pgxpool.Pool, cfg *config.Config) *Handler {
 		cfg.SourceUploadS3Endpoint, cfg.SourceUploadS3Bucket, cfg.SourceUploadS3Region,
 		cfg.SourceUploadS3AccessKey, cfg.SourceUploadS3SecretKey, cfg.SourceUploadS3Insecure,
 	)
+	h.podTarExporter = cloudtask.NewPodTarExporter()
 
 	plans, err := billing.LoadPlans("")
 	if err != nil {

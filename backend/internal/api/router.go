@@ -322,6 +322,7 @@ func SetupRouter(pool *pgxpool.Pool, cfg *config.Config) *gin.Engine {
 		api.GET("/projects/:projectId/environments/:envId/apps/:appName/state", h.GetAppState)
 		api.GET("/projects/:projectId/environments/:envId/apps/:appName/logs", h.GetAppLogs)
 		api.GET("/projects/:projectId/environments/:envId/apps/:appName/metrics", h.GetAppMetrics)
+		api.POST("/projects/:projectId/environments/:envId/apps/:appName/volume/export", h.ExportAppVolume)
 
 		// Deploy-hook tokens (revocable bearer credential for external CI --
 		// see the token-authenticated /api/v1/deploy* routes registered outside

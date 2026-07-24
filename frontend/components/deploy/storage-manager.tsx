@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useState } from "react";
-import { appsApi } from "@/lib/api";
+import { appsApi, getToken, API_BASE_URL } from "@/lib/api";
 import type { AppVolume } from "@/lib/types";
 import { useT } from "@/lib/i18n/console/context";
 
@@ -39,6 +39,9 @@ export function StorageManager({ projectId, envId, appName, canEdit }: Props) {
   const [storageClass, setStorageClass] = useState(STORAGE_CLASSES[0].value);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
+  const [exportBusy, setExportBusy] = useState(false);
+  const [exportError, setExportError] = useState<string | null>(null);
+  const [exportResult, setExportResult] = useState<{ url: string; filename: string } | null>(null);
 
   useEffect(() => {
     if (!envId) return;
@@ -72,6 +75,37 @@ export function StorageManager({ projectId, envId, appName, canEdit }: Props) {
       setMsg({ kind: "err", text: e instanceof Error ? e.message : t("apps.storage.error") });
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function exportVolume() {
+    setExportBusy(true);
+    setExportError(null);
+    setExportResult(null);
+    try {
+      const token = await getToken();
+      const res = await fetch(
+        `${API_BASE_URL}/api/v1/projects/${projectId}/environments/${envId}/apps/${appName}/volume/export`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          },
+        }
+      );
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(typeof data?.error === "string" ? data.error : t("apps.storage.export.error"));
+      }
+      const url = data.url as string;
+      const filename = (data.filename as string) ?? "volume.tar.gz";
+      setExportResult({ url, filename });
+      window.location.href = url;
+    } catch (e) {
+      setExportError(e instanceof Error ? e.message : t("apps.storage.export.error"));
+    } finally {
+      setExportBusy(false);
     }
   }
 
@@ -154,6 +188,38 @@ export function StorageManager({ projectId, envId, appName, canEdit }: Props) {
       >
         {current ? t("apps.storage.update") : t("apps.storage.attach")}
       </button>
+
+      {current && (
+        <div className="mt-6 border-t border-gray-200 dark:border-gray-800 pt-5">
+          <button
+            onClick={exportVolume}
+            disabled={exportBusy}
+            className="inline-flex items-center gap-2 rounded-lg border border-gray-300 dark:border-gray-700 px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-50"
+          >
+            {exportBusy && (
+              <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-gray-400 border-t-transparent" />
+            )}
+            {exportBusy ? t("apps.storage.export.busy") : t("apps.storage.export.button")}
+          </button>
+
+          {exportError && (
+            <p className="mt-3 text-sm text-red-600 dark:text-red-400">{exportError}</p>
+          )}
+
+          {exportResult && (
+            <p className="mt-3 text-sm text-green-600 dark:text-green-400">
+              {t("apps.storage.export.ready")}{" "}
+              <a
+                href={exportResult.url}
+                download={exportResult.filename}
+                className="font-medium underline hover:no-underline"
+              >
+                {t("apps.storage.export.link")}
+              </a>
+            </p>
+          )}
+        </div>
+      )}
     </div>
   );
 }

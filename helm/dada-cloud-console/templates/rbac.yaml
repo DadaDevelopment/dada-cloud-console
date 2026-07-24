@@ -37,6 +37,12 @@ rules:
     resources:
       - pods/log
     verbs: ["get"]
+  # Volume export execs "tar czf" inside a running app pod to stream its PVC
+  # directory out as a tar.gz, without restarting or mutating the pod.
+  - apiGroups: [""]
+    resources:
+      - pods/exec
+    verbs: ["create"]
   # Delete-impact scan lists app-owned Ingresses and cert-manager Certificates so
   # the blast-radius preview shows raw resources not modelled as platform CRs.
   - apiGroups: ["networking.k8s.io"]

@@ -3,6 +3,7 @@ package cloudtask
 import (
 	"context"
 	"fmt"
+	"io"
 	"net/url"
 	"time"
 
@@ -10,17 +11,26 @@ import (
 	"github.com/minio/minio-go/v7/pkg/credentials"
 )
 
-// DBBackupPresigner mints short-lived presigned GET URLs for logical database
-// dump objects in the Kanister dump bucket, so the browser downloads a backup
-// straight from object storage without the dump bytes transiting the API. When
-// the dump-bucket S3 access is not configured the presigner is disabled
-// (Enabled() == false) and the download handler degrades to a 503.
+// dbBackupPutPartSize is the multipart chunk size used when streaming an
+// object of unknown length (size=-1) into the dump bucket, e.g. a live
+// tar.gz being piped straight from a pod-exec stream.
+const dbBackupPutPartSize = 16 * 1024 * 1024
+
+// DBBackupPresigner mints short-lived presigned GET URLs for objects in the
+// Kanister dump bucket, so the browser downloads a backup straight from
+// object storage without the bytes transiting the API. When the dump-bucket
+// S3 access is not configured the presigner is disabled (Enabled() == false)
+// and the download handler degrades to a 503.
 //
 // PresignGet returns a URL that downloads objectKey as an attachment named
-// downloadFilename, valid for ttl.
+// downloadFilename, valid for ttl. PutObject streams r (size may be -1 for an
+// unknown-length stream) into objectKey under the same bucket/credentials;
+// used for artifacts the backend itself writes (e.g. volume-export
+// tarballs), not the Kanister dump/ hierarchy.
 type DBBackupPresigner interface {
 	Enabled() bool
 	PresignGet(ctx context.Context, objectKey, downloadFilename string, ttl time.Duration) (string, error)
+	PutObject(ctx context.Context, objectKey string, r io.Reader, size int64, contentType string) error
 }
 
 // minioDBBackupPresigner presigns against the dump bucket with static keys.
@@ -61,6 +71,17 @@ func (p *minioDBBackupPresigner) PresignGet(ctx context.Context, objectKey, down
 	return u.String(), nil
 }
 
+func (p *minioDBBackupPresigner) PutObject(ctx context.Context, objectKey string, r io.Reader, size int64, contentType string) error {
+	_, err := p.client.PutObject(ctx, p.bucket, objectKey, r, size, minio.PutObjectOptions{
+		PartSize:    dbBackupPutPartSize,
+		ContentType: contentType,
+	})
+	if err != nil {
+		return fmt.Errorf("put dump-bucket object: %w", err)
+	}
+	return nil
+}
+
 // disabledDBBackupPresigner is returned when the dump-bucket S3 access is not
 // configured; every PresignGet fails identically.
 type disabledDBBackupPresigner struct{ err error }
@@ -72,4 +93,11 @@ func (d disabledDBBackupPresigner) PresignGet(context.Context, string, string, t
 		return "", fmt.Errorf("backup download not configured: %w", d.err)
 	}
 	return "", fmt.Errorf("backup download not configured")
+}
+
+func (d disabledDBBackupPresigner) PutObject(context.Context, string, io.Reader, int64, string) error {
+	if d.err != nil {
+		return fmt.Errorf("backup download not configured: %w", d.err)
+	}
+	return fmt.Errorf("backup download not configured")
 }
