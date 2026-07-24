@@ -206,6 +206,18 @@ export const apps: Messages = {
     ru: "В репозитории нет Dockerfile — добавьте его в корень (подойдёт и имя dockerfile).",
     en: "The repository has no Dockerfile — add one to the repo root (the name dockerfile also works).",
   },
+  "apps.builds.fail.noDockerfile.botLead": {
+    ru: "Пишете бота на Python (pyTelegramBotAPI, aiogram и т.п.)? Такой проект автодетект пока не собирает — положите в корень репозитория готовый Dockerfile:",
+    en: "Building a Python bot (pyTelegramBotAPI, aiogram, etc.)? Autodetect does not cover it yet — drop this ready-made Dockerfile into the repo root:",
+  },
+  "apps.builds.fail.noDockerfile.botCmdNote": {
+    ru: "Замените main.py на имя вашего входного файла. Бот без HTTP-порта? Включите worker-режим в настройках приложения.",
+    en: "Replace main.py with your entrypoint file name. Bot without an HTTP port? Enable worker mode in the app settings.",
+  },
+  "apps.builds.fail.noDockerfile.botGuide": {
+    ru: "Пошаговый гайд деплоя бота",
+    en: "Step-by-step bot deploy guide",
+  },
 
   "apps.compose.crumb": { ru: "compose", en: "compose" },
   "apps.compose.heading.suffix": { ru: "/ compose", en: "/ compose" },

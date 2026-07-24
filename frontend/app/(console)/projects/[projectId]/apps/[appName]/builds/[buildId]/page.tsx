@@ -12,6 +12,13 @@ import { BuildStatusBadge, isBuildActive } from "@/components/deploy/build-statu
 import { BuildLogViewer } from "@/components/deploy/build-log-viewer";
 import { useT } from "@/lib/i18n/console/context";
 
+const PYTHON_BOT_DOCKERFILE = `FROM python:3.12-slim
+WORKDIR /app
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+COPY . .
+CMD ["python", "main.py"]`;
+
 export default function BuildDetailPage() {
   const params = useParams<{ projectId: string; appName: string; buildId: string }>();
   const { projectId, appName, buildId } = params;
@@ -122,7 +129,22 @@ export default function BuildDetailPage() {
             <div className="mb-4 rounded-lg border border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-950/40 px-4 py-3 text-sm text-red-700 dark:text-red-300">
               <p className="font-medium">{t("apps.builds.fail.heading")}</p>
               {build.fail_reason === "no_dockerfile" ? (
-                <p className="mt-1">{t("apps.builds.fail.noDockerfile.hint")}</p>
+                <div className="mt-1 space-y-2">
+                  <p>{t("apps.builds.fail.noDockerfile.hint")}</p>
+                  <p>{t("apps.builds.fail.noDockerfile.botLead")}</p>
+                  <pre className="overflow-x-auto rounded-md bg-red-100 dark:bg-red-900/40 px-3 py-2 font-mono text-xs">{PYTHON_BOT_DOCKERFILE}</pre>
+                  <p>
+                    {t("apps.builds.fail.noDockerfile.botCmdNote")}{" "}
+                    <a
+                      href="https://cloud.dada-tuda.ru/hosting-telegram-bot?utm_source=console_build_fail"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="font-medium underline underline-offset-2"
+                    >
+                      {t("apps.builds.fail.noDockerfile.botGuide")}
+                    </a>
+                  </p>
+                </div>
               ) : build.error_message ? (
                 <p className="mt-1 whitespace-pre-wrap break-words font-mono text-xs">{build.error_message}</p>
               ) : null}
