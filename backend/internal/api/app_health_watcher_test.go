@@ -86,15 +86,3 @@ func TestDetectPodAlertPendingPullNotYetBackoffIgnored(t *testing.T) {
 		t.Fatalf("expected ContainerCreating (normal transient state) to not alert")
 	}
 }
-
-func TestAppHealthAlertDedupKey(t *testing.T) {
-	a := appHealthAlert{Namespace: "acme-prod", AppName: "web"}
-	b := appHealthAlert{Namespace: "acme-prod", AppName: "web", PodName: "different-pod"}
-	if a.dedupKey() != b.dedupKey() {
-		t.Fatalf("expected same namespace/app to dedup regardless of pod name: %q vs %q", a.dedupKey(), b.dedupKey())
-	}
-	c := appHealthAlert{Namespace: "acme-prod", AppName: "api"}
-	if a.dedupKey() == c.dedupKey() {
-		t.Fatalf("expected different app names to have distinct dedup keys")
-	}
-}

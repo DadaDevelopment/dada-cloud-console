@@ -31,12 +31,14 @@ func (h *Handler) StartBackupReconciler(ctx context.Context) {
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				h.reconcileBackups(ctx)
-				h.reconcileRestores(ctx)
-				h.expireBackups(ctx)
-				if h.cfg.DBBackupScheduleEnabled {
-					h.runScheduledBackups(ctx)
-				}
+				runWithAdvisoryLock(ctx, h.pool, lockKeyBackupReconcile, "backup-reconcile", func(ctx context.Context) {
+					h.reconcileBackups(ctx)
+					h.reconcileRestores(ctx)
+					h.expireBackups(ctx)
+					if h.cfg.DBBackupScheduleEnabled {
+						h.runScheduledBackups(ctx)
+					}
+				})
 			}
 		}
 	}()

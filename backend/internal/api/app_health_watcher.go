@@ -5,11 +5,11 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"sync"
 	"time"
 
 	"github.com/dada-tuda/console/backend/internal/notify"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgxpool"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
@@ -48,20 +48,13 @@ type appHealthAlert struct {
 	Reason    string
 }
 
-// dedupKey identifies one app for the 24h cooldown map; alerts for different
-// containers of the same app collapse to a single email.
-func (a appHealthAlert) dedupKey() string {
-	return a.Namespace + "/" + a.AppName
-}
-
 // appHealthWatcher polls user-project namespaces for pods stuck in a bad
-// state and emails the project owner once per app per cooldown window.
+// state and emails the project owner once per app per cooldown window. The
+// cooldown lives in the app_health_alerts table (not in memory) so it holds
+// across pod restarts and across replicas.
 type appHealthWatcher struct {
 	clientset kubernetes.Interface
 	h         *Handler
-
-	mu       sync.Mutex
-	lastSent map[string]time.Time
 }
 
 // newAppHealthClientset mirrors the rest.InClusterConfig() +
@@ -93,9 +86,9 @@ func (h *Handler) StartAppHealthWatcher(ctx context.Context) {
 		log.Printf("app-health: no in-cluster client, watcher disabled")
 		return
 	}
-	w := &appHealthWatcher{clientset: clientset, h: h, lastSent: map[string]time.Time{}}
+	w := &appHealthWatcher{clientset: clientset, h: h}
 	go func() {
-		w.tick(ctx)
+		runWithAdvisoryLock(ctx, h.pool, lockKeyAppHealthWatch, "app-health", w.tick)
 		t := time.NewTicker(appHealthWatchInterval)
 		defer t.Stop()
 		for {
@@ -103,7 +96,7 @@ func (h *Handler) StartAppHealthWatcher(ctx context.Context) {
 			case <-ctx.Done():
 				return
 			case <-t.C:
-				w.tick(ctx)
+				runWithAdvisoryLock(ctx, h.pool, lockKeyAppHealthWatch, "app-health", w.tick)
 			}
 		}
 	}()
@@ -227,21 +220,35 @@ func detectPodAlert(pod *corev1.Pod) (appHealthAlert, bool) {
 	return appHealthAlert{}, false
 }
 
-// maybeNotify sends the owner alert for one detected bad-state app, gated by
-// the per-app 24h cooldown. The cooldown timestamp is set before the send
-// attempt so a slow/failing SMTP relay cannot cause a retry storm on the next
-// tick; a genuine second crash within the window is deliberately not
-// re-alerted (P1-2b spec: at most one email per app per 24h).
-func (w *appHealthWatcher) maybeNotify(ctx context.Context, projectID uuid.UUID, alert appHealthAlert) {
-	key := alert.dedupKey()
+// claimAppHealthAlertSlot atomically claims the right to send one alert for
+// (namespace, app) by upserting app_health_alerts, succeeding only when no
+// send is recorded within cooldown. The conditional upsert makes the claim
+// race-free across replicas: of two concurrent claims, exactly one affects a
+// row. Alerts for different containers of the same app collapse to the same
+// (namespace, app_name) key and so to a single email.
+func claimAppHealthAlertSlot(ctx context.Context, pool *pgxpool.Pool, namespace, appName string, cooldown time.Duration) bool {
+	ct, err := pool.Exec(ctx,
+		`INSERT INTO app_health_alerts (namespace, app_name, last_sent_at)
+		 VALUES ($1, $2, now())
+		 ON CONFLICT (namespace, app_name) DO UPDATE SET last_sent_at = now()
+		 WHERE app_health_alerts.last_sent_at <= now() - make_interval(secs => $3)`,
+		namespace, appName, cooldown.Seconds())
+	if err != nil {
+		log.Printf("app-health: cooldown claim for %s/%s failed: %v", namespace, appName, err)
+		return false
+	}
+	return ct.RowsAffected() > 0
+}
 
-	w.mu.Lock()
-	if last, ok := w.lastSent[key]; ok && time.Since(last) < appHealthAlertCooldown {
-		w.mu.Unlock()
+// maybeNotify sends the owner alert for one detected bad-state app, gated by
+// the per-app 24h cooldown persisted in app_health_alerts. The cooldown is
+// claimed before the send attempt so a slow/failing SMTP relay cannot cause a
+// retry storm on the next tick; a genuine second crash within the window is
+// deliberately not re-alerted (P1-2b spec: at most one email per app per 24h).
+func (w *appHealthWatcher) maybeNotify(ctx context.Context, projectID uuid.UUID, alert appHealthAlert) {
+	if !claimAppHealthAlertSlot(ctx, w.h.pool, alert.Namespace, alert.AppName, appHealthAlertCooldown) {
 		return
 	}
-	w.lastSent[key] = time.Now()
-	w.mu.Unlock()
 
 	to := w.h.projectOwnerEmail(ctx, projectID)
 	if to == "" {

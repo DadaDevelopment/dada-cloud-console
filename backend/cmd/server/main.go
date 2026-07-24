@@ -127,18 +127,7 @@ func main() {
 			case <-dnsCtx.Done():
 				return
 			case <-ticker.C:
-				if err := api.VerifyPendingDomains(dnsCtx, pool, cfg); err != nil && !errors.Is(err, context.Canceled) {
-					log.Warn().Err(err).Msg("custom-domain DNS verification failed")
-				}
-				if err := api.ReconcilePendingHostnames(dnsCtx, pool, cfg); err != nil && !errors.Is(err, context.Canceled) {
-					log.Warn().Err(err).Msg("custom-domain hostname reconcile failed")
-				}
-				if err := api.PollPendingDelegations(dnsCtx, pool, cfg); err != nil && !errors.Is(err, context.Canceled) {
-					log.Warn().Err(err).Msg("managed-dns delegation poll failed")
-				}
-				if err := api.BackfillMissingDefaultDomains(dnsCtx, pool, cfg); err != nil && !errors.Is(err, context.Canceled) {
-					log.Warn().Err(err).Msg("default-domain backfill failed")
-				}
+				api.RunDomainMaintenanceTick(dnsCtx, pool, cfg)
 			}
 		}
 	}()
