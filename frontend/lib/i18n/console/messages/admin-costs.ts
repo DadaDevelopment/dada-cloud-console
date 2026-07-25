@@ -48,6 +48,24 @@ export const adminCosts: Messages = {
   "adminCosts.hardware.title": { ru: "Состав счёта за железо", en: "Hardware bill breakdown" },
   "adminCosts.hardware.nodeCount": { ru: "узлов: {count}", en: "{count} node(s)" },
 
+  "adminCosts.method.title": { ru: "Откуда берутся цифры", en: "Where the numbers come from" },
+  "adminCosts.method.model": {
+    ru: "Реальный счёт за железо распределяется по клиентам пропорционально измеренной доле ресурсов (OpenCost). Сумма расходов по клиентам плюс нераспределённый остаток равны счёту за железо.",
+    en: "The real hardware bill is distributed across clients in proportion to their measured resource share (OpenCost). Client costs plus the unallocated remainder equal the hardware bill.",
+  },
+  "adminCosts.method.clientsSum": { ru: "Клиенты (распределено)", en: "Clients (allocated)" },
+  "adminCosts.method.unallocated": { ru: "Не распределено / простой", en: "Unallocated / idle" },
+  "adminCosts.method.totalExpenses": { ru: "Итого расходы", en: "Total expenses" },
+  "adminCosts.method.hardware": { ru: "Счёт за железо", en: "Hardware bill" },
+  "adminCosts.method.delta": { ru: "Расхождение", en: "Discrepancy" },
+  "adminCosts.method.reconciled": { ru: "сходится со счётом за железо", en: "reconciles with the hardware bill" },
+  "adminCosts.method.params": {
+    ru: "Сырьё OpenCost (доля ресурсов): {raw} · множитель до счёта за железо: ×{scale}",
+    en: "OpenCost raw (resource share): {raw} · multiplier to hardware bill: ×{scale}",
+  },
+
+  "adminCosts.table.total": { ru: "Итого", en: "Total" },
+
   "adminCosts.lossMakers.title": { ru: "Топ убыточных клиентов", en: "Top loss-makers" },
   "adminCosts.lossMakers.empty": { ru: "Убыточных клиентов нет", en: "No loss-making clients" },
 

@@ -16,6 +16,18 @@ const (
 	overviewServiceAccountLike  = "service-account-%"
 )
 
+// brokenAppSnapshotPredicate is the single source of truth for "an app the
+// platform can PROVE is currently broken": a live k8s workload the status
+// reconciler observes not-ready and re-stamps within the freshness window.
+// Shared by the headline broken COUNT (overviewProjects.Apps.Broken) and the
+// not-ready LIST (overviewNotReadyApps) so the two can never disagree again --
+// they did: the headline derived broken as total-minus-Ready (28) while the
+// honest list applied this predicate (2). Assumes table alias rs.
+const brokenAppSnapshotPredicate = `rs.kind = 'App'
+	AND rs.summary_json->>'live_source' = 'k8s'
+	AND rs.phase NOT IN ('Ready', 'Stopped', 'Orphaned')
+	AND rs.last_synced_at > now() - interval '10 minutes'`
+
 type overviewUsers struct {
 	Total     int `json:"total"`
 	New24h    int `json:"new_24h"`
@@ -26,6 +38,8 @@ type overviewUsers struct {
 
 type overviewApps struct {
 	Total   int            `json:"total"`
+	Ready   int            `json:"ready"`
+	Broken  int            `json:"broken"`
 	ByPhase map[string]int `json:"by_phase"`
 }
 
@@ -221,6 +235,14 @@ func (h *Handler) overviewProjects(ctx context.Context) (overviewProjects, error
 		return out, err
 	}
 
+	out.Apps.Ready = out.Apps.ByPhase["Ready"]
+
+	if err := h.pool.QueryRow(ctx, `
+		SELECT count(*) FROM resource_snapshots rs
+		WHERE `+brokenAppSnapshotPredicate).Scan(&out.Apps.Broken); err != nil {
+		return out, err
+	}
+
 	return out, nil
 }
 
@@ -284,10 +306,7 @@ func (h *Handler) overviewNotReadyApps(ctx context.Context) ([]overviewNotReadyA
 		FROM resource_snapshots rs
 		JOIN projects p     ON p.id = rs.project_id
 		LEFT JOIN users u   ON u.id = p.owner_id
-		WHERE rs.kind = 'App'
-		  AND rs.summary_json->>'live_source' = 'k8s'
-		  AND rs.phase NOT IN ('Ready', 'Stopped', 'Orphaned')
-		  AND rs.last_synced_at > now() - interval '10 minutes'
+		WHERE `+brokenAppSnapshotPredicate+`
 		ORDER BY rs.last_synced_at DESC
 		LIMIT 100`,
 	)
@@ -342,9 +361,10 @@ func (h *Handler) overviewMoney(ctx context.Context) overviewMoney {
 }
 
 // overviewDynamics returns a per-day series for the last `days` days: signups,
-// builds split success/failed, and apps first seen (a proxy for "new app
-// created" — resource_snapshots has no created_at, so the earliest
-// last_synced_at per (project,env,name) stands in for it).
+// builds split success/failed, and apps first seen. "First seen" is the frozen
+// resource_snapshots.first_seen_at (set once at insert, migration 049); it
+// replaced a min(last_synced_at) proxy that collapsed every live app onto the
+// current day, because last_synced_at is re-stamped every ~30s reconcile.
 func (h *Handler) overviewDynamics(ctx context.Context, days int) ([]overviewDayPoint, error) {
 	since := time.Now().AddDate(0, 0, -days+1)
 
@@ -415,14 +435,9 @@ func (h *Handler) overviewDynamics(ctx context.Context, days int) ([]overviewDay
 	}
 
 	appRows, err := h.pool.Query(ctx, `
-		SELECT to_char(first_seen, 'YYYY-MM-DD'), count(*)
-		FROM (
-			SELECT project_id, environment_id, name, min(last_synced_at) AS first_seen
-			FROM resource_snapshots
-			WHERE kind = 'App'
-			GROUP BY project_id, environment_id, name
-		) firsts
-		WHERE first_seen >= $1
+		SELECT to_char(first_seen_at, 'YYYY-MM-DD'), count(*)
+		FROM resource_snapshots
+		WHERE kind = 'App' AND first_seen_at >= $1
 		GROUP BY 1`,
 		since,
 	)

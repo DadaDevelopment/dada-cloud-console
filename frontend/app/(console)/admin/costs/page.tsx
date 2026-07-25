@@ -77,6 +77,15 @@ export default function AdminCostsPage() {
   const clients = useMemo(() => data?.clients ?? [], [data]);
   const currency = data?.currency;
 
+  const recon = useMemo(() => {
+    const clientsSum = (data?.clients ?? []).reduce((s, c) => s + c.cost, 0);
+    const unalloc = data?.unallocated?.total_cost ?? 0;
+    const total = data?.total_cost ?? clientsSum + unalloc;
+    const hardware = data?.hardware_total_cost ?? 0;
+    const delta = total - hardware;
+    return { clientsSum, unalloc, total, hardware, delta, reconciled: Math.abs(delta) < 1 };
+  }, [data]);
+
   const crumb = (
     <Breadcrumb
       items={[
@@ -206,6 +215,45 @@ export default function AdminCostsPage() {
         </Card>
       )}
 
+      {!isLoading && data?.available && (
+        <Card className="mb-6">
+          <CardHeader className="p-4 pb-2"><CardTitle className="text-sm">{t("adminCosts.method.title")}</CardTitle></CardHeader>
+          <CardContent className="p-4 pt-0">
+            <p className="mb-3 text-xs text-gray-500 dark:text-gray-400">{t("adminCosts.method.model")}</p>
+            <div className="space-y-1.5 text-sm sm:max-w-md">
+              <div className="flex items-center justify-between">
+                <span className="text-gray-600 dark:text-gray-300">{t("adminCosts.method.clientsSum")}</span>
+                <span className="font-mono text-xs text-gray-700 dark:text-gray-200">{formatMoney(recon.clientsSum, currency)}</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-gray-600 dark:text-gray-300">+ {t("adminCosts.method.unallocated")}</span>
+                <span className="font-mono text-xs text-gray-700 dark:text-gray-200">{formatMoney(recon.unalloc, currency)}</span>
+              </div>
+              <div className="flex items-center justify-between border-t border-gray-200 dark:border-gray-800 pt-1.5 font-medium">
+                <span className="text-gray-900 dark:text-gray-100">= {t("adminCosts.method.totalExpenses")}</span>
+                <span className="font-mono text-xs text-gray-900 dark:text-gray-100">{formatMoney(recon.total, currency)}</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-gray-600 dark:text-gray-300">{t("adminCosts.method.hardware")}</span>
+                <span className="font-mono text-xs text-gray-700 dark:text-gray-200">{formatMoney(recon.hardware, currency)}</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-gray-600 dark:text-gray-300">{t("adminCosts.method.delta")}</span>
+                <span className={`font-mono text-xs ${recon.reconciled ? "text-green-600 dark:text-green-400" : "text-amber-600 dark:text-amber-400"}`}>
+                  {formatMoney(recon.delta, currency)}{recon.reconciled ? ` · ${t("adminCosts.method.reconciled")}` : ""}
+                </span>
+              </div>
+            </div>
+            <p className="mt-3 text-xs text-gray-400 dark:text-gray-500">
+              {t("adminCosts.method.params", {
+                raw: Math.round(data?.opencost_raw_total ?? 0).toLocaleString("ru-RU"),
+                scale: (data?.scale_factor ?? 0).toFixed(2),
+              })}
+            </p>
+          </CardContent>
+        </Card>
+      )}
+
       <div className="mb-6 grid grid-cols-1 gap-4 lg:grid-cols-3">
         <Card className="lg:col-span-1">
           <CardHeader className="p-4 pb-2"><CardTitle className="text-sm">{t("adminCosts.lossMakers.title")}</CardTitle></CardHeader>
@@ -267,6 +315,9 @@ function CostTree({
   onToggleProject: (key: string) => void;
   t: (key: string, vars?: Record<string, string | number>) => string;
 }) {
+  const totalCost = clients.reduce((s, c) => s + c.cost, 0);
+  const totalRevenue = clients.reduce((s, c) => s + c.revenue, 0);
+  const totalMargin = clients.reduce((s, c) => s + c.margin, 0);
   return (
     <div className="overflow-x-auto">
       <table className="w-full text-sm">
@@ -294,6 +345,14 @@ function CostTree({
             );
           })}
         </tbody>
+        <tfoot>
+          <tr className="border-t-2 border-gray-200 dark:border-gray-700 font-medium">
+            <td className="py-2 text-left text-gray-900 dark:text-gray-100">{t("adminCosts.table.total")}</td>
+            <td className="py-2 text-right font-mono text-xs text-gray-900 dark:text-gray-100">{formatMoney(totalCost, currency)}</td>
+            <td className="py-2 text-right font-mono text-xs text-gray-900 dark:text-gray-100">{formatMoney(totalRevenue, currency)}</td>
+            <td className={`py-2 text-right font-mono text-xs ${marginClass(totalMargin)}`}>{formatMoney(totalMargin, currency)}</td>
+          </tr>
+        </tfoot>
       </table>
     </div>
   );

@@ -45,6 +45,7 @@ export const adminOverview: Messages = {
     en: "Cost data temporarily unavailable (OpenCost).",
   },
   "adminOverview.money.empty": { ru: "Нет данных по затратам", en: "No cost data" },
+  "adminOverview.money.fullBreakdown": { ru: "Откуда берутся цифры →", en: "Where the numbers come from →" },
 
   "adminOverview.notReady.title": { ru: "Что сломано сейчас", en: "What's broken right now" },
   "adminOverview.notReady.subtitle": {

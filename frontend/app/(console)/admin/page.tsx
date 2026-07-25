@@ -1,5 +1,6 @@
 "use client";
 import { useCallback, useEffect, useState } from "react";
+import Link from "next/link";
 import { adminApi } from "@/lib/api";
 import type { AdminOverviewResponse } from "@/lib/types";
 import { Breadcrumb } from "@/components/ui/breadcrumb";
@@ -82,9 +83,9 @@ export default function AdminOverviewPage() {
     );
   }
 
-  const ready = data?.projects.apps.by_phase["Ready"] ?? 0;
+  const ready = data?.projects.apps.ready ?? 0;
   const appsTotal = data?.projects.apps.total ?? 0;
-  const broken = Math.max(0, appsTotal - ready);
+  const broken = data?.projects.apps.broken ?? 0;
   const dates = (data?.dynamics ?? []).map((p) => p.date.slice(5));
 
   const signupsOption: EChartsOption = {
@@ -255,6 +256,12 @@ export default function AdminOverviewPage() {
                     ))}
                   </ul>
                 )}
+                <Link
+                  href="/admin/costs"
+                  className="mt-3 inline-block text-xs font-medium text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300"
+                >
+                  {t("adminOverview.money.fullBreakdown")}
+                </Link>
               </>
             )}
           </CardContent>

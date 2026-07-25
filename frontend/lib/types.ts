@@ -733,6 +733,8 @@ export interface AdminOverviewUsers {
 
 export interface AdminOverviewApps {
   total: number;
+  ready: number;
+  broken: number;
   by_phase: Record<string, number>;
 }
 
