@@ -44,7 +44,17 @@ func main() {
 		log.Fatal().Err(err).Msg("cloning default repo")
 	}
 
-	dbw := worker.NewDBWatcher(pool, cfg)
+	// In-cluster k8s clients, shared by the DB-watcher (MoveApp re-adopts the
+	// cluster-scoped PublicApi onto the target Argo app) and the status
+	// reconciler. Absent outside a cluster (local dev): both consumers degrade
+	// gracefully on a nil handle rather than crash.
+	clients, err := k8s.NewInClusterClients()
+	if err != nil {
+		log.Warn().Err(err).Msg("no in-cluster k8s config: MoveApp domain-handoff + status-reconciler degraded")
+		clients = nil
+	}
+
+	dbw := worker.NewDBWatcher(pool, cfg, clients)
 	gitw := worker.NewGitWatcher(pool, cfg, defaultMgr)
 	reaper := worker.NewReaper(pool, cfg)
 
@@ -60,8 +70,8 @@ func main() {
 	// the console shows real phase/image/replicas instead of git's "Unknown".
 	// Disabled gracefully when there's no in-cluster config (e.g. local dev).
 	if cfg.StatusReconcileEnabled {
-		if clients, err := k8s.NewInClusterClients(); err != nil {
-			log.Warn().Err(err).Msg("status-reconciler disabled: no in-cluster k8s config")
+		if clients == nil {
+			log.Warn().Msg("status-reconciler disabled: no in-cluster k8s config")
 		} else {
 			go worker.NewStatusReconciler(pool, cfg, clients).Start(ctx)
 		}

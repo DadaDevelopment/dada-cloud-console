@@ -16,6 +16,7 @@ import (
 	"github.com/dada-tuda/console/gitops-agent/internal/crypto"
 	"github.com/dada-tuda/console/gitops-agent/internal/db"
 	"github.com/dada-tuda/console/gitops-agent/internal/git"
+	dadak8s "github.com/dada-tuda/console/gitops-agent/internal/k8s"
 	"github.com/dada-tuda/console/gitops-agent/internal/mlflow"
 	"github.com/dada-tuda/console/gitops-agent/internal/renderer"
 	"github.com/google/uuid"
@@ -31,9 +32,10 @@ type DBWatcher struct {
 	cfg      *config.Config
 	managers map[string]*git.Manager // keyed by repoURL
 	mlflow   *mlflow.Client          // nil when MLFLOW_BASE_URL is unset
+	clients  *dadak8s.Clients        // nil when there is no in-cluster config (local dev)
 }
 
-func NewDBWatcher(pool *pgxpool.Pool, cfg *config.Config) *DBWatcher {
+func NewDBWatcher(pool *pgxpool.Pool, cfg *config.Config, clients *dadak8s.Clients) *DBWatcher {
 	defaultMgr := git.New(git.RepoConfig{
 		RepoURL:   cfg.DefaultRepoURL,
 		Branch:    cfg.DefaultBranch,
@@ -47,7 +49,8 @@ func NewDBWatcher(pool *pgxpool.Pool, cfg *config.Config) *DBWatcher {
 		managers: map[string]*git.Manager{
 			cfg.DefaultRepoURL: defaultMgr,
 		},
-		mlflow: mlflow.New(cfg.MLflowBaseURL, cfg.MLflowAuthHeader),
+		mlflow:  mlflow.New(cfg.MLflowBaseURL, cfg.MLflowAuthHeader),
+		clients: clients,
 	}
 }
 

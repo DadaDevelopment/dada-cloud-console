@@ -136,6 +136,22 @@ func (rv *ResourcesValues) RemoveKind(kind string) int {
 	return removed
 }
 
+// NamesOfKind returns the metadata.name of every manifest of the given kind, in
+// document order (empty when none match). MoveApp uses it to enumerate the
+// cluster-scoped resources an app carries — the custom-domain PublicApi — so it
+// can re-adopt each onto the target Argo app before the source folder is pruned,
+// keeping the single shared object from being deleted mid-move.
+func (rv *ResourcesValues) NamesOfKind(kind string) []string {
+	var names []string
+	for i := range rv.Manifests {
+		k, n := manifestKey(&rv.Manifests[i])
+		if k == kind && n != "" {
+			names = append(names, n)
+		}
+	}
+	return names
+}
+
 // Marshal renders the file back to YAML with a top-level "manifests:" key. When
 // the list is empty it emits "manifests: []" so the file is still valid.
 func (rv *ResourcesValues) Marshal() (string, error) {

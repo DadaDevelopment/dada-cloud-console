@@ -13,7 +13,16 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/rs/zerolog/log"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/types"
 )
+
+// argoInstanceLabel is ArgoCD's label-tracking key: its value is the owning
+// Application's name, stamped on every resource that app manages. MoveApp
+// rewrites it on the cluster-scoped PublicApi to hand ownership to the target
+// app before the source is pruned.
+const argoInstanceLabel = "argocd.argoproj.io/instance"
 
 // pgUniqueViolation is the Postgres SQLSTATE for a unique-constraint violation,
 // used by moveApp's snapshot repoint to detect a same-named row already present
@@ -230,6 +239,9 @@ func (w *DBWatcher) doMoveApp(ctx context.Context, op db.Operation) error {
 		return fmt.Errorf("commit target app: %w", err)
 	}
 
+	srcArgoName := renderer.ScopedArgoName(p.AppName, srcEnvName, op.ProjectID.String())
+	w.preAdoptClusterScopedResources(ctx, rv, srcArgoName, argoName)
+
 	srcPaths := []string{
 		renderer.AppGitPath(srcProjectSlug, srcEnvName, p.AppName),
 		renderer.AppHelmValuesGitPath(srcProjectSlug, srcEnvName, p.AppName),
@@ -343,4 +355,56 @@ func (w *DBWatcher) repointMovedAppSnapshots(ctx context.Context, srcProjectID, 
 		return fmt.Errorf("repoint snapshot %s/%s: %w", ref.Kind, ref.Name, err)
 	}
 	return tx.Commit(ctx)
+}
+
+// preAdoptClusterScopedResources hands the app's cluster-scoped resources (the
+// custom-domain PublicApi) to the target Argo app in the window between
+// committing the target render (step 5) and removing the source git folder (step
+// 6).
+//
+// A PublicApi is a single cluster-scoped object keyed by name, so the source and
+// target renders point at the very same live resource. It carries the source
+// app's argocd.argoproj.io/instance label, so removing the source folder makes
+// the source Argo app prune the PublicApi as its own orphan — dropping the live
+// domain to 502 until the target app reconciles and re-creates it (a multi-second
+// gap). Re-stamping the label to the target first makes the source prune skip the
+// object (no longer owned) while the target already claims it: a zero-downtime
+// handoff.
+//
+// Best-effort by design: with no in-cluster client (local dev) or a PublicApi not
+// yet created, it logs and returns — the move still completes, worst case being
+// the pre-fix blip, never a failed move. Assumes ArgoCD label tracking, the
+// method this install uses (the status reconciler reads the same label).
+func (w *DBWatcher) preAdoptClusterScopedResources(ctx context.Context, rv *renderer.ResourcesValues, srcInstance, dstInstance string) {
+	if w.clients == nil || w.clients.Dynamic == nil || rv == nil || srcInstance == dstInstance {
+		return
+	}
+	for _, name := range rv.NamesOfKind("PublicApi") {
+		if err := w.adoptClusterResourceLabel(ctx, pgvr("publicapis"), name, dstInstance); err != nil {
+			log.Warn().Err(err).Str("publicapi", name).Str("instance", dstInstance).
+				Msg("db-watcher: move pre-adopt failed; live domain may blip until target Argo reconciles")
+		}
+	}
+}
+
+// adoptClusterResourceLabel points a cluster-scoped resource's
+// argocd.argoproj.io/instance label at dstInstance so the target Argo app owns
+// it. No-op when the label already matches (idempotent re-drive); a NotFound
+// (object not created yet) surfaces to the caller, which treats every error as
+// best-effort. The patch is a JSON merge patch touching only that one label.
+func (w *DBWatcher) adoptClusterResourceLabel(ctx context.Context, gvr schema.GroupVersionResource, name, dstInstance string) error {
+	live, err := w.clients.Dynamic.Resource(gvr).Get(ctx, name, metav1.GetOptions{})
+	if err != nil {
+		return fmt.Errorf("get %s %q: %w", gvr.Resource, name, err)
+	}
+	if live.GetLabels()[argoInstanceLabel] == dstInstance {
+		return nil
+	}
+	patch := []byte(fmt.Sprintf(`{"metadata":{"labels":{%q:%q}}}`, argoInstanceLabel, dstInstance))
+	if _, err := w.clients.Dynamic.Resource(gvr).Patch(ctx, name, types.MergePatchType, patch, metav1.PatchOptions{}); err != nil {
+		return fmt.Errorf("patch %s %q instance label: %w", gvr.Resource, name, err)
+	}
+	log.Info().Str("publicapi", name).Str("instance", dstInstance).
+		Msg("db-watcher: re-adopted cluster-scoped resource onto target Argo app")
+	return nil
 }
