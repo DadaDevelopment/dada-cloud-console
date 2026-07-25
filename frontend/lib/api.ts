@@ -83,6 +83,7 @@ import type {
   DeployHook,
   DeployHookCreated,
 } from "./types";
+import type { OnboardingStatus } from "./onboarding/types";
 
 // Empty string → relative URLs → requests go through the ingress proxy.
 // Override with NEXT_PUBLIC_API_URL at build time only for non-prod targets.
@@ -241,6 +242,15 @@ export const api = {
 
   delete: <T>(path: string, token?: string) =>
     apiFetch<T>(path, { method: "DELETE", token }),
+
+  onboarding: {
+    status: () => apiFetch<Record<string, string>>("/api/v1/onboarding"),
+    report: (key: string, body: { status: OnboardingStatus; step: number }) =>
+      apiFetch<{ status: string }>(`/api/v1/onboarding/${encodeURIComponent(key)}`, {
+        method: "POST",
+        body,
+      }),
+  },
 };
 
 // Typed API functions
