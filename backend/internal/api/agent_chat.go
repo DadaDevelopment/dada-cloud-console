@@ -23,7 +23,7 @@ const agentChatHistoryLimit = 20
 const agentChatToolResultMaxLen = 2000
 const agentChatPendingActionTTL = 5 * time.Minute
 
-const agentChatConfirmDeclineMessage = "user declined this action"
+const agentChatConfirmDeclineMessage = "The user chose to decline this action in the confirmation dialog. This is the user's own decision, not a permissions problem and not a tool failure. Do not retry the action, do not speculate about access rights or protection. Briefly acknowledge that the action was cancelled at the user's request and ask what they would like to do instead."
 
 type agentChatRequest struct {
 	Message   string `json:"message"`
