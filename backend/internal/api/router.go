@@ -178,6 +178,7 @@ func SetupRouter(pool *pgxpool.Pool, cfg *config.Config) *gin.Engine {
 	// a session. Lives outside the JWT group on purpose.
 	r.GET("/api/v1/git/install/callback", h.GitInstallCallback)
 	r.GET("/api/v1/git/github/oauth/callback", h.GitHubOAuthCallback)
+	r.GET("/api/v1/payments/oauth/callback", h.PaymentsOAuthCallback)
 
 	// DadaAgent cloud-task webhook callback (status/artifacts). Public route on
 	// purpose — it is bearer-gated by a Keycloak JWKS verifier inside the handler
@@ -401,6 +402,10 @@ func SetupRouter(pool *pgxpool.Pool, cfg *config.Config) *gin.Engine {
 		api.PUT("/projects/:projectId/environments/:envId/apps/:appName/env/:key", h.SetEnvVar)
 		api.GET("/projects/:projectId/environments/:envId/apps/:appName/env/:key", h.RevealEnvVar)
 		api.DELETE("/projects/:projectId/environments/:envId/apps/:appName/env/:key", h.DeleteEnvVar)
+
+		api.POST("/projects/:projectId/environments/:envId/apps/:appName/payments/connect", h.PaymentsConnect)
+		api.GET("/projects/:projectId/environments/:envId/apps/:appName/payments", h.PaymentsStatus)
+		api.DELETE("/projects/:projectId/environments/:envId/apps/:appName/payments", h.PaymentsDisconnect)
 
 		// Monitoring write path (PRD-monitoring / ADR-011).
 		// Management (user-authenticated): list + create monitoring resources.

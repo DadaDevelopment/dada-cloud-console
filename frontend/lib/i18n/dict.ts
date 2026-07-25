@@ -194,6 +194,7 @@ export interface Dict {
   streamlitAlt: AltPage;
   vkBotAlt: AltPage;
   uploadDeployAlt: UploadDeployPage;
+  acceptPaymentsAlt: UploadDeployPage;
   migrateVercel: MigrateGuide;
   statusRadar: StatusRadar;
   databases: {
@@ -898,6 +899,36 @@ const ru: Dict = {
       { q: "Это бесплатно?", a: "Да, первое приложение можно держать на бесплатном тарифе без привязки карты." },
     ],
   },
+  acceptPaymentsAlt: {
+    heroTitle: "Принимай оплату в приложении через ЮKassa",
+    heroSubtitle:
+      "Подключите свой магазин ЮKassa к приложению через OAuth прямо из консоли Dada Cloud - без передачи секретных ключей платформе. Деньги идут напрямую на счёт вашего магазина, а вебхуки о платежах приходят прямо в приложение.",
+    stepsTitle: "Как подключить приём платежей",
+    stepsSubtitle: "Четыре шага от задеплоенного приложения до первого платежа",
+    steps: [
+      { num: "01", title: "Задеплойте приложение", desc: "Разверните приложение в Dada Cloud - из git-репозитория или загрузкой архива." },
+      { num: "02", title: "Настройки → Оплата → «Подключить ЮKassa»", desc: "Откройте вкладку Оплата в настройках приложения и нажмите «Подключить ЮKassa»." },
+      { num: "03", title: "Авторизуйте свой магазин", desc: "Вас перенаправит на сайт ЮKassa для входа в ваш магазин (OAuth). Секретный ключ магазина платформе не передаётся." },
+      { num: "04", title: "Получите переменные окружения и код", desc: "Платформа добавит в приложение готовые переменные окружения и пример кода для приёма платежей - подключите вебхук и принимайте оплату." },
+    ],
+    featuresTitle: "Как это устроено",
+    features: [
+      { title: "OAuth, а не секретный ключ", desc: "Авторизация магазина идёт через протокол OAuth ЮKassa - секретный API-ключ вашего магазина платформа не видит и не хранит." },
+      { title: "Деньги - напрямую на счёт вашего магазина", desc: "Платформа не выступает посредником в расчётах: платежи поступают сразу на счёт вашего магазина ЮKassa, а не на промежуточный счёт платформы." },
+      { title: "Нужен собственный магазин ЮKassa", desc: "Для подключения нужен зарегистрированный магазин ЮKassa на ИП, ООО или самозанятого - платформа не создаёт магазин за вас." },
+      { title: "Чеки 54-ФЗ - на стороне вашего магазина", desc: "Фискализацию и отправку чеков покупателю выполняет ЮKassa на основании настроек вашего магазина - это не функция платформы." },
+      { title: "Вебхуки приходят прямо в приложение", desc: "Уведомления о платежах ЮKassa отправляет напрямую на адрес вашего приложения - без промежуточного сервера платформы." },
+      { title: "Готовые переменные окружения", desc: "После подключения магазина платформа добавляет в приложение переменные окружения и пример кода - остаётся принять платёж." },
+    ],
+    faqTitle: "Приём платежей через ЮKassa - частые вопросы",
+    faq: [
+      { q: "Нужно ли передавать платформе секретный ключ магазина?", a: "Нет. Подключение идёт через OAuth ЮKassa: вы авторизуетесь в своём магазине на сайте ЮKassa, а платформа получает доступ по протоколу OAuth и не видит секретный API-ключ магазина." },
+      { q: "Куда поступают деньги от платежей?", a: "Напрямую на счёт вашего магазина ЮKassa. Платформа не является посредником в расчётах и не проводит платежи через свой счёт." },
+      { q: "Кто отвечает за чеки по 54-ФЗ?", a: "Фискализация и чеки - на стороне вашего магазина ЮKassa: она умеет отправлять чеки покупателям согласно настройкам вашего магазина. Платформа в этот процесс не вмешивается." },
+      { q: "У меня нет магазина ЮKassa - что делать?", a: "Заведите магазин на сайте ЮKassa - это можно сделать как ИП, ООО или самозанятый. После регистрации магазина вернитесь в настройки приложения и подключите его через OAuth." },
+      { q: "Сколько это стоит?", a: "Подключение приёма платежей входит в тарифы Dada Cloud - отдельной платы за саму интеграцию нет. Комиссию с платежей берёт ЮKassa по своим тарифам, которые платформа не устанавливает." },
+    ],
+  },
   databases: {
     heroTitle: "Управляемый PostgreSQL",
     heroSubtitle:
@@ -1085,6 +1116,7 @@ const ru: Dict = {
       { label: "Аналог Fly.io", href: "/analog-fly-io" },
       { label: "Деплой из v0 / Lovable / Bolt", href: "/deploy-vibe-coding" },
       { label: "Хостинг Telegram-бота", href: "/hosting-telegram-bot" },
+      { label: "Приём платежей (ЮKassa)", href: "/accept-payments" },
       { label: "Переезд с Vercel", href: "/migrate-vercel" },
       { label: "Доступность Vercel/Railway из России", href: "/status" },
       { label: "Цены", href: "/pricing" },
@@ -1761,6 +1793,36 @@ const en: Dict = {
       { q: "Is it free?", a: "Yes, your first app can run on the free tier, no card required." },
     ],
   },
+  acceptPaymentsAlt: {
+    heroTitle: "Accept payments in your app via YooKassa",
+    heroSubtitle:
+      "Connect your own YooKassa store to your app via OAuth, right from the Dada Cloud console - no secret keys shared with the platform. Money goes straight to your store's account, and payment webhooks arrive directly in your app.",
+    stepsTitle: "How to connect payments",
+    stepsSubtitle: "Four steps from a deployed app to your first payment",
+    steps: [
+      { num: "01", title: "Deploy your app", desc: "Deploy your app on Dada Cloud - from a git repo or by uploading an archive." },
+      { num: "02", title: "Settings -> Payments -> Connect YooKassa", desc: "Open the Payments tab in your app settings and click Connect YooKassa." },
+      { num: "03", title: "Authorize your store", desc: "You'll be redirected to YooKassa to sign in to your store (OAuth). Your store's secret key is never shared with the platform." },
+      { num: "04", title: "Get environment variables and code", desc: "The platform adds ready-made environment variables and a code snippet to your app - wire up the webhook and start accepting payments." },
+    ],
+    featuresTitle: "How it works",
+    features: [
+      { title: "OAuth, not a secret key", desc: "Store authorization uses YooKassa's OAuth protocol - the platform never sees or stores your store's secret API key." },
+      { title: "Money goes straight to your store", desc: "The platform is not a party to the payment - funds land directly in your YooKassa store's account, not in an intermediate platform account." },
+      { title: "You need your own YooKassa store", desc: "Connecting payments requires a registered YooKassa store under a sole proprietor, LLC, or self-employed status - the platform does not create a store for you." },
+      { title: "54-FZ receipts stay with your store", desc: "Fiscal receipts are issued by YooKassa based on your store's own settings - this is not something the platform handles." },
+      { title: "Webhooks go straight to your app", desc: "YooKassa sends payment notifications directly to your app's address, with no platform server in between." },
+      { title: "Ready-made environment variables", desc: "Once the store is connected, the platform adds environment variables and a code snippet to your app - all that's left is to accept a payment." },
+    ],
+    faqTitle: "Accepting payments via YooKassa - FAQ",
+    faq: [
+      { q: "Do I need to share my store's secret key with the platform?", a: "No. Connection happens via YooKassa OAuth: you sign in to your own store on the YooKassa site, and the platform gets access through OAuth without ever seeing your store's secret API key." },
+      { q: "Where does the payment money go?", a: "Directly to your YooKassa store's account. The platform is not a party to the transaction and never routes payments through its own account." },
+      { q: "Who is responsible for 54-FZ receipts?", a: "Fiscal receipts are handled on your store's side by YooKassa, which can send receipts to buyers based on your store's settings. The platform does not get involved in this process." },
+      { q: "I don't have a YooKassa store yet - what do I do?", a: "Register a store on the YooKassa website - available for sole proprietors, LLCs, or self-employed individuals. Once registered, come back to your app settings and connect it via OAuth." },
+      { q: "How much does this cost?", a: "Connecting payment acceptance is included in Dada Cloud plans - there's no separate fee for the integration itself. YooKassa charges its own transaction fees under its own pricing, which the platform does not set." },
+    ],
+  },
   databases: {
     heroTitle: "Managed PostgreSQL",
     heroSubtitle:
@@ -1948,6 +2010,7 @@ const en: Dict = {
       { label: "Fly.io alternative", href: "/analog-fly-io" },
       { label: "Deploy from v0 / Lovable / Bolt", href: "/deploy-vibe-coding" },
       { label: "Telegram bot hosting", href: "/hosting-telegram-bot" },
+      { label: "Accept payments (YooKassa)", href: "/accept-payments" },
       { label: "Migrate from Vercel", href: "/migrate-vercel" },
       { label: "Vercel/Railway status from Russia", href: "/status" },
       { label: "Pricing", href: "/pricing" },

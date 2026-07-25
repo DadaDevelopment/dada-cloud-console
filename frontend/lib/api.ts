@@ -1367,6 +1367,44 @@ export interface AccountSummary {
   balance_rub: number;
 }
 
+export interface PaymentsConnectResponse {
+  authorize_url: string;
+}
+
+export interface PaymentsWebhook {
+  id: string;
+  event: string;
+}
+
+export interface PaymentsConnection {
+  status: string;
+  account_id: string | null;
+  expires_at: string | null;
+  webhooks: PaymentsWebhook[];
+  webhook_note: string | null;
+  env_keys: string[];
+  connected_at: string | null;
+}
+
+export const paymentsApi = {
+  connect: (projectId: string, envId: string, appName: string) =>
+    apiFetch<PaymentsConnectResponse>(
+      `/api/v1/projects/${projectId}/environments/${envId}/apps/${appName}/payments/connect`,
+      { method: "POST" }
+    ),
+
+  get: (projectId: string, envId: string, appName: string) =>
+    apiFetch<PaymentsConnection>(
+      `/api/v1/projects/${projectId}/environments/${envId}/apps/${appName}/payments`
+    ),
+
+  disconnect: (projectId: string, envId: string, appName: string) =>
+    apiFetch<void>(
+      `/api/v1/projects/${projectId}/environments/${envId}/apps/${appName}/payments`,
+      { method: "DELETE" }
+    ),
+};
+
 // Inference proxy is intentionally NOT in apiFetch (which forces JSON):
 // the playground needs to send multipart and receive arbitrary content types.
 // Returns the raw Response so callers can decide how to interpret the body.

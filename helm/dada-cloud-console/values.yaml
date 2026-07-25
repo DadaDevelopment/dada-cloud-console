@@ -161,6 +161,10 @@ backend:
     YOOKASSA_SHOP_ID: ""
     YOOKASSA_RETURN_URL: "https://console.dada-tuda.ru/billing/return"
     YOOKASSA_SEND_RECEIPT: "false"
+    # YooKassa Partners OAuth client id (payments slice 2, "Connect payments" --
+    # a merchant connects their OWN shop). YOOKASSA_PARTNER_CLIENT_SECRET is in
+    # backend.secret below. Empty disables connect (409 payments_not_configured).
+    YOOKASSA_PARTNER_CLIENT_ID: ""
   existingSecret: ""
   # Service-unique secrets only. Shared keys (DB_URL, GITOPS_VALUES_TOKEN_SECRET,
   # PORTAINER_API_TOKEN) come from global.shared via the Secret template.
@@ -196,6 +200,9 @@ backend:
     # payments outright. In prod this is patched out-of-git into Secret
     # dada-cloud-console-backend, like the DadaAgent secrets above.
     YOOKASSA_SECRET_KEY: ""
+    # YooKassa Partners OAuth client secret (payments slice 2). Empty (with
+    # empty YOOKASSA_PARTNER_CLIENT_ID) disables connect outright.
+    YOOKASSA_PARTNER_CLIENT_SECRET: ""
   persistence:
     enabled: true
     size: 5Gi

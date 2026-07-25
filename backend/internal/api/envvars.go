@@ -1,6 +1,8 @@
 package api
 
 import (
+	"context"
+	"fmt"
 	"net/http"
 	"time"
 
@@ -249,14 +251,13 @@ func (h *Handler) SetEnvVar(c *gin.Context) {
 		return
 	}
 
-	encrypted, err := crypto.EncryptToken(h.cfg.GitopsEncryptionKey, []byte(req.Value))
-	if err != nil {
-		respondError(c, http.StatusInternalServerError, "failed to encrypt value")
-		return
-	}
-
 	var ev envVar
 	if req.PreviewOverride {
+		encrypted, err := crypto.EncryptToken(h.cfg.GitopsEncryptionKey, []byte(req.Value))
+		if err != nil {
+			respondError(c, http.StatusInternalServerError, "failed to encrypt value")
+			return
+		}
 		row := h.pool.QueryRow(c.Request.Context(),
 			`INSERT INTO preview_env_overrides (environment_id, app_name, key, value_encrypted, is_secret, created_by)
 			 VALUES ($1, $2, $3, $4, $5, $6)
@@ -283,22 +284,12 @@ func (h *Handler) SetEnvVar(c *gin.Context) {
 			return
 		}
 
-		row := h.pool.QueryRow(c.Request.Context(),
-			`INSERT INTO env_vars (environment_id, app_name, key, value_encrypted, is_secret, scope, created_by)
-			 VALUES ($1, $2, $3, $4, $5, $6, $7)
-			 ON CONFLICT (environment_id, app_name, key)
-			 DO UPDATE SET value_encrypted = EXCLUDED.value_encrypted,
-			               is_secret = EXCLUDED.is_secret,
-			               scope = EXCLUDED.scope,
-			               updated_at = NOW()
-			 RETURNING id, environment_id, app_name, key, is_secret, scope, created_at, updated_at`,
-			envID, appName, key, encrypted, req.IsSecret, scope, claims.UserID,
-		)
-		if err := row.Scan(&ev.ID, &ev.EnvironmentID, &ev.AppName, &ev.Key,
-			&ev.IsSecret, &ev.Scope, &ev.CreatedAt, &ev.UpdatedAt); err != nil {
+		saved, err := h.upsertEnvVar(c.Request.Context(), envID, appName, key, req.Value, req.IsSecret, scope, claims.UserID.String())
+		if err != nil {
 			respondError(c, http.StatusInternalServerError, "failed to save env var")
 			return
 		}
+		ev = saved
 	}
 
 	_, _ = h.pool.Exec(c.Request.Context(),
@@ -484,4 +475,34 @@ func (h *Handler) DeleteEnvVar(c *gin.Context) {
 	}
 
 	c.Status(http.StatusNoContent)
+}
+
+// upsertEnvVar encrypts value and upserts one env_vars row, shared by the
+// SetEnvVar HTTP handler and any server-side writer (e.g. the payments
+// OAuth callback injecting YOOKASSA_OAUTH_TOKEN/YOOKASSA_ACCOUNT_ID). It does
+// NOT trigger a re-render -- the value lands on the app's next deploy, same
+// as SetEnvVar.
+func (h *Handler) upsertEnvVar(ctx context.Context, envID uuid.UUID, appName, key, value string, secret bool, scope, createdBy string) (envVar, error) {
+	encrypted, err := crypto.EncryptToken(h.cfg.GitopsEncryptionKey, []byte(value))
+	if err != nil {
+		return envVar{}, fmt.Errorf("encrypt value: %w", err)
+	}
+
+	var ev envVar
+	row := h.pool.QueryRow(ctx,
+		`INSERT INTO env_vars (environment_id, app_name, key, value_encrypted, is_secret, scope, created_by)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7)
+		 ON CONFLICT (environment_id, app_name, key)
+		 DO UPDATE SET value_encrypted = EXCLUDED.value_encrypted,
+		               is_secret = EXCLUDED.is_secret,
+		               scope = EXCLUDED.scope,
+		               updated_at = NOW()
+		 RETURNING id, environment_id, app_name, key, is_secret, scope, created_at, updated_at`,
+		envID, appName, key, encrypted, secret, scope, createdBy,
+	)
+	if err := row.Scan(&ev.ID, &ev.EnvironmentID, &ev.AppName, &ev.Key,
+		&ev.IsSecret, &ev.Scope, &ev.CreatedAt, &ev.UpdatedAt); err != nil {
+		return envVar{}, fmt.Errorf("save env var: %w", err)
+	}
+	return ev, nil
 }

@@ -22,6 +22,7 @@ const MARKETING_PATHS = new Set([
   "/analog-fly-io",
   "/deploy-vibe-coding",
   "/hosting-telegram-bot",
+  "/accept-payments",
   "/migrate-vercel",
   "/status",
   "/developer",

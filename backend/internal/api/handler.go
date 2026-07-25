@@ -132,6 +132,8 @@ type Handler struct {
 
 	yookassa *yookassa.YooKassaProvider
 
+	yookassaOAuth *yookassa.OAuthClient
+
 	optionalAuth func(c *gin.Context) (*auth.Claims, bool)
 
 	agentChatLLM   *llmchat.Client
@@ -252,6 +254,7 @@ func NewHandler(pool *pgxpool.Pool, cfg *config.Config) *Handler {
 		ykClient := yookassa.New(cfg.YooKassaShopID, cfg.YooKassaSecretKey)
 		h.yookassa = yookassa.NewProvider(pool, ykClient, cfg.YooKassaReturnURL, cfg.YooKassaSendReceipt)
 	}
+	h.yookassaOAuth = yookassa.NewOAuthClient()
 
 	h.billingMarkup = pricing.MarkupDefault
 	h.billingMargin = cfg.BillingMargin

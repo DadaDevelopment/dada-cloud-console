@@ -11,12 +11,13 @@ import { EnvVarsEditor } from "@/components/deploy/env-vars-editor";
 import { HostnamesManager } from "@/components/deploy/hostnames-manager";
 import { StorageManager } from "@/components/deploy/storage-manager";
 import { ResourceManager } from "@/components/deploy/resource-manager";
+import { PaymentsManager } from "@/components/payments/payments-manager";
 import { CommonConfigEditor } from "@/components/deploy/common-config-editor";
 import { ComposeConfigEditor } from "@/components/deploy/compose-config-editor";
 import { ComposeVolumeEditor } from "@/components/deploy/compose-volume-editor";
 import { useT } from "@/lib/i18n/console/context";
 
-type Tab = "env" | "config" | "git" | "domains" | "storage" | "resources";
+type Tab = "env" | "config" | "git" | "domains" | "storage" | "resources" | "payments";
 
 export default function AppSettingsPage() {
   const params = useParams<{ projectId: string; appName: string }>();
@@ -30,7 +31,9 @@ export default function AppSettingsPage() {
 
   const initialTab = ((): Tab => {
     const q = searchParams.get("tab");
-    return q === "config" || q === "git" || q === "domains" || q === "storage" || q === "resources" ? q : "env";
+    return q === "config" || q === "git" || q === "domains" || q === "storage" || q === "resources" || q === "payments"
+      ? q
+      : "env";
   })();
   const [tab, setTab] = useState<Tab>(initialTab);
   const [verifiedApexes, setVerifiedApexes] = useState<DomainAuthorization[]>([]);
@@ -43,7 +46,7 @@ export default function AppSettingsPage() {
       .catch(() => setVerifiedApexes([]));
   }, [projectId]);
 
-  const validTabsForVM: Tab[] = ["env", "config", "storage", "domains", "git"];
+  const validTabsForVM: Tab[] = ["env", "config", "storage", "payments", "domains", "git"];
   const effectiveTab: Tab = isVM && !validTabsForVM.includes(tab) ? "env" : tab;
 
   const tabs: { key: Tab; label: string }[] = isVM
@@ -51,6 +54,7 @@ export default function AppSettingsPage() {
         { key: "env", label: t("apps.settings.tab.env") },
         { key: "config", label: t("apps.settings.tab.config") },
         { key: "storage", label: t("apps.settings.tab.storage") },
+        { key: "payments", label: t("apps.settings.tab.payments") },
         { key: "domains", label: t("apps.settings.tab.domains") },
         { key: "git", label: t("apps.settings.tab.git") },
       ]
@@ -60,6 +64,7 @@ export default function AppSettingsPage() {
         { key: "git", label: t("apps.settings.tab.git") },
         { key: "storage", label: t("apps.settings.tab.storage") },
         { key: "resources", label: t("apps.settings.tab.resources") },
+        { key: "payments", label: t("apps.settings.tab.payments") },
         { key: "domains", label: t("apps.settings.tab.domains") },
       ];
 
@@ -143,6 +148,10 @@ export default function AppSettingsPage() {
 
       {effectiveTab === "resources" && !isVM && (
         <ResourceManager projectId={projectId} envId={envId} appName={appName} canEdit={canEdit} />
+      )}
+
+      {effectiveTab === "payments" && (
+        <PaymentsManager projectId={projectId} envId={envId} appName={appName} canEdit={canEdit} />
       )}
 
       {effectiveTab === "domains" && (

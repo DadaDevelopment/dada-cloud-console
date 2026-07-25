@@ -328,6 +328,7 @@ export const apps: Messages = {
   "apps.settings.tab.git": { ru: "Git", en: "Git" },
   "apps.settings.tab.domains": { ru: "Домены", en: "Domains" },
   "apps.settings.tab.storage": { ru: "Хранилище", en: "Storage" },
+  "apps.settings.tab.payments": { ru: "Оплата", en: "Payments" },
 
   "apps.config.title": { ru: "Конфигурация приложения", en: "App configuration" },
   "apps.config.subtitle": {
