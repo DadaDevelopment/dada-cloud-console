@@ -30,6 +30,7 @@ import { feedback } from "./feedback";
 import { deployHooks } from "./deploy-hooks";
 import { previews } from "./previews";
 import { agentChat } from "./agent-chat";
+import { onboarding } from "./onboarding";
 
 /**
  * Flat key→{ru,en} map for the whole console. Each screen owns a namespace
@@ -69,4 +70,5 @@ export const messages: Messages = {
   ...deployHooks,
   ...previews,
   ...agentChat,
+  ...onboarding,
 };
