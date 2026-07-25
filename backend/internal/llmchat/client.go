@@ -62,11 +62,16 @@ func (c *Client) Configured() bool {
 	return c != nil && c.BaseURL != "" && c.APIKey != ""
 }
 
+type streamOptions struct {
+	IncludeUsage bool `json:"include_usage"`
+}
+
 type chatRequest struct {
-	Model    string    `json:"model"`
-	Messages []Message `json:"messages"`
-	Tools    []ToolDef `json:"tools,omitempty"`
-	Stream   bool      `json:"stream"`
+	Model         string         `json:"model"`
+	Messages      []Message      `json:"messages"`
+	Tools         []ToolDef      `json:"tools,omitempty"`
+	Stream        bool           `json:"stream"`
+	StreamOptions *streamOptions `json:"stream_options,omitempty"`
 }
 
 type streamChoice struct {
@@ -85,25 +90,42 @@ type streamChoice struct {
 	FinishReason *string `json:"finish_reason"`
 }
 
+type usageInfo struct {
+	PromptTokens     int64 `json:"prompt_tokens"`
+	CompletionTokens int64 `json:"completion_tokens"`
+	TotalTokens      int64 `json:"total_tokens"`
+}
+
 type streamChunk struct {
+	Model   string         `json:"model"`
 	Choices []streamChoice `json:"choices"`
+	Usage   *usageInfo     `json:"usage"`
 	Error   *struct {
 		Message string `json:"message"`
 	} `json:"error"`
 }
 
+// StreamResult carries the assembled turn output plus the usage the gateway
+// reported in its trailing usage chunk (stream_options.include_usage=true).
+// Token counts are the whole-turn totals from that final chunk; they are 0 if
+// the gateway did not emit usage.
 type StreamResult struct {
-	Content      string
-	ToolCalls    []ToolCall
-	FinishReason string
+	Content          string
+	ToolCalls        []ToolCall
+	FinishReason     string
+	Model            string
+	PromptTokens     int64
+	CompletionTokens int64
+	TotalTokens      int64
 }
 
 func (c *Client) StreamChatCompletion(ctx context.Context, messages []Message, tools []ToolDef, onDelta func(string)) (*StreamResult, error) {
 	reqBody := chatRequest{
-		Model:    c.Model,
-		Messages: messages,
-		Tools:    tools,
-		Stream:   true,
+		Model:         c.Model,
+		Messages:      messages,
+		Tools:         tools,
+		Stream:        true,
+		StreamOptions: &streamOptions{IncludeUsage: true},
 	}
 	b, err := json.Marshal(reqBody)
 	if err != nil {
@@ -137,6 +159,8 @@ func (c *Client) StreamChatCompletion(ctx context.Context, messages []Message, t
 	calls := map[int]*callAcc{}
 	maxIdx := -1
 	finishReason := ""
+	model := ""
+	var promptTokens, completionTokens, totalTokens int64
 
 	scanner := bufio.NewScanner(resp.Body)
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
@@ -156,6 +180,14 @@ func (c *Client) StreamChatCompletion(ctx context.Context, messages []Message, t
 		}
 		if chunk.Error != nil {
 			return nil, fmt.Errorf("gateway error: %s", chunk.Error.Message)
+		}
+		if chunk.Model != "" {
+			model = chunk.Model
+		}
+		if chunk.Usage != nil {
+			promptTokens = chunk.Usage.PromptTokens
+			completionTokens = chunk.Usage.CompletionTokens
+			totalTokens = chunk.Usage.TotalTokens
 		}
 		if len(chunk.Choices) == 0 {
 			continue
@@ -195,7 +227,14 @@ func (c *Client) StreamChatCompletion(ctx context.Context, messages []Message, t
 		return nil, fmt.Errorf("read gateway stream: %w", err)
 	}
 
-	result := &StreamResult{Content: content.String(), FinishReason: finishReason}
+	result := &StreamResult{
+		Content:          content.String(),
+		FinishReason:     finishReason,
+		Model:            model,
+		PromptTokens:     promptTokens,
+		CompletionTokens: completionTokens,
+		TotalTokens:      totalTokens,
+	}
 	for i := 0; i <= maxIdx; i++ {
 		acc, ok := calls[i]
 		if !ok || acc.name == "" {

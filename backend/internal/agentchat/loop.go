@@ -37,6 +37,18 @@ type Emitter struct {
 	ToolCall func(name string)
 }
 
+// Usage is the summed LLM token usage for a whole turn. A turn is a ReAct loop
+// of several gateway calls; PromptTokens/CompletionTokens/TotalTokens add up
+// every call's trailing usage chunk, Calls counts the gateway round-trips, and
+// Model is the last resolved model id the gateway reported.
+type Usage struct {
+	PromptTokens     int64
+	CompletionTokens int64
+	TotalTokens      int64
+	Model            string
+	Calls            int
+}
+
 func RunTurn(
 	ctx context.Context,
 	llm *llmchat.Client,
@@ -46,7 +58,7 @@ func RunTurn(
 	history []llmchat.Message,
 	userMessage string,
 	emit Emitter,
-) (assistantText string, toolLog []ToolLogEntry, pending *PendingWrite, err error) {
+) (assistantText string, toolLog []ToolLogEntry, pending *PendingWrite, usage Usage, err error) {
 	messages := make([]llmchat.Message, 0, len(history)+2)
 	messages = append(messages, llmchat.Message{Role: "system", Content: systemPrompt})
 	messages = append(messages, history...)
@@ -64,7 +76,7 @@ func ResumeTurn(
 	toolCallCount int,
 	writeCallCount int,
 	emit Emitter,
-) (assistantText string, toolLog []ToolLogEntry, pending *PendingWrite, err error) {
+) (assistantText string, toolLog []ToolLogEntry, pending *PendingWrite, usage Usage, err error) {
 	return runLoop(ctx, llm, tools, bearer, messages, toolCallCount, writeCallCount, emit)
 }
 
@@ -77,7 +89,7 @@ func runLoop(
 	toolCallCount int,
 	writeCallCount int,
 	emit Emitter,
-) (assistantText string, toolLog []ToolLogEntry, pending *PendingWrite, err error) {
+) (assistantText string, toolLog []ToolLogEntry, pending *PendingWrite, usage Usage, err error) {
 	for round := 0; round < maxRounds; round++ {
 		var toolDefs []llmchat.ToolDef
 		if toolCallCount < MaxToolCallsPerTurn {
@@ -86,11 +98,18 @@ func runLoop(
 
 		result, streamErr := llm.StreamChatCompletion(ctx, messages, toolDefs, emit.Token)
 		if streamErr != nil {
-			return "", toolLog, nil, streamErr
+			return "", toolLog, nil, usage, streamErr
+		}
+		usage.PromptTokens += result.PromptTokens
+		usage.CompletionTokens += result.CompletionTokens
+		usage.TotalTokens += result.TotalTokens
+		usage.Calls++
+		if result.Model != "" {
+			usage.Model = result.Model
 		}
 
 		if len(result.ToolCalls) == 0 {
-			return result.Content, toolLog, nil, nil
+			return result.Content, toolLog, nil, usage, nil
 		}
 
 		messages = append(messages, llmchat.Message{
@@ -158,9 +177,9 @@ func runLoop(
 		}
 
 		if pending != nil {
-			return "", toolLog, pending, nil
+			return "", toolLog, pending, usage, nil
 		}
 	}
 
-	return "", toolLog, nil, fmt.Errorf("agent loop exceeded %d rounds without a final answer", maxRounds)
+	return "", toolLog, nil, usage, fmt.Errorf("agent loop exceeded %d rounds without a final answer", maxRounds)
 }

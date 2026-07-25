@@ -20,9 +20,13 @@ type scriptedToolCall struct {
 }
 
 type scriptedTurn struct {
-	Content      string
-	ToolCalls    []scriptedToolCall
-	FinishReason string
+	Content          string
+	ToolCalls        []scriptedToolCall
+	FinishReason     string
+	Model            string
+	PromptTokens     int64
+	CompletionTokens int64
+	TotalTokens      int64
 }
 
 // newScriptedGatewayServer serves a canned sequence of OpenAI-style SSE
@@ -80,6 +84,18 @@ func newScriptedGatewayServer(t *testing.T, turns []scriptedTurn) *httptest.Serv
 		writeSSEChunk(w, map[string]any{
 			"choices": []map[string]any{{"finish_reason": finish}},
 		})
+		if turn.TotalTokens > 0 {
+			writeSSEChunk(w, map[string]any{
+				"model":   turn.Model,
+				"choices": []map[string]any{},
+				"usage": map[string]any{
+					"prompt_tokens":     turn.PromptTokens,
+					"completion_tokens": turn.CompletionTokens,
+					"total_tokens":      turn.TotalTokens,
+				},
+			})
+			flusher.Flush()
+		}
 		fmt.Fprint(w, "data: [DONE]\n\n")
 		flusher.Flush()
 	}))
@@ -130,7 +146,7 @@ func TestRunTurn_FirstWriteToolCall_StopsWithoutExecuting(t *testing.T) {
 		{ToolCalls: []scriptedToolCall{{ID: "call_1", Name: "restartApp", Args: `{"appName":"web"}`}}},
 	})
 
-	assistantText, toolLog, pending, err := RunTurn(context.Background(), llm, ts, "Bearer test", "system", nil, "restart web please", Emitter{})
+	assistantText, toolLog, pending, _, err := RunTurn(context.Background(), llm, ts, "Bearer test", "system", nil, "restart web please", Emitter{})
 	if err != nil {
 		t.Fatalf("RunTurn: %v", err)
 	}
@@ -171,7 +187,7 @@ func TestRunTurn_ReadOnlyToolCalls_RunToCompletion(t *testing.T) {
 		{Content: "you have 2 apps"},
 	})
 
-	assistantText, toolLog, pending, err := RunTurn(context.Background(), llm, ts, "Bearer test", "system", nil, "list my apps", Emitter{})
+	assistantText, toolLog, pending, _, err := RunTurn(context.Background(), llm, ts, "Bearer test", "system", nil, "list my apps", Emitter{})
 	if err != nil {
 		t.Fatalf("RunTurn: %v", err)
 	}
@@ -192,7 +208,7 @@ func TestRunTurn_WriteCallBudget_CappedAtThreeAcrossResumes(t *testing.T) {
 	llm1 := newTestClient(t, []scriptedTurn{
 		{ToolCalls: []scriptedToolCall{{ID: "call_1", Name: "restartApp", Args: `{}`}}},
 	})
-	_, _, pending1, err := RunTurn(context.Background(), llm1, ts, "Bearer test", "system", nil, "restart", Emitter{})
+	_, _, pending1, _, err := RunTurn(context.Background(), llm1, ts, "Bearer test", "system", nil, "restart", Emitter{})
 	if err != nil || pending1 == nil {
 		t.Fatalf("round 1: pending=%+v err=%v", pending1, err)
 	}
@@ -205,7 +221,7 @@ func TestRunTurn_WriteCallBudget_CappedAtThreeAcrossResumes(t *testing.T) {
 	llm2 := newTestClient(t, []scriptedTurn{
 		{ToolCalls: []scriptedToolCall{{ID: "call_2", Name: "restartApp", Args: `{}`}}},
 	})
-	_, _, pending2, err := ResumeTurn(context.Background(), llm2, ts, "Bearer test", messages, toolCallCount, writeCallCount, Emitter{})
+	_, _, pending2, _, err := ResumeTurn(context.Background(), llm2, ts, "Bearer test", messages, toolCallCount, writeCallCount, Emitter{})
 	if err != nil || pending2 == nil {
 		t.Fatalf("round 2: pending=%+v err=%v", pending2, err)
 	}
@@ -220,7 +236,7 @@ func TestRunTurn_WriteCallBudget_CappedAtThreeAcrossResumes(t *testing.T) {
 	llm3 := newTestClient(t, []scriptedTurn{
 		{ToolCalls: []scriptedToolCall{{ID: "call_3", Name: "restartApp", Args: `{}`}}},
 	})
-	_, _, pending3, err := ResumeTurn(context.Background(), llm3, ts, "Bearer test", messages, toolCallCount, writeCallCount, Emitter{})
+	_, _, pending3, _, err := ResumeTurn(context.Background(), llm3, ts, "Bearer test", messages, toolCallCount, writeCallCount, Emitter{})
 	if err != nil || pending3 == nil {
 		t.Fatalf("round 3: pending=%+v err=%v", pending3, err)
 	}
@@ -239,7 +255,7 @@ func TestRunTurn_WriteCallBudget_CappedAtThreeAcrossResumes(t *testing.T) {
 		{ToolCalls: []scriptedToolCall{{ID: "call_4", Name: "restartApp", Args: `{}`}}},
 		{Content: "I could not restart it a 4th time this turn"},
 	})
-	assistantText, _, pending4, err := ResumeTurn(context.Background(), llm4, ts, "Bearer test", messages, toolCallCount, writeCallCount, Emitter{})
+	assistantText, _, pending4, _, err := ResumeTurn(context.Background(), llm4, ts, "Bearer test", messages, toolCallCount, writeCallCount, Emitter{})
 	if err != nil {
 		t.Fatalf("round 4: err=%v", err)
 	}
@@ -248,5 +264,39 @@ func TestRunTurn_WriteCallBudget_CappedAtThreeAcrossResumes(t *testing.T) {
 	}
 	if assistantText != "I could not restart it a 4th time this turn" {
 		t.Fatalf("assistantText=%q, want the final answer after the budget-exhausted tool result", assistantText)
+	}
+}
+
+func TestRunTurn_AccumulatesUsageAcrossLoop(t *testing.T) {
+	ts := newFakeToolset([]string{"listApps"}, nil)
+	llm := newTestClient(t, []scriptedTurn{
+		{ToolCalls: []scriptedToolCall{{ID: "call_1", Name: "listApps", Args: `{}`}}, Model: "claude-sonnet-5", PromptTokens: 100, CompletionTokens: 20, TotalTokens: 120},
+		{Content: "you have 2 apps", Model: "claude-sonnet-5", PromptTokens: 150, CompletionTokens: 30, TotalTokens: 180},
+	})
+
+	assistantText, _, pending, usage, err := RunTurn(context.Background(), llm, ts, "Bearer test", "system", nil, "list my apps", Emitter{})
+	if err != nil {
+		t.Fatalf("RunTurn: %v", err)
+	}
+	if pending != nil {
+		t.Fatalf("pending=%+v, want nil", pending)
+	}
+	if assistantText != "you have 2 apps" {
+		t.Fatalf("assistantText=%q want %q", assistantText, "you have 2 apps")
+	}
+	if usage.Calls != 2 {
+		t.Fatalf("usage.Calls=%d want 2 (one gateway call per round)", usage.Calls)
+	}
+	if usage.PromptTokens != 250 {
+		t.Fatalf("usage.PromptTokens=%d want 250 (100+150)", usage.PromptTokens)
+	}
+	if usage.CompletionTokens != 50 {
+		t.Fatalf("usage.CompletionTokens=%d want 50 (20+30)", usage.CompletionTokens)
+	}
+	if usage.TotalTokens != 300 {
+		t.Fatalf("usage.TotalTokens=%d want 300 (120+180)", usage.TotalTokens)
+	}
+	if usage.Model != "claude-sonnet-5" {
+		t.Fatalf("usage.Model=%q want claude-sonnet-5", usage.Model)
 	}
 }
