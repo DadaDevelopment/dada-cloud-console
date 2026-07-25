@@ -801,6 +801,9 @@ export interface AdminCostResource {
   ram_cost: number;
   pv_cost: number;
   total_cost: number;
+  revenue: number;
+  margin: number;
+  margin_pct: number;
 }
 
 export interface AdminCostProject {
@@ -809,6 +812,7 @@ export interface AdminCostProject {
   cost: number;
   revenue: number;
   margin: number;
+  margin_pct: number;
   resources: AdminCostResource[];
 }
 
@@ -818,6 +822,7 @@ export interface AdminCostClient {
   cost: number;
   revenue: number;
   margin: number;
+  margin_pct: number;
   projects: AdminCostProject[];
 }
 

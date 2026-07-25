@@ -70,9 +70,10 @@ export const adminCosts: Messages = {
   "adminCosts.lossMakers.empty": { ru: "Убыточных клиентов нет", en: "No loss-making clients" },
 
   "adminCosts.table.client": { ru: "Клиент / проект / ресурс", en: "Client / project / resource" },
-  "adminCosts.table.cost": { ru: "Стоимость", en: "Cost" },
-  "adminCosts.table.revenue": { ru: "Выручка", en: "Revenue" },
-  "adminCosts.table.margin": { ru: "Маржа", en: "Margin" },
+  "adminCosts.table.cost": { ru: "Стоимость железа", en: "Hardware cost" },
+  "adminCosts.table.revenue": { ru: "Платит клиент", en: "Client pays" },
+  "adminCosts.table.marginPct": { ru: "Маржа %", en: "Margin %" },
+  "adminCosts.table.margin": { ru: "Прибыль ₽", en: "Profit ₽" },
 
   "adminCosts.empty": { ru: "Нет данных за выбранный период", en: "No data for the selected window" },
   "adminCosts.expand": { ru: "Развернуть", en: "Expand" },

@@ -19,6 +19,10 @@ function marginClass(v: number): string {
   return "text-gray-500 dark:text-gray-400";
 }
 
+function formatPct(v: number | undefined): string {
+  return `${Math.round(v ?? 0)}%`;
+}
+
 export default function AdminCostsPage() {
   const { t } = useT();
 
@@ -352,6 +356,7 @@ function CostTree({
   const totalCost = clients.reduce((s, c) => s + c.cost, 0);
   const totalRevenue = clients.reduce((s, c) => s + c.revenue, 0);
   const totalMargin = clients.reduce((s, c) => s + c.margin, 0);
+  const totalMarginPct = totalRevenue > 0 ? (totalMargin / totalRevenue) * 100 : 0;
   return (
     <div className="overflow-x-auto">
       <table className="w-full text-sm">
@@ -360,6 +365,7 @@ function CostTree({
             <th className="py-2 text-left">{t("adminCosts.table.client")}</th>
             <th className="py-2 text-right">{t("adminCosts.table.cost")}</th>
             <th className="py-2 text-right">{t("adminCosts.table.revenue")}</th>
+            <th className="py-2 text-right">{t("adminCosts.table.marginPct")}</th>
             <th className="py-2 text-right">{t("adminCosts.table.margin")}</th>
           </tr>
         </thead>
@@ -384,6 +390,7 @@ function CostTree({
             <td className="py-2 text-left text-gray-900 dark:text-gray-100">{t("adminCosts.table.total")}</td>
             <td className="py-2 text-right font-mono text-xs text-gray-900 dark:text-gray-100">{formatMoney(totalCost, currency)}</td>
             <td className="py-2 text-right font-mono text-xs text-gray-900 dark:text-gray-100">{formatMoney(totalRevenue, currency)}</td>
+            <td className={`py-2 text-right font-mono text-xs ${marginClass(totalMarginPct)}`}>{formatPct(totalMarginPct)}</td>
             <td className={`py-2 text-right font-mono text-xs ${marginClass(totalMargin)}`}>{formatMoney(totalMargin, currency)}</td>
           </tr>
         </tfoot>
@@ -418,6 +425,7 @@ function ClientRows({
         </td>
         <td className="py-2 text-right font-mono text-xs text-gray-700 dark:text-gray-200">{formatMoney(client.cost, currency)}</td>
         <td className="py-2 text-right font-mono text-xs text-gray-700 dark:text-gray-200">{formatMoney(client.revenue, currency)}</td>
+        <td className={`py-2 text-right font-mono text-xs ${marginClass(client.margin)}`}>{formatPct(client.margin_pct)}</td>
         <td className={`py-2 text-right font-mono text-xs ${marginClass(client.margin)}`}>{formatMoney(client.margin, currency)}</td>
       </tr>
       {open && client.projects.map((p) => {
@@ -461,6 +469,7 @@ function ProjectRows({
         </td>
         <td className="py-2 text-right font-mono text-xs text-gray-700 dark:text-gray-200">{formatMoney(project.cost, currency)}</td>
         <td className="py-2 text-right font-mono text-xs text-gray-700 dark:text-gray-200">{formatMoney(project.revenue, currency)}</td>
+        <td className={`py-2 text-right font-mono text-xs ${marginClass(project.margin)}`}>{formatPct(project.margin_pct)}</td>
         <td className={`py-2 text-right font-mono text-xs ${marginClass(project.margin)}`}>{formatMoney(project.margin, currency)}</td>
       </tr>
       {open && project.resources.map((r) => (
@@ -469,8 +478,9 @@ function ProjectRows({
             {r.name} <span className="text-gray-300 dark:text-gray-600">· {r.kind}</span>
           </td>
           <td className="py-1.5 text-right font-mono text-[11px] text-gray-500 dark:text-gray-400">{formatMoney(r.total_cost, currency)}</td>
-          <td className="py-1.5 text-right font-mono text-[11px] text-gray-300 dark:text-gray-600">—</td>
-          <td className="py-1.5 text-right font-mono text-[11px] text-gray-300 dark:text-gray-600">—</td>
+          <td className="py-1.5 text-right font-mono text-[11px] text-gray-500 dark:text-gray-400">{formatMoney(r.revenue, currency)}</td>
+          <td className={`py-1.5 text-right font-mono text-[11px] ${marginClass(r.margin)}`}>{formatPct(r.margin_pct)}</td>
+          <td className={`py-1.5 text-right font-mono text-[11px] ${marginClass(r.margin)}`}>{formatMoney(r.margin, currency)}</td>
         </tr>
       ))}
     </>
