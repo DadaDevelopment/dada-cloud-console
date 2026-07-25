@@ -36,6 +36,31 @@ func UpsertSnapshot(ctx context.Context, pool *pgxpool.Pool,
 	return nil
 }
 
+// SnapshotHasImage reports whether a resource_snapshots row already exists for
+// the given identity and carries a non-empty top-level "image" field in its
+// summary_json. Used by the git watcher's syncAppFile to decide whether its
+// own inherently bare payload (git_sha/git_message/app_name only, never image)
+// is allowed to write: a bare git-stub sync must never downgrade a snapshot
+// that already carries a real app spec, no matter how the two writers' commit
+// timestamps compare.
+func SnapshotHasImage(ctx context.Context, pool *pgxpool.Pool,
+	projectID uuid.UUID, environmentID *uuid.UUID, kind, name string,
+) (bool, error) {
+	var image string
+	err := pool.QueryRow(ctx, `
+		SELECT COALESCE(summary_json->>'image', '')
+		FROM resource_snapshots
+		WHERE project_id = $1 AND environment_id IS NOT DISTINCT FROM $2 AND kind = $3 AND name = $4
+	`, projectID, environmentID, kind, name).Scan(&image)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("check snapshot image: %w", err)
+	}
+	return image != "", nil
+}
+
 // DeleteSnapshot removes a resource_snapshots row by identity. Used to purge
 // synthetic rows the console must not display (e.g. resources-only owner apps
 // that carry standalone DB/S3/model CRs but are not user workloads). Returns the

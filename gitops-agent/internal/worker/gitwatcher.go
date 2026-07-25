@@ -425,22 +425,30 @@ func (w *GitWatcher) syncAppFile(ctx context.Context, mgr *git.Manager, filePath
 		return
 	}
 
-	summaryJSON, _ := json.Marshal(map[string]any{
-		"git_sha":     c.SHA,
-		"git_message": c.Message,
-		"git_author":  c.Author,
-		"app_name":    appName,
-		"status":      "Unknown",
-		"message":     "Synced from git",
-	})
-
 	envUUID := &environmentID
-	if err := db.UpsertSnapshot(ctx, w.pool,
-		projectID, envUUID,
-		"App", appName, "Unknown", summaryJSON, c.When,
-	); err != nil {
-		log.Error().Err(err).Str("app", appName).Msg("git-watcher: upsert snapshot")
-		return
+	hasImage, err := db.SnapshotHasImage(ctx, w.pool, projectID, envUUID, "App", appName)
+	if err != nil {
+		log.Warn().Err(err).Str("app", appName).Msg("git-watcher: check existing app snapshot for image")
+	}
+	if hasImage {
+		log.Info().Str("app", appName).Str("path", filePath).
+			Msg("git-watcher: skipping bare app.yaml sync, existing snapshot already carries a real app spec")
+	} else {
+		summaryJSON, _ := json.Marshal(map[string]any{
+			"git_sha":     c.SHA,
+			"git_message": c.Message,
+			"git_author":  c.Author,
+			"app_name":    appName,
+			"status":      "Unknown",
+			"message":     "Synced from git",
+		})
+		if err := db.UpsertSnapshot(ctx, w.pool,
+			projectID, envUUID,
+			"App", appName, "Unknown", summaryJSON, c.When,
+		); err != nil {
+			log.Error().Err(err).Str("app", appName).Msg("git-watcher: upsert snapshot")
+			return
+		}
 	}
 
 	// Record the commit in git_commits (no operation_id — originated in git).
