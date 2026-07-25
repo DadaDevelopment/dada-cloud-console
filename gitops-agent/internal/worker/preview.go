@@ -50,7 +50,14 @@ var previewLimitRange = renderer.LimitRangeSpec{
 //     used to inherit the SAME parent DATABASE_URL verbatim, so every preview
 //     past the first collided on the app's own advisory lock / unique
 //     constraints against the shared database and CrashLooped).
-//  4. render a tight namespace policy (ResourceQuota + LimitRange) into git,
+//  4. auto-create the preview's owning App git stub via ensureAppExists, and
+//     unconditionally pre-seed its App resource_snapshot from the parent env's
+//     own App snapshot (previewOwnerAppSnapshot) whenever one exists — this runs
+//     regardless of step 2's previewDBs, so an app with no managed database
+//     (e.g. worker:true or a volume, no ServiceDatabaseV2) still gets its
+//     worker/volume/workload_type spec carried into the preview's first build
+//     instead of falling through to build-agent's bare CreateApp fallback.
+//  5. render a tight namespace policy (ResourceQuota + LimitRange) into git,
 //     plus — for every database found in step 2 — a raw provider-sql Database
 //     CR owned by the PARENT's existing PG role (so it needs no secret of its
 //     own and the rewritten DATABASE_URL's user/password stay valid), upserted
@@ -154,30 +161,29 @@ func (w *DBWatcher) doCreatePreviewEnv(ctx context.Context, op db.Operation) err
 	policyPath := renderer.NamespacePolicyGitPath(p.Namespace)
 	files := []git.FileChange{{Path: policyPath, Content: policyYAML}}
 
+	projectName, _, _, err := w.projectEnv(ctx, op.ProjectID, &envID)
+	if err != nil {
+		return fmt.Errorf("project/env lookup: %w", err)
+	}
+	appFiles, err := w.ensureAppExists(mgr, projectName, p.EnvName, p.AppName, p.Namespace, op.ID.String())
+	if err != nil {
+		return err
+	}
+	files = append(files, appFiles...)
+	if len(appFiles) > 0 {
+		summaryJSON, err := w.previewOwnerAppSnapshot(ctx, op.ProjectID, parentEnvID, gitRepoID, p.AppName, p.EnvName)
+		if err != nil {
+			return fmt.Errorf("build preview owner app snapshot: %w", err)
+		}
+		if err := db.UpsertSnapshot(ctx, w.pool, op.ProjectID, &envID, "App", p.AppName, "Pending", summaryJSON, time.Now()); err != nil {
+			log.Warn().Err(err).Str("app", p.AppName).Msg("upsert preview owner app snapshot")
+		}
+	}
+
 	// For every parent database found, provision the preview's own Database CR
 	// (owned by the parent's existing PG role) into the preview app's
-	// resources.values.yaml, auto-creating that app's stub if it does not exist
-	// yet (the real deploy that follows fills it in properly).
+	// resources.values.yaml.
 	if len(previewDBs) > 0 {
-		projectName, _, _, err := w.projectEnv(ctx, op.ProjectID, &envID)
-		if err != nil {
-			return fmt.Errorf("project/env lookup: %w", err)
-		}
-		appFiles, err := w.ensureAppExists(mgr, projectName, p.EnvName, p.AppName, p.Namespace, op.ID.String())
-		if err != nil {
-			return err
-		}
-		files = append(files, appFiles...)
-		if len(appFiles) > 0 {
-			summaryJSON, err := w.previewOwnerAppSnapshot(ctx, op.ProjectID, parentEnvID, gitRepoID, p.AppName, p.EnvName)
-			if err != nil {
-				return fmt.Errorf("build preview owner app snapshot: %w", err)
-			}
-			if err := db.UpsertSnapshot(ctx, w.pool, op.ProjectID, &envID, "App", p.AppName, "Pending", summaryJSON, time.Now()); err != nil {
-				log.Warn().Err(err).Str("app", p.AppName).Msg("upsert preview owner app snapshot")
-			}
-		}
-
 		var dbYAMLs []string
 		for _, d := range previewDBs {
 			dbYAML, err := renderer.RenderPreviewDatabase(renderer.PreviewDatabaseSpec{
@@ -243,6 +249,15 @@ func (w *DBWatcher) doCreatePreviewEnv(ctx context.Context, op db.Operation) err
 //
 // Falls back to the old bare stub when there is no parent env, or the parent
 // has no App snapshot of its own (never deployed yet / first-ever app).
+//
+// Residual: when the parent's latest App snapshot is watcher-shaped (synced
+// from git by gitwatcher.go's syncAppFile, which only stamps
+// git_sha/git_message/app_name/status, no image/worker/volume) this still
+// copies it verbatim and therefore still drops the same fields — it logs a
+// loud warning (app + preview_env) instead of enriching from a richer source,
+// since resource_snapshots keeps no history to fall back to and re-reading
+// the parent's real values.yaml here would need to merge two different shapes
+// (chart values vs. resource_snapshots summary_json) without a proven mapping.
 func (w *DBWatcher) previewOwnerAppSnapshot(ctx context.Context, projectID uuid.UUID, parentEnvID, gitRepoID *uuid.UUID, appName, previewEnvName string) ([]byte, error) {
 	stub := func() ([]byte, error) {
 		return json.Marshal(map[string]any{"name": appName, "kind": "App"})
@@ -266,6 +281,11 @@ func (w *DBWatcher) previewOwnerAppSnapshot(ctx context.Context, projectID uuid.
 	var cur map[string]any
 	if err := json.Unmarshal(parentRaw, &cur); err != nil || cur == nil {
 		return stub()
+	}
+
+	if _, hasImage := cur["image"]; !hasImage {
+		log.Warn().Str("app", appName).Str("preview_env", previewEnvName).
+			Msg("preview: parent snapshot watcher-shaped, field loss possible app=" + appName)
 	}
 
 	cur["name"] = appName
