@@ -1,6 +1,6 @@
 # Spec: Token metering for `claude -p` runs in agent-sync-hub / DadaAgent
 
-Status: IMPLEMENTED on BOTH sides. Console: ingest handler + route + migration 053 (verified — see §11). Hub (agent_sync_hub): claude report captures cache-creation + model, CallbackClient.send_usage posts to the `/usage` route, cloud_task_runner emits one metered record per claude run keyed `ct-<task>-<run>-<model>`; hub unit + e2e-contract tests green (see §11).
+Status: IMPLEMENTED on BOTH sides. Console: ingest handler + route + migration 053 (verified — see §11). Hub (agent_sync_hub): claude report captures cache-creation + model, CallbackClient.send_usage posts to the `/usage` route, cloud_task_runner emits one metered record per claude run keyed `ct-<task>-<run>-<model>`; hub unit + e2e-contract tests green, and the live prod auth+tenancy wire smoked `200 {stored:false}` against a real cloud_task with zero ledger pollution (see §11). Residual = hub redeploy + one real claude run to exercise the final INSERT.
 Author: platform
 Verified: `claude -p --output-format json` fields captured from a real run of Claude Code **2.1.215** (local); auth gate + migration numbering checked against repo `[code]`.
 Related: [ADR-015 AI Gateway Runtime & Data-Plane](../adr/ADR-015-ai-gateway-runtime-data-plane.md), migration `051_agent_token_usage.sql`, `053_agent_token_usage_cloud_task_multi.sql`, `backend/internal/dadagent/`, `backend/internal/api/webhooks_dadagent.go`
@@ -222,7 +222,13 @@ Single choke point: the subprocess wrapper that spawns `claude -p`, not each cal
 - **Deliberate simplification vs §8:** one record per invocation (aggregate cost + representative model), not one per `modelUsage` entry. Cost integrity holds — `total_cost_usd` is the whole-run figure, so no double-count and no miss; per-model split is a later additive refinement if needed. `seq` from §9 is realized as `run_id` (globally unique per dispatch, crash-replay stable) rather than an in-run monotonic counter.
 - **Hub tests green:** `test_claude_report_helpers.py` (cache-creation + model precedence/fallback), `test_callback_client.py` (`send_usage` hits `.../usage`, trailing-slash tolerant), `test_cloud_task_runner.py` (full run drives one usage POST with the exact folded numbers; codex run stays silent; `build_usage_payload` field-aligns with the console `dadaAgentUsageCallback` struct and is None when nothing to bill).
 
-**Residual (needs the live cluster, not code):**
+**Proven on live prod (2026-07-25):**
 
-1. One true end-to-end on staging: fire a real cloud-task, confirm a `source='cloud_task'` row lands in `agent_token_usage` with the resolved tenancy. The contract is proven both-sided by unit tests + the shared field set; only the live wire (KC token accepted by console verifier, network egress) remains to smoke.
+- Console route `POST /api/v1/webhooks/dadagent/usage` is deployed + gated (unauth -> `401`, byte-identical to the sibling status webhook).
+- Migration **053** is applied on the prod `cloud-console` DB: `idx_agent_token_usage_cloud_task` is now **non-unique** (`indisunique=false`), `platform_request_id` stays the sole UNIQUE idempotency anchor.
+- **Live auth + tenancy wire smoked end-to-end** from inside the hub pod: minted a real `dada-agent` client-credentials token against prod Keycloak, POSTed a hub-shaped payload to the live console route with `intent_id` of a real `cloud_tasks` row and an unbillable body (`total_tokens=0, cost_usd=0`). Result `200 {"ok":true,"stored":false}` — token **accepted** by the console verifier (not `401`), `azp=dada-agent` gate passed (not `403`), payload **bound cleanly** to the Go `dadaAgentUsageCallback` struct (not `400`), `resolveCloudTaskTenancy` **resolved the real row** (not `404`), and the empty-usage branch no-op'd. Ledger row count stayed `0` after the probe — zero billing pollution. The only path element not exercised live is the final `recordCloudTaskTokenUsage` INSERT, which is separately rehearsed on real PG16 (exact handler upsert twice -> `INSERT 0 1` then `INSERT 0 0`).
+
+**Residual (needs the deploy cycle + a real run, not code):**
+
+1. Redeploy the hub with `058d608` (the running backend predates it), then fire one real claude cloud-task and confirm a `source='cloud_task'` row lands in `agent_token_usage` with the resolved tenancy — i.e. exercise the one remaining segment (hub emit -> INSERT) that the live smoke above deliberately left dry to avoid writing a fake billing row.
 2. Confirm the **pinned** Claude Code version in the hub workspace image emits the same `stream-json` shape as 2.1.215 (parser fallbacks already tolerate `modelUsage` absent + top-level `model`).
