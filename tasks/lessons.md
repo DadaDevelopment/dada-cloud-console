@@ -35,3 +35,23 @@ verify the COMMITTED tree builds — `git stash --keep-index && go build ./... ;
 (or build a fresh `git worktree add` of HEAD). If a concurrent agent owns unstaged files
 (can't stash), reason explicitly about whether the omitted files are build-dependencies of
 the staged ones. Never infer commit-buildability from a dirty-worktree build.
+
+## 2026-07-25 — react-joyride v3 fires no TOUR_START; Next/Turbopack fetch is unhookable
+
+Mistake: onboarding "seen" persistence was wired to `EVENTS.TOUR_START` in the `onEvent`
+callback. In react-joyride 3.2.0 (the v3 rewrite) `onEvent` emits STATUS transitions
+(`STATUS.SKIPPED`, `STATUS.FINISHED`) but never delivers a usable `TOUR_START` — the branch
+was dead, so "seen" was never recorded and every user got re-nagged. This is a v3-vs-v2 API
+drift I adapted wrong: v2 used `callback`; v3 renamed it `onEvent` and changed the emitted
+event surface. Fix: record `seen` deterministically at show-time (inside the setTimeout that
+flips `run`), not from an event.
+
+Second trap in the same debug session: a `window.fetch` monkeypatch did NOT intercept the
+app's own POSTs. Next 16 + Turbopack dev binds `fetch` internally, so app requests bypass the
+`window.fetch` you patched — the probe caught your synthetic call while the real POST sailed
+past uncaught yet visible in the network panel. Verify app network via the browser network
+panel or a source-level hook, never a `window.fetch` shim under Next/Turbopack.
+
+Rule: when adapting a major-version-bumped UI lib, read the new version's event/prop contract
+before mapping old handlers — a compiling `EVENTS.X` reference is not proof the event fires.
+And under Next/Turbopack, `window.fetch` interception is not a valid verification channel.

@@ -864,3 +864,26 @@ If everything passes, the feature is done. If Joyride misbehaves under Next 16 (
 - Keep `onboardingKeys` (backend) and `ONBOARDING_CAMPAIGNS` (frontend) key-sets identical.
 - `react-joyride` is client-only; every file importing it starts with `"use client"`.
 - Do not add inline `//` comments to source (house rule) — the JSDoc/Go-doc blocks shown are fine.
+
+---
+
+## Review / Results (2026-07-25) — SHIPPED
+
+All 5 tasks complete, verified, and on `origin/main`.
+
+**Delivered**
+- T1 — `backend/migrations/049_user_onboarding.sql` (table `user_onboarding`, PK `(user_sub, onboarding_key)`, status CHECK in `seen|skipped|done`, monotonic no-downgrade) + `GET/POST /api/v1/onboarding` handlers + 5 integration tests.
+- T2 — `react-joyride@3.2.0` dep, `lib/api` onboarding client, `lib/onboarding/campaigns.ts` registry (first campaign `agent` → FAB target `[data-onboarding="agent-fab"]`, docs `/developer/mcp-ai-agents`), `lib/onboarding/select.ts` selector.
+- T3 — RU/EN i18n copy, `OnboardingProvider`, custom `TooltipRenderProps` tooltip (mandatory Skip + docs link + primary "Понятно").
+- T4 — wired into `app/(console)/layout.tsx`; suppressed while `chatOpen || navOpen`.
+- T5 — live browser smoke under the real Next 16 runtime (the mandated gate).
+
+**Verification evidence**
+- Backend: 5/5 integration tests PASS against real Postgres (`TestOnboarding_GetEmpty`, `_PostThenGet`, `_MonotonicNoDowngrade`, `_UnknownKey400`, `_InvalidStatus400`) — `ok .../backend/internal/api`.
+- Frontend: `next build` exit 0 (tsc + eslint clean, throwaway `/onb-smoke` route correctly absent).
+- Live smoke: spotlight renders light+dark (RU "Познакомься с AI-агентом", arrow anchored to FAB); `('agent','seen',0)` at show; `('agent','done',1)` on primary closes tour; `('agent','skipped',0)` on Skip closes tour; wire bodies exact (`{status:"done",step:1}`, `{status:"skipped",step:0}`); suppression shows nothing; docs `href=/developer/mcp-ai-agents target=_blank`.
+
+**Bug found + fixed during T5** (commit `79cb761`)
+`seen` was wired to `EVENTS.TOUR_START`, which react-joyride 3.2.0's `onEvent` never fires — so completion was never recorded and users would be re-nagged forever. Fixed by recording `seen` at show-time inside the delay timer and deleting the dead event branch. See `tasks/lessons.md` 2026-07-25 for the v3 API drift + the Next/Turbopack `window.fetch`-unhookable trap that slowed diagnosis.
+
+**Not done (intentional)**: command-palette suppression (YAGNI, see Notes above); the custom-overlay fallback was unnecessary — Joyride behaved under Next 16.
