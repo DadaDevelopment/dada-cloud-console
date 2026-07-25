@@ -75,6 +75,23 @@ interface StreamChatHandlers {
   onDone?: (awaitingConfirm: boolean) => void;
 }
 
+/**
+ * Decode an assistant text delta from its SSE `token` frame. The backend
+ * JSON-encodes the delta so newlines and significant whitespace survive the
+ * line framing; parsing it back yields the exact substring. Falls back to the
+ * raw payload for compatibility with a backend that still emits raw deltas
+ * during a rolling deploy.
+ */
+function parseTokenData(data: string): string {
+  try {
+    const parsed = JSON.parse(data);
+    if (typeof parsed === "string") return parsed;
+  } catch {
+    return data;
+  }
+  return data;
+}
+
 function parseToolCallData(data: string): string | null {
   try {
     const parsed = JSON.parse(data) as { name?: string };
@@ -152,7 +169,7 @@ async function streamSSE(url: string, body: unknown, handlers: StreamChatHandler
       }
       if (line.startsWith("data:")) {
         const data = line.slice("data:".length).trim();
-        if (currentEvent === "token") handlers.onToken(data);
+        if (currentEvent === "token") handlers.onToken(parseTokenData(data));
         if (currentEvent === "tool_call") {
           const name = parseToolCallData(data);
           if (name) handlers.onToolCall(name);
