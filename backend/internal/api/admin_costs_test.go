@@ -1,0 +1,110 @@
+package api
+
+import (
+	"testing"
+
+	"github.com/dada-tuda/console/backend/internal/opencost"
+)
+
+func newTestAccumulator() *adminCostsAccumulator {
+	return &adminCostsAccumulator{
+		clients:   map[string]*adminCostClient{},
+		resources: map[string]map[string]map[string]int{},
+	}
+}
+
+func findResource(acc *adminCostsAccumulator, clientID, projectID, name string) *adminCostResource {
+	cl := acc.clients[clientID]
+	if cl == nil {
+		return nil
+	}
+	pi := adminCostProjectIndex(cl, projectID)
+	if pi < 0 {
+		return nil
+	}
+	for i := range cl.Projects[pi].Resources {
+		if cl.Projects[pi].Resources[i].Name == name {
+			return &cl.Projects[pi].Resources[i]
+		}
+	}
+	return nil
+}
+
+// TestEnsureResourceStablePointerAcrossReallocs guards the position-index
+// rewrite: appending later resources reallocates a project's Resources backing
+// array, so a re-seen resource must still accumulate onto its original slot.
+// The previous pointer-cache implementation wrote to the stale backing array
+// and silently dropped the second contribution.
+func TestEnsureResourceStablePointerAcrossReallocs(t *testing.T) {
+	acc := newTestAccumulator()
+	const cl, cn, p, pn = "c1", "Client 1", "p1", "Proj 1"
+
+	acc.add(cl, cn, p, pn, "appA", "app", opencost.Allocation{CPUCost: 10, TotalCost: 10}, 1)
+	acc.add(cl, cn, p, pn, "appB", "app", opencost.Allocation{CPUCost: 20, TotalCost: 20}, 1)
+	acc.add(cl, cn, p, pn, "appC", "app", opencost.Allocation{CPUCost: 30, TotalCost: 30}, 1)
+	acc.add(cl, cn, p, pn, "appA", "app", opencost.Allocation{CPUCost: 5, TotalCost: 5}, 1)
+
+	a := findResource(acc, cl, p, "appA")
+	if a == nil {
+		t.Fatal("appA missing")
+	}
+	if a.TotalCost != 15 {
+		t.Fatalf("appA TotalCost = %v, want 15 (10 + 5 after a realloc)", a.TotalCost)
+	}
+	if b := findResource(acc, cl, p, "appB"); b == nil || b.TotalCost != 20 {
+		t.Fatalf("appB TotalCost wrong: %+v", b)
+	}
+	if c := findResource(acc, cl, p, "appC"); c == nil || c.TotalCost != 30 {
+		t.Fatalf("appC TotalCost wrong: %+v", c)
+	}
+
+	pi := adminCostProjectIndex(acc.clients[cl], p)
+	if got := len(acc.clients[cl].Projects[pi].Resources); got != 3 {
+		t.Fatalf("resource count = %d, want 3 (appA reused, not duplicated)", got)
+	}
+}
+
+// TestEnsureResourceJoinsRevenueOntoCostNode proves the cost walk and the
+// revenue walk land on the same resource node, so a row's margin is its own
+// apps' revenue minus its own cost.
+func TestEnsureResourceJoinsRevenueOntoCostNode(t *testing.T) {
+	acc := newTestAccumulator()
+	const cl, cn, p, pn = "c1", "Client 1", "p1", "Proj 1"
+
+	acc.add(cl, cn, p, pn, "appA", "app", opencost.Allocation{TotalCost: 40}, 1)
+	r := acc.ensureResource(cl, cn, p, pn, "appA", "app")
+	r.Revenue += 100
+
+	a := findResource(acc, cl, p, "appA")
+	if a == nil {
+		t.Fatal("appA missing")
+	}
+	if a.TotalCost != 40 || a.Revenue != 100 {
+		t.Fatalf("appA = {cost %v, revenue %v}, want {40, 100}", a.TotalCost, a.Revenue)
+	}
+	if pi := adminCostProjectIndex(acc.clients[cl], p); len(acc.clients[cl].Projects[pi].Resources) != 1 {
+		t.Fatal("revenue walk must reuse the cost node, not append a second appA")
+	}
+}
+
+func TestMarginPct(t *testing.T) {
+	cases := []struct {
+		name    string
+		revenue float64
+		cost    float64
+		want    float64
+	}{
+		{"zero revenue yields zero", 0, 50, 0},
+		{"negative revenue guarded", -10, 5, 0},
+		{"healthy margin", 200, 50, 75},
+		{"loss below cost", 100, 150, -50},
+		{"break even", 100, 100, 0},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := marginPct(tc.revenue, tc.cost); got != tc.want {
+				t.Fatalf("marginPct(%v, %v) = %v, want %v", tc.revenue, tc.cost, got, tc.want)
+			}
+		})
+	}
+}
