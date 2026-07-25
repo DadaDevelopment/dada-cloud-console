@@ -26,6 +26,16 @@ spec:
     - host: {{ .Values.ingress.host }}
       http:
         paths:
+          # Next.js API route served by the frontend, not the Go backend. Nginx
+          # picks the longest matching prefix, so this wins over the /api rule
+          # below regardless of order; without it the request 404s in gin.
+          - path: /api/frame-check
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "dada-cloud-console.fullname" . }}-frontend
+                port:
+                  number: {{ .Values.frontend.service.port }}
           - path: /api
             pathType: Prefix
             backend:

@@ -34,6 +34,7 @@ interface AppPreviewPaneProps {
  */
 export function AppPreviewPane({ url, openUrl, title, defaultOpen = false }: AppPreviewPaneProps) {
   const externalUrl = openUrl ?? url;
+  const isGateUrl = openUrl !== undefined && openUrl !== url;
   const { t } = useT();
   const [open, setOpen] = useState(defaultOpen);
   const [viewport, setViewport] = useState<Viewport>("full");
@@ -51,6 +52,10 @@ export function AppPreviewPane({ url, openUrl, title, defaultOpen = false }: App
 
   useEffect(() => {
     if (!open || embeddable !== null) return;
+    if (isGateUrl) {
+      setEmbeddable(true);
+      return;
+    }
     let cancelled = false;
     fetch(`/api/frame-check?url=${encodeURIComponent(url)}`)
       .then((res) => res.json())
@@ -68,7 +73,7 @@ export function AppPreviewPane({ url, openUrl, title, defaultOpen = false }: App
     return () => {
       cancelled = true;
     };
-  }, [open, url, embeddable]);
+  }, [open, url, embeddable, isGateUrl]);
 
   return (
     <div className="rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 shadow-sm">
