@@ -45,4 +45,28 @@ export const billing: Messages = {
     en: "Your payment is being processed - the status will appear on the Billing page.",
   },
   "billing.return.back": { ru: "Вернуться в консоль", en: "Back to console" },
+  "billing.return.waiting": { ru: "Проверяем платёж...", en: "Checking your payment..." },
+  "billing.return.waitingHint": {
+    ru: "Обычно это занимает несколько секунд.",
+    en: "This usually takes a few seconds.",
+  },
+  "billing.return.successTitle": { ru: "Оплата прошла!", en: "Payment received!" },
+  "billing.return.successMessage": {
+    ru: "Тариф уже активен — срок действия виден в разделе Billing.",
+    en: "Your plan is active - see its term on the Billing page.",
+  },
+  "billing.return.canceledTitle": { ru: "Платёж не прошёл", en: "Payment was not completed" },
+  "billing.return.canceledMessage": {
+    ru: "Оплата была отменена. Можно попробовать ещё раз в разделе Billing.",
+    en: "The payment was canceled. You can try again on the Billing page.",
+  },
+  "billing.return.toBilling": { ru: "Открыть Billing", en: "Open Billing" },
+
+  "billing.orgScope": {
+    ru: "План действует на всю организацию — на все её проекты.",
+    en: "The plan applies to your whole organization - all of its projects.",
+  },
+  "billing.expiresOn": { ru: "действует до {date}", en: "active until {date}" },
+  "billing.expiresSoon": { ru: "истекает {date} — продлите, чтобы сохранить тариф", en: "expires {date} - renew to keep your plan" },
+  "billing.renew": { ru: "Продлить за {price} ₽", en: "Renew for {price} rub" },
 };

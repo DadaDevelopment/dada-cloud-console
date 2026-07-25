@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/url"
+	"strings"
 	"time"
 
 	"github.com/dada-tuda/console/backend/internal/billing"
@@ -71,7 +73,11 @@ func NewProvider(pool *pgxpool.Pool, client *Client, returnURL string, sendRecei
 // Idempotence-Key), creates the YooKassa payment, then stores the returned
 // yk_payment_id and confirmation_url on the row. The caller resolves plan
 // server-side (never trusts a client-supplied amount).
-func (p *YooKassaProvider) Checkout(ctx context.Context, orgID string, plan pricing.Plan, customerEmail, createdBySub string) (paymentID, confirmationURL string, err error) {
+//
+// projectID, when non-empty, is carried onto the return URL as
+// ?project=...&payment=... so the console's return page can poll this exact
+// payment's status instead of showing a blind thank-you.
+func (p *YooKassaProvider) Checkout(ctx context.Context, orgID string, plan pricing.Plan, customerEmail, createdBySub, projectID string) (paymentID, confirmationURL string, err error) {
 	id := uuid.New()
 	amountValue := fmt.Sprintf("%.2f", plan.PriceRUB)
 
@@ -83,11 +89,20 @@ func (p *YooKassaProvider) Checkout(ctx context.Context, orgID string, plan pric
 		return "", "", fmt.Errorf("yookassa: insert pending payment: %w", err)
 	}
 
+	returnURL := p.ReturnURL
+	if projectID != "" {
+		sep := "?"
+		if strings.Contains(returnURL, "?") {
+			sep = "&"
+		}
+		returnURL += sep + "project=" + url.QueryEscape(projectID) + "&payment=" + id.String()
+	}
+
 	amount := Amount{Value: amountValue, Currency: "RUB"}
 	req := CreatePaymentRequest{
 		Amount:       amount,
 		Capture:      true,
-		Confirmation: Confirmation{Type: "redirect", ReturnURL: p.ReturnURL},
+		Confirmation: Confirmation{Type: "redirect", ReturnURL: returnURL},
 		Description:  fmt.Sprintf("Dada Cloud: тариф %s", plan.Name),
 	}
 	if p.SendReceipt && customerEmail != "" {

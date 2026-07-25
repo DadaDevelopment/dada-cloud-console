@@ -2,24 +2,17 @@
 
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
-import Link from "next/link";
 import { billingApi } from "@/lib/api";
 import type { BillingAccount, BillingUsage, ConsumptionResponse, BillingPlan, BillingPlanKey, Payment, PaymentStatus } from "@/lib/api";
 import { Spinner } from "@/components/ui/spinner";
 import { Breadcrumb } from "@/components/ui/breadcrumb";
 import { ConsumptionBreakdown } from "@/components/billing/consumption-breakdown";
 import { useT } from "@/lib/i18n/console/context";
-import { marketingHref } from "@/lib/site";
 import { clsx } from "clsx";
 
-const PLAN_DISPLAY_NAMES: Record<string, string> = {
-  free: "Free",
-  startup: "Startup",
-  business: "Business",
-  enterprise: "Enterprise",
-};
-
 const PLAN_ORDER: BillingPlanKey[] = ["free", "startup", "business", "enterprise"];
+
+const EXPIRY_SOON_DAYS = 7;
 
 function statusTone(status: PaymentStatus): string {
   if (status === "succeeded") return "bg-green-100 text-green-700 dark:bg-green-950/50 dark:text-green-400";
@@ -74,6 +67,7 @@ export default function BillingPage() {
   const [checkoutError, setCheckoutError] = useState<{ plan: BillingPlanKey; message: string } | null>(null);
   const [notConfiguredPlan, setNotConfiguredPlan] = useState<BillingPlanKey | null>(null);
   const [checkoutUrl, setCheckoutUrl] = useState<{ plan: BillingPlanKey; url: string } | null>(null);
+  const [loadedAtMs] = useState(() => Date.now());
 
   useEffect(() => {
     let cancelled = false;
@@ -169,8 +163,21 @@ export default function BillingPage() {
 
   if (!account) return null;
 
-  const planName = PLAN_DISPLAY_NAMES[account.plan] ?? account.plan;
+  const planLabel = (key: string): string => {
+    const i18nKey = "billing.plan" + key.charAt(0).toUpperCase() + key.slice(1);
+    const label = t(i18nKey);
+    return label === i18nKey ? key : label;
+  };
+
+  const planName = planLabel(account.plan);
   const usage = account.usage;
+
+  const expiresAt = account.plan_expires_at ? new Date(account.plan_expires_at) : null;
+  const expiryDaysLeft = expiresAt ? Math.ceil((expiresAt.getTime() - loadedAtMs) / (24 * 60 * 60 * 1000)) : null;
+  const expirySoon = expiryDaysLeft !== null && expiryDaysLeft <= EXPIRY_SOON_DAYS;
+  const expiryDate = expiresAt
+    ? expiresAt.toLocaleDateString("ru", { day: "numeric", month: "long", year: "numeric" })
+    : null;
 
   const nearLimitResources = USAGE_KEYS.filter((k) => {
     const item = usage[k];
@@ -234,7 +241,7 @@ export default function BillingPage() {
         </div>
       )}
 
-      <div className="grid gap-6 lg:grid-cols-3">
+      <div className="grid gap-6 lg:grid-cols-2">
         <div className="rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-6 shadow-sm">
           <p className="text-xs font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500">{t("billing.currentPlan")}</p>
           <p className="mt-2 text-3xl font-bold text-gray-900 dark:text-gray-100">{planName}</p>
@@ -245,13 +252,33 @@ export default function BillingPage() {
                 : `${currentPlanInfo.price_rub.toLocaleString("ru")} ₽ / мес`}
             </p>
           )}
-          <Link
-            href={marketingHref("/pricing")}
-            target="_blank"
-            className="mt-5 inline-flex items-center gap-1.5 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-blue-700"
-          >
-            {t("billing.upgradeCta")}
-          </Link>
+          {expiryDate && (
+            <p className={clsx("mt-1 text-sm", expirySoon ? "font-semibold text-amber-600 dark:text-amber-400" : "text-gray-500 dark:text-gray-400")}>
+              {t(expirySoon ? "billing.expiresSoon" : "billing.expiresOn", { date: expiryDate })}
+            </p>
+          )}
+          <p className="mt-3 text-xs text-gray-400 dark:text-gray-500">{t("billing.orgScope")}</p>
+
+          {expirySoon && currentPlanInfo && currentPlanInfo.price_rub !== null && currentPlanInfo.price_rub > 0 && (
+            <div className="mt-4">
+              <button
+                type="button"
+                disabled={checkoutingPlan === account.plan}
+                onClick={() => handleCheckout(account.plan)}
+                className="inline-flex w-full items-center justify-center gap-1.5 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-blue-700 disabled:opacity-60"
+              >
+                {checkoutingPlan === account.plan
+                  ? t("billing.paying")
+                  : t("billing.renew", { price: currentPlanInfo.price_rub.toLocaleString("ru") })}
+              </button>
+              {notConfiguredPlan === account.plan && (
+                <p className="mt-1.5 text-xs text-amber-600 dark:text-amber-400">{t("billing.notConfigured")}</p>
+              )}
+              {checkoutError?.plan === account.plan && (
+                <p className="mt-1.5 text-xs text-red-600 dark:text-red-400">{checkoutError.message}</p>
+              )}
+            </div>
+          )}
 
           {upgradeCandidates.length > 0 && (
             <div className="mt-5 space-y-2 border-t border-gray-100 dark:border-gray-800 pt-4">
@@ -300,19 +327,6 @@ export default function BillingPage() {
           </div>
         )}
 
-        <div className="rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-6 shadow-sm">
-          <p className="text-xs font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500">{t("billing.upgradeTitle")}</p>
-          <p className="mt-2 text-sm text-gray-600 dark:text-gray-400">
-            {t("billing.alertNearLimit")}
-          </p>
-          <Link
-            href={marketingHref("/pricing")}
-            target="_blank"
-            className="mt-5 inline-flex items-center gap-1.5 rounded-lg border border-gray-200 dark:border-gray-700 px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-200 transition-colors hover:bg-gray-50 dark:hover:bg-gray-800"
-          >
-            {t("billing.upgradeCta")} →
-          </Link>
-        </div>
       </div>
 
       <div className="mt-8 rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-6 shadow-sm">
@@ -324,7 +338,7 @@ export default function BillingPage() {
             {payments.map((p) => (
               <div key={p.id} className="flex items-center justify-between rounded-lg bg-gray-50 dark:bg-gray-900 px-4 py-3 text-sm">
                 <div className="flex items-center gap-3">
-                  <span className="font-medium text-gray-900 dark:text-gray-100">{PLAN_DISPLAY_NAMES[p.plan] ?? p.plan}</span>
+                  <span className="font-medium text-gray-900 dark:text-gray-100">{planLabel(p.plan)}</span>
                   <span className="text-gray-400 dark:text-gray-500">
                     {p.amount_value.toLocaleString("ru")} {p.currency}
                   </span>

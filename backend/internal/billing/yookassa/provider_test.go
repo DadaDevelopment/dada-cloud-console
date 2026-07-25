@@ -217,7 +217,7 @@ func TestCheckout_InsertsPendingRowThenStoresYkPaymentID(t *testing.T) {
 	p := NewProvider(pool, client, "https://console.dada-tuda.ru/billing/return", false)
 	plan := pricing.Plan{Key: "startup", Name: "Startup", PriceRUB: 990}
 
-	paymentID, confirmationURL, err := p.Checkout(context.Background(), orgID, plan, "buyer@example.com", "sub-checkout")
+	paymentID, confirmationURL, err := p.Checkout(context.Background(), orgID, plan, "buyer@example.com", "sub-checkout", uuid.NewString())
 	if err != nil {
 		t.Fatalf("Checkout: %v", err)
 	}

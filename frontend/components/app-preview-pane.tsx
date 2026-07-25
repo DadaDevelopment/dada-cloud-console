@@ -39,8 +39,9 @@ export function AppPreviewPane({ url, openUrl, title, defaultOpen = false }: App
   const [open, setOpen] = useState(defaultOpen);
   const [viewport, setViewport] = useState<Viewport>("full");
   const [reloadKey, setReloadKey] = useState(0);
-  const [embeddable, setEmbeddable] = useState<boolean | null>(null);
+  const [checkedEmbeddable, setEmbeddable] = useState<boolean | null>(null);
   const [checkStatus, setCheckStatus] = useState<number | null>(null);
+  const embeddable = isGateUrl ? true : checkedEmbeddable;
   const checking = open && embeddable === null;
   const gatewayError = checkStatus !== null && GATEWAY_ERROR_STATUSES.has(checkStatus);
 
@@ -51,11 +52,7 @@ export function AppPreviewPane({ url, openUrl, title, defaultOpen = false }: App
   }
 
   useEffect(() => {
-    if (!open || embeddable !== null) return;
-    if (isGateUrl) {
-      setEmbeddable(true);
-      return;
-    }
+    if (!open || isGateUrl || checkedEmbeddable !== null) return;
     let cancelled = false;
     fetch(`/api/frame-check?url=${encodeURIComponent(url)}`)
       .then((res) => res.json())
@@ -73,7 +70,7 @@ export function AppPreviewPane({ url, openUrl, title, defaultOpen = false }: App
     return () => {
       cancelled = true;
     };
-  }, [open, url, embeddable, isGateUrl]);
+  }, [open, url, checkedEmbeddable, isGateUrl]);
 
   return (
     <div className="rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 shadow-sm">

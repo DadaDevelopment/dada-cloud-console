@@ -107,7 +107,7 @@ func (h *Handler) BillingCheckout(c *gin.Context) {
 		return
 	}
 
-	paymentID, confirmationURL, err := h.yookassa.Checkout(c.Request.Context(), orgID, *plan, claims.Email, claims.Subject)
+	paymentID, confirmationURL, err := h.yookassa.Checkout(c.Request.Context(), orgID, *plan, claims.Email, claims.Subject, projectID.String())
 	if err != nil {
 		log.Printf("payments: checkout failed org=%s plan=%s: %v", orgID, body.Plan, err)
 		respondError(c, http.StatusInternalServerError, "failed to start checkout")
