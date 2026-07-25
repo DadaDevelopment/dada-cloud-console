@@ -258,7 +258,9 @@ func (w *appHealthWatcher) maybeNotify(ctx context.Context, projectID uuid.UUID,
 
 	logExcerpt := w.tailLog(ctx, alert)
 	consoleLink := fmt.Sprintf("%s/projects/%s/apps/%s", w.h.cfg.PublicBaseURL, projectID, alert.AppName)
-	subject, body := notify.ComposeAppAlert(alert.AppName, alert.Reason, alert.PodName, logExcerpt, consoleLink)
+	codeHint := notify.ClassifyCrashLog(logExcerpt)
+	agentURL := consoleLink + "#agent"
+	subject, body := notify.ComposeAppAlert(alert.AppName, alert.Reason, alert.PodName, logExcerpt, consoleLink, codeHint, agentURL)
 	if err := w.h.auditNotifier.Send(to, subject, body); err != nil {
 		log.Printf("app-health: send to %s failed for app=%s: %v", to, alert.AppName, err)
 		return

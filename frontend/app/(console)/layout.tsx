@@ -41,6 +41,15 @@ function ConsoleShell({ children }: { children: React.ReactNode }) {
     return () => document.removeEventListener("keydown", onKey);
   }, [navOpen]);
 
+  useEffect(() => {
+    function checkAgentHash() {
+      if (window.location.hash === "#agent") setChatOpen(true);
+    }
+    checkAgentHash();
+    window.addEventListener("hashchange", checkAgentHash);
+    return () => window.removeEventListener("hashchange", checkAgentHash);
+  }, []);
+
   return (
     <div className="flex h-dvh flex-col overflow-hidden">
       <TopBar

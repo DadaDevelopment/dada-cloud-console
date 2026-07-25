@@ -62,24 +62,78 @@ func ComposeAudit(action, actorEmail, resourceName, projectName, createdAtUTC st
 	return subject, b.String()
 }
 
+// crashLogSignature is one entry in the ordered pattern table ClassifyCrashLog
+// walks: pattern is matched with strings.Contains against the log excerpt,
+// label is the human hint appended to the pattern name in the parenthetical.
+type crashLogSignature struct {
+	pattern string
+	label   string
+}
+
+// pythonCrashSignatures, nodeCrashSignatures and genericCrashSignatures are
+// checked in this order by ClassifyCrashLog; the first match wins.
+var pythonCrashSignatures = []crashLogSignature{
+	{pattern: "Traceback (most recent call last)", label: "Python"},
+	{pattern: "ModuleNotFoundError", label: "Python"},
+	{pattern: "ImportError", label: "Python"},
+	{pattern: "SyntaxError", label: "Python"},
+	{pattern: "AttributeError", label: "Python"},
+	{pattern: "NameError", label: "Python"},
+}
+
+var nodeCrashSignatures = []crashLogSignature{
+	{pattern: "Cannot find module", label: "Node.js"},
+	{pattern: "SyntaxError:", label: "Node.js"},
+	{pattern: "ReferenceError", label: "Node.js"},
+}
+
+// ClassifyCrashLog looks at a crashed container's log excerpt for known
+// application-code error signatures (as opposed to infra failures like
+// OOMKilled or ImagePullBackOff) and returns a short Russian hint pointing
+// the owner at their own code. Returns "" when nothing recognizable matched,
+// so callers can omit the line entirely rather than show a wrong guess.
+func ClassifyCrashLog(excerpt string) string {
+	for _, sig := range pythonCrashSignatures {
+		if strings.Contains(excerpt, sig.pattern) {
+			return fmt.Sprintf("Судя по логам, это ошибка в коде приложения (%s).", sig.label)
+		}
+	}
+	for _, sig := range nodeCrashSignatures {
+		if strings.Contains(excerpt, sig.pattern) {
+			return fmt.Sprintf("Судя по логам, это ошибка в коде приложения (%s).", sig.label)
+		}
+	}
+	if strings.Contains(excerpt, "panic:") {
+		return "Судя по логам, это похоже на ошибку в коде приложения."
+	}
+	return ""
+}
+
 // ComposeAppAlert builds the subject and plaintext body for a silent-crash
 // alert: the owner's app is stuck in CrashLoopBackOff/OOMKilled/ImagePullBackOff
 // and would otherwise go unnoticed until the owner happens to open the
 // console. logExcerpt is the best-effort last lines of the crashed container's
 // log (may be empty when the cluster read failed or there was nothing to
-// read); consoleLink deep-links straight to the app in the console.
-func ComposeAppAlert(appName, reason, podName, logExcerpt, consoleLink string) (subject, body string) {
+// read); consoleLink deep-links straight to the app in the console. codeHint
+// is the optional ClassifyCrashLog result (may be ""); agentURL deep-links to
+// the console's AI agent panel for this app.
+func ComposeAppAlert(appName, reason, podName, logExcerpt, consoleLink, codeHint, agentURL string) (subject, body string) {
 	subject = fmt.Sprintf("Dada Cloud: %s не работает (%s)", appName, reason)
 	var b strings.Builder
 	fmt.Fprintf(&b, "Приложение %s перезапускается и, похоже, не поднимается.\n\n", appName)
 	fmt.Fprintf(&b, "Причина: %s\n", reason)
 	fmt.Fprintf(&b, "Под: %s\n\n", podName)
+	if codeHint != "" {
+		b.WriteString(codeHint)
+		b.WriteString("\n\n")
+	}
 	if logExcerpt != "" {
 		b.WriteString("Последние строки лога:\n")
 		b.WriteString(logExcerpt)
 		b.WriteString("\n\n")
 	}
 	fmt.Fprintf(&b, "Открыть в консоли: %s\n\n", consoleLink)
+	fmt.Fprintf(&b, "Спросите AI-агента в консоли - он видит логи вашего приложения и поможет разобраться: %s\n\n", agentURL)
 	b.WriteString("Это письмо приходит не чаще раза в 24 часа на приложение.\n")
 	return subject, b.String()
 }
