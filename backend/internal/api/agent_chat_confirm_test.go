@@ -168,19 +168,33 @@ func insertPendingRestartAction(t *testing.T, h *Handler, userSub string) uuid.U
 	return actionID
 }
 
+// parseSSEEvents groups the response body into event-name -> payloads under
+// the gin sse.Encode framing (4419e8a): "event:"/"data:" carry no cosmetic
+// space, and a multi-line payload arrives as several "data:" continuation
+// lines within one block, joined back with "\n" on the blank terminator.
 func parseSSEEvents(t *testing.T, body string) map[string][]string {
 	t.Helper()
 	events := map[string][]string{}
-	lines := strings.Split(body, "\n")
-	var currentEvent string
-	for _, line := range lines {
+	currentEvent := "message"
+	var dataLines []string
+	flush := func() {
+		if len(dataLines) > 0 {
+			events[currentEvent] = append(events[currentEvent], strings.Join(dataLines, "\n"))
+		}
+		currentEvent = "message"
+		dataLines = nil
+	}
+	for _, line := range strings.Split(body, "\n") {
 		switch {
-		case strings.HasPrefix(line, "event: "):
-			currentEvent = strings.TrimPrefix(line, "event: ")
-		case strings.HasPrefix(line, "data: "):
-			events[currentEvent] = append(events[currentEvent], strings.TrimPrefix(line, "data: "))
+		case line == "":
+			flush()
+		case strings.HasPrefix(line, "event:"):
+			currentEvent = strings.TrimSpace(strings.TrimPrefix(line, "event:"))
+		case strings.HasPrefix(line, "data:"):
+			dataLines = append(dataLines, strings.TrimPrefix(line, "data:"))
 		}
 	}
+	flush()
 	return events
 }
 
@@ -206,16 +220,9 @@ func TestAgentChatConfirm_Approve_ExecutesToolAndResumes(t *testing.T) {
 	if len(events["done"]) == 0 || !strings.Contains(events["done"][len(events["done"])-1], `"ok":true`) {
 		t.Fatalf("done events=%v, want a final ok:true", events["done"])
 	}
-	var gotText strings.Builder
-	for _, raw := range events["token"] {
-		var tok string
-		if err := json.Unmarshal([]byte(raw), &tok); err != nil {
-			t.Fatalf("token event %q is not a JSON-framed string (writeSSEToken contract): %v", raw, err)
-		}
-		gotText.WriteString(tok)
-	}
-	if gotText.String() != "Restarted web." {
-		t.Fatalf("streamed token text=%q want %q", gotText.String(), "Restarted web.")
+	gotText := strings.Join(events["token"], "")
+	if gotText != "Restarted web." {
+		t.Fatalf("streamed token text=%q want %q", gotText, "Restarted web.")
 	}
 
 	if seenAuth != "Bearer confirm-bearer-token" {
