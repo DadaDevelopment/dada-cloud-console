@@ -63,12 +63,18 @@ export default function AdminCostsPage() {
     return () => clearInterval(interval);
   }, [forbidden, load]);
 
-  const toggleClient = (id: string) => {
+  const toggleClient = (client: AdminCostClient) => {
+    const id = client.client_id;
+    const wasOpen = openClients.has(id);
     setOpenClients((prev) => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id); else next.add(id);
       return next;
     });
+    if (!wasOpen && client.projects.length === 1) {
+      const key = `${id}/${client.projects[0].project_id}`;
+      setOpenProjects((prev) => new Set(prev).add(key));
+    }
   };
   const toggleProject = (key: string) => {
     setOpenProjects((prev) => {
@@ -83,11 +89,12 @@ export default function AdminCostsPage() {
 
   const recon = useMemo(() => {
     const clientsSum = (data?.clients ?? []).reduce((s, c) => s + c.cost, 0);
+    const platformCost = data?.platform?.cost ?? 0;
     const unalloc = data?.unallocated?.total_cost ?? 0;
-    const total = data?.total_cost ?? clientsSum + unalloc;
+    const total = data?.total_cost ?? clientsSum + platformCost + unalloc;
     const hardware = data?.hardware_total_cost ?? 0;
     const delta = total - hardware;
-    return { clientsSum, unalloc, total, hardware, delta, reconciled: Math.abs(delta) < 1 };
+    return { clientsSum, platformCost, unalloc, total, hardware, delta, reconciled: Math.abs(delta) < 1 };
   }, [data]);
 
   const crumb = (
@@ -230,6 +237,10 @@ export default function AdminCostsPage() {
                 <span className="font-mono text-xs text-gray-700 dark:text-gray-200">{formatMoney(recon.clientsSum, currency)}</span>
               </div>
               <div className="flex items-center justify-between">
+                <span className="text-gray-600 dark:text-gray-300">+ {t("adminCosts.method.platform")}</span>
+                <span className="font-mono text-xs text-gray-700 dark:text-gray-200">{formatMoney(recon.platformCost, currency)}</span>
+              </div>
+              <div className="flex items-center justify-between">
                 <span className="text-gray-600 dark:text-gray-300">+ {t("adminCosts.method.unallocated")}</span>
                 <span className="font-mono text-xs text-gray-700 dark:text-gray-200">{formatMoney(recon.unalloc, currency)}</span>
               </div>
@@ -332,6 +343,27 @@ export default function AdminCostsPage() {
           </CardContent>
         </Card>
       </div>
+
+      {!isLoading && data?.available && data.platform && (data.platform.projects?.length ?? 0) > 0 && (
+        <Card className="mb-6">
+          <CardHeader className="p-4 pb-2">
+            <CardTitle className="text-sm">{t("adminCosts.platform.title")}</CardTitle>
+            <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">{t("adminCosts.platform.subtitle")}</p>
+          </CardHeader>
+          <CardContent className="p-4 pt-0">
+            <CostTree
+              clients={[data.platform]}
+              currency={currency}
+              openClients={openClients}
+              openProjects={openProjects}
+              onToggleClient={toggleClient}
+              onToggleProject={toggleProject}
+              t={t}
+              costOnly
+            />
+          </CardContent>
+        </Card>
+      )}
     </div>
   );
 }
@@ -344,14 +376,16 @@ function CostTree({
   onToggleClient,
   onToggleProject,
   t,
+  costOnly = false,
 }: {
   clients: AdminCostClient[];
   currency?: string;
   openClients: Set<string>;
   openProjects: Set<string>;
-  onToggleClient: (id: string) => void;
+  onToggleClient: (client: AdminCostClient) => void;
   onToggleProject: (key: string) => void;
   t: (key: string, vars?: Record<string, string | number>) => string;
+  costOnly?: boolean;
 }) {
   const totalCost = clients.reduce((s, c) => s + c.cost, 0);
   const totalRevenue = clients.reduce((s, c) => s + c.revenue, 0);
@@ -362,11 +396,11 @@ function CostTree({
       <table className="w-full text-sm">
         <thead>
           <tr className="border-b border-gray-200 dark:border-gray-800 text-xs font-medium text-gray-500 dark:text-gray-400">
-            <th className="py-2 text-left">{t("adminCosts.table.client")}</th>
+            <th className="py-2 text-left">{t(costOnly ? "adminCosts.table.node" : "adminCosts.table.client")}</th>
             <th className="py-2 text-right">{t("adminCosts.table.cost")}</th>
-            <th className="py-2 text-right">{t("adminCosts.table.revenue")}</th>
-            <th className="py-2 text-right">{t("adminCosts.table.marginPct")}</th>
-            <th className="py-2 text-right">{t("adminCosts.table.margin")}</th>
+            {!costOnly && <th className="py-2 text-right">{t("adminCosts.table.revenue")}</th>}
+            {!costOnly && <th className="py-2 text-right">{t("adminCosts.table.marginPct")}</th>}
+            {!costOnly && <th className="py-2 text-right">{t("adminCosts.table.margin")}</th>}
           </tr>
         </thead>
         <tbody>
@@ -378,9 +412,10 @@ function CostTree({
                 client={cl}
                 currency={currency}
                 open={clientOpen}
-                onToggle={() => onToggleClient(cl.client_id)}
+                onToggle={() => onToggleClient(cl)}
                 openProjects={openProjects}
                 onToggleProject={onToggleProject}
+                costOnly={costOnly}
               />
             );
           })}
@@ -389,9 +424,9 @@ function CostTree({
           <tr className="border-t-2 border-gray-200 dark:border-gray-700 font-medium">
             <td className="py-2 text-left text-gray-900 dark:text-gray-100">{t("adminCosts.table.total")}</td>
             <td className="py-2 text-right font-mono text-xs text-gray-900 dark:text-gray-100">{formatMoney(totalCost, currency)}</td>
-            <td className="py-2 text-right font-mono text-xs text-gray-900 dark:text-gray-100">{formatMoney(totalRevenue, currency)}</td>
-            <td className={`py-2 text-right font-mono text-xs ${marginClass(totalMarginPct)}`}>{formatPct(totalMarginPct)}</td>
-            <td className={`py-2 text-right font-mono text-xs ${marginClass(totalMargin)}`}>{formatMoney(totalMargin, currency)}</td>
+            {!costOnly && <td className="py-2 text-right font-mono text-xs text-gray-900 dark:text-gray-100">{formatMoney(totalRevenue, currency)}</td>}
+            {!costOnly && <td className={`py-2 text-right font-mono text-xs ${marginClass(totalMarginPct)}`}>{formatPct(totalMarginPct)}</td>}
+            {!costOnly && <td className={`py-2 text-right font-mono text-xs ${marginClass(totalMargin)}`}>{formatMoney(totalMargin, currency)}</td>}
           </tr>
         </tfoot>
       </table>
@@ -406,6 +441,7 @@ function ClientRows({
   onToggle,
   openProjects,
   onToggleProject,
+  costOnly = false,
 }: {
   client: AdminCostClient;
   currency?: string;
@@ -413,6 +449,7 @@ function ClientRows({
   onToggle: () => void;
   openProjects: Set<string>;
   onToggleProject: (key: string) => void;
+  costOnly?: boolean;
 }) {
   return (
     <>
@@ -424,9 +461,9 @@ function ClientRows({
           </button>
         </td>
         <td className="py-2 text-right font-mono text-xs text-gray-700 dark:text-gray-200">{formatMoney(client.cost, currency)}</td>
-        <td className="py-2 text-right font-mono text-xs text-gray-700 dark:text-gray-200">{formatMoney(client.revenue, currency)}</td>
-        <td className={`py-2 text-right font-mono text-xs ${marginClass(client.margin)}`}>{formatPct(client.margin_pct)}</td>
-        <td className={`py-2 text-right font-mono text-xs ${marginClass(client.margin)}`}>{formatMoney(client.margin, currency)}</td>
+        {!costOnly && <td className="py-2 text-right font-mono text-xs text-gray-700 dark:text-gray-200">{formatMoney(client.revenue, currency)}</td>}
+        {!costOnly && <td className={`py-2 text-right font-mono text-xs ${marginClass(client.margin)}`}>{formatPct(client.margin_pct)}</td>}
+        {!costOnly && <td className={`py-2 text-right font-mono text-xs ${marginClass(client.margin)}`}>{formatMoney(client.margin, currency)}</td>}
       </tr>
       {open && client.projects.map((p) => {
         const key = `${client.client_id}/${p.project_id}`;
@@ -438,6 +475,7 @@ function ClientRows({
             currency={currency}
             open={openProjects.has(key)}
             onToggle={() => onToggleProject(key)}
+            costOnly={costOnly}
           />
         );
       })}
@@ -451,12 +489,14 @@ function ProjectRows({
   currency,
   open,
   onToggle,
+  costOnly = false,
 }: {
   projectKey: string;
   project: AdminCostProject;
   currency?: string;
   open: boolean;
   onToggle: () => void;
+  costOnly?: boolean;
 }) {
   return (
     <>
@@ -468,9 +508,9 @@ function ProjectRows({
           </button>
         </td>
         <td className="py-2 text-right font-mono text-xs text-gray-700 dark:text-gray-200">{formatMoney(project.cost, currency)}</td>
-        <td className="py-2 text-right font-mono text-xs text-gray-700 dark:text-gray-200">{formatMoney(project.revenue, currency)}</td>
-        <td className={`py-2 text-right font-mono text-xs ${marginClass(project.margin)}`}>{formatPct(project.margin_pct)}</td>
-        <td className={`py-2 text-right font-mono text-xs ${marginClass(project.margin)}`}>{formatMoney(project.margin, currency)}</td>
+        {!costOnly && <td className="py-2 text-right font-mono text-xs text-gray-700 dark:text-gray-200">{formatMoney(project.revenue, currency)}</td>}
+        {!costOnly && <td className={`py-2 text-right font-mono text-xs ${marginClass(project.margin)}`}>{formatPct(project.margin_pct)}</td>}
+        {!costOnly && <td className={`py-2 text-right font-mono text-xs ${marginClass(project.margin)}`}>{formatMoney(project.margin, currency)}</td>}
       </tr>
       {open && project.resources.map((r) => (
         <tr key={projectKey + "/" + r.name} className="border-b border-gray-50 dark:border-gray-800/30">
@@ -478,9 +518,9 @@ function ProjectRows({
             {r.name} <span className="text-gray-300 dark:text-gray-600">· {r.kind}</span>
           </td>
           <td className="py-1.5 text-right font-mono text-[11px] text-gray-500 dark:text-gray-400">{formatMoney(r.total_cost, currency)}</td>
-          <td className="py-1.5 text-right font-mono text-[11px] text-gray-500 dark:text-gray-400">{formatMoney(r.revenue, currency)}</td>
-          <td className={`py-1.5 text-right font-mono text-[11px] ${marginClass(r.margin)}`}>{formatPct(r.margin_pct)}</td>
-          <td className={`py-1.5 text-right font-mono text-[11px] ${marginClass(r.margin)}`}>{formatMoney(r.margin, currency)}</td>
+          {!costOnly && <td className="py-1.5 text-right font-mono text-[11px] text-gray-500 dark:text-gray-400">{formatMoney(r.revenue, currency)}</td>}
+          {!costOnly && <td className={`py-1.5 text-right font-mono text-[11px] ${marginClass(r.margin)}`}>{formatPct(r.margin_pct)}</td>}
+          {!costOnly && <td className={`py-1.5 text-right font-mono text-[11px] ${marginClass(r.margin)}`}>{formatMoney(r.margin, currency)}</td>}
         </tr>
       ))}
     </>

@@ -41,11 +41,22 @@ const adminCostSampleDays = 1.0
 // is a pure scale factor applied on read, not a second heavy aggregation.
 var adminCostsWindows = []string{adminCostSampleWindow}
 
-// platformClientID / platformClientName is the pseudo-client every namespace
-// not owned by a project (argocd, monitoring, databases, opensearch, ...)
-// rolls up under, per the god-admin cost drilldown spec.
+// platformClientID / platformClientName is the own-infrastructure bucket the
+// cost tree pulls out of the customer list entirely: every namespace not owned
+// by a project (argocd, monitoring, databases, opensearch, ...) AND every
+// project with no owner user (platform, internal, demo/seed) rolls up here. It
+// is the cloud's own cost of running -- not a client -- so it is rendered as a
+// cost-only section with no revenue or margin: we do not pay ourselves.
 const platformClientID = "platform"
-const platformClientName = "Platform (internal)"
+const platformClientName = "Платформа / своя инфраструктура"
+
+// sharedDBNamespace is the namespace of the platform's one managed-Postgres
+// server (postgresql-0). Every ServiceDatabaseV2 is a logical database (datname)
+// inside this single server, so its pod cost lands wholesale under the platform
+// bucket (the "databases" namespace owns no project). splitSharedDatabaseCost
+// re-attributes each logical database's on-disk-size share of that pool onto the
+// owning project, so a customer's database shows up under their project.
+const sharedDBNamespace = "databases"
 
 // unallocatedResourceName is the line item for OpenCost cost with no namespace
 // (idle capacity, unattributed cluster overhead) -- real spend, but not
@@ -169,6 +180,7 @@ func (h *Handler) GetAdminCosts(c *gin.Context) {
 		"unallocated":         summary.Unallocated,
 		"top_loss_makers":     summary.TopLossMakers,
 		"clients":             summary.Clients,
+		"platform":            summary.Platform,
 		"agent_tokens":        h.adminAgentTokenEconomics(c.Request.Context(), days),
 	})
 }
@@ -195,6 +207,7 @@ type adminCostSummary struct {
 	Unallocated       adminCostResource
 	TopLossMakers     []adminCostLossMaker
 	Clients           []*adminCostClient
+	Platform          *adminCostClient
 }
 
 // buildAdminCostSummary computes the platform cost/revenue/margin economics
@@ -226,6 +239,13 @@ func (h *Handler) buildAdminCostSummary(ctx context.Context, days int) adminCost
 		log.Warn().Err(err).Msg("admin costs: failed to load namespace->owner map")
 		out.Note = "cost data temporarily unavailable"
 		return out
+	}
+
+	projByID := make(map[string]adminCostOwner, len(nsMap))
+	for _, o := range nsMap {
+		if ex, seen := projByID[o.projectID]; !seen || (ex.ownerID == "" && o.ownerID != "") {
+			projByID[o.projectID] = o
+		}
 	}
 
 	rawTotal, unallocatedRaw := adminCostsRawTotal(podAllocs)
@@ -267,7 +287,10 @@ func (h *Handler) buildAdminCostSummary(ctx context.Context, days int) adminCost
 		r.Revenue += round2(snap.pricing.price(alloc.CPUCost, alloc.RAMCost, alloc.PVCost) * revWindowScale)
 	}
 
-	clients := make([]*adminCostClient, 0, len(acc.clients))
+	h.splitSharedDatabaseCost(ctx, acc, projByID)
+
+	customers := make([]*adminCostClient, 0, len(acc.clients))
+	var platform *adminCostClient
 	for _, cl := range acc.clients {
 		for i := range cl.Projects {
 			p := &cl.Projects[i]
@@ -294,18 +317,27 @@ func (h *Handler) buildAdminCostSummary(ctx context.Context, days int) adminCost
 		cl.Margin = round2(cl.Revenue - cl.Cost)
 		cl.MarginPct = marginPct(cl.Revenue, cl.Cost)
 		sort.Slice(cl.Projects, func(a, b int) bool { return cl.Projects[a].Cost > cl.Projects[b].Cost })
-		clients = append(clients, cl)
+		if cl.ClientID == platformClientID {
+			platform = cl
+			continue
+		}
+		customers = append(customers, cl)
 	}
-	sort.Slice(clients, func(i, j int) bool { return clients[i].Cost > clients[j].Cost })
+	sort.Slice(customers, func(i, j int) bool { return customers[i].Cost > customers[j].Cost })
+
+	if platform != nil {
+		platformCostOnly(platform)
+	}
 
 	var totalCost, totalRevenue float64
-	lossMakers := make([]adminCostLossMaker, 0, len(clients))
-	for _, cl := range clients {
+	lossMakers := make([]adminCostLossMaker, 0, len(customers))
+	for _, cl := range customers {
 		totalCost += cl.Cost
 		totalRevenue += cl.Revenue
-		if cl.ClientID != platformClientID {
-			lossMakers = append(lossMakers, adminCostLossMaker{ClientName: cl.ClientName, Margin: cl.Margin})
-		}
+		lossMakers = append(lossMakers, adminCostLossMaker{ClientName: cl.ClientName, Margin: cl.Margin})
+	}
+	if platform != nil {
+		totalCost += platform.Cost
 	}
 	sort.Slice(lossMakers, func(i, j int) bool { return lossMakers[i].Margin < lossMakers[j].Margin })
 	if len(lossMakers) > adminCostsTopLossLimit {
@@ -329,8 +361,26 @@ func (h *Handler) buildAdminCostSummary(ctx context.Context, days int) adminCost
 	out.TotalRevenue = totalRevenue
 	out.Unallocated = unallocated
 	out.TopLossMakers = lossMakers
-	out.Clients = clients
+	out.Clients = customers
+	out.Platform = platform
 	return out
+}
+
+// platformCostOnly blanks the platform bucket's revenue and margin at every
+// level. The platform bucket is the cloud's own infrastructure (shared infra
+// namespaces plus owner-less projects), not a paying client -- we do not pay
+// ourselves -- so it is rendered cost-only and its (incidental) app revenue must
+// never inflate the business revenue or margin totals.
+func platformCostOnly(cl *adminCostClient) {
+	cl.Revenue, cl.Margin, cl.MarginPct = 0, 0, 0
+	for i := range cl.Projects {
+		p := &cl.Projects[i]
+		p.Revenue, p.Margin, p.MarginPct = 0, 0, 0
+		for j := range p.Resources {
+			r := &p.Resources[j]
+			r.Revenue, r.Margin, r.MarginPct = 0, 0, 0
+		}
+	}
 }
 
 // ensureResource returns a live pointer to the client -> project -> resource
@@ -444,17 +494,20 @@ func (h *Handler) adminCostNamespaceOwners(ctx context.Context) (map[string]admi
 }
 
 // adminCostOwnerOf resolves a namespace to (clientID, clientName, projectID,
-// projectName). Namespaces outside the project map are shared platform infra
-// (argocd, monitoring, databases, opencost, ...) and roll up under the
-// platform pseudo-client, one synthetic "project" per real namespace so the
-// breakdown stays legible.
+// projectName). Only namespaces of a project owned by a real user are billed to
+// a customer. Two cases roll up under the platform own-infrastructure bucket
+// instead: namespaces outside the project map (shared infra -- argocd,
+// monitoring, databases, opencost, ...), each as one synthetic "ns:<name>"
+// project; and projects with no owner user (platform, internal, demo/seed),
+// carried under their real project id/name. Neither is a client we charge, so
+// the platform bucket is separated out and shown cost-only downstream.
 func adminCostOwnerOf(ns string, nsMap map[string]adminCostOwner) (clientID, clientName, projectID, projectName string) {
 	owner, ok := nsMap[ns]
 	if !ok {
 		return platformClientID, platformClientName, "ns:" + ns, ns
 	}
 	if owner.ownerID == "" {
-		return "unowned:" + owner.projectID, owner.projectName + " (no owner)", owner.projectID, owner.projectName
+		return platformClientID, platformClientName, owner.projectID, owner.projectName
 	}
 	name := owner.ownerName
 	if name == "" {
@@ -579,4 +632,165 @@ func (h *Handler) begetHardwareCost(ctx context.Context) (float64, []adminCostHa
 		}
 	}
 	return total, breakdown, true
+}
+
+// adminCostDatabase is one logical database on the shared managed-Postgres
+// server: which project owns it (project_id) and its Postgres datname, used to
+// join the on-disk size series onto the owning project.
+type adminCostDatabase struct {
+	projectID string
+	name      string
+	datname   string
+}
+
+// adminCostServiceDatabases lists every ServiceDatabaseV2 with its owning
+// project and Postgres datname. Rows whose summary carries no datname are
+// skipped (nothing to size-attribute). Deleted databases have their snapshot
+// row removed by the watcher, and dead datnames carry no size series, so no
+// explicit soft-delete filter is needed.
+func (h *Handler) adminCostServiceDatabases(ctx context.Context) ([]adminCostDatabase, error) {
+	rows, err := h.pool.Query(ctx,
+		`SELECT project_id::text, name, summary_json
+		 FROM resource_snapshots
+		 WHERE kind = 'ServiceDatabaseV2'`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []adminCostDatabase{}
+	for rows.Next() {
+		var pid, name string
+		var summary []byte
+		if err := rows.Scan(&pid, &name, &summary); err != nil {
+			return nil, err
+		}
+		dn := serviceDatabaseDatname(summary)
+		if dn == "" {
+			continue
+		}
+		out = append(out, adminCostDatabase{projectID: pid, name: name, datname: dn})
+	}
+	return out, rows.Err()
+}
+
+// adminCostDBSizes reads live on-disk database sizes from Prometheus
+// (pg_database_size_bytes, the same series the Databases page uses). It returns
+// the per-datname size and the whole-server total. serverTotal sums every
+// series -- including the system and cloud-console databases -- so a logical
+// database's share is its true fraction of real disk and the platform keeps the
+// system/WAL remainder. Best-effort: a nil client or query error yields a zero
+// total, and splitSharedDatabaseCost then leaves the cost wholesale on platform.
+func (h *Handler) adminCostDBSizes(ctx context.Context) (map[string]float64, float64) {
+	perDatname := map[string]float64{}
+	if h.prometheus == nil {
+		return perDatname, 0
+	}
+	samples, err := h.prometheus.QueryInstant(ctx, "pg_database_size_bytes", time.Time{}, "")
+	if err != nil {
+		return perDatname, 0
+	}
+	var serverTotal float64
+	for _, s := range samples {
+		v := s.Point.V
+		if v <= 0 {
+			continue
+		}
+		serverTotal += v
+		if dn := s.Metric["datname"]; dn != "" {
+			perDatname[dn] += v
+		}
+	}
+	return perDatname, serverTotal
+}
+
+// splitSharedDatabaseCost re-attributes the shared managed-Postgres cost off the
+// platform bucket and onto the projects that own logical databases inside it.
+// The one postgresql-0 server (namespace sharedDBNamespace) hosts every
+// ServiceDatabaseV2 as a datname, so its pod cost initially lands wholesale on
+// the platform "ns:databases" project. This moves each owned database's
+// size-proportional share of that pool onto its owning customer project as a
+// database resource, then shrinks the platform pool by what moved. The
+// system/WAL remainder -- and any owner-less database's share -- stays on
+// platform. Best-effort: any missing input (no platform pool, no sizes, DB list
+// error) leaves the cost where it was rather than failing the whole summary.
+func (h *Handler) splitSharedDatabaseCost(ctx context.Context, acc *adminCostsAccumulator, projByID map[string]adminCostOwner) {
+	platform := acc.clients[platformClientID]
+	if platform == nil {
+		return
+	}
+	pi := adminCostProjectIndex(platform, "ns:"+sharedDBNamespace)
+	if pi < 0 {
+		return
+	}
+	var pool, poolCPU, poolRAM, poolPV float64
+	for i := range platform.Projects[pi].Resources {
+		r := &platform.Projects[pi].Resources[i]
+		if r.Kind != "database" {
+			continue
+		}
+		pool += r.TotalCost
+		poolCPU += r.CPUCost
+		poolRAM += r.RAMCost
+		poolPV += r.PVCost
+	}
+	if pool <= 0 {
+		return
+	}
+
+	perDatname, serverTotal := h.adminCostDBSizes(ctx)
+	if serverTotal <= 0 {
+		return
+	}
+	dbs, err := h.adminCostServiceDatabases(ctx)
+	if err != nil {
+		log.Warn().Err(err).Msg("admin costs: shared-db attribution skipped, service-database list failed")
+		return
+	}
+
+	var moved float64
+	for _, db := range dbs {
+		size := perDatname[db.datname]
+		if size <= 0 {
+			continue
+		}
+		owner, ok := projByID[db.projectID]
+		if !ok || owner.ownerID == "" {
+			continue
+		}
+		name := owner.ownerName
+		if name == "" {
+			name = owner.ownerID
+		}
+		frac := size / serverTotal
+		r := acc.ensureResource(owner.ownerID, name, owner.projectID, owner.projectName, db.name, "database")
+		r.TotalCost += round2(pool * frac)
+		r.CPUCost += round2(poolCPU * frac)
+		r.RAMCost += round2(poolRAM * frac)
+		r.PVCost += round2(poolPV * frac)
+		moved += round2(pool * frac)
+	}
+	if moved <= 0 {
+		return
+	}
+
+	for i := range platform.Projects[pi].Resources {
+		r := &platform.Projects[pi].Resources[i]
+		if r.Kind != "database" || r.TotalCost <= 0 {
+			continue
+		}
+		w := r.TotalCost / pool
+		r.TotalCost = nonNeg(round2(r.TotalCost - moved*w))
+		r.CPUCost = nonNeg(round2(r.CPUCost - moved*w*safeRatio(poolCPU, pool)))
+		r.RAMCost = nonNeg(round2(r.RAMCost - moved*w*safeRatio(poolRAM, pool)))
+		r.PVCost = nonNeg(round2(r.PVCost - moved*w*safeRatio(poolPV, pool)))
+	}
+}
+
+// safeRatio returns a/b, or 0 when b is non-positive, for apportioning a moved
+// cost across its cpu/ram/pv components without risking a divide-by-zero.
+func safeRatio(a, b float64) float64 {
+	if b <= 0 {
+		return 0
+	}
+	return a / b
 }

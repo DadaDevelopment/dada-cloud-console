@@ -87,6 +87,57 @@ func TestEnsureResourceJoinsRevenueOntoCostNode(t *testing.T) {
 	}
 }
 
+// TestAdminCostOwnerOfRouting locks the client-vs-platform routing: only a
+// project owned by a real user is a billable client; owner-less projects and
+// infra namespaces both fall into the single platform own-infrastructure bucket.
+func TestAdminCostOwnerOfRouting(t *testing.T) {
+	nsMap := map[string]adminCostOwner{
+		"acme-prod":     {projectID: "p-acme", projectName: "Acme", ownerID: "u-1", ownerName: "acme@example.com"},
+		"platform-prod": {projectID: "p-plat", projectName: "Platform", ownerID: "", ownerName: ""},
+	}
+
+	cid, cname, pid, pname := adminCostOwnerOf("acme-prod", nsMap)
+	if cid != "u-1" || cname != "acme@example.com" || pid != "p-acme" || pname != "Acme" {
+		t.Fatalf("owned project misrouted: got (%q,%q,%q,%q)", cid, cname, pid, pname)
+	}
+
+	cid, _, pid, pname = adminCostOwnerOf("platform-prod", nsMap)
+	if cid != platformClientID || pid != "p-plat" || pname != "Platform" {
+		t.Fatalf("owner-less project must route to platform bucket, keeping its real project: got (%q,%q,%q)", cid, pid, pname)
+	}
+
+	cid, _, pid, pname = adminCostOwnerOf("databases", nsMap)
+	if cid != platformClientID || pid != "ns:databases" || pname != "databases" {
+		t.Fatalf("infra namespace must route to platform bucket as ns:<name>: got (%q,%q,%q)", cid, pid, pname)
+	}
+}
+
+// TestPlatformCostOnly proves the platform bucket is blanked to cost-only at
+// every level (client, project, resource) while its costs are left untouched --
+// the cloud's own infrastructure is not a client and earns no revenue.
+func TestPlatformCostOnly(t *testing.T) {
+	cl := &adminCostClient{
+		ClientID: platformClientID, Cost: 100, Revenue: 40, Margin: -60, MarginPct: -150,
+		Projects: []adminCostProject{{
+			ProjectID: "ns:databases", Cost: 100, Revenue: 40, Margin: -60, MarginPct: -150,
+			Resources: []adminCostResource{{Name: "postgresql-0", Kind: "database", TotalCost: 100, Revenue: 40, Margin: -60, MarginPct: -150}},
+		}},
+	}
+	platformCostOnly(cl)
+
+	if cl.Cost != 100 || cl.Revenue != 0 || cl.Margin != 0 || cl.MarginPct != 0 {
+		t.Fatalf("client level not cost-only: %+v", cl)
+	}
+	p := cl.Projects[0]
+	if p.Cost != 100 || p.Revenue != 0 || p.Margin != 0 || p.MarginPct != 0 {
+		t.Fatalf("project level not cost-only: %+v", p)
+	}
+	r := p.Resources[0]
+	if r.TotalCost != 100 || r.Revenue != 0 || r.Margin != 0 || r.MarginPct != 0 {
+		t.Fatalf("resource level not cost-only: %+v", r)
+	}
+}
+
 func TestMarginPct(t *testing.T) {
 	cases := []struct {
 		name    string

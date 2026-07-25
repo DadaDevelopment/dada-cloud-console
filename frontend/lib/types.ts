@@ -855,6 +855,7 @@ export interface AdminCostsResponse {
   unallocated?: AdminCostResource;
   top_loss_makers?: AdminCostLossMaker[];
   clients?: AdminCostClient[];
+  platform?: AdminCostClient | null;
   agent_tokens?: AdminAgentTokenEconomics;
 }
 

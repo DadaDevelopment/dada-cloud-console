@@ -69,7 +69,16 @@ export const adminCosts: Messages = {
   "adminCosts.lossMakers.title": { ru: "Топ убыточных клиентов", en: "Top loss-makers" },
   "adminCosts.lossMakers.empty": { ru: "Убыточных клиентов нет", en: "No loss-making clients" },
 
+  "adminCosts.platform.title": { ru: "Платформа / своя инфраструктура", en: "Platform / own infrastructure" },
+  "adminCosts.platform.subtitle": {
+    ru: "Своя инфраструктура облака (общие сервисы + проекты без владельца) — только расход. Сами себе не платим, поэтому здесь нет выручки и маржи.",
+    en: "The cloud's own infrastructure (shared services + owner-less projects) — cost only. We don't pay ourselves, so there's no revenue or margin here.",
+  },
+  "adminCosts.platform.empty": { ru: "Нет собственной инфраструктуры за период", en: "No own-infrastructure cost for the window" },
+  "adminCosts.method.platform": { ru: "Платформа / своя инфраструктура", en: "Platform / own infrastructure" },
+
   "adminCosts.table.client": { ru: "Клиент / проект / ресурс", en: "Client / project / resource" },
+  "adminCosts.table.node": { ru: "Инфраструктура / проект / ресурс", en: "Infrastructure / project / resource" },
   "adminCosts.table.cost": { ru: "Стоимость железа", en: "Hardware cost" },
   "adminCosts.table.revenue": { ru: "Платит клиент", en: "Client pays" },
   "adminCosts.table.marginPct": { ru: "Маржа %", en: "Margin %" },
