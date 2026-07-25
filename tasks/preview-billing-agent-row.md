@@ -21,8 +21,12 @@ Backend-only, admin_costs.go:
 - Effect: artem fonbet row drops 572/1700 (3 merged copies) -> prod-only; pr-6/pr-7 become cost-only lines under Platform. Total cost unchanged, mischarged preview revenue gone.
 - Known minor residual: per-preview DBs still size-split onto the customer project (projByID shares project_id, can't tell preview from prod DB). Preview DB disk is negligible vs pod compute; note, not blocking.
 
-## P2 — customer-facing consumption "оценка" (billing_consumption / billing_fullcost)
-- [ ] Exclude ephemeral namespaces from the customer informational view too (same principle). Verify overhead-factor denominator (userNamespaces) doesn't distort. Separate careful commit.
+## P2 — customer-facing consumption "оценка"  [DONE]
+- [x] Root cause of the x3 the user SEES = `consumptionApps` (billing_consumption.go): `JOIN environments ... WHERE kind='App'` with NO ephemeral filter, so prod + pr-6 + pr-7 all listed and each priced. Feeds GetProjectConsumption + GetAccountSummary.
+- [x] Fix = add `AND NOT e.is_ephemeral` (is_ephemeral BOOLEAN NOT NULL DEFAULT FALSE, mig 014 — safe). Previews are the free feature, so they vanish from the customer's own estimate; their cost already lands in the platform bucket (P1 adminCostOwnerOf). Godoc updated.
+- [x] overhead-factor denominator (userNamespaces / billing_fullcost) UNTOUCHED — deliberately: removing previews there would reclassify them as shared infra and raise per-unit price for everyone.
+- [x] OUT of scope (evidence): meterCountResource (billing_meter.go) also counts previews, but usage_records has ZERO `FROM` reads (write-only) and the meter is gated off by BillingEnabled=false. No user-facing harm now — noted, not fixed (minimal impact).
+- [x] gofmt clean, go build/vet OK, go test ./internal/api PASS. Not-tested: no DB integration harness in repo; SQL filter mirrors the admin-layer is_ephemeral routing already covered by TestAdminCostOwnerOfRouting + mig 014. No Go-level seam to unit-test the WHERE clause.
 
 ## P3 — per-project agent-tasks row  [DONE]
 Backend admin_costs.go + small FE:

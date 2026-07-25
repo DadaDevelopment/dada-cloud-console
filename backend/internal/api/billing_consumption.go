@@ -131,18 +131,23 @@ func (h *Handler) computeProjectConsumption(ctx context.Context, projectID uuid.
 }
 
 // consumptionApps enumerates the project's App resources across its
-// environments and estimates each app's average CPU (cores) and RAM (GB) over
-// the period from Prometheus (shown for context). The cost is the app's real
-// OpenCost allocation from the cached cluster snapshot (CPU+RAM+PV, priced at our
-// tariffs), and falls back to the metrics-derived estimate only when OpenCost
-// cannot attribute the app. Failures degrade to nil usage / 0 cost, never an
-// error.
+// non-ephemeral environments and estimates each app's average CPU (cores) and
+// RAM (GB) over the period from Prometheus (shown for context). The cost is the
+// app's real OpenCost allocation from the cached cluster snapshot (CPU+RAM+PV,
+// priced at our tariffs), and falls back to the metrics-derived estimate only
+// when OpenCost cannot attribute the app. Failures degrade to nil usage / 0 cost,
+// never an error.
+//
+// Ephemeral (PR-preview) environments are excluded: previews are a feature the
+// platform gives for free, so an ignored PR that spawns pr-6/pr-7 copies of an
+// app must not multiply the customer's own consumption estimate. Their cost is
+// carried in the platform own-infrastructure bucket instead (see adminCostOwnerOf).
 func (h *Handler) consumptionApps(ctx context.Context, projectID uuid.UUID, start, end time.Time, snap *billingCostSnapshot, withUsage bool) ([]consumptionResource, error) {
 	rows, err := h.pool.Query(ctx,
 		`SELECT rs.name, e.runtime, e.namespace, COALESCE(rs.summary_json->>'image', '')
 		   FROM resource_snapshots rs
 		   JOIN environments e ON e.id = rs.environment_id
-		  WHERE rs.project_id = $1 AND rs.kind = 'App'
+		  WHERE rs.project_id = $1 AND rs.kind = 'App' AND NOT e.is_ephemeral
 		  ORDER BY rs.name`,
 		projectID,
 	)
