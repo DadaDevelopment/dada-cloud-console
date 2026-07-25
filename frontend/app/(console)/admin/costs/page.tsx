@@ -254,6 +254,40 @@ export default function AdminCostsPage() {
         </Card>
       )}
 
+      {data?.agent_tokens?.available && (
+        <Card className="mb-6">
+          <CardHeader className="p-4 pb-2"><CardTitle className="text-sm">{t("adminCosts.agent.title")}</CardTitle></CardHeader>
+          <CardContent className="p-4 pt-0">
+            <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+              <div>
+                <p className="text-xs font-medium text-gray-500 dark:text-gray-400">{t("adminCosts.agent.revenue")}</p>
+                <p className="mt-1 text-xl font-bold text-gray-900 dark:text-gray-100">{formatMoney(data.agent_tokens.revenue_rub, currency)}</p>
+              </div>
+              <div>
+                <p className="text-xs font-medium text-gray-500 dark:text-gray-400">{t("adminCosts.agent.cost")}</p>
+                <p className="mt-1 text-xl font-bold text-gray-900 dark:text-gray-100">{formatMoney(data.agent_tokens.cost_rub, currency)}</p>
+              </div>
+              <div>
+                <p className="text-xs font-medium text-gray-500 dark:text-gray-400">{t("adminCosts.agent.margin")}</p>
+                <p className={`mt-1 text-xl font-bold ${marginClass(data.agent_tokens.margin_rub ?? 0)}`}>{formatMoney(data.agent_tokens.margin_rub, currency)}</p>
+              </div>
+              <div>
+                <p className="text-xs font-medium text-gray-500 dark:text-gray-400">{t("adminCosts.agent.tokens")}</p>
+                <p className="mt-1 text-xl font-bold text-gray-900 dark:text-gray-100">{(data.agent_tokens.tokens ?? 0).toLocaleString("ru-RU")}</p>
+              </div>
+            </div>
+            <p className="mt-3 text-xs text-gray-400 dark:text-gray-500">
+              {t("adminCosts.agent.params", {
+                usd: (data.agent_tokens.cost_usd ?? 0).toFixed(4),
+                rate: (data.agent_tokens.usd_rub ?? 0).toFixed(0),
+                markup: (data.agent_tokens.markup ?? 0).toFixed(2),
+                days: data.agent_tokens.window_days ?? days,
+              })}
+            </p>
+          </CardContent>
+        </Card>
+      )}
+
       <div className="mb-6 grid grid-cols-1 gap-4 lg:grid-cols-3">
         <Card className="lg:col-span-1">
           <CardHeader className="p-4 pb-2"><CardTitle className="text-sm">{t("adminCosts.lossMakers.title")}</CardTitle></CardHeader>

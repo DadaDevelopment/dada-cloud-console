@@ -77,4 +77,14 @@ export const adminCosts: Messages = {
   "adminCosts.empty": { ru: "Нет данных за выбранный период", en: "No data for the selected window" },
   "adminCosts.expand": { ru: "Развернуть", en: "Expand" },
   "adminCosts.collapse": { ru: "Свернуть", en: "Collapse" },
+
+  "adminCosts.agent.title": { ru: "Агентские запуски (токены ИИ)", en: "Agent runs (AI tokens)" },
+  "adminCosts.agent.revenue": { ru: "Выручка", en: "Revenue" },
+  "adminCosts.agent.cost": { ru: "Себестоимость", en: "Cost" },
+  "adminCosts.agent.margin": { ru: "Маржа", en: "Margin" },
+  "adminCosts.agent.tokens": { ru: "Токенов", en: "Tokens" },
+  "adminCosts.agent.params": {
+    ru: "Себестоимость провайдера: ${usd} · курс {rate} ₽/$ · наценка ×{markup} · окно {days} дн.",
+    en: "Provider cost: ${usd} · rate {rate} RUB/$ · markup ×{markup} · window {days}d",
+  },
 };

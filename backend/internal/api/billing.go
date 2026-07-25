@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"time"
 
@@ -186,15 +187,36 @@ func (h *Handler) GetBillingAccount(c *gin.Context) {
 	}
 	now := time.Now().UTC()
 	period := fmt.Sprintf("%d-%02d", now.Year(), now.Month())
+
+	lineItems := []gin.H{
+		{"kind": "plan", "label": plan.Key, "amount": plan.PriceRUB},
+	}
+	total := plan.PriceRUB
+
+	from, to := currentBillingMonthUTC(now)
+	if bill, aerr := h.agentTokenBillForOrg(c.Request.Context(), orgID, from, to); aerr != nil {
+		log.Printf("billing: agent-token line skipped for org %s: %v", orgID, aerr)
+	} else if bill.RevenueRUB > 0 {
+		lineItems = append(lineItems, gin.H{
+			"kind":    "agent_tokens",
+			"label":   "AI agent usage",
+			"amount":  bill.RevenueRUB,
+			"tokens":  bill.TotalTokens,
+			"costUSD": bill.CostUSD,
+		})
+		total += bill.RevenueRUB
+	}
+
 	c.JSON(http.StatusOK, gin.H{
 		"plan":   plan.Key,
 		"quotas": plan.Quotas,
 		"usage":  usage,
 		"invoicePreview": gin.H{
-			"period":   period,
-			"amount":   plan.PriceRUB,
-			"currency": "RUB",
-			"status":   "preview",
+			"period":    period,
+			"amount":    total,
+			"currency":  "RUB",
+			"status":    "preview",
+			"lineItems": lineItems,
 		},
 	})
 }

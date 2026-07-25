@@ -161,6 +161,7 @@ func (h *Handler) GetAdminCosts(c *gin.Context) {
 		"unallocated":         summary.Unallocated,
 		"top_loss_makers":     summary.TopLossMakers,
 		"clients":             summary.Clients,
+		"agent_tokens":        h.adminAgentTokenEconomics(c.Request.Context(), days),
 	})
 }
 

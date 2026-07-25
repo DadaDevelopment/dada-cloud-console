@@ -850,6 +850,19 @@ export interface AdminCostsResponse {
   unallocated?: AdminCostResource;
   top_loss_makers?: AdminCostLossMaker[];
   clients?: AdminCostClient[];
+  agent_tokens?: AdminAgentTokenEconomics;
+}
+
+export interface AdminAgentTokenEconomics {
+  available: boolean;
+  window_days?: number;
+  tokens?: number;
+  cost_usd?: number;
+  cost_rub?: number;
+  revenue_rub?: number;
+  margin_rub?: number;
+  usd_rub?: number;
+  markup?: number;
 }
 
 // Vercel-flow — Git / Build / Deploy / Env / Domain types --------------------

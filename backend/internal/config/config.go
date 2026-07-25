@@ -213,6 +213,17 @@ type Config struct {
 	// admin_costs.go); operators fill this in manually until one is built.
 	HardwareMonthlyCostRUB float64 // HARDWARE_MONTHLY_COST_RUB
 
+	// AgentTokenUSDToRUB converts the USD provider cost frozen in the
+	// agent_token_usage ledger into rubles at invoice/read time, and
+	// AgentTokenMarkup is the cost-plus multiplier billed on top (owner ask B:
+	// tariff agent runs, cost-plus x2.7). Both are applied at read time so the
+	// stored ledger stays a pure provider-cost record and re-pricing history
+	// needs no migration. The FX default is a deliberately conservative lower
+	// bound so users are never over-converted; operators raise it toward the
+	// live rate via env. See internal/billing/pricing/agent_tokens.go.
+	AgentTokenUSDToRUB float64 // AGENT_TOKEN_USD_RUB_RATE
+	AgentTokenMarkup   float64 // AGENT_TOKEN_MARKUP
+
 	// BegetK8SToken authenticates the read-only Beget managed-Kubernetes
 	// billing client (internal/beget) against api.beget.com. Same bearer JWT
 	// as the Terraform bootstrap credential (beget-credentials secret,
@@ -485,6 +496,8 @@ func Load() (*Config, error) {
 		BillingMargin:             getEnvFloat("BILLING_MARGIN", 1.4),
 		BillingMinUtilization:     getEnvFloat("BILLING_MIN_UTILIZATION", 0.30),
 		HardwareMonthlyCostRUB:    getEnvFloat("HARDWARE_MONTHLY_COST_RUB", 0),
+		AgentTokenUSDToRUB:        getEnvFloat("AGENT_TOKEN_USD_RUB_RATE", 80.0),
+		AgentTokenMarkup:          getEnvFloat("AGENT_TOKEN_MARKUP", 2.7),
 		BegetK8SToken:             getEnv("BEGET_K8S_TOKEN", ""),
 		BegetK8SClusterSlug:       getEnv("BEGET_K8S_CLUSTER_SLUG", ""),
 		UserMetricsQueryURL:       getEnv("USER_METRICS_QUERY_URL", ""),
