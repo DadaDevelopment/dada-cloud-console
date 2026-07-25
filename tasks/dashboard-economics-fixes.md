@@ -23,15 +23,30 @@ OWNER DECISION:
 - PRICE = **cost-plus × 2.7** (real gateway token cost × existing markup).
 - SCOPE = **straight into user invoices** (build usage_records → invoice read-path now) + dashboard.
 
-Finding: `usage_records` written by billing_meter but READ BY NOTHING → invoice read-path does not exist yet. Must build it. agent_chat_messages has no token counts yet.
+GROUNDED 07-25 (code + ADR-015 read):
+- Two agent systems, TWO metering points (not one):
+  - **In-console chat agent** [agent_chat.go → agentchat.RunTurn → llmchat.Client] POSTs `{gateway}/v1/chat/completions` `Bearer sk-dada`, single shared key/model from config. Streams (SSE). Console is BOTH caller and biller: it knows org_id/user_sub/project in-context and gets the response. → **self-meterable in-repo now**, no gateway-config dependency. `llmchat.StreamResult` has NO usage field today → must add `stream_options.include_usage=true` + parse trailing usage chunk. A turn = ReAct loop = several LLM calls → sum usage across the loop.
+  - **agent-sync-hub (cloud-task)** runs `claude -p` (Claude Code headless), EXTERNAL service, NOT through the gateway → invisible from this repo. DEFERRED to spec chip `task_3d6e95dc` (hub reports its own token/project/resource usage into the same ledger).
+- ADR-015 collision: cost-plus **×2.7 markup = escape-trigger #2** (money axis BYOK/post-hoc → managed-key/markup = "financial transaction system, provider-invoice reconciliation"). B must be first-party ledger + pricing, NOT a LiteLLM-management-plane feature (ADR Decision #12 rejects that).
+- OWNER 07-25: charge SVERKA-first? NO — **"сразу в счета"** (charge immediately). Still surface a reconciliation view so drift is visible.
+- Invoice read-path today: `billing.go:190-195` `invoicePreview.amount = plan.PriceRUB` flat, no line items. `usage_records` written by billing_meter, read by nothing.
 
-Tasks (after B research maps surface):
-- [ ] Capture prompt+completion tokens per LLM call. Source of truth TBD by research: either (a) LiteLLM's own spend/usage tracking (per-key/metadata), or (b) plumb `usage` from gateway responses into agent_chat.go + agent-sync-hub. Prefer single source if LiteLLM already records it per org.
-- [ ] Attribute tokens to org (agent_chat has org_id; agent-sync-hub attribution TBD).
-- [ ] Meter into `usage_records` (resource `agent_tokens`, split prompt/completion or total) per org/period — extend billing_meter.go MeterUsage.
-- [ ] Price cost-plus × 2.7: need per-model gateway cost table (LiteLLM has model prices). Build read-path usage_records → invoice line item.
-- [ ] Dashboard: admin economics card (tokens + agent revenue), and agent revenue flows into total_revenue so margin reflects it.
-- [ ] NOTE latent risk: charging real money on unverified numbers. Meter+display must be sanity-checked against LiteLLM spend before first real charge.
+### B1 — capture + observe (in-repo, in-console agent only) — SHIPPED 83ddfd2 (07-25)
+- [x] `llmchat`: send `stream_options.include_usage=true`; parse trailing `usage` (prompt/completion/total) + `model` into StreamResult.
+- [x] `agentchat.RunTurn`/`ResumeTurn`: accumulate usage across the loop's LLM calls, return it (new `Usage` struct).
+- [x] Migration 051 `agent_token_usage` ledger (org_id, project_id, env_id, user_sub, model, prompt/completion/total_tokens, cost_usd frozen, platform_request_id/cloud_task_id partial-unique idempotency, source default console_chat, created_at). Shared by BOTH agent systems (hub writes source=hub later).
+- [x] `agent_chat.go`: after RunTurn/ResumeTurn, `recordAgentTokenUsage` writes ledger row keyed by caller org (no-op if total<=0, fail-soft log on error).
+- [x] Pricing table `billing/pricing/agent_tokens.go`: per-model USD cost + `AgentTokenRevenueRUB(cost, fx, markup)`; unit-tested.
+
+### B2 — charge (wire into invoices) — SHIPPED 1db80b7 (07-25)
+- [x] Per-model provider price = in-repo USD table (default gateway models: sonnet 3/15, haiku 0.8/4; fallback = most expensive). FX = config `AGENT_TOKEN_USD_RUB_RATE` (conservative lower-bound default 80) × `AGENT_TOKEN_MARKUP` (2.7), applied at READ time so re-pricing needs no migration.
+- [x] `billing.go` invoicePreview: agent_tokens line item, folded into month total (charge-immediately). Fail-soft: ledger error drops the line, invoice still 200.
+- [x] Admin `/costs`: separate `agent_tokens` economics block (actual ledger revenue/cost/margin over reporting window) + frontend card. Kept OUT of hardware-reconciled infra totals so ask-A reconciliation stays intact.
+
+### B3 — hub convergence (blocked on chip `task_3d6e95dc`)
+- [ ] Hub reports `claude -p` usage into `agent_token_usage` (source=hub) per the chip's spec; idempotent on cloud_task_id/platform_request_id.
+
+CHECKPOINT: B1+B2 shipped. Ledger + read-time pricing + invoice line + admin card live on main. Await POST-DEPLOY live-verify (ledger fills on real chat turn, invoice line appears, admin card shows). B3 waits on the hub chip.
 
 ## C. "Новые приложения в день" current-day spike (BUG)
 Root cause [code]: `resource_snapshots` is one row/resource (conflict `(project_id,environment_id,kind,name)`), `last_synced_at` bumped every ~30s reconcile (UpdateLiveStatus). overviewDynamics uses `min(last_synced_at)` as first-seen → == now for every live app → all land in today. Table has no creation ts.
