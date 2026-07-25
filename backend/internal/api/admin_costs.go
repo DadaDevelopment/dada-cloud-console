@@ -461,9 +461,12 @@ func (h *Handler) adminCostPodAllocs(ctx context.Context, window string) (map[st
 }
 
 // adminCostOwner is one project's ownership info for the cost drilldown.
+// isPreview marks a PR-preview (ephemeral) environment: its cost is the cloud's
+// own spend on the free preview feature, not a charge to the project owner.
 type adminCostOwner struct {
 	projectID, projectName string
 	ownerID, ownerName     string
+	isPreview              bool
 }
 
 // adminCostNamespaceOwners maps every project namespace to its project and
@@ -471,7 +474,7 @@ type adminCostOwner struct {
 // projects into clients.
 func (h *Handler) adminCostNamespaceOwners(ctx context.Context) (map[string]adminCostOwner, error) {
 	rows, err := h.pool.Query(ctx, `
-		SELECT e.namespace, p.id, p.display_name,
+		SELECT e.namespace, e.is_ephemeral, p.id, p.display_name,
 		       COALESCE(u.id::text, ''), COALESCE(NULLIF(u.email, ''), NULLIF(u.display_name, ''), '')
 		FROM environments e
 		JOIN projects p     ON p.id = e.project_id
@@ -485,25 +488,33 @@ func (h *Handler) adminCostNamespaceOwners(ctx context.Context) (map[string]admi
 	out := make(map[string]adminCostOwner)
 	for rows.Next() {
 		var ns, projectID, projectName, ownerID, ownerName string
-		if err := rows.Scan(&ns, &projectID, &projectName, &ownerID, &ownerName); err != nil {
+		var isPreview bool
+		if err := rows.Scan(&ns, &isPreview, &projectID, &projectName, &ownerID, &ownerName); err != nil {
 			return nil, err
 		}
-		out[ns] = adminCostOwner{projectID: projectID, projectName: projectName, ownerID: ownerID, ownerName: ownerName}
+		out[ns] = adminCostOwner{projectID: projectID, projectName: projectName, ownerID: ownerID, ownerName: ownerName, isPreview: isPreview}
 	}
 	return out, rows.Err()
 }
 
 // adminCostOwnerOf resolves a namespace to (clientID, clientName, projectID,
 // projectName). Only namespaces of a project owned by a real user are billed to
-// a customer. Two cases roll up under the platform own-infrastructure bucket
+// a customer. Three cases roll up under the platform own-infrastructure bucket
 // instead: namespaces outside the project map (shared infra -- argocd,
 // monitoring, databases, opencost, ...), each as one synthetic "ns:<name>"
-// project; and projects with no owner user (platform, internal, demo/seed),
-// carried under their real project id/name. Neither is a client we charge, so
-// the platform bucket is separated out and shown cost-only downstream.
+// project; PR-preview (ephemeral) namespaces, which are the cloud's own spend on
+// the free preview feature rather than a charge to the owner, each carried as
+// its own "ns:<namespace>" line; and projects with no owner user (platform,
+// internal, demo/seed), carried under their real project id/name. None is a
+// client we charge, so the platform bucket is separated out and shown cost-only
+// downstream. Because this drives both the cost and the revenue walk, routing a
+// preview here moves its cost to platform and drops its (incidental) revenue.
 func adminCostOwnerOf(ns string, nsMap map[string]adminCostOwner) (clientID, clientName, projectID, projectName string) {
 	owner, ok := nsMap[ns]
 	if !ok {
+		return platformClientID, platformClientName, "ns:" + ns, ns
+	}
+	if owner.isPreview {
 		return platformClientID, platformClientName, "ns:" + ns, ns
 	}
 	if owner.ownerID == "" {

@@ -93,12 +93,18 @@ func TestEnsureResourceJoinsRevenueOntoCostNode(t *testing.T) {
 func TestAdminCostOwnerOfRouting(t *testing.T) {
 	nsMap := map[string]adminCostOwner{
 		"acme-prod":     {projectID: "p-acme", projectName: "Acme", ownerID: "u-1", ownerName: "acme@example.com"},
+		"acme-pr-7-web": {projectID: "p-acme", projectName: "Acme", ownerID: "u-1", ownerName: "acme@example.com", isPreview: true},
 		"platform-prod": {projectID: "p-plat", projectName: "Platform", ownerID: "", ownerName: ""},
 	}
 
 	cid, cname, pid, pname := adminCostOwnerOf("acme-prod", nsMap)
 	if cid != "u-1" || cname != "acme@example.com" || pid != "p-acme" || pname != "Acme" {
 		t.Fatalf("owned project misrouted: got (%q,%q,%q,%q)", cid, cname, pid, pname)
+	}
+
+	cid, _, pid, pname = adminCostOwnerOf("acme-pr-7-web", nsMap)
+	if cid != platformClientID || pid != "ns:acme-pr-7-web" || pname != "acme-pr-7-web" {
+		t.Fatalf("preview namespace of a real customer must route to platform (the free-preview subsidy), not bill the owner: got (%q,%q,%q)", cid, pid, pname)
 	}
 
 	cid, _, pid, pname = adminCostOwnerOf("platform-prod", nsMap)
