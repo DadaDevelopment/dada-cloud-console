@@ -59,6 +59,9 @@ type adminCostResource struct {
 	RAMCost   float64 `json:"ram_cost"`
 	PVCost    float64 `json:"pv_cost"`
 	TotalCost float64 `json:"total_cost"`
+	Revenue   float64 `json:"revenue"`
+	Margin    float64 `json:"margin"`
+	MarginPct float64 `json:"margin_pct"`
 }
 
 type adminCostProject struct {
@@ -67,6 +70,7 @@ type adminCostProject struct {
 	Cost        float64             `json:"cost"`
 	Revenue     float64             `json:"revenue"`
 	Margin      float64             `json:"margin"`
+	MarginPct   float64             `json:"margin_pct"`
 	Resources   []adminCostResource `json:"resources"`
 }
 
@@ -76,6 +80,7 @@ type adminCostClient struct {
 	Cost       float64            `json:"cost"`
 	Revenue    float64            `json:"revenue"`
 	Margin     float64            `json:"margin"`
+	MarginPct  float64            `json:"margin_pct"`
 	Projects   []adminCostProject `json:"projects"`
 }
 
@@ -85,13 +90,16 @@ type adminCostLossMaker struct {
 }
 
 // adminCostsAccumulator is the mutable working set GetAdminCosts builds while
-// walking the OpenCost pod allocation set, before it is flattened into the
-// response tree and sorted. resources is a client/project/resource-name index
-// kept alongside clients because Go slice appends can reallocate, which would
-// invalidate any *adminCostProject/*adminCostResource held across iterations.
+// walking the OpenCost pod allocation set (cost) and the billing snapshot
+// (revenue), before it is flattened into the response tree and sorted.
+// resources is a client -> project -> resource-name POSITION index (not a
+// pointer cache): Go slice appends can reallocate a project's Resources backing
+// array, so a cached *adminCostResource can go stale across a later append.
+// Positions are append-stable, so ensureResource re-derives the pointer from
+// the current backing array on every call and uses it immediately.
 type adminCostsAccumulator struct {
 	clients   map[string]*adminCostClient
-	resources map[string]map[string]map[string]*adminCostResource
+	resources map[string]map[string]map[string]int
 }
 
 // GetAdminCosts returns the cost/revenue/margin drilldown tree for the
@@ -170,7 +178,7 @@ func (h *Handler) GetAdminCosts(c *gin.Context) {
 // tree) and overviewMoney (admin_overview.go: just the business totals for
 // the "Деньги" card). Building it is pure in-memory work over the cached
 // OpenCost/DB/Beget snapshots (adminCostPodAllocs, adminCostNamespaceOwners,
-// adminRevenueByNamespace, resolveHardwareCost all read-through the shared
+// billingSnapshot, resolveHardwareCost all read-through the shared
 // cache), so computing it twice per overview request is cheap.
 type adminCostSummary struct {
 	Available         bool
@@ -220,8 +228,6 @@ func (h *Handler) buildAdminCostSummary(ctx context.Context, days int) adminCost
 		return out
 	}
 
-	revenueByNS := h.adminRevenueByNamespace(ctx)
-
 	rawTotal, unallocatedRaw := adminCostsRawTotal(podAllocs)
 	hardwareTotal, hardwareSource, hardwareBreakdown := h.resolveHardwareCost(ctx, days)
 	scale := float64(days) / adminCostSampleDays
@@ -233,7 +239,7 @@ func (h *Handler) buildAdminCostSummary(ctx context.Context, days int) adminCost
 
 	acc := &adminCostsAccumulator{
 		clients:   map[string]*adminCostClient{},
-		resources: map[string]map[string]map[string]*adminCostResource{},
+		resources: map[string]map[string]map[string]int{},
 	}
 
 	for _, a := range podAllocs {
@@ -246,23 +252,48 @@ func (h *Handler) buildAdminCostSummary(ctx context.Context, days int) adminCost
 		acc.add(clientID, clientName, projectID, projectName, resourceName, kind, a, scale)
 	}
 
+	revWindowScale := float64(days) / billingMonthDays
+	snap := h.billingSnapshot()
+	for key, alloc := range snap.appCost {
+		ns, app := key, ""
+		if i := strings.IndexByte(key, '/'); i >= 0 {
+			ns, app = key[:i], key[i+1:]
+		}
+		if app == "" {
+			continue
+		}
+		clientID, clientName, projectID, projectName := adminCostOwnerOf(ns, nsMap)
+		r := acc.ensureResource(clientID, clientName, projectID, projectName, app, "app")
+		r.Revenue += round2(snap.pricing.price(alloc.CPUCost, alloc.RAMCost, alloc.PVCost) * revWindowScale)
+	}
+
 	clients := make([]*adminCostClient, 0, len(acc.clients))
 	for _, cl := range acc.clients {
 		for i := range cl.Projects {
 			p := &cl.Projects[i]
-			sort.Slice(p.Resources, func(i, j int) bool { return p.Resources[i].TotalCost > p.Resources[j].TotalCost })
-			for _, r := range p.Resources {
+			sort.Slice(p.Resources, func(a, b int) bool { return p.Resources[a].TotalCost > p.Resources[b].TotalCost })
+			p.Cost, p.Revenue = 0, 0
+			for j := range p.Resources {
+				r := &p.Resources[j]
+				r.TotalCost = round2(r.TotalCost)
+				r.Revenue = round2(r.Revenue)
+				r.Margin = round2(r.Revenue - r.TotalCost)
+				r.MarginPct = marginPct(r.Revenue, r.TotalCost)
 				p.Cost += r.TotalCost
+				p.Revenue += r.Revenue
 			}
-			p.Revenue = round2(revenueByNS[p.ProjectID] * float64(days) / billingMonthDays)
+			p.Cost = round2(p.Cost)
+			p.Revenue = round2(p.Revenue)
 			p.Margin = round2(p.Revenue - p.Cost)
+			p.MarginPct = marginPct(p.Revenue, p.Cost)
 			cl.Cost += p.Cost
 			cl.Revenue += p.Revenue
 		}
 		cl.Cost = round2(cl.Cost)
 		cl.Revenue = round2(cl.Revenue)
 		cl.Margin = round2(cl.Revenue - cl.Cost)
-		sort.Slice(cl.Projects, func(i, j int) bool { return cl.Projects[i].Cost > cl.Projects[j].Cost })
+		cl.MarginPct = marginPct(cl.Revenue, cl.Cost)
+		sort.Slice(cl.Projects, func(a, b int) bool { return cl.Projects[a].Cost > cl.Projects[b].Cost })
 		clients = append(clients, cl)
 	}
 	sort.Slice(clients, func(i, j int) bool { return clients[i].Cost > clients[j].Cost })
@@ -302,36 +333,58 @@ func (h *Handler) buildAdminCostSummary(ctx context.Context, days int) adminCost
 	return out
 }
 
-// add records one pod allocation's scaled cost under client -> project ->
-// resource, creating each level on first sight.
-func (acc *adminCostsAccumulator) add(clientID, clientName, projectID, projectName, resourceName, kind string, a opencost.Allocation, scale float64) {
+// ensureResource returns a live pointer to the client -> project -> resource
+// node, creating each level on first sight. It re-derives the pointer from the
+// current Resources backing array on every call via an append-stable position
+// index (resources[client][project][name] = slot), so callers must use the
+// returned pointer immediately and never cache it across another ensureResource
+// call: a later append can reallocate the backing array and invalidate it.
+func (acc *adminCostsAccumulator) ensureResource(clientID, clientName, projectID, projectName, resourceName, kind string) *adminCostResource {
 	cl, ok := acc.clients[clientID]
 	if !ok {
 		cl = &adminCostClient{ClientID: clientID, ClientName: clientName, Projects: []adminCostProject{}}
 		acc.clients[clientID] = cl
-		acc.resources[clientID] = map[string]map[string]*adminCostResource{}
+		acc.resources[clientID] = map[string]map[string]int{}
 	}
 
-	projResources, ok := acc.resources[clientID][projectID]
+	projIdx, ok := acc.resources[clientID][projectID]
 	if !ok {
 		cl.Projects = append(cl.Projects, adminCostProject{
 			ProjectID: projectID, ProjectName: projectName, Resources: []adminCostResource{},
 		})
-		projResources = map[string]*adminCostResource{}
-		acc.resources[clientID][projectID] = projResources
+		projIdx = map[string]int{}
+		acc.resources[clientID][projectID] = projIdx
 	}
 
-	r, ok := projResources[resourceName]
+	pi := adminCostProjectIndex(cl, projectID)
+	ri, ok := projIdx[resourceName]
 	if !ok {
-		pi := adminCostProjectIndex(cl, projectID)
 		cl.Projects[pi].Resources = append(cl.Projects[pi].Resources, adminCostResource{Name: resourceName, Kind: kind})
-		r = &cl.Projects[pi].Resources[len(cl.Projects[pi].Resources)-1]
-		projResources[resourceName] = r
+		ri = len(cl.Projects[pi].Resources) - 1
+		projIdx[resourceName] = ri
 	}
+	return &cl.Projects[pi].Resources[ri]
+}
+
+// add records one pod allocation's scaled cost under client -> project ->
+// resource, creating each level on first sight.
+func (acc *adminCostsAccumulator) add(clientID, clientName, projectID, projectName, resourceName, kind string, a opencost.Allocation, scale float64) {
+	r := acc.ensureResource(clientID, clientName, projectID, projectName, resourceName, kind)
 	r.CPUCost += round2(nonNeg(a.CPUCost) * scale)
 	r.RAMCost += round2(nonNeg(a.RAMCost) * scale)
 	r.PVCost += round2(nonNeg(a.PVCost) * scale)
 	r.TotalCost += round2(nonNeg(a.TotalCost) * scale)
+}
+
+// marginPct returns profit as a percentage of revenue, rounded to 2 dp. Zero
+// when revenue is non-positive: with no charge there is no defined margin
+// ratio, and returning 0 avoids a divide-by-zero while keeping cost-only rows
+// at 0% instead of negative infinity.
+func marginPct(revenue, cost float64) float64 {
+	if revenue <= 0 {
+		return 0
+	}
+	return round2((revenue - cost) / revenue * 100)
 }
 
 // adminCostProjectIndex finds a client's project slot by ID.
@@ -526,26 +579,4 @@ func (h *Handler) begetHardwareCost(ctx context.Context) (float64, []adminCostHa
 		}
 	}
 	return total, breakdown, true
-}
-
-// adminRevenueByNamespace prices every project namespace's app allocations
-// through the same consumption-pricing formula as GetProjectConsumption
-// (billing_fullcost.go: raw OpenCost cost * per-type overhead factor *
-// margin), summed per namespace at the snapshot's fixed monthly figure --
-// callers scale it down to their requested window themselves. This is "what
-// we would charge", not the real hardware cost -- it deliberately does NOT
-// use the Beget-scaled numbers computed for the cost side. Best-effort: an
-// empty/failed snapshot yields all zeros (the snapshot itself is fail-open,
-// see billingSnapshot).
-func (h *Handler) adminRevenueByNamespace(ctx context.Context) map[string]float64 {
-	out := map[string]float64{}
-	snap := h.billingSnapshot()
-	for key, alloc := range snap.appCost {
-		ns := key
-		if i := strings.IndexByte(key, '/'); i >= 0 {
-			ns = key[:i]
-		}
-		out[ns] += snap.pricing.price(alloc.CPUCost, alloc.RAMCost, alloc.PVCost)
-	}
-	return out
 }

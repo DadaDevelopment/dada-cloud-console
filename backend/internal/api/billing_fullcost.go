@@ -122,7 +122,7 @@ func (h *Handler) emptySnapshot() *billingCostSnapshot {
 // memory, falling back to an empty snapshot when the warmer has not
 // populated one yet (cold boot). It NEVER rebuilds live: every caller of this
 // method is on a request path (GetAccountSummary's per-project loop,
-// adminRevenueByNamespace) or the warmer's own per-project sub-loop
+// buildAdminCostSummary's revenue walk) or the warmer's own per-project sub-loop
 // (warmProjectConsumptions), and a stale/missing snapshot triggering its own
 // synchronous OpenCost call here was the actual root cause of a single
 // project appearing to "hang": whichever project happened to be first to see
