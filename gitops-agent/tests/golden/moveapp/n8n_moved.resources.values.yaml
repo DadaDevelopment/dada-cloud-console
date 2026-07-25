@@ -1,0 +1,27 @@
+manifests:
+    - apiVersion: platform.dada-tuda.ru/v1alpha1
+      kind: PublicApi
+      metadata:
+        name: n8n
+        namespace: example-project-prod
+      spec:
+        upstream:
+            serviceName: n8n-service
+            servicePort: 5678
+    - apiVersion: platform.dada-tuda.ru/v1alpha1
+      kind: ServiceDatabaseV2
+      metadata:
+        name: n8n
+        labels:
+            dada.io/project: platform
+            dada.io/environment: prod
+            dada.io/operation: op-golden-0001
+      spec:
+        appRef: n8n
+        namespace: platform-prod
+        engine: postgresql
+        database: n8n
+        backup:
+            enabled: true
+            frequency: daily
+            retention: 7d

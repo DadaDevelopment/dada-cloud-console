@@ -152,6 +152,26 @@ func (rv *ResourcesValues) NamesOfKind(kind string) []string {
 	return names
 }
 
+// ManifestOfKind returns the YAML of the first manifest of the given kind and
+// whether one was present. The bytes round-trip through the same node encoding
+// Upsert consumes, so a caller can unmarshal a specific CR's fields back out and
+// re-render it. MoveApp reads the app's ServiceDatabaseV2 entry this way to
+// re-home it under the target namespace without hand-parsing the whole file.
+func (rv *ResourcesValues) ManifestOfKind(kind string) (string, bool, error) {
+	for i := range rv.Manifests {
+		k, _ := manifestKey(&rv.Manifests[i])
+		if k != kind {
+			continue
+		}
+		b, err := yaml.Marshal(&rv.Manifests[i])
+		if err != nil {
+			return "", false, fmt.Errorf("marshalling %s manifest: %w", kind, err)
+		}
+		return string(b), true, nil
+	}
+	return "", false, nil
+}
+
 // Marshal renders the file back to YAML with a top-level "manifests:" key. When
 // the list is empty it emits "manifests: []" so the file is still valid.
 func (rv *ResourcesValues) Marshal() (string, error) {

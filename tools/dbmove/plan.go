@@ -22,7 +22,9 @@ func BuildPlan(cfg MoveConfig) []Step {
 		}
 	}
 	steps = append(steps, &copySecretsStep{cfg: cfg})
+	steps = append(steps, &captureDBCredsStep{cfg: cfg})
 	steps = append(steps, &folderMoveStep{cfg: cfg})
+	steps = append(steps, &repatchDBCredsStep{cfg: cfg})
 	steps = append(steps, &verifyStep{cfg: cfg})
 	steps = append(steps, &teardownStep{cfg: cfg})
 	return steps

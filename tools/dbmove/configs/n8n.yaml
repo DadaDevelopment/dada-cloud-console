@@ -7,14 +7,19 @@ srcNamespace: example-project-prod
 targetProject: platform
 targetEnv: prod
 dbDatname: n8n
+dbSchema: n8n
 dbCredSecret: n8n-db-credentials
 argoInfraPath: /Users/alex/IdeaProjects/argo-infra
 appFolderRel: clusters/beget-prod/projects/example-project/environments/prod/apps/n8n
 volumes:
   - pvcName: n8n-data
     mountedBy: n8n
+    chartTemplate: chart/templates/deployment.yaml
+    hasData: false
   - pvcName: n8n-worker-data
     mountedBy: n8n-worker
+    chartTemplate: chart/templates/worker.yaml
+    hasData: true
 oobSecrets:
   - n8n-runtime
   - n8n-smtp

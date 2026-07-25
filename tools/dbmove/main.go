@@ -25,6 +25,8 @@ func main() {
 	execute := flag.Bool("execute", false, "actually run (default is dry-run)")
 	only := flag.String("only", "", "run only the step with this ID")
 	from := flag.String("from", "", "start at the step with this ID")
+	reclaim := flag.Bool("reclaim", false, "run only the gated source-reclaim step (destructive; also needs --execute --confirm-reclaim)")
+	confirmReclaim := flag.Bool("confirm-reclaim", false, "explicit confirmation required by --reclaim before anything is deleted")
 	flag.Parse()
 
 	if err := validateFlags(*only, *from); err != nil {
@@ -37,7 +39,12 @@ func main() {
 		fmt.Fprintln(os.Stderr, "config:", err)
 		os.Exit(2)
 	}
-	steps := BuildPlan(cfg)
+	var steps []Step
+	if *reclaim {
+		steps = []Step{&reclaimStep{cfg: cfg, confirmReclaim: *confirmReclaim}}
+	} else {
+		steps = BuildPlan(cfg)
+	}
 	dryRun := !*execute
 	ctx := context.Background()
 	var runner CommandRunner = execRunner{}

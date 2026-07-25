@@ -16,7 +16,7 @@ func stepIDs(steps []Step) []string {
 func TestBuildPlanDBOnly(t *testing.T) {
 	cfg, _ := LoadConfig("configs/telemost-bot.yaml")
 	got := strings.Join(stepIDs(BuildPlan(cfg)), ",")
-	want := "safety-dump,copy-secrets,folder-move,verify,teardown"
+	want := "safety-dump,copy-secrets,capture-db-creds,folder-move,repatch-db-creds,verify,teardown"
 	if got != want {
 		t.Fatalf("db-only plan = %q, want %q", got, want)
 	}
@@ -25,7 +25,7 @@ func TestBuildPlanDBOnly(t *testing.T) {
 func TestBuildPlanWithVolumes(t *testing.T) {
 	cfg, _ := LoadConfig("configs/n8n.yaml")
 	got := strings.Join(stepIDs(BuildPlan(cfg)), ",")
-	want := "safety-dump,longhorn-backup,scale-down,volume-copy:n8n-data,volume-copy:n8n-worker-data,copy-secrets,folder-move,verify,teardown"
+	want := "safety-dump,longhorn-backup,scale-down,volume-copy:n8n-data,volume-copy:n8n-worker-data,copy-secrets,capture-db-creds,folder-move,repatch-db-creds,verify,teardown"
 	if got != want {
 		t.Fatalf("volume plan = %q, want %q", got, want)
 	}

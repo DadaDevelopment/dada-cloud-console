@@ -42,6 +42,7 @@ const (
 	DBBackupKindManual     = "manual"
 	DBBackupKindScheduled  = "scheduled"
 	DBBackupKindPreRestore = "pre-restore"
+	DBBackupKindPreMove    = "pre-move"
 )
 
 // RestoreServiceDatabasePayload is the typed payload for RestoreServiceDatabase

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -106,48 +107,86 @@ spec:
 `, name, snapName)
 }
 
-// Run forces a fresh snapshot+backup of each source volume so volume-copy restores
-// the post-scale-down state instead of a stale daily backup, then waits for each
-// backup to complete.
+// Run forces a fresh snapshot+backup of each data-bearing source volume so
+// volume-copy restores the post-scale-down state instead of a stale daily
+// backup. It runs before scale-down so the source volume is still attached
+// (Longhorn v1.6.1 cannot snapshot a detached volume). Success is judged on the
+// volume's backupvolume.status.lastBackupAt advancing, NOT on the Backup CR's
+// status.state: a live probe showed Backup.state reaches Completed several
+// seconds before backupvolume.status is updated, so volume-copy (which reads
+// backupvolume.status.lastBackupName) would otherwise race a stale or empty
+// value. Volumes with HasData=false are skipped: their workload is scaled to
+// zero at rest, so the PVC is unmounted and empty and the chart provisions a
+// fresh PVC in the target.
 func (s *longhornBackupStep) Run(ctx context.Context, r CommandRunner, dryRun bool) error {
 	for _, v := range s.cfg.Volumes {
+		if !v.HasData {
+			fmt.Printf("skip longhorn backup of %s (hasData=false, unmounted at rest)\n", v.PVCName)
+			continue
+		}
 		name := moveSnapshotName(s.cfg, v)
 		if dryRun {
-			fmt.Printf("[dry-run] longhorn snapshot %s + backup of PV bound to %s\n", name, v.PVCName)
+			fmt.Printf("[dry-run] longhorn snapshot %s + backup of PV bound to %s (wait on backupvolume.lastBackupAt advancing)\n", name, v.PVCName)
 			continue
 		}
 		pv, err := pvNameForPVC(ctx, r, s.cfg, v.PVCName)
 		if err != nil || pv == "" {
 			return fmt.Errorf("resolve PV for %s: %w\noutput: %s", v.PVCName, err, pv)
 		}
+		before, _ := backupVolumeLastBackupAt(ctx, r, s.cfg.BegetContext, pv)
 		if out, serr := runWithStdin(ctx, r, snapshotYAML(pv, name), "kubectl", "--context", s.cfg.BegetContext, "apply", "-f", "-"); serr != nil {
 			return fmt.Errorf("create snapshot %s: %w\noutput: %s", name, serr, out)
+		}
+		if werr := waitSnapshotReady(ctx, r, s.cfg.BegetContext, name, 10*time.Minute); werr != nil {
+			return werr
 		}
 		if out, berr := runWithStdin(ctx, r, backupYAML(name, name), "kubectl", "--context", s.cfg.BegetContext, "apply", "-f", "-"); berr != nil {
 			return fmt.Errorf("create backup %s: %w\noutput: %s", name, berr, out)
 		}
-		if werr := waitBackupComplete(ctx, r, s.cfg.BegetContext, name, 15*time.Minute); werr != nil {
+		if werr := waitBackupAdvanced(ctx, r, s.cfg.BegetContext, pv, before, 15*time.Minute); werr != nil {
 			return werr
 		}
 	}
 	return nil
 }
 
-// waitBackupComplete polls a Longhorn Backup CR until status.state is Completed.
-func waitBackupComplete(ctx context.Context, r CommandRunner, kctx, name string, timeout time.Duration) error {
+// backupVolumeLastBackupAt returns the backupvolume status.lastBackupAt for a PV,
+// the authoritative "a new backup is durably recorded" timestamp. Empty (with a
+// nil error) means no backup has been recorded yet.
+func backupVolumeLastBackupAt(ctx context.Context, r CommandRunner, kctx, pv string) (string, error) {
+	return r.Run(ctx, "kubectl", "--context", kctx, "-n", "longhorn-system",
+		"get", "backupvolume", pv, "-o", "jsonpath={.status.lastBackupAt}")
+}
+
+// waitSnapshotReady polls a Longhorn Snapshot CR until status.readyToUse is true.
+// A backup taken before the snapshot is ready uploads an incomplete image.
+func waitSnapshotReady(ctx context.Context, r CommandRunner, kctx, name string, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
 		out, err := r.Run(ctx, "kubectl", "--context", kctx, "-n", "longhorn-system",
-			"get", "backup", name, "-o", "jsonpath={.status.state}")
-		if err == nil && out == "Completed" {
+			"get", "snapshot", name, "-o", "jsonpath={.status.readyToUse}")
+		if err == nil && out == "true" {
 			return nil
 		}
-		if err == nil && out == "Error" {
-			return fmt.Errorf("longhorn backup %s entered Error state", name)
+		time.Sleep(5 * time.Second)
+	}
+	return fmt.Errorf("longhorn snapshot %s not readyToUse in %s", name, timeout)
+}
+
+// waitBackupAdvanced polls a PV's backupvolume until status.lastBackupAt is
+// non-empty and different from before, proving the on-demand backup is durably
+// recorded. This is the signal volume-copy depends on, unlike the Backup CR's
+// status.state which flips to Completed before backupvolume.status catches up.
+func waitBackupAdvanced(ctx context.Context, r CommandRunner, kctx, pv, before string, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		out, err := backupVolumeLastBackupAt(ctx, r, kctx, pv)
+		if err == nil && out != "" && out != before {
+			return nil
 		}
 		time.Sleep(10 * time.Second)
 	}
-	return fmt.Errorf("longhorn backup %s did not complete in %s", name, timeout)
+	return fmt.Errorf("backupvolume for %s did not record a new backup (lastBackupAt still %q) in %s", pv, before, timeout)
 }
 
 const longhornBackupTarget = "s3://25f4da9f5cfe-dada-tuda-s3@ru1/"
@@ -170,6 +209,7 @@ metadata:
   namespace: longhorn-system
 spec:
   fromBackup: %q
+  frontend: blockdev
   accessMode: rwx
   dataEngine: v1
   numberOfReplicas: 2
@@ -177,14 +217,24 @@ spec:
 `, name, fromBackup, sizeBytes)
 }
 
+// restorePVName is the static PV name for a restored volume. folder-move injects
+// this same value as volumeName into the chart's PVC template, so the two agree.
+func restorePVName(cfg MoveConfig, v VolumeSpec) string {
+	return longhornVolumeName(cfg, v) + "-pv"
+}
+
 // restorePVYAML renders a static RWX/Retain PV bound to the restored Longhorn
-// volume (mirrors the proven fonbet-value-restored-pv csi block).
+// volume (mirrors the proven fonbet-value-restored-pv csi block). The claimRef
+// pre-binds the PV to the chart's target-ns PVC of the same name, so that PVC
+// (which folder-move gives a matching volumeName) binds this exact PV instead of
+// dynamically provisioning a fresh empty one. dbmove no longer creates its own
+// PVC: the relocated chart owns it.
 func restorePVYAML(cfg MoveConfig, v VolumeSpec, sizeBytes string) string {
 	vol := longhornVolumeName(cfg, v)
 	return fmt.Sprintf(`apiVersion: v1
 kind: PersistentVolume
 metadata:
-  name: %s-pv
+  name: %s
 spec:
   accessModes:
     - ReadWriteMany
@@ -193,6 +243,11 @@ spec:
   persistentVolumeReclaimPolicy: Retain
   storageClassName: longhorn-prod
   volumeMode: Filesystem
+  claimRef:
+    apiVersion: v1
+    kind: PersistentVolumeClaim
+    namespace: %s
+    name: %s
   csi:
     driver: driver.longhorn.io
     fsType: ext4
@@ -204,26 +259,7 @@ spec:
       share: "true"
       staleReplicaTimeout: "30"
       unmapMarkSnapChainRemoved: "ignored"
-`, vol, sizeBytes, vol)
-}
-
-// restorePVCYAML renders a target-ns PVC that statically binds the restored PV.
-func restorePVCYAML(cfg MoveConfig, v VolumeSpec, sizeBytes string) string {
-	vol := longhornVolumeName(cfg, v)
-	return fmt.Sprintf(`apiVersion: v1
-kind: PersistentVolumeClaim
-metadata:
-  name: %s
-  namespace: %s
-spec:
-  accessModes:
-    - ReadWriteMany
-  storageClassName: longhorn-prod
-  volumeName: %s-pv
-  resources:
-    requests:
-      storage: %s
-`, v.PVCName, cfg.TargetNamespace, vol, sizeBytes)
+`, restorePVName(cfg, v), sizeBytes, cfg.TargetNamespace, v.PVCName, vol)
 }
 
 type scaleDownStep struct{ cfg MoveConfig }
@@ -261,13 +297,19 @@ func (s *volumeCopyStep) Describe() string {
 }
 
 // Run restores the source volume's latest backup into a fresh RWX Longhorn volume
-// and materializes a static PV + target-ns PVC bound to it. The source PVC/PV are
-// left untouched (Retain) as rollback. dryRun is checked first, before any
-// cluster read, so a plain (non-execute) run never shells out to kubectl.
+// and materializes a static claimRef-bound PV for the relocated chart's PVC to
+// bind. The source PVC/PV are left untouched (Retain) as rollback. Volumes with
+// HasData=false are skipped: the chart provisions a fresh empty PVC for them.
+// dryRun is checked first, before any cluster read, so a plain (non-execute) run
+// never shells out to kubectl.
 func (s *volumeCopyStep) Run(ctx context.Context, r CommandRunner, dryRun bool) error {
+	if !s.vol.HasData {
+		fmt.Printf("skip volume-copy of %s (hasData=false; chart provisions a fresh empty PVC)\n", s.vol.PVCName)
+		return nil
+	}
 	if dryRun {
-		fmt.Printf("[dry-run] restore backup of %s (PV <source-PV>) -> RWX volume %s -> PV+PVC %s in %s\n",
-			s.vol.PVCName, longhornVolumeName(s.cfg, s.vol), s.vol.PVCName, s.cfg.TargetNamespace)
+		fmt.Printf("[dry-run] restore backup of %s (PV <source-PV>) -> RWX volume %s -> claimRef PV %s for %s/%s\n",
+			s.vol.PVCName, longhornVolumeName(s.cfg, s.vol), restorePVName(s.cfg, s.vol), s.cfg.TargetNamespace, s.vol.PVCName)
 		return nil
 	}
 	srcPV, err := pvNameForPVC(ctx, r, s.cfg, s.vol.PVCName)
@@ -285,7 +327,6 @@ func (s *volumeCopyStep) Run(ctx context.Context, r CommandRunner, dryRun bool) 
 	for _, y := range []string{
 		restoreVolumeYAML(s.cfg, s.vol, srcPV, backupName, sizeBytes),
 		restorePVYAML(s.cfg, s.vol, sizeBytes),
-		restorePVCYAML(s.cfg, s.vol, sizeBytes),
 	} {
 		if out, err := runWithStdin(ctx, r, y, "kubectl", "--context", s.cfg.BegetContext, "apply", "-f", "-"); err != nil {
 			return fmt.Errorf("apply restore manifest for %s: %w\noutput: %s", s.vol.PVCName, err, out)
@@ -387,6 +428,129 @@ func restampSecretNamespace(raw, dstNS string) (string, error) {
 	return string(out), nil
 }
 
+// dbCredsStateDir is where captured DB credentials are staged between the
+// capture-db-creds (pre-move) and repatch-db-creds (post-move) steps, which may
+// run in separate invocations. DBMOVE_STATE_DIR overrides it (tests set it).
+func dbCredsStateDir() string {
+	if d := os.Getenv("DBMOVE_STATE_DIR"); d != "" {
+		return d
+	}
+	return os.TempDir()
+}
+
+// dbCredsStatePath is the per-app staging file for captured DB credentials.
+func dbCredsStatePath(cfg MoveConfig) string {
+	return filepath.Join(dbCredsStateDir(), "dbmove-"+cfg.App+"-dbcreds.json")
+}
+
+// dbCredsPatchFromSecretJSON turns `kubectl get secret -o json` output into a
+// strategic-merge patch body {"data":{...}} carrying the secret's base64 data
+// values verbatim. The data survives the move: the shared Postgres server, role,
+// and password are unchanged, only the delivery namespace differs.
+func dbCredsPatchFromSecretJSON(raw string) (string, error) {
+	var doc struct {
+		Data map[string]string `json:"data"`
+	}
+	if err := json.Unmarshal([]byte(raw), &doc); err != nil {
+		return "", fmt.Errorf("parse secret json: %w", err)
+	}
+	if len(doc.Data) == 0 {
+		return "", fmt.Errorf("secret has no data to capture")
+	}
+	patch, err := json.Marshal(map[string]any{"data": doc.Data})
+	if err != nil {
+		return "", err
+	}
+	return string(patch), nil
+}
+
+type captureDBCredsStep struct{ cfg MoveConfig }
+
+func (s *captureDBCredsStep) ID() string { return "capture-db-creds" }
+func (s *captureDBCredsStep) Describe() string {
+	return "capture " + s.cfg.DBCredSecret + " before move"
+}
+
+// Run reads the source-namespace <app>-db-credentials secret and stages its data
+// to a local file. It must run before folder-move: once the source app leaves
+// git, Crossplane prunes the source secret. In the target namespace provider-sql
+// adopts the pre-existing role and delivers an empty credentials secret (it never
+// republishes the password), so the captured copy is the only way to recover it.
+func (s *captureDBCredsStep) Run(ctx context.Context, r CommandRunner, dryRun bool) error {
+	path := dbCredsStatePath(s.cfg)
+	if dryRun {
+		fmt.Printf("[dry-run] capture secret %s from %s -> %s\n", s.cfg.DBCredSecret, s.cfg.SrcNamespace, path)
+		return nil
+	}
+	raw, err := r.Run(ctx, "kubectl", "--context", s.cfg.BegetContext, "-n", s.cfg.SrcNamespace,
+		"get", "secret", s.cfg.DBCredSecret, "-o", "json")
+	if err != nil {
+		return fmt.Errorf("get db creds secret %s: %w\noutput: %s", s.cfg.DBCredSecret, err, raw)
+	}
+	patch, err := dbCredsPatchFromSecretJSON(raw)
+	if err != nil {
+		return fmt.Errorf("extract db creds from %s: %w", s.cfg.DBCredSecret, err)
+	}
+	if err := os.WriteFile(path, []byte(patch), 0o600); err != nil {
+		return fmt.Errorf("write db creds state %s: %w", path, err)
+	}
+	fmt.Printf("captured %s credentials -> %s\n", s.cfg.DBCredSecret, path)
+	return nil
+}
+
+type repatchDBCredsStep struct{ cfg MoveConfig }
+
+func (s *repatchDBCredsStep) ID() string { return "repatch-db-creds" }
+func (s *repatchDBCredsStep) Describe() string {
+	return "re-patch " + s.cfg.DBCredSecret + " into target ns"
+}
+
+// waitSecretExists polls until a secret is present in ns or times out.
+func waitSecretExists(ctx context.Context, r CommandRunner, kctx, ns, name string, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		out, err := r.Run(ctx, "kubectl", "--context", kctx, "-n", ns,
+			"get", "secret", name, "-o", "jsonpath={.metadata.name}")
+		if err == nil && out == name {
+			return nil
+		}
+		time.Sleep(10 * time.Second)
+	}
+	return fmt.Errorf("target secret %s/%s did not appear in %s (push argo-infra so Crossplane delivers it, then re-run --only repatch-db-creds)", ns, name, timeout)
+}
+
+// Run waits for the Crossplane-delivered (empty) target credentials secret, then
+// merges the captured data into it and restarts the workloads so they pick up the
+// recovered password. The merge patch survives steady-state reconciles because
+// provider-sql only writes the secret on role creation, not on adoption.
+func (s *repatchDBCredsStep) Run(ctx context.Context, r CommandRunner, dryRun bool) error {
+	path := dbCredsStatePath(s.cfg)
+	if dryRun {
+		fmt.Printf("[dry-run] wait for %s/%s, patch captured creds from %s, restart %v\n",
+			s.cfg.TargetNamespace, s.cfg.DBCredSecret, path, s.cfg.ScaleDeployments)
+		return nil
+	}
+	patch, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("read db creds state %s (run capture-db-creds before the move): %w", path, err)
+	}
+	if err := waitSecretExists(ctx, r, s.cfg.BegetContext, s.cfg.TargetNamespace, s.cfg.DBCredSecret, 5*time.Minute); err != nil {
+		return err
+	}
+	if out, err := r.Run(ctx, "kubectl", "--context", s.cfg.BegetContext, "-n", s.cfg.TargetNamespace,
+		"patch", "secret", s.cfg.DBCredSecret, "--type", "merge", "-p", string(patch)); err != nil {
+		return fmt.Errorf("patch db creds into %s/%s: %w\noutput: %s", s.cfg.TargetNamespace, s.cfg.DBCredSecret, err, out)
+	}
+	for _, d := range s.cfg.ScaleDeployments {
+		if out, err := r.Run(ctx, "kubectl", "--context", s.cfg.BegetContext, "-n", s.cfg.TargetNamespace,
+			"rollout", "restart", "deploy", d); err != nil {
+			fmt.Printf("rollout restart deploy/%s in %s skipped (%v)\noutput: %s\n", d, s.cfg.TargetNamespace, err, out)
+		}
+	}
+	fmt.Printf("re-patched %s credentials into %s and restarted workloads\n", s.cfg.DBCredSecret, s.cfg.TargetNamespace)
+	return nil
+}
+
 type folderMoveStep struct{ cfg MoveConfig }
 
 func (s *folderMoveStep) ID() string { return "folder-move" }
@@ -397,9 +561,7 @@ func (s *folderMoveStep) Describe() string {
 // destFolderRel returns the target app folder path (source project/env swapped
 // for target project/env).
 func destFolderRel(cfg MoveConfig) string {
-	src := fmt.Sprintf("projects/%s/environments/%s", cfg.SrcProject, cfg.SrcEnv)
-	dst := fmt.Sprintf("projects/%s/environments/%s", cfg.TargetProject, cfg.TargetEnv)
-	return strings.Replace(cfg.AppFolderRel, src, dst, 1)
+	return strings.Replace(cfg.AppFolderRel, srcPathSegment(cfg), dstPathSegment(cfg), 1)
 }
 
 // Run relocates the app folder in argo-infra and applies namespace/access-mode
@@ -415,10 +577,18 @@ func (s *folderMoveStep) Run(ctx context.Context, r CommandRunner, dryRun bool) 
 	if dryRun {
 		fmt.Printf("[dry-run] git -C %s mv %s %s\n", repo, src, dst)
 		fmt.Printf("[dry-run] edit %s/resources.values.yaml namespace/project literals -> %s / %s\n", dst, s.cfg.TargetNamespace, s.cfg.TargetProject)
-		if len(s.cfg.Volumes) > 0 {
-			fmt.Printf("[dry-run] edit %s/chart/templates/{deployment,worker}.yaml ReadWriteOnce -> ReadWriteMany\n", dst)
+		fmt.Printf("[dry-run] edit %s/app.yaml spec.helm.path %s -> %s\n", dst, srcPathSegment(s.cfg), dstPathSegment(s.cfg))
+		for _, v := range s.cfg.Volumes {
+			if v.ChartTemplate == "" {
+				continue
+			}
+			line := "ReadWriteOnce -> ReadWriteMany"
+			if v.HasData {
+				line += " + volumeName: " + restorePVName(s.cfg, v)
+			}
+			fmt.Printf("[dry-run] edit %s/%s %s\n", dst, v.ChartTemplate, line)
 		}
-		fmt.Printf("[dry-run] git commit -m 'move %s -> %s'\n", s.cfg.App, s.cfg.TargetProject)
+		fmt.Printf("[dry-run] git add %s && git commit -m 'move %s -> %s'\n", dst, s.cfg.App, s.cfg.TargetProject)
 		return nil
 	}
 	if out, err := git("mv", src, dst); err != nil {
@@ -427,8 +597,8 @@ func (s *folderMoveStep) Run(ctx context.Context, r CommandRunner, dryRun bool) 
 	if err := applyFolderLiteralEdits(s.cfg, filepath.Join(repo, dst)); err != nil {
 		return err
 	}
-	if out, err := git("add", "-A"); err != nil {
-		return fmt.Errorf("git add -A: %w\noutput: %s", err, out)
+	if out, err := git("add", dst); err != nil {
+		return fmt.Errorf("git add %s: %w\noutput: %s", dst, err, out)
 	}
 	msg := fmt.Sprintf("chore(move): %s %s -> %s (dbmove)", s.cfg.App, s.cfg.SrcProject, s.cfg.TargetProject)
 	if out, err := git("commit", "-m", msg); err != nil {
@@ -437,10 +607,23 @@ func (s *folderMoveStep) Run(ctx context.Context, r CommandRunner, dryRun bool) 
 	return nil
 }
 
+// srcPathSegment / dstPathSegment are the projects/<project>/environments/<env>
+// path fragments swapped throughout the relocated folder (folder path, and the
+// spec.helm.path literal inside app.yaml).
+func srcPathSegment(cfg MoveConfig) string {
+	return fmt.Sprintf("projects/%s/environments/%s", cfg.SrcProject, cfg.SrcEnv)
+}
+func dstPathSegment(cfg MoveConfig) string {
+	return fmt.Sprintf("projects/%s/environments/%s", cfg.TargetProject, cfg.TargetEnv)
+}
+
 // applyFolderLiteralEdits rewrites namespace/project literals in
-// resources.values.yaml and, when volumes are present, RWO->RWX in the chart
-// PVC templates. Best-effort per file: a missing file is skipped (telemost has
-// no resources.values.yaml / chart).
+// resources.values.yaml, the source project/env path in app.yaml's
+// spec.helm.path (otherwise the relocated ApplicationSet points its chart at a
+// path that no longer exists -> ComparisonError), and per data-bearing volume
+// rewrites RWO->RWX plus injects the restored PV's name as the chart PVC's
+// volumeName. Best-effort per file: a missing file is skipped (telemost has no
+// resources.values.yaml / chart).
 func applyFolderLiteralEdits(cfg MoveConfig, absFolder string) error {
 	rv := filepath.Join(absFolder, "resources.values.yaml")
 	if err := rewriteFile(rv, func(s string) string {
@@ -450,17 +633,49 @@ func applyFolderLiteralEdits(cfg MoveConfig, absFolder string) error {
 	}); err != nil && !os.IsNotExist(err) {
 		return err
 	}
-	if len(cfg.Volumes) > 0 {
-		for _, tpl := range []string{"chart/templates/deployment.yaml", "chart/templates/worker.yaml"} {
-			p := filepath.Join(absFolder, tpl)
-			if err := rewriteFile(p, func(s string) string {
-				return strings.ReplaceAll(s, "- ReadWriteOnce", "- ReadWriteMany")
-			}); err != nil && !os.IsNotExist(err) {
-				return err
+	appYAML := filepath.Join(absFolder, "app.yaml")
+	if err := rewriteFile(appYAML, func(s string) string {
+		return strings.ReplaceAll(s, srcPathSegment(cfg), dstPathSegment(cfg))
+	}); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	for _, v := range cfg.Volumes {
+		if v.ChartTemplate == "" {
+			continue
+		}
+		p := filepath.Join(absFolder, v.ChartTemplate)
+		if err := rewriteFile(p, func(s string) string {
+			s = strings.ReplaceAll(s, "- ReadWriteOnce", "- ReadWriteMany")
+			if v.HasData {
+				s = injectPVCVolumeName(s, restorePVName(cfg, v))
 			}
+			return s
+		}); err != nil && !os.IsNotExist(err) {
+			return err
 		}
 	}
 	return nil
+}
+
+// injectPVCVolumeName inserts a "volumeName: <pv>" line into a chart PVC spec,
+// immediately after the storageClassName line so the PVC statically binds the
+// restored PV instead of dynamically provisioning a fresh one. It is a no-op if
+// the template already carries a top-level (2-space indented) volumeName, so
+// re-running never produces a duplicate key.
+func injectPVCVolumeName(s, pv string) string {
+	if strings.Contains(s, "\n  volumeName:") {
+		return s
+	}
+	lines := strings.Split(s, "\n")
+	for i, ln := range lines {
+		if strings.HasPrefix(ln, "  storageClassName:") {
+			out := append([]string{}, lines[:i+1]...)
+			out = append(out, "  volumeName: "+pv)
+			out = append(out, lines[i+1:]...)
+			return strings.Join(out, "\n")
+		}
+	}
+	return s
 }
 
 // rewriteFile applies fn to a file's contents in place; returns os.ErrNotExist
@@ -480,7 +695,16 @@ func (s *verifyStep) Describe() string {
 	return "verify target healthy"
 }
 
-const verifyRowCountSQL = "select coalesce(sum(n_live_tup), 0) from pg_stat_user_tables"
+// verifyRowCountSQL returns a live row-count probe. When schema is set it scopes
+// the count to that schema (n8n keeps its tables in schema "n8n", not public, so
+// an unscoped count over pg_stat_user_tables would still work but a scoped count
+// proves the app's own tables restored). Empty schema counts all user tables.
+func verifyRowCountSQL(schema string) string {
+	if schema == "" {
+		return "select coalesce(sum(n_live_tup), 0) from pg_stat_user_tables"
+	}
+	return "select coalesce(sum(n_live_tup), 0) from pg_stat_user_tables where schemaname = " + sqlQuote(schema)
+}
 
 // psqlProbeOverrides renders the kubectl run pod override JSON that maps
 // cfg.DBCredSecret's endpoint/port/username/password keys onto the probe
@@ -549,8 +773,11 @@ func sha256ManifestArgs(kctx, ns, pvc string) []string {
 // state. Returns error on a select-1 failure or a manifest mismatch.
 func (s *verifyStep) Run(ctx context.Context, r CommandRunner, dryRun bool) error {
 	if dryRun {
-		fmt.Printf("[dry-run] would probe select 1 + row count in %s via secret %s\n", s.cfg.TargetNamespace, s.cfg.DBCredSecret)
+		fmt.Printf("[dry-run] would probe select 1 + row count (schema %q) in %s via secret %s\n", s.cfg.DBSchema, s.cfg.TargetNamespace, s.cfg.DBCredSecret)
 		for _, v := range s.cfg.Volumes {
+			if !v.HasData {
+				continue
+			}
 			fmt.Printf("[dry-run] would sha256-compare %s: %s vs %s\n", v.PVCName, s.cfg.SrcNamespace, s.cfg.TargetNamespace)
 		}
 		return nil
@@ -562,12 +789,15 @@ func (s *verifyStep) Run(ctx context.Context, r CommandRunner, dryRun bool) erro
 	if strings.TrimSpace(one) != "1" {
 		return fmt.Errorf("verify probe select 1 = %q, want 1", strings.TrimSpace(one))
 	}
-	rows, err := r.Run(ctx, "kubectl", psqlProbeArgs(s.cfg, verifyRowCountSQL)...)
+	rows, err := r.Run(ctx, "kubectl", psqlProbeArgs(s.cfg, verifyRowCountSQL(s.cfg.DBSchema))...)
 	if err != nil {
 		return fmt.Errorf("verify probe row count: %w\noutput: %s", err, rows)
 	}
 	fmt.Printf("verify: %s live row count = %s\n", s.cfg.DBDatname, strings.TrimSpace(rows))
 	for _, v := range s.cfg.Volumes {
+		if !v.HasData {
+			continue
+		}
 		srcSum, err := r.Run(ctx, "kubectl", sha256ManifestArgs(s.cfg.BegetContext, s.cfg.SrcNamespace, v.PVCName)...)
 		if err != nil {
 			return fmt.Errorf("source manifest for %s: %w\noutput: %s", v.PVCName, err, srcSum)
@@ -649,5 +879,61 @@ func (s *teardownStep) Run(ctx context.Context, r CommandRunner, dryRun bool) er
 	for _, line := range reclaimChecklist(s.cfg) {
 		fmt.Println("  - " + line)
 	}
+	return nil
+}
+
+type reclaimStep struct {
+	cfg            MoveConfig
+	confirmReclaim bool
+}
+
+func (s *reclaimStep) ID() string { return "reclaim" }
+func (s *reclaimStep) Describe() string {
+	return "delete retained source resources (gated, destructive)"
+}
+
+// Run is the separately gated reclaim pass a human runs only after the target has
+// soaked healthy. It always prints the retained-source checklist. It deletes only
+// when both --execute (dryRun=false) and --confirm-reclaim are set; either alone
+// leaves everything in place. Deletion removes each data volume's source PVC, its
+// Retain PV, and the underlying Longhorn volume (the last is what actually frees
+// the disk, since a Retain PV leaves the Longhorn volume behind), plus the local
+// captured-credentials file. Safety dumps in the backup target are never touched.
+func (s *reclaimStep) Run(ctx context.Context, r CommandRunner, dryRun bool) error {
+	fmt.Println("retained source resources considered for reclaim:")
+	for _, line := range reclaimChecklist(s.cfg) {
+		fmt.Println("  - " + line)
+	}
+	if dryRun || !s.confirmReclaim {
+		fmt.Println("reclaim is inert: pass --execute --confirm-reclaim to delete the above (irreversible).")
+		return nil
+	}
+	for _, v := range s.cfg.Volumes {
+		if !v.HasData {
+			continue
+		}
+		pv, err := pvNameForPVC(ctx, r, s.cfg, v.PVCName)
+		if err != nil || pv == "" {
+			fmt.Printf("source PVC %s already gone; delete its Released PV + Longhorn volume manually\n", v.PVCName)
+			continue
+		}
+		if out, derr := r.Run(ctx, "kubectl", "--context", s.cfg.BegetContext, "-n", s.cfg.SrcNamespace,
+			"delete", "pvc", v.PVCName, "--ignore-not-found"); derr != nil {
+			return fmt.Errorf("reclaim delete pvc %s: %w\noutput: %s", v.PVCName, derr, out)
+		}
+		if out, derr := r.Run(ctx, "kubectl", "--context", s.cfg.BegetContext,
+			"delete", "pv", pv, "--ignore-not-found"); derr != nil {
+			return fmt.Errorf("reclaim delete pv %s: %w\noutput: %s", pv, derr, out)
+		}
+		if out, derr := r.Run(ctx, "kubectl", "--context", s.cfg.BegetContext, "-n", "longhorn-system",
+			"delete", "volume", pv, "--ignore-not-found"); derr != nil {
+			return fmt.Errorf("reclaim delete longhorn volume %s: %w\noutput: %s", pv, derr, out)
+		}
+		fmt.Printf("reclaimed source PVC %s, PV %s, Longhorn volume %s\n", v.PVCName, pv, pv)
+	}
+	if err := os.Remove(dbCredsStatePath(s.cfg)); err != nil && !os.IsNotExist(err) {
+		fmt.Printf("could not remove creds state file %s: %v\n", dbCredsStatePath(s.cfg), err)
+	}
+	fmt.Println("safety dumps in the backup target are kept (delete separately if desired).")
 	return nil
 }

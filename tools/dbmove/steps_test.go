@@ -4,11 +4,48 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
+
+// seqRunner returns a sequence of canned outputs per command prefix, advancing
+// one step each matching call (clamped at the last), so a test can model a value
+// that changes across polls (e.g. backupvolume.lastBackupAt advancing). Keys not
+// in seq fall back to the out map, like fakeRunner.
+type seqRunner struct {
+	calls [][]string
+	seq   map[string][]string
+	idx   map[string]int
+	out   map[string]string
+}
+
+func newSeqRunner() *seqRunner {
+	return &seqRunner{seq: map[string][]string{}, idx: map[string]int{}, out: map[string]string{}}
+}
+
+func (s *seqRunner) Run(_ context.Context, name string, args ...string) (string, error) {
+	call := append([]string{name}, args...)
+	s.calls = append(s.calls, call)
+	joined := strings.Join(call, " ")
+	for k, vs := range s.seq {
+		if strings.HasPrefix(joined, k) {
+			i := min(s.idx[k], len(vs)-1)
+			s.idx[k]++
+			return vs[i], nil
+		}
+	}
+	for k, v := range s.out {
+		if strings.HasPrefix(joined, k) {
+			return v, nil
+		}
+	}
+	return "", nil
+}
 
 func TestSafetyDumpDryRunDoesNotRun(t *testing.T) {
 	cfg, _ := LoadConfig("configs/telemost-bot.yaml")
@@ -147,20 +184,32 @@ func TestFolderMoveDryRunNoGit(t *testing.T) {
 func TestRestoreVolumeYAMLIsRWXFromBackup(t *testing.T) {
 	cfg, _ := LoadConfig("configs/n8n.yaml")
 	y := restoreVolumeYAML(cfg, VolumeSpec{PVCName: "n8n-data"}, "pvc-src-123", "backup-abc", "2147483648")
-	for _, want := range []string{"kind: Volume", "accessMode: rwx", "backup=backup-abc", "volume=pvc-src-123", "n8n-n8n-data-moved"} {
+	for _, want := range []string{"kind: Volume", "accessMode: rwx", "frontend: blockdev", "backup=backup-abc", "volume=pvc-src-123", "n8n-n8n-data-moved"} {
 		if !strings.Contains(y, want) {
 			t.Fatalf("restore Volume CR missing %q:\n%s", want, y)
 		}
 	}
 }
 
-func TestRestorePVCYAMLIsRWXInTargetNS(t *testing.T) {
+func TestRestorePVYAMLClaimRefBindsTargetPVC(t *testing.T) {
 	cfg, _ := LoadConfig("configs/n8n.yaml")
-	y := restorePVCYAML(cfg, VolumeSpec{PVCName: "n8n-data"}, "2147483648")
-	for _, want := range []string{"kind: PersistentVolumeClaim", "namespace: platform-prod", "name: n8n-data", "ReadWriteMany", "volumeName: n8n-n8n-data-moved-pv"} {
+	y := restorePVYAML(cfg, VolumeSpec{PVCName: "n8n-data"}, "2147483648")
+	for _, want := range []string{
+		"kind: PersistentVolume",
+		"name: n8n-n8n-data-moved-pv",
+		"persistentVolumeReclaimPolicy: Retain",
+		"ReadWriteMany",
+		"claimRef:",
+		"namespace: platform-prod",
+		"name: n8n-data",
+		"volumeHandle: n8n-n8n-data-moved",
+	} {
 		if !strings.Contains(y, want) {
-			t.Fatalf("restore PVC missing %q:\n%s", want, y)
+			t.Fatalf("restore PV missing %q:\n%s", want, y)
 		}
+	}
+	if !strings.HasPrefix(strings.TrimSpace(y), "apiVersion: v1\nkind: PersistentVolume\n") {
+		t.Fatalf("top-level object must be a PersistentVolume, not a PVC (the relocated chart owns the PVC):\n%s", y)
 	}
 }
 
@@ -254,7 +303,7 @@ func TestPsqlProbeOverridesMapsSecretKeysToPGEnv(t *testing.T) {
 func TestVolumeCopyDryRunMakesNoClusterCalls(t *testing.T) {
 	cfg, _ := LoadConfig("configs/n8n.yaml")
 	fr := newFakeRunner()
-	s := &volumeCopyStep{cfg: cfg, vol: cfg.Volumes[0]}
+	s := &volumeCopyStep{cfg: cfg, vol: VolumeSpec{PVCName: "n8n-data", HasData: true}}
 	if err := s.Run(context.Background(), fr, true); err != nil {
 		t.Fatalf("dry-run err: %v", err)
 	}
@@ -263,10 +312,22 @@ func TestVolumeCopyDryRunMakesNoClusterCalls(t *testing.T) {
 	}
 }
 
+func TestVolumeCopySkipsVolumesWithoutData(t *testing.T) {
+	cfg, _ := LoadConfig("configs/n8n.yaml")
+	fr := newFakeRunner()
+	s := &volumeCopyStep{cfg: cfg, vol: VolumeSpec{PVCName: "n8n-data", HasData: false}}
+	if err := s.Run(context.Background(), fr, false); err != nil {
+		t.Fatalf("run err: %v", err)
+	}
+	if len(fr.calls) != 0 {
+		t.Fatalf("hasData=false volume must be skipped with zero cluster calls, got %v", fr.calls)
+	}
+}
+
 func TestVolumeCopyLooksUpSizeFromSourcePVC(t *testing.T) {
 	cfg, _ := LoadConfig("configs/n8n.yaml")
 	fr := newFakeRunner()
-	vol := cfg.Volumes[0]
+	vol := VolumeSpec{PVCName: "n8n-data", HasData: true}
 	pvNameKey := "kubectl --context 83.222.27.62:26443 -n example-project-prod get pvc n8n-data -o jsonpath={.spec.volumeName}"
 	sizeKey := "kubectl --context 83.222.27.62:26443 -n example-project-prod get pvc n8n-data -o jsonpath={.spec.resources.requests.storage}"
 	backupKey := "kubectl --context 83.222.27.62:26443 -n longhorn-system get backupvolume pvc-src-123 -o jsonpath={.status.lastBackupName}"
@@ -348,5 +409,273 @@ func TestLonghornBackupDryRunNoCalls(t *testing.T) {
 	}
 	if len(fr.calls) != 0 {
 		t.Fatalf("dry-run must make zero calls, got: %v", fr.calls)
+	}
+}
+
+func TestWaitBackupAdvancedDetectsNewTimestamp(t *testing.T) {
+	fr := newFakeRunner()
+	fr.out["kubectl --context ctx -n longhorn-system get backupvolume pvc-x -o jsonpath={.status.lastBackupAt}"] = "2026-07-25T10:00:00Z"
+	if err := waitBackupAdvanced(context.Background(), fr, "ctx", "pvc-x", "2026-07-25T09:00:00Z", time.Minute); err != nil {
+		t.Fatalf("advanced timestamp should satisfy: %v", err)
+	}
+}
+
+func TestWaitBackupAdvancedTimesOutWhenStale(t *testing.T) {
+	fr := newFakeRunner()
+	fr.out["kubectl --context ctx -n longhorn-system get backupvolume pvc-x -o jsonpath={.status.lastBackupAt}"] = "2026-07-25T09:00:00Z"
+	err := waitBackupAdvanced(context.Background(), fr, "ctx", "pvc-x", "2026-07-25T09:00:00Z", time.Nanosecond)
+	if err == nil {
+		t.Fatal("stale (unchanged) lastBackupAt must not be accepted as success")
+	}
+}
+
+func TestWaitSnapshotReady(t *testing.T) {
+	fr := newFakeRunner()
+	fr.out["kubectl --context ctx -n longhorn-system get snapshot snap-1 -o jsonpath={.status.readyToUse}"] = "true"
+	if err := waitSnapshotReady(context.Background(), fr, "ctx", "snap-1", time.Minute); err != nil {
+		t.Fatalf("readyToUse=true should satisfy: %v", err)
+	}
+	frNever := newFakeRunner()
+	if err := waitSnapshotReady(context.Background(), frNever, "ctx", "snap-1", time.Nanosecond); err == nil {
+		t.Fatal("never-ready snapshot must time out")
+	}
+}
+
+func TestLonghornBackupJudgesOnBackupVolumeSignal(t *testing.T) {
+	cfg, _ := LoadConfig("configs/n8n.yaml")
+	sr := newSeqRunner()
+	sr.out["kubectl --context 83.222.27.62:26443 -n example-project-prod get pvc n8n-worker-data -o jsonpath={.spec.volumeName}"] = "pvc-w"
+	sr.out["kubectl --context 83.222.27.62:26443 -n longhorn-system get snapshot dbmove-n8n-n8n-worker-data -o jsonpath={.status.readyToUse}"] = "true"
+	sr.seq["kubectl --context 83.222.27.62:26443 -n longhorn-system get backupvolume pvc-w -o jsonpath={.status.lastBackupAt}"] = []string{"T1", "T2"}
+	s := &longhornBackupStep{cfg: cfg}
+	if err := s.Run(context.Background(), sr, false); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	var sawLastBackupAt, sawSnapReady, sawDataPVC bool
+	for _, c := range sr.calls {
+		j := strings.Join(c, " ")
+		if strings.Contains(j, "get backupvolume pvc-w") && strings.Contains(j, "status.lastBackupAt") {
+			sawLastBackupAt = true
+		}
+		if strings.Contains(j, "get snapshot dbmove-n8n-n8n-worker-data") && strings.Contains(j, "readyToUse") {
+			sawSnapReady = true
+		}
+		if strings.Contains(j, "status.state") {
+			t.Fatalf("must not judge success on Backup.status.state (races backupvolume): %v", c)
+		}
+		if strings.Contains(j, "get pvc n8n-data ") {
+			sawDataPVC = true
+		}
+	}
+	if !sawLastBackupAt {
+		t.Fatalf("gap #1: success must be judged on backupvolume.lastBackupAt, never queried it: %v", sr.calls)
+	}
+	if !sawSnapReady {
+		t.Fatalf("gap #1: must wait for snapshot readyToUse before backing up: %v", sr.calls)
+	}
+	if sawDataPVC {
+		t.Fatalf("hasData=false n8n-data must be skipped, but it was snapshotted: %v", sr.calls)
+	}
+}
+
+func TestInjectPVCVolumeNameAfterStorageClass(t *testing.T) {
+	in := strings.Join([]string{
+		"kind: PersistentVolumeClaim",
+		"spec:",
+		"  accessModes:",
+		"    - ReadWriteMany",
+		"  storageClassName: longhorn-prod",
+		"  resources:",
+		"    requests:",
+		"      storage: 5Gi",
+		"",
+	}, "\n")
+	got := injectPVCVolumeName(in, "n8n-n8n-worker-data-moved-pv")
+	if !strings.Contains(got, "  storageClassName: longhorn-prod\n  volumeName: n8n-n8n-worker-data-moved-pv\n") {
+		t.Fatalf("volumeName not injected after storageClassName:\n%s", got)
+	}
+	again := injectPVCVolumeName(got, "n8n-n8n-worker-data-moved-pv")
+	if strings.Count(again, "volumeName:") != 1 {
+		t.Fatalf("inject must be idempotent, got %d volumeName lines:\n%s", strings.Count(again, "volumeName:"), again)
+	}
+}
+
+func TestApplyFolderLiteralEditsRewritesAppYAMLPathAndVolumes(t *testing.T) {
+	cfg, _ := LoadConfig("configs/n8n.yaml")
+	dir := t.TempDir()
+	appYAML := "spec:\n  source:\n    path: clusters/beget-prod/projects/example-project/environments/prod/apps/n8n/chart\n"
+	if err := os.WriteFile(filepath.Join(dir, "app.yaml"), []byte(appYAML), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	rv := "common:\n  namespace: example-project-prod\n  labels:\n    dada.io/project: example-project\n"
+	if err := os.WriteFile(filepath.Join(dir, "resources.values.yaml"), []byte(rv), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "chart", "templates"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	pvc := "spec:\n  accessModes:\n    - ReadWriteOnce\n  storageClassName: longhorn-prod\n  resources:\n    requests:\n      storage: 5Gi\n"
+	if err := os.WriteFile(filepath.Join(dir, "chart", "templates", "worker.yaml"), []byte(pvc), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "chart", "templates", "deployment.yaml"), []byte(pvc), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := applyFolderLiteralEdits(cfg, dir); err != nil {
+		t.Fatalf("edits: %v", err)
+	}
+	gotApp, _ := os.ReadFile(filepath.Join(dir, "app.yaml"))
+	if !strings.Contains(string(gotApp), "projects/platform/environments/prod/apps/n8n/chart") {
+		t.Fatalf("gap #3: app.yaml spec.helm.path not rewritten to target:\n%s", gotApp)
+	}
+	if strings.Contains(string(gotApp), "projects/example-project/environments/prod") {
+		t.Fatalf("gap #3: stale source path still in app.yaml:\n%s", gotApp)
+	}
+	gotRV, _ := os.ReadFile(filepath.Join(dir, "resources.values.yaml"))
+	if !strings.Contains(string(gotRV), "namespace: platform-prod") || !strings.Contains(string(gotRV), "dada.io/project: platform") {
+		t.Fatalf("resources.values.yaml literals not rewritten:\n%s", gotRV)
+	}
+	gotWorker, _ := os.ReadFile(filepath.Join(dir, "chart", "templates", "worker.yaml"))
+	if !strings.Contains(string(gotWorker), "- ReadWriteMany") {
+		t.Fatalf("worker PVC not RWX:\n%s", gotWorker)
+	}
+	if !strings.Contains(string(gotWorker), "volumeName: n8n-n8n-worker-data-moved-pv") {
+		t.Fatalf("gap #5: data volume worker PVC missing injected volumeName:\n%s", gotWorker)
+	}
+	gotDeploy, _ := os.ReadFile(filepath.Join(dir, "chart", "templates", "deployment.yaml"))
+	if !strings.Contains(string(gotDeploy), "- ReadWriteMany") {
+		t.Fatalf("deployment PVC not RWX:\n%s", gotDeploy)
+	}
+	if strings.Contains(string(gotDeploy), "volumeName:") {
+		t.Fatalf("hasData=false n8n-data PVC must NOT get a volumeName (chart provisions fresh):\n%s", gotDeploy)
+	}
+}
+
+func TestDBCredsPatchFromSecretJSON(t *testing.T) {
+	raw := `{"apiVersion":"v1","kind":"Secret","data":{"password":"cGFzcw==","endpoint":"aG9zdA=="}}`
+	patch, err := dbCredsPatchFromSecretJSON(raw)
+	if err != nil {
+		t.Fatalf("patch: %v", err)
+	}
+	var doc struct {
+		Data map[string]string `json:"data"`
+	}
+	if err := json.Unmarshal([]byte(patch), &doc); err != nil {
+		t.Fatalf("patch not valid json: %v\n%s", err, patch)
+	}
+	if doc.Data["password"] != "cGFzcw==" || doc.Data["endpoint"] != "aG9zdA==" {
+		t.Fatalf("patch dropped data values: %v", doc.Data)
+	}
+	if _, err := dbCredsPatchFromSecretJSON(`{"data":{}}`); err == nil {
+		t.Fatal("empty data must error (nothing to recover)")
+	}
+}
+
+func TestCaptureAndRepatchDBCredsRoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("DBMOVE_STATE_DIR", dir)
+	cfg, _ := LoadConfig("configs/n8n.yaml")
+
+	frCap := newFakeRunner()
+	frCap.out["kubectl --context 83.222.27.62:26443 -n example-project-prod get secret n8n-db-credentials -o json"] =
+		`{"data":{"password":"cGFzcw==","endpoint":"aG9zdA==","port":"NTQzMg==","username":"dQ=="}}`
+	if err := (&captureDBCredsStep{cfg: cfg}).Run(context.Background(), frCap, false); err != nil {
+		t.Fatalf("capture: %v", err)
+	}
+	saved, err := os.ReadFile(dbCredsStatePath(cfg))
+	if err != nil {
+		t.Fatalf("state file not written: %v", err)
+	}
+	if !strings.Contains(string(saved), "cGFzcw==") {
+		t.Fatalf("captured state missing password:\n%s", saved)
+	}
+
+	frRep := newFakeRunner()
+	frRep.out["kubectl --context 83.222.27.62:26443 -n platform-prod get secret n8n-db-credentials -o jsonpath={.metadata.name}"] = "n8n-db-credentials"
+	if err := (&repatchDBCredsStep{cfg: cfg}).Run(context.Background(), frRep, false); err != nil {
+		t.Fatalf("repatch: %v", err)
+	}
+	var patched, restarts int
+	for _, c := range frRep.calls {
+		j := strings.Join(c, " ")
+		if strings.Contains(j, "patch secret n8n-db-credentials") && strings.Contains(j, "--type merge") {
+			patched++
+		}
+		if strings.Contains(j, "rollout restart deploy") {
+			restarts++
+		}
+	}
+	if patched != 1 {
+		t.Fatalf("want exactly 1 merge patch of the target secret, got %d (%v)", patched, frRep.calls)
+	}
+	if restarts != 3 {
+		t.Fatalf("want 3 workload restarts (n8n, n8n-runners, n8n-worker), got %d", restarts)
+	}
+}
+
+func TestVerifyRowCountSQLScopesToSchema(t *testing.T) {
+	if got := verifyRowCountSQL(""); strings.Contains(got, "where schemaname") {
+		t.Fatalf("empty schema must not scope: %s", got)
+	}
+	got := verifyRowCountSQL("n8n")
+	if !strings.Contains(got, "where schemaname = 'n8n'") {
+		t.Fatalf("gap #6: schema not applied: %s", got)
+	}
+}
+
+func TestReclaimInertUntilConfirmed(t *testing.T) {
+	cfg, _ := LoadConfig("configs/n8n.yaml")
+	t.Setenv("DBMOVE_STATE_DIR", t.TempDir())
+	for _, tc := range []struct {
+		name    string
+		dryRun  bool
+		confirm bool
+	}{
+		{"dry-run+confirm", true, true},
+		{"execute-without-confirm", false, false},
+	} {
+		fr := newFakeRunner()
+		s := &reclaimStep{cfg: cfg, confirmReclaim: tc.confirm}
+		if err := s.Run(context.Background(), fr, tc.dryRun); err != nil {
+			t.Fatalf("%s: %v", tc.name, err)
+		}
+		for _, c := range fr.calls {
+			if strings.Contains(strings.Join(c, " "), "delete") {
+				t.Fatalf("%s: reclaim must not delete anything, got %v", tc.name, c)
+			}
+		}
+	}
+}
+
+func TestReclaimDeletesSourceWhenConfirmed(t *testing.T) {
+	cfg, _ := LoadConfig("configs/n8n.yaml")
+	t.Setenv("DBMOVE_STATE_DIR", t.TempDir())
+	fr := newFakeRunner()
+	fr.out["kubectl --context 83.222.27.62:26443 -n example-project-prod get pvc n8n-worker-data -o jsonpath={.spec.volumeName}"] = "pvc-w"
+	s := &reclaimStep{cfg: cfg, confirmReclaim: true}
+	if err := s.Run(context.Background(), fr, false); err != nil {
+		t.Fatalf("reclaim: %v", err)
+	}
+	var delPVC, delPV, delVol, touchedData bool
+	for _, c := range fr.calls {
+		j := strings.Join(c, " ")
+		if strings.Contains(j, "delete pvc n8n-worker-data") {
+			delPVC = true
+		}
+		if strings.Contains(j, "delete pv pvc-w") {
+			delPV = true
+		}
+		if strings.Contains(j, "-n longhorn-system delete volume pvc-w") {
+			delVol = true
+		}
+		if strings.Contains(j, "n8n-data") {
+			touchedData = true
+		}
+	}
+	if !delPVC || !delPV || !delVol {
+		t.Fatalf("reclaim must delete source PVC+PV+Longhorn volume, got pvc=%v pv=%v vol=%v (%v)", delPVC, delPV, delVol, fr.calls)
+	}
+	if touchedData {
+		t.Fatalf("hasData=false n8n-data must be left alone by reclaim: %v", fr.calls)
 	}
 }

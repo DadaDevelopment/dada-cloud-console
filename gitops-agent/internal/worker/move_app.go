@@ -40,15 +40,19 @@ const (
 // in the target project/environment.
 const pgUniqueViolation = "23505"
 
-// doMoveApp re-homes a stateless app to another project's environment (ADR-014
-// Phase 1). It never touches a stateful app: a persistent volume or an attached
-// ServiceDatabaseV2 aborts the whole operation before any git write happens.
+// doMoveApp re-homes an app to another project's environment. A stateless app
+// moves outright (ADR-014 Phase 1); an app with an attached ServiceDatabaseV2
+// moves WITH its database via an Orphan-safe re-point (ADR-014 Phase 3) — the
+// logical DB in the shared cluster never moves, only the CR's serving namespace
+// and ArgoCD ownership do. A persistent volume still aborts the move (ADR-014
+// Phase 2 execution pending), before any git write happens.
 //
 // Sequence:
 //  1. Resolve src slug/env/namespace (op.ProjectID, op.EnvironmentID) and dst
 //     slug/env/namespace (payload.TargetProjectID, payload.TargetEnvID).
-//  2. Guard: reload the src App snapshot and its children; abort if a volume or
-//     an attached ServiceDatabaseV2 is present.
+//  2. Guard: reload the src App snapshot; abort if a persistent volume or a
+//     StatefulSet workload is present (an attached ServiceDatabaseV2 is NOT a
+//     blocker — it is re-pointed in step 3).
 //  3. Write the app under the dst git path — app.yaml re-rendered for the new
 //     location, values.yaml carried VERBATIM from src (so servicePort, ingress,
 //     useDotEnv, resources — everything the running app needs, not just the
@@ -56,7 +60,8 @@ const pgUniqueViolation = "23505"
 //     location-specific identity, so values.yaml needs no rewrite), and a
 //     resources.values.yaml carried over from src (its PublicApi/domain entries
 //     verbatim, its Secret regenerated from decrypted env_vars, any
-//     ServiceDatabaseV2 entry defensively stripped).
+//     ServiceDatabaseV2 entry re-pointed to the target namespace — same
+//     name/appRef/database/backup, an Orphan-safe re-home, never a rename).
 //  4. Copy env_vars rows to the dst environment (encrypted bytes unchanged).
 //  5. Commit the dst files in one commit — this also calls db.MarkCommitted, so
 //     the operation's final git_commit/git_path point at the dst commit.
@@ -130,20 +135,13 @@ func (w *DBWatcher) doMoveApp(ctx context.Context, op db.Operation) error {
 		return fmt.Errorf("parse src app snapshot: %w", err)
 	}
 	if len(desired.Volume) > 0 {
-		return fmt.Errorf("move app %q: has persistent storage attached; Phase 1 cannot move stateful apps (ADR-014 Phase 2)", p.AppName)
+		if !moveVolumeAllowed(w.cfg.MoveVolumeEnabled) {
+			return fmt.Errorf("move app %q: has persistent storage attached; moving stateful apps is disabled (set MOVE_VOLUME_ENABLED once ADR-014 Phase 2 volume copy ships)", p.AppName)
+		}
+		return fmt.Errorf("move app %q: MOVE_VOLUME_ENABLED is set but in-agent volume copy is not implemented yet; refusing to move the app without its data (ADR-014 Phase 2)", p.AppName)
 	}
 	if desired.WorkloadType == "StatefulSet" {
 		return fmt.Errorf("move app %q: is a StatefulSet; Phase 1 cannot move stateful apps (ADR-014 Phase 2)", p.AppName)
-	}
-
-	moveSnapshots, err := db.AppMoveSnapshots(ctx, w.pool, op.ProjectID, srcEnvID, p.AppName)
-	if err != nil {
-		return fmt.Errorf("load app snapshots: %w", err)
-	}
-	for _, ref := range moveSnapshots {
-		if ref.Kind == "ServiceDatabaseV2" {
-			return fmt.Errorf("move app %q: has an attached database %q; Phase 1 cannot move stateful apps (ADR-014 Phase 3)", p.AppName, ref.Name)
-		}
 	}
 
 	mgr, err := w.managerFor(ctx, op.ProjectID)
@@ -205,7 +203,9 @@ func (w *DBWatcher) doMoveApp(ctx context.Context, op db.Operation) error {
 	if err != nil {
 		return fmt.Errorf("load src resources.values.yaml: %w", err)
 	}
-	rv.RemoveKind("ServiceDatabaseV2")
+	if err := repointResourcesValuesDB(rv, dstProjectSlug, dstEnvName, dstNamespace, op.ID.String()); err != nil {
+		return fmt.Errorf("re-point attached database for move: %w", err)
+	}
 	secretName := renderer.AppEnvSecretName(p.AppName)
 	if env.hasSecret() {
 		secretYAML, sErr := renderer.RenderAppEnvSecret(renderer.AppEnvSecretSpec{
@@ -368,16 +368,21 @@ func (w *DBWatcher) repointMovedAppSnapshots(ctx context.Context, srcProjectID, 
 	return tx.Commit(ctx)
 }
 
-// preAdoptClusterScopedResources hands the app's cluster-scoped resources (the
-// custom-domain PublicApi) to the target Argo app in the window between
-// committing the target render (step 5) and removing the source git folder (step
-// 6).
+// preAdoptClusterScopedResources hands the app's cluster-scoped resources — the
+// custom-domain PublicApi AND, for a stateful move, the ServiceDatabaseV2
+// composite — to the target Argo app in the window between committing the target
+// render (step 5) and removing the source git folder (step 6).
 //
-// A PublicApi is a single cluster-scoped object keyed by name, so the source and
-// target renders point at the very same live resource. It carries the source
-// app's ArgoCD ownership markers, so removing the source folder makes the source
-// Argo app prune the PublicApi as its own orphan — dropping the live domain to
-// 502 until the target app reconciles and re-creates it (a multi-second gap).
+// Both a PublicApi and a ServiceDatabaseV2 are single cluster-scoped objects
+// keyed by name (the DB's serving namespace lives in spec.namespace, not
+// metadata.namespace), so the source and target renders point at the very same
+// live resource. Each carries the source app's ArgoCD ownership markers, so
+// removing the source folder makes the source Argo app prune the object as its
+// own orphan. For a PublicApi that drops the live domain to 502 for a
+// multi-second gap; for a ServiceDatabaseV2 it tears down the DB composite and
+// its credentials secret (the logical database survives — the backing Crossplane
+// Database is deletionPolicy=Orphan — but the app loses its connection secret,
+// and a recreate may rotate the password) until the target app reconciles.
 // Re-stamping the markers to the target first makes the source prune skip the
 // object (no longer owned) while the target already claims it: a zero-downtime
 // handoff.
@@ -398,6 +403,12 @@ func (w *DBWatcher) preAdoptClusterScopedResources(ctx context.Context, rv *rend
 		if err := w.adoptClusterResource(ctx, pgvr("publicapis"), "PublicApi", name, dstInstance, dstNamespace); err != nil {
 			log.Warn().Err(err).Str("publicapi", name).Str("instance", dstInstance).
 				Msg("db-watcher: move pre-adopt failed; live domain may blip until target Argo reconciles")
+		}
+	}
+	for _, name := range rv.NamesOfKind("ServiceDatabaseV2") {
+		if err := w.adoptClusterResource(ctx, pgvr("servicedatabasesv2"), "ServiceDatabaseV2", name, dstInstance, dstNamespace); err != nil {
+			log.Warn().Err(err).Str("servicedatabase", name).Str("instance", dstInstance).
+				Msg("db-watcher: move DB pre-adopt failed; source prune may drop the DB composite (credentials secret) until target Argo reconciles")
 		}
 	}
 }

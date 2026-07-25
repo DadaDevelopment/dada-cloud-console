@@ -8,9 +8,17 @@ import (
 )
 
 // VolumeSpec names a source PVC and the deployment that mounts it.
+// ChartTemplate is the relocated chart template file whose inline
+// PersistentVolumeClaim backs this volume (RWO->RWX is rewritten there, and for
+// data-bearing volumes a volumeName is injected). HasData is false for a volume
+// whose workload is scaled to zero at rest (its PVC is unmounted and empty, e.g.
+// n8n main): such volumes are not snapshotted, restored, or verified, and the
+// chart simply provisions a fresh empty PVC.
 type VolumeSpec struct {
-	PVCName   string `yaml:"pvcName"`
-	MountedBy string `yaml:"mountedBy"`
+	PVCName       string `yaml:"pvcName"`
+	MountedBy     string `yaml:"mountedBy"`
+	ChartTemplate string `yaml:"chartTemplate"`
+	HasData       bool   `yaml:"hasData"`
 }
 
 // MoveConfig is the full description of one app move.
@@ -25,6 +33,7 @@ type MoveConfig struct {
 	TargetEnv        string       `yaml:"targetEnv"`
 	TargetNamespace  string       `yaml:"targetNamespace"`
 	DBDatname        string       `yaml:"dbDatname"`
+	DBSchema         string       `yaml:"dbSchema"`
 	DBCredSecret     string       `yaml:"dbCredSecret"`
 	ArgoInfraPath    string       `yaml:"argoInfraPath"`
 	AppFolderRel     string       `yaml:"appFolderRel"`

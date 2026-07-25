@@ -96,6 +96,8 @@ type Config struct {
 	OrphanGCEnabled  bool
 	OrphanMarkAfter  time.Duration
 	OrphanPurgeAfter time.Duration
+
+	MoveVolumeEnabled bool
 }
 
 func Load() (*Config, error) {
@@ -158,6 +160,8 @@ func Load() (*Config, error) {
 		OrphanGCEnabled:  getEnv("GITOPS_ORPHAN_GC_ENABLED", "true") == "true",
 		OrphanMarkAfter:  orphanMark,
 		OrphanPurgeAfter: orphanPurge,
+
+		MoveVolumeEnabled: getEnv("MOVE_VOLUME_ENABLED", "false") == "true",
 	}
 
 	if cfg.DatabaseURL == "" {
