@@ -72,6 +72,29 @@ func ComposePaymentSuccess(planName, amountValue string) (subject, body string) 
 	return subject, b.String()
 }
 
+// ComposePlanExpiryReminder builds the customer-facing reminder that a paid
+// plan's 30-day term is running out (plan-expiry sweeper).
+func ComposePlanExpiryReminder(planName, expiresAtUTC string, daysLeft int) (subject, body string) {
+	subject = fmt.Sprintf("Dada Cloud: тариф %s истекает через %d дн.", planName, daysLeft)
+	var b strings.Builder
+	fmt.Fprintf(&b, "Срок действия тарифа %s заканчивается %s (UTC).\n\n", planName, expiresAtUTC)
+	b.WriteString("Продлить можно в консоли: откройте проект → Billing → «Оплатить».\n")
+	b.WriteString("Если тариф не продлить, через 3 дня после окончания аккаунт перейдёт на Free.\n")
+	b.WriteString("Работающие приложения не останавливаются — лимиты Free применяются только к новым ресурсам.\n")
+	return subject, b.String()
+}
+
+// ComposePlanDowngraded builds the customer-facing notice that an expired paid
+// plan lapsed to Free after the grace period (plan-expiry sweeper).
+func ComposePlanDowngraded(planName string) (subject, body string) {
+	subject = fmt.Sprintf("Dada Cloud: тариф %s истёк — аккаунт переведён на Free", planName)
+	var b strings.Builder
+	fmt.Fprintf(&b, "Срок действия тарифа %s закончился, и аккаунт переведён на Free.\n\n", planName)
+	b.WriteString("Работающие приложения не тронуты — лимиты Free действуют только на создание новых ресурсов.\n")
+	b.WriteString("Вернуть тариф можно в любой момент: консоль → проект → Billing → «Оплатить».\n")
+	return subject, b.String()
+}
+
 // crashLogSignature is one entry in the ordered pattern table ClassifyCrashLog
 // walks: pattern is matched with strings.Contains against the log excerpt,
 // label is the human hint appended to the pattern name in the parenthetical.

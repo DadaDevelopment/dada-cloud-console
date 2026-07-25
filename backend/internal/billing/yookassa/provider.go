@@ -215,14 +215,23 @@ func (p *YooKassaProvider) ProcessWebhook(ctx context.Context, ykPaymentID strin
 // assignPlanTx mirrors billing.ManualProvider.AssignPlan's upsert, scoped to
 // the caller's transaction so the payments-row flip and the plan assignment
 // commit or roll back together.
+//
+// Unlike the manual/admin path (plan_expires_at stays NULL = perpetual), a
+// paid assignment always carries a 30-day term: a fresh account gets
+// now+30d, a renewal extends from whichever is later — the current expiry
+// (early renewal keeps the remaining days) or now (a lapsed account does not
+// lose the gap). expiry_notified_at resets so future expiry reminders fire
+// again for the new term.
 func assignPlanTx(ctx context.Context, tx pgx.Tx, orgID, plan string, now time.Time) error {
 	_, err := tx.Exec(ctx, `
-		INSERT INTO billing_accounts (org_id, plan, plan_assigned_at, updated_at)
-		VALUES ($1, $2, $3, $3)
+		INSERT INTO billing_accounts (org_id, plan, plan_assigned_at, plan_expires_at, expiry_notified_at, updated_at)
+		VALUES ($1, $2, $3::timestamptz, $3::timestamptz + interval '30 days', NULL, $3::timestamptz)
 		ON CONFLICT (org_id) DO UPDATE
-		  SET plan             = EXCLUDED.plan,
-		      plan_assigned_at = EXCLUDED.plan_assigned_at,
-		      updated_at       = EXCLUDED.updated_at
+		  SET plan               = EXCLUDED.plan,
+		      plan_assigned_at   = EXCLUDED.plan_assigned_at,
+		      plan_expires_at    = GREATEST(coalesce(billing_accounts.plan_expires_at, EXCLUDED.plan_assigned_at), EXCLUDED.plan_assigned_at) + interval '30 days',
+		      expiry_notified_at = NULL,
+		      updated_at         = EXCLUDED.updated_at
 	`, orgID, plan, now)
 	return err
 }

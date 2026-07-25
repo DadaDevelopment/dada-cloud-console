@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/dada-tuda/console/backend/internal/billing/pricing"
 	"github.com/google/uuid"
@@ -243,5 +244,76 @@ func TestCheckout_InsertsPendingRowThenStoresYkPaymentID(t *testing.T) {
 	}
 	if storedConfirmationURL != confirmationURL {
 		t.Fatalf("stored confirmation_url=%q want %q", storedConfirmationURL, confirmationURL)
+	}
+}
+
+func planExpiryOf(t *testing.T, pool *pgxpool.Pool, orgID string) *time.Time {
+	t.Helper()
+	var expires *time.Time
+	if err := pool.QueryRow(context.Background(), `SELECT plan_expires_at FROM billing_accounts WHERE org_id = $1`, orgID).Scan(&expires); err != nil {
+		t.Fatalf("read plan_expires_at: %v", err)
+	}
+	return expires
+}
+
+func TestProcessWebhook_Succeeded_SetsThirtyDayExpiry(t *testing.T) {
+	pool := testProviderPool(t)
+	orgID := "org-exp-" + uuid.NewString()[:8]
+	ykID := "ykid-" + uuid.NewString()[:8]
+	seedPendingPayment(t, pool, orgID, "startup", ykID)
+
+	client := newFakeYooKassaServer(t, "succeeded")
+	p := NewProvider(pool, client, "https://console.dada-tuda.ru/billing/return", false)
+
+	if _, err := p.ProcessWebhook(context.Background(), ykID); err != nil {
+		t.Fatalf("ProcessWebhook: %v", err)
+	}
+
+	expires := planExpiryOf(t, pool, orgID)
+	if expires == nil {
+		t.Fatal("plan_expires_at is NULL after a paid assignment; want ~now+30d")
+	}
+	want := time.Now().UTC().Add(30 * 24 * time.Hour)
+	if diff := expires.Sub(want); diff < -time.Hour || diff > time.Hour {
+		t.Fatalf("plan_expires_at=%s want within 1h of %s", expires, want)
+	}
+}
+
+func TestProcessWebhook_Renewal_ExtendsFromCurrentExpiry(t *testing.T) {
+	pool := testProviderPool(t)
+	orgID := "org-renew-" + uuid.NewString()[:8]
+	ykID := "ykid-" + uuid.NewString()[:8]
+	seedPendingPayment(t, pool, orgID, "startup", ykID)
+
+	remaining := 10 * 24 * time.Hour
+	current := time.Now().UTC().Add(remaining)
+	if _, err := pool.Exec(context.Background(), `
+		INSERT INTO billing_accounts (org_id, plan, plan_assigned_at, plan_expires_at, expiry_notified_at, updated_at)
+		VALUES ($1, 'startup', now(), $2, now(), now())
+	`, orgID, current); err != nil {
+		t.Fatalf("seed billing account: %v", err)
+	}
+
+	client := newFakeYooKassaServer(t, "succeeded")
+	p := NewProvider(pool, client, "https://console.dada-tuda.ru/billing/return", false)
+	if _, err := p.ProcessWebhook(context.Background(), ykID); err != nil {
+		t.Fatalf("ProcessWebhook: %v", err)
+	}
+
+	expires := planExpiryOf(t, pool, orgID)
+	if expires == nil {
+		t.Fatal("plan_expires_at is NULL after renewal")
+	}
+	want := current.Add(30 * 24 * time.Hour)
+	if diff := expires.Sub(want); diff < -time.Hour || diff > time.Hour {
+		t.Fatalf("early renewal must extend from the current expiry: plan_expires_at=%s want within 1h of %s", expires, want)
+	}
+
+	var notified *time.Time
+	if err := pool.QueryRow(context.Background(), `SELECT expiry_notified_at FROM billing_accounts WHERE org_id = $1`, orgID).Scan(&notified); err != nil {
+		t.Fatalf("read expiry_notified_at: %v", err)
+	}
+	if notified != nil {
+		t.Fatal("expiry_notified_at must reset on renewal so reminders re-arm for the new term")
 	}
 }

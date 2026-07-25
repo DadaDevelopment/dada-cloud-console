@@ -16,6 +16,7 @@ import (
 	"github.com/dada-tuda/console/backend/internal/config"
 	"github.com/dada-tuda/console/backend/internal/db"
 	"github.com/dada-tuda/console/backend/internal/metrics"
+	"github.com/dada-tuda/console/backend/internal/notify"
 	"github.com/joho/godotenv"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
@@ -153,6 +154,21 @@ func main() {
 			}
 		}()
 		log.Info().Dur("interval", meterInterval).Msg("billing meter started")
+
+		expiryNotifier := notify.New(cfg.SMTPHost, cfg.SMTPPort, cfg.SMTPUser, cfg.SMTPPass, cfg.SMTPFrom)
+		go func() {
+			ticker := time.NewTicker(1 * time.Hour)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-meterCtx.Done():
+					return
+				case <-ticker.C:
+					api.SweepPlanExpiry(meterCtx, pool, expiryNotifier, cfg.AuditNotifyEmail, time.Now().UTC())
+				}
+			}
+		}()
+		log.Info().Msg("billing plan-expiry sweeper started")
 	}
 
 	<-quit

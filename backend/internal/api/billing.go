@@ -185,6 +185,12 @@ func (h *Handler) GetBillingAccount(c *gin.Context) {
 		respondError(c, http.StatusInternalServerError, "failed to compute usage")
 		return
 	}
+	var planExpiresAt *time.Time
+	if err := h.pool.QueryRow(c.Request.Context(),
+		`SELECT plan_expires_at FROM billing_accounts WHERE org_id = $1`, orgID,
+	).Scan(&planExpiresAt); err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		log.Printf("billing: plan_expires_at lookup skipped for org %s: %v", orgID, err)
+	}
 	now := time.Now().UTC()
 	period := fmt.Sprintf("%d-%02d", now.Year(), now.Month())
 
@@ -208,9 +214,10 @@ func (h *Handler) GetBillingAccount(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"plan":   plan.Key,
-		"quotas": plan.Quotas,
-		"usage":  usage,
+		"plan":            plan.Key,
+		"plan_expires_at": planExpiresAt,
+		"quotas":          plan.Quotas,
+		"usage":           usage,
 		"invoicePreview": gin.H{
 			"period":    period,
 			"amount":    total,

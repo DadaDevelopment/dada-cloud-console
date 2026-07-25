@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"time"
 )
 
 // defaultBaseURL is the production YooKassa API root.
@@ -27,13 +28,16 @@ type Client struct {
 	HTTPClient *http.Client
 }
 
-// New builds a Client against the production YooKassa API.
+// New builds a Client against the production YooKassa API. The HTTP client
+// carries its own timeout so a hung YooKassa endpoint cannot pin a webhook
+// or checkout goroutine beyond it even when the caller's context has no
+// deadline.
 func New(shopID, secretKey string) *Client {
 	return &Client{
 		ShopID:     shopID,
 		SecretKey:  secretKey,
 		BaseURL:    defaultBaseURL,
-		HTTPClient: http.DefaultClient,
+		HTTPClient: &http.Client{Timeout: 30 * time.Second},
 	}
 }
 
