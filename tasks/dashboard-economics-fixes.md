@@ -46,7 +46,7 @@ GROUNDED 07-25 (code + ADR-015 read):
 ### B3 — hub convergence (blocked on chip `task_3d6e95dc`)
 - [ ] Hub reports `claude -p` usage into `agent_token_usage` (source=hub) per the chip's spec; idempotent on cloud_task_id/platform_request_id.
 
-CHECKPOINT: B1+B2 shipped. Ledger + read-time pricing + invoice line + admin card live on main. Await POST-DEPLOY live-verify (ledger fills on real chat turn, invoice line appears, admin card shows). B3 waits on the hub chip.
+CHECKPOINT: B1+B2 shipped + CI GREEN. B1 built #591 SUCCESS; B2 built #596 SUCCESS (commit f07fe448, contains 83ddfd2+1db80b7; `go test ./... -count=1` RAN — api/pricing/config/agentchat all `ok`, zero FAIL; 6 images pushed to Nexus tag f07fe448). Builds #594/#595 = NOT_BUILT ("Superseded by #595" — benign multibranch concurrency discard from rapid parallel pushes, NOT a failure). Ledger + read-time pricing + invoice line + admin card live on main. Await POST-DEPLOY live-verify (migration 051 runs on prod DB, ledger fills on real chat turn, invoice line appears, admin card shows under god-admin). B3 waits on the hub chip.
 
 ## C. "Новые приложения в день" current-day spike (BUG)
 Root cause [code]: `resource_snapshots` is one row/resource (conflict `(project_id,environment_id,kind,name)`), `last_synced_at` bumped every ~30s reconcile (UpdateLiveStatus). overviewDynamics uses `min(last_synced_at)` as first-seen → == now for every live app → all land in today. Table has no creation ts.
