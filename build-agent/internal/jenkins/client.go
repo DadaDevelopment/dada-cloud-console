@@ -11,10 +11,13 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
 )
+
+var queueItemBodyRe = regexp.MustCompile(`/queue/item/(\d+)/`)
 
 // Client talks to a Jenkins controller with API-token basic auth.
 type Client struct {
@@ -112,16 +115,32 @@ func (c *Client) TriggerBuild(ctx context.Context, jobFullName string, params ma
 		return 0, fmt.Errorf("trigger build: %w", err)
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusCreated {
-		return 0, fmt.Errorf("trigger build %q: %s", jobFullName, readErr(resp))
+
+	if resp.StatusCode == http.StatusCreated {
+		loc := resp.Header.Get("Location")
+		id, err := queueIDFromLocation(loc)
+		if err != nil {
+			return 0, fmt.Errorf("parse queue location %q: %w", loc, err)
+		}
+		return id, nil
 	}
 
-	loc := resp.Header.Get("Location")
-	id, err := queueIDFromLocation(loc)
-	if err != nil {
-		return 0, fmt.Errorf("parse queue location %q: %w", loc, err)
+	if resp.StatusCode == http.StatusOK {
+		if loc := resp.Header.Get("Location"); loc != "" {
+			if id, err := queueIDFromLocation(loc); err == nil {
+				return id, nil
+			}
+		}
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<16))
+		if m := queueItemBodyRe.FindSubmatch(body); m != nil {
+			if id, err := strconv.ParseInt(string(m[1]), 10, 64); err == nil {
+				return id, nil
+			}
+		}
+		return 0, fmt.Errorf("trigger build %q: 200 response with no queue item id: %s", jobFullName, strings.TrimSpace(string(body)))
 	}
-	return id, nil
+
+	return 0, fmt.Errorf("trigger build %q: %s", jobFullName, readErr(resp))
 }
 
 // queueIDFromLocation extracts <id> from a .../queue/item/<id>/ Location URL.

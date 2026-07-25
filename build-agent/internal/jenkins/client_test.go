@@ -32,6 +32,71 @@ func TestQueueIDFromLocation(t *testing.T) {
 	}
 }
 
+func TestTriggerBuildQueueCollapse200WithBodyID(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/crumbIssuer/api/json":
+			w.WriteHeader(http.StatusNotFound)
+		case "/job/web/buildWithParameters":
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte("Queue item exists. For details check, for example, /queue/item/23473/api/json?tree=cancelled,executable[url]"))
+		default:
+			t.Errorf("unexpected path %s", r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+
+	c := New(srv.URL, "u", "t")
+	qid, err := c.TriggerBuild(context.Background(), "web", nil)
+	if err != nil || qid != 23473 {
+		t.Fatalf("trigger: qid=%d err=%v want 23473 nil", qid, err)
+	}
+}
+
+func TestTriggerBuildQueueCollapse200WithLocation(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/crumbIssuer/api/json":
+			w.WriteHeader(http.StatusNotFound)
+		case "/job/web/buildWithParameters":
+			w.Header().Set("Location", "http://x/queue/item/99/")
+			w.WriteHeader(http.StatusOK)
+		default:
+			t.Errorf("unexpected path %s", r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+
+	c := New(srv.URL, "u", "t")
+	qid, err := c.TriggerBuild(context.Background(), "web", nil)
+	if err != nil || qid != 99 {
+		t.Fatalf("trigger: qid=%d err=%v want 99 nil", qid, err)
+	}
+}
+
+func TestTriggerBuildQueueCollapse200NoID(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/crumbIssuer/api/json":
+			w.WriteHeader(http.StatusNotFound)
+		case "/job/web/buildWithParameters":
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte("no id here"))
+		default:
+			t.Errorf("unexpected path %s", r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+
+	c := New(srv.URL, "u", "t")
+	if _, err := c.TriggerBuild(context.Background(), "web", nil); err == nil {
+		t.Fatal("want error when 200 body has no queue item id")
+	}
+}
+
 func TestTriggerResolveAndLogs(t *testing.T) {
 	var triggered bool
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
