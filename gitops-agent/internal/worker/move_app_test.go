@@ -2,6 +2,7 @@ package worker
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -291,32 +292,50 @@ func TestNamesOfKind_ReturnsEveryPublicApi(t *testing.T) {
 	}
 }
 
-// newPublicApi builds a live cluster-scoped PublicApi as ArgoCD leaves it: named,
-// carrying the source app's argocd.argoproj.io/instance tracking label.
-func newPublicApi(name, instance string) *unstructured.Unstructured {
+// trackingID builds the argocd.argoproj.io/tracking-id value exactly as ArgoCD
+// stamps it on a cluster-scoped PublicApi under resourceTrackingMethod=
+// annotation+label (verified live), so tests assert against the real format
+// rather than a guess.
+func trackingID(instance, namespace, name string) string {
+	return fmt.Sprintf("%s:platform.dada-tuda.ru/PublicApi:%s/%s", instance, namespace, name)
+}
+
+// newPublicApi builds a live cluster-scoped PublicApi as ArgoCD leaves it under
+// annotation+label tracking: named, carrying BOTH the instance label and the
+// tracking-id annotation for the owning app in the given namespace.
+func newPublicApi(name, instance, namespace string) *unstructured.Unstructured {
 	u := &unstructured.Unstructured{}
 	u.SetGroupVersionKind(schema.GroupVersionKind{Group: "platform.dada-tuda.ru", Version: "v1alpha1", Kind: "PublicApi"})
 	u.SetName(name)
 	u.SetLabels(map[string]string{argoInstanceLabel: instance})
+	u.SetAnnotations(map[string]string{argoTrackingIDAnnotation: trackingID(instance, namespace, name)})
 	return u
 }
 
-// TestPreAdoptClusterScopedResources_FlipsPublicApiLabelToTarget is the core
-// fix: before the source folder is pruned, every cluster-scoped PublicApi the
-// app carries must have its instance label re-stamped to the target Argo app, so
-// the source prune skips the shared object (no longer owned) instead of deleting
-// it and 502'ing the live domain. Both objects (surrogate + custom domain) must
-// flip. A fake dynamic client stands in for the cluster.
-func TestPreAdoptClusterScopedResources_FlipsPublicApiLabelToTarget(t *testing.T) {
+// TestPreAdoptClusterScopedResources_FlipsBothMarkersToTarget is the core fix:
+// before the source folder is pruned, every cluster-scoped PublicApi the app
+// carries must have BOTH ArgoCD ownership markers re-stamped to the target app —
+// the instance label AND the authoritative tracking-id annotation. Under
+// annotation+label tracking ArgoCD keys prune ownership off the annotation, so a
+// label-only flip would leave the source app still owning (and pruning) the
+// shared object, 502'ing the live domain. Both objects (surrogate + custom
+// domain) must flip, and the annotation must equal the exact value the target app
+// will itself compute (target instance + target namespace). Fake dynamic client
+// stands in for the cluster.
+func TestPreAdoptClusterScopedResources_FlipsBothMarkersToTarget(t *testing.T) {
 	ctx := context.Background()
-	const srcInstance = "dada-development-site-prod-aaaa1111"
-	const dstInstance = "dada-development-site-prod-b9addbae"
+	const (
+		srcInstance  = "dada-development-site-prod-aaaa1111"
+		dstInstance  = "dada-development-site-prod-b9addbae"
+		srcNamespace = "example-project-prod"
+		dstNamespace = "internal-prod"
+	)
 
 	dyn := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(
 		runtime.NewScheme(),
 		map[schema.GroupVersionResource]string{publicApiGVR: "PublicApiList"},
-		newPublicApi("dada-development-site", srcInstance),
-		newPublicApi("dada-development-site-custom", srcInstance),
+		newPublicApi("dada-development-site", srcInstance, srcNamespace),
+		newPublicApi("dada-development-site-custom", srcInstance, srcNamespace),
 	)
 	w := &DBWatcher{clients: &dadak8s.Clients{Dynamic: dyn}}
 	rv, err := renderer.ParseResourcesValues(resourcesValuesTwoPublicApi)
@@ -324,7 +343,7 @@ func TestPreAdoptClusterScopedResources_FlipsPublicApiLabelToTarget(t *testing.T
 		t.Fatalf("parse resources.values.yaml: %v", err)
 	}
 
-	w.preAdoptClusterScopedResources(ctx, rv, srcInstance, dstInstance)
+	w.preAdoptClusterScopedResources(ctx, rv, srcInstance, dstInstance, dstNamespace)
 
 	for _, name := range []string{"dada-development-site", "dada-development-site-custom"} {
 		live, err := dyn.Resource(publicApiGVR).Get(ctx, name, metav1.GetOptions{})
@@ -332,24 +351,32 @@ func TestPreAdoptClusterScopedResources_FlipsPublicApiLabelToTarget(t *testing.T
 			t.Fatalf("get %q after pre-adopt: %v", name, err)
 		}
 		if got := live.GetLabels()[argoInstanceLabel]; got != dstInstance {
-			t.Errorf("%q instance label = %q; want target %q (source prune would delete it)", name, got, dstInstance)
+			t.Errorf("%q instance label = %q; want target %q", name, got, dstInstance)
+		}
+		wantTID := trackingID(dstInstance, dstNamespace, name)
+		if got := live.GetAnnotations()[argoTrackingIDAnnotation]; got != wantTID {
+			t.Errorf("%q tracking-id = %q; want target %q (source prune keys off this)", name, got, wantTID)
 		}
 	}
 }
 
 // TestPreAdoptClusterScopedResources_Idempotent covers the re-drive: an object
-// already owned by the target (a prior partial move) is left untouched, and a
-// PublicApi named in git but not yet created in the cluster is a best-effort skip
-// that neither errors nor blocks the surviving objects from flipping.
+// already fully owned by the target (both markers, from a prior partial move) is
+// left untouched, and a PublicApi named in git but not yet created in the cluster
+// is a best-effort skip that neither errors nor blocks the surviving objects from
+// flipping.
 func TestPreAdoptClusterScopedResources_Idempotent(t *testing.T) {
 	ctx := context.Background()
-	const srcInstance = "app-prod-aaaa1111"
-	const dstInstance = "app-prod-b9addbae"
+	const (
+		srcInstance  = "app-prod-aaaa1111"
+		dstInstance  = "app-prod-b9addbae"
+		dstNamespace = "internal-prod"
+	)
 
 	dyn := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(
 		runtime.NewScheme(),
 		map[schema.GroupVersionResource]string{publicApiGVR: "PublicApiList"},
-		newPublicApi("dada-development-site", dstInstance),
+		newPublicApi("dada-development-site", dstInstance, dstNamespace),
 	)
 	w := &DBWatcher{clients: &dadak8s.Clients{Dynamic: dyn}}
 	rv, err := renderer.ParseResourcesValues(resourcesValuesTwoPublicApi)
@@ -357,7 +384,7 @@ func TestPreAdoptClusterScopedResources_Idempotent(t *testing.T) {
 		t.Fatalf("parse resources.values.yaml: %v", err)
 	}
 
-	w.preAdoptClusterScopedResources(ctx, rv, srcInstance, dstInstance)
+	w.preAdoptClusterScopedResources(ctx, rv, srcInstance, dstInstance, dstNamespace)
 
 	live, err := dyn.Resource(publicApiGVR).Get(ctx, "dada-development-site", metav1.GetOptions{})
 	if err != nil {
@@ -365,6 +392,9 @@ func TestPreAdoptClusterScopedResources_Idempotent(t *testing.T) {
 	}
 	if got := live.GetLabels()[argoInstanceLabel]; got != dstInstance {
 		t.Errorf("already-adopted object instance = %q; want unchanged %q", got, dstInstance)
+	}
+	if got := live.GetAnnotations()[argoTrackingIDAnnotation]; got != trackingID(dstInstance, dstNamespace, "dada-development-site") {
+		t.Errorf("already-adopted object tracking-id = %q; want unchanged", got)
 	}
 }
 
@@ -377,6 +407,6 @@ func TestPreAdoptClusterScopedResources_NoClientIsNoop(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse resources.values.yaml: %v", err)
 	}
-	(&DBWatcher{}).preAdoptClusterScopedResources(context.Background(), rv, "src", "dst")
-	(&DBWatcher{clients: &dadak8s.Clients{}}).preAdoptClusterScopedResources(context.Background(), rv, "src", "dst")
+	(&DBWatcher{}).preAdoptClusterScopedResources(context.Background(), rv, "src", "dst", "internal-prod")
+	(&DBWatcher{clients: &dadak8s.Clients{}}).preAdoptClusterScopedResources(context.Background(), rv, "src", "dst", "internal-prod")
 }

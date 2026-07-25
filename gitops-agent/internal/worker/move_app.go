@@ -18,11 +18,22 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 )
 
-// argoInstanceLabel is ArgoCD's label-tracking key: its value is the owning
-// Application's name, stamped on every resource that app manages. MoveApp
-// rewrites it on the cluster-scoped PublicApi to hand ownership to the target
-// app before the source is pruned.
-const argoInstanceLabel = "argocd.argoproj.io/instance"
+// argoInstanceLabel and argoTrackingIDAnnotation are ArgoCD's two ownership
+// markers. This install runs resourceTrackingMethod=annotation+label: the
+// tracking-id ANNOTATION is authoritative for prune ownership, and the instance
+// LABEL is written alongside for external tooling (the status reconciler reads
+// it). MoveApp must rewrite BOTH on the cluster-scoped PublicApi to hand it to
+// the target app — patching only the label leaves the source app owning the
+// object by annotation, so it still prunes it and the live domain still blips.
+//
+// The label value is the owning Application's name. The annotation value is
+// "<appName>:<group>/<Kind>:<namespace>/<name>" (verified live, e.g.
+// "dada-development-site-prod-b9addbae:platform.dada-tuda.ru/PublicApi:internal-prod/dada-development-site-861841-dada-tuda-ru"),
+// and ArgoCD keys prune ownership off its <appName> segment.
+const (
+	argoInstanceLabel        = "argocd.argoproj.io/instance"
+	argoTrackingIDAnnotation = "argocd.argoproj.io/tracking-id"
+)
 
 // pgUniqueViolation is the Postgres SQLSTATE for a unique-constraint violation,
 // used by moveApp's snapshot repoint to detect a same-named row already present
@@ -240,7 +251,7 @@ func (w *DBWatcher) doMoveApp(ctx context.Context, op db.Operation) error {
 	}
 
 	srcArgoName := renderer.ScopedArgoName(p.AppName, srcEnvName, op.ProjectID.String())
-	w.preAdoptClusterScopedResources(ctx, rv, srcArgoName, argoName)
+	w.preAdoptClusterScopedResources(ctx, rv, srcArgoName, argoName, dstNamespace)
 
 	srcPaths := []string{
 		renderer.AppGitPath(srcProjectSlug, srcEnvName, p.AppName),
@@ -364,47 +375,67 @@ func (w *DBWatcher) repointMovedAppSnapshots(ctx context.Context, srcProjectID, 
 //
 // A PublicApi is a single cluster-scoped object keyed by name, so the source and
 // target renders point at the very same live resource. It carries the source
-// app's argocd.argoproj.io/instance label, so removing the source folder makes
-// the source Argo app prune the PublicApi as its own orphan — dropping the live
-// domain to 502 until the target app reconciles and re-creates it (a multi-second
-// gap). Re-stamping the label to the target first makes the source prune skip the
+// app's ArgoCD ownership markers, so removing the source folder makes the source
+// Argo app prune the PublicApi as its own orphan — dropping the live domain to
+// 502 until the target app reconciles and re-creates it (a multi-second gap).
+// Re-stamping the markers to the target first makes the source prune skip the
 // object (no longer owned) while the target already claims it: a zero-downtime
 // handoff.
 //
+// dstNamespace is the target Argo Application's destination namespace: ArgoCD
+// records it in the tracking-id annotation even for a cluster-scoped object (the
+// annotation's namespace segment mirrors the owning app's namespace), so the
+// re-stamped annotation must match what the target app will itself compute.
+//
 // Best-effort by design: with no in-cluster client (local dev) or a PublicApi not
 // yet created, it logs and returns — the move still completes, worst case being
-// the pre-fix blip, never a failed move. Assumes ArgoCD label tracking, the
-// method this install uses (the status reconciler reads the same label).
-func (w *DBWatcher) preAdoptClusterScopedResources(ctx context.Context, rv *renderer.ResourcesValues, srcInstance, dstInstance string) {
+// the pre-fix blip, never a failed move.
+func (w *DBWatcher) preAdoptClusterScopedResources(ctx context.Context, rv *renderer.ResourcesValues, srcInstance, dstInstance, dstNamespace string) {
 	if w.clients == nil || w.clients.Dynamic == nil || rv == nil || srcInstance == dstInstance {
 		return
 	}
 	for _, name := range rv.NamesOfKind("PublicApi") {
-		if err := w.adoptClusterResourceLabel(ctx, pgvr("publicapis"), name, dstInstance); err != nil {
+		if err := w.adoptClusterResource(ctx, pgvr("publicapis"), "PublicApi", name, dstInstance, dstNamespace); err != nil {
 			log.Warn().Err(err).Str("publicapi", name).Str("instance", dstInstance).
 				Msg("db-watcher: move pre-adopt failed; live domain may blip until target Argo reconciles")
 		}
 	}
 }
 
-// adoptClusterResourceLabel points a cluster-scoped resource's
-// argocd.argoproj.io/instance label at dstInstance so the target Argo app owns
-// it. No-op when the label already matches (idempotent re-drive); a NotFound
-// (object not created yet) surfaces to the caller, which treats every error as
-// best-effort. The patch is a JSON merge patch touching only that one label.
-func (w *DBWatcher) adoptClusterResourceLabel(ctx context.Context, gvr schema.GroupVersionResource, name, dstInstance string) error {
+// adoptClusterResource re-homes a cluster-scoped resource onto the target Argo
+// app by rewriting BOTH ownership markers under resourceTrackingMethod=
+// annotation+label:
+//   - the argocd.argoproj.io/tracking-id annotation (authoritative for prune) to
+//     "<dstInstance>:<group>/<kind>:<dstNamespace>/<name>", the exact value the
+//     target app will compute when it next syncs, so ArgoCD sees no ownership
+//     change and never re-creates the object; and
+//   - the argocd.argoproj.io/instance label to dstInstance, for external tooling.
+//
+// Patching only the label would leave the source app owning the object by
+// annotation — it would still prune it on source removal, defeating the handoff.
+//
+// No-op when both markers already match (idempotent re-drive); a NotFound (object
+// not created yet) surfaces to the caller, which treats every error as
+// best-effort. The patch is a single JSON merge patch touching only these two
+// metadata keys.
+func (w *DBWatcher) adoptClusterResource(ctx context.Context, gvr schema.GroupVersionResource, kind, name, dstInstance, dstNamespace string) error {
 	live, err := w.clients.Dynamic.Resource(gvr).Get(ctx, name, metav1.GetOptions{})
 	if err != nil {
 		return fmt.Errorf("get %s %q: %w", gvr.Resource, name, err)
 	}
-	if live.GetLabels()[argoInstanceLabel] == dstInstance {
+	trackingID := fmt.Sprintf("%s:%s/%s:%s/%s", dstInstance, gvr.Group, kind, dstNamespace, name)
+	if live.GetLabels()[argoInstanceLabel] == dstInstance &&
+		live.GetAnnotations()[argoTrackingIDAnnotation] == trackingID {
 		return nil
 	}
-	patch := []byte(fmt.Sprintf(`{"metadata":{"labels":{%q:%q}}}`, argoInstanceLabel, dstInstance))
+	patch := []byte(fmt.Sprintf(
+		`{"metadata":{"labels":{%q:%q},"annotations":{%q:%q}}}`,
+		argoInstanceLabel, dstInstance, argoTrackingIDAnnotation, trackingID,
+	))
 	if _, err := w.clients.Dynamic.Resource(gvr).Patch(ctx, name, types.MergePatchType, patch, metav1.PatchOptions{}); err != nil {
-		return fmt.Errorf("patch %s %q instance label: %w", gvr.Resource, name, err)
+		return fmt.Errorf("patch %s %q tracking markers: %w", gvr.Resource, name, err)
 	}
-	log.Info().Str("publicapi", name).Str("instance", dstInstance).
+	log.Info().Str("publicapi", name).Str("instance", dstInstance).Str("tracking_id", trackingID).
 		Msg("db-watcher: re-adopted cluster-scoped resource onto target Argo app")
 	return nil
 }
