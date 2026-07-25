@@ -9,6 +9,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gin-contrib/sse"
+
 	"github.com/dada-tuda/console/backend/internal/agentchat"
 	"github.com/dada-tuda/console/backend/internal/auth"
 	"github.com/dada-tuda/console/backend/internal/billing/pricing"
@@ -35,23 +37,18 @@ type agentChatRequest struct {
 	AppName   string `json:"appName"`
 }
 
+// writeSSEEvent frames one Server-Sent Event via the spec-compliant gin sse
+// encoder rather than a hand-rolled Fprintf. This matters for assistant text
+// deltas: sse.Encode rewrites every embedded newline into an additional
+// "data:" continuation line, so a multi-line delta survives the wire intact.
+// The prior "data: %s" form emitted the newline raw, which split the frame and
+// let the client drop the tail line. The encoder also adds no cosmetic leading
+// space, so the client must not strip one (see streamSSE in
+// frontend/components/agent-chat-panel.tsx) or it would eat significant leading
+// spaces in a delta.
 func writeSSEEvent(c *gin.Context, flusher http.Flusher, event string, data string) {
-	fmt.Fprintf(c.Writer, "event: %s\ndata: %s\n\n", event, data)
+	_ = sse.Encode(c.Writer, sse.Event{Event: event, Data: data})
 	flusher.Flush()
-}
-
-// writeSSEToken emits an assistant text delta as a JSON-encoded string so that
-// newlines, leading/trailing spaces and control characters survive the SSE
-// line framing intact. Raw deltas corrupted the wire: an embedded '\n' split
-// the data frame (the tail line lost its "data:" prefix and was dropped) and
-// significant whitespace was eaten by the client-side trim, producing scrambled
-// and glued output. The client JSON-parses the payload back to the exact delta.
-func writeSSEToken(c *gin.Context, flusher http.Flusher, text string) {
-	b, err := json.Marshal(text)
-	if err != nil {
-		return
-	}
-	writeSSEEvent(c, flusher, "token", string(b))
 }
 
 func agentChatOrgID(claims *auth.Claims) string {
@@ -477,7 +474,7 @@ func (h *Handler) AgentChat(c *gin.Context) {
 
 	emit := agentchat.Emitter{
 		Token: func(text string) {
-			writeSSEToken(c, flusher, text)
+			writeSSEEvent(c, flusher, "token", text)
 		},
 		ToolCall: func(name string) {
 			writeSSEEvent(c, flusher, "tool_call", fmt.Sprintf(`{"name":%q}`, name))
@@ -659,7 +656,7 @@ func (h *Handler) AgentChatConfirm(c *gin.Context) {
 
 	emit := agentchat.Emitter{
 		Token: func(text string) {
-			writeSSEToken(c, flusher, text)
+			writeSSEEvent(c, flusher, "token", text)
 		},
 		ToolCall: func(name string) {
 			writeSSEEvent(c, flusher, "tool_call", fmt.Sprintf(`{"name":%q}`, name))

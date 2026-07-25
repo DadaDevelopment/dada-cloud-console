@@ -75,23 +75,6 @@ interface StreamChatHandlers {
   onDone?: (awaitingConfirm: boolean) => void;
 }
 
-/**
- * Decode an assistant text delta from its SSE `token` frame. The backend
- * JSON-encodes the delta so newlines and significant whitespace survive the
- * line framing; parsing it back yields the exact substring. Falls back to the
- * raw payload for compatibility with a backend that still emits raw deltas
- * during a rolling deploy.
- */
-function parseTokenData(data: string): string {
-  try {
-    const parsed = JSON.parse(data);
-    if (typeof parsed === "string") return parsed;
-  } catch {
-    return data;
-  }
-  return data;
-}
-
 function parseToolCallData(data: string): string | null {
   try {
     const parsed = JSON.parse(data) as { name?: string };
@@ -153,6 +136,40 @@ async function streamSSE(url: string, body: unknown, handlers: StreamChatHandler
   const decoder = new TextDecoder();
   let buffer = "";
   let currentEvent = "message";
+  let dataLines: string[] = [];
+
+  const dispatch = (): boolean => {
+    const event = currentEvent;
+    const data = dataLines.join("\n");
+    currentEvent = "message";
+    dataLines = [];
+    if (data === "" && event === "message") return false;
+    switch (event) {
+      case "token":
+        handlers.onToken(data);
+        return false;
+      case "tool_call": {
+        const name = parseToolCallData(data);
+        if (name) handlers.onToolCall(name);
+        return false;
+      }
+      case "confirm_request": {
+        const req = parseConfirmRequestData(data);
+        if (req) handlers.onConfirmRequest(req);
+        return false;
+      }
+      case "error": {
+        const { code, message } = parseErrorData(data);
+        handlers.onError(code, message);
+        return false;
+      }
+      case "done":
+        handlers.onDone?.(parseDoneData(data));
+        return true;
+      default:
+        return false;
+    }
+  };
 
   for (;;) {
     const { done, value } = await reader.read();
@@ -163,29 +180,17 @@ async function streamSSE(url: string, body: unknown, handlers: StreamChatHandler
     buffer = lines.pop() ?? "";
 
     for (const line of lines) {
+      if (line === "") {
+        if (dispatch()) return;
+        continue;
+      }
+      if (line.startsWith(":")) continue;
       if (line.startsWith("event:")) {
         currentEvent = line.slice("event:".length).trim();
         continue;
       }
       if (line.startsWith("data:")) {
-        const data = line.slice("data:".length).trim();
-        if (currentEvent === "token") handlers.onToken(parseTokenData(data));
-        if (currentEvent === "tool_call") {
-          const name = parseToolCallData(data);
-          if (name) handlers.onToolCall(name);
-        }
-        if (currentEvent === "confirm_request") {
-          const req = parseConfirmRequestData(data);
-          if (req) handlers.onConfirmRequest(req);
-        }
-        if (currentEvent === "error") {
-          const { code, message } = parseErrorData(data);
-          handlers.onError(code, message);
-        }
-        if (currentEvent === "done") {
-          handlers.onDone?.(parseDoneData(data));
-          return;
-        }
+        dataLines.push(line.slice("data:".length));
       }
     }
   }
