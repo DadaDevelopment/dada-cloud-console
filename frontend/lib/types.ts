@@ -383,6 +383,7 @@ export interface AppSummary {
   message: string;
   volume?: AppVolume;
   url?: string;
+  preview_url?: string;
 }
 
 export interface AppsResponse {
