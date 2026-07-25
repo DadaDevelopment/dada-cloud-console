@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 import { usePathname } from "next/navigation";
-import { Joyride, STATUS, EVENTS, type Step, type EventData } from "react-joyride";
+import { Joyride, STATUS, type Step, type EventData } from "react-joyride";
 import { ONBOARDING_CAMPAIGNS } from "@/lib/onboarding/campaigns";
 import { selectPendingCampaign } from "@/lib/onboarding/select";
 import type { OnboardingCampaign, OnboardingStatus } from "@/lib/onboarding/types";
@@ -50,6 +50,7 @@ export function OnboardingProvider({ suppressed }: { suppressed: boolean }) {
       firedRef.current = true;
       setActive(campaign);
       setRun(true);
+      report(campaign.key, "seen", 0);
     }, campaign.delayMs ?? 3000);
     return () => clearTimeout(timer);
   }, [statusMap, suppressed, pathname]);
@@ -75,11 +76,7 @@ export function OnboardingProvider({ suppressed }: { suppressed: boolean }) {
   }));
 
   function handleEvent(data: EventData) {
-    const { type, status, index } = data;
-    if (type === EVENTS.TOUR_START) {
-      report(campaign.key, "seen", 0);
-      return;
-    }
+    const { status, index } = data;
     if (status === STATUS.SKIPPED) {
       report(campaign.key, "skipped", index);
       setRun(false);
