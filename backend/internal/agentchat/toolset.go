@@ -27,6 +27,7 @@ var writeKeepTools = []string{
 	"setEnvVar", "deleteEnvVar",
 	"rollbackApp", "rollbackDeployment", "promoteDeployment", "updateAppImage",
 	"updateAppProfile", "updateAppStorage",
+	"createDatabase",
 }
 
 var denyTools = map[string]bool{

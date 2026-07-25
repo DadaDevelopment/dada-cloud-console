@@ -52,4 +52,5 @@ export const agentChat: Messages = {
   "agentChat.tool.updateAppImage": { ru: "Обновить образ приложения", en: "Update app image" },
   "agentChat.tool.updateAppProfile": { ru: "Изменить профиль приложения", en: "Update app profile" },
   "agentChat.tool.updateAppStorage": { ru: "Изменить хранилище приложения", en: "Update app storage" },
+  "agentChat.tool.createDatabase": { ru: "Создать базу данных", en: "Create database" },
 };

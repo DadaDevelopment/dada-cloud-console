@@ -61,6 +61,43 @@ func parseOptionalUUID(s string) *uuid.UUID {
 	return &id
 }
 
+// extractUUIDArg pulls a UUID-shaped field out of a tool call's raw JSON
+// arguments. Used to resolve a confirmation card against what the tool call
+// will ACTUALLY target (e.g. the envId createDatabase's own args carry),
+// rather than the console's current project/env selection at the time the
+// turn started -- those two can legitimately differ (the agent may resolve
+// its own envId per the system prompt's "choose for me" instruction), and the
+// card must never show a target other than the one that's really about to
+// execute.
+func extractUUIDArg(argsJSON, key string) *uuid.UUID {
+	var m map[string]any
+	if err := json.Unmarshal([]byte(argsJSON), &m); err != nil {
+		return nil
+	}
+	raw, ok := m[key].(string)
+	if !ok || raw == "" {
+		return nil
+	}
+	id, err := uuid.Parse(raw)
+	if err != nil {
+		return nil
+	}
+	return &id
+}
+
+// agentChatResolveNames best-effort resolves project/environment display names for a
+// confirmation summary; empty strings on any lookup failure just make the summary
+// slightly less specific, never an error.
+func (h *Handler) agentChatResolveNames(ctx context.Context, projectID, envID *uuid.UUID) (projectName, envName string) {
+	if projectID != nil {
+		_ = h.pool.QueryRow(ctx, `SELECT name FROM projects WHERE id = $1`, *projectID).Scan(&projectName)
+	}
+	if envID != nil {
+		_ = h.pool.QueryRow(ctx, `SELECT name FROM environments WHERE id = $1`, *envID).Scan(&envName)
+	}
+	return projectName, envName
+}
+
 func truncateForTranscript(s string, max int) string {
 	if len(s) <= max {
 		return s
@@ -246,7 +283,11 @@ func (h *Handler) agentChatConsumePendingAction(ctx context.Context, actionID uu
 	return tag.RowsAffected() > 0, nil
 }
 
-func agentChatConfirmSummary(toolName, argsJSON string) string {
+// agentChatConfirmSummary renders the human-readable line shown on a confirmation
+// card. projectName/envName are only used by the createDatabase case (the other
+// write tools are app-scoped, where appName alone is unambiguous); callers pass
+// empty strings for every other tool.
+func agentChatConfirmSummary(toolName, argsJSON, projectName, envName string) string {
 	args := map[string]any{}
 	if strings.TrimSpace(argsJSON) != "" {
 		_ = json.Unmarshal([]byte(argsJSON), &args)
@@ -255,6 +296,27 @@ func agentChatConfirmSummary(toolName, argsJSON string) string {
 	key, _ := args["key"].(string)
 
 	switch toolName {
+	case "createDatabase":
+		name, _ := args["name"].(string)
+		database, _ := args["database"].(string)
+		appRef, _ := args["app_ref"].(string)
+		backupEnabled, _ := args["backup_enabled"].(bool)
+
+		var sb strings.Builder
+		sb.WriteString(fmt.Sprintf("Create a managed PostgreSQL database %q (database=%q)", name, database))
+		if projectName != "" || envName != "" {
+			sb.WriteString(fmt.Sprintf(" in project %q, environment %q", projectName, envName))
+		}
+		if appRef != "" {
+			sb.WriteString(fmt.Sprintf(", bound to app %q", appRef))
+		}
+		if backupEnabled {
+			sb.WriteString(", with backups enabled")
+		} else {
+			sb.WriteString(", without backups")
+		}
+		sb.WriteString(".")
+		return sb.String()
 	case "restartApp":
 		return fmt.Sprintf("Restart app %s", appName)
 	case "rollbackApp":
@@ -305,6 +367,10 @@ func agentChatSystemPrompt(req agentChatRequest) string {
 	if req.ProjectID == "" && req.EnvID == "" && req.AppName == "" {
 		sb.WriteString("none (the user has not selected a project yet).")
 	}
+	sb.WriteString(" You can order a managed PostgreSQL database with the createDatabase tool, but it requires a specific projectId and envId (environment), which are NOT things you may invent. ")
+	sb.WriteString("If envId is not already given above, ask the user which project/environment before calling createDatabase. ")
+	sb.WriteString("If the user says to choose for them, first call getProject (or listProjects) to see the real environments that exist, pick a sensible one (prefer an environment named prod if several exist and the user gave no other hint), and explicitly state which environment you picked before calling the tool -- never guess an envId you have not looked up. ")
+	sb.WriteString("createDatabase always pauses for the user's explicit confirmation in the UI before it actually runs, so propose it as soon as you have resolved name/database/env; you do not need the user to also confirm in chat first.")
 	return sb.String()
 }
 
@@ -438,7 +504,17 @@ func (h *Handler) agentChatEmitConfirmRequest(c *gin.Context, flusher http.Flush
 		return
 	}
 
-	summary := agentChatConfirmSummary(pending.ToolName, pending.ArgsJSON)
+	// The tool call's own args are the ground truth for what will actually
+	// execute -- resolve the project/env names from THOSE, not from the
+	// console context this turn started with, for tools where that can differ
+	// (currently only createDatabase; other write tools are app-scoped).
+	var projectName, envName string
+	if pending.ToolName == "createDatabase" {
+		targetProjectID := extractUUIDArg(pending.ArgsJSON, "projectId")
+		targetEnvID := extractUUIDArg(pending.ArgsJSON, "envId")
+		projectName, envName = h.agentChatResolveNames(ctx, targetProjectID, targetEnvID)
+	}
+	summary := agentChatConfirmSummary(pending.ToolName, pending.ArgsJSON, projectName, envName)
 	payload, _ := json.Marshal(map[string]any{
 		"action_id": actionID,
 		"tool_name": pending.ToolName,
