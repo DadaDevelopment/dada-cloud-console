@@ -144,6 +144,46 @@ func TestPlatformCostOnly(t *testing.T) {
 	}
 }
 
+// TestRollupClientExcludesAgentFromSubtotals proves the per-project agent-tasks
+// line is priced and rendered (its own cost/revenue/margin are computed) but is
+// kept OUT of the project and client subtotals -- agent tokens are Anthropic API
+// spend, not the Beget hardware bill the summary reconciles against, so folding
+// them into the hardware rollup would break reconciliation.
+func TestRollupClientExcludesAgentFromSubtotals(t *testing.T) {
+	cl := &adminCostClient{
+		ClientID: "u-1", ClientName: "acme@example.com",
+		Projects: []adminCostProject{{
+			ProjectID: "p-acme", ProjectName: "Acme",
+			Resources: []adminCostResource{
+				{Name: "web", Kind: "app", TotalCost: 100, Revenue: 150},
+				{Name: agentResourceKind, Kind: agentResourceKind, TotalCost: 30, Revenue: 80},
+			},
+		}},
+	}
+	rollupClient(cl)
+
+	p := cl.Projects[0]
+	if p.Cost != 100 || p.Revenue != 150 {
+		t.Fatalf("project subtotal must count hardware only, not the agent row: got cost %v revenue %v, want 100/150", p.Cost, p.Revenue)
+	}
+	if cl.Cost != 100 || cl.Revenue != 150 {
+		t.Fatalf("client subtotal must count hardware only: got cost %v revenue %v, want 100/150", cl.Cost, cl.Revenue)
+	}
+
+	var agent *adminCostResource
+	for i := range p.Resources {
+		if p.Resources[i].Kind == agentResourceKind {
+			agent = &p.Resources[i]
+		}
+	}
+	if agent == nil {
+		t.Fatal("agent row dropped: it must still render as a resource")
+	}
+	if agent.TotalCost != 30 || agent.Revenue != 80 || agent.Margin != 50 {
+		t.Fatalf("agent row must carry its own priced cost/revenue/margin: got %+v, want cost 30 revenue 80 margin 50", *agent)
+	}
+}
+
 func TestMarginPct(t *testing.T) {
 	cases := []struct {
 		name    string

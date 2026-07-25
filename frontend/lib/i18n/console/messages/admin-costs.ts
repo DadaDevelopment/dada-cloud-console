@@ -84,6 +84,8 @@ export const adminCosts: Messages = {
   "adminCosts.table.marginPct": { ru: "Маржа %", en: "Margin %" },
   "adminCosts.table.margin": { ru: "Прибыль ₽", en: "Profit ₽" },
 
+  "adminCosts.agentRow.label": { ru: "Агентские задачи (ИИ)", en: "Agent tasks (AI)" },
+
   "adminCosts.empty": { ru: "Нет данных за выбранный период", en: "No data for the selected window" },
   "adminCosts.expand": { ru: "Развернуть", en: "Expand" },
   "adminCosts.collapse": { ru: "Свернуть", en: "Collapse" },

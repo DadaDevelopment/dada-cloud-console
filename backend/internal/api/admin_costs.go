@@ -10,6 +10,7 @@ import (
 
 	"github.com/dada-tuda/console/backend/internal/auth"
 	"github.com/dada-tuda/console/backend/internal/beget"
+	"github.com/dada-tuda/console/backend/internal/billing/pricing"
 	"github.com/dada-tuda/console/backend/internal/cache"
 	"github.com/dada-tuda/console/backend/internal/opencost"
 	"github.com/gin-gonic/gin"
@@ -49,6 +50,13 @@ var adminCostsWindows = []string{adminCostSampleWindow}
 // cost-only section with no revenue or margin: we do not pay ourselves.
 const platformClientID = "platform"
 const platformClientName = "Платформа / своя инфраструктура"
+
+// agentResourceKind tags the per-project agent-token line in the cost drilldown.
+// It is the contract between injectAgentTokenRows (which writes the row), the
+// flatten rollup (which skips this kind so AI spend never enters the
+// hardware-reconciled totals), and the frontend (which renders a localized
+// "agent tasks" label for it).
+const agentResourceKind = "agent"
 
 // sharedDBNamespace is the namespace of the platform's one managed-Postgres
 // server (postgresql-0). Every ServiceDatabaseV2 is a logical database (datname)
@@ -288,35 +296,12 @@ func (h *Handler) buildAdminCostSummary(ctx context.Context, days int) adminCost
 	}
 
 	h.splitSharedDatabaseCost(ctx, acc, projByID)
+	h.injectAgentTokenRows(ctx, acc, days)
 
 	customers := make([]*adminCostClient, 0, len(acc.clients))
 	var platform *adminCostClient
 	for _, cl := range acc.clients {
-		for i := range cl.Projects {
-			p := &cl.Projects[i]
-			sort.Slice(p.Resources, func(a, b int) bool { return p.Resources[a].TotalCost > p.Resources[b].TotalCost })
-			p.Cost, p.Revenue = 0, 0
-			for j := range p.Resources {
-				r := &p.Resources[j]
-				r.TotalCost = round2(r.TotalCost)
-				r.Revenue = round2(r.Revenue)
-				r.Margin = round2(r.Revenue - r.TotalCost)
-				r.MarginPct = marginPct(r.Revenue, r.TotalCost)
-				p.Cost += r.TotalCost
-				p.Revenue += r.Revenue
-			}
-			p.Cost = round2(p.Cost)
-			p.Revenue = round2(p.Revenue)
-			p.Margin = round2(p.Revenue - p.Cost)
-			p.MarginPct = marginPct(p.Revenue, p.Cost)
-			cl.Cost += p.Cost
-			cl.Revenue += p.Revenue
-		}
-		cl.Cost = round2(cl.Cost)
-		cl.Revenue = round2(cl.Revenue)
-		cl.Margin = round2(cl.Revenue - cl.Cost)
-		cl.MarginPct = marginPct(cl.Revenue, cl.Cost)
-		sort.Slice(cl.Projects, func(a, b int) bool { return cl.Projects[a].Cost > cl.Projects[b].Cost })
+		rollupClient(cl)
 		if cl.ClientID == platformClientID {
 			platform = cl
 			continue
@@ -424,6 +409,44 @@ func (acc *adminCostsAccumulator) add(clientID, clientName, projectID, projectNa
 	r.RAMCost += round2(nonNeg(a.RAMCost) * scale)
 	r.PVCost += round2(nonNeg(a.PVCost) * scale)
 	r.TotalCost += round2(nonNeg(a.TotalCost) * scale)
+}
+
+// rollupClient rounds every resource, then rolls each project's resources into
+// its project subtotal and each project into the client subtotal, computing
+// margins at all three levels. Resources of kind agentResourceKind are priced and
+// rendered like any other row but are deliberately left OUT of the project and
+// client subtotals: agent tokens are Anthropic API spend, not the Beget hardware
+// bill the summary reconciles against, so folding them in would break the
+// hardware reconciliation. Projects are sorted by cost, resources by cost.
+func rollupClient(cl *adminCostClient) {
+	for i := range cl.Projects {
+		p := &cl.Projects[i]
+		sort.Slice(p.Resources, func(a, b int) bool { return p.Resources[a].TotalCost > p.Resources[b].TotalCost })
+		p.Cost, p.Revenue = 0, 0
+		for j := range p.Resources {
+			r := &p.Resources[j]
+			r.TotalCost = round2(r.TotalCost)
+			r.Revenue = round2(r.Revenue)
+			r.Margin = round2(r.Revenue - r.TotalCost)
+			r.MarginPct = marginPct(r.Revenue, r.TotalCost)
+			if r.Kind == agentResourceKind {
+				continue
+			}
+			p.Cost += r.TotalCost
+			p.Revenue += r.Revenue
+		}
+		p.Cost = round2(p.Cost)
+		p.Revenue = round2(p.Revenue)
+		p.Margin = round2(p.Revenue - p.Cost)
+		p.MarginPct = marginPct(p.Revenue, p.Cost)
+		cl.Cost += p.Cost
+		cl.Revenue += p.Revenue
+	}
+	cl.Cost = round2(cl.Cost)
+	cl.Revenue = round2(cl.Revenue)
+	cl.Margin = round2(cl.Revenue - cl.Cost)
+	cl.MarginPct = marginPct(cl.Revenue, cl.Cost)
+	sort.Slice(cl.Projects, func(a, b int) bool { return cl.Projects[a].Cost > cl.Projects[b].Cost })
 }
 
 // marginPct returns profit as a percentage of revenue, rounded to 2 dp. Zero
@@ -804,4 +827,84 @@ func safeRatio(a, b float64) float64 {
 		return 0
 	}
 	return a / b
+}
+
+// adminCostAgentProject is one project's agent-token spend over the window: the
+// provider USD cost frozen in the ledger and the owning user, used to hang a
+// per-project agent-tasks line off the cost drilldown.
+type adminCostAgentProject struct {
+	projectID, projectName string
+	ownerID, ownerName     string
+	costUSD                float64
+}
+
+// adminCostAgentTokens sums the agent_token_usage ledger per project over
+// [from, to) and joins each project's owning user. The users join mirrors
+// adminCostNamespaceOwners: a personal team's owner_id aliases the user id, so
+// the join resolves the owner the same way the namespace walk does. Rows with no
+// project_id are excluded -- they carry no project to hang the line on and remain
+// counted only in the platform-wide agent card. The window is half-open: from
+// inclusive, to exclusive.
+func (h *Handler) adminCostAgentTokens(ctx context.Context, from, to time.Time) ([]adminCostAgentProject, error) {
+	rows, err := h.pool.Query(ctx, `
+		SELECT atu.project_id::text, COALESCE(p.display_name, ''),
+		       COALESCE(u.id::text, ''), COALESCE(NULLIF(u.email, ''), NULLIF(u.display_name, ''), ''),
+		       COALESCE(SUM(atu.cost_usd), 0)::float8
+		FROM agent_token_usage atu
+		LEFT JOIN projects p ON p.id = atu.project_id
+		LEFT JOIN users u    ON u.id = p.owner_id
+		WHERE atu.project_id IS NOT NULL AND atu.created_at >= $1 AND atu.created_at < $2
+		GROUP BY atu.project_id, p.display_name, u.id, u.email, u.display_name`,
+		from, to,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []adminCostAgentProject{}
+	for rows.Next() {
+		var ap adminCostAgentProject
+		if err := rows.Scan(&ap.projectID, &ap.projectName, &ap.ownerID, &ap.ownerName, &ap.costUSD); err != nil {
+			return nil, err
+		}
+		out = append(out, ap)
+	}
+	return out, rows.Err()
+}
+
+// injectAgentTokenRows hangs a per-project agent-tasks line off the cost
+// drilldown: for each project with agent-token spend over the window it adds one
+// resource priced from the ledger -- provider USD grossed to rubles at the
+// configured FX rate, revenue cost-plus at the configured markup -- routed to the
+// owning customer, or to the platform bucket for an owner-less project. Agent
+// tokens are Anthropic API spend, not Beget iron, so the flatten rollup skips
+// kind=="agent": the row surfaces a project's AI economics without perturbing the
+// hardware bill the summary reconciles against. Best-effort: a ledger read error
+// is logged and skipped rather than failing the whole view.
+func (h *Handler) injectAgentTokenRows(ctx context.Context, acc *adminCostsAccumulator, days int) {
+	to := time.Now().UTC()
+	from := to.AddDate(0, 0, -days)
+	projs, err := h.adminCostAgentTokens(ctx, from, to)
+	if err != nil {
+		log.Warn().Err(err).Msg("admin costs: per-project agent-token rows skipped, ledger read failed")
+		return
+	}
+	usdToRUB := h.cfg.AgentTokenUSDToRUB
+	markup := h.cfg.AgentTokenMarkup
+	for _, ap := range projs {
+		clientID, clientName := ap.ownerID, ap.ownerName
+		switch {
+		case clientID == "":
+			clientID, clientName = platformClientID, platformClientName
+		case clientName == "":
+			clientName = clientID
+		}
+		projectName := ap.projectName
+		if projectName == "" {
+			projectName = ap.projectID
+		}
+		r := acc.ensureResource(clientID, clientName, ap.projectID, projectName, agentResourceKind, agentResourceKind)
+		r.TotalCost += round2(ap.costUSD * usdToRUB)
+		r.Revenue += round2(pricing.AgentTokenRevenueRUB(ap.costUSD, usdToRUB, markup))
+	}
 }

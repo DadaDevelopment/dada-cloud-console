@@ -416,6 +416,7 @@ function CostTree({
                 openProjects={openProjects}
                 onToggleProject={onToggleProject}
                 costOnly={costOnly}
+                t={t}
               />
             );
           })}
@@ -442,6 +443,7 @@ function ClientRows({
   openProjects,
   onToggleProject,
   costOnly = false,
+  t,
 }: {
   client: AdminCostClient;
   currency?: string;
@@ -450,6 +452,7 @@ function ClientRows({
   openProjects: Set<string>;
   onToggleProject: (key: string) => void;
   costOnly?: boolean;
+  t: (key: string, vars?: Record<string, string | number>) => string;
 }) {
   return (
     <>
@@ -476,6 +479,7 @@ function ClientRows({
             open={openProjects.has(key)}
             onToggle={() => onToggleProject(key)}
             costOnly={costOnly}
+            t={t}
           />
         );
       })}
@@ -490,6 +494,7 @@ function ProjectRows({
   open,
   onToggle,
   costOnly = false,
+  t,
 }: {
   projectKey: string;
   project: AdminCostProject;
@@ -497,6 +502,7 @@ function ProjectRows({
   open: boolean;
   onToggle: () => void;
   costOnly?: boolean;
+  t: (key: string, vars?: Record<string, string | number>) => string;
 }) {
   return (
     <>
@@ -515,7 +521,13 @@ function ProjectRows({
       {open && project.resources.map((r) => (
         <tr key={projectKey + "/" + r.name} className="border-b border-gray-50 dark:border-gray-800/30">
           <td className="py-1.5 pl-12 text-xs text-gray-500 dark:text-gray-400">
-            {r.name} <span className="text-gray-300 dark:text-gray-600">· {r.kind}</span>
+            {r.kind === "agent" ? (
+              t("adminCosts.agentRow.label")
+            ) : (
+              <>
+                {r.name} <span className="text-gray-300 dark:text-gray-600">· {r.kind}</span>
+              </>
+            )}
           </td>
           <td className="py-1.5 text-right font-mono text-[11px] text-gray-500 dark:text-gray-400">{formatMoney(r.total_cost, currency)}</td>
           {!costOnly && <td className="py-1.5 text-right font-mono text-[11px] text-gray-500 dark:text-gray-400">{formatMoney(r.revenue, currency)}</td>}
