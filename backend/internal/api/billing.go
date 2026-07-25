@@ -265,12 +265,16 @@ func (h *Handler) RecommendPlan(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"recommended": plan.Key, "reason": reason})
 }
 
-// AssignPlan upserts billing_accounts for the org owning the project. Requires
-// write role. Plan key must exist in the loaded plan set.
+// AssignPlan upserts billing_accounts for the org owning the project.
+// Platform-admin only (/platform-admins group) -- a self-service caller could
+// otherwise assign themselves a paid plan for free. Plan key must exist in
+// the loaded plan set. Real plan changes go through YooKassaProvider.Checkout
+// (checkout + webhook), which flips the plan only after payment succeeds;
+// this endpoint stays for manual/support-driven overrides.
 //
 // @ID          assignBillingPlan
-// @Summary     Assign a billing plan
-// @Description Upserts the org's plan in billing_accounts. Requires write role on the project.
+// @Summary     Assign a billing plan (platform-admin only)
+// @Description Upserts the org's plan in billing_accounts. Platform-admin only (/platform-admins group); every other caller gets 403.
 // @Tags        billing
 // @Accept      json
 // @Produce     json
@@ -290,22 +294,22 @@ func (h *Handler) AssignPlan(c *gin.Context) {
 		respondUnauthorized(c)
 		return
 	}
+	if !isGod(claims) {
+		respondForbidden(c)
+		return
+	}
 	projectID, err := uuid.Parse(c.Param("projectId"))
 	if err != nil {
 		respondNotFound(c)
 		return
 	}
-	role, err := h.effectiveRole(c.Request.Context(), claims, projectID)
+	_, err = h.effectiveRole(c.Request.Context(), claims, projectID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		respondNotFound(c)
 		return
 	}
 	if err != nil {
 		respondError(c, http.StatusInternalServerError, "failed to check project membership")
-		return
-	}
-	if !canWrite(role) {
-		respondForbidden(c)
 		return
 	}
 	var body struct {

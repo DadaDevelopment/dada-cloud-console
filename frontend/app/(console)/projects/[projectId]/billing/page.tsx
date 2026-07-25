@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import { billingApi } from "@/lib/api";
-import type { BillingAccount, BillingUsage, ConsumptionResponse } from "@/lib/api";
+import type { BillingAccount, BillingUsage, ConsumptionResponse, BillingPlan, BillingPlanKey, Payment, PaymentStatus } from "@/lib/api";
 import { Spinner } from "@/components/ui/spinner";
 import { Breadcrumb } from "@/components/ui/breadcrumb";
 import { ConsumptionBreakdown } from "@/components/billing/consumption-breakdown";
@@ -19,11 +19,13 @@ const PLAN_DISPLAY_NAMES: Record<string, string> = {
   enterprise: "Enterprise",
 };
 
-const PLAN_PRICES_RUB: Record<string, number> = {
-  free: 0,
-  startup: 990,
-  business: 2900,
-};
+const PLAN_ORDER: BillingPlanKey[] = ["free", "startup", "business", "enterprise"];
+
+function statusTone(status: PaymentStatus): string {
+  if (status === "succeeded") return "bg-green-100 text-green-700 dark:bg-green-950/50 dark:text-green-400";
+  if (status === "canceled") return "bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400";
+  return "bg-amber-100 text-amber-700 dark:bg-amber-950/50 dark:text-amber-400";
+}
 
 type UsageKey = keyof BillingUsage;
 
@@ -66,6 +68,12 @@ export default function BillingPage() {
   const [consumption, setConsumption] = useState<ConsumptionResponse | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [plans, setPlans] = useState<BillingPlan[]>([]);
+  const [payments, setPayments] = useState<Payment[]>([]);
+  const [checkoutingPlan, setCheckoutingPlan] = useState<BillingPlanKey | null>(null);
+  const [checkoutError, setCheckoutError] = useState<{ plan: BillingPlanKey; message: string } | null>(null);
+  const [notConfiguredPlan, setNotConfiguredPlan] = useState<BillingPlanKey | null>(null);
+  const [checkoutUrl, setCheckoutUrl] = useState<{ plan: BillingPlanKey; url: string } | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -95,6 +103,53 @@ export default function BillingPage() {
       });
     return () => { cancelled = true; };
   }, [projectId]);
+
+  useEffect(() => {
+    let cancelled = false;
+    billingApi
+      .getPlans()
+      .then((data) => {
+        if (!cancelled) setPlans(data.plans);
+      })
+      .catch(() => {
+        if (!cancelled) setPlans([]);
+      });
+    return () => { cancelled = true; };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    billingApi
+      .payments(projectId)
+      .then((data) => {
+        if (!cancelled) setPayments(data.payments);
+      })
+      .catch(() => {
+        if (!cancelled) setPayments([]);
+      });
+    return () => { cancelled = true; };
+  }, [projectId]);
+
+  async function handleCheckout(plan: BillingPlanKey) {
+    setCheckoutError(null);
+    setNotConfiguredPlan(null);
+    setCheckoutUrl(null);
+    setCheckoutingPlan(plan);
+    try {
+      const resp = await billingApi.checkout(projectId, plan);
+      setCheckoutUrl({ plan, url: resp.confirmation_url });
+      window.location.assign(resp.confirmation_url);
+    } catch (err) {
+      const status = (err as { status?: number } | undefined)?.status;
+      if (status === 409) {
+        setNotConfiguredPlan(plan);
+      } else {
+        setCheckoutError({ plan, message: err instanceof Error ? err.message : t("billing.checkoutError") });
+      }
+    } finally {
+      setCheckoutingPlan(null);
+    }
+  }
 
   if (isLoading) {
     return (
@@ -141,6 +196,12 @@ export default function BillingPage() {
     return limit;
   }
 
+  const currentPlanInfo = plans.find((p) => p.key === account.plan);
+  const currentIdx = PLAN_ORDER.indexOf(account.plan);
+  const upgradeCandidates = plans
+    .filter((p) => PLAN_ORDER.indexOf(p.key) > currentIdx && p.price_rub !== null && p.price_rub > 0)
+    .sort((a, b) => PLAN_ORDER.indexOf(a.key) - PLAN_ORDER.indexOf(b.key));
+
   return (
     <div>
       <div className="mb-6">
@@ -177,11 +238,11 @@ export default function BillingPage() {
         <div className="rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-6 shadow-sm">
           <p className="text-xs font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500">{t("billing.currentPlan")}</p>
           <p className="mt-2 text-3xl font-bold text-gray-900 dark:text-gray-100">{planName}</p>
-          {account.plan !== "enterprise" && PLAN_PRICES_RUB[account.plan] !== undefined && (
+          {account.plan !== "enterprise" && currentPlanInfo?.price_rub !== undefined && currentPlanInfo?.price_rub !== null && (
             <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
-              {PLAN_PRICES_RUB[account.plan] === 0
+              {currentPlanInfo.price_rub === 0
                 ? "0 ₽"
-                : `${PLAN_PRICES_RUB[account.plan].toLocaleString("ru")} ₽ / мес`}
+                : `${currentPlanInfo.price_rub.toLocaleString("ru")} ₽ / мес`}
             </p>
           )}
           <Link
@@ -191,6 +252,39 @@ export default function BillingPage() {
           >
             {t("billing.upgradeCta")}
           </Link>
+
+          {upgradeCandidates.length > 0 && (
+            <div className="mt-5 space-y-2 border-t border-gray-100 dark:border-gray-800 pt-4">
+              {upgradeCandidates.map((p) => (
+                <div key={p.key}>
+                  <button
+                    type="button"
+                    disabled={checkoutingPlan === p.key}
+                    onClick={() => handleCheckout(p.key)}
+                    className="inline-flex w-full items-center justify-center gap-1.5 rounded-lg border border-blue-600 px-4 py-2 text-sm font-semibold text-blue-600 transition-colors hover:bg-blue-50 disabled:opacity-60 dark:border-blue-500 dark:text-blue-400 dark:hover:bg-blue-950/40"
+                  >
+                    {checkoutingPlan === p.key
+                      ? t("billing.paying")
+                      : t("billing.pay").replace("{price}", (p.price_rub ?? 0).toLocaleString("ru"))}
+                  </button>
+                  {notConfiguredPlan === p.key && (
+                    <p className="mt-1.5 text-xs text-amber-600 dark:text-amber-400">{t("billing.notConfigured")}</p>
+                  )}
+                  {checkoutError?.plan === p.key && (
+                    <p className="mt-1.5 text-xs text-red-600 dark:text-red-400">{checkoutError.message}</p>
+                  )}
+                  {checkoutUrl?.plan === p.key && (
+                    <a
+                      href={checkoutUrl.url}
+                      className="mt-1.5 inline-block text-xs font-medium text-blue-600 dark:text-blue-400 hover:underline"
+                    >
+                      {t("billing.openCheckout")}
+                    </a>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
         </div>
 
         {account.invoicePreview && (
@@ -219,6 +313,29 @@ export default function BillingPage() {
             {t("billing.upgradeCta")} →
           </Link>
         </div>
+      </div>
+
+      <div className="mt-8 rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-6 shadow-sm">
+        <h2 className="mb-4 text-sm font-semibold text-gray-900 dark:text-gray-100">{t("billing.paymentsTitle")}</h2>
+        {payments.length === 0 ? (
+          <p className="text-sm text-gray-400 dark:text-gray-500">{t("billing.paymentsEmpty")}</p>
+        ) : (
+          <div className="space-y-2">
+            {payments.map((p) => (
+              <div key={p.id} className="flex items-center justify-between rounded-lg bg-gray-50 dark:bg-gray-900 px-4 py-3 text-sm">
+                <div className="flex items-center gap-3">
+                  <span className="font-medium text-gray-900 dark:text-gray-100">{PLAN_DISPLAY_NAMES[p.plan] ?? p.plan}</span>
+                  <span className="text-gray-400 dark:text-gray-500">
+                    {p.amount_value.toLocaleString("ru")} {p.currency}
+                  </span>
+                </div>
+                <span className={clsx("rounded-full px-3 py-1 text-xs font-medium", statusTone(p.status))}>
+                  {t(`billing.status.${p.status}`)}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       <div className="mt-8 rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-6 shadow-sm">

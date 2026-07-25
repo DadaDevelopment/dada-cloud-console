@@ -200,6 +200,8 @@ func SetupRouter(pool *pgxpool.Pool, cfg *config.Config) *gin.Engine {
 	r.POST("/api/v1/deploy", h.DeployTrigger)
 	r.GET("/api/v1/deploy/operations/:operationId", h.GetDeployOperation)
 
+	r.POST("/api/v1/webhooks/yookassa", h.YooKassaWebhook)
+
 	r.POST("/api/v1/client-errors", h.ReportClientError)
 
 	r.POST("/api/v1/feedback", h.SubmitFeedback)
@@ -475,6 +477,8 @@ func SetupRouter(pool *pgxpool.Pool, cfg *config.Config) *gin.Engine {
 		api.GET("/projects/:projectId/billing/account", h.GetBillingAccount)
 		api.GET("/projects/:projectId/billing/usage", h.GetBillingUsage)
 		api.PUT("/projects/:projectId/billing/plan", h.AssignPlan)
+		api.POST("/projects/:projectId/billing/checkout", h.BillingCheckout)
+		api.GET("/projects/:projectId/billing/payments", h.GetBillingPayments)
 
 		// Informational real-consumption + money-equivalent (always on, viewer+).
 		api.GET("/projects/:projectId/billing/consumption", h.GetProjectConsumption)

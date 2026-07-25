@@ -155,6 +155,12 @@ backend:
     # provisioning, never on repeat logins or service accounts). Empty disables
     # the feature outright.
     SIGNUP_NOTIFY_EMAIL: ""
+    # YooKassa (payments slice 1) non-secret half; YOOKASSA_SECRET_KEY is in
+    # backend.secret below. Empty shop id disables checkout (409
+    # payments_not_configured), not a 500.
+    YOOKASSA_SHOP_ID: ""
+    YOOKASSA_RETURN_URL: "https://console.dada-tuda.ru/billing/return"
+    YOOKASSA_SEND_RECEIPT: "false"
   existingSecret: ""
   # Service-unique secrets only. Shared keys (DB_URL, GITOPS_VALUES_TOKEN_SECRET,
   # PORTAINER_API_TOKEN) come from global.shared via the Secret template.
@@ -186,6 +192,10 @@ backend:
     # In prod this is patched out-of-git into Secret dada-cloud-console-backend,
     # copied from the keycloak-smtp-secret password (never duplicated in git).
     SMTP_PASS: ""
+    # YooKassa secret key. Empty (with empty YOOKASSA_SHOP_ID) disables
+    # payments outright. In prod this is patched out-of-git into Secret
+    # dada-cloud-console-backend, like the DadaAgent secrets above.
+    YOOKASSA_SECRET_KEY: ""
   persistence:
     enabled: true
     size: 5Gi

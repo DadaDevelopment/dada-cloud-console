@@ -1272,9 +1272,35 @@ export interface RecommendPlanResponse {
   reason: string;
 }
 
+export type PaymentStatus = "pending" | "succeeded" | "canceled";
+
+export interface Payment {
+  id: string;
+  plan: BillingPlanKey;
+  amount_value: number;
+  currency: string;
+  status: PaymentStatus;
+  created_at: string;
+  paid_at: string | null;
+}
+
+export interface CheckoutResponse {
+  payment_id: string;
+  confirmation_url: string;
+}
+
 export const billingApi = {
   getPlans: () =>
     apiFetch<{ plans: BillingPlan[] }>("/api/v1/billing/plans"),
+
+  checkout: (projectId: string, plan: BillingPlanKey) =>
+    apiFetch<CheckoutResponse>(`/api/v1/projects/${projectId}/billing/checkout`, {
+      method: "POST",
+      body: { plan },
+    }),
+
+  payments: (projectId: string) =>
+    apiFetch<{ payments: Payment[] }>(`/api/v1/projects/${projectId}/billing/payments`),
 
   getAccount: (projectId: string) =>
     apiFetch<BillingAccount>(`/api/v1/projects/${projectId}/billing/account`),

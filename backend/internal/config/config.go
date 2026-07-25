@@ -401,6 +401,14 @@ type Config struct {
 	// URLs handed back to the caller, e.g. the deploy-hook consumption endpoint
 	// (POST {PublicBaseURL}/api/v1/deploy) shown once when a deploy hook is created.
 	PublicBaseURL string // PUBLIC_BASE_URL
+
+	// YooKassa (payments slice 1, own shop/keys, no multi-tenant OAuth). Empty
+	// YooKassaShopID/YooKassaSecretKey means payments are unconfigured and
+	// checkout returns 409 payments_not_configured instead of attempting a call.
+	YooKassaShopID      string // YOOKASSA_SHOP_ID
+	YooKassaSecretKey   string // YOOKASSA_SECRET_KEY
+	YooKassaReturnURL   string // YOOKASSA_RETURN_URL (default https://console.dada-tuda.ru/billing/return)
+	YooKassaSendReceipt bool   // YOOKASSA_SEND_RECEIPT (default false; 54-FZ fiscal receipt block)
 }
 
 // Load reads configuration from environment variables.
@@ -537,6 +545,10 @@ func Load() (*Config, error) {
 		BillingEnabled:            getEnv("BILLING_ENABLED", "false") == "true",
 		BillingMeterIntervalSec:   getEnvInt64("BILLING_METER_INTERVAL_SECS", 3600),
 		PublicBaseURL:             getEnv("PUBLIC_BASE_URL", "https://console.dada-tuda.ru"),
+		YooKassaShopID:            getEnv("YOOKASSA_SHOP_ID", ""),
+		YooKassaSecretKey:         getEnv("YOOKASSA_SECRET_KEY", ""),
+		YooKassaReturnURL:         getEnv("YOOKASSA_RETURN_URL", "https://console.dada-tuda.ru/billing/return"),
+		YooKassaSendReceipt:       getEnv("YOOKASSA_SEND_RECEIPT", "false") == "true",
 	}
 
 	if cfg.DBURL == "" {

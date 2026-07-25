@@ -62,6 +62,16 @@ func ComposeAudit(action, actorEmail, resourceName, projectName, createdAtUTC st
 	return subject, b.String()
 }
 
+// ComposePaymentSuccess builds the subject and plaintext body for the
+// customer-facing payment-success email (YooKassa checkout, payments slice 1).
+func ComposePaymentSuccess(planName, amountValue string) (subject, body string) {
+	subject = fmt.Sprintf("Dada Cloud: оплата тарифа %s прошла успешно", planName)
+	var b strings.Builder
+	fmt.Fprintf(&b, "Спасибо! Платёж на тариф %s (%s ₽) успешно проведён.\n\n", planName, amountValue)
+	b.WriteString("Новый тариф уже активен в консоли.\n")
+	return subject, b.String()
+}
+
 // crashLogSignature is one entry in the ordered pattern table ClassifyCrashLog
 // walks: pattern is matched with strings.Contains against the log excerpt,
 // label is the human hint appended to the pattern name in the parenthetical.

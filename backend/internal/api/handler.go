@@ -13,6 +13,7 @@ import (
 	"github.com/dada-tuda/console/backend/internal/billing"
 	"github.com/dada-tuda/console/backend/internal/billing/costengine"
 	"github.com/dada-tuda/console/backend/internal/billing/pricing"
+	"github.com/dada-tuda/console/backend/internal/billing/yookassa"
 	"github.com/dada-tuda/console/backend/internal/buildagent"
 	"github.com/dada-tuda/console/backend/internal/cache"
 	"github.com/dada-tuda/console/backend/internal/cloudtask"
@@ -129,6 +130,8 @@ type Handler struct {
 	auditRateLimiter      auditNotifyLimiter
 	deployHookNotifyEmail string
 
+	yookassa *yookassa.YooKassaProvider
+
 	optionalAuth func(c *gin.Context) (*auth.Claims, bool)
 
 	agentChatLLM   *llmchat.Client
@@ -243,6 +246,11 @@ func NewHandler(pool *pgxpool.Pool, cfg *config.Config) *Handler {
 		log.Printf("billing: warn: failed to load plans: %v", err)
 	} else {
 		h.billingPlans = plans
+	}
+
+	if cfg.YooKassaShopID != "" && cfg.YooKassaSecretKey != "" {
+		ykClient := yookassa.New(cfg.YooKassaShopID, cfg.YooKassaSecretKey)
+		h.yookassa = yookassa.NewProvider(pool, ykClient, cfg.YooKassaReturnURL, cfg.YooKassaSendReceipt)
 	}
 
 	h.billingMarkup = pricing.MarkupDefault

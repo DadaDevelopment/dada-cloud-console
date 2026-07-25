@@ -27,4 +27,22 @@ export const billing: Messages = {
   "billing.noLimit": { ru: "Без ограничений", en: "Unlimited" },
   "billing.currency.rub": { ru: "₽", en: "₽" },
   "billing.planSince": { ru: "с {date}", en: "since {date}" },
+
+  "billing.pay": { ru: "Оплатить {price} ₽/мес", en: "Pay {price} rub/mo" },
+  "billing.paying": { ru: "Открываем оплату...", en: "Opening checkout..." },
+  "billing.notConfigured": { ru: "Оплата пока не подключена", en: "Payments are not set up yet" },
+  "billing.checkoutError": { ru: "Не удалось начать оплату", en: "Could not start checkout" },
+  "billing.openCheckout": { ru: "Ничего не произошло? Открыть страницу оплаты →", en: "Nothing happened? Open the payment page →" },
+  "billing.paymentsTitle": { ru: "Последние платежи", en: "Recent payments" },
+  "billing.paymentsEmpty": { ru: "Платежей пока нет", en: "No payments yet" },
+  "billing.status.pending": { ru: "В обработке", en: "Pending" },
+  "billing.status.succeeded": { ru: "Оплачено", en: "Paid" },
+  "billing.status.canceled": { ru: "Отменено", en: "Canceled" },
+
+  "billing.return.title": { ru: "Спасибо!", en: "Thank you!" },
+  "billing.return.message": {
+    ru: "Платёж обрабатывается — статус появится в разделе Billing.",
+    en: "Your payment is being processed - the status will appear on the Billing page.",
+  },
+  "billing.return.back": { ru: "Вернуться в консоль", en: "Back to console" },
 };
