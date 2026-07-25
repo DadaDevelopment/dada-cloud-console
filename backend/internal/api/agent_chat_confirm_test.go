@@ -206,9 +206,16 @@ func TestAgentChatConfirm_Approve_ExecutesToolAndResumes(t *testing.T) {
 	if len(events["done"]) == 0 || !strings.Contains(events["done"][len(events["done"])-1], `"ok":true`) {
 		t.Fatalf("done events=%v, want a final ok:true", events["done"])
 	}
-	gotText := strings.Join(events["token"], "")
-	if gotText != "Restarted web." {
-		t.Fatalf("streamed token text=%q want %q", gotText, "Restarted web.")
+	var gotText strings.Builder
+	for _, raw := range events["token"] {
+		var tok string
+		if err := json.Unmarshal([]byte(raw), &tok); err != nil {
+			t.Fatalf("token event %q is not a JSON-framed string (writeSSEToken contract): %v", raw, err)
+		}
+		gotText.WriteString(tok)
+	}
+	if gotText.String() != "Restarted web." {
+		t.Fatalf("streamed token text=%q want %q", gotText.String(), "Restarted web.")
 	}
 
 	if seenAuth != "Bearer confirm-bearer-token" {
