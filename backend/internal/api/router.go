@@ -187,6 +187,7 @@ func SetupRouter(pool *pgxpool.Pool, cfg *config.Config) *gin.Engine {
 	if v, err := auth.NewKeycloakVerifier(context.Background(), cfg.KeycloakIssuer, false, "", "dada-agent"); err == nil {
 		h.agentVerifier = v
 		r.POST("/api/v1/webhooks/dadagent", h.DadaAgentWebhook)
+		r.POST("/api/v1/webhooks/dadagent/usage", h.DadaAgentUsageWebhook)
 		log.Printf("cloud-task: dadagent webhook enabled at /api/v1/webhooks/dadagent")
 	} else {
 		log.Printf("cloud-task: dadagent webhook disabled (keycloak verifier: %v)", err)
