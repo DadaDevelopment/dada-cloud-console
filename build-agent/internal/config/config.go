@@ -79,8 +79,10 @@ type Config struct {
 	SourceUploadS3SecretKey string
 	SourceUploadS3Insecure  bool
 
-	PreviewEnvsEnabled bool
-	PreviewEnvTTL      time.Duration
+	PreviewEnvsEnabled      bool
+	PreviewEnvTTL           time.Duration
+	PreviewEnvsRequireLabel bool
+	PreviewEnvLabel         string
 }
 
 func Load() (*Config, error) {
@@ -149,8 +151,10 @@ func Load() (*Config, error) {
 		SourceUploadS3SecretKey: getEnv("SOURCE_UPLOAD_S3_SECRET_KEY", ""),
 		SourceUploadS3Insecure:  getEnv("SOURCE_UPLOAD_S3_INSECURE", "false") == "true",
 
-		PreviewEnvsEnabled: getEnv("BUILD_PREVIEW_ENVS_ENABLED", "false") == "true",
-		PreviewEnvTTL:      previewEnvTTL,
+		PreviewEnvsEnabled:      getEnv("BUILD_PREVIEW_ENVS_ENABLED", "false") == "true",
+		PreviewEnvTTL:           previewEnvTTL,
+		PreviewEnvsRequireLabel: getEnv("BUILD_PREVIEW_ENVS_REQUIRE_LABEL", "true") == "true",
+		PreviewEnvLabel:         getEnv("BUILD_PREVIEW_ENV_LABEL", "preview"),
 	}
 
 	if cfg.DatabaseURL == "" {

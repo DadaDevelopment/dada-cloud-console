@@ -399,7 +399,7 @@ const ru: Dict = {
     mappingSubtitle: "Не конфиг-файлы, а продуктовые понятия: что называется иначе и что не переносится вовсе.",
     mapping: [
       { from: "Vercel Deployment (проект из GitHub)", to: "Приложение (App) в Dada Cloud", note: "Общий принцип: пуш в основную ветку — автосборка и деплой." },
-      { from: "Preview Deployments (URL на каждый PR)", to: "PR-окружения + live-preview ссылки (*.pv.dada-tuda.ru)", note: "Для подключённого репозитория с автодеплоем на каждый pull request поднимается отдельное окружение со своим адресом; live-preview ссылка дополнительно даёт защищённый доступ к любому задеплоенному окружению." },
+      { from: "Preview Deployments (URL на каждый PR)", to: "PR-окружения + live-preview ссылки (*.pv.dada-tuda.ru)", note: "Для подключённого репозитория с автодеплоем pull request с меткой «preview» получает отдельное окружение со своим адресом; live-preview ссылка дополнительно даёт защищённый доступ к любому задеплоенному окружению." },
       { from: "Serverless Functions / Edge Functions", to: "Обычный контейнер-сервис", note: "Отдельного типа деплоя «функция по вызову» нет — весь код, включая API-роуты, работает внутри одного приложения-сервиса." },
       { from: "Vercel Postgres", to: "Managed PostgreSQL рядом с приложением", note: "DATABASE_URL прокидывается в сервис автоматически, отдельный провайдер базы не нужен." },
       { from: "Vercel Blob", to: "S3-совместимое хранилище (Storage)", note: "Создаётся рядом с приложением, доступ по ключам из панели." },
@@ -1293,7 +1293,7 @@ const en: Dict = {
     mappingSubtitle: "Not config files — product concepts: what's named differently and what doesn't carry over at all.",
     mapping: [
       { from: "Vercel Deployment (project from GitHub)", to: "App in Dada Cloud", note: "Same principle: push to the main branch triggers auto-build and deploy." },
-      { from: "Preview Deployments (a URL per PR)", to: "PR environments + live-preview links (*.pv.dada-tuda.ru)", note: "For a connected repo with auto-deploy on, every pull request gets its own environment with its own address; the live-preview link additionally gives protected access to any deployed environment." },
+      { from: "Preview Deployments (a URL per PR)", to: "PR environments + live-preview links (*.pv.dada-tuda.ru)", note: "For a connected repo with auto-deploy on, a pull request labeled 'preview' gets its own environment with its own address; the live-preview link additionally gives protected access to any deployed environment." },
       { from: "Serverless Functions / Edge Functions", to: "A regular container service", note: "There's no separate on-demand function deploy type — all code, including API routes, runs inside one app service." },
       { from: "Vercel Postgres", to: "Managed PostgreSQL next to the app", note: "DATABASE_URL is injected into the service automatically, no separate database provider needed." },
       { from: "Vercel Blob", to: "S3-compatible storage (Storage)", note: "Created next to the app, accessed with keys from the panel." },

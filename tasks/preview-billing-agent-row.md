@@ -37,8 +37,23 @@ Backend admin_costs.go + small FE:
 - [x] Test: TestRollupClientExcludesAgentFromSubtotals (agent priced+rendered, excluded from subtotals). go build+vet+test PASS. tsc 0 err, eslint clean.
 - Residual: agent-only project (tokens but no k8s) shows parent 0/0/0 with a non-zero agent child — rare, honest. Live render god-gated (no /platform-admins bearer local).
 
-## P4 — "move away from stable app-per-PR" (architecture, owner decision)
-Teardown already exists (7d). Levers: shorter TTL / scale-to-zero (useless for polling apps) / opt-in previews. Present options; do NOT build unprompted.
+## P4 — "move away from stable app-per-PR"  [DONE — owner chose OPT-IN previews]
+Owner picked opt-in ("PR label / repo toggle") over shorter-TTL / lazy-boot / leave-as-is.
+
+Chose the **PR label**, not a repo toggle, on evidence: there is NO repo edit endpoint (`git_repos` is INSERT-at-connect + DELETE only; router.go:383-385 has GET/POST/DELETE, no PATCH), so a per-repo column would need a migration + backend + the first-ever repo-edit UI and would still only help NEWLY connected repos. The label works for every EXISTING repo immediately (mendeleev included), build-agent-only, no migration, no schema, no frontend.
+
+Implementation (build-agent only):
+- [x] config: `PreviewEnvsRequireLabel` (`BUILD_PREVIEW_ENVS_REQUIRE_LABEL`, default **true** = opt-in) + `PreviewEnvLabel` (`BUILD_PREVIEW_ENV_LABEL`, default `preview`). The bool doubles as env-only kill switch back to auto-preview.
+- [x] `pullRequestEvent`: parse `pull_request.labels` (full current set) + top-level `label` (the one that changed on labeled/unlabeled).
+- [x] Action set += `labeled`, `unlabeled`.
+- [x] `previewOptIn(cfg, ev)` gates CREATION only (`existing == nil`) — an already-created preview keeps tracking new commits, so a labeled PR still redeploys on every push. Case/space-insensitive match.
+- [x] `previewOptedOut(ev)` = `unlabeled` AND removed label IS ours AND PR no longer carries it → immediate teardown via the EXISTING closePreviewEnv, so cost stops on un-label instead of waiting out the 7d TTL. Removing an unrelated label is a no-op (neither rebuild nor destroy).
+- [x] Discoverability: one commit status on opened/reopened only ("add the 'preview' label to deploy one") — not on synchronize, to avoid per-push noise.
+- [x] Fixed `TestPullRequestEventUnknownActionIgnored`, which used "labeled" as its example of an UNHANDLED action — my change invalidated that; now uses "assigned" and mirrors the real action set.
+- [x] Fixed stale marketing copy (dict.ts ru+en) promising an env for "every pull request".
+- [x] Tests: 3 new (label unmarshal, 9-case previewOptIn table, 6-case previewOptedOut table). gofmt/build/vet clean; FULL build-agent suite PASS; tsc clean; eslint clean; no forbidden unicode.
+- Deploy note: default flips behavior on the next build-agent roll. `BUILD_PREVIEW_ENVS_ENABLED` is still the outer gate (default false).
+- Pre-existing, NOT mine (evidence): `build-agent/internal/registry/nexus.go` is gofmt-dirty in the committed HEAD version and is unmodified in my worktree. Left alone, flagged separately.
 
 ## Constraints
 - Trunk main, single line (M4 n/a for app code). Auto-push after each commit. Stage explicit paths (parallel worktrees). No source comments. New routes -> swag. Endpoints <300ms.
