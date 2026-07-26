@@ -255,17 +255,17 @@ export function AgentChatPanel({ open, onClose }: AgentChatPanelProps) {
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
   const listRef = useRef<HTMLDivElement>(null);
-  const hydratedRef = useRef(false);
 
-  // Restore the persisted conversation once on mount (page reload, panel
-  // remounted, etc.) instead of always starting from an empty message list --
-  // the server already remembers everything, the browser just didn't ask for
-  // it yet. Guarded to run exactly once so it never clobbers an in-progress
-  // live conversation on a later project/env switch.
+  // Restore the persisted conversation for this project/env scope. selectedEnv
+  // resolves asynchronously (ProjectProvider fetches project details after its
+  // own mount), so a one-shot "run once on mount" effect would fire with a
+  // stale/undefined envId and silently hydrate the wrong (empty) scope. Instead
+  // this re-fires whenever projectId/selectedEnv change, but only ever applies
+  // its result while the panel is still showing nothing of its own (guarded via
+  // the functional setMessages below) -- so it never clobbers a conversation
+  // the user has actually started, no matter how many times project context
+  // settles or changes.
   useEffect(() => {
-    if (hydratedRef.current) return;
-    hydratedRef.current = true;
-
     let cancelled = false;
     (async () => {
       const history = await fetchHistory(projectId ?? undefined, selectedEnv?.id);
@@ -286,14 +286,14 @@ export function AgentChatPanel({ open, onClose }: AgentChatPanelProps) {
           summary: history.pendingAction.summary,
         });
       }
-      if (hydrated.length > 0) setMessages(hydrated);
+      if (hydrated.length === 0) return;
+      setMessages((prev) => (prev.length === 0 ? hydrated : prev));
     })();
 
     return () => {
       cancelled = true;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [projectId, selectedEnv?.id]);
 
   useEffect(() => {
     if (!open) return;
