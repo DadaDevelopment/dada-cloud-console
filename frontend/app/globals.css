@@ -160,6 +160,89 @@ body {
   margin: 2rem 0;
 }
 
+/* Compact markdown rendering for assistant messages in the agent chat panel
+   (lib/markdown.ts renderMarkdown output). Deliberately separate from
+   .dada-doc: that one is sized/colored for full docs pages and has no dark
+   variant, neither of which fits a small dark-mode-aware chat bubble. */
+.agent-chat-md {
+  line-height: 1.5;
+}
+.agent-chat-md > :first-child {
+  margin-top: 0;
+}
+.agent-chat-md > :last-child {
+  margin-bottom: 0;
+}
+.agent-chat-md p {
+  margin: 0 0 0.5em;
+}
+.agent-chat-md h1,
+.agent-chat-md h2,
+.agent-chat-md h3,
+.agent-chat-md h4,
+.agent-chat-md h5,
+.agent-chat-md h6 {
+  font-size: 1em;
+  font-weight: 700;
+  margin: 0.75em 0 0.35em;
+}
+.agent-chat-md ul,
+.agent-chat-md ol {
+  margin: 0 0 0.5em;
+  padding-left: 1.25em;
+}
+.agent-chat-md ul {
+  list-style: disc;
+}
+.agent-chat-md ol {
+  list-style: decimal;
+}
+.agent-chat-md li {
+  margin: 0.2em 0;
+}
+.agent-chat-md a {
+  color: #2563eb;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.dark .agent-chat-md a {
+  color: #60a5fa;
+}
+.agent-chat-md strong {
+  font-weight: 700;
+}
+.agent-chat-md code {
+  background: rgba(15, 23, 42, 0.08);
+  border-radius: 0.3rem;
+  padding: 0.1rem 0.3rem;
+  font-size: 0.85em;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+.dark .agent-chat-md code {
+  background: rgba(226, 232, 240, 0.12);
+}
+.agent-chat-md pre {
+  background: #0f172a;
+  color: #e2e8f0;
+  border-radius: 0.5rem;
+  padding: 0.6rem 0.75rem;
+  margin: 0 0 0.5em;
+  overflow-x: auto;
+}
+.agent-chat-md pre code {
+  background: transparent;
+  color: inherit;
+  padding: 0;
+  font-size: 0.85em;
+}
+.agent-chat-md blockquote {
+  border-left: 3px solid #bfdbfe;
+  background: rgba(191, 219, 254, 0.15);
+  padding: 0.4rem 0.75rem;
+  margin: 0 0 0.5em;
+  border-radius: 0 0.35rem 0.35rem 0;
+}
+
 
 
 

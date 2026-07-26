@@ -6,6 +6,7 @@ import { X, Send, Bot, Loader2, Wrench, AlertTriangle, Check, Ban } from "lucide
 import { useT } from "@/lib/i18n/console/context";
 import { useProjectContext } from "@/lib/project-context";
 import { getToken } from "@/lib/api";
+import { renderMarkdown } from "@/lib/markdown";
 
 type ChatMessage =
   | { id: string; kind: "message"; role: "user" | "assistant"; content: string; pending?: boolean }
@@ -480,13 +481,17 @@ export function AgentChatPanel({ open, onClose }: AgentChatPanelProps) {
           return (
             <div key={m.id} className={`flex ${m.role === "user" ? "justify-end" : "justify-start"}`}>
               <div
-                className={`max-w-[85%] whitespace-pre-wrap rounded-2xl px-3 py-2 text-sm ${
+                className={`max-w-[85%] rounded-2xl px-3 py-2 text-sm ${
                   m.role === "user"
-                    ? "bg-blue-600 text-white"
+                    ? "whitespace-pre-wrap bg-blue-600 text-white"
                     : "bg-gray-100 text-gray-800 dark:bg-gray-900 dark:text-gray-200"
                 }`}
               >
-                {m.content}
+                {m.role === "assistant" && m.content ? (
+                  <div className="agent-chat-md" dangerouslySetInnerHTML={{ __html: renderMarkdown(m.content) }} />
+                ) : (
+                  m.content
+                )}
                 {m.pending && m.content === "" && (
                   <span className="inline-flex items-center gap-1 text-gray-400 dark:text-gray-500">
                     <Loader2 className="h-3 w-3 animate-spin" />
