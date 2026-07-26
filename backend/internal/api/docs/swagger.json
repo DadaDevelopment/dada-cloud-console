@@ -515,6 +515,55 @@
                 }
             }
         },
+        "/agent/chat/history": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Reads back what's already in agent_chat_messages (and, if one is still open, the pending write-action awaiting confirm/reject) so the panel can restore a conversation after a page reload -- the browser-side message list is otherwise pure in-memory React state and disappears on refresh. Read-only; does not touch the LLM gateway or the daily message cap.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "agent"
+                ],
+                "summary": "Get persisted chat history for this project/env, plus any still-open confirmation",
+                "operationId": "agentChatGetHistory",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Project UUID",
+                        "name": "projectId",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Environment UUID",
+                        "name": "envId",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/api.agentChatHistoryResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/auth/login": {
             "post": {
                 "description": "Authenticates a user by username or email plus password and returns a JWT bearer token. Public endpoint — no authentication required. Use the returned token as the Authorization: Bearer header for every other endpoint.",
@@ -12707,6 +12756,52 @@
                     "type": "string"
                 },
                 "decision": {
+                    "type": "string"
+                }
+            }
+        },
+        "api.agentChatHistoryMessage": {
+            "type": "object",
+            "properties": {
+                "content": {
+                    "type": "string"
+                },
+                "role": {
+                    "type": "string"
+                },
+                "toolName": {
+                    "type": "string"
+                }
+            }
+        },
+        "api.agentChatHistoryResponse": {
+            "type": "object",
+            "properties": {
+                "messages": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/api.agentChatHistoryMessage"
+                    }
+                },
+                "pendingAction": {
+                    "$ref": "#/definitions/api.agentChatPendingActionDTO"
+                }
+            }
+        },
+        "api.agentChatPendingActionDTO": {
+            "type": "object",
+            "properties": {
+                "actionId": {
+                    "type": "string"
+                },
+                "args": {
+                    "type": "object",
+                    "additionalProperties": {}
+                },
+                "summary": {
+                    "type": "string"
+                },
+                "toolName": {
                     "type": "string"
                 }
             }

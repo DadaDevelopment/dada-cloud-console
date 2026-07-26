@@ -212,6 +212,34 @@ function streamConfirm(
   return streamSSE("/api/v1/agent/chat/confirm", { action_id: actionId, decision }, handlers);
 }
 
+interface HistoryMessage {
+  role: "user" | "assistant" | "tool";
+  content: string;
+  toolName?: string;
+}
+
+interface HistoryResponse {
+  messages: HistoryMessage[];
+  pendingAction: ConfirmRequestPayload | null;
+}
+
+// fetchHistory reads back whatever the backend already persisted for this
+// project/env scope (GET /agent/chat/history) so the panel can rebuild its
+// message list after a page reload -- `messages` below is otherwise plain
+// in-memory React state and a refresh throws it away even though the server
+// remembers everything (agent_chat_messages + any still-open pending action).
+async function fetchHistory(projectId?: string, envId?: string): Promise<HistoryResponse | null> {
+  const token = await getToken();
+  const params = new URLSearchParams();
+  if (projectId) params.set("projectId", projectId);
+  if (envId) params.set("envId", envId);
+  const res = await fetch(`/api/v1/agent/chat/history?${params.toString()}`, {
+    headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+  });
+  if (!res.ok) return null;
+  return (await res.json()) as HistoryResponse;
+}
+
 interface AgentChatPanelProps {
   open: boolean;
   onClose: () => void;
@@ -227,6 +255,45 @@ export function AgentChatPanel({ open, onClose }: AgentChatPanelProps) {
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
   const listRef = useRef<HTMLDivElement>(null);
+  const hydratedRef = useRef(false);
+
+  // Restore the persisted conversation once on mount (page reload, panel
+  // remounted, etc.) instead of always starting from an empty message list --
+  // the server already remembers everything, the browser just didn't ask for
+  // it yet. Guarded to run exactly once so it never clobbers an in-progress
+  // live conversation on a later project/env switch.
+  useEffect(() => {
+    if (hydratedRef.current) return;
+    hydratedRef.current = true;
+
+    let cancelled = false;
+    (async () => {
+      const history = await fetchHistory(projectId ?? undefined, selectedEnv?.id);
+      if (!history || cancelled) return;
+
+      const hydrated: ChatMessage[] = history.messages.map((m) =>
+        m.role === "tool"
+          ? { id: newId(), kind: "tool_call", name: m.toolName ?? "" }
+          : { id: newId(), kind: "message", role: m.role, content: m.content }
+      );
+      if (history.pendingAction) {
+        hydrated.push({
+          id: newId(),
+          kind: "confirm",
+          actionId: history.pendingAction.actionId,
+          toolName: history.pendingAction.toolName,
+          args: history.pendingAction.args,
+          summary: history.pendingAction.summary,
+        });
+      }
+      if (hydrated.length > 0) setMessages(hydrated);
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     if (!open) return;

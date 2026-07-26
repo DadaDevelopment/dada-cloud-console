@@ -492,6 +492,7 @@ func SetupRouter(pool *pgxpool.Pool, cfg *config.Config) *gin.Engine {
 
 		api.POST("/agent/chat", h.AgentChat)
 		api.POST("/agent/chat/confirm", h.AgentChatConfirm)
+		api.GET("/agent/chat/history", h.AgentChatGetHistory)
 
 		api.GET("/onboarding", h.GetOnboarding)
 		api.POST("/onboarding/:key", h.PostOnboarding)

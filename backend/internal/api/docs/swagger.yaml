@@ -81,6 +81,36 @@ definitions:
       decision:
         type: string
     type: object
+  api.agentChatHistoryMessage:
+    properties:
+      content:
+        type: string
+      role:
+        type: string
+      toolName:
+        type: string
+    type: object
+  api.agentChatHistoryResponse:
+    properties:
+      messages:
+        items:
+          $ref: '#/definitions/api.agentChatHistoryMessage'
+        type: array
+      pendingAction:
+        $ref: '#/definitions/api.agentChatPendingActionDTO'
+    type: object
+  api.agentChatPendingActionDTO:
+    properties:
+      actionId:
+        type: string
+      args:
+        additionalProperties: {}
+        type: object
+      summary:
+        type: string
+      toolName:
+        type: string
+    type: object
   api.agentChatRequest:
     properties:
       appName:
@@ -1036,6 +1066,42 @@ paths:
       security:
       - BearerAuth: []
       summary: Approve or reject a pending agent write action
+      tags:
+      - agent
+  /agent/chat/history:
+    get:
+      description: Reads back what's already in agent_chat_messages (and, if one is
+        still open, the pending write-action awaiting confirm/reject) so the panel
+        can restore a conversation after a page reload -- the browser-side message
+        list is otherwise pure in-memory React state and disappears on refresh. Read-only;
+        does not touch the LLM gateway or the daily message cap.
+      operationId: agentChatGetHistory
+      parameters:
+      - description: Project UUID
+        in: query
+        name: projectId
+        type: string
+      - description: Environment UUID
+        in: query
+        name: envId
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/api.agentChatHistoryResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Get persisted chat history for this project/env, plus any still-open
+        confirmation
       tags:
       - agent
   /auth/login:

@@ -506,6 +506,21 @@ func (h *Handler) AgentChat(c *gin.Context) {
 	writeSSEEvent(c, flusher, "done", `{"ok":true}`)
 }
 
+// agentChatSummaryFor computes a confirmation-card summary for a write-tool
+// call, resolving project/env names from the call's OWN args (the ground
+// truth for what will actually execute) rather than any stale console
+// context. Shared by the live confirm_request path and the history endpoint's
+// reconstruction of a still-open pending action after a page reload.
+func (h *Handler) agentChatSummaryFor(ctx context.Context, toolName, argsJSON string) string {
+	var projectName, envName string
+	if toolName == "createDatabase" {
+		targetProjectID := extractUUIDArg(argsJSON, "projectId")
+		targetEnvID := extractUUIDArg(argsJSON, "envId")
+		projectName, envName = h.agentChatResolveNames(ctx, targetProjectID, targetEnvID)
+	}
+	return agentChatConfirmSummary(toolName, argsJSON, projectName, envName)
+}
+
 func (h *Handler) agentChatEmitConfirmRequest(c *gin.Context, flusher http.Flusher, ctx context.Context, userSub, orgID string, projectID, envID *uuid.UUID, pending *agentchat.PendingWrite) {
 	actionID, err := h.agentChatInsertPendingAction(ctx, userSub, orgID, projectID, envID, pending)
 	if err != nil {
@@ -515,17 +530,7 @@ func (h *Handler) agentChatEmitConfirmRequest(c *gin.Context, flusher http.Flush
 		return
 	}
 
-	// The tool call's own args are the ground truth for what will actually
-	// execute -- resolve the project/env names from THOSE, not from the
-	// console context this turn started with, for tools where that can differ
-	// (currently only createDatabase; other write tools are app-scoped).
-	var projectName, envName string
-	if pending.ToolName == "createDatabase" {
-		targetProjectID := extractUUIDArg(pending.ArgsJSON, "projectId")
-		targetEnvID := extractUUIDArg(pending.ArgsJSON, "envId")
-		projectName, envName = h.agentChatResolveNames(ctx, targetProjectID, targetEnvID)
-	}
-	summary := agentChatConfirmSummary(pending.ToolName, pending.ArgsJSON, projectName, envName)
+	summary := h.agentChatSummaryFor(ctx, pending.ToolName, pending.ArgsJSON)
 	payload, _ := json.Marshal(map[string]any{
 		"action_id": actionID,
 		"tool_name": pending.ToolName,
@@ -686,4 +691,125 @@ func (h *Handler) AgentChatConfirm(c *gin.Context) {
 	}
 
 	writeSSEEvent(c, flusher, "done", `{"ok":true}`)
+}
+
+type agentChatHistoryMessage struct {
+	Role     string `json:"role"`
+	Content  string `json:"content"`
+	ToolName string `json:"toolName,omitempty"`
+}
+
+type agentChatPendingActionDTO struct {
+	ActionID string         `json:"actionId"`
+	ToolName string         `json:"toolName"`
+	Args     map[string]any `json:"args"`
+	Summary  string         `json:"summary"`
+}
+
+type agentChatHistoryResponse struct {
+	Messages      []agentChatHistoryMessage  `json:"messages"`
+	PendingAction *agentChatPendingActionDTO `json:"pendingAction"`
+}
+
+// agentChatFindOpenPendingAction looks up the most recent still-pending,
+// unexpired write action for this user/project/env scope -- used to
+// reconstruct an interrupted confirmation card after a page reload, since the
+// SSE stream that originally emitted confirm_request is long gone.
+func (h *Handler) agentChatFindOpenPendingAction(ctx context.Context, userSub string, projectID, envID *uuid.UUID) (*agentChatPendingRow, error) {
+	var row agentChatPendingRow
+	var orgID *string
+	var snapshotRaw []byte
+	err := h.pool.QueryRow(ctx,
+		`SELECT id, user_sub, org_id, project_id, env_id, tool_name, args_json, tool_call_id,
+		        messages_snapshot, tool_call_count, write_call_count, status, expires_at
+		   FROM agent_chat_pending_actions
+		  WHERE user_sub = $1
+		    AND project_id IS NOT DISTINCT FROM $2
+		    AND env_id IS NOT DISTINCT FROM $3
+		    AND status = 'pending'
+		    AND expires_at > now()
+		  ORDER BY created_at DESC
+		  LIMIT 1`,
+		userSub, projectID, envID,
+	).Scan(&row.id, &row.userSub, &orgID, &row.projectID, &row.envID, &row.toolName, &row.argsJSON,
+		&row.toolCallID, &snapshotRaw, &row.toolCallCount, &row.writeCallCount, &row.status, &row.expiresAt)
+	if err != nil {
+		return nil, err
+	}
+	if orgID != nil {
+		row.orgID = *orgID
+	}
+	if err := json.Unmarshal(snapshotRaw, &row.messagesSnapshot); err != nil {
+		return nil, fmt.Errorf("unmarshal messages snapshot: %w", err)
+	}
+	return &row, nil
+}
+
+// @ID          agentChatGetHistory
+// @Summary     Get persisted chat history for this project/env, plus any still-open confirmation
+// @Description Reads back what's already in agent_chat_messages (and, if one is still open, the pending write-action awaiting confirm/reject) so the panel can restore a conversation after a page reload -- the browser-side message list is otherwise pure in-memory React state and disappears on refresh. Read-only; does not touch the LLM gateway or the daily message cap.
+// @Tags        agent
+// @Produce     json
+// @Security    BearerAuth
+// @Param       projectId query    string false "Project UUID"
+// @Param       envId     query    string false "Environment UUID"
+// @Success     200       {object} agentChatHistoryResponse
+// @Failure     401       {object} map[string]string
+// @Router      /agent/chat/history [get]
+func (h *Handler) AgentChatGetHistory(c *gin.Context) {
+	claims, ok := auth.GetClaims(c)
+	if !ok {
+		respondUnauthorized(c)
+		return
+	}
+
+	ctx := c.Request.Context()
+	userSub := claims.UserID.String()
+	projectID := parseOptionalUUID(c.Query("projectId"))
+	envID := parseOptionalUUID(c.Query("envId"))
+
+	rows, err := h.pool.Query(ctx,
+		`SELECT role, content, tool_name FROM (
+			SELECT role, content, tool_name, created_at FROM agent_chat_messages
+			WHERE user_sub = $1
+			  AND project_id IS NOT DISTINCT FROM $2
+			  AND env_id IS NOT DISTINCT FROM $3
+			  AND role IN ('user', 'assistant', 'tool')
+			ORDER BY created_at DESC
+			LIMIT $4
+		 ) recent ORDER BY created_at ASC`,
+		userSub, projectID, envID, agentChatHistoryLimit,
+	)
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, "failed to load chat history")
+		return
+	}
+	defer rows.Close()
+
+	messages := []agentChatHistoryMessage{}
+	for rows.Next() {
+		var m agentChatHistoryMessage
+		var toolName *string
+		if err := rows.Scan(&m.Role, &m.Content, &toolName); err != nil {
+			continue
+		}
+		if toolName != nil {
+			m.ToolName = *toolName
+		}
+		messages = append(messages, m)
+	}
+
+	var pending *agentChatPendingActionDTO
+	if pendingRow, perr := h.agentChatFindOpenPendingAction(ctx, userSub, projectID, envID); perr == nil && pendingRow != nil {
+		args := map[string]any{}
+		_ = json.Unmarshal([]byte(nonEmptyJSON(pendingRow.argsJSON)), &args)
+		pending = &agentChatPendingActionDTO{
+			ActionID: pendingRow.id.String(),
+			ToolName: pendingRow.toolName,
+			Args:     args,
+			Summary:  h.agentChatSummaryFor(ctx, pendingRow.toolName, pendingRow.argsJSON),
+		}
+	}
+
+	c.JSON(http.StatusOK, agentChatHistoryResponse{Messages: messages, PendingAction: pending})
 }
