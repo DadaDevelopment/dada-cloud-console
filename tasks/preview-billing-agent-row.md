@@ -53,6 +53,13 @@ Implementation (build-agent only):
 - [x] Fixed stale marketing copy (dict.ts ru+en) promising an env for "every pull request".
 - [x] Tests: 3 new (label unmarshal, 9-case previewOptIn table, 6-case previewOptedOut table). gofmt/build/vet clean; FULL build-agent suite PASS; tsc clean; eslint clean; no forbidden unicode.
 - Deploy note: default flips behavior on the next build-agent roll. `BUILD_PREVIEW_ENVS_ENABLED` is still the outer gate (default false).
+- [x] LIVE VERIFIED end to end (commit ddb4667):
+  - [origin] ddb4667 on origin/main; gate code present in origin's tree. Jenkins changeset for #620/#621 hid it because ea9b352 is a MERGE commit (first-parent attribution) -- ddb4667 IS an ancestor of the built d24d3a9.
+  - [CI] build #621 SUCCESS 7m09s; ran `go test ./... -count=1` in build-agent and PASSED `build-agent/internal/server` (log line 625) -- my new tables actually executed, not just compiled.
+  - [live] prod pod `dada-cloud-console-build-agent-84c6967658-4lp6z` running `build-agent:d24d3a98`, age 2m22s.
+  - [live] prod env has `BUILD_PREVIEW_ENVS_ENABLED=true` and NO `BUILD_PREVIEW_ENVS_REQUIRE_LABEL`, so the code default (true = opt-in) is what is now in force. No config change was needed.
+  - [code] gate completeness: `EnsurePreviewEnv` + `InsertCreatePreviewEnvOp` have exactly ONE production caller each, both inside openOrSyncPreviewEnv (server.go:423/430); gitops-agent only CONSUMES the op. No second path can create a preview, so opt-in cannot be bypassed.
+  - Residual (honest): no live PR round-trip executed -- that would mean opening/labeling a PR on a real customer repo, which is an outward-facing action I did not take unprompted. First real labeled PR is the last mile.
 - Pre-existing, NOT mine (evidence): `build-agent/internal/registry/nexus.go` is gofmt-dirty in the committed HEAD version and is unmodified in my worktree. Left alone, flagged separately.
 
 ## Constraints
