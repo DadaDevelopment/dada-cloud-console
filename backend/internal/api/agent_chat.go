@@ -227,9 +227,10 @@ type agentChatPendingRow struct {
 	writeCallCount   int
 	status           string
 	expiresAt        time.Time
+	priceRub         *float64
 }
 
-func (h *Handler) agentChatInsertPendingAction(ctx context.Context, userSub, orgID string, projectID, envID *uuid.UUID, pending *agentchat.PendingWrite) (uuid.UUID, error) {
+func (h *Handler) agentChatInsertPendingAction(ctx context.Context, userSub, orgID string, projectID, envID *uuid.UUID, pending *agentchat.PendingWrite, priceRub *float64) (uuid.UUID, error) {
 	snapshot, err := json.Marshal(pending.Messages)
 	if err != nil {
 		return uuid.Nil, fmt.Errorf("marshal messages snapshot: %w", err)
@@ -248,11 +249,11 @@ func (h *Handler) agentChatInsertPendingAction(ctx context.Context, userSub, org
 	err = h.pool.QueryRow(ctx,
 		`INSERT INTO agent_chat_pending_actions
 			(user_sub, org_id, project_id, env_id, tool_name, args_json, tool_call_id,
-			 messages_snapshot, tool_call_count, write_call_count, status, expires_at)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'pending', $11)
+			 messages_snapshot, tool_call_count, write_call_count, status, expires_at, price_rub)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'pending', $11, $12)
 		 RETURNING id`,
 		userSub, orgArg, projectID, envID, pending.ToolName, args, pending.ToolCallID,
-		snapshot, pending.ToolCallCount, pending.WriteCallCount, time.Now().Add(agentChatPendingActionTTL),
+		snapshot, pending.ToolCallCount, pending.WriteCallCount, time.Now().Add(agentChatPendingActionTTL), priceRub,
 	).Scan(&actionID)
 	if err != nil {
 		return uuid.Nil, err
@@ -266,11 +267,11 @@ func (h *Handler) agentChatLoadPendingAction(ctx context.Context, actionID uuid.
 	var snapshotRaw []byte
 	err := h.pool.QueryRow(ctx,
 		`SELECT id, user_sub, org_id, project_id, env_id, tool_name, args_json, tool_call_id,
-		        messages_snapshot, tool_call_count, write_call_count, status, expires_at
+		        messages_snapshot, tool_call_count, write_call_count, status, expires_at, price_rub
 		   FROM agent_chat_pending_actions WHERE id = $1`,
 		actionID,
 	).Scan(&row.id, &row.userSub, &orgID, &row.projectID, &row.envID, &row.toolName, &row.argsJSON,
-		&row.toolCallID, &snapshotRaw, &row.toolCallCount, &row.writeCallCount, &row.status, &row.expiresAt)
+		&row.toolCallID, &snapshotRaw, &row.toolCallCount, &row.writeCallCount, &row.status, &row.expiresAt, &row.priceRub)
 	if err != nil {
 		return nil, err
 	}
@@ -292,6 +293,43 @@ func (h *Handler) agentChatConsumePendingAction(ctx context.Context, actionID uu
 		return false, err
 	}
 	return tag.RowsAffected() > 0, nil
+}
+
+// agentChatRecordAuditEvent logs the human's approve/reject decision on an
+// agent-proposed write action into the platform's regular audit_events table,
+// distinct from the tool's own audit row (which only fires on a successful
+// approve+execute, same as a manual form submit). This one fires for BOTH
+// approve and reject, and independent of whether the underlying tool call
+// ultimately succeeds -- it records the human decision, not the technical
+// outcome -- so "the agent proposed X, the user said no" is visible to admins
+// too, not just in agent_chat_messages. Best-effort: never blocks the
+// confirm/decline response on a logging failure.
+func (h *Handler) agentChatRecordAuditEvent(ctx context.Context, actorID uuid.UUID, row *agentChatPendingRow, decision string) {
+	action := "AgentChatActionDeclined"
+	if decision == "approve" {
+		action = "AgentChatActionApproved"
+	}
+
+	args := map[string]any{}
+	_ = json.Unmarshal([]byte(nonEmptyJSON(row.argsJSON)), &args)
+	metadata, err := json.Marshal(map[string]any{
+		"tool_name": row.toolName,
+		"action_id": row.id,
+		"args":      args,
+		"price_rub": row.priceRub,
+	})
+	if err != nil {
+		log.Printf("agent-chat: failed to marshal audit metadata for action %s: %v", row.id, err)
+		return
+	}
+
+	if _, err := h.pool.Exec(ctx,
+		`INSERT INTO audit_events (actor_id, project_id, action, resource_kind, resource_name, metadata)
+		 VALUES ($1, $2, $3, $4, $5, $6)`,
+		actorID, row.projectID, action, row.toolName, row.toolName, metadata,
+	); err != nil {
+		log.Printf("agent-chat: failed to record audit event for action %s: %v", row.id, err)
+	}
 }
 
 // agentChatConfirmSummary renders the human-readable line shown on a confirmation
@@ -578,8 +616,50 @@ func (h *Handler) agentChatSummaryFor(ctx context.Context, toolName, argsJSON st
 	return agentChatConfirmSummary(toolName, argsJSON, projectName, envName)
 }
 
+// agentChatPriceEstimateRUB returns a deterministic, non-agent-controlled
+// monthly cost estimate for a write-tool call, reusing the exact same cost
+// model the billing dashboard already uses (billing_fullcost.go's
+// estimateFootprintDB + estimateCost, derived from config/billing/cluster-cost.yaml
+// and the live consumption snapshot's overhead/margin) -- this is never
+// something the LLM is asked to state, and it's computed ONCE here at
+// proposal time and persisted, so the price the user sees on the card is
+// exactly the price recorded to the audit trail, even if the billing
+// snapshot changes before the user confirms. Returns nil when the tool has no
+// fixed recurring footprint to price at creation time (createEndpoint is
+// free; createS3Bucket bills by actual bytes stored later, not by a size
+// chosen at creation).
+func (h *Handler) agentChatPriceEstimateRUB(toolName string) *float64 {
+	switch toolName {
+	case "createDatabase":
+		v := h.estimateCost(estimateFootprintDB, h.billingSnapshot().pricing)
+		return &v
+	default:
+		return nil
+	}
+}
+
 func (h *Handler) agentChatEmitConfirmRequest(c *gin.Context, flusher http.Flusher, ctx context.Context, userSub, orgID string, projectID, envID *uuid.UUID, pending *agentchat.PendingWrite) {
-	actionID, err := h.agentChatInsertPendingAction(ctx, userSub, orgID, projectID, envID, pending)
+	priceRub := h.agentChatPriceEstimateRUB(pending.ToolName)
+
+	// The tool call's own args are the ground truth for what will actually
+	// execute -- store THOSE as the pending action's project/env scope, not
+	// the console context this turn happened to start with. The two can
+	// legitimately differ (no project selected yet, or the agent resolved its
+	// own env per the "choose for me" system-prompt instruction), and every
+	// downstream read of this row (history reconstruction, the confirm_request
+	// transcript row, the resumed turn's tool/assistant messages) needs the
+	// real target, not a stale/absent console selection.
+	targetProjectID, targetEnvID := projectID, envID
+	if toolsNeedingProjectEnvNames[pending.ToolName] {
+		if fromArgs := extractUUIDArg(pending.ArgsJSON, "projectId"); fromArgs != nil {
+			targetProjectID = fromArgs
+		}
+		if fromArgs := extractUUIDArg(pending.ArgsJSON, "envId"); fromArgs != nil {
+			targetEnvID = fromArgs
+		}
+	}
+
+	actionID, err := h.agentChatInsertPendingAction(ctx, userSub, orgID, targetProjectID, targetEnvID, pending, priceRub)
 	if err != nil {
 		log.Printf("agent-chat: failed to persist pending action: %v", err)
 		writeSSEEvent(c, flusher, "error", `{"code":"upstream","message":"agent could not prepare this action for confirmation, please try again"}`)
@@ -593,8 +673,9 @@ func (h *Handler) agentChatEmitConfirmRequest(c *gin.Context, flusher http.Flush
 		"tool_name": pending.ToolName,
 		"args":      json.RawMessage(nonEmptyJSON(pending.ArgsJSON)),
 		"summary":   summary,
+		"price_rub": priceRub,
 	})
-	h.agentChatInsertMessage(ctx, userSub, orgID, projectID, envID, "confirm_request", summary, &pending.ToolName)
+	h.agentChatInsertMessage(ctx, userSub, orgID, targetProjectID, targetEnvID, "confirm_request", summary, &pending.ToolName)
 
 	writeSSEEvent(c, flusher, "confirm_request", string(payload))
 	writeSSEEvent(c, flusher, "done", `{"ok":true,"awaiting_confirm":true}`)
@@ -697,6 +778,7 @@ func (h *Handler) AgentChatConfirm(c *gin.Context) {
 		return
 	}
 
+	h.agentChatRecordAuditEvent(ctx, claims.UserID, row, decision)
 	h.agentChatInsertMessage(ctx, userSub, row.orgID, row.projectID, row.envID, "confirm_result", decision, &row.toolName)
 
 	messages := append([]llmchat.Message{}, row.messagesSnapshot...)
@@ -761,6 +843,7 @@ type agentChatPendingActionDTO struct {
 	ToolName string         `json:"toolName"`
 	Args     map[string]any `json:"args"`
 	Summary  string         `json:"summary"`
+	PriceRub *float64       `json:"priceRub,omitempty"`
 }
 
 type agentChatHistoryResponse struct {
@@ -778,7 +861,7 @@ func (h *Handler) agentChatFindOpenPendingAction(ctx context.Context, userSub st
 	var snapshotRaw []byte
 	err := h.pool.QueryRow(ctx,
 		`SELECT id, user_sub, org_id, project_id, env_id, tool_name, args_json, tool_call_id,
-		        messages_snapshot, tool_call_count, write_call_count, status, expires_at
+		        messages_snapshot, tool_call_count, write_call_count, status, expires_at, price_rub
 		   FROM agent_chat_pending_actions
 		  WHERE user_sub = $1
 		    AND project_id IS NOT DISTINCT FROM $2
@@ -789,7 +872,7 @@ func (h *Handler) agentChatFindOpenPendingAction(ctx context.Context, userSub st
 		  LIMIT 1`,
 		userSub, projectID, envID,
 	).Scan(&row.id, &row.userSub, &orgID, &row.projectID, &row.envID, &row.toolName, &row.argsJSON,
-		&row.toolCallID, &snapshotRaw, &row.toolCallCount, &row.writeCallCount, &row.status, &row.expiresAt)
+		&row.toolCallID, &snapshotRaw, &row.toolCallCount, &row.writeCallCount, &row.status, &row.expiresAt, &row.priceRub)
 	if err != nil {
 		return nil, err
 	}
@@ -865,6 +948,7 @@ func (h *Handler) AgentChatGetHistory(c *gin.Context) {
 			ToolName: pendingRow.toolName,
 			Args:     args,
 			Summary:  h.agentChatSummaryFor(ctx, pendingRow.toolName, pendingRow.argsJSON),
+			PriceRub: pendingRow.priceRub,
 		}
 	}
 

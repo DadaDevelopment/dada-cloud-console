@@ -12805,6 +12805,9 @@ const docTemplate = `{
                     "type": "object",
                     "additionalProperties": {}
                 },
+                "priceRub": {
+                    "type": "number"
+                },
                 "summary": {
                     "type": "string"
                 },

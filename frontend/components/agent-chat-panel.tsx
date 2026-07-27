@@ -19,6 +19,8 @@ type ChatMessage =
       toolName: string;
       args: Record<string, unknown>;
       summary?: string;
+      priceRub?: number | null;
+      acknowledged?: boolean;
       resolved?: "approved" | "rejected" | "error";
     };
 
@@ -68,6 +70,7 @@ interface ConfirmRequestPayload {
   toolName: string;
   args: Record<string, unknown>;
   summary?: string;
+  priceRub?: number | null;
 }
 
 interface StreamChatHandlers {
@@ -103,12 +106,24 @@ function parseConfirmRequestData(data: string): ConfirmRequestPayload | null {
       tool_name?: string;
       args?: Record<string, unknown>;
       summary?: string;
+      price_rub?: number | null;
     };
     if (!parsed.action_id || !parsed.tool_name) return null;
-    return { actionId: parsed.action_id, toolName: parsed.tool_name, args: parsed.args ?? {}, summary: parsed.summary };
+    return {
+      actionId: parsed.action_id,
+      toolName: parsed.tool_name,
+      args: parsed.args ?? {},
+      summary: parsed.summary,
+      priceRub: parsed.price_rub ?? null,
+    };
   } catch {
     return null;
   }
+}
+
+// formatRub renders a monthly RUB estimate for the confirm card, e.g. "≈450 ₽/мес".
+function formatRub(rub: number): string {
+  return `≈${Math.round(rub).toLocaleString("ru-RU")} ₽/мес`;
 }
 
 function parseDoneData(data: string): boolean {
@@ -286,6 +301,7 @@ export function AgentChatPanel({ open, onClose }: AgentChatPanelProps) {
           toolName: history.pendingAction.toolName,
           args: history.pendingAction.args,
           summary: history.pendingAction.summary,
+          priceRub: history.pendingAction.priceRub,
         });
       }
       if (hydrated.length === 0) return;
@@ -349,7 +365,15 @@ export function AgentChatPanel({ open, onClose }: AgentChatPanelProps) {
           onConfirmRequest: (req) => {
             setMessages((prev) => [
               ...prev,
-              { id: newId(), kind: "confirm", actionId: req.actionId, toolName: req.toolName, args: req.args, summary: req.summary },
+              {
+                id: newId(),
+                kind: "confirm",
+                actionId: req.actionId,
+                toolName: req.toolName,
+                args: req.args,
+                summary: req.summary,
+                priceRub: req.priceRub,
+              },
             ]);
           },
           onError: (code, message) => {
@@ -378,6 +402,12 @@ export function AgentChatPanel({ open, onClose }: AgentChatPanelProps) {
       );
       setSending(false);
     }
+  }
+
+  function handleTogglePriceAck(actionId: string, acknowledged: boolean) {
+    setMessages((prev) =>
+      prev.map((m) => (m.kind === "confirm" && m.actionId === actionId ? { ...m, acknowledged } : m))
+    );
   }
 
   async function handleConfirm(actionId: string, decision: "approve" | "reject") {
@@ -419,7 +449,15 @@ export function AgentChatPanel({ open, onClose }: AgentChatPanelProps) {
         onConfirmRequest: (req) => {
           setMessages((prev) => [
             ...prev,
-            { id: newId(), kind: "confirm", actionId: req.actionId, toolName: req.toolName, args: req.args, summary: req.summary },
+            {
+              id: newId(),
+              kind: "confirm",
+              actionId: req.actionId,
+              toolName: req.toolName,
+              args: req.args,
+              summary: req.summary,
+              priceRub: req.priceRub,
+            },
           ]);
         },
         onError: (code, message) => {
@@ -500,6 +538,8 @@ export function AgentChatPanel({ open, onClose }: AgentChatPanelProps) {
             const toolLabelKey = TOOL_NAME_KEYS[m.toolName];
             const toolLabel = toolLabelKey ? t(toolLabelKey) : m.toolName;
             const argEntries = Object.entries(m.args);
+            const isPriced = typeof m.priceRub === "number" && m.priceRub > 0;
+            const confirmBlocked = isPriced && !m.acknowledged;
             return (
               <div key={m.id} className="flex justify-start">
                 <div className="w-full max-w-[92%] rounded-2xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-sm dark:border-amber-900 dark:bg-amber-950/30">
@@ -515,12 +555,30 @@ export function AgentChatPanel({ open, onClose }: AgentChatPanelProps) {
                       ))}
                     </ul>
                   )}
+                  {isPriced && (
+                    <div className="mt-1.5 rounded-lg border border-amber-300 bg-white/70 px-2 py-1.5 dark:border-amber-800 dark:bg-black/20">
+                      <div className="text-xs font-semibold text-amber-900 dark:text-amber-100">
+                        {t("agentChat.confirm.priceEstimate", { price: formatRub(m.priceRub as number) })}
+                      </div>
+                      {!m.resolved && (
+                        <label className="mt-1 flex items-start gap-1.5 text-xs text-amber-800 dark:text-amber-200">
+                          <input
+                            type="checkbox"
+                            checked={!!m.acknowledged}
+                            onChange={(e) => handleTogglePriceAck(m.actionId, e.target.checked)}
+                            className="mt-0.5"
+                          />
+                          <span>{t("agentChat.confirm.priceAck")}</span>
+                        </label>
+                      )}
+                    </div>
+                  )}
                   {!m.resolved ? (
                     <div className="mt-2 flex gap-2">
                       <button
                         type="button"
                         onClick={() => handleConfirm(m.actionId, "approve")}
-                        disabled={sending}
+                        disabled={sending || confirmBlocked}
                         className="flex items-center gap-1 rounded-lg bg-amber-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-amber-700 disabled:cursor-not-allowed disabled:opacity-40"
                       >
                         <Check className="h-3 w-3" />

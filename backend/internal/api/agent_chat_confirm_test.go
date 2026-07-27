@@ -161,7 +161,7 @@ func insertPendingRestartAction(t *testing.T, h *Handler, userSub string) uuid.U
 		ToolCallCount:  0,
 		WriteCallCount: 0,
 	}
-	actionID, err := h.agentChatInsertPendingAction(context.Background(), userSub, "", nil, nil, pending)
+	actionID, err := h.agentChatInsertPendingAction(context.Background(), userSub, "", nil, nil, pending, nil)
 	if err != nil {
 		t.Fatalf("agentChatInsertPendingAction: %v", err)
 	}

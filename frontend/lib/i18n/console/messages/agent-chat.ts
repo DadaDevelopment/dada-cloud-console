@@ -39,6 +39,14 @@ export const agentChat: Messages = {
     ru: "Подтвердите или отклоните действие выше, чтобы продолжить.",
     en: "Approve or reject the action above to continue.",
   },
+  "agentChat.confirm.priceEstimate": {
+    ru: "Ориентировочная стоимость: {price}",
+    en: "Estimated cost: {price}",
+  },
+  "agentChat.confirm.priceAck": {
+    ru: "Я понимаю, что это создаст ежемесячный платёж",
+    en: "I understand this will create a recurring monthly charge",
+  },
   "agentChat.tool.restartApp": { ru: "Перезапустить приложение", en: "Restart app" },
   "agentChat.tool.triggerBuild": { ru: "Запустить сборку", en: "Trigger build" },
   "agentChat.tool.deployTrigger": { ru: "Запустить деплой", en: "Trigger deploy" },

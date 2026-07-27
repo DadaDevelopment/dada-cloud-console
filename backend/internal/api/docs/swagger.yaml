@@ -106,6 +106,8 @@ definitions:
       args:
         additionalProperties: {}
         type: object
+      priceRub:
+        type: number
       summary:
         type: string
       toolName:
