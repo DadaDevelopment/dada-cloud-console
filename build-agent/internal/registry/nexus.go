@@ -5,6 +5,7 @@
 //   - image-ref string builders (digest-pinned),
 //   - a Docker Registry v2 manifest existence check (confirm the pushed image),
 //   - a raw-repo HEAD (confirm an APK/AAB exists and its size).
+//
 // No project/robot provisioning — Jenkins holds the Nexus push credentials.
 package registry
 
