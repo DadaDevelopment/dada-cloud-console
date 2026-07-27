@@ -107,7 +107,17 @@ type aiGatewaySourceStat struct {
 // (which provider, which project, which model, chat-vs-task), separate from
 // /admin/costs' business revenue/margin view.
 //
-// GET /admin/ai-gateway/usage?days=7|30
+// @ID          getAIGatewayUsage
+// @Summary     AI Gateway usage/cost breakdown (platform-admin only)
+// @Description Returns provider/project/model/source cost-and-token breakdown of the agent_token_usage ledger over the trailing window. Platform-admin only; every other caller gets 403.
+// @Tags        admin
+// @Produce     json
+// @Security    BearerAuth
+// @Param       days query    int false "Window length in days: 7 or 30 (default 7)"
+// @Success     200 {object} map[string]interface{}
+// @Failure     401 {object} map[string]string
+// @Failure     403 {object} map[string]string
+// @Router      /admin/ai-gateway/usage [get]
 func (h *Handler) GetAIGatewayUsage(c *gin.Context) {
 	claims, ok := auth.GetClaims(c)
 	if !ok {
