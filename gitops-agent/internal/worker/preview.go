@@ -143,9 +143,12 @@ func (w *DBWatcher) doCreatePreviewEnv(ctx context.Context, op db.Operation) err
 	}
 
 	// Render a tight namespace policy (ResourceQuota + LimitRange) for the preview
-	// namespace, reusing the namespace_policy renderer.
+	// namespace, reusing the namespace_policy renderer. OwnNamespace makes the
+	// chart render the Namespace object too, so doDeletePreviewEnv's removal of
+	// this file tears the namespace down instead of stranding it forever.
 	policyYAML, err := renderer.RenderNamespacePolicy(renderer.NamespacePolicySpec{
 		Namespace:      p.Namespace,
+		OwnNamespace:   true,
 		LimitRange:     previewLimitRange,
 		ResourceQuota:  previewResourceQuota,
 		RegistrySecret: &renderer.RegistrySecretSpec{Enabled: true},

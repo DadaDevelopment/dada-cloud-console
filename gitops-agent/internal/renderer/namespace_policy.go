@@ -32,8 +32,18 @@ type RegistrySecretSpec struct {
 }
 
 // NamespacePolicySpec holds parameters for a namespace-policy manifest.
+//
+// OwnNamespace makes the namespace-policy chart render the Namespace object
+// itself, which puts it in the Application's tracked resource set so removing
+// this file also deletes the namespace. It must stay false for every long-lived
+// namespace: ArgoCD's CreateNamespace=true sync option creates the namespace
+// UNTRACKED, and an untracked namespace is never pruned — deliberate for
+// project and infra namespaces, but a permanent leak for ephemeral ones, since
+// doDeletePreviewEnv then drops the environments row and nothing can ever find
+// the namespace again. Only preview environments set it.
 type NamespacePolicySpec struct {
 	Namespace      string              `yaml:"namespace"`
+	OwnNamespace   bool                `yaml:"ownNamespace,omitempty"`
 	LimitRange     LimitRangeSpec      `yaml:"limitRange"`
 	ResourceQuota  ResourceQuotaSpec   `yaml:"resourceQuota"`
 	RegistrySecret *RegistrySecretSpec `yaml:"registrySecret,omitempty"`
