@@ -3,9 +3,9 @@ plans:
     name: Free
     price_rub: 0
     quotas:
-      apps: 1
+      apps: 2
       databases: 1
-      storage_gb: 1
+      storage_gb: 2
       domains: 1
       environments: 1
       team_members: 1

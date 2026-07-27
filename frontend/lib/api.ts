@@ -1261,6 +1261,7 @@ export interface InvoicePreview {
 export interface BillingAccount {
   plan: BillingPlanKey;
   plan_expires_at?: string | null;
+  quota_grace_until?: string | null;
   quotas: BillingQuota;
   usage: BillingUsage;
   invoicePreview: InvoicePreview;
