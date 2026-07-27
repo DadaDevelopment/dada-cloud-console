@@ -28,6 +28,12 @@ var writeKeepTools = []string{
 	"rollbackApp", "rollbackDeployment", "promoteDeployment", "updateAppImage",
 	"updateAppProfile", "updateAppStorage",
 	"createDatabase",
+	// Cheap/low-risk "order a resource" actions -- no real money/VM provisioning
+	// involved (unlike createAppServer), so they get the same confirm-card
+	// treatment as createDatabase. createAppServer (real Terraform-provisioned
+	// VM, real cost) and createApp deliberately stay out until the confirm-card
+	// infra is reviewed for that class of action.
+	"createEndpoint", "createS3Bucket",
 }
 
 var denyTools = map[string]bool{

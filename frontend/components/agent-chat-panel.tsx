@@ -43,6 +43,8 @@ const TOOL_NAME_KEYS: Record<string, string> = {
   updateAppProfile: "agentChat.tool.updateAppProfile",
   updateAppStorage: "agentChat.tool.updateAppStorage",
   createDatabase: "agentChat.tool.createDatabase",
+  createEndpoint: "agentChat.tool.createEndpoint",
+  createS3Bucket: "agentChat.tool.createS3Bucket",
 };
 
 function formatArgValue(value: unknown): string {

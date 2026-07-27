@@ -53,4 +53,6 @@ export const agentChat: Messages = {
   "agentChat.tool.updateAppProfile": { ru: "Изменить профиль приложения", en: "Update app profile" },
   "agentChat.tool.updateAppStorage": { ru: "Изменить хранилище приложения", en: "Update app storage" },
   "agentChat.tool.createDatabase": { ru: "Создать базу данных", en: "Create database" },
+  "agentChat.tool.createEndpoint": { ru: "Создать публичный эндпоинт", en: "Create public endpoint" },
+  "agentChat.tool.createS3Bucket": { ru: "Создать S3-бакет", en: "Create S3 bucket" },
 };

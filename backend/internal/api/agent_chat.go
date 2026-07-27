@@ -328,6 +328,50 @@ func agentChatConfirmSummary(toolName, argsJSON, projectName, envName string) st
 		}
 		sb.WriteString(".")
 		return sb.String()
+	case "createEndpoint":
+		fqdn, _ := args["fqdn"].(string)
+		authEnabled, _ := args["auth_enabled"].(bool)
+		swaggerEnabled, _ := args["swagger_enabled"].(bool)
+
+		var sb strings.Builder
+		sb.WriteString(fmt.Sprintf("Register public endpoint %q for app %q", fqdn, appName))
+		if projectName != "" || envName != "" {
+			sb.WriteString(fmt.Sprintf(" in project %q, environment %q", projectName, envName))
+		}
+		if authEnabled {
+			sb.WriteString(", with auth enabled")
+		} else {
+			sb.WriteString(", publicly accessible (no auth)")
+		}
+		if swaggerEnabled {
+			sb.WriteString(", Swagger docs published")
+		}
+		sb.WriteString(".")
+		return sb.String()
+	case "createS3Bucket":
+		name, _ := args["name"].(string)
+		bucketName, _ := args["bucket_name"].(string)
+		region, _ := args["region"].(string)
+		public, _ := args["public"].(bool)
+		appRef, _ := args["app_ref"].(string)
+
+		var sb strings.Builder
+		sb.WriteString(fmt.Sprintf("Create an S3 storage bucket %q (bucket=%q", name, bucketName))
+		if region != "" {
+			sb.WriteString(fmt.Sprintf(", region=%q", region))
+		}
+		sb.WriteString(")")
+		if projectName != "" || envName != "" {
+			sb.WriteString(fmt.Sprintf(" in project %q, environment %q", projectName, envName))
+		}
+		if appRef != "" {
+			sb.WriteString(fmt.Sprintf(", bound to app %q", appRef))
+		}
+		if public {
+			sb.WriteString(", publicly readable")
+		}
+		sb.WriteString(".")
+		return sb.String()
 	case "restartApp":
 		return fmt.Sprintf("Restart app %s", appName)
 	case "rollbackApp":
@@ -378,10 +422,11 @@ func agentChatSystemPrompt(req agentChatRequest) string {
 	if req.ProjectID == "" && req.EnvID == "" && req.AppName == "" {
 		sb.WriteString("none (the user has not selected a project yet).")
 	}
-	sb.WriteString(" You can order a managed PostgreSQL database with the createDatabase tool, but it requires a specific projectId and envId (environment), which are NOT things you may invent. ")
-	sb.WriteString("If envId is not already given above, ask the user which project/environment before calling createDatabase. ")
-	sb.WriteString("If the user says to choose for them, first call getProject (or listProjects) to see the real environments that exist, pick a sensible one (prefer an environment named prod if several exist and the user gave no other hint), and explicitly state which environment you picked before calling the tool -- never guess an envId you have not looked up. ")
-	sb.WriteString("createDatabase always pauses for the user's explicit confirmation in the UI before it actually runs, so propose it as soon as you have resolved name/database/env; you do not need the user to also confirm in chat first.")
+	sb.WriteString(" You can order a managed PostgreSQL database (createDatabase), a public endpoint for an app (createEndpoint), or an S3 storage bucket (createS3Bucket). All three require a specific projectId and envId (environment), and createEndpoint also requires a real appName -- these are NOT things you may invent. ")
+	sb.WriteString("If envId (or, for createEndpoint, appName) is not already given above, ask the user before calling any of these tools. ")
+	sb.WriteString("If the user says to choose for them, first call getProject/listProjects (and listApps for an appName) to see what actually exists, pick a sensible one (prefer an environment named prod if several exist and the user gave no other hint), and explicitly state what you picked before calling the tool -- never guess an envId or appName you have not looked up. ")
+	sb.WriteString("Every one of these three tools always pauses for the user's explicit confirmation in the UI before it actually runs, so propose the call as soon as you have resolved its required fields; you do not need the user to also confirm in chat first. ")
+	sb.WriteString("createAppServer (a real, billed virtual machine) and createApp are not available to you yet -- if the user asks for a VM or to deploy a new app, tell them that's not supported from chat yet and point them at the console UI.")
 	return sb.String()
 }
 
@@ -511,9 +556,21 @@ func (h *Handler) AgentChat(c *gin.Context) {
 // truth for what will actually execute) rather than any stale console
 // context. Shared by the live confirm_request path and the history endpoint's
 // reconstruction of a still-open pending action after a page reload.
+// toolsNeedingProjectEnvNames are write tools whose args carry their own
+// projectId/envId (they can target somewhere other than the console's current
+// selection, e.g. an environment the agent resolved itself), so their summary
+// needs those names resolved from the args rather than left blank. The other
+// write tools are app-scoped within whatever env is already selected, where
+// appName alone reads unambiguously without a project/env lookup.
+var toolsNeedingProjectEnvNames = map[string]bool{
+	"createDatabase": true,
+	"createEndpoint": true,
+	"createS3Bucket": true,
+}
+
 func (h *Handler) agentChatSummaryFor(ctx context.Context, toolName, argsJSON string) string {
 	var projectName, envName string
-	if toolName == "createDatabase" {
+	if toolsNeedingProjectEnvNames[toolName] {
 		targetProjectID := extractUUIDArg(argsJSON, "projectId")
 		targetEnvID := extractUUIDArg(argsJSON, "envId")
 		projectName, envName = h.agentChatResolveNames(ctx, targetProjectID, targetEnvID)
