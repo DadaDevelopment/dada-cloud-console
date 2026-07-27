@@ -67,11 +67,13 @@ type streamOptions struct {
 }
 
 type chatRequest struct {
-	Model         string         `json:"model"`
-	Messages      []Message      `json:"messages"`
-	Tools         []ToolDef      `json:"tools,omitempty"`
-	Stream        bool           `json:"stream"`
-	StreamOptions *streamOptions `json:"stream_options,omitempty"`
+	Model         string            `json:"model"`
+	Messages      []Message         `json:"messages"`
+	Tools         []ToolDef         `json:"tools,omitempty"`
+	Stream        bool              `json:"stream"`
+	StreamOptions *streamOptions    `json:"stream_options,omitempty"`
+	User          string            `json:"user,omitempty"`
+	Metadata      map[string]string `json:"metadata,omitempty"`
 }
 
 type streamChoice struct {
@@ -119,13 +121,18 @@ type StreamResult struct {
 	TotalTokens      int64
 }
 
-func (c *Client) StreamChatCompletion(ctx context.Context, messages []Message, tools []ToolDef, onDelta func(string)) (*StreamResult, error) {
+// endUser is the human console user driving this turn, forwarded to the
+// gateway as the OpenAI-standard "user" field so its ledger can attribute a
+// shared project-scoped key's traffic to the right person (ADR-015 phase 2).
+func (c *Client) StreamChatCompletion(ctx context.Context, messages []Message, tools []ToolDef, endUser string, onDelta func(string)) (*StreamResult, error) {
 	reqBody := chatRequest{
 		Model:         c.Model,
 		Messages:      messages,
 		Tools:         tools,
 		Stream:        true,
 		StreamOptions: &streamOptions{IncludeUsage: true},
+		User:          endUser,
+		Metadata:      map[string]string{"caller": "console_chat"},
 	}
 	b, err := json.Marshal(reqBody)
 	if err != nil {

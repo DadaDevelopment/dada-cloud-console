@@ -19,6 +19,7 @@ import { approvals } from "./approvals";
 import { audit } from "./audit";
 import { adminOverview } from "./admin-overview";
 import { adminCosts } from "./admin-costs";
+import { aiGatewayUsage } from "./ai-gateway-usage";
 import { cloudTasks } from "./cloud-tasks";
 import { billing } from "./billing";
 import { consumption } from "./consumption";
@@ -60,6 +61,7 @@ export const messages: Messages = {
   ...audit,
   ...adminOverview,
   ...adminCosts,
+  ...aiGatewayUsage,
   ...cloudTasks,
   ...billing,
   ...consumption,

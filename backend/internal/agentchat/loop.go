@@ -54,6 +54,7 @@ func RunTurn(
 	llm *llmchat.Client,
 	tools *Toolset,
 	bearer string,
+	endUser string,
 	systemPrompt string,
 	history []llmchat.Message,
 	userMessage string,
@@ -64,7 +65,7 @@ func RunTurn(
 	messages = append(messages, history...)
 	messages = append(messages, llmchat.Message{Role: "user", Content: userMessage})
 
-	return runLoop(ctx, llm, tools, bearer, messages, 0, 0, emit)
+	return runLoop(ctx, llm, tools, bearer, endUser, messages, 0, 0, emit)
 }
 
 func ResumeTurn(
@@ -72,12 +73,13 @@ func ResumeTurn(
 	llm *llmchat.Client,
 	tools *Toolset,
 	bearer string,
+	endUser string,
 	messages []llmchat.Message,
 	toolCallCount int,
 	writeCallCount int,
 	emit Emitter,
 ) (assistantText string, toolLog []ToolLogEntry, pending *PendingWrite, usage Usage, err error) {
-	return runLoop(ctx, llm, tools, bearer, messages, toolCallCount, writeCallCount, emit)
+	return runLoop(ctx, llm, tools, bearer, endUser, messages, toolCallCount, writeCallCount, emit)
 }
 
 func runLoop(
@@ -85,6 +87,7 @@ func runLoop(
 	llm *llmchat.Client,
 	tools *Toolset,
 	bearer string,
+	endUser string,
 	messages []llmchat.Message,
 	toolCallCount int,
 	writeCallCount int,
@@ -96,7 +99,7 @@ func runLoop(
 			toolDefs = tools.Defs
 		}
 
-		result, streamErr := llm.StreamChatCompletion(ctx, messages, toolDefs, emit.Token)
+		result, streamErr := llm.StreamChatCompletion(ctx, messages, toolDefs, endUser, emit.Token)
 		if streamErr != nil {
 			return "", toolLog, nil, usage, streamErr
 		}
