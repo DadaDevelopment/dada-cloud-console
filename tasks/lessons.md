@@ -55,3 +55,55 @@ panel or a source-level hook, never a `window.fetch` shim under Next/Turbopack.
 Rule: when adapting a major-version-bumped UI lib, read the new version's event/prop contract
 before mapping old handlers — a compiling `EVENTS.X` reference is not proof the event fires.
 And under Next/Turbopack, `window.fetch` interception is not a valid verification channel.
+
+## 2026-07-27 — Two different columns both loosely called "cloud task id" burned a debug cycle
+
+Mistake: queried `agent_token_usage WHERE platform_request_id LIKE 'ct-<X>-%'` using console's
+`cloud_tasks.id` primary-key UUID as `<X>`, got 0 rows, nearly wrote up a NEW ledger-insert bug.
+Real key is hub's own `meta["cloud_task_id"]` string (which equals console's `cloud_tasks.intent_id`
+column, a DIFFERENT column than `cloud_tasks.id`). My own prior-session memory paraphrase said
+"correlation=cloud_task_id else intent_id" and I read "cloud_task_id" as "the id column" without
+checking which variable the source code actually meant — it was a hub-side dict key, not a
+console-side DB column, and the two systems use overlapping names for different fields.
+
+Rule: when a memory/summary names a correlation/join key by a short label ("cloud_task_id",
+"run_id", etc), do not assume the label maps 1:1 onto a same-named DB column before building a
+query — grep the SOURCE that actually constructs the value (here: `platform_request_id = f"ct-
+{correlation}-..."` in `cloud_task_runner.py`) and confirm which upstream field feeds it. A 0-row
+result against a self-derived key is not evidence of a missing row; it's evidence the key might
+be wrong — check the key before writing up the absence as a bug.
+
+## 2026-07-27 — "Green build" and "config file updated" both lied; only the pod's own start time was true
+
+Three near-misses in one migration, all the same shape: a signal that LOOKS authoritative but sits
+one layer away from the thing it supposedly proves.
+
+1. Jenkins build SUCCESS for telemost-bot while the gitops write-back stage printed
+   "деплой в Argo пропущен" and `exit 0` — `pythonPipeline(infra:true)` defaults `infraProject` to
+   `example-project` and the app had moved to `internal`, so it looked for a values.yaml that does
+   not exist. The app had not been auto-deployed since the move; every build stayed green.
+   → A green build proves the pipeline ran, not that it deployed. Check for the tag-bump commit in
+     argo-infra, not the build result.
+
+2. `grep ai-gateway-service /app/.env` inside the pod returned a match, so I called the env applied.
+   Wrong: `.env` is mounted from a ConfigMap with no checksum annotation, so it updates IN PLACE on
+   a live pod while the process keeps the env it read at import. Comparing `pod.status.startTime`
+   (19:01:04Z) against the values push (19:04:49Z) showed the process predated the config.
+   → File content ≠ process state. For anything read at startup, the authoritative check is the pod
+     start time vs the config's commit time — then restart and re-verify.
+
+3. A chat completion through the gateway returned 200, which I nearly took as "the app works".
+   The same key then failed embeddings with `missing scope ai:embeddings` (gateway maps call_type →
+   scope). One working call path says nothing about the others.
+   → Exercise each distinct call type the app actually uses, in the pod, not one representative.
+
+Bonus, same family: a NetworkPolicy egress rule naming the SERVICE port (80) matched nothing,
+because policy is evaluated after the Service DNAT — the packet's destination is the POD port
+(4000). NetworkPolicy denies by silent drop, so this presents as a TCP timeout indistinguishable
+from the destination being down, with no "policy" string in any log. Isolate it by probing from a
+FRESHLY created pod (rules out conntrack) and directly against the pod IP (separates DNAT from
+policy).
+
+Rule: for every "it works now" claim, name the layer the evidence came from and ask what sits
+between that layer and the behaviour. Build result → deploy commit. Config file → process start
+time. One endpoint → every endpoint the app calls.
