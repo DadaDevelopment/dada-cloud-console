@@ -8,10 +8,10 @@ import (
 
 func TestNormalizeDomain(t *testing.T) {
 	cases := map[string]string{
-		"ACME.com":       "acme.com",
+		"ACME.com":         "acme.com",
 		"  shop.Acme.com ": "shop.acme.com",
-		"acme.com.":      "acme.com",
-		"Sub.Domain.IO.": "sub.domain.io",
+		"acme.com.":        "acme.com",
+		"Sub.Domain.IO.":   "sub.domain.io",
 	}
 	for in, want := range cases {
 		if got := normalizeDomain(in); got != want {
@@ -28,14 +28,14 @@ func TestIsValidDomain(t *testing.T) {
 		}
 	}
 	invalid := []string{
-		"",                      // empty
-		"localhost",             // single label
-		"*.acme.com",            // wildcard out of scope
-		"-bad.com",              // leading hyphen
-		"bad-.com",              // trailing hyphen
-		"acme..com",            // empty label
-		"under_score.com",       // illegal char
-		"UPPER.com",             // not normalized (caller normalizes first)
+		"",                // empty
+		"localhost",       // single label
+		"*.acme.com",      // wildcard out of scope
+		"-bad.com",        // leading hyphen
+		"bad-.com",        // trailing hyphen
+		"acme..com",       // empty label
+		"under_score.com", // illegal char
+		"UPPER.com",       // not normalized (caller normalizes first)
 	}
 	for _, d := range invalid {
 		if isValidDomain(d) {

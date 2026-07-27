@@ -65,12 +65,12 @@ func TestDecideQuota(t *testing.T) {
 	gpu := profiles.Profile{Name: "gpu-t4", CPU: "4", Memory: "16Gi", GPU: "1"}
 
 	cases := []struct {
-		name                    string
-		prof                    profiles.Profile
-		role                    models.MemberRole
-		cpuMax, gpuMax          int
-		cpuInUse, gpuInUse      int
-		want                    quotaDecision
+		name               string
+		prof               profiles.Profile
+		role               models.MemberRole
+		cpuMax, gpuMax     int
+		cpuInUse, gpuInUse int
+		want               quotaDecision
 	}{
 		{"CPU under quota → allow", cpu, models.MemberRoleDeveloper, 5, 0, 2, 0, quotaAllow},
 		{"CPU at quota → reject", cpu, models.MemberRoleDeveloper, 5, 0, 5, 0, quotaReject},

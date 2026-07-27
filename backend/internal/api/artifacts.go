@@ -181,9 +181,9 @@ func (h *Handler) DownloadBuildArtifact(c *gin.Context) {
 	}
 
 	var (
-		nexusURL  string
-		aType     string
-		aSize     int64
+		nexusURL string
+		aType    string
+		aSize    int64
 	)
 	err = h.pool.QueryRow(c.Request.Context(),
 		`SELECT nexus_url, type, size FROM build_artifacts WHERE id = $1 AND build_id = $2`,

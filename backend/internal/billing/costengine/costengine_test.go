@@ -12,7 +12,7 @@ func validBase() costengine.ClusterCost {
 		Nodes: []costengine.NodeSpec{
 			{Flavor: "8vcpu-16gb", Count: 3, MonthlyCostRub: 4000},
 		},
-		Capacity: costengine.Capacity{VCPU: 24, RAMGB: 48, StorageGB: 300},
+		Capacity:    costengine.Capacity{VCPU: 24, RAMGB: 48, StorageGB: 300},
 		CostWeights: costengine.CostWeights{CPU: 0.5, RAM: 0.3, Storage: 0.2},
 	}
 }
@@ -97,12 +97,16 @@ func TestComputeUnitCost_FailClosed(t *testing.T) {
 			mutate: func(c *costengine.ClusterCost) { c.Nodes = nil },
 		},
 		{
-			name:   "weights sum > 1",
-			mutate: func(c *costengine.ClusterCost) { c.CostWeights = costengine.CostWeights{CPU: 0.6, RAM: 0.3, Storage: 0.2} },
+			name: "weights sum > 1",
+			mutate: func(c *costengine.ClusterCost) {
+				c.CostWeights = costengine.CostWeights{CPU: 0.6, RAM: 0.3, Storage: 0.2}
+			},
 		},
 		{
-			name:   "weights sum < 1",
-			mutate: func(c *costengine.ClusterCost) { c.CostWeights = costengine.CostWeights{CPU: 0.4, RAM: 0.3, Storage: 0.2} },
+			name: "weights sum < 1",
+			mutate: func(c *costengine.ClusterCost) {
+				c.CostWeights = costengine.CostWeights{CPU: 0.4, RAM: 0.3, Storage: 0.2}
+			},
 		},
 		{
 			name:   "zero weights",

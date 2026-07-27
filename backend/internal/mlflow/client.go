@@ -42,21 +42,21 @@ func New(baseURL, authHeader string) *Client {
 
 // RegisteredModel mirrors the relevant subset of MLflow's RegisteredModel.
 type RegisteredModel struct {
-	Name             string         `json:"name"`
-	Description      string         `json:"description,omitempty"`
-	LastUpdated      int64          `json:"last_updated_timestamp,omitempty"`
-	LatestVersions   []ModelVersion `json:"latest_versions,omitempty"`
+	Name           string         `json:"name"`
+	Description    string         `json:"description,omitempty"`
+	LastUpdated    int64          `json:"last_updated_timestamp,omitempty"`
+	LatestVersions []ModelVersion `json:"latest_versions,omitempty"`
 }
 
 // ModelVersion mirrors the relevant subset of MLflow's ModelVersion.
 type ModelVersion struct {
-	Name        string `json:"name"`
-	Version     string `json:"version"`
-	Source      string `json:"source"`        // s3://... — the artifact URI
-	RunID       string `json:"run_id,omitempty"`
+	Name         string `json:"name"`
+	Version      string `json:"version"`
+	Source       string `json:"source"` // s3://... — the artifact URI
+	RunID        string `json:"run_id,omitempty"`
 	CurrentStage string `json:"current_stage,omitempty"`
-	Status      string `json:"status,omitempty"`
-	Description string `json:"description,omitempty"`
+	Status       string `json:"status,omitempty"`
+	Description  string `json:"description,omitempty"`
 }
 
 // SearchRegisteredModels lists registered models whose source/path is inside

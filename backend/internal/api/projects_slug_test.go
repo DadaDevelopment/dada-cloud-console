@@ -10,15 +10,15 @@ func TestProjectSlugRe(t *testing.T) {
 		}
 	}
 	invalid := []string{
-		"",            // empty
-		"ab",          // too short (<3)
-		"1abc",        // must start with a letter
-		"-abc",        // must start with a letter
-		"abc-",        // must end alphanumeric
-		"AbC",         // no uppercase
-		"a_b",         // no underscore
-		"a b",         // no space
-		"a..b",        // no dots
+		"",     // empty
+		"ab",   // too short (<3)
+		"1abc", // must start with a letter
+		"-abc", // must start with a letter
+		"abc-", // must end alphanumeric
+		"AbC",  // no uppercase
+		"a_b",  // no underscore
+		"a b",  // no space
+		"a..b", // no dots
 		"thisisaveryveryveryveryveryverylongprojectslugxx", // >40
 	}
 	for _, s := range invalid {

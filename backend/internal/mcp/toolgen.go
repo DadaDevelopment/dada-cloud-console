@@ -22,8 +22,8 @@ type GeneratedTool struct {
 	QueryParams []string
 	BodyProps   []string
 
-	ReadOnly    bool
-	Destructive bool
+	ReadOnly     bool
+	Destructive  bool
 	FallbackName bool
 }
 

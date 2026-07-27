@@ -30,7 +30,7 @@ var _ querier = (*pgxpool.Pool)(nil)
 //     stamping keycloak_sub onto that existing row (and refreshing email/display
 //     name), instead of failing. This makes the local account SSO-backed.
 //
-// password_hash is set to '' for OIDC-provisioned rows. The login handler's
+// password_hash is set to the empty string for OIDC-provisioned rows. The login handler's
 // bcrypt compare against an empty hash always fails, so these rows can never log
 // in via /auth/login — exactly the intent (login is via Keycloak in this mode).
 // ResolveUser returns the resolved local user id and whether this call is the

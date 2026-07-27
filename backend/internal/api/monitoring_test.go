@@ -34,9 +34,9 @@ func TestSanitizeMetricName(t *testing.T) {
 	cases := map[string]string{
 		"http_requests_total": "http_requests_total",
 		"cpu.usage":           "cpu_usage",
-		"5xx":                 "_5xx",   // leading digit gets prefixed
+		"5xx":                 "_5xx", // leading digit gets prefixed
 		"a-b/c d":             "a_b_c_d",
-		"":                    "_",      // empty coerces to _
+		"":                    "_", // empty coerces to _
 		"123":                 "_123",
 		"Foo_Bar9":            "Foo_Bar9",
 	}

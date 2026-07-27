@@ -45,10 +45,11 @@ var reservedLabels = map[string]struct{}{
 // Device-identity contract (OTEL semantic conventions). The `source` label —
 // the per-device pivot the console groups by — is resolved from these resource
 // (or datapoint) attributes in strict precedence, NOT from a custom field:
-//   1. service.instance.id — canonical unique id of one running instance/device.
-//   2. host.name           — the host the data came from.
-//   3. service.name        — logical service (last resort; N devices sharing one
-//                            service.name collapse to a single source).
+//  1. service.instance.id — canonical unique id of one running instance/device.
+//  2. host.name           — the host the data came from.
+//  3. service.name        — logical service (last resort; N devices sharing one
+//     service.name collapse to a single source).
+//
 // This is fixed regardless of what a client happens to emit: a device that wants
 // to appear as its own row MUST set service.instance.id (or at least host.name).
 const (

@@ -25,8 +25,8 @@ func TestValidateImage(t *testing.T) {
 		"no-tag",
 		"has space:v1",
 		"image with spaces:v1",
-		"ghcr.io/org/app@sha256:short",     // digest too short
-		"ghcr.io/org/app@sha256:",          // empty digest
+		"ghcr.io/org/app@sha256:short", // digest too short
+		"ghcr.io/org/app@sha256:",      // empty digest
 	}
 	for _, img := range good {
 		if err := api.ValidateImage(img); err != nil {
