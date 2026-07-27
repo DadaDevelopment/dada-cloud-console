@@ -134,16 +134,26 @@ type pushEvent struct {
 
 // pullRequestEvent is the subset of a GitHub pull_request webhook payload
 // build-agent consumes for preview deployments (opened, reopened,
-// synchronize, closed).
+// synchronize, closed, labeled, unlabeled).
+//
+// Label is the single label GitHub attaches to labeled/unlabeled deliveries (the
+// one that just changed); PullRequest.Labels is the PR's full current set, which
+// is what the opt-in check reads so any action can be evaluated the same way.
 type pullRequestEvent struct {
 	Action     string `json:"action"`
 	Number     int    `json:"number"`
 	Repository struct {
 		FullName string `json:"full_name"`
 	} `json:"repository"`
+	Label struct {
+		Name string `json:"name"`
+	} `json:"label"`
 	PullRequest struct {
-		Title string `json:"title"`
-		Head  struct {
+		Title  string `json:"title"`
+		Labels []struct {
+			Name string `json:"name"`
+		} `json:"labels"`
+		Head struct {
 			SHA  string `json:"sha"`
 			Ref  string `json:"ref"`
 			Repo struct {
@@ -236,16 +246,21 @@ func (s *Server) githubWebhook(w http.ResponseWriter, r *http.Request) {
 // events, gated behind cfg.PreviewEnvsEnabled (BUILD_PREVIEW_ENVS_ENABLED,
 // default off).
 //
-// opened/reopened/synchronize: resolve every git_repos row for the PR's
+// opened/reopened/synchronize/labeled: resolve every git_repos row for the PR's
 // repository, verify each per-repo HMAC, skip a repo with auto-deploy off,
 // reject a fork PR (head.repo != base.repo) with a commit-status error and no
-// build, enforce the project's preview_env_max quota for a PR that does not
-// already have a preview environment, then ensure the preview environment and
-// enqueue a build against it.
+// build, require the preview opt-in label for a PR that has no preview
+// environment yet (see previewOptIn), enforce the project's preview_env_max
+// quota for such a PR, then ensure the preview environment and enqueue a build
+// against it.
 //
 // closed: find the PR's preview environment (if any) and enqueue its teardown.
 // A PR with no preview environment (never opened one, or already torn down)
 // is a no-op 200, not an error - idempotent like the push path.
+//
+// unlabeled: tears the preview down when the label just removed was the opt-in
+// label (see previewOptedOut); removing any other label is a no-op, so an
+// unrelated label edit neither rebuilds nor destroys a running preview.
 func (s *Server) handlePullRequestWebhook(w http.ResponseWriter, r *http.Request, body []byte) {
 	if s.cfg == nil || !s.cfg.PreviewEnvsEnabled {
 		w.WriteHeader(http.StatusOK)
@@ -258,7 +273,7 @@ func (s *Server) handlePullRequestWebhook(w http.ResponseWriter, r *http.Request
 		return
 	}
 	switch ev.Action {
-	case "opened", "reopened", "synchronize", "closed":
+	case "opened", "reopened", "synchronize", "closed", "labeled", "unlabeled":
 	default:
 		w.WriteHeader(http.StatusOK)
 		return
@@ -283,8 +298,11 @@ func (s *Server) handlePullRequestWebhook(w http.ResponseWriter, r *http.Request
 			log.Warn().Str("repo", repo.RepoFullName).Msg("pull_request webhook: invalid signature")
 			continue
 		}
-		if ev.Action == "closed" {
+		if ev.Action == "closed" || s.previewOptedOut(&ev) {
 			s.closePreviewEnv(ctx, repo, ev.Number)
+			continue
+		}
+		if ev.Action == "unlabeled" {
 			continue
 		}
 		if !repo.AutoDeploy {
@@ -301,10 +319,55 @@ func (s *Server) handlePullRequestWebhook(w http.ResponseWriter, r *http.Request
 	w.WriteHeader(http.StatusOK)
 }
 
-// openOrSyncPreviewEnv handles opened/reopened/synchronize for one git_repos
-// row: fork-check, quota-check (only for a PR that has no preview env yet),
-// EnsurePreviewEnv, enqueue the CreatePreviewEnv operation, then enqueue the
-// preview build. Returns true when a build was enqueued.
+// prHasLabel reports whether the PR's current label set carries name, compared
+// case- and space-insensitively so a human-typed label still matches.
+func prHasLabel(ev *pullRequestEvent, name string) bool {
+	for _, l := range ev.PullRequest.Labels {
+		if strings.EqualFold(strings.TrimSpace(l.Name), strings.TrimSpace(name)) {
+			return true
+		}
+	}
+	return false
+}
+
+// previewOptIn reports whether this PR may CREATE a preview environment.
+//
+// Previews are opt-in by default (cfg.PreviewEnvsRequireLabel): a PR gets an
+// environment only once someone adds cfg.PreviewEnvLabel to it. Auto-preview on
+// every PR meant an ignored PR silently spawned a second and third copy of the
+// app and burned platform hardware for the whole TTL for nobody's benefit, so
+// the default is now "no preview unless asked for".
+//
+// With PreviewEnvsRequireLabel off, every PR opts in -- the pre-opt-in behavior,
+// kept as an env-only kill switch. The check reads the PR's full current label
+// set, not the single label of a labeled/unlabeled delivery, so every action
+// evaluates identically (a PR opened with the label already on it opts in
+// immediately).
+func previewOptIn(cfg *config.Config, ev *pullRequestEvent) bool {
+	if cfg == nil || !cfg.PreviewEnvsRequireLabel {
+		return true
+	}
+	return prHasLabel(ev, cfg.PreviewEnvLabel)
+}
+
+// previewOptedOut reports whether this delivery is a PR withdrawing its preview
+// opt-in: the opt-in label was the one just removed and the PR no longer carries
+// it. The preview the label created is then torn down immediately instead of
+// running (and costing) until the TTL reaper reaches it. Only meaningful while
+// previews are label-gated, and never triggered by removing some other label.
+func (s *Server) previewOptedOut(ev *pullRequestEvent) bool {
+	if s.cfg == nil || !s.cfg.PreviewEnvsRequireLabel || ev.Action != "unlabeled" {
+		return false
+	}
+	return strings.EqualFold(strings.TrimSpace(ev.Label.Name), strings.TrimSpace(s.cfg.PreviewEnvLabel)) &&
+		!prHasLabel(ev, s.cfg.PreviewEnvLabel)
+}
+
+// openOrSyncPreviewEnv handles opened/reopened/synchronize/labeled for one
+// git_repos row: fork-check, opt-in-label check and quota-check (both only for a
+// PR that has no preview env yet, so an existing preview keeps tracking new
+// commits), EnsurePreviewEnv, enqueue the CreatePreviewEnv operation, then
+// enqueue the preview build. Returns true when a build was enqueued.
 func (s *Server) openOrSyncPreviewEnv(ctx context.Context, repo *db.Repo, ev *pullRequestEvent) bool {
 	headSHA := ev.PullRequest.Head.SHA
 	headBranch := ev.PullRequest.Head.Ref
@@ -328,6 +391,16 @@ func (s *Server) openOrSyncPreviewEnv(ctx context.Context, repo *db.Repo, ev *pu
 		log.Error().Err(err).Str("repo", repo.RepoFullName).Int("pr", prNumber).Msg("pull_request webhook: find preview env")
 		return false
 	}
+	if existing == nil && !previewOptIn(s.cfg, ev) {
+		if ev.Action == "opened" || ev.Action == "reopened" {
+			s.postPRStatus(ctx, repo, headSHA, "success",
+				fmt.Sprintf("no preview environment: add the '%s' label to deploy one", s.cfg.PreviewEnvLabel))
+		}
+		log.Info().Str("repo", repo.RepoFullName).Int("pr", prNumber).Str("label", s.cfg.PreviewEnvLabel).
+			Msg("pull_request webhook: preview skipped, PR has not opted in")
+		return false
+	}
+
 	if existing == nil {
 		count, cerr := db.CountActivePreviewEnvs(ctx, s.pool, repo.ProjectID)
 		if cerr != nil {
