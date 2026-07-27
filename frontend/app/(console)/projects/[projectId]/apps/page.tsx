@@ -74,6 +74,7 @@ export default function AppsPage() {
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  const [quotaBlocked, setQuotaBlocked] = useState(false);
 
   useEffect(() => {
     if (environments.length === 0) {
@@ -170,6 +171,11 @@ export default function AppsPage() {
       router.push(`/projects/${projectId}/apps/${form.name}`);
     } catch (err) {
       const raw = err instanceof Error ? err.message : "";
+      if ((err as { code?: string } | undefined)?.code === "quota_exceeded") {
+        setSubmitError(null);
+        setQuotaBlocked(true);
+        return;
+      }
       let msg = raw || t("apps.error.create");
       if (/already exists|unique per environment/i.test(raw)) {
         msg = t("apps.error.create.duplicateGlobal");
@@ -397,6 +403,19 @@ export default function AppsPage() {
             </select>
             <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">{t("apps.modal.create.workloadType.hint")}</p>
           </div>
+
+          {quotaBlocked && (
+            <div role="alert" className="rounded-lg border border-blue-200 dark:border-blue-900 bg-blue-50 dark:bg-blue-950/40 px-4 py-3 text-sm">
+              <p className="font-semibold text-blue-800 dark:text-blue-300">{t("apps.error.quota.title")}</p>
+              <p className="mt-1 text-blue-700 dark:text-blue-400">{t("apps.error.quota.text")}</p>
+              <Link
+                href={`/projects/${projectId}/billing`}
+                className="mt-3 inline-flex items-center gap-1.5 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-blue-700"
+              >
+                {t("apps.error.quota.cta")}
+              </Link>
+            </div>
+          )}
 
           {submitError && (
             <div role="alert" className="rounded-lg border border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-950/40 px-4 py-3 text-sm text-red-700 dark:text-red-300">

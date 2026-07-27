@@ -123,6 +123,15 @@ function raceAbort<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
   });
 }
 
+/**
+ * Perform an authenticated API call.
+ *
+ * On a non-2xx response the thrown Error carries `status`, plus `code` (the
+ * backend's machine-readable `error` field, e.g. "quota_exceeded") and
+ * `upgrade` when the failure is a plan limit. The Error's message prefers the
+ * backend's human `message` over the code, so callers that just render
+ * `err.message` show a sentence rather than a raw error code.
+ */
 export async function apiFetch<T>(
   path: string,
   options: RequestOptions = {}
@@ -165,8 +174,15 @@ export async function apiFetch<T>(
 
   if (!res.ok) {
     const err = await res.json().catch(() => ({ error: res.statusText }));
-    const apiError = new Error((err as { error: string }).error ?? "API error") as Error & { status?: number };
+    const body = err as { error?: string; message?: string; upgrade?: boolean };
+    const apiError = new Error(body.message ?? body.error ?? "API error") as Error & {
+      status?: number;
+      code?: string;
+      upgrade?: boolean;
+    };
     apiError.status = res.status;
+    apiError.code = body.error;
+    apiError.upgrade = body.upgrade;
     throw apiError;
   }
 
