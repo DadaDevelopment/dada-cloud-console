@@ -311,7 +311,7 @@ const ru: Dict = {
     pricingTitle: "Прозрачные планы",
     pricingSubtitle: "Без сюрпризов в счёте: понятные квоты плана и оценка стоимости до деплоя.",
     pricingTiers: [
-      { name: "Free", price: "0 ₽", tagline: "Попробовать и пет-проекты", bullets: ["1 приложение", "1 база данных", "Деплой из GitHub", "Базовые логи"] },
+      { name: "Free", price: "0 ₽", tagline: "Попробовать и пет-проекты", bullets: ["2 приложения", "1 база данных", "Деплой из GitHub", "Базовые логи"] },
       { name: "Startup", price: "990 ₽/мес", tagline: "Один разработчик в продакшене", bullets: ["5 приложений", "2 базы данных", "5 доменов", "Бэкапы 7 дней"], highlight: true },
       { name: "Business", price: "2 900 ₽/мес", tagline: "Растущая команда с продакшеном", bullets: ["20 приложений", "10 баз данных", "Бэкапы 30 дней", "Приоритетная поддержка"] },
     ],
@@ -443,7 +443,7 @@ const ru: Dict = {
     faqTitle: "Частые вопросы про переезд с Vercel",
     faq: [
       { q: "Заработает ли мой Next.js-проект без изменений?", a: "В большинстве случаев да — Dada определяет Next.js автоматически и использует стандартную команду сборки и запуска. Если в проекте были rewrites/headers в vercel.json, эти правила нужно перенести в код (например, next.config.js) — готового 1:1 переноса такого конфига нет." },
-      { q: "Нужна ли карта для оплаты?", a: "Нет, если хватает бесплатного тарифа (1 приложение, 1 база, 1 домен). Платные тарифы оплачиваются российской картой, счётом или по договору с закрывающими документами для юрлиц — зарубежная карта не нужна." },
+      { q: "Нужна ли карта для оплаты?", a: "Нет, если хватает бесплатного тарифа (2 приложения, 1 база, 1 домен). Платные тарифы оплачиваются российской картой, счётом или по договору с закрывающими документами для юрлиц — зарубежная карта не нужна." },
       { q: "Куда переносить переменные окружения из Vercel?", a: "В настройки приложения → «Переменные окружения» в Dada Cloud, скопировав значения из Vercel Project Settings вручную — автоматического импорта из Vercel нет." },
       { q: "Поддерживается ли свой домен и HTTPS?", a: "Да. Домен подключается во вкладке Domains (apex — TXT-запись, поддомен — CNAME), сертификат Let's Encrypt выпускается автоматически после подтверждения владения." },
     ],
@@ -978,9 +978,9 @@ const ru: Dict = {
         period: "",
         tagline: "Попробовать и пет-проекты",
         features: [
-          "1 приложение",
+          "2 приложения",
           "1 база данных",
-          "1 ГБ хранилища",
+          "2 ГБ хранилища",
           "1 домен",
           "1 среда",
           "1 участник",
@@ -988,9 +988,9 @@ const ru: Dict = {
           "Поддержка сообщества",
         ],
         quotaMatrix: {
-          apps: "1",
+          apps: "2",
           databases: "1",
-          storage: "1 ГБ",
+          storage: "2 ГБ",
           domains: "1",
           environments: "1",
           members: "1",
@@ -1206,7 +1206,7 @@ const en: Dict = {
     pricingTitle: "Transparent plans",
     pricingSubtitle: "No billing surprises: clear plan quotas and a cost estimate before you deploy.",
     pricingTiers: [
-      { name: "Free", price: "$0", tagline: "Trials and pet projects", bullets: ["1 application", "1 database", "Deploy from GitHub", "Basic logs"] },
+      { name: "Free", price: "$0", tagline: "Trials and pet projects", bullets: ["2 applications", "1 database", "Deploy from GitHub", "Basic logs"] },
       { name: "Startup", price: "$12/mo", tagline: "Solo developer in production", bullets: ["5 applications", "2 databases", "5 domains", "7-day backups"], highlight: true },
       { name: "Business", price: "$35/mo", tagline: "Growing team with production load", bullets: ["20 applications", "10 databases", "30-day backups", "Priority support"] },
     ],
@@ -1337,7 +1337,7 @@ const en: Dict = {
     faqTitle: "Migrating from Vercel — FAQ",
     faq: [
       { q: "Will my Next.js project work without changes?", a: "In most cases yes — Dada detects Next.js automatically and uses the standard build and start commands. If the project used rewrites/headers in vercel.json, those rules need to move into code (e.g. next.config.js) — there's no ready-made 1:1 import for that config." },
-      { q: "Do I need a card to pay?", a: "No, if the free plan (1 app, 1 database, 1 domain) covers you. Paid plans are billed with a Russian card, an invoice, or a contract with closing documents for legal entities — no foreign card needed." },
+      { q: "Do I need a card to pay?", a: "No, if the free plan (2 apps, 1 database, 1 domain) covers you. Paid plans are billed with a Russian card, an invoice, or a contract with closing documents for legal entities — no foreign card needed." },
       { q: "Where do I move the environment variables from Vercel?", a: "Into app settings -> \"Environment variables\" in Dada Cloud, copying values from Vercel Project Settings by hand — there's no automatic import from Vercel." },
       { q: "Is a custom domain with HTTPS supported?", a: "Yes. Add the domain in the Domains tab (apex via a TXT record, subdomain via CNAME); the Let's Encrypt certificate is issued automatically once ownership is verified." },
     ],
@@ -1872,9 +1872,9 @@ const en: Dict = {
         period: "",
         tagline: "Try it out and pet projects",
         features: [
-          "1 application",
+          "2 applications",
           "1 database",
-          "1 GB storage",
+          "2 GB storage",
           "1 domain",
           "1 environment",
           "1 team member",
@@ -1882,9 +1882,9 @@ const en: Dict = {
           "Community support",
         ],
         quotaMatrix: {
-          apps: "1",
+          apps: "2",
           databases: "1",
-          storage: "1 GB",
+          storage: "2 GB",
           domains: "1",
           environments: "1",
           members: "1",

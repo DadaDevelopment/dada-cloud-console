@@ -25,9 +25,9 @@ type GitHookHandler interface {
 
 // Server handles HTTP for /healthz, /webhook/github, and /ws/values.
 type Server struct {
-	addr        string
-	secret      string
-	handler     GitHookHandler
+	addr    string
+	secret  string
+	handler GitHookHandler
 	// Values editor dependencies (optional — nil disables /ws/values).
 	pool        *pgxpool.Pool
 	mgr         *git.Manager

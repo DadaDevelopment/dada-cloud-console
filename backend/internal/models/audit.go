@@ -26,9 +26,9 @@ type ResourceSnapshot struct {
 	ID            uuid.UUID       `json:"id"             db:"id"`
 	ProjectID     uuid.UUID       `json:"project_id"     db:"project_id"`
 	EnvironmentID *uuid.UUID      `json:"environment_id" db:"environment_id"`
-	Kind          string          `json:"kind"           db:"kind"`          // ServiceDatabase, App
+	Kind          string          `json:"kind"           db:"kind"` // ServiceDatabase, App
 	Name          string          `json:"name"           db:"name"`
-	Phase         string          `json:"phase"          db:"phase"`         // Ready, Pending, Failed
+	Phase         string          `json:"phase"          db:"phase"` // Ready, Pending, Failed
 	SummaryJSON   json.RawMessage `json:"summary_json"   db:"summary_json"`
 	LastSyncedAt  time.Time       `json:"last_synced_at" db:"last_synced_at"`
 }

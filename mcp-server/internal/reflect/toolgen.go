@@ -24,7 +24,7 @@ type GeneratedTool struct {
 	QueryParams []string // names of query params
 	BodyProps   []string // top-level flattened body property names
 
-	ReadOnly   bool // GET
+	ReadOnly    bool // GET
 	Destructive bool // DELETE
 
 	// FallbackName is true when operationId was missing and the name was

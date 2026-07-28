@@ -172,6 +172,11 @@ export default function BillingPage() {
   const planName = planLabel(account.plan);
   const usage = account.usage;
 
+  const graceUntil = account.quota_grace_until ? new Date(account.quota_grace_until) : null;
+  const graceDate = graceUntil
+    ? graceUntil.toLocaleDateString("ru", { day: "numeric", month: "long", year: "numeric" })
+    : null;
+
   const expiresAt = account.plan_expires_at ? new Date(account.plan_expires_at) : null;
   const expiryDaysLeft = expiresAt ? Math.ceil((expiresAt.getTime() - loadedAtMs) / (24 * 60 * 60 * 1000)) : null;
   const expirySoon = expiryDaysLeft !== null && expiryDaysLeft <= EXPIRY_SOON_DAYS;
@@ -221,6 +226,13 @@ export default function BillingPage() {
         />
         <h1 className="mt-2 text-2xl font-bold text-gray-900 dark:text-gray-100">{t("billing.title")}</h1>
       </div>
+
+      {graceDate && (
+        <div className="mb-6 rounded-xl border border-blue-200 dark:border-blue-900 bg-blue-50 dark:bg-blue-950/40 px-5 py-4">
+          <p className="text-sm font-semibold text-blue-800 dark:text-blue-300">{t("billing.graceTitle")}</p>
+          <p className="mt-1 text-sm text-blue-700 dark:text-blue-400">{t("billing.graceText", { date: graceDate })}</p>
+        </div>
+      )}
 
       {nearLimitResources.length > 0 && (
         <div className="mb-6 rounded-xl border border-amber-200 dark:border-amber-900 bg-amber-50 dark:bg-amber-950/40 px-5 py-4">

@@ -37,7 +37,7 @@ const COPY = {
     lowPrice: "0",
     highPrice: "2900",
     plans: [
-      { name: "Free", price: "0", desc: "Пет-проекты: 1 приложение, 1 база данных, 1 ГБ, 1 домен." },
+      { name: "Free", price: "0", desc: "Пет-проекты: 2 приложения, 1 база данных, 2 ГБ, 1 домен." },
       { name: "Startup", price: "990", desc: "Один разработчик в продакшене: 5 приложений, 2 базы, бэкапы 7 дней." },
       { name: "Business", price: "2900", desc: "Команда с продакшеном: 20 приложений, 10 баз, бэкапы 30 дней." },
     ] as PlanOffer[],
@@ -69,7 +69,7 @@ const COPY = {
     lowPrice: "0",
     highPrice: "35",
     plans: [
-      { name: "Free", price: "0", desc: "Pet projects: 1 application, 1 database, 1 GB, 1 domain." },
+      { name: "Free", price: "0", desc: "Pet projects: 2 applications, 1 database, 2 GB, 1 domain." },
       { name: "Startup", price: "12", desc: "Solo developer in production: 5 applications, 2 databases, 7-day backups." },
       { name: "Business", price: "35", desc: "Growing team in production: 20 applications, 10 databases, 30-day backups." },
     ] as PlanOffer[],

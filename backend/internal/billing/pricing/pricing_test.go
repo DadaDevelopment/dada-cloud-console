@@ -227,7 +227,9 @@ func TestQuota(t *testing.T) {
 		{"business", "team_members", 10, true},
 		{"enterprise", "apps", 0, true},
 		{"free", "unknown_resource", 0, false},
-		{"startup", "storage_gb", 0, false},
+		{"startup", "storage_gb", 10, true},
+		{"business", "storage_gb", 100, true},
+		{"enterprise", "storage_gb", 0, true},
 	}
 
 	for _, tc := range cases {

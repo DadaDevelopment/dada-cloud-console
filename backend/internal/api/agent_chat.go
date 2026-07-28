@@ -13,13 +13,10 @@ import (
 
 	"github.com/dada-tuda/console/backend/internal/agentchat"
 	"github.com/dada-tuda/console/backend/internal/auth"
-	"github.com/dada-tuda/console/backend/internal/billing/pricing"
 	"github.com/dada-tuda/console/backend/internal/llmchat"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 )
-
-const agentTokenSourceConsoleChat = "console_chat"
 
 const agentChatSlowTestTrigger = "__slowtest__"
 const agentChatSlowTestDuration = 75 * time.Second
@@ -140,41 +137,6 @@ func (h *Handler) agentChatInsertMessage(ctx context.Context, userSub, orgID str
 		userSub, orgArg, projectID, envID, role, content, toolArg,
 	); err != nil {
 		log.Printf("agent-chat: failed to persist %s message: %v", role, err)
-	}
-}
-
-// recordAgentTokenUsage appends one agent_token_usage ledger row for a
-// completed (or partial, on error/confirm interrupt) turn. The provider USD
-// cost is frozen here from the in-repo model price table; FX and markup stay
-// out of the ledger and are applied at invoice time. It no-ops when the turn
-// reported no tokens (e.g. gateway not configured or a pre-flight failure) and
-// never blocks the response on a ledger write error.
-func (h *Handler) recordAgentTokenUsage(ctx context.Context, source, orgID, userSub string, projectID, envID *uuid.UUID, usage agentchat.Usage) {
-	if usage.TotalTokens <= 0 {
-		return
-	}
-	model := usage.Model
-	if model == "" {
-		model = h.cfg.AgentChatModel
-	}
-	costUSD := pricing.AgentTokenCostUSD(model, usage.PromptTokens, usage.CompletionTokens)
-
-	var orgArg, userArg any
-	if orgID != "" {
-		orgArg = orgID
-	}
-	if userSub != "" {
-		userArg = userSub
-	}
-	if _, err := h.pool.Exec(ctx,
-		`INSERT INTO agent_token_usage
-			(source, org_id, project_id, env_id, user_sub, model,
-			 prompt_tokens, completion_tokens, total_tokens, cost_usd)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
-		source, orgArg, projectID, envID, userArg, model,
-		usage.PromptTokens, usage.CompletionTokens, usage.TotalTokens, costUSD,
-	); err != nil {
-		log.Printf("agent-chat: failed to record token usage: %v", err)
 	}
 }
 
@@ -565,8 +527,7 @@ func (h *Handler) AgentChat(c *gin.Context) {
 		},
 	}
 
-	assistantText, toolLog, pending, usage, err := agentchat.RunTurn(ctx, h.agentChatLLM, h.agentChatTools, bearer, systemPrompt, history, message, emit)
-	h.recordAgentTokenUsage(ctx, agentTokenSourceConsoleChat, orgID, userSub, projectID, envID, usage)
+	assistantText, toolLog, pending, _, err := agentchat.RunTurn(ctx, h.agentChatLLM, h.agentChatTools, bearer, userSub, systemPrompt, history, message, emit)
 	if err != nil {
 		writeSSEEvent(c, flusher, "error", fmt.Sprintf(`{"code":"upstream","message":%q}`, "agent could not complete this turn, please try again"))
 		writeSSEEvent(c, flusher, "done", `{"ok":false}`)
@@ -817,8 +778,7 @@ func (h *Handler) AgentChatConfirm(c *gin.Context) {
 		},
 	}
 
-	assistantText, toolLog, nextPending, usage, err := agentchat.ResumeTurn(ctx, h.agentChatLLM, h.agentChatTools, bearer, messages, toolCallCount, writeCallCount, emit)
-	h.recordAgentTokenUsage(ctx, agentTokenSourceConsoleChat, row.orgID, userSub, row.projectID, row.envID, usage)
+	assistantText, toolLog, nextPending, _, err := agentchat.ResumeTurn(ctx, h.agentChatLLM, h.agentChatTools, bearer, userSub, messages, toolCallCount, writeCallCount, emit)
 	if err != nil {
 		writeSSEEvent(c, flusher, "error", `{"code":"upstream","message":"agent could not complete this turn, please try again"}`)
 		writeSSEEvent(c, flusher, "done", `{"ok":false}`)

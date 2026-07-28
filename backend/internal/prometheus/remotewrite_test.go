@@ -14,9 +14,9 @@ import (
 // decoded mirrors of the remote-write messages, rebuilt from the wire bytes so
 // the test proves the hand-rolled encoder produces parseable protobuf.
 type decTS struct {
-	labels  map[string]string
-	value   float64
-	tsMS    int64
+	labels map[string]string
+	value  float64
+	tsMS   int64
 }
 
 func decodeWriteRequest(t *testing.T, b []byte) []decTS {

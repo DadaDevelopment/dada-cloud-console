@@ -66,6 +66,11 @@ export const billing: Messages = {
     ru: "План действует на всю организацию — на все её проекты.",
     en: "The plan applies to your whole organization - all of its projects.",
   },
+  "billing.graceTitle": { ru: "Лимиты Free пока не применяются", en: "Free limits are on hold" },
+  "billing.graceText": {
+    ru: "Вы уже используете больше, чем даёт Free. До {date} ничего не ограничиваем — всё работает как прежде. Чтобы сохранить текущий объём после этой даты, перейдите на платный тариф.",
+    en: "You already use more than Free provides. Nothing is limited until {date} - everything keeps working. To keep your current footprint after that date, move to a paid plan.",
+  },
   "billing.expiresOn": { ru: "действует до {date}", en: "active until {date}" },
   "billing.expiresSoon": { ru: "истекает {date} — продлите, чтобы сохранить тариф", en: "expires {date} - renew to keep your plan" },
   "billing.renew": { ru: "Продлить за {price} ₽", en: "Renew for {price} rub" },

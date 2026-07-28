@@ -128,7 +128,7 @@ const termsRu: LegalDocData = {
     {
       heading: "3. Тарифы",
       body: [
-        "Бесплатный тариф включает: 1 приложение, 1 базу данных, 1 ГБ хранилища, 1 домен, 1 окружение и 1 участника команды; резервные копии на бесплатном тарифе не хранятся.",
+        "Бесплатный тариф включает: 2 приложения, 1 базу данных, 2 ГБ хранилища, 1 домен, 1 окружение и 1 участника команды; резервные копии на бесплатном тарифе не хранятся.",
         "Платные тарифы и их стоимость указаны на странице тарифов. Условия оплаты определяются выбранным тарифом.",
       ],
     },
@@ -266,7 +266,7 @@ const termsEn: LegalDocData = {
     {
       heading: "3. Plans",
       body: [
-        "The free plan includes: 1 application, 1 database, 1 GB of storage, 1 domain, 1 environment, and 1 team member; backups are not retained on the free plan.",
+        "The free plan includes: 2 applications, 1 database, 2 GB of storage, 1 domain, 1 environment, and 1 team member; backups are not retained on the free plan.",
         "Paid plans and their prices are listed on the pricing page. Payment terms depend on the selected plan.",
       ],
     },

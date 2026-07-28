@@ -4,7 +4,7 @@ import "sync"
 
 // Session represents one active WebSocket editor connection.
 type Session struct {
-	key  string      // "project/env/app"
+	key  string       // "project/env/app"
 	send chan wsEvent // buffered; agent writes updates here
 }
 

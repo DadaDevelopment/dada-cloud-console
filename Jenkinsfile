@@ -350,6 +350,20 @@ spec:
                             '''
                         }
 
+                        stage('Go format check') {
+                            sh '''
+                                set -eu
+                                unformatted=$(gofmt -l backend build-agent gitops-agent mcp-server portainer-agent tools/dbmove)
+                                if [ -n "$unformatted" ]; then
+                                    echo "gofmt violations in:"
+                                    echo "$unformatted"
+                                    echo "Fix locally: gofmt -w <file>"
+                                    exit 1
+                                fi
+                                echo "all Go modules gofmt-clean"
+                            '''
+                        }
+
                         stage('Backend tests') {
                             dir('backend') {
                                 sh 'go test ./... -count=1'

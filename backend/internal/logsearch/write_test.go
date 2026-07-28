@@ -76,7 +76,7 @@ func TestIndex_WritesDatedDocWithTenancyLabels(t *testing.T) {
 		"project_id":     "proj1",
 		"environment":    "prod",
 		"monitoring_app": "my-app",
-		"app":            "my-app",  // reuse-compat
+		"app":            "my-app",   // reuse-compat
 		"vm_name":        "worker-1", // reuse-compat
 	}
 	for k, want := range checks {

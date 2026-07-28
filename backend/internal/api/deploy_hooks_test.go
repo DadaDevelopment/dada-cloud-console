@@ -51,7 +51,7 @@ func TestGenerateDeployToken_FormatAndHash(t *testing.T) {
 
 func TestClassifyOperationStatus(t *testing.T) {
 	cases := []struct {
-		status           models.OperationStatus
+		status            models.OperationStatus
 		terminal, success bool
 	}{
 		{models.OperationStatusCommitted, true, true},

@@ -340,12 +340,13 @@ const defaultVolumeStorageClass = "longhorn-dev"
 
 var volumeSizeRe = regexp.MustCompile(`^[1-9][0-9]*(Mi|Gi|Ti)$`)
 
-// maxVolumeSize caps a per-app persistent volume at the same ceiling the
-// per-tenant default-limits LimitRange enforces (type=PersistentVolumeClaim
-// max.storage=10Gi, argo-infra). Rejecting an oversized request here turns a
-// silent, retry-looping Argo apply failure (PVC forbidden at admission) into an
-// immediate, clear API error.
-const maxVolumeSize = "10Gi"
+// absoluteMaxVolumeSize is a hard safety ceiling on a per-app persistent
+// volume, independent of billing plan. The plan-aware cap is enforced
+// separately (see storageCapBytes in billing.go); this constant only stops a
+// fat-finger request larger than the biggest plan's quota from ever reaching
+// the Argo apply step, where an oversized PVC would otherwise fail admission
+// (silent, retry-looping) instead of erroring clearly here.
+const absoluteMaxVolumeSize = "100Gi"
 
 // allowedVolumeStorageClasses guards against pointing app data at ephemeral
 // (reclaimPolicy=Delete) classes. All entries are Retain on beget-prod.
@@ -369,8 +370,8 @@ func validateAppVolume(v *appVolumeReq) (*models.AppVolume, error) {
 	if !volumeSizeRe.MatchString(v.Size) {
 		return nil, fmt.Errorf("volume size must be a quantity like 1Gi, 512Mi or 2Ti")
 	}
-	if quantityBytes(v.Size) > quantityBytes(maxVolumeSize) {
-		return nil, fmt.Errorf("volume size must not exceed %s per app", maxVolumeSize)
+	if quantityBytes(v.Size) > quantityBytes(absoluteMaxVolumeSize) {
+		return nil, fmt.Errorf("volume size must not exceed %s per app", absoluteMaxVolumeSize)
 	}
 	sc := v.StorageClass
 	if sc == "" {
@@ -555,6 +556,19 @@ func (h *Handler) CreateApp(c *gin.Context) {
 	if appVolume != nil && isCompose {
 		respondError(c, http.StatusBadRequest, "persistent storage is only supported for Kubernetes apps")
 		return
+	}
+	if appVolume != nil {
+		if orgID, orgErr := h.projectOrg(c.Request.Context(), projectID); orgErr == nil {
+			capBytes, limitGB, capErr := h.storageCapBytes(c.Request.Context(), orgID)
+			if capErr != nil {
+				respondError(c, http.StatusInternalServerError, "failed to resolve storage quota")
+				return
+			}
+			if capBytes > 0 && quantityBytes(appVolume.Size) > capBytes {
+				respondQuotaExceeded(c, "storage_gb", limitGB)
+				return
+			}
+		}
 	}
 
 	// Uniqueness is scoped to THIS project+environment, not the whole Argo instance.
@@ -1019,6 +1033,7 @@ func quantityBytes(q string) int64 {
 // @Failure     400       {object} map[string]string
 // @Failure     403       {object} map[string]string
 // @Failure     404       {object} map[string]string
+// @Failure     500       {object} map[string]string
 // @Router      /projects/{projectId}/environments/{envId}/apps/{appName}/storage [put]
 func (h *Handler) UpdateAppStorage(c *gin.Context) {
 	claims, ok := auth.GetClaims(c)
@@ -1091,6 +1106,24 @@ func (h *Handler) UpdateAppStorage(c *gin.Context) {
 		if quantityBytes(vol.Size) < quantityBytes(cur.Volume.Size) {
 			respondError(c, http.StatusBadRequest, "storage can only be expanded, not shrunk")
 			return
+		}
+	}
+
+	if orgID, orgErr := h.projectOrg(c.Request.Context(), projectID); orgErr == nil {
+		capBytes, limitGB, capErr := h.storageCapBytes(c.Request.Context(), orgID)
+		if capErr != nil {
+			respondError(c, http.StatusInternalServerError, "failed to resolve storage quota")
+			return
+		}
+		if capBytes > 0 {
+			allowedBytes := capBytes
+			if cur.Volume != nil && quantityBytes(cur.Volume.Size) > allowedBytes {
+				allowedBytes = quantityBytes(cur.Volume.Size)
+			}
+			if quantityBytes(vol.Size) > allowedBytes {
+				respondQuotaExceeded(c, "storage_gb", limitGB)
+				return
+			}
 		}
 	}
 

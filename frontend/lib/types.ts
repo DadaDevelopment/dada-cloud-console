@@ -859,6 +859,45 @@ export interface AdminCostsResponse {
   agent_tokens?: AdminAgentTokenEconomics;
 }
 
+export interface AIGatewayProviderStat {
+  provider: string;
+  calls: number;
+  prompt_tokens: number;
+  completion_tokens: number;
+  cost_usd: number;
+}
+
+export interface AIGatewayProjectStat {
+  project_id: string;
+  project_name: string;
+  calls: number;
+  cost_usd: number;
+}
+
+export interface AIGatewayModelStat {
+  model: string;
+  calls: number;
+  cost_usd: number;
+}
+
+export interface AIGatewaySourceStat {
+  source: string;
+  calls: number;
+  cost_usd: number;
+}
+
+export interface AIGatewayUsageResponse {
+  days: number;
+  window: { from: string; to: string };
+  currency: string;
+  total_cost: number;
+  total_calls: number;
+  providers: AIGatewayProviderStat[];
+  projects: AIGatewayProjectStat[];
+  models: AIGatewayModelStat[];
+  sources: AIGatewaySourceStat[];
+}
+
 export interface AdminAgentTokenEconomics {
   available: boolean;
   window_days?: number;

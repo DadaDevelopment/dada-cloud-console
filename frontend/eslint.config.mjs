@@ -21,6 +21,7 @@ const eslintConfig = defineConfig([
       "components/deploy/deploy-hooks-card.tsx",
       "app/(console)/admin/page.tsx",
       "app/(console)/admin/costs/page.tsx",
+      "app/(console)/admin/ai-gateway/page.tsx",
     ],
     rules: { "react-hooks/set-state-in-effect": "off" },
   },

@@ -139,14 +139,14 @@ func (w *DBWatcher) doCreateAIModel(ctx context.Context, op db.Operation) error 
 
 	// Snapshot row so the read APIs / quotas counter pick it up immediately.
 	summary, _ := json.Marshal(map[string]any{
-		"profile":         p.Profile,
-		"model_type":      p.ModelType,
-		"version":         p.Version,
-		"stage":           stageFromEnv(envName),
-		"artifact_uri":    artifactURI,
-		"auth_mode":       p.AuthMode,
-		"attached_app":    p.AttachedAppName,
-		"status":          "Pending",
+		"profile":      p.Profile,
+		"model_type":   p.ModelType,
+		"version":      p.Version,
+		"stage":        stageFromEnv(envName),
+		"artifact_uri": artifactURI,
+		"auth_mode":    p.AuthMode,
+		"attached_app": p.AttachedAppName,
+		"status":       "Pending",
 	})
 	return db.UpsertSnapshot(ctx, w.pool,
 		op.ProjectID, op.EnvironmentID, "AIModel", p.Name, "Pending", summary, time.Now(),
@@ -434,4 +434,3 @@ func asString(v any) string {
 	s, _ := v.(string)
 	return s
 }
-

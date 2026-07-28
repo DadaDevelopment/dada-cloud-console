@@ -407,6 +407,10 @@ type Config struct {
 
 	BillingEnabled          bool  // BILLING_ENABLED (default false) — guards metering ticker; billing endpoints always load plans read-only
 	BillingMeterIntervalSec int64 // BILLING_METER_INTERVAL_SECS (default 3600)
+	// BillingExemptOrgs (BILLING_EXEMPT_ORGS, comma-separated) never hit a quota
+	// wall. The platform's own org lives here: it carries the demo/e2e estate
+	// (dozens of apps) and must not be gated by the customer plan ladder.
+	BillingExemptOrgs []string
 
 	// PublicBaseURL is the console's own public origin. Used to build absolute
 	// URLs handed back to the caller, e.g. the deploy-hook consumption endpoint
@@ -564,6 +568,7 @@ func Load() (*Config, error) {
 		MetrikaOAuthToken:           getEnv("METRIKA_OAUTH_TOKEN", ""),
 		BillingEnabled:              getEnv("BILLING_ENABLED", "false") == "true",
 		BillingMeterIntervalSec:     getEnvInt64("BILLING_METER_INTERVAL_SECS", 3600),
+		BillingExemptOrgs:           splitList(getEnv("BILLING_EXEMPT_ORGS", "")),
 		PublicBaseURL:               getEnv("PUBLIC_BASE_URL", "https://console.dada-tuda.ru"),
 		YooKassaShopID:              getEnv("YOOKASSA_SHOP_ID", ""),
 		YooKassaSecretKey:           getEnv("YOOKASSA_SECRET_KEY", ""),

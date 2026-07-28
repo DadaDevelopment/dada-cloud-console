@@ -94,11 +94,45 @@ func (h *Handler) countResource(ctx context.Context, orgID, resource string) (in
 	return 0, fmt.Errorf("billing: unknown resource %q", resource)
 }
 
+// quotaExempt reports whether the org is outside the customer plan ladder
+// entirely (BILLING_EXEMPT_ORGS — the platform's own org and its demo/e2e
+// estate).
+func (h *Handler) quotaExempt(orgID string) bool {
+	for _, exempt := range h.cfg.BillingExemptOrgs {
+		if exempt == orgID {
+			return true
+		}
+	}
+	return false
+}
+
+// quotaGraceActive reports whether the org is inside its grandfathering
+// window. Orgs that already exceeded the free quotas when enforcement was
+// switched on (migration 055) carry a 60-day grace so enforcement never
+// blocks work that was legal when it started; they see the upgrade prompt,
+// not a wall. A missing row or a NULL/past value means no grace.
+func (h *Handler) quotaGraceActive(ctx context.Context, orgID string) bool {
+	var graceUntil *time.Time
+	err := h.pool.QueryRow(ctx,
+		`SELECT quota_grace_until FROM billing_accounts WHERE org_id = $1`, orgID,
+	).Scan(&graceUntil)
+	if err != nil {
+		if !errors.Is(err, pgx.ErrNoRows) {
+			log.Printf("billing: quota grace lookup failed for org %s: %v", orgID, err)
+		}
+		return false
+	}
+	return graceUntil != nil && graceUntil.After(time.Now().UTC())
+}
+
 // checkQuota is the hard gate for countable resources. It returns a
 // *quotaExceededError when the org is at or over its plan limit. A limit of 0
 // means unlimited (Enterprise).
 func (h *Handler) checkQuota(ctx context.Context, orgID, resource string) error {
 	if !h.cfg.BillingEnabled {
+		return nil
+	}
+	if h.quotaExempt(orgID) || h.quotaGraceActive(ctx, orgID) {
 		return nil
 	}
 	plan, err := h.planFor(ctx, orgID)
@@ -128,6 +162,34 @@ func respondQuotaExceeded(c *gin.Context, resource string, limit int) {
 		"upgrade":  true,
 		"message":  "Upgrade your plan to add more " + resource,
 	})
+}
+
+// storageCapBytes resolves the plan-aware ceiling on a single app's
+// persistent volume for the given org, in bytes, plus the same value in GB
+// for the quota-exceeded error body. A cap of 0 means unlimited (Enterprise
+// plan, or an exempt org).
+//
+// Billing-disabled deployments keep the legacy flat 10Gi ceiling. Exempt
+// orgs are unlimited. quotaGraceActive is deliberately NOT consulted here:
+// grace is about not blocking orgs that were already over quota when
+// enforcement switched on, and for storage that is handled by the
+// current-size allowance in UpdateAppStorage instead.
+func (h *Handler) storageCapBytes(ctx context.Context, orgID string) (int64, int, error) {
+	if !h.cfg.BillingEnabled {
+		return quantityBytes("10Gi"), 10, nil
+	}
+	if h.quotaExempt(orgID) {
+		return 0, 0, nil
+	}
+	plan, err := h.planFor(ctx, orgID)
+	if err != nil {
+		return 0, 0, err
+	}
+	gb := plan.Quotas.StorageGB
+	if gb == 0 {
+		return 0, 0, nil
+	}
+	return int64(gb) << 30, gb, nil
 }
 
 // GetBillingPlans returns all loaded plans.
@@ -185,13 +247,16 @@ func (h *Handler) GetBillingAccount(c *gin.Context) {
 		respondError(c, http.StatusInternalServerError, "failed to compute usage")
 		return
 	}
-	var planExpiresAt *time.Time
-	if err := h.pool.QueryRow(c.Request.Context(),
-		`SELECT plan_expires_at FROM billing_accounts WHERE org_id = $1`, orgID,
-	).Scan(&planExpiresAt); err != nil && !errors.Is(err, pgx.ErrNoRows) {
-		log.Printf("billing: plan_expires_at lookup skipped for org %s: %v", orgID, err)
-	}
 	now := time.Now().UTC()
+	var planExpiresAt, quotaGraceUntil *time.Time
+	if err := h.pool.QueryRow(c.Request.Context(),
+		`SELECT plan_expires_at, quota_grace_until FROM billing_accounts WHERE org_id = $1`, orgID,
+	).Scan(&planExpiresAt, &quotaGraceUntil); err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		log.Printf("billing: plan term lookup skipped for org %s: %v", orgID, err)
+	}
+	if quotaGraceUntil != nil && !quotaGraceUntil.After(now) {
+		quotaGraceUntil = nil
+	}
 	period := fmt.Sprintf("%d-%02d", now.Year(), now.Month())
 
 	lineItems := []gin.H{
@@ -214,10 +279,11 @@ func (h *Handler) GetBillingAccount(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"plan":            plan.Key,
-		"plan_expires_at": planExpiresAt,
-		"quotas":          plan.Quotas,
-		"usage":           usage,
+		"plan":              plan.Key,
+		"plan_expires_at":   planExpiresAt,
+		"quota_grace_until": quotaGraceUntil,
+		"quotas":            plan.Quotas,
+		"usage":             usage,
 		"invoicePreview": gin.H{
 			"period":    period,
 			"amount":    total,

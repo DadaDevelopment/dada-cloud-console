@@ -16,24 +16,24 @@ const markupDefault = MarkupDefault
 // Quotas holds the per-plan resource limits.
 // A value of 0 means unlimited (used for Enterprise).
 type Quotas struct {
-	Apps                 int `yaml:"apps"`
-	Databases            int `yaml:"databases"`
-	StorageGB            int `yaml:"storage_gb"`
-	Domains              int `yaml:"domains"`
-	Environments         int `yaml:"environments"`
-	TeamMembers          int `yaml:"team_members"`
-	BackupRetentionDays  int `yaml:"backup_retention_days"`
+	Apps                int `yaml:"apps"`
+	Databases           int `yaml:"databases"`
+	StorageGB           int `yaml:"storage_gb"`
+	Domains             int `yaml:"domains"`
+	Environments        int `yaml:"environments"`
+	TeamMembers         int `yaml:"team_members"`
+	BackupRetentionDays int `yaml:"backup_retention_days"`
 }
 
 // Plan represents a billing plan loaded from plans.yaml.
 type Plan struct {
-	Key               string                    `yaml:"key"`
-	Name              string                    `yaml:"name"`
-	PriceRUB          float64                   `yaml:"price_rub"`
-	Quotas            Quotas                    `yaml:"quotas"`
-	Capabilities      []string                  `yaml:"capabilities"`
-	SupportLevel      string                    `yaml:"support_level"`
-	InternalFootprint costengine.Footprint      `yaml:"internal_footprint"`
+	Key               string               `yaml:"key"`
+	Name              string               `yaml:"name"`
+	PriceRUB          float64              `yaml:"price_rub"`
+	Quotas            Quotas               `yaml:"quotas"`
+	Capabilities      []string             `yaml:"capabilities"`
+	SupportLevel      string               `yaml:"support_level"`
+	InternalFootprint costengine.Footprint `yaml:"internal_footprint"`
 }
 
 // Need describes what a user requires to find a recommended plan.
@@ -92,6 +92,8 @@ func Quota(p Plan, resource string) (int, bool) {
 		return p.Quotas.Domains, true
 	case "team_members":
 		return p.Quotas.TeamMembers, true
+	case "storage_gb":
+		return p.Quotas.StorageGB, true
 	}
 	return 0, false
 }

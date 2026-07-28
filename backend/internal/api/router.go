@@ -257,6 +257,7 @@ func SetupRouter(pool *pgxpool.Pool, cfg *config.Config) *gin.Engine {
 		internal.POST("/backfill/project-groups", h.BackfillProjectGroups)
 		internal.POST("/ai/credential/set", h.AISetProviderCredential)
 		internal.POST("/ai/credential/get", h.AIGetProviderCredential)
+		internal.POST("/ai/usage/record", h.AIRecordUsage)
 		log.Printf("internal: provisioning API enabled at /internal")
 	}
 
@@ -472,6 +473,7 @@ func SetupRouter(pool *pgxpool.Pool, cfg *config.Config) *gin.Engine {
 			api.GET("/admin/audit", h.ListAuditEvents)
 			api.GET("/admin/overview", h.GetAdminOverview)
 			api.GET("/admin/costs", h.GetAdminCosts)
+			api.GET("/admin/ai-gateway/usage", h.GetAIGatewayUsage)
 
 			// Inference proxy (playground only — production traffic goes via PublicApi ingress).
 			api.POST("/projects/:projectId/environments/:envId/models/:name/infer", h.ProxyInference)

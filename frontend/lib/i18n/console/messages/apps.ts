@@ -123,6 +123,12 @@ export const apps: Messages = {
   "apps.modal.create.submit": { ru: "Создать приложение", en: "Create App" },
   "apps.modal.create.submitting": { ru: "Создание…", en: "Creating…" },
   "apps.error.create": { ru: "Не удалось создать приложение", en: "Failed to create application" },
+  "apps.error.quota.title": { ru: "Достигнут лимит тарифа", en: "You have reached your plan limit" },
+  "apps.error.quota.text": {
+    ru: "На текущем тарифе больше приложений создать нельзя. Уже работающие приложения продолжают работать — ограничение касается только новых.",
+    en: "Your current plan does not allow more applications. Everything already running keeps running - the limit applies only to new ones.",
+  },
+  "apps.error.quota.cta": { ru: "Посмотреть тарифы", en: "See plans" },
   "apps.error.create.duplicateGlobal": {
     ru: "Приложение с таким именем уже есть в этом проекте. Выберите другое имя.",
     en: "An app with this name already exists in this project. Choose another name.",

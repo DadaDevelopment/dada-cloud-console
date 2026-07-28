@@ -11,7 +11,7 @@ import { api } from "@/lib/api";
 import type { BillingPlanKey, RecommendPlanResponse } from "@/lib/api";
 
 const PLAN_QUOTAS: Record<string, { apps: number | null; databases: number | null; storage_gb: number | null; domains: number | null; members: number | null }> = {
-  free:       { apps: 1,    databases: 1,  storage_gb: 1,   domains: 1,  members: 1  },
+  free:       { apps: 2,    databases: 1,  storage_gb: 2,   domains: 1,  members: 1  },
   startup:    { apps: 5,    databases: 2,  storage_gb: 10,  domains: 5,  members: 3  },
   business:   { apps: 20,   databases: 10, storage_gb: 100, domains: 20, members: 10 },
   enterprise: { apps: null, databases: null, storage_gb: null, domains: null, members: null },
@@ -128,7 +128,7 @@ function PlanRecommender() {
 }
 
 export default function PricingPage() {
-  const { t } = useLang();
+  const { t, locale } = useLang();
 
   const quotaLabels = t.pricing.plans[0]
     ? Object.keys(t.pricing.plans[0].quotaMatrix)
@@ -145,7 +145,7 @@ export default function PricingPage() {
     support: "Поддержка",
   };
 
-  const isRu = (t.pricing.plans[0]?.quotaMatrix.apps === "1");
+  const isRu = locale !== "en";
 
   const matrixLabelsRu: Record<string, string> = {
     apps: "Приложения",

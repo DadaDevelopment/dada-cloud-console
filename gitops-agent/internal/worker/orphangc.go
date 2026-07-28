@@ -304,8 +304,8 @@ const (
 //   - alive (a live pod OR an app.yaml in git) -> clear if currently Orphaned, else none.
 //   - uncertain (git not verifiable AND no live pod) -> none; never prune on doubt.
 //   - dead (git verifiably absent AND no live pod):
-//       not yet Orphaned -> mark once last_synced is older than markAfter;
-//       already Orphaned  -> purge once orphaned_at is older than purgeAfter.
+//     not yet Orphaned -> mark once last_synced is older than markAfter;
+//     already Orphaned  -> purge once orphaned_at is older than purgeAfter.
 func gcDecide(liveBacked, gitBacked, gitVerifiable bool, phase string,
 	lastSynced time.Time, orphanedAt *time.Time, now time.Time,
 	markAfter, purgeAfter time.Duration,
