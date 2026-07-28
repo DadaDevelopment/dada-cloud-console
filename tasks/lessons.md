@@ -107,3 +107,32 @@ policy).
 Rule: for every "it works now" claim, name the layer the evidence came from and ask what sits
 between that layer and the behaviour. Build result → deploy commit. Config file → process start
 time. One endpoint → every endpoint the app calls.
+
+## 2026-07-28 — A config key present in the pod's .env is not a config key the app read
+
+Migrating profi-backend onto the AI Gateway, I changed `OPENAI_BASE_URL` in the app's
+`envFileValue` and treated that as the redirect being done. It was not. `app/config.py`
+declares its pydantic-settings model with `extra="ignore"` and never declares
+`OPENAI_BASE_URL`, so the key was loaded out of `.env` and thrown away, and the code's
+`getattr(settings, "OPENAI_BASE_URL", None)` could only ever return `None` — `ChatOpenAI`
+then resolved the openai SDK default. Shipped alongside a new platform key, this would
+have sent an `sk-dada-` token to `api.openai.com` and 500'd every KP-from-brief call. A
+pod did go Ready in that state before I caught it.
+
+What made it invisible: every proxy signal agreed with me. The values commit was pushed,
+Argo synced, the ConfigMap contained the key, `grep OPENAI_BASE_URL /app/.env` in the pod
+matched. Four green lights, and the process still had `None`.
+
+Rule: for anything consumed through a settings/config layer, the authoritative check is
+reading the value back **through that layer inside the process** — `hasattr(settings, X)`
+and the effective value on the constructed client — not the presence of the key in the
+file the layer read. Config layers with `extra="ignore"` (pydantic-settings, viper, most
+schema-validated loaders) silently discard undeclared keys, so "the key is in .env" and
+"the app is configured" are different claims. Ask which layer the evidence came from and
+what sits between it and the behaviour: file → loader → object → client.
+
+Corollary, same session: one 200 is not coverage. A plain chat completion through the
+gateway succeeded while the app's real traffic is tool-calls plus structured output. Both
+had to be exercised through the app's own `KPAgent._build_llm()` in the pod before the
+migration could be called verified — and the authoritative signal was the
+`agent_token_usage` row, not the HTTP status.
