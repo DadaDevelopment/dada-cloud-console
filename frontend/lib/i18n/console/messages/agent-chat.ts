@@ -5,7 +5,7 @@ export const agentChat: Messages = {
   "agentChat.title": { ru: "Агент", en: "Agent" },
   "agentChat.open": { ru: "Открыть чат с агентом", en: "Open agent chat" },
   "agentChat.close": { ru: "Свернуть чат", en: "Collapse chat" },
-  "agentChat.clearContext": { ru: "Очистить контекст", en: "Clear context" },
+  "agentChat.clearContext": { ru: "Очистить историю", en: "Clear history" },
   "agentChat.placeholder": { ru: "Спросите что-нибудь про проект…", en: "Ask something about your project…" },
   "agentChat.send": { ru: "Отправить", en: "Send" },
   "agentChat.emptyState": {
