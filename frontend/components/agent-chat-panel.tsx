@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { usePathname } from "next/navigation";
-import { X, Send, Bot, Loader2, Wrench, AlertTriangle, Check, Ban } from "lucide-react";
+import { X, Send, Bot, Loader2, Wrench, AlertTriangle, Check, Ban, RotateCcw } from "lucide-react";
 import { useT } from "@/lib/i18n/console/context";
 import { useProjectContext } from "@/lib/project-context";
 import { getToken } from "@/lib/api";
@@ -257,6 +257,24 @@ async function fetchHistory(projectId?: string, envId?: string): Promise<History
   return (await res.json()) as HistoryResponse;
 }
 
+// clearContext tells the backend to stop feeding everything before now into
+// the next chat turn (and to reconstruct history from this point on),
+// without deleting any underlying agent_chat_messages rows -- the daily
+// message cap and the confirm/decline audit trail are computed from those
+// rows and are completely unaffected by clearing.
+async function clearContext(projectId?: string, envId?: string): Promise<boolean> {
+  const token = await getToken();
+  const res = await fetch("/api/v1/agent/chat/context/clear", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    body: JSON.stringify({ projectId, envId }),
+  });
+  return res.ok;
+}
+
 interface AgentChatPanelProps {
   open: boolean;
   onClose: () => void;
@@ -481,6 +499,12 @@ export function AgentChatPanel({ open, onClose }: AgentChatPanelProps) {
     }
   }
 
+  async function handleClearContext() {
+    if (sending) return;
+    const ok = await clearContext(projectId ?? undefined, selectedEnv?.id);
+    if (ok) setMessages([]);
+  }
+
   function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
@@ -499,14 +523,26 @@ export function AgentChatPanel({ open, onClose }: AgentChatPanelProps) {
           <Bot className="h-4 w-4 text-blue-600 dark:text-blue-400" />
           <span className="text-sm font-semibold text-gray-900 dark:text-gray-100">{t("agentChat.title")}</span>
         </div>
-        <button
-          type="button"
-          onClick={onClose}
-          aria-label={t("agentChat.close")}
-          className="rounded-md p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-600 dark:text-gray-500 dark:hover:bg-gray-900 dark:hover:text-gray-300"
-        >
-          <X className="h-4 w-4" />
-        </button>
+        <div className="flex items-center gap-1">
+          <button
+            type="button"
+            onClick={handleClearContext}
+            disabled={sending || messages.length === 0}
+            aria-label={t("agentChat.clearContext")}
+            title={t("agentChat.clearContext")}
+            className="rounded-md p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-600 disabled:cursor-not-allowed disabled:opacity-40 dark:text-gray-500 dark:hover:bg-gray-900 dark:hover:text-gray-300"
+          >
+            <RotateCcw className="h-4 w-4" />
+          </button>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label={t("agentChat.close")}
+            className="rounded-md p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-600 dark:text-gray-500 dark:hover:bg-gray-900 dark:hover:text-gray-300"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
       </div>
 
       <div ref={listRef} className="flex-1 space-y-3 overflow-y-auto px-4 py-4">

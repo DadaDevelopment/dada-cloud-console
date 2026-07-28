@@ -15,6 +15,59 @@ const docTemplate = `{
     "host": "{{.Host}}",
     "basePath": "{{.BasePath}}",
     "paths": {
+        "/admin/ai-gateway/usage": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Returns provider/project/model/source cost-and-token breakdown of the agent_token_usage ledger over the trailing window. Platform-admin only; every other caller gets 403.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin"
+                ],
+                "summary": "AI Gateway usage/cost breakdown (platform-admin only)",
+                "operationId": "getAIGatewayUsage",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Window length in days: 7 or 30 (default 7)",
+                        "name": "days",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/admin/audit": {
             "get": {
                 "security": [
@@ -507,6 +560,58 @@ const docTemplate = `{
                             "type": "object",
                             "additionalProperties": {
                                 "type": "string"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/agent/chat/context/clear": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Resets what the next chat turn sends the LLM as history and what GET /agent/chat/history reconstructs on reload -- a cluttered/stale conversation can be started fresh without losing anything real. Past agent_chat_messages rows are NOT deleted: the daily message cap and the confirm/decline audit trail are computed from those rows and are completely unaffected by clearing. Also auto-declines any write-action confirmation still open in this scope, since resuming it against a conversation the user just asked to forget would be confusing.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "agent"
+                ],
+                "summary": "Clear the agent's conversation context for this project/env scope",
+                "operationId": "agentChatClearContext",
+                "parameters": [
+                    {
+                        "description": "Scope to clear (projectId/envId may be empty for the no-project-selected scope)",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/api.agentChatClearContextRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "boolean"
                             }
                         }
                     },
@@ -7539,6 +7644,15 @@ const docTemplate = `{
                                 "type": "string"
                             }
                         }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
                     }
                 }
             }
@@ -12752,6 +12866,17 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "apex_domain": {
+                    "type": "string"
+                }
+            }
+        },
+        "api.agentChatClearContextRequest": {
+            "type": "object",
+            "properties": {
+                "envId": {
+                    "type": "string"
+                },
+                "projectId": {
                     "type": "string"
                 }
             }

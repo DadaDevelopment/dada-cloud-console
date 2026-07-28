@@ -74,6 +74,13 @@ definitions:
       apex_domain:
         type: string
     type: object
+  api.agentChatClearContextRequest:
+    properties:
+      envId:
+        type: string
+      projectId:
+        type: string
+    type: object
   api.agentChatConfirmRequest:
     properties:
       action_id:
@@ -712,6 +719,42 @@ info:
   title: DADA Cloud Console API
   version: "1.0"
 paths:
+  /admin/ai-gateway/usage:
+    get:
+      description: Returns provider/project/model/source cost-and-token breakdown
+        of the agent_token_usage ledger over the trailing window. Platform-admin only;
+        every other caller gets 403.
+      operationId: getAIGatewayUsage
+      parameters:
+      - description: 'Window length in days: 7 or 30 (default 7)'
+        in: query
+        name: days
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: AI Gateway usage/cost breakdown (platform-admin only)
+      tags:
+      - admin
   /admin/audit:
     get:
       description: Returns audit_events rows joined with the actor's email and the
@@ -1068,6 +1111,47 @@ paths:
       security:
       - BearerAuth: []
       summary: Approve or reject a pending agent write action
+      tags:
+      - agent
+  /agent/chat/context/clear:
+    post:
+      consumes:
+      - application/json
+      description: 'Resets what the next chat turn sends the LLM as history and what
+        GET /agent/chat/history reconstructs on reload -- a cluttered/stale conversation
+        can be started fresh without losing anything real. Past agent_chat_messages
+        rows are NOT deleted: the daily message cap and the confirm/decline audit
+        trail are computed from those rows and are completely unaffected by clearing.
+        Also auto-declines any write-action confirmation still open in this scope,
+        since resuming it against a conversation the user just asked to forget would
+        be confusing.'
+      operationId: agentChatClearContext
+      parameters:
+      - description: Scope to clear (projectId/envId may be empty for the no-project-selected
+          scope)
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/api.agentChatClearContextRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: boolean
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Clear the agent's conversation context for this project/env scope
       tags:
       - agent
   /agent/chat/history:
@@ -5838,6 +5922,12 @@ paths:
             type: object
         "404":
           description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
           schema:
             additionalProperties:
               type: string

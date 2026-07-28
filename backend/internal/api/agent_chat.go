@@ -140,7 +140,29 @@ func (h *Handler) agentChatInsertMessage(ctx context.Context, userSub, orgID str
 	}
 }
 
+// agentChatContextClearedAt returns the most recent "clear context" timestamp
+// for this user/project/env scope, or the zero time if the user has never
+// cleared it (in which case a `created_at > zeroTime` filter is always true,
+// i.e. a no-op). Reads from agent_chat_context_resets, which is append-only --
+// clearing never deletes the underlying agent_chat_messages rows, so the daily
+// message cap (agentChatDailyMessageCount) and the audit trail stay accurate
+// regardless of how many times a conversation gets cleared.
+func (h *Handler) agentChatContextClearedAt(ctx context.Context, userSub string, projectID, envID *uuid.UUID) time.Time {
+	var clearedAt time.Time
+	err := h.pool.QueryRow(ctx,
+		`SELECT cleared_at FROM agent_chat_context_resets
+		 WHERE user_sub = $1 AND project_id IS NOT DISTINCT FROM $2 AND env_id IS NOT DISTINCT FROM $3
+		 ORDER BY cleared_at DESC LIMIT 1`,
+		userSub, projectID, envID,
+	).Scan(&clearedAt)
+	if err != nil {
+		return time.Time{}
+	}
+	return clearedAt
+}
+
 func (h *Handler) agentChatHistory(ctx context.Context, userSub string, projectID, envID *uuid.UUID) []llmchat.Message {
+	clearedAt := h.agentChatContextClearedAt(ctx, userSub, projectID, envID)
 	rows, err := h.pool.Query(ctx,
 		`SELECT role, content FROM (
 			SELECT role, content, created_at FROM agent_chat_messages
@@ -149,10 +171,11 @@ func (h *Handler) agentChatHistory(ctx context.Context, userSub string, projectI
 			  AND env_id IS NOT DISTINCT FROM $3
 			  AND role IN ('user', 'assistant')
 			  AND content <> ''
+			  AND created_at > $5
 			ORDER BY created_at DESC
 			LIMIT $4
 		 ) recent ORDER BY created_at ASC`,
-		userSub, projectID, envID, agentChatHistoryLimit,
+		userSub, projectID, envID, agentChatHistoryLimit, clearedAt,
 	)
 	if err != nil {
 		return nil
@@ -877,6 +900,7 @@ func (h *Handler) AgentChatGetHistory(c *gin.Context) {
 	userSub := claims.UserID.String()
 	projectID := parseOptionalUUID(c.Query("projectId"))
 	envID := parseOptionalUUID(c.Query("envId"))
+	clearedAt := h.agentChatContextClearedAt(ctx, userSub, projectID, envID)
 
 	rows, err := h.pool.Query(ctx,
 		`SELECT role, content, tool_name FROM (
@@ -885,10 +909,11 @@ func (h *Handler) AgentChatGetHistory(c *gin.Context) {
 			  AND project_id IS NOT DISTINCT FROM $2
 			  AND env_id IS NOT DISTINCT FROM $3
 			  AND role IN ('user', 'assistant', 'tool')
+			  AND created_at > $5
 			ORDER BY created_at DESC
 			LIMIT $4
 		 ) recent ORDER BY created_at ASC`,
-		userSub, projectID, envID, agentChatHistoryLimit,
+		userSub, projectID, envID, agentChatHistoryLimit, clearedAt,
 	)
 	if err != nil {
 		respondError(c, http.StatusInternalServerError, "failed to load chat history")
@@ -923,4 +948,49 @@ func (h *Handler) AgentChatGetHistory(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, agentChatHistoryResponse{Messages: messages, PendingAction: pending})
+}
+
+type agentChatClearContextRequest struct {
+	ProjectID string `json:"projectId"`
+	EnvID     string `json:"envId"`
+}
+
+// @ID          agentChatClearContext
+// @Summary     Clear the agent's conversation context for this project/env scope
+// @Description Resets what the next chat turn sends the LLM as history and what GET /agent/chat/history reconstructs on reload -- a cluttered/stale conversation can be started fresh without losing anything real. Past agent_chat_messages rows are NOT deleted: the daily message cap and the confirm/decline audit trail are computed from those rows and are completely unaffected by clearing. Also auto-declines any write-action confirmation still open in this scope, since resuming it against a conversation the user just asked to forget would be confusing.
+// @Tags        agent
+// @Accept      json
+// @Produce     json
+// @Security    BearerAuth
+// @Param       body body     agentChatClearContextRequest true "Scope to clear (projectId/envId may be empty for the no-project-selected scope)"
+// @Success     200  {object} map[string]bool
+// @Failure     401  {object} map[string]string
+// @Router      /agent/chat/context/clear [post]
+func (h *Handler) AgentChatClearContext(c *gin.Context) {
+	claims, ok := auth.GetClaims(c)
+	if !ok {
+		respondUnauthorized(c)
+		return
+	}
+
+	var req agentChatClearContextRequest
+	_ = c.ShouldBindJSON(&req)
+	projectID := parseOptionalUUID(req.ProjectID)
+	envID := parseOptionalUUID(req.EnvID)
+	userSub := claims.UserID.String()
+	ctx := c.Request.Context()
+
+	if _, err := h.pool.Exec(ctx,
+		`INSERT INTO agent_chat_context_resets (user_sub, project_id, env_id, cleared_at) VALUES ($1, $2, $3, now())`,
+		userSub, projectID, envID,
+	); err != nil {
+		respondError(c, http.StatusInternalServerError, "failed to clear context")
+		return
+	}
+
+	if pendingRow, err := h.agentChatFindOpenPendingAction(ctx, userSub, projectID, envID); err == nil && pendingRow != nil {
+		_, _ = h.agentChatConsumePendingAction(ctx, pendingRow.id, "declined")
+	}
+
+	c.JSON(http.StatusOK, gin.H{"ok": true})
 }
