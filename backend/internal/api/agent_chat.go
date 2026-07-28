@@ -464,7 +464,8 @@ func agentChatSystemPrompt(req agentChatRequest) string {
 	sb.WriteString("If envId (or, for createEndpoint, appName) is not already given above, ask the user before calling any of these tools. ")
 	sb.WriteString("If the user says to choose for them, first call getProject/listProjects (and listApps for an appName) to see what actually exists, pick a sensible one (prefer an environment named prod if several exist and the user gave no other hint), and explicitly state what you picked before calling the tool -- never guess an envId or appName you have not looked up. ")
 	sb.WriteString("Every one of these three tools always pauses for the user's explicit confirmation in the UI before it actually runs, so propose the call as soon as you have resolved its required fields; you do not need the user to also confirm in chat first. ")
-	sb.WriteString("createAppServer (a real, billed virtual machine) and createApp are not available to you yet -- if the user asks for a VM or to deploy a new app, tell them that's not supported from chat yet and point them at the console UI.")
+	sb.WriteString("createAppServer (a real, billed virtual machine) and createApp are not available to you yet -- if the user asks for a VM or to deploy a new app, tell them that's not supported from chat yet and point them at the console UI. ")
+	sb.WriteString("Naming rules for every resource name you pick yourself (createDatabase's name and database fields, createS3Bucket's name and bucket_name fields, any future VM/app name): lowercase letters, digits, and hyphens ONLY -- no underscores, no spaces, no uppercase, no leading/trailing hyphen, max 63 characters; database additionally must START with a letter, not a digit or hyphen. If the user gives you a name with underscores, spaces, or uppercase (e.g. \"my_database\", \"My DB\"), silently convert it to a valid one (underscores/spaces to hyphens, lowercase) instead of guessing and retrying after a rejection -- state the converted name you're using in the confirmation summary so the user can object. Getting this right on the first call matters: every write-tool attempt that fails backend validation still consumes this turn's limited tool-call budget, and a bad name is the single most common way to burn through it without ever creating anything.")
 	return sb.String()
 }
 
@@ -788,12 +789,21 @@ func (h *Handler) AgentChatConfirm(c *gin.Context) {
 	bearer := c.GetHeader("Authorization")
 
 	if decision == "approve" {
-		text, _ := h.agentChatTools.Execute(ctx, bearer, row.toolName, row.argsJSON)
+		text, isError := h.agentChatTools.Execute(ctx, bearer, row.toolName, row.argsJSON)
 		toolName := row.toolName
 		h.agentChatInsertMessage(ctx, userSub, row.orgID, row.projectID, row.envID, "tool", truncateForTranscript(text, agentChatToolResultMaxLen), &toolName)
 		messages = append(messages, llmchat.Message{Role: "tool", ToolCallID: row.toolCallID, Content: text})
 		toolCallCount++
-		writeCallCount++
+		// The scarce per-turn WRITE budget (unlike the general tool-call
+		// budget above) exists to bound how many resources one turn can
+		// actually create, not how many times the agent tries. A rejected
+		// attempt (bad name, quota exceeded, etc.) created nothing, so it must
+		// not count against it -- otherwise a single bad name that the model
+		// has to retry a few times exhausts the write budget before anything
+		// is ever actually created, and the turn gives up for no real reason.
+		if !isError {
+			writeCallCount++
+		}
 	} else {
 		messages = append(messages, llmchat.Message{Role: "tool", ToolCallID: row.toolCallID, Content: agentChatConfirmDeclineMessage})
 	}
