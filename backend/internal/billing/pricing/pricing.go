@@ -92,6 +92,8 @@ func Quota(p Plan, resource string) (int, bool) {
 		return p.Quotas.Domains, true
 	case "team_members":
 		return p.Quotas.TeamMembers, true
+	case "storage_gb":
+		return p.Quotas.StorageGB, true
 	}
 	return 0, false
 }

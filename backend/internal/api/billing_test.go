@@ -22,6 +22,7 @@ func testPlans() []pricing.Plan {
 				Databases:   1,
 				Domains:     1,
 				TeamMembers: 1,
+				StorageGB:   2,
 			},
 		},
 		{

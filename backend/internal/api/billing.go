@@ -164,6 +164,34 @@ func respondQuotaExceeded(c *gin.Context, resource string, limit int) {
 	})
 }
 
+// storageCapBytes resolves the plan-aware ceiling on a single app's
+// persistent volume for the given org, in bytes, plus the same value in GB
+// for the quota-exceeded error body. A cap of 0 means unlimited (Enterprise
+// plan, or an exempt org).
+//
+// Billing-disabled deployments keep the legacy flat 10Gi ceiling. Exempt
+// orgs are unlimited. quotaGraceActive is deliberately NOT consulted here:
+// grace is about not blocking orgs that were already over quota when
+// enforcement switched on, and for storage that is handled by the
+// current-size allowance in UpdateAppStorage instead.
+func (h *Handler) storageCapBytes(ctx context.Context, orgID string) (int64, int, error) {
+	if !h.cfg.BillingEnabled {
+		return quantityBytes("10Gi"), 10, nil
+	}
+	if h.quotaExempt(orgID) {
+		return 0, 0, nil
+	}
+	plan, err := h.planFor(ctx, orgID)
+	if err != nil {
+		return 0, 0, err
+	}
+	gb := plan.Quotas.StorageGB
+	if gb == 0 {
+		return 0, 0, nil
+	}
+	return int64(gb) << 30, gb, nil
+}
+
 // GetBillingPlans returns all loaded plans.
 //
 // @ID          getBillingPlans
