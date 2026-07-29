@@ -209,7 +209,7 @@ const ru: BoxCopy = {
       { kind: "ok", text: "https://b-7f3a9c.box.dada-tuda.ru · TLS выпущен" },
       { kind: "note", text: "прототип живёт, ссылку можно показать клиенту" },
       { kind: "cmd", text: "dada box crystallize --domain my-proto.ru" },
-      { kind: "out", text: "переносим: образ, тома, env, postgres, бакет, адрес" },
+      { kind: "out", text: "переносим: образ, тома, env, адрес · база и бакет остаются на месте, меняется владелец" },
       { kind: "ok", text: "VM vm-2c81 · то же окружение, теперь постоянное · домен привязан" },
     ],
   },
@@ -217,15 +217,15 @@ const ru: BoxCopy = {
   crystal: {
     title: "Кристаллизация",
     subtitle:
-      "Главное отличие от песочницы: эксперимент не выбрасывается и не переезжает. Он взрослеет. Одно удостоверение проходит весь путь.",
+      "Главное отличие от песочницы: эксперимент не выбрасывается и не пересобирается. Он переезжает целиком и взрослеет. Одно удостоверение проходит весь путь.",
     carriedTitle: "Что переносится",
     carried: [
       "файловая система бокса целиком, как есть",
-      "тома и данные, без дампов и восстановлений",
+      "тома и данные побайтово, без дампов и восстановлений (для базы внутри бокса — короткая остановка на финальной синхронизации)",
       "переменные окружения и секреты",
       "подцепленные база и бакет, теми же строками подключения",
       "публичный адрес — с временного на твой домен",
-      "запущенные процессы и порты",
+      "порты как есть, процессы — те же команды, перезапущенные один раз",
     ],
     note:
       "Это механический перенос объекта, а не пересборка по описанию. Модель в этом пути не участвует — значит нечему угадать неправильно.",
@@ -300,6 +300,8 @@ const ru: BoxCopy = {
       "кристаллизация в один шаг — сейчас это несколько операций с нашим участием",
       "тарификация за минуты",
       "гарантии по времени старта: обещать секунды публично будем, когда это будет правдой всегда",
+      "перенос без простоя: простой есть, он короткий — десятки секунд, больше на объёмных данных. Называем его цифрой, а не «без перезапуска»",
+      "перенос процессов без перезапуска: спрос измеряем, но пока считаем это честно нереализуемым",
     ],
   },
 
@@ -471,7 +473,7 @@ const en: BoxCopy = {
       { kind: "ok", text: "https://b-7f3a9c.box.dada-tuda.ru · TLS issued" },
       { kind: "note", text: "the prototype is live — the link is shareable" },
       { kind: "cmd", text: "dada box crystallize --domain my-proto.dev" },
-      { kind: "out", text: "carrying over: image, volumes, env, postgres, bucket, address" },
+      { kind: "out", text: "carrying over: image, volumes, env, address · db and bucket stay put, only the owner changes" },
       { kind: "ok", text: "VM vm-2c81 · same environment, now permanent · domain bound" },
     ],
   },
@@ -479,15 +481,15 @@ const en: BoxCopy = {
   crystal: {
     title: "Crystallization",
     subtitle:
-      "The real difference from a sandbox: the experiment is neither thrown away nor migrated. It grows up. One identity for the whole journey.",
+      "The real difference from a sandbox: the experiment is neither thrown away nor rebuilt. It moves across whole, and grows up. One identity for the whole journey.",
     carriedTitle: "What carries over",
     carried: [
       "the box filesystem, exactly as it is",
-      "volumes and data, with no dump-and-restore",
+      "volumes and data byte for byte, with no dump-and-restore (a database inside the box needs a short pause for the final sync)",
       "environment variables and secrets",
       "attached database and bucket, same connection strings",
       "the public address — from a temporary one to your domain",
-      "running processes and ports",
+      "the same ports, and the same processes relaunched once — same commands, same working dirs",
     ],
     note:
       "This is a mechanical move of an object, not a rebuild from a description. No model participates in this path — so there is nothing to guess wrong.",
@@ -562,6 +564,8 @@ const en: BoxCopy = {
       "one-step crystallization — today it's several operations with us involved",
       "per-minute billing",
       "start-time guarantees: we'll advertise seconds once it's always true",
+      "zero-downtime promotion: there is downtime, it is short — tens of seconds, longer on heavy data. We quote the number rather than claiming \"no restart\"",
+      "moving processes without a restart: we're measuring demand, but today we consider it honestly out of reach",
     ],
   },
 
