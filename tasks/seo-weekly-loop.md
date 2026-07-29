@@ -79,3 +79,71 @@ Once supplied, `scripts/seo-weekly.py` writes `tasks/seo/<date>.md` automaticall
 - Bing Webmaster Tools imports from GSC in one click, and IndexNow already feeds Bing.
 - Ranking in Google additionally needs external links; the apex-domain fix is a
   prerequisite for any link pointing at the brand root resolving cleanly.
+
+### Why Google is at zero — measured, not assumed
+
+Ingress access logs over the retained window (`ingress-nginx-pub-controller`, both
+replicas) show the crawl split plainly:
+
+| Crawler | Requests | What it fetched |
+|---|---|---|
+| YandexBot | 33 | `/`, `/developer`, `/en/status`, `/storage`, `/sitemap.xml`, `/robots.txt` |
+| bingbot | 12 | `/robots.txt`, `/en/developer/*` |
+| Googlebot (UA) | 6 | `/wp-config.php.bak`, `/.env.backup`, `/config.json`, `/signup` — all 404 |
+
+Every request carrying a Googlebot user agent is a spoofed vulnerability scanner.
+**Real Googlebot has never fetched this host.** `robots.txt` already advertises the
+sitemap and allows everything, so this is not a blocking problem — it is a discovery
+problem. Google finds new hosts through links, and there are effectively none.
+
+That leaves exactly two levers, and only one is free:
+
+1. **Search Console verification** (free, immediate). The verification meta tag now
+   ships behind `GOOGLE_SITE_VERIFICATION`, so claiming the property is an env change
+   on the deployment, no rebuild. The public sitemap ping endpoint Google used to
+   accept was retired in 2023 — Search Console is the only remaining submission path.
+2. **External links** (slow, manual). Nothing technical substitutes for this.
+
+## Review — shipped 2026-07-29/30
+
+| Defect | State | Evidence |
+|---|---|---|
+| 1. Six orphan landings | fixed | footer "Хостинг и деплой" column renders 18 landing links on live `/` and `/en` |
+| 2. Apex serves fake cert | fixed | `dada-tuda.ru` + `www`, http and https, all 301 → `https://cloud.dada-tuda.ru`, terminal 200; cert `CN=dada-tuda.ru`, issuer Let's Encrypt YR1, valid to 2026-10-27 |
+| 3. Thin-page cliff | fixed | live word counts 736-903 across ru/en (was ~330); FAQPage + HowTo JSON-LD on every page |
+| 4. Attribution blind | partly fixed | `landing_cta_click` fires with `source` + `placement` (verified against a stubbed counter: `source=pseo_discord_bot`, `placement=hero`/`band`); `/register` fires `signup_started` and writes the `dada_src` cookie. **Not** persisted to the `users` table — still no source column. |
+| 5. No Google submission path | unblocked | `GOOGLE_SITE_VERIFICATION` renders `<meta name="google-site-verification">` in SSR; token still needs minting in GSC |
+
+New pages, live and in the sitemap (88 URLs, was 84): `/hosting-discord-bot`,
+`/deploy-aiogram-bot` and their `/en` mirrors. Both submitted to Yandex (202) and
+Bing (200) via `scripts/indexnow-submit.py`.
+
+The Discord landing's core promise was measured before it was written: from the prod
+cluster, `discord.com/api/v10/gateway` returns 200 and a real websocket handshake to
+`wss://gateway.discord.gg` returns `op=10 heartbeat=41250`. The page says so.
+
+### Predictions to grade next Monday
+
+Recorded now so the next iteration is scored, not re-argued:
+
+- **P1.** Pages in Yandex index rises from 12 to ≥ 20. Mechanism: the orphans are now
+  internally linked and were pushed via IndexNow. *Falsified if still < 16.*
+- **P2.** At least one of `/hosting-fastapi`, `/hosting-django`, `/hosting-flask`
+  earns its first impression. Mechanism: 330w → 750w+ crossed the threshold every
+  currently-ranking page sits above. *Falsified if all three stay at zero.*
+- **P3.** `analog-*` stays flat (≤ 35 impressions/week total). This is the control —
+  it received no changes. If it moves, the cause is sitewide (apex fix, crawl budget),
+  not the content work, and P1/P2 must be re-attributed.
+- **P4.** Google stays at zero until the GSC property is verified. *Falsified by any
+  real Googlebot hit in the ingress logs* — check with the crawler count above.
+
+### Owner actions that unblock the rest
+
+1. Create the `cloud.dada-tuda.ru` property in Google Search Console, paste the token
+   into `GOOGLE_SITE_VERIFICATION` on the cloud-console deployment, then submit
+   `sitemap.xml`. This is the entire Google story.
+2. Register `landing_cta_click` and `signup_started` in Metrika counter 110158915 as
+   JavaScript-event goals — the calls fire, but reports stay empty until the goals
+   exist.
+3. Supply one Yandex OAuth token (`metrika:read` + Webmaster read) so
+   `scripts/seo-weekly.py` replaces the screenshot in the table at the top of this file.
