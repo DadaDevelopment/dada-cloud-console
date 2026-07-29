@@ -24,6 +24,18 @@ spec:
         app.kubernetes.io/component: frontend
     spec:
       serviceAccountName: {{ include "dada-cloud-console.fullname" . }}
+      {{- if gt (int .Values.frontend.replicaCount) 1 }}
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                topologyKey: kubernetes.io/hostname
+                labelSelector:
+                  matchLabels:
+                    {{- include "dada-cloud-console.selectorLabels" . | nindent 20 }}
+                    app.kubernetes.io/component: frontend
+      {{- end }}
       {{- with .Values.global.imagePullSecrets }}
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
