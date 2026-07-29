@@ -32,10 +32,33 @@ const appVolumeAlertThreshold = 0.85
 // suppressed by, a crash-loop alert for the same app.
 const appVolumeAlertCooldown = 24 * time.Hour
 
-// volumeUsageQuery is a single cluster-wide instant query for every PVC's
+// volumeUsageQuery is a single cluster-wide query for every PVC's
 // used/capacity ratio; the watcher filters the result set down to user
 // namespaces itself rather than querying per-namespace.
-const volumeUsageQuery = `kubelet_volume_stats_used_bytes / kubelet_volume_stats_capacity_bytes`
+//
+// The ratio is built from last_over_time rather than a bare instant division
+// on purpose. kubelet publishes volume stats per node, so a pod that keeps
+// getting rescheduled - exactly what a full volume causes, via ENOSPC
+// CrashLoopBackOff - staleness-marks its series on the old node before the
+// new node's first scrape lands. A bare instant query then finds no sample at
+// the tick instant and the PVC silently drops out of the result set, so the
+// watcher misses precisely the volumes it exists to catch. Reproduced on the
+// 2026-07-29 fonbet-value incident: the fill ratio held at 0.9987 for the
+// whole window while five consecutive ticks saw the PVC vanish and logged
+// hot_user_ns=0, with the series bouncing across three nodes.
+//
+// The lookback exceeds the largest churn gap observed there (~13m) while
+// staying far below appVolumeAlertCooldown, so a stale sample can never
+// resurrect an alert for a volume that has since been resized. Do not attempt
+// to fix this class of miss by shortening appVolumeWatchInterval: more
+// frequent instant queries raise the chance of landing in a gap, they do not
+// lower it.
+const volumeUsageLookback = "20m"
+
+var volumeUsageQuery = fmt.Sprintf(
+	`last_over_time(kubelet_volume_stats_used_bytes[%[1]s]) / last_over_time(kubelet_volume_stats_capacity_bytes[%[1]s])`,
+	volumeUsageLookback,
+)
 
 // appVolumeWatcher polls Prometheus for PVC fill ratio across every user
 // namespace and emails the project owner once per app per cooldown window
