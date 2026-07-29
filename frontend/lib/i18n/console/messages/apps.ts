@@ -474,6 +474,14 @@ export const apps: Messages = {
   },
   "apps.settings.git.manageRepos": { ru: "Управление репозиториями", en: "Manage repositories" },
   "apps.settings.git.viewDeployments": { ru: "Просмотр деплоев", en: "View deployments" },
+  "apps.settings.source.title": { ru: "Загруженный исходник", en: "Uploaded source" },
+  "apps.settings.source.subtitle": {
+    ru: "Это приложение задеплоено из загруженного архива, а не из Git-репозитория. Скачайте архив, если потеряли локальную копию.",
+    en: "This app was deployed from an uploaded archive, not a connected Git repository. Download it back if you lost your local copy.",
+  },
+  "apps.settings.source.download": { ru: "Скачать исходник", en: "Download source" },
+  "apps.settings.source.busy": { ru: "Подготовка ссылки…", en: "Preparing link…" },
+  "apps.settings.source.error": { ru: "Не удалось подготовить скачивание", en: "Failed to prepare download" },
 
   "apps.values.crumb": { ru: "values.yaml", en: "values.yaml" },
   "apps.values.heading.suffix": { ru: "/ values.yaml", en: "/ values.yaml" },

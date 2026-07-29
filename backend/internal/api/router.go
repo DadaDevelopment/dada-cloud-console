@@ -389,6 +389,7 @@ func SetupRouter(pool *pgxpool.Pool, cfg *config.Config) *gin.Engine {
 		api.GET("/projects/:projectId/environments/:envId/apps/:appName/builds", auth.RequireScope("builds:read"), h.ListBuilds)
 		api.POST("/projects/:projectId/environments/:envId/apps/:appName/builds", auth.RequireScope("builds:write"), h.TriggerBuild)
 		api.POST("/projects/:projectId/environments/:envId/apps/:appName/source-archive", auth.RequireScope("builds:write"), h.UploadSourceArchive)
+		api.GET("/projects/:projectId/environments/:envId/apps/:appName/source-archive/download", h.DownloadSourceArchive)
 		api.GET("/projects/:projectId/builds/:buildId", auth.RequireScope("builds:read"), h.GetBuild)
 		api.POST("/projects/:projectId/builds/:buildId/cancel", auth.RequireScope("builds:write"), h.CancelBuild)
 		api.POST("/projects/:projectId/builds/:buildId/logs-token", auth.RequireScope("builds:read"), h.GetBuildLogsToken)

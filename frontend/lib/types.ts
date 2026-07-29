@@ -928,7 +928,7 @@ export type DeployTrigger =
   | "rollback"
   | "promote";
 
-export type GitProvider = "github" | "gitlab";
+export type GitProvider = "github" | "gitlab" | "archive";
 
 export interface GitInstallation {
   id: string;

@@ -5,7 +5,7 @@ import Link from "next/link";
 import { Breadcrumb } from "@/components/ui/breadcrumb";
 import { useProjectContext } from "@/lib/project-context";
 import { canMutate } from "@/lib/rbac";
-import { customDomainsApi } from "@/lib/api";
+import { customDomainsApi, appsApi, gitApi } from "@/lib/api";
 import type { DomainAuthorization } from "@/lib/types";
 import { EnvVarsEditor } from "@/components/deploy/env-vars-editor";
 import { HostnamesManager } from "@/components/deploy/hostnames-manager";
@@ -37,6 +37,9 @@ export default function AppSettingsPage() {
   })();
   const [tab, setTab] = useState<Tab>(initialTab);
   const [verifiedApexes, setVerifiedApexes] = useState<DomainAuthorization[]>([]);
+  const [isUploadedSource, setIsUploadedSource] = useState(false);
+  const [sourceDownloadBusy, setSourceDownloadBusy] = useState(false);
+  const [sourceDownloadError, setSourceDownloadError] = useState<string | null>(null);
   const canEdit = canMutate(role);
 
   useEffect(() => {
@@ -45,6 +48,30 @@ export default function AppSettingsPage() {
       .then((d) => setVerifiedApexes((d.authorizations ?? []).filter((a) => a.status === "verified")))
       .catch(() => setVerifiedApexes([]));
   }, [projectId]);
+
+  useEffect(() => {
+    if (!envId) return;
+    gitApi
+      .listRepos(projectId, envId)
+      .then((d) => {
+        const repo = (d.repos ?? []).find((r) => r.app_name === appName);
+        setIsUploadedSource(repo?.provider === "archive");
+      })
+      .catch(() => setIsUploadedSource(false));
+  }, [projectId, envId, appName]);
+
+  async function downloadSource() {
+    setSourceDownloadBusy(true);
+    setSourceDownloadError(null);
+    try {
+      const d = await appsApi.downloadSourceArchive(projectId, envId, appName);
+      window.location.href = d.url;
+    } catch (e) {
+      setSourceDownloadError(e instanceof Error ? e.message : t("apps.settings.source.error"));
+    } finally {
+      setSourceDownloadBusy(false);
+    }
+  }
 
   const validTabsForVM: Tab[] = ["env", "config", "storage", "payments", "domains", "git"];
   const effectiveTab: Tab = isVM && !validTabsForVM.includes(tab) ? "env" : tab;
@@ -127,6 +154,27 @@ export default function AppSettingsPage() {
               {t("apps.settings.git.viewDeployments")}
             </Link>
           </div>
+
+          {isUploadedSource && (
+            <div className="mt-6 border-t border-gray-200 dark:border-gray-800 pt-5">
+              <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100">
+                {t("apps.settings.source.title")}
+              </h3>
+              <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
+                {t("apps.settings.source.subtitle")}
+              </p>
+              <button
+                onClick={downloadSource}
+                disabled={sourceDownloadBusy}
+                className="mt-3 rounded-lg border border-gray-300 dark:border-gray-700 px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-50 disabled:opacity-50"
+              >
+                {sourceDownloadBusy ? t("apps.settings.source.busy") : t("apps.settings.source.download")}
+              </button>
+              {sourceDownloadError && (
+                <p className="mt-2 text-sm text-red-600 dark:text-red-400">{sourceDownloadError}</p>
+              )}
+            </div>
+          )}
         </div>
       )}
 

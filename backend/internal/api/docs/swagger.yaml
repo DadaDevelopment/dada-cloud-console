@@ -5811,6 +5811,67 @@ paths:
       summary: Deploy from an uploaded source archive
       tags:
       - build
+  /projects/{projectId}/environments/{envId}/apps/{appName}/source-archive/download:
+    get:
+      description: Returns a short-lived (15 min) presigned download URL for the source
+        archive most recently uploaded for this app via upload-deploy. 404 when the
+        app has no uploaded archive (it was created from a connected git repo instead,
+        or nothing has been uploaded yet). 503 when source upload/download is not
+        configured for this environment. Requires write access.
+      operationId: downloadSourceArchive
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      - description: Environment UUID
+        in: path
+        name: envId
+        required: true
+        type: string
+      - description: App name
+        in: path
+        name: appName
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: object with url, filename and expires_at
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "503":
+          description: Service Unavailable
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Download the uploaded source archive for an app
+      tags:
+      - build
   /projects/{projectId}/environments/{envId}/apps/{appName}/state:
     get:
       description: Returns the live Docker Compose stack + container state for a VM

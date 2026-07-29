@@ -407,6 +407,11 @@ export const appsApi = {
     );
   },
 
+  downloadSourceArchive: (projectId: string, envId: string, appName: string) =>
+    apiFetch<{ url: string; filename: string; expires_at: string }>(
+      `/api/v1/projects/${projectId}/environments/${envId}/apps/${appName}/source-archive/download`
+    ),
+
   updateStorage: (
     projectId: string,
     envId: string,
