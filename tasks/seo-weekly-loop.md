@@ -233,3 +233,69 @@ measurable per source next week; that number should be the first thing checked.
    third-party availability that age fast.
 3. Only then more bot-cluster pages. Bot demand in Yandex is currently 2
    impressions/month; the cluster is a product-fit bet, not yet a measured one.
+
+## Correction 2 — 2026-07-30, the "76% signup drop" is a measurement artifact
+
+Queue item 1 said "investigate the 21 → 5 signup drop. Highest expected value in the
+file." Investigated. The drop is not real, and the shape of the funnel is different
+from what the Metrika goals imply.
+
+### What the goals actually measure
+
+`Регистрация (переход на /register)` is a **url-contains-`register`** goal, so it
+counts visits that touched the page, not people. `Регистрация: завершена (JS)` fires
+only from `/callback`, and only when `startRegister()` wrote the
+`dada_pending_registration` marker within the last 30 minutes
+(`frontend/app/callback/page.tsx:51`). Anyone who signs up by clicking Keycloak's own
+"Register" link from `/login` — 65 pageviews vs `/register`'s 14 in the same window —
+creates a real account and never trips the goal. The two numbers were never a funnel.
+
+### The real numbers, from Keycloak and the console DB
+
+| Stage | Count (2026-06-30..07-30) | Source |
+|---|---:|---|
+| Keycloak accounts created | 22 | admin API `createdTimestamp` |
+| — minus e2e/test/internal | **16 real signups** | excludes `*@dada-tuda.ru`, `sp2-verify`, UUID-named |
+| Started at least one build | **7** | `builds` join `environments` join `projects` |
+| Reached a successful build | **7** | `status='success'` |
+| Never created an app at all | **8** | zero `resource_snapshots` of kind App |
+
+So signup completes fine — roughly 16 accounts against 25 `/register` goal reaches.
+**The leak is activation: 9 of 16 real signups (56%) never triggered a single build.**
+
+Two things fall out of the same query:
+
+- **Everyone who started a build got a green one.** with_builds = 7, activated = 7.
+  Build reliability is not the constraint right now; pressing the button is.
+- **The drop-off users left no trace.** 8 of the 9 have zero rows in `audit_events`;
+  the ninth (`top.decker@yandex.ru`) created an app and never built it. The project
+  each of them owns is the one the backend auto-provisions on first login, not
+  something they made.
+
+### Why they stall — the one structural cause visible in code
+
+`ONBOARDING_CAMPAIGNS` (`frontend/lib/onboarding/campaigns.ts`) contains exactly one
+campaign, `agent`, pointing at the agent-chat FAB. There is no first-deploy campaign.
+`user_onboarding` holds 6 rows total, all `agent`, all from internal users — including
+for the two accounts created on 07-29, after the onboarding engine shipped on 07-25.
+A new user lands in an auto-provisioned empty project with nothing directing them at
+a first deploy.
+
+This is product work, not SEO, and it is deliberately left queued rather than shipped
+tonight: the fix is an onboarding path, and its shape is an owner call. But it is
+correctly sized now — 56% of everyone who signs up, against 11 search clicks for the
+whole month. It remains item 1.
+
+### Effect on the queue
+
+1. **Activation, not signup.** Build a first-deploy path for the empty project.
+   Evidence above. Owner decision on shape.
+2. Payment/access-intent landings — in flight in a parallel session
+   (`/oplatit-vercel-iz-rossii`, `/rabotaet-li-vercel-v-rossii`, + `/en` mirrors),
+   not duplicated here.
+3. Bot-cluster pages — unchanged, still a product-fit bet at 2 impressions/month.
+
+Also worth fixing when someone touches Metrika next: rename the url goal to
+"Visited /register" so it stops reading as a signup count, and fire
+`registration_complete` from the console shell on first authenticated load for a
+brand-new `sub` rather than from the marker, so KC-side signups are counted too.
