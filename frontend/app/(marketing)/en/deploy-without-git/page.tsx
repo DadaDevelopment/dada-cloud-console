@@ -4,6 +4,7 @@ import { useLang } from "@/lib/i18n/context";
 import { ProductHero, FeatureGrid, FaqList, CtaBand } from "@/components/marketing/sections";
 import { FaqJsonLd } from "@/components/marketing/faq-jsonld";
 import { HowToJsonLd } from "@/components/marketing/howto-jsonld";
+import { PricingAndCaveats } from "@/components/marketing/alt-landing";
 
 const UTM = "utm_source=upload_landing";
 
@@ -41,6 +42,7 @@ export default function DeployWithoutGitPage() {
       </section>
 
       <FeatureGrid title={g.featuresTitle} features={g.features} />
+      <PricingAndCaveats {...g} />
       <FaqList title={g.faqTitle} items={g.faq} />
       <CtaBand ctaHref={`/register?${UTM}`} />
     </>

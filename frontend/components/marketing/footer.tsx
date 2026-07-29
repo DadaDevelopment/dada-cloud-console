@@ -21,11 +21,20 @@ const MARKETING_PATHS = new Set([
   "/analog-digitalocean",
   "/analog-fly-io",
   "/deploy-vibe-coding",
+  "/deploy-without-git",
   "/hosting-telegram-bot",
+  "/deploy-aiogram-bot",
+  "/hosting-discord-bot",
+  "/hosting-vk-bot",
+  "/hosting-fastapi",
+  "/hosting-flask",
+  "/hosting-django",
+  "/hosting-streamlit",
   "/accept-payments",
   "/migrate-vercel",
   "/status",
   "/developer",
+  "/developer/mcp-ai-agents",
   "/privacy",
   "/terms",
 ]);
@@ -35,6 +44,7 @@ export function MarketingFooter() {
   const href = (path: string) => (MARKETING_PATHS.has(path) ? localeHref(path, locale) : path);
   const cols = [
     { title: t.footer.productsTitle, links: t.footer.products },
+    { title: t.footer.hostingTitle, links: t.footer.hosting },
     { title: t.footer.companyTitle, links: t.footer.company },
     { title: t.footer.resourcesTitle, links: t.footer.resources },
   ];
@@ -42,8 +52,8 @@ export function MarketingFooter() {
   return (
     <footer className="border-t border-white/10 bg-[#0b1220] text-white/70">
       <div className="mx-auto max-w-7xl px-4 py-12 sm:px-6 lg:px-8">
-        <div className="grid grid-cols-2 gap-8 md:grid-cols-4">
-          <div className="col-span-2 md:col-span-1">
+        <div className="grid grid-cols-2 gap-8 md:grid-cols-3 lg:grid-cols-5">
+          <div className="col-span-2 md:col-span-3 lg:col-span-1">
             <Link href={localeHref("/", locale)} className="flex items-center gap-2 text-white">
               <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-blue-600">
                 <Cloud className="h-5 w-5" />

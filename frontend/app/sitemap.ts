@@ -23,6 +23,8 @@ const STATIC_ROUTES: Array<{ path: string; priority: number; changeFrequency: Me
   { path: "/deploy-vibe-coding", priority: 0.9, changeFrequency: "monthly" },
   { path: "/deploy-without-git", priority: 0.9, changeFrequency: "monthly" },
   { path: "/hosting-telegram-bot", priority: 0.9, changeFrequency: "monthly" },
+  { path: "/deploy-aiogram-bot", priority: 0.9, changeFrequency: "monthly" },
+  { path: "/hosting-discord-bot", priority: 0.8, changeFrequency: "monthly" },
   { path: "/accept-payments", priority: 0.9, changeFrequency: "monthly" },
   { path: "/hosting-fastapi", priority: 0.8, changeFrequency: "monthly" },
   { path: "/hosting-flask", priority: 0.8, changeFrequency: "monthly" },

@@ -3,6 +3,7 @@ import { Suspense, useEffect, useRef } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useAuth } from "@/lib/auth";
 import { startRegister } from "@/lib/register-redirect";
+import { GOAL_SIGNUP_STARTED, reachGoal, rememberSource } from "@/lib/metrika";
 
 const AUTH_MODE = process.env.NEXT_PUBLIC_AUTH_MODE;
 
@@ -36,6 +37,7 @@ function OidcRegisterPage() {
   const { isLoading, token } = useAuth();
   const startedRef = useRef(false);
   const returnTo = sanitizeReturnTo(searchParams.get("returnTo") ?? searchParams.get("next"));
+  const source = searchParams.get("utm_source") ?? "direct";
 
   useEffect(() => {
     if (isLoading) return;
@@ -45,8 +47,10 @@ function OidcRegisterPage() {
     }
     if (startedRef.current) return;
     startedRef.current = true;
+    rememberSource(source);
+    reachGoal(GOAL_SIGNUP_STARTED, { source });
     void startRegister(returnTo);
-  }, [isLoading, token, router, returnTo]);
+  }, [isLoading, token, router, returnTo, source]);
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-gray-50">

@@ -37,3 +37,7 @@ Thumbs.db
 
 # Git state repo (local dev only)
 /tmp/dada-state-repo/
+
+# Python
+__pycache__/
+*.pyc

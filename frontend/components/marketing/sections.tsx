@@ -5,6 +5,7 @@ import { Check, ChevronDown } from "lucide-react";
 import { useState } from "react";
 import { useLang } from "@/lib/i18n/context";
 import { consoleHref, localeHref } from "@/lib/site";
+import { GOAL_LANDING_CTA, ctaSource, reachGoal } from "@/lib/metrika";
 import { clsx } from "clsx";
 
 export function ProductHero({
@@ -35,6 +36,7 @@ export function ProductHero({
           <div className="mt-8 flex flex-wrap gap-3">
             <Link
               href={consoleHref(ctaHref ?? "/register")}
+              onClick={() => reachGoal(GOAL_LANDING_CTA, { source: ctaSource(ctaHref ?? ""), placement: "hero" })}
               className="rounded-md bg-blue-600 px-6 py-3 text-sm font-semibold text-white transition-colors hover:bg-blue-700"
             >
               {t.common.createAccount}
@@ -127,6 +129,7 @@ export function CtaBand({ ctaHref }: { ctaHref?: string } = {}) {
         <p className="mx-auto mt-4 max-w-xl text-lg text-white/70">{t.home.ctaSubtitle}</p>
         <Link
           href={consoleHref(ctaHref ?? "/register")}
+          onClick={() => reachGoal(GOAL_LANDING_CTA, { source: ctaSource(ctaHref ?? ""), placement: "band" })}
           className="mt-8 inline-block rounded-md bg-blue-600 px-8 py-3 text-sm font-semibold text-white transition-colors hover:bg-blue-700"
         >
           {t.common.createAccount}
