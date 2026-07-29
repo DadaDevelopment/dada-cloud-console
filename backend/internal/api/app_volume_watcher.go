@@ -208,28 +208,39 @@ func claimAppVolumeAlertSlot(ctx context.Context, pool *pgxpool.Pool, namespace,
 }
 
 // maybeNotify sends the owner alert for one over-threshold volume, gated by
-// the per-app 24h cooldown persisted in app_volume_alerts. The cooldown is
-// claimed before the send attempt so a slow/failing SMTP relay cannot cause a
-// retry storm on the next tick.
+// the per-app 24h cooldown persisted in app_volume_alerts. The recipient is
+// resolved BEFORE the cooldown is claimed (P1-ALERT-OWNERLESS-DROP: claiming
+// first meant a project with no resolvable owner burned its 24h cooldown slot
+// on a drop, muting real alerts even after ownership got fixed). The cooldown
+// is still claimed before the actual send, so a slow/failing SMTP relay
+// cannot cause a retry storm on the next tick.
 func (w *appVolumeWatcher) maybeNotify(ctx context.Context, projectID uuid.UUID, namespace, appName string, ratio float64) {
-	if !claimAppVolumeAlertSlot(ctx, w.h.pool, namespace, appName, appVolumeAlertCooldown) {
+	to, source := w.h.resolveAlertRecipient(ctx, projectID)
+	if to == "" {
+		to = w.h.auditNotifyEmail
+		source = alertSourceOperator
+	}
+	if to == "" {
+		log.Printf("app-volume: no owner/member/org/operator recipient for project %s, dropping alert for app=%s ratio=%.3f", projectID, appName, ratio)
 		return
 	}
 
-	to := w.h.projectOwnerEmail(ctx, projectID)
-	if to == "" {
-		log.Printf("app-volume: no owner email for project %s, dropping alert for app=%s ratio=%.3f", projectID, appName, ratio)
+	if !claimAppVolumeAlertSlot(ctx, w.h.pool, namespace, appName, appVolumeAlertCooldown) {
 		return
 	}
 
 	size := w.h.declaredVolumeSize(ctx, projectID, appName)
 	consoleLink := fmt.Sprintf("%s/projects/%s/apps/%s/settings?tab=storage", w.h.cfg.PublicBaseURL, projectID, appName)
 	subject, body := notify.ComposeVolumeAlert(appName, ratio, size, consoleLink)
+	if source == alertSourceOperator {
+		log.Printf("app-volume: WARN no reachable owner for project %s, falling back to operator for app=%s ratio=%.3f", projectID, appName, ratio)
+		subject, body = notify.ComposeNoOwnerFallback(projectID.String(), w.h.projectDisplayName(ctx, projectID), subject, body)
+	}
 	if err := w.h.auditNotifier.Send(to, subject, body); err != nil {
 		log.Printf("app-volume: send to %s failed for app=%s: %v", to, appName, err)
 		return
 	}
-	log.Printf("app-volume: alerted %s for app=%s ratio=%.3f", to, appName, ratio)
+	log.Printf("app-volume: alerted %s (source=%s) for app=%s ratio=%.3f", to, source, appName, ratio)
 }
 
 // declaredVolumeSize best-effort reads the app's declared volume size (e.g.

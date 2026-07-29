@@ -193,6 +193,23 @@ func ComposeVolumeAlert(appName string, ratio float64, declaredSize, consoleLink
 	return subject, b.String()
 }
 
+// ComposeNoOwnerFallback wraps an already-composed alert subject/body for the
+// operator-fallback case (P1-ALERT-OWNERLESS-DROP): the resolver chain found
+// no reachable owner (no owner_id, no Owner/Admin member, no personal-org
+// username match), so the alert routes to the operator mailbox instead of
+// being silently dropped. The wrapped copy states plainly, up front, that
+// this is not a normal owner alert — the operator needs to see at a glance
+// that a project has drifted into an unreachable-owner state, not just read
+// another crash/volume email as if it reached the customer.
+func ComposeNoOwnerFallback(projectID, projectName, origSubject, origBody string) (subject, body string) {
+	subject = fmt.Sprintf("[БЕЗ ВЛАДЕЛЬЦА] %s", origSubject)
+	var b strings.Builder
+	b.WriteString("ВНИМАНИЕ: у проекта не найден достижимый владелец (нет owner_id, нет участника Owner/Admin, нет совпадения personal-org). Письмо отправлено оператору вместо клиента.\n")
+	fmt.Fprintf(&b, "Проект: %s (id=%s)\n\n", projectName, projectID)
+	b.WriteString(origBody)
+	return subject, b.String()
+}
+
 // Send delivers one message to a single recipient over SMTP with STARTTLS
 // (net/smtp negotiates STARTTLS automatically when the server advertises it,
 // as Postbox does on 587). Returns an error the caller logs and swallows.

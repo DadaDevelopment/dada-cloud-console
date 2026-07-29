@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"strings"
 	"time"
 
 	"github.com/dada-tuda/console/backend/internal/notify"
@@ -134,21 +135,120 @@ func (h *Handler) namespaceProjects(ctx context.Context) (map[string]namespaceEn
 	return out, rows.Err()
 }
 
-// projectOwnerEmail resolves the recipient for an app-health alert: the
-// project's owner, the same LEFT JOIN users ON owner_id pattern used across
-// projects.go/admin_overview.go. Empty when the project has no owner_id
-// (team-owned project with no single owner on record) so the caller can skip
-// sending rather than guess a recipient.
-func (h *Handler) projectOwnerEmail(ctx context.Context, projectID uuid.UUID) string {
+// Alert recipient sources, logged at send time (P1-ALERT-OWNERLESS-DROP) so
+// every alert email is traceable to exactly which step of the resolver chain
+// picked the address, and the operator-fallback case (no reachable owner) is
+// distinguishable from the normal case in logs alone.
+const (
+	alertSourceOwner       = "owner"
+	alertSourceMember      = "member"
+	alertSourcePersonalOrg = "personal-org"
+	alertSourceOperator    = "operator-fallback"
+)
+
+// isKeycloakLocalEmail reports whether email is one of the synthetic
+// placeholder addresses internal/auth/provision.go stamps on a Keycloak
+// identity with no email claim (<sub>@keycloak.local). Such an address
+// resolves non-empty but is not a real mailbox: every step of
+// resolveAlertRecipient must reject it and fall through to the next
+// candidate instead of "sending" an alert into the void.
+func isKeycloakLocalEmail(email string) bool {
+	return strings.HasSuffix(strings.ToLower(email), "@keycloak.local")
+}
+
+// ownerEmailByOwnerID is resolveAlertRecipient step (a): projects.owner_id ->
+// users.email, the same LEFT JOIN users ON owner_id pattern used across
+// projects.go/admin_overview.go. This is the normal case for every project
+// with a single recorded owner.
+func (h *Handler) ownerEmailByOwnerID(ctx context.Context, projectID uuid.UUID) string {
 	var email string
 	err := h.pool.QueryRow(ctx,
 		`SELECT u.email FROM projects p
 		 JOIN users u ON u.id = p.owner_id
 		 WHERE p.id = $1`, projectID).Scan(&email)
-	if err != nil {
+	if err != nil || isKeycloakLocalEmail(email) {
 		return ""
 	}
 	return email
+}
+
+// ownerEmailByMembers is resolveAlertRecipient step (b): a project_members
+// row with role Owner or Admin, picked deterministically (highest role rank
+// first, then oldest membership) so repeated ticks always land on the same
+// address. A row with a synthetic @keycloak.local email is skipped in favor
+// of the next candidate row rather than aborting the whole step.
+func (h *Handler) ownerEmailByMembers(ctx context.Context, projectID uuid.UUID) string {
+	rows, err := h.pool.Query(ctx,
+		`SELECT u.email FROM project_members pm
+		 JOIN users u ON u.id = pm.user_id
+		 WHERE pm.project_id = $1 AND pm.role IN ('Owner', 'Admin')
+		 ORDER BY CASE pm.role WHEN 'Owner' THEN 0 WHEN 'Admin' THEN 1 ELSE 2 END,
+		          pm.created_at ASC`, projectID)
+	if err != nil {
+		return ""
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var email string
+		if err := rows.Scan(&email); err != nil {
+			continue
+		}
+		if email != "" && !isKeycloakLocalEmail(email) {
+			return email
+		}
+	}
+	return ""
+}
+
+// ownerEmailByOrgUsername is resolveAlertRecipient step (c): the personal-org
+// convention (internal/auth/jwt.go:113-122, every user is implicitly Owner of
+// an org whose id equals their username) applied in reverse — a project whose
+// org_id matches a user's username is that user's personal project even with
+// no owner_id and no project_members row.
+func (h *Handler) ownerEmailByOrgUsername(ctx context.Context, projectID uuid.UUID) string {
+	var email string
+	err := h.pool.QueryRow(ctx,
+		`SELECT u.email FROM projects p
+		 JOIN users u ON u.username = p.org_id
+		 WHERE p.id = $1`, projectID).Scan(&email)
+	if err != nil || isKeycloakLocalEmail(email) {
+		return ""
+	}
+	return email
+}
+
+// resolveAlertRecipient is the single choke point every watcher alert routes
+// through to pick a send address: owner_id, then project_members Owner/Admin,
+// then the org_id/username personal-org match. Returns ("", "") when none
+// resolve to a real mailbox so the caller can fall back to the operator
+// address instead of silently dropping the alert — the P1-ALERT-OWNERLESS-DROP
+// bug this replaces: 5 live projects have owner_id NULL, one of them
+// (client-a-prod) with real crashlooping pods, a real Keycloak user working
+// in it, and zero joinable project_members rows, so every alert for it was
+// being dropped with no operator visibility at all.
+func (h *Handler) resolveAlertRecipient(ctx context.Context, projectID uuid.UUID) (email, source string) {
+	if e := h.ownerEmailByOwnerID(ctx, projectID); e != "" {
+		return e, alertSourceOwner
+	}
+	if e := h.ownerEmailByMembers(ctx, projectID); e != "" {
+		return e, alertSourceMember
+	}
+	if e := h.ownerEmailByOrgUsername(ctx, projectID); e != "" {
+		return e, alertSourcePersonalOrg
+	}
+	return "", ""
+}
+
+// projectDisplayName best-effort reads a project's name for the operator
+// fallback email body (project id + name, so the operator can act on it
+// without a console lookup), falling back to the raw id string on any
+// failure so a name-lookup problem never blocks the alert itself.
+func (h *Handler) projectDisplayName(ctx context.Context, projectID uuid.UUID) string {
+	var name string
+	if err := h.pool.QueryRow(ctx, `SELECT name FROM projects WHERE id = $1`, projectID).Scan(&name); err != nil || name == "" {
+		return projectID.String()
+	}
+	return name
 }
 
 // tick scans every user namespace once, detects bad-state pods, and fires at
@@ -241,18 +341,26 @@ func claimAppHealthAlertSlot(ctx context.Context, pool *pgxpool.Pool, namespace,
 }
 
 // maybeNotify sends the owner alert for one detected bad-state app, gated by
-// the per-app 24h cooldown persisted in app_health_alerts. The cooldown is
-// claimed before the send attempt so a slow/failing SMTP relay cannot cause a
-// retry storm on the next tick; a genuine second crash within the window is
-// deliberately not re-alerted (P1-2b spec: at most one email per app per 24h).
+// the per-app 24h cooldown persisted in app_health_alerts. The recipient is
+// resolved BEFORE the cooldown is claimed (P1-ALERT-OWNERLESS-DROP: claiming
+// first meant a project with no resolvable owner burned its 24h cooldown slot
+// on a drop, muting real alerts even after ownership got fixed). The cooldown
+// is still claimed before the actual send, so a slow/failing SMTP relay
+// cannot cause a retry storm on the next tick; a genuine second crash within
+// the window is deliberately not re-alerted (P1-2b spec: at most one email
+// per app per 24h).
 func (w *appHealthWatcher) maybeNotify(ctx context.Context, projectID uuid.UUID, alert appHealthAlert) {
-	if !claimAppHealthAlertSlot(ctx, w.h.pool, alert.Namespace, alert.AppName, appHealthAlertCooldown) {
+	to, source := w.h.resolveAlertRecipient(ctx, projectID)
+	if to == "" {
+		to = w.h.auditNotifyEmail
+		source = alertSourceOperator
+	}
+	if to == "" {
+		log.Printf("app-health: no owner/member/org/operator recipient for project %s, dropping alert for app=%s reason=%s", projectID, alert.AppName, alert.Reason)
 		return
 	}
 
-	to := w.h.projectOwnerEmail(ctx, projectID)
-	if to == "" {
-		log.Printf("app-health: no owner email for project %s, dropping alert for app=%s reason=%s", projectID, alert.AppName, alert.Reason)
+	if !claimAppHealthAlertSlot(ctx, w.h.pool, alert.Namespace, alert.AppName, appHealthAlertCooldown) {
 		return
 	}
 
@@ -261,11 +369,15 @@ func (w *appHealthWatcher) maybeNotify(ctx context.Context, projectID uuid.UUID,
 	codeHint := notify.ClassifyCrashLog(logExcerpt)
 	agentURL := consoleLink + "#agent"
 	subject, body := notify.ComposeAppAlert(alert.AppName, alert.Reason, alert.PodName, logExcerpt, consoleLink, codeHint, agentURL)
+	if source == alertSourceOperator {
+		log.Printf("app-health: WARN no reachable owner for project %s, falling back to operator for app=%s reason=%s", projectID, alert.AppName, alert.Reason)
+		subject, body = notify.ComposeNoOwnerFallback(projectID.String(), w.h.projectDisplayName(ctx, projectID), subject, body)
+	}
 	if err := w.h.auditNotifier.Send(to, subject, body); err != nil {
 		log.Printf("app-health: send to %s failed for app=%s: %v", to, alert.AppName, err)
 		return
 	}
-	log.Printf("app-health: alerted %s for app=%s reason=%s pod=%s", to, alert.AppName, alert.Reason, alert.PodName)
+	log.Printf("app-health: alerted %s (source=%s) for app=%s reason=%s pod=%s", to, source, alert.AppName, alert.Reason, alert.PodName)
 }
 
 // tailLog best-effort fetches the crashed container's last lines: the
