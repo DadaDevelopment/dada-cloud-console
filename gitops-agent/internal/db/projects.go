@@ -3,10 +3,12 @@ package db
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -99,34 +101,73 @@ func ListProjectMembers(ctx context.Context, pool *pgxpool.Pool, projectName str
 }
 
 // UpsertProject stores a project catalog row, preferring values from git.
+// ownerID is nullable: pass nil when the manifest names no owner or the named
+// owner could not be resolved to a users.id. Returns whether the call inserted
+// a brand-new row (true) or updated an existing one (false), via the
+// `xmax = 0` Postgres idiom, so callers can decide whether a missing owner is
+// worth a one-time warning versus repeating it on every poll.
 func UpsertProject(ctx context.Context, pool *pgxpool.Pool,
 	name, displayName, ownerType, defaultEnvironment string,
-	quotas json.RawMessage,
-) error {
+	quotas json.RawMessage, ownerID *uuid.UUID,
+) (bool, error) {
 	if quotas == nil {
 		quotas = json.RawMessage(`{}`)
+	}
+
+	var ownerIDParam any
+	if ownerID != nil {
+		ownerIDParam = *ownerID
 	}
 
 	// Git-origin projects (no console creator) belong to the shared org "dada"
 	// (decision: project created via git = dada org). On conflict we keep any
 	// existing org_id so a console-created project's personal org is never
-	// downgraded; COALESCE also heals legacy rows still NULL.
-	_, err := pool.Exec(ctx, `
+	// downgraded; COALESCE also heals legacy rows still NULL. owner_id follows
+	// the same never-clobber rule: a manifest owner only fills a NULL slot, it
+	// never overwrites a real owner already on the row (M5 lives on shared
+	// prod data).
+	var inserted bool
+	err := pool.QueryRow(ctx, `
 		INSERT INTO projects
-			(name, display_name, owner_type, default_environment, quotas, org_id)
-		VALUES ($1, $2, $3, $4, $5, 'dada')
+			(name, display_name, owner_type, default_environment, quotas, org_id, owner_id)
+		VALUES ($1, $2, $3, $4, $5, 'dada', $6)
 		ON CONFLICT (name) DO UPDATE
 		SET display_name         = EXCLUDED.display_name,
 		    owner_type           = EXCLUDED.owner_type,
 		    default_environment   = EXCLUDED.default_environment,
 		    quotas                = EXCLUDED.quotas,
 		    org_id                = COALESCE(projects.org_id, EXCLUDED.org_id),
+		    owner_id              = COALESCE(projects.owner_id, EXCLUDED.owner_id),
 		    updated_at            = NOW()
-	`, name, displayName, ownerType, defaultEnvironment, quotas)
+		RETURNING (xmax = 0)
+	`, name, displayName, ownerType, defaultEnvironment, quotas, ownerIDParam).Scan(&inserted)
 	if err != nil {
-		return fmt.Errorf("upsert project: %w", err)
+		return false, fmt.Errorf("upsert project: %w", err)
 	}
-	return nil
+	return inserted, nil
+}
+
+// ResolveUserIDByIdentity looks up a user's id from a manifest-supplied owner
+// identity, matching either their email or their Keycloak subject (the same
+// two identifiers project.yaml authors could plausibly know). Returns
+// ok=false, no error when the identity is empty or matches no user — that is
+// the normal case for a manifest that predates the owner field, and callers
+// must treat it as "still unresolved" rather than a failure.
+func ResolveUserIDByIdentity(ctx context.Context, pool *pgxpool.Pool, identity string) (uuid.UUID, bool, error) {
+	if identity == "" {
+		return uuid.UUID{}, false, nil
+	}
+	var id uuid.UUID
+	err := pool.QueryRow(ctx, `
+		SELECT id FROM users WHERE email = $1 OR keycloak_sub = $1 LIMIT 1
+	`, identity).Scan(&id)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return uuid.UUID{}, false, nil
+		}
+		return uuid.UUID{}, false, fmt.Errorf("resolve user identity %s: %w", identity, err)
+	}
+	return id, true, nil
 }
 
 // AddPlatformAdminsToProject is a no-op since ADR-009 (native RBAC).

@@ -80,10 +80,16 @@ type envManifest struct {
 	Type      string `yaml:"type"`
 }
 
+// projectManifest's Owner field is optional and free-form: either the email
+// or the Keycloak subject of the intended owner, resolved against users at
+// sync time via db.ResolveUserIDByIdentity. Left empty (the case for every
+// manifest committed before this field existed), the project keeps
+// owner_id = NULL exactly as before.
 type projectManifest struct {
 	Project            string         `yaml:"project"`
 	DisplayName        string         `yaml:"displayName"`
 	OwnerType          string         `yaml:"ownerType"`
+	Owner              string         `yaml:"owner"`
 	DefaultEnvironment string         `yaml:"defaultEnvironment"`
 	Environments       []envManifest  `yaml:"environments"`
 	Quotas             map[string]any `yaml:"quotas"`
@@ -297,6 +303,16 @@ func (w *GitWatcher) notifyValuesChange(mgr *git.Manager, filePath, project, env
 	log.Debug().Str("app", app).Msg("git-watcher: notified ws clients of values change")
 }
 
+// ownerUnresolvedWarning reports whether a just-synced project deserves the
+// unresolved-owner warning: only newly-inserted rows (an existing project
+// already went through this check once, no need to repeat it every poll),
+// only when no owner_id was resolved, and never for owner_type "team" —
+// dada's own internal/platform projects are intentionally ownerless and not
+// a defect (see the 4 legacy team-owned rows this fix does not touch).
+func ownerUnresolvedWarning(isNew bool, ownerID *uuid.UUID, ownerType string) bool {
+	return isNew && ownerID == nil && ownerType != "team"
+}
+
 func (w *GitWatcher) syncProjectFile(ctx context.Context, mgr *git.Manager, filePath, projectSlug string, c git.Commit) {
 	content, err := mgr.ReadFileAtCommit(c.SHA, filePath)
 	if err != nil {
@@ -331,10 +347,24 @@ func (w *GitWatcher) syncProjectFile(ctx context.Context, mgr *git.Manager, file
 		quotas = map[string]any{}
 	}
 
+	var ownerID *uuid.UUID
+	if manifest.Owner != "" {
+		id, ok, err := db.ResolveUserIDByIdentity(ctx, w.pool, manifest.Owner)
+		if err != nil {
+			log.Warn().Err(err).Str("project", projectSlug).Str("owner", manifest.Owner).Msg("git-watcher: resolve project owner")
+		} else if ok {
+			ownerID = &id
+		}
+	}
+
 	quotasJSON, _ := json.Marshal(quotas)
-	if err := db.UpsertProject(ctx, w.pool, name, displayName, ownerType, defaultEnvironment, quotasJSON); err != nil {
+	isNew, err := db.UpsertProject(ctx, w.pool, name, displayName, ownerType, defaultEnvironment, quotasJSON, ownerID)
+	if err != nil {
 		log.Error().Err(err).Str("project", projectSlug).Str("path", filePath).Msg("git-watcher: upsert project")
 		return
+	}
+	if ownerUnresolvedWarning(isNew, ownerID, ownerType) {
+		log.Warn().Str("project", name).Str("owner_type", ownerType).Msg("git-watcher: new project has no resolvable owner; health/volume alerts and billing will never reach anyone for it until an owner is set")
 	}
 
 	// Upsert environments declared in the manifest.
@@ -374,7 +404,7 @@ func (w *GitWatcher) resolveOrCreateProjectEnv(ctx context.Context, projectSlug,
 	}
 
 	log.Info().Str("project", projectSlug).Str("env", envSlug).Msg("git-watcher: auto-creating project/env from git path")
-	if err := db.UpsertProject(ctx, w.pool, projectSlug, projectSlug, "team", envSlug, nil); err != nil {
+	if _, err := db.UpsertProject(ctx, w.pool, projectSlug, projectSlug, "team", envSlug, nil, nil); err != nil {
 		return uuid.Nil, uuid.Nil, fmt.Errorf("auto-create project: %w", err)
 	}
 	if err := db.UpsertEnvironment(ctx, w.pool, projectSlug, envSlug, "", ""); err != nil {
