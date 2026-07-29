@@ -14,11 +14,10 @@ import (
 )
 
 // findAppPVCName resolves the live PersistentVolumeClaim backing appName in
-// namespace by the dada.io/app label, the same ownership signal
-// delete_impact.go's scanApp already relies on for this exact resource. A
-// PVC's own object name is not assumed to relate to the app name (observed
-// live: PVC "fonbet-value-pvc" backs app "fonbet-value"). Returns "" when no
-// PVC is labeled for this app, or the cluster is unreachable.
+// namespace through the app's pod spec: rendered PVCs carry no dada.io/app
+// label (observed live — only pods do), so the pod volume list is the one
+// authoritative claim-to-app binding. Returns "" when no pod of this app
+// mounts a PVC, or the cluster is unreachable.
 func findAppPVCName(ctx context.Context, namespace, appName string) string {
 	clientset := newAppHealthClientset()
 	if clientset == nil {
@@ -26,13 +25,20 @@ func findAppPVCName(ctx context.Context, namespace, appName string) string {
 	}
 	listCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	pvcs, err := clientset.CoreV1().PersistentVolumeClaims(namespace).List(listCtx, metav1.ListOptions{
+	pods, err := clientset.CoreV1().Pods(namespace).List(listCtx, metav1.ListOptions{
 		LabelSelector: "dada.io/app=" + appName,
 	})
-	if err != nil || len(pvcs.Items) == 0 {
+	if err != nil {
 		return ""
 	}
-	return pvcs.Items[0].Name
+	for i := range pods.Items {
+		for _, v := range pods.Items[i].Spec.Volumes {
+			if v.PersistentVolumeClaim != nil {
+				return v.PersistentVolumeClaim.ClaimName
+			}
+		}
+	}
+	return ""
 }
 
 // GetAppVolumeUsage returns an app's live persistent-volume fill ratio, read

@@ -116,26 +116,29 @@ func overThreshold(samples []volumeUsageSample, ratio float64) []volumeUsageSamp
 	return out
 }
 
-// pvcAppLabels maps every PVC's dada.io/app label in namespace, matching the
-// ownership signal delete_impact.go's scanApp already relies on for the same
-// PVC resource. A PVC's own object name is not assumed to relate to the app
-// name it belongs to (observed live: PVC "fonbet-value-pvc" backs app
-// "fonbet-value" — an "<app>-pvc" convention, not an identity).
+// pvcAppLabels maps PVC claim names in namespace to the app that mounts them,
+// resolved through pod specs: rendered PVCs carry no dada.io/app label
+// (observed live — only the pod template does), so the pod's volume list is
+// the one authoritative claim-to-app binding available at runtime.
 func (w *appVolumeWatcher) pvcAppLabels(ctx context.Context, namespace string) map[string]string {
 	listCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
-	pvcs, err := w.clientset.CoreV1().PersistentVolumeClaims(namespace).List(listCtx, metav1.ListOptions{})
+	pods, err := w.clientset.CoreV1().Pods(namespace).List(listCtx, metav1.ListOptions{LabelSelector: "dada.io/app"})
 	if err != nil {
-		log.Printf("app-volume: list PVCs in %s failed: %v", namespace, err)
+		log.Printf("app-volume: list pods in %s failed: %v", namespace, err)
 		return nil
 	}
 	out := map[string]string{}
-	for i := range pvcs.Items {
-		appName := pvcs.Items[i].Labels["dada.io/app"]
+	for i := range pods.Items {
+		appName := pods.Items[i].Labels["dada.io/app"]
 		if appName == "" {
 			continue
 		}
-		out[pvcs.Items[i].Name] = appName
+		for _, v := range pods.Items[i].Spec.Volumes {
+			if v.PersistentVolumeClaim != nil {
+				out[v.PersistentVolumeClaim.ClaimName] = appName
+			}
+		}
 	}
 	return out
 }
