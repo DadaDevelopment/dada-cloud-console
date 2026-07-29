@@ -60,6 +60,7 @@ func (h *Handler) StartAppVolumeWatcher(ctx context.Context) {
 		return
 	}
 	w := &appVolumeWatcher{clientset: clientset, h: h}
+	log.Printf("app-volume: watcher started interval=%s threshold=%.2f", appVolumeWatchInterval, appVolumeAlertThreshold)
 	go func() {
 		runWithAdvisoryLock(ctx, h.pool, lockKeyAppVolumeWatch, "app-volume", w.tick)
 		t := time.NewTicker(appVolumeWatchInterval)
@@ -161,13 +162,15 @@ func (w *appVolumeWatcher) tick(ctx context.Context) {
 		return
 	}
 
+	parsed := parseVolumeUsageSamples(samples)
 	byNamespace := map[string][]volumeUsageSample{}
-	for _, s := range overThreshold(parseVolumeUsageSamples(samples), appVolumeAlertThreshold) {
+	for _, s := range overThreshold(parsed, appVolumeAlertThreshold) {
 		if _, ok := nsProjects[s.Namespace]; !ok {
 			continue
 		}
 		byNamespace[s.Namespace] = append(byNamespace[s.Namespace], s)
 	}
+	log.Printf("app-volume: tick samples=%d parsed=%d hot_user_ns=%d", len(samples), len(parsed), len(byNamespace))
 
 	for ns, hot := range byNamespace {
 		env := nsProjects[ns]
