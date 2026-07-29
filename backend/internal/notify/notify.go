@@ -171,6 +171,28 @@ func ComposeAppAlert(appName, reason, podName, logExcerpt, consoleLink, codeHint
 	return subject, b.String()
 }
 
+// ComposeVolumeAlert builds the subject and plaintext body for a volume-fill
+// alert: the owner's app is at or above appVolumeAlertThreshold on its
+// persistent volume and would otherwise fill silently until an out-of-space
+// write crashes the app (P2, real incident: fonbet-value hit 100% and
+// CrashLooped for about a day before anyone noticed). declaredSize is the
+// app's declared volume size (e.g. "10Gi"), or "" when it could not be read;
+// consoleLink deep-links to the app's Storage settings tab.
+func ComposeVolumeAlert(appName string, ratio float64, declaredSize, consoleLink string) (subject, body string) {
+	percent := ratio * 100
+	subject = fmt.Sprintf("Dada Cloud: том приложения %s заполнен на %.0f%%", appName, percent)
+	var b strings.Builder
+	fmt.Fprintf(&b, "Постоянный том приложения %s заполнен на %.0f%%.\n\n", appName, percent)
+	if declaredSize != "" {
+		fmt.Fprintf(&b, "Объявленный размер: %s\n\n", declaredSize)
+	}
+	b.WriteString("Если том заполнится полностью, приложение может перестать работать (нет места для записи).\n\n")
+	fmt.Fprintf(&b, "Открыть хранилище в консоли: %s\n\n", consoleLink)
+	b.WriteString("Увеличить том можно там же, либо выгрузить и почистить данные через экспорт тома.\n\n")
+	b.WriteString("Это письмо приходит не чаще раза в 24 часа на приложение.\n")
+	return subject, b.String()
+}
+
 // Send delivers one message to a single recipient over SMTP with STARTTLS
 // (net/smtp negotiates STARTTLS automatically when the server advertises it,
 // as Postbox does on 587). Returns an error the caller logs and swallows.

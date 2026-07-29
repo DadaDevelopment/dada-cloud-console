@@ -429,6 +429,11 @@ export const appsApi = {
       { method: "PATCH", body }
     ),
 
+  volumeUsage: (projectId: string, envId: string, appName: string) =>
+    apiFetch<{ used_bytes: number; capacity_bytes: number; ratio: number }>(
+      `/api/v1/projects/${projectId}/environments/${envId}/apps/${appName}/volume/usage`
+    ),
+
   updateComposeVolume: (
     projectId: string,
     envId: string,

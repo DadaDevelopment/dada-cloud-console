@@ -42,6 +42,7 @@ export function StorageManager({ projectId, envId, appName, canEdit }: Props) {
   const [exportBusy, setExportBusy] = useState(false);
   const [exportError, setExportError] = useState<string | null>(null);
   const [exportResult, setExportResult] = useState<{ url: string; filename: string } | null>(null);
+  const [usage, setUsage] = useState<{ ratio: number } | null>(null);
 
   useEffect(() => {
     if (!envId) return;
@@ -59,6 +60,22 @@ export function StorageManager({ projectId, envId, appName, canEdit }: Props) {
       })
       .catch(() => {});
   }, [projectId, envId, appName]);
+
+  useEffect(() => {
+    if (!envId || !current) return;
+    let cancelled = false;
+    appsApi
+      .volumeUsage(projectId, envId, appName)
+      .then((d) => {
+        if (!cancelled) setUsage({ ratio: d.ratio });
+      })
+      .catch(() => {
+        if (!cancelled) setUsage(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId, envId, appName, current]);
 
   async function submit() {
     setBusy(true);
@@ -126,6 +143,39 @@ export function StorageManager({ projectId, envId, appName, canEdit }: Props) {
           </span>
         ) : (
           <span className="text-gray-400 dark:text-gray-500">{t("apps.storage.none")}</span>
+        )}
+        {usage && (
+          <div className="mt-3">
+            <div className="flex items-center justify-between text-xs text-gray-500 dark:text-gray-400">
+              <span>{t("apps.storage.usage.label")}</span>
+              <span
+                className={
+                  usage.ratio >= 0.95
+                    ? "font-medium text-red-600 dark:text-red-400"
+                    : usage.ratio >= 0.85
+                      ? "font-medium text-amber-600 dark:text-amber-500"
+                      : "font-medium text-gray-700 dark:text-gray-300"
+                }
+              >
+                {Math.round(usage.ratio * 100)}%
+              </span>
+            </div>
+            <div className="mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-gray-200 dark:bg-gray-800">
+              <div
+                className={
+                  usage.ratio >= 0.95
+                    ? "h-full rounded-full bg-red-600"
+                    : usage.ratio >= 0.85
+                      ? "h-full rounded-full bg-amber-500"
+                      : "h-full rounded-full bg-blue-600"
+                }
+                style={{ width: `${Math.min(100, Math.round(usage.ratio * 100))}%` }}
+              />
+            </div>
+            {usage.ratio >= 0.85 && (
+              <p className="mt-1.5 text-xs text-amber-600 dark:text-amber-500">{t("apps.storage.usage.warn")}</p>
+            )}
+          </div>
         )}
       </div>
 

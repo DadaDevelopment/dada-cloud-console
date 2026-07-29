@@ -21,6 +21,7 @@ const (
 	lockKeyDomainReconcile int64 = 0x64616461_0001
 	lockKeyBackupReconcile int64 = 0x64616461_0002
 	lockKeyAppHealthWatch  int64 = 0x64616461_0003
+	lockKeyAppVolumeWatch  int64 = 0x64616461_0004
 )
 
 // runWithAdvisoryLock executes fn while holding the session-scoped Postgres

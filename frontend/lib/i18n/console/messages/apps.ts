@@ -446,6 +446,11 @@ export const apps: Messages = {
   "apps.storage.export.ready": { ru: "Архив готов", en: "Archive ready" },
   "apps.storage.export.link": { ru: "Скачать архив", en: "Download archive" },
   "apps.storage.export.error": { ru: "Не удалось экспортировать том", en: "Failed to export volume" },
+  "apps.storage.usage.label": { ru: "Заполнено", en: "Used" },
+  "apps.storage.usage.warn": {
+    ru: "Том почти заполнен. Увеличьте размер или очистите данные, иначе приложение может перестать писать данные.",
+    en: "Volume is nearly full. Grow it or clear data, or the app may stop being able to write.",
+  },
   "apps.resources.title": { ru: "Ресурсы", en: "Resources" },
   "apps.resources.subtitle": {
     ru: "Размер CPU/RAM для этого приложения. Изменение вызывает передеплой (перезапуск подов).",

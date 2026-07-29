@@ -279,6 +279,7 @@ func NewHandler(pool *pgxpool.Pool, cfg *config.Config) *Handler {
 	// stuck CrashLoopBackOff/OOMKilled/ImagePullBackOff. No-op off-cluster or
 	// when SMTP is unconfigured.
 	h.StartAppHealthWatcher(context.Background())
+	h.StartAppVolumeWatcher(context.Background())
 
 	h.agentChatLLM = llmchat.New(cfg.AgentChatGatewayURL, cfg.AgentChatGatewayKey, cfg.AgentChatModel)
 	selfURL := cfg.MCPSelfURL

@@ -6076,6 +6076,66 @@ paths:
       summary: Export an app's persistent volume as a tar.gz
       tags:
       - app
+  /projects/{projectId}/environments/{envId}/apps/{appName}/volume/usage:
+    get:
+      description: Reads the app's PersistentVolumeClaim used/capacity ratio from
+        Prometheus (kubelet_volume_stats_used_bytes / kubelet_volume_stats_capacity_bytes).
+        404 when the app has no volume, is not a Kubernetes app, or the metric has
+        not scraped yet. 503 when Prometheus or the cluster client is not configured.
+      operationId: getAppVolumeUsage
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      - description: Environment UUID
+        in: path
+        name: envId
+        required: true
+        type: string
+      - description: App name
+        in: path
+        name: appName
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: object with used_bytes, capacity_bytes and ratio
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "503":
+          description: Service Unavailable
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Get an app's persistent volume usage
+      tags:
+      - app
   /projects/{projectId}/environments/{envId}/databases:
     get:
       description: Returns all managed PostgreSQL (ServiceDatabaseV2) resources in
