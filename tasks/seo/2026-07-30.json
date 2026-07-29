@@ -1,0 +1,4812 @@
+{
+  "date_from": "2026-06-30",
+  "date_to": "2026-07-30",
+  "webmaster": {
+    "host_id": "https:cloud.dada-tuda.ru:443",
+    "summary": {
+      "sqi": 0,
+      "excluded_pages_count": 0,
+      "searchable_pages_count": 16,
+      "site_problems": {
+        "RECOMMENDATION": 2
+      }
+    },
+    "queries": {
+      "count": 61,
+      "queries": [
+        {
+          "query_id": "4a37a2ddbeb01044",
+          "query_text": "оплата vercel для россиян",
+          "indicators": {
+            "TOTAL_SHOWS": 11.0,
+            "TOTAL_CLICKS": 0.0,
+            "AVG_SHOW_POSITION": 8.181818181818182,
+            "AVG_CLICK_POSITION": null
+          }
+        },
+        {
+          "query_id": "abf9c55268189a49",
+          "query_text": "оплата netlify из россии",
+          "indicators": {
+            "TOTAL_SHOWS": 5.0,
+            "TOTAL_CLICKS": 0.0,
+            "AVG_SHOW_POSITION": 10.0,
+            "AVG_CLICK_POSITION": null
+          }
+        },
+        {
+          "query_id": "885bae8478ccbb87",
+          "query_text": "dada cloud",
+          "indicators": {
+            "TOTAL_SHOWS": 3.0,
+            "TOTAL_CLICKS": 2.0,
+            "AVG_SHOW_POSITION": 1.0,
+            "AVG_CLICK_POSITION": 1.0
+          }
+        },
+        {
+          "query_id": "b870b2de46a11384",
+          "query_text": "оплатить heroku",
+          "indicators": {
+            "TOTAL_SHOWS": 3.0,
+            "TOTAL_CLICKS": 0.0,
+            "AVG_SHOW_POSITION": 10.333333333333334,
+            "AVG_CLICK_POSITION": null
+          }
+        },
+        {
+          "query_id": "c8e93f215b858253",
+          "query_text": "как загрузить телеграмм бота на dada console",
+          "indicators": {
+            "TOTAL_SHOWS": 3.0,
+            "TOTAL_CLICKS": 0.0,
+            "AVG_SHOW_POSITION": 1.3333333333333333,
+            "AVG_CLICK_POSITION": null
+          }
+        },
+        {
+          "query_id": "e3f50a938200bce4",
+          "query_text": "оплата heroku для россиян",
+          "indicators": {
+            "TOTAL_SHOWS": 3.0,
+            "TOTAL_CLICKS": 0.0,
+            "AVG_SHOW_POSITION": 12.0,
+            "AVG_CLICK_POSITION": null
+          }
+        },
+        {
+          "query_id": "73f522178f997903",
+          "query_text": "оплата vercel из россии",
+          "indicators": {
+            "TOTAL_SHOWS": 3.0,
+            "TOTAL_CLICKS": 0.0,
+            "AVG_SHOW_POSITION": 8.0,
+            "AVG_CLICK_POSITION": null
+          }
+        },
+        {
+          "query_id": "8626c82d1d1d2d03",
+          "query_text": "аналоги vercel в россии",
+          "indicators": {
+            "TOTAL_SHOWS": 2.0,
+            "TOTAL_CLICKS": 0.0,
+            "AVG_SHOW_POSITION": 9.0,
+            "AVG_CLICK_POSITION": null
+          }
+        },
+        {
+          "query_id": "a9eb7cec31836064",
+          "query_text": "работает ли netlify drop с vpn",
+          "indicators": {
+            "TOTAL_SHOWS": 2.0,
+            "TOTAL_CLICKS": 0.0,
+            "AVG_SHOW_POSITION": 8.0,
+            "AVG_CLICK_POSITION": null
+          }
+        },
+        {
+          "query_id": "c3bfa4b6f822ab96",
+          "query_text": "бесплатный сервис аналог railway",
+          "indicators": {
+            "TOTAL_SHOWS": 2.0,
+            "TOTAL_CLICKS": 1.0,
+            "AVG_SHOW_POSITION": 3.0,
+            "AVG_CLICK_POSITION": 3.0
+          }
+        },
+        {
+          "query_id": "e25a63dc4f1a6f76",
+          "query_text": "оплатить vercel",
+          "indicators": {
+            "TOTAL_SHOWS": 2.0,
+            "TOTAL_CLICKS": 0.0,
+            "AVG_SHOW_POSITION": 9.5,
+            "AVG_CLICK_POSITION": null
+          }
+        },
+        {
+          "query_id": "e8cc76e66dfb0c60",
+          "query_text": "как оплатить railway",
+          "indicators": {
+            "TOTAL_SHOWS": 2.0,
+            "TOTAL_CLICKS": 0.0,
+            "AVG_SHOW_POSITION": 11.0,
+            "AVG_CLICK_POSITION": null
+          }
+        },
+        {
+          "query_id": "eb79faeef9369477",
+          "query_text": "netlify не работает в россии?",
+          "indicators": {
+            "TOTAL_SHOWS": 2.0,
+            "TOTAL_CLICKS": 0.0,
+            "AVG_SHOW_POSITION": 5.0,
+            "AVG_CLICK_POSITION": null
+          }
+        },
+        {
+          "query_id": "03ba44f9b8170b1e",
+          "query_text": "аналоги railway",
+          "indicators": {
+            "TOTAL_SHOWS": 2.0,
+            "TOTAL_CLICKS": 0.0,
+            "AVG_SHOW_POSITION": 4.5,
+            "AVG_CLICK_POSITION": null
+          }
+        },
+        {
+          "query_id": "44200f802b357951",
+          "query_text": "аналог версел",
+          "indicators": {
+            "TOTAL_SHOWS": 2.0,
+            "TOTAL_CLICKS": 0.0,
+            "AVG_SHOW_POSITION": 3.5,
+            "AVG_CLICK_POSITION": null
+          }
+        },
+        {
+          "query_id": "4e8485ce465545a3",
+          "query_text": "roconnected.vercel чо за сайт",
+          "indicators": {
+            "TOTAL_SHOWS": 2.0,
+            "TOTAL_CLICKS": 0.0,
+            "AVG_SHOW_POSITION": 11.0,
+            "AVG_CLICK_POSITION": null
+          }
+        },
+        {
+          "query_id": "58aaffe821c92d62",
+          "query_text": "oblako-erp.vercel",
+          "indicators": {
+            "TOTAL_SHOWS": 2.0,
+            "TOTAL_CLICKS": 0.0,
+            "AVG_SHOW_POSITION": 7.0,
+            "AVG_CLICK_POSITION": null
+          }
+        },
+        {
+          "query_id": "6f4beae9dcd3b635",
+          "query_text": "работает ли в россии сервис railway",
+          "indicators": {
+            "TOTAL_SHOWS": 2.0,
+            "TOTAL_CLICKS": 0.0,
+            "AVG_SHOW_POSITION": 6.5,
+            "AVG_CLICK_POSITION": null
+          }
+        },
+        {
+          "query_id": "7cf2372e1540d26e",
+          "query_text": "работает ли в россии versel",
+          "indicators": {
+            "TOTAL_SHOWS": 2.0,
+            "TOTAL_CLICKS": 0.0,
+            "AVG_SHOW_POSITION": 12.0,
+            "AVG_CLICK_POSITION": null
+          }
+        },
+        {
+          "query_id": "8d4e8ccab2c73689",
+          "query_text": "дешевые облачные сервера чтобы поставить на них телеграмм бота",
+          "indicators": {
+            "TOTAL_SHOWS": 1.0,
+            "TOTAL_CLICKS": 0.0,
+            "AVG_SHOW_POSITION": 13.0,
+            "AVG_CLICK_POSITION": null
+          }
+        },
+        {
+          "query_id": "8dcb3c8e247d6076",
+          "query_text": "railway оплаты из россии",
+          "indicators": {
+            "TOTAL_SHOWS": 1.0,
+            "TOTAL_CLICKS": 0.0,
+            "AVG_SHOW_POSITION": 12.0,
+            "AVG_CLICK_POSITION": null
+          }
+        },
+        {
+          "query_id": "90757692f881c645",
+          "query_text": "деплой приложения из lovable",
+          "indicators": {
+            "TOTAL_SHOWS": 1.0,
+            "TOTAL_CLICKS": 0.0,
+            "AVG_SHOW_POSITION": 9.0,
+            "AVG_CLICK_POSITION": null
+          }
+        },
+        {
+          "query_id": "9ef4a07f29291fad",
+          "query_text": "netlify работает в россии",
+          "indicators": {
+            "TOTAL_SHOWS": 1.0,
+            "TOTAL_CLICKS": 0.0,
+            "AVG_SHOW_POSITION": 10.0,
+            "AVG_CLICK_POSITION": null
+          }
+        },
+        {
+          "query_id": "a9a36361c7403a71",
+          "query_text": "оплата vercel pomiru",
+          "indicators": {
+            "TOTAL_SHOWS": 1.0,
+            "TOTAL_CLICKS": 0.0,
+            "AVG_SHOW_POSITION": 6.0,
+            "AVG_CLICK_POSITION": null
+          }
+        },
+        {
+          "query_id": "b37aeb1ba3e74212",
+          "query_text": "дешевый хостинг для тг бота",
+          "indicators": {
+            "TOTAL_SHOWS": 1.0,
+            "TOTAL_CLICKS": 0.0,
+            "AVG_SHOW_POSITION": 8.0,
+            "AVG_CLICK_POSITION": null
+          }
+        },
+        {
+          "query_id": "bf3d529daf9e5377",
+          "query_text": "аналоги github и railway в россии",
+          "indicators": {
+            "TOTAL_SHOWS": 1.0,
+            "TOTAL_CLICKS": 3.0,
+            "AVG_SHOW_POSITION": 2.0,
+            "AVG_CLICK_POSITION": 2.0
+          }
+        },
+        {
+          "query_id": "bfc4a2d8da1d4f62",
+          "query_text": "работают ли сайты на vercel в россии",
+          "indicators": {
+            "TOTAL_SHOWS": 1.0,
+            "TOTAL_CLICKS": 0.0,
+            "AVG_SHOW_POSITION": 5.0,
+            "AVG_CLICK_POSITION": null
+          }
+        },
+        {
+          "query_id": "c088d582d048d1aa",
+          "query_text": "оплата vercel из россии pomiru",
+          "indicators": {
+            "TOTAL_SHOWS": 1.0,
+            "TOTAL_CLICKS": 0.0,
+            "AVG_SHOW_POSITION": 9.0,
+            "AVG_CLICK_POSITION": null
+          }
+        },
+        {
+          "query_id": "c24782e4bfdb290f",
+          "query_text": "аналог vercel в россии",
+          "indicators": {
+            "TOTAL_SHOWS": 1.0,
+            "TOTAL_CLICKS": 0.0,
+            "AVG_SHOW_POSITION": 7.0,
+            "AVG_CLICK_POSITION": null
+          }
+        },
+        {
+          "query_id": "ccb79b8b82d59bc5",
+          "query_text": "heroku аналоги для россии",
+          "indicators": {
+            "TOTAL_SHOWS": 1.0,
+            "TOTAL_CLICKS": 0.0,
+            "AVG_SHOW_POSITION": 9.0,
+            "AVG_CLICK_POSITION": null
+          }
+        },
+        {
+          "query_id": "d0ba9f2c04f47d3c",
+          "query_text": "сайт на netlify не открывается без впн",
+          "indicators": {
+            "TOTAL_SHOWS": 1.0,
+            "TOTAL_CLICKS": 0.0,
+            "AVG_SHOW_POSITION": 7.0,
+            "AVG_CLICK_POSITION": null
+          }
+        },
+        {
+          "query_id": "d20d418eca46d181",
+          "query_text": "netlify русский аналог",
+          "indicators": {
+            "TOTAL_SHOWS": 1.0,
+            "TOTAL_CLICKS": 0.0,
+            "AVG_SHOW_POSITION": 9.0,
+            "AVG_CLICK_POSITION": null
+          }
+        },
+        {
+          "query_id": "d31e5d9adb7a58e3",
+          "query_text": "vercel работает в россии?",
+          "indicators": {
+            "TOTAL_SHOWS": 1.0,
+            "TOTAL_CLICKS": 1.0,
+            "AVG_SHOW_POSITION": 6.0,
+            "AVG_CLICK_POSITION": 6.0
+          }
+        },
+        {
+          "query_id": "d5bc2f9018b9c803",
+          "query_text": "{принимает ли vercel русские номера?}",
+          "indicators": {
+            "TOTAL_SHOWS": 1.0,
+            "TOTAL_CLICKS": 0.0,
+            "AVG_SHOW_POSITION": 12.0,
+            "AVG_CLICK_POSITION": null
+          }
+        },
+        {
+          "query_id": "ddee6dc345bfe18a",
+          "query_text": "аналог vercel в россии топ",
+          "indicators": {
+            "TOTAL_SHOWS": 1.0,
+            "TOTAL_CLICKS": 1.0,
+            "AVG_SHOW_POSITION": 8.0,
+            "AVG_CLICK_POSITION": 8.0
+          }
+        },
+        {
+          "query_id": "e5b3f508f9f336c0",
+          "query_text": "railway российский анало",
+          "indicators": {
+            "TOTAL_SHOWS": 1.0,
+            "TOTAL_CLICKS": 0.0,
+            "AVG_SHOW_POSITION": 2.0,
+            "AVG_CLICK_POSITION": null
+          }
+        },
+        {
+          "query_id": "ec5f62cb0162e580",
+          "query_text": "аналоги railway в россии",
+          "indicators": {
+            "TOTAL_SHOWS": 1.0,
+            "TOTAL_CLICKS": 0.0,
+            "AVG_SHOW_POSITION": 1.0,
+            "AVG_CLICK_POSITION": null
+          }
+        },
+        {
+          "query_id": "edb9b95b48fe247c",
+          "query_text": "каким сайтом можно воспользоваться вместо railway",
+          "indicators": {
+            "TOTAL_SHOWS": 1.0,
+            "TOTAL_CLICKS": 0.0,
+            "AVG_SHOW_POSITION": 3.0,
+            "AVG_CLICK_POSITION": null
+          }
+        },
+        {
+          "query_id": "f6b5b4284ab6c0df",
+          "query_text": "дада сервис",
+          "indicators": {
+            "TOTAL_SHOWS": 1.0,
+            "TOTAL_CLICKS": 0.0,
+            "AVG_SHOW_POSITION": 4.0,
+            "AVG_CLICK_POSITION": null
+          }
+        },
+        {
+          "query_id": "ffcdb0b60f4b483c",
+          "query_text": "хостинг для бота вк",
+          "indicators": {
+            "TOTAL_SHOWS": 1.0,
+            "TOTAL_CLICKS": 0.0,
+            "AVG_SHOW_POSITION": 13.0,
+            "AVG_CLICK_POSITION": null
+          }
+        },
+        {
+          "query_id": "ffd7b08f6cd0f47d",
+          "query_text": "можно ли по закону запускать сайты на vercel",
+          "indicators": {
+            "TOTAL_SHOWS": 1.0,
+            "TOTAL_CLICKS": 1.0,
+            "AVG_SHOW_POSITION": 12.0,
+            "AVG_CLICK_POSITION": 12.0
+          }
+        },
+        {
+          "query_id": "01473df35379b33a",
+          "query_text": "бесплатный аналог heroku в рф",
+          "indicators": {
+            "TOTAL_SHOWS": 1.0,
+            "TOTAL_CLICKS": 0.0,
+            "AVG_SHOW_POSITION": 12.0,
+            "AVG_CLICK_POSITION": null
+          }
+        },
+        {
+          "query_id": "1496f6261022db19",
+          "query_text": "railway аналоги",
+          "indicators": {
+            "TOTAL_SHOWS": 1.0,
+            "TOTAL_CLICKS": 0.0,
+            "AVG_SHOW_POSITION": 3.0,
+            "AVG_CLICK_POSITION": null
+          }
+        },
+        {
+          "query_id": "1f7a948eb5f56c4e",
+          "query_text": "виртуальная карта для vercel",
+          "indicators": {
+            "TOTAL_SHOWS": 1.0,
+            "TOTAL_CLICKS": 0.0,
+            "AVG_SHOW_POSITION": 8.0,
+            "AVG_CLICK_POSITION": null
+          }
+        },
+        {
+          "query_id": "22f60f4339513057",
+          "query_text": "аренда сервера для бота телеграм",
+          "indicators": {
+            "TOTAL_SHOWS": 1.0,
+            "TOTAL_CLICKS": 0.0,
+            "AVG_SHOW_POSITION": 6.0,
+            "AVG_CLICK_POSITION": null
+          }
+        },
+        {
+          "query_id": "3413772d928ebad0",
+          "query_text": "netlify аналог в россии",
+          "indicators": {
+            "TOTAL_SHOWS": 1.0,
+            "TOTAL_CLICKS": 0.0,
+            "AVG_SHOW_POSITION": 8.0,
+            "AVG_CLICK_POSITION": null
+          }
+        },
+        {
+          "query_id": "3a40aee698dcba55",
+          "query_text": "телеграм хостинг для бота в россии с учетом ограничений serveles",
+          "indicators": {
+            "TOTAL_SHOWS": 1.0,
+            "TOTAL_CLICKS": 0.0,
+            "AVG_SHOW_POSITION": 13.0,
+            "AVG_CLICK_POSITION": null
+          }
+        },
+        {
+          "query_id": "3cd52f0bfae366a5",
+          "query_text": "https://roconnected.vercel чо за сайт",
+          "indicators": {
+            "TOTAL_SHOWS": 1.0,
+            "TOTAL_CLICKS": 0.0,
+            "AVG_SHOW_POSITION": 6.0,
+            "AVG_CLICK_POSITION": null
+          }
+        },
+        {
+          "query_id": "3edf8c697965110e",
+          "query_text": "заблокирован ли railway в россии?",
+          "indicators": {
+            "TOTAL_SHOWS": 1.0,
+            "TOTAL_CLICKS": 0.0,
+            "AVG_SHOW_POSITION": 8.0,
+            "AVG_CLICK_POSITION": null
+          }
+        },
+        {
+          "query_id": "3fedc615e3843cc4",
+          "query_text": "хостинги для телеграмм ботов с оплатой российской картой.",
+          "indicators": {
+            "TOTAL_SHOWS": 1.0,
+            "TOTAL_CLICKS": 0.0,
+            "AVG_SHOW_POSITION": 3.0,
+            "AVG_CLICK_POSITION": null
+          }
+        },
+        {
+          "query_id": "47d2a68925b17701",
+          "query_text": "сервис дада",
+          "indicators": {
+            "TOTAL_SHOWS": 1.0,
+            "TOTAL_CLICKS": 0.0,
+            "AVG_SHOW_POSITION": 4.0,
+            "AVG_CLICK_POSITION": null
+          }
+        },
+        {
+          "query_id": "512b54f852ae49c1",
+          "query_text": "netlify drop доступ в россии есть?",
+          "indicators": {
+            "TOTAL_SHOWS": 1.0,
+            "TOTAL_CLICKS": 0.0,
+            "AVG_SHOW_POSITION": 11.0,
+            "AVG_CLICK_POSITION": null
+          }
+        },
+        {
+          "query_id": "57f9bf0cb8fdcb97",
+          "query_text": "сайты по типу railway г.де тоже можно",
+          "indicators": {
+            "TOTAL_SHOWS": 1.0,
+            "TOTAL_CLICKS": 0.0,
+            "AVG_SHOW_POSITION": 4.0,
+            "AVG_CLICK_POSITION": null
+          }
+        },
+        {
+          "query_id": "5c0c09b5cba529c4",
+          "query_text": "vercel заблокирован в россии",
+          "indicators": {
+            "TOTAL_SHOWS": 1.0,
+            "TOTAL_CLICKS": 0.0,
+            "AVG_SHOW_POSITION": 5.0,
+            "AVG_CLICK_POSITION": null
+          }
+        },
+        {
+          "query_id": "65f47652d0ddcdca",
+          "query_text": "аналоги сервиса vercel в россии",
+          "indicators": {
+            "TOTAL_SHOWS": 1.0,
+            "TOTAL_CLICKS": 1.0,
+            "AVG_SHOW_POSITION": 2.0,
+            "AVG_CLICK_POSITION": 2.0
+          }
+        },
+        {
+          "query_id": "6a8f65acf7bc9589",
+          "query_text": "аналоги heroku и railway в рф",
+          "indicators": {
+            "TOTAL_SHOWS": 1.0,
+            "TOTAL_CLICKS": 1.0,
+            "AVG_SHOW_POSITION": 4.0,
+            "AVG_CLICK_POSITION": 4.0
+          }
+        },
+        {
+          "query_id": "6b89d7442875e7ae",
+          "query_text": "vercel можно ли пользоваться в россии",
+          "indicators": {
+            "TOTAL_SHOWS": 1.0,
+            "TOTAL_CLICKS": 0.0,
+            "AVG_SHOW_POSITION": 12.0,
+            "AVG_CLICK_POSITION": null
+          }
+        },
+        {
+          "query_id": "70daaa6250fafbc7",
+          "query_text": "как загрузить телеграмм бота на dada cloud",
+          "indicators": {
+            "TOTAL_SHOWS": 1.0,
+            "TOTAL_CLICKS": 0.0,
+            "AVG_SHOW_POSITION": 2.0,
+            "AVG_CLICK_POSITION": null
+          }
+        },
+        {
+          "query_id": "71e03cf07168d69b",
+          "query_text": "сайт на netlify не открывается без ван",
+          "indicators": {
+            "TOTAL_SHOWS": 1.0,
+            "TOTAL_CLICKS": 0.0,
+            "AVG_SHOW_POSITION": 9.0,
+            "AVG_CLICK_POSITION": null
+          }
+        },
+        {
+          "query_id": "79b6b4a8c625291f",
+          "query_text": "любаня облако российский деплой для приложений",
+          "indicators": {
+            "TOTAL_SHOWS": 1.0,
+            "TOTAL_CLICKS": 0.0,
+            "AVG_SHOW_POSITION": 11.0,
+            "AVG_CLICK_POSITION": null
+          }
+        },
+        {
+          "query_id": "7ec3dbeb0e66e756",
+          "query_text": "оплата heroku из россии",
+          "indicators": {
+            "TOTAL_SHOWS": 1.0,
+            "TOTAL_CLICKS": 0.0,
+            "AVG_SHOW_POSITION": 9.0,
+            "AVG_CLICK_POSITION": null
+          }
+        }
+      ],
+      "date_from": "2026-06-30",
+      "date_to": "2026-07-27"
+    },
+    "queries_history": {
+      "indicators": {
+        "TOTAL_SHOWS": [
+          {
+            "date": "2026-06-30T00:00:00.000+03:00",
+            "value": 0.0
+          },
+          {
+            "date": "2026-07-01T00:00:00.000+03:00",
+            "value": 0.0
+          },
+          {
+            "date": "2026-07-02T00:00:00.000+03:00",
+            "value": 2.0
+          },
+          {
+            "date": "2026-07-03T00:00:00.000+03:00",
+            "value": 0.0
+          },
+          {
+            "date": "2026-07-04T00:00:00.000+03:00",
+            "value": 0.0
+          },
+          {
+            "date": "2026-07-05T00:00:00.000+03:00",
+            "value": 0.0
+          },
+          {
+            "date": "2026-07-06T00:00:00.000+03:00",
+            "value": 0.0
+          },
+          {
+            "date": "2026-07-07T00:00:00.000+03:00",
+            "value": 0.0
+          },
+          {
+            "date": "2026-07-08T00:00:00.000+03:00",
+            "value": 0.0
+          },
+          {
+            "date": "2026-07-09T00:00:00.000+03:00",
+            "value": 0.0
+          },
+          {
+            "date": "2026-07-10T00:00:00.000+03:00",
+            "value": 0.0
+          },
+          {
+            "date": "2026-07-11T00:00:00.000+03:00",
+            "value": 0.0
+          },
+          {
+            "date": "2026-07-12T00:00:00.000+03:00",
+            "value": 0.0
+          },
+          {
+            "date": "2026-07-13T00:00:00.000+03:00",
+            "value": 0.0
+          },
+          {
+            "date": "2026-07-14T00:00:00.000+03:00",
+            "value": 0.0
+          },
+          {
+            "date": "2026-07-15T00:00:00.000+03:00",
+            "value": 8.0
+          },
+          {
+            "date": "2026-07-16T00:00:00.000+03:00",
+            "value": 18.0
+          },
+          {
+            "date": "2026-07-17T00:00:00.000+03:00",
+            "value": 10.0
+          },
+          {
+            "date": "2026-07-18T00:00:00.000+03:00",
+            "value": 8.0
+          },
+          {
+            "date": "2026-07-19T00:00:00.000+03:00",
+            "value": 5.0
+          },
+          {
+            "date": "2026-07-20T00:00:00.000+03:00",
+            "value": 2.0
+          },
+          {
+            "date": "2026-07-21T00:00:00.000+03:00",
+            "value": 7.0
+          },
+          {
+            "date": "2026-07-22T00:00:00.000+03:00",
+            "value": 5.0
+          },
+          {
+            "date": "2026-07-23T00:00:00.000+03:00",
+            "value": 9.0
+          },
+          {
+            "date": "2026-07-24T00:00:00.000+03:00",
+            "value": 9.0
+          },
+          {
+            "date": "2026-07-25T00:00:00.000+03:00",
+            "value": 10.0
+          },
+          {
+            "date": "2026-07-26T00:00:00.000+03:00",
+            "value": 3.0
+          },
+          {
+            "date": "2026-07-27T00:00:00.000+03:00",
+            "value": 1.0
+          },
+          {
+            "date": "2026-07-28T00:00:00.000+03:00",
+            "value": 5.0
+          },
+          {
+            "date": "2026-07-29T00:00:00.000+03:00",
+            "value": 0.0
+          },
+          {
+            "date": "2026-07-30T00:00:00.000+03:00",
+            "value": 0.0
+          }
+        ],
+        "TOTAL_CLICKS": [
+          {
+            "date": "2026-06-30T00:00:00.000+03:00",
+            "value": 0.0
+          },
+          {
+            "date": "2026-07-01T00:00:00.000+03:00",
+            "value": 0.0
+          },
+          {
+            "date": "2026-07-02T00:00:00.000+03:00",
+            "value": 1.0
+          },
+          {
+            "date": "2026-07-03T00:00:00.000+03:00",
+            "value": 0.0
+          },
+          {
+            "date": "2026-07-04T00:00:00.000+03:00",
+            "value": 0.0
+          },
+          {
+            "date": "2026-07-05T00:00:00.000+03:00",
+            "value": 0.0
+          },
+          {
+            "date": "2026-07-06T00:00:00.000+03:00",
+            "value": 0.0
+          },
+          {
+            "date": "2026-07-07T00:00:00.000+03:00",
+            "value": 0.0
+          },
+          {
+            "date": "2026-07-08T00:00:00.000+03:00",
+            "value": 0.0
+          },
+          {
+            "date": "2026-07-09T00:00:00.000+03:00",
+            "value": 0.0
+          },
+          {
+            "date": "2026-07-10T00:00:00.000+03:00",
+            "value": 0.0
+          },
+          {
+            "date": "2026-07-11T00:00:00.000+03:00",
+            "value": 0.0
+          },
+          {
+            "date": "2026-07-12T00:00:00.000+03:00",
+            "value": 0.0
+          },
+          {
+            "date": "2026-07-13T00:00:00.000+03:00",
+            "value": 0.0
+          },
+          {
+            "date": "2026-07-14T00:00:00.000+03:00",
+            "value": 0.0
+          },
+          {
+            "date": "2026-07-15T00:00:00.000+03:00",
+            "value": 1.0
+          },
+          {
+            "date": "2026-07-16T00:00:00.000+03:00",
+            "value": 0.0
+          },
+          {
+            "date": "2026-07-17T00:00:00.000+03:00",
+            "value": 4.0
+          },
+          {
+            "date": "2026-07-18T00:00:00.000+03:00",
+            "value": 1.0
+          },
+          {
+            "date": "2026-07-19T00:00:00.000+03:00",
+            "value": 0.0
+          },
+          {
+            "date": "2026-07-20T00:00:00.000+03:00",
+            "value": 0.0
+          },
+          {
+            "date": "2026-07-21T00:00:00.000+03:00",
+            "value": 0.0
+          },
+          {
+            "date": "2026-07-22T00:00:00.000+03:00",
+            "value": 0.0
+          },
+          {
+            "date": "2026-07-23T00:00:00.000+03:00",
+            "value": 1.0
+          },
+          {
+            "date": "2026-07-24T00:00:00.000+03:00",
+            "value": 1.0
+          },
+          {
+            "date": "2026-07-25T00:00:00.000+03:00",
+            "value": 1.0
+          },
+          {
+            "date": "2026-07-26T00:00:00.000+03:00",
+            "value": 0.0
+          },
+          {
+            "date": "2026-07-27T00:00:00.000+03:00",
+            "value": 1.0
+          },
+          {
+            "date": "2026-07-28T00:00:00.000+03:00",
+            "value": 0.0
+          },
+          {
+            "date": "2026-07-29T00:00:00.000+03:00",
+            "value": 0.0
+          },
+          {
+            "date": "2026-07-30T00:00:00.000+03:00",
+            "value": 0.0
+          }
+        ]
+      }
+    },
+    "indexing_history": {
+      "history": [
+        {
+          "date": "2026-06-30T10:00:07.082+03:00",
+          "value": 0
+        },
+        {
+          "date": "2026-07-01T10:00:02.746+03:00",
+          "value": 2
+        },
+        {
+          "date": "2026-07-03T10:00:08.515+03:00",
+          "value": 2
+        },
+        {
+          "date": "2026-07-05T10:00:02.033+03:00",
+          "value": 2
+        },
+        {
+          "date": "2026-07-07T10:00:09.138+03:00",
+          "value": 7
+        },
+        {
+          "date": "2026-07-09T10:00:09.406+03:00",
+          "value": 7
+        },
+        {
+          "date": "2026-07-12T10:00:02.864+03:00",
+          "value": 2
+        },
+        {
+          "date": "2026-07-13T10:00:10.419+03:00",
+          "value": 2
+        },
+        {
+          "date": "2026-07-14T10:00:11.306+03:00",
+          "value": 2
+        },
+        {
+          "date": "2026-07-16T10:00:07.265+03:00",
+          "value": 2
+        },
+        {
+          "date": "2026-07-18T10:00:02.499+03:00",
+          "value": 2
+        },
+        {
+          "date": "2026-07-20T10:00:05.731+03:00",
+          "value": 8
+        },
+        {
+          "date": "2026-07-21T10:00:10.637+03:00",
+          "value": 8
+        },
+        {
+          "date": "2026-07-23T10:00:07.332+03:00",
+          "value": 10
+        },
+        {
+          "date": "2026-07-24T10:00:06.368+03:00",
+          "value": 14
+        },
+        {
+          "date": "2026-07-25T10:00:08.702+03:00",
+          "value": 14
+        },
+        {
+          "date": "2026-07-27T10:00:04.793+03:00",
+          "value": 12
+        },
+        {
+          "date": "2026-07-29T10:00:06.675+03:00",
+          "value": 16
+        }
+      ]
+    },
+    "in_search_samples": {
+      "count": 16,
+      "samples": [
+        {
+          "url": "https://cloud.dada-tuda.ru/analog-vercel",
+          "last_access": "2026-07-24T23:36:33.000+03:00",
+          "title": "Аналог Vercel в России — деплой из GitHub, оплата рублями — DADA Cloud"
+        },
+        {
+          "url": "https://cloud.dada-tuda.ru/",
+          "last_access": "2026-07-24T04:55:56.000+03:00",
+          "title": "DADA Cloud — бэкенд-облако: задеплой бэкенд из GitHub за минуты"
+        },
+        {
+          "url": "https://cloud.dada-tuda.ru/pricing",
+          "last_access": "2026-07-23T21:08:54.000+03:00",
+          "title": "Цены DADA Cloud — Free, Startup, Business, Enterprise — DADA Cloud"
+        },
+        {
+          "url": "https://cloud.dada-tuda.ru/analog-railway",
+          "last_access": "2026-07-23T16:37:29.000+03:00",
+          "title": "Аналог Railway в России — деплой из GitHub, оплата рублями — DADA Cloud"
+        },
+        {
+          "url": "https://cloud.dada-tuda.ru/hosting-telegram-bot",
+          "last_access": "2026-07-23T11:30:46.000+03:00",
+          "title": "Хостинг телеграм-бота без Docker — Dada Cloud — DADA Cloud"
+        },
+        {
+          "url": "https://cloud.dada-tuda.ru/en/deploy-without-git",
+          "last_access": "2026-07-23T09:51:56.000+03:00",
+          "title": "Deploy without git: upload a zip, get a live URL - Dada Cloud — DADA Cloud"
+        },
+        {
+          "url": "https://cloud.dada-tuda.ru/en/hosting-flask",
+          "last_access": "2026-07-22T15:29:44.000+03:00",
+          "title": "Flask hosting without a server - Dada Cloud — DADA Cloud"
+        },
+        {
+          "url": "https://cloud.dada-tuda.ru/en/hosting-vk-bot",
+          "last_access": "2026-07-22T15:11:48.000+03:00",
+          "title": "VK bot hosting - Dada Cloud — DADA Cloud"
+        },
+        {
+          "url": "https://cloud.dada-tuda.ru/en/hosting-fastapi",
+          "last_access": "2026-07-22T15:11:48.000+03:00",
+          "title": "FastAPI hosting without Docker - Dada Cloud — DADA Cloud"
+        },
+        {
+          "url": "https://cloud.dada-tuda.ru/en/hosting-streamlit",
+          "last_access": "2026-07-22T15:11:45.000+03:00",
+          "title": "Streamlit hosting in Russia - Dada Cloud — DADA Cloud"
+        },
+        {
+          "url": "https://cloud.dada-tuda.ru/en/hosting-django",
+          "last_access": "2026-07-22T15:11:45.000+03:00",
+          "title": "Django hosting without your own server - Dada Cloud — DADA Cloud"
+        },
+        {
+          "url": "https://cloud.dada-tuda.ru/migrate-vercel",
+          "last_access": "2026-07-15T21:39:27.000+03:00",
+          "title": "Переезд с Vercel на Dada Cloud - пошаговый гайд — DADA Cloud"
+        },
+        {
+          "url": "https://cloud.dada-tuda.ru/en/migrate-vercel",
+          "last_access": "2026-07-15T21:17:15.000+03:00",
+          "title": "Moving from Vercel to Dada Cloud - a step-by-step guide — DADA Cloud"
+        },
+        {
+          "url": "https://cloud.dada-tuda.ru/en/hosting-telegram-bot",
+          "last_access": "2026-07-15T12:04:54.000+03:00",
+          "title": "Telegram bot hosting in Russia — Dada Cloud — DADA Cloud"
+        },
+        {
+          "url": "https://cloud.dada-tuda.ru/analog-heroku",
+          "last_access": "2026-07-15T06:49:52.000+03:00",
+          "title": "Аналог Heroku для России — деплой из GitHub, оплата рублями — DADA Cloud"
+        },
+        {
+          "url": "https://cloud.dada-tuda.ru/en",
+          "last_access": "2026-07-12T18:39:22.000+03:00",
+          "title": "DADA Cloud — backend cloud: ship your backend from GitHub in minutes — DADA Cloud"
+        }
+      ]
+    },
+    "search_events": {
+      "count": 44,
+      "samples": [
+        {
+          "url": "https://cloud.dada-tuda.ru/analog-netlify",
+          "title": "",
+          "event_date": "2026-07-29T00:00:00.000+03:00",
+          "last_access": "2026-07-15T00:00:00.000+03:00",
+          "event": "REMOVED_FROM_SEARCH",
+          "excluded_url_status": "NOTHING_FOUND",
+          "bad_http_status": null,
+          "target_url": null
+        },
+        {
+          "url": "https://cloud.dada-tuda.ru/en/deploy-without-git",
+          "title": "Deploy without git: upload a zip, get a live URL - Dada Cloud — DADA Cloud",
+          "event_date": "2026-07-29T00:00:00.000+03:00",
+          "last_access": "2026-07-23T00:00:00.000+03:00",
+          "event": "APPEARED_IN_SEARCH",
+          "excluded_url_status": null,
+          "bad_http_status": null,
+          "target_url": null
+        },
+        {
+          "url": "https://cloud.dada-tuda.ru/en/developer/mcp-ai-agents",
+          "title": "Control DADA Cloud from an AI agent (MCP)",
+          "event_date": "2026-07-29T00:00:00.000+03:00",
+          "last_access": "2026-07-15T00:00:00.000+03:00",
+          "event": "REMOVED_FROM_SEARCH",
+          "excluded_url_status": "LOW_QUALITY",
+          "bad_http_status": null,
+          "target_url": null
+        },
+        {
+          "url": "https://cloud.dada-tuda.ru/en/hosting-django",
+          "title": "Django hosting without your own server - Dada Cloud — DADA Cloud",
+          "event_date": "2026-07-29T00:00:00.000+03:00",
+          "last_access": "2026-07-22T00:00:00.000+03:00",
+          "event": "APPEARED_IN_SEARCH",
+          "excluded_url_status": null,
+          "bad_http_status": null,
+          "target_url": null
+        },
+        {
+          "url": "https://cloud.dada-tuda.ru/en/hosting-fastapi",
+          "title": "FastAPI hosting without Docker - Dada Cloud — DADA Cloud",
+          "event_date": "2026-07-29T00:00:00.000+03:00",
+          "last_access": "2026-07-22T00:00:00.000+03:00",
+          "event": "APPEARED_IN_SEARCH",
+          "excluded_url_status": null,
+          "bad_http_status": null,
+          "target_url": null
+        },
+        {
+          "url": "https://cloud.dada-tuda.ru/en/hosting-flask",
+          "title": "Flask hosting without a server - Dada Cloud — DADA Cloud",
+          "event_date": "2026-07-29T00:00:00.000+03:00",
+          "last_access": "2026-07-22T00:00:00.000+03:00",
+          "event": "APPEARED_IN_SEARCH",
+          "excluded_url_status": null,
+          "bad_http_status": null,
+          "target_url": null
+        },
+        {
+          "url": "https://cloud.dada-tuda.ru/en/hosting-streamlit",
+          "title": "Streamlit hosting in Russia - Dada Cloud — DADA Cloud",
+          "event_date": "2026-07-29T00:00:00.000+03:00",
+          "last_access": "2026-07-22T00:00:00.000+03:00",
+          "event": "APPEARED_IN_SEARCH",
+          "excluded_url_status": null,
+          "bad_http_status": null,
+          "target_url": null
+        },
+        {
+          "url": "https://cloud.dada-tuda.ru/en/hosting-vk-bot",
+          "title": "VK bot hosting - Dada Cloud — DADA Cloud",
+          "event_date": "2026-07-29T00:00:00.000+03:00",
+          "last_access": "2026-07-22T00:00:00.000+03:00",
+          "event": "APPEARED_IN_SEARCH",
+          "excluded_url_status": null,
+          "bad_http_status": null,
+          "target_url": null
+        },
+        {
+          "url": "https://cloud.dada-tuda.ru/analog-netlify",
+          "title": "Аналог Netlify в России — деплой из GitHub, оплата рублями — DADA Cloud",
+          "event_date": "2026-07-27T00:00:00.000+03:00",
+          "last_access": "2026-07-15T00:00:00.000+03:00",
+          "event": "APPEARED_IN_SEARCH",
+          "excluded_url_status": null,
+          "bad_http_status": null,
+          "target_url": null
+        },
+        {
+          "url": "https://cloud.dada-tuda.ru/en/analog-fly-io",
+          "title": "Fly.io alternative for Russia — pay in rubles, no forwarders — DADA Cloud",
+          "event_date": "2026-07-27T00:00:00.000+03:00",
+          "last_access": "2026-07-15T00:00:00.000+03:00",
+          "event": "REMOVED_FROM_SEARCH",
+          "excluded_url_status": "LOW_QUALITY",
+          "bad_http_status": null,
+          "target_url": null
+        },
+        {
+          "url": "https://cloud.dada-tuda.ru/en/analog-railway",
+          "title": "Railway alternative that works in Russia — deploy from GitHub — DADA Cloud",
+          "event_date": "2026-07-27T00:00:00.000+03:00",
+          "last_access": "2026-07-15T00:00:00.000+03:00",
+          "event": "REMOVED_FROM_SEARCH",
+          "excluded_url_status": "LOW_QUALITY",
+          "bad_http_status": null,
+          "target_url": null
+        },
+        {
+          "url": "https://cloud.dada-tuda.ru/en/analog-render",
+          "title": "Render alternative for Russia — deploy from GitHub, pay in rubles — DADA Cloud",
+          "event_date": "2026-07-27T00:00:00.000+03:00",
+          "last_access": "2026-07-15T00:00:00.000+03:00",
+          "event": "REMOVED_FROM_SEARCH",
+          "excluded_url_status": "LOW_QUALITY",
+          "bad_http_status": null,
+          "target_url": null
+        },
+        {
+          "url": "https://cloud.dada-tuda.ru/en/analog-vercel",
+          "title": "Vercel alternative that works in Russia — deploy from GitHub — DADA Cloud",
+          "event_date": "2026-07-27T00:00:00.000+03:00",
+          "last_access": "2026-07-15T00:00:00.000+03:00",
+          "event": "REMOVED_FROM_SEARCH",
+          "excluded_url_status": "LOW_QUALITY",
+          "bad_http_status": null,
+          "target_url": null
+        },
+        {
+          "url": "https://cloud.dada-tuda.ru/migrate-vercel",
+          "title": "Переезд с Vercel на Dada Cloud - пошаговый гайд — DADA Cloud",
+          "event_date": "2026-07-27T00:00:00.000+03:00",
+          "last_access": "2026-07-15T00:00:00.000+03:00",
+          "event": "APPEARED_IN_SEARCH",
+          "excluded_url_status": null,
+          "bad_http_status": null,
+          "target_url": null
+        },
+        {
+          "url": "https://cloud.dada-tuda.ru/developer/mcp-ai-agents",
+          "title": "Control DADA Cloud from an AI agent (MCP)",
+          "event_date": "2026-07-24T00:00:00.000+03:00",
+          "last_access": "2026-07-15T00:00:00.000+03:00",
+          "event": "REMOVED_FROM_SEARCH",
+          "excluded_url_status": "LOW_QUALITY",
+          "bad_http_status": null,
+          "target_url": null
+        },
+        {
+          "url": "https://cloud.dada-tuda.ru/en/analog-fly-io",
+          "title": "Fly.io alternative for Russia — pay in rubles, no forwarders — DADA Cloud",
+          "event_date": "2026-07-24T00:00:00.000+03:00",
+          "last_access": "2026-07-15T00:00:00.000+03:00",
+          "event": "APPEARED_IN_SEARCH",
+          "excluded_url_status": null,
+          "bad_http_status": null,
+          "target_url": null
+        },
+        {
+          "url": "https://cloud.dada-tuda.ru/en/analog-railway",
+          "title": "Railway alternative that works in Russia — deploy from GitHub — DADA Cloud",
+          "event_date": "2026-07-24T00:00:00.000+03:00",
+          "last_access": "2026-07-15T00:00:00.000+03:00",
+          "event": "APPEARED_IN_SEARCH",
+          "excluded_url_status": null,
+          "bad_http_status": null,
+          "target_url": null
+        },
+        {
+          "url": "https://cloud.dada-tuda.ru/en/analog-render",
+          "title": "Render alternative for Russia — deploy from GitHub, pay in rubles — DADA Cloud",
+          "event_date": "2026-07-24T00:00:00.000+03:00",
+          "last_access": "2026-07-15T00:00:00.000+03:00",
+          "event": "APPEARED_IN_SEARCH",
+          "excluded_url_status": null,
+          "bad_http_status": null,
+          "target_url": null
+        },
+        {
+          "url": "https://cloud.dada-tuda.ru/en/analog-vercel",
+          "title": "Vercel alternative that works in Russia — deploy from GitHub — DADA Cloud",
+          "event_date": "2026-07-24T00:00:00.000+03:00",
+          "last_access": "2026-07-15T00:00:00.000+03:00",
+          "event": "APPEARED_IN_SEARCH",
+          "excluded_url_status": null,
+          "bad_http_status": null,
+          "target_url": null
+        },
+        {
+          "url": "https://cloud.dada-tuda.ru/en/developer/mcp-ai-agents",
+          "title": "Control DADA Cloud from an AI agent (MCP)",
+          "event_date": "2026-07-24T00:00:00.000+03:00",
+          "last_access": "2026-07-15T00:00:00.000+03:00",
+          "event": "APPEARED_IN_SEARCH",
+          "excluded_url_status": null,
+          "bad_http_status": null,
+          "target_url": null
+        },
+        {
+          "url": "https://cloud.dada-tuda.ru/en/hosting-telegram-bot",
+          "title": "Telegram bot hosting in Russia — Dada Cloud — DADA Cloud",
+          "event_date": "2026-07-24T00:00:00.000+03:00",
+          "last_access": "2026-07-15T00:00:00.000+03:00",
+          "event": "APPEARED_IN_SEARCH",
+          "excluded_url_status": null,
+          "bad_http_status": null,
+          "target_url": null
+        },
+        {
+          "url": "https://cloud.dada-tuda.ru/migrate-vercel",
+          "title": "Переезд с Vercel на Dada Cloud - пошаговый гайд — DADA Cloud",
+          "event_date": "2026-07-24T00:00:00.000+03:00",
+          "last_access": "2026-07-15T00:00:00.000+03:00",
+          "event": "REMOVED_FROM_SEARCH",
+          "excluded_url_status": "LOW_QUALITY",
+          "bad_http_status": null,
+          "target_url": null
+        },
+        {
+          "url": "https://cloud.dada-tuda.ru/analog-heroku",
+          "title": "Аналог Heroku для России — деплой из GitHub, оплата рублями — DADA Cloud",
+          "event_date": "2026-07-23T00:00:00.000+03:00",
+          "last_access": "2026-07-15T00:00:00.000+03:00",
+          "event": "APPEARED_IN_SEARCH",
+          "excluded_url_status": null,
+          "bad_http_status": null,
+          "target_url": null
+        },
+        {
+          "url": "https://cloud.dada-tuda.ru/en/migrate-vercel",
+          "title": "Moving from Vercel to Dada Cloud - a step-by-step guide — DADA Cloud",
+          "event_date": "2026-07-23T00:00:00.000+03:00",
+          "last_access": "2026-07-15T00:00:00.000+03:00",
+          "event": "APPEARED_IN_SEARCH",
+          "excluded_url_status": null,
+          "bad_http_status": null,
+          "target_url": null
+        },
+        {
+          "url": "https://cloud.dada-tuda.ru/analog-vercel",
+          "title": "Аналог Vercel в России — деплой из GitHub, оплата рублями — DADA Cloud",
+          "event_date": "2026-07-21T00:00:00.000+03:00",
+          "last_access": "2026-07-15T00:00:00.000+03:00",
+          "event": "APPEARED_IN_SEARCH",
+          "excluded_url_status": null,
+          "bad_http_status": null,
+          "target_url": null
+        },
+        {
+          "url": "https://cloud.dada-tuda.ru/en/migrate-vercel",
+          "title": "Moving from Vercel to Dada Cloud - a step-by-step guide — DADA Cloud",
+          "event_date": "2026-07-21T00:00:00.000+03:00",
+          "last_access": "2026-07-15T00:00:00.000+03:00",
+          "event": "REMOVED_FROM_SEARCH",
+          "excluded_url_status": "LOW_QUALITY",
+          "bad_http_status": null,
+          "target_url": null
+        },
+        {
+          "url": "https://cloud.dada-tuda.ru/analog-railway",
+          "title": "Аналог Railway в России — деплой из GitHub, оплата рублями — DADA Cloud",
+          "event_date": "2026-07-20T00:00:00.000+03:00",
+          "last_access": "2026-07-15T00:00:00.000+03:00",
+          "event": "APPEARED_IN_SEARCH",
+          "excluded_url_status": null,
+          "bad_http_status": null,
+          "target_url": null
+        },
+        {
+          "url": "https://cloud.dada-tuda.ru/developer/mcp-ai-agents",
+          "title": "Control DADA Cloud from an AI agent (MCP)",
+          "event_date": "2026-07-20T00:00:00.000+03:00",
+          "last_access": "2026-07-15T00:00:00.000+03:00",
+          "event": "APPEARED_IN_SEARCH",
+          "excluded_url_status": null,
+          "bad_http_status": null,
+          "target_url": null
+        },
+        {
+          "url": "https://cloud.dada-tuda.ru/en/migrate-vercel",
+          "title": "Moving from Vercel to Dada Cloud - a step-by-step guide — DADA Cloud",
+          "event_date": "2026-07-20T00:00:00.000+03:00",
+          "last_access": "2026-07-15T00:00:00.000+03:00",
+          "event": "APPEARED_IN_SEARCH",
+          "excluded_url_status": null,
+          "bad_http_status": null,
+          "target_url": null
+        },
+        {
+          "url": "https://cloud.dada-tuda.ru/hosting-telegram-bot",
+          "title": "Хостинг для Telegram-бота в России — Dada Cloud — DADA Cloud",
+          "event_date": "2026-07-20T00:00:00.000+03:00",
+          "last_access": "2026-07-16T00:00:00.000+03:00",
+          "event": "APPEARED_IN_SEARCH",
+          "excluded_url_status": null,
+          "bad_http_status": null,
+          "target_url": null
+        },
+        {
+          "url": "https://cloud.dada-tuda.ru/migrate-vercel",
+          "title": "Переезд с Vercel на Dada Cloud - пошаговый гайд — DADA Cloud",
+          "event_date": "2026-07-20T00:00:00.000+03:00",
+          "last_access": "2026-07-15T00:00:00.000+03:00",
+          "event": "APPEARED_IN_SEARCH",
+          "excluded_url_status": null,
+          "bad_http_status": null,
+          "target_url": null
+        },
+        {
+          "url": "https://cloud.dada-tuda.ru/pricing",
+          "title": "Цены DADA Cloud — Free, Startup, Business, Enterprise — DADA Cloud",
+          "event_date": "2026-07-20T00:00:00.000+03:00",
+          "last_access": "2026-07-15T00:00:00.000+03:00",
+          "event": "APPEARED_IN_SEARCH",
+          "excluded_url_status": null,
+          "bad_http_status": null,
+          "target_url": null
+        },
+        {
+          "url": "https://cloud.dada-tuda.ru/cloud-servers",
+          "title": "DADA Cloud — бэкенд-облако: задеплой бэкенд из GitHub за минуты",
+          "event_date": "2026-07-12T00:00:00.000+03:00",
+          "last_access": "2026-07-03T00:00:00.000+03:00",
+          "event": "REMOVED_FROM_SEARCH",
+          "excluded_url_status": "LOW_QUALITY",
+          "bad_http_status": null,
+          "target_url": null
+        },
+        {
+          "url": "https://cloud.dada-tuda.ru/databases",
+          "title": "DADA Cloud — бэкенд-облако: задеплой бэкенд из GitHub за минуты",
+          "event_date": "2026-07-12T00:00:00.000+03:00",
+          "last_access": "2026-07-03T00:00:00.000+03:00",
+          "event": "REMOVED_FROM_SEARCH",
+          "excluded_url_status": "LOW_QUALITY",
+          "bad_http_status": null,
+          "target_url": null
+        },
+        {
+          "url": "https://cloud.dada-tuda.ru/developer",
+          "title": "DADA Cloud — бэкенд-облако: задеплой бэкенд из GitHub за минуты",
+          "event_date": "2026-07-12T00:00:00.000+03:00",
+          "last_access": "2026-07-03T00:00:00.000+03:00",
+          "event": "REMOVED_FROM_SEARCH",
+          "excluded_url_status": "LOW_QUALITY",
+          "bad_http_status": null,
+          "target_url": null
+        },
+        {
+          "url": "https://cloud.dada-tuda.ru/pricing",
+          "title": "DADA Cloud — бэкенд-облако: задеплой бэкенд из GitHub за минуты",
+          "event_date": "2026-07-12T00:00:00.000+03:00",
+          "last_access": "2026-07-03T00:00:00.000+03:00",
+          "event": "REMOVED_FROM_SEARCH",
+          "excluded_url_status": "LOW_QUALITY",
+          "bad_http_status": null,
+          "target_url": null
+        },
+        {
+          "url": "https://cloud.dada-tuda.ru/storage",
+          "title": "DADA Cloud — бэкенд-облако: задеплой бэкенд из GitHub за минуты",
+          "event_date": "2026-07-12T00:00:00.000+03:00",
+          "last_access": "2026-07-03T00:00:00.000+03:00",
+          "event": "REMOVED_FROM_SEARCH",
+          "excluded_url_status": "LOW_QUALITY",
+          "bad_http_status": null,
+          "target_url": null
+        },
+        {
+          "url": "https://cloud.dada-tuda.ru/cloud-servers",
+          "title": "DADA Cloud — бэкенд-облако: задеплой бэкенд из GitHub за минуты",
+          "event_date": "2026-07-07T00:00:00.000+03:00",
+          "last_access": "2026-07-03T00:00:00.000+03:00",
+          "event": "APPEARED_IN_SEARCH",
+          "excluded_url_status": null,
+          "bad_http_status": null,
+          "target_url": null
+        },
+        {
+          "url": "https://cloud.dada-tuda.ru/databases",
+          "title": "DADA Cloud — бэкенд-облако: задеплой бэкенд из GitHub за минуты",
+          "event_date": "2026-07-07T00:00:00.000+03:00",
+          "last_access": "2026-07-03T00:00:00.000+03:00",
+          "event": "APPEARED_IN_SEARCH",
+          "excluded_url_status": null,
+          "bad_http_status": null,
+          "target_url": null
+        },
+        {
+          "url": "https://cloud.dada-tuda.ru/developer",
+          "title": "DADA Cloud — бэкенд-облако: задеплой бэкенд из GitHub за минуты",
+          "event_date": "2026-07-07T00:00:00.000+03:00",
+          "last_access": "2026-07-03T00:00:00.000+03:00",
+          "event": "APPEARED_IN_SEARCH",
+          "excluded_url_status": null,
+          "bad_http_status": null,
+          "target_url": null
+        },
+        {
+          "url": "https://cloud.dada-tuda.ru/pricing",
+          "title": "DADA Cloud — бэкенд-облако: задеплой бэкенд из GitHub за минуты",
+          "event_date": "2026-07-07T00:00:00.000+03:00",
+          "last_access": "2026-07-03T00:00:00.000+03:00",
+          "event": "APPEARED_IN_SEARCH",
+          "excluded_url_status": null,
+          "bad_http_status": null,
+          "target_url": null
+        },
+        {
+          "url": "https://cloud.dada-tuda.ru/storage",
+          "title": "DADA Cloud — бэкенд-облако: задеплой бэкенд из GitHub за минуты",
+          "event_date": "2026-07-07T00:00:00.000+03:00",
+          "last_access": "2026-07-03T00:00:00.000+03:00",
+          "event": "APPEARED_IN_SEARCH",
+          "excluded_url_status": null,
+          "bad_http_status": null,
+          "target_url": null
+        },
+        {
+          "url": "https://cloud.dada-tuda.ru/",
+          "title": "DADA Cloud — бэкенд-облако: задеплой бэкенд из GitHub за минуты",
+          "event_date": "2026-07-01T00:00:00.000+03:00",
+          "last_access": "2026-06-26T00:00:00.000+03:00",
+          "event": "APPEARED_IN_SEARCH",
+          "excluded_url_status": null,
+          "bad_http_status": null,
+          "target_url": null
+        },
+        {
+          "url": "https://cloud.dada-tuda.ru/en",
+          "title": "DADA Cloud — backend cloud: ship your backend from GitHub in minutes — DADA Cloud",
+          "event_date": "2026-07-01T00:00:00.000+03:00",
+          "last_access": "2026-06-26T00:00:00.000+03:00",
+          "event": "APPEARED_IN_SEARCH",
+          "excluded_url_status": null,
+          "bad_http_status": null,
+          "target_url": null
+        }
+      ]
+    },
+    "indexing_samples": {
+      "count": 101,
+      "samples": [
+        {
+          "status": "HTTP_2XX",
+          "http_code": 200,
+          "url": "https://cloud.dada-tuda.ru/",
+          "access_date": "2026-06-26T22:00:00.000+03:00"
+        },
+        {
+          "status": "HTTP_2XX",
+          "http_code": 200,
+          "url": "https://cloud.dada-tuda.ru/en",
+          "access_date": "2026-06-26T22:00:00.000+03:00"
+        },
+        {
+          "status": "HTTP_2XX",
+          "http_code": 200,
+          "url": "https://cloud.dada-tuda.ru/cloud-servers",
+          "access_date": "2026-07-03T03:00:00.000+03:00"
+        },
+        {
+          "status": "HTTP_2XX",
+          "http_code": 200,
+          "url": "https://cloud.dada-tuda.ru/databases",
+          "access_date": "2026-07-03T03:00:00.000+03:00"
+        },
+        {
+          "status": "HTTP_2XX",
+          "http_code": 200,
+          "url": "https://cloud.dada-tuda.ru/developer",
+          "access_date": "2026-07-03T03:00:00.000+03:00"
+        },
+        {
+          "status": "HTTP_2XX",
+          "http_code": 200,
+          "url": "https://cloud.dada-tuda.ru/en/cloud-servers",
+          "access_date": "2026-07-03T03:00:00.000+03:00"
+        },
+        {
+          "status": "HTTP_2XX",
+          "http_code": 200,
+          "url": "https://cloud.dada-tuda.ru/en/developer",
+          "access_date": "2026-07-03T03:00:00.000+03:00"
+        },
+        {
+          "status": "HTTP_2XX",
+          "http_code": 200,
+          "url": "https://cloud.dada-tuda.ru/en/kubernetes",
+          "access_date": "2026-07-03T03:00:00.000+03:00"
+        },
+        {
+          "status": "HTTP_2XX",
+          "http_code": 200,
+          "url": "https://cloud.dada-tuda.ru/en/storage",
+          "access_date": "2026-07-03T03:00:00.000+03:00"
+        },
+        {
+          "status": "HTTP_2XX",
+          "http_code": 200,
+          "url": "https://cloud.dada-tuda.ru/kubernetes",
+          "access_date": "2026-07-03T03:00:00.000+03:00"
+        },
+        {
+          "status": "HTTP_2XX",
+          "http_code": 200,
+          "url": "https://cloud.dada-tuda.ru/",
+          "access_date": "2026-07-03T04:00:00.000+03:00"
+        },
+        {
+          "status": "HTTP_2XX",
+          "http_code": 200,
+          "url": "https://cloud.dada-tuda.ru/en/pricing",
+          "access_date": "2026-07-03T04:00:00.000+03:00"
+        },
+        {
+          "status": "HTTP_2XX",
+          "http_code": 200,
+          "url": "https://cloud.dada-tuda.ru/databases",
+          "access_date": "2026-07-03T05:00:00.000+03:00"
+        },
+        {
+          "status": "HTTP_2XX",
+          "http_code": 200,
+          "url": "https://cloud.dada-tuda.ru/storage",
+          "access_date": "2026-07-03T05:00:00.000+03:00"
+        },
+        {
+          "status": "HTTP_2XX",
+          "http_code": 200,
+          "url": "https://cloud.dada-tuda.ru/pricing",
+          "access_date": "2026-07-03T08:00:00.000+03:00"
+        },
+        {
+          "status": "HTTP_2XX",
+          "http_code": 200,
+          "url": "https://cloud.dada-tuda.ru/en/databases",
+          "access_date": "2026-07-03T09:00:00.000+03:00"
+        },
+        {
+          "status": "HTTP_2XX",
+          "http_code": 200,
+          "url": "https://cloud.dada-tuda.ru/",
+          "access_date": "2026-07-05T12:00:00.000+03:00"
+        },
+        {
+          "status": "HTTP_2XX",
+          "http_code": 200,
+          "url": "https://cloud.dada-tuda.ru/",
+          "access_date": "2026-07-11T04:00:00.000+03:00"
+        },
+        {
+          "status": "HTTP_2XX",
+          "http_code": 200,
+          "url": "https://cloud.dada-tuda.ru/",
+          "access_date": "2026-07-11T18:00:00.000+03:00"
+        },
+        {
+          "status": "HTTP_2XX",
+          "http_code": 200,
+          "url": "https://cloud.dada-tuda.ru/",
+          "access_date": "2026-07-12T05:00:00.000+03:00"
+        },
+        {
+          "status": "HTTP_2XX",
+          "http_code": 200,
+          "url": "https://cloud.dada-tuda.ru/en",
+          "access_date": "2026-07-12T18:00:00.000+03:00"
+        },
+        {
+          "status": "HTTP_2XX",
+          "http_code": 200,
+          "url": "https://cloud.dada-tuda.ru/",
+          "access_date": "2026-07-13T05:00:00.000+03:00"
+        },
+        {
+          "status": "HTTP_2XX",
+          "http_code": 200,
+          "url": "https://cloud.dada-tuda.ru/",
+          "access_date": "2026-07-13T18:00:00.000+03:00"
+        },
+        {
+          "status": "HTTP_2XX",
+          "http_code": 200,
+          "url": "https://cloud.dada-tuda.ru/",
+          "access_date": "2026-07-14T07:00:00.000+03:00"
+        },
+        {
+          "status": "HTTP_2XX",
+          "http_code": 200,
+          "url": "https://cloud.dada-tuda.ru/",
+          "access_date": "2026-07-14T21:00:00.000+03:00"
+        },
+        {
+          "status": "HTTP_2XX",
+          "http_code": 200,
+          "url": "https://cloud.dada-tuda.ru/analog-vercel",
+          "access_date": "2026-07-15T04:00:00.000+03:00"
+        },
+        {
+          "status": "HTTP_2XX",
+          "http_code": 200,
+          "url": "https://cloud.dada-tuda.ru/en/analog-vercel",
+          "access_date": "2026-07-15T04:00:00.000+03:00"
+        },
+        {
+          "status": "HTTP_2XX",
+          "http_code": 200,
+          "url": "https://cloud.dada-tuda.ru/analog-heroku",
+          "access_date": "2026-07-15T06:00:00.000+03:00"
+        },
+        {
+          "status": "HTTP_2XX",
+          "http_code": 200,
+          "url": "https://cloud.dada-tuda.ru/analog-railway",
+          "access_date": "2026-07-15T06:00:00.000+03:00"
+        },
+        {
+          "status": "HTTP_2XX",
+          "http_code": 200,
+          "url": "https://cloud.dada-tuda.ru/analog-vercel",
+          "access_date": "2026-07-15T06:00:00.000+03:00"
+        },
+        {
+          "status": "HTTP_2XX",
+          "http_code": 200,
+          "url": "https://cloud.dada-tuda.ru/analog-render",
+          "access_date": "2026-07-15T07:00:00.000+03:00"
+        },
+        {
+          "status": "HTTP_2XX",
+          "http_code": 200,
+          "url": "https://cloud.dada-tuda.ru/en/analog-railway",
+          "access_date": "2026-07-15T07:00:00.000+03:00"
+        },
+        {
+          "status": "HTTP_2XX",
+          "http_code": 200,
+          "url": "https://cloud.dada-tuda.ru/en/analog-render",
+          "access_date": "2026-07-15T07:00:00.000+03:00"
+        },
+        {
+          "status": "HTTP_2XX",
+          "http_code": 200,
+          "url": "https://cloud.dada-tuda.ru/analog-digitalocean",
+          "access_date": "2026-07-15T08:00:00.000+03:00"
+        },
+        {
+          "status": "HTTP_2XX",
+          "http_code": 200,
+          "url": "https://cloud.dada-tuda.ru/en/analog-heroku",
+          "access_date": "2026-07-15T08:00:00.000+03:00"
+        },
+        {
+          "status": "HTTP_2XX",
+          "http_code": 200,
+          "url": "https://cloud.dada-tuda.ru/",
+          "access_date": "2026-07-15T09:00:00.000+03:00"
+        },
+        {
+          "status": "HTTP_2XX",
+          "http_code": 200,
+          "url": "https://cloud.dada-tuda.ru/en/analog-netlify",
+          "access_date": "2026-07-15T09:00:00.000+03:00"
+        },
+        {
+          "status": "HTTP_2XX",
+          "http_code": 200,
+          "url": "https://cloud.dada-tuda.ru/analog-netlify",
+          "access_date": "2026-07-15T10:00:00.000+03:00"
+        },
+        {
+          "status": "HTTP_2XX",
+          "http_code": 200,
+          "url": "https://cloud.dada-tuda.ru/en/analog-digitalocean",
+          "access_date": "2026-07-15T10:00:00.000+03:00"
+        },
+        {
+          "status": "HTTP_2XX",
+          "http_code": 200,
+          "url": "https://cloud.dada-tuda.ru/analog-render",
+          "access_date": "2026-07-15T11:00:00.000+03:00"
+        },
+        {
+          "status": "HTTP_2XX",
+          "http_code": 200,
+          "url": "https://cloud.dada-tuda.ru/en/analog-netlify",
+          "access_date": "2026-07-15T11:00:00.000+03:00"
+        },
+        {
+          "status": "HTTP_2XX",
+          "http_code": 200,
+          "url": "https://cloud.dada-tuda.ru/analog-fly-io",
+          "access_date": "2026-07-15T12:00:00.000+03:00"
+        },
+        {
+          "status": "HTTP_2XX",
+          "http_code": 200,
+          "url": "https://cloud.dada-tuda.ru/en/analog-fly-io",
+          "access_date": "2026-07-15T12:00:00.000+03:00"
+        },
+        {
+          "status": "HTTP_2XX",
+          "http_code": 200,
+          "url": "https://cloud.dada-tuda.ru/en/hosting-telegram-bot",
+          "access_date": "2026-07-15T12:00:00.000+03:00"
+        },
+        {
+          "status": "HTTP_4XX",
+          "http_code": 404,
+          "url": "https://cloud.dada-tuda.ru/en/telegram-bot-hosting",
+          "access_date": "2026-07-15T12:00:00.000+03:00"
+        },
+        {
+          "status": "HTTP_2XX",
+          "http_code": 200,
+          "url": "https://cloud.dada-tuda.ru/hosting-telegram-bot",
+          "access_date": "2026-07-15T12:00:00.000+03:00"
+        },
+        {
+          "status": "HTTP_4XX",
+          "http_code": 404,
+          "url": "https://cloud.dada-tuda.ru/telegram-bot-hosting",
+          "access_date": "2026-07-15T12:00:00.000+03:00"
+        },
+        {
+          "status": "HTTP_4XX",
+          "http_code": 404,
+          "url": "https://cloud.dada-tuda.ru/vibe-coding-deploy",
+          "access_date": "2026-07-15T12:00:00.000+03:00"
+        },
+        {
+          "status": "HTTP_2XX",
+          "http_code": 200,
+          "url": "https://cloud.dada-tuda.ru/deploy-vibe-coding",
+          "access_date": "2026-07-15T13:00:00.000+03:00"
+        },
+        {
+          "status": "HTTP_4XX",
+          "http_code": 404,
+          "url": "https://cloud.dada-tuda.ru/en/vibe-coding-deploy",
+          "access_date": "2026-07-15T13:00:00.000+03:00"
+        },
+        {
+          "status": "HTTP_2XX",
+          "http_code": 200,
+          "url": "https://cloud.dada-tuda.ru/en/deploy-vibe-coding",
+          "access_date": "2026-07-15T14:00:00.000+03:00"
+        },
+        {
+          "status": "HTTP_2XX",
+          "http_code": 200,
+          "url": "https://cloud.dada-tuda.ru/",
+          "access_date": "2026-07-15T21:00:00.000+03:00"
+        },
+        {
+          "status": "HTTP_2XX",
+          "http_code": 200,
+          "url": "https://cloud.dada-tuda.ru/en/privacy",
+          "access_date": "2026-07-15T21:00:00.000+03:00"
+        },
+        {
+          "status": "HTTP_2XX",
+          "http_code": 200,
+          "url": "https://cloud.dada-tuda.ru/en/terms",
+          "access_date": "2026-07-15T21:00:00.000+03:00"
+        },
+        {
+          "status": "HTTP_2XX",
+          "http_code": 200,
+          "url": "https://cloud.dada-tuda.ru/migrate-vercel",
+          "access_date": "2026-07-15T21:00:00.000+03:00"
+        },
+        {
+          "status": "HTTP_2XX",
+          "http_code": 200,
+          "url": "https://cloud.dada-tuda.ru/terms",
+          "access_date": "2026-07-15T21:00:00.000+03:00"
+        },
+        {
+          "status": "HTTP_2XX",
+          "http_code": 200,
+          "url": "https://cloud.dada-tuda.ru/developer/mcp-ai-agents",
+          "access_date": "2026-07-15T22:00:00.000+03:00"
+        },
+        {
+          "status": "HTTP_2XX",
+          "http_code": 200,
+          "url": "https://cloud.dada-tuda.ru/en/migrate-vercel",
+          "access_date": "2026-07-15T22:00:00.000+03:00"
+        },
+        {
+          "status": "HTTP_2XX",
+          "http_code": 200,
+          "url": "https://cloud.dada-tuda.ru/en/pricing",
+          "access_date": "2026-07-15T22:00:00.000+03:00"
+        },
+        {
+          "status": "HTTP_2XX",
+          "http_code": 200,
+          "url": "https://cloud.dada-tuda.ru/privacy",
+          "access_date": "2026-07-15T22:00:00.000+03:00"
+        },
+        {
+          "status": "HTTP_2XX",
+          "http_code": 200,
+          "url": "https://cloud.dada-tuda.ru/en/developer/mcp-ai-agents",
+          "access_date": "2026-07-15T23:00:00.000+03:00"
+        },
+        {
+          "status": "HTTP_2XX",
+          "http_code": 200,
+          "url": "https://cloud.dada-tuda.ru/en/status",
+          "access_date": "2026-07-16T00:00:00.000+03:00"
+        },
+        {
+          "status": "HTTP_2XX",
+          "http_code": 200,
+          "url": "https://cloud.dada-tuda.ru/status",
+          "access_date": "2026-07-16T00:00:00.000+03:00"
+        },
+        {
+          "status": "HTTP_2XX",
+          "http_code": 200,
+          "url": "https://cloud.dada-tuda.ru/en/status",
+          "access_date": "2026-07-16T01:00:00.000+03:00"
+        },
+        {
+          "status": "HTTP_2XX",
+          "http_code": 200,
+          "url": "https://cloud.dada-tuda.ru/status",
+          "access_date": "2026-07-16T01:00:00.000+03:00"
+        },
+        {
+          "status": "HTTP_2XX",
+          "http_code": 200,
+          "url": "https://cloud.dada-tuda.ru/pricing",
+          "access_date": "2026-07-16T02:00:00.000+03:00"
+        },
+        {
+          "status": "HTTP_2XX",
+          "http_code": 200,
+          "url": "https://cloud.dada-tuda.ru/hosting-telegram-bot",
+          "access_date": "2026-07-16T03:00:00.000+03:00"
+        },
+        {
+          "status": "HTTP_2XX",
+          "http_code": 200,
+          "url": "https://cloud.dada-tuda.ru/",
+          "access_date": "2026-07-16T10:00:00.000+03:00"
+        },
+        {
+          "status": "HTTP_2XX",
+          "http_code": 200,
+          "url": "https://cloud.dada-tuda.ru/",
+          "access_date": "2026-07-16T22:00:00.000+03:00"
+        },
+        {
+          "status": "HTTP_2XX",
+          "http_code": 200,
+          "url": "https://cloud.dada-tuda.ru/",
+          "access_date": "2026-07-17T10:00:00.000+03:00"
+        },
+        {
+          "status": "HTTP_2XX",
+          "http_code": 200,
+          "url": "https://cloud.dada-tuda.ru/pricing",
+          "access_date": "2026-07-17T18:00:00.000+03:00"
+        },
+        {
+          "status": "HTTP_2XX",
+          "http_code": 200,
+          "url": "https://cloud.dada-tuda.ru/",
+          "access_date": "2026-07-17T22:00:00.000+03:00"
+        },
+        {
+          "status": "HTTP_2XX",
+          "http_code": 200,
+          "url": "https://cloud.dada-tuda.ru/",
+          "access_date": "2026-07-18T11:00:00.000+03:00"
+        },
+        {
+          "status": "HTTP_2XX",
+          "http_code": 200,
+          "url": "https://cloud.dada-tuda.ru/",
+          "access_date": "2026-07-19T01:00:00.000+03:00"
+        },
+        {
+          "status": "HTTP_2XX",
+          "http_code": 200,
+          "url": "https://cloud.dada-tuda.ru/",
+          "access_date": "2026-07-19T15:00:00.000+03:00"
+        },
+        {
+          "status": "HTTP_5XX",
+          "http_code": 503,
+          "url": "https://cloud.dada-tuda.ru/pricing",
+          "access_date": "2026-07-20T13:00:00.000+03:00"
+        },
+        {
+          "status": "HTTP_5XX",
+          "http_code": 503,
+          "url": "https://cloud.dada-tuda.ru/analog-vercel",
+          "access_date": "2026-07-20T15:00:00.000+03:00"
+        },
+        {
+          "status": "HTTP_2XX",
+          "http_code": 200,
+          "url": "https://cloud.dada-tuda.ru/",
+          "access_date": "2026-07-21T03:00:00.000+03:00"
+        },
+        {
+          "status": "HTTP_2XX",
+          "http_code": 200,
+          "url": "https://cloud.dada-tuda.ru/",
+          "access_date": "2026-07-22T12:00:00.000+03:00"
+        },
+        {
+          "status": "HTTP_2XX",
+          "http_code": 200,
+          "url": "https://cloud.dada-tuda.ru/en/hosting-django",
+          "access_date": "2026-07-22T15:00:00.000+03:00"
+        },
+        {
+          "status": "HTTP_2XX",
+          "http_code": 200,
+          "url": "https://cloud.dada-tuda.ru/en/hosting-fastapi",
+          "access_date": "2026-07-22T15:00:00.000+03:00"
+        },
+        {
+          "status": "HTTP_2XX",
+          "http_code": 200,
+          "url": "https://cloud.dada-tuda.ru/en/hosting-streamlit",
+          "access_date": "2026-07-22T15:00:00.000+03:00"
+        },
+        {
+          "status": "HTTP_2XX",
+          "http_code": 200,
+          "url": "https://cloud.dada-tuda.ru/en/hosting-vk-bot",
+          "access_date": "2026-07-22T15:00:00.000+03:00"
+        },
+        {
+          "status": "HTTP_2XX",
+          "http_code": 200,
+          "url": "https://cloud.dada-tuda.ru/hosting-django",
+          "access_date": "2026-07-22T15:00:00.000+03:00"
+        },
+        {
+          "status": "HTTP_2XX",
+          "http_code": 200,
+          "url": "https://cloud.dada-tuda.ru/hosting-fastapi",
+          "access_date": "2026-07-22T15:00:00.000+03:00"
+        },
+        {
+          "status": "HTTP_2XX",
+          "http_code": 200,
+          "url": "https://cloud.dada-tuda.ru/hosting-flask",
+          "access_date": "2026-07-22T15:00:00.000+03:00"
+        },
+        {
+          "status": "HTTP_2XX",
+          "http_code": 200,
+          "url": "https://cloud.dada-tuda.ru/hosting-streamlit",
+          "access_date": "2026-07-22T15:00:00.000+03:00"
+        },
+        {
+          "status": "HTTP_2XX",
+          "http_code": 200,
+          "url": "https://cloud.dada-tuda.ru/hosting-vk-bot",
+          "access_date": "2026-07-22T15:00:00.000+03:00"
+        },
+        {
+          "status": "HTTP_2XX",
+          "http_code": 200,
+          "url": "https://cloud.dada-tuda.ru/en/hosting-flask",
+          "access_date": "2026-07-22T16:00:00.000+03:00"
+        },
+        {
+          "status": "HTTP_2XX",
+          "http_code": 200,
+          "url": "https://cloud.dada-tuda.ru/en/deploy-without-git",
+          "access_date": "2026-07-23T09:00:00.000+03:00"
+        },
+        {
+          "status": "HTTP_2XX",
+          "http_code": 200,
+          "url": "https://cloud.dada-tuda.ru/deploy-without-git",
+          "access_date": "2026-07-23T10:00:00.000+03:00"
+        },
+        {
+          "status": "HTTP_2XX",
+          "http_code": 200,
+          "url": "https://cloud.dada-tuda.ru/hosting-telegram-bot",
+          "access_date": "2026-07-23T11:00:00.000+03:00"
+        },
+        {
+          "status": "HTTP_2XX",
+          "http_code": 200,
+          "url": "https://cloud.dada-tuda.ru/analog-railway",
+          "access_date": "2026-07-23T16:00:00.000+03:00"
+        },
+        {
+          "status": "HTTP_2XX",
+          "http_code": 200,
+          "url": "https://cloud.dada-tuda.ru/pricing",
+          "access_date": "2026-07-23T21:00:00.000+03:00"
+        },
+        {
+          "status": "HTTP_2XX",
+          "http_code": 200,
+          "url": "https://cloud.dada-tuda.ru/",
+          "access_date": "2026-07-24T06:00:00.000+03:00"
+        },
+        {
+          "status": "HTTP_2XX",
+          "http_code": 200,
+          "url": "https://cloud.dada-tuda.ru/analog-vercel",
+          "access_date": "2026-07-25T01:00:00.000+03:00"
+        },
+        {
+          "status": "HTTP_2XX",
+          "http_code": 200,
+          "url": "https://cloud.dada-tuda.ru/accept-payments",
+          "access_date": "2026-07-25T13:00:00.000+03:00"
+        },
+        {
+          "status": "HTTP_2XX",
+          "http_code": 200,
+          "url": "https://cloud.dada-tuda.ru/en/accept-payments",
+          "access_date": "2026-07-25T13:00:00.000+03:00"
+        },
+        {
+          "status": "HTTP_2XX",
+          "http_code": 200,
+          "url": "https://cloud.dada-tuda.ru/",
+          "access_date": "2026-07-26T15:00:00.000+03:00"
+        },
+        {
+          "status": "HTTP_2XX",
+          "http_code": 200,
+          "url": "https://cloud.dada-tuda.ru/",
+          "access_date": "2026-07-27T20:00:00.000+03:00"
+        }
+      ]
+    },
+    "diagnostics": {
+      "problems": {
+        "FAVICON_PROBLEM": {
+          "severity": "RECOMMENDATION",
+          "state": "ABSENT",
+          "last_state_update": null
+        },
+        "NO_ROBOTS_TXT": {
+          "severity": "POSSIBLE_PROBLEM",
+          "state": "ABSENT",
+          "last_state_update": null
+        },
+        "NO_REGIONS": {
+          "severity": "RECOMMENDATION",
+          "state": "PRESENT",
+          "last_state_update": "2026-07-29T17:35:00.439+03:00"
+        },
+        "DNS_ERROR": {
+          "severity": "FATAL",
+          "state": "ABSENT",
+          "last_state_update": null
+        },
+        "DOCUMENTS_MISSING_DESCRIPTION": {
+          "severity": "POSSIBLE_PROBLEM",
+          "state": "ABSENT",
+          "last_state_update": null
+        },
+        "THREATS": {
+          "severity": "FATAL",
+          "state": "ABSENT",
+          "last_state_update": null
+        },
+        "ERROR_IN_ROBOTS_TXT": {
+          "severity": "POSSIBLE_PROBLEM",
+          "state": "ABSENT",
+          "last_state_update": null
+        },
+        "NOT_IN_SPRAV": {
+          "severity": "RECOMMENDATION",
+          "state": "PRESENT",
+          "last_state_update": "2026-07-29T17:35:00.439+03:00"
+        },
+        "TOO_MANY_DOMAINS_ON_SEARCH": {
+          "severity": "POSSIBLE_PROBLEM",
+          "state": "ABSENT",
+          "last_state_update": null
+        },
+        "DISALLOWED_IN_ROBOTS": {
+          "severity": "FATAL",
+          "state": "ABSENT",
+          "last_state_update": null
+        },
+        "MAIN_PAGE_REDIRECTS": {
+          "severity": "POSSIBLE_PROBLEM",
+          "state": "ABSENT",
+          "last_state_update": null
+        },
+        "URL_ALERT_5XX": {
+          "severity": "CRITICAL",
+          "state": "ABSENT",
+          "last_state_update": null
+        },
+        "NO_METRIKA_COUNTER_BINDING": {
+          "severity": "POSSIBLE_PROBLEM",
+          "state": "ABSENT",
+          "last_state_update": "2026-07-15T17:50:55.862+03:00"
+        },
+        "MAIN_MIRROR_IS_NOT_HTTPS": {
+          "severity": "POSSIBLE_PROBLEM",
+          "state": "ABSENT",
+          "last_state_update": null
+        },
+        "NOT_MOBILE_FRIENDLY": {
+          "severity": "RECOMMENDATION",
+          "state": "UNDEFINED",
+          "last_state_update": null
+        },
+        "BIG_FAVICON_ABSENT": {
+          "severity": "RECOMMENDATION",
+          "state": "ABSENT",
+          "last_state_update": null
+        },
+        "DUPLICATE_CONTENT_ATTRS": {
+          "severity": "POSSIBLE_PROBLEM",
+          "state": "ABSENT",
+          "last_state_update": null
+        },
+        "FAVICON_ERROR": {
+          "severity": "POSSIBLE_PROBLEM",
+          "state": "ABSENT",
+          "last_state_update": null
+        },
+        "SLOW_AVG_RESPONSE_TIME": {
+          "severity": "CRITICAL",
+          "state": "ABSENT",
+          "last_state_update": null
+        },
+        "VIDEOHOST_OFFER_NEED_PAPER": {
+          "severity": "POSSIBLE_PROBLEM",
+          "state": "ABSENT",
+          "last_state_update": null
+        },
+        "NO_SITEMAP_MODIFICATIONS": {
+          "severity": "POSSIBLE_PROBLEM",
+          "state": "ABSENT",
+          "last_state_update": null
+        },
+        "DUPLICATE_PAGES": {
+          "severity": "POSSIBLE_PROBLEM",
+          "state": "ABSENT",
+          "last_state_update": null
+        },
+        "DOCUMENTS_MISSING_TITLE": {
+          "severity": "POSSIBLE_PROBLEM",
+          "state": "ABSENT",
+          "last_state_update": null
+        },
+        "VIDEOHOST_OFFER_FAILED": {
+          "severity": "POSSIBLE_PROBLEM",
+          "state": "ABSENT",
+          "last_state_update": null
+        },
+        "NO_METRIKA_COUNTER_CRAWL_ENABLED": {
+          "severity": "POSSIBLE_PROBLEM",
+          "state": "ABSENT",
+          "last_state_update": null
+        },
+        "NO_SITEMAPS": {
+          "severity": "POSSIBLE_PROBLEM",
+          "state": "ABSENT",
+          "last_state_update": null
+        },
+        "INSIGNIFICANT_CGI_PARAMETER": {
+          "severity": "RECOMMENDATION",
+          "state": "ABSENT",
+          "last_state_update": null
+        },
+        "MAIN_PAGE_ERROR": {
+          "severity": "FATAL",
+          "state": "ABSENT",
+          "last_state_update": null
+        },
+        "SOFT_404": {
+          "severity": "POSSIBLE_PROBLEM",
+          "state": "ABSENT",
+          "last_state_update": "2026-07-25T09:33:19.455+03:00"
+        },
+        "NO_METRIKA_COUNTER": {
+          "severity": "RECOMMENDATION",
+          "state": "ABSENT",
+          "last_state_update": null
+        },
+        "ERRORS_IN_SITEMAPS": {
+          "severity": "POSSIBLE_PROBLEM",
+          "state": "ABSENT",
+          "last_state_update": null
+        },
+        "URL_ALERT_4XX": {
+          "severity": "RECOMMENDATION",
+          "state": "ABSENT",
+          "last_state_update": null
+        },
+        "CONNECT_FAILED": {
+          "severity": "FATAL",
+          "state": "ABSENT",
+          "last_state_update": null
+        }
+      }
+    },
+    "sqi_history": {
+      "points": [
+        {
+          "date": "2026-06-30T00:00:00.000+03:00",
+          "value": 0
+        },
+        {
+          "date": "2026-07-01T00:00:00.000+03:00",
+          "value": 0
+        },
+        {
+          "date": "2026-07-02T00:00:00.000+03:00",
+          "value": 0
+        },
+        {
+          "date": "2026-07-03T00:00:00.000+03:00",
+          "value": 0
+        },
+        {
+          "date": "2026-07-04T00:00:00.000+03:00",
+          "value": 0
+        },
+        {
+          "date": "2026-07-05T00:00:00.000+03:00",
+          "value": 0
+        },
+        {
+          "date": "2026-07-06T00:00:00.000+03:00",
+          "value": 0
+        },
+        {
+          "date": "2026-07-07T00:00:00.000+03:00",
+          "value": 0
+        },
+        {
+          "date": "2026-07-08T00:00:00.000+03:00",
+          "value": 0
+        },
+        {
+          "date": "2026-07-09T00:00:00.000+03:00",
+          "value": 0
+        },
+        {
+          "date": "2026-07-10T00:00:00.000+03:00",
+          "value": 0
+        },
+        {
+          "date": "2026-07-11T00:00:00.000+03:00",
+          "value": 0
+        },
+        {
+          "date": "2026-07-12T00:00:00.000+03:00",
+          "value": 0
+        },
+        {
+          "date": "2026-07-13T00:00:00.000+03:00",
+          "value": 0
+        },
+        {
+          "date": "2026-07-14T00:00:00.000+03:00",
+          "value": 0
+        },
+        {
+          "date": "2026-07-15T00:00:00.000+03:00",
+          "value": 0
+        },
+        {
+          "date": "2026-07-16T00:00:00.000+03:00",
+          "value": 0
+        },
+        {
+          "date": "2026-07-17T00:00:00.000+03:00",
+          "value": 0
+        },
+        {
+          "date": "2026-07-18T00:00:00.000+03:00",
+          "value": 0
+        },
+        {
+          "date": "2026-07-19T00:00:00.000+03:00",
+          "value": 0
+        },
+        {
+          "date": "2026-07-20T00:00:00.000+03:00",
+          "value": 0
+        },
+        {
+          "date": "2026-07-21T00:00:00.000+03:00",
+          "value": 0
+        },
+        {
+          "date": "2026-07-22T00:00:00.000+03:00",
+          "value": 0
+        },
+        {
+          "date": "2026-07-23T00:00:00.000+03:00",
+          "value": 0
+        },
+        {
+          "date": "2026-07-24T00:00:00.000+03:00",
+          "value": 0
+        },
+        {
+          "date": "2026-07-25T00:00:00.000+03:00",
+          "value": 0
+        },
+        {
+          "date": "2026-07-26T00:00:00.000+03:00",
+          "value": 0
+        },
+        {
+          "date": "2026-07-27T00:00:00.000+03:00",
+          "value": 0
+        },
+        {
+          "date": "2026-07-28T00:00:00.000+03:00",
+          "value": 0
+        },
+        {
+          "date": "2026-07-29T00:00:00.000+03:00",
+          "value": 0
+        },
+        {
+          "date": "2026-07-30T00:00:00.000+03:00",
+          "value": 0
+        }
+      ]
+    }
+  },
+  "metrika": {
+    "counter_id": "110158915",
+    "goals": [
+      {
+        "id": 574508955,
+        "name": "Автоцель: отправка формы"
+      },
+      {
+        "id": 585010094,
+        "name": "Регистрация (переход на /register)"
+      },
+      {
+        "id": 585010111,
+        "name": "Лендинг: страница аналога (/analog-*)"
+      },
+      {
+        "id": 585205874,
+        "name": "Активация: успешный деплой (JS)"
+      },
+      {
+        "id": 586052031,
+        "name": "Регистрация: завершена (JS)"
+      }
+    ],
+    "landing_pages": {
+      "query": {
+        "ids": [
+          110158915
+        ],
+        "dimensions": [
+          "ym:s:startURLPath"
+        ],
+        "metrics": [
+          "ym:s:visits",
+          "ym:s:users",
+          "ym:s:bounceRate",
+          "ym:s:avgVisitDurationSeconds"
+        ],
+        "sort": [
+          "-ym:s:visits"
+        ],
+        "date1": "2026-06-30",
+        "date2": "2026-07-30",
+        "limit": 200,
+        "offset": 1,
+        "group": "Week",
+        "benchmarks_version": "1784505600000",
+        "benchmarks_sub_industry": "false",
+        "auto_group_size": "1",
+        "exp_bucket_size": "100",
+        "attr_name": "",
+        "funnel_window": "",
+        "benchmarks_quantile": "50",
+        "time_interval": "1SECOND",
+        "intervals": "1",
+        "quantile": "50",
+        "offline_window": "21",
+        "attribution": "CROSS_DEVICE_LAST_SIGNIFICANT",
+        "currency": "RUB",
+        "benchmarks_attribution": "Automatic",
+        "adfox_event_id": "0",
+        "funnel_pattern": ""
+      },
+      "data": [
+        {
+          "dimensions": [
+            {
+              "name": "/",
+              "favicon": "cloud.dada-tuda.ru"
+            }
+          ],
+          "metrics": [
+            152.0,
+            138.0,
+            28.28947368,
+            88.20394737
+          ]
+        },
+        {
+          "dimensions": [
+            {
+              "name": "/callback",
+              "favicon": "console.dada-tuda.ru"
+            }
+          ],
+          "metrics": [
+            28.0,
+            8.0,
+            14.28571429,
+            434.10714286
+          ]
+        },
+        {
+          "dimensions": [
+            {
+              "name": "/login",
+              "favicon": "console.dada-tuda.ru"
+            }
+          ],
+          "metrics": [
+            27.0,
+            13.0,
+            29.62962963,
+            850.81481481
+          ]
+        },
+        {
+          "dimensions": [
+            {
+              "name": "/projects",
+              "favicon": "console.dada-tuda.ru"
+            }
+          ],
+          "metrics": [
+            24.0,
+            9.0,
+            33.33333333,
+            94.0
+          ]
+        },
+        {
+          "dimensions": [
+            {
+              "name": "/projects/29089f68-d315-4ae2-ae34-6c8503082a96",
+              "favicon": "console.dada-tuda.ru"
+            }
+          ],
+          "metrics": [
+            9.0,
+            3.0,
+            33.33333333,
+            230.88888889
+          ]
+        },
+        {
+          "dimensions": [
+            {
+              "name": "/analog-vercel",
+              "favicon": "cloud.dada-tuda.ru"
+            }
+          ],
+          "metrics": [
+            5.0,
+            5.0,
+            0.0,
+            110.6
+          ]
+        },
+        {
+          "dimensions": [
+            {
+              "name": "/projects/1fd06dec-5af9-4ae3-a569-15e1e304ea45",
+              "favicon": "console.dada-tuda.ru"
+            }
+          ],
+          "metrics": [
+            5.0,
+            1.0,
+            0.0,
+            318.2
+          ]
+        },
+        {
+          "dimensions": [
+            {
+              "name": "/projects/81ad6b4f-161f-4e2c-a346-f1bf6fb8f906",
+              "favicon": "console.dada-tuda.ru"
+            }
+          ],
+          "metrics": [
+            5.0,
+            1.0,
+            0.0,
+            219.8
+          ]
+        },
+        {
+          "dimensions": [
+            {
+              "name": "/projects/e5c0b9e6-82cd-4f49-9e7f-35716649ac5a/domains",
+              "favicon": "console.dada-tuda.ru"
+            }
+          ],
+          "metrics": [
+            5.0,
+            2.0,
+            0.0,
+            22.4
+          ]
+        },
+        {
+          "dimensions": [
+            {
+              "name": "/projects/e5c0b9e6-82cd-4f49-9e7f-35716649ac5a/monitoring/a6fa6845-9c5a-457c-8136-4dffba003269",
+              "favicon": "console.dada-tuda.ru"
+            }
+          ],
+          "metrics": [
+            5.0,
+            1.0,
+            40.0,
+            319.4
+          ]
+        },
+        {
+          "dimensions": [
+            {
+              "name": "/analog-railway",
+              "favicon": "cloud.dada-tuda.ru"
+            }
+          ],
+          "metrics": [
+            4.0,
+            4.0,
+            25.0,
+            577.25
+          ]
+        },
+        {
+          "dimensions": [
+            {
+              "name": "/projects/a6e4522b-68ad-48cf-aa06-2b2b1fdf60c2",
+              "favicon": "console.dada-tuda.ru"
+            }
+          ],
+          "metrics": [
+            4.0,
+            2.0,
+            50.0,
+            16.5
+          ]
+        },
+        {
+          "dimensions": [
+            {
+              "name": "/projects/e5c0b9e6-82cd-4f49-9e7f-35716649ac5a",
+              "favicon": "console.dada-tuda.ru"
+            }
+          ],
+          "metrics": [
+            4.0,
+            1.0,
+            25.0,
+            645.25
+          ]
+        },
+        {
+          "dimensions": [
+            {
+              "name": "/pricing",
+              "favicon": "cloud.dada-tuda.ru"
+            }
+          ],
+          "metrics": [
+            3.0,
+            3.0,
+            33.33333333,
+            7.33333333
+          ]
+        },
+        {
+          "dimensions": [
+            {
+              "name": "/register",
+              "favicon": "console.dada-tuda.ru"
+            }
+          ],
+          "metrics": [
+            3.0,
+            3.0,
+            0.0,
+            19.66666667
+          ]
+        },
+        {
+          "dimensions": [
+            {
+              "name": "/admin/costs",
+              "favicon": "console.dada-tuda.ru"
+            }
+          ],
+          "metrics": [
+            2.0,
+            1.0,
+            0.0,
+            636.0
+          ]
+        },
+        {
+          "dimensions": [
+            {
+              "name": "/authorize",
+              "favicon": "console.dada-tuda.ru"
+            }
+          ],
+          "metrics": [
+            2.0,
+            1.0,
+            0.0,
+            166.0
+          ]
+        },
+        {
+          "dimensions": [
+            {
+              "name": "/en",
+              "favicon": "cloud.dada-tuda.ru"
+            }
+          ],
+          "metrics": [
+            2.0,
+            2.0,
+            0.0,
+            17.0
+          ]
+        },
+        {
+          "dimensions": [
+            {
+              "name": "/projects/014d8fb8-b253-4bbf-83a9-6bf01b36fb17",
+              "favicon": "console.dada-tuda.ru"
+            }
+          ],
+          "metrics": [
+            2.0,
+            1.0,
+            0.0,
+            241.0
+          ]
+        },
+        {
+          "dimensions": [
+            {
+              "name": "/projects/68ea2bb2-efdb-4919-8f78-c0462838e4c9",
+              "favicon": "console.dada-tuda.ru"
+            }
+          ],
+          "metrics": [
+            2.0,
+            1.0,
+            0.0,
+            17.5
+          ]
+        },
+        {
+          "dimensions": [
+            {
+              "name": "/projects/68ea2bb2-efdb-4919-8f78-c0462838e4c9/git/import",
+              "favicon": "console.dada-tuda.ru"
+            }
+          ],
+          "metrics": [
+            2.0,
+            1.0,
+            50.0,
+            1124.0
+          ]
+        },
+        {
+          "dimensions": [
+            {
+              "name": "/projects/75487ba7-5d91-4027-a20a-d8d0daa698ab/billing",
+              "favicon": "console.dada-tuda.ru"
+            }
+          ],
+          "metrics": [
+            2.0,
+            1.0,
+            0.0,
+            2002.0
+          ]
+        },
+        {
+          "dimensions": [
+            {
+              "name": "/projects/81ad6b4f-161f-4e2c-a346-f1bf6fb8f906/billing",
+              "favicon": "console.dada-tuda.ru"
+            }
+          ],
+          "metrics": [
+            2.0,
+            1.0,
+            0.0,
+            34.5
+          ]
+        },
+        {
+          "dimensions": [
+            {
+              "name": "/projects/81ad6b4f-161f-4e2c-a346-f1bf6fb8f906/git/import",
+              "favicon": "console.dada-tuda.ru"
+            }
+          ],
+          "metrics": [
+            2.0,
+            1.0,
+            0.0,
+            508.5
+          ]
+        },
+        {
+          "dimensions": [
+            {
+              "name": "/projects/81ad6b4f-161f-4e2c-a346-f1bf6fb8f906/members",
+              "favicon": "console.dada-tuda.ru"
+            }
+          ],
+          "metrics": [
+            2.0,
+            1.0,
+            0.0,
+            44.0
+          ]
+        },
+        {
+          "dimensions": [
+            {
+              "name": "/projects/9b3ae7eb-b42e-4f42-b372-835a0517af61/monitoring/13b2968d-b9e4-4ac2-ae8f-56b0fe40db12",
+              "favicon": "console.dada-tuda.ru"
+            }
+          ],
+          "metrics": [
+            2.0,
+            1.0,
+            50.0,
+            1218.5
+          ]
+        },
+        {
+          "dimensions": [
+            {
+              "name": "/projects/cd6481fa-e5c4-4ff8-a254-abdcdff4b42a/apps/fonbet-value",
+              "favicon": "console.dada-tuda.ru"
+            }
+          ],
+          "metrics": [
+            2.0,
+            1.0,
+            50.0,
+            7.5
+          ]
+        },
+        {
+          "dimensions": [
+            {
+              "name": "/admin",
+              "favicon": "console.dada-tuda.ru"
+            }
+          ],
+          "metrics": [
+            1.0,
+            1.0,
+            0.0,
+            1013.0
+          ]
+        },
+        {
+          "dimensions": [
+            {
+              "name": "/admin/ai-gateway",
+              "favicon": "console.dada-tuda.ru"
+            }
+          ],
+          "metrics": [
+            1.0,
+            1.0,
+            100.0,
+            0.0
+          ]
+        },
+        {
+          "dimensions": [
+            {
+              "name": "/admin/audit",
+              "favicon": "console.dada-tuda.ru"
+            }
+          ],
+          "metrics": [
+            1.0,
+            1.0,
+            0.0,
+            1679.0
+          ]
+        },
+        {
+          "dimensions": [
+            {
+              "name": "/cloud-servers",
+              "favicon": "cloud.dada-tuda.ru"
+            }
+          ],
+          "metrics": [
+            1.0,
+            1.0,
+            100.0,
+            0.0
+          ]
+        },
+        {
+          "dimensions": [
+            {
+              "name": "/deploy-vibe-coding",
+              "favicon": "cloud.dada-tuda.ru"
+            }
+          ],
+          "metrics": [
+            1.0,
+            1.0,
+            0.0,
+            87.0
+          ]
+        },
+        {
+          "dimensions": [
+            {
+              "name": "/developer",
+              "favicon": "cloud.dada-tuda.ru"
+            }
+          ],
+          "metrics": [
+            1.0,
+            1.0,
+            100.0,
+            0.0
+          ]
+        },
+        {
+          "dimensions": [
+            {
+              "name": "/hosting-telegram-bot",
+              "favicon": "cloud.dada-tuda.ru"
+            }
+          ],
+          "metrics": [
+            1.0,
+            1.0,
+            0.0,
+            120.0
+          ]
+        },
+        {
+          "dimensions": [
+            {
+              "name": "/projects/1e614a3f-a7c0-4c2b-a29e-5d2f7dba8447/apps/dada-static-starter",
+              "favicon": "console.dada-tuda.ru"
+            }
+          ],
+          "metrics": [
+            1.0,
+            1.0,
+            0.0,
+            108.0
+          ]
+        },
+        {
+          "dimensions": [
+            {
+              "name": "/projects/29089f68-d315-4ae2-ae34-6c8503082a96/apps/a2ahub-landing",
+              "favicon": "console.dada-tuda.ru"
+            }
+          ],
+          "metrics": [
+            1.0,
+            1.0,
+            0.0,
+            18.0
+          ]
+        },
+        {
+          "dimensions": [
+            {
+              "name": "/projects/29089f68-d315-4ae2-ae34-6c8503082a96/databases/test-db-1",
+              "favicon": "console.dada-tuda.ru"
+            }
+          ],
+          "metrics": [
+            1.0,
+            1.0,
+            0.0,
+            544.0
+          ]
+        },
+        {
+          "dimensions": [
+            {
+              "name": "/projects/46ad8263-dadf-4f03-87db-af5c560901fb",
+              "favicon": "console.dada-tuda.ru"
+            }
+          ],
+          "metrics": [
+            1.0,
+            1.0,
+            100.0,
+            0.0
+          ]
+        },
+        {
+          "dimensions": [
+            {
+              "name": "/projects/46ad8263-dadf-4f03-87db-af5c560901fb/apps/tvk-assistantbot/builds/5c75cba4-15fe-49d4-8c19-eed404af23b1",
+              "favicon": "console.dada-tuda.ru"
+            }
+          ],
+          "metrics": [
+            1.0,
+            1.0,
+            0.0,
+            5138.0
+          ]
+        },
+        {
+          "dimensions": [
+            {
+              "name": "/projects/46ad8263-dadf-4f03-87db-af5c560901fb/apps/tvk-assistantbot/deployments",
+              "favicon": "console.dada-tuda.ru"
+            }
+          ],
+          "metrics": [
+            1.0,
+            1.0,
+            0.0,
+            2262.0
+          ]
+        },
+        {
+          "dimensions": [
+            {
+              "name": "/projects/46ad8263-dadf-4f03-87db-af5c560901fb/storage",
+              "favicon": "console.dada-tuda.ru"
+            }
+          ],
+          "metrics": [
+            1.0,
+            1.0,
+            0.0,
+            34.0
+          ]
+        },
+        {
+          "dimensions": [
+            {
+              "name": "/projects/4f368b91-e55b-455d-8e23-cbf1088b1dc2",
+              "favicon": "console.dada-tuda.ru"
+            }
+          ],
+          "metrics": [
+            1.0,
+            1.0,
+            0.0,
+            15.0
+          ]
+        },
+        {
+          "dimensions": [
+            {
+              "name": "/projects/6042008f-a66d-4b03-add5-f4c3dd107d62",
+              "favicon": "console.dada-tuda.ru"
+            }
+          ],
+          "metrics": [
+            1.0,
+            1.0,
+            0.0,
+            228.0
+          ]
+        },
+        {
+          "dimensions": [
+            {
+              "name": "/projects/75487ba7-5d91-4027-a20a-d8d0daa698ab/app-servers",
+              "favicon": "console.dada-tuda.ru"
+            }
+          ],
+          "metrics": [
+            1.0,
+            1.0,
+            0.0,
+            226.0
+          ]
+        },
+        {
+          "dimensions": [
+            {
+              "name": "/projects/75487ba7-5d91-4027-a20a-d8d0daa698ab/app-servers/findata",
+              "favicon": "console.dada-tuda.ru"
+            }
+          ],
+          "metrics": [
+            1.0,
+            1.0,
+            0.0,
+            40.0
+          ]
+        },
+        {
+          "dimensions": [
+            {
+              "name": "/projects/75487ba7-5d91-4027-a20a-d8d0daa698ab/apps",
+              "favicon": "console.dada-tuda.ru"
+            }
+          ],
+          "metrics": [
+            1.0,
+            1.0,
+            0.0,
+            17.0
+          ]
+        },
+        {
+          "dimensions": [
+            {
+              "name": "/projects/81ad6b4f-161f-4e2c-a346-f1bf6fb8f906/apps",
+              "favicon": "console.dada-tuda.ru"
+            }
+          ],
+          "metrics": [
+            1.0,
+            1.0,
+            0.0,
+            1485.0
+          ]
+        },
+        {
+          "dimensions": [
+            {
+              "name": "/projects/e5c0b9e6-82cd-4f49-9e7f-35716649ac5a/apps",
+              "favicon": "console.dada-tuda.ru"
+            }
+          ],
+          "metrics": [
+            1.0,
+            1.0,
+            0.0,
+            2838.0
+          ]
+        },
+        {
+          "dimensions": [
+            {
+              "name": "/projects/e5c0b9e6-82cd-4f49-9e7f-35716649ac5a/apps/magic-mirror",
+              "favicon": "console.dada-tuda.ru"
+            }
+          ],
+          "metrics": [
+            1.0,
+            1.0,
+            0.0,
+            4455.0
+          ]
+        },
+        {
+          "dimensions": [
+            {
+              "name": "/projects/e5c0b9e6-82cd-4f49-9e7f-35716649ac5a/apps/magic-mirror-cloud/deployments",
+              "favicon": "console.dada-tuda.ru"
+            }
+          ],
+          "metrics": [
+            1.0,
+            1.0,
+            0.0,
+            1525.0
+          ]
+        },
+        {
+          "dimensions": [
+            {
+              "name": "/projects/e5c0b9e6-82cd-4f49-9e7f-35716649ac5a/apps/magic-mirror/builds/e6412134-ac23-4dd6-8435-f24c194272a6",
+              "favicon": "console.dada-tuda.ru"
+            }
+          ],
+          "metrics": [
+            1.0,
+            1.0,
+            0.0,
+            5896.0
+          ]
+        },
+        {
+          "dimensions": [
+            {
+              "name": "/projects/e5c0b9e6-82cd-4f49-9e7f-35716649ac5a/billing",
+              "favicon": "console.dada-tuda.ru"
+            }
+          ],
+          "metrics": [
+            1.0,
+            1.0,
+            0.0,
+            105.0
+          ]
+        },
+        {
+          "dimensions": [
+            {
+              "name": "/status",
+              "favicon": "cloud.dada-tuda.ru"
+            }
+          ],
+          "metrics": [
+            1.0,
+            1.0,
+            0.0,
+            15.0
+          ]
+        },
+        {
+          "dimensions": [
+            {
+              "name": "/terms",
+              "favicon": "cloud.dada-tuda.ru"
+            }
+          ],
+          "metrics": [
+            1.0,
+            1.0,
+            100.0,
+            0.0
+          ]
+        }
+      ],
+      "total_rows": 54,
+      "total_rows_rounded": false,
+      "sampled": false,
+      "contains_sensitive_data": false,
+      "sample_share": 1.0,
+      "sample_size": 335,
+      "sample_space": 335,
+      "data_lag": 0,
+      "totals": [
+        334.0,
+        171.0,
+        24.25149701,
+        307.5988024
+      ],
+      "min": [
+        1.0,
+        1.0,
+        0.0,
+        0.0
+      ],
+      "max": [
+        152.0,
+        138.0,
+        100.0,
+        5896.0
+      ]
+    },
+    "search_landing_pages": {
+      "query": {
+        "ids": [
+          110158915
+        ],
+        "dimensions": [
+          "ym:s:startURLPath"
+        ],
+        "metrics": [
+          "ym:s:visits",
+          "ym:s:users"
+        ],
+        "sort": [
+          "-ym:s:visits"
+        ],
+        "date1": "2026-06-30",
+        "date2": "2026-07-30",
+        "filters": "ym:s:lastsignTrafficSource=='organic'",
+        "limit": 200,
+        "offset": 1,
+        "group": "Week",
+        "benchmarks_version": "1784505600000",
+        "benchmarks_sub_industry": "false",
+        "auto_group_size": "1",
+        "exp_bucket_size": "100",
+        "attr_name": "",
+        "funnel_window": "",
+        "benchmarks_quantile": "50",
+        "time_interval": "1SECOND",
+        "intervals": "1",
+        "quantile": "50",
+        "offline_window": "21",
+        "attribution": "CROSS_DEVICE_LAST_SIGNIFICANT",
+        "currency": "RUB",
+        "benchmarks_attribution": "Automatic",
+        "adfox_event_id": "0",
+        "funnel_pattern": ""
+      },
+      "data": [
+        {
+          "dimensions": [
+            {
+              "name": "/callback",
+              "favicon": "console.dada-tuda.ru"
+            }
+          ],
+          "metrics": [
+            12.0,
+            1.0
+          ]
+        },
+        {
+          "dimensions": [
+            {
+              "name": "/projects",
+              "favicon": "console.dada-tuda.ru"
+            }
+          ],
+          "metrics": [
+            8.0,
+            1.0
+          ]
+        },
+        {
+          "dimensions": [
+            {
+              "name": "/",
+              "favicon": "cloud.dada-tuda.ru"
+            }
+          ],
+          "metrics": [
+            7.0,
+            5.0
+          ]
+        },
+        {
+          "dimensions": [
+            {
+              "name": "/login",
+              "favicon": "console.dada-tuda.ru"
+            }
+          ],
+          "metrics": [
+            7.0,
+            1.0
+          ]
+        },
+        {
+          "dimensions": [
+            {
+              "name": "/projects/29089f68-d315-4ae2-ae34-6c8503082a96",
+              "favicon": "console.dada-tuda.ru"
+            }
+          ],
+          "metrics": [
+            6.0,
+            1.0
+          ]
+        },
+        {
+          "dimensions": [
+            {
+              "name": "/analog-vercel",
+              "favicon": "cloud.dada-tuda.ru"
+            }
+          ],
+          "metrics": [
+            5.0,
+            5.0
+          ]
+        },
+        {
+          "dimensions": [
+            {
+              "name": "/projects/1fd06dec-5af9-4ae3-a569-15e1e304ea45",
+              "favicon": "console.dada-tuda.ru"
+            }
+          ],
+          "metrics": [
+            5.0,
+            1.0
+          ]
+        },
+        {
+          "dimensions": [
+            {
+              "name": "/projects/81ad6b4f-161f-4e2c-a346-f1bf6fb8f906",
+              "favicon": "console.dada-tuda.ru"
+            }
+          ],
+          "metrics": [
+            5.0,
+            1.0
+          ]
+        },
+        {
+          "dimensions": [
+            {
+              "name": "/analog-railway",
+              "favicon": "cloud.dada-tuda.ru"
+            }
+          ],
+          "metrics": [
+            4.0,
+            4.0
+          ]
+        },
+        {
+          "dimensions": [
+            {
+              "name": "/authorize",
+              "favicon": "console.dada-tuda.ru"
+            }
+          ],
+          "metrics": [
+            2.0,
+            1.0
+          ]
+        },
+        {
+          "dimensions": [
+            {
+              "name": "/projects/75487ba7-5d91-4027-a20a-d8d0daa698ab/billing",
+              "favicon": "console.dada-tuda.ru"
+            }
+          ],
+          "metrics": [
+            2.0,
+            1.0
+          ]
+        },
+        {
+          "dimensions": [
+            {
+              "name": "/projects/81ad6b4f-161f-4e2c-a346-f1bf6fb8f906/billing",
+              "favicon": "console.dada-tuda.ru"
+            }
+          ],
+          "metrics": [
+            2.0,
+            1.0
+          ]
+        },
+        {
+          "dimensions": [
+            {
+              "name": "/projects/81ad6b4f-161f-4e2c-a346-f1bf6fb8f906/git/import",
+              "favicon": "console.dada-tuda.ru"
+            }
+          ],
+          "metrics": [
+            2.0,
+            1.0
+          ]
+        },
+        {
+          "dimensions": [
+            {
+              "name": "/projects/81ad6b4f-161f-4e2c-a346-f1bf6fb8f906/members",
+              "favicon": "console.dada-tuda.ru"
+            }
+          ],
+          "metrics": [
+            2.0,
+            1.0
+          ]
+        },
+        {
+          "dimensions": [
+            {
+              "name": "/projects/cd6481fa-e5c4-4ff8-a254-abdcdff4b42a/apps/fonbet-value",
+              "favicon": "console.dada-tuda.ru"
+            }
+          ],
+          "metrics": [
+            2.0,
+            1.0
+          ]
+        },
+        {
+          "dimensions": [
+            {
+              "name": "/admin",
+              "favicon": "console.dada-tuda.ru"
+            }
+          ],
+          "metrics": [
+            1.0,
+            1.0
+          ]
+        },
+        {
+          "dimensions": [
+            {
+              "name": "/admin/audit",
+              "favicon": "console.dada-tuda.ru"
+            }
+          ],
+          "metrics": [
+            1.0,
+            1.0
+          ]
+        },
+        {
+          "dimensions": [
+            {
+              "name": "/admin/costs",
+              "favicon": "console.dada-tuda.ru"
+            }
+          ],
+          "metrics": [
+            1.0,
+            1.0
+          ]
+        },
+        {
+          "dimensions": [
+            {
+              "name": "/deploy-vibe-coding",
+              "favicon": "cloud.dada-tuda.ru"
+            }
+          ],
+          "metrics": [
+            1.0,
+            1.0
+          ]
+        },
+        {
+          "dimensions": [
+            {
+              "name": "/pricing",
+              "favicon": "cloud.dada-tuda.ru"
+            }
+          ],
+          "metrics": [
+            1.0,
+            1.0
+          ]
+        },
+        {
+          "dimensions": [
+            {
+              "name": "/projects/29089f68-d315-4ae2-ae34-6c8503082a96/apps/a2ahub-landing",
+              "favicon": "console.dada-tuda.ru"
+            }
+          ],
+          "metrics": [
+            1.0,
+            1.0
+          ]
+        },
+        {
+          "dimensions": [
+            {
+              "name": "/projects/4f368b91-e55b-455d-8e23-cbf1088b1dc2",
+              "favicon": "console.dada-tuda.ru"
+            }
+          ],
+          "metrics": [
+            1.0,
+            1.0
+          ]
+        },
+        {
+          "dimensions": [
+            {
+              "name": "/projects/6042008f-a66d-4b03-add5-f4c3dd107d62",
+              "favicon": "console.dada-tuda.ru"
+            }
+          ],
+          "metrics": [
+            1.0,
+            1.0
+          ]
+        },
+        {
+          "dimensions": [
+            {
+              "name": "/projects/68ea2bb2-efdb-4919-8f78-c0462838e4c9",
+              "favicon": "console.dada-tuda.ru"
+            }
+          ],
+          "metrics": [
+            1.0,
+            1.0
+          ]
+        },
+        {
+          "dimensions": [
+            {
+              "name": "/projects/68ea2bb2-efdb-4919-8f78-c0462838e4c9/git/import",
+              "favicon": "console.dada-tuda.ru"
+            }
+          ],
+          "metrics": [
+            1.0,
+            1.0
+          ]
+        },
+        {
+          "dimensions": [
+            {
+              "name": "/projects/75487ba7-5d91-4027-a20a-d8d0daa698ab/app-servers",
+              "favicon": "console.dada-tuda.ru"
+            }
+          ],
+          "metrics": [
+            1.0,
+            1.0
+          ]
+        },
+        {
+          "dimensions": [
+            {
+              "name": "/projects/75487ba7-5d91-4027-a20a-d8d0daa698ab/apps",
+              "favicon": "console.dada-tuda.ru"
+            }
+          ],
+          "metrics": [
+            1.0,
+            1.0
+          ]
+        },
+        {
+          "dimensions": [
+            {
+              "name": "/projects/81ad6b4f-161f-4e2c-a346-f1bf6fb8f906/apps",
+              "favicon": "console.dada-tuda.ru"
+            }
+          ],
+          "metrics": [
+            1.0,
+            1.0
+          ]
+        },
+        {
+          "dimensions": [
+            {
+              "name": "/projects/a6e4522b-68ad-48cf-aa06-2b2b1fdf60c2",
+              "favicon": "console.dada-tuda.ru"
+            }
+          ],
+          "metrics": [
+            1.0,
+            1.0
+          ]
+        },
+        {
+          "dimensions": [
+            {
+              "name": "/projects/e5c0b9e6-82cd-4f49-9e7f-35716649ac5a/apps/magic-mirror",
+              "favicon": "console.dada-tuda.ru"
+            }
+          ],
+          "metrics": [
+            1.0,
+            1.0
+          ]
+        },
+        {
+          "dimensions": [
+            {
+              "name": "/projects/e5c0b9e6-82cd-4f49-9e7f-35716649ac5a/billing",
+              "favicon": "console.dada-tuda.ru"
+            }
+          ],
+          "metrics": [
+            1.0,
+            1.0
+          ]
+        },
+        {
+          "dimensions": [
+            {
+              "name": "/projects/e5c0b9e6-82cd-4f49-9e7f-35716649ac5a/domains",
+              "favicon": "console.dada-tuda.ru"
+            }
+          ],
+          "metrics": [
+            1.0,
+            1.0
+          ]
+        },
+        {
+          "dimensions": [
+            {
+              "name": "/status",
+              "favicon": "cloud.dada-tuda.ru"
+            }
+          ],
+          "metrics": [
+            1.0,
+            1.0
+          ]
+        }
+      ],
+      "total_rows": 33,
+      "total_rows_rounded": false,
+      "sampled": false,
+      "contains_sensitive_data": false,
+      "sample_share": 1.0,
+      "sample_size": 335,
+      "sample_space": 335,
+      "data_lag": 0,
+      "totals": [
+        89.0,
+        15.0
+      ],
+      "min": [
+        1.0,
+        1.0
+      ],
+      "max": [
+        12.0,
+        5.0
+      ]
+    },
+    "sources": {
+      "query": {
+        "ids": [
+          110158915
+        ],
+        "dimensions": [
+          "ym:s:lastsignTrafficSource",
+          "ym:s:lastsignSearchEngine"
+        ],
+        "metrics": [
+          "ym:s:visits",
+          "ym:s:users"
+        ],
+        "sort": [
+          "-ym:s:visits"
+        ],
+        "date1": "2026-06-30",
+        "date2": "2026-07-30",
+        "limit": 200,
+        "offset": 1,
+        "group": "Week",
+        "benchmarks_version": "1784505600000",
+        "benchmarks_sub_industry": "false",
+        "auto_group_size": "1",
+        "exp_bucket_size": "100",
+        "attr_name": "",
+        "funnel_window": "",
+        "benchmarks_quantile": "50",
+        "time_interval": "1SECOND",
+        "intervals": "1",
+        "quantile": "50",
+        "offline_window": "21",
+        "attribution": "CROSS_DEVICE_LAST_SIGNIFICANT",
+        "currency": "RUB",
+        "benchmarks_attribution": "Automatic",
+        "adfox_event_id": "0",
+        "funnel_pattern": ""
+      },
+      "data": [
+        {
+          "dimensions": [
+            {
+              "icon_id": "0",
+              "icon_type": "traffic-source",
+              "name": "Direct traffic",
+              "id": "direct"
+            },
+            {
+              "name": null,
+              "id": null,
+              "favicon": null
+            }
+          ],
+          "metrics": [
+            166.0,
+            136.0
+          ]
+        },
+        {
+          "dimensions": [
+            {
+              "icon_id": "2",
+              "icon_type": "traffic-source",
+              "name": "Search engine traffic",
+              "id": "organic"
+            },
+            {
+              "name": "Yandex, search results",
+              "id": "yandex_search",
+              "favicon": "www.yandex.ru"
+            }
+          ],
+          "metrics": [
+            84.0,
+            10.0
+          ]
+        },
+        {
+          "dimensions": [
+            {
+              "icon_id": "1",
+              "icon_type": "traffic-source",
+              "name": "Link traffic",
+              "id": "referral"
+            },
+            {
+              "name": null,
+              "id": null,
+              "favicon": null
+            }
+          ],
+          "metrics": [
+            66.0,
+            16.0
+          ]
+        },
+        {
+          "dimensions": [
+            {
+              "icon_id": "-1",
+              "icon_type": "traffic-source",
+              "name": "Internal traffic",
+              "id": "internal"
+            },
+            {
+              "name": null,
+              "id": null,
+              "favicon": null
+            }
+          ],
+          "metrics": [
+            7.0,
+            5.0
+          ]
+        },
+        {
+          "dimensions": [
+            {
+              "icon_id": "10",
+              "icon_type": "traffic-source",
+              "name": "Messenger traffic",
+              "id": "messenger"
+            },
+            {
+              "name": null,
+              "id": null,
+              "favicon": null
+            }
+          ],
+          "metrics": [
+            4.0,
+            4.0
+          ]
+        },
+        {
+          "dimensions": [
+            {
+              "icon_id": "2",
+              "icon_type": "traffic-source",
+              "name": "Search engine traffic",
+              "id": "organic"
+            },
+            {
+              "name": "Bing, search results",
+              "id": "bing_search",
+              "favicon": "bing.com"
+            }
+          ],
+          "metrics": [
+            3.0,
+            3.0
+          ]
+        },
+        {
+          "dimensions": [
+            {
+              "icon_id": "2",
+              "icon_type": "traffic-source",
+              "name": "Search engine traffic",
+              "id": "organic"
+            },
+            {
+              "name": "Yandex Mobile",
+              "id": "yandex_mobile",
+              "favicon": "m.yandex.ru"
+            }
+          ],
+          "metrics": [
+            2.0,
+            2.0
+          ]
+        },
+        {
+          "dimensions": [
+            {
+              "icon_id": "9",
+              "icon_type": "traffic-source",
+              "name": "Recommendation system traffic",
+              "id": "recommend"
+            },
+            {
+              "name": null,
+              "id": null,
+              "favicon": null
+            }
+          ],
+          "metrics": [
+            2.0,
+            2.0
+          ]
+        }
+      ],
+      "total_rows": 8,
+      "total_rows_rounded": false,
+      "sampled": false,
+      "contains_sensitive_data": false,
+      "sample_share": 1.0,
+      "sample_size": 335,
+      "sample_space": 335,
+      "data_lag": 0,
+      "totals": [
+        334.0,
+        171.0
+      ],
+      "min": [
+        2.0,
+        2.0
+      ],
+      "max": [
+        166.0,
+        136.0
+      ]
+    },
+    "search_phrases": {
+      "query": {
+        "ids": [
+          110158915
+        ],
+        "dimensions": [
+          "ym:s:lastsignSearchPhrase"
+        ],
+        "metrics": [
+          "ym:s:visits",
+          "ym:s:users"
+        ],
+        "sort": [
+          "-ym:s:visits"
+        ],
+        "date1": "2026-06-30",
+        "date2": "2026-07-30",
+        "limit": 200,
+        "offset": 1,
+        "group": "Week",
+        "benchmarks_version": "1784505600000",
+        "benchmarks_sub_industry": "false",
+        "auto_group_size": "1",
+        "exp_bucket_size": "100",
+        "attr_name": "",
+        "funnel_window": "",
+        "benchmarks_quantile": "50",
+        "time_interval": "1SECOND",
+        "intervals": "1",
+        "quantile": "50",
+        "offline_window": "21",
+        "attribution": "CROSS_DEVICE_LAST_SIGNIFICANT",
+        "currency": "RUB",
+        "benchmarks_attribution": "Automatic",
+        "adfox_event_id": "0",
+        "funnel_pattern": ""
+      },
+      "data": [
+        {
+          "dimensions": [
+            {
+              "name": "dada cloud",
+              "favicon": "www.yandex.ru",
+              "url": "https://yandex.ru/search/?text=dada%20cloud"
+            }
+          ],
+          "metrics": [
+            3.0,
+            1.0
+          ]
+        },
+        {
+          "dimensions": [
+            {
+              "name": "vercel работает в россии?",
+              "favicon": "m.yandex.ru",
+              "url": "https://yandex.ru/yandsearch?text=vercel%20%D1%80%D0%B0%D0%B1%D0%BE%D1%82%D0%B0%D0%B5%D1%82%20%D0%B2%20%D1%80%D0%BE%D1%81%D1%81%D0%B8%D0%B8%3F"
+            }
+          ],
+          "metrics": [
+            1.0,
+            1.0
+          ]
+        },
+        {
+          "dimensions": [
+            {
+              "name": "аналог vercel в россии топ",
+              "favicon": "www.yandex.ru",
+              "url": "https://yandex.ru/search/?text=%D0%B0%D0%BD%D0%B0%D0%BB%D0%BE%D0%B3%20vercel%20%D0%B2%20%D1%80%D0%BE%D1%81%D1%81%D0%B8%D0%B8%20%D1%82%D0%BE%D0%BF"
+            }
+          ],
+          "metrics": [
+            1.0,
+            1.0
+          ]
+        },
+        {
+          "dimensions": [
+            {
+              "name": "аналог версел",
+              "favicon": "www.yandex.ru",
+              "url": "https://yandex.ru/search/?text=%D0%B0%D0%BD%D0%B0%D0%BB%D0%BE%D0%B3%20%D0%B2%D0%B5%D1%80%D1%81%D0%B5%D0%BB"
+            }
+          ],
+          "metrics": [
+            1.0,
+            1.0
+          ]
+        },
+        {
+          "dimensions": [
+            {
+              "name": "аналоги github и railway в россии",
+              "favicon": "www.yandex.ru",
+              "url": "https://yandex.ru/search/?text=%D0%B0%D0%BD%D0%B0%D0%BB%D0%BE%D0%B3%D0%B8%20github%20%D0%B8%20railway%20%D0%B2%20%D1%80%D0%BE%D1%81%D1%81%D0%B8%D0%B8"
+            }
+          ],
+          "metrics": [
+            1.0,
+            1.0
+          ]
+        },
+        {
+          "dimensions": [
+            {
+              "name": "аналоги сервиса vercel в россии",
+              "favicon": "www.yandex.ru",
+              "url": "https://yandex.ru/search/?text=%D0%B0%D0%BD%D0%B0%D0%BB%D0%BE%D0%B3%D0%B8%20%D1%81%D0%B5%D1%80%D0%B2%D0%B8%D1%81%D0%B0%20vercel%20%D0%B2%20%D1%80%D0%BE%D1%81%D1%81%D0%B8%D0%B8"
+            }
+          ],
+          "metrics": [
+            1.0,
+            1.0
+          ]
+        },
+        {
+          "dimensions": [
+            {
+              "name": "бесплатный сервис аналог railway",
+              "favicon": "m.yandex.ru",
+              "url": "https://yandex.ru/yandsearch?text=%D0%B1%D0%B5%D1%81%D0%BF%D0%BB%D0%B0%D1%82%D0%BD%D1%8B%D0%B9%20%D1%81%D0%B5%D1%80%D0%B2%D0%B8%D1%81%20%D0%B0%D0%BD%D0%B0%D0%BB%D0%BE%D0%B3%20railway"
+            }
+          ],
+          "metrics": [
+            1.0,
+            1.0
+          ]
+        },
+        {
+          "dimensions": [
+            {
+              "name": "версел аналог в россии",
+              "favicon": "www.yandex.ru",
+              "url": "https://yandex.ru/search/?text=%D0%B2%D0%B5%D1%80%D1%81%D0%B5%D0%BB%20%D0%B0%D0%BD%D0%B0%D0%BB%D0%BE%D0%B3%20%D0%B2%20%D1%80%D0%BE%D1%81%D1%81%D0%B8%D0%B8"
+            }
+          ],
+          "metrics": [
+            1.0,
+            1.0
+          ]
+        },
+        {
+          "dimensions": [
+            {
+              "name": "недорогой российский деплой для динамического сайта",
+              "favicon": "www.yandex.ru",
+              "url": "https://yandex.ru/search/?text=%D0%BD%D0%B5%D0%B4%D0%BE%D1%80%D0%BE%D0%B3%D0%BE%D0%B9%20%D1%80%D0%BE%D1%81%D1%81%D0%B8%D0%B9%D1%81%D0%BA%D0%B8%D0%B9%20%D0%B4%D0%B5%D0%BF%D0%BB%D0%BE%D0%B9%20%D0%B4%D0%BB%D1%8F%20%D0%B4%D0%B8%D0%BD%D0%B0%D0%BC%D0%B8%D1%87%D0%B5%D1%81%D0%BA%D0%BE%D0%B3%D0%BE%20%D1%81%D0%B0%D0%B9%D1%82%D0%B0"
+            }
+          ],
+          "metrics": [
+            1.0,
+            1.0
+          ]
+        }
+      ],
+      "total_rows": 9,
+      "total_rows_rounded": false,
+      "sampled": false,
+      "contains_sensitive_data": false,
+      "sample_share": 1.0,
+      "sample_size": 335,
+      "sample_space": 335,
+      "data_lag": 0,
+      "totals": [
+        11.0,
+        9.0
+      ],
+      "min": [
+        1.0,
+        1.0
+      ],
+      "max": [
+        3.0,
+        1.0
+      ]
+    },
+    "goal_574508955_by_landing": {
+      "query": {
+        "ids": [
+          110158915
+        ],
+        "dimensions": [
+          "ym:s:startURLPath"
+        ],
+        "metrics": [
+          "ym:s:goal574508955reaches",
+          "ym:s:goal574508955conversionRate"
+        ],
+        "sort": [
+          "-ym:s:goal574508955reaches"
+        ],
+        "date1": "2026-06-30",
+        "date2": "2026-07-30",
+        "limit": 200,
+        "offset": 1,
+        "group": "Week",
+        "benchmarks_version": "1784505600000",
+        "benchmarks_sub_industry": "false",
+        "auto_group_size": "1",
+        "exp_bucket_size": "100",
+        "attr_name": "",
+        "funnel_window": "",
+        "benchmarks_quantile": "50",
+        "time_interval": "1SECOND",
+        "intervals": "1",
+        "quantile": "50",
+        "offline_window": "21",
+        "attribution": "CROSS_DEVICE_LAST_SIGNIFICANT",
+        "currency": "RUB",
+        "benchmarks_attribution": "Automatic",
+        "adfox_event_id": "0",
+        "funnel_pattern": ""
+      },
+      "data": [
+        {
+          "dimensions": [
+            {
+              "name": "/projects/014d8fb8-b253-4bbf-83a9-6bf01b36fb17",
+              "favicon": "console.dada-tuda.ru"
+            }
+          ],
+          "metrics": [
+            31.0,
+            100.0
+          ]
+        },
+        {
+          "dimensions": [
+            {
+              "name": "/login",
+              "favicon": "console.dada-tuda.ru"
+            }
+          ],
+          "metrics": [
+            16.0,
+            22.22222222
+          ]
+        },
+        {
+          "dimensions": [
+            {
+              "name": "/callback",
+              "favicon": "console.dada-tuda.ru"
+            }
+          ],
+          "metrics": [
+            13.0,
+            10.71428571
+          ]
+        },
+        {
+          "dimensions": [
+            {
+              "name": "/projects/e5c0b9e6-82cd-4f49-9e7f-35716649ac5a/apps/magic-mirror/builds/e6412134-ac23-4dd6-8435-f24c194272a6",
+              "favicon": "console.dada-tuda.ru"
+            }
+          ],
+          "metrics": [
+            11.0,
+            100.0
+          ]
+        },
+        {
+          "dimensions": [
+            {
+              "name": "/projects/46ad8263-dadf-4f03-87db-af5c560901fb/apps/tvk-assistantbot/builds/5c75cba4-15fe-49d4-8c19-eed404af23b1",
+              "favicon": "console.dada-tuda.ru"
+            }
+          ],
+          "metrics": [
+            7.0,
+            100.0
+          ]
+        },
+        {
+          "dimensions": [
+            {
+              "name": "/projects/81ad6b4f-161f-4e2c-a346-f1bf6fb8f906/apps",
+              "favicon": "console.dada-tuda.ru"
+            }
+          ],
+          "metrics": [
+            7.0,
+            100.0
+          ]
+        },
+        {
+          "dimensions": [
+            {
+              "name": "/projects",
+              "favicon": "console.dada-tuda.ru"
+            }
+          ],
+          "metrics": [
+            5.0,
+            8.33333333
+          ]
+        },
+        {
+          "dimensions": [
+            {
+              "name": "/",
+              "favicon": "cloud.dada-tuda.ru"
+            }
+          ],
+          "metrics": [
+            3.0,
+            0.65789474
+          ]
+        },
+        {
+          "dimensions": [
+            {
+              "name": "/projects/46ad8263-dadf-4f03-87db-af5c560901fb/apps/tvk-assistantbot/deployments",
+              "favicon": "console.dada-tuda.ru"
+            }
+          ],
+          "metrics": [
+            3.0,
+            100.0
+          ]
+        },
+        {
+          "dimensions": [
+            {
+              "name": "/projects/9b3ae7eb-b42e-4f42-b372-835a0517af61/monitoring/13b2968d-b9e4-4ac2-ae8f-56b0fe40db12",
+              "favicon": "console.dada-tuda.ru"
+            }
+          ],
+          "metrics": [
+            3.0,
+            50.0
+          ]
+        },
+        {
+          "dimensions": [
+            {
+              "name": "/projects/29089f68-d315-4ae2-ae34-6c8503082a96",
+              "favicon": "console.dada-tuda.ru"
+            }
+          ],
+          "metrics": [
+            2.0,
+            22.22222222
+          ]
+        },
+        {
+          "dimensions": [
+            {
+              "name": "/projects/6042008f-a66d-4b03-add5-f4c3dd107d62",
+              "favicon": "console.dada-tuda.ru"
+            }
+          ],
+          "metrics": [
+            2.0,
+            100.0
+          ]
+        },
+        {
+          "dimensions": [
+            {
+              "name": "/projects/81ad6b4f-161f-4e2c-a346-f1bf6fb8f906/git/import",
+              "favicon": "console.dada-tuda.ru"
+            }
+          ],
+          "metrics": [
+            2.0,
+            100.0
+          ]
+        },
+        {
+          "dimensions": [
+            {
+              "name": "/analog-railway",
+              "favicon": "cloud.dada-tuda.ru"
+            }
+          ],
+          "metrics": [
+            1.0,
+            25.0
+          ]
+        },
+        {
+          "dimensions": [
+            {
+              "name": "/projects/68ea2bb2-efdb-4919-8f78-c0462838e4c9/git/import",
+              "favicon": "console.dada-tuda.ru"
+            }
+          ],
+          "metrics": [
+            1.0,
+            50.0
+          ]
+        },
+        {
+          "dimensions": [
+            {
+              "name": "/projects/81ad6b4f-161f-4e2c-a346-f1bf6fb8f906/billing",
+              "favicon": "console.dada-tuda.ru"
+            }
+          ],
+          "metrics": [
+            1.0,
+            50.0
+          ]
+        },
+        {
+          "dimensions": [
+            {
+              "name": "/projects/81ad6b4f-161f-4e2c-a346-f1bf6fb8f906/members",
+              "favicon": "console.dada-tuda.ru"
+            }
+          ],
+          "metrics": [
+            1.0,
+            50.0
+          ]
+        },
+        {
+          "dimensions": [
+            {
+              "name": "/projects/e5c0b9e6-82cd-4f49-9e7f-35716649ac5a",
+              "favicon": "console.dada-tuda.ru"
+            }
+          ],
+          "metrics": [
+            1.0,
+            25.0
+          ]
+        },
+        {
+          "dimensions": [
+            {
+              "name": "/projects/e5c0b9e6-82cd-4f49-9e7f-35716649ac5a/apps",
+              "favicon": "console.dada-tuda.ru"
+            }
+          ],
+          "metrics": [
+            1.0,
+            100.0
+          ]
+        },
+        {
+          "dimensions": [
+            {
+              "name": "/projects/e5c0b9e6-82cd-4f49-9e7f-35716649ac5a/apps/magic-mirror-cloud/deployments",
+              "favicon": "console.dada-tuda.ru"
+            }
+          ],
+          "metrics": [
+            1.0,
+            100.0
+          ]
+        }
+      ],
+      "total_rows": 20,
+      "total_rows_rounded": false,
+      "sampled": false,
+      "contains_sensitive_data": false,
+      "sample_share": 1.0,
+      "sample_size": 335,
+      "sample_space": 335,
+      "data_lag": 0,
+      "totals": [
+        112.0,
+        11.61048689
+      ],
+      "min": [
+        1.0,
+        0.65789474
+      ],
+      "max": [
+        31.0,
+        100.0
+      ]
+    },
+    "goal_585010094_by_landing": {
+      "query": {
+        "ids": [
+          110158915
+        ],
+        "dimensions": [
+          "ym:s:startURLPath"
+        ],
+        "metrics": [
+          "ym:s:goal585010094reaches",
+          "ym:s:goal585010094conversionRate"
+        ],
+        "sort": [
+          "-ym:s:goal585010094reaches"
+        ],
+        "date1": "2026-06-30",
+        "date2": "2026-07-30",
+        "limit": 200,
+        "offset": 1,
+        "group": "Week",
+        "benchmarks_version": "1784505600000",
+        "benchmarks_sub_industry": "false",
+        "auto_group_size": "1",
+        "exp_bucket_size": "100",
+        "attr_name": "",
+        "funnel_window": "",
+        "benchmarks_quantile": "50",
+        "time_interval": "1SECOND",
+        "intervals": "1",
+        "quantile": "50",
+        "offline_window": "21",
+        "attribution": "CROSS_DEVICE_LAST_SIGNIFICANT",
+        "currency": "RUB",
+        "benchmarks_attribution": "Automatic",
+        "adfox_event_id": "0",
+        "funnel_pattern": ""
+      },
+      "data": [
+        {
+          "dimensions": [
+            {
+              "name": "/",
+              "favicon": "cloud.dada-tuda.ru"
+            }
+          ],
+          "metrics": [
+            14.0,
+            4.60526316
+          ]
+        },
+        {
+          "dimensions": [
+            {
+              "name": "/register",
+              "favicon": "console.dada-tuda.ru"
+            }
+          ],
+          "metrics": [
+            4.0,
+            100.0
+          ]
+        },
+        {
+          "dimensions": [
+            {
+              "name": "/analog-vercel",
+              "favicon": "cloud.dada-tuda.ru"
+            }
+          ],
+          "metrics": [
+            3.0,
+            20.0
+          ]
+        },
+        {
+          "dimensions": [
+            {
+              "name": "/analog-railway",
+              "favicon": "cloud.dada-tuda.ru"
+            }
+          ],
+          "metrics": [
+            2.0,
+            25.0
+          ]
+        },
+        {
+          "dimensions": [
+            {
+              "name": "/deploy-vibe-coding",
+              "favicon": "cloud.dada-tuda.ru"
+            }
+          ],
+          "metrics": [
+            2.0,
+            100.0
+          ]
+        }
+      ],
+      "total_rows": 5,
+      "total_rows_rounded": false,
+      "sampled": false,
+      "contains_sensitive_data": false,
+      "sample_share": 1.0,
+      "sample_size": 335,
+      "sample_space": 335,
+      "data_lag": 0,
+      "totals": [
+        25.0,
+        7.87878788
+      ],
+      "min": [
+        2.0,
+        4.60526316
+      ],
+      "max": [
+        14.0,
+        100.0
+      ]
+    },
+    "goal_585010111_by_landing": {
+      "query": {
+        "ids": [
+          110158915
+        ],
+        "dimensions": [
+          "ym:s:startURLPath"
+        ],
+        "metrics": [
+          "ym:s:goal585010111reaches",
+          "ym:s:goal585010111conversionRate"
+        ],
+        "sort": [
+          "-ym:s:goal585010111reaches"
+        ],
+        "date1": "2026-06-30",
+        "date2": "2026-07-30",
+        "limit": 200,
+        "offset": 1,
+        "group": "Week",
+        "benchmarks_version": "1784505600000",
+        "benchmarks_sub_industry": "false",
+        "auto_group_size": "1",
+        "exp_bucket_size": "100",
+        "attr_name": "",
+        "funnel_window": "",
+        "benchmarks_quantile": "50",
+        "time_interval": "1SECOND",
+        "intervals": "1",
+        "quantile": "50",
+        "offline_window": "21",
+        "attribution": "CROSS_DEVICE_LAST_SIGNIFICANT",
+        "currency": "RUB",
+        "benchmarks_attribution": "Automatic",
+        "adfox_event_id": "0",
+        "funnel_pattern": ""
+      },
+      "data": [
+        {
+          "dimensions": [
+            {
+              "name": "/analog-vercel",
+              "favicon": "cloud.dada-tuda.ru"
+            }
+          ],
+          "metrics": [
+            7.0,
+            100.0
+          ]
+        },
+        {
+          "dimensions": [
+            {
+              "name": "/analog-railway",
+              "favicon": "cloud.dada-tuda.ru"
+            }
+          ],
+          "metrics": [
+            6.0,
+            100.0
+          ]
+        }
+      ],
+      "total_rows": 2,
+      "total_rows_rounded": false,
+      "sampled": false,
+      "contains_sensitive_data": false,
+      "sample_share": 1.0,
+      "sample_size": 335,
+      "sample_space": 335,
+      "data_lag": 0,
+      "totals": [
+        13.0,
+        100.0
+      ],
+      "min": [
+        6.0,
+        100.0
+      ],
+      "max": [
+        7.0,
+        100.0
+      ]
+    },
+    "goal_585205874_by_landing": {
+      "query": {
+        "ids": [
+          110158915
+        ],
+        "dimensions": [
+          "ym:s:startURLPath"
+        ],
+        "metrics": [
+          "ym:s:goal585205874reaches",
+          "ym:s:goal585205874conversionRate"
+        ],
+        "sort": [
+          "-ym:s:goal585205874reaches"
+        ],
+        "date1": "2026-06-30",
+        "date2": "2026-07-30",
+        "limit": 200,
+        "offset": 1,
+        "group": "Week",
+        "benchmarks_version": "1784505600000",
+        "benchmarks_sub_industry": "false",
+        "auto_group_size": "1",
+        "exp_bucket_size": "100",
+        "attr_name": "",
+        "funnel_window": "",
+        "benchmarks_quantile": "50",
+        "time_interval": "1SECOND",
+        "intervals": "1",
+        "quantile": "50",
+        "offline_window": "21",
+        "attribution": "CROSS_DEVICE_LAST_SIGNIFICANT",
+        "currency": "RUB",
+        "benchmarks_attribution": "Automatic",
+        "adfox_event_id": "0",
+        "funnel_pattern": ""
+      },
+      "data": [
+        {
+          "dimensions": [
+            {
+              "name": "/callback",
+              "favicon": "console.dada-tuda.ru"
+            }
+          ],
+          "metrics": [
+            2.0,
+            7.14285714
+          ]
+        },
+        {
+          "dimensions": [
+            {
+              "name": "/login",
+              "favicon": "console.dada-tuda.ru"
+            }
+          ],
+          "metrics": [
+            2.0,
+            7.40740741
+          ]
+        },
+        {
+          "dimensions": [
+            {
+              "name": "/admin",
+              "favicon": "console.dada-tuda.ru"
+            }
+          ],
+          "metrics": [
+            1.0,
+            100.0
+          ]
+        },
+        {
+          "dimensions": [
+            {
+              "name": "/projects/1fd06dec-5af9-4ae3-a569-15e1e304ea45",
+              "favicon": "console.dada-tuda.ru"
+            }
+          ],
+          "metrics": [
+            1.0,
+            20.0
+          ]
+        },
+        {
+          "dimensions": [
+            {
+              "name": "/projects/46ad8263-dadf-4f03-87db-af5c560901fb/apps/tvk-assistantbot/deployments",
+              "favicon": "console.dada-tuda.ru"
+            }
+          ],
+          "metrics": [
+            1.0,
+            100.0
+          ]
+        },
+        {
+          "dimensions": [
+            {
+              "name": "/projects/75487ba7-5d91-4027-a20a-d8d0daa698ab/apps",
+              "favicon": "console.dada-tuda.ru"
+            }
+          ],
+          "metrics": [
+            1.0,
+            100.0
+          ]
+        }
+      ],
+      "total_rows": 6,
+      "total_rows_rounded": false,
+      "sampled": false,
+      "contains_sensitive_data": false,
+      "sample_share": 1.0,
+      "sample_size": 335,
+      "sample_space": 335,
+      "data_lag": 0,
+      "totals": [
+        8.0,
+        12.6984127
+      ],
+      "min": [
+        1.0,
+        7.14285714
+      ],
+      "max": [
+        2.0,
+        100.0
+      ]
+    },
+    "goal_586052031_by_landing": {
+      "query": {
+        "ids": [
+          110158915
+        ],
+        "dimensions": [
+          "ym:s:startURLPath"
+        ],
+        "metrics": [
+          "ym:s:goal586052031reaches",
+          "ym:s:goal586052031conversionRate"
+        ],
+        "sort": [
+          "-ym:s:goal586052031reaches"
+        ],
+        "date1": "2026-06-30",
+        "date2": "2026-07-30",
+        "limit": 200,
+        "offset": 1,
+        "group": "Week",
+        "benchmarks_version": "1784505600000",
+        "benchmarks_sub_industry": "false",
+        "auto_group_size": "1",
+        "exp_bucket_size": "100",
+        "attr_name": "",
+        "funnel_window": "",
+        "benchmarks_quantile": "50",
+        "time_interval": "1SECOND",
+        "intervals": "1",
+        "quantile": "50",
+        "offline_window": "21",
+        "attribution": "CROSS_DEVICE_LAST_SIGNIFICANT",
+        "currency": "RUB",
+        "benchmarks_attribution": "Automatic",
+        "adfox_event_id": "0",
+        "funnel_pattern": ""
+      },
+      "data": [
+        {
+          "dimensions": [
+            {
+              "name": "/",
+              "favicon": "cloud.dada-tuda.ru"
+            }
+          ],
+          "metrics": [
+            4.0,
+            2.63157895
+          ]
+        },
+        {
+          "dimensions": [
+            {
+              "name": "/register",
+              "favicon": "console.dada-tuda.ru"
+            }
+          ],
+          "metrics": [
+            1.0,
+            33.33333333
+          ]
+        }
+      ],
+      "total_rows": 2,
+      "total_rows_rounded": false,
+      "sampled": false,
+      "contains_sensitive_data": false,
+      "sample_share": 1.0,
+      "sample_size": 335,
+      "sample_space": 335,
+      "data_lag": 0,
+      "totals": [
+        5.0,
+        3.22580645
+      ],
+      "min": [
+        1.0,
+        2.63157895
+      ],
+      "max": [
+        4.0,
+        33.33333333
+      ]
+    }
+  }
+}

@@ -52,6 +52,15 @@ def get(url: str, token: str, params: dict | None = None) -> dict:
         raise ApiError(f"{exc.code} {url}\n{body}") from exc
 
 
+def soft(label: str, fn, *a, **kw):
+    """Run one API call, degrading to an error record instead of aborting the pull."""
+    try:
+        return fn(*a, **kw)
+    except ApiError as exc:
+        print(f"  ! {label}: {exc}".replace("\n", " ")[:300], file=sys.stderr)
+        return {"_error": str(exc)}
+
+
 def webmaster_host(token: str) -> tuple[str, str]:
     user_id = get(f"{WEBMASTER}/user", token)["user_id"]
     hosts = get(f"{WEBMASTER}/user/{user_id}/hosts", token)["hosts"]
@@ -67,9 +76,10 @@ def collect_webmaster(token: str, date_from: str, date_to: str) -> dict:
     base = f"{WEBMASTER}/user/{user_id}/hosts/{host_id}"
     out: dict = {"host_id": host_id}
 
-    out["summary"] = get(f"{base}/summary", token)
+    out["summary"] = soft("summary", get, f"{base}/summary", token)
 
-    out["queries"] = get(
+    out["queries"] = soft(
+        "queries", get,
         f"{base}/search-queries/popular",
         token,
         {
@@ -81,21 +91,26 @@ def collect_webmaster(token: str, date_from: str, date_to: str) -> dict:
         },
     )
 
-    out["queries_history"] = get(
-        f"{base}/search-queries/history/all",
+    out["queries_history"] = soft(
+        "queries_history", get,
+        f"{base}/search-queries/all/history",
         token,
         {"query_indicator": ["TOTAL_SHOWS", "TOTAL_CLICKS"], "date_from": date_from, "date_to": date_to},
     )
 
-    out["indexing_history"] = get(
+    out["indexing_history"] = soft(
+        "indexing_history", get,
         f"{base}/search-urls/in-search/history",
         token,
         {"date_from": date_from, "date_to": date_to},
     )
 
-    out["in_search_samples"] = get(f"{base}/search-urls/in-search/samples", token, {"limit": 100})
-    out["excluded_samples"] = get(f"{base}/search-urls/excluded/samples", token, {"limit": 100})
-    out["diagnostics"] = get(f"{base}/diagnostics", token)
+    out["in_search_samples"] = soft("in_search_samples", get, f"{base}/search-urls/in-search/samples", token, {"limit": 100})
+    out["search_events"] = soft("search_events", get, f"{base}/search-urls/events/samples", token, {"limit": 100})
+    out["indexing_samples"] = soft("indexing_samples", get, f"{base}/indexing/samples", token, {"limit": 100})
+    out["diagnostics"] = soft("diagnostics", get, f"{base}/diagnostics", token)
+    out["sqi_history"] = soft("sqi_history", get, f"{base}/sqi-history", token,
+                              {"date_from": date_from, "date_to": date_to})
     return out
 
 
@@ -117,17 +132,19 @@ def metrika_report(token: str, dimensions: list[str], metrics: list[str], date1:
 
 def collect_metrika(token: str, date1: str, date2: str) -> dict:
     out: dict = {"counter_id": COUNTER_ID}
-    goals = get(f"{METRIKA_MGMT}/counter/{COUNTER_ID}/goals", token).get("goals", [])
+    goals = soft("goals", get, f"{METRIKA_MGMT}/counter/{COUNTER_ID}/goals", token).get("goals", [])
     out["goals"] = [{"id": g["id"], "name": g["name"]} for g in goals]
 
-    out["landing_pages"] = metrika_report(
+    out["landing_pages"] = soft(
+        "landing_pages", metrika_report,
         token,
         ["ym:s:startURLPath"],
         ["ym:s:visits", "ym:s:users", "ym:s:bounceRate", "ym:s:avgVisitDurationSeconds"],
         date1, date2,
     )
 
-    out["search_landing_pages"] = metrika_report(
+    out["search_landing_pages"] = soft(
+        "search_landing_pages", metrika_report,
         token,
         ["ym:s:startURLPath"],
         ["ym:s:visits", "ym:s:users"],
@@ -135,14 +152,16 @@ def collect_metrika(token: str, date1: str, date2: str) -> dict:
         filters="ym:s:lastsignTrafficSource=='organic'",
     )
 
-    out["sources"] = metrika_report(
+    out["sources"] = soft(
+        "sources", metrika_report,
         token,
         ["ym:s:lastsignTrafficSource", "ym:s:lastsignSearchEngine"],
         ["ym:s:visits", "ym:s:users"],
         date1, date2,
     )
 
-    out["search_phrases"] = metrika_report(
+    out["search_phrases"] = soft(
+        "search_phrases", metrika_report,
         token,
         ["ym:s:lastsignSearchPhrase"],
         ["ym:s:visits", "ym:s:users"],
@@ -151,7 +170,8 @@ def collect_metrika(token: str, date1: str, date2: str) -> dict:
 
     for goal in out["goals"]:
         gid = goal["id"]
-        out[f"goal_{gid}_by_landing"] = metrika_report(
+        out[f"goal_{gid}_by_landing"] = soft(
+            f"goal_{gid}", metrika_report,
             token,
             ["ym:s:startURLPath"],
             [f"ym:s:goal{gid}reaches", f"ym:s:goal{gid}conversionRate"],
@@ -185,9 +205,10 @@ def render(snapshot: dict, prev: dict | None) -> str:
     wm, mk = snapshot["webmaster"], snapshot["metrika"]
     lines = [f"# SEO weekly -- {snapshot['date_to']} (window {snapshot['date_from']}..{snapshot['date_to']})", ""]
 
-    searchable = wm.get("summary", {}).get("searchable_urls_count")
-    excluded = wm.get("summary", {}).get("excluded_urls_count")
-    sqi = wm.get("summary", {}).get("sqi")
+    summary = wm.get("summary", {})
+    searchable = summary.get("searchable_pages_count")
+    excluded = summary.get("excluded_pages_count")
+    sqi = summary.get("sqi")
     lines += ["## Index", f"- in search: {searchable}", f"- excluded: {excluded}", f"- SQI: {sqi}", ""]
 
     q = flat_queries(wm)
@@ -199,9 +220,9 @@ def render(snapshot: dict, prev: dict | None) -> str:
 
     lines += ["### Top queries", "", "| query | shows | clicks | avg pos | d shows |", "|---|---:|---:|---:|---:|"]
     for text, v in sorted(q.items(), key=lambda kv: -kv[1]["shows"])[:30]:
-        delta = v["shows"] - prev_q.get(text, {}).get("shows", 0)
+        delta = float(v["shows"]) - float(prev_q.get(text, {}).get("shows", 0))
         pos = f"{v['pos']:.1f}" if isinstance(v["pos"], (int, float)) else "-"
-        lines.append(f"| {text} | {v['shows']} | {v['clicks']} | {pos} | {delta:+d} |")
+        lines.append(f"| {text} | {v['shows']:.0f} | {v['clicks']:.0f} | {pos} | {delta:+.0f} |")
     lines.append("")
 
     if prev_q:
@@ -232,6 +253,33 @@ def render(snapshot: dict, prev: dict | None) -> str:
         lines += ["## Excluded from search (sample)", "", "| url | reason |", "|---|---|"]
         for s in excluded_rows[:30]:
             lines.append(f"| {s.get('url','')} | {s.get('status','')} |")
+        lines.append("")
+
+    problems = wm.get("diagnostics", {}).get("problems", {})
+    open_problems = [(k, v) for k, v in problems.items() if v.get("state") == "PRESENT"]
+    if open_problems:
+        lines += ["## Open Webmaster problems", "", "| problem | severity | since |", "|---|---|---|"]
+        for name, p in sorted(open_problems, key=lambda kv: kv[1].get("severity", "")):
+            lines.append(f"| {name} | {p.get('severity','')} | {(p.get('last_state_update') or '')[:10]} |")
+        lines.append("")
+
+    bad = [
+        s
+        for s in wm.get("indexing_samples", {}).get("samples", [])
+        if s.get("status") != "HTTP_2XX"
+    ]
+    if bad:
+        lines += [
+            "## URLs the crawler could not fetch",
+            "",
+            "A 404 here is usually a renamed slug that never got a redirect; a 5xx is a",
+            "real page the crawler saw break.",
+            "",
+            "| url | code | seen |",
+            "|---|---:|---|",
+        ]
+        for s in sorted(bad, key=lambda x: x.get("access_date", ""), reverse=True)[:30]:
+            lines.append(f"| {s.get('url','')} | {s.get('http_code','')} | {s.get('access_date','')[:10]} |")
         lines.append("")
 
     return "\n".join(lines)

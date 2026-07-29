@@ -137,6 +137,80 @@ Recorded now so the next iteration is scored, not re-argued:
 - **P4.** Google stays at zero until the GSC property is verified. *Falsified by any
   real Googlebot hit in the ingress logs* — check with the crawler count above.
 
+## Correction — 2026-07-30, first automated pull (`tasks/seo/2026-07-30.md`)
+
+A Yandex OAuth token arrived and `scripts/seo-weekly.py` produced the first real
+pull (window 06-30..07-30). It contradicts parts of the analysis above, which was
+built on a screenshot. The screenshot-derived rows in the baseline table are
+superseded by these:
+
+| Metric | Screenshot estimate | Measured |
+|---|---|---|
+| Pages in search | 12 | **16** (`searchable_pages_count`) |
+| Excluded pages | unknown | **0** |
+| Impressions | ~36/week | **97/30d** |
+| Clicks | 3/week | **11/30d**, CTR 11.3% |
+| SQI | unknown | **0**, flat for the whole window |
+
+### What the query data actually says
+
+The demand is **not** "аналог X". It is *payment and access*:
+
+| Intent cluster | Impressions | Clicks | Avg position |
+|---|---:|---:|---|
+| "оплата / оплатить {vercel, netlify, heroku, railway}" | ~28 | **0** | 6-12 |
+| "работает ли {netlify, vercel, railway} в России" | ~10 | **0** | 5-12 |
+| "аналог(и) {vercel, railway, heroku}" | ~10 | 1 | 3-9 |
+| brand ("dada cloud", "как загрузить телеграмм бота на dada console") | 6 | 2 | 1.0-1.3 |
+| bot hosting ("дешевый хостинг для тг бота" etc.) | 2 | 0 | 8-13 |
+
+**39% of all search demand is payment/access intent converting at 0%.** The
+`analog-*` pages rank for it — they are stuffed with "оплата рублями" (23-28
+occurrences each) — but their titles answer a different question than the one
+typed. Someone searching "оплата vercel для россиян" wants to pay Vercel; the
+snippet offers to replace it. Position 8 with a zero click-through is an intent
+mismatch, not a ranking problem.
+
+This **overturns the "STOP expanding analog-*" verdict above.** The cluster is not
+at its ceiling; it is mis-targeted. The correct next move is a page that answers
+the payment/access question directly and offers the alternative at the bottom —
+not another "аналог X" page, and not abandoning the cluster.
+
+### Three defects the pull exposed that the screenshot could not
+
+1. **Renamed slugs 404 instead of redirecting.** Yandex still crawls
+   `/telegram-bot-hosting` and `/vibe-coding-deploy` (+ `/en`) — the pre-rename
+   slugs — and gets 404. Fixed: 301s in `next.config.ts`, verified locally.
+2. **`/analog-vercel` and `/pricing` served Yandex a 503 on 2026-07-20.** The best
+   performing page in the whole site returned an error to the crawler. Worth
+   correlating with the console rollout schedule.
+3. **`NO_REGIONS` and `NOT_IN_SPRAV` are the only open Webmaster problems.** The
+   site has no region assigned, which suppresses geo-relevant ranking for a
+   Russia-targeted site. Free to fix, owner-side, in the Webmaster UI.
+
+### The RU/EN asymmetry — open question, not a diagnosis
+
+Of the 16 URLs in search, the `/en` mirrors of five "orphan" landings are indexed
+(`/en/hosting-flask`, `/en/hosting-fastapi`, `/en/hosting-django`,
+`/en/hosting-streamlit`, `/en/hosting-vk-bot`, `/en/deploy-without-git`) while
+their RU originals are not — despite both being crawled 200 on the same day
+(2026-07-22) and carrying correct self-canonicals and reciprocal hreflang.
+
+This weakens defect 1's stated mechanism: crawl reached the orphans fine, so
+internal linking was not what kept them out. The fix was still worth making, but
+the cause of the RU/EN split is unexplained. `NO_REGIONS` is the leading suspect
+and is testable — assign the region, then re-check whether RU pages enter.
+
+### The funnel leak is bigger than any SEO gain
+
+Metrika goals over the same window: "Регистрация (переход на /register)" = 21
+reaches (14 from `/`, 3 `/analog-vercel`, 2 `/analog-railway`, 2
+`/deploy-vibe-coding`), "Регистрация: завершена (JS)" = 5. **A 76% drop between
+starting and finishing signup.** Total search clicks for the month were 11. No
+realistic content win moves the top of this funnel as much as recovering the
+people already in it. The `signup_started` goal shipped tonight makes the drop
+measurable per source next week; that number should be the first thing checked.
+
 ### Owner actions that unblock the rest
 
 1. Create the `cloud.dada-tuda.ru` property in Google Search Console, paste the token
@@ -145,5 +219,17 @@ Recorded now so the next iteration is scored, not re-argued:
 2. Register `landing_cta_click` and `signup_started` in Metrika counter 110158915 as
    JavaScript-event goals — the calls fire, but reports stay empty until the goals
    exist.
-3. Supply one Yandex OAuth token (`metrika:read` + Webmaster read) so
-   `scripts/seo-weekly.py` replaces the screenshot in the table at the top of this file.
+3. ~~Supply one Yandex OAuth token~~ — done, first automated pull is
+   `tasks/seo/2026-07-30.md`.
+4. Assign the site region in Yandex Webmaster (`NO_REGIONS` is open). Free, and it
+   is the leading suspect for the RU/EN indexation split.
+
+### Next iteration's build queue, in priority order
+
+1. Investigate the 21 → 5 signup drop. Highest expected value in the file.
+2. One page serving payment/access intent ("как оплатить Vercel/Netlify/Heroku из
+   России", "работает ли X в России") — ~38 impressions/month currently converting
+   at zero. Needs research before it is written: it makes factual claims about
+   third-party availability that age fast.
+3. Only then more bot-cluster pages. Bot demand in Yandex is currently 2
+   impressions/month; the cluster is a product-fit bet, not yet a measured one.
