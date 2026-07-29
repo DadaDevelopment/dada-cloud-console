@@ -14,7 +14,10 @@ export function MarketingHeader() {
   const { token } = useAuth();
   const [open, setOpen] = useState(false);
 
-  const links = [
+  // Box is the pivot product; it gets a highlighted nav slot in first position.
+  // The label is a product name, identical in both locales, so it stays out of Dict.
+  const links: { href: string; label: string; highlight?: boolean }[] = [
+    { href: localeHref("/box", locale), label: "Box", highlight: true },
     { href: localeHref("/#how", locale), label: t.nav.how },
     { href: localeHref("/cloud-servers", locale), label: t.nav.servers },
     { href: localeHref("/databases", locale), label: t.nav.databases },
@@ -37,7 +40,12 @@ export function MarketingHeader() {
               <Link
                 key={l.href}
                 href={l.href}
-                className="rounded-md px-3 py-2 text-sm font-medium text-white/75 transition-colors hover:bg-white/5 hover:text-white"
+                className={clsx(
+                  "rounded-md px-3 py-2 text-sm font-medium transition-colors",
+                  l.highlight
+                    ? "text-amber-300 hover:bg-amber-500/10 hover:text-amber-200"
+                    : "text-white/75 hover:bg-white/5 hover:text-white",
+                )}
               >
                 {l.label}
               </Link>
@@ -86,7 +94,12 @@ export function MarketingHeader() {
               key={l.href}
               href={l.href}
               onClick={() => setOpen(false)}
-              className="block rounded-md px-3 py-2 text-sm font-medium text-white/80 hover:bg-white/5 hover:text-white"
+              className={clsx(
+                "block rounded-md px-3 py-2 text-sm font-medium",
+                l.highlight
+                  ? "text-amber-300 hover:bg-amber-500/10 hover:text-amber-200"
+                  : "text-white/80 hover:bg-white/5 hover:text-white",
+              )}
             >
               {l.label}
             </Link>

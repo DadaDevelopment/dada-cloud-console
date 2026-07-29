@@ -23,6 +23,15 @@ export interface BoxCopy {
   heroSecondary: string;
   heroNote: string;
 
+  /** Promo band on the main marketing page. Box is becoming the central product. */
+  spotlight: {
+    eyebrow: string;
+    title: string;
+    body: string;
+    bullets: string[];
+    cta: string;
+  };
+
   problem: {
     title: string;
     subtitle: string;
@@ -120,6 +129,18 @@ const ru: BoxCopy = {
   heroPrimary: "Получить доступ",
   heroSecondary: "Посмотреть, как это работает",
   heroNote: "Своего агента приводишь сам. Токены мы не перепродаём.",
+
+  spotlight: {
+    eyebrow: "Новое · приватный превью",
+    title: "Dada Box — тело для твоего агента",
+    body: "Бокс с рутом за секунды, твой Claude или Cursor подключается и работает как на своей машине. База и S3 доцепляются на ходу, а выживший прототип кристаллизуется в постоянную VM с доменом — без переезда.",
+    bullets: [
+      "Десять агентов параллельно вместо одного",
+      "Ноутбук остаётся чистым",
+      "Одно окружение от мысли до прода",
+    ],
+    cta: "Посмотреть Box",
+  },
 
   problem: {
     title: "Ноутбук — плохое тело для агента",
@@ -370,6 +391,18 @@ const en: BoxCopy = {
   heroPrimary: "Request access",
   heroSecondary: "See how it works",
   heroNote: "You bring your own agent. We don't resell tokens.",
+
+  spotlight: {
+    eyebrow: "New · private preview",
+    title: "Dada Box — a body for your agent",
+    body: "A root box in seconds; your Claude or Cursor connects and works like it owns the machine. A database and S3 attach mid-flight, and a surviving prototype crystallizes into a permanent VM with a domain — no migration.",
+    bullets: [
+      "Ten agents in parallel instead of one",
+      "Your laptop stays clean",
+      "One environment from thought to production",
+    ],
+    cta: "See Box",
+  },
 
   problem: {
     title: "A laptop is a bad body for an agent",

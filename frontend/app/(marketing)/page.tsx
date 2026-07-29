@@ -15,6 +15,7 @@ import { consoleHref, localeHref } from "@/lib/site";
 import { CtaBand, FaqList } from "@/components/marketing/sections";
 import { HomeJsonLd } from "@/components/marketing/home-jsonld";
 import { McpAgentSection } from "@/components/marketing/mcp-agent";
+import { BoxSpotlight } from "@/components/marketing/box-spotlight";
 import { clsx } from "clsx";
 
 const STEP_ICONS = [GitBranch, Database, RotateCcw];
@@ -62,6 +63,9 @@ export default function HomePage() {
           </div>
         </div>
       </section>
+
+      {/* Box — new central product, top placement under the hero */}
+      <BoxSpotlight />
 
       {/* How it works */}
       <section id="how" className="scroll-mt-20 bg-white py-20">
