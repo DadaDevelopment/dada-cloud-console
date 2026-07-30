@@ -162,9 +162,16 @@ func (h *Handler) BoxUp(c *gin.Context) {
 
 	inst := res.Instance
 	// The MCP URL is the BOX's own endpoint, relayed verbatim: the control plane
-	// never interprets a runtime handle. LocalRuntime has no broker, so the URL is
-	// the session surface this process serves and the response says so.
+	// never interprets a runtime handle. cmd/box-broker runs inside the box and
+	// publishes the address it actually bound, so this URL is read out of the box
+	// rather than assumed — and when there is no broker the response falls back to
+	// the control-plane surface and SAYS SO instead of dressing it up.
 	mcpURL := fmt.Sprintf("%s/api/v1/box/session/mcp", stack.sessions)
+	if addr, err := h.openBoxDoor(ctx, stack, inst, b.ID, b.Name); err != nil {
+		logDoorFailure(b.Name, err)
+	} else {
+		mcpURL = box.BrokerMCPURL(addr)
+	}
 	sshHost := inst.SSHHost
 	if sshHost == "" {
 		sshHost = inst.NodeRef
@@ -258,15 +265,23 @@ func (h *Handler) boxConnectBlock(stack *boxRuntimeStack, b models.Box, token st
 	if mcpURL == "" {
 		mcpURL = fmt.Sprintf("%s/api/v1/box/session/mcp", stack.sessions)
 	}
+	own := boxOwnsItsMCPURL(mcpURL)
+	reason := "served by cmd/box-broker INSIDE the box: a command run through this endpoint does not pass through the Dada control plane. " +
+		"On LocalRuntime the box shares the host's network namespace, so the address is loopback on the box host rather than the box's own hostname; " +
+		"in production it is the box's Pod address (ADR-019)."
+	if !own {
+		reason = "this box has no endpoint of its own — BOX_BROKER_DIR is unset on this host, or its broker did not come up. " +
+			"The URL above is the control-plane fallback (internal/api/box_session.go), which means commands DO pass through us. " +
+			"That is a degraded box, not the product."
+	}
 	return gin.H{
 		"ssh_host":    b.SSHHost,
 		"ssh_command": boxSSHCommand(b.SSHHost, b.SSHPort),
 		"mcp": gin.H{
 			"url":       mcpURL,
-			"available": false,
-			"reason": "the box's MCP endpoint is served by cmd/box-broker (backlog phase 4), which is not in this branch. " +
-				"The snippet is the shape a client pastes once the broker exists; the session endpoint below is what LocalRuntime serves today.",
-			"snippet": mcpServersSnippet(b.Name, mcpURL, token),
+			"available": own,
+			"reason":    reason,
+			"snippet":   mcpServersSnippet(b.Name, mcpURL, token),
 		},
 		"session_endpoint": stack.sessions + "/api/v1/box/session/exec",
 		"session_auth":     "X-Dada-Box-Token: <the one-time dadabox_ token>",
@@ -315,6 +330,16 @@ func (h *Handler) GetBoxConnection(c *gin.Context) {
 			return
 		}
 		token = plaintext
+		// The new digest has to reach the box, or the token this response hands out
+		// opens the control-plane fallback and nothing else — a credential that works
+		// on the wrong door is worse than one that works on none, because the
+		// customer's work would silently start flowing through us.
+		inst := instanceFor(b.ID.String(), b.InstanceRef, b.NodeRef, b.Image, b.Region, b.SSHHost, b.SSHPort, b.MCPURL)
+		if err := h.syncBoxDoor(c.Request.Context(), stack, inst, b.ID); err != nil {
+			respondError(c, http.StatusInternalServerError,
+				"the session was minted but could not be installed in the box: "+err.Error())
+			return
+		}
 		resp["session"] = gin.H{
 			"token": plaintext, "token_prefix": prefix, "expires_at": expiry,
 			"note": "shown exactly once; only its sha256 and prefix are stored",

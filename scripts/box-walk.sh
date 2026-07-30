@@ -24,6 +24,14 @@
 #     verification report prints which parts are the stand-in.
 #   * systemd is not present, so the rendered unit is written and its ExecStart is
 #     executed by the same supervisor the box used.
+#   * The box runs its OWN endpoint (cmd/box-broker) and that is what `box up`
+#     publishes, so the commands in the box's-own-door step below do not pass
+#     through the control plane. What is a stand-in is the ADDRESS: LocalRuntime
+#     gives the box no network namespace, so the broker's listener is loopback on
+#     the box host rather than the box's own hostname. In production it is the box's
+#     Pod address (ADR-019). POST /api/v1/box/session/exec is still served and still
+#     exercised here — it is the named fallback for a box whose broker did not come
+#     up, not the product's path.
 #
 # REQUIREMENTS (all verified present in the environment this was written in):
 #   root (the runtime creates mount namespaces), Postgres on 127.0.0.1:5433 as
@@ -247,6 +255,10 @@ export BOX_MANAGED_PG_URL="postgres://${DB_USER}@${DB_HOST}:${DB_PORT}/postgres?
 export BOX_MANAGED_PG_HOST="$DB_HOST"
 export BOX_MANAGED_PG_PORT="$DB_PORT"
 export BOX_SESSION_BASE_URL="$BASE"
+# The box's own door (D6). BOX_BROKER_DIR is a DIRECTORY, and only the box-broker
+# binary is put in it: the value is a bind-mount source, so pointing it at a
+# populated bin directory would mount that whole directory into every tenant's body.
+export BOX_BROKER_DIR="$WORKDIR/broker"
 export BOX_HOSTNAME_BASE="box.dada-tuda.ru"
 
 info "DB_URL=$DB_URL"
@@ -259,6 +271,9 @@ info "  creates a real role and a real database on it, OUTSIDE the box."
 # see. One binary means one pid to stop.
 info "building ./cmd/server"
 ( cd "$BACKEND_DIR" && go build -o "$WORKDIR/dada-server" ./cmd/server ) || die "the backend did not build"
+info "building ./cmd/box-broker — the endpoint that runs INSIDE the box"
+mkdir -p "$BOX_BROKER_DIR"
+( cd "$BACKEND_DIR" && go build -o "$BOX_BROKER_DIR/box-broker" ./cmd/box-broker ) || die "the box broker did not build"
 "$WORKDIR/dada-server" >"$LOG" 2>&1 &
 BACKEND_PID=$!
 info "backend pid $BACKEND_PID, log $LOG"
@@ -377,6 +392,110 @@ info "processes visible inside the box: $HOSTPROC (the host has $(ls /proc | gre
 [[ "$HOSTPROC" -lt 50 ]] || die "the box sees the host's process table; the PID namespace is not doing its job"
 
 # ---------------------------------------------------------------------------
+step "the box's OWN door — cmd/box-broker, with the control plane off the path"
+# This is D6 made real rather than described. The step above went through
+# POST /api/v1/box/session/exec, which is OUR process: it works, it is authenticated
+# by the box's own credential, and it is still a path on which the customer's
+# commands traverse the control plane. The product's promise is that they do not, so
+# the box runs its own endpoint and that is what the agent connects to.
+#
+# What is asserted here, and why each one:
+#   * box up published the BOX's URL, not ours, and said so in `available`
+#   * the listener is a process INSIDE the box's PID namespace and its own root
+#   * MCP tools/list on that endpoint advertises run_command — the verb our surface
+#     deliberately does not have
+#   * a command run through it produces output from inside the box
+#   * a wrong credential is refused by the box, not by us
+
+MCP_URL="$(printf '%s' "$UP" | jqish connect.mcp.url)"
+MCP_AVAILABLE="$(printf '%s' "$UP" | jqish connect.mcp.available)"
+info "connect.mcp.url       = $MCP_URL"
+info "connect.mcp.available = $MCP_AVAILABLE"
+[[ "$MCP_AVAILABLE" == "true" ]] || die "box up did not report an endpoint of the box's own (available=$MCP_AVAILABLE)"
+case "$MCP_URL" in
+  */api/v1/box/session/mcp) die "the published MCP URL is the control-plane fallback, not the box's own door" ;;
+  http://*/mcp) : ;;
+  *) die "the published MCP URL has an unexpected shape: $MCP_URL" ;;
+esac
+BROKER_BASE="${MCP_URL%/mcp}"
+
+# The listener really is the box's process. Read from inside the box, so this is the
+# box's own view of its own process table rather than a claim made from the host.
+BROKER_PID="$(boxexec 'cat /run/dada-broker/broker.pid' | jqish stdout | tr -d '[:space:]')"
+[[ -n "$BROKER_PID" ]] || die "the box has no broker pid file"
+BROKER_COMM="$(boxexec "cat /proc/$BROKER_PID/comm 2>/dev/null" | jqish stdout | tr -d '[:space:]')"
+[[ "$BROKER_COMM" == "box-broker" ]] || die "pid $BROKER_PID inside the box is '$BROKER_COMM', not box-broker"
+info "the endpoint is pid $BROKER_PID inside the box, comm=$BROKER_COMM"
+# Its root is the box's root: /proc/<pid>/root/etc/dada/root-marker exists only in
+# this box's tree, so reading it proves the process is confined to this box and not
+# a host process that happens to be listening.
+BROKER_ROOT_MARKER="$(boxexec "cat /proc/$BROKER_PID/root/etc/dada/root-marker 2>/dev/null" | jqish stdout | tr -d '[:space:]')"
+[[ -n "$BROKER_ROOT_MARKER" ]] || die "the broker's root carries no box marker; it may be running on the host"
+info "the endpoint's root marker: $BROKER_ROOT_MARKER (the box's own tree)"
+
+# The binary came from the read-only bind, under /run — machine-owned, so ADR-019
+# excludes it from the userland a crystallization carries.
+BROKER_MOUNT="$(boxexec 'grep -c " /run/dada-broker/bin " /proc/mounts' | jqish stdout | tr -d '[:space:]')"
+[[ "$BROKER_MOUNT" == "1" ]] || die "/run/dada-broker/bin is not a mount inside the box"
+BROKER_RO="$(boxexec 'touch /run/dada-broker/bin/probe 2>/dev/null && echo WRITABLE || echo readonly' | jqish stdout | tr -d '[:space:]')"
+[[ "$BROKER_RO" == "readonly" ]] || die "the broker binary directory is writable inside the box"
+info "/run/dada-broker/bin is a read-only bind inside the box — the tenant cannot replace its own door"
+
+# tools/list on the BOX's endpoint. The tool that is absent from our MCP surface on
+# purpose is the tool that is present here.
+MCP_TOOLS="$(curl -sS -X POST "$MCP_URL" -H "Authorization: Bearer $BOX_TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}')"
+printf '%s\n' "$MCP_TOOLS" | pretty | sed 's/^/  /'
+printf '%s' "$MCP_TOOLS" | grep -q '"run_command"' \
+  || die "the box's MCP surface does not advertise run_command"
+info "the box advertises run_command; our control-plane surface has no such tool and no keep-list entry that could create one"
+
+# And it runs. The marker is generated on the host and must come back out of the
+# box, so a canned response cannot pass this.
+BOX_INSTANCE_HOSTNAME="$(boxexec 'cat /etc/hostname' | jqish stdout | tr -d '[:space:]')"
+[[ -n "$BOX_INSTANCE_HOSTNAME" ]] || die "the box has no hostname"
+DOOR_MARKER="door-$RUN_MARKER"
+MCP_CALL="$(curl -sS -X POST "$MCP_URL" -H "Authorization: Bearer $BOX_TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"name\":\"run_command\",\"arguments\":{\"command\":\"echo $DOOR_MARKER; cat /etc/hostname; echo served_by=\$(cat /run/dada-broker/addr)\"}}}")"
+printf '%s\n' "$MCP_CALL" | pretty | sed 's/^/  /'
+printf '%s' "$MCP_CALL" | grep -q "$DOOR_MARKER" \
+  || die "the box's endpoint did not return the marker the host generated"
+# The tool result is JSON nested inside a JSON string, so both of these match the
+# escaped form on the wire rather than a pretty-printed one.
+printf '%s' "$MCP_CALL" | grep -q "box.*$BOX_NAME" \
+  || die "the box's endpoint did not name this box in its response"
+# Note what the box's /etc/hostname actually is: the instance ref, not the box name.
+# Asserted as such rather than glossed — a check whose label says "hostname" while it
+# matches a different field is a check that will pass for the wrong reason later.
+printf '%s' "$MCP_CALL" | grep -q "$BOX_INSTANCE_HOSTNAME" \
+  || die "the box's endpoint did not return this box's own /etc/hostname ($BOX_INSTANCE_HOSTNAME)"
+info "a command ran inside the box through the box's own endpoint — the control plane was not on that path"
+
+# The env an attach injects is visible through this door too, so the box's own
+# endpoint is not a second-class path with a different environment. (Checked again
+# after the attach step, below.)
+DOOR_EXEC="$(curl -sS -X POST "$BROKER_BASE/exec" -H "X-Box-Token: $BOX_TOKEN" \
+  -H 'Content-Type: application/json' -d '{"command":"id -u; pwd"}')"
+DOOR_EXIT="$(printf '%s' "$DOOR_EXEC" | jqish exit_code)"
+[[ "$DOOR_EXIT" == "0" ]] || die "POST /exec on the box's endpoint exited $DOOR_EXIT"
+info "POST $BROKER_BASE/exec -> exit 0, served_by=$(printf '%s' "$DOOR_EXEC" | jqish served_by)"
+
+# A wrong credential is refused BY THE BOX. The refusal has to come from the box,
+# because a door that delegates its own authentication to the control plane has not
+# moved anything.
+BAD_STATUS="$(curl -sS -o /dev/null -w '%{http_code}' -X POST "$BROKER_BASE/exec" \
+  -H "X-Box-Token: dadabox_definitelynotthetoken" \
+  -H 'Content-Type: application/json' -d '{"command":"echo nope"}')"
+[[ "$BAD_STATUS" == "401" ]] || die "the box's endpoint answered $BAD_STATUS to a wrong credential, expected 401"
+info "a wrong credential gets 401 from the box itself"
+NOAUTH_STATUS="$(curl -sS -o /dev/null -w '%{http_code}' -X POST "$BROKER_BASE/exec" \
+  -H 'Content-Type: application/json' -d '{"command":"echo nope"}')"
+[[ "$NOAUTH_STATUS" == "401" ]] || die "the box's endpoint answered $NOAUTH_STATUS to a request with no credential, expected 401"
+info "no credential gets 401 as well"
+
+# ---------------------------------------------------------------------------
 step "attach db — a REAL managed Postgres database, reachable from inside the box"
 ATTACH="$(api POST "/api/v1/projects/$PROJECT_ID/boxes/$BOX_NAME/attach/database" \
   '{"name":"app","env_prefix":""}')"
@@ -403,6 +522,18 @@ show_exec "env perms" 'stat -c "%n mode=%a owner=%U" /etc/dada/box.env'
 printf '\n  THE PROOF: psql "$DATABASE_URL" -c '"'"'select 1'"'"' FROM INSIDE THE BOX\n'
 show_exec "psql select 1" 'psql "$DATABASE_URL" -c "select 1"'
 show_exec "psql write"    'psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -tAc "create table if not exists walk(t text)" && psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -tAc "insert into walk values ('"'"'written from inside the box'"'"')" && psql "$DATABASE_URL" -tAc "select t from walk"'
+
+# The SAME credential through the box's OWN door. Asserted rather than assumed: the
+# two doors source the box's env with the same prelude, and if they ever diverged
+# the box's own endpoint would become a second-class path where the customer's
+# attached database is simply missing.
+DOOR_DB="$(curl -sS -X POST "$BROKER_BASE/exec" -H "X-Box-Token: $BOX_TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"command":"psql \"$DATABASE_URL\" -tAc \"select t from walk\""}')"
+DOOR_DB_EXIT="$(printf '%s' "$DOOR_DB" | jqish exit_code)"
+[[ "$DOOR_DB_EXIT" == "0" ]] || die "the attached database is not reachable through the box's own door (exit $DOOR_DB_EXIT)"
+printf '  through the BOX'"'"'S OWN door: psql "$DATABASE_URL" -> %s\n' \
+  "$(printf '%s' "$DOOR_DB" | jqish stdout | tr -d '\n')"
 
 # ---------------------------------------------------------------------------
 step "start a server INSIDE the box, then expose it and get a real 200"
@@ -515,6 +646,20 @@ info "carry manifest: $CARRY"
 printf '%s' "$CARRY" | grep -q '"lost"' && die "the carry manifest reports lost state"
 info "no state reported lost (dada_box_crystallize_state_loss_total stays at zero)"
 
+# THE VM CARRIES NO DOOR. The broker binary and the box's credential digests live
+# under /run, which ADR-019 excludes as machine-owned — so a crystallized VM has
+# neither. That is the correct outcome and not an accident of the copy: a permanent
+# VM is not an ephemeral body an agent claims, and carrying a live box token onto
+# one would extend that credential past the life of the box it was minted for.
+VM_ROOT="$BOX_LOCAL_ROOT/vms/walk-vm/root"
+[[ -d "$VM_ROOT" ]] || die "the crystallized VM root $VM_ROOT does not exist"
+if [[ -e "$VM_ROOT/run/dada-broker" ]]; then
+  die "the crystallized VM carries $VM_ROOT/run/dada-broker — a box credential reached a permanent machine"
+fi
+CARRIED_BROKER="$(find "$VM_ROOT" -name 'box-broker' -o -name 'tokens' -path '*dada-broker*' 2>/dev/null | head -5)"
+[[ -z "$CARRIED_BROKER" ]] || die "the crystallized VM carries broker files: $CARRIED_BROKER"
+info "the crystallized VM contains no broker binary and no box credential — checked on the VM's real filesystem"
+
 info "the stored report is re-readable afterwards:"
 api GET "/api/v1/projects/$PROJECT_ID/boxes/$BOX_NAME/crystallizations" \
   | jqish crystallizations.0.verified | sed 's/^/    verified=/'
@@ -533,6 +678,17 @@ info "live sessions after delete: $AFTER_SESSIONS"
 DEAD="$(boxexec 'echo should-not-run')"
 printf '  the revoked token now gets: %s\n' "$(printf '%s' "$DEAD" | tr -d '\n')"
 printf '%s' "$DEAD" | grep -qi 'unauthorized\|error' || die "a revoked session token still worked"
+
+# AND THE BOX'S OWN DOOR IS SHUT. This is the assertion that would have caught the
+# whole point of the door being somewhere else: revoking a session in our table does
+# nothing to a listener inside the box, so the revocation has to reach the digest
+# file the box authenticates against. Without this check a "revoked" credential would
+# keep working on exactly the path the control plane is deliberately not on.
+DOOR_DEAD="$(curl -sS -o /dev/null -w '%{http_code}' -X POST "$BROKER_BASE/exec" \
+  -H "X-Box-Token: $BOX_TOKEN" -H 'Content-Type: application/json' \
+  -d '{"command":"echo should-not-run"}')"
+printf '  the revoked token on the BOX'"'"'S OWN door gets: HTTP %s\n' "$DOOR_DEAD"
+[[ "$DOOR_DEAD" == "401" ]] || die "the box's own door still accepts a revoked credential (HTTP $DOOR_DEAD)"
 
 # ---------------------------------------------------------------------------
 step "the measured numbers"

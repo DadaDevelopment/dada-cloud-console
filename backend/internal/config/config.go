@@ -480,6 +480,18 @@ type Config struct {
 	// process serve requests" rather than two that can disagree.
 	BoxSessionBaseURL string // BOX_SESSION_BASE_URL
 
+	// BoxBrokerDir is a directory containing the box-broker binary, bind-mounted
+	// read-only into every box so the box has an endpoint of its own (D6). Empty
+	// means the boxes of this host have no door of their own and `box up` says so
+	// in its response rather than publishing the control-plane fallback as if it
+	// were the box's.
+	//
+	// A DIRECTORY and not a path to the binary, because the value is a bind-mount
+	// source: pointing it at /usr/local/bin would mount the host's whole bin
+	// directory into every tenant's body, which is the kind of accident a type
+	// cannot catch but a name can.
+	BoxBrokerDir string // BOX_BROKER_DIR
+
 	// Managed Postgres the attach path provisions into. It lives OUTSIDE the box on
 	// purpose: a disposable body must not own the customer's database.
 	// BoxManagedPGURL is a superuser DSN used by the control plane and never
@@ -643,6 +655,7 @@ func Load() (*Config, error) {
 		BoxLocalRoot:             getEnv("BOX_LOCAL_ROOT", ""),
 		BoxWarmPoolSize:          getEnvInt("BOX_WARM_POOL_SIZE", 2),
 		BoxWarmImage:             getEnv("BOX_WARM_IMAGE", "warm-v1"),
+		BoxBrokerDir:             getEnv("BOX_BROKER_DIR", ""),
 		BoxRegion:                getEnv("BOX_REGION", ""),
 		BoxHostnameBase:          getEnv("BOX_HOSTNAME_BASE", "box.dada-tuda.ru"),
 		BoxCrystallizeDomainBase: getEnv("BOX_CRYSTALLIZE_DOMAIN_BASE", "dada-tuda.ru"),
