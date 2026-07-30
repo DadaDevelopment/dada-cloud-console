@@ -406,3 +406,13 @@ overlay down clean (no residual `.react-joyride__overlay`).
 
 This moves the 07-31 predictions' start date: nothing could have been seen before
 `e59137e` reaches prod, so grade tour-seen rate from that rollout, not from `e84680a`.
+
+**Fix live on prod — 2026-07-31 02:08.** Frontend image `08d6f4dd`, whose commit is
+a descendant of `e59137e` (`git merge-base --is-ancestor` confirms), 2/2 replicas
+ready. Read the logic out of the running pod rather than trusting the tag: chunk
+`0eg9ib5cxjcr6.js` contains the polled selector inlined —
+`if(n>1e4)return null … o!==a[0]&&n<4e3?null:o … },250)` — i.e. the 10s window, the
+4s lower-priority grace and the 250ms poll are all in the bundle prod is serving,
+next to the campaign registry that still leads with `first-deploy`.
+
+Tour-seen clock starts now.
