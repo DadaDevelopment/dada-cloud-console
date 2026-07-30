@@ -10,11 +10,13 @@ import "syscall"
 // tree killable by process group.
 //
 // CLONE_NEW* live in package syscall only on Linux, which is why this sits
-// behind a build tag -- see sysprocattr_other.go for the non-Linux stub.
-func newNamespaceSysProcAttr() *syscall.SysProcAttr {
+// behind a build tag -- see sysprocattr_other.go for the non-Linux stub. The
+// error return exists for that stub's sake: off Linux there is no honest value
+// to return, and a caller must be told rather than handed a weaker isolation.
+func newNamespaceSysProcAttr() (*syscall.SysProcAttr, error) {
 	return &syscall.SysProcAttr{
 		Cloneflags:   syscall.CLONE_NEWNS | syscall.CLONE_NEWPID | syscall.CLONE_NEWUTS | syscall.CLONE_NEWIPC,
 		Unshareflags: syscall.CLONE_NEWNS,
 		Setpgid:      true,
-	}
+	}, nil
 }

@@ -515,7 +515,11 @@ func (r *LocalRuntime) startInit(ctx context.Context, inst *Instance) error {
 	}
 	name := inst.InstanceRef
 	cmd := exec.Command("/bin/sh", "-c", initScript, "box-init", root, name, strings.Join(specs, ","))
-	cmd.SysProcAttr = newNamespaceSysProcAttr()
+	attr, err := newNamespaceSysProcAttr()
+	if err != nil {
+		return err
+	}
+	cmd.SysProcAttr = attr
 	logPath := filepath.Join(r.BoxDir(inst.InstanceRef), "init.log")
 	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
 	if err != nil {
@@ -1150,7 +1154,11 @@ func (r *LocalRuntime) OpenRoot(ctx context.Context, root, hostname string, moun
 		return nil, err
 	}
 	cmd := exec.Command("/bin/sh", "-c", initScript, "root-session", root, hostname, strings.Join(mounts, ","))
-	cmd.SysProcAttr = newNamespaceSysProcAttr()
+	attr, err := newNamespaceSysProcAttr()
+	if err != nil {
+		return nil, err
+	}
+	cmd.SysProcAttr = attr
 	var log strings.Builder
 	cmd.Stdout, cmd.Stderr = &log, &log
 	if err := cmd.Start(); err != nil {

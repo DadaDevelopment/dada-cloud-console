@@ -2,13 +2,19 @@
 
 package box
 
-import "syscall"
+import (
+	"fmt"
+	"runtime"
+	"syscall"
+)
 
-// newNamespaceSysProcAttr is the non-Linux stub: only Setpgid, because Linux
-// namespace clone flags do not exist on other platforms. Keeping it compilable
-// off Linux is what lets the rest of the console build and its tests run on a
-// developer's macOS machine; the box runtime itself is only ever executed on
-// Linux hosts, where the tagged sibling applies.
-func newNamespaceSysProcAttr() *syscall.SysProcAttr {
-	return &syscall.SysProcAttr{Setpgid: true}
+// newNamespaceSysProcAttr is the non-Linux stub, and it fails instead of
+// degrading. Keeping it compilable off Linux is what lets the rest of the
+// console build and its platform-neutral box tests run on a developer's macOS
+// machine, but a box started without CLONE_NEWNS/NEWPID/NEWUTS/NEWIPC is not a
+// weaker box -- it is an unisolated process tree chrooted into the host, which
+// is the one outcome this runtime exists to prevent. So the seam reports that
+// the platform is unsupported and the caller aborts.
+func newNamespaceSysProcAttr() (*syscall.SysProcAttr, error) {
+	return nil, fmt.Errorf("box: the local box runtime is unsupported on %s/%s: it requires Linux mount, pid, uts and ipc namespaces (CLONE_NEW*), which exist only on Linux -- run the box runtime on a Linux host", runtime.GOOS, runtime.GOARCH)
 }
