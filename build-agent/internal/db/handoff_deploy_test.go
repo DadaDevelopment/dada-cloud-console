@@ -204,3 +204,40 @@ func exec(t *testing.T, pool *pgxpool.Pool, sql string, args ...any) {
 		t.Fatalf("seed exec failed: %v\nsql: %s", err, sql)
 	}
 }
+
+// TestHandoffDeploy_WorkerRepoGetsNoDefaultHostname pins the second half of the
+// upload false-green defect: an archive whose detection found no listening port
+// is a bot or a queue consumer, and the platform must not mint it a surrogate
+// domain. Default-domain knobs are ON here on purpose — the worker flag has to
+// win over them, otherwise the console shows the user a link that can only 502.
+func TestHandoffDeploy_WorkerRepoGetsNoDefaultHostname(t *testing.T) {
+	pool := testPool(t)
+	projectID, envID := seedProjectEnv(t, pool, "small")
+
+	appName := "demo-bot"
+	gitRepoID := seedGitRepo(t, pool, projectID, envID, appName, "small")
+	repo := &Repo{ProjectID: projectID, EnvironmentID: envID, AppName: appName, Port: 8080, Replicas: 1, Profile: "small", Worker: true}
+	b := seedBuild(t, pool, gitRepoID, envID, appName, "bot123")
+
+	opID, err := HandoffDeploy(context.Background(), pool, b, repo,
+		"nexus.example.com/p/demo-bot@sha256:abc", DeployDetection{Framework: "python"},
+		DefaultDomainOpts{Enabled: true, Base: "dada-tuda.ru"})
+	if err != nil {
+		t.Fatalf("HandoffDeploy: %v", err)
+	}
+
+	action, payload := readOperation(t, pool, opID)
+	if action != "CreateApp" {
+		t.Fatalf("action = %q, want CreateApp", action)
+	}
+	var p createAppPayload
+	if err := json.Unmarshal(payload, &p); err != nil {
+		t.Fatalf("unmarshal CreateApp payload: %v", err)
+	}
+	if p.DefaultHostname != "" {
+		t.Errorf("DefaultHostname = %q, want empty (a worker listens on nothing)", p.DefaultHostname)
+	}
+	if !p.Worker {
+		t.Error("Worker = false, want true (the flag must reach gitops-agent, which records it on the snapshot)")
+	}
+}

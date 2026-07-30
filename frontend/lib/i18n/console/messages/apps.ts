@@ -41,7 +41,6 @@ export const apps: Messages = {
   "apps.deploy.fromUpload.submit": { ru: "Загрузить и задеплоить", en: "Upload and deploy" },
   "apps.deploy.fromUpload.submitting": { ru: "Загрузка...", en: "Uploading..." },
   "apps.deploy.fromUpload.error.type": { ru: "Поддерживаются только архивы .zip, .tar.gz, .tgz", en: "Only .zip, .tar.gz, .tgz archives are supported" },
-  "apps.deploy.fromUpload.error.create": { ru: "Не удалось создать приложение", en: "Failed to create the app" },
   "apps.deploy.fromUpload.error.upload": { ru: "Не удалось загрузить архив", en: "Failed to upload the archive" },
   "apps.deploy.continue": { ru: "Продолжить", en: "Continue" },
   "apps.env.count": { ru: "{count} прил.", en: "{count} apps" },

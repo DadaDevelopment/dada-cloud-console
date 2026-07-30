@@ -8,9 +8,19 @@ import { Breadcrumb } from "@/components/ui/breadcrumb";
 import { timeAgo } from "@/lib/format";
 import { useT } from "@/lib/i18n/console/context";
 
+/**
+ * Statuses that still expect another write from an agent.
+ *
+ * `Committed` is deliberately NOT here: it is the terminal status of the
+ * gitops track. gitops-agent's last write for every k8s/Helm operation is
+ * MarkCommitted, and nothing in the platform ever advances Committed ->
+ * WaitingForArgoSync -> Ready (only the VM/portainer track reaches Ready).
+ * Treating it as in-progress rendered a spinner that never stopped and kept
+ * the page polling every 3s forever.
+ */
 const IN_PROGRESS_STATUSES = new Set<OperationStatus>([
   "Created", "Validated", "Queued", "Rendering",
-  "CommittingToGit", "Committed", "WaitingForArgoSync",
+  "CommittingToGit", "WaitingForArgoSync",
   "Syncing", "Reconciling", "WaitingForApproval",
 ]);
 
@@ -18,8 +28,12 @@ function isInProgress(status: OperationStatus): boolean {
   return IN_PROGRESS_STATUSES.has(status);
 }
 
+function isSucceeded(status: OperationStatus): boolean {
+  return status === "Ready" || status === "Committed";
+}
+
 function statusColor(status: OperationStatus): string {
-  if (status === "Ready") return "bg-green-100 dark:bg-green-950/40 text-green-700 dark:text-green-300";
+  if (isSucceeded(status)) return "bg-green-100 dark:bg-green-950/40 text-green-700 dark:text-green-300";
   if (status === "Failed") return "bg-red-100 dark:bg-red-950/40 text-red-700 dark:text-red-300";
   if (status === "Cancelled") return "bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400";
   if (status === "WaitingForApproval") return "bg-yellow-100 dark:bg-yellow-950/40 text-yellow-700 dark:text-yellow-300";
@@ -27,7 +41,7 @@ function statusColor(status: OperationStatus): string {
 }
 
 function statusDot(status: OperationStatus): string {
-  if (status === "Ready") return "bg-green-500";
+  if (isSucceeded(status)) return "bg-green-500";
   if (status === "Failed") return "bg-red-500";
   if (status === "Cancelled") return "bg-gray-400";
   if (status === "WaitingForApproval") return "bg-yellow-500";
@@ -35,7 +49,7 @@ function statusDot(status: OperationStatus): string {
 }
 
 function StatusIcon({ status }: { status: OperationStatus }) {
-  if (status === "Ready") {
+  if (isSucceeded(status)) {
     return (
       <svg className="h-4 w-4 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
@@ -134,7 +148,8 @@ export default function OperationsPage() {
   const q = query.trim().toLowerCase();
   const filtered = operations.filter((op) => {
     if (statusFilter === "in-progress" && !isInProgress(op.status)) return false;
-    if (statusFilter !== "all" && statusFilter !== "in-progress" && op.status !== statusFilter) return false;
+    if (statusFilter === "Ready" && !isSucceeded(op.status)) return false;
+    if (statusFilter !== "all" && statusFilter !== "in-progress" && statusFilter !== "Ready" && op.status !== statusFilter) return false;
     if (!q) return true;
     return (
       op.action.toLowerCase().includes(q) ||

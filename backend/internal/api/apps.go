@@ -77,6 +77,58 @@ func SuppressNonHTTPURL(apps []models.ResourceSnapshot) {
 	}
 }
 
+// placeholderImagePrefix is the image the console deploys for an app whose real
+// image does not exist yet: the upload flow must create the App before it can
+// POST the archive to it, so it seeds a pause container as a stand-in. The pause
+// container starts instantly and never exits, and console-created apps carry no
+// liveness/readiness probes, so kubelet reports it 1/1 Running within seconds and
+// the status reconciler writes phase=Ready. Everything downstream then lies: the
+// app list shows a green Ready badge, the detail page offers the default domain
+// (which 502s — pause serves nothing), and the frontend fires the
+// deploy_success Metrika goal, so the funnel counts a deploy that has not
+// happened. That green badge survives even when the build later FAILS.
+const placeholderImagePrefix = "registry.k8s.io/pause"
+
+// RestatePlaceholderPhase rewrites the phase of any app still running the
+// placeholder image so it reports what is actually true, and drops its "url" —
+// a pause container answers no HTTP request, so the surrogate domain is a
+// guaranteed 502 until the real image lands.
+//
+// The replacement phase comes from the app's latest build (name → status in
+// buildStatus): a queued/running build means "Building", a failed one means
+// "Failed", anything else means the app was never really deployed. Only
+// "Failed" is terminal for the frontend poller, so a page watching a
+// still-building app keeps polling instead of settling on a false Ready.
+func RestatePlaceholderPhase(apps []models.ResourceSnapshot, buildStatus map[string]string) {
+	for i := range apps {
+		if len(apps[i].SummaryJSON) == 0 {
+			continue
+		}
+		var m map[string]any
+		if err := json.Unmarshal(apps[i].SummaryJSON, &m); err != nil {
+			continue
+		}
+		image, _ := m["image"].(string)
+		if !strings.HasPrefix(image, placeholderImagePrefix) {
+			continue
+		}
+		switch buildStatus[apps[i].Name] {
+		case "queued", "running":
+			apps[i].Phase = "Building"
+		case "failed":
+			apps[i].Phase = "Failed"
+		default:
+			apps[i].Phase = "NotDeployed"
+		}
+		if _, hasURL := m["url"]; hasURL {
+			delete(m, "url")
+			if b, err := json.Marshal(m); err == nil {
+				apps[i].SummaryJSON = b
+			}
+		}
+	}
+}
+
 // GitRepoRow is one git_repos row plus its latest build status — the inputs
 // SynthesizeGitRepoApps needs to decide whether to surface a NotDeployed
 // placeholder app for a repo that has no live snapshot yet.
@@ -244,9 +296,14 @@ func (h *Handler) ListApps(c *gin.Context) {
 			gitRows = append(gitRows, r)
 		}
 	}
+	buildStatus := make(map[string]string, len(gitRows))
+	for _, r := range gitRows {
+		buildStatus[r.Name] = r.LatestStatus
+	}
 	apps, repoByName := SynthesizeGitRepoApps(apps, gitRows, seen, projectID, envID)
 
 	FillRepoFullName(apps, repoByName)
+	RestatePlaceholderPhase(apps, buildStatus)
 	SuppressNonHTTPURL(apps)
 	EnrichPreviewURL(apps, envID, h.cfg)
 

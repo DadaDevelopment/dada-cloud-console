@@ -9354,7 +9354,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Uploads a zip/tar.gz of an app's source (max 100MB), detects framework/port from manifest files, stores it in object storage, and queues a build. The app must already exist. Requires write access.",
+                "description": "Uploads a zip/tar.gz of an app's source (max 100MB), detects framework/port from manifest files, stores it in object storage, and queues a build. The app is created by the first successful build if it does not exist yet. Requires write access.",
                 "consumes": [
                     "multipart/form-data"
                 ],

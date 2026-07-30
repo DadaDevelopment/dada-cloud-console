@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"regexp"
 	"time"
 
 	"github.com/dada-tuda/console/backend/internal/auth"
@@ -28,18 +29,46 @@ type uploadSourceDetect struct {
 	Port      int    `json:"port"`
 }
 
+// uploadAppNameRe is the DNS-1123 label the app name must satisfy. The upload
+// endpoint no longer requires the app to exist first, so this is the only
+// gate between a user-typed name and a k8s object name; it mirrors the pattern
+// the console's upload card enforces client-side.
+var uploadAppNameRe = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$`)
+
+// isWorkerUpload reports whether an archive whose detection produced this port
+// is a workload with no HTTP entrypoint — a Telegram bot, a queue consumer, a
+// cron job. Detection returns 0 exactly when it found no web framework and no
+// EXPOSE, which is the shape of every long-polling bot, the headline case of
+// the /hosting-telegram-bot landing.
+//
+// Such an app still needs a nominal servicePort for the chart, but it must
+// never be handed a surrogate domain: nothing is listening, so the link the
+// console would show can only ever 502. The verdict is stored on the git_repos
+// row (migration 067) because the app itself is materialized later, by
+// HandoffDeploy after the first successful build, long after this request is
+// gone.
+func isWorkerUpload(detectedPort int) bool {
+	return detectedPort <= 0
+}
+
 // UploadSourceArchive accepts a multipart archive (zip or tar.gz, max 100MB)
 // of an app's source, detects its framework and port from manifest files
 // (Dockerfile, package.json, requirements.txt, pyproject.toml), stores the
 // bytes in object storage, upserts a provider='archive' git_repos row
 // pointing at that object, and queues a build against it — the same
 // builds/poller/build-agent/Jenkins pipeline that serves git-linked apps.
-// The app must already exist (create it via the ordinary CreateApp flow
-// first); this endpoint only replaces the "clone from git" step.
+//
+// The app does NOT have to exist yet. It is materialized by HandoffDeploy when
+// the first build succeeds, exactly as for a git-connected repo, so its port,
+// framework and worker flag come from detection instead of from a guess the
+// console had to make before it had ever seen the archive. Creating it upfront
+// (the old contract) meant deploying a pause placeholder that k8s reports 1/1
+// Running within seconds — a green "Ready" badge and a live-looking domain over
+// a build that may still be running, or may already have failed.
 //
 // @ID          uploadSourceArchive
 // @Summary     Deploy from an uploaded source archive
-// @Description Uploads a zip/tar.gz of an app's source (max 100MB), detects framework/port from manifest files, stores it in object storage, and queues a build. The app must already exist. Requires write access.
+// @Description Uploads a zip/tar.gz of an app's source (max 100MB), detects framework/port from manifest files, stores it in object storage, and queues a build. The app is created by the first successful build if it does not exist yet. Requires write access.
 // @Tags        build
 // @Accept      multipart/form-data
 // @Produce     json
@@ -93,17 +122,8 @@ func (h *Handler) UploadSourceArchive(c *gin.Context) {
 		return
 	}
 
-	var appCount int
-	if err := h.pool.QueryRow(c.Request.Context(),
-		`SELECT COUNT(*) FROM resource_snapshots
-		 WHERE project_id = $1 AND environment_id = $2 AND kind = 'App' AND name = $3`,
-		projectID, envID, appName,
-	).Scan(&appCount); err != nil {
-		respondError(c, http.StatusInternalServerError, "failed to check app existence")
-		return
-	}
-	if appCount == 0 {
-		respondNotFound(c)
+	if !uploadAppNameRe.MatchString(appName) {
+		respondError(c, http.StatusBadRequest, "app name must be a lowercase DNS label (a-z, 0-9, '-'), 1-63 characters")
 		return
 	}
 
@@ -168,6 +188,7 @@ func (h *Handler) UploadSourceArchive(c *gin.Context) {
 	if detected.Framework != "" {
 		frameworkOverride = &detected.Framework
 	}
+	isWorker := isWorkerUpload(detected.Port)
 	port := detected.Port
 	if port <= 0 {
 		port = 8080
@@ -177,8 +198,8 @@ func (h *Handler) UploadSourceArchive(c *gin.Context) {
 	if err := h.pool.QueryRow(c.Request.Context(),
 		`INSERT INTO git_repos
 		   (project_id, environment_id, app_name, provider, repo_full_name, clone_url,
-		    production_branch, framework_override, port, created_by)
-		 VALUES ($1, $2, $3, 'archive', $4, $5, 'upload', $6, $7, $8)
+		    production_branch, framework_override, port, worker, created_by)
+		 VALUES ($1, $2, $3, 'archive', $4, $5, 'upload', $6, $7, $8, $9)
 		 ON CONFLICT (project_id, environment_id, app_name) DO UPDATE SET
 		   provider           = 'archive',
 		   repo_full_name     = EXCLUDED.repo_full_name,
@@ -187,10 +208,11 @@ func (h *Handler) UploadSourceArchive(c *gin.Context) {
 		   production_branch  = 'upload',
 		   framework_override = EXCLUDED.framework_override,
 		   port               = EXCLUDED.port,
+		   worker             = EXCLUDED.worker,
 		   updated_at         = NOW()
 		 RETURNING id`,
 		projectID, envID, appName, "upload/"+appName, artifactURI,
-		frameworkOverride, port, claims.UserID,
+		frameworkOverride, port, isWorker, claims.UserID,
 	).Scan(&gitRepoID); err != nil {
 		respondError(c, http.StatusInternalServerError, "failed to record uploaded source")
 		return

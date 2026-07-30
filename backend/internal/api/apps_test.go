@@ -162,3 +162,48 @@ func TestSuppressNonHTTPURL(t *testing.T) {
 		t.Errorf("empty-summary: should stay untouched")
 	}
 }
+
+// TestRestatePlaceholderPhase pins the false-green defect found by dogfooding
+// the upload flow: the pause stand-in image starts instantly and probes are
+// absent, so k8s (and the reconciler) call the app Ready while its real build
+// is still running — or has already failed.
+func TestRestatePlaceholderPhase(t *testing.T) {
+	apps := []models.ResourceSnapshot{
+		{Name: "building", Phase: "Ready", SummaryJSON: json.RawMessage(`{"image":"registry.k8s.io/pause:3.9","port":8080,"url":"https://building-a1b2c3.dada-tuda.ru"}`)},
+		{Name: "broken", Phase: "Ready", SummaryJSON: json.RawMessage(`{"image":"registry.k8s.io/pause:3.9","port":8080,"url":"https://broken-a1b2c3.dada-tuda.ru"}`)},
+		{Name: "never-built", Phase: "Ready", SummaryJSON: json.RawMessage(`{"image":"registry.k8s.io/pause:3.9","port":8080}`)},
+		{Name: "real", Phase: "Ready", SummaryJSON: json.RawMessage(`{"image":"nexus.dada-tuda.ru/org/real@sha256:abc","port":8080,"url":"https://real-a1b2c3.dada-tuda.ru"}`)},
+		{Name: "empty-summary", Phase: "Ready", SummaryJSON: nil},
+	}
+	api.RestatePlaceholderPhase(apps, map[string]string{
+		"building": "running",
+		"broken":   "failed",
+		"real":     "succeeded",
+	})
+
+	want := map[string]string{
+		"building":      "Building",
+		"broken":        "Failed",
+		"never-built":   "NotDeployed",
+		"real":          "Ready",
+		"empty-summary": "Ready",
+	}
+	for _, a := range apps {
+		if a.Phase != want[a.Name] {
+			t.Errorf("%s: phase = %q, want %q", a.Name, a.Phase, want[a.Name])
+		}
+	}
+
+	hasURL := func(raw json.RawMessage) bool {
+		var m map[string]any
+		_ = json.Unmarshal(raw, &m)
+		_, ok := m["url"]
+		return ok
+	}
+	if hasURL(apps[0].SummaryJSON) {
+		t.Error("building: url must be dropped — a pause container answers no HTTP request")
+	}
+	if !hasURL(apps[3].SummaryJSON) {
+		t.Error("real: url must survive on an app running its real image")
+	}
+}

@@ -41,6 +41,7 @@ type createAppPayload struct {
 	Replicas        int    `json:"replicas,omitempty"`
 	Profile         string `json:"profile,omitempty"`
 	DefaultHostname string `json:"default_hostname,omitempty"`
+	Worker          bool   `json:"worker,omitempty"`
 }
 
 // DeployDetection carries build-time framework/port detection into the deploy
@@ -54,6 +55,10 @@ type DeployDetection struct {
 // DefaultDomainOpts carries the platform default-domain knobs into HandoffDeploy
 // so a git-built app materialized by its first build gets the same auto
 // surrogate hostname as a console-created app (mirrors backend apps.go CreateApp).
+//
+// A repo flagged worker gets no hostname at all, whatever these knobs say: an
+// upload whose detection found no listening port is a bot or a queue consumer,
+// and a domain pointed at it can only 502.
 type DefaultDomainOpts struct {
 	Enabled bool
 	Base    string
@@ -236,7 +241,7 @@ func HandoffDeploy(ctx context.Context, pool *pgxpool.Pool, b *Build, repo *Repo
 				WHERE environment_id = $1 AND app_name = $2 AND managed = true
 			)
 		`, b.EnvironmentID, b.AppName).Scan(&hasManagedDomain)
-		if dd.Enabled && dd.Base != "" && !hasManagedDomain {
+		if dd.Enabled && dd.Base != "" && !hasManagedDomain && !repo.Worker {
 			if suffix, sErr := randomHostSuffix(); sErr == nil {
 				isEphemeral, headBranch, pErr := EnvPreviewInfo(ctx, tx, b.EnvironmentID)
 				if pErr == nil && isEphemeral && headBranch != "" {
@@ -254,6 +259,7 @@ func HandoffDeploy(ctx context.Context, pool *pgxpool.Pool, b *Build, repo *Repo
 			Replicas:        repo.Replicas,
 			Profile:         repo.Profile,
 			DefaultHostname: defaultHostname,
+			Worker:          repo.Worker,
 		})
 	}
 	if err != nil {

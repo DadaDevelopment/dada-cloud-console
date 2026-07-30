@@ -8,8 +8,6 @@ import { useT } from "@/lib/i18n/console/context";
 
 const APP_NAME_RE = /^([a-z0-9]|[a-z0-9][a-z0-9-]{0,61}[a-z0-9])$/;
 const ACCEPTED_EXT = [".zip", ".tar.gz", ".tgz"];
-const DEFAULT_PORT = 8080;
-const PLACEHOLDER_IMAGE = "registry.k8s.io/pause:3.9";
 
 function hasAcceptedExtension(name: string): boolean {
   const lower = name.toLowerCase();
@@ -27,10 +25,16 @@ export interface UploadDeployCardProps {
 /**
  * Second no-git onramp, next to the starter-template cards: drop an archive
  * exported from a vibe-coding tool (Lovable/Bolt/v0) and get a live URL without
- * ever touching GitHub. Flow: create the app with a placeholder image (the
- * upload endpoint 404s if the app doesn't exist yet), then upload the archive,
- * which detects framework/port, stores it, and queues the first build. Redirects
- * to that build's log page on success.
+ * ever touching GitHub. Flow: upload the archive, which detects framework/port,
+ * stores it, and queues the first build; the app itself is materialized by that
+ * build when it succeeds, with the detected port and worker flag. Redirects to
+ * the build's log page on success.
+ *
+ * Do NOT reintroduce the old pre-create step (an app seeded with a pause
+ * placeholder image so the upload endpoint would accept it): the pause container
+ * is reported 1/1 Running within seconds, which showed the user a green Ready
+ * badge and a surrogate domain over a build that was still running — or had
+ * already failed.
  */
 export function UploadDeployCard({ projectId, envId, compact, hero, className }: UploadDeployCardProps) {
   const { t } = useT();
@@ -69,25 +73,6 @@ export function UploadDeployCard({ projectId, envId, compact, hero, className }:
     setSubmitting(true);
     setError(null);
     setProgress(0);
-    try {
-      await appsApi.create(projectId, envId, {
-        name: trimmedName,
-        image: PLACEHOLDER_IMAGE,
-        port: DEFAULT_PORT,
-        replicas: 1,
-        profile: "small",
-        workload_type: "Deployment",
-        worker: false,
-      });
-    } catch (err) {
-      const raw = err instanceof Error ? err.message : "";
-      if (!/already exists|unique per environment/i.test(raw)) {
-        setError(raw || t("apps.deploy.fromUpload.error.create"));
-        setSubmitting(false);
-        setProgress(null);
-        return;
-      }
-    }
     try {
       const result = await appsApi.uploadSourceArchive(projectId, envId, trimmedName, file, (pct) => setProgress(pct));
       router.push(`/projects/${projectId}/apps/${trimmedName}/builds/${result.build.id}?envId=${envId}`);

@@ -35,6 +35,11 @@ type Repo struct {
 	Replicas int
 	Profile  string
 
+	// Worker marks an app with no HTTP entrypoint (a bot, a queue consumer), set
+	// by upload-time source detection. It suppresses the auto surrogate domain at
+	// CreateApp: nothing listens, so the link could only 502.
+	Worker bool
+
 	// GitHub App installation (numeric id from git_app_installations).
 	InstallationID int64
 
@@ -49,7 +54,7 @@ const repoSelect = `
 	       r.provider, r.repo_full_name, r.clone_url, r.token_encrypted,
 	       COALESCE(r.webhook_secret, ''), r.production_branch, r.root_dir,
 	       COALESCE(r.framework_override, ''), r.auto_deploy,
-	       r.port, r.replicas, r.profile,
+	       r.port, r.replicas, r.profile, COALESCE(r.worker, false),
 	       COALESCE(i.installation_id, 0), r.created_by
 	FROM   git_repos r
 	JOIN   projects p     ON p.id = r.project_id
@@ -64,7 +69,7 @@ func scanRepo(row pgx.Row) (*Repo, error) {
 		&rp.Provider, &rp.RepoFullName, &rp.CloneURL, &rp.TokenEncrypted,
 		&rp.WebhookSecret, &rp.ProductionBranch, &rp.RootDir,
 		&rp.FrameworkOverride, &rp.AutoDeploy,
-		&rp.Port, &rp.Replicas, &rp.Profile, &rp.InstallationID, &rp.CreatedBy,
+		&rp.Port, &rp.Replicas, &rp.Profile, &rp.Worker, &rp.InstallationID, &rp.CreatedBy,
 	); err != nil {
 		return nil, err
 	}
