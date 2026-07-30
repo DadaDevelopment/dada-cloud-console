@@ -191,5 +191,94 @@ func collect(ctx context.Context, pool *pgxpool.Pool) {
 		domainHostnamePendingAge.Set(age)
 	}
 
+	collectBoxes(c, pool)
+
 	collectDuration.Set(time.Since(start).Seconds())
+}
+
+// collectBoxes refreshes the Box state gauges declared in box.go.
+//
+// It lives in this file, in this package, rather than exposing setters from
+// box.go: the gauges are package-private promauto vars and the collector is their
+// only writer, so a setter per gauge would be four exported functions whose only
+// caller is thirty lines away. box.go stays a declaration-and-record-path file;
+// anything that reads the database stays here, next to the identical refresh
+// pattern used for operations, builds and hostnames.
+//
+// Everything here is best-effort in the same way as the rest of collect(): a
+// failed query increments dada_metrics_collect_errors_total and leaves the gauge
+// at its previous value. That is deliberate for state gauges — publishing a zero
+// on a transient DB error would look exactly like "the fleet emptied out" and
+// would clear an alert that should still be firing.
+func collectBoxes(ctx context.Context, pool *pgxpool.Pool) {
+	// dada_boxes{phase}: a plain GROUP BY on boxes.status. The status vocabulary in
+	// migration 061 and models.BoxStatus is deliberately the same as this label's,
+	// so the gauge cannot drift from the state machine. Deleted rows are tombstones
+	// and are excluded: they hold no capacity, and counting them would make the
+	// gauge grow forever.
+	if rows, err := pool.Query(ctx,
+		`SELECT lower(status), count(*) FROM boxes WHERE status <> 'Deleted' GROUP BY status`); err != nil {
+		collectErrors.Inc()
+		log.Warn().Err(err).Msg("metrics: boxes query failed")
+	} else {
+		boxes.Reset()
+		for rows.Next() {
+			var phase string
+			var n float64
+			if err := rows.Scan(&phase, &n); err != nil {
+				collectErrors.Inc()
+				continue
+			}
+			boxes.WithLabelValues(phase).Set(n)
+		}
+		rows.Close()
+	}
+
+	// Same shape as dada_builds_failed_recent: an hour window so it clears itself
+	// as failures age out and therefore tracks live breakage rather than history.
+	var failedRecent float64
+	if err := pool.QueryRow(ctx,
+		`SELECT count(*) FROM boxes
+		  WHERE status = 'Failed' AND updated_at > now() - interval '1 hour'`).Scan(&failedRecent); err != nil {
+		collectErrors.Inc()
+		log.Warn().Err(err).Msg("metrics: recent-failed boxes query failed")
+	} else {
+		boxFailedRecent.Set(failedRecent)
+	}
+
+	// dada_box_pool_available and dada_box_pool_target are deliberately NOT written
+	// here, and this is the one place that has to say why out loud.
+	//
+	// They mean "free PRE-WARMED boxes" and "how many the controller is trying to
+	// keep free". The boxes table cannot answer either question: a row in it is a
+	// CLAIMED, tenant-owned box, while a warm slot is unclaimed and lives in the
+	// runtime. Counting live boxes and labelling the result "available" would be
+	// close to the opposite of the truth — a full fleet with zero spare capacity
+	// would report the highest availability — and a hard-coded target would be a
+	// number invented by this function rather than a decision made by the pool
+	// controller, which is precisely what comparing the two gauges is for.
+	//
+	// The repository has already paid twice for dressing a proxy up as a
+	// measurement, so these stay absent until their real writer exists: the pool
+	// controller (phase 5, portainer-agent/internal/boxhost), which is the only
+	// component that knows both numbers. internal/box.WarmPool already declares
+	// Available/Target for exactly that reason. An absent series is honestly
+	// missing; a fabricated one is a lie a dashboard renders as truth.
+
+	// dada_box_spend_cap_max_ratio and dada_box_crystallizations_pending_age_seconds
+	// are pinned at 0 for the same reason as each other: the tables they read do not
+	// exist yet (box_usage_minutes with the meter, box_crystallizations in phase 8).
+	//
+	// Pinned rather than left unset, because these two have alert rules already
+	// watching them: a gauge that only starts reporting later is silent-by-absence
+	// in between, and "the alert never fired" is indistinguishable from "nothing is
+	// wrong". A published 0 says "measured, and the answer is none".
+	//
+	// Neither gets a proxy query. "Oldest box in status Crystallizing" is NOT the
+	// age of a stuck promotion record — a box can sit in that phase for reasons
+	// that have nothing to do with the crystallization saga — and a spend ratio
+	// without a usage ledger has no numerator at all. They start telling the truth
+	// on the same commits that give them tables to read.
+	boxSpendCapMaxRatio.Set(0)
+	boxCrystallizationsPendingAge.Set(0)
 }
