@@ -87,7 +87,10 @@ Plan and evidence: `tasks/seo/PLAN.md`, baseline `tasks/seo/2026-07-30.md` / `.j
 - [x] Ship `/oplatit-vercel-iz-rossii` and `/rabotaet-li-vercel-v-rossii` (ru+en) for the payment-block cluster
 - [x] Fix `FaqList` — answers were never in the DOM, so every landing read as thin to a crawler
 - [x] Expand the ten sub-500-word pages past ~900 words of page-specific content
-- [ ] Submit the changed URLs to IndexNow once the deploy is live
+- [x] Submit the changed URLs to IndexNow once the deploy is live — 94 URLs, Yandex 202, Bing 200
+- [x] Verify live after the roll: 94/94 sitemap URLs 200, new payment pages 1112-1482 words
+- [ ] Watch, do not pre-expand: 32 thin `/developer/*` docs pages (442-668 words). Expand only if
+      the weekly pull shows them indexed then dropped as `LOW_QUALITY`
 - [ ] **Owner action:** set the region in Yandex Webmaster and register in Yandex Business
       (`NO_REGIONS`, `NOT_IN_SPRAV`); no API exists for either
 - [ ] **Owner action:** verify the host in Google Search Console and submit the sitemap

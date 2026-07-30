@@ -81,9 +81,25 @@ block; `pricing` and `storage` gained FAQ; `developer` gained an intro; the five
 landings moved to the new `LandingGuide` shape (how-to, what-does-not-port, a six-row concept
 mapping table, four extra Q&A). `HowTo` and `FAQ` JSON-LD follow the visible content.
 
-Result: all 62 sitemap routes 200; ten still under 700 words and all of them are legal, status
-or hub pages (`/terms` 415, `/status` 581, `/accept-payments` 594, `/developer` 623,
-`/pricing` 660, `/migrate-vercel` 697, plus the /en mirrors) where more prose would be padding.
+Verified live after the roll (94 sitemap URLs, all 200):
+
+- the two new payment-cluster pages: `/oplatit-vercel-iz-rossii` 1308, `/rabotaet-li-vercel-v-rossii`
+  1112, `/en/*` 1482 and 1293
+- `/analog-heroku` 967, and every other landing above the ~900 line
+- IndexNow submitted all 94 URLs — Yandex 202, Bing 200
+
+**Correction to the pre-deploy measurement.** The local sweep reported 62 routes with ten under
+700 words. That was wrong: it never walked `/developer/*`, which `sitemap.ts` enumerates from the
+content directory rather than listing statically. The real live figure is 94 URLs with 38 under
+700 words, and 32 of those 38 are the `/developer/*` docs pages (442-668 words each, ru+en).
+Only six are the legal/status/hub pages that genuinely should stay short (`/terms` 415,
+`/status` 581, `/accept-payments` 594, `/developer` 623, `/pricing` 660, `/migrate-vercel` 697).
+
+**The docs cluster is not being expanded on spec.** None of those 32 pages are in the index yet,
+so there is no evidence they will be dropped, and rewriting 32 guides to chase a threshold
+inferred from six landings is the kind of work that looks productive and proves nothing. It is a
+watch item instead: if the weekly pull shows `/developer/*` URLs admitted and then removed as
+`LOW_QUALITY`, they get expanded or dropped from the sitemap under the existing rule.
 
 **Multiply** — the payment-block cluster, starting with Vercel (about 21 of 97 shows concern
 Vercel payment/availability):
@@ -102,6 +118,7 @@ average position, and goal reaches from the weekly pull.
 | 07-30 | the six thin EN pages admitted on 07-29 get dropped as `LOW_QUALITY` | 08-06 pull | Webmaster removal reasons |
 | 07-31 | the ten expanded pages re-enter the index and stay | 14 days after they next appear | pages-in-search count, no new `LOW_QUALITY` for those URLs |
 | 07-31 | `/oplatit-vercel-iz-rossii` and `/rabotaet-li-vercel-v-rossii` take the payment-block cluster (31 shows/mo at pos 8-12, 0 clicks today) and convert it | 14 days after each enters the index | shows on those URLs, average position <= 5, clicks > 0, goal "переход на /register" attributed to them |
+| 07-31 | the 32 thin `/developer/*` docs pages are NOT dropped as `LOW_QUALITY` — the threshold behaves differently for docs than for landings | first pull in which any of them is indexed | Webmaster removal reasons for `/developer/*` URLs |
 
 A prediction that is wrong is recorded as wrong in the weekly file — the point is calibration,
 not a scoreboard.
