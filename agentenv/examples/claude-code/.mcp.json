@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "agentenv": {
+      "type": "stdio",
+      "command": "agentenv",
+      "args": ["mcp"],
+      "env": {
+        "AGENTENV_ADAPTER": "local"
+      }
+    }
+  }
+}

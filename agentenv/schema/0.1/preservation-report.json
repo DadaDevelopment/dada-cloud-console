@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agentenv.dev/schema/0.1/preservation-report.json",
+  "title": "Preservation report",
+  "description": "Returned by env_promote. The intellectual content of the profile: for every plane of the environment, exactly what happened to it. An implementation that reports \"lost\" for something it advertised in the object's guarantees fails conformance.",
+  "type": "object",
+  "required": ["filesystem", "volumes", "env", "attachments", "address", "processes", "excluded"],
+  "additionalProperties": false,
+  "properties": {
+    "filesystem":  { "$ref": "#/$defs/plane" },
+    "volumes":     { "$ref": "#/$defs/plane" },
+    "env":         { "$ref": "#/$defs/plane" },
+    "attachments": { "$ref": "#/$defs/plane" },
+    "address":     { "$ref": "#/$defs/plane" },
+    "processes":   { "$ref": "#/$defs/plane" },
+    "excluded": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Paths deliberately not carried because they belong to the machine rather than the application. REQUIRED: an exclusion list that lives only in the implementer's source silently drifts from reality, and printing it is what makes the drift reviewable.",
+      "minItems": 1
+    },
+    "downtime_seconds": {
+      "type": "number",
+      "minimum": 0,
+      "description": "Measured, never estimated. If it was not measured, omit this field and report \"unknown\" — a number nobody took is worse than an absent one."
+    }
+  },
+  "$defs": {
+    "plane": {
+      "type": "object",
+      "required": ["result"],
+      "properties": {
+        "result": {
+          "enum": ["preserved", "recreated", "lost", "unknown"],
+          "description": "preserved: byte-identical or semantically identical. recreated: equivalent but rebuilt, e.g. processes restarted with the same argv and cwd. lost: not carried — MUST be declared, never omitted."
+        },
+        "note":  { "type": "string" },
+        "bytes": { "type": "integer", "minimum": 0 },
+        "keys":  { "type": "integer", "minimum": 0 },
+        "count": { "type": "integer", "minimum": 0 }
+      },
+      "additionalProperties": false
+    }
+  }
+}
