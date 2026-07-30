@@ -22,6 +22,7 @@ type AltPage = {
   mappingTitle?: string;
   mappingSubtitle?: string;
   mapping?: MappingRow[];
+  mappingHeaders?: [string, string, string];
   notPortableTitle?: string;
   notPortableSubtitle?: string;
   notPortable?: Feature[];
@@ -169,6 +170,8 @@ export interface Dict {
     pricingNote: string;
     faqTitle: string;
     faq: Faq[];
+    hubTitle: string;
+    hubSubtitle: string;
     ctaTitle: string;
     ctaSubtitle: string;
     mcp: {
@@ -207,6 +210,8 @@ export interface Dict {
   uploadDeployAlt: UploadDeployPage;
   acceptPaymentsAlt: UploadDeployPage;
   migrateVercel: MigrateGuide;
+  payVercel: AltPage;
+  vercelInRussia: AltPage;
   statusRadar: StatusRadar;
   databases: {
     heroTitle: string;
@@ -339,6 +344,8 @@ const ru: Dict = {
       { q: "Мы ещё маленькие", a: "Тем более ваш вариант. Один проект вместо ручной инфраструктуры, которую в таком размере держать нечем. Sandbox бесплатный, квоты плана держат счёт под контролем, а вырастете — переезжать не надо." },
       { q: "Чем это отличается от Heroku, Vercel и Coolify?", a: "DADA Cloud — backend-облако уровня PaaS: как Heroku или Render, вы деплоите бэкенд из GitHub одним push. В отличие от Vercel, заточенного под фронтенд, здесь первичен долгоживущий бэкенд с управляемым Postgres. А в отличие от self-hosted Coolify, свой сервер администрировать не нужно — хотя существующий VPS можно подключить по SSH и вести из той же панели." },
     ],
+    hubTitle: "Все возможности платформы",
+    hubSubtitle: "Сценарии, фреймворки и замены зарубежным площадкам — каждая страница отвечает на конкретный вопрос.",
     ctaTitle: "Поднимите backend из GitHub сегодня",
     ctaSubtitle: "Подключение репозитория занимает минуту. Платите только за то, что реально потребляете.",
     mcp: {
@@ -378,6 +385,10 @@ const ru: Dict = {
       { q: "Что будет с контейнерами, которые уже работают на сервере?", a: "Discovery покажет их в режиме только чтения. Если решите импортировать — каждый сервис станет отдельным приложением со своими логами и метриками, тома с данными сохранятся." },
       { q: "Можно вести серверы нескольких клиентов в одной панели?", a: "Да, это основной сценарий для агентств: сервер каждого клиента подключается отдельно, а деплой, логи и мониторинг видны из одной панели." },
       { q: "Обязательно переносить сервер, если он уже работает?", a: "Нет. Можно подключить существующий сервер как есть — переносить ничего не нужно. Либо закажите у нас новую VM, если хотите начать с чистого листа." },
+      { q: "Чем это отличается от обычного VPS у хостера?", a: "VPS даёт вам машину и на этом заканчивается: деплой, логи, метрики и перезапуск вы делаете сами через SSH. Здесь тот же сервер, но с деплоем из репозитория, логами и метриками в панели — и без необходимости держать свой скрипт выкатки." },
+      { q: "Что произойдёт, если агент потеряет связь с платформой?", a: "Контейнеры на сервере продолжат работать: агент нужен для управления и телеметрии, а не для того, чтобы приложение отвечало на запросы. После восстановления связи состояние синхронизируется, ничего перезапускать вручную не нужно." },
+      { q: "Можно ли держать на одном сервере несколько приложений?", a: "Да. Каждый сервис становится отдельным управляемым приложением со своими переменными окружения, логами и метриками, но физически они живут на одной машине и делят её ресурсы." },
+      { q: "Нужны ли MySQL или Redis?", a: "Управляемый вариант — только PostgreSQL. MySQL, Redis и всё остальное поднимается контейнером на вашем сервере и ведётся из той же панели, как обычное приложение." },
     ],
   },
   vercelAlt: {
@@ -428,6 +439,178 @@ const ru: Dict = {
       { title: "Edge Middleware и глобальная edge-сеть", desc: "Нет отдельного слоя edge-выполнения в десятках регионов — код приложения работает в одном месте, как в обычном self-hosted Next.js." },
       { title: "Vercel Image Optimization как отдельный edge-сервис", desc: "next/image продолжает работать внутри самого приложения, но отдельного управляемого сервиса ресайза картинок на edge-CDN, как у Vercel, нет." },
       { title: "Vercel KV", desc: "Управляемого Redis/KV-хранилища нет — из баз данных платформа предлагает только managed PostgreSQL. Под key-value нужен свой контейнер." },
+    ],
+  },
+  payVercel: {
+    heroTitle: "Как оплатить Vercel из России: что работает, что ломается и чем заменить",
+    heroSubtitle:
+      "Российские карты Vercel не принимает с 2022 года, и обходные пути ломаются один за другим. Разбираем каждый способ оплаты, который ещё остался, его реальные риски — и что делать, если проект уже в проде, а платёж не проходит сегодня.",
+    featuresTitle: "Почему оплата Vercel из России не проходит",
+    features: [
+      {
+        title: "Карты российских банков отклоняются на уровне эквайринга",
+        desc: "Vercel принимает деньги через международного платёжного провайдера. Карты, выпущенные в России, отклоняются ещё до того, как платёж дойдёт до Vercel: провайдер видит страну эмитента по BIN-коду карты и отказывает. Ошибка выглядит как «Your card was declined», хотя с картой и лимитами всё в порядке. Карта «Мир» не поддерживается вообще: у неё нет международного маршрута.",
+      },
+      {
+        title: "Оплата с иностранной карты работает, пока не сработает проверка",
+        desc: "Карта банка из Казахстана, Армении, Грузии или Киргизии обычно проходит. Но платёж всё равно уходит из российского IP, и при ручной проверке аккаунта расхождение страны карты, адреса и адреса подключения — типовой повод для запроса документов. Заранее просчитать, у кого сработает проверка, а у кого нет, нельзя.",
+      },
+      {
+        title: "PayPal и Apple Pay проблему не решают",
+        desc: "Оба способа — это надстройка над той же картой. PayPal не работает с российскими аккаунтами с 2022 года, а Apple Pay при оплате передаёт токен той же самой карты, поэтому отказ приходит по той же причине. Смена способа оплаты в интерфейсе Vercel не меняет банк-эмитент.",
+      },
+      {
+        title: "Виртуальные карты и посредники: комиссия и срок жизни",
+        desc: "Сервисы, выпускающие виртуальные зарубежные карты, берут 5-15% на пополнение и живут непредсказуемо: карта может перестать проходить после очередного обновления правил платёжной системы. Для разового платежа это терпимо, для ежемесячной подписки прод-проекта — источник аварий, потому что отказ приходит в момент автосписания, а не когда вы к нему готовы.",
+      },
+      {
+        title: "Юрлицу нужны закрывающие документы, которых не будет",
+        desc: "Российская компания не сможет принять к учёту расход по подписке Vercel: счёт выставляется иностранным юрлицом, оплата в валюте, акта и счёта-фактуры по российским правилам нет. Даже если платёж физически прошёл, бухгалтерия его не проведёт, а валютный контроль банка запросит основание платежа.",
+      },
+      {
+        title: "Что происходит с проектом, когда платёж не проходит",
+        desc: "Vercel не выключает проект в ту же минуту, но после нескольких неудачных списаний аккаунт уходит в состояние с ограничениями: сначала блокируются новые сборки, затем проект переводится в режим только для чтения. Домены при этом продолжают указывать на Vercel, поэтому сайт формально «висит», но обновить его уже нельзя.",
+      },
+    ],
+    howtoTitle: "Что сделать прямо сейчас, если оплата не проходит",
+    howtoSubtitle:
+      "Порядок действий, который снимает риск за один вечер и не требует ждать, пока получится оплатить.",
+    howtoSteps: [
+      {
+        num: "1",
+        title: "Заберите исходники и переменные окружения",
+        desc: "Убедитесь, что код лежит в вашем Git-репозитории, а не только в интеграции Vercel. Отдельно выпишите переменные окружения из настроек проекта: их нигде больше нет, и при блокировке аккаунта вы их не восстановите.",
+      },
+      {
+        num: "2",
+        title: "Посчитайте, что действительно завязано на Vercel",
+        desc: "Обычный Next.js-, Vite- или Node-проект переносится без правок. Отдельно проверьте только то, что использует специфичные для Vercel сервисы: serverless- и edge-функции, Vercel KV, Vercel Blob, Edge Middleware, аналитику. Список того, чему нужна замена, обычно занимает одну-две строки.",
+      },
+      {
+        num: "3",
+        title: "Поднимите то же приложение на российской площадке",
+        desc: "В Dada Cloud подключается тот же GitHub-репозиторий: платформа сама собирает проект и выдаёт HTTPS-адрес. Оплата — рублёвой картой, с закрывающими документами для юрлица. На бесплатном тарифе можно проверить сборку и работу приложения до того, как переключать боевой домен.",
+      },
+      {
+        num: "4",
+        title: "Переключите домен, когда убедились, что всё работает",
+        desc: "Пока DNS смотрит на Vercel, сайт продолжает работать оттуда. Проверяете новый адрес, затем меняете A-запись домена — переключение занимает минуты, откат тоже. Только после этого можно отключать проект на Vercel.",
+      },
+    ],
+    mappingTitle: "Способы оплаты Vercel из России: сводка",
+    mappingSubtitle: "Что реально происходит при каждом варианте и чем он опасен для боевого проекта.",
+    mappingHeaders: ["Способ оплаты", "Что происходит", "Риск"],
+    mapping: [
+      { from: "Карта российского банка (Visa/Mastercard/Мир)", to: "Отказ на стороне платёжного провайдера", note: "Не работает вообще, обхода нет" },
+      { from: "Карта банка СНГ (KZ, AM, GE, KG)", to: "Обычно проходит", note: "Возможна ручная проверка аккаунта и запрос документов" },
+      { from: "PayPal", to: "Российский аккаунт недоступен", note: "Не работает" },
+      { from: "Виртуальная карта через посредника", to: "Проходит, пока карта жива", note: "Комиссия 5-15%, отказ приходит в момент автосписания" },
+      { from: "Оплата от российского юрлица", to: "Технически невозможна", note: "Нет договора, акта и счёта-фактуры по российским правилам" },
+      { from: "Российская платформа (Dada Cloud)", to: "Рублёвая карта или счёт для юрлица", note: "Есть закрывающие документы, автосписание не ломается" },
+    ],
+    notPortableTitle: "Что честно теряется при переезде",
+    notPortableSubtitle: "Чтобы решение принималось с открытыми глазами, а не по маркетинговому обещанию.",
+    notPortable: [
+      { title: "Serverless- и edge-функции как отдельный тип деплоя", desc: "В Dada Cloud приложение работает как постоянный контейнер-сервис. Логика из функций переносится обычным API-роутом внутри самого приложения — кода это добавляет немного, но переписать придётся." },
+      { title: "Глобальная edge-сеть в десятках регионов", desc: "Код выполняется в одном месте, как в обычном self-hosted Next.js. Для аудитории из России это чаще выигрыш по задержке, для мировой — проигрыш." },
+      { title: "Vercel KV и Vercel Blob", desc: "Управляемого KV-хранилища нет: из баз есть managed PostgreSQL, под key-value поднимается свой контейнер. Файлы кладутся в S3-совместимое объектное хранилище платформы." },
+      { title: "Preview-деплой в том же виде", desc: "Preview-окружения на пул-реквест есть и они бесплатны, но включаются по метке на PR, а не автоматически для каждой ветки." },
+    ],
+    faqTitle: "Частые вопросы про оплату Vercel из России",
+    faq: [
+      { q: "Можно ли оплатить Vercel картой «Мир»?", a: "Нет. У карты «Мир» нет международного платёжного маршрута, поэтому платёж не доходит до Vercel в принципе — отказ происходит на стороне платёжного провайдера." },
+      { q: "Работает ли оплата Vercel через VPN?", a: "VPN меняет только видимый IP-адрес, а карта отклоняется по стране банка-эмитента. Поэтому VPN не помогает при оплате, зато добавляет расхождение между страной карты и страной подключения — это повод для дополнительной проверки аккаунта." },
+      { q: "Что будет с сайтом, если подписка не оплачена?", a: "Сначала перестают проходить новые сборки, затем проект переводится в режим только для чтения. Уже задеплоенная версия какое-то время продолжает отдаваться, но обновить её нельзя, а восстановить доступ без успешной оплаты не получится." },
+      { q: "Есть ли у Vercel бесплатный тариф, на котором можно остаться?", a: "Есть, но он предназначен для некоммерческих проектов и ограничен по трафику и времени сборки. Как только проект начинает приносить деньги, условия тарифа требуют перехода на платный план — и вы возвращаетесь к той же проблеме с оплатой." },
+      { q: "Можно ли платить криптовалютой?", a: "Vercel не принимает криптовалюту напрямую. Сервисы, которые предлагают такую оплату, — это посредники, выпускающие виртуальную карту, со всеми их рисками: комиссией и внезапным отказом в момент автосписания." },
+      { q: "Сколько времени занимает переезд обычного Next.js-проекта?", a: "Если проект не использует edge-функции и Vercel KV, перенос сводится к подключению репозитория и переносу переменных окружения — это минуты. Дольше всего обычно идёт проверка на тестовом адресе перед переключением домена." },
+      { q: "Нужна ли карта, чтобы попробовать Dada Cloud?", a: "Нет. Бесплатный тариф не требует карты: можно подключить репозиторий, собрать приложение и открыть его по выданному HTTPS-адресу, чтобы сравнить с текущим деплоем на Vercel." },
+      { q: "Можно ли оставить домен на Vercel, а приложение перенести?", a: "Да, домен и хостинг разделяются. Пока A-запись указывает на Vercel, трафик идёт туда; после проверки нового адреса запись меняется, и откат делается тем же способом за минуты." },
+    ],
+  },
+  vercelInRussia: {
+    heroTitle: "Работает ли Vercel в России в 2026 году",
+    heroSubtitle:
+      "Короткий ответ: сайты на Vercel из России в основном открываются, а вот завести и оплатить аккаунт — нет. Разбираем по частям, что именно работает, что отваливается и как проверить свой проект за пять минут.",
+    featuresTitle: "Что работает, а что нет: по частям",
+    features: [
+      {
+        title: "Сайты на Vercel из России открываются — с оговорками",
+        desc: "Сама раздача контента с серверов Vercel из России не заблокирована, поэтому чужие сайты на *.vercel.app обычно открываются. Но маршрут идёт через европейские точки присутствия, поэтому задержка для российского пользователя ощутимо выше, чем у площадки внутри страны, а на некоторых провайдерах соединение периодически рвётся.",
+      },
+      {
+        title: "Регистрация нового аккаунта — как повезёт",
+        desc: "Форма регистрации открывается, но при входе с российского IP-адреса аккаунт чаще уходит на дополнительную проверку. Итог не гарантирован заранее: часть аккаунтов проходит, часть блокируется без подробного объяснения.",
+      },
+      {
+        title: "Оплата — не работает",
+        desc: "Это главный блокер. Карты российских банков отклоняются на уровне платёжного провайдера, карта «Мир» не поддерживается, PayPal российским аккаунтам недоступен. Подробный разбор всех вариантов и их рисков — на отдельной странице про оплату Vercel из России.",
+      },
+      {
+        title: "Деплой из GitHub — работает, пока аккаунт активен",
+        desc: "Сборка и деплой из репозитория технически ничем не ограничены. Проблема не в деплое, а в том, что он останавливается, как только у аккаунта возникают проблемы с оплатой: новые сборки перестают запускаться первыми.",
+      },
+      {
+        title: "Собственные домены и сертификаты — работают",
+        desc: "Подключение своего домена и выпуск сертификата идут как обычно. Но домен, привязанный к аккаунту с проблемной оплатой, — это риск: сайт остаётся на площадке, которую вы не можете обновить.",
+      },
+      {
+        title: "152-ФЗ: персональные данные россиян",
+        desc: "Если приложение собирает персональные данные российских пользователей, их первичная обработка должна вестись на серверах в России. Vercel таких серверов не предлагает, поэтому для проектов с регистрацией пользователей вопрос не в удобстве, а в требованиях закона.",
+      },
+    ],
+    howtoTitle: "Как проверить свой проект за пять минут",
+    howtoSubtitle: "Четыре шага, после которых понятно, есть ли у проекта проблема и насколько она срочная.",
+    howtoSteps: [
+      {
+        num: "1",
+        title: "Проверьте доступность самого сайта",
+        desc: "Откройте свой адрес с мобильного интернета и с домашнего провайдера — маршруты у них разные. Если разница по скорости заметна невооружённым глазом, российская аудитория уже теряется на загрузке.",
+      },
+      {
+        num: "2",
+        title: "Посмотрите статус биллинга в аккаунте",
+        desc: "В разделе оплаты видно дату следующего списания и статус последнего платежа. Неудачное списание — это таймер: до остановки сборок обычно остаются дни, а не месяцы.",
+      },
+      {
+        num: "3",
+        title: "Выпишите зависимости от платформы",
+        desc: "Проверьте, использует ли проект edge-функции, Vercel KV, Vercel Blob и Edge Middleware. Обычное Next.js- или Vite-приложение без них переносится без правок кода.",
+      },
+      {
+        num: "4",
+        title: "Соберите проект на российской площадке параллельно",
+        desc: "Подключите тот же репозиторий в Dada Cloud и откройте выданный HTTPS-адрес. Это ничего не ломает на Vercel: два деплоя спокойно живут одновременно, пока домен смотрит на старый.",
+      },
+    ],
+    mappingTitle: "Vercel из России: сводная таблица",
+    mappingSubtitle: "Состояние по каждой части сервиса и что с этим делать.",
+    mappingHeaders: ["Что проверяем", "Состояние из России", "Что делать"],
+    mapping: [
+      { from: "Просмотр сайта на *.vercel.app", to: "Открывается, задержка выше", note: "Терпимо для витрины, заметно для приложения" },
+      { from: "Регистрация нового аккаунта", to: "Не гарантирована", note: "Заводить аккаунт с российского IP рискованно" },
+      { from: "Оплата подписки", to: "Не работает", note: "Главный блокер, обхода без иностранной карты нет" },
+      { from: "Деплой из GitHub", to: "Работает, пока аккаунт активен", note: "Останавливается первым при проблемах с оплатой" },
+      { from: "Свой домен и сертификат", to: "Работает", note: "Держите доступ к DNS у себя, чтобы уметь переключиться" },
+      { from: "Хранение персональных данных россиян", to: "Не соответствует 152-ФЗ", note: "Для проектов с регистрацией нужна площадка в России" },
+    ],
+    notPortableTitle: "Чего ждать не стоит",
+    notPortableSubtitle: "Три частых ожидания, которые не оправдываются.",
+    notPortable: [
+      { title: "«Заплачу через VPN»", desc: "VPN меняет IP-адрес, а карта отклоняется по стране банка-эмитента. На оплату это не влияет, зато добавляет расхождение между страной карты и страной подключения." },
+      { title: "«Останусь на бесплатном тарифе навсегда»", desc: "Бесплатный план рассчитан на некоммерческие проекты и ограничен по трафику и времени сборки. Как только проект начинает зарабатывать, условия требуют платного плана." },
+      { title: "«Успею перенести, когда отключат»", desc: "После остановки сборок вы уже не можете обновить приложение, а переменные окружения из заблокированного аккаунта не выгружаются. Переносить нужно, пока доступ есть." },
+    ],
+    faqTitle: "Частые вопросы",
+    faq: [
+      { q: "Заблокирован ли Vercel в России?", a: "Со стороны России доступ к сайтам на Vercel не блокируется — они открываются. Ограничения идут со стороны самого сервиса и его платёжного провайдера: не проходит оплата и не гарантирована регистрация." },
+      { q: "Почему мой сайт на Vercel медленно открывается в России?", a: "Ближайшие точки присутствия находятся за пределами страны, поэтому каждый запрос идёт по более длинному маршруту. Для статики это десятки миллисекунд, для приложения с несколькими обращениями к API разница накапливается." },
+      { q: "Могут ли отключить уже работающий проект?", a: "Прямого отключения по стране нет, но проект останавливается по цепочке из оплаты: неудачное списание — остановка сборок — режим только для чтения. Именно так большинство российских проектов и теряет Vercel." },
+      { q: "Работает ли Vercel CLI из России?", a: "Да, командная строка работает, пока аккаунт активен: деплой из терминала не ограничивается географически. Проблема снова не в деплое, а в оплате аккаунта." },
+      { q: "Что с Railway, Netlify и Heroku — там так же?", a: "Схема та же: сервис работает, а оплата российской картой не проходит. Мы держим страницу со статусом доступности этих площадок из России и обновляем её по фактическим проверкам." },
+      { q: "Чем заменить Vercel в России?", a: "Нужна площадка с тем же флоу «подключил репозиторий — получил HTTPS-адрес», но с рублёвой оплатой и серверами в РФ. Именно так устроен Dada Cloud: подробное сравнение — на странице про аналог Vercel." },
+      { q: "Нужно ли переписывать Next.js-приложение при переезде?", a: "Если проект не использует edge-функции, Edge Middleware и Vercel KV, код не меняется: переносятся репозиторий и переменные окружения. Всё, что использует эти сервисы, переписывается на обычные API-роуты и managed PostgreSQL." },
+      { q: "Можно ли проверить перенос, не трогая боевой сайт?", a: "Да. Приложение поднимается на выданном платформой HTTPS-адресе и живёт параллельно с деплоем на Vercel. Домен переключается только после того, как вы убедились, что всё работает." },
     ],
   },
   migrateVercel: {
@@ -1218,10 +1401,13 @@ const ru: Dict = {
     engines: ["PostgreSQL"],
     featuresTitle: "Что входит в управляемый Postgres",
     features: [
-      { title: "Бэкапы по расписанию", desc: "Резервное копирование настраивается при создании базы, расписание видно в панели." },
-      { title: "Мониторинг производительности", desc: "Метрики подключений, запросов и нагрузки в реальном времени." },
-      { title: "Безопасный доступ", desc: "Приватные сети, доступ по ролям и шифрование соединений." },
-      { title: "Масштабирование", desc: "Меняйте ресурсы инстанса без миграции данных вручную." },
+      { title: "Бэкапы по расписанию", desc: "Резервное копирование настраивается при создании базы: почасовое или ежедневное расписание, срок хранения 7, 14 или 30 дней. Копии складываются в объектное хранилище, а не рядом с самой базой, и скачиваются из панели по временной ссылке." },
+      { title: "Восстановление по схеме", desc: "Восстановить можно не только весь инстанс целиком, но и отдельную схему — это то, что реально нужно, когда неудачная миграция задела одну часть данных, а остальное продолжает работать." },
+      { title: "Мониторинг производительности", desc: "Метрики подключений, запросов и нагрузки видны в реальном времени в той же панели, где живёт приложение. Отдельный экспортер и дашборд поднимать не нужно — история хранится вместе с метриками сервиса." },
+      { title: "Безопасный доступ", desc: "База доступна приложению по внутренней сети, а не через публичный адрес. Доступ разграничен по ролям проекта, соединения шифруются, и пароль не приходится передавать вручную между разработчиками." },
+      { title: "Строка подключения приезжает сама", desc: "При привязке базы к приложению DATABASE_URL появляется в переменных окружения сервиса автоматически. Пересоздали базу или сменили пароль — приложение получает актуальный DSN без ручной правки конфигов." },
+      { title: "Масштабирование без ручной миграции", desc: "Ресурсы инстанса меняются на месте: строка подключения остаётся прежней, переносить данные руками и переписывать конфигурацию приложения не нужно." },
+      { title: "Данные в России (152-ФЗ)", desc: "Инстансы разворачиваются на серверах в РФ. Для проекта с регистрацией пользователей это не вопрос удобства, а требование закона к первичной обработке персональных данных." },
     ],
     note: "Нужны MySQL или Redis? Managed Postgres — здесь, MySQL и Redis разворачиваются на своём сервере.",
     noteLinkLabel: "Серверы (App Servers) →",
@@ -1231,6 +1417,10 @@ const ru: Dict = {
       { q: "Нужно ли собирать строку подключения вручную?", a: "Нет. При создании базы вы привязываете её к приложению, и DATABASE_URL появляется в переменных окружения сервиса сам — DSN руками собирать не нужно." },
       { q: "Есть ли резервные копии?", a: "Да. Бэкапы включаются при создании базы: вы выбираете расписание (почасовое или ежедневное) и срок хранения — 7, 14 или 30 дней." },
       { q: "Можно ли менять ресурсы базы без миграции?", a: "Да. Ресурсы инстанса меняются без ручного переноса данных — приложение продолжает использовать ту же строку подключения." },
+      { q: "Можно ли скачать бэкап к себе?", a: "Да. Резервные копии складываются в объектное хранилище, и из панели выдаётся временная ссылка на скачивание. Копия остаётся у вас, даже если инстанс потом будет удалён." },
+      { q: "Что делать, если неудачная миграция сломала одну схему?", a: "Восстановление работает не только для всего инстанса, но и для отдельной схемы. Это тот случай, ради которого схемное восстановление и делали: остальные данные продолжают работать, пока восстанавливается пострадавшая часть." },
+      { q: "База доступна из интернета?", a: "По умолчанию нет: приложение ходит в базу по внутренней сети проекта. Публичный доступ — отдельное решение, которое включается осознанно, а не является состоянием по умолчанию." },
+      { q: "Что с 152-ФЗ?", a: "Инстансы разворачиваются на серверах в России, поэтому первичная обработка персональных данных российских пользователей идёт внутри страны. Именно это чаще всего заставляет переезжать с зарубежных managed-баз." },
     ],
   },
   storage: {
@@ -1239,14 +1429,23 @@ const ru: Dict = {
       "S3-совместимое хранилище для бэкапов, медиа и статики. Сейчас в статусе Beta — часть возможностей ещё дорабатывается.",
     featuresTitle: "Возможности хранилища",
     features: [
-      { title: "S3-совместимый API", desc: "Работает с привычными SDK и инструментами (aws-cli, s3cmd и др.)." },
-      { title: "Оплата за объём", desc: "Платите только за реально занятое место и трафик." },
+      { title: "S3-совместимый API", desc: "Тот же протокол, что у Amazon S3: работают aws-cli, s3cmd, rclone, MinIO Client и любые SDK — boto3, aws-sdk-js, minio-go. В коде меняется только адрес эндпоинта и ключи, остальная логика загрузки и раздачи файлов остаётся как была." },
+      { title: "Оплата за объём", desc: "Считается реально занятое место и трафик, а не размер купленного диска. Для проекта, у которого нагрузка растёт неравномерно, это дешевле фиксированного тарифа: вы не оплачиваете пустое место «на вырост»." },
+      { title: "Ключи доступа выдаются по запросу", desc: "Access key и secret key лежат в отдельном секрете и показываются в панели по требованию, а не хранятся в репозитории. Скомпрометированный ключ отзывается пересозданием секрета, без правок кода приложения." },
+      { title: "Данные в России", desc: "Бакеты живут на серверах в РФ. Для проектов, которые хранят пользовательские файлы — документы, сканы, аватарки — это то же требование 152-ФЗ, что и для баз данных, только про файлы про него часто забывают." },
+      { title: "Бэкапы приложений и баз", desc: "Хранилище — типовое место для дампов Postgres и архивов сборок. Резервные копии баз выгружаются в бакет и скачиваются по временной ссылке, отдельный файловый сервер под это поднимать не нужно." },
+      { title: "Раздача статики и медиа", desc: "Картинки, видео и загруженные пользователями файлы отдаются напрямую из хранилища, не занимая диск и память самого приложения. Приложение остаётся stateless, и его можно перезапускать и масштабировать без риска потерять файлы." },
     ],
     faqTitle: "Вопросы об объектном хранилище",
     faq: [
-      { q: "В каком статусе сейчас объектное хранилище?", a: "В статусе Beta. Создание S3-совместимых бакетов работает, часть возможностей ещё дорабатывается. Не закладывайте его в критичные сценарии, пока хранилище не вышло из беты." },
-      { q: "С какими инструментами оно совместимо?", a: "API S3-совместимый, поэтому хранилище работает с привычными инструментами — aws-cli, s3cmd и любыми SDK, которые умеют в S3." },
-      { q: "Как считается оплата?", a: "По объёму: вы платите за реально занятое место и трафик, а не за фиксированный тариф диска." },
+      { q: "В каком статусе сейчас объектное хранилище?", a: "В статусе Beta. Создание S3-совместимых бакетов работает, часть возможностей ещё дорабатывается. Не закладывайте его в критичные сценарии, пока хранилище не вышло из беты — для бэкапов и статики оно уже пригодно, для единственной копии важных данных пока нет." },
+      { q: "С какими инструментами оно совместимо?", a: "API S3-совместимый, поэтому работают привычные инструменты: aws-cli, s3cmd, rclone, MinIO Client и SDK для Python, Node.js, Go, PHP. Достаточно указать в конфигурации адрес эндпоинта платформы вместо адреса Amazon." },
+      { q: "Как считается оплата?", a: "По объёму: вы платите за реально занятое место и трафик, а не за фиксированный тариф диска. Пустой бакет не стоит ничего, а расход растёт вместе с реальными данными." },
+      { q: "Где взять ключи доступа?", a: "Access key и secret key выдаются в панели по запросу — они лежат в отдельном секрете подключения. Класть их в репозиторий не нужно: в приложение они попадают переменными окружения." },
+      { q: "Можно ли раздавать файлы напрямую пользователям?", a: "Да. Публичные объекты отдаются по прямой ссылке, приватные — по временной подписанной ссылке с ограниченным сроком жизни. Второй вариант используют для документов и всего, что не должно индексироваться поисковиками." },
+      { q: "Подходит ли хранилище для бэкапов баз данных?", a: "Да, это основной сценарий. Дампы управляемого PostgreSQL складываются в бакет, а скачать их можно по временной ссылке из панели. Хранение бэкапов отдельно от самой базы — правило, которое спасает при потере инстанса." },
+      { q: "Где физически лежат данные?", a: "На серверах в России. Если приложение хранит файлы пользователей-россиян, это тот же вопрос 152-ФЗ, что и с базой данных: про базу помнят все, про загруженные файлы — почти никто." },
+      { q: "Есть ли ограничение на размер файла?", a: "Крупные файлы загружаются составной загрузкой (multipart upload), которую поддерживают все совместимые клиенты, — так же, как в любом S3-хранилище. Для отдачи больших медиафайлов это штатный режим, а не обходной путь." },
     ],
   },
   pricing: {
@@ -1390,6 +1589,8 @@ const ru: Dict = {
       { label: "Базы данных", href: "/databases" },
       { label: "Объектное хранилище", href: "/storage" },
       { label: "Аналог Vercel", href: "/analog-vercel" },
+      { label: "Оплата Vercel из России", href: "/oplatit-vercel-iz-rossii" },
+      { label: "Работает ли Vercel в России", href: "/rabotaet-li-vercel-v-rossii" },
       { label: "Аналог Heroku", href: "/analog-heroku" },
       { label: "Аналог Railway", href: "/analog-railway" },
       { label: "Аналог Render", href: "/analog-render" },
@@ -1514,6 +1715,8 @@ const en: Dict = {
       { q: "We're still small", a: "All the more reason. One project instead of manual infrastructure you've got no one to run at this size. Sandbox is free, plan quotas keep the bill in check, and when you grow there's no migration to do." },
       { q: "How is this different from Heroku, Vercel and Coolify?", a: "DADA Cloud is a PaaS-grade backend cloud: like Heroku or Render, you deploy a backend from GitHub with a single push. Unlike Vercel, which is frontend-first, the long-running backend with managed Postgres is the primary object here. And unlike self-hosted Coolify, you don't administer your own server — though you can connect an existing VPS over SSH and run it from the same panel." },
     ],
+    hubTitle: "Everything the platform covers",
+    hubSubtitle: "Scenarios, frameworks and replacements for foreign platforms — each page answers one specific question.",
     ctaTitle: "Get your backend live from GitHub today",
     ctaSubtitle: "Connecting a repo takes a minute. You only pay for what you actually use.",
     mcp: {
@@ -1553,6 +1756,10 @@ const en: Dict = {
       { q: "What happens to containers already running on the server?", a: "Discovery lists them read-only. If you choose to import, each service becomes its own application with its own logs and metrics, and data volumes are preserved." },
       { q: "Can I run multiple clients' servers from one panel?", a: "Yes — that's the main agency scenario: each client's server connects separately, and deploys, logs and monitoring all show up in one panel." },
       { q: "Do I have to migrate my server if it already works?", a: "No. You can connect the existing server as-is — nothing to migrate. Or order a fresh VM from us if you'd rather start clean." },
+      { q: "How is this different from a plain VPS?", a: "A VPS gives you a machine and stops there: deploys, logs, metrics and restarts are all yours over SSH. This is the same server, but with deploys from a repository and logs and metrics in the panel — and no home-grown rollout script to maintain." },
+      { q: "What happens if the agent loses contact with the platform?", a: "Containers on the server keep running: the agent is there for management and telemetry, not to serve requests. When the link comes back, state resynchronises and nothing has to be restarted by hand." },
+      { q: "Can one server host several applications?", a: "Yes. Each service becomes its own managed application with its own environment variables, logs and metrics, while physically sharing one machine and its resources." },
+      { q: "What about MySQL or Redis?", a: "The managed engine is PostgreSQL only. MySQL, Redis and anything else runs as a container on your own server and is managed from the same panel as a regular application." },
     ],
   },
   vercelAlt: {
@@ -1602,6 +1809,127 @@ const en: Dict = {
       { title: "Edge Middleware and a global edge network", desc: "There's no separate edge-execution layer spread across dozens of regions — app code runs in one place, like an ordinary self-hosted Next.js deployment." },
       { title: "Vercel Image Optimization as a separate edge service", desc: "next/image still works inside the app itself, but there's no separate managed edge-CDN image-resizing service the way Vercel provides one." },
       { title: "Vercel KV", desc: "There's no managed Redis/KV store — the only managed database offered is PostgreSQL. Key-value storage needs its own container." },
+    ],
+  },
+  payVercel: {
+    heroTitle: "How to pay for Vercel from Russia: what works, what breaks, what to use instead",
+    heroSubtitle:
+      "Vercel has not accepted Russian cards since 2022, and the workarounds keep breaking one by one. Here is every remaining payment route, its real risk — and what to do if your project is already in production and the charge fails today.",
+    featuresTitle: "Why Vercel payments from Russia fail",
+    features: [
+      {
+        title: "Russian bank cards are declined at the acquirer",
+        desc: "Vercel collects money through an international payment provider. Cards issued in Russia are declined before the charge ever reaches Vercel: the provider reads the issuing country from the card BIN and refuses. The error reads «Your card was declined» even though the card and its limits are fine. Mir cards do not work at all — they have no international route.",
+      },
+      {
+        title: "A foreign card works until a review is triggered",
+        desc: "A card from Kazakhstan, Armenia, Georgia or Kyrgyzstan usually clears. The payment still originates from a Russian IP, and a mismatch between card country, billing address and connection country is a standard trigger for a manual account review. There is no way to predict in advance whose account gets flagged.",
+      },
+      {
+        title: "PayPal and Apple Pay do not solve it",
+        desc: "Both sit on top of the same card. PayPal has not served Russian accounts since 2022, and Apple Pay forwards a token for the very same card, so the decline arrives for the same reason. Changing the payment method inside Vercel does not change the issuing bank.",
+      },
+      {
+        title: "Virtual cards and resellers: fees and a short life",
+        desc: "Services that issue virtual foreign cards charge 5-15% on top-ups and have unpredictable lifetimes: a card can stop clearing after the next rules update from the payment network. Tolerable for a one-off charge, dangerous for a production subscription — the failure lands during an automatic renewal, not at a moment of your choosing.",
+      },
+      {
+        title: "A Russian company cannot book the expense",
+        desc: "A Russian legal entity cannot put a Vercel subscription in its books: the invoice comes from a foreign entity, the payment is in foreign currency, and there is no act or VAT invoice in the Russian format. Even when the charge physically clears, accounting cannot record it and the bank's currency control will ask for grounds.",
+      },
+      {
+        title: "What happens to the project when payment fails",
+        desc: "Vercel does not switch the project off the same minute, but after several failed charges the account is restricted: new builds stop first, then the project goes read-only. Domains keep pointing at Vercel, so the site technically stays up — you just cannot update it any more.",
+      },
+    ],
+    howtoTitle: "What to do right now if payment fails",
+    howtoSubtitle: "A sequence that removes the risk in one evening and does not depend on getting a charge through.",
+    howtoSteps: [
+      { num: "1", title: "Pull the source and the environment variables", desc: "Make sure the code lives in your own Git repository, not only inside the Vercel integration. Export the project's environment variables separately: they exist nowhere else, and a locked account will not give them back." },
+      { num: "2", title: "List what actually depends on Vercel", desc: "A plain Next.js, Vite or Node project moves without edits. Check only the platform-specific parts: serverless and edge functions, Vercel KV, Vercel Blob, Edge Middleware, analytics. The list of things that need a replacement is usually one or two lines long." },
+      { num: "3", title: "Bring the same app up on a Russian platform", desc: "Dada Cloud connects the same GitHub repository, builds it and hands back an HTTPS URL. Billing is a Russian card, with proper documents for a legal entity. The free plan is enough to confirm the build and the running app before you touch the live domain." },
+      { num: "4", title: "Switch the domain once you have verified it", desc: "While DNS points at Vercel, the site keeps serving from there. You check the new URL, then change the A record — the switch takes minutes and so does the rollback. Only after that do you shut the Vercel project down." },
+    ],
+    mappingTitle: "Paying for Vercel from Russia: the summary",
+    mappingSubtitle: "What actually happens with each option and why it is risky for a production project.",
+    mappingHeaders: ["Payment route", "What happens", "Risk"],
+    mapping: [
+      { from: "Russian bank card (Visa/Mastercard/Mir)", to: "Declined by the payment provider", note: "Does not work at all, no workaround" },
+      { from: "CIS bank card (KZ, AM, GE, KG)", to: "Usually clears", note: "May trigger a manual account review and document request" },
+      { from: "PayPal", to: "Not available to Russian accounts", note: "Does not work" },
+      { from: "Virtual card via a reseller", to: "Clears while the card lives", note: "5-15% fee, failure lands on auto-renewal" },
+      { from: "Payment from a Russian company", to: "Technically impossible", note: "No contract, act or VAT invoice in the Russian format" },
+      { from: "A Russian platform (Dada Cloud)", to: "Russian card or company invoice", note: "Proper documents, renewals do not break" },
+    ],
+    notPortableTitle: "What you honestly give up",
+    notPortableSubtitle: "So the decision is made with open eyes, not on a marketing promise.",
+    notPortable: [
+      { title: "Serverless and edge functions as a deploy type", desc: "On Dada Cloud an app runs as a long-lived container service. Function logic moves into a normal API route inside the app — not much code, but it does have to be rewritten." },
+      { title: "A global edge network across dozens of regions", desc: "Code runs in one place, like a regular self-hosted Next.js. For a Russian audience that usually wins on latency; for a worldwide one it loses." },
+      { title: "Vercel KV and Vercel Blob", desc: "There is no managed KV store: databases mean managed PostgreSQL, and key-value means your own container. Files go to the platform's S3-compatible object storage." },
+      { title: "Preview deploys in the same form", desc: "Pull-request preview environments exist and are free, but they are enabled by a label on the PR rather than automatically for every branch." },
+    ],
+    faqTitle: "FAQ: paying for Vercel from Russia",
+    faq: [
+      { q: "Can I pay for Vercel with a Mir card?", a: "No. Mir has no international payment route, so the charge never reaches Vercel — it is declined by the payment provider." },
+      { q: "Does paying for Vercel over a VPN work?", a: "A VPN only changes the visible IP address, while the card is declined by the issuing country. So it does not help with payment, and it adds a mismatch between card country and connection country, which is itself a reason for an account review." },
+      { q: "What happens to my site if the subscription is unpaid?", a: "New builds stop first, then the project goes read-only. The already deployed version keeps serving for a while, but you cannot update it, and access does not come back without a successful charge." },
+      { q: "Can I just stay on the free plan?", a: "The free plan is meant for non-commercial projects and is capped on traffic and build time. As soon as the project makes money, the terms require a paid plan — and you are back to the payment problem." },
+      { q: "Can I pay in cryptocurrency?", a: "Vercel does not accept crypto directly. Services that advertise it are resellers issuing a virtual card, with the same risks: fees and a sudden decline during auto-renewal." },
+      { q: "How long does moving a typical Next.js project take?", a: "If the project does not use edge functions or Vercel KV, the move is connecting the repository and copying environment variables — minutes. The longest part is usually verifying the new URL before switching the domain." },
+      { q: "Do I need a card to try Dada Cloud?", a: "No. The free plan needs no card: connect a repository, build the app and open it on the HTTPS URL you get, so you can compare it with the current Vercel deploy." },
+      { q: "Can I keep the domain on Vercel and move only the app?", a: "Yes, domain and hosting are separate. While the A record points at Vercel, traffic goes there; once the new URL checks out you change the record, and the rollback works the same way in minutes." },
+    ],
+  },
+  vercelInRussia: {
+    heroTitle: "Does Vercel work in Russia in 2026?",
+    heroSubtitle:
+      "Short answer: sites hosted on Vercel mostly open from Russia, but creating and paying for an account does not work. Here is the part-by-part breakdown of what works, what falls over, and how to check your own project in five minutes.",
+    featuresTitle: "What works and what does not",
+    features: [
+      { title: "Sites on Vercel do open from Russia — with caveats", desc: "Content delivery from Vercel is not blocked on the Russian side, so *.vercel.app sites generally open. The route runs through European points of presence, so latency for a Russian visitor is noticeably higher than for an in-country platform, and on some ISPs the connection drops intermittently." },
+      { title: "Creating a new account is a coin flip", desc: "The signup form opens, but an account created from a Russian IP is more likely to be sent to review. The outcome is not predictable: some accounts pass, some are locked with no detailed explanation." },
+      { title: "Payment does not work", desc: "This is the real blocker. Russian bank cards are declined at the payment provider, Mir is unsupported, and PayPal is unavailable to Russian accounts. The full breakdown of every route and its risk is on the dedicated page about paying for Vercel from Russia." },
+      { title: "Deploying from GitHub works while the account is healthy", desc: "Builds and deploys from a repository are not restricted in any geographic way. The problem is not the deploy — it is that deploys stop the moment billing goes wrong, because new builds are the first thing to be cut off." },
+      { title: "Custom domains and certificates work", desc: "Attaching your own domain and issuing a certificate behave normally. But a domain attached to an account with billing trouble is a liability: the site stays on a platform you can no longer update." },
+      { title: "152-FZ: personal data of Russian users", desc: "If the app collects personal data from Russian users, the primary processing has to happen on servers inside Russia. Vercel does not offer those, so for a project with user accounts this is a legal requirement, not a convenience question." },
+    ],
+    howtoTitle: "Check your own project in five minutes",
+    howtoSubtitle: "Four steps that tell you whether the project has a problem and how urgent it is.",
+    howtoSteps: [
+      { num: "1", title: "Check that the site itself is reachable", desc: "Open your URL on mobile data and on a home ISP — the routes differ. If the speed gap is visible to the naked eye, you are already losing Russian visitors during load." },
+      { num: "2", title: "Look at the billing status in the account", desc: "The billing section shows the next charge date and the status of the last one. A failed charge is a countdown: what is left before builds stop is usually days, not months." },
+      { num: "3", title: "Write down the platform dependencies", desc: "Check whether the project uses edge functions, Vercel KV, Vercel Blob or Edge Middleware. A plain Next.js or Vite app without them moves with no code changes." },
+      { num: "4", title: "Build the project on a Russian platform in parallel", desc: "Connect the same repository on Dada Cloud and open the HTTPS URL you get. This breaks nothing on Vercel: the two deploys coexist happily while the domain still points at the old one." },
+    ],
+    mappingTitle: "Vercel from Russia: the summary table",
+    mappingSubtitle: "The state of each part of the service and what to do about it.",
+    mappingHeaders: ["What you check", "State from Russia", "What to do"],
+    mapping: [
+      { from: "Viewing a site on *.vercel.app", to: "Opens, higher latency", note: "Tolerable for a brochure site, visible for an app" },
+      { from: "Creating a new account", to: "Not guaranteed", note: "Signing up from a Russian IP is risky" },
+      { from: "Paying for a subscription", to: "Does not work", note: "The blocker; no workaround without a foreign card" },
+      { from: "Deploying from GitHub", to: "Works while the account is healthy", note: "First thing to stop when billing fails" },
+      { from: "Custom domain and certificate", to: "Works", note: "Keep DNS access yourself so you can switch" },
+      { from: "Storing personal data of Russian users", to: "Does not meet 152-FZ", note: "Projects with user accounts need a platform in Russia" },
+    ],
+    notPortableTitle: "What not to count on",
+    notPortableSubtitle: "Three common expectations that do not hold.",
+    notPortable: [
+      { title: "«I will pay over a VPN»", desc: "A VPN changes the IP address, while the card is declined by issuing country. It does not affect payment, and it adds a mismatch between card country and connection country." },
+      { title: "«I will stay on the free plan forever»", desc: "The free plan targets non-commercial projects and is capped on traffic and build time. Once the project earns money, the terms require a paid plan." },
+      { title: "«I will migrate when they cut me off»", desc: "After builds stop you can no longer update the app, and environment variables cannot be exported from a locked account. Migrate while you still have access." },
+    ],
+    faqTitle: "FAQ",
+    faq: [
+      { q: "Is Vercel blocked in Russia?", a: "Russia does not block access to sites hosted on Vercel — they open. The restrictions come from the service and its payment provider: payments fail and signup is not guaranteed." },
+      { q: "Why is my Vercel site slow in Russia?", a: "The nearest points of presence are outside the country, so every request takes a longer route. For static assets that is tens of milliseconds; for an app making several API calls the difference compounds." },
+      { q: "Can a working project be shut down?", a: "There is no country-based shutdown, but the project stops through the billing chain: failed charge, builds stop, read-only mode. That is how most Russian projects actually lose Vercel." },
+      { q: "Does the Vercel CLI work from Russia?", a: "Yes, the CLI works while the account is healthy: deploying from a terminal is not geographically restricted. Again, the problem is billing, not deployment." },
+      { q: "What about Railway, Netlify and Heroku?", a: "Same pattern: the service works, but a Russian card will not pay for it. We keep a status page for availability of those platforms from Russia and update it from real checks." },
+      { q: "What is the alternative to Vercel in Russia?", a: "You need the same connect-a-repo-get-an-HTTPS-URL flow with Russian card billing and servers inside Russia. That is what Dada Cloud does — the detailed comparison is on the Vercel alternative page." },
+      { q: "Do I have to rewrite a Next.js app to migrate?", a: "If the project does not use edge functions, Edge Middleware or Vercel KV, the code does not change: you move the repository and the environment variables. Anything using those services is rewritten as normal API routes plus managed PostgreSQL." },
+      { q: "Can I test the migration without touching the live site?", a: "Yes. The app comes up on the HTTPS URL the platform issues and runs alongside the Vercel deploy. You only switch the domain once you are satisfied it works." },
     ],
   },
   migrateVercel: {
@@ -2392,10 +2720,13 @@ const en: Dict = {
     engines: ["PostgreSQL"],
     featuresTitle: "What managed Postgres includes",
     features: [
-      { title: "Scheduled backups", desc: "Backup schedule is set when you create the database and shown right in the panel." },
-      { title: "Performance monitoring", desc: "Connection, query and load metrics in real time." },
-      { title: "Secure access", desc: "Private networks, role-based access and connection encryption." },
-      { title: "Scaling", desc: "Change instance resources without manual data migration." },
+      { title: "Scheduled backups", desc: "The schedule is set when you create the database: hourly or daily, with a 7, 14 or 30 day retention window. Copies land in object storage rather than next to the database itself, and download over a temporary link from the panel." },
+      { title: "Restore by schema", desc: "You can restore a single schema, not only the whole instance — which is what you actually need when a bad migration hit one part of the data while everything else keeps serving." },
+      { title: "Performance monitoring", desc: "Connection, query and load metrics in real time, in the same panel as the application. There is no exporter or dashboard to set up, and history is kept alongside the service metrics." },
+      { title: "Secure access", desc: "The database is reachable by the app over the internal network rather than a public address. Access follows project roles, connections are encrypted, and the password never has to be passed around between developers by hand." },
+      { title: "The connection string arrives on its own", desc: "Binding a database to an application injects DATABASE_URL into the service environment automatically. Recreate the database or rotate the password and the app picks up the current DSN without a config edit." },
+      { title: "Scaling without a manual migration", desc: "Instance resources change in place: the connection string stays the same, and there is no data to move or configuration to rewrite." },
+      { title: "Data inside Russia (152-FZ)", desc: "Instances run on servers in Russia. For a project with user accounts that is not a convenience question but what the law requires for the primary processing of personal data." },
     ],
     note: "Need MySQL or Redis? Managed Postgres lives here — MySQL and Redis run on your own server.",
     noteLinkLabel: "App Servers →",
@@ -2405,6 +2736,10 @@ const en: Dict = {
       { q: "Do I have to build the connection string by hand?", a: "No. When you create the database you bind it to an application, and DATABASE_URL shows up in the service's environment variables on its own — no DSN to assemble manually." },
       { q: "Are there backups?", a: "Yes. Backups are enabled when you create the database: you pick a schedule (hourly or daily) and a retention window — 7, 14 or 30 days." },
       { q: "Can I resize the database without a migration?", a: "Yes. Instance resources change without manual data migration — the app keeps using the same connection string." },
+      { q: "Can I download a backup?", a: "Yes. Backups are written to object storage and the panel issues a temporary download link. The copy stays with you even if the instance is later deleted." },
+      { q: "What if a bad migration broke a single schema?", a: "Restore works per schema, not only for the whole instance. That is exactly what schema-level restore is for: the rest of the data keeps serving while the damaged part is restored." },
+      { q: "Is the database reachable from the internet?", a: "Not by default: the app talks to it over the project's internal network. Public access is a deliberate decision, not the default state." },
+      { q: "What about 152-FZ?", a: "Instances run on servers in Russia, so the primary processing of Russian users' personal data happens inside the country. That is usually the reason teams move off foreign managed databases." },
     ],
   },
   storage: {
@@ -2413,14 +2748,23 @@ const en: Dict = {
       "S3-compatible storage for backups, media and static assets. Currently in Beta — some capabilities are still being finished.",
     featuresTitle: "Storage capabilities",
     features: [
-      { title: "S3-compatible API", desc: "Works with familiar SDKs and tools (aws-cli, s3cmd, etc.)." },
-      { title: "Pay for what you store", desc: "Pay only for space actually used and traffic." },
+      { title: "S3-compatible API", desc: "The same protocol as Amazon S3: aws-cli, s3cmd, rclone, MinIO Client and any SDK — boto3, aws-sdk-js, minio-go — all work. In your code only the endpoint URL and the keys change; the upload and delivery logic stays as it is." },
+      { title: "Pay for what you store", desc: "Billing counts the space actually used and the traffic, not the size of a disk you bought. For a project whose load grows unevenly that is cheaper than a fixed tier: you don't pay for empty space kept 'just in case'." },
+      { title: "Access keys issued on demand", desc: "The access key and secret key live in a separate connection secret and are revealed in the panel on request rather than committed to a repository. A leaked key is rotated by recreating the secret, with no changes to application code." },
+      { title: "Data inside Russia", desc: "Buckets live on servers in Russia. For projects that store user files — documents, scans, avatars — this is the same 152-FZ requirement that applies to databases; for files people usually forget about it." },
+      { title: "Backups for apps and databases", desc: "Storage is the natural home for Postgres dumps and build archives. Database backups are written to a bucket and downloaded over a temporary link, so there is no separate file server to run." },
+      { title: "Static and media delivery", desc: "Images, video and user uploads are served straight from storage instead of consuming the app's disk and memory. The application stays stateless, so it can be restarted and scaled without risking the files." },
     ],
     faqTitle: "Object storage FAQ",
     faq: [
-      { q: "What state is object storage in?", a: "It's in Beta. Creating S3-compatible buckets works; some capabilities are still being finished. Don't build critical workflows on it until it's out of beta." },
-      { q: "What tools is it compatible with?", a: "The API is S3-compatible, so it works with familiar tools — aws-cli, s3cmd and any SDK that speaks S3." },
-      { q: "How is it billed?", a: "By volume: you pay for the space actually used and traffic, not a fixed disk tier." },
+      { q: "What state is object storage in?", a: "It's in Beta. Creating S3-compatible buckets works; some capabilities are still being finished. Don't build critical workflows on it until it's out of beta — it is fine for backups and static assets, not yet for the only copy of important data." },
+      { q: "What tools is it compatible with?", a: "The API is S3-compatible, so familiar tools work: aws-cli, s3cmd, rclone, MinIO Client, and SDKs for Python, Node.js, Go and PHP. You point the client at the platform endpoint instead of the Amazon one." },
+      { q: "How is it billed?", a: "By volume: you pay for the space actually used and the traffic, not a fixed disk tier. An empty bucket costs nothing and the bill grows with the real data." },
+      { q: "Where do I get access keys?", a: "The access key and secret key are revealed in the panel on request — they live in a separate connection secret. They don't belong in the repository: the app receives them as environment variables." },
+      { q: "Can I serve files directly to users?", a: "Yes. Public objects are served over a direct link, private ones over a temporary signed link with a limited lifetime. The second option is what you use for documents and anything that should not be indexed by search engines." },
+      { q: "Is it suitable for database backups?", a: "Yes, that is the main scenario. Managed PostgreSQL dumps land in a bucket and are downloaded from the panel over a temporary link. Keeping backups away from the database itself is the rule that saves you when an instance is lost." },
+      { q: "Where is the data physically stored?", a: "On servers in Russia. If your app stores files belonging to Russian users, this is the same 152-FZ question as the database — everyone remembers the database, almost nobody remembers the uploads." },
+      { q: "Is there a file size limit?", a: "Large files go through multipart upload, which every compatible client supports, exactly as in any S3 storage. For serving large media that is the normal mode, not a workaround." },
     ],
   },
   pricing: {
@@ -2564,6 +2908,8 @@ const en: Dict = {
       { label: "Databases", href: "/databases" },
       { label: "Object storage", href: "/storage" },
       { label: "Vercel alternative", href: "/analog-vercel" },
+      { label: "Paying for Vercel from Russia", href: "/oplatit-vercel-iz-rossii" },
+      { label: "Does Vercel work in Russia", href: "/rabotaet-li-vercel-v-rossii" },
       { label: "Heroku alternative", href: "/analog-heroku" },
       { label: "Railway alternative", href: "/analog-railway" },
       { label: "Render alternative", href: "/analog-render" },

@@ -86,6 +86,67 @@ export function FeatureGrid({
   );
 }
 
+export function StepsGrid({
+  title,
+  subtitle,
+  steps,
+}: {
+  title: string;
+  subtitle?: string;
+  steps: { num: string; title: string; desc: string }[];
+}) {
+  return (
+    <section className="bg-slate-50 py-20">
+      <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+        <div className="mb-12 max-w-2xl">
+          <h2 className="text-3xl font-bold tracking-tight text-slate-900">{title}</h2>
+          {subtitle && <p className="mt-3 text-lg text-slate-600">{subtitle}</p>}
+        </div>
+        <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
+          {steps.map((s) => (
+            <div key={s.num} className="relative rounded-xl border border-slate-200 bg-white p-6">
+              <span className="absolute right-5 top-4 text-3xl font-bold text-slate-100">
+                {s.num}
+              </span>
+              <h3 className="pr-8 text-base font-semibold text-slate-900">{s.title}</h3>
+              <p className="mt-2 text-sm text-slate-600">{s.desc}</p>
+            </div>
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+export function UseCaseGrid({
+  title,
+  subtitle,
+  items,
+}: {
+  title: string;
+  subtitle?: string;
+  items: { title: string; desc: string }[];
+}) {
+  return (
+    <section className="bg-white py-20">
+      <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+        <div className="mb-12 max-w-2xl">
+          <h2 className="text-3xl font-bold tracking-tight text-slate-900">{title}</h2>
+          {subtitle && <p className="mt-3 text-lg text-slate-600">{subtitle}</p>}
+        </div>
+        <div className="grid gap-6 sm:grid-cols-2">
+          {items.map((it) => (
+            <div key={it.title} className="rounded-xl border border-slate-200 bg-white p-7">
+              <h3 className="text-lg font-semibold text-slate-900">{it.title}</h3>
+              <p className="mt-2 text-sm text-slate-600">{it.desc}</p>
+            </div>
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+}
+
 export function FaqList({ title, items }: { title: string; items: { q: string; a: string }[] }) {
   const [open, setOpen] = useState<number | null>(0);
   return (

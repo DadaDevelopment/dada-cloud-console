@@ -10,6 +10,7 @@ import path from "path";
 const RENAMED_LANDINGS: [string, string][] = [
   ["/telegram-bot-hosting", "/hosting-telegram-bot"],
   ["/vibe-coding-deploy", "/deploy-vibe-coding"],
+  ["/kubernetes", "/cloud-servers"],
 ];
 
 const nextConfig: NextConfig = {

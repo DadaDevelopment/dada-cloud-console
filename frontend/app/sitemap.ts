@@ -14,6 +14,8 @@ const STATIC_ROUTES: Array<{ path: string; priority: number; changeFrequency: Me
   { path: "/", priority: 1.0, changeFrequency: "weekly" },
   { path: "/pricing", priority: 0.9, changeFrequency: "weekly" },
   { path: "/analog-vercel", priority: 0.9, changeFrequency: "monthly" },
+  { path: "/oplatit-vercel-iz-rossii", priority: 0.9, changeFrequency: "monthly" },
+  { path: "/rabotaet-li-vercel-v-rossii", priority: 0.9, changeFrequency: "monthly" },
   { path: "/analog-heroku", priority: 0.9, changeFrequency: "monthly" },
   { path: "/analog-railway", priority: 0.9, changeFrequency: "monthly" },
   { path: "/analog-render", priority: 0.9, changeFrequency: "monthly" },

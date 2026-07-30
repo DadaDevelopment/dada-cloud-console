@@ -14,6 +14,8 @@ const MARKETING_PATHS = new Set([
   "/storage",
   "/pricing",
   "/analog-vercel",
+  "/oplatit-vercel-iz-rossii",
+  "/rabotaet-li-vercel-v-rossii",
   "/analog-heroku",
   "/analog-railway",
   "/analog-render",
