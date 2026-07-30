@@ -63,12 +63,8 @@ func seedAlertProject(t *testing.T, pool *pgxpool.Pool, name string, ownerID *uu
 	return id
 }
 
-func nullableString(s string) any {
-	if s == "" {
-		return nil
-	}
-	return s
-}
+// nullableString now lives in box_leads.go, where a production handler needed the
+// same "" -> NULL mapping. Kept as one definition rather than two identical ones.
 
 func seedAlertMember(t *testing.T, pool *pgxpool.Pool, projectID, userID uuid.UUID, role string, createdAt time.Time) {
 	t.Helper()

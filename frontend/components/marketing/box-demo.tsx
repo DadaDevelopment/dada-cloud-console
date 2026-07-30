@@ -5,6 +5,7 @@ import { Play, RotateCcw, Terminal } from "lucide-react";
 import { clsx } from "clsx";
 import type { DemoLine } from "@/lib/box-copy";
 import { reportBoxEvent } from "@/lib/box-events";
+import { useLang } from "@/lib/i18n/context";
 
 /**
  * Scripted replay of the box lifecycle for the /box landing.
@@ -32,6 +33,7 @@ export function BoxDemo({
   replayLabel: string;
   lines: DemoLine[];
 }) {
+  const { locale } = useLang();
   const [shown, setShown] = useState(0);
   const [running, setRunning] = useState(false);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -60,7 +62,9 @@ export function BoxDemo({
     clear();
     setShown(0);
     setRunning(true);
-    reportBoxEvent({ event: "demo_run" });
+    // Locale was missing here, which made dada_box_funnel_events_total's locale
+    // label default to "ru" for every English demo run.
+    reportBoxEvent({ event: "demo_run", locale });
   };
 
   const finished = !running && shown >= lines.length;

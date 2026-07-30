@@ -1,5 +1,12 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
+import {
+  BOX_VID_COOKIE,
+  boxVidSetCookie,
+  isBoxLandingPath,
+  isBoxVid,
+  newBoxVid,
+} from "@/lib/box-vid";
 
 // One frontend image serves BOTH the marketing host (cloud.dada-tuda.ru) and the
 // console host (console.dada-tuda.ru). The marketing landing lives at "/", but on
@@ -50,7 +57,22 @@ export function proxy(request: NextRequest) {
   const locale = path === "/en" || path.startsWith("/en/") ? "en" : "ru";
   const headers = new Headers(request.headers);
   headers.set("x-dada-locale", locale);
-  return NextResponse.next({ request: { headers } });
+  const response = NextResponse.next({ request: { headers } });
+
+  // Issue the anonymous Box visitor id on the first hit of the landing, so every
+  // funnel event from this browser carries the same opaque key and the page-view
+  // denominator can count people instead of reloads (lib/box-vid.ts).
+  //
+  // Issued here rather than from the page: the cookie is HttpOnly, and the id must
+  // exist before the landing's first page_view fires. Only on /box and /en/box —
+  // the rest of the marketing site has no funnel to attribute, and an id set on
+  // every page would be tracking without a purpose.
+  if (isBoxLandingPath(path) && !isBoxVid(request.cookies.get(BOX_VID_COOKIE)?.value)) {
+    const proto = request.headers.get("x-forwarded-proto") ?? request.nextUrl.protocol.replace(":", "");
+    response.headers.append("set-cookie", boxVidSetCookie(newBoxVid(), proto === "https"));
+  }
+
+  return response;
 }
 
 export const config = {

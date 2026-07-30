@@ -138,6 +138,10 @@ type Handler struct {
 
 	agentChatLLM   *llmchat.Client
 	agentChatTools *agentchat.Toolset
+
+	// boxFunnelLimiter bounds the unauthenticated Dada Box fake-door ingest
+	// (RecordBoxFunnelEvent). Never nil.
+	boxFunnelLimiter *boxFunnelLimiter
 }
 
 func (h *Handler) optionalClaims(c *gin.Context) (*auth.Claims, bool) {
@@ -150,6 +154,7 @@ func (h *Handler) optionalClaims(c *gin.Context) (*auth.Claims, bool) {
 // NewHandler constructs a Handler with the given dependencies.
 func NewHandler(pool *pgxpool.Pool, cfg *config.Config) *Handler {
 	h := &Handler{pool: pool, cfg: cfg}
+	h.boxFunnelLimiter = newBoxFunnelLimiter(boxFunnelPerMin, boxFunnelGlobalPerMin)
 	if cfg.AIStudioEnabled && cfg.MLflowBaseURL != "" {
 		h.mlflow = mlflow.New(cfg.MLflowBaseURL, cfg.MLflowAuthHeader)
 	}

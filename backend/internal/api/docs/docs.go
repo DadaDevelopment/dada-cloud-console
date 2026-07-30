@@ -139,6 +139,85 @@ const docTemplate = `{
                 }
             }
         },
+        "/admin/box/grants": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Records that a Dada Box request code (claim) was handed a box during the concierge-provisioned private preview: the join between a fake-door lead and a real box, and the only data source for the repeat-use metric. Platform-admin only. Idempotent per (claim, box_id) -- re-granting the same box refreshes granted_at, and granting a second box to the same claim adds a row, which is the normal case once the first box has been reaped.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "box"
+                ],
+                "summary": "Record a manual Dada Box grant",
+                "operationId": "grantBox",
+                "parameters": [
+                    {
+                        "description": "Grant",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/api.grantBoxRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/admin/costs": {
             "get": {
                 "security": [
@@ -878,6 +957,69 @@ const docTemplate = `{
                     },
                     "400": {
                         "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/box/leads": {
+            "post": {
+                "description": "Stores one funnel event from the Dada Box private-preview landing (page_view, demo_run, box_requested, crystallize_intent) into box_funnel_events, and the lead itself into box_leads when the event is box_requested. Unauthenticated marketing ingest, called server-to-server by the landing's route handler, rate-limited per client IP. ` + "`" + `vid` + "`" + ` is the opaque dada_vid visitor cookie and must be a UUID -- never an email or any other personal datum. A page_view is deduplicated per vid within a 30-minute session window and then reports recorded=false. The request code (claim) is minted by the landing so the visitor still gets one when this endpoint is down.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "box"
+                ],
+                "summary": "Record a Dada Box fake-door funnel event",
+                "operationId": "recordBoxFunnelEvent",
+                "parameters": [
+                    {
+                        "description": "Funnel event",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/api.recordBoxFunnelEventRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "status and whether the event was recorded",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "429": {
+                        "description": "Too Many Requests",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
                         "schema": {
                             "type": "object",
                             "additionalProperties": {
@@ -13667,6 +13809,20 @@ const docTemplate = `{
                 }
             }
         },
+        "api.grantBoxRequest": {
+            "type": "object",
+            "properties": {
+                "box_id": {
+                    "type": "string"
+                },
+                "claim": {
+                    "type": "string"
+                },
+                "org_id": {
+                    "type": "string"
+                }
+            }
+        },
         "api.importComposeStackRequest": {
             "type": "object",
             "properties": {
@@ -13741,8 +13897,7 @@ const docTemplate = `{
                 "metrics": {
                     "type": "object",
                     "additionalProperties": {
-                        "type": "number",
-                        "format": "float64"
+                        "type": "number"
                     }
                 },
                 "source": {
@@ -13789,6 +13944,53 @@ const docTemplate = `{
             "properties": {
                 "target_project_id": {
                     "type": "string"
+                }
+            }
+        },
+        "api.recordBoxFunnelEventRequest": {
+            "type": "object",
+            "properties": {
+                "agent": {
+                    "type": "string"
+                },
+                "claim": {
+                    "type": "string"
+                },
+                "contact": {
+                    "type": "string"
+                },
+                "email": {
+                    "type": "string"
+                },
+                "event": {
+                    "type": "string"
+                },
+                "locale": {
+                    "type": "string"
+                },
+                "parallel": {
+                    "type": "string"
+                },
+                "price": {
+                    "type": "string"
+                },
+                "referer": {
+                    "type": "string"
+                },
+                "use_case": {
+                    "type": "string"
+                },
+                "utm_source": {
+                    "type": "string"
+                },
+                "vid": {
+                    "type": "string"
+                },
+                "wants": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
                 }
             }
         },
