@@ -748,6 +748,42 @@
                 }
             }
         },
+        "/ai/catalog": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Lists the model aliases callable through the AI Gateway and the providers a project can store a BYOK credential for. Use the alias (not the upstream model id) as the `model` field of an OpenAI-compatible request.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "ai-gateway"
+                ],
+                "summary": "AI Gateway model and provider catalog",
+                "operationId": "getAIGatewayCatalog",
+                "responses": {
+                    "200": {
+                        "description": "object with models, providers and base_url",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/auth/login": {
             "post": {
                 "description": "Authenticates a user by username or email plus password and returns a JWT bearer token. Public endpoint — no authentication required. Use the returned token as the Authorization: Bearer header for every other endpoint.",
@@ -1945,6 +1981,441 @@
                     },
                     "403": {
                         "description": "Forbidden",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/projects/{projectId}/ai/credentials": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Lists the providers this project holds a BYOK credential for. Never returns a usable key -- only a masked hint, the optional api_base override and the last update time.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "ai-gateway"
+                ],
+                "summary": "List a project's AI provider credentials",
+                "operationId": "listAIProviderCredentials",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Project UUID",
+                        "name": "projectId",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "object with credentials array",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/projects/{projectId}/ai/credentials/{provider}": {
+            "put": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Stores (or replaces) this project's own provider key, encrypted at rest. The AI Gateway injects it server-side for every request the project's AI keys make against a model of that provider; the key is never returned to the browser afterwards.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "ai-gateway"
+                ],
+                "summary": "Store a project's AI provider credential",
+                "operationId": "putAIProviderCredential",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Project UUID",
+                        "name": "projectId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Provider name from the catalog",
+                        "name": "provider",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Provider key and optional api_base override",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/api.putAICredentialRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Removes the stored provider key. Calls to models of that provider then fail closed -- there is no shared platform key to fall back to.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "ai-gateway"
+                ],
+                "summary": "Delete a project's AI provider credential",
+                "operationId": "deleteAIProviderCredential",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Project UUID",
+                        "name": "projectId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Provider name",
+                        "name": "provider",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "no content"
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/projects/{projectId}/ai/keys": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Lists the AI Gateway keys minted for this project (including revoked ones). Never returns the plaintext key or its hash -- only the id, label, token_prefix, scopes and lifecycle timestamps.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "ai-gateway"
+                ],
+                "summary": "List a project's AI Gateway keys",
+                "operationId": "listAIGatewayKeys",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Project UUID",
+                        "name": "projectId",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "object with keys array and base_url",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            },
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Mints a revocable project-scoped key for the AI Gateway (scopes ai:chat and ai:embeddings). Use it as the api_key of any OpenAI-compatible SDK with base_url set to the returned base_url. The plaintext key is returned ONLY in this response -- store it now, it cannot be retrieved again.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "ai-gateway"
+                ],
+                "summary": "Create an AI Gateway key for a project",
+                "operationId": "createAIGatewayKey",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Project UUID",
+                        "name": "projectId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Optional label for the key",
+                        "name": "body",
+                        "in": "body",
+                        "schema": {
+                            "$ref": "#/definitions/api.createAIKeyRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/api.createAIKeyResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/projects/{projectId}/ai/keys/{keyId}": {
+            "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Permanently revokes the key. The gateway caches introspection for up to 60 seconds, so an in-flight key stops working within a minute.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "ai-gateway"
+                ],
+                "summary": "Revoke an AI Gateway key",
+                "operationId": "deleteAIGatewayKey",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Project UUID",
+                        "name": "projectId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Key UUID",
+                        "name": "keyId",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "no content"
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/projects/{projectId}/ai/usage": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Returns the project's AI Gateway calls, tokens and cost over the trailing window, broken down by model and by day. Any project member may read it.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "ai-gateway"
+                ],
+                "summary": "A project's own AI Gateway usage",
+                "operationId": "getProjectAIUsage",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Project UUID",
+                        "name": "projectId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Window length in days: 7 or 30 (default 7)",
+                        "name": "days",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
                         "schema": {
                             "type": "object",
                             "additionalProperties": {
@@ -14844,6 +15315,40 @@
                 }
             }
         },
+        "api.createAIKeyRequest": {
+            "type": "object",
+            "properties": {
+                "name": {
+                    "type": "string"
+                }
+            }
+        },
+        "api.createAIKeyResponse": {
+            "type": "object",
+            "properties": {
+                "base_url": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "key": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "scopes": {
+                    "type": "string"
+                },
+                "token_prefix": {
+                    "type": "string"
+                }
+            }
+        },
         "api.createAIModelRequest": {
             "type": "object",
             "properties": {
@@ -15373,7 +15878,8 @@
                 "metrics": {
                     "type": "object",
                     "additionalProperties": {
-                        "type": "number"
+                        "type": "number",
+                        "format": "float64"
                     }
                 },
                 "source": {
@@ -15419,6 +15925,20 @@
             "type": "object",
             "properties": {
                 "target_project_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "api.putAICredentialRequest": {
+            "type": "object",
+            "required": [
+                "api_key"
+            ],
+            "properties": {
+                "api_base": {
+                    "type": "string"
+                },
+                "api_key": {
                     "type": "string"
                 }
             }

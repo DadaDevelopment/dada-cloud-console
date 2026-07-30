@@ -216,6 +216,7 @@ export default function ProjectOverviewPage() {
       <div className="mb-8">
         <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">{t("overview.section.more")}</h2>
         <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+          <SecondaryLink icon="ai" label={t("nav.ai")} hint={t("overview.secondary.ai.hint")} href={`/projects/${projectId}/ai`} />
           <SecondaryLink icon="monitoring" label={t("nav.monitoring")} hint={t("overview.secondary.monitoring.hint")} href={`/projects/${projectId}/monitoring`} />
           <SecondaryLink icon="storage" label={t("nav.storage")} hint={t("overview.secondary.storage.hint")} href={`/projects/${projectId}/storage`} />
           <SecondaryLink icon="models" label={t("nav.models")} hint={t("overview.secondary.models.hint")} href={`/projects/${projectId}/models`} />

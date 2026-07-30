@@ -445,6 +445,13 @@ type Config struct {
 	// (POST {PublicBaseURL}/api/v1/deploy) shown once when a deploy hook is created.
 	PublicBaseURL string // PUBLIC_BASE_URL
 
+	// AIGatewayPublicURL is the OpenAI-compatible base_url a customer points an
+	// SDK at. Handed back verbatim with a minted AI Gateway key and shown in the
+	// console quickstart, so it must be the gateway's own public ingress
+	// (ADR-015: the gateway is a separate data plane, never behind the console
+	// origin).
+	AIGatewayPublicURL string // AI_GATEWAY_PUBLIC_URL
+
 	// YooKassa (payments slice 1, own shop/keys, no multi-tenant OAuth). Empty
 	// YooKassaShopID/YooKassaSecretKey means payments are unconfigured and
 	// checkout returns 409 payments_not_configured instead of attempting a call.
@@ -633,6 +640,7 @@ func Load() (*Config, error) {
 		BoxActiveCPUPercent:         getEnvFloat("BOX_ACTIVE_CPU_PERCENT", 5),
 		BoxDefaultSpendCapRub:       getEnvFloat("BOX_DEFAULT_SPEND_CAP_RUB", 500),
 		PublicBaseURL:               getEnv("PUBLIC_BASE_URL", "https://console.dada-tuda.ru"),
+		AIGatewayPublicURL:          getEnv("AI_GATEWAY_PUBLIC_URL", "https://ai.dada-tuda.ru/v1"),
 		YooKassaShopID:              getEnv("YOOKASSA_SHOP_ID", ""),
 		YooKassaSecretKey:           getEnv("YOOKASSA_SECRET_KEY", ""),
 		YooKassaReturnURL:           getEnv("YOOKASSA_RETURN_URL", "https://console.dada-tuda.ru/billing/return"),

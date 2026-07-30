@@ -1104,6 +1104,83 @@ export interface DeployHookCreated {
   created_at: string;
 }
 
+// AI Gateway (OpenAI-compatible endpoint, project-scoped BYOK) ---------------
+
+/** A project's AI Gateway key. The plaintext is only ever present in `AIGatewayKeyCreated`. */
+export interface AIGatewayKey {
+  id: string;
+  name: string;
+  token_prefix: string;
+  scopes: string;
+  created_at: string;
+  last_used_at?: string | null;
+  revoked_at?: string | null;
+}
+
+/** Returned once, right after `POST .../ai/keys` — the only time the plaintext key exists client-side. */
+export interface AIGatewayKeyCreated {
+  id: string;
+  name: string;
+  key: string;
+  token_prefix: string;
+  scopes: string;
+  base_url: string;
+  created_at: string;
+}
+
+/** A stored BYOK provider credential, secret-free: `key_hint` is masked and unusable. */
+export interface AIProviderCredential {
+  provider: string;
+  key_hint: string;
+  api_base?: string;
+  updated_at: string;
+}
+
+/** One model alias callable through the gateway. `alias` goes in the request's `model` field, not `upstream`. */
+export interface AICatalogModel {
+  alias: string;
+  provider: string;
+  kind: "chat" | "embeddings";
+  upstream: string;
+}
+
+/** One upstream a project can store a credential for. `key_url` is where the customer mints that key. */
+export interface AICatalogProvider {
+  name: string;
+  label: string;
+  key_url: string;
+}
+
+export interface AICatalogResponse {
+  base_url: string;
+  models: AICatalogModel[];
+  providers: AICatalogProvider[];
+}
+
+export interface AIUsageModelStat {
+  model: string;
+  calls: number;
+  cost_usd: number;
+}
+
+export interface AIUsageDayStat {
+  day: string;
+  calls: number;
+  cost_usd: number;
+}
+
+/** A project's own AI Gateway consumption over the trailing window. Costs are the provider's, in USD. */
+export interface ProjectAIUsage {
+  days: number;
+  currency: string;
+  total_calls: number;
+  total_cost: number;
+  prompt_tokens: number;
+  completion_tokens: number;
+  models: AIUsageModelStat[];
+  daily: AIUsageDayStat[];
+}
+
 // Monitoring (Grafana-backed observability apps) -----------------------------
 
 export interface MonitoringApp {

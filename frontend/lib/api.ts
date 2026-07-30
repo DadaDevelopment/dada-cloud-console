@@ -83,6 +83,11 @@ import type {
   MoveImpactResponse,
   DeployHook,
   DeployHookCreated,
+  AIGatewayKey,
+  AIGatewayKeyCreated,
+  AIProviderCredential,
+  AICatalogResponse,
+  ProjectAIUsage,
 } from "./types";
 import type { OnboardingStatus } from "./onboarding/types";
 
@@ -546,6 +551,44 @@ export const deployHooksApi = {
       `/api/v1/projects/${projectId}/environments/${envId}/apps/${appName}/deploy-hooks/${hookId}`,
       { method: "DELETE" }
     ),
+};
+
+/**
+ * AI Gateway control plane: project keys for the OpenAI-compatible endpoint,
+ * the BYOK provider credentials the gateway injects server-side, the model
+ * catalog, and the project's own consumption.
+ */
+export const aiGatewayApi = {
+  catalog: () => apiFetch<AICatalogResponse>(`/api/v1/ai/catalog`),
+
+  listKeys: (projectId: string) =>
+    apiFetch<{ keys: AIGatewayKey[]; base_url: string }>(`/api/v1/projects/${projectId}/ai/keys`),
+
+  createKey: (projectId: string, name?: string) =>
+    apiFetch<AIGatewayKeyCreated>(`/api/v1/projects/${projectId}/ai/keys`, {
+      method: "POST",
+      body: { name: name ?? "" },
+    }),
+
+  revokeKey: (projectId: string, keyId: string) =>
+    apiFetch<void>(`/api/v1/projects/${projectId}/ai/keys/${keyId}`, { method: "DELETE" }),
+
+  listCredentials: (projectId: string) =>
+    apiFetch<{ credentials: AIProviderCredential[] }>(`/api/v1/projects/${projectId}/ai/credentials`),
+
+  putCredential: (projectId: string, provider: string, apiKey: string, apiBase?: string) =>
+    apiFetch<{ status: string }>(
+      `/api/v1/projects/${projectId}/ai/credentials/${encodeURIComponent(provider)}`,
+      { method: "PUT", body: { api_key: apiKey, api_base: apiBase ?? "" } }
+    ),
+
+  deleteCredential: (projectId: string, provider: string) =>
+    apiFetch<void>(`/api/v1/projects/${projectId}/ai/credentials/${encodeURIComponent(provider)}`, {
+      method: "DELETE",
+    }),
+
+  usage: (projectId: string, days: 7 | 30 = 7) =>
+    apiFetch<ProjectAIUsage>(`/api/v1/projects/${projectId}/ai/usage?days=${days}`),
 };
 
 export const costApi = {

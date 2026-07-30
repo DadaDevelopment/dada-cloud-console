@@ -77,6 +77,7 @@ export const overview: Messages = {
 
   "overview.section.more": { ru: "Ещё в проекте", en: "More in project" },
 
+  "overview.secondary.ai.hint": { ru: "OpenAI-эндпоинт без VPN", en: "OpenAI endpoint, no VPN" },
   "overview.secondary.monitoring.hint": { ru: "Логи и метрики", en: "Logs and metrics" },
   "overview.secondary.operations.hint": { ru: "История деплоев", en: "Deploy history" },
   "overview.secondary.storage.hint": { ru: "S3-совместимые бакеты", en: "S3-compatible buckets" },
