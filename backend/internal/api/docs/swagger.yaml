@@ -140,6 +140,16 @@ definitions:
       storage_class:
         type: string
     type: object
+  api.attachBoxDatabaseRequest:
+    properties:
+      env_prefix:
+        description: EnvPrefix lets a box hold two databases without their env keys
+          colliding.
+        type: string
+      name:
+        description: Name labels the attachment inside the box's namespace of attachments.
+        type: string
+    type: object
   api.attachHostnameRequest:
     properties:
       hostname:
@@ -155,6 +165,36 @@ definitions:
       installation_id:
         description: numeric GitHub installation id
         type: string
+    type: object
+  api.boxUpRequest:
+    properties:
+      image:
+        type: string
+      name:
+        type: string
+      profile:
+        type: string
+      region:
+        type: string
+      session_ttl_hours:
+        description: SessionTTLHours defaults to 12 and is capped at 168.
+        type: integer
+      spend_cap_rub:
+        type: number
+      ssh_public_key:
+        description: |-
+          SSHPublicKey is a PUBLIC key: the caller keeps the private half, so the
+          platform stores no customer credential at all.
+        type: string
+      ttl_seconds:
+        description: TTLSeconds is when the box goes to SLEEP, not when it is destroyed.
+        type: integer
+      wait_seconds:
+        description: |-
+          WaitSeconds bounds how long the caller is willing to wait, in [0,120]. It is
+          a bound and not a hint: exceeding it returns a classified failure rather than
+          a body that arrives after the caller gave up.
+        type: integer
     type: object
   api.build:
     properties:
@@ -474,6 +514,22 @@ definitions:
       name:
         type: string
     type: object
+  api.crystallizeBoxRequest:
+    properties:
+      ack_monthly_charge:
+        description: AckMonthlyCharge is consent, not a flag. Without it the answer
+          is 409.
+        type: boolean
+      app_server_name:
+        description: AppServerName names the permanent artifact.
+        type: string
+      domain:
+        description: Domain is the address the crystallized artifact answers on.
+        type: string
+      probe_path:
+        description: ProbePath is the path the end-to-end probe requests.
+        type: string
+    type: object
   api.deployOperationStatusResponse:
     properties:
       error_code:
@@ -498,6 +554,14 @@ definitions:
         type: string
       operation_id:
         type: string
+    type: object
+  api.exposeBoxRequest:
+    properties:
+      port:
+        description: |-
+          Port is the port SERVING INSIDE the box. There is no hostname field on
+          purpose — see the file comment.
+        type: integer
     type: object
   api.extendBoxRequest:
     properties:
@@ -1471,6 +1535,33 @@ paths:
       summary: Recommend a billing plan
       tags:
       - billing
+  /box/catalog:
+    get:
+      description: 'Returns the frozen catalog of warm box images and size profiles.
+        Deliberately not a table: a size is only real if the pool controller has pre-warmed
+        bodies of that shape, and a warm image is only real if it has been pulled
+        and digest-pinned, so adding an entry is a code change plus a deploy — the
+        same event that rolls the pool config and the image pin. Read-only.'
+      operationId: getBoxCatalog
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: object with images and sizes
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: List the box images and size profiles
+      tags:
+      - box
   /box/leads:
     post:
       consumes:
@@ -2824,6 +2915,81 @@ paths:
       summary: Get billing usage
       tags:
       - billing
+  /projects/{projectId}/box-up:
+    post:
+      consumes:
+      - application/json
+      description: The single-call door to a box. Creates the box and its owning environment,
+        claims a pre-warmed body, binds the caller's identity to it, and returns only
+        once a command has actually executed inside it and returned success — not
+        when the API answered and not when a port accepted. The response carries the
+        connection coordinates, a one-time "dadabox_" session token (shown exactly
+        once, never retrievable again), a ready-to-paste mcpServers snippet pointing
+        at the BOX's own endpoint, and the measured time to ready broken down by phase.
+        Synchronous rather than 202-with-an-operation because a worker poll is longer
+        than the entire time-to-ready budget.
+      operationId: boxUp
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      - description: Box specification (every field optional)
+        in: body
+        name: body
+        schema:
+          $ref: '#/definitions/api.boxUpRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: object with the ready box, its connection coordinates, the
+            one-time token and the measured time to ready
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "409":
+          description: a live box with that name already exists in this project
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "503":
+          description: no warm box available, or the box runtime is not configured
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Bring up a box in one call (synchronous)
+      tags:
+      - box
   /projects/{projectId}/boxes:
     get:
       description: Returns every box in a project that has not been deleted, newest
@@ -3015,6 +3181,394 @@ paths:
       security:
       - BearerAuth: []
       summary: Get a box by name
+      tags:
+      - box
+  /projects/{projectId}/boxes/{boxName}/attach/database:
+    post:
+      consumes:
+      - application/json
+      description: 'Provisions a managed PostgreSQL database and role OUTSIDE the
+        box and injects the connection credential into the box''s env file (mode 0600,
+        root). The box can then open it immediately — the very next command inside
+        the box sees DATABASE_URL. The database is deliberately not inside the box:
+        a disposable body must not own the customer''s data, so deleting or crystallizing
+        the box never destroys it. The response lists WHICH env keys were injected
+        and never their values.'
+      operationId: attachBoxDatabase
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      - description: Box name
+        in: path
+        name: boxName
+        required: true
+        type: string
+      - description: Attachment name and optional env prefix
+        in: body
+        name: body
+        schema:
+          $ref: '#/definitions/api.attachBoxDatabaseRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: object with the attachment and the injected env key names
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "409":
+          description: the box is not in a phase that can accept an attachment
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "503":
+          description: box runtime or managed Postgres not configured
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Attach a managed Postgres database to a running box
+      tags:
+      - box
+  /projects/{projectId}/boxes/{boxName}/attachments:
+    get:
+      description: 'Returns the box''s attachments with the env key NAMES each one
+        injected. Never any values: the credentials exist only inside the box''s 0600
+        env file, which is also the only thing crystallization carries. Read-only.'
+      operationId: listBoxAttachments
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      - description: Box name
+        in: path
+        name: boxName
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: object with an attachments array
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: List the resources attached to a box
+      tags:
+      - box
+  /projects/{projectId}/boxes/{boxName}/connection:
+    get:
+      description: Returns the box's SSH and MCP coordinates plus the ready-to-paste
+        mcpServers snippet. Pass new_session=true to mint a FRESH one-time "dadabox_"
+        token; the previous one is not revealed because only its sha256 is stored.
+        Minting a new session does not revoke the old ones — use suspend or delete
+        for that, both of which revoke every live session before they enqueue anything.
+      operationId: getBoxConnection
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      - description: Box name
+        in: path
+        name: boxName
+        required: true
+        type: string
+      - description: Mint a fresh one-time session token
+        in: query
+        name: new_session
+        type: boolean
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: object with connection coordinates
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "503":
+          description: box runtime not configured
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Get a box's connection coordinates
+      tags:
+      - box
+  /projects/{projectId}/boxes/{boxName}/crystallizations:
+    get:
+      description: 'Returns every crystallization attempt for the box with its stored
+        verification report. `verified` is separate from `status` on purpose: an attempt
+        can finish while verification failed, and a dashboard that could not tell
+        "finished" from "correct" would make the only critical box alert unreadable.
+        Read-only.'
+      operationId: listBoxCrystallizations
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      - description: Box name
+        in: path
+        name: boxName
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: object with a crystallizations array
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: List a box's crystallization attempts
+      tags:
+      - box
+  /projects/{projectId}/boxes/{boxName}/crystallize:
+    post:
+      consumes:
+      - application/json
+      description: 'Materializes the box''s USERLAND onto a real VM booted from a
+        standard OS slug: the VM keeps its own kernel, init and bootloader, and only
+        the application half of the filesystem is applied onto it. Named volumes are
+        restored by mount path, env is written out of band at 0600 root, and the entrypoint
+        and published ports become a systemd unit — the result runs under systemd
+        with no Docker, no compose and no Portainer agent, because a crystallized
+        VM is not a container host. Then it is VERIFIED: file-manifest equality on
+        (path, size, mode, sha256), equality of the listening-socket set before the
+        freeze and after the cutover, an sha256-per-key env comparison, and an end-to-end
+        HTTP probe. Never "rsync exited 0" — an rsync that copied nothing exits 0.
+        Requires ack_monthly_charge: promotion turns a per-minute body into a monthly
+        VM bill, so consent is a gate and the answer is 409 without it. The full verification
+        report, including the exclusion lists it applied, is returned and stored.'
+      operationId: crystallizeBox
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      - description: Box name
+        in: path
+        name: boxName
+        required: true
+        type: string
+      - description: Target name, domain and the monthly-charge acknowledgement
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/api.crystallizeBoxRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: object with the verification report and the carry manifest
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "409":
+          description: the monthly charge was not acknowledged, or the box is not
+            in a promotable phase
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "422":
+          description: the materialization completed but verification failed; the
+            report says which check
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "503":
+          description: box runtime not configured
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Crystallize a box into a permanent VM (ADR-019)
+      tags:
+      - box
+  /projects/{projectId}/boxes/{boxName}/expose:
+    post:
+      consumes:
+      - application/json
+      description: 'Publishes one port serving inside the box on a hostname the PLATFORM
+        assigns under its wildcard. The caller cannot choose the hostname: custom
+        domains are a crystallization feature, and a throwaway body with an arbitrary
+        name is a phishing surface. Returns the assigned hostname and the URL that
+        answers it, plus the measured time from the request to the first real 200
+        — not to "the route was created". Responses carry X-Robots-Tag: noindex, because
+        an ephemeral body must not accumulate search presence it will outlive by hours.'
+      operationId: exposeBox
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      - description: Box name
+        in: path
+        name: boxName
+        required: true
+        type: string
+      - description: The port serving inside the box
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/api.exposeBoxRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: object with the assigned hostname and the URL that answers
+            it
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "409":
+          description: the box is not in a phase that can publish a port
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "503":
+          description: box runtime not configured
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Publish a port of a box on a platform hostname
       tags:
       - box
   /projects/{projectId}/boxes/{boxName}/extend:

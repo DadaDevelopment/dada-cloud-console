@@ -1,0 +1,145 @@
+package api
+
+import (
+	"net/http"
+	"time"
+
+	"github.com/dada-tuda/console/backend/internal/metrics"
+	"github.com/dada-tuda/console/backend/internal/models"
+	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
+)
+
+// expose: publish one port of a box.
+//
+// Two product rules are enforced by this handler rather than described elsewhere:
+//
+//   - The hostname is ASSIGNED BY THE PLATFORM under its wildcard and can never be
+//     chosen by the caller. Custom domains are a crystallization feature, which is
+//     also what removes most of the phishing incentive from a body that lives hours.
+//   - Publishing is measured from the request to the first real 200, by cert path.
+//     "The ingress object was created" is not the same event and is the one that
+//     looks green while nothing answers.
+
+type exposeBoxRequest struct {
+	// Port is the port SERVING INSIDE the box. There is no hostname field on
+	// purpose — see the file comment.
+	Port int `json:"port"`
+}
+
+// ExposeBox publishes a port of the box through the platform edge.
+//
+// @ID          exposeBox
+// @Summary     Publish a port of a box on a platform hostname
+// @Description Publishes one port serving inside the box on a hostname the PLATFORM assigns under its wildcard. The caller cannot choose the hostname: custom domains are a crystallization feature, and a throwaway body with an arbitrary name is a phishing surface. Returns the assigned hostname and the URL that answers it, plus the measured time from the request to the first real 200 — not to "the route was created". Responses carry X-Robots-Tag: noindex, because an ephemeral body must not accumulate search presence it will outlive by hours.
+// @Tags        box
+// @Accept      json
+// @Produce     json
+// @Security    BearerAuth
+// @Param       projectId path     string           true "Project UUID"
+// @Param       boxName   path     string           true "Box name"
+// @Param       body      body     exposeBoxRequest true "The port serving inside the box"
+// @Success     200       {object} map[string]interface{} "object with the assigned hostname and the URL that answers it"
+// @Failure     400       {object} map[string]string
+// @Failure     401       {object} map[string]string
+// @Failure     403       {object} map[string]string
+// @Failure     404       {object} map[string]string
+// @Failure     409       {object} map[string]string "the box is not in a phase that can publish a port"
+// @Failure     503       {object} map[string]string "box runtime not configured"
+// @Router      /projects/{projectId}/boxes/{boxName}/expose [post]
+func (h *Handler) ExposeBox(c *gin.Context) {
+	_, projectID, ok := h.boxWriteGate(c, true)
+	if !ok {
+		return
+	}
+	stack, ok := h.requireBoxRuntime(c)
+	if !ok {
+		return
+	}
+	b, ok := h.resolveBox(c, projectID, c.Param("boxName"))
+	if !ok {
+		return
+	}
+	var req exposeBoxRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		respondError(c, http.StatusBadRequest, err.Error())
+		return
+	}
+	if req.Port < 1 || req.Port > 65535 {
+		respondError(c, http.StatusBadRequest, "port must be between 1 and 65535")
+		return
+	}
+	if b.Status != models.BoxStatusReady && b.Status != models.BoxStatusIdle {
+		respondError(c, http.StatusConflict,
+			"a box in phase "+string(b.Status)+" cannot publish a port; it must be Ready or Idle")
+		return
+	}
+
+	started := time.Now()
+	exp, err := stack.exposer.Expose(b.Name, req.Port)
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, "failed to publish the port: "+err.Error())
+		return
+	}
+	// Measured to the first real 200 from the published address, which is why the
+	// probe happens before the metric and before the response.
+	probe := probePublishedURL(exp.URL, exp.Hostname)
+	elapsed := time.Since(started)
+	metrics.RecordBoxExpose("wildcard", elapsed)
+
+	var exposureID uuid.UUID
+	if err := h.pool.QueryRow(c.Request.Context(),
+		`INSERT INTO box_exposures (box_id, port, hostname, url, cert)
+		 VALUES ($1, $2, $3, $4, $5)
+		 ON CONFLICT (box_id, port) WHERE withdrawn_at IS NULL
+		 DO UPDATE SET hostname = EXCLUDED.hostname, url = EXCLUDED.url, cert = EXCLUDED.cert
+		 RETURNING id`,
+		b.ID, req.Port, exp.Hostname, exp.URL, exp.Cert,
+	).Scan(&exposureID); err != nil {
+		respondError(c, http.StatusInternalServerError, "failed to record the exposure")
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"exposure": gin.H{
+			"id":       exposureID,
+			"port":     exp.Port,
+			"hostname": exp.Hostname,
+			"url":      exp.URL,
+			"cert":     exp.Cert,
+		},
+		"first_response": gin.H{
+			"status": probe.status,
+			"ok":     probe.ok,
+			"body":   probe.body,
+		},
+		"expose_ms": elapsed.Milliseconds(),
+		"note": "the hostname is assigned by the platform under its wildcard and cannot be chosen. " +
+			"Responses carry X-Robots-Tag: noindex.",
+	})
+}
+
+type publishedProbe struct {
+	status int
+	ok     bool
+	body   string
+}
+
+// probePublishedURL fetches the published address once, sending the assigned
+// hostname as the Host header so the request is the one a real client makes.
+func probePublishedURL(url, host string) publishedProbe {
+	req, err := http.NewRequest(http.MethodGet, url, nil)
+	if err != nil {
+		return publishedProbe{body: err.Error()}
+	}
+	req.Host = host
+	client := &http.Client{Timeout: 5 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return publishedProbe{body: err.Error()}
+	}
+	defer resp.Body.Close()
+	buf := make([]byte, 512)
+	n, _ := resp.Body.Read(buf)
+	return publishedProbe{status: resp.StatusCode, ok: resp.StatusCode == http.StatusOK, body: string(buf[:n])}
+}

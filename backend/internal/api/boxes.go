@@ -330,111 +330,8 @@ func (h *Handler) CreateBox(c *gin.Context) {
 		return
 	}
 
-	name := req.Name
-	if name == "" {
-		generated, err := generateBoxName()
-		if err != nil {
-			respondError(c, http.StatusInternalServerError, "failed to generate box name")
-			return
-		}
-		name = generated
-	}
-	if err := validateKubeName(name); err != nil {
-		respondError(c, http.StatusBadRequest, err.Error())
-		return
-	}
-
-	image := req.Image
-	if image == "" {
-		image = boxcatalog.DefaultImage().Name
-	}
-	if _, found := boxcatalog.LookupImage(image); !found {
-		respondError(c, http.StatusBadRequest,
-			fmt.Sprintf("unknown image %q; available: %v", image, boxcatalog.ImageNames()))
-		return
-	}
-	profile := req.Profile
-	if profile == "" {
-		profile = boxcatalog.DefaultSize().Name
-	}
-	size, found := boxcatalog.LookupSize(profile)
-	if !found {
-		respondError(c, http.StatusBadRequest,
-			fmt.Sprintf("unknown profile %q; available: %v", profile, boxcatalog.SizeNames()))
-		return
-	}
-
-	ttl := req.TTLSeconds
-	if ttl == 0 {
-		ttl = size.MaxTTLSeconds
-	}
-	if ttl < 0 || ttl > maxBoxTTLSeconds {
-		respondError(c, http.StatusBadRequest,
-			fmt.Sprintf("ttl_seconds must be between 1 and %d", maxBoxTTLSeconds))
-		return
-	}
-	if req.SpendCapRub != nil && *req.SpendCapRub <= 0 {
-		respondError(c, http.StatusBadRequest, "spend_cap_rub must be positive when set")
-		return
-	}
-
-	var projectSlug string
-	if err := h.pool.QueryRow(c.Request.Context(),
-		`SELECT name FROM projects WHERE id = $1`, projectID,
-	).Scan(&projectSlug); err == pgx.ErrNoRows {
-		respondNotFound(c)
-		return
-	} else if err != nil {
-		respondError(c, http.StatusInternalServerError, "failed to resolve project")
-		return
-	}
-
-	// The environment row and the box row are created in ONE transaction. A box
-	// without its environment is an identity-less body, and an environment
-	// without its box is an orphan that the name-uniqueness index would then
-	// block forever — so a half-create must not be observable.
-	tx, err := h.pool.Begin(c.Request.Context())
-	if err != nil {
-		respondError(c, http.StatusInternalServerError, "failed to begin transaction")
-		return
-	}
-	defer tx.Rollback(context.Background()) //nolint:errcheck
-
-	var envID uuid.UUID
-	if err := tx.QueryRow(c.Request.Context(),
-		`INSERT INTO environments (project_id, name, namespace, type, runtime)
-		 VALUES ($1, $2, $3, 'dev', 'box')
-		 ON CONFLICT (project_id, name) DO NOTHING
-		 RETURNING id`,
-		projectID, name, projectSlug+"-"+name,
-	).Scan(&envID); err == pgx.ErrNoRows {
-		// The (project_id, name) pair is taken by an existing environment. That is
-		// a 409 rather than a reuse: silently adopting someone else's environment
-		// would hand the box an identity that already owns other resources.
-		respondError(c, http.StatusConflict, "an environment with that name already exists in this project; pick another box name")
-		return
-	} else if err != nil {
-		respondError(c, http.StatusInternalServerError, "failed to create box environment")
-		return
-	}
-
-	var b models.Box
-	row := tx.QueryRow(c.Request.Context(),
-		`INSERT INTO boxes (project_id, environment_id, name, image, profile, region,
-		                    status, ttl_seconds, spend_cap_rub, created_by)
-		 VALUES ($1, $2, $3, $4, $5, $6, 'Requested', $7, $8, $9)
-		 RETURNING `+boxColumns,
-		projectID, envID, name, image, profile, req.Region, ttl, req.SpendCapRub, claims.UserID,
-	)
-	if err := scanBox(row, &b); err != nil {
-		// The partial unique index on (project_id, name) WHERE status <> 'Deleted'
-		// is what refuses a duplicate live name — the DATABASE refuses it, so two
-		// racing replicas cannot both win.
-		respondError(c, http.StatusConflict, "a box with that name already exists in this project")
-		return
-	}
-	if err := tx.Commit(c.Request.Context()); err != nil {
-		respondError(c, http.StatusInternalServerError, "failed to commit box creation")
+	b, ok := h.provisionBoxRecord(c, claims.UserID, projectID, req)
+	if !ok {
 		return
 	}
 
@@ -462,6 +359,127 @@ func (h *Handler) CreateBox(c *gin.Context) {
 	)
 
 	c.JSON(http.StatusAccepted, gin.H{"box": b, "operation": op, "message": "box creation queued"})
+}
+
+// provisionBoxRecord validates a box request and writes the environment row and
+// the box row in ONE transaction, returning the created box.
+//
+// Extracted from CreateBox so the synchronous single-call door (BoxUp, boxes_up.go)
+// creates the object through the identical path. A second copy of this validation
+// would be a second place for the (project_id, name) uniqueness and the D1
+// one-environment-per-box invariant to drift, and a drift in either is a box with
+// an identity that already owns somebody else's resources.
+//
+// On failure it has already written the response and returns ok=false.
+func (h *Handler) provisionBoxRecord(c *gin.Context, actorID uuid.UUID, projectID uuid.UUID, req createBoxRequest) (models.Box, bool) {
+	name := req.Name
+	if name == "" {
+		generated, err := generateBoxName()
+		if err != nil {
+			respondError(c, http.StatusInternalServerError, "failed to generate box name")
+			return models.Box{}, false
+		}
+		name = generated
+	}
+	if err := validateKubeName(name); err != nil {
+		respondError(c, http.StatusBadRequest, err.Error())
+		return models.Box{}, false
+	}
+
+	image := req.Image
+	if image == "" {
+		image = boxcatalog.DefaultImage().Name
+	}
+	if _, found := boxcatalog.LookupImage(image); !found {
+		respondError(c, http.StatusBadRequest,
+			fmt.Sprintf("unknown image %q; available: %v", image, boxcatalog.ImageNames()))
+		return models.Box{}, false
+	}
+	profile := req.Profile
+	if profile == "" {
+		profile = boxcatalog.DefaultSize().Name
+	}
+	size, found := boxcatalog.LookupSize(profile)
+	if !found {
+		respondError(c, http.StatusBadRequest,
+			fmt.Sprintf("unknown profile %q; available: %v", profile, boxcatalog.SizeNames()))
+		return models.Box{}, false
+	}
+
+	ttl := req.TTLSeconds
+	if ttl == 0 {
+		ttl = size.MaxTTLSeconds
+	}
+	if ttl < 0 || ttl > maxBoxTTLSeconds {
+		respondError(c, http.StatusBadRequest,
+			fmt.Sprintf("ttl_seconds must be between 1 and %d", maxBoxTTLSeconds))
+		return models.Box{}, false
+	}
+	if req.SpendCapRub != nil && *req.SpendCapRub <= 0 {
+		respondError(c, http.StatusBadRequest, "spend_cap_rub must be positive when set")
+		return models.Box{}, false
+	}
+
+	var projectSlug string
+	if err := h.pool.QueryRow(c.Request.Context(),
+		`SELECT name FROM projects WHERE id = $1`, projectID,
+	).Scan(&projectSlug); err == pgx.ErrNoRows {
+		respondNotFound(c)
+		return models.Box{}, false
+	} else if err != nil {
+		respondError(c, http.StatusInternalServerError, "failed to resolve project")
+		return models.Box{}, false
+	}
+
+	// The environment row and the box row are created in ONE transaction. A box
+	// without its environment is an identity-less body, and an environment
+	// without its box is an orphan that the name-uniqueness index would then
+	// block forever — so a half-create must not be observable.
+	tx, err := h.pool.Begin(c.Request.Context())
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, "failed to begin transaction")
+		return models.Box{}, false
+	}
+	defer tx.Rollback(context.Background()) //nolint:errcheck
+
+	var envID uuid.UUID
+	if err := tx.QueryRow(c.Request.Context(),
+		`INSERT INTO environments (project_id, name, namespace, type, runtime)
+		 VALUES ($1, $2, $3, 'dev', 'box')
+		 ON CONFLICT (project_id, name) DO NOTHING
+		 RETURNING id`,
+		projectID, name, projectSlug+"-"+name,
+	).Scan(&envID); err == pgx.ErrNoRows {
+		// The (project_id, name) pair is taken by an existing environment. That is
+		// a 409 rather than a reuse: silently adopting someone else's environment
+		// would hand the box an identity that already owns other resources.
+		respondError(c, http.StatusConflict, "an environment with that name already exists in this project; pick another box name")
+		return models.Box{}, false
+	} else if err != nil {
+		respondError(c, http.StatusInternalServerError, "failed to create box environment")
+		return models.Box{}, false
+	}
+
+	var b models.Box
+	row := tx.QueryRow(c.Request.Context(),
+		`INSERT INTO boxes (project_id, environment_id, name, image, profile, region,
+		                    status, ttl_seconds, spend_cap_rub, created_by)
+		 VALUES ($1, $2, $3, $4, $5, $6, 'Requested', $7, $8, $9)
+		 RETURNING `+boxColumns,
+		projectID, envID, name, image, profile, req.Region, ttl, req.SpendCapRub, actorID,
+	)
+	if err := scanBox(row, &b); err != nil {
+		// The partial unique index on (project_id, name) WHERE status <> 'Deleted'
+		// is what refuses a duplicate live name — the DATABASE refuses it, so two
+		// racing replicas cannot both win.
+		respondError(c, http.StatusConflict, "a box with that name already exists in this project")
+		return models.Box{}, false
+	}
+	if err := tx.Commit(c.Request.Context()); err != nil {
+		respondError(c, http.StatusInternalServerError, "failed to commit box creation")
+		return models.Box{}, false
+	}
+	return b, true
 }
 
 // DeleteBox marks the box Deleting and enqueues DeleteBox.
@@ -495,13 +513,24 @@ func (h *Handler) DeleteBox(c *gin.Context) {
 	}
 
 	// Status moves to Deleting BEFORE the operation is enqueued so a box being
-	// torn down is never handed out as live by a concurrent read. Slice 2 adds
-	// the other half of this ordering: revoking every live box session here too,
-	// so an SSH credential cannot outlive the enqueue.
+	// torn down is never handed out as live by a concurrent read.
 	if _, err := h.pool.Exec(c.Request.Context(),
 		`UPDATE boxes SET status = 'Deleting', updated_at = now() WHERE id = $1`, b.ID,
 	); err != nil {
 		respondError(c, http.StatusInternalServerError, "failed to mark box deleting")
+		return
+	}
+
+	// EVERY LIVE SESSION IS REVOKED BEFORE THE ENQUEUE, and the order is the
+	// point. An operation waits in the queue for as long as a worker takes to poll
+	// it, so a credential revoked after the enqueue stays usable for exactly that
+	// window — a caller could keep working inside a body the customer has been
+	// told is gone, and nothing would look wrong because both steps succeeded.
+	// A failure here therefore aborts the delete rather than being logged: a
+	// teardown that could not withdraw the credential must not proceed.
+	revoked, err := h.revokeBoxSessions(c.Request.Context(), b.ID)
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, "failed to revoke box sessions")
 		return
 	}
 
@@ -519,7 +548,11 @@ func (h *Handler) DeleteBox(c *gin.Context) {
 		claims.UserID, projectID, op.ID, models.ActionDeleteBox, models.ResourceKindBox, b.Name, auditMeta,
 	)
 
-	c.JSON(http.StatusAccepted, gin.H{"operation": op, "message": "box deletion queued"})
+	c.JSON(http.StatusAccepted, gin.H{
+		"operation":        op,
+		"sessions_revoked": revoked,
+		"message":          "box deletion queued",
+	})
 }
 
 // SuspendBox enqueues SuspendBox (freeze; billing for compute stops).
@@ -557,13 +590,28 @@ func (h *Handler) SuspendBox(c *gin.Context) {
 		return
 	}
 
+	// Same ordering rule as DeleteBox, for the same reason and one more: a
+	// suspended box is frozen, so a credential that survived the enqueue would open
+	// nothing — until the box is resumed, at which point the credential the
+	// customer believed was withdrawn works again. Revoking here means resume
+	// hands out a fresh one rather than reviving an old one.
+	revoked, err := h.revokeBoxSessions(c.Request.Context(), b.ID)
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, "failed to revoke box sessions")
+		return
+	}
+
 	op, err := h.enqueueBoxOperation(c.Request.Context(), claims.UserID, b,
 		models.ActionSuspendBox, models.SuspendBoxPayload{BoxID: b.ID, Reason: "user"})
 	if err != nil {
 		respondError(c, http.StatusInternalServerError, "failed to create operation")
 		return
 	}
-	c.JSON(http.StatusAccepted, gin.H{"operation": op, "message": "box suspend queued"})
+	c.JSON(http.StatusAccepted, gin.H{
+		"operation":        op,
+		"sessions_revoked": revoked,
+		"message":          "box suspend queued",
+	})
 }
 
 type resumeBoxRequest struct {

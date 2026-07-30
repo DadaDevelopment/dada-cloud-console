@@ -272,6 +272,48 @@ func RecordBoxClientReady(pool string, total time.Duration) {
 	boxClientReadyDuration.WithLabelValues(pool).Observe(total.Seconds())
 }
 
+// RecordBoxAttach records one attach of a managed resource to a running box.
+//
+// d must be measured to a USABLE CREDENTIAL, not to the API response: the number
+// that matters to an agent mid-flight is when it can open the connection, and an
+// attach that answers fast and injects slowly is the failure this histogram exists
+// to make visible.
+func RecordBoxAttach(resource, result string, d time.Duration) {
+	boxAttachTotal.WithLabelValues(resource, result).Inc()
+	if result == "success" {
+		boxAttachDuration.WithLabelValues(resource).Observe(d.Seconds())
+	}
+}
+
+// RecordBoxExpose records one expose, from the request to the first public 200.
+// cert is wildcard|acme.
+func RecordBoxExpose(cert string, d time.Duration) {
+	boxExposeDuration.WithLabelValues(cert).Observe(d.Seconds())
+}
+
+// RecordBoxCrystallization records one crystallization attempt. result is
+// success|failed|rolled_back and stage is the stage it ended in.
+func RecordBoxCrystallization(result, stage string, d time.Duration) {
+	boxCrystallizations.WithLabelValues(result, stage).Inc()
+	boxCrystallizeDuration.WithLabelValues(result).Observe(d.Seconds())
+}
+
+// RecordBoxDestroy records one destroyed box by cause (user|ttl|spend_cap|abuse|
+// crystallized).
+func RecordBoxDestroy(cause string) { boxDestroys.WithLabelValues(cause).Inc() }
+
+// SetBoxPoolGauges publishes the warm pool's free and target counts.
+//
+// Only the pool controller may call this. The boxes table cannot answer either
+// number — its rows are CLAIMED boxes, and a warm slot is by definition not
+// claimed — so counting live boxes here would publish nearly the inverse of the
+// truth (a full fleet with no spare reading as maximum availability). That is why
+// internal/box.WarmPool declares Available and Target at all.
+func SetBoxPoolGauges(image, region string, available, target int) {
+	boxPoolAvailable.WithLabelValues(image, region).Set(float64(available))
+	boxPoolTarget.WithLabelValues(image, region).Set(float64(target))
+}
+
 // RecordBoxCrystallizeStateLoss records state a crystallization failed to carry.
 // Any non-zero value is a critical alert: the promise is that the same object
 // continues living.

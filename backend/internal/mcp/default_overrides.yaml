@@ -65,15 +65,34 @@ keep:
   # of a disposable body's life, not the loss of a customer's deployment, and an
   # agent that cannot release a box it created leaks paid capacity.
   #
-  # Slice 2 replaces createBox/resumeBox with the single-call boxUp door and adds
-  # listAllBoxes (cross-project), getBoxConnection and getBoxCatalog.
+  # boxUp is the single-call door and the one an agent should reach for: one call
+  # returns a body that has already run a command, its coordinates, a one-time
+  # credential and the measured time to ready. createBox stays exposed because it is
+  # the asynchronous form for a caller that does not want to hold a request open.
+  #
+  # attachBoxDatabase, exposeBox and crystallizeBox are the three verbs that make a
+  # box a product rather than a shell: a database mid-flight, a public port, and the
+  # promotion into something permanent. crystallizeBox is safe to expose despite
+  # being irreversible-ish because it is gated on ack_monthly_charge — the agent
+  # cannot bill the customer monthly by accident.
+  #
+  # NOT exposed, deliberately: nothing that runs a command. Also no session-token
+  # minting tool beyond getBoxConnection, whose whole output is coordinates.
   - listBoxes
   - createBox
+  - boxUp
   - getBoxState
+  - getBoxConnection
+  - getBoxCatalog
   - resumeBox
   - suspendBox
   - extendBox
   - deleteBox
+  - attachBoxDatabase
+  - listBoxAttachments
+  - exposeBox
+  - crystallizeBox
+  - listBoxCrystallizations
 
 rename: {}
 annotate: {}

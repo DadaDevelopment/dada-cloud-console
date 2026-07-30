@@ -960,6 +960,42 @@
                 }
             }
         },
+        "/box/catalog": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Returns the frozen catalog of warm box images and size profiles. Deliberately not a table: a size is only real if the pool controller has pre-warmed bodies of that shape, and a warm image is only real if it has been pulled and digest-pinned, so adding an entry is a code change plus a deploy — the same event that rolls the pool config and the image pin. Read-only.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "box"
+                ],
+                "summary": "List the box images and size profiles",
+                "operationId": "getBoxCatalog",
+                "responses": {
+                    "200": {
+                        "description": "object with images and sizes",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/box/leads": {
             "post": {
                 "description": "Stores one funnel event from the Dada Box private-preview landing (page_view, demo_run, box_requested, crystallize_intent) into box_funnel_events, and the lead itself into box_leads when the event is box_requested. Unauthenticated marketing ingest, called server-to-server by the landing's route handler, rate-limited per client IP. `vid` is the opaque dada_vid visitor cookie and must be a UUID -- never an email or any other personal datum. A page_view is deduplicated per vid within a 30-minute session window and then reports recorded=false. The request code (claim) is minted by the landing so the visitor still gets one when this endpoint is down.",
@@ -2953,6 +2989,107 @@
                 }
             }
         },
+        "/projects/{projectId}/box-up": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "The single-call door to a box. Creates the box and its owning environment, claims a pre-warmed body, binds the caller's identity to it, and returns only once a command has actually executed inside it and returned success — not when the API answered and not when a port accepted. The response carries the connection coordinates, a one-time \"dadabox_\" session token (shown exactly once, never retrievable again), a ready-to-paste mcpServers snippet pointing at the BOX's own endpoint, and the measured time to ready broken down by phase. Synchronous rather than 202-with-an-operation because a worker poll is longer than the entire time-to-ready budget.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "box"
+                ],
+                "summary": "Bring up a box in one call (synchronous)",
+                "operationId": "boxUp",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Project UUID",
+                        "name": "projectId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Box specification (every field optional)",
+                        "name": "body",
+                        "in": "body",
+                        "schema": {
+                            "$ref": "#/definitions/api.boxUpRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "object with the ready box, its connection coordinates, the one-time token and the measured time to ready",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "409": {
+                        "description": "a live box with that name already exists in this project",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "503": {
+                        "description": "no warm box available, or the box runtime is not configured",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/projects/{projectId}/boxes": {
             "get": {
                 "security": [
@@ -3217,6 +3354,539 @@
                     },
                     "404": {
                         "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/projects/{projectId}/boxes/{boxName}/attach/database": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Provisions a managed PostgreSQL database and role OUTSIDE the box and injects the connection credential into the box's env file (mode 0600, root). The box can then open it immediately — the very next command inside the box sees DATABASE_URL. The database is deliberately not inside the box: a disposable body must not own the customer's data, so deleting or crystallizing the box never destroys it. The response lists WHICH env keys were injected and never their values.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "box"
+                ],
+                "summary": "Attach a managed Postgres database to a running box",
+                "operationId": "attachBoxDatabase",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Project UUID",
+                        "name": "projectId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Box name",
+                        "name": "boxName",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Attachment name and optional env prefix",
+                        "name": "body",
+                        "in": "body",
+                        "schema": {
+                            "$ref": "#/definitions/api.attachBoxDatabaseRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "object with the attachment and the injected env key names",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "409": {
+                        "description": "the box is not in a phase that can accept an attachment",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "503": {
+                        "description": "box runtime or managed Postgres not configured",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/projects/{projectId}/boxes/{boxName}/attachments": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Returns the box's attachments with the env key NAMES each one injected. Never any values: the credentials exist only inside the box's 0600 env file, which is also the only thing crystallization carries. Read-only.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "box"
+                ],
+                "summary": "List the resources attached to a box",
+                "operationId": "listBoxAttachments",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Project UUID",
+                        "name": "projectId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Box name",
+                        "name": "boxName",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "object with an attachments array",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/projects/{projectId}/boxes/{boxName}/connection": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Returns the box's SSH and MCP coordinates plus the ready-to-paste mcpServers snippet. Pass new_session=true to mint a FRESH one-time \"dadabox_\" token; the previous one is not revealed because only its sha256 is stored. Minting a new session does not revoke the old ones — use suspend or delete for that, both of which revoke every live session before they enqueue anything.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "box"
+                ],
+                "summary": "Get a box's connection coordinates",
+                "operationId": "getBoxConnection",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Project UUID",
+                        "name": "projectId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Box name",
+                        "name": "boxName",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "boolean",
+                        "description": "Mint a fresh one-time session token",
+                        "name": "new_session",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "object with connection coordinates",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "503": {
+                        "description": "box runtime not configured",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/projects/{projectId}/boxes/{boxName}/crystallizations": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Returns every crystallization attempt for the box with its stored verification report. `verified` is separate from `status` on purpose: an attempt can finish while verification failed, and a dashboard that could not tell \"finished\" from \"correct\" would make the only critical box alert unreadable. Read-only.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "box"
+                ],
+                "summary": "List a box's crystallization attempts",
+                "operationId": "listBoxCrystallizations",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Project UUID",
+                        "name": "projectId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Box name",
+                        "name": "boxName",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "object with a crystallizations array",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/projects/{projectId}/boxes/{boxName}/crystallize": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Materializes the box's USERLAND onto a real VM booted from a standard OS slug: the VM keeps its own kernel, init and bootloader, and only the application half of the filesystem is applied onto it. Named volumes are restored by mount path, env is written out of band at 0600 root, and the entrypoint and published ports become a systemd unit — the result runs under systemd with no Docker, no compose and no Portainer agent, because a crystallized VM is not a container host. Then it is VERIFIED: file-manifest equality on (path, size, mode, sha256), equality of the listening-socket set before the freeze and after the cutover, an sha256-per-key env comparison, and an end-to-end HTTP probe. Never \"rsync exited 0\" — an rsync that copied nothing exits 0. Requires ack_monthly_charge: promotion turns a per-minute body into a monthly VM bill, so consent is a gate and the answer is 409 without it. The full verification report, including the exclusion lists it applied, is returned and stored.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "box"
+                ],
+                "summary": "Crystallize a box into a permanent VM (ADR-019)",
+                "operationId": "crystallizeBox",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Project UUID",
+                        "name": "projectId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Box name",
+                        "name": "boxName",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Target name, domain and the monthly-charge acknowledgement",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/api.crystallizeBoxRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "object with the verification report and the carry manifest",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "409": {
+                        "description": "the monthly charge was not acknowledged, or the box is not in a promotable phase",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "the materialization completed but verification failed; the report says which check",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "503": {
+                        "description": "box runtime not configured",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/projects/{projectId}/boxes/{boxName}/expose": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Publishes one port serving inside the box on a hostname the PLATFORM assigns under its wildcard. The caller cannot choose the hostname: custom domains are a crystallization feature, and a throwaway body with an arbitrary name is a phishing surface. Returns the assigned hostname and the URL that answers it, plus the measured time from the request to the first real 200 — not to \"the route was created\". Responses carry X-Robots-Tag: noindex, because an ephemeral body must not accumulate search presence it will outlive by hours.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "box"
+                ],
+                "summary": "Publish a port of a box on a platform hostname",
+                "operationId": "exposeBox",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Project UUID",
+                        "name": "projectId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Box name",
+                        "name": "boxName",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "The port serving inside the box",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/api.exposeBoxRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "object with the assigned hostname and the URL that answers it",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "409": {
+                        "description": "the box is not in a phase that can publish a port",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "503": {
+                        "description": "box runtime not configured",
                         "schema": {
                             "type": "object",
                             "additionalProperties": {
@@ -13883,6 +14553,19 @@
                 }
             }
         },
+        "api.attachBoxDatabaseRequest": {
+            "type": "object",
+            "properties": {
+                "env_prefix": {
+                    "description": "EnvPrefix lets a box hold two databases without their env keys colliding.",
+                    "type": "string"
+                },
+                "name": {
+                    "description": "Name labels the attachment inside the box's namespace of attachments.",
+                    "type": "string"
+                }
+            }
+        },
         "api.attachHostnameRequest": {
             "type": "object",
             "properties": {
@@ -13905,6 +14588,42 @@
                 "installation_id": {
                     "description": "numeric GitHub installation id",
                     "type": "string"
+                }
+            }
+        },
+        "api.boxUpRequest": {
+            "type": "object",
+            "properties": {
+                "image": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "profile": {
+                    "type": "string"
+                },
+                "region": {
+                    "type": "string"
+                },
+                "session_ttl_hours": {
+                    "description": "SessionTTLHours defaults to 12 and is capped at 168.",
+                    "type": "integer"
+                },
+                "spend_cap_rub": {
+                    "type": "number"
+                },
+                "ssh_public_key": {
+                    "description": "SSHPublicKey is a PUBLIC key: the caller keeps the private half, so the\nplatform stores no customer credential at all.",
+                    "type": "string"
+                },
+                "ttl_seconds": {
+                    "description": "TTLSeconds is when the box goes to SLEEP, not when it is destroyed.",
+                    "type": "integer"
+                },
+                "wait_seconds": {
+                    "description": "WaitSeconds bounds how long the caller is willing to wait, in [0,120]. It is\na bound and not a hint: exceeding it returns a classified failure rather than\na body that arrives after the caller gave up.",
+                    "type": "integer"
                 }
             }
         },
@@ -14370,6 +15089,27 @@
                 }
             }
         },
+        "api.crystallizeBoxRequest": {
+            "type": "object",
+            "properties": {
+                "ack_monthly_charge": {
+                    "description": "AckMonthlyCharge is consent, not a flag. Without it the answer is 409.",
+                    "type": "boolean"
+                },
+                "app_server_name": {
+                    "description": "AppServerName names the permanent artifact.",
+                    "type": "string"
+                },
+                "domain": {
+                    "description": "Domain is the address the crystallized artifact answers on.",
+                    "type": "string"
+                },
+                "probe_path": {
+                    "description": "ProbePath is the path the end-to-end probe requests.",
+                    "type": "string"
+                }
+            }
+        },
         "api.deployOperationStatusResponse": {
             "type": "object",
             "properties": {
@@ -14406,6 +15146,15 @@
                 },
                 "operation_id": {
                     "type": "string"
+                }
+            }
+        },
+        "api.exposeBoxRequest": {
+            "type": "object",
+            "properties": {
+                "port": {
+                    "description": "Port is the port SERVING INSIDE the box. There is no hostname field on\npurpose — see the file comment.",
+                    "type": "integer"
                 }
             }
         },
