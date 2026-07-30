@@ -213,3 +213,20 @@ what is actually in the DOM?* Anything that mounts after data loads is not there
 round-trips") proves the backend, not the feature. I wrote "still unverified: the joyride
 spotlight itself" in the notes and then treated the feature as shipped. If a gap is worth
 writing down, it is worth closing before the next thing — the gap was the whole feature.
+
+## 2026-07-31 — A 404 on a bare brand domain can be a reservation, not a bug
+
+I found `dada-tuda.ru` answering 404 behind the ingress controller's self-signed certificate,
+read it as an obvious defect, and claimed the host for the cloud's marketing landing. The
+domain was earmarked for a different product. Nobody asked me to consolidate the brand apex;
+I inferred it from "the bare domain is broken."
+
+The measurements I took were all correct and all beside the point. Zero pages in Yandex
+search, `MAIN_PAGE_ERROR` since 07-22, no other Ingress claiming the host — every one of
+those says nothing was *displaced*, which is a different question from whether the host was
+*mine to take*. Empty is not the same as unclaimed.
+
+**Rule.** A bare brand domain is a product decision, not an infrastructure one. Subdomains
+are fair game inside the platform's own zone; the apex and `www` are the brand's front door.
+Before claiming one, ask what is supposed to live there — and if the answer is "nothing
+yet," that is still an answer someone else gets to give.
