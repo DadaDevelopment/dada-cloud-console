@@ -149,6 +149,13 @@ type Handler struct {
 	// boxFunnelLimiter bounds the unauthenticated Dada Box fake-door ingest
 	// (RecordBoxFunnelEvent). Never nil.
 	boxFunnelLimiter *boxFunnelLimiter
+
+	// boxStack is the box runtime: the LocalRuntime adapter, its warm pool, its
+	// attach provider and its edge. nil when BOX_LOCAL_ROOT is unset, in which case
+	// every box runtime verb answers 503 with a reason — the same degradation as
+	// Portainer, Kanister and the S3 resolvers. See box_runtime.go, and note that
+	// the production adapter per ADR-019 is a Pod in the existing cluster, NOT this.
+	boxStack *boxRuntimeStack
 }
 
 func (h *Handler) optionalClaims(c *gin.Context) (*auth.Claims, bool) {
@@ -303,6 +310,11 @@ func NewHandler(pool *pgxpool.Pool, cfg *config.Config) *Handler {
 	} else {
 		h.agentChatTools = toolset
 	}
+	// Dada Box runtime (ADR-019). No-op unless BOX_LOCAL_ROOT is set, so tests and
+	// every production deployment that has not opted in are untouched.
+	h.initBoxRuntime(cfg)
+	h.StartBoxSessionSweeper(context.Background())
+
 	if h.agentChatLLM.Configured() {
 		log.Printf("agent-chat: gateway configured at %s, model %s", cfg.AgentChatGatewayURL, cfg.AgentChatModel)
 	} else {

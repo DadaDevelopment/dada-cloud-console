@@ -238,6 +238,28 @@ func SetupRouter(pool *pgxpool.Pool, cfg *config.Config) *gin.Engine {
 	// by a landing page, not something an agent calls.
 	r.POST("/api/v1/box/leads", h.RecordBoxFunnelEvent)
 
+	// The box's OWN door: run a command inside the box, authenticated by the box's
+	// "dadabox_" session token rather than by a console session.
+	//
+	// Registered only when the box runtime is configured, and carrying no swaggo
+	// annotation — the same construction as the box-agent webhooks above, and the
+	// guard is what makes the missing annotation safe: under the coverage test's
+	// config no runtime is configured, so these routes are not registered and the
+	// gate has nothing to demand a spec entry for. It also keeps them out of
+	// swagger.json and therefore out of the REFLECTED MCP toolset, whose standalone
+	// server curates by denylist — so an annotated exec endpoint would become an
+	// agent-callable "run a command in a box" tool on our control plane by default.
+	//
+	// That is a product decision (D6), not a security nicety: the customer's agent
+	// keeps its brain local and talks to the box, so their code and model
+	// credentials never traverse our API. In production this surface is
+	// cmd/box-broker at the box's own hostname (backlog phase 4).
+	if h.boxStack != nil {
+		r.POST("/api/v1/box/session/exec", h.BoxSessionExec)
+		r.GET("/api/v1/box/session/info", h.BoxSessionInfo)
+		log.Printf("box: session surface enabled at /api/v1/box/session/{exec,info} (LocalRuntime stand-in for cmd/box-broker)")
+	}
+
 	// Embedded MCP server at /mcp (Streamable HTTP transport).
 	// Each tool call self-proxies to cfg.MCPSelfURL/api/v1/... so auth and all
 	// middleware apply unchanged. Disabled via MCP_ENABLED=false.
@@ -352,6 +374,24 @@ func SetupRouter(pool *pgxpool.Pool, cfg *config.Config) *gin.Engine {
 		// (migration 063). Read-only, member-visible: a customer must be able to see
 		// what they are being billed for without asking us.
 		api.GET("/projects/:projectId/boxes/:boxName/usage", h.GetBoxUsage)
+
+		// The single-call door. The path is /box-up rather than /boxes/up because
+		// gin's router refuses a static segment beside an existing wildcard at the
+		// same position, and /boxes/:boxName already owns that slot. Worth stating so
+		// nobody "tidies" it into a panic at startup.
+		api.POST("/projects/:projectId/box-up", h.BoxUp)
+		api.GET("/projects/:projectId/boxes/:boxName/connection", h.GetBoxConnection)
+		api.GET("/box/catalog", h.GetBoxCatalog)
+
+		// attach / expose / crystallize. These three drive the runtime seams
+		// synchronously; see the file comments in boxes_attach.go and
+		// boxes_crystallize.go for exactly where that diverges from the async
+		// operations convention and why.
+		api.POST("/projects/:projectId/boxes/:boxName/attach/database", h.AttachBoxDatabase)
+		api.GET("/projects/:projectId/boxes/:boxName/attachments", h.ListBoxAttachments)
+		api.POST("/projects/:projectId/boxes/:boxName/expose", h.ExposeBox)
+		api.POST("/projects/:projectId/boxes/:boxName/crystallize", h.CrystallizeBox)
+		api.GET("/projects/:projectId/boxes/:boxName/crystallizations", h.ListBoxCrystallizations)
 
 		// Apps
 		api.GET("/projects/:projectId/environments/:envId/apps", h.ListApps)

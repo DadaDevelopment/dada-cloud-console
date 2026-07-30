@@ -459,6 +459,37 @@ type Config struct {
 	// connect returns 409 payments_not_configured instead of attempting OAuth.
 	YooKassaPartnerClientID     string // YOOKASSA_PARTNER_CLIENT_ID
 	YooKassaPartnerClientSecret string // YOOKASSA_PARTNER_CLIENT_SECRET
+
+	// Dada Box runtime (ADR-019). ONE switch turns the whole feature on:
+	// BoxLocalRoot empty means every box verb answers 503 with a reason, the same
+	// way Portainer, Kanister and the S3 resolvers degrade when unconfigured.
+	//
+	// The variable is named BOX_LOCAL_ROOT rather than BOX_ROOT on purpose. It
+	// enables internal/box.LocalRuntime, the single-host adapter — NOT the
+	// production adapter, which runs a box as a Pod in the existing cluster. A
+	// values file must not be able to switch the local adapter on while reading as
+	// though it switched on "the box runtime".
+	BoxLocalRoot             string // BOX_LOCAL_ROOT (empty = box runtime disabled)
+	BoxWarmPoolSize          int    // BOX_WARM_POOL_SIZE (default 2)
+	BoxWarmImage             string // BOX_WARM_IMAGE (default warm-v1, must exist in boxcatalog)
+	BoxRegion                string // BOX_REGION (pool key; default "")
+	BoxHostnameBase          string // BOX_HOSTNAME_BASE (platform wildcard for expose)
+	BoxCrystallizeDomainBase string // BOX_CRYSTALLIZE_DOMAIN_BASE (default domain for a crystallized VM)
+	// BoxSessionBaseURL is where the box's own session surface answers. Defaults to
+	// MCPSelfURL and then to loopback, so there is one answer to "where does this
+	// process serve requests" rather than two that can disagree.
+	BoxSessionBaseURL string // BOX_SESSION_BASE_URL
+
+	// Managed Postgres the attach path provisions into. It lives OUTSIDE the box on
+	// purpose: a disposable body must not own the customer's database.
+	// BoxManagedPGURL is a superuser DSN used by the control plane and never
+	// injected anywhere; BoxManagedPGHost/Port are how the BOX reaches the cluster,
+	// kept separate because the platform's path to a database and the tenant's are
+	// routinely different and conflating them yields a DSN that works from the
+	// control plane and fails inside the guest.
+	BoxManagedPGURL  string // BOX_MANAGED_PG_URL
+	BoxManagedPGHost string // BOX_MANAGED_PG_HOST
+	BoxManagedPGPort int    // BOX_MANAGED_PG_PORT
 }
 
 // Load reads configuration from environment variables.
@@ -608,6 +639,17 @@ func Load() (*Config, error) {
 		YooKassaSendReceipt:         getEnv("YOOKASSA_SEND_RECEIPT", "false") == "true",
 		YooKassaPartnerClientID:     getEnv("YOOKASSA_PARTNER_CLIENT_ID", ""),
 		YooKassaPartnerClientSecret: getEnv("YOOKASSA_PARTNER_CLIENT_SECRET", ""),
+
+		BoxLocalRoot:             getEnv("BOX_LOCAL_ROOT", ""),
+		BoxWarmPoolSize:          int(getEnvInt64("BOX_WARM_POOL_SIZE", 2)),
+		BoxWarmImage:             getEnv("BOX_WARM_IMAGE", "warm-v1"),
+		BoxRegion:                getEnv("BOX_REGION", ""),
+		BoxHostnameBase:          getEnv("BOX_HOSTNAME_BASE", "box.dada-tuda.ru"),
+		BoxCrystallizeDomainBase: getEnv("BOX_CRYSTALLIZE_DOMAIN_BASE", "dada-tuda.ru"),
+		BoxSessionBaseURL:        getEnv("BOX_SESSION_BASE_URL", ""),
+		BoxManagedPGURL:          getEnv("BOX_MANAGED_PG_URL", ""),
+		BoxManagedPGHost:         getEnv("BOX_MANAGED_PG_HOST", "127.0.0.1"),
+		BoxManagedPGPort:         int(getEnvInt64("BOX_MANAGED_PG_PORT", 5432)),
 	}
 
 	if cfg.DBURL == "" {
