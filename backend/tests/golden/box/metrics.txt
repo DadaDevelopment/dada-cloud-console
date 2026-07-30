@@ -1,0 +1,27 @@
+dada_box_active_minutes_total counter plan
+dada_box_attach_duration_seconds histogram resource
+dada_box_attach_total counter resource,result
+dada_box_client_ready_duration_seconds histogram pool
+dada_box_crystallizations_pending_age_seconds gauge 
+dada_box_crystallizations_total counter result,stage
+dada_box_crystallize_duration_seconds histogram result
+dada_box_crystallize_state_loss_total counter kind
+dada_box_destroys_total counter cause
+dada_box_expose_duration_seconds histogram cert
+dada_box_failed_recent gauge 
+dada_box_funnel_events_total counter event,locale
+dada_box_idle_minutes_total counter plan
+dada_box_meter_errors_total counter 
+dada_box_metered_minutes_lag_seconds gauge 
+dada_box_phase_duration_seconds histogram phase,pool
+dada_box_pool_available gauge image,region
+dada_box_pool_misses_total counter image
+dada_box_pool_refill_duration_seconds histogram image
+dada_box_pool_target gauge image,region
+dada_box_ready_budget_breaches_total counter pool,phase
+dada_box_ready_duration_seconds histogram pool,region
+dada_box_repeat_use_7d_ratio gauge 
+dada_box_spawns_total counter result,pool,reason
+dada_box_spend_cap_hits_total counter action
+dada_box_spend_cap_max_ratio gauge 
+dada_boxes gauge phase

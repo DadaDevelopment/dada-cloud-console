@@ -1,4 +1,4 @@
-.PHONY: help dev dev-db dev-backend dev-frontend dev-init stop clean build-backend build-gateway build-frontend test-backend test helm-lint helm-render
+.PHONY: help dev dev-db dev-backend dev-frontend dev-init stop clean build-backend build-gateway build-frontend test-backend test-box test migrate helm-lint helm-render
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}'
@@ -37,6 +37,12 @@ build-frontend: ## Build frontend for production
 
 test-backend: ## Run backend tests
 	@cd backend && go test ./...
+
+test-box: ## Run Dada Box tests (ready path, readiness, pool, metric surface)
+	@cd backend && go test ./internal/box/... ./internal/metrics/... -count=1
+
+migrate: ## Apply DB migrations (uses DATABASE_URL or TEST_DATABASE_URL)
+	@cd backend && go run ./cmd/migrate
 
 test: test-backend ## Run all tests (backend unit + golden manifests)
 	@echo "All tests passed."

@@ -58,4 +58,83 @@ spec:
             description: >-
               The console /metrics collector is failing its state queries; the resource-health
               alerts above may be blind. Check the backend logs.
+    - name: dada-cloud-console.box
+      rules:
+        # Dada Box. Time to ready is the product claim marketing cannot
+        # compensate for, so it gets two alerts: a breach counter that fires fast
+        # and names the guilty phase, and an SLO regression on the p95 that fires
+        # slower but catches a gradual slide the counter would not.
+        - alert: BoxReadyBudgetBreached
+          expr: sum by (phase) (rate(dada_box_ready_budget_breaches_total[10m])) > 0
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Box spawns over the time-to-ready budget (phase {{`{{ $labels.phase }}`}})"
+            description: >-
+              Boxes are taking longer than the {{ .Values.metrics.alerts.boxReadyBudgetSeconds }}s
+              time-to-ready budget, and {{`{{ $labels.phase }}`}} is the phase consuming the time.
+              A box that is not ready in seconds is not a body for an agent — this is the core
+              product claim regressing. Check dada_box_phase_duration_seconds for that phase and
+              dada_box_pool_available: the usual cause is an exhausted warm pool turning every
+              spawn into a cold start.
+        - alert: BoxReadySLORegressed
+          expr: histogram_quantile(0.95, sum by (le) (rate(dada_box_ready_duration_seconds_bucket[30m]))) > {{ .Values.metrics.alerts.boxReadyP95Seconds }}
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Box time-to-ready p95 over SLO"
+            description: >-
+              p95 time to ready is {{`{{ $value | humanizeDuration }}`}}, over the
+              {{ .Values.metrics.alerts.boxReadyP95Seconds }}s SLO. Individual spawns may still be
+              inside the hard budget, so the breach counter can be quiet while this fires — that is
+              the point: it catches a gradual slide before customers do.
+        - alert: BoxPoolExhausted
+          expr: dada_box_pool_available == 0
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Box warm pool empty ({{`{{ $labels.image }}`}}/{{`{{ $labels.region }}`}})"
+            description: >-
+              No pre-warmed boxes left for image {{`{{ $labels.image }}`}} in
+              {{`{{ $labels.region }}`}}, so every spawn now pays a cold start. Check the pool
+              controller and dada_box_pool_refill_duration_seconds.
+        - alert: BoxCrystallizeStateLoss
+          expr: increase(dada_box_crystallize_state_loss_total[1h]) > 0
+          for: 0m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Crystallization lost {{`{{ $labels.kind }}`}}"
+            description: >-
+              A crystallization failed to carry over {{`{{ $labels.kind }}`}}. The promise is that
+              the same object continues living; one loss teaches the customer not to trust the
+              graduation path, which severs the monetization ladder at its second step. Treat as
+              customer-visible data loss: find the operation, read its validation_result
+              equivalence report, and contact the customer before they find out themselves.
+        - alert: BoxMeterStale
+          expr: dada_box_metered_minutes_lag_seconds > {{ .Values.metrics.alerts.boxMeterStaleSeconds }}
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Box minute meter stalled"
+            description: >-
+              The newest metered box-minute is {{`{{ $value | humanizeDuration }}`}} old. Boxes bill
+              per active minute, so a stalled meter is silent revenue loss that no monthly
+              reconciliation will surface in time. Check dada_box_meter_errors_total and the meter
+              ticker in the backend.
+        - alert: BoxFailedRecent
+          expr: dada_box_failed_recent > 0
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Box(es) failing"
+            description: >-
+              {{`{{ $value }}`}} box(es) reached a failed state in the last hour. An agent asked for
+              a body and did not get one. Check operations.error_message for the box actions and
+              the box-agent logs on the host.
 {{- end }}

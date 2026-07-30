@@ -52,52 +52,84 @@
 
 Делается до того, как рантайм существует: тогда остальные эмитят в определённый контракт.
 
-### Предусловие CI (subagent: executor)
+### Предусловие CI (subagent: executor) — ГОТОВО
 
-- [ ] `postgres:16-alpine` в pod template `Jenkinsfile` (trust-auth, `tmpfs` под данные)
-- [ ] в стадии `Backend tests` (`Jenkinsfile:367`) прогнать миграции и выставить
-      `TEST_DATABASE_URL`
-- [ ] guard-тест, **падающий** при `CI=true` и пустом `TEST_DATABASE_URL`
-- [ ] проверить, что ранее молча скипавшиеся `advisory_lock_test.go`,
-      `billing_quota_gate_test.go`, `storage_cap_test.go` теперь реально исполняются
+- [x] `postgres:16-alpine` в pod template `Jenkinsfile` (trust-auth, дефолтный каталог данных —
+      **не** `/dev/shm`, там 64 МиБ по умолчанию и свежий кластер с WAL его переполняет)
+- [x] `backend/cmd/migrate` — применяет миграции и **сам ретраит подключение**, поэтому в CI не
+      нужен ни `psql`, ни угаданный `sleep`: Jenkins не ждёт готовности сайдкара перед шагами
+- [x] в стадии `Backend tests` прогон миграций и `TEST_DATABASE_URL`
+- [x] `TestCIRequiresDatabase` — **падает** при `CI=true` и пустом `TEST_DATABASE_URL`, локально
+      скипается (проверено в обе стороны)
+- [x] проверено на настоящем postgres 16: 62 миграции применяются,
+      **66 тестов в `internal/api`, которые молча скипались, теперь исполняются и проходят**
+      (212 PASS с базой против 146 без)
+- [x] `make test-box`, `make migrate`
+- [x] стадия фронтенда больше не съедает провал линта и типов. Форма
+      `probe && npm run lint || echo "No lint script — skip"` привязывала `||` ко всей цепочке,
+      поэтому настоящая ошибка линта давала exit 0 с обманчивым сообщением про отсутствующий
+      скрипт. Заменено на `if/else`. **Доказано воспроизведением:** с внесённой настоящей ошибкой
+      старая форма даёт 0, новая — 1. Это и была системная причина, по которой ошибка
+      `react-hooks/set-state-in-effect` в `box-demo.tsx` дожила до ветки
+- [ ] **найдено попутно, не блокирует:** у `gitops-agent` есть тесты с БД, которые в CI
+      скипаются — стадия `GitOps-agent tests` не получает `TEST_DATABASE_URL`, его выставляет
+      только `Backend tests`. На чистой базе там **6–7 падений, и счёт плавает** между прогонами,
+      то есть тесты зависят от порядка и делят состояние. Проверено: на `origin/main` — 7,
+      на этой ветке — 6, и ни один файл `gitops-agent` здесь не изменён. Когда кто-нибудь даст
+      этой стадии базу, сборка станет красной. Починка — отдельная задача в своём модуле:
+      изолировать состояние между тестами, потом дать стадии базу и держать её зелёной
 
-### Контракт метрик (subagent: executor)
 
-- [ ] `backend/internal/metrics/box.go`: `boxReadyBudget = 10s`,
-      `dada_box_ready_duration_seconds{pool,region}` с бакетами
-      `0.5,1,2,3,5,8,10,15,20,30,45,60,120`, `dada_box_phase_duration_seconds{phase,pool}`,
-      `dada_box_ready_budget_breaches_total{pool,phase}`
-- [ ] gauge из коллектора: `dada_boxes{phase}`, `dada_box_failed_recent`,
-      `dada_box_pool_{available,target}`, `dada_box_spend_cap_max_ratio`,
-      `dada_box_crystallizations_pending_age_seconds`
-- [ ] счётчики: `dada_box_spawns_total{result,pool,reason}`, `dada_box_destroys_total{cause}`,
-      `dada_box_pool_misses_total`, `dada_box_active_minutes_total{plan}`,
-      `dada_box_idle_minutes_total{plan}`, `dada_box_spend_cap_hits_total{action}`,
-      `dada_box_crystallizations_total{result,stage}`,
-      **`dada_box_crystallize_state_loss_total{kind}`**, `dada_box_funnel_events_total{event,locale}`
-- [ ] golden поверхности метрик: `backend/internal/box/metrics_golden_test.go` +
-      `backend/tests/golden/box/metrics.txt` (имя, тип, отсортированный набор лейблов)
-- [ ] тест замыкания алерт↔метрика: извлечь все `dada_[a-z_]+` из
-      `helm/.../prometheusrule.yaml` и проверить, что каждая зарегистрирована.
-      Закрывает дыру «переименование молча убивает алерт», в том числе для существующих метрик
-- [ ] группа алертов `dada-cloud-console.box` в `prometheusrule.yaml` под существующим
-      `.Values.metrics.alerts.enabled`. **`BoxCrystallizeStateLoss` — единственный critical**
-- [ ] `docs/runbooks/box-latency-budget.md` по образцу `docs/runbooks/latency-budget.md`
+### Контракт метрик (subagent: executor) — ГОТОВО
 
-### Швы и герметичные тесты (subagent: executor)
+- [x] `backend/internal/metrics/box.go` — 27 метрик, `BoxReadyBudget = 10s`, бакеты
+      `0.5…120` для жизненного цикла и `5…600` для кристаллизации, `RecordBoxReady` с
+      **атрибуцией нарушения бюджета доминирующей фазе** (детерминированный тайбрейк, чтобы
+      порядок обхода map не заставлял алерт мигать)
+- [x] `backend/internal/metrics/box_surface.go` — объявленная поверхность таблицей
+- [x] `TestBoxMetricSurfaceGolden` + `backend/tests/golden/box/metrics.txt`
+- [x] `TestBoxMetricSpecsMatchCollectors` — таблица сверяется с тем, что реально
+      зарегистрировано. **Двухсторонняя защита:** golden ловит расхождение записи с намерением,
+      этот тест ловит расхождение записи с реальностью. Без второго golden пинил бы ложь
+- [x] `TestBoxMetricSurfaceConventions` — суффиксы по типу, запрет лейблов неограниченной
+      кардинальности (`org_id`, `box_id`, …)
+- [x] `TestAlertedMetricsAreDeclared` — статический скан репозитория. **Статический, а не по
+      реестру:** у неиспользованного `CounterVec` нет детей, поэтому проверка по реестру прошла бы
+      при опечатке в имени. Покрывает и существующие алерты
+- [x] группа `dada-cloud-console.box`, 6 алертов, `BoxCrystallizeStateLoss` — единственный critical
+- [x] `values.yaml`: `boxReadyBudgetSeconds`, `boxReadyP95Seconds`, `boxMeterStaleSeconds`
+- [x] `docs/runbooks/box-latency-budget.md`
+- [ ] **осталось:** подключить gauge к циклу коллектора (`dada_boxes{phase}`,
+      `dada_box_failed_recent`, `dada_box_pool_*`, `dada_box_spend_cap_max_ratio`,
+      `dada_box_crystallizations_pending_age_seconds`). Метрики объявлены и запинены, но обновлять
+      их нечем: запросы нужны к таблице `boxes`, которой ещё нет. Делать в фазе 2 вместе с `058`
 
-- [ ] интерфейсы `BoxRuntime`, `WarmPool`, `AttachProvider`, `Crystallizer` +
-      `fakeRuntime`/`fakePool` с задержками и отказами из фикстур.
-      **Все метки времени фаз снимает оркестратор; метка от гостя отвергается**
-- [ ] `backend/internal/box/readypath_golden_test.go` + `backend/tests/golden/box/ready-path.txt` —
-      упорядоченный список шагов критического пути. Добавление последовательного шага роняет PR
-- [ ] `readiness_test.go`: бокс, принимающий TCP, но с канарейкой, вернувшей не-ноль или без
-      тёплого тулчейна, **не готов**
-- [ ] `phases_test.go`: фазы не пересекаются, сумма равна итогу
-- [ ] `budget_test.go`: превышение бюджета логирует WARN и инкрементит счётчик с лейблом
-      **доминирующей** фазы
-- [ ] `pool_test.go`: ровно однократный захват под 100 горутинами; исчерпание отдаёт
-      `ErrPoolExhausted`, а не висит
+### Швы и герметичные тесты (subagent: executor) — ГОТОВО
+
+- [x] `backend/internal/box/box.go` — `BoxRuntime`, `WarmPool`, `AttachProvider`, `Crystallizer`,
+      `CarryManifest` с `preserved|recreated|lost`
+- [x] `phases.go` — `PhaseTimeline`. **У него нет метода, принимающего метку времени от
+      вызывающего** — это и есть весь дизайн: единственный способ закрыть фазу это спросить часы
+      оркестратора в момент события, поэтому время от гостя не может попасть в замер даже случайно
+- [x] `readiness.go` — канарейка отдаёт `key=value`, а не сырые баннеры версий, поэтому разбор
+      точный, а не набор regex по вендорским форматам
+- [x] `pool.go` — `MemoryPool`, референсное поведение: захват ровно однократный, исчерпание отдаёт
+      `ErrPoolExhausted` вместо блокировки
+- [x] `spawn.go` — путь готовности с записью шагов
+- [x] `fake.go` — `FakeClock`, `FakeRuntime`, `NewWarmFixture`. Задержки применяются продвижением
+      часов, а не `sleep`, поэтому тест про 40-секундную загрузку исполняется мгновенно и
+      детерминированно
+- [x] `readypath_golden_test.go` + `backend/tests/golden/box/ready-path.txt` — 8 шагов
+- [x] `TestSpawnIgnoresGuestReportedTime` — гость заявляет время на 26 лет мимо, замер не сдвигается
+- [x] `TestSpawnRefusesToPublishAnInconsistentMeasurement` — часы назад → spawn падает, а не
+      публикует бессмысленную длительность
+- [x] `TestReadinessRequiresTheWarmToolchain`, `TestReadinessRejectsAcceptButUnusable`,
+      `TestCanaryCommandProbesEveryRequiredTool` (команда и список сверяются друг с другом:
+      расхождение в любую сторону молчаливо)
+- [x] `TestPoolClaimIsExactlyOnceUnderConcurrency` — 100 горутин на 10 боксов
+- [x] `TestSpawnClassifiesRejections` — quota / spend_cap / pool_exhausted / холодный образ
+- [x] `TestSpawnOrchestrationOverheadIsNegligible`
+- [x] всё зелёное: `go build ./...`, `go vet ./...`, `gofmt`, 26 пакетов `go test`
 
 ### Воронка (subagent: executor, не зависит ни от чего)
 
