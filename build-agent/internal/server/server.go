@@ -1702,12 +1702,8 @@ func detectPythonContent(raw, path string, depth, score int) (frameworkCandidate
 		framework = "django"
 	case strings.Contains(lower, "flask"):
 		framework = "flask"
-	case strings.Contains(lower, "uvicorn"):
-		framework = "python"
 	default:
-		if framework == "" {
-			return frameworkCandidate{}, false
-		}
+		framework = "python"
 	}
 	build := ""
 	pm, install := pythonPackageManagerFromContent(raw, path)

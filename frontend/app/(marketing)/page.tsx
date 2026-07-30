@@ -225,6 +225,40 @@ export default function HomePage() {
       {/* FAQ objections */}
       <FaqList title={t.home.faqTitle} items={t.home.faq} />
 
+      {/* Landing hub: every marketing page reachable from the highest-authority page */}
+      <section className="bg-slate-50 py-20">
+        <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+          <div className="mb-10 max-w-2xl">
+            <h2 className="text-3xl font-bold tracking-tight text-slate-900">{t.home.hubTitle}</h2>
+            <p className="mt-3 text-lg text-slate-600">{t.home.hubSubtitle}</p>
+          </div>
+          <div className="grid gap-10 sm:grid-cols-2">
+            {[
+              { title: t.footer.productsTitle, links: t.footer.products },
+              { title: t.footer.hostingTitle, links: t.footer.hosting },
+            ].map((col) => (
+              <div key={col.title}>
+                <h3 className="text-sm font-semibold uppercase tracking-wide text-slate-500">{col.title}</h3>
+                <ul className="mt-4 grid gap-2 sm:grid-cols-2">
+                  {col.links
+                    .filter((l) => !l.href.startsWith("http"))
+                    .map((l) => (
+                      <li key={l.href}>
+                        <Link
+                          href={localeHref(l.href, locale)}
+                          className="text-sm text-slate-700 transition-colors hover:text-blue-600"
+                        >
+                          {l.label}
+                        </Link>
+                      </li>
+                    ))}
+                </ul>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
       <CtaBand />
     </>
   );

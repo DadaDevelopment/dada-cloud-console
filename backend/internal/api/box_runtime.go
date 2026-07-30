@@ -51,6 +51,11 @@ func (h *Handler) initBoxRuntime(cfg *config.Config) {
 		return
 	}
 	rt := box.NewLocalRuntime(cfg.BoxLocalRoot, box.SystemClock{})
+	// The box's own door (D6). Set before Warm, because the bind that makes the
+	// binary visible inside a box happens in that box's init — a broker directory
+	// attached after warming would only reach boxes created later, which is the kind
+	// of half-configured fleet that produces "it works on the second box".
+	rt.BrokerDir = cfg.BoxBrokerDir
 	pool := box.NewMemoryPool()
 	stack := &boxRuntimeStack{
 		runtime: rt,
@@ -80,9 +85,17 @@ func (h *Handler) initBoxRuntime(cfg *config.Config) {
 			Str("root", cfg.BoxLocalRoot).
 			Str("image", stack.image).
 			Int("warm", cfg.BoxWarmPoolSize).
+			Bool("broker", rt.BrokerConfigured()).
 			Dur("took", time.Since(started)).
 			Msg("box: LocalRuntime warm pool ready")
 		stack.warmed = true
+	}
+	if !rt.BrokerConfigured() {
+		// Said out loud at start rather than discovered per box. Without a broker a
+		// box has no endpoint of its own, so every agent connection goes through the
+		// control plane — which is the fallback, not the product (D6).
+		log.Warn().Str("dir", cfg.BoxBrokerDir).
+			Msg("box: no broker binary (BOX_BROKER_DIR); boxes will have no endpoint of their own and `box up` will say so")
 	}
 	metrics.SetBoxPoolGauges(stack.image, stack.region,
 		pool.Available(stack.image, stack.region), pool.Target(stack.image, stack.region))

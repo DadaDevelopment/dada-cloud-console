@@ -15,6 +15,7 @@ import { monitoring } from "./monitoring";
 import { models } from "./models";
 import { appServers } from "./app-servers";
 import { aiStudio } from "./ai-studio";
+import { ai } from "./ai";
 import { approvals } from "./approvals";
 import { audit } from "./audit";
 import { adminOverview } from "./admin-overview";
@@ -57,6 +58,7 @@ export const messages: Messages = {
   ...models,
   ...appServers,
   ...aiStudio,
+  ...ai,
   ...approvals,
   ...audit,
   ...adminOverview,

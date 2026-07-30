@@ -445,6 +445,13 @@ type Config struct {
 	// (POST {PublicBaseURL}/api/v1/deploy) shown once when a deploy hook is created.
 	PublicBaseURL string // PUBLIC_BASE_URL
 
+	// AIGatewayPublicURL is the OpenAI-compatible base_url a customer points an
+	// SDK at. Handed back verbatim with a minted AI Gateway key and shown in the
+	// console quickstart, so it must be the gateway's own public ingress
+	// (ADR-015: the gateway is a separate data plane, never behind the console
+	// origin).
+	AIGatewayPublicURL string // AI_GATEWAY_PUBLIC_URL
+
 	// YooKassa (payments slice 1, own shop/keys, no multi-tenant OAuth). Empty
 	// YooKassaShopID/YooKassaSecretKey means payments are unconfigured and
 	// checkout returns 409 payments_not_configured instead of attempting a call.
@@ -479,6 +486,18 @@ type Config struct {
 	// MCPSelfURL and then to loopback, so there is one answer to "where does this
 	// process serve requests" rather than two that can disagree.
 	BoxSessionBaseURL string // BOX_SESSION_BASE_URL
+
+	// BoxBrokerDir is a directory containing the box-broker binary, bind-mounted
+	// read-only into every box so the box has an endpoint of its own (D6). Empty
+	// means the boxes of this host have no door of their own and `box up` says so
+	// in its response rather than publishing the control-plane fallback as if it
+	// were the box's.
+	//
+	// A DIRECTORY and not a path to the binary, because the value is a bind-mount
+	// source: pointing it at /usr/local/bin would mount the host's whole bin
+	// directory into every tenant's body, which is the kind of accident a type
+	// cannot catch but a name can.
+	BoxBrokerDir string // BOX_BROKER_DIR
 
 	// Managed Postgres the attach path provisions into. It lives OUTSIDE the box on
 	// purpose: a disposable body must not own the customer's database.
@@ -633,6 +652,7 @@ func Load() (*Config, error) {
 		BoxActiveCPUPercent:         getEnvFloat("BOX_ACTIVE_CPU_PERCENT", 5),
 		BoxDefaultSpendCapRub:       getEnvFloat("BOX_DEFAULT_SPEND_CAP_RUB", 500),
 		PublicBaseURL:               getEnv("PUBLIC_BASE_URL", "https://console.dada-tuda.ru"),
+		AIGatewayPublicURL:          getEnv("AI_GATEWAY_PUBLIC_URL", "https://ai.dada-tuda.ru/v1"),
 		YooKassaShopID:              getEnv("YOOKASSA_SHOP_ID", ""),
 		YooKassaSecretKey:           getEnv("YOOKASSA_SECRET_KEY", ""),
 		YooKassaReturnURL:           getEnv("YOOKASSA_RETURN_URL", "https://console.dada-tuda.ru/billing/return"),
@@ -643,6 +663,7 @@ func Load() (*Config, error) {
 		BoxLocalRoot:             getEnv("BOX_LOCAL_ROOT", ""),
 		BoxWarmPoolSize:          getEnvInt("BOX_WARM_POOL_SIZE", 2),
 		BoxWarmImage:             getEnv("BOX_WARM_IMAGE", "warm-v1"),
+		BoxBrokerDir:             getEnv("BOX_BROKER_DIR", ""),
 		BoxRegion:                getEnv("BOX_REGION", ""),
 		BoxHostnameBase:          getEnv("BOX_HOSTNAME_BASE", "box.dada-tuda.ru"),
 		BoxCrystallizeDomainBase: getEnv("BOX_CRYSTALLIZE_DOMAIN_BASE", "dada-tuda.ru"),
@@ -719,14 +740,18 @@ func splitList(v string) []string {
 	return out
 }
 
-// getEnvInt reads a positive int-sized setting, returning defaultVal when unset,
-// unparseable, or non-positive.
+// getEnvInt reads a positive int-sized setting.
 //
-// It exists so that no call site writes int(getEnvInt64(...)). That conversion
-// silently truncates on a 32-bit build — SMTP_PORT=4294967883 would land next to
-// 587 instead of being rejected — and every setting reached this way is a count, a
-// port or a day limit, i.e. natively int. strconv.Atoi returns a platform int and
-// errors on overflow, so the conversion disappears rather than being bounds-checked.
+// It exists so no call site has to write int(getEnvInt64(...)). That conversion is
+// not merely ugly: on a 32-bit build it silently truncates a 64-bit value, so
+// SMTP_PORT=4294967883 would land next to 587 instead of being rejected. CodeQL
+// flags every one of those call sites, and it is right to. strconv.Atoi parses into
+// a platform int and errors on overflow, which makes the whole class impossible
+// instead of guarded seven times.
+//
+// Non-positive and unparseable values fall back to the default, matching
+// getEnvInt64's contract — every setting using this is a count, a port or an
+// interval, and zero has never meant "zero" for any of them.
 func getEnvInt(key string, defaultVal int) int {
 	v := os.Getenv(key)
 	if v == "" {

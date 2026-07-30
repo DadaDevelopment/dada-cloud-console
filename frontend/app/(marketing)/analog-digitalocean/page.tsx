@@ -1,18 +1,21 @@
 "use client";
 
 import { useLang } from "@/lib/i18n/context";
-import { ProductHero, FeatureGrid, FaqList, CtaBand } from "@/components/marketing/sections";
-import { FaqJsonLd } from "@/components/marketing/faq-jsonld";
+import { LandingGuide } from "@/components/marketing/landing-guide";
 
 export default function DigitalOceanAlternativePage() {
   const { t } = useLang();
   return (
-    <>
-      <FaqJsonLd path="/analog-digitalocean" items={t.digitaloceanAlt.faq} />
-      <ProductHero title={t.digitaloceanAlt.heroTitle} subtitle={t.digitaloceanAlt.heroSubtitle} />
-      <FeatureGrid title={t.digitaloceanAlt.featuresTitle} features={t.digitaloceanAlt.features} />
-      <FaqList title={t.digitaloceanAlt.faqTitle} items={t.digitaloceanAlt.faq} />
-      <CtaBand />
-    </>
+    <LandingGuide
+      path="/analog-digitalocean"
+      utm="utm_source=digitalocean-alt"
+      copy={t.digitaloceanAlt}
+      related={[
+          { label: t.servers.heroTitle, href: "/cloud-servers" },
+          { label: t.databases.heroTitle, href: "/databases" },
+          { label: t.storage.heroTitle, href: "/storage" },
+          { label: t.flyIoAlt.heroTitle, href: "/analog-fly-io" },
+      ]}
+    />
   );
 }

@@ -32,9 +32,13 @@ const (
 
 // Result is what Detect resolves from an archive's manifest files.
 //
-// Framework is one of "docker", "vite", "next", "react-scripts", "fastapi",
-// "flask", "django", "streamlit", or "" when nothing matched. Port is 0 when
-// unresolved.
+// Framework is one of "docker", "nextjs", "vite", "react", "node", "fastapi",
+// "flask", "django", "streamlit", "python", or "" when nothing matched. The
+// names are the vocabulary dadaBuildPipeline.renderDockerfile switches on —
+// keep them in sync with build-agent's GitHub-side detection
+// (build-agent/internal/server/server.go), or the pipeline finds no template
+// and the build fails with no_dockerfile. Port is 0 when unresolved, which
+// lets the template pick its own default.
 type Result struct {
 	Format    Format
 	Framework string
@@ -289,13 +293,13 @@ func parsePackageJSON(raw []byte) (framework string, port int, ok bool) {
 	}
 	switch {
 	case has("next"):
-		return "next", 3000, true
+		return "nextjs", 3000, true
 	case has("vite"):
 		return "vite", 5173, true
 	case has("react-scripts"):
-		return "react-scripts", 3000, true
+		return "react", 3000, true
 	default:
-		return "", 0, false
+		return "node", 3000, true
 	}
 }
 
@@ -304,6 +308,11 @@ func parsePackageJSON(raw []byte) (framework string, port int, ok bool) {
 // formats list the package name at the start of a dependency token
 // (requirements.txt: "fastapi==0.110.0"; pyproject.toml dependency arrays:
 // "fastapi>=0.110").
+//
+// A python manifest with no recognized web framework still resolves to the
+// generic "python" framework with port 0: a long-polling worker (a Telegram
+// bot, a queue consumer) is a first-class upload target and must not fall
+// through to the empty framework, which the build pipeline cannot template.
 func parsePythonManifest(raw []byte) (framework string, port int, ok bool) {
 	text := strings.ToLower(string(raw))
 	for _, fw := range []struct {
@@ -319,7 +328,7 @@ func parsePythonManifest(raw []byte) (framework string, port int, ok bool) {
 			return fw.name, fw.port, true
 		}
 	}
-	return "", 0, false
+	return "python", 0, true
 }
 
 func pythonPackageRe(name string) *regexp.Regexp {

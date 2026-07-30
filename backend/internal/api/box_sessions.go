@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/dada-tuda/console/backend/internal/box"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -107,6 +108,17 @@ func (h *Handler) mintBoxSession(ctx context.Context, boxID, projectID uuid.UUID
 // a body the customer has already been told is gone. Revoking after the enqueue
 // would leave exactly that window, and it would be invisible because both steps
 // succeeded.
+//
+// SHUTTING THE BOX'S OWN DOOR IS PART OF REVOKING, not a follow-up. Since D6 the
+// box runs its own endpoint and authenticates against a digest file inside itself,
+// so a revocation that only updated this table would leave that file — and
+// therefore that door — exactly as it was. The credential would keep working on the
+// one path the control plane is deliberately not on, which is the worst possible
+// place for a revocation to be incomplete.
+//
+// A failure to clear the file fails the revocation, for the same reason the
+// ordering above is strict: a teardown that could not withdraw the credential must
+// not report that it did.
 func (h *Handler) revokeBoxSessions(ctx context.Context, boxID uuid.UUID) (int64, error) {
 	tag, err := h.pool.Exec(ctx,
 		`UPDATE box_sessions SET revoked_at = now()
@@ -114,7 +126,28 @@ func (h *Handler) revokeBoxSessions(ctx context.Context, boxID uuid.UUID) (int64
 	if err != nil {
 		return 0, err
 	}
+	if err := h.clearBoxDoor(ctx, boxID); err != nil {
+		return 0, err
+	}
 	return tag.RowsAffected(), nil
+}
+
+// clearBoxDoor empties the digest file inside the box, if this host runs the box
+// and gave it a door at all.
+func (h *Handler) clearBoxDoor(ctx context.Context, boxID uuid.UUID) error {
+	stack := h.boxStack
+	if stack == nil || !stack.runtime.BrokerConfigured() {
+		return nil
+	}
+	var instanceRef string
+	if err := h.pool.QueryRow(ctx,
+		`SELECT instance_ref FROM boxes WHERE id = $1`, boxID).Scan(&instanceRef); err != nil {
+		return err
+	}
+	if instanceRef == "" {
+		return nil
+	}
+	return stack.runtime.RevokeAllSessionDigests(ctx, &box.Instance{ID: boxID.String(), InstanceRef: instanceRef})
 }
 
 // resolvedBoxSession is the tenancy a box session token resolves to.

@@ -5,7 +5,8 @@ import Link from "next/link";
 import { Check } from "lucide-react";
 import { useLang } from "@/lib/i18n/context";
 import { consoleHref } from "@/lib/site";
-import { ProductHero, CtaBand } from "@/components/marketing/sections";
+import { ProductHero, CtaBand, FaqList, RelatedLinks } from "@/components/marketing/sections";
+import { FaqJsonLd } from "@/components/marketing/faq-jsonld";
 import { clsx } from "clsx";
 import { api } from "@/lib/api";
 import type { BillingPlanKey, RecommendPlanResponse } from "@/lib/api";
@@ -239,6 +240,15 @@ export default function PricingPage() {
           </div>
         </div>
       </section>
+      <FaqJsonLd path="/pricing" items={t.pricing.faq} />
+      <FaqList title={t.pricing.faqTitle} items={t.pricing.faq} />
+      <RelatedLinks
+        links={[
+          { label: t.databases.heroTitle, href: "/databases" },
+          { label: t.storage.heroTitle, href: "/storage" },
+          { label: t.servers.heroTitle, href: "/cloud-servers" },
+        ]}
+      />
       <CtaBand />
     </>
   );

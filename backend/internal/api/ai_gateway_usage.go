@@ -8,6 +8,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 
 	"github.com/dada-tuda/console/backend/internal/auth"
 )
@@ -282,4 +283,134 @@ func (h *Handler) aiGatewayBySource(ctx context.Context, from, to time.Time) ([]
 		out = append(out, s)
 	}
 	return out, rows.Err()
+}
+
+// aiProjectDayStat is one calendar day of a project's own gateway spend, used
+// to draw the sparkline on the project AI page.
+type aiProjectDayStat struct {
+	Day     string  `json:"day"`
+	Calls   int64   `json:"calls"`
+	CostUSD float64 `json:"cost_usd"`
+}
+
+// GetProjectAIUsage returns this project's own AI Gateway consumption over the
+// trailing window: totals plus a per-model and per-day breakdown. Scoped by
+// project membership -- it is the customer-facing counterpart of
+// GetAIGatewayUsage, which is platform-admin only and spans every tenant.
+//
+// @ID          getProjectAIUsage
+// @Summary     A project's own AI Gateway usage
+// @Description Returns the project's AI Gateway calls, tokens and cost over the trailing window, broken down by model and by day. Any project member may read it.
+// @Tags        ai-gateway
+// @Produce     json
+// @Security    BearerAuth
+// @Param       projectId path     string true "Project UUID"
+// @Param       days      query    int    false "Window length in days: 7 or 30 (default 7)"
+// @Success     200       {object} map[string]interface{}
+// @Failure     401       {object} map[string]string
+// @Failure     404       {object} map[string]string
+// @Router      /projects/{projectId}/ai/usage [get]
+func (h *Handler) GetProjectAIUsage(c *gin.Context) {
+	claims, ok := auth.GetClaims(c)
+	if !ok {
+		respondUnauthorized(c)
+		return
+	}
+	projectID, err := uuid.Parse(c.Param("projectId"))
+	if err != nil {
+		respondNotFound(c)
+		return
+	}
+	if _, err := h.effectiveRole(c.Request.Context(), claims, projectID); err == pgx.ErrNoRows {
+		respondNotFound(c)
+		return
+	} else if err != nil {
+		respondError(c, http.StatusInternalServerError, "failed to check project membership")
+		return
+	}
+
+	days := 7
+	if v, err := strconv.Atoi(c.Query("days")); err == nil && (v == 7 || v == 30) {
+		days = v
+	}
+	to := time.Now().UTC()
+	from := to.AddDate(0, 0, -days)
+	ctx := c.Request.Context()
+
+	var calls, promptTokens, completionTokens int64
+	var cost float64
+	if err := h.pool.QueryRow(ctx, `
+		SELECT COUNT(*),
+		       COALESCE(SUM(prompt_tokens), 0),
+		       COALESCE(SUM(completion_tokens), 0),
+		       COALESCE(SUM(cost_usd), 0)::float8
+		  FROM agent_token_usage
+		 WHERE project_id = $1 AND created_at >= $2 AND created_at < $3`,
+		projectID, from, to,
+	).Scan(&calls, &promptTokens, &completionTokens, &cost); err != nil {
+		respondError(c, http.StatusInternalServerError, "load usage totals: "+err.Error())
+		return
+	}
+
+	modelRows, err := h.pool.Query(ctx, `
+		SELECT model, COUNT(*), COALESCE(SUM(cost_usd), 0)::float8
+		  FROM agent_token_usage
+		 WHERE project_id = $1 AND created_at >= $2 AND created_at < $3
+		 GROUP BY model
+		 ORDER BY 3 DESC`,
+		projectID, from, to,
+	)
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, "load model breakdown: "+err.Error())
+		return
+	}
+	defer modelRows.Close()
+	models := []aiGatewayModelStat{}
+	for modelRows.Next() {
+		var s aiGatewayModelStat
+		if err := modelRows.Scan(&s.Model, &s.Calls, &s.CostUSD); err != nil {
+			respondError(c, http.StatusInternalServerError, "scan model breakdown: "+err.Error())
+			return
+		}
+		s.CostUSD = round2(s.CostUSD)
+		models = append(models, s)
+	}
+
+	dayRows, err := h.pool.Query(ctx, `
+		SELECT to_char(date_trunc('day', created_at), 'YYYY-MM-DD'),
+		       COUNT(*),
+		       COALESCE(SUM(cost_usd), 0)::float8
+		  FROM agent_token_usage
+		 WHERE project_id = $1 AND created_at >= $2 AND created_at < $3
+		 GROUP BY 1
+		 ORDER BY 1`,
+		projectID, from, to,
+	)
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, "load daily breakdown: "+err.Error())
+		return
+	}
+	defer dayRows.Close()
+	daily := []aiProjectDayStat{}
+	for dayRows.Next() {
+		var s aiProjectDayStat
+		if err := dayRows.Scan(&s.Day, &s.Calls, &s.CostUSD); err != nil {
+			respondError(c, http.StatusInternalServerError, "scan daily breakdown: "+err.Error())
+			return
+		}
+		s.CostUSD = round2(s.CostUSD)
+		daily = append(daily, s)
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"days":              days,
+		"window":            gin.H{"from": from, "to": to},
+		"currency":          "usd",
+		"total_calls":       calls,
+		"total_cost":        round2(cost),
+		"prompt_tokens":     promptTokens,
+		"completion_tokens": completionTokens,
+		"models":            models,
+		"daily":             daily,
+	})
 }

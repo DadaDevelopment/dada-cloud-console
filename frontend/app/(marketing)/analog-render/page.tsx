@@ -1,18 +1,21 @@
 "use client";
 
 import { useLang } from "@/lib/i18n/context";
-import { ProductHero, FeatureGrid, FaqList, CtaBand } from "@/components/marketing/sections";
-import { FaqJsonLd } from "@/components/marketing/faq-jsonld";
+import { LandingGuide } from "@/components/marketing/landing-guide";
 
 export default function RenderAlternativePage() {
   const { t } = useLang();
   return (
-    <>
-      <FaqJsonLd path="/analog-render" items={t.renderAlt.faq} />
-      <ProductHero title={t.renderAlt.heroTitle} subtitle={t.renderAlt.heroSubtitle} />
-      <FeatureGrid title={t.renderAlt.featuresTitle} features={t.renderAlt.features} />
-      <FaqList title={t.renderAlt.faqTitle} items={t.renderAlt.faq} />
-      <CtaBand />
-    </>
+    <LandingGuide
+      path="/analog-render"
+      utm="utm_source=render-alt"
+      copy={t.renderAlt}
+      related={[
+          { label: t.herokuAlt.heroTitle, href: "/analog-heroku" },
+          { label: t.railwayAlt.heroTitle, href: "/analog-railway" },
+          { label: t.vercelAlt.heroTitle, href: "/analog-vercel" },
+          { label: t.flyIoAlt.heroTitle, href: "/analog-fly-io" },
+      ]}
+    />
   );
 }

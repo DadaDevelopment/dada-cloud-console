@@ -32,10 +32,17 @@ import (
 // product promises. There is no such tool, there is no keep-list entry that could
 // create one, and this endpoint cannot become one.
 //
-// WHERE THIS BELONGS IN PRODUCTION: cmd/box-broker (backlog phase 4), reachable at
-// the box's own hostname over SSH and MCP Streamable HTTP. It lives on this process
-// here because LocalRuntime has no broker, and that is stated in the box's connect
-// block rather than left to be discovered.
+// WHAT THIS IS NOW: the FALLBACK. cmd/box-broker exists and runs inside the box, and
+// `box up` publishes the box's own endpoint whenever it came up — so on a configured
+// host the customer's agent never reaches this handler at all. It is kept, and kept
+// working, for the box whose broker did not start or whose host has no BOX_BROKER_DIR:
+// deleting the only working door in the change that adds a new one is how a walkable
+// path stops being walkable.
+//
+// Which of the two a given box got is not left to be discovered. The connect block
+// computes `mcp.available` from the published URL, and when it is false it says
+// plainly that commands DO pass through us and that this is a degraded box rather
+// than the product.
 //
 // AUTHENTICATION IS THE BOX'S OWN CREDENTIAL, never a console session: the
 // "dadabox_" token from `box up`, resolved by sha256 against box_sessions. A user

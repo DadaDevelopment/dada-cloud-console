@@ -310,6 +310,7 @@ func SetupRouter(pool *pgxpool.Pool, cfg *config.Config) *gin.Engine {
 		internal.POST("/ai/credential/set", h.AISetProviderCredential)
 		internal.POST("/ai/credential/get", h.AIGetProviderCredential)
 		internal.POST("/ai/usage/record", h.AIRecordUsage)
+		internal.POST("/ai/key/introspect", h.AIIntrospectKey)
 		log.Printf("internal: provisioning API enabled at /internal")
 	}
 
@@ -422,6 +423,18 @@ func SetupRouter(pool *pgxpool.Pool, cfg *config.Config) *gin.Engine {
 		api.POST("/projects/:projectId/environments/:envId/apps/:appName/deploy-hooks", h.CreateDeployHook)
 		api.GET("/projects/:projectId/environments/:envId/apps/:appName/deploy-hooks", h.ListDeployHooks)
 		api.DELETE("/projects/:projectId/environments/:envId/apps/:appName/deploy-hooks/:hookId", h.DeleteDeployHook)
+
+		// AI Gateway (ADR-015 control plane): self-service keys, BYOK provider
+		// credentials and the project's own usage. The inference data plane
+		// itself is a separate origin (ai.dada-tuda.ru) and never routes here.
+		api.GET("/ai/catalog", h.GetAIGatewayCatalog)
+		api.POST("/projects/:projectId/ai/keys", h.CreateAIGatewayKey)
+		api.GET("/projects/:projectId/ai/keys", h.ListAIGatewayKeys)
+		api.DELETE("/projects/:projectId/ai/keys/:keyId", h.DeleteAIGatewayKey)
+		api.GET("/projects/:projectId/ai/credentials", h.ListAIProviderCredentials)
+		api.PUT("/projects/:projectId/ai/credentials/:provider", h.PutAIProviderCredential)
+		api.DELETE("/projects/:projectId/ai/credentials/:provider", h.DeleteAIProviderCredential)
+		api.GET("/projects/:projectId/ai/usage", h.GetProjectAIUsage)
 
 		// Cloud tasks (DadaAgent integration).
 		api.GET("/projects/:projectId/environments/:envId/apps/:appName/cloud-tasks", h.ListCloudTasks)

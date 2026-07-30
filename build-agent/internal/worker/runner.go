@@ -641,6 +641,17 @@ func (r *Runner) execute(ctx context.Context, b *db.Build, repo *db.Repo, llog *
 			llog.Info().Str("framework", det.Framework).Msg("build-time framework detected")
 		}
 	}
+
+	if repo.Provider == "archive" && repo.FrameworkOverride != "" {
+		params["detected_framework"] = repo.FrameworkOverride
+		if repo.Port > 0 {
+			params["app_port"] = strconv.Itoa(repo.Port)
+			detPort = repo.Port
+		}
+		detFramework = repo.FrameworkOverride
+		llog.Info().Str("framework", repo.FrameworkOverride).Msg("archive framework forwarded from upload-time detection")
+	}
+
 	queueID, err := r.jenkins.TriggerBuild(ctx, r.cfg.JenkinsJob, params)
 	if err != nil {
 		return buildOutcome{}, fmt.Errorf("trigger jenkins build: %w", err)

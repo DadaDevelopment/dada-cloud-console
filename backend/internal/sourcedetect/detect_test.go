@@ -112,8 +112,44 @@ func TestDetectZipNext(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Detect: %v", err)
 	}
-	if res.Framework != "next" || res.Port != 3000 {
-		t.Errorf("got framework=%q port=%d, want next/3000", res.Framework, res.Port)
+	if res.Framework != "nextjs" || res.Port != 3000 {
+		t.Errorf("got framework=%q port=%d, want nextjs/3000", res.Framework, res.Port)
+	}
+}
+
+// TestDetectZipTelegramBot pins the upload flow's headline case: a plain
+// python worker with no web framework. It must resolve to "python", never to
+// the empty framework — an empty framework reaches dadaBuildPipeline with no
+// template and fails the build with no_dockerfile.
+func TestDetectZipTelegramBot(t *testing.T) {
+	data := buildZip(t, []zipFile{
+		{"demo-bot/requirements.txt", "aiogram==3.15.0\n"},
+		{"demo-bot/bot.py", "import asyncio"},
+	})
+	res, err := Detect(data)
+	if err != nil {
+		t.Fatalf("Detect: %v", err)
+	}
+	if res.Framework != "python" {
+		t.Errorf("Framework = %q, want python", res.Framework)
+	}
+	if res.Port != 0 {
+		t.Errorf("Port = %d, want 0 (a long-polling bot listens on nothing)", res.Port)
+	}
+}
+
+// TestDetectZipPlainNode covers a node app with no recognized framework: it
+// still has to name a framework the pipeline can template.
+func TestDetectZipPlainNode(t *testing.T) {
+	data := buildZip(t, []zipFile{
+		{"package.json", `{"dependencies":{"telegraf":"4.16.0"}}`},
+	})
+	res, err := Detect(data)
+	if err != nil {
+		t.Fatalf("Detect: %v", err)
+	}
+	if res.Framework != "node" {
+		t.Errorf("Framework = %q, want node", res.Framework)
 	}
 }
 
@@ -172,7 +208,7 @@ func TestDetectZipSlipEntriesSkipped(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Detect: %v", err)
 	}
-	if res.Framework != "react-scripts" {
-		t.Errorf("Framework = %q, want react-scripts (zip-slip entry must be skipped, not crash)", res.Framework)
+	if res.Framework != "react" {
+		t.Errorf("Framework = %q, want react (zip-slip entry must be skipped, not crash)", res.Framework)
 	}
 }
