@@ -676,7 +676,7 @@ spec:
                                     sh '''
                                         set -eux
                                         npx playwright install chromium
-                                        E2E_BASE_URL=https://console.dada-tuda.ru npx playwright test --project=smoke
+                                        E2E_BASE_URL=https://console.dada-tuda.ru E2E_MARKETING_BASE_URL=https://cloud.dada-tuda.ru npx playwright test --project=smoke
                                     '''
                                 }
                             }

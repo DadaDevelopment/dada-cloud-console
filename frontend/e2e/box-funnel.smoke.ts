@@ -9,17 +9,24 @@ import { test, expect } from "@playwright/test";
  * count page loads instead of people and the conversion denominator would be
  * meaningless — the exact failure this whole slice exists to fix.
  *
- * NOTE: only meaningful against a marketing-host target. On the console host
- * proxy.ts takes the other branch and /box does not exist there.
+ * NOTE: only the marketing host issues the cookie. The console host serves /box
+ * with a 200 and NO Set-Cookie (verified live 2026-07-30), so a 404 guard is not
+ * enough: point `E2E_MARKETING_BASE_URL` at the marketing origin and the cookie
+ * assertions run against an absolute URL there.
  */
 const VID_COOKIE = "dada_vid";
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const MARKETING_BASE_URL = process.env.E2E_MARKETING_BASE_URL?.replace(/\/$/, "");
+const BOX_URL = MARKETING_BASE_URL ? `${MARKETING_BASE_URL}/box` : "/box";
 
 test("the box landing issues a stable, opaque visitor id", async ({ page, context }) => {
-  const response = await page.goto("/box", { waitUntil: "domcontentloaded" });
+  const response = await page.goto(BOX_URL, { waitUntil: "domcontentloaded" });
   expect(response, "navigation returned a response").not.toBeNull();
   expect(response!.status(), "landing is not a 5xx").toBeLessThan(500);
-  test.skip(response!.status() === 404, "/box not served on this target");
+  test.skip(
+    !MARKETING_BASE_URL && response!.status() === 404,
+    "/box not served on this target",
+  );
 
   const first = (await context.cookies()).find((c) => c.name === VID_COOKIE);
   expect(first, `${VID_COOKIE} is set on the first hit`).toBeDefined();
@@ -29,7 +36,7 @@ test("the box landing issues a stable, opaque visitor id", async ({ page, contex
   // ~400 days, allowing for the seconds spent in this test.
   expect(first!.expires * 1000 - Date.now()).toBeGreaterThan(399 * 24 * 60 * 60 * 1000);
 
-  await page.goto("/box", { waitUntil: "domcontentloaded" });
+  await page.goto(BOX_URL, { waitUntil: "domcontentloaded" });
   const second = (await context.cookies()).find((c) => c.name === VID_COOKIE);
   expect(second!.value, "a returning visitor keeps the same id").toBe(first!.value);
 });
