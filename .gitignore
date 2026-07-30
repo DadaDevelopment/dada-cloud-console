@@ -32,6 +32,10 @@ Thumbs.db
 *.swp
 *.swo
 
+# Claude Code agent git worktrees. Transient checkouts created when a subagent
+# runs in isolation and removed when it finishes — local scratch, never source.
+.claude/worktrees/
+
 # Docker
 *.log
 
