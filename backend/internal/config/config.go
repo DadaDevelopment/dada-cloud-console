@@ -537,7 +537,7 @@ func Load() (*Config, error) {
 		DBBackupStatefulSet:         getEnv("DB_BACKUP_STATEFULSET", "postgresql"),
 		DBBackupProfile:             getEnv("DB_BACKUP_PROFILE", "dada-db-backups"),
 		DBBackupBlueprint:           getEnv("DB_BACKUP_BLUEPRINT", "postgres-logical-db-blueprint"),
-		DBBackupRetentionDays:       int(getEnvInt64("DB_BACKUP_RETENTION_DAYS", 14)),
+		DBBackupRetentionDays:       getEnvInt("DB_BACKUP_RETENTION_DAYS", 14),
 		DBBackupScheduleEnabled:     getEnv("DB_BACKUP_SCHEDULE_ENABLED", "false") == "true",
 		DBBackupS3Endpoint:          getEnv("DB_BACKUP_S3_ENDPOINT", ""),
 		DBBackupS3Bucket:            getEnv("DB_BACKUP_S3_BUCKET", ""),
@@ -593,14 +593,14 @@ func Load() (*Config, error) {
 		PrometheusRemoteWriteURL:    getEnv("PROMETHEUS_REMOTE_WRITE_URL", ""),
 		PrometheusRemoteWriteUser:   getEnv("PROMETHEUS_REMOTE_WRITE_USER", ""),
 		PrometheusRemoteWritePass:   getEnv("PROMETHEUS_REMOTE_WRITE_PASS", ""),
-		MonitoringRateLimitPerMin:   int(getEnvInt64("MONITORING_RATE_LIMIT_PER_MIN", 120)),
-		MonitoringMaxLabels:         int(getEnvInt64("MONITORING_MAX_LABELS", 30)),
-		MonitoringMaxSeriesPerReq:   int(getEnvInt64("MONITORING_MAX_SERIES_PER_REQUEST", 2000)),
+		MonitoringRateLimitPerMin:   getEnvInt("MONITORING_RATE_LIMIT_PER_MIN", 120),
+		MonitoringMaxLabels:         getEnvInt("MONITORING_MAX_LABELS", 30),
+		MonitoringMaxSeriesPerReq:   getEnvInt("MONITORING_MAX_SERIES_PER_REQUEST", 2000),
 		GatewayDBURL:                getEnv("GATEWAY_DB_URL", ""),
 		UserServiceURL:              getEnv("USER_SERVICE_URL", ""),
 		GatewayPort:                 getEnv("GATEWAY_PORT", "8081"),
 		SMTPHost:                    getEnv("SMTP_HOST", ""),
-		SMTPPort:                    int(getEnvInt64("SMTP_PORT", 587)),
+		SMTPPort:                    getEnvInt("SMTP_PORT", 587),
 		SMTPUser:                    getEnv("SMTP_USER", ""),
 		SMTPPass:                    getEnv("SMTP_PASS", ""),
 		SMTPFrom:                    getEnv("SMTP_FROM", ""),
@@ -641,7 +641,7 @@ func Load() (*Config, error) {
 		YooKassaPartnerClientSecret: getEnv("YOOKASSA_PARTNER_CLIENT_SECRET", ""),
 
 		BoxLocalRoot:             getEnv("BOX_LOCAL_ROOT", ""),
-		BoxWarmPoolSize:          int(getEnvInt64("BOX_WARM_POOL_SIZE", 2)),
+		BoxWarmPoolSize:          getEnvInt("BOX_WARM_POOL_SIZE", 2),
 		BoxWarmImage:             getEnv("BOX_WARM_IMAGE", "warm-v1"),
 		BoxRegion:                getEnv("BOX_REGION", ""),
 		BoxHostnameBase:          getEnv("BOX_HOSTNAME_BASE", "box.dada-tuda.ru"),
@@ -649,7 +649,7 @@ func Load() (*Config, error) {
 		BoxSessionBaseURL:        getEnv("BOX_SESSION_BASE_URL", ""),
 		BoxManagedPGURL:          getEnv("BOX_MANAGED_PG_URL", ""),
 		BoxManagedPGHost:         getEnv("BOX_MANAGED_PG_HOST", "127.0.0.1"),
-		BoxManagedPGPort:         int(getEnvInt64("BOX_MANAGED_PG_PORT", 5432)),
+		BoxManagedPGPort:         getEnvInt("BOX_MANAGED_PG_PORT", 5432),
 	}
 
 	if cfg.DBURL == "" {
@@ -717,6 +717,26 @@ func splitList(v string) []string {
 		}
 	}
 	return out
+}
+
+// getEnvInt reads a positive int-sized setting, returning defaultVal when unset,
+// unparseable, or non-positive.
+//
+// It exists so that no call site writes int(getEnvInt64(...)). That conversion
+// silently truncates on a 32-bit build — SMTP_PORT=4294967883 would land next to
+// 587 instead of being rejected — and every setting reached this way is a count, a
+// port or a day limit, i.e. natively int. strconv.Atoi returns a platform int and
+// errors on overflow, so the conversion disappears rather than being bounds-checked.
+func getEnvInt(key string, defaultVal int) int {
+	v := os.Getenv(key)
+	if v == "" {
+		return defaultVal
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil || n <= 0 {
+		return defaultVal
+	}
+	return n
 }
 
 func getEnvInt64(key string, defaultVal int64) int64 {
