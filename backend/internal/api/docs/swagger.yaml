@@ -314,6 +314,32 @@ definitions:
         description: Manual-mode fields (connecting a pre-existing VM over SSH).
         type: string
     type: object
+  api.createBoxRequest:
+    properties:
+      image:
+        description: |-
+          Image and Profile name entries in the frozen boxcatalog (not a table): a
+          size only exists if the pool controller pre-warmed sandboxes of that shape.
+        type: string
+      name:
+        type: string
+      profile:
+        type: string
+      region:
+        type: string
+      spend_cap_rub:
+        description: SpendCapRub, when reached, suspends the box. It never deletes
+          it.
+        type: number
+      ssh_public_key:
+        description: |-
+          SSHPublicKey is a PUBLIC key: the caller keeps the private half, so the
+          platform stores no customer credential at all.
+        type: string
+      ttl_seconds:
+        description: TTLSeconds is when the box goes to sleep, not when it is destroyed.
+        type: integer
+    type: object
   api.createCloudTaskRequest:
     properties:
       task_type:
@@ -473,6 +499,12 @@ definitions:
       operation_id:
         type: string
     type: object
+  api.extendBoxRequest:
+    properties:
+      ttl_seconds:
+        description: TTLSeconds is the new lifetime measured from now, capped at maxBoxTTLSeconds.
+        type: integer
+    type: object
   api.gitInstallation:
     properties:
       account_login:
@@ -582,6 +614,14 @@ definitions:
   api.restoreDatabaseRequest:
     properties:
       backup_id:
+        type: string
+    type: object
+  api.resumeBoxRequest:
+    properties:
+      ssh_public_key:
+        description: |-
+          SSHPublicKey lets a resume rebind a fresh key, so the caller never has to
+          keep one alive across a sleep. Public half only.
         type: string
     type: object
   api.saveDashboardRequest:
@@ -2639,6 +2679,429 @@ paths:
       summary: Get billing usage
       tags:
       - billing
+  /projects/{projectId}/boxes:
+    get:
+      description: Returns every box in a project that has not been deleted, newest
+        first. A box is an ephemeral root sandbox an agent works in; it owns one environment
+        whose runtime is "box". Read-only.
+      operationId: listBoxes
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: object with a boxes array
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: List boxes in a project
+      tags:
+      - box
+    post:
+      consumes:
+      - application/json
+      description: 'Creates a box: an ephemeral sandbox with root inside it, an image
+        from the frozen box catalog and a size profile. The box owns exactly one environment
+        (runtime "box", type "dev"), which is the identity every later attachment,
+        env var and hostname hangs off — and which crystallization later promotes
+        in place, so nothing has to be migrated. Asynchronous: returns 202 with an
+        operation; poll it, then read the box state for connection coordinates.'
+      operationId: createBox
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      - description: Box specification (every field optional)
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/api.createBoxRequest'
+      produces:
+      - application/json
+      responses:
+        "202":
+          description: object with the created box and the accepted operation
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "409":
+          description: a live box with that name already exists in this project
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Create a box (ephemeral root sandbox)
+      tags:
+      - box
+  /projects/{projectId}/boxes/{boxName}:
+    delete:
+      description: 'Destructive: destroys the box''s sandbox and its disk. Irreversible
+        for anything living only inside the box. Resources attached to the box (managed
+        databases, buckets) live outside it and are NOT deleted. Asynchronous: returns
+        202 with an operation; poll it until terminal. The box''s name becomes reusable
+        once deletion completes.'
+      operationId: deleteBox
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      - description: Box name
+        in: path
+        name: boxName
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "202":
+          description: object with the accepted operation
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Delete a box
+      tags:
+      - box
+    get:
+      description: 'Returns one box''s stored record: status, image, size profile,
+        TTL clocks, spend cap and (once the runtime has reported them) its SSH and
+        MCP coordinates. Read-only.'
+      operationId: getBox
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      - description: Box name
+        in: path
+        name: boxName
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: object with the box
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Get a box by name
+      tags:
+      - box
+  /projects/{projectId}/boxes/{boxName}/extend:
+    post:
+      consumes:
+      - application/json
+      description: Pushes out when the box goes to sleep, measured from now and capped
+        at 24 hours. Synchronous — the only box mutation that is, because it moves
+        a timestamp in our own row and touches no runtime. Reaching the TTL puts a
+        box to sleep, it never destroys it, so extending is a convenience rather than
+        a rescue.
+      operationId: extendBox
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      - description: Box name
+        in: path
+        name: boxName
+        required: true
+        type: string
+      - description: New TTL in seconds, from now
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/api.extendBoxRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: object with the updated box
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "409":
+          description: box phase cannot be extended
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Extend a box's TTL
+      tags:
+      - box
+  /projects/{projectId}/boxes/{boxName}/resume:
+    post:
+      consumes:
+      - application/json
+      description: 'Thaws a sleeping box and waits for its exec channel to accept
+        again. The same box, the same disk, the same injected credentials. Optionally
+        rebinds a fresh SSH public key so the caller need not keep one alive across
+        the sleep. Asynchronous: returns 202 with an operation.'
+      operationId: resumeBox
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      - description: Box name
+        in: path
+        name: boxName
+        required: true
+        type: string
+      - description: Optional fresh SSH public key
+        in: body
+        name: body
+        schema:
+          $ref: '#/definitions/api.resumeBoxRequest'
+      produces:
+      - application/json
+      responses:
+        "202":
+          description: object with the accepted operation
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "409":
+          description: box is not sleeping
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Resume (wake) a sleeping box
+      tags:
+      - box
+  /projects/{projectId}/boxes/{boxName}/state:
+    get:
+      description: Returns the box's phase plus the connection coordinates the runtime
+        reported (SSH host/port, MCP URL), the age of the newest out-of-guest sample,
+        and whether the box has passed its TTL. Read-only. Coordinates are empty until
+        the runtime reports Ready.
+      operationId: getBoxState
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      - description: Box name
+        in: path
+        name: boxName
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: object with status, connection coordinates and sample freshness
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Get live state and connection coordinates of a box
+      tags:
+      - box
+  /projects/{projectId}/boxes/{boxName}/suspend:
+    post:
+      description: 'Freezes the box so compute billing stops while its disk survives.
+        Not destructive and not a delete: resume brings the same box back. This is
+        also what a reached spend cap does, deliberately — a runaway must cost the
+        customer money, never their data. Asynchronous: returns 202 with an operation.'
+      operationId: suspendBox
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      - description: Box name
+        in: path
+        name: boxName
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "202":
+          description: object with the accepted operation
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "409":
+          description: box is not in a suspendable phase
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Suspend (sleep) a box
+      tags:
+      - box
   /projects/{projectId}/builds/{buildId}:
     get:
       description: Returns a single build by id. Read-only.

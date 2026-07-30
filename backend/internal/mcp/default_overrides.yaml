@@ -52,6 +52,28 @@ keep:
   # App servers (VMs)
   - listAppServers
   - createAppServer
+  # Boxes (ephemeral root sandboxes). This is the front door of the product for
+  # an agent: one call gets a body, later calls get it back or let it go.
+  #
+  # NO COMMAND-EXECUTION TOOL HERE, AND THERE NEVER WILL BE (D6). Our MCP surface
+  # is control plane only. The box hands out its OWN local MCP endpoint, which the
+  # customer's agent adds as a second server, so the customer's code and model
+  # credentials never traverse our API. A boxExec/boxRunCommand tool here would
+  # route every keystroke of their work through us — the opposite of the promise.
+  #
+  # deleteBox IS exposed, unlike deleteApp above. Deleting a box is the normal end
+  # of a disposable body's life, not the loss of a customer's deployment, and an
+  # agent that cannot release a box it created leaks paid capacity.
+  #
+  # Slice 2 replaces createBox/resumeBox with the single-call boxUp door and adds
+  # listAllBoxes (cross-project), getBoxConnection and getBoxCatalog.
+  - listBoxes
+  - createBox
+  - getBoxState
+  - resumeBox
+  - suspendBox
+  - extendBox
+  - deleteBox
 
 rename: {}
 annotate: {}
