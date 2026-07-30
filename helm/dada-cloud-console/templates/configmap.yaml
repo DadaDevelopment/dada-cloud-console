@@ -16,6 +16,15 @@ data:
 {{- with .Values.redis.cacheCostTTLSeconds }}
   CACHE_COST_TTL_SECONDS: {{ . | quote }}
 {{- end }}
+{{- with .Values.redis.cacheCostSlowTTLSeconds }}
+  CACHE_COST_SLOW_TTL_SECONDS: {{ . | quote }}
+{{- end }}
+{{- with .Values.redis.costWarmIntervalSeconds }}
+  COST_WARM_INTERVAL_SECONDS: {{ . | quote }}
+{{- end }}
+{{- with .Values.redis.costSlowWarmIntervalSeconds }}
+  COST_SLOW_WARM_INTERVAL_SECONDS: {{ . | quote }}
+{{- end }}
   BILLING_MARGIN: {{ .Values.billing.margin | default "1.4" | quote }}
   BILLING_MIN_UTILIZATION: {{ .Values.billing.minUtilization | default "0.30" | quote }}
   CROSSPLANE_SECRET_NAMESPACE: {{ .Values.rbac.crossplaneSecretNamespace | default "crossplane-system" | quote }}

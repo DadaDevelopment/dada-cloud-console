@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"net/http"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -37,15 +38,39 @@ func withCostBudget(ctx context.Context) (context.Context, context.CancelFunc) {
 	return context.WithTimeout(ctx, costRequestBudget)
 }
 
-// allowedCostWindows whitelists the OpenCost window values the UI may request.
-// Restricting to a fixed set keeps the value out of any injection surface and
-// bounds the query cost. Note the on-cluster Prometheus retains only ~7d, so
-// windows beyond that fill in from OpenCost's own history as it accumulates.
-var allowedCostWindows = map[string]bool{
-	"24h": true,
-	"7d":  true,
-	"14d": true,
-	"30d": true,
+// fastCostWindows and slowCostWindows together whitelist the OpenCost window
+// values the UI may request. Restricting to a fixed set keeps the value out of
+// any injection surface and bounds the query cost. Note the on-cluster
+// Prometheus retains only ~7d, so windows beyond that fill in from OpenCost's
+// own history as it accumulates.
+//
+// The split is by what the window COSTS upstream, not by what it means.
+// OpenCost answers an allocation window by issuing one PromQL query per day in
+// it, so cost grows with the window: measured on prod, 24h ~6s and 7d ~40-86s
+// against 14d ~63-111s and 30d ~94-121s. The two long windows were ~75% of
+// every warm sweep while changing least between refreshes, so they are warmed
+// on their own slow schedule (CostSlowWarmInterval) and cached far longer
+// (CacheCostSlowTTL) than the short ones.
+var (
+	fastCostWindows = []string{"24h", "7d"}
+	slowCostWindows = []string{"14d", "30d"}
+)
+
+// costWindowAllowed reports whether a user-supplied window is one of the four
+// whitelisted values.
+func costWindowAllowed(window string) bool {
+	return slices.Contains(fastCostWindows, window) || slices.Contains(slowCostWindows, window)
+}
+
+// costCacheTTL is how long a cached allocation set for a window stays valid.
+// Read and write paths must agree on it: a user request that misses and
+// recomputes must not re-store a long window under the short TTL, or the next
+// user pays the full aggregation again.
+func (h *Handler) costCacheTTL(window string) time.Duration {
+	if slices.Contains(slowCostWindows, window) {
+		return h.cfg.CacheCostSlowTTL
+	}
+	return h.cfg.CacheCostTTL
 }
 
 // envCost is the per-environment (per-namespace) cost breakdown.
@@ -102,7 +127,7 @@ func (h *Handler) GetProjectCost(c *gin.Context) {
 	}
 
 	window := c.DefaultQuery("window", "30d")
-	if !allowedCostWindows[window] {
+	if !costWindowAllowed(window) {
 		respondError(c, http.StatusBadRequest, "invalid window: allowed 24h, 7d, 14d, 30d")
 		return
 	}
@@ -164,99 +189,87 @@ func (h *Handler) clusterAllocsByWindow(ctx context.Context, window string) (map
 	bctx, cancel := withCostBudget(ctx)
 	defer cancel()
 	return cache.Fetch(bctx, h.cache,
-		"cost:allocs:"+window, h.cfg.CacheCostTTL,
+		"cost:allocs:"+window, h.costCacheTTL(window),
 		func() (map[string]opencost.Allocation, error) {
 			return h.opencost.Compute(bctx, window, "namespace", "")
 		})
 }
 
-// StartCostCacheWarmer refreshes the cost cache for every allowed window on an
-// interval so the expensive OpenCost aggregation is paid by this background loop,
-// never by a user request. It also keeps OpenCost's own compute cache warm.
-// No-op unless both OpenCost and the Redis cache are configured; interval must be
-// shorter than CacheCostTTL so the entries never expire between refreshes.
+// StartCostCacheWarmer refreshes the cost cache so the expensive OpenCost
+// aggregation is paid by this background loop, never by a user request. It also
+// keeps OpenCost's own compute cache warm. No-op unless both OpenCost and the
+// Redis cache are configured.
 //
-// It uses a dedicated patient OpenCost client (CostWarmTimeout, default 240s)
-// rather than the user-facing one (20s): OpenCost's own allocation/compute call
-// slows down under Mimir CPU throttling (observed 34s at 1d window, >60s at
-// 7d/30d), and the warmer must be able to ride that out so the cache gets
-// populated off the user path. Users keep the 20s fail-fast client.
+// It runs TWO loops, not one, because the windows differ by an order of
+// magnitude in what they cost upstream (see fastCostWindows/slowCostWindows):
 //
-// Every window/step below runs SEQUENTIALLY in this one goroutine (a plain for
-// loop, no per-window goroutine fan-out) so slow OpenCost/Mimir windows do not
-// pile parallel load onto an already-throttled upstream and compound each
-// other's latency.
+//   - fast (CostWarmInterval, default 150s): 24h + 7d namespace allocations,
+//     the admin pod-allocation window, the billing snapshot, per-project
+//     consumptions. All cached for CacheCostTTL.
+//   - slow (CostSlowWarmInterval, default 30m): 14d + 30d namespace
+//     allocations, cached for CacheCostSlowTTL.
+//
+// The intervals are explicit config, NOT derived from the cache TTL. Deriving
+// the interval as CacheCostTTL/2 silently assumed a sweep fits inside the TTL;
+// once the full sweep grew to 215-339s against a 150s interval, ticks ran
+// end-to-end with no idle gap, on both replicas, and OpenCost's fan-out
+// (one PromQL per day of window) pinned Mimir at ~1.7 CPU — the cluster's
+// single largest consumer. If a sweep ever again takes longer than its
+// interval, that is a signal to lengthen the interval, not to let it free-run.
+//
+// Both loops are guarded by a Postgres advisory lock (advisory_lock.go), so
+// exactly ONE replica warms per tick. The result lands in shared Redis, so a
+// second replica recomputing it buys nothing and doubles the upstream load.
+//
+// Each loop uses the same dedicated patient OpenCost client (CostWarmTimeout,
+// default 240s) rather than the user-facing one (20s): OpenCost's own
+// allocation/compute call slows down under Mimir CPU throttling (observed 34s
+// at 1d window, >60s at 7d/30d), and the warmer must be able to ride that out
+// so the cache gets populated off the user path. Users keep the 20s fail-fast
+// client.
+//
+// Every window/step below runs SEQUENTIALLY within its loop (a plain for loop,
+// no per-window goroutine fan-out) so slow OpenCost/Mimir windows do not pile
+// parallel load onto an already-throttled upstream and compound each other's
+// latency.
 //
 // The initial warm runs INSIDE the goroutine, never synchronously: a cold or
 // slow OpenCost made a synchronous first warm block boot ~76s across windows,
 // past the liveness probe budget, crash-looping the backend (nginx 503 for every
-// authed user). Do NOT move the first warm() back onto the startup path.
-func (h *Handler) StartCostCacheWarmer(ctx context.Context, interval time.Duration) {
+// authed user). Do NOT move the first warm back onto the startup path.
+func (h *Handler) StartCostCacheWarmer(ctx context.Context) {
 	if h.opencost == nil || !h.cache.Enabled() {
 		return
 	}
 	warmClient := opencost.NewWithTimeout(h.cfg.OpenCostURL, h.cfg.CostWarmTimeout)
-	var warming atomic.Bool
-	warm := func() {
-		if !warming.CompareAndSwap(false, true) {
-			log.Warn().Msg("cost warmer: previous tick still running, skipping this tick")
+
+	h.startCostWarmLoop(ctx, "cost-warm-fast", lockKeyCostWarmFast, h.cfg.CostWarmInterval,
+		func(ctx context.Context) { h.warmFastCost(ctx, warmClient) })
+	h.startCostWarmLoop(ctx, "cost-warm-slow", lockKeyCostWarmSlow, h.cfg.CostSlowWarmInterval,
+		func(ctx context.Context) { h.warmSlowCost(ctx, warmClient) })
+}
+
+// startCostWarmLoop runs tick immediately and then on an interval, holding the
+// given advisory lock for the duration of each tick so only one replica warms.
+//
+// The in-process atomic guard is kept ALONGSIDE the cross-replica lock: the
+// lock stops two pods from warming at once, the guard stops one pod from
+// starting a second tick while its own is still running (the advisory lock is
+// re-entrant within a session and would not catch that).
+func (h *Handler) startCostWarmLoop(ctx context.Context, name string, lockKey int64, interval time.Duration, tick func(context.Context)) {
+	var running atomic.Bool
+	run := func() {
+		if !running.CompareAndSwap(false, true) {
+			log.Warn().Str("loop", name).Msg("cost warmer: previous tick still running, skipping this tick")
 			return
 		}
-		defer warming.Store(false)
-
-		start := time.Now()
-		windowDurations := make(map[string]time.Duration, len(allowedCostWindows)+len(adminCostsWindows))
-		okWindows, failedWindows := 0, 0
-
-		for w := range allowedCostWindows {
-			wStart := time.Now()
-			wctx, cancel := context.WithTimeout(ctx, h.cfg.CostWarmTimeout)
-			allocs, err := warmClient.Compute(wctx, w, "namespace", "")
-			cancel()
-			if err != nil {
-				failedWindows++
-				log.Warn().Err(err).Str("window", w).Dur("elapsed", time.Since(wStart)).Msg("cost warmer: OpenCost compute failed")
-				continue
-			}
-			cache.Store(ctx, h.cache, "cost:allocs:"+w, h.cfg.CacheCostTTL, allocs)
-			okWindows++
-			windowDurations["allocs:"+w] = time.Since(wStart)
+		defer running.Store(false)
+		if !runWithAdvisoryLock(ctx, h.pool, lockKey, name, tick) {
+			log.Debug().Str("loop", name).Msg("cost warmer: another replica holds the lock, skipping this tick")
 		}
-		for _, w := range adminCostsWindows {
-			wStart := time.Now()
-			wctx, cancel := context.WithTimeout(ctx, h.cfg.CostWarmTimeout)
-			podAllocs, err := warmClient.Compute(wctx, w, "pod", "")
-			cancel()
-			if err != nil {
-				failedWindows++
-				log.Warn().Err(err).Str("window", w).Dur("elapsed", time.Since(wStart)).Msg("cost warmer: OpenCost admin pod compute failed")
-				continue
-			}
-			cache.Store(ctx, h.cache, "cost:admin:pod:"+w, h.cfg.CacheCostTTL, podAllocs)
-			okWindows++
-			windowDurations["admin:pod:"+w] = time.Since(wStart)
-		}
-
-		snapStart := time.Now()
-		h.warmBillingSnapshot(ctx, warmClient)
-		windowDurations["billing:snapshot"] = time.Since(snapStart)
-
-		pcStart := time.Now()
-		okProjects, failedProjects, failedProjectIDs := h.warmProjectConsumptions(ctx)
-		windowDurations["project:consumptions"] = time.Since(pcStart)
-
-		log.Info().
-			Dur("total", time.Since(start)).
-			Int("ok_windows", okWindows).
-			Int("failed_windows", failedWindows).
-			Int("ok_projects", okProjects).
-			Int("failed_projects", failedProjects).
-			Strs("failed_project_ids", failedProjectIDs).
-			Interface("durations", windowDurations).
-			Msg("cost warmer: tick complete")
 	}
 	go func() {
-		warm()
+		run()
 		t := time.NewTicker(interval)
 		defer t.Stop()
 		for {
@@ -264,10 +277,92 @@ func (h *Handler) StartCostCacheWarmer(ctx context.Context, interval time.Durati
 			case <-ctx.Done():
 				return
 			case <-t.C:
-				warm()
+				run()
 			}
 		}
 	}()
+}
+
+// warmFastCost refreshes everything whose upstream cost is small enough to pay
+// every CostWarmInterval: the short namespace windows, the admin pod window,
+// the billing snapshot, and per-project consumptions.
+func (h *Handler) warmFastCost(ctx context.Context, warmClient *opencost.Client) {
+	start := time.Now()
+	durations := make(map[string]time.Duration, len(fastCostWindows)+len(adminCostsWindows)+2)
+	okWindows, failedWindows := h.warmAllocWindows(ctx, warmClient, fastCostWindows, durations)
+
+	for _, w := range adminCostsWindows {
+		wStart := time.Now()
+		wctx, cancel := context.WithTimeout(ctx, h.cfg.CostWarmTimeout)
+		podAllocs, err := warmClient.Compute(wctx, w, "pod", "")
+		cancel()
+		if err != nil {
+			failedWindows++
+			log.Warn().Err(err).Str("window", w).Dur("elapsed", time.Since(wStart)).Msg("cost warmer: OpenCost admin pod compute failed")
+			continue
+		}
+		cache.Store(ctx, h.cache, "cost:admin:pod:"+w, h.cfg.CacheCostTTL, podAllocs)
+		okWindows++
+		durations["admin:pod:"+w] = time.Since(wStart)
+	}
+
+	snapStart := time.Now()
+	h.warmBillingSnapshot(ctx, warmClient)
+	durations["billing:snapshot"] = time.Since(snapStart)
+
+	pcStart := time.Now()
+	okProjects, failedProjects, failedProjectIDs := h.warmProjectConsumptions(ctx)
+	durations["project:consumptions"] = time.Since(pcStart)
+
+	log.Info().
+		Str("loop", "cost-warm-fast").
+		Dur("total", time.Since(start)).
+		Int("ok_windows", okWindows).
+		Int("failed_windows", failedWindows).
+		Int("ok_projects", okProjects).
+		Int("failed_projects", failedProjects).
+		Strs("failed_project_ids", failedProjectIDs).
+		Interface("durations", durations).
+		Msg("cost warmer: tick complete")
+}
+
+// warmSlowCost refreshes the long namespace windows only. It is deliberately
+// the whole body of the slow loop: nothing else the warmer does is expensive
+// enough upstream to be worth delaying by half an hour.
+func (h *Handler) warmSlowCost(ctx context.Context, warmClient *opencost.Client) {
+	start := time.Now()
+	durations := make(map[string]time.Duration, len(slowCostWindows))
+	okWindows, failedWindows := h.warmAllocWindows(ctx, warmClient, slowCostWindows, durations)
+
+	log.Info().
+		Str("loop", "cost-warm-slow").
+		Dur("total", time.Since(start)).
+		Int("ok_windows", okWindows).
+		Int("failed_windows", failedWindows).
+		Interface("durations", durations).
+		Msg("cost warmer: tick complete")
+}
+
+// warmAllocWindows computes and caches the cluster-wide namespace allocation
+// set for each window, recording per-window elapsed time into durations.
+// Each window is stored under its own TTL (costCacheTTL), so the loop that
+// warms a window and the request that reads it agree on how long it lives.
+func (h *Handler) warmAllocWindows(ctx context.Context, warmClient *opencost.Client, windows []string, durations map[string]time.Duration) (ok, failed int) {
+	for _, w := range windows {
+		wStart := time.Now()
+		wctx, cancel := context.WithTimeout(ctx, h.cfg.CostWarmTimeout)
+		allocs, err := warmClient.Compute(wctx, w, "namespace", "")
+		cancel()
+		if err != nil {
+			failed++
+			log.Warn().Err(err).Str("window", w).Dur("elapsed", time.Since(wStart)).Msg("cost warmer: OpenCost compute failed")
+			continue
+		}
+		cache.Store(ctx, h.cache, "cost:allocs:"+w, h.costCacheTTL(w), allocs)
+		ok++
+		durations["allocs:"+w] = time.Since(wStart)
+	}
+	return ok, failed
 }
 
 // projectNamespaces returns the k8s namespaces of a project's environments,

@@ -63,6 +63,9 @@ redis:
   image: "redis:7.4-alpine"
   maxmemory: "128mb"
   cacheCostTTLSeconds: "300"
+  cacheCostSlowTTLSeconds: "5400"
+  costWarmIntervalSeconds: "150"
+  costSlowWarmIntervalSeconds: "1800"
   resources:
     requests:
       cpu: "10m"

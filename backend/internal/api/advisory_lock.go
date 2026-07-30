@@ -13,8 +13,15 @@ import (
 // body has non-idempotent side effects (DNS/domain writes, alert emails,
 // Kanister ActionSets) takes its key with pg_try_advisory_lock before running,
 // so with replicas > 1 exactly one pod fires per tick and the others skip.
-// Idempotent loops (billing meter upsert, reveal-row cleanup, cost cache
-// warmer, metrics collector) deliberately run unguarded on every replica.
+// Idempotent loops (billing meter upsert, reveal-row cleanup, metrics
+// collector) deliberately run unguarded on every replica.
+//
+// The cost cache warmer is guarded despite being idempotent, which is the one
+// exception to that split: its result goes to SHARED Redis, so a second
+// replica computing it adds no value, and its cost is not local CPU but a
+// multi-minute OpenCost/Mimir aggregation. Unguarded on two replicas it
+// doubled the load on the cluster's single busiest component.
+//
 // Keys are arbitrary but must stay distinct and stable across versions: a
 // rolling deploy briefly runs old and new pods against the same database.
 const (
@@ -22,6 +29,8 @@ const (
 	lockKeyBackupReconcile int64 = 0x64616461_0002
 	lockKeyAppHealthWatch  int64 = 0x64616461_0003
 	lockKeyAppVolumeWatch  int64 = 0x64616461_0004
+	lockKeyCostWarmFast    int64 = 0x64616461_0005
+	lockKeyCostWarmSlow    int64 = 0x64616461_0006
 )
 
 // runWithAdvisoryLock executes fn while holding the session-scoped Postgres

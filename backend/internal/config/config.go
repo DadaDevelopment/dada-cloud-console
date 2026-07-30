@@ -173,7 +173,29 @@ type Config struct {
 
 	// CacheCostTTL is how long a per-project cost response is cached. OpenCost
 	// aggregates slowly-changing data, so seconds of staleness are fine.
+	// Applies to the SHORT windows (24h, 7d) only; see CacheCostSlowTTL.
 	CacheCostTTL time.Duration
+
+	// CacheCostSlowTTL is CacheCostTTL for the LONG windows (14d, 30d). A month
+	// of accumulated cost barely moves in an hour, while its OpenCost
+	// aggregation is by far the most expensive thing the console asks of Mimir
+	// (measured on prod: 30d ~100s, 14d ~90s, vs 7d ~60s and 24h ~6s), so the
+	// long windows are cached for far longer and refreshed on their own slow
+	// schedule. Must exceed CostSlowWarmInterval by enough that a failed slow
+	// tick does not expose a cold entry to a user request.
+	CacheCostSlowTTL time.Duration
+
+	// CostWarmInterval is how often the cost-cache warmer refreshes the SHORT
+	// windows. Set independently of CacheCostTTL: deriving it as TTL/2 assumed a
+	// tick finishes well inside the TTL, and once the sweep grew past 300s the
+	// warmer ran back-to-back forever and pinned Mimir at >1.5 CPU. Keep it
+	// shorter than CacheCostTTL, and longer than one short-window sweep.
+	CostWarmInterval time.Duration
+
+	// CostSlowWarmInterval is how often the LONG windows (14d, 30d) are
+	// refreshed. This is the knob that trades cost-page freshness for Mimir
+	// load; the long windows are ~75% of the total warm cost.
+	CostSlowWarmInterval time.Duration
 
 	// CostWarmTimeout bounds each background cost-cache-warmer OpenCost/Mimir
 	// call (per window, admin pod compute, billing snapshot). It is patient by
@@ -579,6 +601,9 @@ func Load() (*Config, error) {
 		OpenCostURL:                 getEnv("OPENCOST_URL", ""),
 		RedisAddr:                   getEnv("REDIS_ADDR", ""),
 		CacheCostTTL:                time.Duration(getEnvInt64("CACHE_COST_TTL_SECONDS", 300)) * time.Second,
+		CacheCostSlowTTL:            time.Duration(getEnvInt64("CACHE_COST_SLOW_TTL_SECONDS", 5400)) * time.Second,
+		CostWarmInterval:            time.Duration(getEnvInt64("COST_WARM_INTERVAL_SECONDS", 150)) * time.Second,
+		CostSlowWarmInterval:        time.Duration(getEnvInt64("COST_SLOW_WARM_INTERVAL_SECONDS", 1800)) * time.Second,
 		CostWarmTimeout:             time.Duration(getEnvInt64("COST_WARM_TIMEOUT_SECONDS", 240)) * time.Second,
 		CacheMetricsTTL:             time.Duration(getEnvInt64("CACHE_METRICS_TTL_SECONDS", 20)) * time.Second,
 		CacheLogsTTL:                time.Duration(getEnvInt64("CACHE_LOGS_TTL_SECONDS", 10)) * time.Second,

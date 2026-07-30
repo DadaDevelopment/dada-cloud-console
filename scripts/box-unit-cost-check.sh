@@ -27,7 +27,7 @@
 #
 # Usage:
 #   scripts/box-unit-cost-check.sh                       # arm A only
-#   OPENCOST_URL=http://opencost.monitoring:9003 \
+#   OPENCOST_URL=http://opencost.opencost.svc.cluster.local:9003 \
 #     scripts/box-unit-cost-check.sh                     # both arms
 #
 #   MARGIN_FLOOR=0.25   minimum acceptable margin as a fraction of price (default 0.25)

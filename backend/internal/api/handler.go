@@ -186,7 +186,7 @@ func NewHandler(pool *pgxpool.Pool, cfg *config.Config) *Handler {
 		}
 		cancel()
 	}
-	h.StartCostCacheWarmer(context.Background(), h.cfg.CacheCostTTL/2)
+	h.StartCostCacheWarmer(context.Background())
 	// User-telemetry reads go to the multi-tenant Mimir store (per-tenant
 	// X-Scope-OrgID). When USER_METRICS_QUERY_URL is unset, reuse the plain
 	// Prometheus client so behaviour is unchanged until the Mimir cutover.
