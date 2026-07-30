@@ -144,6 +144,14 @@ type Box struct {
 	// it never deletes it, so the customer's data survives their own runaway.
 	SpendCapRub *float64 `json:"spend_cap_rub,omitempty" db:"spend_cap_rub"`
 
+	// SpendCappedAt is set when the cap actually fired. Its presence is what makes
+	// the stop irreversible without a deliberate act: nothing in the normal
+	// lifecycle clears it, so a plain resume is capped again on the next meter
+	// tick, and only RAISING SpendCapRub lets the box run (see clearSpendCap in
+	// internal/api/box_meter.go). A stop a customer could undo by clicking resume
+	// would not be a spend cap, it would be a dialog box.
+	SpendCappedAt *time.Time `json:"spend_capped_at,omitempty" db:"spend_capped_at"`
+
 	// LastSampleJSON is the newest box-agent sample, taken OUTSIDE the guest —
 	// the authoritative activity signal. A heartbeat from inside the guest may
 	// only ask for MORE billing, never less, which is what makes trusting it safe.

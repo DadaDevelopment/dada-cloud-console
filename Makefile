@@ -1,4 +1,4 @@
-.PHONY: help dev dev-db dev-backend dev-frontend dev-init stop clean build-backend build-gateway build-frontend test-backend test-box test migrate helm-lint helm-render
+.PHONY: help dev dev-db dev-backend dev-frontend dev-init stop clean build-backend build-gateway build-frontend test-backend test-box box-cost box-billing-rehearsal test migrate helm-lint helm-render
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}'
@@ -38,8 +38,15 @@ build-frontend: ## Build frontend for production
 test-backend: ## Run backend tests
 	@cd backend && go test ./...
 
-test-box: ## Run Dada Box tests (ready path, readiness, pool, metric surface)
-	@cd backend && go test ./internal/box/... ./internal/metrics/... -count=1
+test-box: ## Run Dada Box tests (ready path, readiness, pool, metric surface, metering)
+	@cd backend && go test ./internal/box/... ./internal/metrics/... ./internal/boxcatalog/... ./internal/billing/... -count=1
+	@cd backend && go test ./internal/api/ -count=1 -run 'Box|ClassifyBoxMinute|SpendCap|GuestCannot|Guest'
+
+box-cost: ## Print the derived Dada Box unit economics and check the margin
+	@scripts/box-unit-cost-check.sh
+
+box-billing-rehearsal: ## Prove an idle box accumulates zero (needs TEST_DATABASE_URL)
+	@scripts/box-idle-billing-rehearsal.sh
 
 migrate: ## Apply DB migrations (uses DATABASE_URL or TEST_DATABASE_URL)
 	@cd backend && go run ./cmd/migrate

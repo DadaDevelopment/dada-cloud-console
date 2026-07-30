@@ -273,21 +273,27 @@ func collectBoxes(ctx context.Context, pool *pgxpool.Pool) {
 	// Available/Target for exactly that reason. An absent series is honestly
 	// missing; a fabricated one is a lie a dashboard renders as truth.
 
-	// dada_box_spend_cap_max_ratio and dada_box_crystallizations_pending_age_seconds
-	// are pinned at 0 for the same reason as each other: the tables they read do not
-	// exist yet (box_usage_minutes with the meter, box_crystallizations in phase 8).
+	// dada_box_crystallizations_pending_age_seconds is still pinned at 0: the table
+	// it reads (box_crystallizations) arrives in phase 8.
 	//
-	// Pinned rather than left unset, because these two have alert rules already
-	// watching them: a gauge that only starts reporting later is silent-by-absence
-	// in between, and "the alert never fired" is indistinguishable from "nothing is
-	// wrong". A published 0 says "measured, and the answer is none".
+	// Pinned rather than left unset, because it has an alert rule already watching
+	// it: a gauge that only starts reporting later is silent-by-absence in between,
+	// and "the alert never fired" is indistinguishable from "nothing is wrong". A
+	// published 0 says "measured, and the answer is none".
 	//
-	// Neither gets a proxy query. "Oldest box in status Crystallizing" is NOT the
-	// age of a stuck promotion record — a box can sit in that phase for reasons
-	// that have nothing to do with the crystallization saga — and a spend ratio
-	// without a usage ledger has no numerator at all. They start telling the truth
-	// on the same commits that give them tables to read.
-	boxSpendCapMaxRatio.Set(0)
+	// It gets no proxy query either. "Oldest box in status Crystallizing" is NOT the
+	// age of a stuck promotion record — a box can sit in that phase for reasons that
+	// have nothing to do with the crystallization saga. It starts telling the truth
+	// on the commit that gives it a table to read.
+	//
+	// dada_box_spend_cap_max_ratio USED to be pinned here for the same reason, and
+	// is no longer: the ledger it needs now exists (migration 063) and its writer is
+	// the metering tick (metrics.SetBoxSpendCapMaxRatio, called from
+	// internal/api/box_meter.go), which has already summed every box's spend against
+	// its cap for that tick. Re-deriving it here would run the same query a second
+	// time and let two answers to one question disagree. It is a plain unlabelled
+	// Gauge, so it still publishes 0 from registration and is never
+	// silent-by-absence before the first tick.
 	boxCrystallizationsPendingAge.Set(0)
 }
 
