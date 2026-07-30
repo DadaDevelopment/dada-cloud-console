@@ -165,7 +165,8 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
   //   URL ?env= → localStorage → project.default_environment → first env.
   useEffect(() => {
     if (!projectId || environments.length === 0) return;
-    if (envInitFor.current === projectId && selectedEnvId) return;
+    const stillValid = environments.some((e) => e.id === selectedEnvId);
+    if (envInitFor.current === projectId && stillValid) return;
 
     const byId = (id: string | null | undefined) =>
       id ? environments.find((e) => e.id === id) : undefined;
