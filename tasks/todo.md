@@ -91,8 +91,16 @@ Plan and evidence: `tasks/seo/PLAN.md`, baseline `tasks/seo/2026-07-30.md` / `.j
 - [x] Verify live after the roll: 94/94 sitemap URLs 200, new payment pages 1112-1482 words
 - [ ] Watch, do not pre-expand: 32 thin `/developer/*` docs pages (442-668 words). Expand only if
       the weekly pull shows them indexed then dropped as `LOW_QUALITY`
-- [ ] **Owner action:** set the region in Yandex Webmaster and register in Yandex Business
-      (`NO_REGIONS`, `NOT_IN_SPRAV`); no API exists for either
-- [ ] **Owner action:** verify the host in Google Search Console and submit the sitemap
-      (`GOOGLE_SITE_VERIFICATION` env); Google delivered 0 sessions in 30 days and ignores IndexNow
+- [x] **Owner did 07-31:** region set via Yandex Business UI — diagnostics not re-evaluated yet
+      (`last_state_update` still 07-30T13:35), verdict deferred to the 08-06 pull
+- [x] **Owner did 07-30:** Google Search Console verified, `/sitemap.xml` processed Успешно,
+      88 URLs discovered. Real Googlebot started crawling 07-30 17:17 (ingress logs: `/` 200,
+      `/analog-railway` 200, CSS chunk = rendering service). 0 clicks is not yet a signal — the
+      Performance chart ends 07-28, before submission
+- [x] Fix the apex redirect dropping the path (`dada-tuda.ru/robots.txt` -> homepage HTML);
+      host-conditioned 301 in `next.config.ts`, verified locally
+- [ ] Repoint the apex ingress at the frontend service so that redirect takes effect
+      (argo-infra `cloud-console/resources.values.yaml`, drop `permanent-redirect`)
+- [ ] **Only remaining Google lever: backlinks.** A fresh third-level domain with none will not
+      rank no matter how many pages it has
 - [ ] 2026-08-06: re-run `scripts/seo-weekly.py`, grade the three standing predictions in PLAN.md
