@@ -354,3 +354,27 @@ they stalled.
 Not verified in a browser: the joyride spotlight over the hero grid. The console
 route needs a Keycloak session, so placement is unproven visually — the engine
 itself is the one already shipped for `agent` on 07-25.
+
+### Verified live on prod — 2026-07-31
+
+Jenkins #674 → image tag `84278750` (= commit `842787504d64`, whose parent is the
+onboarding commit `e84680a`), auto-pinned in argo-infra, `cloud-console-prod` Synced.
+
+| Check | Result | Source |
+|---|---|---|
+| Frontend rolled | `frontend:84278750`, 2/2 Ready on two nodes | `kubectl get deploy/pods -o wide` [live] |
+| Backend rolled | `backend:84278750`, 2/2 Ready | same [live] |
+| Campaign is in the served bundle | `first-deploy` and the RU copy found in `.next/static` + `.next/server` chunks inside the running pod | `kubectl exec … grep -rl` [live] |
+| Whitelist accepts the key | `POST /api/v1/onboarding/first-deploy` → 200 `{"status":"ok"}` | curl with a KC service-account bearer [live] |
+| Whitelist still rejects unknown keys | `POST /api/v1/onboarding/definitely-not-a-campaign` → 400 `unknown onboarding key` | same [live] |
+| The report actually persisted | `GET /api/v1/onboarding` → `{"first-deploy":"seen"}`, and the row was visible in `user_onboarding` | curl + psql [live] |
+
+The last two rows are the ones that matter: a 200 on the POST alone would not have
+proved anything, since the infinite-tour failure mode is precisely a report that
+never lands. The synthetic row written by that probe was deleted afterwards
+(`DELETE 1`, count for `first-deploy` back to 0), so Monday's cohort count starts
+from a clean baseline.
+
+Still unverified: the joyride spotlight itself. The bundle contains the campaign
+and the API accepts it, but nobody has seen the tooltip render over the hero grid —
+that needs a Keycloak session in a browser.
