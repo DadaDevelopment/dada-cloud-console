@@ -318,3 +318,39 @@ the frontend ran a single replica while also serving the public marketing site, 
 restart or drain was an outage window. Now 2 replicas with `maxUnavailable: 0` and a
 soft anti-affinity — chart `050acaa` in dada-cloud, values `c1a738e1` in argo-infra.
 Whether the crawler sees another 5xx is itself a prediction to grade next Monday.
+
+## First-deploy onboarding shipped — 2026-07-31
+
+Queue item 1 is done, commit `e84680a` on main. `ONBOARDING_CAMPAIGNS` now leads
+with `first-deploy` ahead of `agent`; the anchor is the deploy hero
+(`data-onboarding="first-deploy"`) on the project overview and the apps empty
+state, which React renders only while the project has zero apps — so "who sees
+the tour" needs no route guard and no app count in the provider. The copy names
+the two things that skip the GitHub connect gate: one-click starter templates
+(~2 min to a running URL) and folder upload.
+
+The failure mode worth remembering: `onboardingKeys` in
+`backend/internal/api/onboarding.go` is a whitelist. A campaign key missing from
+it 400s every `POST /onboarding/{key}`, so the status map never fills and the
+tour re-runs on every page load, forever. `TestOnboardingKeysMatchFrontendRegistry`
+now parses `campaigns.ts` and fails on drift in either direction.
+
+**Prediction to grade next Monday (2026-08-03), from the same two sources as the
+07-30 measurement:**
+
+| # | Prediction | How to grade |
+|---|---|---|
+| 1 | ≥60% of accounts created after 07-31 have a `user_onboarding` row for `first-deploy` | `SELECT status, count(*) FROM user_onboarding WHERE onboarding_key='first-deploy' GROUP BY 1` vs KC accounts created in the window |
+| 2 | Build-start rate among new signups rises above the 44% (7/16) baseline | KC `createdTimestamp` joined against `builds → environments → projects`, same query as 07-30 |
+| 3 | `skipped` stays under half of `first-deploy` rows — if most people dismiss it, the copy is wrong, not the placement | status split in the same table |
+
+Prediction 2 is the one that matters and the one most likely to stay noisy: at
+~16 signups a month, a week's cohort is single digits. Read it as directional and
+grade it again at 30 days. If the tour is seen (1) but the build rate does not
+move (2), the constraint is downstream of the button — that is a different fix
+than more nudging, and the `audit_events` trail for those users will say where
+they stalled.
+
+Not verified in a browser: the joyride spotlight over the hero grid. The console
+route needs a Keycloak session, so placement is unproven visually — the engine
+itself is the one already shipped for `agent` on 07-25.
