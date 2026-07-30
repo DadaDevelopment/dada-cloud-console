@@ -654,6 +654,15 @@ func (h *Handler) CreateApp(c *gin.Context) {
 		req.Name, projectID, envID,
 	).Scan(&exists)
 	if err == nil {
+		h.recordAudit(c.Request.Context(), claims.UserID, auditEntry{
+			ProjectID:     projectID,
+			EnvironmentID: envID,
+			Action:        "CreateApp",
+			ResourceKind:  "App",
+			ResourceName:  req.Name,
+			Outcome:       auditOutcomeFailure,
+			Metadata:      map[string]any{"reason": "name_taken"},
+		})
 		respondError(c, http.StatusConflict, fmt.Sprintf(
 			"the app name %q is already taken in this project's environment; choose another name",
 			req.Name))
@@ -742,12 +751,15 @@ func (h *Handler) CreateApp(c *gin.Context) {
 	}
 
 	// Insert AuditEvent (best-effort)
-	auditMeta, _ := json.Marshal(payload)
-	_, _ = h.pool.Exec(c.Request.Context(),
-		`INSERT INTO audit_events (actor_id, project_id, operation_id, action, resource_kind, resource_name, metadata)
-		 VALUES ($1, $2, $3, 'CreateApp', 'App', $4, $5)`,
-		claims.UserID, projectID, op.ID, req.Name, auditMeta,
-	)
+	h.recordAudit(c.Request.Context(), claims.UserID, auditEntry{
+		ProjectID:     projectID,
+		EnvironmentID: envID,
+		OperationID:   op.ID,
+		Action:        "CreateApp",
+		ResourceKind:  "App",
+		ResourceName:  req.Name,
+		Metadata:      payload,
+	})
 	h.notifyAuditEvent(claims, projectID, "CreateApp", req.Name)
 
 	c.JSON(http.StatusAccepted, gin.H{

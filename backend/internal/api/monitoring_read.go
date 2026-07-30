@@ -836,6 +836,15 @@ func (h *Handler) GetMonitoringLogs(c *gin.Context) {
 	if res.Entries == nil {
 		res.Entries = []logsearch.LogEntry{}
 	}
+	if claims, ok := auth.GetClaims(c); ok {
+		h.recordViewAudit(claims, auditActionViewAppLogs, auditEntry{
+			ProjectID:     app.ProjectID,
+			EnvironmentID: app.EnvironmentID,
+			ResourceKind:  "App",
+			ResourceName: app.Name,
+			Metadata:     map[string]any{"source": source, "entries": len(res.Entries)},
+		})
+	}
 	c.JSON(http.StatusOK, res)
 }
 

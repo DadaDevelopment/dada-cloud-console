@@ -277,11 +277,14 @@ func (h *Handler) TriggerBuild(c *gin.Context) {
 		return
 	}
 
-	_, _ = h.pool.Exec(c.Request.Context(),
-		`INSERT INTO audit_events (actor_id, project_id, action, resource_kind, resource_name)
-		 VALUES ($1, $2, 'TriggerBuild', 'Build', $3)`,
-		claims.UserID, projectID, appName,
-	)
+	h.recordAudit(c.Request.Context(), claims.UserID, auditEntry{
+		ProjectID:     projectID,
+		EnvironmentID: envID,
+		Action:        "TriggerBuild",
+		ResourceKind:  "Build",
+		ResourceName:  appName,
+		Metadata:      map[string]any{"build_id": b.ID.String(), "branch": b.Branch},
+	})
 	h.notifyAuditEvent(claims, projectID, "TriggerBuild", appName)
 
 	c.JSON(http.StatusAccepted, gin.H{"build": b})
@@ -361,11 +364,14 @@ func (h *Handler) CancelBuild(c *gin.Context) {
 		return
 	}
 
-	_, _ = h.pool.Exec(c.Request.Context(),
-		`INSERT INTO audit_events (actor_id, project_id, action, resource_kind, resource_name)
-		 VALUES ($1, $2, 'CancelBuild', 'Build', $3)`,
-		claims.UserID, projectID, b.AppName,
-	)
+	h.recordAudit(c.Request.Context(), claims.UserID, auditEntry{
+		ProjectID:     projectID,
+		EnvironmentID: b.EnvironmentID,
+		Action:        "CancelBuild",
+		ResourceKind:  "Build",
+		ResourceName:  b.AppName,
+		Metadata:      map[string]any{"build_id": b.ID.String(), "status_before": "in_flight"},
+	})
 
 	c.JSON(http.StatusOK, gin.H{"build": b})
 }
@@ -440,6 +446,17 @@ func (h *Handler) GetBuildLogsToken(c *gin.Context) {
 		respondError(c, http.StatusInternalServerError, "failed to sign token")
 		return
 	}
+
+	h.recordViewAudit(claims, auditActionViewBuildLogs, auditEntry{
+		ProjectID:     projectID,
+		EnvironmentID: b.EnvironmentID,
+		ResourceKind:  "Build",
+		ResourceName:  b.AppName,
+		Metadata: map[string]any{
+			"build_id":     buildID.String(),
+			"build_status": b.Status,
+		},
+	})
 
 	c.JSON(http.StatusOK, gin.H{
 		"token":  token,
