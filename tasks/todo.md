@@ -99,8 +99,8 @@ Plan and evidence: `tasks/seo/PLAN.md`, baseline `tasks/seo/2026-07-30.md` / `.j
       Performance chart ends 07-28, before submission
 - [x] Fix the apex redirect dropping the path (`dada-tuda.ru/robots.txt` -> homepage HTML);
       host-conditioned 301 in `next.config.ts`, verified locally
-- [ ] Repoint the apex ingress at the frontend service so that redirect takes effect
-      (argo-infra `cloud-console/resources.values.yaml`, drop `permanent-redirect`)
+- [x] Repoint the apex ingress at the frontend service so that redirect takes effect
+      (argo-infra `d4f2061d`) — verified live: apex `/robots.txt` now returns robots, not HTML
 - [ ] **Only remaining Google lever: backlinks.** A fresh third-level domain with none will not
       rank no matter how many pages it has
 - [ ] 2026-08-06: re-run `scripts/seo-weekly.py`, grade the three standing predictions in PLAN.md

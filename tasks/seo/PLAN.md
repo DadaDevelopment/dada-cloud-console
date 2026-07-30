@@ -178,7 +178,24 @@ domain with no backlinks will not rank on merit. Bing already crawls via IndexNo
 Webmaster only buys reporting. Treat Google as a 3-6 month play and keep the RU budget on Yandex.
 
 Open, in order:
-- [ ] repoint the apex ingress at the frontend service so the path-preserving redirect in
-      `next.config.ts` takes over from `permanent-redirect`
-      (argo-infra `clusters/beget-prod/.../cloud-console/resources.values.yaml`)
+- [x] repoint the apex ingress at the frontend service so the path-preserving redirect in
+      `next.config.ts` takes over from `permanent-redirect` — shipped 07-31, argo-infra
+      `d4f2061d`. Verified live on the public host: `dada-tuda.ru/robots.txt`,
+      `/pricing`, `/analog-vercel` and `/oplatit-vercel-iz-rossii` each 301 to the same path
+      on `cloud.dada-tuda.ru`; following the apex `robots.txt` now returns the real robots
+      body instead of the landing page's HTML; `www` behaves the same; `cloud` 200 and
+      `console` untouched (307 to `/projects`, its own pre-existing behaviour)
 - [ ] earn the first backlinks — this is the only remaining Google lever
+
+## Where the remaining SEO effort goes
+
+Ranked by what the data says is left, not by what is easy:
+
+1. **Backlinks.** Google now crawls but nothing points at the domain. Nothing else moves it.
+2. **The payment cluster's second wave** — Heroku, Netlify, Railway payment pages, but only
+   after the first pair (`/oplatit-vercel-iz-rossii`, `/rabotaet-li-vercel-v-rossii`) is graded.
+   Shipping the rest before the verdict would multiply an unmeasured bet.
+3. **Nothing on Google beyond that.** More pages do not help a domain with no links.
+
+Per [[project_activation_leak_not_signup]], every SEO win still funnels into a product where
+56% of signups never trigger a build — the content ceiling is lower than the activation one.
