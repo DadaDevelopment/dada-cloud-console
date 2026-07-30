@@ -412,6 +412,34 @@ type Config struct {
 	// (dozens of apps) and must not be gated by the customer plan ladder.
 	BillingExemptOrgs []string
 
+	// Dada Box metering knobs (internal/api/box_meter.go, box_reaper.go). Named
+	// BOX_* rather than BILLING_BOX_* because the same window also drives the
+	// reaper's sleep decision, which is a lifecycle concern and not a billing one.
+	//
+	// BoxMeterIntervalSecs is the meter's tick period. 60 by default and it should
+	// stay there: the ledger's grain is one minute, so a longer period does not
+	// batch work, it drops minutes nobody bills. Shorter is harmless (the PK makes
+	// a re-tick a no-op upsert) but pointless.
+	BoxMeterIntervalSecs int64 // BOX_METER_INTERVAL_SECS (default 60)
+	// BoxActiveWindowSecs is how stale an activity signal may be and still count
+	// for the minute being metered. 120 = two meter ticks, so ONE lost box-agent
+	// sample does not bill an active box as idle. Deliberately biased toward
+	// billing: the sample comes from outside the guest and a dropped one is our
+	// packet loss, not the customer going idle.
+	BoxActiveWindowSecs int64 // BOX_ACTIVE_WINDOW_SECS (default 120)
+	// BoxActiveCPUPercent is the guest-CPU floor, in percent of ONE core, above
+	// which a minute is active even with nobody attached. 5% bills a detached
+	// `cargo build` or a model download — the work an agent leaves running is
+	// exactly the work worth paying for — while staying above the idle noise of
+	// sshd, cron and the box daemon itself.
+	BoxActiveCPUPercent float64 // BOX_ACTIVE_CPU_PERCENT (default 5)
+	// BoxDefaultSpendCapRub is the cap applied to a box whose creator named none
+	// (boxes.spend_cap_rub IS NULL). A default rather than "unlimited" on purpose:
+	// the runaway this protects against is an agent in a loop, and an agent in a
+	// loop belongs to a customer who did not think to set a cap. Reaching it
+	// suspends the box; it never deletes it.
+	BoxDefaultSpendCapRub float64 // BOX_DEFAULT_SPEND_CAP_RUB (default 500)
+
 	// PublicBaseURL is the console's own public origin. Used to build absolute
 	// URLs handed back to the caller, e.g. the deploy-hook consumption endpoint
 	// (POST {PublicBaseURL}/api/v1/deploy) shown once when a deploy hook is created.
@@ -600,6 +628,10 @@ func Load() (*Config, error) {
 		BillingEnabled:              getEnv("BILLING_ENABLED", "false") == "true",
 		BillingMeterIntervalSec:     getEnvInt64("BILLING_METER_INTERVAL_SECS", 3600),
 		BillingExemptOrgs:           splitList(getEnv("BILLING_EXEMPT_ORGS", "")),
+		BoxMeterIntervalSecs:        getEnvInt64("BOX_METER_INTERVAL_SECS", 60),
+		BoxActiveWindowSecs:         getEnvInt64("BOX_ACTIVE_WINDOW_SECS", 120),
+		BoxActiveCPUPercent:         getEnvFloat("BOX_ACTIVE_CPU_PERCENT", 5),
+		BoxDefaultSpendCapRub:       getEnvFloat("BOX_DEFAULT_SPEND_CAP_RUB", 500),
 		PublicBaseURL:               getEnv("PUBLIC_BASE_URL", "https://console.dada-tuda.ru"),
 		YooKassaShopID:              getEnv("YOOKASSA_SHOP_ID", ""),
 		YooKassaSecretKey:           getEnv("YOOKASSA_SECRET_KEY", ""),

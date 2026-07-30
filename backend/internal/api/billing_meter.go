@@ -27,7 +27,18 @@ func MeterUsage(ctx context.Context, pool *pgxpool.Pool, cfg *config.Config, pla
 		return
 	}
 
-	countable := []string{"apps", "databases", "domains"}
+	// box_minutes joins the same list as apps/databases/domains rather than getting
+	// a meter of its own, and that ONE-WORD ADDITION is why every existing
+	// /billing/* surface (account quotas+usage, invoice preview, the console's usage
+	// bars) shows box minutes without another line of code: they all read
+	// usage_records, keyed by (org, resource, period_start).
+	//
+	// It is nonetheless a different KIND of number from its neighbours: apps and
+	// domains are stocks (how many exist right now), box_minutes is a flow (how many
+	// were billed since the first of the month). Both are correct as "the value of
+	// this resource at this hour", which is exactly what a usage_records row means,
+	// so no new shape was needed — see meterCountResource.
+	countable := []string{"apps", "databases", "domains", "box_minutes"}
 	for _, orgID := range orgs {
 		for _, resource := range countable {
 			count, err := meterCountResource(ctx, pool, orgID, resource)
@@ -91,8 +102,34 @@ func meterCountResource(ctx context.Context, pool *pgxpool.Pool, orgID, resource
 			WHERE p.org_id = $1
 		`, orgID).Scan(&n)
 		return n, err
+
+	case "box_minutes":
+		return countOrgBoxMinutes(ctx, pool, orgID, time.Now().UTC())
 	}
 	return 0, nil
+}
+
+// countOrgBoxMinutes counts the org's BILLED ACTIVE box minutes in the calendar
+// month containing now. Shared by the meter (usage_records) and by the quota gate
+// (checkQuota -> countResource) so the number a customer is shown and the number
+// they are gated on cannot disagree.
+//
+// Only kind='active' counts. suspended_disk rows are storage accrual for a box that
+// is asleep, and folding them in would consume a customer's minute allowance while
+// they were not using anything — which is precisely the bill-shock the "idle is not
+// billed" promise rules out. The disk accrual is still visible as money in
+// /billing/consumption and still enforced by the per-box spend cap; it just is not
+// a minute of use.
+//
+// The ledger carries org_id itself (denormalized in migration 063), so this survives
+// the deletion of the project and the box it describes.
+func countOrgBoxMinutes(ctx context.Context, pool *pgxpool.Pool, orgID string, now time.Time) (int, error) {
+	var n int
+	err := pool.QueryRow(ctx, `
+		SELECT COUNT(*) FROM box_usage
+		 WHERE org_id = $1 AND kind = $2 AND minute_start >= $3
+	`, orgID, boxUsageKindActive, monthStart(now)).Scan(&n)
+	return n, err
 }
 
 func meterUpsert(ctx context.Context, pool *pgxpool.Pool, orgID, resource string, used int, periodStart time.Time) {

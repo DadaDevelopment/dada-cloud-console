@@ -91,3 +91,31 @@ func ComputeUnitCost(cfg ClusterCost) (UnitCost, error) {
 func PlanCost(fp Footprint, u UnitCost) float64 {
 	return fp.VCPU*u.PerVCPU + fp.RAMGB*u.PerGBRAM + fp.StorageGB*u.PerGBStorage
 }
+
+// MinutesPerMonth is the divisor that turns a MONTHLY cost into a per-minute one:
+// 30 days x 24 h x 60 min. A fixed 43200 rather than the real length of the
+// current calendar month, on purpose — a February minute and a July minute must
+// cost the same, or the same box would carry two prices and neither could be
+// quoted.
+const MinutesPerMonth = 43200
+
+// PerMinuteCost is the per-minute internal cost in RUB of a footprint.
+//
+// THE ARITHMETIC IS THE PRODUCT CLAIM, which is why this is three lines and no
+// price table (D5 in docs/plans/2026-07-29-box-backend-slice.md). A box billed
+// for all 43200 minutes of a month costs exactly PlanCost(fp, u) — the same
+// monthly figure the crystallized VM of the same shape costs, because both are
+// derived from the same hardware bill and the same capacity. So "a box-minute
+// matches a VPS at the same size" holds by construction: it is the definition of
+// this function, not a claim someone has to keep re-checking against a price
+// list that drifts. The customer-facing number applies pricing.MarkupDefault on
+// top, exactly like pricing.PriceFloor does for a plan, so the markup also stays
+// in one place.
+//
+// Consequence worth stating: metering a box for MORE than a month cannot be
+// cheaper per minute than the VM, and cannot be more expensive either. The only
+// way a box beats a VM on price is by not running — which is why an idle minute
+// writes no row at all (migration 063).
+func PerMinuteCost(fp Footprint, u UnitCost) float64 {
+	return PlanCost(fp, u) / MinutesPerMonth
+}

@@ -298,6 +298,48 @@ func RecordBoxCrystallization(result, stage string, d time.Duration) {
 	boxCrystallizeDuration.WithLabelValues(result).Observe(d.Seconds())
 }
 
+// RecordBoxMeteredMinutes records one meter tick's verdict for the fleet: how many
+// box-minutes were billed and how many were not, on the given plan.
+//
+// Both counters are advanced by the SAME call on purpose. "Idle is not billed" is
+// a claim about a ratio, and a ratio needs both terms to move from one writer, or
+// a bug that stops writing idle minutes reads on a dashboard as "everything we
+// meter is billable" — which is the flattering direction and therefore the one
+// that has to be structurally impossible.
+func RecordBoxMeteredMinutes(plan string, active, idle int) {
+	if active > 0 {
+		boxActiveMinutes.WithLabelValues(plan).Add(float64(active))
+	}
+	if idle > 0 {
+		boxIdleMinutes.WithLabelValues(plan).Add(float64(idle))
+	}
+}
+
+// SetBoxMeteredMinutesLag publishes the age of the newest metered minute. A
+// stalled meter is silent revenue loss, which is why this is a gauge that is
+// alerted on rather than something a monthly reconciliation would eventually
+// notice.
+func SetBoxMeteredMinutesLag(age time.Duration) { boxMeteredMinutesLag.Set(age.Seconds()) }
+
+// RecordBoxMeterError counts one failure inside the metering loop.
+func RecordBoxMeterError() { boxMeterErrors.Inc() }
+
+// RecordBoxSpendCapHit records one spend-cap action. action must be one of
+// warned|throttled|stopped (the Help text on dada_box_spend_cap_hits_total is the
+// contract). "stopped" means suspended: the cap never deletes a box, so a customer
+// loses money to their own runaway, never data.
+func RecordBoxSpendCapHit(action string) { boxSpendCapHits.WithLabelValues(action).Inc() }
+
+// SetBoxSpendCapMaxRatio publishes the highest spend-to-cap ratio in the fleet.
+//
+// Written by the meter rather than by the state collector, which is a change from
+// how collectBoxes pinned it at 0 while no ledger existed: the meter is the only
+// component that has already summed each box's spend against its cap this tick, so
+// letting the collector re-derive it would run the same query twice and let the two
+// answers disagree. The gauge is a plain unlabelled Gauge, so it publishes 0 from
+// registration and is never silent-by-absence in between ticks.
+func SetBoxSpendCapMaxRatio(ratio float64) { boxSpendCapMaxRatio.Set(ratio) }
+
 // RecordBoxDestroy records one destroyed box by cause (user|ttl|spend_cap|abuse|
 // crystallized).
 func RecordBoxDestroy(cause string) { boxDestroys.WithLabelValues(cause).Inc() }

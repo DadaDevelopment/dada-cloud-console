@@ -4234,6 +4234,97 @@ const docTemplate = `{
                 }
             }
         },
+        "/projects/{projectId}/boxes/{boxName}/usage": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Returns the box's billed minutes and money over a window, read straight from the per-minute ledger. basis is always \"actual\": every row was written at the time the minute elapsed with its price frozen into it, so nothing here is modelled or estimated. Kinds are \"active\" (the box was doing your work) and \"suspended_disk\" (the box was asleep and only its disk was occupied). IDLE MINUTES ARE ABSENT ENTIRELY — an idle minute writes no row, which is why an idle box reports zero rather than a small charge. Window defaults to the current calendar month; ?from=\u0026to= accept RFC3339 or unix seconds and may not span more than 92 days. Read-only, available to any project member.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "box"
+                ],
+                "summary": "Get a box's metered minutes and cost",
+                "operationId": "getBoxUsage",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Project UUID",
+                        "name": "projectId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Box name",
+                        "name": "boxName",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Window start (RFC3339 or unix seconds). Defaults to the first instant of the current calendar month.",
+                        "name": "from",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Window end (RFC3339 or unix seconds). Defaults to now.",
+                        "name": "to",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "period, currency, basis, totals and per-kind breakdown",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/projects/{projectId}/builds/{buildId}": {
             "get": {
                 "security": [

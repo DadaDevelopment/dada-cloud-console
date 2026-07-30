@@ -1,0 +1,74 @@
+# Dada Box capacity pool cost.
+#
+# WHAT THIS FILE DESCRIBES, AFTER ADR-019: not a fleet of dedicated hosts. ADR-019
+# (2026-07-30) revoked ADR-016/ADR-017 and established, as a checked fact, that
+# there is no gVisor VM fleet and none is planned — the ephemeral box runs as a
+# container in the cloud we ALREADY have. Pricing minutes against three invented
+# Beget hosts would repeat the exact error that ADR names: a decision resting on
+# infrastructure that does not exist, presented as fact.
+#
+# So this file describes the SHARE OF THE EXISTING CLUSTER reserved for the box
+# pool, and every number in it is derived from cluster-cost.yaml rather than
+# invented. See the derivation below each block.
+#
+# WHY IT IS STILL A SEPARATE FILE, and this survives ADR-019 unchanged:
+# costengine.ComputeUnitCost divides the WHOLE bill by the WHOLE capacity. Boxes
+# and k8s apps are sold against the same hardware but under DIFFERENT density
+# rules — a box pod's memory is a hard reservation (a runaway agent build must not
+# OOM its neighbour) while its CPU limit is a ceiling handed out several times
+# over, which is why the weights below are RAM-heavy and the cluster's are
+# CPU-heavy. Adding the box pool's rubles and vCPU into cluster-cost.yaml would
+# silently move the per-vCPU cost that every k8s app, managed database and plan
+# price floor is derived from, and every resulting number would still look
+# plausible. Two pools, two unit costs.
+
+nodes:
+  # Derivation: cluster-cost.yaml bills 7711.80 (prod-k8s-3node) + 2328.60
+  # (platform-overhead) = 10040.40 ₽/mo for 18 vCPU / 33 GB / 195 GB. The box pool
+  # reserves ONE THIRD of that cluster, so it carries one third of the bill:
+  #
+  #   10040.40 / 3 = 3346.80
+  #
+  # A third, not a half and not a tenth, because that is 11 GB of reservable
+  # memory — two concurrent standard boxes (4 GiB each) plus the warm slot — which
+  # is the private-preview scale the product is opening at. Growing the pool means
+  # editing this one number and the capacity below it together.
+  - flavor: box-pool-third-of-prod-k8s
+    count: 1
+    monthly_cost_rub: 3346.80
+
+# Addressable capacity of the pool, i.e. the reserved third of the cluster, with
+# the box-specific density rules applied.
+#
+#   vcpu:       6 reserved (18/3) x 3 — a box's cpu limit is a CEILING, handed out
+#               roughly 3x over, exactly as the cluster does for apps.
+#   ram_gb:     11 reserved (33/3), NOT oversubscribed. Memory is what actually
+#               decides how many boxes fit, so this is the binding number.
+#   storage_gb: 65 reserved (195/3).
+#
+# Deliberately conservative in the one direction that cannot flatter us:
+# understating capacity RAISES the derived unit cost, so a margin check can be
+# pleasantly surprised but never quietly negative.
+capacity:
+  vcpu: 18
+  ram_gb: 11
+  storage_gb: 65
+
+# RAM-weighted, unlike cluster-cost.yaml's CPU-weighted split — see the header.
+# Must sum to 1.0 (±0.001) or ComputeUnitCost fails closed.
+cost_weights:
+  cpu: 0.3
+  ram: 0.5
+  storage: 0.2
+
+# Box egress is shaped, not billed (50 Mbit/s, 20 GiB per 24 h, then throttled to
+# 1 Mbit/s). Throttling rather than billing is deliberate: a surprise egress line
+# on a throwaway sandbox is exactly the bill-shock the product promises not to
+# deliver. 0 here means "not a metered dimension", not "free of charge to us".
+egress_rub_per_gb: 0
+
+# NOT modelled here, recovered by pricing.MarkupDefault instead, same as the PaaS
+# oversubscription headroom in plans.yaml: the warm pool. Pre-warmed boxes occupy
+# real memory and disk while nobody is billed for them, and the pool size moves
+# with demand. Encoding a guess about it as capacity would bake today's traffic
+# into the unit cost of every future minute.

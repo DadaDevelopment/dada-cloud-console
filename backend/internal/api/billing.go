@@ -88,6 +88,15 @@ func (h *Handler) countResource(ctx context.Context, orgID, resource string) (in
 		`, orgID).Scan(&n)
 		return n, err
 
+	case "box_minutes":
+		// The quota gate on box minutes reads the SAME function the meter writes
+		// usage_records from (countOrgBoxMinutes), so the figure a customer sees on
+		// /billing/account and the figure that refuses their next box are one query.
+		// Two queries here would eventually disagree, and a customer refused a box
+		// while their own usage page shows them under the limit has been given a
+		// reason to distrust every other number we publish.
+		return countOrgBoxMinutes(ctx, h.pool, orgID, time.Now().UTC())
+
 	case "team_members":
 		return 0, nil
 	}

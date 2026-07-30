@@ -93,6 +93,12 @@ keep:
   - exposeBox
   - crystallizeBox
   - listBoxCrystallizations
+  # getBoxUsage is exposed for the same reason an agent gets deleteBox: an agent
+  # that spends the customer's money must be able to see how much it has spent. It
+  # is read-only and per-box, and it is the only billing tool in this list —
+  # /billing/* stays out, because an agent needs its own consumption, not the
+  # customer's whole account.
+  - getBoxUsage
 
 rename: {}
 annotate: {}

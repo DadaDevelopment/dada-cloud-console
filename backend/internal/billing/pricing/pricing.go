@@ -23,6 +23,17 @@ type Quotas struct {
 	Environments        int `yaml:"environments"`
 	TeamMembers         int `yaml:"team_members"`
 	BackupRetentionDays int `yaml:"backup_retention_days"`
+	// BoxMinutes is the per-CALENDAR-MONTH allowance of billed active box
+	// minutes. Unlike every other quota in this struct it is a flow, not a
+	// stock: apps/databases/domains count what exists right now, box minutes
+	// count what was consumed since the first of the month.
+	//
+	// That difference is the whole reason a box needs its own quota. Counting
+	// live boxes would cap concurrency, and a free-tier account that keeps one
+	// box awake for 30 days would pass such a gate while consuming 43200
+	// minutes. The gate has to be on the metered flow or it does not bound
+	// anything (see boxMinutesQuotaResource in internal/api/billing.go).
+	BoxMinutes int `yaml:"box_minutes"`
 }
 
 // Plan represents a billing plan loaded from plans.yaml.
@@ -94,6 +105,8 @@ func Quota(p Plan, resource string) (int, bool) {
 		return p.Quotas.TeamMembers, true
 	case "storage_gb":
 		return p.Quotas.StorageGB, true
+	case "box_minutes":
+		return p.Quotas.BoxMinutes, true
 	}
 	return 0, false
 }

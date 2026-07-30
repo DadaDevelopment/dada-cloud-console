@@ -193,6 +193,79 @@ func ComposeVolumeAlert(appName string, ratio float64, declaredSize, consoleLink
 	return subject, b.String()
 }
 
+// Dada Box notifications.
+//
+// Every one of these says WHAT WILL HAPPEN TO THE DATA, in the first paragraph,
+// because that is the only question a customer actually has when a box is
+// suspended or about to be reaped. A box is a body the customer's agent worked in;
+// "we stopped it" and "we deleted it" are entirely different pieces of news and an
+// email that leaves that ambiguous is worse than no email.
+
+// ComposeBoxSpendCapWarning is the heads-up at boxSpendCapWarnRatio of the cap:
+// nothing has happened yet, and there are two ways to keep it that way.
+func ComposeBoxSpendCapWarning(boxName string, spentRub, capRub float64) (subject, body string) {
+	subject = fmt.Sprintf("Dada Box: бокс %s израсходовал %.0f%% лимита", boxName, spentRub/capRub*100)
+	var b strings.Builder
+	fmt.Fprintf(&b, "Бокс %s израсходовал %.2f ₽ из лимита %.2f ₽ за текущий месяц.\n\n", boxName, spentRub, capRub)
+	b.WriteString("Пока ничего не произошло: бокс работает, данные на месте.\n\n")
+	b.WriteString("При достижении лимита бокс будет ПРИОСТАНОВЛЕН (усыплён), а не удалён: диск, установленные пакеты и подключённые базы сохраняются, решение остаётся за вами.\n\n")
+	b.WriteString("Варианты: поднять лимит расходов у бокса, либо усыпить его самостоятельно, когда работа закончена. Минуты простоя не тарифицируются вообще.\n\n")
+	b.WriteString("Это письмо приходит один раз на бокс.\n")
+	return subject, b.String()
+}
+
+// ComposeBoxSpendCapStopped is sent when the cap suspended the box. It leads with
+// the fact that nothing was destroyed, because that is what the customer will
+// assume happened.
+func ComposeBoxSpendCapStopped(boxName string, spentRub, capRub float64) (subject, body string) {
+	subject = fmt.Sprintf("Dada Box: бокс %s приостановлен по лимиту расходов", boxName)
+	var b strings.Builder
+	fmt.Fprintf(&b, "Бокс %s достиг лимита расходов (%.2f ₽ из %.2f ₽) и был ПРИОСТАНОВЛЕН.\n\n", boxName, spentRub, capRub)
+	b.WriteString("Данные не удалены. Диск бокса, установленные пакеты и подключённые базы и бакеты на месте: подключённые ресурсы вообще живут вне бокса и лимитом не затрагиваются.\n\n")
+	b.WriteString("Чтобы продолжить работу, поднимите лимит расходов бокса — после этого бокс можно разбудить (resume), и это тот же бокс с тем же состоянием.\n\n")
+	b.WriteString("Если работа в боксе оказалась нужна надолго — её можно кристаллизовать в постоянную VM с доменом: месячная цена вместо поминутной, состояние переезжает как есть.\n")
+	return subject, b.String()
+}
+
+// ComposeBoxDiskAccrualWarning is the only Dada Box email that announces a coming
+// deletion from the billing side: a box asleep so long that its rootfs alone has
+// accrued a multiple of its spend cap.
+func ComposeBoxDiskAccrualWarning(boxName string, diskSpentRub, capRub float64, grace time.Duration) (subject, body string) {
+	subject = fmt.Sprintf("Dada Box: бокс %s будет удалён через %.0f ч", boxName, grace.Hours())
+	var b strings.Builder
+	fmt.Fprintf(&b, "Спящий бокс %s продолжает занимать диск: %.2f ₽ хранения при лимите расходов %.2f ₽.\n\n", boxName, diskSpentRub, capRub)
+	fmt.Fprintf(&b, "Если ничего не изменится, через %.0f часов бокс будет УДАЛЁН вместе с его диском. Это необратимо для всего, что живёт только внутри бокса.\n\n", grace.Hours())
+	b.WriteString("Что можно сделать сейчас: разбудить бокс и забрать нужное; поднять лимит расходов, если бокс ещё нужен; или кристаллизовать его в постоянную VM — тогда состояние сохраняется, а тарификация становится месячной.\n\n")
+	b.WriteString("Подключённые базы и бакеты живут вне бокса и удалены НЕ будут.\n")
+	return subject, b.String()
+}
+
+// ComposeBoxReapWarning is the sleep-reaper's warning. attemptsLeft distinguishes
+// the first notice from the last one, because "we will delete this" read twice with
+// identical wording is read as a duplicate and ignored.
+//
+// THIS IS THE CRYSTALLIZATION UPSELL MOMENT, and it is deliberate rather than
+// opportunistic: a customer who has left a box asleep for two days has a prototype
+// that survived. That is exactly the population the product's monetization ladder
+// is built for, and this is the only moment we can be sure they still care about
+// the contents — so the email offers promotion to a permanent VM instead of only
+// announcing a deletion. An email that just says "we are deleting your work" wastes
+// the one conversation the funnel exists to have.
+func ComposeBoxReapWarning(boxName string, asleepHours, deleteInHours float64, final bool) (subject, body string) {
+	prefix := "Dada Box"
+	if final {
+		prefix = "Dada Box (последнее предупреждение)"
+	}
+	subject = fmt.Sprintf("%s: спящий бокс %s будет удалён через %.0f ч", prefix, boxName, deleteInHours)
+	var b strings.Builder
+	fmt.Fprintf(&b, "Бокс %s спит уже %.0f часов.\n\n", boxName, asleepHours)
+	fmt.Fprintf(&b, "Через %.0f часов он будет удалён вместе с диском. Мы храним спящий бокс 72 часа — этого достаточно, чтобы вернуться и забрать нужное.\n\n", deleteInHours)
+	b.WriteString("Если прототип в этом боксе выжил — его можно кристаллизовать в постоянную VM: тот же диск, те же пакеты, те же подключённые базы и переменные, плюс домен и HTTPS. Поминутная тарификация меняется на месячную.\n\n")
+	b.WriteString("Если бокс больше не нужен — ничего делать не надо.\n\n")
+	b.WriteString("Подключённые базы и бакеты живут вне бокса и удалены НЕ будут.\n")
+	return subject, b.String()
+}
+
 // ComposeNoOwnerFallback wraps an already-composed alert subject/body for the
 // operator-fallback case (P1-ALERT-OWNERLESS-DROP): the resolver chain found
 // no reachable owner (no owner_id, no Owner/Admin member, no personal-org

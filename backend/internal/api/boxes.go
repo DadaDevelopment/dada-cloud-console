@@ -41,7 +41,7 @@ import (
 const boxColumns = `id, project_id, environment_id, name, image, profile, region,
 	 status, error_message, instance_ref, node_ref, ssh_host, ssh_port, mcp_url,
 	 ttl_seconds, idle_timeout_seconds, expires_at, last_active_at, slept_at,
-	 spend_cap_rub, last_sample_json, last_sample_at, app_server_id,
+	 spend_cap_rub, spend_capped_at, last_sample_json, last_sample_at, app_server_id,
 	 created_by, created_at, updated_at, deleted_at`
 
 // rowScanner is the shared shape of pgx.Row and pgx.Rows for scanning one box.
@@ -54,7 +54,7 @@ func scanBox(row rowScanner, b *models.Box) error {
 		&b.ID, &b.ProjectID, &b.EnvironmentID, &b.Name, &b.Image, &b.Profile, &b.Region,
 		&b.Status, &b.ErrorMessage, &b.InstanceRef, &b.NodeRef, &b.SSHHost, &b.SSHPort, &b.MCPURL,
 		&b.TTLSeconds, &b.IdleTimeoutSeconds, &b.ExpiresAt, &b.LastActiveAt, &b.SleptAt,
-		&b.SpendCapRub, &b.LastSampleJSON, &b.LastSampleAt, &b.AppServerID,
+		&b.SpendCapRub, &b.SpendCappedAt, &b.LastSampleJSON, &b.LastSampleAt, &b.AppServerID,
 		&b.CreatedBy, &b.CreatedAt, &b.UpdatedAt, &b.DeletedAt,
 	)
 }

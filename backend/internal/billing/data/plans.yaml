@@ -10,6 +10,12 @@ plans:
       environments: 1
       team_members: 1
       backup_retention_days: 0
+      # box_minutes is a per-calendar-month flow, not a live count (see
+      # pricing.Quotas.BoxMinutes). 300 = 5 hours of BILLED ACTIVE time, which is
+      # room to run a real task and decide, and far too little to host anything.
+      # Idle minutes are not billed and therefore not counted here at all, so a box
+      # left open overnight consumes none of this.
+      box_minutes: 300
     capabilities: []
     support_level: community
     # internal_footprint = expected average actual usage per plan (NOT customer quota ceiling).
@@ -31,6 +37,8 @@ plans:
       environments: 2
       team_members: 3
       backup_retention_days: 7
+      # ~50 h/month of active box time: a working week of agent sessions.
+      box_minutes: 3000
     capabilities:
       - email_support
     support_level: email
@@ -51,6 +59,8 @@ plans:
       environments: 5
       team_members: 10
       backup_retention_days: 30
+      # ~333 h/month: several engineers each keeping a box busy daily.
+      box_minutes: 20000
     capabilities:
       - email_support
       - priority_support
@@ -72,6 +82,7 @@ plans:
       environments: 0
       team_members: 0
       backup_retention_days: 0
+      box_minutes: 0
     capabilities:
       - email_support
       - priority_support
