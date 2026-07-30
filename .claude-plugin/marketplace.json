@@ -11,13 +11,20 @@
     {
       "name": "dada-cloud",
       "source": "./mcp-plugin",
-      "description": "Deploy and manage apps on Dada Cloud from Claude Code — 132 MCP tools plus guided deploy/configure/diagnose prompts, over an authenticated browser login.",
+      "description": "Deploy and manage apps on Dada Cloud from Claude Code, and get a Dada Box — an ephemeral root sandbox — in one tool call. 40 curated MCP tools plus guided deploy/configure/diagnose prompts, over an authenticated browser login.",
       "version": "0.1.0",
       "author": {
         "name": "Dada Cloud"
       },
       "category": "devops",
-      "tags": ["mcp", "deploy", "paas", "dada-cloud"]
+      "tags": [
+        "mcp",
+        "deploy",
+        "paas",
+        "box",
+        "sandbox",
+        "dada-cloud"
+      ]
     }
   ]
 }

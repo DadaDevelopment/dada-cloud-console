@@ -76,6 +76,12 @@ type LocalRuntime struct {
 	// crystallizer must exclude from the userland rsync and restore separately
 	// (ADR-019 steps 2 and 4).
 	Volumes []Volume
+	// BrokerDir is a host directory holding the box-broker binary. When set, it is
+	// bind-mounted read-only into every box at /run/dada-broker so the box has an
+	// endpoint of its own (see broker.go). Empty means the boxes of this runtime
+	// have no door of their own and callers must say so; it is not silently
+	// substituted with a control-plane URL.
+	BrokerDir string
 
 	mu    sync.Mutex
 	inits map[string]*boxInit
@@ -459,7 +465,7 @@ func localNodeRef() string {
 // the sentinel files the template put there, then the named volumes. Everything
 // after the chroot sees only the box.
 const initScript = `set -e
-ROOT="$1"; NAME="$2"; VOLSPEC="$3"
+ROOT="$1"; NAME="$2"; VOLSPEC="$3"; BROKER="$4"
 for d in usr bin sbin lib lib64 opt; do
   [ -e "/$d" ] || continue
   mkdir -p "$ROOT/$d"
@@ -489,6 +495,19 @@ ln -sf /proc/self/fd/0 "$ROOT/dev/stdin"
 ln -sf /proc/self/fd/1 "$ROOT/dev/stdout"
 ln -sf /proc/self/fd/2 "$ROOT/dev/stderr"
 mount -t tmpfs tmpfs "$ROOT/dev/shm"
+# The box's own endpoint, mounted read-only AFTER the /run tmpfs so it lands inside
+# it. Under /run on purpose: /run is machine-owned in ADR-019's exclusion list, so
+# the broker binary is never part of the box's userland and a crystallized VM
+# contains no broker (see broker.go).
+# Only bin/ is the bind: the directory above it stays tmpfs so the broker can write
+# its digests, its address and its log there. Mounting the whole directory read-only
+# would give the box an endpoint that cannot record who may open it.
+if [ -n "$BROKER" ] && [ -d "$BROKER" ]; then
+  mkdir -p "$ROOT/run/dada-broker/bin"
+  chmod 0700 "$ROOT/run/dada-broker"
+  mount --bind "$BROKER" "$ROOT/run/dada-broker/bin"
+  mount -o remount,bind,ro "$ROOT/run/dada-broker/bin"
+fi
 IFS=','
 for spec in $VOLSPEC; do
   [ -n "$spec" ] || continue
@@ -514,7 +533,11 @@ func (r *LocalRuntime) startInit(ctx context.Context, inst *Instance) error {
 		specs = append(specs, filepath.Join(r.volumeDir(inst.InstanceRef), v.Name)+":"+v.MountPath)
 	}
 	name := inst.InstanceRef
-	cmd := exec.Command("/bin/sh", "-c", initScript, "box-init", root, name, strings.Join(specs, ","))
+	brokerDir := ""
+	if r.BrokerConfigured() {
+		brokerDir = r.BrokerDir
+	}
+	cmd := exec.Command("/bin/sh", "-c", initScript, "box-init", root, name, strings.Join(specs, ","), brokerDir)
 	attr, err := newNamespaceSysProcAttr()
 	if err != nil {
 		return err
