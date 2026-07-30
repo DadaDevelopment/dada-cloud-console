@@ -103,7 +103,7 @@ beget-coredns  coredns-coredns  ClusterIP  10.96.0.10  53/UDP,53/TCP  k8s-app=co
 
 ## Как выглядит «уснуть» на подах: снимка памяти нет, но in-place resize есть
 
-Замерено, потому что на этом стоит весь жизненный цикл (`docs/plans/2026-08-01-box-lifecycle.md`).
+Замерено, потому что на этом стоит весь жизненный цикл (`docs/plans/2026-07-31-box-lifecycle.md`).
 
 **Снимка памяти пода в этом кластере нет.** `kubectl get runtimeclass` пусто, gVisor нет, а
 единственные апстримные пути к «заморозить и разморозить процесс» (Pod Snapshots в GKE, CRIU

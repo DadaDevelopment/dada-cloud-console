@@ -11,7 +11,7 @@ spec:
   storageClassName: longhorn-box
   resources:
     requests:
-      storage: 10Gi
+      storage: 20Gi
 ---
 apiVersion: v1
 kind: Pod
@@ -24,6 +24,7 @@ metadata:
     dada.io/box-phase: parked
   annotations:
     dada.io/box-image: warm-v1
+    dada.io/box-size: box-standard
     dada.io/box-region: ru-1
 spec:
   hostUsers: false
@@ -51,7 +52,7 @@ spec:
         sizeLimit: 64Mi
   containers:
     - name: box
-      image: registry.dada-tuda.ru/dada/box-ubuntu-24-04:warm-v1
+      image: nexus.dada-tuda.ru/dada/box-warm:v1
       imagePullPolicy: IfNotPresent
       command: ["/usr/local/bin/box-init"]
       workingDir: /workspace
@@ -81,12 +82,12 @@ spec:
           restartPolicy: NotRequired
       resources:
         requests:
-          cpu: 250m
-          memory: 1Gi
+          cpu: 667m
+          memory: 4Gi
           ephemeral-storage: 1Gi
         limits:
           cpu: "2"
-          memory: 2Gi
+          memory: 4Gi
           ephemeral-storage: 4Gi
       volumeMounts:
         - name: workspace
