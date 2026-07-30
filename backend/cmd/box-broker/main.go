@@ -279,14 +279,26 @@ func (b *broker) handleExec(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, res)
 }
 
+// defaultWorkdir is where a command runs when the caller names no directory. Same
+// as LocalRuntime's, and the fallback when it does not exist is the same too: `/`,
+// so a box whose /srv/app was removed still runs commands instead of failing every
+// one of them with a message about a directory the caller never mentioned.
+const defaultWorkdir = "/srv/app"
+
+// workdirEnv carries the caller's working directory to the shell. It is set on the
+// shell's environment and consumed by execPrelude, so the value never becomes part
+// of the script text and a directory name containing a quote cannot break it.
+const workdirEnv = "DADA_BOX_WORKDIR"
+
 // execPrelude sources the box's env before the caller's command so a credential
 // injected by an attach is present in the very next command without the caller
-// re-reading anything. It is character-for-character the prelude
-// internal/box/localruntime.go uses, because a command must not behave differently
-// depending on which of the two doors it came through.
+// re-reading anything. It is the prelude internal/box/localruntime.go uses, down to
+// the cd and its fallback, because a command must not behave differently depending
+// on which of the two doors it came through.
 const execPrelude = `set -a
 [ -r /etc/dada/box.env ] && . /etc/dada/box.env
 set +a
+cd "${` + workdirEnv + `:-` + defaultWorkdir + `}" 2>/dev/null || cd /
 `
 
 // exec runs one command inside the box.
@@ -316,15 +328,23 @@ func (b *broker) exec(ctx context.Context, req execRequest) (map[string]any, err
 
 	workdir := req.WorkingDir
 	if workdir == "" {
-		workdir = "/srv/app"
-	}
-	if _, err := os.Stat(workdir); err != nil {
-		workdir = "/"
+		workdir = defaultWorkdir
 	}
 
 	started := time.Now()
 	cmd := exec.CommandContext(ctx, "/bin/sh")
-	cmd.Dir = workdir
+	// The working directory is handed to the SHELL as an environment variable and
+	// changed into by the prelude, rather than resolved here and set as cmd.Dir.
+	//
+	// Three reasons, in order of weight. The path is a path INSIDE the box, and this
+	// process's own view of the filesystem is the box's — so an os.Stat here is the
+	// wrong resolver asking at the wrong moment, and its answer can be stale by the
+	// time the shell runs. Passing it through the environment rather than splicing it
+	// into the script text means a directory name containing a quote cannot break the
+	// script. And it makes this door's cd identical to LocalRuntime.execPrelude's,
+	// which matters because a command must not behave differently depending on which
+	// of the two doors it came through.
+	cmd.Env = append(os.Environ(), workdirEnv+"="+workdir)
 	cmd.Stdin = strings.NewReader(execPrelude + req.Command + "\n")
 	var stdout, stderr strings.Builder
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr

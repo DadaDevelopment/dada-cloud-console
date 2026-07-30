@@ -147,6 +147,52 @@ func TestExecRunsTheCommandAndReportsItsExitCode(t *testing.T) {
 	}
 }
 
+// The working directory is resolved by the shell inside the box, not by this
+// process. These cases pin the behaviour that resolution has to keep: an honoured
+// directory, a fallback for one that is not there, and — the one a naive
+// implementation loses — a directory whose name would break a script if it were
+// spliced into the script text instead of passed through the environment.
+func TestTheWorkingDirectoryIsResolvedByTheShell(t *testing.T) {
+	b := &broker{cfg: config{TokensFile: digestFile(t), ExecTimeout: 10 * time.Second}}
+
+	dir := t.TempDir()
+	res, err := b.exec(t.Context(), execRequest{Command: "pwd", WorkingDir: dir})
+	if err != nil {
+		t.Fatalf("exec: %v", err)
+	}
+	// macOS resolves /var to /private/var, so compare the base name rather than the
+	// whole path: the claim under test is "the caller's directory was honoured",
+	// not "the kernel does not normalise symlinks".
+	if got := strings.TrimSpace(res["stdout"].(string)); !strings.HasSuffix(got, filepath.Base(dir)) {
+		t.Fatalf("pwd = %q, want it to end in %q", got, filepath.Base(dir))
+	}
+
+	// A directory that does not exist must not fail every command with a message
+	// about a path the caller may not even have named.
+	res, err = b.exec(t.Context(), execRequest{Command: "pwd", WorkingDir: "/definitely/not/here"})
+	if err != nil {
+		t.Fatalf("exec: %v", err)
+	}
+	if got := res["exit_code"].(int); got != 0 {
+		t.Fatalf("exit_code = %d for a missing working_dir, want the command to still run", got)
+	}
+
+	// The quote is the point. If the path ever gets spliced into the script text,
+	// this case stops running the caller's command and starts running something
+	// else — silently, because the shell would still exit 0 on some other line.
+	odd := filepath.Join(dir, `a"b'c d`)
+	if err := os.MkdirAll(odd, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	res, err = b.exec(t.Context(), execRequest{Command: "echo marker-$(basename \"$PWD\")", WorkingDir: odd})
+	if err != nil {
+		t.Fatalf("exec: %v", err)
+	}
+	if got := strings.TrimSpace(res["stdout"].(string)); got != `marker-a"b'c d` {
+		t.Fatalf("stdout = %q, want %q — a quote in the path changed what ran", got, `marker-a"b'c d`)
+	}
+}
+
 // tools/call reports a non-zero exit as isError:true rather than as a protocol
 // error. Collapsing the two would make a failing build indistinguishable from a
 // broken box.

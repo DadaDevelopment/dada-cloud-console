@@ -1,8 +1,8 @@
 ==============================================================================
 DADA BOX — END-TO-END WALK
-started      2026-07-30T14:39:41Z
+started      2026-07-30T14:45:45Z
 repo         /home/user/dada-cloud-console
-commit       22a5a2c
+commit       c1a4b3e
 backend      http://127.0.0.1:18080
 postgres     127.0.0.1:5433 user=dada db=dada_box_walk
 box runtime  LocalRuntime at /var/tmp/dada-box-walk/runtime
@@ -23,7 +23,7 @@ STEP 1 — preflight: the tools and the services this walk really needs
 127.0.0.1:5433 - accepting connections
   postgres -> PostgreSQL 16.13 (Ubuntu 16.13-0ubuntu0.24.04.1) on x86_64-pc-linux-gnu, compiled by gcc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0, 64-bit
   app port 18099 is free — a later 200 on it can only come from the box
-  run marker: box-walk-20260730T143942Z-1257 (must appear in the served body and in the crystallized VM's response)
+  run marker: box-walk-20260730T144545Z-8841 (must appear in the served body and in the crystallized VM's response)
 
 ------------------------------------------------------------------------------
 STEP 2 — create the walk's own database (the cluster already running is left alone)
@@ -40,11 +40,11 @@ STEP 3 — build and start the real backend — it applies every migration itsel
     creates a real role and a real database on it, OUTSIDE the box.
   building ./cmd/server
   building ./cmd/box-broker — the endpoint that runs INSIDE the box
-  backend pid 1365, log /var/tmp/dada-box-walk/backend.log
+  backend pid 8962, log /var/tmp/dada-box-walk/backend.log
   waiting for /health (the warm pool is built before the server listens)
   health -> {"status":"ok"}
-  | [90m2:39PM[0m [32mINF[0m [1mbox: LocalRuntime warm pool ready[0m [36mbroker=[0mtrue [36mimage=[0mwarm-v1 [36mroot=[0m/var/tmp/dada-box-walk/runtime [36mtook=[0m2040.228085 [36mwarm=[0m2
-  | 2026/07/30 14:39:46 box: session surface enabled at /api/v1/box/session/{exec,info} (LocalRuntime stand-in for cmd/box-broker)
+  | [90m2:45PM[0m [32mINF[0m [1mbox: LocalRuntime warm pool ready[0m [36mbroker=[0mtrue [36mimage=[0mwarm-v1 [36mroot=[0m/var/tmp/dada-box-walk/runtime [36mtook=[0m968.269855 [36mwarm=[0m2
+  | 2026/07/30 14:45:53 box: session surface enabled at /api/v1/box/session/{exec,info} (LocalRuntime stand-in for cmd/box-broker)
 
 ------------------------------------------------------------------------------
 STEP 4 — authenticate through the real login handler (local HS256 mode)
@@ -55,7 +55,7 @@ STEP 4 — authenticate through the real login handler (local HS256 mode)
 ------------------------------------------------------------------------------
 STEP 5 — create a project through the real API
 ------------------------------------------------------------------------------
-  project id 51a3a1b4-e2cb-4a5e-83a1-4b69ce3abd45  org admin  role Owner
+  project id ee64ad96-00a9-4ed1-b668-8c7da16c5fad  org admin  role Owner
 
 ------------------------------------------------------------------------------
 STEP 6 — GET /box/catalog — the frozen warm-image and size catalog, plus the live pool
@@ -120,25 +120,25 @@ STEP 7 — box up — one call, and it returns only once a command has run INSID
 ------------------------------------------------------------------------------
   {
       "box": {
-          "id": "1facfe7e-6c3a-43a3-9357-864543901f7f",
-          "project_id": "51a3a1b4-e2cb-4a5e-83a1-4b69ce3abd45",
-          "environment_id": "ce4afaf0-640d-44db-932a-04af9fe38f34",
-          "name": "box-4e5a5189",
+          "id": "c72f038d-0eb5-4cf0-b432-b28c008dabaf",
+          "project_id": "ee64ad96-00a9-4ed1-b668-8c7da16c5fad",
+          "environment_id": "0ed6d375-2e67-4725-a629-82666331260d",
+          "name": "box-0cf0acf5",
           "image": "warm-v1",
           "profile": "box-standard",
           "region": "",
           "status": "Ready",
-          "instance_ref": "local-3282643ec3",
+          "instance_ref": "local-387ab80e55",
           "node_ref": "local-host/vm",
           "ssh_host": "local-host/vm",
-          "mcp_url": "http://127.0.0.1:35781/mcp",
+          "mcp_url": "http://127.0.0.1:42185/mcp",
           "ttl_seconds": 28800,
           "idle_timeout_seconds": 900,
-          "expires_at": "2026-07-30T22:39:48.337814Z",
-          "last_active_at": "2026-07-30T14:39:48.337814Z",
+          "expires_at": "2026-07-30T22:45:54.853304Z",
+          "last_active_at": "2026-07-30T14:45:54.853304Z",
           "created_by": "00000000-0000-0000-0000-000000000001",
-          "created_at": "2026-07-30T14:39:48.110087Z",
-          "updated_at": "2026-07-30T14:39:48.337814Z"
+          "created_at": "2026-07-30T14:45:54.606066Z",
+          "updated_at": "2026-07-30T14:45:54.853304Z"
       },
       "connect": {
           "mcp": {
@@ -146,16 +146,16 @@ STEP 7 — box up — one call, and it returns only once a command has run INSID
               "reason": "served by cmd/box-broker INSIDE the box: a command run through this endpoint does not pass through the Dada control plane. On LocalRuntime the box shares the host's network namespace, so the address is loopback on the box host rather than the box's own hostname; in production it is the box's Pod address (ADR-019).",
               "snippet": {
                   "mcpServers": {
-                      "dada-box-box-4e5a5189": {
+                      "dada-box-box-0cf0acf5": {
                           "headers": {
-                              "Authorization": "Bearer dadabox_43358dbe5e039a503a53e7840e7ec139e135140b"
+                              "Authorization": "Bearer dadabox_a09f4f858b0fbb12da11f0b53cc54363d3b62024"
                           },
                           "type": "http",
-                          "url": "http://127.0.0.1:35781/mcp"
+                          "url": "http://127.0.0.1:42185/mcp"
                       }
                   }
               },
-              "url": "http://127.0.0.1:35781/mcp"
+              "url": "http://127.0.0.1:42185/mcp"
           },
           "note": "the session endpoint is the box's own door. It carries no swaggo annotation and is registered only when the box runtime is configured, so it never reaches swagger.json and therefore can never become a reflected MCP tool on our control-plane surface.",
           "session_auth": "X-Dada-Box-Token: <the one-time dadabox_ token>",
@@ -181,28 +181,28 @@ STEP 7 — box up — one call, and it returns only once a command has run INSID
           "phase_ms": {
               "admit": 0,
               "auth": 5,
-              "boot": 2,
-              "canary": 82,
+              "boot": 0,
+              "canary": 98,
               "net": 0,
               "pool_pop": 0
           },
           "pool": "hit",
-          "time_to_ready_ms": 91
+          "time_to_ready_ms": 104
       },
       "session": {
-          "expires_at": "2026-07-31T02:39:48.11383Z",
+          "expires_at": "2026-07-31T02:45:54.615017Z",
           "note": "shown exactly once; only its sha256 and prefix are stored",
-          "token": "dadabox_43358dbe5e039a503a53e7840e7ec139e135140b",
-          "token_prefix": "dadabox_43358d"
+          "token": "dadabox_a09f4f858b0fbb12da11f0b53cc54363d3b62024",
+          "token_prefix": "dadabox_a09f4f"
       }
   }
-  box=box-4e5a5189 status=Ready pool=hit
-  one-time credential: dadabox_43358d… (only its sha256 and 6-hex prefix are stored)
+  box=box-0cf0acf5 status=Ready pool=hit
+  one-time credential: dadabox_a09f4f… (only its sha256 and 6-hex prefix are stored)
   GET .../connection does NOT reveal the token again — confirmed
   readiness canary the box actually ran:
     echo dada-ready && echo "node=$(node -v 2>&1)" && echo "python=$(python3 -V 2>&1)" && echo "go=$(go version 2>&1)" && echo "git=$(git --version 2>&1)" && echo "docker=$(docker info --format '{{.ServerVersion}}' 2>&1)"
   critical path walked: ["admit", "pool.claim", "runtime.bind", "runtime.program_network", "runtime.unfreeze", "runtime.exec_canary", "readiness.evaluate", "metrics.record"]
-  phase breakdown (ms): {"admit": 0, "auth": 5, "boot": 2, "canary": 82, "net": 0, "pool_pop": 0}
+  phase breakdown (ms): {"admit": 0, "auth": 5, "boot": 0, "canary": 98, "net": 0, "pool_pop": 0}
 
 ------------------------------------------------------------------------------
 STEP 8 — run commands INSIDE the box and see their real output
@@ -211,7 +211,7 @@ STEP 8 — run commands INSIDE the box and see their real output
   (no boxExec tool exists on our MCP surface — see box_session.go)
 
   $ echo "hostname=$(cat /etc/hostname)"; echo "whoami=$(whoami)"; echo "pwd=$(pwd)"; echo "pid1=$(cat /proc/1/comm)"
-    hostname=local-3282643ec3
+    hostname=local-387ab80e55
     whoami=root
     pwd=/srv/app
     pid1=sleep
@@ -235,15 +235,15 @@ STEP 8 — run commands INSIDE the box and see their real output
     
     [exit 0]
 
-  $ mkdir -p /srv/app && printf '%s\n' 'box-walk-20260730T143942Z-1257' > /srv/app/marker.txt && cat /srv/app/marker.txt
-    box-walk-20260730T143942Z-1257
+  $ mkdir -p /srv/app && printf '%s\n' 'box-walk-20260730T144545Z-8841' > /srv/app/marker.txt && cat /srv/app/marker.txt
+    box-walk-20260730T144545Z-8841
     
     [exit 0]
 
-  $ printf '%s\n' 'volume-box-walk-20260730T143942Z-1257' > /data/notes.txt && ls -l /data && cat /data/notes.txt
+  $ printf '%s\n' 'volume-box-walk-20260730T144545Z-8841' > /data/notes.txt && ls -l /data && cat /data/notes.txt
     total 4
-    -rw-r--r-- 1 root root 38 Jul 30 14:39 notes.txt
-    volume-box-walk-20260730T143942Z-1257
+    -rw-r--r-- 1 root root 38 Jul 30 14:45 notes.txt
+    volume-box-walk-20260730T144545Z-8841
     
     [exit 0]
   toolchain: node -v                                    present
@@ -252,15 +252,15 @@ STEP 8 — run commands INSIDE the box and see their real output
   toolchain: git --version                              present
   toolchain: psql --version                             present
   toolchain: docker info --format {{.ServerVersion}}    present
-  processes visible inside the box: 8 (the host has 125)
+  processes visible inside the box: 8 (the host has 136)
 
 ------------------------------------------------------------------------------
 STEP 9 — the box's OWN door — cmd/box-broker, with the control plane off the path
 ------------------------------------------------------------------------------
-  connect.mcp.url       = http://127.0.0.1:35781/mcp
+  connect.mcp.url       = http://127.0.0.1:42185/mcp
   connect.mcp.available = true
-  the endpoint is pid 201 inside the box, comm=box-broker
-  the endpoint's root marker: local-3282643ec3 (the box's own tree)
+  the endpoint is pid 205 inside the box, comm=box-broker
+  the endpoint's root marker: local-387ab80e55 (the box's own tree)
   /run/dada-broker/bin is a read-only bind inside the box — the tenant cannot replace its own door
   {
       "id": 1,
@@ -309,7 +309,7 @@ STEP 9 — the box's OWN door — cmd/box-broker, with the control plane off the
       "result": {
           "content": [
               {
-                  "text": "{\n  \"box\": \"box-4e5a5189\",\n  \"duration_ms\": 4,\n  \"exit_code\": 0,\n  \"served_by\": \"box-broker (inside the box)\",\n  \"stderr\": \"\",\n  \"stdout\": \"door-box-walk-20260730T143942Z-1257\\nlocal-3282643ec3\\nserved_by=127.0.0.1:35781\\n\",\n  \"timed_out\": false\n}",
+                  "text": "{\n  \"box\": \"box-0cf0acf5\",\n  \"duration_ms\": 4,\n  \"exit_code\": 0,\n  \"served_by\": \"box-broker (inside the box)\",\n  \"stderr\": \"\",\n  \"stdout\": \"door-box-walk-20260730T144545Z-8841\\nlocal-387ab80e55\\nserved_by=127.0.0.1:42185\\n\",\n  \"timed_out\": false\n}",
                   "type": "text"
               }
           ],
@@ -317,7 +317,7 @@ STEP 9 — the box's OWN door — cmd/box-broker, with the control plane off the
       }
   }
   a command ran inside the box through the box's own endpoint — the control plane was not on that path
-  POST http://127.0.0.1:35781/exec -> exit 0, served_by=box-broker (inside the box)
+  POST http://127.0.0.1:42185/exec -> exit 0, served_by=box-broker (inside the box)
   a wrong credential gets 401 from the box itself
   no credential gets 401 as well
 
@@ -325,13 +325,13 @@ STEP 9 — the box's OWN door — cmd/box-broker, with the control plane off the
 STEP 10 — attach db — a REAL managed Postgres database, reachable from inside the box
 ------------------------------------------------------------------------------
   {
-      "attach_ms": 84,
+      "attach_ms": 54,
       "attachment": {
           "env_prefix": "",
-          "id": "6505c0fd-a35f-4255-a32d-0fdf8e3ee78d",
+          "id": "a9bd9145-44bd-478d-acc3-4437785fea92",
           "kind": "postgres",
           "name": "app",
-          "resource_name": "box_local_3282643ec3_app",
+          "resource_name": "box_local_387ab80e55_app",
           "status": "Attached"
       },
       "injected_env_keys": [
@@ -344,8 +344,8 @@ STEP 10 — attach db — a REAL managed Postgres database, reachable from insid
       ],
       "note": "the database lives OUTSIDE the box; deleting or crystallizing the box does not destroy it. Values are only in the box's env file (0600, root) and are never returned or stored here."
   }
-  database box_local_3282643ec3_app exists on the managed cluster, OUTSIDE the box:
-    box_local_3282643ec3_app
+  database box_local_387ab80e55_app exists on the managed cluster, OUTSIDE the box:
+    box_local_387ab80e55_app
   the response carries env key NAMES only, never values — confirmed
   the box's env file is 0600 and root-owned:
 
@@ -379,7 +379,7 @@ STEP 11 — start a server INSIDE the box, then expose it and get a real 200
   wrote the app inside the box: wrote 17 lines [exit 0]
   {
       "descriptor": "/etc/dada/services/demo-app.json (inside the box; crystallization reads it)",
-      "duration_ms": 254,
+      "duration_ms": 263,
       "listening": [
           18099
       ],
@@ -405,32 +405,32 @@ STEP 11 — start a server INSIDE the box, then expose it and get a real 200
       "expose_ms": 1,
       "exposure": {
           "cert": "none (plain HTTP loopback edge; production uses the DNS-01 wildcard)",
-          "hostname": "box-4e5a5189-18099.box.dada-tuda.ru",
-          "id": "abf20d94-9f39-40eb-8893-8e9ce4c40a8a",
+          "hostname": "box-0cf0acf5-18099.box.dada-tuda.ru",
+          "id": "94e1b875-4078-44c1-ac61-3492d0fd4572",
           "port": 18099,
-          "url": "http://127.0.0.1:34581/"
+          "url": "http://127.0.0.1:38403/"
       },
       "first_response": {
-          "body": "dada-box demo app\nmarker: box-walk-20260730T143942Z-1257\nvolume: volume-box-walk-20260730T143942Z-1257\n",
+          "body": "dada-box demo app\nmarker: box-walk-20260730T144545Z-8841\nvolume: volume-box-walk-20260730T144545Z-8841\n",
           "ok": true,
           "status": 200
       },
       "note": "the hostname is assigned by the platform under its wildcard and cannot be chosen. Responses carry X-Robots-Tag: noindex."
   }
-  platform-assigned hostname: box-4e5a5189-18099.box.dada-tuda.ru (the caller cannot choose it)
+  platform-assigned hostname: box-0cf0acf5-18099.box.dada-tuda.ru (the caller cannot choose it)
 
   THE PROOF: curl against the exposed address
     HTTP/1.1 200 OK
     Content-Length: 103
     Content-Type: text/plain; charset=utf-8
-    Date: Thu, 30 Jul 2026 14:39:51 GMT
+    Date: Thu, 30 Jul 2026 14:45:58 GMT
     Server: BaseHTTP/0.6 Python/3.11.15
-    X-Dada-Box-Hostname: box-4e5a5189-18099.box.dada-tuda.ru
+    X-Dada-Box-Hostname: box-0cf0acf5-18099.box.dada-tuda.ru
     X-Robots-Tag: noindex
     
     dada-box demo app
-    marker: box-walk-20260730T143942Z-1257
-    volume: volume-box-walk-20260730T143942Z-1257
+    marker: box-walk-20260730T144545Z-8841
+    volume: volume-box-walk-20260730T144545Z-8841
   HTTP 200 through the platform edge, and the body carries this run's marker —
   so it was served by the process inside this box and read this box's filesystem
 
@@ -445,11 +445,11 @@ STEP 12 — crystallize — materialize the box's userland onto a separate root,
 
   CRYSTALLIZATION VERIFICATION REPORT
   ------------------------------------------------------------------------------
-  box            1facfe7e-6c3a-43a3-9357-864543901f7f (local-3282643ec3)
+  box            c72f038d-0eb5-4cf0-b432-b28c008dabaf (local-387ab80e55)
   vm             walk-vm  root=/var/tmp/dada-box-walk/runtime/vms/walk-vm/root
   os slug        ubuntu-24-04 (box image base and VM slug must match — ADR-019 §3)
   domain         walk-vm.dada-tuda.ru
-  stage          none   duration 693ms
+  stage          none   duration 734ms
   ------------------------------------------------------------------------------
   ADR-019 FIXED EXCLUSIONS (machine, not application)
     /proc
@@ -475,7 +475,7 @@ STEP 12 — crystallize — materialize the box's userland onto a separate root,
     /data
   ------------------------------------------------------------------------------
   TRANSFER
-    rsync -aHAX --numeric-ids --exclude=/proc --exclude=/sys --exclude=/dev --exclude=/run --exclude=/tmp --exclude=/boot --exclude=/lib/modules --exclude=/etc/fstab --exclude=/etc/machine-id --exclude=/etc/hostname --exclude=/etc/resolv.conf --exclude=/etc/hosts --exclude=/usr --exclude=/bin --exclude=/sbin --exclude=/lib --exclude=/lib64 --exclude=/opt --exclude=/data /var/tmp/dada-box-walk/runtime/instances/local-3282643ec3/rootfs/ /var/tmp/dada-box-walk/runtime/vms/walk-vm/root/
+    rsync -aHAX --numeric-ids --exclude=/proc --exclude=/sys --exclude=/dev --exclude=/run --exclude=/tmp --exclude=/boot --exclude=/lib/modules --exclude=/etc/fstab --exclude=/etc/machine-id --exclude=/etc/hostname --exclude=/etc/resolv.conf --exclude=/etc/hosts --exclude=/usr --exclude=/bin --exclude=/sbin --exclude=/lib --exclude=/lib64 --exclude=/opt --exclude=/data /var/tmp/dada-box-walk/runtime/instances/local-387ab80e55/rootfs/ /var/tmp/dada-box-walk/runtime/vms/walk-vm/root/
     (no --delete: the userland is applied ONTO the VM's root, it does not mirror it)
   ------------------------------------------------------------------------------
   FILE MANIFEST (path, size, mode, sha256)
@@ -507,20 +507,20 @@ STEP 12 — crystallize — materialize the box's userland onto a separate root,
   ------------------------------------------------------------------------------
   ENV (sha256 per key, never values)
     file mode              0600
-    BOX_ENV_ID               box=47ac795801210b5b vm=47ac795801210b5b
+    BOX_ENV_ID               box=1007876ad9b059ff vm=1007876ad9b059ff
     BOX_IMAGE                box=a43662fe94a164b7 vm=a43662fe94a164b7
-    BOX_INSTANCE_REF         box=d913ddb30091b31e vm=d913ddb30091b31e
-    BOX_NAME                 box=0ebf76aec0bdb1bf vm=0ebf76aec0bdb1bf
+    BOX_INSTANCE_REF         box=1b1c2d75cd2260c7 vm=1b1c2d75cd2260c7
+    BOX_NAME                 box=704eceb13bbf3802 vm=704eceb13bbf3802
     BOX_PROFILE              box=9677a10ec8bd35ab vm=9677a10ec8bd35ab
-    BOX_PROJECT_ID           box=9273dd837bb29a93 vm=9273dd837bb29a93
-    DATABASE_URL             box=0b0895f41b5c5936 vm=0b0895f41b5c5936
+    BOX_PROJECT_ID           box=9165f30d49fe2cb2 vm=9165f30d49fe2cb2
+    DATABASE_URL             box=f4e6658756d37ff3 vm=f4e6658756d37ff3
     HOME                     box=94a6b447580330f9 vm=94a6b447580330f9
     PATH                     box=df7d13793c3598c9 vm=df7d13793c3598c9
-    PGDATABASE               box=e109432b7c8d6acd vm=e109432b7c8d6acd
+    PGDATABASE               box=dc0ebdee9841242f vm=dc0ebdee9841242f
     PGHOST                   box=12ca17b49af22894 vm=12ca17b49af22894
-    PGPASSWORD               box=bd2ec18e6c2173ef vm=bd2ec18e6c2173ef
+    PGPASSWORD               box=cd2c570e089f1271 vm=cd2c570e089f1271
     PGPORT                   box=5f60288fa383ac8c vm=5f60288fa383ac8c
-    PGUSER                   box=d8f37c4db51b3983 vm=d8f37c4db51b3983
+    PGUSER                   box=16efc095db8463b8 vm=16efc095db8463b8
     ENV EQUAL              true  mismatched=[]
   ------------------------------------------------------------------------------
   VOLUMES RESTORED BY MOUNT PATH
@@ -560,8 +560,8 @@ STEP 12 — crystallize — materialize the box's userland onto a separate root,
     GET http://127.0.0.1:18099/   Host: walk-vm.dada-tuda.ru
     status 200   ok=true
     body   dada-box demo app
-  marker: box-walk-20260730T143942Z-1257
-  volume: volume-box-walk-20260730T143942Z-1257
+  marker: box-walk-20260730T144545Z-8841
+  volume: volume-box-walk-20260730T144545Z-8841
   ------------------------------------------------------------------------------
   CARRY MANIFEST (preserved|recreated|lost)
     address      recreated
@@ -592,20 +592,20 @@ STEP 13 — delete the box — every live session is revoked BEFORE the enqueue
   {
       "message": "box deletion queued",
       "operation": {
-          "id": "3acfd145-8102-40a8-9fb8-018c88ef8546",
+          "id": "cfb7861e-6507-4094-8110-a3243cb63ce0",
           "actor_id": "00000000-0000-0000-0000-000000000001",
-          "project_id": "51a3a1b4-e2cb-4a5e-83a1-4b69ce3abd45",
-          "environment_id": "ce4afaf0-640d-44db-932a-04af9fe38f34",
+          "project_id": "ee64ad96-00a9-4ed1-b668-8c7da16c5fad",
+          "environment_id": "0ed6d375-2e67-4725-a629-82666331260d",
           "action": "DeleteBox",
           "resource_kind": "Box",
-          "resource_name": "box-4e5a5189",
+          "resource_name": "box-0cf0acf5",
           "status": "Created",
           "payload": {
-              "box_id": "1facfe7e-6c3a-43a3-9357-864543901f7f",
+              "box_id": "c72f038d-0eb5-4cf0-b432-b28c008dabaf",
               "reason": "user"
           },
-          "created_at": "2026-07-30T14:39:52.484201Z",
-          "updated_at": "2026-07-30T14:39:52.484201Z"
+          "created_at": "2026-07-30T14:45:59.246768Z",
+          "updated_at": "2026-07-30T14:45:59.246768Z"
       },
       "sessions_revoked": 1
   }
@@ -620,14 +620,14 @@ STEP 14 — the measured numbers
   caller-supplied timestamp — a guest-reported instant cannot enter the
   measurement even by accident.
 
-  TIME TO READY (T0 admission -> T1 canary exit status): 91 ms
+  TIME TO READY (T0 admission -> T1 canary exit status): 104 ms
   pool: hit   budget: 10000 ms
-  per phase (ms): {"admit": 0, "auth": 5, "boot": 2, "canary": 82, "net": 0, "pool_pop": 0}
-  attach to a usable credential: 84 ms
+  per phase (ms): {"admit": 0, "auth": 5, "boot": 0, "canary": 98, "net": 0, "pool_pop": 0}
+  attach to a usable credential: 54 ms
   expose to the first real 200:  1 ms
-  crystallize end to end:        693 ms
+  crystallize end to end:        734 ms
 
 ------------------------------------------------------------------------------
 WALK COMPLETE — every step above ran against the real HTTP API.
-finished 2026-07-30T14:39:52Z
+finished 2026-07-30T14:45:59Z
 ------------------------------------------------------------------------------
