@@ -1,0 +1,8 @@
+1 admit
+2 pool.claim
+3 runtime.bind
+4 runtime.program_network
+5 runtime.unfreeze
+6 runtime.exec_canary
+7 readiness.evaluate
+8 metrics.record

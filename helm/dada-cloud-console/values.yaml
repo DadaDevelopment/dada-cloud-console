@@ -474,3 +474,12 @@ metrics:
     enabled: true
     # Fire DadaCustomDomainStuck once a hostname stays non-active this long.
     customDomainStuckSeconds: 1800
+    # Box time-to-ready. Keep boxReadyBudgetSeconds in step with
+    # metrics.BoxReadyBudget in backend/internal/metrics/box.go — the backend owns
+    # the breach counter, this value only renders it into the alert text.
+    boxReadyBudgetSeconds: 10
+    # p95 SLO for warm-path time to ready. Looser than the p50 target (3s) and
+    # tighter than the hard budget, so a gradual slide fires here first.
+    boxReadyP95Seconds: 8
+    # Fire BoxMeterStale once the newest metered box-minute is this old.
+    boxMeterStaleSeconds: 3600

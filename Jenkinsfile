@@ -179,6 +179,43 @@ spec:
         - name: tools-volume
           mountPath: /tools
 
+    # Postgres for the DB-backed backend tests.
+    #
+    # Without this container TEST_DATABASE_URL is unset in CI, so every test that
+    # calls a pool helper (advisory locks, quota gates, storage caps) hits its
+    # t.Skip and the "Backend tests" stage passes while testing none of them. The
+    # gate was decoration. TestCIRequiresDatabase in backend/internal/api now fails
+    # if this ever silently goes away again.
+    #
+    # trust auth and the image's default data dir on the container's own writable
+    # layer: this database exists for the length of one build, holds no real data,
+    # and is never reachable outside the pod. (Deliberately not /dev/shm — k8s
+    # defaults that to 64Mi, which a fresh cluster plus WAL overruns.)
+    - name: postgres
+      image: postgres:16-alpine
+      env:
+        - name: POSTGRES_USER
+          value: dada
+        - name: POSTGRES_PASSWORD
+          value: dada
+        - name: POSTGRES_DB
+          value: dada_test
+        - name: POSTGRES_HOST_AUTH_METHOD
+          value: trust
+      resources:
+        requests:
+          cpu: "100m"
+          memory: "256Mi"
+        limits:
+          cpu: "1000m"
+          memory: "512Mi"
+      readinessProbe:
+        exec:
+          command: ["pg_isready", "-U", "dada", "-d", "dada_test"]
+        initialDelaySeconds: 2
+        periodSeconds: 2
+        failureThreshold: 30
+
     - name: node-builder
       image: ${NODE_BUILDER_IMAGE}
       command: ['cat']
@@ -366,7 +403,19 @@ spec:
 
                         stage('Backend tests') {
                             dir('backend') {
-                                sh 'go test ./... -count=1'
+                                // TEST_DATABASE_URL points at the postgres sidecar in the pod
+                                // template. Before it existed, every DB-backed test in
+                                // internal/api hit its t.Skip and this stage went green while
+                                // testing none of them; TestCIRequiresDatabase now fails if that
+                                // regresses.
+                                //
+                                // cmd/migrate retries the connection itself, so there is no
+                                // sleep guess here and the build image needs no psql: Jenkins
+                                // does not wait for sidecar readiness before running steps.
+                                withEnv(['TEST_DATABASE_URL=postgres://dada:dada@localhost:5432/dada_test?sslmode=disable']) {
+                                    sh 'go run ./cmd/migrate'
+                                    sh 'go test ./... -count=1'
+                                }
                             }
                         }
 
