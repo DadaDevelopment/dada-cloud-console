@@ -332,8 +332,11 @@ func gcDecide(liveBacked, gitBacked, gitVerifiable bool, phase string,
 }
 
 // gcRepo resolves and freshens the GC's own clone of a project's repo, returning
-// nil when the repo can't be verified this tick (integration lookup, decrypt, or
-// clone failure) — callers treat nil as "unknown", never as "absent from git".
+// nil when the repo can't be verified this tick (integration lookup, decrypt,
+// clone, or sync failure) — callers treat nil as "unknown", never as "absent
+// from git". The sync is a hard reset (see Manager.SyncHard) because every GC
+// signal below is a filesystem probe: a worktree that lags the remote answers
+// "still in git" for deleted apps and freezes their snapshots forever.
 func (r *StatusReconciler) gcRepo(ctx context.Context, projectID uuid.UUID) *git.Manager {
 	mgr, err := r.gcManagerFor(ctx, projectID)
 	if err != nil || mgr == nil {
@@ -346,7 +349,10 @@ func (r *StatusReconciler) gcRepo(ctx context.Context, projectID uuid.UUID) *git
 		log.Warn().Err(err).Str("project", projectID.String()).Msg("orphan-gc: clone")
 		return nil
 	}
-	_, _ = mgr.Pull()
+	if err := mgr.SyncHard(); err != nil {
+		log.Warn().Err(err).Str("project", projectID.String()).Msg("orphan-gc: sync repo (rows left unverified)")
+		return nil
+	}
 	return mgr
 }
 

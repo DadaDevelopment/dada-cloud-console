@@ -140,6 +140,38 @@ func (m *Manager) pull() (string, error) {
 	return head.Hash().String(), nil
 }
 
+// SyncHard makes the worktree bit-for-bit identical to the remote branch:
+// fetch, hard reset (which also removes paths the remote deleted and drops any
+// stale staged edit), then sweep untracked leftovers.
+//
+// Read-only consumers that answer "does this path exist in git?" by stat'ing
+// the worktree MUST use this instead of Pull. Pull is a go-git merge: on a
+// long-lived PVC clone whose index or worktree has drifted it leaves the
+// checkout alone, so files deleted upstream survive on disk forever and every
+// existence probe keeps answering yes. That is how the orphan GC came to see
+// app.yaml for apps deleted months earlier and never pruned their snapshots,
+// leaving the console listing apps that do not exist (2026-07-31).
+func (m *Manager) SyncHard() error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	repo, err := gogit.PlainOpen(m.path)
+	if err != nil {
+		return fmt.Errorf("opening repo: %w", err)
+	}
+	wt, err := repo.Worktree()
+	if err != nil {
+		return err
+	}
+	if err := m.resetToRemoteHead(repo, wt); err != nil {
+		return err
+	}
+	if err := wt.Clean(&gogit.CleanOptions{Dir: true}); err != nil {
+		return fmt.Errorf("cleaning untracked files: %w", err)
+	}
+	return nil
+}
+
 // FileChange is one file write in a git commit.
 type FileChange struct {
 	Path    string
