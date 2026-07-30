@@ -142,12 +142,21 @@ func (h *Handler) computeProjectConsumption(ctx context.Context, projectID uuid.
 // platform gives for free, so an ignored PR that spawns pr-6/pr-7 copies of an
 // app must not multiply the customer's own consumption estimate. Their cost is
 // carried in the platform own-infrastructure bucket instead (see adminCostOwnerOf).
+//
+// Box environments (runtime='box') are excluded for a different reason: a box is
+// metered per active minute by its own path, so anything running INSIDE a box
+// that happens to leave an App snapshot behind would be counted twice — once as a
+// box-minute and once as a monthly app estimate. The exclusion is here from the
+// moment 'box' became a possible runtime rather than added later with the meter,
+// because the double count would have been silent and would have overstated a
+// customer's consumption.
 func (h *Handler) consumptionApps(ctx context.Context, projectID uuid.UUID, start, end time.Time, snap *billingCostSnapshot, withUsage bool) ([]consumptionResource, error) {
 	rows, err := h.pool.Query(ctx,
 		`SELECT rs.name, e.runtime, e.namespace, COALESCE(rs.summary_json->>'image', '')
 		   FROM resource_snapshots rs
 		   JOIN environments e ON e.id = rs.environment_id
 		  WHERE rs.project_id = $1 AND rs.kind = 'App' AND NOT e.is_ephemeral
+		    AND e.runtime <> 'box'
 		  ORDER BY rs.name`,
 		projectID,
 	)

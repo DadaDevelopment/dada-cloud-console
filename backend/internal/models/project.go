@@ -30,11 +30,22 @@ const (
 )
 
 // EnvironmentRuntime discriminates the deployment substrate for an environment.
+//
+// Three values, and the third one is load-bearing: a Dada Box owns exactly one
+// environment row with runtime='box' (D1), and crystallization flips that SAME
+// row to 'vm' rather than creating a new one, which is how a box's attached
+// databases, injected env vars and hostnames survive promotion untouched.
+//
+// Consequence for anyone adding a runtime branch: 'box' must be handled
+// explicitly, never left to a default arm. The guards in api/runtime_guard.go and
+// every `runtime = 'k8s'` / `runtime == "vm"` predicate in the API were audited
+// for this when 'box' was introduced (migration 061).
 type EnvironmentRuntime string
 
 const (
 	EnvironmentRuntimeK8s EnvironmentRuntime = "k8s"
 	EnvironmentRuntimeVM  EnvironmentRuntime = "vm"
+	EnvironmentRuntimeBox EnvironmentRuntime = "box"
 )
 
 // Environment represents a deployment environment within a project (e.g. dev, prod).

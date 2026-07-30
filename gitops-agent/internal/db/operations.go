@@ -40,13 +40,31 @@ func ClaimPending(ctx context.Context, pool *pgxpool.Pool) ([]Operation, error) 
 	// excluded here. The split is purely by action, making the two claim sets
 	// disjoint regardless of env.runtime — this list MUST mirror the exclusion of
 	// portainer-agent's ClaimPending include list (add new VM actions to both).
+	//
+	// THIS IS A DENYLIST, AND THAT MAKES IT A LANDMINE FOR EVERY NEW ACTION.
+	// Anything not named here is claimed by this agent, and anything it claims
+	// that its dispatch switch does not know is failed immediately with
+	// "unknown action". So an action owned by a *third* agent must be excluded
+	// here on the same commit that introduces it, or the feature is dead on
+	// arrival with a confusing error and no retry. portainer-agent, by contrast,
+	// uses an allowlist and needs no edit for a foreign action.
+	//
+	// The ten Box* actions below are owned by box-agent (a separate module, not
+	// yet written; see docs/plans/2026-07-29-box-runtime-architecture.md). They
+	// are excluded ahead of that agent existing on purpose: until it ships, a box
+	// operation sits in Created — visibly pending — instead of being claimed here
+	// and marked Failed. Keep this list byte-identical to models.BoxActions in the
+	// backend module (the two cannot import each other).
 	rows, err := tx.Query(ctx, `
 		UPDATE operations
 		SET    status = 'Processing', updated_at = NOW()
 		WHERE  id IN (
 			SELECT o.id FROM operations o
 			WHERE  o.status = 'Created'
-			  AND  o.action NOT IN ('CreateAppServer', 'DeleteAppServer', 'DeployStack', 'DiscoverWorkload', 'RestartStack')
+			  AND  o.action NOT IN ('CreateAppServer', 'DeleteAppServer', 'DeployStack', 'DiscoverWorkload', 'RestartStack',
+			                        'BoxUp', 'SuspendBox', 'ResumeBox', 'DeleteBox',
+			                        'AttachBoxDatabase', 'AttachBoxS3', 'DetachBoxAttachment',
+			                        'ExposeBox', 'UnexposeBox', 'CrystallizeBox')
 			ORDER  BY o.created_at
 			LIMIT  $1
 			FOR UPDATE SKIP LOCKED
