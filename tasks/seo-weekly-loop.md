@@ -378,3 +378,31 @@ from a clean baseline.
 Still unverified: the joyride spotlight itself. The bundle contains the campaign
 and the API accepts it, but nobody has seen the tooltip render over the hero grid —
 that needs a Keycloak session in a browser.
+
+### Browser probe closed that gap — and the tour was broken — 2026-07-31
+
+Ran the console against a local mock API (probe worktree, dev server on :3077,
+local-mode auth, no real credential in the page) and loaded a zero-app project.
+The tooltip that rendered was **the agent one**, not first-deploy.
+
+Cause: `OnboardingProvider` picked a campaign exactly once, when `GET /onboarding`
+resolved. `[data-onboarding="agent-fab"]` is part of the console shell and exists
+at first paint; `[data-onboarding="first-deploy"]` is the deploy hero, which mounts
+only after the overview's four data calls return. The status fetch is one fast call
+and always won, so `selectPendingCampaign` saw no first-deploy target and returned
+`agent` — on every load, for every new user. The campaign shipped in `e84680a` never
+rendered once in production.
+
+Fix `e59137e`: selection is now a pure function `selectCampaignToFire(campaigns,
+statusMap, ctx, elapsedMs)` polled every 250ms for up to 10s. The top pending
+campaign fires as soon as its own `delayMs` elapses; a lower-priority campaign holds
+4s first, giving a page-level anchor time to mount. Five new tests cover the race,
+the grace window, the delay floor and the window close (19 pass).
+
+Browser evidence after the fix, same probe: the first-deploy tooltip renders anchored
+to the deploy hero — "Первый деплой — в один клик" over the template + upload grid —
+and "Понятно" POSTs `seen` then `done` to `/onboarding/first-deploy` and tears the
+overlay down clean (no residual `.react-joyride__overlay`).
+
+This moves the 07-31 predictions' start date: nothing could have been seen before
+`e59137e` reaches prod, so grade tour-seen rate from that rollout, not from `e84680a`.

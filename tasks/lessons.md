@@ -189,3 +189,27 @@ dashboard records what has been aggregated so far.
 order where they are never both active, and say so in the first commit message. Here the
 frontend half went out deliberately inert and the ingress half followed once it was live in
 prod — verified by the image tag being a descendant of the fix commit, not by the clock.
+
+## 2026-07-31 — A unit test on a pure selector cannot see a DOM race
+
+The first-deploy onboarding campaign shipped with six unit tests, a cross-language sync test,
+and live proof on prod that the API round-trips. All of it green. The tour still never
+rendered for a real user: campaign selection ran once, the moment `GET /onboarding` resolved,
+and at that instant the deploy hero had not mounted yet — it waits on four project data
+calls — while the agent FAB, being part of the shell, was already in the DOM. So the
+fallthrough branch that the unit test asserts as correct behavior ("a project that already
+has an app falls through to agent") fired on every load, on empty projects too.
+
+The tests were not wrong; they were answering a question that assumes a settled DOM. The bug
+lived in *when* the question was asked, and only a browser could show that. I found it two
+minutes after the probe page rendered, by reading the tooltip title in a screenshot.
+
+**Rule.** If a feature's behavior depends on an element existing at a particular moment, the
+verification must be a real page load, not a function call. `hasTarget: () => true` in a test
+is a claim about timing, and the test cannot check it. Ask: *at the instant this code runs,
+what is actually in the DOM?* Anything that mounts after data loads is not there yet.
+
+**Second rule.** Ship-verification that only proves the API accepted the write ("POST 200, row
+round-trips") proves the backend, not the feature. I wrote "still unverified: the joyride
+spotlight itself" in the notes and then treated the feature as shipped. If a gap is worth
+writing down, it is worth closing before the next thing — the gap was the whole feature.
