@@ -2,7 +2,28 @@
 
 ## Status
 
-Accepted (architecture) — 2026-07-30. The substrate decision below is binding on
+**SUPERSEDED 2026-07-30 by
+[ADR-019](ADR-019-box-container-in-cloud-materialized-onto-a-real-vm.md).**
+
+Two of its premises were false, both factually rather than debatably:
+
+1. It assumed a **dedicated fleet of Beget VMs running gVisor**. No such fleet exists
+   and none is planned. The decision rested on infrastructure that isn't there.
+2. It defined the crystallized artifact as **a compose service on a VM**. A container
+   living on a virtual machine is not a virtual machine, and the product promise is a
+   permanent VM the customer owns.
+
+ADR-019 also records the verified substrate constraint that closes one of the two
+possible mechanisms: the Beget terraform provider takes an OS id resolved from a
+**slug**, so there is no way to hand it a disk image built from a container.
+
+Kept below for the record. What survived — crystallization as a mechanical move of an
+object rather than a model-inferred description, the commit point, and the failure
+matrix — is carried into ADR-019. Do not build against the substrate described here.
+
+---
+
+*Original status:* Accepted (architecture) — 2026-07-30. The substrate decision below is binding on
 the control plane, which is why it is recorded now: `backend/internal/box`,
 `backend/internal/models/box.go` and migration `061_boxes.sql` are already written
 against it. The runtime itself (`box-agent`) is NOT built yet, and three of the

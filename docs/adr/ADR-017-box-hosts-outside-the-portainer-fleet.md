@@ -2,7 +2,24 @@
 
 ## Status
 
-Accepted — 2026-07-30. This is a carve-out from ADR-007, not a reversal of it:
+**SUPERSEDED 2026-07-30 by
+[ADR-019](ADR-019-box-container-in-cloud-materialized-onto-a-real-vm.md).**
+
+Its premise disappeared with ADR-016: there is no fleet of box hosts, because boxes are
+containers in the existing cloud rather than gVisor sandboxes on dedicated VMs.
+
+The conclusion partly survives, for a different reason. A crystallized box still stays
+out of the Portainer fleet — not because hostile code shares its host, but because it
+**is not a container host at all**: it is a real VM running the workload under systemd,
+with no Docker and nothing for Portainer to manage. So `bootstrap.sh.tmpl`, which
+installs `docker.io` and the edge agent with `/var/run/docker.sock` and `/:/host`
+mounted, does not apply to the crystallization path either. See ADR-019.
+
+Kept below for the record.
+
+---
+
+*Original status:* Accepted — 2026-07-30. This is a carve-out from ADR-007, not a reversal of it:
 ADR-007 continues to govern the app-server (VM/compose) track without change. Box
 hosts are excluded from it, permanently, and the exclusion is a **gate on public
 access**, not a preference.
