@@ -340,6 +340,10 @@ export const apps: Messages = {
     ru: "Основные настройки приложения. Расширенные параметры — в редакторе конфигурации.",
     en: "Core app settings. Use the config editor for advanced options.",
   },
+  "apps.config.uploadedSourceNote": {
+    ru: "Это приложение задеплоено из загруженного архива. Ручное редактирование тега образа не обновит код — загрузите новый архив, чтобы задеплоить изменения.",
+    en: "This app was deployed from an uploaded archive. Editing the image tag by hand will not update the code — upload a new archive to deploy changes.",
+  },
   "apps.config.imageName": { ru: "Образ", en: "Image" },
   "apps.config.imageTag": { ru: "Тег образа", en: "Image tag" },
   "apps.config.imageHint": {
@@ -481,6 +485,18 @@ export const apps: Messages = {
   "apps.settings.source.download": { ru: "Скачать исходник", en: "Download source" },
   "apps.settings.source.busy": { ru: "Подготовка ссылки…", en: "Preparing link…" },
   "apps.settings.source.error": { ru: "Не удалось подготовить скачивание", en: "Failed to prepare download" },
+  "apps.settings.source.reupload.title": { ru: "Обновить исходник", en: "Update source" },
+  "apps.settings.source.reupload.subtitle": {
+    ru: "Загрузите новый архив, чтобы заменить текущий исходник и запустить новую сборку.",
+    en: "Upload a new archive to replace the current source and start a new build.",
+  },
+  "apps.settings.source.reupload.button": { ru: "Загрузить новый архив", en: "Upload new archive" },
+  "apps.settings.source.reupload.uploading": { ru: "Загрузка…", en: "Uploading…" },
+  "apps.settings.source.reupload.error.type": {
+    ru: "Поддерживаются только .zip, .tar.gz или .tgz",
+    en: "Only .zip, .tar.gz, or .tgz are supported",
+  },
+  "apps.settings.source.reupload.error.upload": { ru: "Не удалось загрузить архив", en: "Failed to upload archive" },
 
   "apps.values.crumb": { ru: "values.yaml", en: "values.yaml" },
   "apps.values.heading.suffix": { ru: "/ values.yaml", en: "/ values.yaml" },

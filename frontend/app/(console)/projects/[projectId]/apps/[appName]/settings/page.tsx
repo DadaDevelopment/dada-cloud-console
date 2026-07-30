@@ -15,6 +15,7 @@ import { PaymentsManager } from "@/components/payments/payments-manager";
 import { CommonConfigEditor } from "@/components/deploy/common-config-editor";
 import { ComposeConfigEditor } from "@/components/deploy/compose-config-editor";
 import { ComposeVolumeEditor } from "@/components/deploy/compose-volume-editor";
+import { ArchiveReuploadControl } from "@/components/deploy/archive-reupload";
 import { useT } from "@/lib/i18n/console/context";
 
 type Tab = "env" | "config" | "git" | "domains" | "storage" | "resources" | "payments";
@@ -173,6 +174,15 @@ export default function AppSettingsPage() {
               {sourceDownloadError && (
                 <p className="mt-2 text-sm text-red-600 dark:text-red-400">{sourceDownloadError}</p>
               )}
+
+              {canEdit && envId && (
+                <ArchiveReuploadControl
+                  projectId={projectId}
+                  envId={envId}
+                  appName={appName}
+                  className="mt-5 border-t border-gray-200 dark:border-gray-800 pt-5"
+                />
+              )}
             </div>
           )}
         </div>
@@ -182,7 +192,13 @@ export default function AppSettingsPage() {
         isVM ? (
           <ComposeConfigEditor projectId={projectId} envId={envId} appName={appName} canEdit={canEdit} />
         ) : (
-          <CommonConfigEditor projectId={projectId} envId={envId} appName={appName} canEdit={canEdit} />
+          <CommonConfigEditor
+            projectId={projectId}
+            envId={envId}
+            appName={appName}
+            canEdit={canEdit}
+            isUploadedSource={isUploadedSource}
+          />
         )
       )}
 

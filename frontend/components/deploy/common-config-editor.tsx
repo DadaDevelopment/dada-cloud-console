@@ -5,6 +5,7 @@ import { readCommon, patchCommon, type CommonConfig } from "@/lib/values-common"
 import { Spinner } from "@/components/ui/spinner";
 import { useT } from "@/lib/i18n/console/context";
 import { useClaims } from "@/lib/claims";
+import { ArchiveReuploadControl } from "@/components/deploy/archive-reupload";
 
 type WsIncoming =
   | { type: "content"; yaml: string }
@@ -19,6 +20,7 @@ interface Props {
   envId: string;
   appName: string;
   canEdit: boolean;
+  isUploadedSource?: boolean;
 }
 
 const EMPTY: CommonConfig = {
@@ -40,7 +42,7 @@ const EMPTY: CommonConfig = {
  * and on save merges the form back into the untouched YAML and commits it. The
  * raw YAML editor stays available for anything this form does not expose.
  */
-export function CommonConfigEditor({ projectId, envId, appName, canEdit }: Props) {
+export function CommonConfigEditor({ projectId, envId, appName, canEdit, isUploadedSource }: Props) {
   const { t } = useT();
   const godMode = !!useClaims()?.platformAdmin;
   const minReplicas = godMode ? 0 : 1;
@@ -177,6 +179,15 @@ export function CommonConfigEditor({ projectId, envId, appName, canEdit }: Props
         </div>
       ) : (
         <>
+          {isUploadedSource && (
+            <div className="mt-5 rounded-lg border border-blue-200 dark:border-blue-900 bg-blue-50 dark:bg-blue-950/40 px-4 py-3">
+              <p className="text-sm text-blue-800 dark:text-blue-200">{t("apps.config.uploadedSourceNote")}</p>
+              {envId && canEdit && (
+                <ArchiveReuploadControl projectId={projectId} envId={envId} appName={appName} className="mt-3" />
+              )}
+            </div>
+          )}
+
           <div className="mt-5 grid gap-4 sm:grid-cols-2">
             <div className="sm:col-span-2">
               <label className={label}>{t("apps.config.imageName")}</label>
