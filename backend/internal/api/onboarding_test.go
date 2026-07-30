@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -137,5 +138,34 @@ func TestOnboarding_InvalidStatus400(t *testing.T) {
 
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("invalid status: want 400, got %d", rec.Code)
+	}
+}
+
+// TestOnboardingKeysMatchFrontendRegistry guards the sync contract documented
+// on onboardingKeys: a campaign added to the frontend registry but missing
+// from the whitelist makes every progress report 400, so the tour re-runs on
+// every page load forever.
+func TestOnboardingKeysMatchFrontendRegistry(t *testing.T) {
+	const registry = "../../../frontend/lib/onboarding/campaigns.ts"
+	src, err := os.ReadFile(registry)
+	if err != nil {
+		t.Skipf("frontend registry not available (%v); skipping sync check", err)
+	}
+	found := map[string]bool{}
+	for _, m := range regexp.MustCompile(`key:\s*"([^"]+)"`).FindAllStringSubmatch(string(src), -1) {
+		found[m[1]] = true
+	}
+	if len(found) == 0 {
+		t.Fatalf("no campaign keys parsed from %s", registry)
+	}
+	for key := range found {
+		if !onboardingKeys[key] {
+			t.Errorf("campaign %q is in the frontend registry but not in onboardingKeys", key)
+		}
+	}
+	for key := range onboardingKeys {
+		if !found[key] {
+			t.Errorf("onboardingKeys has %q but the frontend registry does not", key)
+		}
 	}
 }

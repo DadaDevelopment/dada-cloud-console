@@ -11,7 +11,8 @@ import (
 // stay in sync with the frontend campaign registry in
 // frontend/lib/onboarding/campaigns.ts. Adding a campaign = add its key here.
 var onboardingKeys = map[string]bool{
-	"agent": true,
+	"agent":        true,
+	"first-deploy": true,
 }
 
 // onboardingStatuses is the set of accepted progress states.

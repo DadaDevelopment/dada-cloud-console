@@ -542,7 +542,7 @@ function GroupBlock({ title, primaryEnv, projectId, entries, infra, previews, ca
       {entries.length === 0 ? (
         <>
           {!isVM && (
-            <div className="mb-6 grid gap-4 lg:grid-cols-2">
+            <div data-onboarding="first-deploy" className="mb-6 grid gap-4 lg:grid-cols-2">
               <TemplateDeployCards projectId={projectId} envId={primaryEnv.id} hero />
               <UploadDeployCard projectId={projectId} envId={primaryEnv.id} hero />
             </div>

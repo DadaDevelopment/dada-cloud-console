@@ -137,7 +137,7 @@ export default function ProjectOverviewPage() {
       <CostCard projectId={projectId} />
 
       {showTemplates && (
-        <div className="mb-8 grid gap-4 lg:grid-cols-2">
+        <div data-onboarding="first-deploy" className="mb-8 grid gap-4 lg:grid-cols-2">
           <TemplateDeployCards projectId={projectId} envId={envId} hero />
           <UploadDeployCard projectId={projectId} envId={envId} hero />
         </div>
