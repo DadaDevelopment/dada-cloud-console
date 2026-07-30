@@ -18,9 +18,11 @@ package metrics
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
@@ -192,9 +194,15 @@ func collect(ctx context.Context, pool *pgxpool.Pool) {
 	}
 
 	collectBoxes(c, pool)
+	collectBoxRepeatUse(c, pool)
 
 	collectDuration.Set(time.Since(start).Seconds())
 }
+
+// boxRepeatUseWindowDays is the length of the repeat-use window. A claim is only
+// counted once its window has closed, so a grant made yesterday is not scored as
+// "did not come back" while it still has six days to.
+const boxRepeatUseWindowDays = 7
 
 // collectBoxes refreshes the Box state gauges declared in box.go.
 //
@@ -281,4 +289,47 @@ func collectBoxes(ctx context.Context, pool *pgxpool.Pool) {
 	// on the same commits that give them tables to read.
 	boxSpendCapMaxRatio.Set(0)
 	boxCrystallizationsPendingAge.Set(0)
+}
+
+// collectBoxRepeatUse refreshes dada_box_repeat_use_7d_ratio, the brief's headline
+// metric: of the claims that were handed a box and whose 7-day window has closed,
+// what share used a box in two sessions at least 24h apart.
+//
+// Three things it refuses to do, each of which would turn the number into a proxy
+// (tasks/lessons.md — the repository has paid for this twice):
+//
+//   - It never reports 0 for "no data". The box_repeat_use_7d view reads an active
+//     minute ledger that does not exist yet, so a missing relation sets NaN. A
+//     zero here would read as "nobody came back", which is a conclusion, not a gap.
+//   - It never counts an open window. Only claims whose first activation is older
+//     than the window are scored.
+//   - An empty denominator is NaN, not 0. Zero of zero is not zero percent.
+//
+// A missing view is the expected state today, so it is not counted as a collect
+// error: dada_metrics_collect_errors_total must keep meaning "something broke".
+func collectBoxRepeatUse(ctx context.Context, pool *pgxpool.Pool) {
+	var repeat, total float64
+	err := pool.QueryRow(ctx, `
+		SELECT COUNT(*) FILTER (WHERE repeat_use), COUNT(*)
+		  FROM box_repeat_use_7d
+		 WHERE first_activation_at <= now() - make_interval(days => $1)`,
+		boxRepeatUseWindowDays).Scan(&repeat, &total)
+	if err != nil {
+		var pgErr *pgconn.PgError
+		// 42P01 = undefined_table, which Postgres also raises for a missing view.
+		if errors.As(err, &pgErr) && pgErr.Code == "42P01" {
+			// The view is gated on the active-minute ledger (migrations/060_box_leads.sql).
+			SetBoxRepeatUse7dUnavailable()
+			return
+		}
+		collectErrors.Inc()
+		log.Warn().Err(err).Msg("metrics: box repeat-use query failed")
+		SetBoxRepeatUse7dUnavailable()
+		return
+	}
+	if total == 0 {
+		SetBoxRepeatUse7dUnavailable()
+		return
+	}
+	SetBoxRepeatUse7dRatio(repeat / total)
 }

@@ -42,7 +42,15 @@ func TestDefaultOverridesCurateToolSurface(t *testing.T) {
 			t.Errorf("core tool %q missing after curation", must)
 		}
 	}
-	for _, noise := range []string{"ingestLogs", "ingestMetrics", "gitInstallCallback", "gitHubOAuthCallback", "login"} {
+	// recordBoxFunnelEvent/grantBox are annotated (the OpenAPI coverage gate
+	// requires it) but must never become agent tools: the first is a marketing
+	// ingest written by a landing page, the second is a human operator recording
+	// a hand-provisioned box. The keep-list being an allowlist is what stops
+	// them, and this asserts that guarantee holds rather than assuming it.
+	for _, noise := range []string{
+		"ingestLogs", "ingestMetrics", "gitInstallCallback", "gitHubOAuthCallback", "login",
+		"recordBoxFunnelEvent", "grantBox",
+	} {
 		if present[noise] {
 			t.Errorf("noise tool %q should have been curated out", noise)
 		}

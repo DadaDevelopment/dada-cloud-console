@@ -230,6 +230,14 @@ func SetupRouter(pool *pgxpool.Pool, cfg *config.Config) *gin.Engine {
 
 	r.POST("/api/v1/feedback", h.SubmitFeedback)
 
+	// Dada Box fake-door funnel ingest. Public on purpose: the /box landing is a
+	// marketing page with no session, and its route handler forwards events
+	// server-to-server. Guarded by a per-IP + global token bucket inside the
+	// handler, a closed event-name set and a capped body — not by the user JWT
+	// middleware. Deliberately NOT in the MCP keep-list: it is an ingest written
+	// by a landing page, not something an agent calls.
+	r.POST("/api/v1/box/leads", h.RecordBoxFunnelEvent)
+
 	// Embedded MCP server at /mcp (Streamable HTTP transport).
 	// Each tool call self-proxies to cfg.MCPSelfURL/api/v1/... so auth and all
 	// middleware apply unchanged. Disabled via MCP_ENABLED=false.
@@ -510,6 +518,11 @@ func SetupRouter(pool *pgxpool.Pool, cfg *config.Config) *gin.Engine {
 			api.GET("/admin/overview", h.GetAdminOverview)
 			api.GET("/admin/costs", h.GetAdminCosts)
 			api.GET("/admin/ai-gateway/usage", h.GetAIGatewayUsage)
+
+			// Concierge write-back for the Box private preview: which claim got
+			// which box. Mandatory — it is the only source for the repeat-use
+			// metric while provisioning is manual.
+			api.POST("/admin/box/grants", h.GrantBox)
 
 			// Inference proxy (playground only — production traffic goes via PublicApi ingress).
 			api.POST("/projects/:projectId/environments/:envId/models/:name/infer", h.ProxyInference)

@@ -1,6 +1,7 @@
 package metrics
 
 import (
+	"math"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -206,7 +207,7 @@ var (
 
 	boxRepeatUse7d = promauto.NewGauge(prometheus.GaugeOpts{
 		Name: "dada_box_repeat_use_7d_ratio",
-		Help: "Share of granted boxes used in two sessions at least 24h apart within 7 days of first activation. The brief's headline metric: first use is curiosity, second use is a closed need.",
+		Help: "Share of claims that used a box in two sessions at least 24h apart within 7 days of first activation. The brief's headline metric: first use is curiosity, second use is a closed need. Denominator is claims that activated a granted box AND whose 7-day window has closed -- scoring an open window would count \"has not come back yet\" as \"did not come back\", and claims granted a box they never touched are reported separately (see docs/runbooks/box-funnel-metrics.md) rather than folded in here. NaN, never 0, while no active-minute ledger exists to derive it from.",
 	})
 )
 
@@ -282,3 +283,24 @@ func RecordBoxCrystallizeStateLoss(kind string) {
 func RecordBoxFunnelEvent(event, locale string) {
 	boxFunnelEvents.WithLabelValues(event, locale).Inc()
 }
+
+// SetBoxRepeatUse7dRatio publishes the measured share of granted claims that came
+// back and used a box a second time (see the box_repeat_use_7d view).
+func SetBoxRepeatUse7dRatio(ratio float64) { boxRepeatUse7d.Set(ratio) }
+
+// SetBoxRepeatUse7dUnavailable marks the headline metric as having no data.
+//
+// It sets NaN rather than 0, and that distinction is the whole point. A gauge is
+// exported from the moment it is registered, so an unsourced gauge reads 0.0 on
+// every scrape — and "0% of people came back" is a measurement, a devastating one,
+// that nobody actually took. NaN is Prometheus's "no data": comparisons against it
+// are false, so no alert fires on it and no dashboard draws a zero line.
+//
+// The active-minute ledger this ratio is derived from does not exist yet, so this
+// is the state the metric ships in.
+func SetBoxRepeatUse7dUnavailable() { boxRepeatUse7d.Set(math.NaN()) }
+
+// The headline funnel metric starts as "no data" instead of "zero" for the reason
+// spelled out on SetBoxRepeatUse7dUnavailable. The collector overwrites it with a
+// real ratio as soon as the box_repeat_use_7d view can supply one.
+func init() { SetBoxRepeatUse7dUnavailable() }

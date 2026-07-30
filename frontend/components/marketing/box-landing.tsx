@@ -1,10 +1,13 @@
 "use client";
 
+import { useEffect } from "react";
 import Link from "next/link";
 import { ArrowRight, Box, Check, Database, Gem, Minus, Plug, Rocket, Zap } from "lucide-react";
 import { clsx } from "clsx";
 import { useLang } from "@/lib/i18n/context";
+import { BOX_UTM_SOURCE, reportBoxPageView } from "@/lib/box-events";
 import { boxCopy } from "@/lib/box-copy";
+import { localeHref } from "@/lib/site";
 import { BoxDemo } from "@/components/marketing/box-demo";
 import { BoxAccessForm } from "@/components/marketing/box-access-form";
 import { FaqList } from "@/components/marketing/sections";
@@ -21,9 +24,34 @@ import { FaqJsonLd } from "@/components/marketing/faq-jsonld";
 
 const STEP_ICONS = [Zap, Plug, Database, Gem];
 
+/**
+ * In-page CTA targets, carrying `utm_source=door_box`.
+ *
+ * Same pattern as the other landings (`/register?utm_source=door_b`), so the tag
+ * is in the URL from the first click onward and the funnel's `utm_source` lines up
+ * with the existing `door_*` tests. The difference is that this landing's
+ * conversion IS the form on the page — there is no /register hop to carry the tag
+ * for us — so the CTAs stay in-page anchors and the tag rides the query string of
+ * the landing's own URL. Written out in full rather than as a bare `?...#...`
+ * relative href so the target is unambiguous on both /box and /en/box.
+ */
+function ctaHref(path: string, locale: "ru" | "en", hash: string): string {
+  return `${localeHref(path, locale)}?utm_source=${BOX_UTM_SOURCE}#${hash}`;
+}
+
 export function BoxLanding() {
   const { locale } = useLang();
   const copy = boxCopy[locale];
+  const ctaAccess = ctaHref("/box", locale, "access");
+  const ctaDemo = ctaHref("/box", locale, "demo");
+
+  // Top of the funnel, recorded server-side once per session. Without this the
+  // denominator of "view -> request" lives in Yandex Metrika while the numerator
+  // lives in our own tables, and the ratio becomes something to argue about
+  // instead of something to use.
+  useEffect(() => {
+    reportBoxPageView(locale);
+  }, [locale]);
 
   return (
     <>
@@ -43,14 +71,14 @@ export function BoxLanding() {
             <p className="mt-6 max-w-2xl text-lg text-white/70 sm:text-xl">{copy.heroSubtitle}</p>
             <div className="mt-9 flex flex-wrap items-center gap-3">
               <Link
-                href="#access"
+                href={ctaAccess}
                 className="inline-flex items-center gap-2 rounded-md bg-blue-600 px-7 py-3 text-sm font-semibold text-white transition-colors hover:bg-blue-700"
               >
                 <Box className="h-4 w-4" />
                 {copy.heroPrimary}
               </Link>
               <Link
-                href="#demo"
+                href={ctaDemo}
                 className="rounded-md border border-white/20 px-7 py-3 text-sm font-semibold text-white transition-colors hover:bg-white/5"
               >
                 {copy.heroSecondary}
@@ -228,7 +256,7 @@ export function BoxLanding() {
           </h2>
           <p className="mx-auto mt-4 max-w-xl text-lg text-white/70">{copy.heroNote}</p>
           <Link
-            href="#access"
+            href={ctaAccess}
             className="mt-8 inline-flex items-center gap-2 rounded-md bg-blue-600 px-8 py-3 text-sm font-semibold text-white transition-colors hover:bg-blue-700"
           >
             <Rocket className="h-4 w-4" />

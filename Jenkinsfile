@@ -520,12 +520,21 @@ spec:
                                     "NEXT_PUBLIC_OIDC_CLIENT_ID=${NEXT_PUBLIC_OIDC_CLIENT_ID}",
                                     "NEXT_PUBLIC_CONSOLE_URL=${NEXT_PUBLIC_CONSOLE_URL}",
                                 ]) {
+                                    // The `probe && run || echo skip` form this replaced looked like
+                                    // "tolerate a missing script" but actually swallowed a FAILING
+                                    // one: `||` binds to the whole `probe && npm run lint` chain, so
+                                    // a real lint error exited 0 and printed "No lint script — skip".
+                                    // Verified by reproducing it — a genuine
+                                    // react-hooks/set-state-in-effect error passed this stage.
+                                    // if/else keeps the missing-script tolerance and lets a real
+                                    // failure fail the build, which is the whole point of the stage.
                                     sh '''
                                         set -eux
-                                        node -e "const p=require('./package.json'); process.exit(p.scripts && p.scripts.typecheck ? 0 : 1)" \
-                                          && npm run typecheck || echo "No typecheck script — skip"
-                                        node -e "const p=require('./package.json'); process.exit(p.scripts && p.scripts.lint ? 0 : 1)" \
-                                          && npm run lint || echo "No lint script — skip"
+                                        has_script() {
+                                            node -e "const p=require('./package.json'); process.exit(p.scripts && p.scripts['$1'] ? 0 : 1)"
+                                        }
+                                        if has_script typecheck; then npm run typecheck; else echo "No typecheck script — skip"; fi
+                                        if has_script lint;      then npm run lint;      else echo "No lint script — skip";      fi
                                         npm run build
                                     '''
                                 }

@@ -1,18 +1,28 @@
 import { NextResponse } from "next/server";
+import { boxVidSetCookie, newBoxVid, readBoxVid } from "@/lib/box-vid";
 
 /**
  * Funnel sink for the Dada Box private-preview fake door (/box, /en/box).
  *
- * Deliberately has no database and no backend dependency: the experiment must
- * ship without a platform release (docs/product/box-product-brief.md §8). Events
- * are written as one structured log line each, and optionally forwarded to a
- * webhook or Telegram chat so a human sees requests in real time and can
- * provision a box by hand (concierge mode).
+ * Events are forwarded to the backend (POST /api/v1/box/leads), which writes them
+ * to box_funnel_events / box_leads. That is the system of record — a log line
+ * could not answer the questions the experiment exists for (see
+ * docs/plans/2026-07-29-box-test-and-measurement.md §6): no denominator, no
+ * visitor identity, and therefore no trustworthy conversion ratio.
  *
- * When Box graduates from experiment to product, replace this with a real
- * backend endpoint and a table.
+ * The log line and the webhook stay, deliberately, as a FAIL-OPEN FALLBACK. This
+ * handler's original stance was that the page must never break because of our own
+ * plumbing, and forwarding must not weaken it: the claim code is still minted here
+ * and returned to the visitor whether or not the backend answered, and a storage
+ * failure is logged, not surfaced.
+ *
+ * PII: the log line carries metadata only. The email the person typed is delivered
+ * to the operator through the webhook/Telegram channel and stored in box_leads —
+ * never written to stdout, which is shipped to OpenSearch and retained for weeks.
  *
  * Env:
+ *   BOX_LEADS_BACKEND_ORIGIN   backend origin for the durable store (optional;
+ *                              falls back to NEXT_PUBLIC_CONSOLE_URL)
  *   BOX_LEADS_WEBHOOK_URL      generic JSON POST target (optional)
  *   BOX_LEADS_TELEGRAM_TOKEN   bot token (optional, needs CHAT too)
  *   BOX_LEADS_TELEGRAM_CHAT    chat id to notify (optional)
@@ -20,7 +30,20 @@ import { NextResponse } from "next/server";
 
 export const dynamic = "force-dynamic";
 
-const KNOWN_EVENTS = new Set(["demo_run", "box_requested", "crystallize_intent"]);
+// page_view is a first-class server-side event, not something left to Yandex
+// Metrika: with the denominator in a different system from the numerator, the
+// view -> request conversion is a ratio nobody can check, and it gets argued about
+// instead of used. It is deduplicated per dada_vid per session by the backend.
+const KNOWN_EVENTS = new Set(["page_view", "demo_run", "box_requested", "crystallize_intent"]);
+
+// Events that must never page a human: high volume, low signal.
+const QUIET_EVENTS = new Set(["page_view", "demo_run"]);
+
+const BACKEND_ORIGIN = (
+  process.env.BOX_LEADS_BACKEND_ORIGIN ??
+  process.env.NEXT_PUBLIC_CONSOLE_URL ??
+  "https://console.dada-tuda.ru"
+).replace(/\/$/, "");
 
 // Field caps: this endpoint is unauthenticated, so bound everything that gets
 // logged or forwarded rather than trusting the client.
@@ -82,28 +105,47 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "unknown_event" }, { status: 400 });
   }
 
+  // The visitor id is read from the cookie the browser sent, never from the body:
+  // the body is client-controlled, and a vid a caller can choose is a vid a caller
+  // can collide with. The proxy issues it on the first hit of /box; minting one
+  // here covers a request that somehow arrives without it (cookie blocked, direct
+  // POST) so the event still carries an identity.
+  const cookieVid = readBoxVid(req.headers.get("cookie"));
+  const vid = cookieVid ?? newBoxVid();
+
+  const locale = str(body.locale, 8) ?? "ru";
+  const utmSource = str(body.utmSource, 120) ?? str(body.utm_source, 120);
+  const referer = str(req.headers.get("referer") ?? undefined);
+
   const record: Record<string, unknown> = {
     at: new Date().toISOString(),
     event,
-    locale: str(body.locale, 8) ?? "ru",
-    referer: str(req.headers.get("referer") ?? undefined),
+    locale,
+    vid,
+    utmSource,
+    referer,
     ua: str(req.headers.get("user-agent") ?? undefined, 300),
   };
 
   let claim: string | undefined;
+  let email: string | undefined;
+  let contact: string | undefined;
+  let useCase: string | undefined;
+  let wants: string[] = [];
 
   if (event === "box_requested") {
-    const email = str(body.email, 200);
-    const useCase = str(body.useCase, MAX_USE_CASE);
+    email = str(body.email, 200);
+    useCase = str(body.useCase, MAX_USE_CASE);
     if (!email || !useCase) {
       return NextResponse.json({ error: "missing_fields" }, { status: 400 });
     }
+    contact = str(body.contact);
+    // The claim code is minted HERE, not by the backend. The visitor must receive
+    // a real code even when the durable store is unreachable — that is what makes
+    // the storage hop non-load-bearing for the page.
     claim = claimCode();
     Object.assign(record, {
       claim,
-      email,
-      useCase,
-      contact: str(body.contact),
       agent: str(body.agent, 60),
       parallel: str(body.parallel, 60),
       price: str(body.price, 60),
@@ -111,19 +153,93 @@ export async function POST(req: Request) {
   }
 
   if (event === "crystallize_intent") {
-    const wants = Array.isArray(body.wants)
+    wants = Array.isArray(body.wants)
       ? body.wants.filter((w): w is string => typeof w === "string").slice(0, 20).map((w) => w.slice(0, MAX_FIELD))
       : [];
-    Object.assign(record, { claim: str(body.claim, 40), wants });
+    claim = str(body.claim, 40);
+    Object.assign(record, { claim, wants });
   }
 
-  // The log line IS the storage for this experiment. Keep it single-line JSON so
-  // it survives log aggregation and can be grepped by event name.
-  console.log(`box_funnel ${JSON.stringify(record)}`);
+  const stored = await storeEvent({
+    event,
+    claim,
+    vid,
+    locale,
+    utm_source: utmSource,
+    referer,
+    email,
+    contact,
+    agent: str(body.agent, 60),
+    parallel: str(body.parallel, 60),
+    price: str(body.price, 60),
+    use_case: useCase,
+    wants,
+  }, ip);
 
-  await Promise.allSettled([notifyWebhook(record), notifyTelegram(record)]);
+  // Fallback record. Single-line JSON so it survives log aggregation and can be
+  // grepped by event name. `stored` says whether the durable write succeeded, so
+  // a gap in the tables can be reconciled from logs instead of guessed at.
+  //
+  // No email and no contact here: stdout is shipped to OpenSearch and retained,
+  // and this experiment's PII rule is that the address the person typed lives in
+  // box_leads and in the operator's notification, nowhere else. The booleans are
+  // enough to notice a lead that failed to store.
+  console.log(
+    `box_funnel ${JSON.stringify({
+      ...record,
+      stored,
+      has_email: Boolean(email),
+      has_contact: Boolean(contact),
+    })}`,
+  );
 
-  return NextResponse.json(claim ? { ok: true, claim } : { ok: true });
+  // The operator's channel keeps the full record, email included: it is a direct
+  // notification to a person who has to reply to the lead, not a log sink.
+  const notifiable = { ...record, email, contact, useCase };
+  await Promise.allSettled([notifyWebhook(notifiable), notifyTelegram(notifiable)]);
+
+  const res = NextResponse.json(claim ? { ok: true, claim } : { ok: true });
+  if (!cookieVid) {
+    // Only when the browser did not already have one, so an existing id is never
+    // rotated: a rotated id would double-count one person in the funnel.
+    res.headers.append("set-cookie", boxVidSetCookie(vid, isHttps(req)));
+  }
+  return res;
+}
+
+/** True when the original client request arrived over https (nginx sets the header). */
+function isHttps(req: Request): boolean {
+  const proto = req.headers.get("x-forwarded-proto");
+  if (proto) return proto.split(",")[0].trim() === "https";
+  return new URL(req.url).protocol === "https:";
+}
+
+/**
+ * Forwards one event to the durable store. Returns whether it landed, and never
+ * throws: the door must keep working when the backend is down. The visitor's
+ * request does not wait long for it either — a 4s ceiling, because the form is
+ * blocking on this response.
+ */
+async function storeEvent(payload: Record<string, unknown>, clientAddr: string): Promise<boolean> {
+  try {
+    const upstream = await fetch(`${BACKEND_ORIGIN}/api/v1/box/leads`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        // Pass the visitor's address through, so the backend's per-IP bucket sees
+        // the visitor rather than this pod (every event would otherwise share one
+        // bucket and a busy landing would rate-limit itself). The backend's global
+        // bucket is what guards against a forged value.
+        "X-Forwarded-For": clientAddr,
+      },
+      body: JSON.stringify(payload),
+      cache: "no-store",
+      signal: AbortSignal.timeout(4000),
+    });
+    return upstream.ok;
+  } catch {
+    return false;
+  }
 }
 
 async function notifyWebhook(record: Record<string, unknown>): Promise<void> {
@@ -146,8 +262,9 @@ async function notifyTelegram(record: Record<string, unknown>): Promise<void> {
   const chat = process.env.BOX_LEADS_TELEGRAM_CHAT;
   if (!token || !chat) return;
 
-  // demo_run is high-volume and low-signal — log it, but don't page a human.
-  if (record.event === "demo_run") return;
+  // page_view and demo_run are high-volume and low-signal — store them, but don't
+  // page a human.
+  if (QUIET_EVENTS.has(String(record.event))) return;
 
   const lines = Object.entries(record)
     .filter(([, v]) => v !== undefined && v !== null && v !== "")
