@@ -3,11 +3,13 @@ import { useEffect, useRef, useState } from "react";
 import { usePathname } from "next/navigation";
 import { Joyride, STATUS, type Step, type EventData } from "react-joyride";
 import { ONBOARDING_CAMPAIGNS } from "@/lib/onboarding/campaigns";
-import { selectPendingCampaign } from "@/lib/onboarding/select";
+import { SELECT_WINDOW_MS, selectCampaignToFire } from "@/lib/onboarding/select";
 import type { OnboardingCampaign, OnboardingStatus } from "@/lib/onboarding/types";
 import { api } from "@/lib/api";
 import { useT } from "@/lib/i18n/console/context";
 import { makeOnboardingTooltip } from "./onboarding-tooltip";
+
+const POLL_MS = 250;
 
 function isDark(): boolean {
   return typeof document !== "undefined" && document.documentElement.classList.contains("dark");
@@ -38,21 +40,27 @@ export function OnboardingProvider({ suppressed }: { suppressed: boolean }) {
 
   useEffect(() => {
     if (statusMap === null || suppressed || firedRef.current) return;
-    const campaign = selectPendingCampaign(ONBOARDING_CAMPAIGNS, statusMap, {
-      pathname,
-      hasTarget: (sel) => !!document.querySelector(sel),
-    });
-    if (!campaign) return;
-    const timer = setTimeout(() => {
-      if (firedRef.current || suppressed) return;
-      const first = campaign.steps[0];
-      if (!document.querySelector(first.target)) return;
+    const start = Date.now();
+    const timer = setInterval(() => {
+      const elapsed = Date.now() - start;
+      if (firedRef.current || suppressed || elapsed > SELECT_WINDOW_MS) {
+        clearInterval(timer);
+        return;
+      }
+      const campaign = selectCampaignToFire(
+        ONBOARDING_CAMPAIGNS,
+        statusMap,
+        { pathname, hasTarget: (sel) => !!document.querySelector(sel) },
+        elapsed,
+      );
+      if (!campaign) return;
+      clearInterval(timer);
       firedRef.current = true;
       setActive(campaign);
       setRun(true);
       report(campaign.key, "seen", 0);
-    }, campaign.delayMs ?? 3000);
-    return () => clearTimeout(timer);
+    }, POLL_MS);
+    return () => clearInterval(timer);
   }, [statusMap, suppressed, pathname]);
 
   function report(key: string, status: OnboardingStatus, step: number) {

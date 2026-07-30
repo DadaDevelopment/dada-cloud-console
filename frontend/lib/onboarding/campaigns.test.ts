@@ -17,9 +17,17 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { ONBOARDING_CAMPAIGNS } from "./campaigns.ts";
-import { selectPendingCampaign } from "./select.ts";
+import {
+  LOWER_PRIORITY_GRACE_MS,
+  SELECT_WINDOW_MS,
+  selectCampaignToFire,
+  selectPendingCampaign,
+} from "./select.ts";
 
 const FIRST_DEPLOY_TARGET = '[data-onboarding="first-deploy"]';
+
+const shellOnly = { pathname: "/projects/p1", hasTarget: (sel: string) => sel !== FIRST_DEPLOY_TARGET };
+const heroMounted = { pathname: "/projects/p1", hasTarget: () => true };
 
 test("first-deploy outranks agent so an empty project gets the deploy tour", () => {
   const keys = ONBOARDING_CAMPAIGNS.map((c) => c.key);
@@ -54,6 +62,35 @@ test("a skipped first-deploy is not offered again", () => {
     pathname: "/projects/p1",
     hasTarget: () => true,
   });
+  assert.equal(picked?.key, "agent");
+});
+
+test("agent does not steal the tour while the deploy hero is still loading", () => {
+  const early = selectCampaignToFire(ONBOARDING_CAMPAIGNS, {}, shellOnly, 3000);
+  assert.equal(early, null);
+  const afterHeroMounts = selectCampaignToFire(ONBOARDING_CAMPAIGNS, {}, heroMounted, 3000);
+  assert.equal(afterHeroMounts?.key, "first-deploy");
+});
+
+test("agent still fires once the grace window passes with no deploy hero", () => {
+  const picked = selectCampaignToFire(ONBOARDING_CAMPAIGNS, {}, shellOnly, LOWER_PRIORITY_GRACE_MS);
+  assert.equal(picked?.key, "agent");
+});
+
+test("a campaign never fires before its own delay", () => {
+  const campaign = ONBOARDING_CAMPAIGNS.find((c) => c.key === "first-deploy");
+  assert.ok(campaign?.delayMs);
+  assert.equal(selectCampaignToFire(ONBOARDING_CAMPAIGNS, {}, heroMounted, campaign.delayMs - 1), null);
+  assert.equal(selectCampaignToFire(ONBOARDING_CAMPAIGNS, {}, heroMounted, campaign.delayMs)?.key, "first-deploy");
+});
+
+test("nothing fires after the selection window closes", () => {
+  const picked = selectCampaignToFire(ONBOARDING_CAMPAIGNS, {}, heroMounted, SELECT_WINDOW_MS + 1);
+  assert.equal(picked, null);
+});
+
+test("a skipped first-deploy promotes agent to top priority immediately", () => {
+  const picked = selectCampaignToFire(ONBOARDING_CAMPAIGNS, { "first-deploy": "skipped" }, shellOnly, 3000);
   assert.equal(picked?.key, "agent");
 });
 
