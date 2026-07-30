@@ -12,6 +12,7 @@ export const nav: Messages = {
   "nav.storage": { ru: "Объектное хранилище", en: "Object Storage" },
   "nav.domains": { ru: "Домены", en: "Domains" },
   "nav.monitoring": { ru: "Мониторинг", en: "Monitoring" },
+  "nav.ai": { ru: "AI API", en: "AI API" },
   "nav.models": { ru: "AI-модели", en: "AI Models" },
   "nav.app-servers": { ru: "Managed VM", en: "Managed VM" },
   "nav.git": { ru: "Сборки", en: "Builds" },

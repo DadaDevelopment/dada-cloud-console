@@ -283,6 +283,28 @@ definitions:
           Ignored for GitHub.'
         type: string
     type: object
+  api.createAIKeyRequest:
+    properties:
+      name:
+        type: string
+    type: object
+  api.createAIKeyResponse:
+    properties:
+      base_url:
+        type: string
+      created_at:
+        type: string
+      id:
+        type: string
+      key:
+        type: string
+      name:
+        type: string
+      scopes:
+        type: string
+      token_prefix:
+        type: string
+    type: object
   api.createAIModelRequest:
     properties:
       artifact_uri:
@@ -644,6 +666,7 @@ definitions:
     properties:
       metrics:
         additionalProperties:
+          format: float64
           type: number
         type: object
       source:
@@ -675,6 +698,15 @@ definitions:
     properties:
       target_project_id:
         type: string
+    type: object
+  api.putAICredentialRequest:
+    properties:
+      api_base:
+        type: string
+      api_key:
+        type: string
+    required:
+    - api_key
     type: object
   api.recordBoxFunnelEventRequest:
     properties:
@@ -1389,6 +1421,31 @@ paths:
         confirmation
       tags:
       - agent
+  /ai/catalog:
+    get:
+      description: Lists the model aliases callable through the AI Gateway and the
+        providers a project can store a BYOK credential for. Use the alias (not the
+        upstream model id) as the `model` field of an OpenAI-compatible request.
+      operationId: getAIGatewayCatalog
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: object with models, providers and base_url
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: AI Gateway model and provider catalog
+      tags:
+      - ai-gateway
   /auth/login:
     post:
       consumes:
@@ -2213,6 +2270,303 @@ paths:
       summary: Get a project with its environments
       tags:
       - project
+  /projects/{projectId}/ai/credentials:
+    get:
+      description: Lists the providers this project holds a BYOK credential for. Never
+        returns a usable key -- only a masked hint, the optional api_base override
+        and the last update time.
+      operationId: listAIProviderCredentials
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: object with credentials array
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: List a project's AI provider credentials
+      tags:
+      - ai-gateway
+  /projects/{projectId}/ai/credentials/{provider}:
+    delete:
+      description: Removes the stored provider key. Calls to models of that provider
+        then fail closed -- there is no shared platform key to fall back to.
+      operationId: deleteAIProviderCredential
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      - description: Provider name
+        in: path
+        name: provider
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "204":
+          description: no content
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Delete a project's AI provider credential
+      tags:
+      - ai-gateway
+    put:
+      consumes:
+      - application/json
+      description: Stores (or replaces) this project's own provider key, encrypted
+        at rest. The AI Gateway injects it server-side for every request the project's
+        AI keys make against a model of that provider; the key is never returned to
+        the browser afterwards.
+      operationId: putAIProviderCredential
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      - description: Provider name from the catalog
+        in: path
+        name: provider
+        required: true
+        type: string
+      - description: Provider key and optional api_base override
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/api.putAICredentialRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Store a project's AI provider credential
+      tags:
+      - ai-gateway
+  /projects/{projectId}/ai/keys:
+    get:
+      description: Lists the AI Gateway keys minted for this project (including revoked
+        ones). Never returns the plaintext key or its hash -- only the id, label,
+        token_prefix, scopes and lifecycle timestamps.
+      operationId: listAIGatewayKeys
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: object with keys array and base_url
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: List a project's AI Gateway keys
+      tags:
+      - ai-gateway
+    post:
+      consumes:
+      - application/json
+      description: Mints a revocable project-scoped key for the AI Gateway (scopes
+        ai:chat and ai:embeddings). Use it as the api_key of any OpenAI-compatible
+        SDK with base_url set to the returned base_url. The plaintext key is returned
+        ONLY in this response -- store it now, it cannot be retrieved again.
+      operationId: createAIGatewayKey
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      - description: Optional label for the key
+        in: body
+        name: body
+        schema:
+          $ref: '#/definitions/api.createAIKeyRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/api.createAIKeyResponse'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Create an AI Gateway key for a project
+      tags:
+      - ai-gateway
+  /projects/{projectId}/ai/keys/{keyId}:
+    delete:
+      description: Permanently revokes the key. The gateway caches introspection for
+        up to 60 seconds, so an in-flight key stops working within a minute.
+      operationId: deleteAIGatewayKey
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      - description: Key UUID
+        in: path
+        name: keyId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "204":
+          description: no content
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Revoke an AI Gateway key
+      tags:
+      - ai-gateway
+  /projects/{projectId}/ai/usage:
+    get:
+      description: Returns the project's AI Gateway calls, tokens and cost over the
+        trailing window, broken down by model and by day. Any project member may read
+        it.
+      operationId: getProjectAIUsage
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      - description: 'Window length in days: 7 or 30 (default 7)'
+        in: query
+        name: days
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: A project's own AI Gateway usage
+      tags:
+      - ai-gateway
   /projects/{projectId}/app-servers:
     get:
       description: Returns all app servers (provisioned or connected VMs) in a project,

@@ -299,3 +299,22 @@ Also worth fixing when someone touches Metrika next: rename the url goal to
 "Visited /register" so it stops reading as a signup count, and fire
 `registration_complete` from the console shell on first authenticated load for a
 brand-new `sub` rather than from the marker, so KC-side signups are counted too.
+
+## Verified live — 2026-07-31
+
+Image `e31d207d` (build #661) carries the redirect commit `0de4792`; Argo has it on
+prod.
+
+| Check | Result | Source |
+|---|---|---|
+| `/telegram-bot-hosting`, `/vibe-coding-deploy` (+ `/en`) | 301 → renamed slug, all 4 | `curl -w '%{http_code} %{redirect_url}'` [live] |
+| Redirect targets | 200 | same [live] |
+| Apex `dada-tuda.ru` | still 301 → `https://cloud.dada-tuda.ru/` | same [live] |
+| Frontend replicas | 2/2 ready, on two different nodes | `kubectl get deploy/pods -o wide` [live] |
+| IndexNow push of the 8 affected URLs | Yandex 202, Bing 200 | `scripts/indexnow-submit.py` [live] |
+
+Defect 2 (the 07-20 503 on `/analog-vercel` and `/pricing`) is addressed at the cause:
+the frontend ran a single replica while also serving the public marketing site, so any
+restart or drain was an outage window. Now 2 replicas with `maxUnavailable: 0` and a
+soft anti-affinity — chart `050acaa` in dada-cloud, values `c1a738e1` in argo-infra.
+Whether the crawler sees another 5xx is itself a prediction to grade next Monday.

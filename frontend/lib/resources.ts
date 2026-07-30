@@ -14,6 +14,7 @@ export type IconName =
   | "apps"
   | "databases"
   | "models"
+  | "ai"
   | "app-servers"
   | "operations"
   | "approvals"
@@ -47,6 +48,7 @@ export const PROJECT_NAV: ResourceNavItem[] = [
   { key: "overview", label: "Overview", icon: "overview", segment: "", group: "resources" },
   { key: "apps", label: "Applications", icon: "apps", segment: "/apps", group: "resources" },
   { key: "databases", label: "Databases", icon: "databases", segment: "/databases", group: "resources" },
+  { key: "ai", label: "AI API", icon: "ai", segment: "/ai", group: "resources" },
   { key: "storage", label: "Object Storage", icon: "storage", segment: "/storage", group: "resources" },
   { key: "domains", label: "Domains", icon: "domains", segment: "/domains", group: "resources" },
   { key: "monitoring", label: "Monitoring", icon: "monitoring", segment: "/monitoring", group: "resources" },
