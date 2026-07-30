@@ -58,12 +58,32 @@ force-matched at position 8-12 with a page that answers a different question, he
 **Cut** — stop producing new `/analog-*` pages. Seven exist; the cluster yields ~11 shows/month.
 
 **Fix before adding anything** (new thin pages would be dropped the same way):
-- expand the ten sub-500-word pages past ~900 words of page-specific content
-- link the six orphans from footer + a homepage hub block, and cross-link topical siblings
-- 301 the five dead slugs
-- make deploys not serve 5xx to crawlers
-- set the region in Webmaster, register in Yandex Business
-- issue a cert for the apex and 301 it to `cloud.dada-tuda.ru`
+- [x] expand the ten sub-500-word pages past ~900 words of page-specific content — shipped 07-31
+- [x] link the six orphans from footer + a homepage hub block, and cross-link topical siblings
+- [x] 301 the five dead slugs (`next.config.ts` `RENAMED_LANDINGS`, ru+en, statusCode 301)
+- [x] make deploys not serve 5xx to crawlers — `URL_ALERT_5XX` now `ABSENT` in diagnostics
+- [x] issue a cert for the apex and 301 it to `cloud.dada-tuda.ru` — `https://dada-tuda.ru/` 301s, TLS valid
+- [ ] set the region in Webmaster, register in Yandex Business — **blocked, owner action.**
+  `NO_REGIONS` and `NOT_IN_SPRAV` are still `PRESENT` (last update 07-30). Webmaster API v4
+  exposes no region endpoint (`/regions/` returns `RESOURCE_NOT_FOUND`), and Yandex Business
+  needs a real address plus phone confirmation, so both are done by hand in the UI.
+
+### What the expansion pass actually changed (07-31)
+
+The root cause was not only short copy. `FaqList` mounted the answer paragraph only for the open
+accordion item, so every landing's FAQ prose lived in React state and never in the DOM — a
+crawler saw the questions and nothing else. Rendering the answer always and hiding it with a
+class lifted every FAQ-bearing page at once: `/analog-vercel` 700 -> 1137, `/hosting-telegram-bot`
+-> 1043, `/storage` 910 -> 1216.
+
+On top of that: `servers` / `databases` / `storage` gained how-to steps, use cases and a limits
+block; `pricing` and `storage` gained FAQ; `developer` gained an intro; the five comparison
+landings moved to the new `LandingGuide` shape (how-to, what-does-not-port, a six-row concept
+mapping table, four extra Q&A). `HowTo` and `FAQ` JSON-LD follow the visible content.
+
+Result: all 62 sitemap routes 200; ten still under 700 words and all of them are legal, status
+or hub pages (`/terms` 415, `/status` 581, `/accept-payments` 594, `/developer` 623,
+`/pricing` 660, `/migrate-vercel` 697, plus the /en mirrors) where more prose would be padding.
 
 **Multiply** — the payment-block cluster, starting with Vercel (about 21 of 97 shows concern
 Vercel payment/availability):
@@ -74,6 +94,17 @@ Railway if the pair works.
 
 **Measure** — declare each new page won or lost 14 days after it enters the index, on shows,
 average position, and goal reaches from the weekly pull.
+
+## Standing predictions
+
+| made | prediction | verdict due | how it is judged |
+|---|---|---|---|
+| 07-30 | the six thin EN pages admitted on 07-29 get dropped as `LOW_QUALITY` | 08-06 pull | Webmaster removal reasons |
+| 07-31 | the ten expanded pages re-enter the index and stay | 14 days after they next appear | pages-in-search count, no new `LOW_QUALITY` for those URLs |
+| 07-31 | `/oplatit-vercel-iz-rossii` and `/rabotaet-li-vercel-v-rossii` take the payment-block cluster (31 shows/mo at pos 8-12, 0 clicks today) and convert it | 14 days after each enters the index | shows on those URLs, average position <= 5, clicks > 0, goal "переход на /register" attributed to them |
+
+A prediction that is wrong is recorded as wrong in the weekly file — the point is calibration,
+not a scoreboard.
 
 ## Weekly loop
 

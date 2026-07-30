@@ -72,3 +72,24 @@ Whole path is k8s-hardwired; needs compose branches in doAttachCustomHostname / 
 
 ## Review
 (to fill in after implementation)
+
+---
+
+## SEO weekly loop (2026-07-31)
+
+Plan and evidence: `tasks/seo/PLAN.md`, baseline `tasks/seo/2026-07-30.md` / `.json`.
+
+- [x] Pull real data (Webmaster v4 + Metrika stat v1), classify all 97 shows into intent clusters
+- [x] 301 the five dead slugs (ru+en) in `next.config.ts`
+- [x] Link the six orphan landings from the footer
+- [x] Apex `dada-tuda.ru` cert + 301 to `cloud.dada-tuda.ru`
+- [x] Stop serving 5xx to crawlers during a frontend roll (`URL_ALERT_5XX` now ABSENT)
+- [x] Ship `/oplatit-vercel-iz-rossii` and `/rabotaet-li-vercel-v-rossii` (ru+en) for the payment-block cluster
+- [x] Fix `FaqList` — answers were never in the DOM, so every landing read as thin to a crawler
+- [x] Expand the ten sub-500-word pages past ~900 words of page-specific content
+- [ ] Submit the changed URLs to IndexNow once the deploy is live
+- [ ] **Owner action:** set the region in Yandex Webmaster and register in Yandex Business
+      (`NO_REGIONS`, `NOT_IN_SPRAV`); no API exists for either
+- [ ] **Owner action:** verify the host in Google Search Console and submit the sitemap
+      (`GOOGLE_SITE_VERIFICATION` env); Google delivered 0 sessions in 30 days and ignores IndexNow
+- [ ] 2026-08-06: re-run `scripts/seo-weekly.py`, grade the three standing predictions in PLAN.md
