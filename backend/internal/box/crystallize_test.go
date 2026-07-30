@@ -2,6 +2,7 @@ package box
 
 import (
 	"context"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
@@ -198,11 +199,11 @@ func readyBoxFixture(t *testing.T, rt *LocalRuntime, ctx context.Context) *Insta
 // holds turns the socket comparison into a check on that other process.
 func freeLocalPort(t *testing.T) int {
 	t.Helper()
-	ln, err := netListen()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatalf("reserve a port: %v", err)
 	}
-	port := ln.Addr().(*netTCPAddr).Port
+	port := ln.Addr().(*net.TCPAddr).Port
 	_ = ln.Close()
 	return port
 }

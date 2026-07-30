@@ -469,11 +469,11 @@ type Config struct {
 	// production adapter, which runs a box as a Pod in the existing cluster. A
 	// values file must not be able to switch the local adapter on while reading as
 	// though it switched on "the box runtime".
-	BoxLocalRoot     string // BOX_LOCAL_ROOT (empty = box runtime disabled)
-	BoxWarmPoolSize  int    // BOX_WARM_POOL_SIZE (default 2)
-	BoxWarmImage     string // BOX_WARM_IMAGE (default warm-v1, must exist in boxcatalog)
-	BoxRegion        string // BOX_REGION (pool key; default "")
-	BoxHostnameBase  string // BOX_HOSTNAME_BASE (platform wildcard for expose)
+	BoxLocalRoot             string // BOX_LOCAL_ROOT (empty = box runtime disabled)
+	BoxWarmPoolSize          int    // BOX_WARM_POOL_SIZE (default 2)
+	BoxWarmImage             string // BOX_WARM_IMAGE (default warm-v1, must exist in boxcatalog)
+	BoxRegion                string // BOX_REGION (pool key; default "")
+	BoxHostnameBase          string // BOX_HOSTNAME_BASE (platform wildcard for expose)
 	BoxCrystallizeDomainBase string // BOX_CRYSTALLIZE_DOMAIN_BASE (default domain for a crystallized VM)
 	// BoxSessionBaseURL is where the box's own session surface answers. Defaults to
 	// MCPSelfURL and then to loopback, so there is one answer to "where does this

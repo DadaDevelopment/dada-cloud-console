@@ -420,6 +420,26 @@ func (h *Handler) provisionBoxRecord(c *gin.Context, actorID uuid.UUID, projectI
 		return models.Box{}, false
 	}
 
+	// The box_minutes quota gate, checked here rather than in each caller so that
+	// createBox and boxUp cannot drift apart. It sits after validation on purpose:
+	// a caller with a malformed request should be told about the request, not about
+	// their plan. A quota lookup that fails for any other reason does not block the
+	// box — an unavailable billing read must not become an outage of the product.
+	//
+	// This gate was briefly lost when the body of createBox was extracted into this
+	// helper: the extraction predated the gate, and merging the two took the
+	// extraction wholesale. TestCreateBox_BoxMinutesQuotaUsesTheExistingForbiddenShape
+	// caught it, which is the whole reason that test asserts on the response shape
+	// rather than on an internal call.
+	if orgID, orgErr := h.projectOrg(c.Request.Context(), projectID); orgErr == nil {
+		if qErr := h.checkQuota(c.Request.Context(), orgID, "box_minutes"); qErr != nil {
+			if qe, ok := qErr.(*quotaExceededError); ok {
+				respondQuotaExceeded(c, qe.Resource, qe.Limit)
+				return models.Box{}, false
+			}
+		}
+	}
+
 	var projectSlug string
 	if err := h.pool.QueryRow(c.Request.Context(),
 		`SELECT name FROM projects WHERE id = $1`, projectID,
