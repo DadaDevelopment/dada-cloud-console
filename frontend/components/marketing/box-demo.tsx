@@ -35,7 +35,7 @@ export function BoxDemo({
 }) {
   const { locale } = useLang();
   const [shown, setShown] = useState(0);
-  const [running, setRunning] = useState(false);
+  const [playing, setPlaying] = useState(false);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const clear = useCallback(() => {
@@ -45,29 +45,32 @@ export function BoxDemo({
     }
   }, []);
 
-  // Advance one line at a time while running. Cleared on unmount and on replay.
+  // "Are we still advancing" is DERIVED, not stored. An earlier version kept a
+  // `running` flag and switched it off from inside the effect once the last line
+  // showed — a synchronous setState in an effect body, which
+  // react-hooks/set-state-in-effect rejects for causing cascading renders. It was
+  // avoidable state: whether the replay is advancing is a function of two values
+  // already on hand — did the user press play, and are there lines left.
+  const advancing = playing && shown < lines.length;
+  const finished = playing && shown >= lines.length;
+
+  // Advance one line at a time. Cleared on unmount and on replay.
   useEffect(() => {
-    if (!running) return;
-    if (shown >= lines.length) {
-      setRunning(false);
-      return;
-    }
+    if (!advancing) return;
     timer.current = setTimeout(() => setShown((n) => n + 1), LINE_DELAY_MS);
     return clear;
-  }, [running, shown, lines.length, clear]);
+  }, [advancing, shown, clear]);
 
   useEffect(() => clear, [clear]);
 
   const start = () => {
     clear();
     setShown(0);
-    setRunning(true);
+    setPlaying(true);
     // Locale was missing here, which made dada_box_funnel_events_total's locale
     // label default to "ru" for every English demo run.
     reportBoxEvent({ event: "demo_run", locale });
   };
-
-  const finished = !running && shown >= lines.length;
 
   return (
     <section id="demo" className="scroll-mt-20 bg-slate-950 py-20">
@@ -88,7 +91,7 @@ export function BoxDemo({
               onClick={start}
               className="inline-flex items-center gap-1.5 rounded-md bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-blue-700"
             >
-              {finished || running ? (
+              {finished || advancing ? (
                 <RotateCcw className="h-3.5 w-3.5" />
               ) : (
                 <Play className="h-3.5 w-3.5" />
@@ -104,7 +107,7 @@ export function BoxDemo({
             {lines.slice(0, shown).map((line, i) => (
               <DemoRow key={`${i}-${line.text}`} line={line} />
             ))}
-            {running && <span className="inline-block h-4 w-2 animate-pulse bg-white/60 align-middle" />}
+            {advancing && <span className="inline-block h-4 w-2 animate-pulse bg-white/60 align-middle" />}
           </div>
         </div>
       </div>
