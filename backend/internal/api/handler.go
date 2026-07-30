@@ -66,6 +66,13 @@ type Handler struct {
 	dadagent      *dadagent.Client
 	agentVerifier *auth.KeycloakVerifier
 
+	// boxAgentVerifier gates the box-agent ingest webhooks (status + samples).
+	// nil disables them, exactly like agentVerifier: the routes are registered
+	// only when the verifier builds, which is also what keeps those two
+	// platform-internal endpoints out of the OpenAPI coverage gate and therefore
+	// out of the reflected MCP tool surface. See webhooks_boxagent.go.
+	boxAgentVerifier *auth.KeycloakVerifier
+
 	// counters resolves an app's Yandex Metrika counter id from its live
 	// YandexMetrikaCounter CR. Never nil: off-cluster it returns a resolver
 	// whose Resolve fails with a clear "not configured" error.

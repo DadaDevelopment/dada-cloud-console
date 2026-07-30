@@ -193,6 +193,28 @@ func SetupRouter(pool *pgxpool.Pool, cfg *config.Config) *gin.Engine {
 		log.Printf("cloud-task: dadagent webhook disabled (keycloak verifier: %v)", err)
 	}
 
+	// box-agent ingest webhooks (status transitions + out-of-guest activity
+	// samples). Same shape and same reasons as the dadagent webhook above:
+	// public route, bearer-gated by a JWKS verifier inside the handler
+	// (azp=box-agent only), NOT the user JWT middleware, and registered only when
+	// the verifier builds.
+	//
+	// The guard is load-bearing beyond configuration. These two handlers carry no
+	// swaggo annotation, and the guard is what makes that safe: under the
+	// coverage test's config no verifier builds, so the routes are not registered
+	// and openapi_coverage_test.go has nothing to demand a spec entry for. It also
+	// keeps them out of swagger.json, and therefore out of the reflected MCP
+	// toolset — whose standalone server curates by denylist, so a spec entry would
+	// become an agent-callable "write a box's billing sample" tool by default.
+	if v, err := auth.NewKeycloakVerifier(context.Background(), cfg.KeycloakIssuer, false, "", "box-agent"); err == nil {
+		h.boxAgentVerifier = v
+		r.POST("/api/v1/webhooks/boxagent/status", h.BoxAgentStatusWebhook)
+		r.POST("/api/v1/webhooks/boxagent/sample", h.BoxAgentSampleWebhook)
+		log.Printf("box: box-agent webhooks enabled at /api/v1/webhooks/boxagent/{status,sample}")
+	} else {
+		log.Printf("box: box-agent webhooks disabled (keycloak verifier: %v)", err)
+	}
+
 	// Deploy-hook consumption routes. Public on purpose: authenticated by a
 	// revocable per-app bearer token (app_deploy_hooks.token_hash) resolved
 	// inside the handler, not the Keycloak user JWT middleware -- this is how
@@ -314,6 +336,18 @@ func SetupRouter(pool *pgxpool.Pool, cfg *config.Config) *gin.Engine {
 		api.DELETE("/projects/:projectId/app-servers/:serverName", h.DeleteAppServer)
 		api.POST("/projects/:projectId/app-servers/:serverName/discover", h.DiscoverWorkload)
 		api.POST("/projects/:projectId/app-servers/:serverName/import", h.ImportComposeStack)
+
+		// Boxes (ephemeral root sandboxes). A box owns exactly one environment
+		// with runtime='box'; crystallization later promotes that same row to
+		// runtime='vm', which is how its attachments and hostnames survive.
+		api.GET("/projects/:projectId/boxes", h.ListBoxes)
+		api.POST("/projects/:projectId/boxes", h.CreateBox)
+		api.GET("/projects/:projectId/boxes/:boxName", h.GetBox)
+		api.GET("/projects/:projectId/boxes/:boxName/state", h.GetBoxState)
+		api.DELETE("/projects/:projectId/boxes/:boxName", h.DeleteBox)
+		api.POST("/projects/:projectId/boxes/:boxName/suspend", h.SuspendBox)
+		api.POST("/projects/:projectId/boxes/:boxName/resume", h.ResumeBox)
+		api.POST("/projects/:projectId/boxes/:boxName/extend", h.ExtendBox)
 
 		// Apps
 		api.GET("/projects/:projectId/environments/:envId/apps", h.ListApps)

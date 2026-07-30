@@ -16,12 +16,19 @@
 
 ## БЛОКЕРЫ — решить до первой строки кода
 
-- [ ] **B1. Бокс = строка `environments` (`runtime='box'`) или свой `ResourceKind`?**
-      Два плана противоречат друг другу. Рекомендация — `runtime='box'` с мутацией на месте при
-      кристаллизации, потому что `environment_id` это носитель удостоверения, к которому привязаны
-      `env_vars`, `resource_snapshots`, `domain_hostnames`, и переиспользование строки **и есть**
-      механизм продукта. Цена — аудит `api/runtime_guard.go`. **Решение основателя/архитектора.**
-      Все задачи бэкенда ниже написаны под рекомендацию.
+- [x] **B1 — РЕАЛИЗОВАНО ПО РЕКОМЕНДАЦИИ, подтверждения архитектора не было: бокс = строка
+      `environments` с `runtime='box'`.** Два плана противоречили друг другу; выбрана та сторона,
+      где `environment_id` остаётся носителем удостоверения, к которому привязаны `env_vars`,
+      `resource_snapshots` и `domain_hostnames` — переиспользование этой строки **и есть** механизм
+      «одно удостоверение на весь путь», а новая строка при промоции воссоздала бы тот отказ
+      «кристаллизация потеряла состояние», ради предотвращения которого продукт и строится.
+      Реализовано в `061_boxes.sql`. Цена решения уплачена: аудит всех 18 ветвлений по
+      `environments.runtime` выполнен отдельной задачей с чеклистом (см. ФАЗА 2), два места с
+      ветвью по умолчанию исправлены, остальные безопасны по построению.
+      **Если архитектор решит иначе — откатывать надо до того, как на этой модели встанут
+      attach/expose (ФАЗА 6): дальше цена разворота растёт быстро.**
+      Устаревший абзац в `docs/plans/2026-07-29-box-runtime-architecture.md`, утверждавший
+      обратное, исправлен в этой же ветке.
 - [ ] **B2. Развилка «анти-lock-in против OEM-канала через хостеров».** Решение письменно.
       Если OEM — блок `agentenv` не начинать вообще и удалить из бэклога.
 - [ ] **B3. `ls /dev/kvm` на Beget-инстансе** (30 минут). Закрывает вопрос Firecracker фактом.
@@ -99,11 +106,17 @@
 - [x] группа `dada-cloud-console.box`, 6 алертов, `BoxCrystallizeStateLoss` — единственный critical
 - [x] `values.yaml`: `boxReadyBudgetSeconds`, `boxReadyP95Seconds`, `boxMeterStaleSeconds`
 - [x] `docs/runbooks/box-latency-budget.md`
-- [ ] **осталось:** подключить gauge к циклу коллектора (`dada_boxes{phase}`,
-      `dada_box_failed_recent`, `dada_box_pool_*`, `dada_box_spend_cap_max_ratio`,
-      `dada_box_crystallizations_pending_age_seconds`). Метрики объявлены и запинены, но обновлять
-      их нечем: запросы нужны к таблице `boxes`, которой ещё нет. Делать в фазе 2 вместе с `058`
-
+- [x] gauge подключены к циклу коллектора (`collectBoxes` в `metrics/collector.go`, рядом с
+      идентичным паттерном для operations/builds/hostnames): `dada_boxes{phase}` — GROUP BY по
+      `boxes.status` без tombstone'ов, `dada_box_failed_recent` — окно в час, как у
+      `dada_builds_failed_recent`. Провал запроса **оставляет прежнее значение**, а не публикует
+      ноль: ноль на транзиентной ошибке выглядит как «парк опустел» и погасил бы живой алерт
+- [ ] **осталось:** `dada_box_pool_available`/`_target` — писателя нет. Таблица `boxes` не может
+      на них ответить: её строка это **захваченный** бокс тенанта, а тёплый слот не захвачен и
+      живёт в рантайме. Подсчёт живых боксов под именем «available» дал бы почти обратную правду
+      (полный парк без запаса = максимальная доступность). Писать их должен контроллер пула
+      (фаза 5), единственный, кто знает оба числа; `internal/box.WarmPool` ровно поэтому
+      объявляет `Available`/`Target`
 
 ### Швы и герметичные тесты (subagent: executor) — ГОТОВО
 
@@ -172,56 +185,129 @@
 
 ---
 
-## ФАЗА 2 — бэкенд, слайс 1: объект и жизненный цикл (3–4 д)
+## ФАЗА 2 — бэкенд, слайс 1: объект и жизненный цикл (3–4 д) — ГОТОВО
 
-### Миграции (subagent: executor)
+**Решение B1 принято по рекомендации:** бокс владеет одной строкой `environments` с
+`runtime='box'`, `type='dev'`; кристаллизация переводит **эту же** строку в `runtime='vm'`,
+`type='prod'`. Аудит ветвлений выполнен (чеклист ниже).
 
-- [ ] `058_boxes.sql` — `environments_runtime_check` расширить до `('k8s','vm','box')` через
-      `DO $$ ... EXCEPTION WHEN insufficient_privilege` с проверкой, что `box` уже валидируется;
-      таблица `boxes` (`environment_id UNIQUE`, статусы, TTL, `spend_cap_rub`,
-      `last_sample_json`); `idx_boxes_project_name_live` частичный `WHERE status <> 'Deleted'`
-- [ ] `062_grant_box_tables.sql` — явный `GRANT` на все таблицы бокса роли `dada`
+**Номера миграций поехали:** `058`/`059` заняты (`059_alert_context.sql` уже в проде), `060`
+за соседним агентом, поэтому боксы получили `061`/`062`. Следствие: **пункт 8.1 фазы 8 больше
+не может называться `061_box_crystallizations.sql`** — взять свободный номер (`063`+).
 
-### Модель и каталог (subagent: executor)
+### Миграции (subagent: executor) — ГОТОВО
 
-- [ ] `backend/internal/models/box.go` — `Box`, `BoxStatus`, 10 констант действий, 10
-      payload-структур. Комментарий «JSON-теги — жёсткий контракт с воркером, НЕ переименовывать»
-- [ ] `backend/internal/boxcatalog/catalog.go` — образы и профили по образцу
-      `profiles/catalog.go` (замороженная переменная, `Lookup`, `Names`). **Не таблица**
+- [x] `061_boxes.sql` (было `058`) — `environments_runtime_check` расширен до `('k8s','vm','box')`
+      через `DO $$ ... EXCEPTION WHEN insufficient_privilege`; `insufficient_privilege` глушится
+      **только** если ни одно живое CHECK по `runtime` не запрещает `'box'`, иначе `RAISE`.
+      `DROP`+`ADD` в одном блоке: неявная подтранзакция откатывает `DROP` при падении `ADD`,
+      поэтому таблица никогда не остаётся без ограничения
+- [x] таблица `boxes`: `environment_id UNIQUE`, 9 статусов (словарь совпадает с лейблом
+      `dada_boxes{phase}`), TTL/idle/expires/slept, `spend_cap_rub`, `last_sample_json`,
+      `app_server_id` под кристаллизацию; `idx_boxes_project_name_live` частичный
+      `WHERE status <> 'Deleted'`; индексы по статусу, проекту и `instance_ref`
+- [x] `062_grant_box_tables.sql` — явный именованный `GRANT` роли `dada`
+- [x] **проверено на живом postgres 16:** 64 миграции применяются, повторный прогон
+      идемпотентен, `runtime='box'` вставляется, оба ограничения срабатывают, имя удалённого
+      бокса переиспользуется
 
-### API (subagent: executor)
+### Модель и каталог (subagent: executor) — ГОТОВО
 
-- [ ] `backend/internal/api/boxes.go` — list/create/get/state/delete/suspend/resume/extend
-- [ ] `backend/internal/api/webhooks_boxagent.go` — статус и сэмплы. **Регистрировать внутри гарда
-      `if verifier ok` и НЕ аннотировать** (иначе протекут в coverage-гейт и в MCP-поверхность)
-- [ ] роуты в `router.go`; полные аннотации swaggo на все аннотируемые; регенерация
-      `swag init` и **коммит всех трёх** файлов (`swagger.json`, `swagger.yaml`, `docs.go`)
+- [x] `backend/internal/models/box.go` — `Box`, `BoxStatus`, машина переходов таблицей,
+      10 констант действий + `BoxActions`, 10 payload-структур, комментарий «JSON-теги —
+      жёсткий контракт с воркером, НЕ переименовывать» на каждой
+- [x] `SessionTokenHash` несёт только sha256; контраст с `CreateAppServerPayload.SSHPrivateKey`
+      выписан в комментарии и закреплён структурным тестом (падает, если в payload появится
+      поле с секретом)
+- [x] `backend/internal/boxcatalog/catalog.go` — образы и размеры замороженной переменной,
+      `LookupImage`/`LookupSize`/`ImageNames`/`SizeNames`/`Default*`. **Не таблица.** Тест
+      сверяет размеры с флейвором хоста: память не переподписывается, значит бокс не может
+      просить больше памяти, чем есть у хоста
 
-### МИНА (subagent: executor) — в этом же PR, не в следующем
+### API (subagent: executor) — ГОТОВО
 
-- [ ] `gitops-agent/internal/db/operations.go`: добавить все 10 имён действий в денилист
-      `NOT IN (...)`. Без этого gitops-agent захватит `BoxUp` и провалит с `unknown action`
-- [ ] `go build ./...` во всех четырёх модулях (`backend`, `gitops-agent`, `portainer-agent`,
-      `mcp-server`)
+- [x] `backend/internal/api/boxes.go` — list/create/get/state/delete/suspend/resume/extend,
+      форма гардов из `appservers.go` дословно, `pgx.ErrNoRows` → **404, не 403**
+- [x] `backend/internal/api/webhooks_boxagent.go` — статус и сэмплы, **внутри гарда
+      `if verifier ok` и БЕЗ аннотаций**; проверено, что `boxagent` не попал в `swagger.json`
+- [x] тенантность из `instance_ref`, никогда от агента; устаревший переход отбрасывается
+      машиной состояний с **200** (4xx заставил бы агента ретраить вечно)
+- [x] роуты в `router.go`; полные аннотации swaggo; регенерация
+      `swag init -g cmd/server/main.go --parseInternal -o internal/api/docs` и **коммит всех
+      трёх** файлов. Проверено, что команда байт-в-байт воспроизводит спеку до правок
+- [x] 7 записей `keep` в `default_overrides.yaml`, **после** регенерации спеки
 
-### Следствие B1 (subagent: executor) — блокирующее
+### МИНА (subagent: executor) — ГОТОВО, в том же коммите, что и модель
 
-- [ ] аудит **каждого** ветвления по `environments.runtime`: `api/runtime_guard.go`,
-      `databases.go`, `billing_consumption.go`, рендереры. Составить список и обработать `'box'`
-      явно в каждом. Не «по ходу», а отдельной задачей с чеклистом
+- [x] `gitops-agent/internal/db/operations.go`: все 10 имён в денилисте `NOT IN (...)`
+- [x] тест-растяжка в `models`: статический скан обоих агентов — все 10 в денилисте
+      gitops-agent и ни одного в аллоулисте portainer-agent (иначе оба захватывают и гонятся)
+- [x] `go build ./...`, `go vet ./...`, `gofmt -l .`, `go test ./...` во всех четырёх модулях
 
-### Документы
+### Следствие B1 — аудит `environments.runtime` (subagent: executor) — ГОТОВО
 
-- [ ] `docs/adr/ADR-016-box-runtime-gvisor-on-beget-vms.md`
-- [ ] `docs/adr/ADR-017-box-hosts-outside-the-portainer-fleet.md` — отклонение от ADR-007:
-      `bootstrap.sh.tmpl` монтирует `docker.sock` и `/:/host`, на хосте с враждебным кодом это
-      root-эквивалент к каналу управления всем парком
+Найдено 18 мест. **Изменены два, оба с ветвью по умолчанию; остальные 16 безопасны по
+построению, потому что сравнивают на равенство либо фильтруют `= 'k8s'`.**
 
-### Verify
+- [x] `api/runtime_guard.go` — `valuesFileAllowedForRuntime` **ИСПРАВЛЕНО**: ветка по умолчанию
+      читалась «всё, что не vm, редактирует values.yaml» и выдала бы боксу подписанный
+      values-токен на несуществующий helm-чарт. Плюс `valuesFileRuntimeMsg`
+- [x] `api/billing_consumption.go` — `consumptionApps` **ИСПРАВЛЕНО**: добавлено
+      `AND e.runtime <> 'box'` (правка из фазы 7 подтянута вперёд), иначе внутренний workload
+      бокса посчитался бы дважды
+- [x] `api/runtime_guard.go` — `requireVMRuntime`/`requireK8sRuntime`: сравнение на равенство,
+      бокс уже получает 400 «only supported for …». Верно: у бокса нет ни helm-релиза, ни стека
+- [x] `api/databases.go:322` — **D2 подтверждён чтением кода:** `runtime == "vm"` → compose
+      внутри VM, всё остальное → Crossplane. `'box'` уже маршрутизируется в управляемый Postgres
+      **вне** бокса. Менять не нужно
+- [x] `api/apps.go:462` — `isCompose := runtime == VM`; бокс уйдёт в helm-ветку, но у него нет
+      строки `App`, а `CreateApp` в окружении бокса — сценарий вне слайса. Оставлено как есть
+- [x] `api/domains.go:520` — `== VM`; бокс попадёт в CNAME-ветку. Гард требует снапшот `App`
+      в окружении, которого у бокса нет → 404 раньше. Домены боксов — фаза 6, через брокер
+- [x] `api/domains.go:1161` — `e.runtime = $1` (`k8s`): аллоулист, бокс исключён
+- [x] `api/metrics.go:352`, `api/billing_consumption.go:227` — `runtime == "k8s" && …` иначе
+      compose-метки; недостижимо для бокса (нужен снапшот `App`), метрики бокса — свой путь
+- [x] `api/cost.go:279`, `api/logs.go:198`, `api/admin_costs.go:505`,
+      `api/billing_fullcost.go:281`, `api/app_health_watcher.go:133` — `runtime='k8s'` +
+      `namespace <> ''`: аллоулисты, бокс исключён
+- [x] `api/apps_values.go:109` — вызывает исправленный `valuesFileAllowedForRuntime`
+- [x] `api/appservers.go:599` — пишет `'vm'` при импорте, боксов не касается
+- [x] `api/projects.go:505` — только читает `runtime` в ответ; окружение бокса будет видно
+      в списке окружений проекта, и это верно (оно и есть носитель удостоверения)
+- [x] `gitops-agent/internal/db/environments.go:27`, `snapshots.go:107/182` —
+      `e.runtime = 'k8s'`: аллоулисты, окружения боксов не сканируются
+- [x] `gitops-agent/internal/worker/move_app.go:114` — `srcRuntime != "k8s" || dst != "k8s"` →
+      отказ. Бокс переехать между проектами не может, и это правильно: у него есть тело на хосте
+- [x] `gitops-agent/internal/worker/dbwatcher.go:1096/1696/2080/2289` — `runtime == "vm"` →
+      compose-путь, иначе k8s. Тот же вывод, что D2
+- [x] `models/project.go` — добавлен `EnvironmentRuntimeBox` с комментарием о том, что третье
+      значение обрабатывается явно, никогда веткой по умолчанию
 
-- [ ] `POST /boxes` → 202 + строка `boxes` + строка `environments` с `runtime='box'`
-- [ ] curl'нутый вебхук переводит в Ready с координатами SSH; `GET .../state` их показывает
-- [ ] `go test ./...` зелёный во всех модулях; `openapi_coverage_test` зелёный
+### Документы — ГОТОВО
+
+- [x] `docs/adr/ADR-016-box-runtime-gvisor-on-beget-vms.md` — принят с явно названными
+      незакрытыми допущениями (S1/S2/S4/B4) и с сохранённым швом под Firecracker
+- [x] `docs/adr/ADR-017-box-hosts-outside-the-portainer-fleet.md` — отклонение от ADR-007 с
+      цитатой строк 66–68 `bootstrap.sh.tmpl` (`docker.sock`, `/:/host`, `EDGE_KEY`) и
+      отдельным разбором, почему «тот же шаблон под флагом `BOX_HOST=1`» отвергнут
+
+### Verify — ГОТОВО
+
+- [x] `POST /boxes` → 202 + строка `boxes` + строка `environments` с `runtime='box'`/`type='dev'`
+      + операция `BoxUp` в `Created` со проштампованным `environment_id` (тест на живой базе)
+- [x] вебхук переводит в Ready с координатами SSH, стартует часы TTL; `GET .../state` их
+      показывает (тест на живой базе)
+- [x] `go test ./...` зелёный во всех четырёх модулях; `openapi_coverage_test`,
+      `curation_test`, `boot_smoke_test` зелёные. С базой в `internal/api` исполняются
+      **231** теста против 153 без базы
+
+### НЕ сделано в этом слайсе (осознанно)
+
+- снапшот `resource_snapshots` вида `Box` не пишется: в слайсе 1 его никто не читает, а
+  добавление неизвестного вида в реестр снапшотов тянет за собой пути сверки и orphan-GC
+- квота `box_minutes` и `checkQuota` при создании бокса — фаза 7 вместе с метерингом
+- `dada_box_pool_available`/`_target` не публикуются: таблица `boxes` не может на них
+  ответить, писатель — контроллер пула (фаза 5). Подробнее в комментарии `collector.go`
 
 ---
 
@@ -376,7 +462,8 @@
 
 Порядок сознательно противоинтуитивен: **верификация выходит раньше переноса данных.**
 
-- [ ] 8.1 скелет: `061_box_crystallizations.sql`, `operations.parent_operation_id`, частичный
+- [ ] 8.1 скелет: `box_crystallizations` (номер `061` **занят** таблицей `boxes` — взять `063`+),
+      `operations.parent_operation_id`, частичный
       уникальный индекс на одну кристаллизацию на бокс, `box_plan.go` (чистый планировщик),
       пара API план+запуск, машина состояний. **Кристаллизовать пустой бокс** (1,5 нед)
 - [ ] 8.2 захват образа: `docker commit` → Nexus → pull, подъём цели на существующем

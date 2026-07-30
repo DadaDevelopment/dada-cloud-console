@@ -2953,6 +2953,610 @@
                 }
             }
         },
+        "/projects/{projectId}/boxes": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Returns every box in a project that has not been deleted, newest first. A box is an ephemeral root sandbox an agent works in; it owns one environment whose runtime is \"box\". Read-only.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "box"
+                ],
+                "summary": "List boxes in a project",
+                "operationId": "listBoxes",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Project UUID",
+                        "name": "projectId",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "object with a boxes array",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            },
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Creates a box: an ephemeral sandbox with root inside it, an image from the frozen box catalog and a size profile. The box owns exactly one environment (runtime \"box\", type \"dev\"), which is the identity every later attachment, env var and hostname hangs off — and which crystallization later promotes in place, so nothing has to be migrated. Asynchronous: returns 202 with an operation; poll it, then read the box state for connection coordinates.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "box"
+                ],
+                "summary": "Create a box (ephemeral root sandbox)",
+                "operationId": "createBox",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Project UUID",
+                        "name": "projectId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Box specification (every field optional)",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/api.createBoxRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "202": {
+                        "description": "object with the created box and the accepted operation",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "409": {
+                        "description": "a live box with that name already exists in this project",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/projects/{projectId}/boxes/{boxName}": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Returns one box's stored record: status, image, size profile, TTL clocks, spend cap and (once the runtime has reported them) its SSH and MCP coordinates. Read-only.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "box"
+                ],
+                "summary": "Get a box by name",
+                "operationId": "getBox",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Project UUID",
+                        "name": "projectId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Box name",
+                        "name": "boxName",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "object with the box",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Destructive: destroys the box's sandbox and its disk. Irreversible for anything living only inside the box. Resources attached to the box (managed databases, buckets) live outside it and are NOT deleted. Asynchronous: returns 202 with an operation; poll it until terminal. The box's name becomes reusable once deletion completes.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "box"
+                ],
+                "summary": "Delete a box",
+                "operationId": "deleteBox",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Project UUID",
+                        "name": "projectId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Box name",
+                        "name": "boxName",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "202": {
+                        "description": "object with the accepted operation",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/projects/{projectId}/boxes/{boxName}/extend": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Pushes out when the box goes to sleep, measured from now and capped at 24 hours. Synchronous — the only box mutation that is, because it moves a timestamp in our own row and touches no runtime. Reaching the TTL puts a box to sleep, it never destroys it, so extending is a convenience rather than a rescue.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "box"
+                ],
+                "summary": "Extend a box's TTL",
+                "operationId": "extendBox",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Project UUID",
+                        "name": "projectId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Box name",
+                        "name": "boxName",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "New TTL in seconds, from now",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/api.extendBoxRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "object with the updated box",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "409": {
+                        "description": "box phase cannot be extended",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/projects/{projectId}/boxes/{boxName}/resume": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Thaws a sleeping box and waits for its exec channel to accept again. The same box, the same disk, the same injected credentials. Optionally rebinds a fresh SSH public key so the caller need not keep one alive across the sleep. Asynchronous: returns 202 with an operation.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "box"
+                ],
+                "summary": "Resume (wake) a sleeping box",
+                "operationId": "resumeBox",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Project UUID",
+                        "name": "projectId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Box name",
+                        "name": "boxName",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Optional fresh SSH public key",
+                        "name": "body",
+                        "in": "body",
+                        "schema": {
+                            "$ref": "#/definitions/api.resumeBoxRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "202": {
+                        "description": "object with the accepted operation",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "409": {
+                        "description": "box is not sleeping",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/projects/{projectId}/boxes/{boxName}/state": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Returns the box's phase plus the connection coordinates the runtime reported (SSH host/port, MCP URL), the age of the newest out-of-guest sample, and whether the box has passed its TTL. Read-only. Coordinates are empty until the runtime reports Ready.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "box"
+                ],
+                "summary": "Get live state and connection coordinates of a box",
+                "operationId": "getBoxState",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Project UUID",
+                        "name": "projectId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Box name",
+                        "name": "boxName",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "object with status, connection coordinates and sample freshness",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/projects/{projectId}/boxes/{boxName}/suspend": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Freezes the box so compute billing stops while its disk survives. Not destructive and not a delete: resume brings the same box back. This is also what a reached spend cap does, deliberately — a runaway must cost the customer money, never their data. Asynchronous: returns 202 with an operation.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "box"
+                ],
+                "summary": "Suspend (sleep) a box",
+                "operationId": "suspendBox",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Project UUID",
+                        "name": "projectId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Box name",
+                        "name": "boxName",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "202": {
+                        "description": "object with the accepted operation",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "409": {
+                        "description": "box is not in a suspendable phase",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/projects/{projectId}/builds/{buildId}": {
             "get": {
                 "security": [
@@ -13537,6 +14141,36 @@
                 }
             }
         },
+        "api.createBoxRequest": {
+            "type": "object",
+            "properties": {
+                "image": {
+                    "description": "Image and Profile name entries in the frozen boxcatalog (not a table): a\nsize only exists if the pool controller pre-warmed sandboxes of that shape.",
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "profile": {
+                    "type": "string"
+                },
+                "region": {
+                    "type": "string"
+                },
+                "spend_cap_rub": {
+                    "description": "SpendCapRub, when reached, suspends the box. It never deletes it.",
+                    "type": "number"
+                },
+                "ssh_public_key": {
+                    "description": "SSHPublicKey is a PUBLIC key: the caller keeps the private half, so the\nplatform stores no customer credential at all.",
+                    "type": "string"
+                },
+                "ttl_seconds": {
+                    "description": "TTLSeconds is when the box goes to sleep, not when it is destroyed.",
+                    "type": "integer"
+                }
+            }
+        },
         "api.createCloudTaskRequest": {
             "type": "object",
             "properties": {
@@ -13775,6 +14409,15 @@
                 }
             }
         },
+        "api.extendBoxRequest": {
+            "type": "object",
+            "properties": {
+                "ttl_seconds": {
+                    "description": "TTLSeconds is the new lifetime measured from now, capped at maxBoxTTLSeconds.",
+                    "type": "integer"
+                }
+            }
+        },
         "api.gitInstallation": {
             "type": "object",
             "properties": {
@@ -14002,6 +14645,15 @@
             "type": "object",
             "properties": {
                 "backup_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "api.resumeBoxRequest": {
+            "type": "object",
+            "properties": {
+                "ssh_public_key": {
+                    "description": "SSHPublicKey lets a resume rebind a fresh key, so the caller never has to\nkeep one alive across a sleep. Public half only.",
                     "type": "string"
                 }
             }

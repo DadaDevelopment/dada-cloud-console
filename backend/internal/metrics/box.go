@@ -63,7 +63,7 @@ var (
 
 	boxes = promauto.NewGaugeVec(prometheus.GaugeOpts{
 		Name: "dada_boxes",
-		Help: "Live boxes grouped by phase (requested|booting|ready|idle|sleeping|crystallizing|failed). Refreshed by the state collector.",
+		Help: "Live boxes grouped by phase (requested|booting|ready|idle|sleeping|crystallizing|failed|deleting). Refreshed by the state collector; Deleted tombstones are excluded because they hold no capacity.",
 	}, []string{"phase"})
 
 	boxFailedRecent = promauto.NewGauge(prometheus.GaugeOpts{
