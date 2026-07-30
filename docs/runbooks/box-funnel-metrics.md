@@ -208,35 +208,57 @@ Notes that the SQL settles and prose cannot:
 - A claim is only **scored** once its 7-day window has closed. Scoring an open
   window counts "has not come back yet" as "did not come back".
 
-### THIS METRIC CANNOT BE COMPUTED TODAY
+### THE LEDGER LANDED — WHAT CHANGED, AND THE ONE SEMANTIC CORRECTION
 
-There is no active-minute ledger. The box object arrives in ФАЗА 2 and the minute
-ledger in ФАЗА 7 of `tasks/box-backlog.md`. Consequently:
+`backend/migrations/063_box_usage.sql` (ФАЗА 7) creates `box_usage` and re-runs the
+guarded `DO` block, so `box_repeat_use_7d` now exists and
+`dada_box_repeat_use_7d_ratio` has a real data source. Two consequences:
 
-- `backend/migrations/060_box_leads.sql` creates the view **only if** a relation
-  named `box_usage` already exists, and otherwise raises a NOTICE and skips it. The
-  migration deliberately does not invent a substitute: a view returning zero rows
-  over a table that does not exist would read as "nobody came back", which is a
-  conclusion nobody measured.
-- `dada_box_repeat_use_7d_ratio` reports **NaN**, not 0, until the view can supply
-  a number. A gauge that reported 0 here would be the same lie in Prometheus form.
-- **Until then the only honest source of repeat use is the operator's Telegram
-  thread** — i.e. a table with names in it, labelled as a table with names in it.
-  Returning page views, a second `demo_run`, and a reply to an email are **not**
-  second use. This repository has already paid for that lesson twice
-  (`tasks/lessons.md`).
+- Every database that migrated past `060` BEFORE 063 existed had skipped the view
+  silently — the migration's gate raised a NOTICE and moved on. Re-running the block
+  from 063 (`CREATE OR REPLACE VIEW`, idempotent) is what un-darkens the metric on
+  those environments. A fresh database that applies 060 and then 063 creates the same
+  view twice and is fine.
+- `TestCollectBoxRepeatUsePublishesTheMeasuredRatio`
+  (`backend/internal/metrics/box_funnel_test.go`) no longer skips. It pins the
+  definition end to end: two sessions 26h apart count, two sessions 3h apart do not.
 
-Expected shape of the ledger, which the view is written against:
+**The correction, and it is a real change to the SQL in 060, not a restatement.**
+060 joined `box_usage` with no `WHERE` on `kind`, on the assumption that every row in
+the ledger meant activity. That is no longer true. `kind = 'suspended_disk'` is a row
+for a minute in which the box was **asleep**, billed only because its rootfs still
+occupies storage. Counting those as activity would be actively destructive to THIS
+metric: 72 hours of contiguous sleeping minutes merge every session on that box into
+one (the 30-minute gap rule never fires), so `sessions_within_7d` collapses to 1 and
+`repeat_use` becomes false for exactly the users who did come back. The view would
+report "nobody returned" for a mechanical reason having nothing to do with people.
+
+So the canonical join now reads:
+
+```sql
+    FROM box_grants g
+    JOIN box_usage  u ON u.box_id = g.box_id
+   WHERE u.kind <> 'suspended_disk'
+```
+
+Written as an exclusion rather than `kind = 'active'` so the pinned definition test
+(which seeds a third kind) keeps measuring what it was written to measure. **Any
+future `kind` that does not mean "the customer was working" must be added to this
+exclusion list.** The full view definition lives in `063_box_usage.sql`.
+
+Shape of the ledger the view reads:
 
 ```
-box_usage(box_id UUID, minute_start TIMESTAMPTZ, kind TEXT, ...)
-one row per ACTIVE minute per kind; an idle minute produces no row at all
+box_usage(box_id UUID, minute_start TIMESTAMPTZ, kind TEXT,
+          org_id TEXT, project_id UUID,
+          vcpu NUMERIC, ram_gb NUMERIC, storage_gb NUMERIC,
+          cost_rub NUMERIC, recorded_at TIMESTAMPTZ)
+PK (box_id, minute_start, kind)
+one row per BILLED minute per kind; an idle minute produces NO ROW AT ALL
 ```
 
-When ФАЗА 7 lands `box_usage`, re-run the guarded `DO` block from
-`backend/migrations/060_box_leads.sql` (it is idempotent — `CREATE OR REPLACE
-VIEW`) as part of that migration. The block is also reproduced there in full so it
-cannot be lost.
+`box_id` is deliberately not a foreign key: this is a billing ledger and must
+outlive the box, the environment and the project it describes.
 
 ### The queries, for when the ledger exists
 

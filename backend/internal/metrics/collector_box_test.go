@@ -138,20 +138,40 @@ func TestCollectBoxesCountsRecentFailures(t *testing.T) {
 	}
 }
 
-// TestCollectBoxesPublishesZeroForTablelessGauges: the two gauges whose tables do
-// not exist yet are PUBLISHED at 0 rather than left unset, because alert rules
-// already watch them and a gauge that only starts reporting later is
-// silent-by-absence in between — "the alert never fired" would be
-// indistinguishable from "nothing is wrong".
+// TestCollectBoxesPublishesZeroForTablelessGauges: a gauge whose table does not
+// exist yet is PUBLISHED at 0 rather than left unset, because an alert rule already
+// watches it and a gauge that only starts reporting later is silent-by-absence in
+// between — "the alert never fired" would be indistinguishable from "nothing is
+// wrong".
+//
+// dada_box_spend_cap_max_ratio was in this test until ФАЗА 7 and is deliberately
+// not any more: its ledger (box_usage, migration 063) now exists, and its writer is
+// the metering tick, which has already summed each box's spend against its cap. It
+// keeps the same silent-by-absence protection for free by being a plain unlabelled
+// Gauge, which publishes 0 from registration.
 func TestCollectBoxesPublishesZeroForTablelessGauges(t *testing.T) {
 	pool := testCollectorPool(t)
 	collectBoxes(context.Background(), pool)
 
-	if got := gaugeValue(t, boxSpendCapMaxRatio); got != 0 {
-		t.Errorf("dada_box_spend_cap_max_ratio = %v, want 0 until the usage ledger exists", got)
-	}
 	if got := gaugeValue(t, boxCrystallizationsPendingAge); got != 0 {
 		t.Errorf("dada_box_crystallizations_pending_age_seconds = %v, want 0 until box_crystallizations exists", got)
+	}
+}
+
+// TestCollectBoxesDoesNotOverwriteTheSpendCapRatio pins the ownership change the
+// comment above describes. The state collector runs every 30s and the meter every
+// 60s, so a collector that still wrote 0 here would blank a real, alarming ratio
+// for half of every minute — the alert would flap and the dashboard would show a
+// sawtooth that has nothing to do with anyone's spending.
+func TestCollectBoxesDoesNotOverwriteTheSpendCapRatio(t *testing.T) {
+	pool := testCollectorPool(t)
+	t.Cleanup(func() { SetBoxSpendCapMaxRatio(0) })
+
+	SetBoxSpendCapMaxRatio(0.91)
+	collectBoxes(context.Background(), pool)
+	if got := gaugeValue(t, boxSpendCapMaxRatio); got != 0.91 {
+		t.Errorf("dada_box_spend_cap_max_ratio = %v after a collector pass, want the meter's 0.91 kept: "+
+			"the meter owns this gauge now (see SetBoxSpendCapMaxRatio)", got)
 	}
 }
 
