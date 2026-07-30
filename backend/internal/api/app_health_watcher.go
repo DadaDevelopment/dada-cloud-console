@@ -173,8 +173,12 @@ func isKeycloakLocalEmail(email string) bool {
 // projects.go/admin_overview.go. This is the normal case for every project
 // with a single recorded owner.
 func (h *Handler) ownerEmailByOwnerID(ctx context.Context, projectID uuid.UUID) string {
+	return ownerEmailByOwnerID(ctx, h.pool, projectID)
+}
+
+func ownerEmailByOwnerID(ctx context.Context, pool *pgxpool.Pool, projectID uuid.UUID) string {
 	var email string
-	err := h.pool.QueryRow(ctx,
+	err := pool.QueryRow(ctx,
 		`SELECT u.email FROM projects p
 		 JOIN users u ON u.id = p.owner_id
 		 WHERE p.id = $1`, projectID).Scan(&email)
@@ -190,7 +194,11 @@ func (h *Handler) ownerEmailByOwnerID(ctx context.Context, projectID uuid.UUID) 
 // address. A row with a synthetic @keycloak.local email is skipped in favor
 // of the next candidate row rather than aborting the whole step.
 func (h *Handler) ownerEmailByMembers(ctx context.Context, projectID uuid.UUID) string {
-	rows, err := h.pool.Query(ctx,
+	return ownerEmailByMembers(ctx, h.pool, projectID)
+}
+
+func ownerEmailByMembers(ctx context.Context, pool *pgxpool.Pool, projectID uuid.UUID) string {
+	rows, err := pool.Query(ctx,
 		`SELECT u.email FROM project_members pm
 		 JOIN users u ON u.id = pm.user_id
 		 WHERE pm.project_id = $1 AND pm.role IN ('Owner', 'Admin')
@@ -218,8 +226,12 @@ func (h *Handler) ownerEmailByMembers(ctx context.Context, projectID uuid.UUID) 
 // org_id matches a user's username is that user's personal project even with
 // no owner_id and no project_members row.
 func (h *Handler) ownerEmailByOrgUsername(ctx context.Context, projectID uuid.UUID) string {
+	return ownerEmailByOrgUsername(ctx, h.pool, projectID)
+}
+
+func ownerEmailByOrgUsername(ctx context.Context, pool *pgxpool.Pool, projectID uuid.UUID) string {
 	var email string
-	err := h.pool.QueryRow(ctx,
+	err := pool.QueryRow(ctx,
 		`SELECT u.email FROM projects p
 		 JOIN users u ON u.username = p.org_id
 		 WHERE p.id = $1`, projectID).Scan(&email)
@@ -239,13 +251,27 @@ func (h *Handler) ownerEmailByOrgUsername(ctx context.Context, projectID uuid.UU
 // in it, and zero joinable project_members rows, so every alert for it was
 // being dropped with no operator visibility at all.
 func (h *Handler) resolveAlertRecipient(ctx context.Context, projectID uuid.UUID) (email, source string) {
-	if e := h.ownerEmailByOwnerID(ctx, projectID); e != "" {
+	return alertRecipientForProject(ctx, h.pool, projectID)
+}
+
+// alertRecipientForProject is resolveAlertRecipient with the pool passed in rather
+// than reached through a Handler.
+//
+// The split exists because the Dada Box background loops (box_meter.go,
+// box_reaper.go) are package functions with no request, no claims and no Handler —
+// and they still have to email a customer when a spend cap suspends their box or a
+// reaper is about to destroy it. Giving them their own recipient lookup would have
+// been a second implementation of the anti-drop ladder this function IS, and the
+// two would have drifted; the P1-ALERT-OWNERLESS-DROP bug in the comment above is
+// what that costs. So there is one ladder, and the Handler method is a wrapper.
+func alertRecipientForProject(ctx context.Context, pool *pgxpool.Pool, projectID uuid.UUID) (email, source string) {
+	if e := ownerEmailByOwnerID(ctx, pool, projectID); e != "" {
 		return e, alertSourceOwner
 	}
-	if e := h.ownerEmailByMembers(ctx, projectID); e != "" {
+	if e := ownerEmailByMembers(ctx, pool, projectID); e != "" {
 		return e, alertSourceMember
 	}
-	if e := h.ownerEmailByOrgUsername(ctx, projectID); e != "" {
+	if e := ownerEmailByOrgUsername(ctx, pool, projectID); e != "" {
 		return e, alertSourcePersonalOrg
 	}
 	return "", ""

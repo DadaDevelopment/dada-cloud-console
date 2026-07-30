@@ -122,6 +122,12 @@ func (h *Handler) computeProjectConsumption(ctx context.Context, projectID uuid.
 	dns := h.consumptionDNS(ctx, projectID, snap)
 	out.Resources = append(out.Resources, dns...)
 
+	boxes, err := h.consumptionBoxes(ctx, projectID, start, now)
+	if err != nil {
+		return projectConsumption{}, err
+	}
+	out.Resources = append(out.Resources, boxes...)
+
 	var total float64
 	for _, r := range out.Resources {
 		total += r.CostRub
@@ -199,6 +205,80 @@ func (h *Handler) consumptionApps(ctx context.Context, projectID uuid.UUID, star
 		out = append(out, res)
 	}
 	return out, nil
+}
+
+// consumptionBoxes prices the project's boxes from the per-minute ledger.
+//
+// Basis is ALWAYS basisActual, with no estimate fallback anywhere in this function,
+// and that is the substantive difference from every other consumption source in this
+// file. Apps fall back to a metrics-derived estimate when OpenCost cannot attribute
+// them; databases fall back to estimateFootprintDB. A box needs neither, because
+// box_usage is not a model of what a box probably consumed — it is a row per minute
+// the box was actually billed for, written at the time, with the price frozen into
+// it (migration 063). There is nothing to estimate and therefore nothing that could
+// silently become an estimate.
+//
+// The two consequences are worth stating because they look like bugs and are not:
+//
+//   - A box with no rows in the window contributes NOTHING, not a zero-cost line.
+//     An idle box writes no rows at all, so the honest rendering of "this box cost
+//     you nothing" is its absence from the breakdown, matching the ledger exactly.
+//   - The cpu/ram/storage columns are the sums of what was BILLED, i.e. footprint
+//     x minutes, not an average utilisation. They are the dimensions the money was
+//     derived from, which is the only reading under which the numbers add up.
+//
+// Boxes are NOT double counted against consumptionApps: that query already carries
+// `AND e.runtime <> 'box'` (added when 'box' became a possible runtime, precisely so
+// this could never overlap), so an App snapshot left behind by something running
+// inside a box is excluded from the monthly estimator. Verified rather than
+// re-added — a second copy of that predicate would be the same bug in a new place.
+func (h *Handler) consumptionBoxes(ctx context.Context, projectID uuid.UUID, start, end time.Time) ([]consumptionResource, error) {
+	rows, err := h.pool.Query(ctx,
+		`SELECT b.name,
+		        SUM(u.vcpu)       AS vcpu_minutes,
+		        SUM(u.ram_gb)     AS ram_minutes,
+		        SUM(u.storage_gb) AS storage_minutes,
+		        SUM(u.cost_rub)   AS cost_rub,
+		        COUNT(*) FILTER (WHERE u.kind = $4) AS active_minutes
+		   FROM box_usage u
+		   JOIN boxes b ON b.id = u.box_id
+		  WHERE b.project_id = $1 AND u.minute_start >= $2 AND u.minute_start < $3
+		  GROUP BY b.name
+		  ORDER BY b.name`,
+		projectID, start, end, boxUsageKindActive,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []consumptionResource
+	for rows.Next() {
+		var name string
+		var vcpuMinutes, ramMinutes, storageMinutes, cost float64
+		var activeMinutes int
+		if err := rows.Scan(&name, &vcpuMinutes, &ramMinutes, &storageMinutes, &cost, &activeMinutes); err != nil {
+			return nil, err
+		}
+		// Reported as the average over the billed minutes, so the three dimensions
+		// read in the same units as every other line in this breakdown (cores, GB)
+		// instead of in core-minutes, which nothing else here uses.
+		minutes := float64(activeMinutes)
+		cpu, ram, storage := vcpuMinutes, ramMinutes, storageMinutes
+		if minutes > 0 {
+			cpu, ram, storage = vcpuMinutes/minutes, ramMinutes/minutes, storageMinutes/minutes
+		}
+		out = append(out, consumptionResource{
+			Kind:      "box",
+			Name:      name,
+			CPUCores:  &cpu,
+			RAMGB:     &ram,
+			StorageGB: &storage,
+			CostRub:   round2(cost),
+			Basis:     basisActual,
+		})
+	}
+	return out, rows.Err()
 }
 
 // appUsage is the cached per-app usage average (nil dimensions preserved).

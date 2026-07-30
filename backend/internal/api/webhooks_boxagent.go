@@ -67,7 +67,36 @@ type boxAgentSampleCallback struct {
 	// Sample is the opaque metadata blob (cpu, memory, egress bytes, open
 	// sessions). Metadata only — never commands, keystrokes or tenant traffic
 	// content. Stored verbatim in boxes.last_sample_json.
+	//
+	// ONE KEY IN IT IS READ BY THE BILLING PATH: cpu_percent, guest CPU as a
+	// percentage of one core, measured by the agent from the cgroup counters
+	// OUTSIDE the guest. box_meter.go thresholds it against BOX_ACTIVE_CPU_PERCENT
+	// so a detached `cargo build` with nobody attached is still billed. The rest of
+	// the blob stays uninterpreted.
 	Sample json.RawMessage `json:"sample"`
+	// GuestActive is the IN-GUEST agent's own claim, relayed by box-agent. It is a
+	// POINTER so "the guest said idle" is distinguishable from "there was no
+	// in-guest signal at all".
+	//
+	// It is admitted in exactly one direction, and that asymmetry is the integrity
+	// property the whole meter rests on: true stamps guest_heartbeat_at, which can
+	// only DEFER suspension and ADD billable minutes. false is DISCARDED here — it
+	// is not written anywhere and no code path reads it — so a guest can never
+	// reduce what it is billed, and by symmetry nobody can accuse us of having let
+	// a guest inflate it downward and then over-reported. Trusting a signal that can
+	// only cost its own sender money is safe.
+	GuestActive *bool `json:"guest_active"`
+}
+
+// guestHeartbeatDefersOnly is the in-guest claim reduced to what the platform is
+// willing to act on: a heartbeat instant, or nothing.
+//
+// Written as a separate function with its own name so the rule is a thing a reader
+// can find and a reviewer can see being changed. A `false` from the guest returns
+// false here and is then not written to any column, which is what makes "the guest
+// cannot reduce billing" true structurally rather than by convention.
+func guestHeartbeatDefersOnly(guestActive *bool) bool {
+	return guestActive != nil && *guestActive
 }
 
 // resolvedBoxRef is the tenancy the backend derived itself from instance_ref.
@@ -223,14 +252,27 @@ func (h *Handler) boxAgentSampleWebhook(c *gin.Context, verifier tokenVerifier) 
 	// An active sample also refreshes last_active_at, which is what the idle
 	// reaper reads. An INACTIVE sample deliberately does not touch it: idleness is
 	// the absence of activity, so it must not be recorded as an event.
+	//
+	// last_sample_active stores the out-of-guest verdict ITSELF, not just its
+	// consequence. The meter needs the boolean because "the last sample said idle",
+	// "no sample has arrived" and "something else bumped this box" are three
+	// different states and last_active_at collapses them into one.
+	//
+	// guest_heartbeat_at is written only when the guest claimed activity
+	// (guestHeartbeatDefersOnly). A guest claiming INACTIVITY changes nothing here —
+	// no column moves — so the out-of-guest verdict above stands and the billed
+	// minute is unaffected. That is the asymmetry, enforced by there being no
+	// statement that could express the other direction.
 	if _, err := h.pool.Exec(c.Request.Context(),
 		`UPDATE boxes
-		    SET last_sample_json = COALESCE($2, last_sample_json),
-		        last_sample_at   = now(),
-		        last_active_at   = CASE WHEN $3 THEN now() ELSE last_active_at END,
-		        updated_at       = now()
+		    SET last_sample_json   = COALESCE($2, last_sample_json),
+		        last_sample_at     = now(),
+		        last_sample_active = $3,
+		        last_active_at     = CASE WHEN $3 OR $4 THEN now() ELSE last_active_at END,
+		        guest_heartbeat_at = CASE WHEN $4 THEN now() ELSE guest_heartbeat_at END,
+		        updated_at         = now()
 		  WHERE id = $1`,
-		ref.BoxID, cb.Sample, cb.Active,
+		ref.BoxID, cb.Sample, cb.Active, guestHeartbeatDefersOnly(cb.GuestActive),
 	); err != nil {
 		respondError(c, http.StatusInternalServerError, "failed to record box sample")
 		return

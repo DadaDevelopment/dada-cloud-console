@@ -41,7 +41,7 @@ import (
 const boxColumns = `id, project_id, environment_id, name, image, profile, region,
 	 status, error_message, instance_ref, node_ref, ssh_host, ssh_port, mcp_url,
 	 ttl_seconds, idle_timeout_seconds, expires_at, last_active_at, slept_at,
-	 spend_cap_rub, last_sample_json, last_sample_at, app_server_id,
+	 spend_cap_rub, spend_capped_at, last_sample_json, last_sample_at, app_server_id,
 	 created_by, created_at, updated_at, deleted_at`
 
 // rowScanner is the shared shape of pgx.Row and pgx.Rows for scanning one box.
@@ -54,7 +54,7 @@ func scanBox(row rowScanner, b *models.Box) error {
 		&b.ID, &b.ProjectID, &b.EnvironmentID, &b.Name, &b.Image, &b.Profile, &b.Region,
 		&b.Status, &b.ErrorMessage, &b.InstanceRef, &b.NodeRef, &b.SSHHost, &b.SSHPort, &b.MCPURL,
 		&b.TTLSeconds, &b.IdleTimeoutSeconds, &b.ExpiresAt, &b.LastActiveAt, &b.SleptAt,
-		&b.SpendCapRub, &b.LastSampleJSON, &b.LastSampleAt, &b.AppServerID,
+		&b.SpendCapRub, &b.SpendCappedAt, &b.LastSampleJSON, &b.LastSampleAt, &b.AppServerID,
 		&b.CreatedBy, &b.CreatedAt, &b.UpdatedAt, &b.DeletedAt,
 	)
 }
@@ -376,6 +376,31 @@ func (h *Handler) CreateBox(c *gin.Context) {
 	if req.SpendCapRub != nil && *req.SpendCapRub <= 0 {
 		respondError(c, http.StatusBadRequest, "spend_cap_rub must be positive when set")
 		return
+	}
+
+	// The box-minutes quota, through the EXISTING gate and the EXISTING 403 body.
+	//
+	// Same shape as CreateApp/CreateDatabase/CreateDomain: resolve the org, call
+	// checkQuota, and on a *quotaExceededError answer respondQuotaExceeded. That
+	// means the response is byte-for-byte the contract storage_cap_test.go already
+	// asserts on ({error: "quota_exceeded", resource, limit, upgrade, message}), and
+	// a client that already handles a quota wall for apps handles it for boxes with
+	// no change at all.
+	//
+	// The gate is on the metered FLOW, not on a count of live boxes, because a count
+	// bounds nothing: one box kept awake for a month is 43200 minutes and would sail
+	// through a "max 2 boxes" check. See pricing.Quotas.BoxMinutes.
+	//
+	// Placed before the transaction so a refused box leaves no environment row
+	// behind, and after validation so a caller with a malformed request is told
+	// about that rather than about their plan.
+	if orgID, orgErr := h.projectOrg(c.Request.Context(), projectID); orgErr == nil {
+		if qErr := h.checkQuota(c.Request.Context(), orgID, "box_minutes"); qErr != nil {
+			if qe, ok := qErr.(*quotaExceededError); ok {
+				respondQuotaExceeded(c, qe.Resource, qe.Limit)
+				return
+			}
+		}
 	}
 
 	var projectSlug string

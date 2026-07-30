@@ -348,6 +348,10 @@ func SetupRouter(pool *pgxpool.Pool, cfg *config.Config) *gin.Engine {
 		api.POST("/projects/:projectId/boxes/:boxName/suspend", h.SuspendBox)
 		api.POST("/projects/:projectId/boxes/:boxName/resume", h.ResumeBox)
 		api.POST("/projects/:projectId/boxes/:boxName/extend", h.ExtendBox)
+		// Metered minutes and money for one box, read from the per-minute ledger
+		// (migration 063). Read-only, member-visible: a customer must be able to see
+		// what they are being billed for without asking us.
+		api.GET("/projects/:projectId/boxes/:boxName/usage", h.GetBoxUsage)
 
 		// Apps
 		api.GET("/projects/:projectId/environments/:envId/apps", h.ListApps)
