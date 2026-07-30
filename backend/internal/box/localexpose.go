@@ -57,6 +57,8 @@ type Exposure struct {
 	Cert     string `json:"cert"`
 }
 
+var _ Exposer = (*LocalExposer)(nil)
+
 // NewLocalExposer builds an exposer publishing under base.
 func NewLocalExposer(base string) *LocalExposer {
 	if base == "" {

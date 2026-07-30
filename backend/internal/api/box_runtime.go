@@ -26,15 +26,43 @@ import (
 
 // boxRuntimeStack is everything the box verbs need. It is either fully wired or
 // nil; a half-wired stack would answer some verbs and 500 on others.
+//
+// The fields are INTERFACES, not the local adapter's types, and that is the point
+// of this struct: the handlers are the control plane, and a control plane that
+// names a concrete runtime cannot be pointed at a second one. The cluster adapter
+// (ADR-019) is a different implementation of the same five seams, so wiring it is
+// a change to initBoxRuntime and to nothing else.
+//
+// `local` is the exception, and it is deliberately the ugly one. Two paths still
+// need more than the seams offer — the control-plane session surface (the box's
+// door when no broker started) and the crystallizer's stand-in — and both are
+// LocalRuntime-only by construction. Naming them in one field, set only when the
+// wired runtime IS the local adapter, keeps that dependency countable: when the
+// cluster adapter arrives, `local` is nil, those two paths answer 503 with a
+// reason, and nothing else in the package notices. A stack that hid this behind an
+// interface it cannot satisfy would fail at run time instead of at wiring time.
 type boxRuntimeStack struct {
-	runtime  *box.LocalRuntime
-	pool     *box.MemoryPool
-	attach   *box.LocalAttachProvider
-	exposer  *box.LocalExposer
+	runtime  box.BoxRuntime
+	pool     box.WarmPool
+	attach   box.AttachProvider
+	exposer  box.Exposer
+	door     box.Door
+	local    *box.LocalRuntime
 	image    string
 	region   string
 	sessions string // base URL of the box session surface (the broker's stand-in)
 	warmed   bool
+}
+
+// requireLocalRuntime answers 503 for the two paths that only the local adapter
+// can serve, naming which one the caller asked for.
+func (s *boxRuntimeStack) requireLocalRuntime(c *gin.Context, what string) (*box.LocalRuntime, bool) {
+	if s.local == nil {
+		respondError(c, http.StatusServiceUnavailable,
+			"the wired box runtime does not serve "+what+": it is available on the local adapter only (ADR-019)")
+		return nil, false
+	}
+	return s.local, true
 }
 
 // initBoxRuntime wires the local box runtime when BOX_LOCAL_ROOT is set.
@@ -59,6 +87,8 @@ func (h *Handler) initBoxRuntime(cfg *config.Config) {
 	pool := box.NewMemoryPool()
 	stack := &boxRuntimeStack{
 		runtime: rt,
+		door:    rt,
+		local:   rt,
 		pool:    pool,
 		attach: &box.LocalAttachProvider{
 			Runtime:       rt,

@@ -112,12 +112,69 @@ type WarmPool interface {
 	Target(image, region string) int
 }
 
+// ParkingPool is a WarmPool a warmer can also fill: Add parks a pre-warmed
+// instance, SetTarget records how many free ones the controller aims to keep, so
+// "available" reads against an intent rather than against zero.
+//
+// Claiming and filling are separate interfaces because they have separate callers.
+// Request handlers only ever claim, and a handler able to park an instance could
+// also park a used one.
+type ParkingPool interface {
+	WarmPool
+	Add(image, region string, inst *Instance)
+	SetTarget(image, region string, n int)
+}
+
+// Warmer fills a pool ahead of demand. Separate from BoxRuntime because warming is
+// startup, not a request: an adapter is asked to warm once, and asked to bind and
+// exec for the rest of its life.
+type Warmer interface {
+	Warm(ctx context.Context, pool ParkingPool, image, region string, n int) error
+}
+
+// Door is the box's own endpoint (D6): the customer's agent talks to the BOX, so
+// their source, prompts and model credentials never traverse the control plane.
+// BrokerConfigured reports whether this adapter can give a box a door at all;
+// InstallSessionDigests makes the box's credential file match the live session set
+// (a mirror and not a log, which is how a revocation lands); RevokeAllSessionDigests
+// empties it; StartBroker starts the endpoint and returns the address it bound.
+//
+// A seam of its own rather than part of BoxRuntime, because the two answer
+// different questions. BoxRuntime answers "does this body exist and run commands";
+// Door answers "can the tenant reach it without us in the middle". An adapter can
+// satisfy the first and not the second — that is exactly the degraded box the
+// control-plane fallback exists for — and one interface would make that
+// distinction unrepresentable.
+type Door interface {
+	BrokerConfigured() bool
+	InstallSessionDigests(ctx context.Context, inst *Instance, digests []SessionDigest) error
+	RevokeAllSessionDigests(ctx context.Context, inst *Instance) error
+	StartBroker(ctx context.Context, inst *Instance, boxName string) (string, error)
+}
+
+// Exposer publishes one port of a box on a hostname the PLATFORM assigns. The
+// caller never chooses the hostname: custom domains belong to crystallization, and
+// an arbitrary name on a throwaway body is a phishing surface.
+type Exposer interface {
+	Expose(boxName string, port int) (Exposure, error)
+	Unexpose(hostname string) error
+}
+
 // AttachProvider attaches managed resources to a running box. The resources live
 // outside the box — a disposable body must not own the customer's database — so
 // attaching is credential injection plus a record of exactly what was injected.
+//
+// AttachPostgresNamed additionally returns the name of the resource that was
+// created, so the attachment row records what exists rather than what was asked
+// for; the two differ whenever a name is normalised or made unique.
+// ManagedPostgresConfigured lets a handler answer 503 rather than 500 when the
+// platform is simply not wired for managed Postgres: an unconfigured subsystem is
+// not a failed request, and conflating them makes an outage dashboard lie.
 type AttachProvider interface {
 	AttachPostgres(ctx context.Context, inst *Instance, name, envPrefix string) (injected []string, err error)
+	AttachPostgresNamed(ctx context.Context, inst *Instance, name, envPrefix string) (injected []string, resource string, err error)
 	AttachS3(ctx context.Context, inst *Instance, bucket, envPrefix string) (injected []string, err error)
+	ManagedPostgresConfigured() bool
 }
 
 // Crystallizer promotes an ephemeral box into a permanent VM. It returns a carry

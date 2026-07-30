@@ -27,6 +27,8 @@ type poolKey struct {
 	region string
 }
 
+var _ ParkingPool = (*MemoryPool)(nil)
+
 // NewMemoryPool builds an empty pool.
 func NewMemoryPool() *MemoryPool {
 	return &MemoryPool{

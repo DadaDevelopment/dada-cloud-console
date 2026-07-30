@@ -52,6 +52,13 @@ type LocalAttachProvider struct {
 
 var _ AttachProvider = (*LocalAttachProvider)(nil)
 
+// ManagedPostgresConfigured reports whether this provider can provision at all.
+//
+// A handler asks this instead of reading AdminDSN, because "the platform is not
+// wired for managed Postgres" is a 503 and "the provision failed" is a 500, and a
+// caller holding only the seam cannot tell them apart from an error string.
+func (p *LocalAttachProvider) ManagedPostgresConfigured() bool { return p.AdminDSN != "" }
+
 // safeIdent bounds what can become a SQL identifier. Postgres has no placeholder
 // for identifiers, so CREATE DATABASE has to interpolate — which makes this
 // pattern the actual injection defence rather than a tidiness check.

@@ -59,14 +59,14 @@ func (h *Handler) liveBoxSessionDigests(ctx context.Context, boxID uuid.UUID) ([
 // not an error here: there is no door to keep in sync, and the caller has already
 // been told the box has none.
 func (h *Handler) syncBoxDoor(ctx context.Context, stack *boxRuntimeStack, inst *box.Instance, boxID uuid.UUID) error {
-	if stack == nil || !stack.runtime.BrokerConfigured() || inst == nil || inst.InstanceRef == "" {
+	if stack == nil || !stack.door.BrokerConfigured() || inst == nil || inst.InstanceRef == "" {
 		return nil
 	}
 	digests, err := h.liveBoxSessionDigests(ctx, boxID)
 	if err != nil {
 		return err
 	}
-	return stack.runtime.InstallSessionDigests(ctx, inst, digests)
+	return stack.door.InstallSessionDigests(ctx, inst, digests)
 }
 
 // openBoxDoor installs the box's credentials and starts its endpoint, returning the
@@ -77,13 +77,13 @@ func (h *Handler) syncBoxDoor(ctx context.Context, stack *boxRuntimeStack, inst 
 // refuses everyone is indistinguishable in a log from a door that is open and
 // refuses the right people.
 func (h *Handler) openBoxDoor(ctx context.Context, stack *boxRuntimeStack, inst *box.Instance, boxID uuid.UUID, boxName string) (string, error) {
-	if !stack.runtime.BrokerConfigured() {
+	if !stack.door.BrokerConfigured() {
 		return "", box.ErrNoBroker
 	}
 	if err := h.syncBoxDoor(ctx, stack, inst, boxID); err != nil {
 		return "", err
 	}
-	return stack.runtime.StartBroker(ctx, inst, boxName)
+	return stack.door.StartBroker(ctx, inst, boxName)
 }
 
 // controlPlaneMCPPath is the path of the control-plane fallback surface. It is

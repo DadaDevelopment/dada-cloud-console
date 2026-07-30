@@ -120,7 +120,7 @@ func (h *Handler) AttachBoxDatabase(c *gin.Context) {
 			`UPDATE box_attachments SET status = 'Failed', error_message = $2 WHERE id = $1`,
 			attachmentID, err.Error())
 		status := http.StatusInternalServerError
-		if stack.attach.AdminDSN == "" {
+		if !stack.attach.ManagedPostgresConfigured() {
 			status = http.StatusServiceUnavailable
 		}
 		respondError(c, status, "failed to attach database: "+err.Error())

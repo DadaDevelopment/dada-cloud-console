@@ -70,6 +70,10 @@ func (h *Handler) BoxSessionExec(c *gin.Context) {
 	if !ok {
 		return
 	}
+	rt, ok := stack.requireLocalRuntime(c, "the control-plane exec fallback")
+	if !ok {
+		return
+	}
 	s, ok := h.boxSessionFromToken(c)
 	if !ok {
 		return
@@ -126,14 +130,14 @@ func (h *Handler) BoxSessionExec(c *gin.Context) {
 	started := time.Now()
 
 	if req.Background {
-		if err := stack.runtime.StartService(ctx, inst, req.ServiceName, req.Command, req.WorkingDir, req.Ports); err != nil {
+		if err := rt.StartService(ctx, inst, req.ServiceName, req.Command, req.WorkingDir, req.Ports); err != nil {
 			respondError(c, http.StatusInternalServerError, "failed to start the service: "+err.Error())
 			return
 		}
 		// Report which declared ports actually came up, by connecting to them FROM
 		// INSIDE the box. A response that said "started" without that would be the
 		// same lie as a readiness check that stops at "the process was spawned".
-		listening := waitForBoxPorts(ctx, stack.runtime, inst, req.Ports, 10*time.Second)
+		listening := waitForBoxPorts(ctx, rt, inst, req.Ports, 10*time.Second)
 		c.JSON(http.StatusOK, gin.H{
 			"service":     req.ServiceName,
 			"ports":       req.Ports,
@@ -144,7 +148,7 @@ func (h *Handler) BoxSessionExec(c *gin.Context) {
 		return
 	}
 
-	res, err := stack.runtime.Run(ctx, inst, req.Command)
+	res, err := rt.Run(ctx, inst, req.Command)
 	if err != nil {
 		respondError(c, http.StatusInternalServerError, "failed to run the command: "+err.Error())
 		return

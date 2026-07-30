@@ -71,6 +71,10 @@ func (h *Handler) CrystallizeBox(c *gin.Context) {
 	if !ok {
 		return
 	}
+	local, ok := stack.requireLocalRuntime(c, "crystallization")
+	if !ok {
+		return
+	}
 	b, ok := h.resolveBox(c, projectID, c.Param("boxName"))
 	if !ok {
 		return
@@ -131,7 +135,7 @@ func (h *Handler) CrystallizeBox(c *gin.Context) {
 	}
 
 	inst := instanceFor(b.ID.String(), b.InstanceRef, b.NodeRef, b.Image, b.Region, b.SSHHost, b.SSHPort, b.MCPURL)
-	cz := &box.LocalCrystallizer{Runtime: stack.runtime, Clock: box.SystemClock{}}
+	cz := &box.LocalCrystallizer{Runtime: local, Clock: box.SystemClock{}}
 	report, cErr := cz.CrystallizeWithReport(c.Request.Context(), inst, box.CrystallizeOptions{
 		VMName:    name,
 		Domain:    domain,

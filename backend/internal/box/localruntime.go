@@ -101,7 +101,11 @@ type boxInit struct {
 	cmd *exec.Cmd
 }
 
-var _ BoxRuntime = (*LocalRuntime)(nil)
+var (
+	_ BoxRuntime = (*LocalRuntime)(nil)
+	_ Warmer     = (*LocalRuntime)(nil)
+	_ Door       = (*LocalRuntime)(nil)
+)
 
 // DefaultBoxVolumes is the named-volume set a box gets. One volume, because the
 // point is to prove the mountpoint is excluded from the userland set and restored
@@ -309,7 +313,7 @@ func copyHostEtc(staging string) error {
 // is what costs, so it happens ahead of demand and a spawn is a claim (see
 // Spawn's doc comment). The instances it parks are already unfrozen with their
 // namespaces up, so a claim is a bind plus a thaw rather than a boot.
-func (r *LocalRuntime) Warm(ctx context.Context, pool *MemoryPool, image, region string, n int) error {
+func (r *LocalRuntime) Warm(ctx context.Context, pool ParkingPool, image, region string, n int) error {
 	if err := r.EnsureTemplate(ctx); err != nil {
 		return err
 	}

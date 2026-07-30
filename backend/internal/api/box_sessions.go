@@ -136,7 +136,7 @@ func (h *Handler) revokeBoxSessions(ctx context.Context, boxID uuid.UUID) (int64
 // and gave it a door at all.
 func (h *Handler) clearBoxDoor(ctx context.Context, boxID uuid.UUID) error {
 	stack := h.boxStack
-	if stack == nil || !stack.runtime.BrokerConfigured() {
+	if stack == nil || !stack.door.BrokerConfigured() {
 		return nil
 	}
 	var instanceRef string
@@ -147,7 +147,7 @@ func (h *Handler) clearBoxDoor(ctx context.Context, boxID uuid.UUID) error {
 	if instanceRef == "" {
 		return nil
 	}
-	return stack.runtime.RevokeAllSessionDigests(ctx, &box.Instance{ID: boxID.String(), InstanceRef: instanceRef})
+	return stack.door.RevokeAllSessionDigests(ctx, &box.Instance{ID: boxID.String(), InstanceRef: instanceRef})
 }
 
 // resolvedBoxSession is the tenancy a box session token resolves to.
