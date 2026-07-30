@@ -1,0 +1,62 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: dada-boxes
+  labels:
+    dada.io/purpose: boxes
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/enforce-version: latest
+    pod-security.kubernetes.io/warn: restricted
+    pod-security.kubernetes.io/warn-version: latest
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/audit-version: latest
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: box-runner
+  namespace: dada-boxes
+automountServiceAccountToken: false
+---
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: dada-boxes-fleet
+  namespace: dada-boxes
+spec:
+  hard:
+    pods: "60"
+    requests.cpu: "24"
+    requests.memory: 96Gi
+    limits.cpu: "60"
+    limits.memory: 180Gi
+    requests.ephemeral-storage: 120Gi
+    limits.ephemeral-storage: 300Gi
+    requests.storage: 600Gi
+    persistentvolumeclaims: "80"
+    services: "60"
+    count/ingresses.networking.k8s.io: "60"
+---
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: dada-boxes-defaults
+  namespace: dada-boxes
+spec:
+  limits:
+    - type: Container
+      default:
+        cpu: "1"
+        memory: 2Gi
+        ephemeral-storage: 4Gi
+      defaultRequest:
+        cpu: 250m
+        memory: 1Gi
+        ephemeral-storage: 1Gi
+      max:
+        cpu: "4"
+        memory: 8Gi
+        ephemeral-storage: 20Gi
+    - type: PersistentVolumeClaim
+      max:
+        storage: 50Gi

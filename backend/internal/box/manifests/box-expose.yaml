@@ -1,0 +1,45 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: box-example-3000
+  namespace: dada-boxes
+  labels:
+    dada.io/box: "true"
+    dada.io/box-id: example
+spec:
+  type: ClusterIP
+  selector:
+    dada.io/box-id: example
+  ports:
+    - name: http
+      port: 80
+      targetPort: 3000
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: box-example-3000
+  namespace: dada-boxes
+  labels:
+    dada.io/box: "true"
+    dada.io/box-id: example
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-body-size: 64m
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts: ["example-3000.box.dada-tuda.ru"]
+      secretName: box-wildcard-tls
+  rules:
+    - host: example-3000.box.dada-tuda.ru
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: box-example-3000
+                port:
+                  number: 80
