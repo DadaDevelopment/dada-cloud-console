@@ -207,7 +207,7 @@ var (
 
 	boxRepeatUse7d = promauto.NewGauge(prometheus.GaugeOpts{
 		Name: "dada_box_repeat_use_7d_ratio",
-		Help: "Share of granted boxes used in two sessions at least 24h apart within 7 days of first activation. The brief's headline metric: first use is curiosity, second use is a closed need.",
+		Help: "Share of claims that used a box in two sessions at least 24h apart within 7 days of first activation. The brief's headline metric: first use is curiosity, second use is a closed need. Denominator is claims that activated a granted box AND whose 7-day window has closed -- scoring an open window would count \"has not come back yet\" as \"did not come back\", and claims granted a box they never touched are reported separately (see docs/runbooks/box-funnel-metrics.md) rather than folded in here. NaN, never 0, while no active-minute ledger exists to derive it from.",
 	})
 )
 
