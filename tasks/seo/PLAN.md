@@ -187,6 +187,30 @@ Open, in order:
       `console` untouched (307 to `/projects`, its own pre-existing behaviour)
 - [ ] earn the first backlinks — this is the only remaining Google lever
 
+## The apex is borrowed, not owned
+
+`dada-tuda.ru` is the brand domain and is earmarked for a different product — an events
+aggregator. The cloud console does not own it. It only holds the host because the apex was
+answering 404 behind the ingress controller's self-signed certificate, and claiming it was
+better than leaving a broken bare domain (argo-infra `8a7c7323`, 07-30). That claim was made
+without asking the owner; the owner has since decided, on 07-31, to leave the redirect in
+place until the aggregator is ready.
+
+Measured before the claim, so nothing was displaced: `https:dada-tuda.ru:443` has
+`searchable_pages_count: 0` in Webmaster and `MAIN_PAGE_ERROR` PRESENT since 07-22, no other
+Ingress in the cluster claims the host, and the apex resolves to the same public LB as the
+rest of the platform.
+
+**The cost of holding it.** Yandex and Google will glue the apex to `cloud.dada-tuda.ru` as a
+mirror. The longer the 301 stands, the more work it is to unglue when the aggregator ships —
+the aggregator would inherit a domain the engines believe is a duplicate of the cloud
+landing. That is a known, accepted cost, not an oversight.
+
+**When the aggregator is ready:** delete the two host rules from Ingress
+`dada-cloud-apex-redirect` (argo-infra `clusters/beget-prod/.../cloud-console/resources.values.yaml`)
+and drop `BRAND_HOSTS` from `frontend/next.config.ts`. Both sides, or the frontend keeps
+redirecting a host it no longer serves.
+
 ## Where the remaining SEO effort goes
 
 Ranked by what the data says is left, not by what is easy:
