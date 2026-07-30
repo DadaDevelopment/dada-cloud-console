@@ -58,11 +58,19 @@ export default function DeveloperPage() {
       guidesTitle: "Руководства",
       guidesSubtitle: "Пошаговые гайды по консоли — от первого деплоя до биллинга и ролей.",
       guidesNote: "Документация пока доступна только на английском.",
+      intro: [
+        "API работает с теми же объектами, что и консоль: проект, приложение, база данных, домен, сервер. Одно приложение — это репозиторий или образ плюс переменные окружения; всё остальное платформа собирает сама, поэтому в запросе не нужно описывать инфраструктуру.",
+        "Авторизация — токен в заголовке Authorization. Токен привязан к вашей роли в проекте: что нельзя сделать руками в консоли, того не сделает и запрос. Для выкатки из чужой CI отдельно выдаётся деплой-хук на конкретное приложение, чтобы не носить в пайплайне полноценный токен.",
+        "Операции, которые меняют состояние, асинхронные: запрос возвращает идентификатор операции, а её статус читается отдельным вызовом. Логи и метрики отдаются тем же API, так что дежурный скрипт или AI-агент видят ровно то же, что видно в панели.",
+      ],
       faqTitle: "Вопросы по API и разработке",
       faq: [
         { q: "Есть ли у DADA Cloud REST API?", a: "Да. Всё, что делает консоль — деплой приложений, серверы, базы, домены и мониторинг — доступно через REST API /api/v1 с авторизацией по токену." },
         { q: "Где взять токен доступа к API?", a: "Токен выдаётся в консоли: войдите в панель и откройте проект — там доступен токен доступа и все ресурсы." },
         { q: "На каком языке документация?", a: "Пошаговые руководства пока доступны на английском; сам лендинг — на русском и английском." },
+        { q: "Чем API отличается от деплой-хука?", a: "Деплой-хук — это один защищённый токеном адрес, который запускает пересборку конкретного приложения; его удобно дёргать из чужой CI. REST API даёт полное управление: создать проект, поднять базу, привязать домен, прочитать метрики и логи." },
+        { q: "Можно ли управлять облаком из AI-агента?", a: "Да. Кроме REST есть MCP-сервер: агент подключается к нему и работает с проектами, приложениями, базами и логами теми же правами, что и ваш токен. Отдельное руководство по MCP есть в списке ниже." },
+        { q: "Есть ли ограничения на частоту запросов?", a: "Чтение метрик и логов кэшируется на стороне платформы, поэтому опрос раз в несколько секунд не создаёт нагрузки. Операции изменения (деплой, создание ресурсов) идут через очередь задач и возвращают идентификатор операции, по которому отслеживается статус." },
       ],
     },
     en: {
@@ -76,11 +84,19 @@ export default function DeveloperPage() {
       guidesTitle: "Guides",
       guidesSubtitle: "Step-by-step how-tos for the console — from your first deploy to billing and roles.",
       guidesNote: "",
+      intro: [
+        "The API works with the same objects as the console: project, app, database, domain, server. An app is a repository or an image plus environment variables; the platform assembles everything else, so a request never has to describe infrastructure.",
+        "Auth is a token in the Authorization header. The token carries your role in the project: whatever you cannot do by hand in the console, a request cannot do either. For deploys from someone else's CI there is a per-app deploy hook, so a pipeline never has to carry a full token.",
+        "State-changing calls are asynchronous: the request returns an operation id and the status is read separately. Logs and metrics come from the same API, so an on-call script or an AI agent sees exactly what the console shows.",
+      ],
       faqTitle: "API and developer FAQ",
       faq: [
         { q: "Does DADA Cloud have a REST API?", a: "Yes. Everything the console does — app deploys, servers, databases, domains and monitoring — is available over the /api/v1 REST API with token auth." },
         { q: "Where do I get an API token?", a: "In the console: log in, open a project, and your access token and all resources are there." },
         { q: "What language are the docs in?", a: "The step-by-step guides are currently in English; the marketing site itself is available in Russian and English." },
+        { q: "How is the API different from a deploy hook?", a: "A deploy hook is a single token-protected URL that triggers a rebuild of one app; it is handy to call from someone else's CI. The REST API is full control: create a project, provision a database, attach a domain, read metrics and logs." },
+        { q: "Can an AI agent drive the cloud?", a: "Yes. Besides REST there is an MCP server: an agent connects to it and works with projects, apps, databases and logs under exactly the permissions your token has. There is a dedicated MCP guide in the list below." },
+        { q: "Are there rate limits?", a: "Metric and log reads are cached on the platform side, so polling every few seconds costs nothing. Mutating operations (deploys, resource creation) go through a task queue and return an operation id you can track." },
       ],
     },
   }[locale];
@@ -92,6 +108,13 @@ export default function DeveloperPage() {
       <section className="bg-white py-20">
         <div className="mx-auto max-w-5xl px-4 sm:px-6 lg:px-8">
           <h2 className="mb-8 text-3xl font-bold tracking-tight text-slate-900">{copy.buildTitle}</h2>
+          <div className="mb-10 space-y-4">
+            {copy.intro.map((par) => (
+              <p key={par.slice(0, 24)} className="max-w-3xl text-base text-slate-600">
+                {par}
+              </p>
+            ))}
+          </div>
         </div>
         <div className="mx-auto grid max-w-5xl gap-6 px-4 sm:px-6 md:grid-cols-2 lg:px-8">
           <div className="rounded-xl border border-slate-200 bg-white p-7">

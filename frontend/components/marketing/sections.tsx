@@ -170,7 +170,14 @@ export function FaqList({ title, items }: { title: string; items: { q: string; a
                   )}
                 />
               </button>
-              {open === i && <p className="px-6 pb-4 text-sm text-slate-600">{it.a}</p>}
+              <p
+                className={clsx(
+                  "px-6 pb-4 text-sm text-slate-600",
+                  open === i ? "block" : "hidden",
+                )}
+              >
+                {it.a}
+              </p>
             </div>
           ))}
         </div>
@@ -195,6 +202,26 @@ export function CtaBand({ ctaHref }: { ctaHref?: string } = {}) {
         >
           {t.common.createAccount}
         </Link>
+      </div>
+    </section>
+  );
+}
+
+export function RelatedLinks({ links }: { links: { label: string; href: string }[] }) {
+  const { locale } = useLang();
+  if (links.length === 0) return null;
+  return (
+    <section className="border-t border-slate-200 bg-white py-12">
+      <div className="mx-auto flex max-w-7xl flex-wrap gap-x-6 gap-y-3 px-4 text-sm sm:px-6 lg:px-8">
+        {links.map((r) => (
+          <Link
+            key={r.href}
+            href={localeHref(r.href, locale)}
+            className="font-semibold text-blue-600 transition-colors hover:text-blue-700"
+          >
+            {r.label}
+          </Link>
+        ))}
       </div>
     </section>
   );

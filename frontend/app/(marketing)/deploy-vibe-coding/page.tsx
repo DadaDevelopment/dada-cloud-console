@@ -1,22 +1,21 @@
 "use client";
 
 import { useLang } from "@/lib/i18n/context";
-import { ProductHero, FeatureGrid, FaqList, CtaBand } from "@/components/marketing/sections";
-import { FaqJsonLd } from "@/components/marketing/faq-jsonld";
+import { LandingGuide } from "@/components/marketing/landing-guide";
 
-export default function VibeCodingDeployPage() {
+export default function VibeCodingPage() {
   const { t } = useLang();
   return (
-    <>
-      <FaqJsonLd path="/deploy-vibe-coding" items={t.vibeCodingAlt.faq} />
-      <ProductHero
-        title={t.vibeCodingAlt.heroTitle}
-        subtitle={t.vibeCodingAlt.heroSubtitle}
-        ctaHref="/register?utm_source=door_b"
-      />
-      <FeatureGrid title={t.vibeCodingAlt.featuresTitle} features={t.vibeCodingAlt.features} />
-      <FaqList title={t.vibeCodingAlt.faqTitle} items={t.vibeCodingAlt.faq} />
-      <CtaBand ctaHref="/register?utm_source=door_b" />
-    </>
+    <LandingGuide
+      path="/deploy-vibe-coding"
+      utm="utm_source=vibe-coding"
+      copy={t.vibeCodingAlt}
+      related={[
+          { label: t.uploadDeployAlt.heroTitle, href: "/deploy-without-git" },
+          { label: t.vercelAlt.heroTitle, href: "/analog-vercel" },
+          { label: t.telegramBotAlt.heroTitle, href: "/hosting-telegram-bot" },
+          { label: t.pricing.heroTitle, href: "/pricing" },
+      ]}
+    />
   );
 }
