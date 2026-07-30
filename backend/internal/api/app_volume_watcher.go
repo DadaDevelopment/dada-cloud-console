@@ -32,6 +32,17 @@ const appVolumeAlertThreshold = 0.85
 // suppressed by, a crash-loop alert for the same app.
 const appVolumeAlertCooldown = 24 * time.Hour
 
+// appVolumeAlertFreshWindow is how recently last_seen_at must have been
+// touched for the console to still show a volume alert as current, mirroring
+// appHealthAlertFreshWindow's rationale. Tied to appVolumeWatchInterval (15m)
+// with a 3x margin (tighter than health's 5x because a 15m tick already
+// leaves less room before the window would otherwise lapse between ticks):
+// a volume still over threshold gets re-touched every 15m and never falls
+// out of a 45m window, while a volume resized 20 minutes ago clears the
+// banner instead of showing red for the next 24h. Move this with
+// appVolumeWatchInterval if that interval ever changes.
+const appVolumeAlertFreshWindow = 3 * appVolumeWatchInterval
+
 // volumeUsageQuery is a single cluster-wide query for every PVC's
 // used/capacity ratio; the watcher filters the result set down to user
 // namespaces itself rather than querying per-namespace.
@@ -215,19 +226,40 @@ func (w *appVolumeWatcher) tick(ctx context.Context) {
 // (namespace, app) by upserting app_volume_alerts, succeeding only when no
 // send is recorded within cooldown. Race-free across replicas, identical
 // shape to claimAppHealthAlertSlot but against its own table so a crash alert
-// and a volume alert for the same app never suppress one another.
-func claimAppVolumeAlertSlot(ctx context.Context, pool *pgxpool.Pool, namespace, appName string, cooldown time.Duration) bool {
+// and a volume alert for the same app never suppress one another. ratio is
+// persisted alongside the cooldown timestamp (P1-ALERTS-IN-UI) so the console
+// can read back the detected fill level without a live Prometheus query.
+func claimAppVolumeAlertSlot(ctx context.Context, pool *pgxpool.Pool, namespace, appName string, ratio float64, cooldown time.Duration) bool {
 	ct, err := pool.Exec(ctx,
-		`INSERT INTO app_volume_alerts (namespace, app_name, last_sent_at)
-		 VALUES ($1, $2, now())
-		 ON CONFLICT (namespace, app_name) DO UPDATE SET last_sent_at = now()
-		 WHERE app_volume_alerts.last_sent_at <= now() - make_interval(secs => $3)`,
-		namespace, appName, cooldown.Seconds())
+		`INSERT INTO app_volume_alerts (namespace, app_name, last_sent_at, ratio)
+		 VALUES ($1, $2, now(), $3)
+		 ON CONFLICT (namespace, app_name) DO UPDATE SET last_sent_at = now(), ratio = $3
+		 WHERE app_volume_alerts.last_sent_at <= now() - make_interval(secs => $4)`,
+		namespace, appName, ratio, cooldown.Seconds())
 	if err != nil {
 		log.Printf("app-volume: cooldown claim for %s/%s failed: %v", namespace, appName, err)
 		return false
 	}
 	return ct.RowsAffected() > 0
+}
+
+// touchAppVolumeAlertSeen unconditionally records "this over-threshold
+// volume was observed right now", independent of the 24h email cooldown —
+// mirrors touchAppHealthAlertSeen's rationale (P1-ALERTS-IN-UI-FRESHNESS):
+// app_volume_alerts otherwise only gets written once per cooldown, so the
+// console cannot distinguish a volume that is still filling from one that
+// was resized 20 hours ago. Same epoch-sentinel INSERT path as the health
+// touch, for the same reason: last_sent_at must stay untouched so the next
+// claimAppVolumeAlertSlot call still fires the first real email.
+func touchAppVolumeAlertSeen(ctx context.Context, pool *pgxpool.Pool, namespace, appName string, ratio float64) {
+	_, err := pool.Exec(ctx,
+		`INSERT INTO app_volume_alerts (namespace, app_name, last_sent_at, last_seen_at, ratio)
+		 VALUES ($1, $2, to_timestamp(0), now(), $3)
+		 ON CONFLICT (namespace, app_name) DO UPDATE SET last_seen_at = now(), ratio = $3`,
+		namespace, appName, ratio)
+	if err != nil {
+		log.Printf("app-volume: touch-seen for %s/%s failed: %v", namespace, appName, err)
+	}
 }
 
 // maybeNotify sends the owner alert for one over-threshold volume, gated by
@@ -236,8 +268,13 @@ func claimAppVolumeAlertSlot(ctx context.Context, pool *pgxpool.Pool, namespace,
 // first meant a project with no resolvable owner burned its 24h cooldown slot
 // on a drop, muting real alerts even after ownership got fixed). The cooldown
 // is still claimed before the actual send, so a slow/failing SMTP relay
-// cannot cause a retry storm on the next tick.
+// cannot cause a retry storm on the next tick. The unconditional seen-touch
+// runs first, ahead of recipient resolution and the cooldown claim, so the
+// console's "is this still over threshold" signal never depends on whether
+// an email actually goes out this tick.
 func (w *appVolumeWatcher) maybeNotify(ctx context.Context, projectID uuid.UUID, namespace, appName string, ratio float64) {
+	touchAppVolumeAlertSeen(ctx, w.h.pool, namespace, appName, ratio)
+
 	to, source := w.h.resolveAlertRecipient(ctx, projectID)
 	if to == "" {
 		to = w.h.auditNotifyEmail
@@ -248,7 +285,7 @@ func (w *appVolumeWatcher) maybeNotify(ctx context.Context, projectID uuid.UUID,
 		return
 	}
 
-	if !claimAppVolumeAlertSlot(ctx, w.h.pool, namespace, appName, appVolumeAlertCooldown) {
+	if !claimAppVolumeAlertSlot(ctx, w.h.pool, namespace, appName, ratio, appVolumeAlertCooldown) {
 		return
 	}
 

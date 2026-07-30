@@ -17,6 +17,8 @@ import { PhaseBadge } from "@/components/ui/phase-badge";
 import { CloudTaskPanel } from "@/components/cloud-task/cloud-task-panel";
 import { DeployHooksCard } from "@/components/deploy/deploy-hooks-card";
 import { AppPreviewPane } from "@/components/app-preview-pane";
+import { AppAlertsBanner } from "@/components/deploy/app-alerts-banner";
+import { getAppAlerts } from "@/lib/app-alerts";
 import { useT } from "@/lib/i18n/console/context";
 import { Globe, Database, GitPullRequest } from "lucide-react";
 import { classifyVMResource } from "@/lib/vm-resources";
@@ -435,6 +437,12 @@ export default function AppDetailPage() {
           )}
         </div>
       </div>
+
+      <AppAlertsBanner
+        alerts={getAppAlerts(app)}
+        logsHref={`/projects/${projectId}/apps/${appName}${envId ? `?envId=${envId}` : ""}#logs`}
+        storageHref={`/projects/${projectId}/apps/${appName}/settings?tab=storage${envId ? `&envId=${envId}` : ""}`}
+      />
 
       {!isResource && summary.url && (
         <div className="mb-6">

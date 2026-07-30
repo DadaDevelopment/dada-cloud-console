@@ -23,6 +23,7 @@ import { Globe, Database, GitPullRequest, ChevronDown } from "lucide-react";
 import { AppPreviewPane } from "@/components/app-preview-pane";
 import { LogsViewer } from "@/components/logs-viewer";
 import { classifyVMResource, extractIngressSpec, extractDatabaseSpec } from "@/lib/vm-resources";
+import { getAppAlerts, hasAlertType, type AppAlert } from "@/lib/app-alerts";
 
 interface CreateAppForm {
   name: string;
@@ -188,6 +189,15 @@ export default function AppsPage() {
     }
   }
 
+  const alertedApps = Object.entries(appsByEnv).flatMap(([envId, apps]) => {
+    const env = environments.find((e) => e.id === envId);
+    return apps
+      .map((app) => ({ app, env, alerts: getAppAlerts(app) }))
+      .filter((row): row is { app: ResourceSnapshot; env: Environment; alerts: AppAlert[] } => row.env != null && row.alerts.length > 0);
+  });
+  const crashCount = alertedApps.filter((r) => hasAlertType(r.alerts, "crash")).length;
+  const volumeCount = alertedApps.filter((r) => hasAlertType(r.alerts, "volume")).length;
+
   const canCreate = canMutate(role);
   const modalEnv = environments.find((e) => e.id === modalEnvId);
   const modalIsVM = modalEnv?.runtime === "vm";
@@ -231,6 +241,31 @@ export default function AppsPage() {
       {error && (
         <div className="mb-6 rounded-lg border border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-950/40 px-4 py-3 text-sm text-red-700 dark:text-red-300">
           {error}
+        </div>
+      )}
+
+      {alertedApps.length > 0 && (
+        <div
+          className={`mb-6 rounded-lg border px-4 py-3 text-sm ${
+            crashCount > 0
+              ? "border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-950/40 text-red-700 dark:text-red-300"
+              : "border-amber-200 dark:border-amber-900 bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300"
+          }`}
+        >
+          <p className="font-medium">
+            {t("apps.alerts.summary.title", { count: alertedApps.length, crash: crashCount, volume: volumeCount })}
+          </p>
+          <div className="mt-1.5 flex flex-wrap gap-x-4 gap-y-1">
+            {alertedApps.map(({ app, env }) => (
+              <Link
+                key={`${env.id}-${app.id}`}
+                href={`/projects/${projectId}/apps/${app.name}?envId=${env.id}`}
+                className="font-mono text-xs font-semibold underline underline-offset-2 hover:opacity-80"
+              >
+                {app.name}
+              </Link>
+            ))}
+          </div>
         </div>
       )}
 
@@ -589,6 +624,9 @@ function AppRow({ app, env, projectId, previews, expanded, onToggle, t }: AppRow
   const ing = resType === "ingress" ? extractIngressSpec(app) : null;
   const db = resType === "database" ? extractDatabaseSpec(app) : null;
   const appHref = `/projects/${projectId}/apps/${app.name}?envId=${env.id}`;
+  const alerts = getAppAlerts(app);
+  const hasCrashAlert = hasAlertType(alerts, "crash");
+  const hasVolumeAlert = hasAlertType(alerts, "volume");
   const rowPreviews = previews.filter((p) => p.env.name === `pr-${p.env.pr_number}-${app.name}`);
   const subtitle =
     resType === "ingress"
@@ -629,6 +667,16 @@ function AppRow({ app, env, projectId, previews, expanded, onToggle, t }: AppRow
             <div className="flex items-center gap-2">
               <p className="font-mono text-sm font-semibold text-gray-900 dark:text-gray-100 truncate">{app.name}</p>
               <PhaseBadge phase={app.phase} />
+              {hasCrashAlert && (
+                <span className="inline-flex items-center rounded-full bg-red-100 dark:bg-red-950/60 px-2 py-0.5 text-xs font-medium text-red-700 dark:text-red-300">
+                  {t("apps.alerts.chip.crash")}
+                </span>
+              )}
+              {hasVolumeAlert && (
+                <span className="inline-flex items-center rounded-full bg-amber-100 dark:bg-amber-950/60 px-2 py-0.5 text-xs font-medium text-amber-700 dark:text-amber-300">
+                  {t("apps.alerts.chip.volume")}
+                </span>
+              )}
               {rowPreviews.map((p) =>
                 p.url ? (
                   <a

@@ -54,13 +54,13 @@ func TestClaimAppHealthAlertSlotCooldown(t *testing.T) {
 		_, _ = pool.Exec(context.Background(), `DELETE FROM app_health_alerts WHERE namespace = $1`, ns)
 	})
 
-	if !claimAppHealthAlertSlot(ctx, pool, ns, "web", 24*time.Hour) {
+	if !claimAppHealthAlertSlot(ctx, pool, ns, "web", "CrashLoopBackOff", "pod/web", 24*time.Hour) {
 		t.Fatalf("first claim for a fresh app must succeed")
 	}
-	if claimAppHealthAlertSlot(ctx, pool, ns, "web", 24*time.Hour) {
+	if claimAppHealthAlertSlot(ctx, pool, ns, "web", "CrashLoopBackOff", "pod/web", 24*time.Hour) {
 		t.Fatalf("second claim inside cooldown must be rejected")
 	}
-	if !claimAppHealthAlertSlot(ctx, pool, ns, "api", 24*time.Hour) {
+	if !claimAppHealthAlertSlot(ctx, pool, ns, "api", "OOMKilled", "pod/api", 24*time.Hour) {
 		t.Fatalf("claim for a different app must be independent")
 	}
 
@@ -69,7 +69,7 @@ func TestClaimAppHealthAlertSlotCooldown(t *testing.T) {
 		 WHERE namespace = $1 AND app_name = 'web'`, ns); err != nil {
 		t.Fatalf("backdate cooldown row: %v", err)
 	}
-	if !claimAppHealthAlertSlot(ctx, pool, ns, "web", 24*time.Hour) {
+	if !claimAppHealthAlertSlot(ctx, pool, ns, "web", "CrashLoopBackOff", "pod/web", 24*time.Hour) {
 		t.Fatalf("claim after cooldown expiry must succeed")
 	}
 }

@@ -506,6 +506,31 @@ export const apps: Messages = {
   },
   "apps.values.toast.committed": { ru: "Закоммичено · {sha}", en: "Committed · {sha}" },
 
+  "apps.alerts.crash.text": {
+    ru: "Приложение падает: контейнер перезапускается по кругу",
+    en: "App is crashing: the container keeps restarting",
+  },
+  "apps.alerts.crash.text.oom": {
+    ru: "Приложению не хватило памяти — контейнер убит (OOMKilled). Нужен профиль побольше",
+    en: "App ran out of memory — the container was killed (OOMKilled). It needs a bigger profile",
+  },
+  "apps.alerts.crash.text.image": {
+    ru: "Образ приложения не скачивается — деплой не может запуститься",
+    en: "App image cannot be pulled — the deploy cannot start",
+  },
+  "apps.alerts.crash.cta": { ru: "Смотреть логи", en: "View logs" },
+  "apps.alerts.chip.crash": { ru: "Падает", en: "Crashing" },
+  "apps.alerts.volume.text": {
+    ru: "Диск заполнен на {percent}% — приложение упадёт при нехватке места",
+    en: "Disk is {percent}% full — the app will crash once space runs out",
+  },
+  "apps.alerts.volume.cta": { ru: "Открыть Storage", en: "Open Storage" },
+  "apps.alerts.chip.volume": { ru: "Диск", en: "Disk" },
+  "apps.alerts.summary.title": {
+    ru: "Требуют внимания: {count} — падают: {crash}, диск заполнен: {volume}",
+    en: "Need attention: {count} — crashing: {crash}, disk filling up: {volume}",
+  },
+
   "apps.dangerZone.title": { ru: "Опасная зона", en: "Danger zone" },
   "apps.dangerZone.subtitle": {
     ru: "Безвозвратное удаление приложения и всех связанных с ним ресурсов.",

@@ -31,4 +31,19 @@ type ResourceSnapshot struct {
 	Phase         string          `json:"phase"          db:"phase"` // Ready, Pending, Failed
 	SummaryJSON   json.RawMessage `json:"summary_json"   db:"summary_json"`
 	LastSyncedAt  time.Time       `json:"last_synced_at" db:"last_synced_at"`
+	Alerts        []AppAlert      `json:"alerts,omitempty" db:"-"`
+}
+
+// AppAlert is one unresolved-within-cooldown alert surfaced to the console for
+// an app: either a health alert (crash/OOM/image-pull) or a volume-fill alert,
+// read straight off the app_health_alerts / app_volume_alerts cooldown rows
+// the watchers already write when they send an owner email. No live cluster
+// or Prometheus read backs this — it is exactly the fact "we emailed about
+// this within the last 24h", so ListApps stays within its latency budget.
+type AppAlert struct {
+	Type       string    `json:"type"` // "crash" or "volume"
+	Reason     string    `json:"reason,omitempty"`
+	Detail     string    `json:"detail,omitempty"`
+	Ratio      *float64  `json:"ratio,omitempty"`
+	DetectedAt time.Time `json:"detected_at"`
 }

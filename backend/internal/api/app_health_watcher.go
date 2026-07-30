@@ -27,6 +27,18 @@ const appHealthWatchInterval = 3 * time.Minute
 // crashloop does not spam the owner's inbox every tick.
 const appHealthAlertCooldown = 24 * time.Hour
 
+// appHealthAlertFreshWindow is how recently last_seen_at must have been
+// touched for the console to still show a crash alert as current
+// (P1-ALERTS-IN-UI-FRESHNESS). Tied to appHealthWatchInterval (3m) with a 5x
+// margin: the watcher touches last_seen_at on every tick it still detects
+// the bad state, so a genuinely ongoing crash is re-touched every 3m and
+// never falls out of a 15m window, while an app fixed 10 minutes ago clears
+// the banner well before the old 24h cooldown row would have. If
+// appHealthWatchInterval ever changes, this margin must move with it — a
+// window narrower than a few tick periods risks a fresh crash briefly
+// reading as resolved between ticks.
+const appHealthAlertFreshWindow = 5 * appHealthWatchInterval
+
 // appHealthLogTailLines bounds the best-effort log excerpt attached to the
 // alert email.
 const appHealthLogTailLines = 20
@@ -325,19 +337,50 @@ func detectPodAlert(pod *corev1.Pod) (appHealthAlert, bool) {
 // send is recorded within cooldown. The conditional upsert makes the claim
 // race-free across replicas: of two concurrent claims, exactly one affects a
 // row. Alerts for different containers of the same app collapse to the same
-// (namespace, app_name) key and so to a single email.
-func claimAppHealthAlertSlot(ctx context.Context, pool *pgxpool.Pool, namespace, appName string, cooldown time.Duration) bool {
+// (namespace, app_name) key and so to a single email. reason/detail are
+// persisted alongside the cooldown timestamp (P1-ALERTS-IN-UI) so the console
+// can read back "what was detected" without a live cluster scan.
+func claimAppHealthAlertSlot(ctx context.Context, pool *pgxpool.Pool, namespace, appName, reason, detail string, cooldown time.Duration) bool {
 	ct, err := pool.Exec(ctx,
-		`INSERT INTO app_health_alerts (namespace, app_name, last_sent_at)
-		 VALUES ($1, $2, now())
-		 ON CONFLICT (namespace, app_name) DO UPDATE SET last_sent_at = now()
-		 WHERE app_health_alerts.last_sent_at <= now() - make_interval(secs => $3)`,
-		namespace, appName, cooldown.Seconds())
+		`INSERT INTO app_health_alerts (namespace, app_name, last_sent_at, reason, detail)
+		 VALUES ($1, $2, now(), $3, $4)
+		 ON CONFLICT (namespace, app_name) DO UPDATE SET last_sent_at = now(), reason = $3, detail = $4
+		 WHERE app_health_alerts.last_sent_at <= now() - make_interval(secs => $5)`,
+		namespace, appName, reason, detail, cooldown.Seconds())
 	if err != nil {
 		log.Printf("app-health: cooldown claim for %s/%s failed: %v", namespace, appName, err)
 		return false
 	}
 	return ct.RowsAffected() > 0
+}
+
+// touchAppHealthAlertSeen unconditionally records "this bad state was
+// observed right now", independent of the 24h email cooldown
+// (P1-ALERTS-IN-UI-FRESHNESS). Without this, app_health_alerts only ever
+// gets written once per cooldown window, so the console cannot tell "still
+// crashing" from "crashed once 20 hours ago and has been fine since" — the
+// exact false-positive the console must never show (owner: a wrong red
+// banner is worse than no banner). last_seen_at is refreshed on every tick
+// that still detects the bad state; loadAppAlerts then gates on last_seen_at
+// freshness (minutes), not on last_sent_at (which only moves once per 24h).
+//
+// The INSERT path seeds last_sent_at with the epoch sentinel, never with
+// now(): if this ran first and stamped last_sent_at = now(), the very next
+// claimAppHealthAlertSlot call would see a "just sent" cooldown row and skip
+// the first real email entirely. The epoch sentinel guarantees the following
+// claim's WHERE last_sent_at <= now() - cooldown always passes on a brand
+// new row. The ON CONFLICT path never touches last_sent_at at all — only
+// last_seen_at/reason/detail — so an established cooldown is never reset by
+// a touch.
+func touchAppHealthAlertSeen(ctx context.Context, pool *pgxpool.Pool, namespace, appName, reason, detail string) {
+	_, err := pool.Exec(ctx,
+		`INSERT INTO app_health_alerts (namespace, app_name, last_sent_at, last_seen_at, reason, detail)
+		 VALUES ($1, $2, to_timestamp(0), now(), $3, $4)
+		 ON CONFLICT (namespace, app_name) DO UPDATE SET last_seen_at = now(), reason = $3, detail = $4`,
+		namespace, appName, reason, detail)
+	if err != nil {
+		log.Printf("app-health: touch-seen for %s/%s failed: %v", namespace, appName, err)
+	}
 }
 
 // maybeNotify sends the owner alert for one detected bad-state app, gated by
@@ -348,8 +391,13 @@ func claimAppHealthAlertSlot(ctx context.Context, pool *pgxpool.Pool, namespace,
 // is still claimed before the actual send, so a slow/failing SMTP relay
 // cannot cause a retry storm on the next tick; a genuine second crash within
 // the window is deliberately not re-alerted (P1-2b spec: at most one email
-// per app per 24h).
+// per app per 24h). The unconditional seen-touch runs first, ahead of both
+// recipient resolution and the cooldown claim, so the console's "is this
+// still happening" signal never depends on whether an email actually goes
+// out this tick.
 func (w *appHealthWatcher) maybeNotify(ctx context.Context, projectID uuid.UUID, alert appHealthAlert) {
+	touchAppHealthAlertSeen(ctx, w.h.pool, alert.Namespace, alert.AppName, alert.Reason, alert.PodName+"/"+alert.Container)
+
 	to, source := w.h.resolveAlertRecipient(ctx, projectID)
 	if to == "" {
 		to = w.h.auditNotifyEmail
@@ -360,7 +408,7 @@ func (w *appHealthWatcher) maybeNotify(ctx context.Context, projectID uuid.UUID,
 		return
 	}
 
-	if !claimAppHealthAlertSlot(ctx, w.h.pool, alert.Namespace, alert.AppName, appHealthAlertCooldown) {
+	if !claimAppHealthAlertSlot(ctx, w.h.pool, alert.Namespace, alert.AppName, alert.Reason, alert.PodName+"/"+alert.Container, appHealthAlertCooldown) {
 		return
 	}
 

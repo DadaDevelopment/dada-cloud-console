@@ -168,11 +168,11 @@ func TestClaimAppHealthAlertSlot_NotBurnedByFailedResolution(t *testing.T) {
 		t.Fatalf("expected unresolved recipient for orphan project, got (%q, %q)", email, source)
 	}
 
-	if !claimAppHealthAlertSlot(ctx, pool, namespace, appName, appHealthAlertCooldown) {
+	if !claimAppHealthAlertSlot(ctx, pool, namespace, appName, "CrashLoopBackOff", "pod/app-cooldown", appHealthAlertCooldown) {
 		t.Fatal("cooldown slot should still be free: a failed resolution must never have claimed it")
 	}
 
-	if claimAppHealthAlertSlot(ctx, pool, namespace, appName, appHealthAlertCooldown) {
+	if claimAppHealthAlertSlot(ctx, pool, namespace, appName, "CrashLoopBackOff", "pod/app-cooldown", appHealthAlertCooldown) {
 		t.Fatal("second claim within cooldown should fail (the first real send did claim it)")
 	}
 }

@@ -250,6 +250,12 @@ func (h *Handler) ListApps(c *gin.Context) {
 	SuppressNonHTTPURL(apps)
 	EnrichPreviewURL(apps, envID, h.cfg)
 
+	if ns := h.environmentNamespace(c.Request.Context(), envID); ns != "" {
+		if byApp, aerr := h.loadAppAlerts(c.Request.Context(), ns); aerr == nil {
+			applyAppAlerts(apps, byApp)
+		}
+	}
+
 	sort.Slice(apps, func(i, j int) bool { return apps[i].Name < apps[j].Name })
 
 	c.JSON(http.StatusOK, gin.H{"apps": apps})
