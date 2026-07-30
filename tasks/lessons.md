@@ -165,3 +165,27 @@ First, I concluded pages were thin from their source copy. Several were long in 
 Second, I reported "62 sitemap routes, ten under 700 words" from a sweep built off the static path list in `frontend/app/sitemap.ts`. That file also enumerates `/developer/*` from the content directory via `getDocSlugs()`, so the real sitemap is 94 URLs and 38 are under 700 words. I had shipped that wrong number into a commit message before catching it.
 Root cause: both are the same error — measuring an input to the artifact instead of the artifact. Source copy is an input to the rendered DOM; a static array is an input to the generated sitemap.
 Rule: when the consumer is a crawler, a client, or any external system, measure what that consumer receives — fetch the deployed URL, parse the served HTML, read the generated sitemap. Never derive a content or coverage metric from the source that produces it. A page can be long in the repo and empty on the wire.
+
+## 2026-07-31 — A dashboard reading zero is not a result until you check its date
+
+The Search Console overview said "Всего 0 кликов в веб-поиске" and the honest first
+instinct was to treat it as the verdict on the whole Google push. It was not. The chart's
+last data point was 28 July; the sitemap was submitted on the 30th. The screenshot could not
+have contained the answer, because the period it covers ends before the thing being measured
+started.
+
+The actual evidence was in the ingress logs, not the dashboard: Googlebot's traffic changes
+character at 30 July 17:17 — before it, only spoofed scanners probing `/config.json`; after
+it, real fetches of `/`, `/analog-railway`, `robots.txt` and a `_next/static` CSS chunk. The
+stylesheet is the tell: fetching CSS means the rendering service, not the raw fetcher. That
+falsified my own earlier finding that real Googlebot had never touched the host.
+
+**Rule.** Before reading a metric as a result, check that its window covers the change. A
+number from before the intervention is not a measurement of the intervention. And when a
+dashboard and a log disagree, the log is the artifact — it records what happened, the
+dashboard records what has been aggregated so far.
+
+**Second rule, same day.** When a fix spans two layers that both redirect, ship them in an
+order where they are never both active, and say so in the first commit message. Here the
+frontend half went out deliberately inert and the ingress half followed once it was live in
+prod — verified by the image tag being a descendant of the fix commit, not by the clock.
