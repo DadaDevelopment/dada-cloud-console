@@ -22,4 +22,17 @@ export const consumption: Messages = {
   "spend.thisMonth": { ru: "Расход в этом месяце", en: "Spend this month" },
   "spend.balance": { ru: "Баланс", en: "Balance" },
   "spend.toBilling": { ru: "Открыть биллинг", en: "Open billing" },
+
+  "spend.quota.title": { ru: "Тариф {plan}: что включено", en: "{plan} plan: what is included" },
+  "spend.quota.apps": { ru: "Приложения", en: "Apps" },
+  "spend.quota.databases": { ru: "Базы данных", en: "Databases" },
+  "spend.quota.domains": { ru: "Домены", en: "Domains" },
+  "spend.quota.team_members": { ru: "Участники", en: "Members" },
+  "spend.quota.value": { ru: "{used} из {limit}", en: "{used} of {limit}" },
+  "spend.quota.full": { ru: "Лимит исчерпан", en: "Limit reached" },
+  "spend.quota.grace": {
+    ru: "Что уже создано — работает. Лимиты начнут действовать {date}.",
+    en: "Everything you already created keeps running. Limits start applying on {date}.",
+  },
+  "spend.quota.upgrade": { ru: "Увеличить лимиты", en: "Raise the limits" },
 };

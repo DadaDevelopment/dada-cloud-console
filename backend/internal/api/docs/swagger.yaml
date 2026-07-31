@@ -1554,10 +1554,10 @@ paths:
       - auth
   /billing/account/summary:
     get:
-      description: 'Returns the org''s plan and current-month informational spend,
-        summed across every project the caller can read. Money-equivalent estimate
-        at our tariffs — NOT a bill. balance_rub is always 0 (payments not built yet).
-        Robust: metric gaps contribute 0.'
+      description: 'Returns the org''s plan, current-month informational spend and
+        its plan-quota usage, summed across every project the caller can read. Money-equivalent
+        estimate at our tariffs — NOT a bill. quotas/quota_grace_until are null for
+        exempt orgs and when billing is disabled. Robust: metric gaps contribute 0.'
       operationId: getAccountSummary
       produces:
       - application/json

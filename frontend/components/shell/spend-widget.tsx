@@ -17,6 +17,19 @@ function CoinIcon({ className }: { className?: string }) {
 }
 
 /**
+ * Resources shown in the plan meter, in the order a user runs into them. A
+ * resource whose limit is 0 (unlimited on that plan) is omitted rather than
+ * rendered as "3 of 0".
+ */
+const QUOTA_ORDER = ["apps", "databases", "domains", "team_members"] as const;
+
+/** Renders the grace deadline as a plain date, no time-of-day noise. */
+function formatGraceDate(iso: string): string {
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? iso : d.toLocaleDateString();
+}
+
+/**
  * Compact top-bar pill showing the current-month account spend. Clicking opens
  * a dropdown (styled to match the account menu) with plan, month spend, balance
  * and a link to billing. Fetch failures render nothing — the widget is a nicety,
@@ -63,6 +76,10 @@ export function SpendWidget() {
   if (!summary) return null;
 
   const monthLabel = t("consumption.perMonth", { amount: formatRub(summary.period_spend_rub) });
+  const quotaRows = QUOTA_ORDER.flatMap((key) => {
+    const row = summary.quotas?.[key];
+    return row && row.limit > 0 ? [{ key, used: row.used, limit: row.limit }] : [];
+  });
 
   return (
     <div ref={ref} className="relative hidden sm:block">
@@ -94,6 +111,40 @@ export function SpendWidget() {
               <span className="font-medium tabular-nums text-gray-900 dark:text-gray-100">{formatRub(summary.balance_rub)}</span>
             </div>
           </div>
+          {quotaRows.length > 0 && (
+            <div className="border-t border-gray-100 px-4 py-3 dark:border-gray-800">
+              <p className="text-xs font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500">
+                {t("spend.quota.title", { plan: summary.plan })}
+              </p>
+              <div className="mt-2 space-y-1.5">
+                {quotaRows.map((row) => (
+                  <div key={row.key} className="flex items-center justify-between text-sm">
+                    <span className="text-gray-500 dark:text-gray-400">{t(`spend.quota.${row.key}`)}</span>
+                    <span
+                      className={`font-medium tabular-nums ${
+                        row.used >= row.limit ? "text-amber-600 dark:text-amber-400" : "text-gray-900 dark:text-gray-100"
+                      }`}
+                    >
+                      {t("spend.quota.value", { used: String(row.used), limit: String(row.limit) })}
+                    </span>
+                  </div>
+                ))}
+              </div>
+              {summary.quota_grace_until && (
+                <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
+                  {t("spend.quota.grace", { date: formatGraceDate(summary.quota_grace_until) })}
+                </p>
+              )}
+              <Link
+                href="/pricing"
+                onClick={() => setOpen(false)}
+                className="mt-2 inline-block text-sm font-medium text-blue-600 hover:underline dark:text-blue-400"
+              >
+                {t("spend.quota.upgrade")} →
+              </Link>
+            </div>
+          )}
+
           {projectId && (
             <div className="border-t border-gray-100 py-1 dark:border-gray-800">
               <Link

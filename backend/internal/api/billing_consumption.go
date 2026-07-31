@@ -3,16 +3,19 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"net/http"
 	"time"
 
 	"github.com/dada-tuda/console/backend/internal/auth"
+	"github.com/dada-tuda/console/backend/internal/billing/pricing"
 	"github.com/dada-tuda/console/backend/internal/cache"
 	"github.com/dada-tuda/console/backend/internal/prometheus"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/rs/zerolog/log"
 )
 
@@ -665,7 +668,7 @@ func (h *Handler) GetProjectConsumption(c *gin.Context) {
 //
 // @ID          getAccountSummary
 // @Summary     Get account spend summary (informational)
-// @Description Returns the org's plan and current-month informational spend, summed across every project the caller can read. Money-equivalent estimate at our tariffs — NOT a bill. balance_rub is always 0 (payments not built yet). Robust: metric gaps contribute 0.
+// @Description Returns the org's plan, current-month informational spend and its plan-quota usage, summed across every project the caller can read. Money-equivalent estimate at our tariffs — NOT a bill. quotas/quota_grace_until are null for exempt orgs and when billing is disabled. Robust: metric gaps contribute 0.
 // @Tags        billing
 // @Produce     json
 // @Security    BearerAuth
@@ -682,9 +685,15 @@ func (h *Handler) GetAccountSummary(c *gin.Context) {
 	ctx := c.Request.Context()
 
 	planName := "free"
+	var quotaUsage map[string]gin.H
+	var graceUntil *time.Time
+	exempt := false
 	if org := h.callerOrg(claims); org != "" {
-		if plan, err := h.planFor(ctx, org); err == nil && plan.Name != "" {
-			planName = plan.Name
+		if plan, err := h.planFor(ctx, org); err == nil {
+			if plan.Name != "" {
+				planName = plan.Name
+			}
+			quotaUsage, graceUntil, exempt = h.quotaSnapshot(ctx, org, plan)
 		}
 	}
 
@@ -717,12 +726,48 @@ func (h *Handler) GetAccountSummary(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"currency":         "RUB",
-		"plan":             planName,
-		"period_spend_rub": round2(spend),
-		"balance_rub":      0,
-		"partial":          partial,
+		"currency":          "RUB",
+		"plan":              planName,
+		"period_spend_rub":  round2(spend),
+		"balance_rub":       0,
+		"partial":           partial,
+		"quotas":            quotaUsage,
+		"quota_grace_until": graceUntil,
+		"quota_exempt":      exempt,
 	})
+}
+
+// quotaSnapshot returns what the caller's org has used against what its plan
+// allows, plus the grandfathering deadline after which those limits start
+// blocking.
+//
+// It exists so the shell can show the free tier BEFORE the user runs into it.
+// Until now the only surface that spoke about limits was the 403 raised at the
+// moment of creation: a user learned their plan had a ceiling by hitting it,
+// which is both a bad first impression and a bad way to sell an upgrade.
+//
+// Every failure degrades to nil rather than an error — this rides on the spend
+// widget, which is deliberately non-load-bearing chrome, so a quota lookup must
+// never be able to fail the summary request.
+func (h *Handler) quotaSnapshot(ctx context.Context, orgID string, plan pricing.Plan) (map[string]gin.H, *time.Time, bool) {
+	if !h.cfg.BillingEnabled || h.quotaExempt(orgID) {
+		return nil, nil, h.quotaExempt(orgID)
+	}
+	usage, err := h.buildUsage(ctx, orgID, plan)
+	if err != nil {
+		log.Warn().Err(err).Str("org", orgID).Msg("billing account summary: quota usage skipped")
+		return nil, nil, false
+	}
+	var graceUntil *time.Time
+	if err := h.pool.QueryRow(ctx,
+		`SELECT quota_grace_until FROM billing_accounts WHERE org_id = $1`, orgID,
+	).Scan(&graceUntil); err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		log.Warn().Err(err).Str("org", orgID).Msg("billing account summary: grace lookup skipped")
+	}
+	if graceUntil != nil && !graceUntil.After(time.Now().UTC()) {
+		graceUntil = nil
+	}
+	return usage, graceUntil, false
 }
 
 // callerOrg resolves the caller's primary org from claims for the plan lookup:

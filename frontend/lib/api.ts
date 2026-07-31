@@ -1444,12 +1444,28 @@ export interface ConsumptionResponse {
   resources: ConsumptionResource[];
 }
 
-/** Account-wide spend snapshot for the top-bar spend widget. */
+/** One countable resource: how much of the plan's allowance is already used. */
+export interface QuotaUsage {
+  used: number;
+  limit: number;
+}
+
+/**
+ * Account-wide spend snapshot for the top-bar spend widget.
+ *
+ * `quotas` is absent for orgs the plan ladder does not apply to (billing
+ * disabled, or an exempt platform org) — those must not be shown a free-tier
+ * meter they are not subject to. `quota_grace_until` is the date the
+ * grandfathering window closes; null once it has passed.
+ */
 export interface AccountSummary {
   currency: "RUB";
   plan: string;
   period_spend_rub: number;
   balance_rub: number;
+  quotas?: Record<string, QuotaUsage> | null;
+  quota_grace_until?: string | null;
+  quota_exempt?: boolean;
 }
 
 export interface PaymentsConnectResponse {
