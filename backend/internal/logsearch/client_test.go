@@ -107,6 +107,33 @@ func TestBuildQuery_KubeFilters(t *testing.T) {
 	}
 }
 
+func TestBuildQuery_SortIsTotalOrder(t *testing.T) {
+	c := New("https://es.example.com", "", "")
+	q := c.buildQuery(SearchOpts{App: "x"})
+	sortRaw, ok := q["sort"].([]map[string]any)
+	if !ok {
+		t.Fatalf("sort field missing or wrong type: %+v", q["sort"])
+	}
+	wantSort := []map[string]any{
+		{"@timestamp": map[string]any{"order": "desc"}},
+		{"_doc": map[string]any{"order": "desc"}},
+	}
+	if len(sortRaw) != len(wantSort) {
+		t.Fatalf("sort = %+v, want %+v", sortRaw, wantSort)
+	}
+	raw, err := json.Marshal(q["sort"])
+	if err != nil {
+		t.Fatalf("marshal sort: %v", err)
+	}
+	wantRaw, err := json.Marshal(wantSort)
+	if err != nil {
+		t.Fatalf("marshal wantSort: %v", err)
+	}
+	if !bytes.Equal(raw, wantRaw) {
+		t.Errorf("sort = %s, want %s (order matters: @timestamp desc must come before the _doc tiebreaker)", raw, wantRaw)
+	}
+}
+
 func TestSearch_ParsesKubernetesHits(t *testing.T) {
 	const body = `{"hits":{"total":{"value":2},"hits":[
 		{"_source":{"@timestamp":"2026-06-04T00:00:00Z","log":"hi","stream":"stdout",

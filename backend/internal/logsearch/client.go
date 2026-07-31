@@ -159,6 +159,13 @@ func decodeAppField(raw json.RawMessage) (name, message string) {
 	return "", ""
 }
 
+// buildQuery sorts strictly newest-first by @timestamp, then _doc as a
+// tiebreaker. @timestamp alone is only millisecond precision and ties
+// routinely span an entire multi-line traceback (confirmed live against
+// filebeat-*: this cluster's filebeat does not populate log.offset, so _doc
+// is the tiebreaker, not a log-offset field), so callers that reverse the
+// result (buildLogLines in internal/api/diagnose.go) depend on this full
+// ordering being total and deterministic, not just "mostly sorted".
 func (c *Client) buildQuery(opts SearchOpts) map[string]any {
 	filters := []map[string]any{}
 	if opts.VMName != "" {
@@ -288,7 +295,10 @@ func (c *Client) buildQuery(opts SearchOpts) map[string]any {
 
 	return map[string]any{
 		"size": size,
-		"sort": []map[string]any{{"@timestamp": map[string]any{"order": "desc"}}},
+		"sort": []map[string]any{
+			{"@timestamp": map[string]any{"order": "desc"}},
+			{"_doc": map[string]any{"order": "desc"}},
+		},
 		"query": map[string]any{
 			"bool": map[string]any{
 				"filter": filters,
