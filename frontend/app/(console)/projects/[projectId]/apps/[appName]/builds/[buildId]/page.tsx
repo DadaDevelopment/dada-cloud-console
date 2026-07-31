@@ -151,7 +151,14 @@ export default function BuildDetailPage() {
             </div>
           )}
 
-          <BuildLogViewer projectId={projectId} buildId={buildId} />
+          <BuildLogViewer
+            projectId={projectId}
+            buildId={buildId}
+            onCancel={canDeploy && isBuildActive(build.status) ? handleCancel : undefined}
+            canceling={canceling}
+            cancelLabel={t("apps.builds.cancel")}
+            cancelingLabel={t("apps.builds.canceling")}
+          />
         </>
       ) : null}
     </div>

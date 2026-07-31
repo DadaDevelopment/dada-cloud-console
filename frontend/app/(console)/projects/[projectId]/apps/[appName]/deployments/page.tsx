@@ -107,6 +107,10 @@ export default function AppDeploymentsPage() {
     setNotice(null);
     try {
       const { build } = await buildsApi.trigger(projectId, envId, appName);
+      if (build?.id) {
+        router.push(`/projects/${projectId}/apps/${appName}/builds/${build.id}${envId ? `?envId=${envId}` : ""}`);
+        return;
+      }
       setNotice(t("apps.deployments.notice.queued", { sha: build.commit_sha?.slice(0, 7) ?? build.id.slice(0, 7) }));
       await load(true);
     } catch (err) {

@@ -35,7 +35,21 @@ function isBuildNoise(text: string): boolean {
   return NOISE_PATTERNS.some((re) => re.test(text));
 }
 
-export function BuildLogViewer({ projectId, buildId }: { projectId: string; buildId: string }) {
+export function BuildLogViewer({
+  projectId,
+  buildId,
+  onCancel,
+  canceling,
+  cancelLabel,
+  cancelingLabel,
+}: {
+  projectId: string;
+  buildId: string;
+  onCancel?: () => void;
+  canceling?: boolean;
+  cancelLabel?: string;
+  cancelingLabel?: string;
+}) {
   const [lines, setLines] = useState<LogLine[]>([]);
   const [status, setStatus] = useState<ConnStatus>("connecting");
   const wsRef = useRef<WebSocket | null>(null);
@@ -105,7 +119,18 @@ export function BuildLogViewer({ projectId, buildId }: { projectId: string; buil
     <div className="overflow-hidden rounded-lg border border-gray-800 bg-gray-950">
       <div className="flex items-center justify-between border-b border-gray-800 px-4 py-2">
         <span className="text-xs font-medium text-gray-400">Build logs</span>
-        <StatusDot status={status} onReconnect={connect} />
+        <div className="flex items-center gap-3">
+          <StatusDot status={status} onReconnect={connect} />
+          {onCancel && (
+            <button
+              onClick={onCancel}
+              disabled={canceling}
+              className="rounded-lg border border-gray-700 px-3 py-1 text-xs font-medium text-gray-300 hover:bg-gray-900 disabled:opacity-50"
+            >
+              {canceling ? cancelingLabel : cancelLabel}
+            </button>
+          )}
+        </div>
       </div>
       <div className="max-h-[520px] overflow-y-auto p-4 font-mono text-xs leading-relaxed">
         {lines.length === 0 && status === "connecting" ? (
