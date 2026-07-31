@@ -69,8 +69,8 @@ properties([
                 ),
                 booleanParam(
                         name: 'BUILD_BOX_IMAGE',
-                        defaultValue: true,
-                        description: 'Also build and push the Dada Box warm image (backend/Dockerfile.box-warm). ON until ghcr.io/dadadevelopment/dada-box-warm:v1 exists: the cluster box adapter pulls that tag, and a tag nothing has ever pushed is why every box pod would sit in ImagePullBackOff. Turn it back off once the first :v1 is published — it is a multi-GB Ubuntu image that changes far less often than the console.'
+                        defaultValue: false,
+                        description: 'Also build and push the Dada Box warm image (backend/Dockerfile.box-warm), retagging it :v1. OFF by default since build #730 published the first :v1 — it is a multi-GB Ubuntu image that changes far less often than the console, and rebuilding it on every console commit costs six minutes of pipeline for a layer set nothing asked to change. Turn it ON for any commit that touches Dockerfile.box-warm or the toolchain a box is expected to ship with; nothing else republishes the tag every box pod pulls.'
                 )
         ])
 ])
