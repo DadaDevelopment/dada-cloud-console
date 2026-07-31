@@ -8,6 +8,7 @@ import (
 
 	"github.com/dada-tuda/console/backend/internal/models"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 type recordingDBBackupPresigner struct {
@@ -234,6 +235,205 @@ func equalNames(a, b []string) bool {
 		}
 	}
 	return true
+}
+
+func TestScheduledBackupRetryBackoff_DoublesPerFailureAndCaps(t *testing.T) {
+	capInterval := 24 * time.Hour
+	cases := []struct {
+		failures int
+		want     time.Duration
+	}{
+		{0, 0},
+		{1, 15 * time.Minute},
+		{2, 30 * time.Minute},
+		{3, time.Hour},
+		{4, 2 * time.Hour},
+		{5, 4 * time.Hour},
+		{6, 8 * time.Hour},
+		{7, 16 * time.Hour},
+		{8, capInterval},
+		{9, capInterval},
+		{1000, capInterval},
+	}
+	for _, tc := range cases {
+		if got := scheduledBackupRetryBackoff(tc.failures, capInterval); got != tc.want {
+			t.Errorf("scheduledBackupRetryBackoff(%d, %v) = %v, want %v", tc.failures, capInterval, got, tc.want)
+		}
+	}
+}
+
+func TestScheduledBackupRetryBackoff_CapSmallerThanBase(t *testing.T) {
+	capInterval := 5 * time.Minute
+	if got := scheduledBackupRetryBackoff(1, capInterval); got != capInterval {
+		t.Errorf("scheduledBackupRetryBackoff(1, %v) = %v, want capped at %v", capInterval, got, capInterval)
+	}
+	if got := scheduledBackupRetryBackoff(50, capInterval); got != capInterval {
+		t.Errorf("scheduledBackupRetryBackoff(50, %v) = %v, want capped at %v", capInterval, got, capInterval)
+	}
+}
+
+func failingCandidate(name string, failuresSinceSuccess int, lastAttemptAgo time.Duration, now time.Time) scheduledBackupCandidate {
+	attempt := now.Add(-lastAttemptAgo)
+	return scheduledBackupCandidate{
+		projectID:            uuid.New(),
+		envID:                uuid.New(),
+		name:                 name,
+		database:             name,
+		frequency:            "@daily",
+		lastBackupAt:         nil,
+		lastAttemptAt:        &attempt,
+		failuresSinceSuccess: failuresSinceSuccess,
+	}
+}
+
+func TestDueScheduledBackups_FailingCandidateInBackoffWindow_HealthyCandidatePickedInstead(t *testing.T) {
+	now := time.Now()
+
+	broken := failingCandidate("broken", 1, 5*time.Minute, now)
+	healthy := namedCandidate("healthy", nil)
+
+	got := dueScheduledBackups([]scheduledBackupCandidate{broken, healthy}, 1, now)
+	if len(got) != 1 || got[0].name != "healthy" {
+		t.Fatalf("expected the healthy never-backed-up candidate to be picked instead of the backing-off broken one, got %v", names(got))
+	}
+}
+
+func TestDueScheduledBackups_FailingCandidateBackoffElapsed_IsDue(t *testing.T) {
+	now := time.Now()
+
+	broken := failingCandidate("broken", 1, 20*time.Minute, now)
+
+	got := dueScheduledBackups([]scheduledBackupCandidate{broken}, 1, now)
+	if len(got) != 1 || got[0].name != "broken" {
+		t.Fatalf("expected broken to be due once its 15m backoff elapsed, got %v", names(got))
+	}
+}
+
+func TestDueScheduledBackups_FailingCandidateStillInBackoff_NoOtherCandidates_SkipsAll(t *testing.T) {
+	now := time.Now()
+
+	broken := failingCandidate("broken", 3, time.Minute, now)
+
+	got := dueScheduledBackups([]scheduledBackupCandidate{broken}, 1, now)
+	if len(got) != 0 {
+		t.Fatalf("expected no candidates due while broken is inside its backoff window, got %v", names(got))
+	}
+}
+
+func seedScheduledBackupServiceDatabase(t *testing.T, pool *pgxpool.Pool, name string) (projectID, envID uuid.UUID) {
+	t.Helper()
+	ctx := context.Background()
+	suffix := uuid.NewString()[:8]
+
+	if err := pool.QueryRow(ctx,
+		`INSERT INTO projects (name, display_name) VALUES ($1, $1) RETURNING id`,
+		"sched-backup-test-"+suffix,
+	).Scan(&projectID); err != nil {
+		t.Fatalf("seed project: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM projects WHERE id = $1`, projectID)
+	})
+
+	if err := pool.QueryRow(ctx,
+		`INSERT INTO environments (project_id, name, namespace, type) VALUES ($1, 'prod', $2, 'prod') RETURNING id`,
+		projectID, "ns-"+suffix,
+	).Scan(&envID); err != nil {
+		t.Fatalf("seed environment: %v", err)
+	}
+
+	summary := `{"spec":{"database":"` + name + `","backup":{"enabled":true,"frequency":"daily"}}}`
+	if _, err := pool.Exec(ctx,
+		`INSERT INTO resource_snapshots (project_id, environment_id, kind, name, summary_json)
+		 VALUES ($1, $2, 'ServiceDatabaseV2', $3, $4)`,
+		projectID, envID, name, summary,
+	); err != nil {
+		t.Fatalf("seed resource_snapshot: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM db_backups WHERE project_id = $1`, projectID)
+	})
+	return projectID, envID
+}
+
+func seedDBBackupRow(t *testing.T, pool *pgxpool.Pool, projectID, envID uuid.UUID, resourceName, status string, createdAt time.Time) {
+	t.Helper()
+	if _, err := pool.Exec(context.Background(),
+		`INSERT INTO db_backups (project_id, environment_id, resource_name, database_name, dump_path, status, kind, created_at)
+		 VALUES ($1, $2, $3, $3, $4, $5, $6, $7)`,
+		projectID, envID, resourceName, "dumps/"+resourceName+".dump", status, models.DBBackupKindScheduled, createdAt,
+	); err != nil {
+		t.Fatalf("seed db_backups row (status=%s): %v", status, err)
+	}
+}
+
+func TestScheduledBackupCandidates_RealDB_ComputesHistoryAndPicksHealthyOverFailing(t *testing.T) {
+	pool := testVolumeExportPool(t)
+	ctx := context.Background()
+	h := &Handler{pool: pool}
+	now := time.Now().UTC()
+
+	projectA, envA := seedScheduledBackupServiceDatabase(t, pool, "broken-"+uuid.NewString()[:8])
+	projectB, _ := seedScheduledBackupServiceDatabase(t, pool, "healthy-"+uuid.NewString()[:8])
+
+	failedTimes := []time.Time{
+		now.Add(-30 * time.Minute),
+		now.Add(-10 * time.Minute),
+		now.Add(-2 * time.Minute),
+	}
+	var resourceNameA string
+	if err := pool.QueryRow(ctx, `SELECT name FROM resource_snapshots WHERE project_id = $1`, projectA).Scan(&resourceNameA); err != nil {
+		t.Fatalf("read seeded resource name: %v", err)
+	}
+	for _, ft := range failedTimes {
+		seedDBBackupRow(t, pool, projectA, envA, resourceNameA, "Failed", ft)
+	}
+
+	candidates, err := h.scheduledBackupCandidates(ctx)
+	if err != nil {
+		t.Fatalf("scheduledBackupCandidates: %v", err)
+	}
+
+	var candA, candB *scheduledBackupCandidate
+	for i := range candidates {
+		switch candidates[i].projectID {
+		case projectA:
+			candA = &candidates[i]
+		case projectB:
+			candB = &candidates[i]
+		}
+	}
+	if candA == nil {
+		t.Fatalf("candidate A (broken) not found among %d candidates", len(candidates))
+	}
+	if candB == nil {
+		t.Fatalf("candidate B (healthy) not found among %d candidates", len(candidates))
+	}
+
+	if candA.lastBackupAt != nil {
+		t.Errorf("A: lastBackupAt = %v, want nil (no Ready/Pending/Running rows)", *candA.lastBackupAt)
+	}
+	if candA.failuresSinceSuccess != len(failedTimes) {
+		t.Errorf("A: failuresSinceSuccess = %d, want %d", candA.failuresSinceSuccess, len(failedTimes))
+	}
+	if candA.lastAttemptAt == nil || !candA.lastAttemptAt.Equal(failedTimes[len(failedTimes)-1]) {
+		t.Errorf("A: lastAttemptAt = %v, want %v (newest Failed row)", candA.lastAttemptAt, failedTimes[len(failedTimes)-1])
+	}
+
+	if candB.lastBackupAt != nil {
+		t.Errorf("B: lastBackupAt = %v, want nil", *candB.lastBackupAt)
+	}
+	if candB.failuresSinceSuccess != 0 {
+		t.Errorf("B: failuresSinceSuccess = %d, want 0", candB.failuresSinceSuccess)
+	}
+	if candB.lastAttemptAt != nil {
+		t.Errorf("B: lastAttemptAt = %v, want nil (no backup rows at all)", *candB.lastAttemptAt)
+	}
+
+	due := dueScheduledBackups([]scheduledBackupCandidate{*candA, *candB}, 1, now)
+	if len(due) != 1 || due[0].projectID != projectB {
+		t.Fatalf("expected only the healthy never-attempted B to be due (A is inside its 15m backoff), got %v", names(due))
+	}
 }
 
 func TestFailStuckBackups_OnlyPastTimeout(t *testing.T) {

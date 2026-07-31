@@ -292,14 +292,55 @@ func (h *Handler) sweepVolumeExports(ctx context.Context) {
 }
 
 // scheduledBackupCandidate is one ServiceDatabaseV2 considered by
-// runScheduledBackups on a given tick.
+// runScheduledBackups on a given tick. lastAttemptAt is MAX(created_at)
+// across every db_backups row for the candidate regardless of status, so it
+// advances even when every recent attempt Failed. failuresSinceSuccess
+// counts the Failed rows created after the most recent Ready row (or all
+// Failed rows if there has never been a Ready one). Together they drive the
+// retry-backoff gate in dueScheduledBackups; lastBackupAt stays
+// success/in-flight-only on purpose so the fairness ordering there is never
+// fooled by a database that is failing every time.
 type scheduledBackupCandidate struct {
-	projectID    uuid.UUID
-	envID        uuid.UUID
-	name         string
-	database     string
-	frequency    string
-	lastBackupAt *time.Time
+	projectID            uuid.UUID
+	envID                uuid.UUID
+	name                 string
+	database             string
+	frequency            string
+	lastBackupAt         *time.Time
+	lastAttemptAt        *time.Time
+	failuresSinceSuccess int
+}
+
+// scheduledBackupRetryBaseBackoff is the wait before the first retry of a
+// failed scheduled backup.
+const scheduledBackupRetryBaseBackoff = 15 * time.Minute
+
+// scheduledBackupRetryBackoff returns how long a candidate with failures
+// consecutive Failed attempts (since its last Ready backup, or ever) must
+// wait after its last attempt before it is eligible again: 15m, 30m, 1h, 2h,
+// doubling per failure, capped at capInterval (the candidate's own
+// backup-frequency interval, from backupIntervalForFrequency). The loop
+// returns as soon as doubling would meet or exceed the cap, which also keeps
+// it from overflowing time.Duration for a large failure count since it never
+// doubles past capInterval.
+func scheduledBackupRetryBackoff(failures int, capInterval time.Duration) time.Duration {
+	if failures <= 0 {
+		return 0
+	}
+	d := scheduledBackupRetryBaseBackoff
+	if d > capInterval {
+		return capInterval
+	}
+	for i := 1; i < failures; i++ {
+		if d > capInterval/2 {
+			return capInterval
+		}
+		d *= 2
+	}
+	if d > capInterval {
+		return capInterval
+	}
+	return d
 }
 
 // dueScheduledBackups picks up to freeSlots candidates that are due for a
@@ -312,7 +353,18 @@ type scheduledBackupCandidate struct {
 // first in the query win every tick forever, starving the rest. Sorting by
 // last_backup_at with NULLS FIRST (never-backed-up databases first), then
 // by name to break ties deterministically, guarantees every candidate
-// eventually reaches the front once the databases ahead of it get backed up.
+// eventually reaches the front once the databases ahead of it get backed up
+// -- but only if a database that cannot succeed is also able to fall out of
+// the running. lastBackupAt alone cannot do that: a database whose backups
+// keep Failing never advances it, so it would sort first and win the only
+// slot on every tick forever, starving every other candidate. The
+// retry-backoff gate below fixes that without touching the ordering or the
+// interval gate: a candidate with failuresSinceSuccess > 0 is skipped until
+// scheduledBackupRetryBackoff has elapsed since its lastAttemptAt. A
+// transient failure retries in 15 minutes, so the recovery-point objective
+// is barely dented; a permanently broken database backs off to at most once
+// per its own interval and can never hold the only slot away from a healthy
+// candidate.
 func dueScheduledBackups(candidates []scheduledBackupCandidate, freeSlots int, now time.Time) []scheduledBackupCandidate {
 	if freeSlots <= 0 {
 		return nil
@@ -338,8 +390,14 @@ func dueScheduledBackups(candidates []scheduledBackupCandidate, freeSlots int, n
 
 	var due []scheduledBackupCandidate
 	for _, c := range ordered {
-		if c.lastBackupAt != nil && now.Sub(*c.lastBackupAt) < backupIntervalForFrequency(c.frequency) {
+		interval := backupIntervalForFrequency(c.frequency)
+		if c.lastBackupAt != nil && now.Sub(*c.lastBackupAt) < interval {
 			continue
+		}
+		if c.failuresSinceSuccess > 0 && c.lastAttemptAt != nil {
+			if now.Sub(*c.lastAttemptAt) < scheduledBackupRetryBackoff(c.failuresSinceSuccess, interval) {
+				continue
+			}
 		}
 		due = append(due, c)
 		if len(due) == freeSlots {
@@ -367,23 +425,61 @@ func (h *Handler) runScheduledBackups(ctx context.Context) {
 		return
 	}
 
-	rows, err := h.pool.Query(ctx,
-		`SELECT rs.project_id, rs.environment_id, rs.name, rs.summary_json,
-		        (SELECT MAX(b.created_at) FROM db_backups b
-		         WHERE b.project_id = rs.project_id AND b.environment_id = rs.environment_id
-		           AND b.resource_name = rs.name
-		           AND b.status IN ('Pending', 'Running', 'Ready')) AS last_backup_at
-		 FROM resource_snapshots rs
-		 WHERE rs.kind = 'ServiceDatabaseV2'
-		   AND rs.summary_json->'spec'->'backup'->>'enabled' = 'true'`)
+	candidates, err := h.scheduledBackupCandidates(ctx)
 	if err != nil {
 		return
 	}
+
+	for _, c := range dueScheduledBackups(candidates, freeSlots, time.Now()) {
+		if _, err := h.startDBBackup(ctx, c.projectID, c.envID, c.name, c.database, models.DBBackupKindScheduled, nil); err != nil {
+			log.Printf("scheduled backup for %s failed to start: %v", c.name, err)
+		}
+	}
+}
+
+// scheduledBackupCandidates lists every opted-in ServiceDatabaseV2 with the
+// per-candidate backup history dueScheduledBackups needs: last_backup_at
+// (successful/in-flight only, for the fairness ordering), last_attempt_at
+// (every status, so it advances even through consecutive Failed attempts),
+// and failures_since_success (Failed rows after the most recent Ready row,
+// or all Failed rows if there has never been one). Split out from
+// runScheduledBackups so it can be exercised directly against the pool in
+// tests.
+func (h *Handler) scheduledBackupCandidates(ctx context.Context) ([]scheduledBackupCandidate, error) {
+	rows, err := h.pool.Query(ctx,
+		`SELECT rs.project_id, rs.environment_id, rs.name, rs.summary_json,
+		        agg.last_backup_at, agg.last_attempt_at, agg.failures_since_success
+		 FROM resource_snapshots rs
+		 CROSS JOIN LATERAL (
+		     SELECT MAX(b.created_at) AS last_ready_at
+		     FROM db_backups b
+		     WHERE b.project_id = rs.project_id AND b.environment_id = rs.environment_id
+		       AND b.resource_name = rs.name AND b.status = 'Ready'
+		 ) ready
+		 CROSS JOIN LATERAL (
+		     SELECT
+		         MAX(b.created_at) FILTER (WHERE b.status IN ('Pending', 'Running', 'Ready')) AS last_backup_at,
+		         MAX(b.created_at) AS last_attempt_at,
+		         COUNT(*) FILTER (
+		             WHERE b.status = 'Failed'
+		               AND b.created_at > COALESCE(ready.last_ready_at, '-infinity'::timestamptz)
+		         ) AS failures_since_success
+		     FROM db_backups b
+		     WHERE b.project_id = rs.project_id AND b.environment_id = rs.environment_id
+		       AND b.resource_name = rs.name
+		 ) agg
+		 WHERE rs.kind = 'ServiceDatabaseV2'
+		   AND rs.summary_json->'spec'->'backup'->>'enabled' = 'true'`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
 	var candidates []scheduledBackupCandidate
 	for rows.Next() {
 		var c scheduledBackupCandidate
 		var summary []byte
-		if rows.Scan(&c.projectID, &c.envID, &c.name, &summary, &c.lastBackupAt) != nil {
+		if rows.Scan(&c.projectID, &c.envID, &c.name, &summary, &c.lastBackupAt, &c.lastAttemptAt, &c.failuresSinceSuccess) != nil {
 			continue
 		}
 		c.database = serviceDatabaseName(summary)
@@ -393,13 +489,7 @@ func (h *Handler) runScheduledBackups(ctx context.Context) {
 		c.frequency = serviceDatabaseBackupFrequency(summary)
 		candidates = append(candidates, c)
 	}
-	rows.Close()
-
-	for _, c := range dueScheduledBackups(candidates, freeSlots, time.Now()) {
-		if _, err := h.startDBBackup(ctx, c.projectID, c.envID, c.name, c.database, models.DBBackupKindScheduled, nil); err != nil {
-			log.Printf("scheduled backup for %s failed to start: %v", c.name, err)
-		}
-	}
+	return candidates, rows.Err()
 }
 
 func nonEmpty(v, fallback string) string {
