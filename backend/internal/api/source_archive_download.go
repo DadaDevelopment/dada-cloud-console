@@ -1,7 +1,6 @@
 package api
 
 import (
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"strings"
@@ -77,8 +76,20 @@ func (h *Handler) DownloadSourceArchive(c *gin.Context) {
 	if _, err := h.requireWriter(c, claims.UserID, projectID); err != nil {
 		return
 	}
+	reject := func(status int, reason, msg string) {
+		h.recordAudit(c.Request.Context(), claims.UserID, auditEntry{
+			ProjectID:     projectID,
+			EnvironmentID: envID,
+			Action:        "DownloadSourceArchive",
+			ResourceKind:  "Build",
+			ResourceName:  appName,
+			Outcome:       auditOutcomeFailure,
+			Metadata:      map[string]any{"reason": reason, "status": status},
+		})
+		respondError(c, status, msg)
+	}
 	if !h.sourceUploader.Enabled() {
-		respondError(c, http.StatusServiceUnavailable, "source archive download is not configured")
+		reject(http.StatusServiceUnavailable, "uploader_disabled", "source archive download is not configured")
 		return
 	}
 
@@ -89,33 +100,36 @@ func (h *Handler) DownloadSourceArchive(c *gin.Context) {
 		projectID, envID, appName,
 	).Scan(&provider, &cloneURL)
 	if err == pgx.ErrNoRows || (err == nil && provider != "archive") {
-		respondError(c, http.StatusNotFound, "this app has no uploaded source archive")
+		reject(http.StatusNotFound, "no_uploaded_source", "this app has no uploaded source archive")
 		return
 	}
 	if err != nil {
-		respondError(c, http.StatusInternalServerError, "failed to look up uploaded source")
+		reject(http.StatusInternalServerError, "source_lookup_failed", "failed to look up uploaded source")
 		return
 	}
 
 	bucket, key, err := parseSourceArchiveURL(cloneURL)
 	if err != nil || bucket != h.sourceUploader.Bucket() {
-		respondError(c, http.StatusInternalServerError, "stored source archive reference is invalid")
+		reject(http.StatusInternalServerError, "invalid_archive_ref", "stored source archive reference is invalid")
 		return
 	}
 
 	filename := appName + "-source" + sourceArchiveExt(key)
 	downloadURL, err := h.sourceUploader.PresignGet(c.Request.Context(), key, filename, sourceArchiveDownloadTTL)
 	if err != nil {
-		respondError(c, http.StatusInternalServerError, "failed to prepare download")
+		reject(http.StatusInternalServerError, "presign_failed", "failed to prepare download")
 		return
 	}
 
-	auditMeta, _ := json.Marshal(map[string]any{"app_name": appName})
-	_, _ = h.pool.Exec(c.Request.Context(),
-		`INSERT INTO audit_events (actor_id, project_id, action, resource_kind, resource_name, metadata)
-		 VALUES ($1, $2, 'DownloadSourceArchive', 'Build', $3, $4)`,
-		claims.UserID, projectID, appName, auditMeta,
-	)
+	h.recordAudit(c.Request.Context(), claims.UserID, auditEntry{
+		ProjectID:     projectID,
+		EnvironmentID: envID,
+		Action:        "DownloadSourceArchive",
+		ResourceKind:  "Build",
+		ResourceName:  appName,
+		Outcome:       auditOutcomeSuccess,
+		Metadata:      map[string]any{"app_name": appName},
+	})
 
 	c.JSON(http.StatusOK, gin.H{
 		"url":        downloadURL,

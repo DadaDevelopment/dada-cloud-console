@@ -152,22 +152,37 @@ func (h *Handler) CreateS3Bucket(c *gin.Context) {
 		return
 	}
 
-	var req createS3BucketRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		respondError(c, http.StatusBadRequest, err.Error())
-		return
+	bucketAudit := ""
+	reject := func(status int, reason, msg string) {
+		h.recordAudit(c.Request.Context(), claims.UserID, auditEntry{
+			ProjectID:     projectID,
+			EnvironmentID: envID,
+			Action:        "CreateS3Bucket",
+			ResourceKind:  "S3Bucket",
+			ResourceName:  bucketAudit,
+			Outcome:       auditOutcomeFailure,
+			Metadata:      map[string]any{"reason": reason, "status": status},
+		})
+		respondError(c, status, msg)
 	}
 
+	var req createS3BucketRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		reject(http.StatusBadRequest, "malformed_body", err.Error())
+		return
+	}
+	bucketAudit = req.Name
+
 	if req.Name == "" {
-		respondError(c, http.StatusBadRequest, "name is required")
+		reject(http.StatusBadRequest, "missing_name", "name is required")
 		return
 	}
 	if req.BucketName == "" {
-		respondError(c, http.StatusBadRequest, "bucket_name is required")
+		reject(http.StatusBadRequest, "missing_bucket_name", "bucket_name is required")
 		return
 	}
 	if err := validateKubeName(req.Name); err != nil {
-		respondError(c, http.StatusBadRequest, err.Error())
+		reject(http.StatusBadRequest, "invalid_name", err.Error())
 		return
 	}
 
@@ -182,11 +197,11 @@ func (h *Handler) CreateS3Bucket(c *gin.Context) {
 		projectID, envID, req.Name,
 	).Scan(&existing)
 	if err != nil {
-		respondError(c, http.StatusInternalServerError, "failed to check name uniqueness")
+		reject(http.StatusInternalServerError, "uniqueness_check_failed", "failed to check name uniqueness")
 		return
 	}
 	if existing > 0 {
-		respondError(c, http.StatusConflict, "an S3 bucket with that name already exists in this environment")
+		reject(http.StatusConflict, "name_taken", "an S3 bucket with that name already exists in this environment")
 		return
 	}
 
@@ -201,13 +216,13 @@ func (h *Handler) CreateS3Bucket(c *gin.Context) {
 	}
 	payloadBytes, err := json.Marshal(payload)
 	if err != nil {
-		respondError(c, http.StatusInternalServerError, "failed to marshal payload")
+		reject(http.StatusInternalServerError, "marshal_failed", "failed to marshal payload")
 		return
 	}
 
 	tx, err := h.pool.Begin(c.Request.Context())
 	if err != nil {
-		respondError(c, http.StatusInternalServerError, "failed to create operation")
+		reject(http.StatusInternalServerError, "operation_begin_failed", "failed to create operation")
 		return
 	}
 	defer func() { _ = tx.Rollback(c.Request.Context()) }()
@@ -222,28 +237,37 @@ func (h *Handler) CreateS3Bucket(c *gin.Context) {
 		claims.UserID, projectID, envID, req.Name, payloadBytes,
 	)
 	if err = scanOperation(row, &op); err != nil {
-		respondError(c, http.StatusInternalServerError, "failed to create operation")
+		reject(http.StatusInternalServerError, "operation_insert_failed", "failed to create operation")
 		return
 	}
 
 	if err = seedOptimisticSnapshot(c.Request.Context(), tx, projectID, envID, "S3Bucket", req.Name, map[string]any{
 		"app_ref": req.AppRef,
 	}); err != nil {
-		respondError(c, http.StatusInternalServerError, "failed to create operation")
+		reject(http.StatusInternalServerError, "snapshot_seed_failed", "failed to create operation")
 		return
 	}
 
 	if err = tx.Commit(c.Request.Context()); err != nil {
-		respondError(c, http.StatusInternalServerError, "failed to create operation")
+		reject(http.StatusInternalServerError, "operation_commit_failed", "failed to create operation")
 		return
 	}
 
-	auditMeta, _ := json.Marshal(payload)
-	_, _ = h.pool.Exec(c.Request.Context(),
-		`INSERT INTO audit_events (actor_id, project_id, operation_id, action, resource_kind, resource_name, metadata)
-		 VALUES ($1, $2, $3, 'CreateS3Bucket', 'S3Bucket', $4, $5)`,
-		claims.UserID, projectID, op.ID, req.Name, auditMeta,
-	)
+	h.recordAudit(c.Request.Context(), claims.UserID, auditEntry{
+		ProjectID:     projectID,
+		EnvironmentID: envID,
+		OperationID:   op.ID,
+		Action:        "CreateS3Bucket",
+		ResourceKind:  "S3Bucket",
+		ResourceName:  req.Name,
+		Outcome:       auditOutcomeSuccess,
+		Metadata: map[string]any{
+			"bucket_name": req.BucketName,
+			"region":      req.Region,
+			"public":      req.Public,
+			"ftp_sftp":    req.FtpSftpEnable,
+		},
+	})
 
 	c.JSON(http.StatusAccepted, gin.H{
 		"operation": op,
@@ -286,8 +310,20 @@ func (h *Handler) GetS3BucketCredentials(c *gin.Context) {
 		return
 	}
 	name := c.Param("name")
+	rejectReveal := func(status int, reason, msg string) {
+		h.recordAudit(c.Request.Context(), claims.UserID, auditEntry{
+			ProjectID:     projectID,
+			EnvironmentID: envID,
+			Action:        "RevealS3Credentials",
+			ResourceKind:  "S3Bucket",
+			ResourceName:  name,
+			Outcome:       auditOutcomeFailure,
+			Metadata:      map[string]any{"reason": reason, "status": status},
+		})
+		respondError(c, status, msg)
+	}
 	if c.Query("reveal") != "true" {
-		respondError(c, http.StatusBadRequest, "reveal=true is required")
+		rejectReveal(http.StatusBadRequest, "reveal_flag_missing", "reveal=true is required")
 		return
 	}
 
@@ -298,10 +334,19 @@ func (h *Handler) GetS3BucketCredentials(c *gin.Context) {
 		projectID, envID, name,
 	).Scan(&summaryRaw); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
+			h.recordAudit(c.Request.Context(), claims.UserID, auditEntry{
+				ProjectID:     projectID,
+				EnvironmentID: envID,
+				Action:        "RevealS3Credentials",
+				ResourceKind:  "S3Bucket",
+				ResourceName:  name,
+				Outcome:       auditOutcomeFailure,
+				Metadata:      map[string]any{"reason": "bucket_not_found", "status": http.StatusNotFound},
+			})
 			respondNotFound(c)
 			return
 		}
-		respondError(c, http.StatusInternalServerError, "failed to check bucket existence")
+		rejectReveal(http.StatusInternalServerError, "existence_check_failed", "failed to check bucket existence")
 		return
 	}
 
@@ -315,19 +360,22 @@ func (h *Handler) GetS3BucketCredentials(c *gin.Context) {
 	}
 	if err != nil {
 		if errors.Is(err, cloudtask.ErrS3CredentialsNotReady) {
-			respondError(c, http.StatusNotFound, "credentials not available yet — the bucket is still provisioning")
+			rejectReveal(http.StatusNotFound, "credentials_not_ready", "credentials not available yet — the bucket is still provisioning")
 			return
 		}
-		respondError(c, http.StatusServiceUnavailable, "S3 credential access is not configured for this environment")
+		rejectReveal(http.StatusServiceUnavailable, "credential_access_unconfigured", "S3 credential access is not configured for this environment")
 		return
 	}
 
-	auditMeta, _ := json.Marshal(map[string]any{"revealed": true})
-	_, _ = h.pool.Exec(c.Request.Context(),
-		`INSERT INTO audit_events (actor_id, project_id, action, resource_kind, resource_name, metadata)
-		 VALUES ($1, $2, 'RevealS3Credentials', 'S3Bucket', $3, $4)`,
-		claims.UserID, projectID, name, auditMeta,
-	)
+	h.recordAudit(c.Request.Context(), claims.UserID, auditEntry{
+		ProjectID:     projectID,
+		EnvironmentID: envID,
+		Action:        "RevealS3Credentials",
+		ResourceKind:  "S3Bucket",
+		ResourceName:  name,
+		Outcome:       auditOutcomeSuccess,
+		Metadata:      map[string]any{"revealed": true},
+	})
 
 	c.JSON(http.StatusOK, gin.H{
 		"endpoint":    creds.Endpoint,

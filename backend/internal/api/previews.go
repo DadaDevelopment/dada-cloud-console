@@ -61,6 +61,20 @@ func (h *Handler) DeletePreviewEnvironment(c *gin.Context) {
 		return
 	}
 
+	nsAudit := ""
+	reject := func(status int, reason string, respond func()) {
+		h.recordAudit(c.Request.Context(), claims.UserID, auditEntry{
+			ProjectID:     projectID,
+			EnvironmentID: envID,
+			Action:        "DeletePreviewEnv",
+			ResourceKind:  "Environment",
+			ResourceName:  nsAudit,
+			Outcome:       auditOutcomeFailure,
+			Metadata:      map[string]any{"reason": reason, "status": status},
+		})
+		respond()
+	}
+
 	var namespace string
 	var isEphemeral bool
 	err = h.pool.QueryRow(c.Request.Context(),
@@ -68,15 +82,18 @@ func (h *Handler) DeletePreviewEnvironment(c *gin.Context) {
 		envID, projectID,
 	).Scan(&namespace, &isEphemeral)
 	if err == pgx.ErrNoRows {
-		respondNotFound(c)
+		reject(http.StatusNotFound, "environment_not_found", func() { respondNotFound(c) })
 		return
 	}
 	if err != nil {
-		respondError(c, http.StatusInternalServerError, "failed to load environment")
+		reject(http.StatusInternalServerError, "environment_load_failed", func() {
+			respondError(c, http.StatusInternalServerError, "failed to load environment")
+		})
 		return
 	}
+	nsAudit = namespace
 	if !isEphemeral {
-		respondNotFound(c)
+		reject(http.StatusNotFound, "not_ephemeral", func() { respondNotFound(c) })
 		return
 	}
 
@@ -86,7 +103,9 @@ func (h *Handler) DeletePreviewEnvironment(c *gin.Context) {
 	}
 	payloadBytes, err := json.Marshal(payload)
 	if err != nil {
-		respondError(c, http.StatusInternalServerError, "failed to marshal payload")
+		reject(http.StatusInternalServerError, "marshal_failed", func() {
+			respondError(c, http.StatusInternalServerError, "failed to marshal payload")
+		})
 		return
 	}
 
@@ -100,16 +119,22 @@ func (h *Handler) DeletePreviewEnvironment(c *gin.Context) {
 		claims.UserID, projectID, envID, namespace, payloadBytes,
 	)
 	if err := scanOperation(row, &op); err != nil {
-		respondError(c, http.StatusInternalServerError, "failed to create operation")
+		reject(http.StatusInternalServerError, "operation_insert_failed", func() {
+			respondError(c, http.StatusInternalServerError, "failed to create operation")
+		})
 		return
 	}
 
-	auditMeta, _ := json.Marshal(map[string]string{"namespace": namespace})
-	_, _ = h.pool.Exec(c.Request.Context(),
-		`INSERT INTO audit_events (actor_id, project_id, operation_id, action, resource_kind, resource_name, metadata)
-		 VALUES ($1, $2, $3, 'DeletePreviewEnv', 'Environment', $4, $5)`,
-		claims.UserID, projectID, op.ID, namespace, auditMeta,
-	)
+	h.recordAudit(c.Request.Context(), claims.UserID, auditEntry{
+		ProjectID:     projectID,
+		EnvironmentID: envID,
+		OperationID:   op.ID,
+		Action:        "DeletePreviewEnv",
+		ResourceKind:  "Environment",
+		ResourceName:  namespace,
+		Outcome:       auditOutcomeSuccess,
+		Metadata:      map[string]any{"namespace": namespace},
+	})
 	h.notifyAuditEvent(claims, projectID, "DeletePreviewEnv", namespace)
 
 	c.JSON(http.StatusAccepted, gin.H{"operation": op, "message": "preview environment teardown queued"})

@@ -83,21 +83,36 @@ func (h *Handler) CreateIngress(c *gin.Context) {
 		return
 	}
 
+	nameAudit := ""
+	reject := func(status int, reason, msg string) {
+		h.recordAudit(c.Request.Context(), claims.UserID, auditEntry{
+			ProjectID:     projectID,
+			EnvironmentID: envID,
+			Action:        "CreateIngress",
+			ResourceKind:  "App",
+			ResourceName:  nameAudit,
+			Outcome:       auditOutcomeFailure,
+			Metadata:      map[string]any{"reason": reason, "status": status},
+		})
+		respondError(c, status, msg)
+	}
+
 	var req createIngressRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		respondError(c, http.StatusBadRequest, err.Error())
+		reject(http.StatusBadRequest, "malformed_body", err.Error())
 		return
 	}
+	nameAudit = req.Name
 	if req.Name == "" {
-		respondError(c, http.StatusBadRequest, "name is required")
+		reject(http.StatusBadRequest, "missing_name", "name is required")
 		return
 	}
 	if err := validateKubeName(req.Name); err != nil {
-		respondError(c, http.StatusBadRequest, err.Error())
+		reject(http.StatusBadRequest, "invalid_name", err.Error())
 		return
 	}
 	if req.Host == "" {
-		respondError(c, http.StatusBadRequest, "host is required")
+		reject(http.StatusBadRequest, "missing_host", "host is required")
 		return
 	}
 
@@ -113,16 +128,20 @@ func (h *Handler) CreateIngress(c *gin.Context) {
 		claims.UserID, projectID, envID, req.Name, payloadBytes,
 	)
 	if err := scanOperation(row, &op); err != nil {
-		respondError(c, http.StatusInternalServerError, "failed to create operation")
+		reject(http.StatusInternalServerError, "operation_insert_failed", "failed to create operation")
 		return
 	}
 
-	auditMeta, _ := json.Marshal(map[string]any{"name": req.Name, "host": req.Host})
-	_, _ = h.pool.Exec(c.Request.Context(),
-		`INSERT INTO audit_events (actor_id, project_id, operation_id, action, resource_kind, resource_name, metadata)
-		 VALUES ($1, $2, $3, 'CreateIngress', 'App', $4, $5)`,
-		claims.UserID, projectID, op.ID, req.Name, auditMeta,
-	)
+	h.recordAudit(c.Request.Context(), claims.UserID, auditEntry{
+		ProjectID:     projectID,
+		EnvironmentID: envID,
+		OperationID:   op.ID,
+		Action:        "CreateIngress",
+		ResourceKind:  "App",
+		ResourceName:  req.Name,
+		Outcome:       auditOutcomeSuccess,
+		Metadata:      map[string]any{"name": req.Name, "host": req.Host},
+	})
 
 	c.JSON(http.StatusAccepted, gin.H{"operation": op, "message": "ingress creation queued"})
 }
