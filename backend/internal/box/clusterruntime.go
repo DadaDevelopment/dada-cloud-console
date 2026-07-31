@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/dada-tuda/console/backend/internal/boxcatalog"
@@ -530,8 +531,8 @@ func (c *ClusterRuntime) execWithStdin(ctx context.Context, inst *Instance, cmd 
 		Stdout:    true,
 		Stderr:    true,
 	}
-	var out bytes.Buffer
-	streams := remotecommand.StreamOptions{Stdout: &out, Stderr: &out}
+	out := &syncBuffer{}
+	streams := remotecommand.StreamOptions{Stdout: out, Stderr: out}
 	if stdin != nil {
 		opts.Stdin = true
 		streams.Stdin = stdin
@@ -555,6 +556,34 @@ func (c *ClusterRuntime) execWithStdin(ctx context.Context, inst *Instance, cmd 
 		return CanaryResult{Stdout: out.String()}, fmt.Errorf("exec in box: %w", err)
 	}
 	return CanaryResult{ExitCode: 0, Stdout: out.String()}, nil
+}
+
+// syncBuffer is a bytes.Buffer that survives being written from two goroutines at
+// once.
+//
+// THIS IS NOT DEFENSIVE PROGRAMMING, IT IS THE FIX FOR A LIVE FAILURE. remotecommand
+// copies the remote stdout and the remote stderr in SEPARATE goroutines, and Exec
+// deliberately points both at one writer so the canary sees "node=sh: node: not
+// found" the way the shell produced it. A plain bytes.Buffer under two concurrent
+// writers is a data race whose realistic outcome is not a crash but LOST BYTES —
+// which surfaced as a box whose canary exited 0 with empty output and was rejected
+// for "canary output missing dada-ready marker" while the exact same command run by
+// hand in the exact same pod printed it.
+type syncBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (s *syncBuffer) Write(p []byte) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.buf.Write(p)
+}
+
+func (s *syncBuffer) String() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.buf.String()
 }
 
 // exitCodeFrom separates "the command failed" from "we could not run it". A
