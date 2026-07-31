@@ -154,3 +154,52 @@ func TestFetchPropagatesComputeError(t *testing.T) {
 		t.Fatal("failed compute must not populate the cache")
 	}
 }
+
+// TestTryClaimOneWinnerPerInterval is the gate the cost warmer relies on: two
+// replicas sharing one Redis must produce exactly one worker per interval, and
+// the next interval must hand the work out again.
+func TestTryClaimOneWinnerPerInterval(t *testing.T) {
+	mr, err := miniredis.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer mr.Close()
+	replicaA := New(mr.Addr())
+	defer replicaA.Close()
+	replicaB := New(mr.Addr())
+	defer replicaB.Close()
+
+	ctx := context.Background()
+	if !replicaA.TryClaim(ctx, "warm", 135*time.Second) {
+		t.Fatal("first claim must win")
+	}
+	if replicaB.TryClaim(ctx, "warm", 135*time.Second) {
+		t.Fatal("second replica must lose the claim while it is held")
+	}
+	if replicaA.TryClaim(ctx, "warm", 135*time.Second) {
+		t.Fatal("holder must not re-win its own claim within the interval")
+	}
+
+	mr.FastForward(136 * time.Second)
+	if !replicaB.TryClaim(ctx, "warm", 135*time.Second) {
+		t.Fatal("claim must be winnable again after it expires")
+	}
+}
+
+func TestTryClaimFailsOpen(t *testing.T) {
+	var nilCache *Cache
+	if !nilCache.TryClaim(context.Background(), "warm", time.Minute) {
+		t.Fatal("disabled cache must not gate the loop")
+	}
+
+	mr, err := miniredis.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := New(mr.Addr())
+	defer c.Close()
+	mr.Close()
+	if !c.TryClaim(context.Background(), "warm", time.Minute) {
+		t.Fatal("dead redis must not stop every replica from warming")
+	}
+}

@@ -118,6 +118,33 @@ func Store[T any](ctx context.Context, c *Cache, key string, ttl time.Duration, 
 	set(ctx, c, key, ttl, v)
 }
 
+// TryClaim atomically claims key for ttl and reports whether this caller won
+// it. It is the cross-replica rate gate for background loops: every replica
+// ticks on its own timer, but only the one that wins the claim does the work,
+// and the rest skip until the claim expires. A mutual-exclusion lock is not
+// enough on its own — replicas whose ticks are offset in time never contend for
+// a lock, so each one runs a full pass and the upstream load is multiplied by
+// the replica count.
+//
+// Fail-open like the rest of the package: a disabled cache or a Redis error
+// returns true, so an outage degrades to every replica working (the pre-gate
+// behaviour) rather than no replica working.
+func (c *Cache) TryClaim(ctx context.Context, key string, ttl time.Duration) bool {
+	if !c.Enabled() {
+		return true
+	}
+	rctx, cancel := context.WithTimeout(ctx, c.opTimeout)
+	defer cancel()
+
+	won, err := c.rdb.SetNX(rctx, key, "1", ttl).Result()
+	if err != nil {
+		ops.WithLabelValues("error").Inc()
+		log.Debug().Err(err).Str("key", key).Msg("cache: claim failed, proceeding without the gate")
+		return true
+	}
+	return won
+}
+
 func get[T any](ctx context.Context, c *Cache, key string) (T, bool) {
 	var zero T
 	rctx, cancel := context.WithTimeout(ctx, c.opTimeout)

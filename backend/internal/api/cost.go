@@ -249,14 +249,26 @@ func (h *Handler) StartCostCacheWarmer(ctx context.Context) {
 		func(ctx context.Context) { h.warmSlowCost(ctx, warmClient) })
 }
 
-// startCostWarmLoop runs tick immediately and then on an interval, holding the
-// given advisory lock for the duration of each tick so only one replica warms.
+// startCostWarmLoop runs tick immediately and then on an interval, gated so
+// that the whole deployment performs one pass per interval no matter how many
+// replicas are running.
 //
-// The in-process atomic guard is kept ALONGSIDE the cross-replica lock: the
-// lock stops two pods from warming at once, the guard stops one pod from
-// starting a second tick while its own is still running (the advisory lock is
-// re-entrant within a session and would not catch that).
+// Three guards, each covering a case the others miss:
+//
+//   - The Redis claim is the rate gate. Replicas tick on independent timers and
+//     drift apart in phase, so a mutual-exclusion lock alone never sees
+//     contention and every replica ends up doing a full pass — measured on prod
+//     as double the intended OpenCost load with two replicas. The claim lives
+//     for slightly less than the interval so ticker jitter cannot swallow a
+//     whole cycle.
+//   - The advisory lock covers a tick that outlives its own claim (degraded
+//     OpenCost); without it the expired claim would let a second replica pile
+//     on exactly when upstream is already struggling.
+//   - The in-process atomic guard stops one pod from starting a second tick
+//     while its own is still running: the advisory lock is re-entrant within a
+//     session and would not catch that.
 func (h *Handler) startCostWarmLoop(ctx context.Context, name string, lockKey int64, interval time.Duration, tick func(context.Context)) {
+	claimTTL := interval - interval/10
 	var running atomic.Bool
 	run := func() {
 		if !running.CompareAndSwap(false, true) {
@@ -264,6 +276,10 @@ func (h *Handler) startCostWarmLoop(ctx context.Context, name string, lockKey in
 			return
 		}
 		defer running.Store(false)
+		if !h.cache.TryClaim(ctx, "cost:warm:claim:"+name, claimTTL) {
+			log.Debug().Str("loop", name).Msg("cost warmer: another replica warmed within this interval, skipping this tick")
+			return
+		}
 		if !runWithAdvisoryLock(ctx, h.pool, lockKey, name, tick) {
 			log.Debug().Str("loop", name).Msg("cost warmer: another replica holds the lock, skipping this tick")
 		}
