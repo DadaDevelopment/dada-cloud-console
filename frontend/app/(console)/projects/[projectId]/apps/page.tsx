@@ -19,6 +19,7 @@ import { DeployChooser } from "@/components/deploy/deploy-chooser";
 import { TemplateDeployCards } from "@/components/console/template-deploy-cards";
 import { UploadDeployCard } from "@/components/deploy/upload-deploy";
 import { useT } from "@/lib/i18n/console/context";
+import { QuotaUpsell } from "@/components/billing/quota-upsell";
 import { Globe, Database, GitPullRequest, ChevronDown } from "lucide-react";
 import { AppPreviewPane } from "@/components/app-preview-pane";
 import { LogsViewer } from "@/components/logs-viewer";
@@ -75,7 +76,7 @@ export default function AppsPage() {
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
-  const [quotaBlocked, setQuotaBlocked] = useState(false);
+  const [quotaBlocked, setQuotaBlocked] = useState<{ resource: string; limit?: number } | null>(null);
 
   useEffect(() => {
     if (environments.length === 0) {
@@ -172,9 +173,10 @@ export default function AppsPage() {
       router.push(`/projects/${projectId}/apps/${form.name}`);
     } catch (err) {
       const raw = err instanceof Error ? err.message : "";
-      if ((err as { code?: string } | undefined)?.code === "quota_exceeded") {
+      const quota = err as { code?: string; resource?: string; limit?: number } | undefined;
+      if (quota?.code === "quota_exceeded") {
         setSubmitError(null);
-        setQuotaBlocked(true);
+        setQuotaBlocked({ resource: quota.resource ?? "apps", limit: quota.limit });
         return;
       }
       let msg = raw || t("apps.error.create");
@@ -440,16 +442,7 @@ export default function AppsPage() {
           </div>
 
           {quotaBlocked && (
-            <div role="alert" className="rounded-lg border border-blue-200 dark:border-blue-900 bg-blue-50 dark:bg-blue-950/40 px-4 py-3 text-sm">
-              <p className="font-semibold text-blue-800 dark:text-blue-300">{t("apps.error.quota.title")}</p>
-              <p className="mt-1 text-blue-700 dark:text-blue-400">{t("apps.error.quota.text")}</p>
-              <Link
-                href={`/projects/${projectId}/billing`}
-                className="mt-3 inline-flex items-center gap-1.5 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-blue-700"
-              >
-                {t("apps.error.quota.cta")}
-              </Link>
-            </div>
+            <QuotaUpsell resource={quotaBlocked.resource} limit={quotaBlocked.limit} projectId={projectId} />
           )}
 
           {submitError && (

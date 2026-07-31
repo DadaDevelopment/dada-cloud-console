@@ -16,6 +16,7 @@ import { ResourceZeroState } from "@/components/ui/resource-zero-state";
 import { Database } from "lucide-react";
 import { useT } from "@/lib/i18n/console/context";
 import { isSettling } from "@/lib/phase";
+import { QuotaUpsell } from "@/components/billing/quota-upsell";
 
 interface CreateDbForm {
   name: string;
@@ -72,10 +73,12 @@ export default function DatabasesPage() {
   }));
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  const [quotaBlock, setQuotaBlock] = useState<{ resource: string; limit?: number } | null>(null);
 
   function openCreateModal() {
     setForm((prev) => ({ ...prev, ...generateDbNames() }));
     setSubmitError(null);
+    setQuotaBlock(null);
     setIsModalOpen(true);
   }
 
@@ -129,6 +132,12 @@ export default function DatabasesPage() {
       setForm({ ...generateDbNames(), backup_enabled: false, backup_schedule: "daily", backup_retention: "7d" });
       setRefreshTick((v) => v + 1);
     } catch (err) {
+      const quota = err as { code?: string; resource?: string; limit?: number } | undefined;
+      if (quota?.code === "quota_exceeded") {
+        setSubmitError(null);
+        setQuotaBlock({ resource: quota.resource ?? "databases", limit: quota.limit });
+        return;
+      }
       setSubmitError(err instanceof Error ? err.message : t("databases.error.create"));
     } finally {
       setIsSubmitting(false);
@@ -323,6 +332,10 @@ export default function DatabasesPage() {
                 </select>
               </div>
             </div>
+          )}
+
+          {quotaBlock && (
+            <QuotaUpsell resource={quotaBlock.resource} limit={quotaBlock.limit} projectId={projectId} />
           )}
 
           {submitError && (

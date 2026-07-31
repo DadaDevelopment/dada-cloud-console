@@ -42,4 +42,17 @@ export const consumption: Messages = {
   },
   "grace.banner.cta": { ru: "Посмотреть тарифы", en: "See the plans" },
   "grace.banner.dismiss": { ru: "Скрыть", en: "Dismiss" },
+  "quota.upsell.title": { ru: "Достигнут лимит тарифа", en: "You have reached your plan limit" },
+  "quota.upsell.text": {
+    ru: "На текущем тарифе доступно {resource}: {limit}. Всё созданное продолжает работать — чтобы создать ещё, нужен тариф побольше.",
+    en: "Your current plan includes {limit} {resource}. Everything you created keeps running — creating more needs a bigger plan.",
+  },
+  "quota.upsell.textNoLimit": {
+    ru: "Лимит текущего тарифа по ресурсу «{resource}» исчерпан. Всё созданное продолжает работать.",
+    en: "Your plan limit for {resource} is used up. Everything you created keeps running.",
+  },
+  "quota.upsell.cta": { ru: "{plan} — {price} ₽/мес, оплатить", en: "{plan} — {price} ₽/mo, pay now" },
+  "quota.upsell.plansCta": { ru: "Посмотреть тарифы", en: "See the plans" },
+  "quota.upsell.starting": { ru: "Открываем оплату…", en: "Opening checkout…" },
+  "quota.upsell.error": { ru: "Не удалось открыть оплату", en: "Could not open checkout" },
 };
