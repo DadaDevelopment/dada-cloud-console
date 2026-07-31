@@ -522,12 +522,15 @@ func (h *Handler) DeployTrigger(c *gin.Context) {
 		return
 	}
 
-	auditMeta, _ := json.Marshal(payload)
-	_, _ = h.pool.Exec(c.Request.Context(),
-		`INSERT INTO audit_events (actor_id, project_id, operation_id, action, resource_kind, resource_name, metadata)
-		 VALUES ($1, $2, $3, 'DeployImageVersion', 'App', $4, $5)`,
-		actorID, hook.ProjectID, op.ID, hook.AppName, auditMeta,
-	)
+	h.recordAudit(c.Request.Context(), actorID, auditEntry{
+		ProjectID:     hook.ProjectID,
+		EnvironmentID: hook.EnvironmentID,
+		OperationID:   op.ID,
+		Action:        "DeployImageVersion",
+		ResourceKind:  "App",
+		ResourceName:  hook.AppName,
+		Metadata:      payload,
+	})
 	h.notifyDeployHook(hook.ProjectID, "DeployImageVersion", hook.AppName, "CI (deploy-hook)")
 
 	_, _ = h.pool.Exec(c.Request.Context(),

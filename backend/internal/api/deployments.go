@@ -256,13 +256,15 @@ func (h *Handler) redeployFrom(c *gin.Context, trigger, message string) {
 		return
 	}
 
-	// Best-effort audit.
-	auditMeta, _ := json.Marshal(payload)
-	_, _ = h.pool.Exec(c.Request.Context(),
-		`INSERT INTO audit_events (actor_id, project_id, operation_id, action, resource_kind, resource_name, metadata)
-		 VALUES ($1, $2, $3, 'DeployImageVersion', 'App', $4, $5)`,
-		claims.UserID, projectID, op.ID, appName, auditMeta,
-	)
+	h.recordAudit(c.Request.Context(), claims.UserID, auditEntry{
+		ProjectID:     projectID,
+		EnvironmentID: envID,
+		OperationID:   op.ID,
+		Action:        "DeployImageVersion",
+		ResourceKind:  "App",
+		ResourceName:  appName,
+		Metadata:      payload,
+	})
 
 	c.JSON(http.StatusAccepted, gin.H{
 		"operation": op,
