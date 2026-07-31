@@ -91,6 +91,29 @@ The e2e must verify:
 - UI shows operation;
 - status eventually reaches Ready in dev simulation.
 
+### 6a. Format gate (once per clone)
+
+```bash
+make hooks
+```
+
+This points `core.hooksPath` at `.githooks`, enabling the pre-push gate. The gate
+runs `gofmt` over the Go files carried by the commits being pushed — the same
+check as the Jenkinsfile stage `Go format check`, which runs before any image is
+built and inside a `failFast` parallel block. One unformatted file there turns
+main red, kills the frontend lane too, and stops every deploy until someone
+notices. On 2026-07-31 that cost six consecutive red builds and about eight
+hours of blocked delivery.
+
+The hook reads file content from the pushed commit, not the working tree, so a
+concurrent session's unstaged edits never block your push. To check or fix the
+whole repo at once:
+
+```bash
+make fmt-check
+make fmt
+```
+
 ### 7. Helm render gate
 
 Before merge:

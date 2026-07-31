@@ -1,23 +1,78 @@
 #!/usr/bin/env bash
-# Ban feat/* and feature/* branches in this repo (trunk-based: everything on main).
+# Pre-push gate. Two checks, both mirroring rules that are otherwise only
+# enforced by Jenkins, where a violation costs a full red pipeline:
 #
-# Rejects any push that would create/update a remote branch whose name matches
-# feat/* or feature/*. Stdin lines (git pre-push protocol):
+#   1. Ban feat/* and feature/* branches (trunk-based: everything on main).
+#   2. gofmt on the Go files carried by the pushed commits. Jenkinsfile stage
+#      'Go format check' runs `gofmt -l` before any build, inside a failFast
+#      parallel block, so one unformatted file kills the Go AND the frontend
+#      lane and nothing reaches prod. On 2026-07-31 that cost 6 red builds
+#      and ~8 hours of blocked delivery.
+#
+# The gofmt check reads file content from the pushed commit, not from the
+# working tree: this repo is shared by concurrent sessions, and someone
+# else's unstaged edit must not block your push.
+#
+# Stdin lines (git pre-push protocol):
 #   <local ref> <local sha> <remote ref> <remote sha>
-set -euo pipefail
+set -uo pipefail
 
 banned_re='^refs/heads/(feat|feature)/'
 zero='0000000000000000000000000000000000000000'
+gofmt_dirs_re='^(backend|build-agent|gitops-agent|mcp-server|portainer-agent|tools/dbmove)/'
 violation=0
+go_blobs=()
 
 while read -r local_ref local_sha remote_ref remote_sha; do
   # Skip deletes (local sha all-zero) — removing a feat/* branch is allowed.
   [ "$local_sha" = "$zero" ] && continue
+
   if [[ "$remote_ref" =~ $banned_re ]]; then
     echo "✖ blocked: '$remote_ref' — feat/* and feature/* branches are banned in this repo." >&2
     echo "  Work on main (trunk-based). See AGENTS.md / docs." >&2
     violation=1
   fi
+
+  if [ "$remote_sha" = "$zero" ] || ! git cat-file -e "$remote_sha" 2>/dev/null; then
+    diff_args=(show --name-only --pretty=format: "$local_sha")
+  else
+    diff_args=(diff --name-only "$remote_sha" "$local_sha")
+  fi
+
+  while IFS= read -r path; do
+    [ -n "$path" ] || continue
+    [[ "$path" == *.go ]] || continue
+    [[ "$path" =~ $gofmt_dirs_re ]] || continue
+    # Deleted paths are absent from the pushed tree — skip them.
+    git cat-file -e "$local_sha:$path" 2>/dev/null || continue
+    go_blobs+=("$local_sha:$path")
+  done < <(git "${diff_args[@]}" 2>/dev/null || true)
 done
+
+if [ ${#go_blobs[@]} -gt 0 ]; then
+  if ! command -v gofmt >/dev/null 2>&1; then
+    echo "✖ blocked: gofmt not on PATH — cannot verify the format gate Jenkins enforces." >&2
+    exit 1
+  fi
+  tmp="$(mktemp -d)"
+  trap 'rm -rf "$tmp"' EXIT
+  unformatted=""
+  for blob in "${go_blobs[@]}"; do
+    path="${blob#*:}"
+    file="$tmp/$(printf '%s' "$path" | tr '/' '_')"
+    git cat-file blob "$blob" >"$file" 2>/dev/null || continue
+    if [ -n "$(gofmt -l "$file")" ]; then
+      unformatted="$unformatted  $path"$'\n'
+    fi
+  done
+  if [ -n "$unformatted" ]; then
+    echo "✖ blocked: gofmt violations in the commits you are pushing:" >&2
+    printf '%s' "$unformatted" >&2
+    echo "  Jenkins stage 'Go format check' fails the whole pipeline on this," >&2
+    echo "  so main goes red and nothing reaches prod." >&2
+    echo "  Fix: gofmt -w <file>, then amend or add a commit." >&2
+    violation=1
+  fi
+fi
 
 exit $violation
