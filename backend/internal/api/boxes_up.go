@@ -131,25 +131,7 @@ func (h *Handler) BoxUp(c *gin.Context) {
 	ctx, cancel := context.WithTimeout(c.Request.Context(), time.Duration(wait)*time.Second)
 	defer cancel()
 
-	spec := box.Spec{
-		Image:        b.Image,
-		Profile:      b.Profile,
-		Region:       b.Region,
-		SSHPublicKey: req.SSHPublicKey,
-		Env: map[string]string{
-			"BOX_NAME":       b.Name,
-			"BOX_PROJECT_ID": projectID.String(),
-			"BOX_ENV_ID":     b.EnvironmentID.String(),
-		},
-	}
-	res, spawnErr := box.Spawn(ctx, box.Deps{
-		Clock:   box.SystemClock{},
-		Admit:   box.AllowAll{},
-		Pool:    stack.pool,
-		Runtime: stack.runtime,
-	}, spec)
-	stack.publishBoxPoolGauges()
-
+	res, mcpURL, sshHost, spawnErr := h.bootBoxInstance(ctx, stack, projectID, b, req.SSHPublicKey)
 	if spawnErr != nil {
 		h.failBox(context.Background(), b.ID, spawnErr.Error())
 		status := http.StatusServiceUnavailable
@@ -159,41 +141,10 @@ func (h *Handler) BoxUp(c *gin.Context) {
 		respondError(c, status, "box did not become ready: "+spawnErr.Error())
 		return
 	}
-
 	inst := res.Instance
-	// The MCP URL is the BOX's own endpoint, relayed verbatim: the control plane
-	// never interprets a runtime handle. cmd/box-broker runs inside the box and
-	// publishes the address it actually bound, so this URL is read out of the box
-	// rather than assumed — and when there is no broker the response falls back to
-	// the control-plane surface and SAYS SO instead of dressing it up.
-	mcpURL := fmt.Sprintf("%s/api/v1/box/session/mcp", stack.sessions)
-	if addr, err := h.openBoxDoor(ctx, stack, inst, b.ID, b.Name); err != nil {
-		logDoorFailure(b.Name, err)
-	} else {
-		mcpURL = box.BrokerMCPURL(addr)
-	}
-	sshHost := inst.SSHHost
-	if sshHost == "" {
-		sshHost = inst.NodeRef
-	}
 
-	var updated models.Box
-	row := h.pool.QueryRow(c.Request.Context(),
-		`UPDATE boxes
-		    SET status         = 'Ready',
-		        instance_ref   = $2,
-		        node_ref       = $3,
-		        ssh_host       = $4,
-		        mcp_url         = $5,
-		        error_message  = '',
-		        last_active_at = now(),
-		        expires_at     = COALESCE(expires_at, now() + (ttl_seconds * INTERVAL '1 second')),
-		        updated_at     = now()
-		  WHERE id = $1
-		 RETURNING `+boxColumns,
-		b.ID, inst.InstanceRef, inst.NodeRef, sshHost, mcpURL,
-	)
-	if err := scanBox(row, &updated); err != nil {
+	updated, err := h.markBoxReady(c.Request.Context(), b.ID, inst, mcpURL, sshHost)
+	if err != nil {
 		respondError(c, http.StatusInternalServerError, "failed to record the ready box")
 		return
 	}

@@ -317,6 +317,7 @@ func NewHandler(pool *pgxpool.Pool, cfg *config.Config) *Handler {
 	// every production deployment that has not opted in are untouched.
 	h.initBoxRuntime(cfg)
 	h.StartBoxSessionSweeper(context.Background())
+	h.StartBoxOperationsWorker(context.Background())
 
 	if h.agentChatLLM.Configured() {
 		log.Printf("agent-chat: gateway configured at %s, model %s", cfg.AgentChatGatewayURL, cfg.AgentChatModel)
