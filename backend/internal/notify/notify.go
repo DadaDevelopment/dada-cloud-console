@@ -95,6 +95,41 @@ func ComposePlanDowngraded(planName string) (subject, body string) {
 	return subject, b.String()
 }
 
+// QuotaLine is one resource the grandfathering notice names: how much the org
+// has now against what the free tier includes.
+type QuotaLine struct {
+	Label string
+	Used  int
+	Limit int
+}
+
+// ComposeQuotaGraceReminder builds the customer-facing notice that the
+// grandfathering window is closing.
+//
+// It leads with what does NOT change, because that is the honest headline:
+// these users were promised a free tier and nothing they built is being taken
+// away. The numbers are the org's own, so the message is actionable rather
+// than a generic policy announcement; when nothing is over the limit the list
+// is empty and the mail says exactly that.
+func ComposeQuotaGraceReminder(graceUntilUTC string, daysLeft int, over []QuotaLine) (subject, body string) {
+	subject = fmt.Sprintf("Dada Cloud: бесплатные лимиты начнут действовать через %d дн.", daysLeft)
+	var b strings.Builder
+	fmt.Fprintf(&b, "С %s (UTC) на аккаунте начинают действовать лимиты бесплатного тарифа.\n\n", graceUntilUTC)
+	b.WriteString("Всё, что уже создано, продолжает работать — ничего не останавливается и не удаляется.\n")
+	b.WriteString("Лимиты применяются только к созданию новых ресурсов.\n\n")
+	if len(over) == 0 {
+		b.WriteString("Вы сейчас внутри бесплатных лимитов — делать ничего не нужно.\n")
+	} else {
+		b.WriteString("Сейчас сверх бесплатного тарифа:\n")
+		for _, l := range over {
+			fmt.Fprintf(&b, "  - %s: %d, бесплатно %d\n", l.Label, l.Used, l.Limit)
+		}
+		b.WriteString("\nЧтобы создавать новые ресурсы после этой даты, нужен платный тариф:\n")
+		b.WriteString("консоль → проект → Billing → «Оплатить».\n")
+	}
+	return subject, b.String()
+}
+
 // crashLogSignature is one entry in the ordered pattern table ClassifyCrashLog
 // walks: pattern is matched with strings.Contains against the log excerpt,
 // label is the human hint appended to the pattern name in the parenthetical.

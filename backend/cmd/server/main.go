@@ -214,11 +214,13 @@ func main() {
 				case <-meterCtx.Done():
 					return
 				case <-ticker.C:
-					api.SweepPlanExpiry(meterCtx, pool, expiryNotifier, cfg.AuditNotifyEmail, time.Now().UTC())
+					now := time.Now().UTC()
+					api.SweepPlanExpiry(meterCtx, pool, expiryNotifier, cfg.AuditNotifyEmail, now)
+					api.SweepQuotaGrace(meterCtx, pool, expiryNotifier, cfg.AuditNotifyEmail, billingPlans, now)
 				}
 			}
 		}()
-		log.Info().Msg("billing plan-expiry sweeper started")
+		log.Info().Msg("billing plan-expiry and quota-grace sweepers started")
 	}
 
 	<-quit
