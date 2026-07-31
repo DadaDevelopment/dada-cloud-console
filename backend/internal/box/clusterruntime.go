@@ -104,6 +104,17 @@ const clusterDefaultReadyTimeout = 3 * time.Minute
 // dead and simply not yet swept.
 const clusterOrphanAfter = clusterDefaultReadyTimeout
 
+// clusterClaimOrphanAfter is the reaper's threshold for the other way a pod is
+// abandoned: claimed out of the pool and never moved on to live.
+//
+// A claimed pod is Ready, so the not-Ready rule above cannot see it, and its
+// creation time says nothing — it may have sat parked for hours before the claim.
+// What bounds it is the claim itself: Spawn goes from Claim to ProgramNetwork in
+// seconds, so a pod still claimed long afterwards belongs to a spawn that died in
+// between, and nothing will ever come back for it. Twice the ready timeout leaves
+// room for the slowest honest spawn, whose Unfreeze can burn the whole of one.
+const clusterClaimOrphanAfter = 2 * clusterDefaultReadyTimeout
+
 // labelBox, labelBoxID and labelBoxPhase mark every object this adapter owns, so
 // a sweep can find them all without parsing names.
 const (
@@ -721,15 +732,12 @@ func (c *ClusterRuntime) ReapOrphans(ctx context.Context) (int, error) {
 	if err != nil {
 		return 0, fmt.Errorf("list box pods: %w", err)
 	}
-	cutoff := c.clock.Now().Add(-clusterOrphanAfter)
+	now := c.clock.Now()
 	reaped := 0
 	var firstErr error
 	for i := range pods.Items {
 		pod := pods.Items[i]
-		if clusterPodReady(&pod) {
-			continue
-		}
-		if pod.CreationTimestamp.Time.After(cutoff) {
+		if !clusterOrphaned(&pod, now) {
 			continue
 		}
 		boxID := pod.Labels[labelBoxID]
@@ -746,6 +754,33 @@ func (c *ClusterRuntime) ReapOrphans(ctx context.Context) (int, error) {
 		reaped++
 	}
 	return reaped, firstErr
+}
+
+// clusterOrphaned reports whether a box pod has been abandoned, in either of the
+// two ways a pod can be.
+//
+// The first is a create that never finished: the pod is not Ready and has not
+// been since it was made. The second is a claim that never finished: the pod is
+// Ready, it left the parked set, and it never arrived at live. Both are pods no
+// live goroutine will ever come back for, and both hold a slot of the fleet
+// quota — which is the whole cost, since a namespace full of abandoned pods
+// answers a paying customer's create with pool_exhausted.
+//
+// A pod whose claim is not yet stamped is left alone. The stamp is written by the
+// same Update that makes the claim, so its absence means the pod predates this
+// code, and guessing an age for it would reap boxes that are merely old.
+func clusterOrphaned(pod *corev1.Pod, now time.Time) bool {
+	if !clusterPodReady(pod) {
+		return pod.CreationTimestamp.Time.Before(now.Add(-clusterOrphanAfter))
+	}
+	if pod.Labels[labelBoxPhase] != phaseClaimed {
+		return false
+	}
+	claimedAt, err := time.Parse(time.RFC3339, pod.Annotations[annBoxClaimedAt])
+	if err != nil {
+		return false
+	}
+	return claimedAt.Before(now.Add(-clusterClaimOrphanAfter))
 }
 
 // BrokerConfigured reports true: the broker is baked into the warm image and

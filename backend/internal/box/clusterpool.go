@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -15,6 +16,15 @@ import (
 // transition out of the parked set: no NetworkPolicy selects it, so a pod caught
 // in this phase can reach nothing, which is the right side to fail on.
 const phaseClaimed = "claimed"
+
+// annBoxClaimedAt records when a pod left the parked set, in RFC3339.
+//
+// The reaper needs it because a claimed pod is Ready and its creation time says
+// nothing about how long it has been claimed: a pod may sit parked for hours
+// before a tenant takes it. Without this stamp the only way to bound an
+// abandoned claim would be the pod's age, which would reap healthy long-lived
+// warm pods the moment they were handed out.
+const annBoxClaimedAt = "dada.io/box-claimed-at"
 
 // ClusterPool is the warm pool the production adapter claims from, and its state
 // lives in the cluster rather than in this process.
@@ -95,6 +105,10 @@ func (p *ClusterPool) Claim(ctx context.Context, image, region string) (*Instanc
 	for i := range pods {
 		pod := pods[i]
 		pod.Labels[labelBoxPhase] = phaseClaimed
+		if pod.Annotations == nil {
+			pod.Annotations = map[string]string{}
+		}
+		pod.Annotations[annBoxClaimedAt] = p.rt.clock.Now().UTC().Format(time.RFC3339)
 		updated, err := p.rt.clientset.CoreV1().Pods(p.rt.Namespace).Update(ctx, &pod, metav1.UpdateOptions{})
 		if err != nil {
 			if apierrors.IsConflict(err) || apierrors.IsNotFound(err) {

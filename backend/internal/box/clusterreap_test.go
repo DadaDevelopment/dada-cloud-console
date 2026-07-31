@@ -286,3 +286,53 @@ func TestSuspendKeepsTheWorkspaceAndResumeReattachesIt(t *testing.T) {
 		t.Fatalf("after resume: %d pods, %d pvcs", pods, pvcs)
 	}
 }
+
+// TestReapOrphansRemovesAbandonedClaim closes the second way a pod is abandoned.
+// A claim is a label flip out of the parked set, and Spawn moves the pod on to
+// live seconds later; a pod still claimed long afterwards belongs to a spawn that
+// died in between. It is Ready, so the not-Ready rule cannot see it, and nothing
+// will ever come back for it — it just holds a slot of the fleet quota until a
+// paying customer's create is answered with pool_exhausted.
+func TestReapOrphansRemovesAbandonedClaim(t *testing.T) {
+	start := time.Date(2026, 8, 1, 12, 0, 0, 0, time.UTC)
+	clock := NewFakeClock(start)
+	cs := fake.NewSimpleClientset(parkedPod("box-w1", "warm-v1", "", true))
+	rt := newClusterRuntime(cs, nil, "dada-boxes", clock)
+	pool := NewClusterPool(rt)
+
+	if _, hit, err := pool.Claim(context.Background(), "warm-v1", ""); !hit || err != nil {
+		t.Fatalf("Claim = (hit %v, %v), want a pool hit to abandon", hit, err)
+	}
+
+	clock.Advance(clusterClaimOrphanAfter / 2)
+	if reaped, err := rt.ReapOrphans(context.Background()); err != nil || reaped != 0 {
+		t.Fatalf("reaped %d (%v) while a spawn could still be in flight, want 0", reaped, err)
+	}
+
+	clock.Advance(clusterClaimOrphanAfter)
+	reaped, err := rt.ReapOrphans(context.Background())
+	if err != nil {
+		t.Fatalf("ReapOrphans: %v", err)
+	}
+	if reaped != 1 {
+		t.Fatalf("reaped %d abandoned claims, want 1", reaped)
+	}
+	if pods, _ := countBoxObjects(t, cs, "dada-boxes"); pods != 0 {
+		t.Errorf("%d abandoned pods survived the sweep", pods)
+	}
+}
+
+// TestReapOrphansLeavesAnOldParkedPodAlone is the guard the claim rule needs: a
+// warm pod's age says nothing, so the sweep must key off the claim stamp and not
+// off creation. Reaping by age here would empty the warm pool every time it got
+// old enough to be useful.
+func TestReapOrphansLeavesAnOldParkedPodAlone(t *testing.T) {
+	clock := NewFakeClock(time.Date(2026, 8, 1, 12, 0, 0, 0, time.UTC))
+	cs := fake.NewSimpleClientset(parkedPod("box-w1", "warm-v1", "", true))
+	rt := newClusterRuntime(cs, nil, "dada-boxes", clock)
+
+	clock.Advance(72 * time.Hour)
+	if reaped, err := rt.ReapOrphans(context.Background()); err != nil || reaped != 0 {
+		t.Fatalf("reaped %d parked pods (%v) after three days, want 0", reaped, err)
+	}
+}
