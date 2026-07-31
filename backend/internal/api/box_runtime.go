@@ -151,10 +151,16 @@ func (h *Handler) initBoxRuntime(cfg *config.Config) {
 // created inside a disposable body, and shipping the local provider here would
 // hand the tenant a DSN that resolves to nothing.
 //
-// Warming is synchronous for the reason the local path documents, and it is more
-// expensive here: the first pod on a node pulls a multi-GB image. A warm miss is
-// therefore minutes, not seconds, which is exactly why it must not be hidden
-// behind a fast startup.
+// Warming is BACKGROUND here, and that is the one place this path departs from
+// the local adapter on purpose. The local warm costs seconds, so paying it before
+// the server answers is honest. A cluster warm costs minutes — the first pod on a
+// node pulls a multi-GB image — and the console backend runs behind a startup
+// probe that kills a process which has not answered by then. A synchronous warm
+// would therefore not produce a slow start, it would produce a crashloop, and a
+// crashlooping console is a worse answer to "the pool is cold" than
+// pool_exhausted. The cost is not hidden: a spawn before the pool fills still
+// reports pool_exhausted, and the gauges below start at zero and are refreshed
+// when warming finishes.
 func (h *Handler) initClusterBoxRuntime(cfg *config.Config) {
 	rt, err := box.NewClusterRuntime(cfg.BoxClusterNamespace, box.SystemClock{})
 	if err != nil {
@@ -183,23 +189,27 @@ func (h *Handler) initClusterBoxRuntime(cfg *config.Config) {
 		sessions: boxSessionBaseURL(cfg),
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Minute)
-	defer cancel()
-	started := time.Now()
-	if err := rt.Warm(ctx, pool, stack.image, stack.region, cfg.BoxWarmPoolSize); err != nil {
-		log.Error().Err(err).Msg("box: warming the cluster pool failed; spawns will report pool_exhausted")
-	} else {
-		log.Info().
-			Str("namespace", rt.Namespace).
-			Str("image", stack.image).
-			Int("warm", cfg.BoxWarmPoolSize).
-			Dur("took", time.Since(started)).
-			Msg("box: ClusterRuntime warm pool ready")
-		stack.warmed = true
-	}
 	metrics.SetBoxPoolGauges(stack.image, stack.region,
 		pool.Available(stack.image, stack.region), pool.Target(stack.image, stack.region))
 	h.boxStack = stack
+
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Minute)
+		defer cancel()
+		started := time.Now()
+		if err := rt.Warm(ctx, pool, stack.image, stack.region, cfg.BoxWarmPoolSize); err != nil {
+			log.Error().Err(err).Msg("box: warming the cluster pool failed; spawns will report pool_exhausted")
+		} else {
+			log.Info().
+				Str("namespace", rt.Namespace).
+				Str("image", stack.image).
+				Int("warm", cfg.BoxWarmPoolSize).
+				Dur("took", time.Since(started)).
+				Msg("box: ClusterRuntime warm pool ready")
+		}
+		metrics.SetBoxPoolGauges(stack.image, stack.region,
+			pool.Available(stack.image, stack.region), pool.Target(stack.image, stack.region))
+	}()
 }
 
 // boxSessionBaseURL is where the box's own session surface lives. Derived from the
