@@ -117,13 +117,26 @@ func (h *Handler) UploadSourceArchive(c *gin.Context) {
 		return
 	}
 
+	reject := func(status int, reason, msg string) {
+		h.recordAudit(c.Request.Context(), claims.UserID, auditEntry{
+			ProjectID:     projectID,
+			EnvironmentID: envID,
+			Action:        "UploadSourceArchive",
+			ResourceKind:  "Build",
+			ResourceName:  appName,
+			Outcome:       auditOutcomeFailure,
+			Metadata:      map[string]any{"reason": reason, "status": status},
+		})
+		respondError(c, status, msg)
+	}
+
 	if !h.sourceUploader.Enabled() {
-		respondError(c, http.StatusServiceUnavailable, "source upload is not configured")
+		reject(http.StatusServiceUnavailable, "uploader_disabled", "source upload is not configured")
 		return
 	}
 
 	if !uploadAppNameRe.MatchString(appName) {
-		respondError(c, http.StatusBadRequest, "app name must be a lowercase DNS label (a-z, 0-9, '-'), 1-63 characters")
+		reject(http.StatusBadRequest, "invalid_app_name", "app name must be a lowercase DNS label (a-z, 0-9, '-'), 1-63 characters")
 		return
 	}
 
@@ -132,16 +145,16 @@ func (h *Handler) UploadSourceArchive(c *gin.Context) {
 	if err != nil {
 		var maxErr *http.MaxBytesError
 		if errors.As(err, &maxErr) {
-			respondError(c, http.StatusRequestEntityTooLarge, fmt.Sprintf("archive exceeds %d bytes", uploadSourceMaxBytes))
+			reject(http.StatusRequestEntityTooLarge, "archive_too_large", fmt.Sprintf("archive exceeds %d bytes", uploadSourceMaxBytes))
 			return
 		}
-		respondError(c, http.StatusBadRequest, `missing "archive" form field`)
+		reject(http.StatusBadRequest, "missing_archive_field", `missing "archive" form field`)
 		return
 	}
 
 	src, err := fileHeader.Open()
 	if err != nil {
-		respondError(c, http.StatusBadRequest, "failed to read uploaded archive")
+		reject(http.StatusBadRequest, "archive_unreadable", "failed to read uploaded archive")
 		return
 	}
 	defer src.Close()
@@ -150,24 +163,24 @@ func (h *Handler) UploadSourceArchive(c *gin.Context) {
 	if err != nil {
 		var maxErr *http.MaxBytesError
 		if errors.As(err, &maxErr) {
-			respondError(c, http.StatusRequestEntityTooLarge, fmt.Sprintf("archive exceeds %d bytes", uploadSourceMaxBytes))
+			reject(http.StatusRequestEntityTooLarge, "archive_too_large", fmt.Sprintf("archive exceeds %d bytes", uploadSourceMaxBytes))
 			return
 		}
-		respondError(c, http.StatusBadRequest, "failed to read uploaded archive")
+		reject(http.StatusBadRequest, "archive_unreadable", "failed to read uploaded archive")
 		return
 	}
 	if len(data) > uploadSourceMaxBytes {
-		respondError(c, http.StatusRequestEntityTooLarge, fmt.Sprintf("archive exceeds %d bytes", uploadSourceMaxBytes))
+		reject(http.StatusRequestEntityTooLarge, "archive_too_large", fmt.Sprintf("archive exceeds %d bytes", uploadSourceMaxBytes))
 		return
 	}
 	if len(data) == 0 {
-		respondError(c, http.StatusBadRequest, "uploaded archive is empty")
+		reject(http.StatusBadRequest, "archive_empty", "uploaded archive is empty")
 		return
 	}
 
 	detected, err := sourcedetect.Detect(data)
 	if err != nil {
-		respondError(c, http.StatusBadRequest, fmt.Sprintf("unrecognized archive: %v", err))
+		reject(http.StatusBadRequest, "archive_unrecognized", fmt.Sprintf("unrecognized archive: %v", err))
 		return
 	}
 
@@ -179,7 +192,7 @@ func (h *Handler) UploadSourceArchive(c *gin.Context) {
 	uploadID := uuid.New().String()
 	key := fmt.Sprintf("source-uploads/%s/%s/%s%s", projectID, appName, uploadID, ext)
 	if err := h.sourceUploader.PutObject(c.Request.Context(), key, bytes.NewReader(data), int64(len(data)), contentType); err != nil {
-		respondError(c, http.StatusInternalServerError, "failed to store uploaded archive")
+		reject(http.StatusInternalServerError, "store_failed", "failed to store uploaded archive")
 		return
 	}
 	artifactURI := fmt.Sprintf("s3://%s/%s", h.sourceUploader.Bucket(), key)
@@ -232,11 +245,19 @@ func (h *Handler) UploadSourceArchive(c *gin.Context) {
 		return
 	}
 
-	_, _ = h.pool.Exec(c.Request.Context(),
-		`INSERT INTO audit_events (actor_id, project_id, action, resource_kind, resource_name)
-		 VALUES ($1, $2, 'UploadSourceArchive', 'Build', $3)`,
-		claims.UserID, projectID, appName,
-	)
+	h.recordAudit(c.Request.Context(), claims.UserID, auditEntry{
+		ProjectID:     projectID,
+		EnvironmentID: envID,
+		Action:        "UploadSourceArchive",
+		ResourceKind:  "Build",
+		ResourceName:  appName,
+		Metadata: map[string]any{
+			"framework": detected.Framework,
+			"format":    string(detected.Format),
+			"bytes":     len(data),
+			"worker":    isWorker,
+		},
+	})
 	h.notifyAuditEvent(claims, projectID, "UploadSourceArchive", appName)
 
 	c.JSON(http.StatusAccepted, uploadSourceResponse{
