@@ -496,6 +496,21 @@ func (h *Handler) CreateApp(c *gin.Context) {
 		return
 	}
 
+	var req createAppRequest
+
+	rejectCreate := func(status int, reason, msg string) {
+		h.recordAudit(c.Request.Context(), claims.UserID, auditEntry{
+			ProjectID:     projectID,
+			EnvironmentID: envID,
+			Action:        "CreateApp",
+			ResourceKind:  "App",
+			ResourceName:  req.Name,
+			Outcome:       auditOutcomeFailure,
+			Metadata:      map[string]any{"reason": reason, "status": status},
+		})
+		respondError(c, status, msg)
+	}
+
 	if orgID, orgErr := h.projectOrg(c.Request.Context(), projectID); orgErr == nil {
 		if qErr := h.checkQuota(c.Request.Context(), orgID, "apps"); qErr != nil {
 			if qe, ok := qErr.(*quotaExceededError); ok {
@@ -538,7 +553,7 @@ func (h *Handler) CreateApp(c *gin.Context) {
 			envID, projectID,
 		).Scan(&appServerName, &status)
 		if err == pgx.ErrNoRows {
-			respondError(c, http.StatusConflict, "this VM environment has no AppServer attached; create or attach one first")
+			rejectCreate(http.StatusConflict, "no_appserver", "this VM environment has no AppServer attached; create or attach one first")
 			return
 		}
 		if err != nil {
@@ -546,24 +561,23 @@ func (h *Handler) CreateApp(c *gin.Context) {
 			return
 		}
 		if status != string(models.AppServerStatusReady) {
-			respondError(c, http.StatusConflict, "the environment's AppServer is not Ready yet")
+			rejectCreate(http.StatusConflict, "appserver_not_ready", "the environment's AppServer is not Ready yet")
 			return
 		}
 	}
 
-	var req createAppRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		respondError(c, http.StatusBadRequest, err.Error())
+		rejectCreate(http.StatusBadRequest, "malformed_body", err.Error())
 		return
 	}
 
 	// Validate name (common to both runtimes).
 	if req.Name == "" {
-		respondError(c, http.StatusBadRequest, "name is required")
+		rejectCreate(http.StatusBadRequest, "name_required", "name is required")
 		return
 	}
 	if err := validateKubeName(req.Name); err != nil {
-		respondError(c, http.StatusBadRequest, err.Error())
+		rejectCreate(http.StatusBadRequest, "invalid_name", err.Error())
 		return
 	}
 
@@ -579,15 +593,15 @@ func (h *Handler) CreateApp(c *gin.Context) {
 			req.Profile = "small"
 		}
 		if req.Image == "" {
-			respondError(c, http.StatusBadRequest, "image is required")
+			rejectCreate(http.StatusBadRequest, "image_required", "image is required")
 			return
 		}
 		if err := ValidateImage(req.Image); err != nil {
-			respondError(c, http.StatusBadRequest, err.Error())
+			rejectCreate(http.StatusBadRequest, "invalid_image", err.Error())
 			return
 		}
 		if req.Port < 1 || req.Port > 65535 {
-			respondError(c, http.StatusBadRequest, "port must be between 1 and 65535")
+			rejectCreate(http.StatusBadRequest, "invalid_port", "port must be between 1 and 65535")
 			return
 		}
 		minReplicas := 1
@@ -595,37 +609,37 @@ func (h *Handler) CreateApp(c *gin.Context) {
 			minReplicas = 0
 		}
 		if req.Replicas < minReplicas || req.Replicas > 10 {
-			respondError(c, http.StatusBadRequest, fmt.Sprintf("replicas must be between %d and 10", minReplicas))
+			rejectCreate(http.StatusBadRequest, "invalid_replicas", fmt.Sprintf("replicas must be between %d and 10", minReplicas))
 			return
 		}
 		validProfiles := map[string]bool{"small": true, "medium": true, "large": true}
 		if !validProfiles[req.Profile] {
-			respondError(c, http.StatusBadRequest, "profile must be one of: small, medium, large")
+			rejectCreate(http.StatusBadRequest, "invalid_profile", "profile must be one of: small, medium, large")
 			return
 		}
 		validWorkloadTypes := map[string]bool{"": true, "Deployment": true, "StatefulSet": true}
 		if !validWorkloadTypes[req.WorkloadType] {
-			respondError(c, http.StatusBadRequest, "workload_type must be one of: Deployment, StatefulSet")
+			rejectCreate(http.StatusBadRequest, "invalid_workload_type", "workload_type must be one of: Deployment, StatefulSet")
 			return
 		}
 	} else {
 		if req.WorkloadType != "" {
-			respondError(c, http.StatusBadRequest, "workload_type is only supported for Kubernetes apps")
+			rejectCreate(http.StatusBadRequest, "workload_type_not_supported", "workload_type is only supported for Kubernetes apps")
 			return
 		}
 		if req.Worker {
-			respondError(c, http.StatusBadRequest, "worker is only supported for Kubernetes apps")
+			rejectCreate(http.StatusBadRequest, "worker_not_supported", "worker is only supported for Kubernetes apps")
 			return
 		}
 	}
 
 	appVolume, err := validateAppVolume(req.Volume)
 	if err != nil {
-		respondError(c, http.StatusBadRequest, err.Error())
+		rejectCreate(http.StatusBadRequest, "invalid_volume", err.Error())
 		return
 	}
 	if appVolume != nil && isCompose {
-		respondError(c, http.StatusBadRequest, "persistent storage is only supported for Kubernetes apps")
+		rejectCreate(http.StatusBadRequest, "storage_not_supported", "persistent storage is only supported for Kubernetes apps")
 		return
 	}
 	if appVolume != nil {
@@ -636,6 +650,15 @@ func (h *Handler) CreateApp(c *gin.Context) {
 				return
 			}
 			if capBytes > 0 && quantityBytes(appVolume.Size) > capBytes {
+				h.recordAudit(c.Request.Context(), claims.UserID, auditEntry{
+					ProjectID:     projectID,
+					EnvironmentID: envID,
+					Action:        "CreateApp",
+					ResourceKind:  "App",
+					ResourceName:  req.Name,
+					Outcome:       auditOutcomeFailure,
+					Metadata:      map[string]any{"reason": "storage_quota_exceeded", "limit_gb": limitGB},
+				})
 				respondQuotaExceeded(c, "storage_gb", limitGB)
 				return
 			}
