@@ -8,10 +8,22 @@
 #      parallel block, so one unformatted file kills the Go AND the frontend
 #      lane and nothing reaches prod. On 2026-07-31 that cost 6 red builds
 #      and ~8 hours of blocked delivery.
+#   3. eslint on the frontend files carried by the pushed commits. The same
+#      day, a single `react-hooks/set-state-in-effect` error held 8 commits
+#      out of prod — the Go gate was clean and the frontend lane failed
+#      instead. `npm run lint` is a hard failure in Jenkins, so this costs
+#      exactly as much as an unformatted Go file.
 #
 # The gofmt check reads file content from the pushed commit, not from the
 # working tree: this repo is shared by concurrent sessions, and someone
 # else's unstaged edit must not block your push.
+#
+# eslint cannot work that way — it needs the real tree to resolve imports,
+# tsconfig and the flat config. So it runs on working-tree paths and skips
+# any path with uncommitted changes, keeping the same promise: a concurrent
+# session's dirty file never blocks your push. It also skips (loudly, without
+# blocking) when frontend/node_modules is absent — a gate that fails because
+# of the environment is a gate people disable with --no-verify.
 #
 # Stdin lines (git pre-push protocol):
 #   <local ref> <local sha> <remote ref> <remote sha>
@@ -22,6 +34,8 @@ zero='0000000000000000000000000000000000000000'
 gofmt_dirs_re='^(backend|build-agent|gitops-agent|mcp-server|portainer-agent|tools/dbmove)/'
 violation=0
 go_blobs=()
+front_paths=()
+front_re='^frontend/.*\.(ts|tsx|js|jsx|mjs)$'
 
 while read -r local_ref local_sha remote_ref remote_sha; do
   # Skip deletes (local sha all-zero) — removing a feat/* branch is allowed.
@@ -41,11 +55,13 @@ while read -r local_ref local_sha remote_ref remote_sha; do
 
   while IFS= read -r path; do
     [ -n "$path" ] || continue
-    [[ "$path" == *.go ]] || continue
-    [[ "$path" =~ $gofmt_dirs_re ]] || continue
     # Deleted paths are absent from the pushed tree — skip them.
     git cat-file -e "$local_sha:$path" 2>/dev/null || continue
-    go_blobs+=("$local_sha:$path")
+    if [[ "$path" == *.go && "$path" =~ $gofmt_dirs_re ]]; then
+      go_blobs+=("$local_sha:$path")
+    elif [[ "$path" =~ $front_re ]]; then
+      front_paths+=("$path")
+    fi
   done < <(git "${diff_args[@]}" 2>/dev/null || true)
 done
 
@@ -72,6 +88,32 @@ if [ ${#go_blobs[@]} -gt 0 ]; then
     echo "  so main goes red and nothing reaches prod." >&2
     echo "  Fix: gofmt -w <file>, then amend or add a commit." >&2
     violation=1
+  fi
+fi
+
+if [ ${#front_paths[@]} -gt 0 ]; then
+  repo_root="$(git rev-parse --show-toplevel)"
+  if [ ! -d "$repo_root/frontend/node_modules" ]; then
+    echo "⚠ skipping the eslint gate: frontend/node_modules is absent (run: cd frontend && npm ci)." >&2
+    echo "  Jenkins still runs it — a lint error there blocks delivery for everyone." >&2
+  else
+    lint_paths=()
+    for path in "${front_paths[@]}"; do
+      if [ -n "$(git status --porcelain -- "$path" 2>/dev/null)" ]; then
+        echo "⚠ eslint gate skips '$path': it has uncommitted changes, so the tree" >&2
+        echo "  does not match what you are pushing (concurrent session?)." >&2
+        continue
+      fi
+      lint_paths+=("${path#frontend/}")
+    done
+    if [ ${#lint_paths[@]} -gt 0 ]; then
+      if ! (cd "$repo_root/frontend" && npx --no-install eslint "${lint_paths[@]}" >&2); then
+        echo "✖ blocked: eslint errors in the frontend files you are pushing." >&2
+        echo "  'npm run lint' is a hard failure in Jenkins, so main goes red" >&2
+        echo "  and nothing — backend included — reaches prod." >&2
+        violation=1
+      fi
+    fi
   fi
 fi
 
