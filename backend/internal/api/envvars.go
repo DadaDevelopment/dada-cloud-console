@@ -2,12 +2,14 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"time"
 
 	"github.com/dada-tuda/console/backend/internal/auth"
 	"github.com/dada-tuda/console/backend/internal/crypto"
+	"github.com/dada-tuda/console/backend/internal/models"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -31,6 +33,53 @@ type envVar struct {
 	PreviewOverride bool      `json:"preview_override"`
 	CreatedAt       time.Time `json:"created_at"`
 	UpdatedAt       time.Time `json:"updated_at"`
+}
+
+// queueEnvApply re-deploys an app so an env var change actually reaches its
+// pods, and reports whether it queued anything.
+//
+// Env vars are resolved at RENDER time, not at save time: the gitops-agent
+// decrypts env_vars while rendering an operation and writes them into
+// values.yaml / a per-app Secret. Saving a variable alone therefore changed
+// nothing a user could observe — the row sat in the database and the running
+// pods kept the environment they were born with. Observed live: BOT_TOKEN was
+// saved through the console, the app kept crashlooping on KeyError: 'BOT_TOKEN',
+// and only an unrelated deploy picked the value up. Restart is not a substitute:
+// it is compose-only, and re-rendering is exactly what is needed here.
+//
+// The re-deploy is the app's CURRENT image, so this is a no-op for the workload
+// itself and the only observable effect is the new environment. Apps with no
+// image yet (a bare app, or an upload whose first build has not finished) are
+// skipped: there is nothing to deploy, and their env is picked up by the deploy
+// that materializes them.
+func (h *Handler) queueEnvApply(c *gin.Context, claims *auth.Claims, projectID, envID uuid.UUID, appName string) (*models.Operation, bool) {
+	var image string
+	if err := h.pool.QueryRow(c.Request.Context(),
+		`SELECT COALESCE(summary_json->>'image', '') FROM resource_snapshots
+		 WHERE project_id = $1 AND environment_id = $2 AND kind = 'App' AND name = $3`,
+		projectID, envID, appName,
+	).Scan(&image); err != nil || image == "" {
+		return nil, false
+	}
+
+	payloadBytes, err := json.Marshal(models.DeployImageVersionPayload{AppName: appName, Image: image})
+	if err != nil {
+		return nil, false
+	}
+
+	var op models.Operation
+	row := h.pool.QueryRow(c.Request.Context(),
+		`INSERT INTO operations (actor_id, project_id, environment_id, action, resource_kind, resource_name, status, payload)
+		 VALUES ($1, $2, $3, 'DeployImageVersion', 'App', $4, 'Created', $5)
+		 RETURNING id, actor_id, project_id, environment_id, action, resource_kind, resource_name,
+		           status, payload, validation_result, git_commit, git_path, argo_application,
+		           error_code, error_message, created_at, updated_at`,
+		claims.UserID, projectID, envID, appName, payloadBytes,
+	)
+	if err := scanOperation(row, &op); err != nil {
+		return nil, false
+	}
+	return &op, true
 }
 
 // ListEnvVars returns the env vars for an app. Secret values are never returned —
@@ -298,7 +347,182 @@ func (h *Handler) SetEnvVar(c *gin.Context) {
 		claims.UserID, projectID, appName,
 	)
 
-	c.JSON(http.StatusOK, gin.H{"env_var": ev})
+	resp := gin.H{"env_var": ev}
+	if !req.PreviewOverride {
+		if op, queued := h.queueEnvApply(c, claims, projectID, envID, appName); queued {
+			resp["operation"] = op
+		}
+	}
+	c.JSON(http.StatusOK, resp)
+}
+
+type bulkEnvVarItem struct {
+	Key      string `json:"key"`
+	Value    string `json:"value"`
+	IsSecret bool   `json:"is_secret"`
+	Scope    string `json:"scope"`
+}
+
+type bulkSetEnvVarsRequest struct {
+	Vars []bulkEnvVarItem `json:"vars"`
+}
+
+// BulkSetEnvVars upserts many environment variables in one call.
+//
+// The single-variable endpoint costs a full round trip and, since env changes
+// now queue a re-deploy, one deploy PER VARIABLE. Pasting a .env with eight
+// keys through it means eight deploys racing each other. Here every variable is
+// written first and exactly one re-deploy is queued at the end.
+//
+// Partial success is not offered: a half-applied .env is worse than a rejected
+// one, because the app comes up with an environment the user never described.
+// Validation therefore runs over the whole batch before anything is written.
+//
+// Preview overrides are deliberately out of scope — bulk entry exists for the
+// "here is my .env, run my app" path, and preview_env_overrides is an expert
+// feature that belongs on the single-variable form.
+//
+// @ID          bulkSetEnvVars
+// @Summary     Set many environment variables at once
+// @Description Creates or updates several environment variables for an app in a single request, then queues one re-deploy so the new environment reaches the running pods. Values are stored AES-GCM encrypted. Requires write access. The batch is all-or-nothing.
+// @Tags        env-var
+// @Accept      json
+// @Produce     json
+// @Security    BearerAuth
+// @Param       projectId path     string                true "Project UUID"
+// @Param       envId     path     string                true "Environment UUID"
+// @Param       appName   path     string                true "App name"
+// @Param       body      body     bulkSetEnvVarsRequest true "Variables to set"
+// @Success     200       {object} map[string]interface{} "object with the saved env vars"
+// @Failure     400       {object} map[string]string
+// @Failure     403       {object} map[string]string
+// @Failure     404       {object} map[string]string
+// @Router      /projects/{projectId}/environments/{envId}/apps/{appName}/env/bulk [post]
+func (h *Handler) BulkSetEnvVars(c *gin.Context) {
+	claims, ok := auth.GetClaims(c)
+	if !ok {
+		respondUnauthorized(c)
+		return
+	}
+
+	projectID, err := uuid.Parse(c.Param("projectId"))
+	if err != nil {
+		respondNotFound(c)
+		return
+	}
+	envID, err := uuid.Parse(c.Param("envId"))
+	if err != nil {
+		respondNotFound(c)
+		return
+	}
+	appName := c.Param("appName")
+
+	role, err := h.effectiveRole(c.Request.Context(), claims, projectID)
+	if err == pgx.ErrNoRows {
+		respondNotFound(c)
+		return
+	}
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, "failed to check project membership")
+		return
+	}
+	if !canWrite(role) {
+		respondForbidden(c)
+		return
+	}
+
+	if ok, err := h.envBelongsToProject(c.Request.Context(), envID, projectID); err != nil {
+		respondError(c, http.StatusInternalServerError, "failed to verify environment")
+		return
+	} else if !ok {
+		respondNotFound(c)
+		return
+	}
+
+	var req bulkSetEnvVarsRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		respondError(c, http.StatusBadRequest, err.Error())
+		return
+	}
+	if len(req.Vars) == 0 {
+		respondError(c, http.StatusBadRequest, "vars is required")
+		return
+	}
+	if len(req.Vars) > 200 {
+		respondError(c, http.StatusBadRequest, "at most 200 variables per request")
+		return
+	}
+
+	seen := make(map[string]struct{}, len(req.Vars))
+	for i := range req.Vars {
+		v := &req.Vars[i]
+		if !validEnvKey(v.Key) {
+			respondError(c, http.StatusBadRequest, fmt.Sprintf("invalid key %q: expected letters, digits and underscore, not starting with a digit", v.Key))
+			return
+		}
+		if _, dup := seen[v.Key]; dup {
+			respondError(c, http.StatusBadRequest, fmt.Sprintf("duplicate key %q", v.Key))
+			return
+		}
+		seen[v.Key] = struct{}{}
+		if len(v.Value) > 4*1024 {
+			respondError(c, http.StatusBadRequest, fmt.Sprintf("value for %q exceeds 4KiB limit", v.Key))
+			return
+		}
+		if v.Scope == "" {
+			v.Scope = "runtime"
+		}
+		if v.Scope != "build" && v.Scope != "runtime" && v.Scope != "both" {
+			respondError(c, http.StatusBadRequest, "scope must be one of: build, runtime, both")
+			return
+		}
+	}
+
+	saved := make([]envVar, 0, len(req.Vars))
+	for _, v := range req.Vars {
+		ev, err := h.upsertEnvVar(c.Request.Context(), envID, appName, v.Key, v.Value, v.IsSecret, v.Scope, claims.UserID.String())
+		if err != nil {
+			respondError(c, http.StatusInternalServerError, "failed to save env var")
+			return
+		}
+		saved = append(saved, ev)
+	}
+
+	_, _ = h.pool.Exec(c.Request.Context(),
+		`INSERT INTO audit_events (actor_id, project_id, action, resource_kind, resource_name)
+		 VALUES ($1, $2, 'SetEnvVar', 'EnvVar', $3)`,
+		claims.UserID, projectID, appName,
+	)
+
+	resp := gin.H{"env_vars": saved}
+	if op, queued := h.queueEnvApply(c, claims, projectID, envID, appName); queued {
+		resp["operation"] = op
+	}
+	c.JSON(http.StatusOK, resp)
+}
+
+// validEnvKey reports whether key is a POSIX-shell-safe environment variable
+// name. The single-variable form enforces the same shape in the browser via a
+// pattern attribute; bulk entry accepts a pasted blob, so the check has to live
+// on the server too.
+func validEnvKey(key string) bool {
+	if key == "" || len(key) > 256 {
+		return false
+	}
+	for i, r := range key {
+		switch {
+		case r == '_':
+		case r >= 'a' && r <= 'z':
+		case r >= 'A' && r <= 'Z':
+		case r >= '0' && r <= '9':
+			if i == 0 {
+				return false
+			}
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 // RevealEnvVar returns the decrypted value of a single env var (write access required).
@@ -472,6 +696,10 @@ func (h *Handler) DeleteEnvVar(c *gin.Context) {
 	if tag.RowsAffected() == 0 {
 		respondNotFound(c)
 		return
+	}
+
+	if table == "env_vars" {
+		_, _ = h.queueEnvApply(c, claims, projectID, envID, appName)
 	}
 
 	c.Status(http.StatusNoContent)

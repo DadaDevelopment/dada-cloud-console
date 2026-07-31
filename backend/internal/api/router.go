@@ -503,6 +503,7 @@ func SetupRouter(pool *pgxpool.Pool, cfg *config.Config) *gin.Engine {
 		// Env vars (always encrypted at rest; reveal is write-gated).
 		api.GET("/projects/:projectId/environments/:envId/apps/:appName/env", h.ListEnvVars)
 		api.PUT("/projects/:projectId/environments/:envId/apps/:appName/env/:key", h.SetEnvVar)
+		api.POST("/projects/:projectId/environments/:envId/apps/:appName/env/bulk", h.BulkSetEnvVars)
 		api.GET("/projects/:projectId/environments/:envId/apps/:appName/env/:key", h.RevealEnvVar)
 		api.DELETE("/projects/:projectId/environments/:envId/apps/:appName/env/:key", h.DeleteEnvVar)
 

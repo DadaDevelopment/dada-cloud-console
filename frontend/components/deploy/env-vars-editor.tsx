@@ -6,6 +6,7 @@ import { Modal } from "@/components/ui/modal";
 import { Spinner } from "@/components/ui/spinner";
 import { CopyButton } from "@/components/ui/copy-button";
 import { useT } from "@/lib/i18n/console/context";
+import { parseEnvBlob } from "@/lib/dotenv";
 
 type Scope = "build" | "runtime" | "both";
 
@@ -18,11 +19,20 @@ interface EditState {
   editingExisting: boolean;
 }
 
+/**
+ * A new variable is runtime-only.
+ *
+ * The form used to default to `both`, which meant every variable a user added
+ * — a bot token, an API key — was also handed to the build. That is wrong by
+ * default (the build has no business seeing a token), and it forced a decision
+ * the user has no way to make on their first deploy. Build-time exposure is a
+ * real need for a minority of frameworks, so it stays available under Advanced.
+ */
 const EMPTY: EditState = {
   key: "",
   value: "",
   is_secret: true,
-  scope: "both",
+  scope: "runtime",
   preview_override: false,
   editingExisting: false,
 };
@@ -54,6 +64,12 @@ export function EnvVarsEditor({
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<string | null>(null);
+
+  const [bulkOpen, setBulkOpen] = useState(false);
+  const [bulkText, setBulkText] = useState("");
+  const [bulkSubmitting, setBulkSubmitting] = useState(false);
+  const [bulkError, setBulkError] = useState<string | null>(null);
+  const bulkParsed = parseEnvBlob(bulkText);
 
   const load = useCallback(async () => {
     if (!envId) return;
@@ -131,6 +147,28 @@ export function EnvVarsEditor({
     }
   }
 
+  async function handleBulkSubmit(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    setBulkError(null);
+    setBulkSubmitting(true);
+    try {
+      await envVarsApi.bulkUpsert(
+        projectId,
+        envId,
+        appName,
+        bulkParsed.vars.map((v) => ({ key: v.key, value: v.value, is_secret: true, scope: "runtime" as const }))
+      );
+      setBulkOpen(false);
+      setBulkText("");
+      setRevealed({});
+      await load();
+    } catch (err) {
+      setBulkError(err instanceof Error ? err.message : t("apps.env.error.save"));
+    } finally {
+      setBulkSubmitting(false);
+    }
+  }
+
   async function handleDelete(v: EnvVar) {
     if (!window.confirm(t("apps.env.confirmDelete", { key: v.key }))) return;
     const rk = rowKey(v);
@@ -153,6 +191,16 @@ export function EnvVarsEditor({
           <p className="text-sm text-gray-600 dark:text-gray-400">{t("apps.env.subtitle")}</p>
         </div>
         {canEdit && (
+          <div className="flex items-center gap-2">
+          <button
+            onClick={() => {
+              setBulkError(null);
+              setBulkOpen(true);
+            }}
+            className="inline-flex items-center gap-2 rounded-lg border border-gray-300 dark:border-gray-700 px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
+          >
+            {t("apps.env.bulk.button")}
+          </button>
           <button
             onClick={openAdd}
             className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 transition-colors"
@@ -162,6 +210,7 @@ export function EnvVarsEditor({
             </svg>
             {t("apps.env.add")}
           </button>
+          </div>
         )}
       </div>
 
@@ -300,19 +349,6 @@ export function EnvVarsEditor({
             />
           </div>
 
-          <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-200">{t("apps.env.col.scope")}</label>
-            <select
-              value={form.scope}
-              onChange={(e) => setForm((f) => ({ ...f, scope: e.target.value as Scope }))}
-              className="mt-1 block w-full rounded-lg border border-gray-300 dark:border-gray-700 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-            >
-              <option value="both">{t("apps.env.scope.both")}</option>
-              <option value="build">{t("apps.env.scope.build")}</option>
-              <option value="runtime">{t("apps.env.scope.runtime")}</option>
-            </select>
-          </div>
-
           <div className="flex items-center justify-between rounded-lg border border-gray-200 dark:border-gray-800 px-4 py-3">
             <div>
               <p className="text-sm font-medium text-gray-700 dark:text-gray-200">{t("apps.env.field.secret")}</p>
@@ -331,6 +367,25 @@ export function EnvVarsEditor({
             </button>
           </div>
 
+          <details className="rounded-lg border border-gray-200 dark:border-gray-800 px-4 py-3">
+            <summary className="cursor-pointer text-sm font-medium text-gray-700 dark:text-gray-200">
+              {t("apps.env.advanced")}
+            </summary>
+            <div className="mt-4 space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-200">{t("apps.env.col.scope")}</label>
+                <select
+                  value={form.scope}
+                  onChange={(e) => setForm((f) => ({ ...f, scope: e.target.value as Scope }))}
+                  className="mt-1 block w-full rounded-lg border border-gray-300 dark:border-gray-700 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                >
+                  <option value="runtime">{t("apps.env.scope.runtime")}</option>
+                  <option value="both">{t("apps.env.scope.both")}</option>
+                  <option value="build">{t("apps.env.scope.build")}</option>
+                </select>
+                <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">{t("apps.env.scope.hint")}</p>
+              </div>
+
           <div className="flex items-center justify-between rounded-lg border border-gray-200 dark:border-gray-800 px-4 py-3">
             <div>
               <p className="text-sm font-medium text-gray-700 dark:text-gray-200">{t("apps.env.previewOverride.label")}</p>
@@ -348,6 +403,8 @@ export function EnvVarsEditor({
               <span className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${form.preview_override ? "translate-x-6" : "translate-x-1"}`} />
             </button>
           </div>
+            </div>
+          </details>
 
           {submitError && (
             <div role="alert" className="rounded-lg border border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-950/40 px-4 py-3 text-sm text-red-700 dark:text-red-300">
@@ -372,6 +429,73 @@ export function EnvVarsEditor({
               className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50 transition-colors"
             >
               {submitting ? <><Spinner size="sm" /> {t("apps.env.saving")}</> : t("apps.env.save")}
+            </button>
+          </div>
+        </form>
+      </Modal>
+
+      <Modal
+        isOpen={bulkOpen}
+        onClose={() => {
+          setBulkOpen(false);
+          setBulkError(null);
+        }}
+        title={t("apps.env.bulk.title")}
+      >
+        <form onSubmit={handleBulkSubmit} className="space-y-4">
+          <p className="text-sm text-gray-600 dark:text-gray-400">{t("apps.env.bulk.hint")}</p>
+          <textarea
+            value={bulkText}
+            onChange={(e) => setBulkText(e.target.value)}
+            rows={10}
+            spellCheck={false}
+            placeholder={"BOT_TOKEN=123:abc\nDATABASE_URL=postgres://…"}
+            className="block w-full rounded-lg border border-gray-300 dark:border-gray-700 px-3 py-2 text-sm font-mono text-gray-900 dark:text-gray-100 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+          />
+
+          {bulkText.trim() && (
+            <div className="space-y-1 text-xs">
+              <p className="text-gray-600 dark:text-gray-400">
+                {bulkParsed.vars.length > 0
+                  ? t("apps.env.bulk.parsed", { count: String(bulkParsed.vars.length) })
+                  : t("apps.env.bulk.empty")}
+              </p>
+              {bulkParsed.vars.length > 0 && (
+                <p className="font-mono text-gray-500 dark:text-gray-400 break-all">
+                  {bulkParsed.vars.map((v) => v.key).join(", ")}
+                </p>
+              )}
+              {bulkParsed.errors.length > 0 && (
+                <p className="text-amber-700 dark:text-amber-400 break-all">
+                  {t("apps.env.bulk.badLines", { lines: bulkParsed.errors.join(" | ") })}
+                </p>
+              )}
+            </div>
+          )}
+
+          {bulkError && (
+            <div role="alert" className="rounded-lg border border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-950/40 px-4 py-3 text-sm text-red-700 dark:text-red-300">
+              {bulkError}
+            </div>
+          )}
+
+          <div className="flex justify-end gap-3 pt-1">
+            <button
+              type="button"
+              onClick={() => {
+                setBulkOpen(false);
+                setBulkError(null);
+              }}
+              className="rounded-lg px-4 py-2 text-sm font-medium text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+            >
+              {t("common.cancel")}
+            </button>
+            <button
+              type="submit"
+              disabled={bulkSubmitting || bulkParsed.vars.length === 0}
+              className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50 transition-colors"
+            >
+              {bulkSubmitting ? <><Spinner size="sm" /> {t("apps.env.saving")}</> : t("apps.env.bulk.submit")}
             </button>
           </div>
         </form>

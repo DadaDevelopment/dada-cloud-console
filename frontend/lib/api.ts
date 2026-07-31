@@ -1055,6 +1055,17 @@ export const envVarsApi = {
       { method: "PUT", body: data }
     ),
 
+  bulkUpsert: (
+    projectId: string,
+    envId: string,
+    appName: string,
+    vars: { key: string; value: string; is_secret: boolean; scope: "build" | "runtime" | "both" }[]
+  ) =>
+    apiFetch<OperationResponse>(
+      `/api/v1/projects/${projectId}/environments/${envId}/apps/${appName}/env/bulk`,
+      { method: "POST", body: { vars } }
+    ),
+
   reveal: (
     projectId: string,
     envId: string,

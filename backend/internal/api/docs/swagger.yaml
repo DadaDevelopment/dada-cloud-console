@@ -235,6 +235,24 @@ definitions:
       updated_at:
         type: string
     type: object
+  api.bulkEnvVarItem:
+    properties:
+      is_secret:
+        type: boolean
+      key:
+        type: string
+      scope:
+        type: string
+      value:
+        type: string
+    type: object
+  api.bulkSetEnvVarsRequest:
+    properties:
+      vars:
+        items:
+          $ref: '#/definitions/api.bulkEnvVarItem'
+        type: array
+    type: object
   api.clientErrorReport:
     properties:
       component_stack:
@@ -6511,6 +6529,68 @@ paths:
       security:
       - BearerAuth: []
       summary: Set an environment variable
+      tags:
+      - env-var
+  /projects/{projectId}/environments/{envId}/apps/{appName}/env/bulk:
+    post:
+      consumes:
+      - application/json
+      description: Creates or updates several environment variables for an app in
+        a single request, then queues one re-deploy so the new environment reaches
+        the running pods. Values are stored AES-GCM encrypted. Requires write access.
+        The batch is all-or-nothing.
+      operationId: bulkSetEnvVars
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      - description: Environment UUID
+        in: path
+        name: envId
+        required: true
+        type: string
+      - description: App name
+        in: path
+        name: appName
+        required: true
+        type: string
+      - description: Variables to set
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/api.bulkSetEnvVarsRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: object with the saved env vars
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Set many environment variables at once
       tags:
       - env-var
   /projects/{projectId}/environments/{envId}/apps/{appName}/hostnames:

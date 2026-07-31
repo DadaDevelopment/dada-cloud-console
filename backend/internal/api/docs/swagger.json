@@ -7888,6 +7888,95 @@
                 }
             }
         },
+        "/projects/{projectId}/environments/{envId}/apps/{appName}/env/bulk": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Creates or updates several environment variables for an app in a single request, then queues one re-deploy so the new environment reaches the running pods. Values are stored AES-GCM encrypted. Requires write access. The batch is all-or-nothing.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "env-var"
+                ],
+                "summary": "Set many environment variables at once",
+                "operationId": "bulkSetEnvVars",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Project UUID",
+                        "name": "projectId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Environment UUID",
+                        "name": "envId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "App name",
+                        "name": "appName",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Variables to set",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/api.bulkSetEnvVarsRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "object with the saved env vars",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/projects/{projectId}/environments/{envId}/apps/{appName}/env/{key}": {
             "get": {
                 "security": [
@@ -15245,6 +15334,34 @@
                 },
                 "updated_at": {
                     "type": "string"
+                }
+            }
+        },
+        "api.bulkEnvVarItem": {
+            "type": "object",
+            "properties": {
+                "is_secret": {
+                    "type": "boolean"
+                },
+                "key": {
+                    "type": "string"
+                },
+                "scope": {
+                    "type": "string"
+                },
+                "value": {
+                    "type": "string"
+                }
+            }
+        },
+        "api.bulkSetEnvVarsRequest": {
+            "type": "object",
+            "properties": {
+                "vars": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/api.bulkEnvVarItem"
+                    }
                 }
             }
         },
