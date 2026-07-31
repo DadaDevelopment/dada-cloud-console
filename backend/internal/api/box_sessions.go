@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -134,6 +135,14 @@ func (h *Handler) revokeBoxSessions(ctx context.Context, boxID uuid.UUID) (int64
 
 // clearBoxDoor empties the digest file inside the box, if this host runs the box
 // and gave it a door at all.
+//
+// A box whose body is gone counts as revoked rather than as a failure. The strict
+// rule above — a teardown that could not withdraw the credential must not report
+// that it did — is about a door that still stands; a pod that no longer exists
+// has no broker, no digest file and no path a token could arrive on. Treating
+// that as a failure is what wedged the reaper: every idle box whose pod had
+// already gone away failed its suspend three times, stayed Ready, and was
+// re-enqueued on the next pass forever.
 func (h *Handler) clearBoxDoor(ctx context.Context, boxID uuid.UUID) error {
 	stack := h.boxStack
 	if stack == nil || !stack.door.BrokerConfigured() {
@@ -147,7 +156,11 @@ func (h *Handler) clearBoxDoor(ctx context.Context, boxID uuid.UUID) error {
 	if instanceRef == "" {
 		return nil
 	}
-	return stack.door.RevokeAllSessionDigests(ctx, &box.Instance{ID: boxID.String(), InstanceRef: instanceRef})
+	err := stack.door.RevokeAllSessionDigests(ctx, &box.Instance{ID: boxID.String(), InstanceRef: instanceRef})
+	if errors.Is(err, box.ErrBodyGone) {
+		return nil
+	}
+	return err
 }
 
 // resolvedBoxSession is the tenancy a box session token resolves to.

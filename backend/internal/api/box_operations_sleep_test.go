@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -10,6 +11,15 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
+
+// vanishedDoor is a configured broker whose box no longer has a body — the state
+// a pod left behind by a node drain, an eviction or a teardown that already ran.
+type vanishedDoor struct{ fakeDoor }
+
+func (vanishedDoor) BrokerConfigured() bool { return true }
+func (vanishedDoor) RevokeAllSessionDigests(context.Context, *box.Instance) error {
+	return fmt.Errorf("exec in box: %w: pods \"box-gone\" not found", box.ErrBodyGone)
+}
 
 // boxExpiry reads a box's sleep deadline.
 func boxExpiry(t *testing.T, pool *pgxpool.Pool, boxID uuid.UUID) time.Time {
@@ -88,6 +98,40 @@ func TestBoxOperationsWorker_SuspendIsIdempotentOnASleepingBox(t *testing.T) {
 	status, errMsg, _ := operationStatus(t, pool, opID)
 	if status != string(models.OperationStatusReady) {
 		t.Errorf("operation status = %q, want Ready: suspending a sleeping box is success; error_message=%q", status, errMsg)
+	}
+}
+
+// TestBoxOperationsWorker_SuspendSucceedsWhenTheBodyIsAlreadyGone is a live
+// regression. The first prod run of this worker failed every reaper-issued
+// suspend with `revoke sessions: install session digests: exec in box: pods
+// "box-…" not found`: the pods had already been deleted, revocation treated the
+// missing door as an incomplete revocation, and each box stayed Ready while the
+// reaper re-enqueued the same doomed suspend on every pass.
+//
+// A door that no longer exists cannot be knocked on. Suspend must land.
+func TestBoxOperationsWorker_SuspendSucceedsWhenTheBodyIsAlreadyGone(t *testing.T) {
+	pool := testOptimisticPool(t)
+	rt := &box.FakeRuntime{Clock: box.NewFakeClock(fixedWorkerTestTime)}
+
+	boxID, opID, _, _ := seedBoxOperation(t, pool, models.BoxStatusReady, "box-gone",
+		models.ActionSuspendBox, models.SuspendBoxPayload{})
+	if _, err := pool.Exec(context.Background(),
+		`UPDATE operations SET payload = $2 WHERE id = $1`, opID,
+		mustMarshal(t, models.SuspendBoxPayload{BoxID: boxID, Reason: "idle"})); err != nil {
+		t.Fatalf("fix up payload with the real box id: %v", err)
+	}
+
+	h := newTestBoxWorkerHandler(pool, rt, box.NewMemoryPool())
+	h.boxStack.door = vanishedDoor{}
+	w := &boxOperationsWorker{h: h}
+	w.tick(context.Background())
+
+	status, errMsg, _ := operationStatus(t, pool, opID)
+	if status != string(models.OperationStatusReady) {
+		t.Errorf("operation status = %q, want Ready: a box with no body is already revoked; error_message=%q", status, errMsg)
+	}
+	if got := boxStatus(t, pool, boxID); got != string(models.BoxStatusSleeping) {
+		t.Errorf("box status = %q, want Sleeping: a box left Ready with no pod is re-reaped forever", got)
 	}
 }
 

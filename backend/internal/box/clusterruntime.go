@@ -571,6 +571,9 @@ func (c *ClusterRuntime) execWithStdin(ctx context.Context, inst *Instance, cmd 
 		if code, ok := exitCodeFrom(err); ok {
 			return CanaryResult{ExitCode: code, Stdout: out.String()}, nil
 		}
+		if apierrors.IsNotFound(err) {
+			return CanaryResult{Stdout: out.String()}, fmt.Errorf("exec in box: %w: %v", ErrBodyGone, err)
+		}
 		return CanaryResult{Stdout: out.String()}, fmt.Errorf("exec in box: %w", err)
 	}
 	return CanaryResult{ExitCode: 0, Stdout: out.String()}, nil

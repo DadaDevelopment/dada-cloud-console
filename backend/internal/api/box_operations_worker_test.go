@@ -65,6 +65,7 @@ func seedBoxOperation(t *testing.T, pool *pgxpool.Pool, status models.BoxStatus,
 		t.Fatalf("seed project: %v", err)
 	}
 	t.Cleanup(func() { _, _ = pool.Exec(context.Background(), `DELETE FROM projects WHERE id = $1`, projectID) })
+	parkClaimableBoxOperations(t, pool)
 
 	boxName = "bw-" + suffix
 	var envID uuid.UUID
@@ -96,6 +97,25 @@ func seedBoxOperation(t *testing.T, pool *pgxpool.Pool, status models.BoxStatus,
 		t.Fatalf("seed operation: %v", err)
 	}
 	return boxID, opID, projectID, boxName
+}
+
+// parkClaimableBoxOperations retires every Box operation still claimable when a
+// test starts, so one tick sees only the operation that test just seeded.
+//
+// The worker claims a BATCH, and a test that asserts on its own operation is
+// really asserting that the batch reached it. Tests whose operation is meant to
+// stay retryable leave it claimable, and a shared test database keeps those rows
+// across runs, so a package that passed at eight tests silently starts failing at
+// nine when the batch fills up with somebody else's leftovers. The failure looks
+// like the code under test broke, which is the expensive kind of wrong.
+func parkClaimableBoxOperations(t *testing.T, pool *pgxpool.Pool) {
+	t.Helper()
+	if _, err := pool.Exec(context.Background(),
+		`UPDATE operations SET status = 'Failed'
+		  WHERE resource_kind = $1 AND status IN ('Created', 'Reconciling')`,
+		models.ResourceKindBox); err != nil {
+		t.Fatalf("park leftover box operations: %v", err)
+	}
 }
 
 func operationStatus(t *testing.T, pool *pgxpool.Pool, opID uuid.UUID) (status, errMsg string, attempts int) {

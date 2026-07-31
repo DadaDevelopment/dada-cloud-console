@@ -34,6 +34,16 @@ import (
 // that sees ErrPoolExhausted can fall back to a cold start and account for it.
 var ErrPoolExhausted = errors.New("box: warm pool exhausted")
 
+// ErrBodyGone reports that the box's running body no longer exists — the pod was
+// deleted by a node drain, an evicted preemption, or a teardown that already ran.
+//
+// It exists so teardown paths can tell "I could not reach the box" apart from
+// "there is nothing left to reach". The difference is not cosmetic: a suspend
+// that treats a missing pod as a failure retries until it gives up, the reaper
+// enqueues the same suspend on its next pass, and the box stays Ready forever
+// while pointing at an address that answers nothing.
+var ErrBodyGone = errors.New("box: the box has no running body")
+
 // Clock is the orchestrator's time source. Injected so tests can drive the ready
 // path deterministically; it is never satisfied by anything reported by a box.
 type Clock interface {
