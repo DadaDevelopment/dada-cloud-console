@@ -178,7 +178,7 @@ func (h *Handler) initClusterBoxRuntime(cfg *config.Config) {
 		exposer.TLSSecret = cfg.BoxClusterTLSSecret
 	}
 
-	pool := box.NewMemoryPool()
+	pool := box.NewClusterPool(rt)
 	stack := &boxRuntimeStack{
 		runtime:  rt,
 		door:     rt,
