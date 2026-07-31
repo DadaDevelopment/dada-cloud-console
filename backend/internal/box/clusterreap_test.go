@@ -365,3 +365,34 @@ func TestResumeDoesNotPutTheBoxBackInThePool(t *testing.T) {
 		t.Errorf("resumed pod phase = %q, want %q", got, phaseLive)
 	}
 }
+
+// TestReapOrphansNeverDestroysALiveBoxWorkspace pins the rule that keeps this
+// sweep from destroying data. Destroy takes the PVC with the pod, which is right
+// for a warm slot whose disk is empty and catastrophic for a box someone is
+// working in: a live box whose pod is merely slow to schedule would come back
+// with its work erased. Box m2-boxup-0801c lost its workspace exactly this way.
+func TestReapOrphansNeverDestroysALiveBoxWorkspace(t *testing.T) {
+	clock := NewFakeClock(time.Date(2026, 8, 1, 12, 0, 0, 0, time.UTC))
+	pod := parkedPod("box-w1", "warm-v1", "", false)
+	pod.Labels[labelBoxPhase] = phaseLive
+	cs := fake.NewSimpleClientset(pod, &corev1.PersistentVolumeClaim{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "box-w1-workspace",
+			Namespace: "dada-boxes",
+			Labels:    map[string]string{labelBox: "true", labelBoxID: "box-w1"},
+		},
+	})
+	rt := newClusterRuntime(cs, nil, "dada-boxes", clock)
+
+	clock.Advance(4 * clusterOrphanAfter)
+	reaped, err := rt.ReapOrphans(context.Background())
+	if err != nil {
+		t.Fatalf("ReapOrphans: %v", err)
+	}
+	if reaped != 0 {
+		t.Fatalf("reaped %d live boxes whose pod was slow to schedule, want 0", reaped)
+	}
+	if pods, pvcs := countBoxObjects(t, cs, "dada-boxes"); pods != 1 || pvcs != 1 {
+		t.Fatalf("the sweep took a live box's body or disk: pods=%d pvcs=%d", pods, pvcs)
+	}
+}

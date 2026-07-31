@@ -777,11 +777,26 @@ func (c *ClusterRuntime) ReapOrphans(ctx context.Context) (int, error) {
 // A pod whose claim is not yet stamped is left alone. The stamp is written by the
 // same Update that makes the claim, so its absence means the pod predates this
 // code, and guessing an age for it would reap boxes that are merely old.
+//
+// ONLY A PARKED POD COUNTS AS A FAILED CREATE, and that restriction is what keeps
+// this sweep from destroying data. Destroy takes the workspace PVC with the pod,
+// which is right for a warm slot whose disk is empty and catastrophic for a box a
+// customer is using: a live box whose pod is merely slow — a node under pressure,
+// a volume waiting to attach, a scheduler with nowhere to put it — would come
+// back with its work erased. That is not hypothetical. It is how box
+// m2-boxup-0801c lost its workspace on 2026-08-01, when Resume still rebuilt
+// customer pods wearing the parked label and this sweep could not tell one from
+// an abandoned warm create. A stuck live box leaks a quota slot until something
+// else reclaims it, which is the cheaper of the two mistakes by a wide margin.
 func clusterOrphaned(pod *corev1.Pod, now time.Time) bool {
+	phase := pod.Labels[labelBoxPhase]
 	if !clusterPodReady(pod) {
+		if phase != phaseParked {
+			return false
+		}
 		return pod.CreationTimestamp.Time.Before(now.Add(-clusterOrphanAfter))
 	}
-	if pod.Labels[labelBoxPhase] != phaseClaimed {
+	if phase != phaseClaimed {
 		return false
 	}
 	claimedAt, err := time.Parse(time.RFC3339, pod.Annotations[annBoxClaimedAt])
