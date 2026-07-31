@@ -2,7 +2,9 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"log"
+	"strings"
 	"time"
 
 	"github.com/dada-tuda/console/backend/internal/cloudtask"
@@ -12,12 +14,58 @@ import (
 
 const (
 	backupReconcileInterval = 30 * time.Second
-	scheduledBackupEvery    = 24 * time.Hour
 
 	volumeExportRetention   = 24 * time.Hour
 	volumeExportSweepEvery  = 10 * time.Minute
 	volumeExportSweepPrefix = "volexports/"
 )
+
+// backupFrequencyIntervals maps a ServiceDatabaseV2's configured backup
+// frequency to the cadence runScheduledBackups enforces. Keys use K10's
+// @-prefixed form (see normalizeBackupFrequency in databases.go);
+// backupIntervalForFrequency also accepts the bare word the console stores in
+// some rows.
+var backupFrequencyIntervals = map[string]time.Duration{
+	"@hourly":  time.Hour,
+	"@daily":   24 * time.Hour,
+	"@weekly":  7 * 24 * time.Hour,
+	"@monthly": 30 * 24 * time.Hour,
+	"@yearly":  365 * 24 * time.Hour,
+}
+
+// backupIntervalForFrequency resolves the scheduled-backup cadence for a
+// database's configured frequency. An unknown or absent frequency on an
+// enabled database defaults to @daily: a database that advertises "backups
+// enabled" must get backups on some cadence, never be silently skipped.
+func backupIntervalForFrequency(freq string) time.Duration {
+	f := strings.ToLower(strings.TrimSpace(freq))
+	if f != "" && !strings.HasPrefix(f, "@") {
+		f = "@" + f
+	}
+	if d, ok := backupFrequencyIntervals[f]; ok {
+		return d
+	}
+	return backupFrequencyIntervals["@daily"]
+}
+
+// serviceDatabaseBackupFrequency pulls spec.backup.frequency from a
+// ServiceDatabaseV2 snapshot's summary_json, or "" if absent/unparsable.
+func serviceDatabaseBackupFrequency(summaryRaw []byte) string {
+	var summary map[string]any
+	if json.Unmarshal(summaryRaw, &summary) != nil {
+		return ""
+	}
+	spec, ok := summary["spec"].(map[string]any)
+	if !ok {
+		return ""
+	}
+	backup, ok := spec["backup"].(map[string]any)
+	if !ok {
+		return ""
+	}
+	freq, _ := backup["frequency"].(string)
+	return freq
+}
 
 // lastVolumeExportSweep throttles sweepVolumeExports to at most one run per
 // volumeExportSweepEvery. It is process-local (not shared across replicas):
@@ -193,50 +241,56 @@ func (h *Handler) sweepVolumeExports(ctx context.Context) {
 	}
 }
 
-// runScheduledBackups takes a scheduled backup for each managed database whose
-// most recent backup is older than the schedule interval (or has none).
+// runScheduledBackups takes a scheduled backup for each ServiceDatabaseV2
+// that has opted in (spec.backup.enabled) and whose most recent backup is
+// older than its own configured frequency (or has none). Databases that
+// never opted in are never touched here.
 func (h *Handler) runScheduledBackups(ctx context.Context) {
 	rows, err := h.pool.Query(ctx,
-		`SELECT rs.project_id, rs.environment_id, rs.name, rs.summary_json
+		`SELECT rs.project_id, rs.environment_id, rs.name, rs.summary_json,
+		        (SELECT MAX(b.created_at) FROM db_backups b
+		         WHERE b.project_id = rs.project_id AND b.environment_id = rs.environment_id
+		           AND b.resource_name = rs.name
+		           AND b.status IN ('Pending', 'Running', 'Ready')) AS last_backup_at
 		 FROM resource_snapshots rs
 		 WHERE rs.kind = 'ServiceDatabaseV2'
-		   AND NOT EXISTS (
-		     SELECT 1 FROM db_backups b
-		     WHERE b.project_id = rs.project_id AND b.environment_id = rs.environment_id
-		       AND b.resource_name = rs.name
-		       AND b.status IN ('Pending', 'Running', 'Ready')
-		       AND b.created_at > NOW() - INTERVAL '24 hours'
-		   )`)
+		   AND rs.summary_json->'spec'->'backup'->>'enabled' = 'true'`)
 	if err != nil {
 		return
 	}
 	type item struct {
-		projectID uuid.UUID
-		envID     uuid.UUID
-		name      string
-		database  string
+		projectID    uuid.UUID
+		envID        uuid.UUID
+		name         string
+		database     string
+		frequency    string
+		lastBackupAt *time.Time
 	}
 	var items []item
 	for rows.Next() {
 		var it item
 		var summary []byte
-		if rows.Scan(&it.projectID, &it.envID, &it.name, &summary) != nil {
+		if rows.Scan(&it.projectID, &it.envID, &it.name, &summary, &it.lastBackupAt) != nil {
 			continue
 		}
 		it.database = serviceDatabaseName(summary)
 		if it.database == "" {
 			it.database = it.name
 		}
+		it.frequency = serviceDatabaseBackupFrequency(summary)
 		items = append(items, it)
 	}
 	rows.Close()
 
+	now := time.Now()
 	for _, it := range items {
+		if it.lastBackupAt != nil && now.Sub(*it.lastBackupAt) < backupIntervalForFrequency(it.frequency) {
+			continue
+		}
 		if _, err := h.startDBBackup(ctx, it.projectID, it.envID, it.name, it.database, models.DBBackupKindScheduled, nil); err != nil {
 			log.Printf("scheduled backup for %s failed to start: %v", it.name, err)
 		}
 	}
-	_ = scheduledBackupEvery
 }
 
 func nonEmpty(v, fallback string) string {

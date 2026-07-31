@@ -75,3 +75,63 @@ func TestSweepVolumeExports_Throttled_SecondImmediateCallSkips(t *testing.T) {
 		t.Fatalf("expected throttled second call to be a no-op, got %d calls", len(p.calls))
 	}
 }
+
+func TestBackupIntervalForFrequency(t *testing.T) {
+	cases := []struct {
+		freq string
+		want time.Duration
+	}{
+		{"@hourly", time.Hour},
+		{"@daily", 24 * time.Hour},
+		{"@weekly", 7 * 24 * time.Hour},
+		{"@monthly", 30 * 24 * time.Hour},
+		{"@yearly", 365 * 24 * time.Hour},
+		{"daily", 24 * time.Hour},
+		{"weekly", 7 * 24 * time.Hour},
+		{"WEEKLY", 7 * 24 * time.Hour},
+		{"  @weekly  ", 7 * 24 * time.Hour},
+		{"", 24 * time.Hour},
+		{"nonsense", 24 * time.Hour},
+	}
+	for _, tc := range cases {
+		if got := backupIntervalForFrequency(tc.freq); got != tc.want {
+			t.Errorf("backupIntervalForFrequency(%q) = %v, want %v", tc.freq, got, tc.want)
+		}
+	}
+}
+
+func TestServiceDatabaseBackupFrequency(t *testing.T) {
+	cases := []struct {
+		name    string
+		summary string
+		want    string
+	}{
+		{
+			name:    "present",
+			summary: `{"spec":{"backup":{"enabled":true,"frequency":"weekly"}}}`,
+			want:    "weekly",
+		},
+		{
+			name:    "absent backup block",
+			summary: `{"spec":{"database":"recog"}}`,
+			want:    "",
+		},
+		{
+			name:    "absent spec",
+			summary: `{"kind":"ServiceDatabaseV2"}`,
+			want:    "",
+		},
+		{
+			name:    "malformed json",
+			summary: `not json`,
+			want:    "",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := serviceDatabaseBackupFrequency([]byte(tc.summary)); got != tc.want {
+				t.Errorf("serviceDatabaseBackupFrequency(%s) = %q, want %q", tc.summary, got, tc.want)
+			}
+		})
+	}
+}
