@@ -12,6 +12,22 @@ const DISMISS_KEY = "dada_grace_banner_dismissed_until";
 const QUOTA_ORDER = ["apps", "databases", "domains", "team_members"] as const;
 
 /**
+ * Reads the remembered dismissal without touching state during an effect.
+ *
+ * Safe as a lazy initialiser: the banner renders nothing until the account
+ * summary arrives over the network, so server and first client render agree
+ * on `null` output regardless of what storage holds.
+ */
+function readDismissed(): string | null {
+  if (typeof window === "undefined") return null;
+  try {
+    return window.localStorage.getItem(DISMISS_KEY);
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Announces the end of the grandfathering window to the accounts it actually
  * affects.
  *
@@ -33,7 +49,7 @@ const QUOTA_ORDER = ["apps", "databases", "domains", "team_members"] as const;
 export function GraceBanner() {
   const { t } = useT();
   const [summary, setSummary] = useState<AccountSummary | null>(null);
-  const [dismissedFor, setDismissedFor] = useState<string | null>(null);
+  const [dismissedFor, setDismissedFor] = useState<string | null>(readDismissed);
 
   useEffect(() => {
     let cancelled = false;
@@ -46,14 +62,6 @@ export function GraceBanner() {
     return () => {
       cancelled = true;
     };
-  }, []);
-
-  useEffect(() => {
-    try {
-      setDismissedFor(window.localStorage.getItem(DISMISS_KEY));
-    } catch {
-      setDismissedFor(null);
-    }
   }, []);
 
   const graceUntil = summary?.quota_grace_until ?? null;
