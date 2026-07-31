@@ -95,6 +95,10 @@ func (h *Handler) AttachBoxDatabase(c *gin.Context) {
 		respondError(c, http.StatusConflict, "the box has no runtime instance yet")
 		return
 	}
+	attach, ok := stack.requireAttachProvider(c)
+	if !ok {
+		return
+	}
 
 	var attachmentID uuid.UUID
 	if err := h.pool.QueryRow(c.Request.Context(),
@@ -113,14 +117,14 @@ func (h *Handler) AttachBoxDatabase(c *gin.Context) {
 	// Measured to a USABLE CREDENTIAL, not to this handler's response: what matters
 	// to an agent mid-flight is when it can open the connection.
 	started := time.Now()
-	injected, resourceName, err := stack.attach.AttachPostgresNamed(c.Request.Context(), inst, req.Name, req.EnvPrefix)
+	injected, resourceName, err := attach.AttachPostgresNamed(c.Request.Context(), inst, req.Name, req.EnvPrefix)
 	if err != nil {
 		metrics.RecordBoxAttach("postgres", "failed", time.Since(started))
 		_, _ = h.pool.Exec(c.Request.Context(),
 			`UPDATE box_attachments SET status = 'Failed', error_message = $2 WHERE id = $1`,
 			attachmentID, err.Error())
 		status := http.StatusInternalServerError
-		if !stack.attach.ManagedPostgresConfigured() {
+		if !attach.ManagedPostgresConfigured() {
 			status = http.StatusServiceUnavailable
 		}
 		respondError(c, status, "failed to attach database: "+err.Error())

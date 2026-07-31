@@ -75,8 +75,16 @@ func (s *boxRuntimeStack) requireLocalRuntime(c *gin.Context, what string) (*box
 // ErrPoolExhausted exists to keep visible.
 func (h *Handler) initBoxRuntime(cfg *config.Config) {
 	if cfg.BoxLocalRoot == "" {
-		log.Info().Msg("box: runtime disabled (BOX_LOCAL_ROOT unset); box verbs answer 503")
+		if cfg.BoxClusterNamespace != "" {
+			h.initClusterBoxRuntime(cfg)
+			return
+		}
+		log.Info().Msg("box: runtime disabled (BOX_LOCAL_ROOT and BOX_CLUSTER_NAMESPACE unset); box verbs answer 503")
 		return
+	}
+	if cfg.BoxClusterNamespace != "" {
+		log.Warn().Str("namespace", cfg.BoxClusterNamespace).
+			Msg("box: BOX_LOCAL_ROOT and BOX_CLUSTER_NAMESPACE are both set; using the local adapter and ignoring the cluster one")
 	}
 	rt := box.NewLocalRuntime(cfg.BoxLocalRoot, box.SystemClock{})
 	// The box's own door (D6). Set before Warm, because the bind that makes the
@@ -132,6 +140,68 @@ func (h *Handler) initBoxRuntime(cfg *config.Config) {
 	h.boxStack = stack
 }
 
+// initClusterBoxRuntime wires the production adapter: a box is a Pod in the
+// existing cluster (ADR-019).
+//
+// Two seams stay unwired here and that is deliberate rather than unfinished.
+// `local` is nil, so the control-plane session fallback and the crystallizer
+// answer 503 naming themselves — the boxRuntimeStack doc explains why that is
+// countable instead of hidden. `attach` is nil for the same reason: managed
+// Postgres for a cluster box means a real ServiceDatabaseV2, not a database
+// created inside a disposable body, and shipping the local provider here would
+// hand the tenant a DSN that resolves to nothing.
+//
+// Warming is synchronous for the reason the local path documents, and it is more
+// expensive here: the first pod on a node pulls a multi-GB image. A warm miss is
+// therefore minutes, not seconds, which is exactly why it must not be hidden
+// behind a fast startup.
+func (h *Handler) initClusterBoxRuntime(cfg *config.Config) {
+	rt, err := box.NewClusterRuntime(cfg.BoxClusterNamespace, box.SystemClock{})
+	if err != nil {
+		log.Error().Err(err).Str("namespace", cfg.BoxClusterNamespace).
+			Msg("box: cluster adapter requested but no in-cluster client could be built; box verbs answer 503")
+		return
+	}
+	rt.PullSecret = cfg.BoxClusterPullSecret
+	if cfg.BoxClusterStorageClass != "" {
+		rt.StorageClass = cfg.BoxClusterStorageClass
+	}
+
+	exposer := box.NewClusterExposer(rt, cfg.BoxHostnameBase)
+	if cfg.BoxClusterTLSSecret != "" {
+		exposer.TLSSecret = cfg.BoxClusterTLSSecret
+	}
+
+	pool := box.NewMemoryPool()
+	stack := &boxRuntimeStack{
+		runtime:  rt,
+		door:     rt,
+		pool:     pool,
+		exposer:  exposer,
+		image:    cfg.BoxWarmImage,
+		region:   cfg.BoxRegion,
+		sessions: boxSessionBaseURL(cfg),
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Minute)
+	defer cancel()
+	started := time.Now()
+	if err := rt.Warm(ctx, pool, stack.image, stack.region, cfg.BoxWarmPoolSize); err != nil {
+		log.Error().Err(err).Msg("box: warming the cluster pool failed; spawns will report pool_exhausted")
+	} else {
+		log.Info().
+			Str("namespace", rt.Namespace).
+			Str("image", stack.image).
+			Int("warm", cfg.BoxWarmPoolSize).
+			Dur("took", time.Since(started)).
+			Msg("box: ClusterRuntime warm pool ready")
+		stack.warmed = true
+	}
+	metrics.SetBoxPoolGauges(stack.image, stack.region,
+		pool.Available(stack.image, stack.region), pool.Target(stack.image, stack.region))
+	h.boxStack = stack
+}
+
 // boxSessionBaseURL is where the box's own session surface lives. Derived from the
 // same loopback URL the embedded MCP proxy uses so there is one answer to "where
 // does this process answer requests".
@@ -143,6 +213,22 @@ func boxSessionBaseURL(cfg *config.Config) string {
 		return cfg.MCPSelfURL
 	}
 	return "http://127.0.0.1:" + cfg.Port
+}
+
+// requireAttachProvider answers 503 when the wired adapter has no attach path.
+//
+// The cluster adapter deliberately has none yet: managed Postgres for a cluster
+// box means a real ServiceDatabaseV2 outside the box, and the local provider
+// would hand the tenant a DSN pointing at a database inside a body that is about
+// to be destroyed. An unconfigured subsystem is not a failed request, which is
+// why this is 503 with a reason and not a 500.
+func (s *boxRuntimeStack) requireAttachProvider(c *gin.Context) (box.AttachProvider, bool) {
+	if s.attach == nil {
+		respondError(c, http.StatusServiceUnavailable,
+			"the wired box runtime cannot attach managed resources yet: attach is available on the local adapter only (ADR-019)")
+		return nil, false
+	}
+	return s.attach, true
 }
 
 // requireBoxRuntime answers 503 when the box runtime is not configured.

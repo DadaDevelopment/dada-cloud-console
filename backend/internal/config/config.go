@@ -531,6 +531,21 @@ type Config struct {
 	BoxManagedPGURL  string // BOX_MANAGED_PG_URL
 	BoxManagedPGHost string // BOX_MANAGED_PG_HOST
 	BoxManagedPGPort int    // BOX_MANAGED_PG_PORT
+
+	// The cluster box adapter (ADR-019), which is the production one: a box is a
+	// Pod in the existing cluster. BoxClusterNamespace empty means this adapter is
+	// off, exactly like BoxLocalRoot for the local one. Setting BOTH is a
+	// misconfiguration rather than a merge, and the wiring resolves it by
+	// preferring the local adapter and saying so, because a host that names a
+	// local root is a developer machine.
+	//
+	// BoxClusterPullSecret is an imagePullSecret name inside the namespace. It is a
+	// NAME and never a credential: the secret is created by whoever administers the
+	// cluster, and this process only points pods at it.
+	BoxClusterNamespace    string // BOX_CLUSTER_NAMESPACE (empty = cluster adapter off)
+	BoxClusterPullSecret   string // BOX_CLUSTER_PULL_SECRET
+	BoxClusterStorageClass string // BOX_CLUSTER_STORAGE_CLASS (default longhorn-box)
+	BoxClusterTLSSecret    string // BOX_CLUSTER_TLS_SECRET (default box-wildcard-tls)
 }
 
 // Load reads configuration from environment variables.
@@ -696,6 +711,10 @@ func Load() (*Config, error) {
 		BoxManagedPGURL:          getEnv("BOX_MANAGED_PG_URL", ""),
 		BoxManagedPGHost:         getEnv("BOX_MANAGED_PG_HOST", "127.0.0.1"),
 		BoxManagedPGPort:         getEnvInt("BOX_MANAGED_PG_PORT", 5432),
+		BoxClusterNamespace:      getEnv("BOX_CLUSTER_NAMESPACE", ""),
+		BoxClusterPullSecret:     getEnv("BOX_CLUSTER_PULL_SECRET", ""),
+		BoxClusterStorageClass:   getEnv("BOX_CLUSTER_STORAGE_CLASS", "longhorn-box"),
+		BoxClusterTLSSecret:      getEnv("BOX_CLUSTER_TLS_SECRET", "box-wildcard-tls"),
 	}
 
 	if cfg.DBURL == "" {
