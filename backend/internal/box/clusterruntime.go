@@ -664,6 +664,13 @@ func (c *ClusterRuntime) Suspend(ctx context.Context, inst *Instance) error {
 // already owns one; claiming a warm instance would hand the customer somebody
 // else's empty workspace under their own box's name. The cost is a cold start,
 // which is the honest price of having stopped paying for the running body.
+//
+// The rebuilt pod is born LIVE rather than parked, and that is not cosmetic. The
+// pool's inventory is every parked pod the kubelet calls Ready, so a resumed pod
+// wearing the parked label is claimable from the instant it goes Ready until
+// ProgramNetwork gets around to relabelling it — a window in which another
+// tenant's spawn can be handed a body that already holds this customer's disk.
+// ProgramNetwork still runs after this and simply finds nothing to change.
 func (c *ClusterRuntime) Resume(ctx context.Context, inst *Instance, spec Spec) error {
 	boxID := clusterBoxIDFromPodName(inst.InstanceRef)
 	if boxID == "" {
@@ -682,6 +689,7 @@ func (c *ClusterRuntime) Resume(ctx context.Context, inst *Instance, spec Spec) 
 		region = inst.Region
 	}
 	pod := c.BuildPod(boxID, img, boxcatalog.DefaultSize(), region)
+	pod.Labels[labelBoxPhase] = phaseLive
 	if _, err := c.clientset.CoreV1().Pods(c.Namespace).Create(ctx, pod, metav1.CreateOptions{}); err != nil && !apierrors.IsAlreadyExists(err) {
 		return fmt.Errorf("recreate box pod: %w", err)
 	}

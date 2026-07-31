@@ -336,3 +336,32 @@ func TestReapOrphansLeavesAnOldParkedPodAlone(t *testing.T) {
 		t.Fatalf("reaped %d parked pods (%v) after three days, want 0", reaped, err)
 	}
 }
+
+// TestResumeDoesNotPutTheBoxBackInThePool is the guard against the worst failure
+// this subsystem has. The pool's inventory is every parked pod the kubelet calls
+// Ready; a resumed pod born parked is therefore claimable the moment it goes
+// Ready, and what a second tenant would be handed is a body already mounting the
+// first tenant's disk.
+func TestResumeDoesNotPutTheBoxBackInThePool(t *testing.T) {
+	cs := fake.NewSimpleClientset()
+	readyOnCreate(cs)
+	rt := newClusterRuntime(cs, nil, "dada-boxes", nil)
+	image := boxcatalog.DefaultImage().Name
+
+	inst := &Instance{ID: "1a2fbe7c-6a19-4bb1-b3bd-1e15d5b8f4a1", InstanceRef: "box-w9", Image: image}
+	if err := rt.Resume(context.Background(), inst, Spec{Image: image}); err != nil {
+		t.Fatalf("resume: %v", err)
+	}
+
+	pool := NewClusterPool(rt)
+	if got := pool.Available(image, ""); got != 0 {
+		t.Fatalf("a resumed box counts as %d free pool slots, want 0", got)
+	}
+	pod, err := cs.CoreV1().Pods("dada-boxes").Get(context.Background(), "box-w9", metav1.GetOptions{})
+	if err != nil {
+		t.Fatalf("get resumed pod: %v", err)
+	}
+	if got := pod.Labels[labelBoxPhase]; got != phaseLive {
+		t.Errorf("resumed pod phase = %q, want %q", got, phaseLive)
+	}
+}
