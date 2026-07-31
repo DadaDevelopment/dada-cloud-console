@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"log"
+	"sort"
 	"strings"
 	"time"
 
@@ -19,6 +20,19 @@ const (
 	volumeExportSweepEvery  = 10 * time.Minute
 	volumeExportSweepPrefix = "volexports/"
 )
+
+// maxConcurrentScheduledBackups caps how many scheduled backups may be
+// Pending/Running at the same time, across every ServiceDatabaseV2 that
+// opted in. postgresql-0 (namespace databases) runs under limits: cpu 500m /
+// memory 1Gi and also hosts Keycloak, whose unavailability panics the
+// console backend at startup. Ten opted-in databases share that one
+// instance today, including a roughly 5.9 GB Keycloak dump; letting every
+// due backup start in the same tick would launch that many concurrent
+// pg_dump processes against a 500m CPU budget and could take Keycloak down
+// with it. Keep this at 1 until postgresql-0 gets a dedicated
+// backup-capacity budget; dueScheduledBackups still reaches every database
+// over time, one at a time, longest-waiting first.
+const maxConcurrentScheduledBackups = 1
 
 // backupFrequencyIntervals maps a ServiceDatabaseV2's configured backup
 // frequency to the cadence runScheduledBackups enforces. Keys use K10's
@@ -241,11 +255,82 @@ func (h *Handler) sweepVolumeExports(ctx context.Context) {
 	}
 }
 
+// scheduledBackupCandidate is one ServiceDatabaseV2 considered by
+// runScheduledBackups on a given tick.
+type scheduledBackupCandidate struct {
+	projectID    uuid.UUID
+	envID        uuid.UUID
+	name         string
+	database     string
+	frequency    string
+	lastBackupAt *time.Time
+}
+
+// dueScheduledBackups picks up to freeSlots candidates that are due for a
+// scheduled backup (no backup yet, or the last one older than the
+// candidate's configured frequency), longest-waiting first.
+//
+// Ordering matters once freeSlots is smaller than the due count: with
+// maxConcurrentScheduledBackups capping concurrency to 1, a fixed or
+// undefined iteration order would let whichever database happens to sort
+// first in the query win every tick forever, starving the rest. Sorting by
+// last_backup_at with NULLS FIRST (never-backed-up databases first), then
+// by name to break ties deterministically, guarantees every candidate
+// eventually reaches the front once the databases ahead of it get backed up.
+func dueScheduledBackups(candidates []scheduledBackupCandidate, freeSlots int, now time.Time) []scheduledBackupCandidate {
+	if freeSlots <= 0 {
+		return nil
+	}
+
+	ordered := make([]scheduledBackupCandidate, len(candidates))
+	copy(ordered, candidates)
+	sort.SliceStable(ordered, func(i, j int) bool {
+		a, b := ordered[i].lastBackupAt, ordered[j].lastBackupAt
+		switch {
+		case a == nil && b == nil:
+			return ordered[i].name < ordered[j].name
+		case a == nil:
+			return true
+		case b == nil:
+			return false
+		case !a.Equal(*b):
+			return a.Before(*b)
+		default:
+			return ordered[i].name < ordered[j].name
+		}
+	})
+
+	var due []scheduledBackupCandidate
+	for _, c := range ordered {
+		if c.lastBackupAt != nil && now.Sub(*c.lastBackupAt) < backupIntervalForFrequency(c.frequency) {
+			continue
+		}
+		due = append(due, c)
+		if len(due) == freeSlots {
+			break
+		}
+	}
+	return due
+}
+
 // runScheduledBackups takes a scheduled backup for each ServiceDatabaseV2
 // that has opted in (spec.backup.enabled) and whose most recent backup is
-// older than its own configured frequency (or has none). Databases that
-// never opted in are never touched here.
+// older than its own configured frequency (or has none), up to
+// maxConcurrentScheduledBackups minus whatever scheduled backups are already
+// Pending/Running. Databases that never opted in are never touched here.
 func (h *Handler) runScheduledBackups(ctx context.Context) {
+	var inflight int
+	if err := h.pool.QueryRow(ctx,
+		`SELECT count(*) FROM db_backups WHERE status IN ('Pending', 'Running') AND kind = $1`,
+		models.DBBackupKindScheduled,
+	).Scan(&inflight); err != nil {
+		return
+	}
+	freeSlots := maxConcurrentScheduledBackups - inflight
+	if freeSlots <= 0 {
+		return
+	}
+
 	rows, err := h.pool.Query(ctx,
 		`SELECT rs.project_id, rs.environment_id, rs.name, rs.summary_json,
 		        (SELECT MAX(b.created_at) FROM db_backups b
@@ -258,37 +343,25 @@ func (h *Handler) runScheduledBackups(ctx context.Context) {
 	if err != nil {
 		return
 	}
-	type item struct {
-		projectID    uuid.UUID
-		envID        uuid.UUID
-		name         string
-		database     string
-		frequency    string
-		lastBackupAt *time.Time
-	}
-	var items []item
+	var candidates []scheduledBackupCandidate
 	for rows.Next() {
-		var it item
+		var c scheduledBackupCandidate
 		var summary []byte
-		if rows.Scan(&it.projectID, &it.envID, &it.name, &summary, &it.lastBackupAt) != nil {
+		if rows.Scan(&c.projectID, &c.envID, &c.name, &summary, &c.lastBackupAt) != nil {
 			continue
 		}
-		it.database = serviceDatabaseName(summary)
-		if it.database == "" {
-			it.database = it.name
+		c.database = serviceDatabaseName(summary)
+		if c.database == "" {
+			c.database = c.name
 		}
-		it.frequency = serviceDatabaseBackupFrequency(summary)
-		items = append(items, it)
+		c.frequency = serviceDatabaseBackupFrequency(summary)
+		candidates = append(candidates, c)
 	}
 	rows.Close()
 
-	now := time.Now()
-	for _, it := range items {
-		if it.lastBackupAt != nil && now.Sub(*it.lastBackupAt) < backupIntervalForFrequency(it.frequency) {
-			continue
-		}
-		if _, err := h.startDBBackup(ctx, it.projectID, it.envID, it.name, it.database, models.DBBackupKindScheduled, nil); err != nil {
-			log.Printf("scheduled backup for %s failed to start: %v", it.name, err)
+	for _, c := range dueScheduledBackups(candidates, freeSlots, time.Now()) {
+		if _, err := h.startDBBackup(ctx, c.projectID, c.envID, c.name, c.database, models.DBBackupKindScheduled, nil); err != nil {
+			log.Printf("scheduled backup for %s failed to start: %v", c.name, err)
 		}
 	}
 }

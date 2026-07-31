@@ -5,6 +5,8 @@ import (
 	"io"
 	"testing"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 type recordingDBBackupPresigner struct {
@@ -134,4 +136,101 @@ func TestServiceDatabaseBackupFrequency(t *testing.T) {
 			}
 		})
 	}
+}
+
+func namedCandidate(name string, lastBackupAt *time.Time) scheduledBackupCandidate {
+	return scheduledBackupCandidate{
+		projectID:    uuid.New(),
+		envID:        uuid.New(),
+		name:         name,
+		database:     name,
+		frequency:    "@daily",
+		lastBackupAt: lastBackupAt,
+	}
+}
+
+func daysAgo(now time.Time, days int) *time.Time {
+	t := now.AddDate(0, 0, -days)
+	return &t
+}
+
+func TestDueScheduledBackups_NoFreeSlots_StartsNothing(t *testing.T) {
+	now := time.Now()
+	candidates := []scheduledBackupCandidate{
+		namedCandidate("a", nil),
+		namedCandidate("b", nil),
+		namedCandidate("c", daysAgo(now, 30)),
+	}
+
+	for _, freeSlots := range []int{0, -1, -5} {
+		got := dueScheduledBackups(candidates, freeSlots, now)
+		if len(got) != 0 {
+			t.Errorf("freeSlots=%d: expected 0 started, got %d (%v)", freeSlots, len(got), got)
+		}
+	}
+}
+
+func TestDueScheduledBackups_StartsExactlyFreeSlots_LongestWaitingFirst(t *testing.T) {
+	now := time.Now()
+	candidates := []scheduledBackupCandidate{
+		namedCandidate("stale", daysAgo(now, 2)),
+		namedCandidate("fresh", daysAgo(now, 0)),
+		namedCandidate("old", daysAgo(now, 30)),
+		namedCandidate("never", nil),
+	}
+
+	got := dueScheduledBackups(candidates, 1, now)
+	if len(got) != 1 || got[0].name != "never" {
+		t.Fatalf("freeSlots=1: got %v, want exactly [never]", names(got))
+	}
+
+	got = dueScheduledBackups(candidates, 2, now)
+	if len(names(got)) != 2 || names(got)[0] != "never" || names(got)[1] != "old" {
+		t.Fatalf("freeSlots=2: got %v, want [never old]", names(got))
+	}
+
+	got = dueScheduledBackups(candidates, 10, now)
+	if len(got) != 3 {
+		t.Fatalf("freeSlots=10: expected all 3 due candidates (fresh excluded), got %v", names(got))
+	}
+	for _, c := range got {
+		if c.name == "fresh" {
+			t.Errorf("freeSlots=10: fresh is within its @daily interval and must not be started")
+		}
+	}
+}
+
+func TestDueScheduledBackups_NullsFirst_ThenByName(t *testing.T) {
+	now := time.Now()
+	candidates := []scheduledBackupCandidate{
+		namedCandidate("zeta", daysAgo(now, 30)),
+		namedCandidate("bravo", nil),
+		namedCandidate("alpha", nil),
+	}
+
+	got := dueScheduledBackups(candidates, 10, now)
+	want := []string{"alpha", "bravo", "zeta"}
+	if got := names(got); !equalNames(got, want) {
+		t.Fatalf("order = %v, want %v", got, want)
+	}
+}
+
+func names(cs []scheduledBackupCandidate) []string {
+	out := make([]string, len(cs))
+	for i, c := range cs {
+		out[i] = c.name
+	}
+	return out
+}
+
+func equalNames(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }
