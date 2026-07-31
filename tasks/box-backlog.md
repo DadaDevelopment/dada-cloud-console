@@ -509,8 +509,15 @@ tc/HTB) заменяются кластерными. **RuntimeClass на упр�
 - [ ] S3: существующая `CreateS3Bucket`, `cloudtask/s3creds.go`, внедрить `AWS_*` и `S3_ENDPOINT`,
       добавить endpoint в allowlist egress
 - [ ] `box_expose.go` — суррогатные домены миграции 030 + pdns + `AttachDefaultDomain`
-- [ ] **wildcard `*.box.dada-tuda.ru` по DNS-01, реплицированный на хосты.** Per-host LE на бокс
-      упирается в 50 сертификатов на домен в неделю — **50 боксов в неделю заканчивают продукт**
+- [~] **wildcard `*.box.dada-tuda.ru` по DNS-01, реплицированный на хосты.** Per-host LE на бокс
+      упирается в 50 сертификатов на домен в неделю — **50 боксов в неделю заканчивают продукт**.
+      2026-07-31: зона в PowerDNS, `Certificate box-wildcard` и `StorageClass longhorn-box`
+      заведены (`argo-infra@e1d670d6`), DNS отвечает. Сертификат висит `Ready=False` из-за
+      **одного** незакрытого шага — Beget не делегировал `box` нашим NS, а их API это делать не
+      умеет (проверено: тип `DNS` → `METHOD_FAILED`, тип `NS` → тихий успех без изменений).
+      Нужен человек в панели Beget; **поддомен при этом не создавать** — это ломает резолвинг
+      `*.box.dada-tuda.ru`. Подробности и обходной путь на апексе —
+      `docs/plans/2026-07-31-box-pod-manifest.md`
 
 ---
 

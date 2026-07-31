@@ -153,15 +153,74 @@ namespace `argocd-prod`.
 
 ## Что нужно завести до первого бокса
 
-Три внешние зависимости, ни одна не делается этим коммитом:
+Заведено 2026-07-31 в `argo-infra` (`console-migration`, коммит `e1d670d6`), Argo синхронизировал
+в `beget-prod`. Состояние проверено на живом кластере:
 
-- **StorageClass `longhorn-box`** — `reclaimPolicy: Delete`, одна реплика. `Delete`
-  обязателен: у прод-классов `Retain`, и с ним каждый удалённый бокс оставлял бы PV навсегда.
-  Одна реплика — потому что `/workspace` живёт часы и уже реплицируется в git тенанта; три
-  реплики на эфемерную работу — это тройная цена за хранение временного.
-- **Секрет `box-wildcard-tls`** в `dada-boxes` на `*.box.dada-tuda.ru`. Wildcard-сертификаты в
-  кластере уже так и живут (`pv-wildcard-tls` у превью), схема повторяется.
-- **DNS `*.box.dada-tuda.ru` → LB** `155.212.223.198`, как у `*.dada-tuda.ru`.
+- **StorageClass `longhorn-box`** — ЕСТЬ. `reclaimPolicy: Delete`, одна реплика,
+  `allowVolumeExpansion: true`. `Delete` обязателен: у прод-классов `Retain`, и с ним каждый
+  удалённый бокс оставлял бы PV навсегда. Одна реплика — потому что `/workspace` живёт часы и
+  уже реплицируется в git тенанта; три реплики на эфемерную работу — тройная цена за временное.
+- **Namespace `dada-boxes`** с PSS `restricted`, SA `box-runner`, ResourceQuota и LimitRange —
+  ЕСТЬ, ровно как в `manifests/namespace.yaml`.
+- **DNS `*.box.dada-tuda.ru` → LB** `155.212.223.198` — ЕСТЬ на нашей стороне. `DNSZone`
+  `box-dada-tuda-ru` (`READY=True`) создал зону в PowerDNS; `ns1.dada-tuda.ru` отвечает на
+  `zzz.box.dada-tuda.ru` адресом LB. SOA пришлось поправить руками: композиция оставляет
+  дефолтный PowerDNS `a.misconfigured.dns.server.invalid.`, теперь там `ns1.dada-tuda.ru.`
+- **Секрет `box-wildcard-tls`** — НЕТ. `Certificate box-wildcard` создан и висит `Ready=False`.
+  Причина одна и она ниже.
+
+### Единственный незакрытый шаг — делегирование у регистратора
+
+Апекс `dada-tuda.ru` обслуживает Beget, поддомен `box` ему не делегирован. Отсюда всё
+остальное: cert-manager ищет зону для челленджа обходом SOA вверх от
+`_acme-challenge.box.dada-tuda.ru`, публичный DNS отвечает «зона — `dada-tuda.ru`», и webhook
+идёт за ней в наш PowerDNS, где её нет:
+
+```
+failed loading existing records for _acme-challenge.box.dada-tuda.ru. in domain
+dada-tuda.ru.: failed loading zone dada-tuda.ru.: Not Found
+```
+
+Это не ошибка конфигурации solver'а — он общий и без per-zone настроек, как и у превью.
+После делегирования SOA для `box.dada-tuda.ru` начнёт указывать на нашу зону, webhook попадёт
+в неё, и сертификат выпишется сам.
+
+**Через API Beget делегирование недостижимо — проверено, а не предположено:**
+
+| Вызов | Результат |
+|---|---|
+| `dns/changeRecords` тип `DNS` (их модель NS-делегирования) | `METHOD_FAILED: Failed to change DNS records` |
+| `dns/changeRecords` тип `NS` | `result: true` и **ноль изменений** в зоне — тихий успех |
+| `dns/changeRecords` тип `A` | работает |
+| `v1/auth` (новое API) теми же кредами | `INCORRECT_CREDENTIALS` |
+
+То есть их API умеет менять записи поддомена, но не умеет отдавать поддомен чужим NS. Так что
+`pv.dada-tuda.ru` делегировали руками через панель — в списке поддоменов его нет, а NS у него
+наши.
+
+Две ловушки, стоившие времени и одной аварии:
+
+1. Пароль в секрете `beget-dns-credentials` лежит **уже URL-кодированным** (`%25` = `%`),
+   потому что композиция клеит тело запроса строкой без экранирования. Кодировать его второй
+   раз — получить `Username/password incorrect`, что легко принять за отозванные креды.
+2. `domain/addSubdomainVirtual` для `box` **ломает резолвинг**: как только узел
+   `box.dada-tuda.ru` появляется в зоне Beget, апексный `*.dada-tuda.ru` перестаёт покрывать
+   `*.box.dada-tuda.ru`, и всё под ним становится NXDOMAIN. Плюс поддомену выдаётся A на
+   шаред-хостинг и MX Beget. Проверено и откачено (`domain/deleteSubdomain`), резолвинг
+   восстановлен. **Создавать поддомен ради делегирования нельзя.**
+
+Шаг, который делает человек в панели Beget: у домена `dada-tuda.ru` в разделе DNS добавить для
+имени `box` NS-записи `ns1.dada-tuda.ru` и `ns2.dada-tuda.ru` (оба уже резолвятся в
+`159.194.204.174`), поддомен при этом не создавать.
+
+### Пока делегирования нет
+
+Публиковать порты можно на апексе: `BOX_HOSTNAME_BASE=dada-tuda.ru` даёт
+`<box>-<port>.dada-tuda.ru`, что покрыто и живым wildcard-DNS, и существующим сертификатом
+(`dada-tuda-ru-tls-secret`, SAN `*.dada-tuda.ru` + `dada-tuda.ru`) — новой инфраструктуры не
+нужно вообще. Цена: одно пространство имён с суррогатными доменами приложений
+(`<app>-<hash>.dada-tuda.ru`), то есть коллизия имён становится возможной. Поэтому это
+временная мера, а дефолт в `config.go` остаётся `box.dada-tuda.ru`.
 
 ## Чего манифест не решает
 
