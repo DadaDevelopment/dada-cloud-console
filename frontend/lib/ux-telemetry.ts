@@ -30,6 +30,33 @@
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? "";
 const INGEST_PATH = "/api/v1/telemetry/events";
 
+/**
+ * The console host is the only one whose ingress routes `/api/v1/*` to the
+ * backend. The marketing site runs the same image on `cloud.dada-tuda.ru`,
+ * where a relative POST answers 404 -- which silently threw away exactly the
+ * pre-login half of the path this module exists to capture (verified live:
+ * `fetch('/api/v1/telemetry/events')` on cloud.dada-tuda.ru returns 404).
+ *
+ * Both hosts are same-site under dada-tuda.ru, so the SameSite=Lax `dada_uid`
+ * cookie still travels and the user is still resolved server-side.
+ */
+const CONSOLE_ORIGIN = "https://console.dada-tuda.ru";
+const API_HOST = "console.dada-tuda.ru";
+
+/**
+ * Resolves the ingest endpoint for the current host. An explicit
+ * NEXT_PUBLIC_API_URL wins (non-prod targets), then any host that is not the
+ * console gets the absolute console origin, and everything else stays
+ * relative -- which keeps localhost dev on its own dev server.
+ */
+function ingestEndpoint(): string {
+  if (API_BASE_URL) return `${API_BASE_URL}${INGEST_PATH}`;
+  if (typeof location !== "undefined" && /\.dada-tuda\.ru$/.test(location.hostname)) {
+    if (location.hostname !== API_HOST) return `${CONSOLE_ORIGIN}${INGEST_PATH}`;
+  }
+  return INGEST_PATH;
+}
+
 const ANON_STORAGE_KEY = "dada_ux_aid";
 const SESSION_STORAGE_KEY = "dada_ux_sid";
 
@@ -108,18 +135,25 @@ function currentPath(): string {
   return location.pathname.slice(0, PATH_MAX);
 }
 
+/**
+ * Sends one batch. The body is labelled `text/plain` on purpose: that keeps the
+ * cross-origin POST from the marketing host a CORS "simple request" with no
+ * preflight, which sendBeacon cannot perform at all. The backend binds JSON
+ * explicitly and does not read the content type. Responses are never read, so
+ * the missing CORS response headers cost nothing.
+ */
 function post(body: string): void {
-  const endpoint = `${API_BASE_URL}${INGEST_PATH}`;
+  const endpoint = ingestEndpoint();
   try {
     if (typeof navigator !== "undefined" && typeof navigator.sendBeacon === "function") {
-      const ok = navigator.sendBeacon(endpoint, new Blob([body], { type: "application/json" }));
+      const ok = navigator.sendBeacon(endpoint, new Blob([body], { type: "text/plain" }));
       if (ok) return;
     }
     void fetch(endpoint, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "text/plain" },
       body,
-      credentials: "same-origin",
+      credentials: "include",
       keepalive: true,
     }).catch(ignore);
   } catch {
