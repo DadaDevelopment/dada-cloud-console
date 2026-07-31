@@ -150,6 +150,8 @@ type Handler struct {
 	// (RecordBoxFunnelEvent). Never nil.
 	boxFunnelLimiter *boxFunnelLimiter
 
+	uxIngestLimiter *boxFunnelLimiter
+
 	// boxStack is the box runtime: the LocalRuntime adapter, its warm pool, its
 	// attach provider and its edge. nil when BOX_LOCAL_ROOT is unset, in which case
 	// every box runtime verb answers 503 with a reason — the same degradation as
@@ -169,6 +171,7 @@ func (h *Handler) optionalClaims(c *gin.Context) (*auth.Claims, bool) {
 func NewHandler(pool *pgxpool.Pool, cfg *config.Config) *Handler {
 	h := &Handler{pool: pool, cfg: cfg}
 	h.boxFunnelLimiter = newBoxFunnelLimiter(boxFunnelPerMin, boxFunnelGlobalPerMin)
+	h.uxIngestLimiter = newBoxFunnelLimiter(uxIngestPerMin, uxIngestGlobalPerMin)
 	if cfg.AIStudioEnabled && cfg.MLflowBaseURL != "" {
 		h.mlflow = mlflow.New(cfg.MLflowBaseURL, cfg.MLflowAuthHeader)
 	}

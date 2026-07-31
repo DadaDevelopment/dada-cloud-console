@@ -4,6 +4,7 @@ import { headers } from "next/headers";
 import "./globals.css";
 import { AuthProvider } from "@/lib/auth";
 import { YandexMetrika } from "@/components/yandex-metrika";
+import { UxTelemetryProvider } from "@/components/ux-telemetry-provider";
 
 const geist = Geist({ subsets: ["latin"], variable: "--font-geist-sans" });
 const geistMono = Geist_Mono({ subsets: ["latin"], variable: "--font-geist-mono" });
@@ -39,6 +40,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
     <html lang={lang} className={`${geist.variable} ${geistMono.variable} h-full`}>
       <body className="h-full bg-gray-50 antialiased">
         <YandexMetrika />
+        <UxTelemetryProvider />
         <AuthProvider>{children}</AuthProvider>
       </body>
     </html>
