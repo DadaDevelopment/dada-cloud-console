@@ -105,10 +105,12 @@ func poolLabel(hit bool) string {
 // command has executed inside it successfully.
 //
 // It does not create a box. Creation is what costs minutes, so it happens ahead of
-// demand in the pool controller; a spawn is a claim. On a pool miss this function
-// reports the miss and fails rather than silently paying a multi-minute cold
-// start on the caller's request — the cold path is the pool controller's job, and
-// hiding it here is how the headline number becomes a lie.
+// demand in the pool controller; a spawn is a claim. What a pool does on a miss is
+// the pool's decision, not this function's — the cluster pool pays a cold start,
+// the memory pool refuses — and either way this function's job is the same: label
+// the result honestly. A miss is counted as a miss and its latency is recorded
+// under the `miss` label, so a cold start can never be averaged into the headline
+// ready time, which is the way that number would become a lie.
 func Spawn(ctx context.Context, d Deps, spec Spec) (*SpawnResult, error) {
 	res := &SpawnResult{Steps: make([]Step, 0, 8)}
 	timeline := StartTimeline(d.Clock)

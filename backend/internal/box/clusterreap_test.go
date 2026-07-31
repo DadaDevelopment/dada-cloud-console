@@ -322,6 +322,34 @@ func TestReapOrphansRemovesAbandonedClaim(t *testing.T) {
 	}
 }
 
+// TestReapOrphansRemovesAColdStartThatNeverCameUp covers the pod a cold start
+// leaves when its process dies mid-create. Such a pod is born claimed and never
+// becomes Ready, so it matches neither the parked-and-stuck rule nor the
+// Ready-and-claimed one — before the claim rule stopped consulting readiness it
+// was a pod nothing in this file could ever collect.
+func TestReapOrphansRemovesAColdStartThatNeverCameUp(t *testing.T) {
+	clock := NewFakeClock(time.Date(2026, 8, 1, 12, 0, 0, 0, time.UTC))
+	pod := parkedPod("box-w1", "warm-v1", "", false)
+	pod.Labels[labelBoxPhase] = phaseClaimed
+	pod.Annotations[annBoxClaimedAt] = clock.Now().UTC().Format(time.RFC3339)
+	cs := fake.NewSimpleClientset(pod)
+	rt := newClusterRuntime(cs, nil, "dada-boxes", clock)
+
+	clock.Advance(clusterClaimOrphanAfter / 2)
+	if reaped, err := rt.ReapOrphans(context.Background()); err != nil || reaped != 0 {
+		t.Fatalf("reaped %d (%v) while the cold start could still be running, want 0", reaped, err)
+	}
+
+	clock.Advance(clusterClaimOrphanAfter)
+	reaped, err := rt.ReapOrphans(context.Background())
+	if err != nil {
+		t.Fatalf("ReapOrphans: %v", err)
+	}
+	if reaped != 1 {
+		t.Fatalf("reaped %d dead cold starts, want 1", reaped)
+	}
+}
+
 // TestReapOrphansLeavesAnOldParkedPodAlone is the guard the claim rule needs: a
 // warm pod's age says nothing, so the sweep must key off the claim stamp and not
 // off creation. Reaping by age here would empty the warm pool every time it got

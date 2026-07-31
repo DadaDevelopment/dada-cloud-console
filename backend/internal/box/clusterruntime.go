@@ -234,6 +234,21 @@ func (c *ClusterRuntime) Warm(ctx context.Context, pool ParkingPool, image, regi
 // that never becomes ready is destroyed rather than parked, because a pool slot
 // that fails on claim is worse than a smaller pool.
 func (c *ClusterRuntime) createParked(ctx context.Context, image, region string) (*Instance, error) {
+	return c.createBody(ctx, image, region, phaseParked)
+}
+
+// createClaimed creates a body that belongs to its caller from birth.
+//
+// It exists for the cold start the pool pays when a burst empties it. Creating
+// the pod parked and claiming it afterwards would be a race with every other
+// claimer and with the fill loop: the customer who waited three minutes for the
+// pod would watch someone else take it and get pool_exhausted anyway. Born
+// claimed, no NetworkPolicy selects it and nothing else can list it as free.
+func (c *ClusterRuntime) createClaimed(ctx context.Context, image, region string) (*Instance, error) {
+	return c.createBody(ctx, image, region, phaseClaimed)
+}
+
+func (c *ClusterRuntime) createBody(ctx context.Context, image, region, phase string) (*Instance, error) {
 	img, ok := boxcatalog.LookupImage(image)
 	if !ok {
 		return nil, fmt.Errorf("unknown warm image %q", image)
@@ -246,6 +261,10 @@ func (c *ClusterRuntime) createParked(ctx context.Context, image, region string)
 		return nil, fmt.Errorf("create workspace claim: %w", err)
 	}
 	pod := c.BuildPod(boxID, img, size, region)
+	pod.Labels[labelBoxPhase] = phase
+	if phase == phaseClaimed {
+		pod.Annotations[annBoxClaimedAt] = c.clock.Now().UTC().Format(time.RFC3339)
+	}
 	if _, err := c.clientset.CoreV1().Pods(c.Namespace).Create(ctx, pod, metav1.CreateOptions{}); err != nil && !apierrors.IsAlreadyExists(err) {
 		_ = c.deleteClaim(ctx, clusterPVCName(boxID))
 		return nil, fmt.Errorf("create box pod: %w", err)
@@ -774,6 +793,13 @@ func (c *ClusterRuntime) ReapOrphans(ctx context.Context) (int, error) {
 // quota — which is the whole cost, since a namespace full of abandoned pods
 // answers a paying customer's create with pool_exhausted.
 //
+// A claimed pod is judged by its stamp whether or not it is Ready, because a
+// cold start is born claimed: it never passes through the parked set, so a cold
+// start whose process died before the pod came up would otherwise be a pod no
+// rule here can ever see. Its disk is empty by construction — nothing has been
+// handed to a tenant until ProgramNetwork moves it to live — so the reap is free
+// of the data risk the paragraph below is about.
+//
 // A pod whose claim is not yet stamped is left alone. The stamp is written by the
 // same Update that makes the claim, so its absence means the pod predates this
 // code, and guessing an age for it would reap boxes that are merely old.
@@ -790,11 +816,8 @@ func (c *ClusterRuntime) ReapOrphans(ctx context.Context) (int, error) {
 // else reclaims it, which is the cheaper of the two mistakes by a wide margin.
 func clusterOrphaned(pod *corev1.Pod, now time.Time) bool {
 	phase := pod.Labels[labelBoxPhase]
-	if !clusterPodReady(pod) {
-		if phase != phaseParked {
-			return false
-		}
-		return pod.CreationTimestamp.Time.Before(now.Add(-clusterOrphanAfter))
+	if phase == phaseParked {
+		return !clusterPodReady(pod) && pod.CreationTimestamp.Time.Before(now.Add(-clusterOrphanAfter))
 	}
 	if phase != phaseClaimed {
 		return false

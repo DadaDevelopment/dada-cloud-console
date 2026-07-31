@@ -5,7 +5,9 @@ import (
 	"errors"
 	"sync"
 	"testing"
+	"time"
 
+	"github.com/dada-tuda/console/backend/internal/boxcatalog"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -74,9 +76,17 @@ func TestClusterPoolAdoptsPodsThisProcessDidNotCreate(t *testing.T) {
 // depend on: the claim is an atomic label transition, so the API server picks
 // one winner per pod. Two tenants in one body is the worst failure this
 // subsystem has.
+//
+// The seven losers each fall through to a cold start, which is the fallback
+// working and not what is under test here, so ReadyTimeout is cut to nothing:
+// their creates give up at once instead of waiting out the real timeout seven
+// times over. A cold start returns hit=false, so it can never be miscounted as
+// a second winner.
 func TestClusterPoolDoesNotHandOutAPodTwice(t *testing.T) {
 	cs := fake.NewSimpleClientset(parkedPod("box-w1", "warm-v1", "", true))
-	pool := NewClusterPool(newClusterRuntime(cs, nil, "dada-boxes", nil))
+	rt := newClusterRuntime(cs, nil, "dada-boxes", nil)
+	rt.ReadyTimeout = time.Millisecond
+	pool := NewClusterPool(rt)
 
 	var mu sync.Mutex
 	hits := 0
@@ -145,13 +155,89 @@ func TestClusterPoolSkipsPodsThatAreNotClaimable(t *testing.T) {
 		parkedPod("box-w2", "other-image", "", true),
 		parkedPod("box-w3", "warm-v1", "elsewhere", true),
 	)
-	pool := NewClusterPool(newClusterRuntime(cs, nil, "dada-boxes", nil))
+	rt := newClusterRuntime(cs, nil, "dada-boxes", nil)
+	rt.ReadyTimeout = 30 * time.Millisecond
+	pool := NewClusterPool(rt)
 
 	if got := pool.Available("warm-v1", ""); got != 0 {
 		t.Fatalf("available = %d, want 0: not-ready, wrong image and wrong region are all unclaimable", got)
 	}
-	if _, hit, err := pool.Claim(context.Background(), "warm-v1", ""); hit || !errors.Is(err, ErrPoolExhausted) {
-		t.Fatalf("Claim = (hit %v, %v), want ErrPoolExhausted", hit, err)
+	inst, hit, err := pool.Claim(context.Background(), "warm-v1", "")
+	if hit {
+		t.Fatalf("Claim reported a pool hit against %v: none of those pods was claimable", inst)
+	}
+	if err == nil {
+		t.Fatalf("Claim returned %v: the cold start had no pod that could become ready", inst)
+	}
+	for _, name := range []string{"box-w1", "box-w2", "box-w3"} {
+		pod, getErr := cs.CoreV1().Pods("dada-boxes").Get(context.Background(), name, metav1.GetOptions{})
+		if getErr != nil {
+			t.Fatalf("get %s: %v", name, getErr)
+		}
+		if pod.Labels[labelBoxPhase] != phaseParked {
+			t.Errorf("%s left the parked set as %q; an unclaimable pod must not be handed out", name, pod.Labels[labelBoxPhase])
+		}
+	}
+}
+
+// TestClaimColdStartsWhenTheParkedSetIsEmpty is the fix for a dead end the
+// production target of one warm box makes routine: the second person to create a
+// box in the same minute found the pool empty and was told `pool_exhausted` —
+// a refusal they can do nothing about, on a cluster with room to spare.
+func TestClaimColdStartsWhenTheParkedSetIsEmpty(t *testing.T) {
+	cs := fake.NewSimpleClientset()
+	cs.PrependReactor("create", "pods", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		pod, ok := action.(k8stesting.CreateAction).GetObject().(*corev1.Pod)
+		if !ok {
+			return false, nil, nil
+		}
+		pod.Status.PodIP = "10.244.0.9"
+		pod.Status.Conditions = []corev1.PodCondition{{Type: corev1.PodReady, Status: corev1.ConditionTrue}}
+		return false, nil, nil
+	})
+	rt := newClusterRuntime(cs, nil, "dada-boxes", nil)
+	image := boxcatalog.DefaultImage().Name
+	pool := NewClusterPool(rt)
+
+	inst, hit, err := pool.Claim(context.Background(), image, "")
+	if err != nil {
+		t.Fatalf("Claim against an empty pool: %v", err)
+	}
+	if hit {
+		t.Error("a cold start reported a pool hit; it must be measured as a miss")
+	}
+	if inst.SSHHost == "" {
+		t.Error("a cold-started box came back with no address to reach it on")
+	}
+	pod, err := cs.CoreV1().Pods("dada-boxes").Get(context.Background(), inst.InstanceRef, metav1.GetOptions{})
+	if err != nil {
+		t.Fatalf("get cold-started pod: %v", err)
+	}
+	if pod.Labels[labelBoxPhase] != phaseClaimed {
+		t.Errorf("cold-started pod is %q, want %q: born parked it could be stolen by another claimer",
+			pod.Labels[labelBoxPhase], phaseClaimed)
+	}
+	if pod.Annotations[annBoxClaimedAt] == "" {
+		t.Error("cold-started pod carries no claim stamp; the reaper cannot bound it")
+	}
+}
+
+// TestClaimColdStartFailureIsStillPoolExhausted: when there is no free box AND
+// making one fails, the customer's answer is unchanged and so is the alert that
+// watches it. A second rejection reason would split that alert in half.
+func TestClaimColdStartFailureIsStillPoolExhausted(t *testing.T) {
+	cs := fake.NewSimpleClientset()
+	rt := newClusterRuntime(cs, nil, "dada-boxes", nil)
+	rt.ReadyTimeout = 30 * time.Millisecond
+	pool := NewClusterPool(rt)
+
+	_, hit, err := pool.Claim(context.Background(), boxcatalog.DefaultImage().Name, "")
+	if hit || !errors.Is(err, ErrPoolExhausted) {
+		t.Fatalf("Claim = (hit %v, %v), want an ErrPoolExhausted", hit, err)
+	}
+	pods, pvcs := countBoxObjects(t, cs, "dada-boxes")
+	if pods != 0 || pvcs != 0 {
+		t.Fatalf("a failed cold start left pods=%d pvcs=%d behind, want 0 and 0", pods, pvcs)
 	}
 }
 

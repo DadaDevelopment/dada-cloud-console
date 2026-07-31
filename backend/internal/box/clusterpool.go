@@ -94,6 +94,17 @@ func (p *ClusterPool) Available(image, region string) int {
 // claim. Update carries the pod's resourceVersion, so a second claimer racing
 // for the same pod is rejected by the API server instead of both succeeding;
 // that claimer simply tries the next parked pod.
+//
+// An empty parked set is a slow claim, not a refusal. The pool target in
+// production is one, so the SECOND person to create a box in the same minute
+// finds it empty — and answering them `pool_exhausted` is telling a customer the
+// product is full when the cluster has room. That answer is a dead end: nothing
+// they can do makes it succeed, and the person it hits hardest is the outsider
+// trying the product for the first time. So a miss creates a body and waits for
+// it. The honesty the miss was protecting is kept where it belongs — in the
+// measurement: the returned hit=false labels the spawn and its latency `miss`,
+// so a cold start shows up as a cold start in the metric instead of quietly
+// inflating the headline ready time.
 func (p *ClusterPool) Claim(ctx context.Context, image, region string) (*Instance, bool, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, false, err
@@ -126,7 +137,20 @@ func (p *ClusterPool) Claim(ctx context.Context, image, region string) (*Instanc
 			SSHPort:     p.rt.BrokerPort,
 		}, true, nil
 	}
-	return nil, false, ErrPoolExhausted
+	return p.coldStart(ctx, image, region)
+}
+
+// coldStart builds a body on the caller's request after the parked set came up
+// empty. A failure here is still reported as ErrPoolExhausted so the spawn keeps
+// its `pool_exhausted` label: from the customer's side there was no free box and
+// making one did not work either, and splitting that into a second reason would
+// split the alert that watches it.
+func (p *ClusterPool) coldStart(ctx context.Context, image, region string) (*Instance, bool, error) {
+	inst, err := p.rt.createClaimed(ctx, image, region)
+	if err != nil {
+		return nil, false, fmt.Errorf("%w: cold start: %v", ErrPoolExhausted, err)
+	}
+	return inst, false, nil
 }
 
 // parked lists the claimable pods for one image and region.
