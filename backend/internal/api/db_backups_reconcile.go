@@ -34,6 +34,18 @@ const (
 // over time, one at a time, longest-waiting first.
 const maxConcurrentScheduledBackups = 1
 
+// stuckBackupTimeout bounds how long a backup may sit in Pending/Running
+// before failStuckBackups marks it Failed. reconcileBackups can only advance
+// a row while its ActionSet is still readable: if the ActionSet is deleted or
+// never recorded, Status returns an error and the row stays Running forever.
+// With maxConcurrentScheduledBackups at 1, one such row would permanently
+// consume the only slot and silently stop scheduled backups for every
+// database. The bound is generous on purpose -- the largest opted-in dump is
+// roughly 5.9 GB against a 500m CPU budget -- so a healthy backup finishes
+// long before it, and a Failed row is recoverable (the next tick simply
+// starts a new backup) whereas a stuck one is not.
+const stuckBackupTimeout = 6 * time.Hour
+
 // backupFrequencyIntervals maps a ServiceDatabaseV2's configured backup
 // frequency to the cadence runScheduledBackups enforces. Keys use K10's
 // @-prefixed form (see normalizeBackupFrequency in databases.go);
@@ -106,6 +118,7 @@ func (h *Handler) StartBackupReconciler(ctx context.Context) {
 			case <-ticker.C:
 				runWithAdvisoryLock(ctx, h.pool, lockKeyBackupReconcile, "backup-reconcile", func(ctx context.Context) {
 					h.reconcileBackups(ctx)
+					h.failStuckBackups(ctx)
 					h.reconcileRestores(ctx)
 					h.expireBackups(ctx)
 					h.sweepVolumeExports(ctx)
@@ -153,6 +166,29 @@ func (h *Handler) reconcileBackups(ctx context.Context) {
 				`UPDATE db_backups SET status = 'Failed', error_message = $2, updated_at = NOW() WHERE id = $1`,
 				it.id, nonEmpty(st.Error, "backup ActionSet failed"))
 		}
+	}
+}
+
+// failStuckBackups marks backups Failed once they have been Pending or
+// Running for longer than stuckBackupTimeout. Such a row is unreachable for
+// reconcileBackups -- its ActionSet is gone or was never recorded, so Status
+// keeps erroring -- and it would otherwise hold a scheduled-backup slot
+// forever.
+func (h *Handler) failStuckBackups(ctx context.Context) {
+	tag, err := h.pool.Exec(ctx,
+		`UPDATE db_backups
+		    SET status = 'Failed',
+		        error_message = COALESCE(error_message, 'backup stuck without a readable ActionSet'),
+		        updated_at = NOW()
+		  WHERE status IN ('Pending', 'Running')
+		    AND created_at < NOW() - $1::interval`,
+		stuckBackupTimeout.String())
+	if err != nil {
+		log.Printf("failStuckBackups: %v", err)
+		return
+	}
+	if n := tag.RowsAffected(); n > 0 {
+		log.Printf("failStuckBackups: marked %d stuck backup(s) Failed", n)
 	}
 }
 

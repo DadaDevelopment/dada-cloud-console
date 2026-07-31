@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/dada-tuda/console/backend/internal/models"
 	"github.com/google/uuid"
 )
 
@@ -233,4 +234,45 @@ func equalNames(a, b []string) bool {
 		}
 	}
 	return true
+}
+
+func TestFailStuckBackups_OnlyPastTimeout(t *testing.T) {
+	pool := testVolumeExportPool(t)
+	ctx := context.Background()
+	h := &Handler{pool: pool}
+
+	projectID, envID, _ := seedVolumeExportApp(t, pool, "")
+	stuckID, freshID := uuid.New(), uuid.New()
+	insert := func(id uuid.UUID, age time.Duration) {
+		t.Helper()
+		if _, err := pool.Exec(ctx,
+			`INSERT INTO db_backups (id, project_id, environment_id, resource_name, database_name,
+			     dump_path, status, kind, created_at)
+			 VALUES ($1, $2, $3, 'stuck-test', 'stuck-test', 'dumps/stuck-test.dump', 'Running', $4, NOW() - $5::interval)`,
+			id, projectID, envID, models.DBBackupKindScheduled, age.String()); err != nil {
+			t.Fatalf("seed backup: %v", err)
+		}
+	}
+	insert(stuckID, stuckBackupTimeout+time.Hour)
+	insert(freshID, time.Minute)
+	t.Cleanup(func() {
+		_, _ = pool.Exec(ctx, `DELETE FROM db_backups WHERE project_id = $1`, projectID)
+	})
+
+	h.failStuckBackups(ctx)
+
+	status := func(id uuid.UUID) string {
+		t.Helper()
+		var s string
+		if err := pool.QueryRow(ctx, `SELECT status FROM db_backups WHERE id = $1`, id).Scan(&s); err != nil {
+			t.Fatalf("read status: %v", err)
+		}
+		return s
+	}
+	if got := status(stuckID); got != "Failed" {
+		t.Fatalf("stuck backup status = %q, want Failed", got)
+	}
+	if got := status(freshID); got != "Running" {
+		t.Fatalf("fresh backup status = %q, want Running", got)
+	}
 }
