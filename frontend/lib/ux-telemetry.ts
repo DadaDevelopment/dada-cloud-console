@@ -275,6 +275,7 @@ function describeTarget(el: Element): { target: string; props: Record<string, un
   if (tag === "a") {
     const href = control.getAttribute("href") ?? "";
     if (href.startsWith("/")) props.href = href.split("?")[0].slice(0, PATH_MAX);
+    else if (href.startsWith("#")) props.href = href.slice(0, PATH_MAX);
     else if (href) props.href = "external";
   }
   const disabled =
