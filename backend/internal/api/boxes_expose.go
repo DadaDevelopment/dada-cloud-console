@@ -83,7 +83,7 @@ func (h *Handler) ExposeBox(c *gin.Context) {
 	}
 	// Measured to the first real 200 from the published address, which is why the
 	// probe happens before the metric and before the response.
-	probe := probePublishedURL(exp.URL, exp.Hostname)
+	probe := awaitPublishedURL(exp.URL, exp.Hostname, exposeProbeBudget, exposeProbeInterval)
 	elapsed := time.Since(started)
 	metrics.RecordBoxExpose("wildcard", elapsed)
 
@@ -109,9 +109,10 @@ func (h *Handler) ExposeBox(c *gin.Context) {
 			"cert":     exp.Cert,
 		},
 		"first_response": gin.H{
-			"status": probe.status,
-			"ok":     probe.ok,
-			"body":   probe.body,
+			"status":   probe.status,
+			"ok":       probe.ok,
+			"body":     probe.body,
+			"attempts": probe.attempts,
 		},
 		"expose_ms": elapsed.Milliseconds(),
 		"note": "the hostname is assigned by the platform under its wildcard and cannot be chosen. " +
@@ -119,10 +120,38 @@ func (h *Handler) ExposeBox(c *gin.Context) {
 	})
 }
 
+// An ingress object and its wildcard certificate are programmed by the edge a
+// few seconds after the API returns, so a single immediate probe reports the
+// gap rather than the outcome: callers saw ok=false with a certificate error on
+// an address that answered 200 three seconds later. The budget is what an agent
+// is willing to wait for its own URL, not a retry policy for a broken edge.
+const (
+	exposeProbeBudget   = 25 * time.Second
+	exposeProbeInterval = 500 * time.Millisecond
+)
+
 type publishedProbe struct {
-	status int
-	ok     bool
-	body   string
+	status   int
+	ok       bool
+	body     string
+	attempts int
+}
+
+// awaitPublishedURL probes the published address until it answers 200 or the
+// budget runs out, and reports the last observation either way. A failure after
+// the budget is a real failure: the caller waited as long as it declared it
+// would and nothing answered.
+func awaitPublishedURL(url, host string, budget, interval time.Duration) publishedProbe {
+	deadline := time.Now().Add(budget)
+	var last publishedProbe
+	for attempt := 1; ; attempt++ {
+		last = probePublishedURL(url, host)
+		last.attempts = attempt
+		if last.ok || !time.Now().Add(interval).Before(deadline) {
+			return last
+		}
+		time.Sleep(interval)
+	}
 }
 
 // probePublishedURL fetches the published address once, sending the assigned
