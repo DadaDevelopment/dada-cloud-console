@@ -367,11 +367,19 @@ func seedDBBackupRow(t *testing.T, pool *pgxpool.Pool, projectID, envID uuid.UUI
 	}
 }
 
+// TestScheduledBackupCandidates_RealDB_ComputesHistoryAndPicksHealthyOverFailing
+// runs the candidate query against a real Postgres and asserts it reports the
+// history dueScheduledBackups needs.
+//
+// The seeded timestamps are truncated to a millisecond first: Postgres stores
+// microsecond precision, so a raw time.Now() with nanoseconds does not survive
+// the round trip and the equality assertions below would compare a truncated
+// value against the untruncated one.
 func TestScheduledBackupCandidates_RealDB_ComputesHistoryAndPicksHealthyOverFailing(t *testing.T) {
 	pool := testVolumeExportPool(t)
 	ctx := context.Background()
 	h := &Handler{pool: pool}
-	now := time.Now().UTC()
+	now := time.Now().UTC().Truncate(time.Millisecond)
 
 	projectA, envA := seedScheduledBackupServiceDatabase(t, pool, "broken-"+uuid.NewString()[:8])
 	projectB, _ := seedScheduledBackupServiceDatabase(t, pool, "healthy-"+uuid.NewString()[:8])
