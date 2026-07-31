@@ -159,8 +159,8 @@ func (h *Handler) initBoxRuntime(cfg *config.Config) {
 // would therefore not produce a slow start, it would produce a crashloop, and a
 // crashlooping console is a worse answer to "the pool is cold" than
 // pool_exhausted. The cost is not hidden: a spawn before the pool fills still
-// reports pool_exhausted, and the gauges below start at zero and are refreshed
-// when warming finishes.
+// reports pool_exhausted, and the gauges start at zero and are refreshed on every
+// fill. The fill also does not stop after boot — see boxPoolFillLoop.
 func (h *Handler) initClusterBoxRuntime(cfg *config.Config) {
 	rt, err := box.NewClusterRuntime(cfg.BoxClusterNamespace, box.SystemClock{})
 	if err != nil {
@@ -201,30 +201,68 @@ func (h *Handler) initClusterBoxRuntime(cfg *config.Config) {
 	}
 	go boxOrphanReapLoop(rt)
 
-	go func() {
+	go boxPoolFillLoop(rt, pool, stack.image, stack.region, cfg.BoxWarmPoolSize)
+}
+
+// clusterPoolFillInterval is how often the running process reconciles the warm
+// pool back up to its target.
+//
+// A minute is chosen against the two failures it has to cover, not against a
+// guess. The first is a claim: the pool drops by one the moment a box is handed
+// over, and the next customer should not inherit that hole. The second is a
+// transient create failure — an image tag that does not exist yet, a storage
+// quota momentarily full, a node with no room — which at boot used to be
+// permanent, because warming ran exactly once and a process that failed it
+// served pool_exhausted until someone restarted it. A minute is far shorter than
+// a customer's patience and far longer than a pod create, and refills cost
+// nothing while the pool is full: Warm reconciles to the target and returns
+// immediately when there is no deficit.
+const clusterPoolFillInterval = time.Minute
+
+// boxPoolFillLoop keeps the warm pool at its target for the life of the process.
+// It fills once immediately — a cold pool at boot is the common case and waiting
+// out the first tick would add a minute to it for no reason — and then reconciles
+// on the ticker.
+//
+// Like the orphan sweep it has no cancellation: the process exiting is what stops
+// it. Failures are logged and retried on the next tick rather than ending the
+// loop, because the conditions that make a create fail are exactly the ones that
+// pass on their own.
+func boxPoolFillLoop(rt *box.ClusterRuntime, pool box.ParkingPool, image, region string, target int) {
+	fill := func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Minute)
 		defer cancel()
 		started := time.Now()
-		if err := rt.Warm(ctx, pool, stack.image, stack.region, cfg.BoxWarmPoolSize); err != nil {
-			log.Error().Err(err).Msg("box: warming the cluster pool failed; spawns will report pool_exhausted")
-		} else {
+		before := pool.Available(image, region)
+		if err := rt.Warm(ctx, pool, image, region, target); err != nil {
+			log.Error().Err(err).Int("available", pool.Available(image, region)).Int("target", target).
+				Msg("box: filling the cluster pool failed; spawns report pool_exhausted until the next attempt")
+		} else if added := pool.Available(image, region) - before; added > 0 {
 			log.Info().
 				Str("namespace", rt.Namespace).
-				Str("image", stack.image).
-				Int("warm", cfg.BoxWarmPoolSize).
+				Str("image", image).
+				Int("added", added).
+				Int("available", pool.Available(image, region)).
+				Int("target", target).
 				Dur("took", time.Since(started)).
-				Msg("box: ClusterRuntime warm pool ready")
+				Msg("box: cluster warm pool filled")
 		}
-		metrics.SetBoxPoolGauges(stack.image, stack.region,
-			pool.Available(stack.image, stack.region), pool.Target(stack.image, stack.region))
-	}()
+		metrics.SetBoxPoolGauges(image, region, pool.Available(image, region), pool.Target(image, region))
+	}
+
+	fill()
+	ticker := time.NewTicker(clusterPoolFillInterval)
+	defer ticker.Stop()
+	for range ticker.C {
+		fill()
+	}
 }
 
 // clusterOrphanReapInterval is how often the running process re-sweeps the box
-// namespace for pods that never went Ready. It runs independently of Warm: Warm
-// only ever tries to fill the pool once at boot, but a pod can be orphaned at any
-// time the process is restarted mid-create, so the sweep has to keep going for
-// the process's whole life, not just its startup.
+// namespace for pods that never went Ready. It runs independently of the fill
+// loop: a pod can be orphaned any time a process is restarted mid-create, and the
+// process that would have cleaned it up is the one that died, so the sweep has to
+// be somebody else's job and has to keep going for the whole process life.
 const clusterOrphanReapInterval = 2 * time.Minute
 
 // boxOrphanReapLoop runs ReapOrphans on a ticker for as long as the process

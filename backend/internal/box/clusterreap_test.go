@@ -8,7 +8,9 @@ import (
 	"github.com/dada-tuda/console/backend/internal/boxcatalog"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes/fake"
+	k8stesting "k8s.io/client-go/testing"
 )
 
 // countBoxObjects returns how many pods and PVCs carry the box label in ns, so a
@@ -145,5 +147,72 @@ func TestReapOrphansLeavesReadyPodsAlone(t *testing.T) {
 	pods, pvcs := countBoxObjects(t, cs, "dada-boxes")
 	if pods != 1 || pvcs != 1 {
 		t.Fatalf("healthy warm pod/pvc was removed: pods=%d pvcs=%d, want 1 and 1", pods, pvcs)
+	}
+}
+
+// readyOnCreate makes every pod the fake clientset accepts come back Ready, which
+// is what lets a test exercise the SUCCESSFUL warm path: the real readiness signal
+// is a startup probe against the box's own door, and there is no door in a fake.
+func readyOnCreate(cs *fake.Clientset) {
+	cs.PrependReactor("create", "pods", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		pod, ok := action.(k8stesting.CreateAction).GetObject().(*corev1.Pod)
+		if !ok {
+			return false, nil, nil
+		}
+		pod.Status.Conditions = append(pod.Status.Conditions, corev1.PodCondition{
+			Type:   corev1.PodReady,
+			Status: corev1.ConditionTrue,
+		})
+		return false, nil, nil
+	})
+}
+
+// TestWarmReconcilesToTheTarget is the fix for the defect that made the warm pool
+// a one-shot: Warm used to CREATE n pods on every call, so the only safe place to
+// call it was boot, so a pool emptied by the first customer stayed empty until
+// somebody restarted the console — and a create that failed at boot for a reason
+// that later passed (a tag not pushed yet, a momentarily full quota) failed
+// forever. Warm now fills only the shortfall, which is what makes it safe to run
+// on a ticker, and the ticker is the thing that refills after a claim and retries
+// after a bad boot.
+func TestWarmReconcilesToTheTarget(t *testing.T) {
+	cs := fake.NewSimpleClientset()
+	readyOnCreate(cs)
+	rt := newClusterRuntime(cs, nil, "dada-boxes", nil)
+	pool := NewMemoryPool()
+	image := boxcatalog.DefaultImage().Name
+	ctx := context.Background()
+
+	if err := rt.Warm(ctx, pool, image, "ru-1", 2); err != nil {
+		t.Fatalf("warm to 2: %v", err)
+	}
+	if got := pool.Available(image, "ru-1"); got != 2 {
+		t.Fatalf("available=%d after warming to 2, want 2", got)
+	}
+	if pods, _ := countBoxObjects(t, cs, "dada-boxes"); pods != 2 {
+		t.Fatalf("warming to 2 created %d pods, want 2", pods)
+	}
+
+	if err := rt.Warm(ctx, pool, image, "ru-1", 2); err != nil {
+		t.Fatalf("second warm to 2: %v", err)
+	}
+	if pods, _ := countBoxObjects(t, cs, "dada-boxes"); pods != 2 {
+		t.Fatalf("a warm against a full pool built bodies nobody asked for: pods=%d, want 2", pods)
+	}
+
+	if _, _, err := pool.Claim(ctx, image, "ru-1"); err != nil {
+		t.Fatalf("claim: %v", err)
+	}
+	if err := rt.Warm(ctx, pool, image, "ru-1", 2); err != nil {
+		t.Fatalf("refill after claim: %v", err)
+	}
+	if got := pool.Available(image, "ru-1"); got != 2 {
+		t.Fatalf("available=%d after the refill, want 2: a claimed slot has to come back", got)
+	}
+	if pods, _ := countBoxObjects(t, cs, "dada-boxes"); pods != 3 {
+		t.Fatalf("refill left %d pods, want 3 (two warm plus the replacement for the claimed one)", pods)
+	}
+	if got := pool.Target(image, "ru-1"); got != 2 {
+		t.Fatalf("target=%d, want 2: a refill must not rewrite the target to its own shortfall", got)
 	}
 }

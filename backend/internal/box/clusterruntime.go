@@ -160,15 +160,27 @@ func clusterPodName(boxID string) string { return "box-" + boxID }
 // clusterPVCName is the workspace claim name for a box id.
 func clusterPVCName(boxID string) string { return clusterPodName(boxID) + "-workspace" }
 
-// Warm creates n parked pods and parks them in the pool once their door accepts.
+// Warm brings the pool up to n free pods, parking each one once its door accepts.
+//
+// It reconciles rather than creates: n is the TARGET, and only the shortfall is
+// built. That is what makes it safe to call on a ticker, which is what the caller
+// does — a pool filled once at boot is empty forever after the first claim, so
+// the second customer of the day gets pool_exhausted from a control plane that
+// has been up for hours and is not even trying. Calling this with the same n
+// repeatedly is therefore a no-op while the pool is full and a refill the moment
+// it is not.
 //
 // Failures are per-pod and non-fatal: a partially warmed pool is a real pool with
 // fewer slots, and reporting the shortfall is more useful than refusing to serve.
 func (c *ClusterRuntime) Warm(ctx context.Context, pool ParkingPool, image, region string, n int) error {
 	pool.SetTarget(image, region, n)
+	deficit := n - pool.Available(image, region)
+	if deficit <= 0 {
+		return nil
+	}
 	var firstErr error
 	created := 0
-	for i := 0; i < n; i++ {
+	for i := 0; i < deficit; i++ {
 		inst, err := c.createParked(ctx, image, region)
 		if err != nil {
 			if firstErr == nil {
@@ -180,10 +192,10 @@ func (c *ClusterRuntime) Warm(ctx context.Context, pool ParkingPool, image, regi
 		created++
 	}
 	if created == 0 && firstErr != nil {
-		return fmt.Errorf("warm %d boxes: %w", n, firstErr)
+		return fmt.Errorf("warm %d boxes: %w", deficit, firstErr)
 	}
 	if firstErr != nil {
-		return fmt.Errorf("warmed %d of %d boxes: %w", created, n, firstErr)
+		return fmt.Errorf("warmed %d of %d boxes: %w", created, deficit, firstErr)
 	}
 	return nil
 }
