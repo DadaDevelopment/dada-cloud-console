@@ -3,7 +3,13 @@
 # CPU/mem and drops the Jenkins agent channel mid-build (builds #138-#145).
 # Mirror backend/Dockerfile — copy the prebuilt binary into a minimal runtime.
 FROM alpine:3.19
-RUN apk add --no-cache ca-certificates git openssh-client
+RUN printf '%s\n' \
+      https://mirror.yandex.ru/mirrors/alpine/v3.19/main \
+      https://mirror.yandex.ru/mirrors/alpine/v3.19/community \
+      https://dl-cdn.alpinelinux.org/alpine/v3.19/main \
+      https://dl-cdn.alpinelinux.org/alpine/v3.19/community \
+      > /etc/apk/repositories \
+ && { for i in 1 2 3; do apk add --no-cache ca-certificates git openssh-client && exit 0; sleep 3; done; exit 1; }
 WORKDIR /app
 COPY bin/gitops-agent ./gitops-agent
 # Repos are cloned at runtime into a volume mounted at /var/lib/gitops-repos

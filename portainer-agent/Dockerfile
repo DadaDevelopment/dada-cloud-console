@@ -8,7 +8,13 @@ FROM hashicorp/terraform:1.9 AS terraform
 
 # Stage 2: minimal runtime image
 FROM alpine:3.19
-RUN apk add --no-cache ca-certificates openssh-client
+RUN printf '%s\n' \
+      https://mirror.yandex.ru/mirrors/alpine/v3.19/main \
+      https://mirror.yandex.ru/mirrors/alpine/v3.19/community \
+      https://dl-cdn.alpinelinux.org/alpine/v3.19/main \
+      https://dl-cdn.alpinelinux.org/alpine/v3.19/community \
+      > /etc/apk/repositories \
+ && { for i in 1 2 3; do apk add --no-cache ca-certificates openssh-client && exit 0; sleep 3; done; exit 1; }
 
 COPY --from=terraform /bin/terraform /usr/local/bin/terraform
 COPY bin/portainer-agent /portainer-agent
