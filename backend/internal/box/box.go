@@ -102,6 +102,21 @@ type BoxRuntime interface {
 	Destroy(ctx context.Context, inst *Instance) error
 }
 
+// Sleeper is the optional half of a runtime: a box that can be put down and
+// picked back up without losing what the agent did in it.
+//
+// It is deliberately not part of BoxRuntime. Sleep is only meaningful where the
+// disk outlives the body, and a runtime that cannot promise that must fail the
+// request out loud rather than inherit a method it would have to implement as a
+// destroy. Callers type-assert, and the failure of that assertion is the honest
+// answer "this runtime does not do that".
+type Sleeper interface {
+	// Suspend releases the running body and keeps the workspace disk.
+	Suspend(ctx context.Context, inst *Instance) error
+	// Resume rebuilds a body around the surviving disk and waits for its door.
+	Resume(ctx context.Context, inst *Instance, spec Spec) error
+}
+
 // WarmPool hands out pre-warmed instances. Boxes are not created on demand:
 // creation is what costs minutes, so it happens ahead of demand and a spawn is a
 // claim. Claim reports whether it was a warm hit, because a miss must be

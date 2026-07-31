@@ -628,6 +628,62 @@ func (c *ClusterRuntime) Destroy(ctx context.Context, inst *Instance) error {
 	return c.deleteClaim(ctx, clusterClaimNameFor(inst))
 }
 
+// Suspend deletes the pod and KEEPS the workspace claim.
+//
+// That asymmetry with Destroy is the entire feature: a suspended box costs the
+// customer storage instead of compute and comes back with its work intact, so
+// deleting the claim here would turn a sleep into a data loss the API calls
+// non-destructive. The pod name is derived from the box id, so the body that
+// Resume creates lands on the same claim.
+func (c *ClusterRuntime) Suspend(ctx context.Context, inst *Instance) error {
+	grace := int64(clusterDestroyGraceSecs)
+	err := c.clientset.CoreV1().Pods(c.Namespace).Delete(ctx, inst.InstanceRef, metav1.DeleteOptions{GracePeriodSeconds: &grace})
+	if err != nil && !apierrors.IsNotFound(err) {
+		return fmt.Errorf("delete box pod: %w", err)
+	}
+	return nil
+}
+
+// Resume rebuilds the pod of a suspended box and waits for its door to accept.
+//
+// It does NOT go through the warm pool. A pool body is a fresh disk, and this box
+// already owns one; claiming a warm instance would hand the customer somebody
+// else's empty workspace under their own box's name. The cost is a cold start,
+// which is the honest price of having stopped paying for the running body.
+func (c *ClusterRuntime) Resume(ctx context.Context, inst *Instance, spec Spec) error {
+	boxID := clusterBoxIDFromPodName(inst.InstanceRef)
+	if boxID == "" {
+		return fmt.Errorf("cannot resume box: %q is not a box pod name", inst.InstanceRef)
+	}
+	image := spec.Image
+	if image == "" {
+		image = inst.Image
+	}
+	img, ok := boxcatalog.LookupImage(image)
+	if !ok {
+		return fmt.Errorf("unknown warm image %q", image)
+	}
+	region := spec.Region
+	if region == "" {
+		region = inst.Region
+	}
+	pod := c.BuildPod(boxID, img, boxcatalog.DefaultSize(), region)
+	if _, err := c.clientset.CoreV1().Pods(c.Namespace).Create(ctx, pod, metav1.CreateOptions{}); err != nil && !apierrors.IsAlreadyExists(err) {
+		return fmt.Errorf("recreate box pod: %w", err)
+	}
+	inst.InstanceRef = pod.Name
+	return c.waitReady(ctx, inst)
+}
+
+// clusterBoxIDFromPodName recovers the runtime's box id from a pod name, which is
+// the only place it survives a round trip through the database.
+func clusterBoxIDFromPodName(podName string) string {
+	if !strings.HasPrefix(podName, "box-") {
+		return ""
+	}
+	return strings.TrimPrefix(podName, "box-")
+}
+
 // deleteClaim removes a box's workspace PVC by name, tolerating an already-gone claim.
 func (c *ClusterRuntime) deleteClaim(ctx context.Context, claim string) error {
 	err := c.clientset.CoreV1().PersistentVolumeClaims(c.Namespace).Delete(ctx, claim, metav1.DeleteOptions{})

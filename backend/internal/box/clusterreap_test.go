@@ -244,3 +244,45 @@ func TestDestroyFromDatabaseRowDeletesTheWorkspace(t *testing.T) {
 		t.Fatalf("destroy from a database row left %d pods and %d pvcs behind", pods, pvcs)
 	}
 }
+
+// TestSuspendKeepsTheWorkspaceAndResumeReattachesIt pins the promise the API
+// makes about sleep: it is not a delete. The body goes away, the claim does not,
+// and a resume rebuilds a pod on the same name so the same volume comes back.
+func TestSuspendKeepsTheWorkspaceAndResumeReattachesIt(t *testing.T) {
+	cs := fake.NewSimpleClientset()
+	readyOnCreate(cs)
+	rt := newClusterRuntime(cs, nil, "dada-boxes", nil)
+	pool := NewMemoryPool()
+	image := boxcatalog.DefaultImage().Name
+
+	if err := rt.Warm(context.Background(), pool, image, "ru1", 1); err != nil {
+		t.Fatalf("warm: %v", err)
+	}
+	inst, _, err := pool.Claim(context.Background(), image, "ru1")
+	if err != nil {
+		t.Fatalf("claim: %v", err)
+	}
+	podName := inst.InstanceRef
+
+	fromRow := &Instance{ID: "a53392a6-45aa-4ac7-b8c3-f57b1280f7f3", InstanceRef: podName, Image: image, Region: "ru1"}
+	if err := rt.Suspend(context.Background(), fromRow); err != nil {
+		t.Fatalf("suspend: %v", err)
+	}
+	pods, pvcs := countBoxObjects(t, cs, "dada-boxes")
+	if pods != 0 {
+		t.Fatalf("suspend left %d pods running", pods)
+	}
+	if pvcs != 1 {
+		t.Fatalf("suspend destroyed the workspace: %d claims left", pvcs)
+	}
+
+	if err := rt.Resume(context.Background(), fromRow, Spec{Image: image, Region: "ru1"}); err != nil {
+		t.Fatalf("resume: %v", err)
+	}
+	if fromRow.InstanceRef != podName {
+		t.Fatalf("resume moved the box to pod %q, so it would mount a different volume than %q", fromRow.InstanceRef, podName)
+	}
+	if pods, pvcs := countBoxObjects(t, cs, "dada-boxes"); pods != 1 || pvcs != 1 {
+		t.Fatalf("after resume: %d pods, %d pvcs", pods, pvcs)
+	}
+}
