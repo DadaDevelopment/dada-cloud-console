@@ -36,6 +36,18 @@ var inferenceServiceGVR = schema.GroupVersionResource{
 // mapped back to the resource_snapshots row the console UI renders.
 const appLabel = "dada.io/app"
 
+// Container-state reasons mirrored from backend/internal/api/app_health_watcher.go
+// (reasonOOMKilled etc, detectPodAlert) so the two live-health detectors in this
+// codebase agree on vocabulary and precedence instead of one saying "Ready" while
+// the other is emailing the owner about the same pod. Not extracted to a shared
+// package this cycle — see the reconcile() doc comment.
+const (
+	reasonOOMKilled        = "OOMKilled"
+	reasonCrashLoopBackOff = "CrashLoopBackOff"
+	reasonImagePullBackOff = "ImagePullBackOff"
+	reasonErrImagePull     = "ErrImagePull"
+)
+
 // StatusReconciler periodically reads Deployment status from each k8s
 // environment's namespace and mirrors phase + image + replicas onto the
 // matching App snapshot. Without it, git-synced apps are stuck at phase
@@ -287,10 +299,21 @@ func isvcURL(o *unstructured.Unstructured) string {
 // liveApp aggregates the workload state for one app within a namespace. An app
 // may map to more than one Deployment (rare); replicas are summed and the first
 // non-empty image wins.
+//
+// crashLooping/reason/restarts/lastExitCode come from a separate cluster-wide
+// Pod list: readyReplicas alone lies about health when a workload has no
+// readinessProbe — kubelet marks a just-started container ready right up until
+// it crashes again, so desired==ready reads "Ready" for a container stuck in
+// CrashLoopBackOff.
 type liveApp struct {
 	desired int32
 	ready   int32
 	image   string
+
+	crashLooping bool
+	reason       string
+	restarts     int32
+	lastExitCode *int32
 }
 
 // snapKey identifies one App snapshot to update: its environment + app name.
@@ -332,18 +355,28 @@ func (r *StatusReconciler) reconcile(ctx context.Context) map[snapKey]bool {
 	// StatefulSet, any GitHub/Docker image) reports its real live phase instead of
 	// being frozen at the git-watcher's "Unknown". Still strictly read-only.
 	agg := map[snapKey]*liveApp{}
+
+	// resolveEnv is the namespace-to-environment lookup shared by every workload
+	// kind (Deployment/StatefulSet/DaemonSet/Pod): normal case is the workload's
+	// own namespace, fallback is an unambiguous namespace-override app name.
+	resolveEnv := func(app, ns string) (uuid.UUID, bool) {
+		if id, ok := envByNs[ns]; ok {
+			return id, true // workload sits in its env's namespace (normal case)
+		}
+		if ids := appEnvs[app]; len(ids) == 1 {
+			return ids[0], true // namespace override, unambiguous app name
+		}
+		return uuid.UUID{}, false // not an app namespace, and name absent/ambiguous → skip
+	}
+
 	acc := func(labels map[string]string, name, ns string, desired, ready int32, containers []corev1.Container) {
 		app := appKeyFromMeta(labels, name, envNames)
 		if app == "" {
 			return
 		}
-		var envID uuid.UUID
-		if id, ok := envByNs[ns]; ok {
-			envID = id // workload sits in its env's namespace (normal case)
-		} else if ids := appEnvs[app]; len(ids) == 1 {
-			envID = ids[0] // namespace override, unambiguous app name
-		} else {
-			return // not an app namespace, and name absent/ambiguous → skip
+		envID, ok := resolveEnv(app, ns)
+		if !ok {
+			return
 		}
 		k := snapKey{envID, app}
 		la := agg[k]
@@ -387,6 +420,29 @@ func (r *StatusReconciler) reconcile(ctx context.Context) map[snapKey]bool {
 		}
 	}
 
+	if pods, err := r.client.CoreV1().Pods("").List(ctx, metav1.ListOptions{}); err != nil {
+		log.Warn().Err(err).Msg("status-reconciler: list pods")
+	} else {
+		for i := range pods.Items {
+			p := &pods.Items[i]
+			if !isLivePod(p) {
+				continue
+			}
+			app := appKeyFromMeta(p.Labels, p.Name, envNames)
+			if app == "" {
+				continue
+			}
+			envID, ok := resolveEnv(app, p.Namespace)
+			if !ok {
+				continue
+			}
+			k := snapKey{envID, app}
+			if la := agg[k]; la != nil {
+				applyPodCrashState(la, p)
+			}
+		}
+	}
+
 	updated := 0
 	for k, la := range agg {
 		phase := livePhase(la)
@@ -395,8 +451,15 @@ func (r *StatusReconciler) reconcile(ctx context.Context) map[snapKey]bool {
 			"image":       la.image,
 			"replicas":    la.desired,
 			"ready":       la.ready,
+			"restarts":    la.restarts,
 			"live_source": "k8s",
 			"live_at":     time.Now().UTC().Format(time.RFC3339),
+		}
+		if la.reason != "" {
+			patchFields["reason"] = la.reason
+		}
+		if la.lastExitCode != nil {
+			patchFields["exit_code"] = *la.lastExitCode
 		}
 		if hostname, err := db.PrimaryHostname(ctx, r.pool, k.env, k.app, r.cfg.DefaultDomainBase); err != nil {
 			log.Warn().Err(err).Str("app", k.app).Msg("status-reconciler: primary hostname lookup")
@@ -500,13 +563,86 @@ func imageFromContainers(cs []corev1.Container) string {
 	return ""
 }
 
-// livePhase maps replica readiness to a phase string the PhaseBadge understands
-// ("Ready" → green). Conservative: a partially-ready or scaled-to-zero workload
-// is "Pending"/"Stopped", never silently "Ready".
+// isLivePod excludes a pod from crash-state aggregation once it is no longer
+// the app's current revision: a Terminating pod (DeletionTimestamp set) or one
+// that already reached a terminal Phase (Succeeded/Failed) can keep carrying a
+// stale waiting.reason=CrashLoopBackOff from before a fix landed and a fresh,
+// healthy ReplicaSet replaced it. Without this guard a resolved crashloop reads
+// CrashLoop forever until the old pod is garbage-collected. A genuinely
+// crashlooping container's pod stays Phase=Running throughout (verified live:
+// the pod object itself never restarts, only the container inside it does).
+func isLivePod(p *corev1.Pod) bool {
+	if p.DeletionTimestamp != nil {
+		return false
+	}
+	switch p.Status.Phase {
+	case corev1.PodSucceeded, corev1.PodFailed:
+		return false
+	}
+	return true
+}
+
+// applyPodCrashState folds one pod's container statuses onto its app's
+// aggregate, mirroring detectPodAlert's reason vocabulary and precedence
+// (backend/internal/api/app_health_watcher.go): OOMKilled beats
+// CrashLoopBackOff/ImagePullBackOff/ErrImagePull because it is the actual root
+// cause, the backoff state is just its symptom. The well-known logging sidecar
+// is skipped, same convention as imageFromContainers. restarts is a max across
+// containers/pods, not a sum, since the signal that matters is "is anything
+// still crashing", not a cluster-wide counter.
+func applyPodCrashState(la *liveApp, p *corev1.Pod) {
+	for _, cs := range p.Status.ContainerStatuses {
+		if cs.Name == "fluent-container" {
+			continue
+		}
+		if cs.RestartCount > la.restarts {
+			la.restarts = cs.RestartCount
+		}
+	}
+	if la.reason == reasonOOMKilled {
+		return
+	}
+	for _, cs := range p.Status.ContainerStatuses {
+		if cs.Name == "fluent-container" {
+			continue
+		}
+		if cs.LastTerminationState.Terminated != nil && cs.LastTerminationState.Terminated.Reason == reasonOOMKilled {
+			la.crashLooping = true
+			la.reason = reasonOOMKilled
+			code := cs.LastTerminationState.Terminated.ExitCode
+			la.lastExitCode = &code
+			return
+		}
+	}
+	for _, cs := range p.Status.ContainerStatuses {
+		if cs.Name == "fluent-container" || cs.State.Waiting == nil {
+			continue
+		}
+		switch cs.State.Waiting.Reason {
+		case reasonCrashLoopBackOff, reasonImagePullBackOff, reasonErrImagePull:
+			la.crashLooping = true
+			la.reason = cs.State.Waiting.Reason
+			if cs.LastTerminationState.Terminated != nil {
+				code := cs.LastTerminationState.Terminated.ExitCode
+				la.lastExitCode = &code
+			}
+			return
+		}
+	}
+}
+
+// livePhase maps replica readiness and pod crash state to a phase string the
+// PhaseBadge understands ("Ready" → green, "CrashLoop" → red). Conservative: a
+// partially-ready or scaled-to-zero workload is "Pending"/"Stopped", never
+// silently "Ready" — and a crashlooping container never reads "Ready" even
+// when readyReplicas momentarily matches desired between crashes (no
+// readinessProbe means kubelet marks it ready right up until the next crash).
 func livePhase(la *liveApp) string {
 	switch {
 	case la.desired == 0:
 		return "Stopped"
+	case la.crashLooping:
+		return "CrashLoop"
 	case la.ready >= la.desired:
 		return "Ready"
 	default:

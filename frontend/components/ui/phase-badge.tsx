@@ -3,6 +3,7 @@ function tone(phase: string): string {
     case "ready":
       return "bg-green-100 dark:bg-green-950/40 text-green-700 dark:text-green-300";
     case "failed":
+    case "crashloop":
       return "bg-red-100 dark:bg-red-950/40 text-red-700 dark:text-red-300";
     case "waitingforapproval":
       return "bg-amber-100 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300";
