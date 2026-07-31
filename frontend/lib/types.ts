@@ -1258,3 +1258,11 @@ export interface CloudTaskResponse {
 export interface CreateCloudTaskResponse {
   cloud_task: CloudTask;
 }
+
+export interface AppDiagnosis {
+  reason: string;
+  diagnosis: string;
+  log_excerpt: string[];
+  can_autofix: boolean;
+  generated_at: string;
+}

@@ -7656,6 +7656,100 @@
                 }
             }
         },
+        "/projects/{projectId}/environments/{envId}/apps/{appName}/diagnose": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "One click from a crash alert to a grounded diagnosis: pulls the app's latest health-alert reason and recent runtime logs, and asks the AI gateway for a short russian explanation quoting the log evidence it used. Write role required.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "cloud-tasks"
+                ],
+                "summary": "Diagnose a crashing app from its own logs",
+                "operationId": "diagnoseApp",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Project UUID",
+                        "name": "projectId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Environment UUID",
+                        "name": "envId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "App name",
+                        "name": "appName",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/api.diagnoseResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "502": {
+                        "description": "Bad Gateway",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/projects/{projectId}/environments/{envId}/apps/{appName}/endpoints": {
             "get": {
                 "security": [
@@ -15912,6 +16006,29 @@
                     "type": "string"
                 },
                 "operation_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "api.diagnoseResponse": {
+            "type": "object",
+            "properties": {
+                "can_autofix": {
+                    "type": "boolean"
+                },
+                "diagnosis": {
+                    "type": "string"
+                },
+                "generated_at": {
+                    "type": "string"
+                },
+                "log_excerpt": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "reason": {
                     "type": "string"
                 }
             }

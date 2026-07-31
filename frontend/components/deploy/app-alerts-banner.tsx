@@ -1,9 +1,13 @@
 "use client";
 
 import Link from "next/link";
+import { useState } from "react";
 import { timeAgo } from "@/lib/format";
 import { useT } from "@/lib/i18n/console/context";
+import { Spinner } from "@/components/ui/spinner";
+import { diagnoseApi, cloudTasksApi } from "@/lib/api";
 import type { AppAlert } from "@/lib/app-alerts";
+import type { AppDiagnosis } from "@/lib/types";
 
 /**
  * Maps the watcher's raw container reason to the message key, so an
@@ -23,39 +27,165 @@ function crashTextKey(reason?: string): string {
   }
 }
 
+type DiagnoseState =
+  | { status: "idle" }
+  | { status: "pending" }
+  | { status: "error"; message: string }
+  | { status: "done"; result: AppDiagnosis };
+
+type AutofixState =
+  | { status: "idle" }
+  | { status: "pending" }
+  | { status: "error"; message: string }
+  | { status: "done"; prUrl?: string };
+
 interface AppAlertsBannerProps {
   alerts: AppAlert[];
   logsHref: string;
   storageHref: string;
+  projectId: string;
+  envId: string;
+  appName: string;
 }
 
 /**
  * Per-app alert banner: one row per alert (crash = red, volume = amber),
  * each with a plain-language reason and a link to the tab where the user can
- * act on it. Renders nothing when `alerts` is empty or absent.
+ * act on it. The crash row also offers an inline "Diagnose" flow backed by
+ * the diagnose endpoint (LLM-read logs), with an honest pending state and
+ * a follow-up autofix action once a diagnosis names a fixable cause.
+ * Renders nothing when `alerts` is empty or absent.
  */
-export function AppAlertsBanner({ alerts, logsHref, storageHref }: AppAlertsBannerProps) {
+export function AppAlertsBanner({ alerts, logsHref, storageHref, projectId, envId, appName }: AppAlertsBannerProps) {
   const { t } = useT();
+  const [diagnose, setDiagnose] = useState<DiagnoseState>({ status: "idle" });
+  const [autofix, setAutofix] = useState<AutofixState>({ status: "idle" });
+
   if (alerts.length === 0) return null;
+
+  async function handleDiagnose() {
+    setDiagnose({ status: "pending" });
+    setAutofix({ status: "idle" });
+    try {
+      const result = await diagnoseApi.run(projectId, envId, appName);
+      setDiagnose({ status: "done", result });
+    } catch (err) {
+      setDiagnose({
+        status: "error",
+        message: err instanceof Error ? err.message : t("apps.alerts.crash.diagnose.error"),
+      });
+    }
+  }
+
+  async function handleAutofix() {
+    setAutofix({ status: "pending" });
+    try {
+      const summary = diagnose.status === "done" ? diagnose.result.diagnosis : "";
+      const res = await cloudTasksApi.triggerAutofix(projectId, envId, appName, summary);
+      setAutofix({ status: "done", prUrl: res.cloud_task.pr_url });
+    } catch (err) {
+      setAutofix({
+        status: "error",
+        message: err instanceof Error ? err.message : t("apps.alerts.crash.autofix.error"),
+      });
+    }
+  }
 
   return (
     <div className="mb-6 space-y-3">
       {alerts.map((alert, idx) =>
         alert.type === "crash" ? (
-          <div
-            key={`crash-${idx}`}
-            className="rounded-lg border border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-950/40 px-4 py-3 text-sm text-red-700 dark:text-red-300"
-          >
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <p className="font-medium">{t(crashTextKey(alert.reason))}</p>
-              <span className="text-xs text-red-500 dark:text-red-400">{timeAgo(alert.detected_at)}</span>
+          <div key={`crash-${idx}`} className="space-y-2">
+            <div className="rounded-lg border border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-950/40 px-4 py-3 text-sm text-red-700 dark:text-red-300">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <p className="font-medium">{t(crashTextKey(alert.reason))}</p>
+                <span className="text-xs text-red-500 dark:text-red-400">{timeAgo(alert.detected_at)}</span>
+              </div>
+              <div className="mt-2 flex flex-wrap items-center gap-3">
+                <button
+                  type="button"
+                  onClick={handleDiagnose}
+                  disabled={diagnose.status === "pending"}
+                  className="inline-flex items-center gap-1.5 rounded-md bg-red-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-red-700 disabled:opacity-60"
+                >
+                  {diagnose.status === "pending" && <Spinner size="sm" />}
+                  {diagnose.status === "pending" ? t("apps.alerts.crash.diagnose.pending") : t("apps.alerts.crash.diagnose")}
+                </button>
+                <Link
+                  href={logsHref}
+                  className="inline-flex items-center gap-1 text-xs font-semibold text-red-700 dark:text-red-300 underline underline-offset-2 hover:text-red-800 dark:hover:text-red-200"
+                >
+                  {t("apps.alerts.crash.cta")}
+                </Link>
+              </div>
             </div>
-            <Link
-              href={logsHref}
-              className="mt-1.5 inline-flex items-center gap-1 text-xs font-semibold text-red-700 dark:text-red-300 underline underline-offset-2 hover:text-red-800 dark:hover:text-red-200"
-            >
-              {t("apps.alerts.crash.cta")}
-            </Link>
+
+            {diagnose.status === "error" && (
+              <div className="rounded-lg border border-red-200 dark:border-red-900 bg-white dark:bg-gray-900 px-4 py-3 text-sm text-red-700 dark:text-red-300">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <span>{diagnose.message}</span>
+                  <button
+                    type="button"
+                    onClick={handleDiagnose}
+                    className="text-xs font-semibold underline underline-offset-2 hover:text-red-800 dark:hover:text-red-200"
+                  >
+                    {t("apps.alerts.crash.diagnose.retry")}
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {diagnose.status === "done" && (
+              <div className="rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 px-4 py-3 text-sm text-gray-700 dark:text-gray-300 overflow-x-hidden">
+                <p className="whitespace-pre-wrap break-words">{diagnose.result.diagnosis}</p>
+
+                <details className="mt-3">
+                  <summary className="cursor-pointer text-xs font-semibold text-gray-500 dark:text-gray-400">
+                    {t("apps.alerts.crash.diagnose.logsTitle")}
+                  </summary>
+                  <div className="mt-2 max-h-64 overflow-y-auto overflow-x-auto rounded-md bg-gray-950 px-3 py-2">
+                    <pre className="whitespace-pre text-xs text-gray-100 font-mono">
+                      {diagnose.result.log_excerpt.join("\n")}
+                    </pre>
+                  </div>
+                </details>
+
+                {diagnose.result.can_autofix && (
+                  <div className="mt-3 flex flex-wrap items-center gap-3">
+                    <button
+                      type="button"
+                      onClick={handleAutofix}
+                      disabled={autofix.status === "pending"}
+                      className="inline-flex items-center gap-1.5 rounded-md border border-gray-300 dark:border-gray-700 px-3 py-1.5 text-xs font-semibold text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-60"
+                    >
+                      {autofix.status === "pending" && <Spinner size="sm" />}
+                      {autofix.status === "pending" ? t("apps.alerts.crash.autofix.pending") : t("apps.alerts.crash.autofix")}
+                    </button>
+                    {autofix.status === "done" && (
+                      <span className="text-xs text-gray-500 dark:text-gray-400">
+                        {t("apps.alerts.crash.autofix.created")}
+                        {autofix.prUrl && (
+                          <>
+                            {" · "}
+                            <a
+                              href={autofix.prUrl}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="font-semibold underline underline-offset-2"
+                            >
+                              {t("apps.alerts.crash.autofix.prLink")}
+                            </a>
+                          </>
+                        )}
+                      </span>
+                    )}
+                    {autofix.status === "error" && (
+                      <span className="text-xs text-red-600 dark:text-red-400">{autofix.message}</span>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         ) : (
           <div

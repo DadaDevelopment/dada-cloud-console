@@ -79,6 +79,7 @@ import type {
   CloudTasksResponse,
   CloudTaskResponse,
   CreateCloudTaskResponse,
+  AppDiagnosis,
   DeleteImpactResponse,
   MoveImpactResponse,
   DeployHook,
@@ -115,6 +116,7 @@ type RequestOptions = {
   // Override the base URL. user-service endpoints (orgs/members/invitations)
   // sit at the gateway root, not under dada-cloud's /api/v1 — see lib/userService.ts.
   baseUrl?: string;
+  timeoutMs?: number;
 };
 
 function raceAbort<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
@@ -143,7 +145,7 @@ export async function apiFetch<T>(
   path: string,
   options: RequestOptions = {}
 ): Promise<T> {
-  const { method = "GET", body, token, baseUrl } = options;
+  const { method = "GET", body, token, baseUrl, timeoutMs = 30_000 } = options;
 
   // Hard timeout so a hung request (e.g. a stuck SSO silent-refresh that never
   // resolves the bearer token) surfaces as an error instead of an infinite
@@ -151,7 +153,7 @@ export async function apiFetch<T>(
   // it is the exact "stuck SSO silent-refresh" case this guard is for, and
   // fetch()'s AbortSignal only takes effect once fetch() itself is called.
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 30_000);
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
   let res: Response;
   try {
     const bearerToken = token ?? await raceAbort(getToken(), controller.signal);
@@ -1035,6 +1037,14 @@ export const deploymentsApi = {
     apiFetch<OperationResponse>(
       `/api/v1/projects/${projectId}/deployments/${deploymentId}/rollback`,
       { method: "POST", body: {} }
+    ),
+};
+
+export const diagnoseApi = {
+  run: (projectId: string, envId: string, appName: string) =>
+    apiFetch<AppDiagnosis>(
+      `/api/v1/projects/${projectId}/environments/${envId}/apps/${appName}/diagnose`,
+      { method: "POST", body: {}, timeoutMs: 60_000 }
     ),
 };
 

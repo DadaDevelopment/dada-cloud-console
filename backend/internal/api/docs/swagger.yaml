@@ -595,6 +595,21 @@ definitions:
       operation_id:
         type: string
     type: object
+  api.diagnoseResponse:
+    properties:
+      can_autofix:
+        type: boolean
+      diagnosis:
+        type: string
+      generated_at:
+        type: string
+      log_excerpt:
+        items:
+          type: string
+        type: array
+      reason:
+        type: string
+    type: object
   api.exposeBoxRequest:
     properties:
       port:
@@ -6214,6 +6229,71 @@ paths:
       summary: List deployments for an app
       tags:
       - deployment
+  /projects/{projectId}/environments/{envId}/apps/{appName}/diagnose:
+    post:
+      description: 'One click from a crash alert to a grounded diagnosis: pulls the
+        app''s latest health-alert reason and recent runtime logs, and asks the AI
+        gateway for a short russian explanation quoting the log evidence it used.
+        Write role required.'
+      operationId: diagnoseApp
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      - description: Environment UUID
+        in: path
+        name: envId
+        required: true
+        type: string
+      - description: App name
+        in: path
+        name: appName
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/api.diagnoseResponse'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "502":
+          description: Bad Gateway
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Diagnose a crashing app from its own logs
+      tags:
+      - cloud-tasks
   /projects/{projectId}/environments/{envId}/apps/{appName}/endpoints:
     get:
       description: Returns all public API endpoints (PublicApi resources / domains)

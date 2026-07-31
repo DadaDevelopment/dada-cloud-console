@@ -442,6 +442,9 @@ export default function AppDetailPage() {
         alerts={getAppAlerts(app)}
         logsHref={`/projects/${projectId}/apps/${appName}${envId ? `?envId=${envId}` : ""}#logs`}
         storageHref={`/projects/${projectId}/apps/${appName}/settings?tab=storage${envId ? `&envId=${envId}` : ""}`}
+        projectId={projectId}
+        envId={envId}
+        appName={appName}
       />
 
       {!isResource && summary.url && (

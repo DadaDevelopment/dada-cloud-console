@@ -549,6 +549,25 @@ export const apps: Messages = {
     en: "App image cannot be pulled — the deploy cannot start",
   },
   "apps.alerts.crash.cta": { ru: "Смотреть логи", en: "View logs" },
+  "apps.alerts.crash.diagnose": { ru: "Разобраться", en: "Diagnose" },
+  "apps.alerts.crash.diagnose.pending": { ru: "Смотрю логи…", en: "Reading logs…" },
+  "apps.alerts.crash.diagnose.error": {
+    ru: "Не удалось получить диагноз",
+    en: "Could not get a diagnosis",
+  },
+  "apps.alerts.crash.diagnose.retry": { ru: "Повторить", en: "Retry" },
+  "apps.alerts.crash.diagnose.logsTitle": {
+    ru: "Логи, на которых основан вывод",
+    en: "Logs this is based on",
+  },
+  "apps.alerts.crash.autofix": { ru: "Починить автоматически", en: "Fix automatically" },
+  "apps.alerts.crash.autofix.pending": { ru: "Запуск…", en: "Starting…" },
+  "apps.alerts.crash.autofix.created": { ru: "Задача создана", en: "Task created" },
+  "apps.alerts.crash.autofix.prLink": { ru: "Открыть PR", en: "Open PR" },
+  "apps.alerts.crash.autofix.error": {
+    ru: "Не удалось запустить авто-исправление",
+    en: "Failed to start auto-fix",
+  },
   "apps.alerts.chip.crash": { ru: "Падает", en: "Crashing" },
   "apps.alerts.volume.text": {
     ru: "Диск заполнен на {percent}% — приложение упадёт при нехватке места",
