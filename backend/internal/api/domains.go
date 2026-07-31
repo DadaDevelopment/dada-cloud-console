@@ -105,9 +105,29 @@ func (h *Handler) AddDomainAuthorization(c *gin.Context) {
 		return
 	}
 
+	apex := ""
+	rejectAuth := func(status int, reason, msg string) {
+		h.recordAudit(c.Request.Context(), claims.UserID, auditEntry{
+			ProjectID:    projectID,
+			Action:       "AddDomainAuthorization",
+			ResourceKind: "CustomDomain",
+			ResourceName: apex,
+			Outcome:      auditOutcomeFailure,
+			Metadata:     map[string]any{"reason": reason, "status": status},
+		})
+		respondError(c, status, msg)
+	}
+
 	if orgID, orgErr := h.projectOrg(c.Request.Context(), projectID); orgErr == nil {
 		if qErr := h.checkQuota(c.Request.Context(), orgID, "domains"); qErr != nil {
 			if qe, ok := qErr.(*quotaExceededError); ok {
+				h.recordAudit(c.Request.Context(), claims.UserID, auditEntry{
+					ProjectID:    projectID,
+					Action:       "AddDomainAuthorization",
+					ResourceKind: "CustomDomain",
+					Outcome:      auditOutcomeFailure,
+					Metadata:     map[string]any{"reason": "domain_quota_exceeded", "limit": qe.Limit},
+				})
 				respondQuotaExceeded(c, qe.Resource, qe.Limit)
 				return
 			}
@@ -116,18 +136,18 @@ func (h *Handler) AddDomainAuthorization(c *gin.Context) {
 
 	var req addDomainAuthorizationRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		respondError(c, http.StatusBadRequest, err.Error())
+		rejectAuth(http.StatusBadRequest, "malformed_body", err.Error())
 		return
 	}
-	apex := normalizeDomain(req.ApexDomain)
+	apex = normalizeDomain(req.ApexDomain)
 	if !isValidDomain(apex) {
-		respondError(c, http.StatusBadRequest, "apex_domain must be a valid domain name")
+		rejectAuth(http.StatusBadRequest, "invalid_domain", "apex_domain must be a valid domain name")
 		return
 	}
 
 	token, err := randomToken()
 	if err != nil {
-		respondError(c, http.StatusInternalServerError, "failed to generate token")
+		rejectAuth(http.StatusInternalServerError, "token_generation_failed", "failed to generate token")
 		return
 	}
 
@@ -143,13 +163,22 @@ func (h *Handler) AddDomainAuthorization(c *gin.Context) {
 		&a.VerifiedAt, &a.LastCheckedAt, &a.ErrorMessage, &a.CreatedBy, &a.CreatedAt, &a.UpdatedAt,
 	)
 	if isUniqueViolation(err) {
-		respondError(c, http.StatusConflict, "that apex domain is already authorized by a project")
+		rejectAuth(http.StatusConflict, "domain_taken", "that apex domain is already authorized by a project")
 		return
 	}
 	if err != nil {
-		respondError(c, http.StatusInternalServerError, "failed to create authorization")
+		rejectAuth(http.StatusInternalServerError, "create_failed", "failed to create authorization")
 		return
 	}
+
+	h.recordAudit(c.Request.Context(), claims.UserID, auditEntry{
+		ProjectID:    projectID,
+		Action:       "AddDomainAuthorization",
+		ResourceKind: "CustomDomain",
+		ResourceName: apex,
+		Metadata:     map[string]any{"authorization_id": a.ID.String(), "status": a.Status},
+	})
+	h.notifyAuditEvent(claims, projectID, "AddDomainAuthorization", apex)
 
 	c.JSON(http.StatusCreated, gin.H{
 		"authorization": a,
@@ -284,6 +313,23 @@ func (h *Handler) VerifyDomainAuthorization(c *gin.Context) {
 
 	verifyAuthorization(c.Request.Context(), h.pool, h.cfg, &a)
 
+	verifyOutcome := auditOutcomeFailure
+	if a.Status == "verified" {
+		verifyOutcome = auditOutcomeSuccess
+	}
+	verifyMeta := map[string]any{"status": a.Status}
+	if a.ErrorMessage != "" {
+		verifyMeta["reason"] = a.ErrorMessage
+	}
+	h.recordAudit(c.Request.Context(), claims.UserID, auditEntry{
+		ProjectID:    projectID,
+		Action:       "VerifyDomainAuthorization",
+		ResourceKind: "CustomDomain",
+		ResourceName: a.ApexDomain,
+		Outcome:      verifyOutcome,
+		Metadata:     verifyMeta,
+	})
+
 	c.JSON(http.StatusOK, gin.H{
 		"authorization": a,
 		"challenge":     h.authChallenge(&a),
@@ -380,24 +426,53 @@ func (h *Handler) DeleteDomainAuthorization(c *gin.Context) {
 			respondError(c, http.StatusInternalServerError, "failed to remove attached hostname")
 			return
 		}
-		auditMeta, _ := json.Marshal(payload)
-		_, _ = h.pool.Exec(c.Request.Context(),
-			`INSERT INTO audit_events (actor_id, project_id, operation_id, action, resource_kind, resource_name, metadata)
-			 VALUES ($1, $2, $3, 'DetachCustomHostname', 'CustomDomain', $4, $5)`,
-			claims.UserID, projectID, opID, a.host, auditMeta,
-		)
+		h.recordAudit(c.Request.Context(), claims.UserID, auditEntry{
+			ProjectID:     projectID,
+			EnvironmentID: a.envID,
+			OperationID:   opID,
+			Action:        "DetachCustomHostname",
+			ResourceKind:  "CustomDomain",
+			ResourceName:  a.host,
+			Metadata:      map[string]any{"app_name": a.appName, "cascade": "authorization_deleted"},
+		})
 	}
 
-	ct, err := h.pool.Exec(c.Request.Context(),
-		`DELETE FROM domain_authorizations WHERE id = $1 AND project_id = $2`, authID, projectID)
-	if err != nil {
-		respondError(c, http.StatusInternalServerError, "failed to delete authorization")
-		return
-	}
-	if ct.RowsAffected() == 0 {
+	var deletedApex string
+	err = h.pool.QueryRow(c.Request.Context(),
+		`DELETE FROM domain_authorizations WHERE id = $1 AND project_id = $2 RETURNING apex_domain`,
+		authID, projectID).Scan(&deletedApex)
+	if err == pgx.ErrNoRows {
+		h.recordAudit(c.Request.Context(), claims.UserID, auditEntry{
+			ProjectID:    projectID,
+			Action:       "DeleteDomainAuthorization",
+			ResourceKind: "CustomDomain",
+			Outcome:      auditOutcomeFailure,
+			Metadata:     map[string]any{"reason": "not_found", "status": http.StatusNotFound},
+		})
 		respondNotFound(c)
 		return
 	}
+	if err != nil {
+		h.recordAudit(c.Request.Context(), claims.UserID, auditEntry{
+			ProjectID:    projectID,
+			Action:       "DeleteDomainAuthorization",
+			ResourceKind: "CustomDomain",
+			Outcome:      auditOutcomeFailure,
+			Metadata:     map[string]any{"reason": "delete_failed", "status": http.StatusInternalServerError},
+		})
+		respondError(c, http.StatusInternalServerError, "failed to delete authorization")
+		return
+	}
+
+	h.recordAudit(c.Request.Context(), claims.UserID, auditEntry{
+		ProjectID:    projectID,
+		Action:       "DeleteDomainAuthorization",
+		ResourceKind: "CustomDomain",
+		ResourceName: deletedApex,
+		Metadata:     map[string]any{"detached_hostnames": len(attached)},
+	})
+	h.notifyAuditEvent(claims, projectID, "DeleteDomainAuthorization", deletedApex)
+
 	c.Status(http.StatusNoContent)
 }
 
@@ -459,14 +534,28 @@ func (h *Handler) AttachHostname(c *gin.Context) {
 		return
 	}
 
+	hostname := ""
+	rejectAttach := func(status int, reason, msg string) {
+		h.recordAudit(c.Request.Context(), claims.UserID, auditEntry{
+			ProjectID:     projectID,
+			EnvironmentID: envID,
+			Action:        "AttachCustomHostname",
+			ResourceKind:  "CustomDomain",
+			ResourceName:  hostname,
+			Outcome:       auditOutcomeFailure,
+			Metadata:      map[string]any{"reason": reason, "status": status, "app_name": appName},
+		})
+		respondError(c, status, msg)
+	}
+
 	var req attachHostnameRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		respondError(c, http.StatusBadRequest, err.Error())
+		rejectAttach(http.StatusBadRequest, "malformed_body", err.Error())
 		return
 	}
-	hostname := normalizeDomain(req.Hostname)
+	hostname = normalizeDomain(req.Hostname)
 	if !isValidDomain(hostname) {
-		respondError(c, http.StatusBadRequest, "hostname must be a valid domain name")
+		rejectAttach(http.StatusBadRequest, "invalid_hostname", "hostname must be a valid domain name")
 		return
 	}
 
@@ -482,11 +571,11 @@ func (h *Handler) AttachHostname(c *gin.Context) {
 		projectID, hostname,
 	).Scan(&authID, &apex)
 	if err == pgx.ErrNoRows {
-		respondError(c, http.StatusForbidden, "no verified apex authorization covers this hostname")
+		rejectAttach(http.StatusForbidden, "no_verified_apex", "no verified apex authorization covers this hostname")
 		return
 	}
 	if err != nil {
-		respondError(c, http.StatusInternalServerError, "failed to check authorization")
+		rejectAttach(http.StatusInternalServerError, "authorization_lookup_failed", "failed to check authorization")
 		return
 	}
 
@@ -497,11 +586,11 @@ func (h *Handler) AttachHostname(c *gin.Context) {
 		 WHERE project_id = $1 AND environment_id = $2 AND kind = 'App' AND name = $3`,
 		projectID, envID, appName,
 	).Scan(&appCount); err != nil {
-		respondError(c, http.StatusInternalServerError, "failed to verify app")
+		rejectAttach(http.StatusInternalServerError, "app_lookup_failed", "failed to verify app")
 		return
 	}
 	if appCount == 0 {
-		respondError(c, http.StatusNotFound, "app not found")
+		rejectAttach(http.StatusNotFound, "app_not_found", "app not found")
 		return
 	}
 
@@ -537,7 +626,7 @@ func (h *Handler) AttachHostname(c *gin.Context) {
 	payload := models.AttachCustomHostnamePayload{AppName: appName, Hostname: hostname}
 	payloadBytes, err := json.Marshal(payload)
 	if err != nil {
-		respondError(c, http.StatusInternalServerError, "failed to marshal payload")
+		rejectAttach(http.StatusInternalServerError, "marshal_failed", "failed to marshal payload")
 		return
 	}
 
@@ -551,7 +640,7 @@ func (h *Handler) AttachHostname(c *gin.Context) {
 		claims.UserID, projectID, envID, hostname, payloadBytes,
 	), &op)
 	if err != nil {
-		respondError(c, http.StatusInternalServerError, "failed to create operation")
+		rejectAttach(http.StatusInternalServerError, "operation_create_failed", "failed to create operation")
 		return
 	}
 
@@ -567,20 +656,23 @@ func (h *Handler) AttachHostname(c *gin.Context) {
 		&hn.Status, &hn.CertStatus, &hn.OperationID, &hn.CreatedAt, &hn.UpdatedAt,
 	)
 	if isUniqueViolation(err) {
-		respondError(c, http.StatusConflict, "that hostname is already attached")
+		rejectAttach(http.StatusConflict, "hostname_already_attached", "that hostname is already attached")
 		return
 	}
 	if err != nil {
-		respondError(c, http.StatusInternalServerError, "failed to record hostname")
+		rejectAttach(http.StatusInternalServerError, "record_failed", "failed to record hostname")
 		return
 	}
 
-	auditMeta, _ := json.Marshal(payload)
-	_, _ = h.pool.Exec(c.Request.Context(),
-		`INSERT INTO audit_events (actor_id, project_id, operation_id, action, resource_kind, resource_name, metadata)
-		 VALUES ($1, $2, $3, 'AttachCustomHostname', 'CustomDomain', $4, $5)`,
-		claims.UserID, projectID, op.ID, hostname, auditMeta,
-	)
+	h.recordAudit(c.Request.Context(), claims.UserID, auditEntry{
+		ProjectID:     projectID,
+		EnvironmentID: envID,
+		OperationID:   op.ID,
+		Action:        "AttachCustomHostname",
+		ResourceKind:  "CustomDomain",
+		ResourceName:  hostname,
+		Metadata:      map[string]any{"app_name": appName, "record_type": recordType, "apex": apex},
+	})
 	h.notifyAuditEvent(claims, projectID, "AttachCustomHostname", hostname)
 
 	dnsRecord := gin.H{
@@ -738,11 +830,25 @@ func (h *Handler) DetachHostname(c *gin.Context) {
 		return
 	}
 
+	detachHostname := ""
+	rejectDetach := func(status int, reason, msg string) {
+		h.recordAudit(c.Request.Context(), claims.UserID, auditEntry{
+			ProjectID:     projectID,
+			EnvironmentID: envID,
+			Action:        "DetachCustomHostname",
+			ResourceKind:  "CustomDomain",
+			ResourceName:  detachHostname,
+			Outcome:       auditOutcomeFailure,
+			Metadata:      map[string]any{"reason": reason, "status": status, "app_name": appName},
+		})
+		respondError(c, status, msg)
+	}
+
 	if ok, err := h.envBelongsToProject(c.Request.Context(), envID, projectID); err != nil {
-		respondError(c, http.StatusInternalServerError, "failed to verify environment")
+		rejectDetach(http.StatusInternalServerError, "env_lookup_failed", "failed to verify environment")
 		return
 	} else if !ok {
-		respondNotFound(c)
+		rejectDetach(http.StatusNotFound, "env_not_in_project", "not found")
 		return
 	}
 
@@ -757,22 +863,23 @@ func (h *Handler) DetachHostname(c *gin.Context) {
 		&hn.Status, &hn.CertStatus, &hn.OperationID, &hn.CreatedAt, &hn.UpdatedAt,
 	)
 	if err == pgx.ErrNoRows {
-		respondNotFound(c)
+		rejectDetach(http.StatusNotFound, "hostname_not_found", "not found")
 		return
 	}
 	if err != nil {
-		respondError(c, http.StatusInternalServerError, "failed to load hostname")
+		rejectDetach(http.StatusInternalServerError, "hostname_load_failed", "failed to load hostname")
 		return
 	}
+	detachHostname = hn.Hostname
 	if hn.Managed {
-		respondError(c, http.StatusConflict, "the default domain cannot be detached")
+		rejectDetach(http.StatusConflict, "managed_domain", "the default domain cannot be detached")
 		return
 	}
 
 	payload := models.DetachCustomHostnamePayload{AppName: appName, Hostname: hn.Hostname}
 	payloadBytes, err := json.Marshal(payload)
 	if err != nil {
-		respondError(c, http.StatusInternalServerError, "failed to marshal payload")
+		rejectDetach(http.StatusInternalServerError, "marshal_failed", "failed to marshal payload")
 		return
 	}
 
@@ -786,19 +893,23 @@ func (h *Handler) DetachHostname(c *gin.Context) {
 		claims.UserID, projectID, envID, hn.Hostname, payloadBytes,
 	), &op)
 	if err != nil {
-		respondError(c, http.StatusInternalServerError, "failed to create operation")
+		rejectDetach(http.StatusInternalServerError, "operation_create_failed", "failed to create operation")
 		return
 	}
 
 	// Drop the hostname record now that teardown is queued.
 	_, _ = h.pool.Exec(c.Request.Context(), `DELETE FROM domain_hostnames WHERE id = $1`, hostnameID)
 
-	auditMeta, _ := json.Marshal(payload)
-	_, _ = h.pool.Exec(c.Request.Context(),
-		`INSERT INTO audit_events (actor_id, project_id, operation_id, action, resource_kind, resource_name, metadata)
-		 VALUES ($1, $2, $3, 'DetachCustomHostname', 'CustomDomain', $4, $5)`,
-		claims.UserID, projectID, op.ID, hn.Hostname, auditMeta,
-	)
+	h.recordAudit(c.Request.Context(), claims.UserID, auditEntry{
+		ProjectID:     projectID,
+		EnvironmentID: envID,
+		OperationID:   op.ID,
+		Action:        "DetachCustomHostname",
+		ResourceKind:  "CustomDomain",
+		ResourceName:  hn.Hostname,
+		Metadata:      map[string]any{"app_name": appName, "record_type": hn.RecordType},
+	})
+	h.notifyAuditEvent(claims, projectID, "DetachCustomHostname", hn.Hostname)
 
 	c.JSON(http.StatusAccepted, gin.H{
 		"operation": op,
