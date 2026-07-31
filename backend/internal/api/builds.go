@@ -251,6 +251,15 @@ func (h *Handler) TriggerBuild(c *gin.Context) {
 		projectID, envID, appName,
 	).Scan(&gitRepoID, &prodBranch)
 	if err == pgx.ErrNoRows {
+		h.recordAudit(c.Request.Context(), claims.UserID, auditEntry{
+			ProjectID:     projectID,
+			EnvironmentID: envID,
+			Action:        "TriggerBuild",
+			ResourceKind:  "Build",
+			ResourceName:  appName,
+			Outcome:       auditOutcomeFailure,
+			Metadata:      map[string]any{"reason": "no_linked_repo"},
+		})
 		respondError(c, http.StatusConflict, "this app has no linked git repository")
 		return
 	}
@@ -273,6 +282,15 @@ func (h *Handler) TriggerBuild(c *gin.Context) {
 		gitRepoID, envID, appName, commitSHA, prodBranch, claims.UserID,
 	)
 	if err := scanBuild(row, &b); err != nil {
+		h.recordAudit(c.Request.Context(), claims.UserID, auditEntry{
+			ProjectID:     projectID,
+			EnvironmentID: envID,
+			Action:        "TriggerBuild",
+			ResourceKind:  "Build",
+			ResourceName:  appName,
+			Outcome:       auditOutcomeFailure,
+			Metadata:      map[string]any{"reason": "queue_failed"},
+		})
 		respondError(c, http.StatusInternalServerError, "failed to queue build")
 		return
 	}

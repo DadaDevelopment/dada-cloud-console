@@ -499,6 +499,14 @@ func (h *Handler) CreateApp(c *gin.Context) {
 	if orgID, orgErr := h.projectOrg(c.Request.Context(), projectID); orgErr == nil {
 		if qErr := h.checkQuota(c.Request.Context(), orgID, "apps"); qErr != nil {
 			if qe, ok := qErr.(*quotaExceededError); ok {
+				h.recordAudit(c.Request.Context(), claims.UserID, auditEntry{
+					ProjectID:     projectID,
+					EnvironmentID: envID,
+					Action:        "CreateApp",
+					ResourceKind:  "App",
+					Outcome:       auditOutcomeFailure,
+					Metadata:      map[string]any{"reason": "quota_exceeded", "resource": qe.Resource, "limit": qe.Limit},
+				})
 				respondQuotaExceeded(c, qe.Resource, qe.Limit)
 				return
 			}
@@ -881,13 +889,15 @@ func (h *Handler) UpdateAppImage(c *gin.Context) {
 		return
 	}
 
-	// Insert AuditEvent (best-effort)
-	auditMeta, _ := json.Marshal(payload)
-	_, _ = h.pool.Exec(c.Request.Context(),
-		`INSERT INTO audit_events (actor_id, project_id, operation_id, action, resource_kind, resource_name, metadata)
-		 VALUES ($1, $2, $3, 'DeployImageVersion', 'App', $4, $5)`,
-		claims.UserID, projectID, op.ID, appName, auditMeta,
-	)
+	h.recordAudit(c.Request.Context(), claims.UserID, auditEntry{
+		ProjectID:     projectID,
+		EnvironmentID: envID,
+		OperationID:   op.ID,
+		Action:        "DeployImageVersion",
+		ResourceKind:  "App",
+		ResourceName:  appName,
+		Metadata:      payload,
+	})
 
 	c.JSON(http.StatusAccepted, gin.H{
 		"operation": op,
@@ -1053,12 +1063,15 @@ func (h *Handler) UpdateAppProfile(c *gin.Context) {
 		return
 	}
 
-	auditMeta, _ := json.Marshal(payload)
-	_, _ = h.pool.Exec(c.Request.Context(),
-		`INSERT INTO audit_events (actor_id, project_id, operation_id, action, resource_kind, resource_name, metadata)
-		 VALUES ($1, $2, $3, 'UpdateAppProfile', 'App', $4, $5)`,
-		claims.UserID, projectID, op.ID, appName, auditMeta,
-	)
+	h.recordAudit(c.Request.Context(), claims.UserID, auditEntry{
+		ProjectID:     projectID,
+		EnvironmentID: envID,
+		OperationID:   op.ID,
+		Action:        "UpdateAppProfile",
+		ResourceKind:  "App",
+		ResourceName:  appName,
+		Metadata:      payload,
+	})
 
 	c.JSON(http.StatusAccepted, gin.H{
 		"operation": op,
@@ -1223,12 +1236,15 @@ func (h *Handler) UpdateAppStorage(c *gin.Context) {
 		return
 	}
 
-	auditMeta, _ := json.Marshal(payload)
-	_, _ = h.pool.Exec(c.Request.Context(),
-		`INSERT INTO audit_events (actor_id, project_id, operation_id, action, resource_kind, resource_name, metadata)
-		 VALUES ($1, $2, $3, 'UpdateAppStorage', 'App', $4, $5)`,
-		claims.UserID, projectID, op.ID, appName, auditMeta,
-	)
+	h.recordAudit(c.Request.Context(), claims.UserID, auditEntry{
+		ProjectID:     projectID,
+		EnvironmentID: envID,
+		OperationID:   op.ID,
+		Action:        "UpdateAppStorage",
+		ResourceKind:  "App",
+		ResourceName:  appName,
+		Metadata:      payload,
+	})
 
 	c.JSON(http.StatusAccepted, gin.H{
 		"operation": op,
@@ -1320,12 +1336,15 @@ func (h *Handler) RollbackApp(c *gin.Context) {
 		return
 	}
 
-	auditMeta, _ := json.Marshal(map[string]string{"app_name": appName})
-	_, _ = h.pool.Exec(c.Request.Context(),
-		`INSERT INTO audit_events (actor_id, project_id, operation_id, action, resource_kind, resource_name, metadata)
-		 VALUES ($1, $2, $3, 'RollbackStack', 'App', $4, $5)`,
-		claims.UserID, projectID, op.ID, appName, auditMeta,
-	)
+	h.recordAudit(c.Request.Context(), claims.UserID, auditEntry{
+		ProjectID:     projectID,
+		EnvironmentID: envID,
+		OperationID:   op.ID,
+		Action:        "RollbackStack",
+		ResourceKind:  "App",
+		ResourceName:  appName,
+		Metadata:      map[string]string{"app_name": appName},
+	})
 
 	c.JSON(http.StatusAccepted, gin.H{"operation": op, "message": "rollback queued"})
 }
@@ -1416,12 +1435,15 @@ func (h *Handler) AdoptApp(c *gin.Context) {
 		return
 	}
 
-	auditMeta, _ := json.Marshal(map[string]string{"source_app": appName})
-	_, _ = h.pool.Exec(c.Request.Context(),
-		`INSERT INTO audit_events (actor_id, project_id, operation_id, action, resource_kind, resource_name, metadata)
-		 VALUES ($1, $2, $3, 'AdoptComposeStack', 'App', $4, $5)`,
-		claims.UserID, projectID, op.ID, appName, auditMeta,
-	)
+	h.recordAudit(c.Request.Context(), claims.UserID, auditEntry{
+		ProjectID:     projectID,
+		EnvironmentID: envID,
+		OperationID:   op.ID,
+		Action:        "AdoptComposeStack",
+		ResourceKind:  "App",
+		ResourceName:  appName,
+		Metadata:      map[string]string{"source_app": appName},
+	})
 
 	c.JSON(http.StatusAccepted, gin.H{"operation": op, "message": "adopt queued"})
 }
@@ -1509,12 +1531,15 @@ func (h *Handler) RestartApp(c *gin.Context) {
 		return
 	}
 
-	auditMeta, _ := json.Marshal(map[string]string{"app_name": appName})
-	_, _ = h.pool.Exec(c.Request.Context(),
-		`INSERT INTO audit_events (actor_id, project_id, operation_id, action, resource_kind, resource_name, metadata)
-		 VALUES ($1, $2, $3, 'RestartStack', 'App', $4, $5)`,
-		claims.UserID, projectID, op.ID, appName, auditMeta,
-	)
+	h.recordAudit(c.Request.Context(), claims.UserID, auditEntry{
+		ProjectID:     projectID,
+		EnvironmentID: envID,
+		OperationID:   op.ID,
+		Action:        "RestartStack",
+		ResourceKind:  "App",
+		ResourceName:  appName,
+		Metadata:      map[string]string{"app_name": appName},
+	})
 
 	c.JSON(http.StatusAccepted, gin.H{"operation": op, "message": "restart queued"})
 }
@@ -1627,12 +1652,15 @@ func (h *Handler) UpdateComposeConfig(c *gin.Context) {
 		return
 	}
 
-	auditMeta, _ := json.Marshal(map[string]string{"app_name": appName, "image": req.Image})
-	_, _ = h.pool.Exec(c.Request.Context(),
-		`INSERT INTO audit_events (actor_id, project_id, operation_id, action, resource_kind, resource_name, metadata)
-		 VALUES ($1, $2, $3, 'UpdateComposeConfig', 'App', $4, $5)`,
-		claims.UserID, projectID, op.ID, appName, auditMeta,
-	)
+	h.recordAudit(c.Request.Context(), claims.UserID, auditEntry{
+		ProjectID:     projectID,
+		EnvironmentID: envID,
+		OperationID:   op.ID,
+		Action:        "UpdateComposeConfig",
+		ResourceKind:  "App",
+		ResourceName:  appName,
+		Metadata:      map[string]string{"app_name": appName, "image": req.Image},
+	})
 
 	c.JSON(http.StatusAccepted, gin.H{"operation": op, "message": "compose config update queued"})
 }
@@ -1743,12 +1771,15 @@ func (h *Handler) UpdateComposeVolume(c *gin.Context) {
 		return
 	}
 
-	auditMeta, _ := json.Marshal(map[string]string{"app_name": appName})
-	_, _ = h.pool.Exec(c.Request.Context(),
-		`INSERT INTO audit_events (actor_id, project_id, operation_id, action, resource_kind, resource_name, metadata)
-		 VALUES ($1, $2, $3, 'UpdateComposeVolume', 'App', $4, $5)`,
-		claims.UserID, projectID, op.ID, appName, auditMeta,
-	)
+	h.recordAudit(c.Request.Context(), claims.UserID, auditEntry{
+		ProjectID:     projectID,
+		EnvironmentID: envID,
+		OperationID:   op.ID,
+		Action:        "UpdateComposeVolume",
+		ResourceKind:  "App",
+		ResourceName:  appName,
+		Metadata:      map[string]string{"app_name": appName},
+	})
 
 	c.JSON(http.StatusAccepted, gin.H{"operation": op, "message": "compose volume update queued"})
 }

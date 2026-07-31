@@ -341,11 +341,13 @@ func (h *Handler) SetEnvVar(c *gin.Context) {
 		ev = saved
 	}
 
-	_, _ = h.pool.Exec(c.Request.Context(),
-		`INSERT INTO audit_events (actor_id, project_id, action, resource_kind, resource_name)
-		 VALUES ($1, $2, 'SetEnvVar', 'EnvVar', $3)`,
-		claims.UserID, projectID, appName,
-	)
+	h.recordAudit(c.Request.Context(), claims.UserID, auditEntry{
+		ProjectID:     projectID,
+		EnvironmentID: envID,
+		Action:        "SetEnvVar",
+		ResourceKind:  "EnvVar",
+		ResourceName:  appName,
+	})
 
 	resp := gin.H{"env_var": ev}
 	if !req.PreviewOverride {
@@ -488,11 +490,13 @@ func (h *Handler) BulkSetEnvVars(c *gin.Context) {
 		saved = append(saved, ev)
 	}
 
-	_, _ = h.pool.Exec(c.Request.Context(),
-		`INSERT INTO audit_events (actor_id, project_id, action, resource_kind, resource_name)
-		 VALUES ($1, $2, 'SetEnvVar', 'EnvVar', $3)`,
-		claims.UserID, projectID, appName,
-	)
+	h.recordAudit(c.Request.Context(), claims.UserID, auditEntry{
+		ProjectID:     projectID,
+		EnvironmentID: envID,
+		Action:        "SetEnvVar",
+		ResourceKind:  "EnvVar",
+		ResourceName:  appName,
+	})
 
 	resp := gin.H{"env_vars": saved}
 	if op, queued := h.queueEnvApply(c, claims, projectID, envID, appName); queued {
