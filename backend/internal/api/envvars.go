@@ -276,6 +276,19 @@ func (h *Handler) SetEnvVar(c *gin.Context) {
 		return
 	}
 
+	rejectEnv := func(status int, reason, msg string) {
+		h.recordAudit(c.Request.Context(), claims.UserID, auditEntry{
+			ProjectID:     projectID,
+			EnvironmentID: envID,
+			Action:        "SetEnvVar",
+			ResourceKind:  "EnvVar",
+			ResourceName:  appName,
+			Outcome:       auditOutcomeFailure,
+			Metadata:      map[string]any{"reason": reason, "status": status},
+		})
+		respondError(c, status, msg)
+	}
+
 	if ok, err := h.envBelongsToProject(c.Request.Context(), envID, projectID); err != nil {
 		respondError(c, http.StatusInternalServerError, "failed to verify environment")
 		return
@@ -285,18 +298,18 @@ func (h *Handler) SetEnvVar(c *gin.Context) {
 	}
 
 	if key == "" {
-		respondError(c, http.StatusBadRequest, "key is required")
+		rejectEnv(http.StatusBadRequest, "key_required", "key is required")
 		return
 	}
 
 	var req setEnvVarRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		respondError(c, http.StatusBadRequest, err.Error())
+		rejectEnv(http.StatusBadRequest, "malformed_body", err.Error())
 		return
 	}
 	// 4KiB/var cap (see plan §5).
 	if len(req.Value) > 4*1024 {
-		respondError(c, http.StatusBadRequest, "value exceeds 4KiB limit")
+		rejectEnv(http.StatusBadRequest, "value_too_large", "value exceeds 4KiB limit")
 		return
 	}
 
@@ -304,7 +317,7 @@ func (h *Handler) SetEnvVar(c *gin.Context) {
 	if req.PreviewOverride {
 		encrypted, err := crypto.EncryptToken(h.cfg.GitopsEncryptionKey, []byte(req.Value))
 		if err != nil {
-			respondError(c, http.StatusInternalServerError, "failed to encrypt value")
+			rejectEnv(http.StatusInternalServerError, "encrypt_failed", "failed to encrypt value")
 			return
 		}
 		row := h.pool.QueryRow(c.Request.Context(),
@@ -319,7 +332,7 @@ func (h *Handler) SetEnvVar(c *gin.Context) {
 		)
 		if err := row.Scan(&ev.ID, &ev.EnvironmentID, &ev.AppName, &ev.Key,
 			&ev.IsSecret, &ev.CreatedAt, &ev.UpdatedAt); err != nil {
-			respondError(c, http.StatusInternalServerError, "failed to save preview env override")
+			rejectEnv(http.StatusInternalServerError, "save_preview_override_failed", "failed to save preview env override")
 			return
 		}
 		ev.PreviewOverride = true
@@ -329,13 +342,13 @@ func (h *Handler) SetEnvVar(c *gin.Context) {
 			scope = "runtime"
 		}
 		if scope != "build" && scope != "runtime" && scope != "both" {
-			respondError(c, http.StatusBadRequest, "scope must be one of: build, runtime, both")
+			rejectEnv(http.StatusBadRequest, "invalid_scope", "scope must be one of: build, runtime, both")
 			return
 		}
 
 		saved, err := h.upsertEnvVar(c.Request.Context(), envID, appName, key, req.Value, req.IsSecret, scope, claims.UserID.String())
 		if err != nil {
-			respondError(c, http.StatusInternalServerError, "failed to save env var")
+			rejectEnv(http.StatusInternalServerError, "save_failed", "failed to save env var")
 			return
 		}
 		ev = saved
@@ -433,6 +446,19 @@ func (h *Handler) BulkSetEnvVars(c *gin.Context) {
 		return
 	}
 
+	rejectEnv := func(status int, reason, msg string) {
+		h.recordAudit(c.Request.Context(), claims.UserID, auditEntry{
+			ProjectID:     projectID,
+			EnvironmentID: envID,
+			Action:        "SetEnvVar",
+			ResourceKind:  "EnvVar",
+			ResourceName:  appName,
+			Outcome:       auditOutcomeFailure,
+			Metadata:      map[string]any{"reason": reason, "status": status},
+		})
+		respondError(c, status, msg)
+	}
+
 	if ok, err := h.envBelongsToProject(c.Request.Context(), envID, projectID); err != nil {
 		respondError(c, http.StatusInternalServerError, "failed to verify environment")
 		return
@@ -443,15 +469,15 @@ func (h *Handler) BulkSetEnvVars(c *gin.Context) {
 
 	var req bulkSetEnvVarsRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		respondError(c, http.StatusBadRequest, err.Error())
+		rejectEnv(http.StatusBadRequest, "malformed_body", err.Error())
 		return
 	}
 	if len(req.Vars) == 0 {
-		respondError(c, http.StatusBadRequest, "vars is required")
+		rejectEnv(http.StatusBadRequest, "vars_required", "vars is required")
 		return
 	}
 	if len(req.Vars) > 200 {
-		respondError(c, http.StatusBadRequest, "at most 200 variables per request")
+		rejectEnv(http.StatusBadRequest, "batch_too_large", "at most 200 variables per request")
 		return
 	}
 
@@ -459,23 +485,23 @@ func (h *Handler) BulkSetEnvVars(c *gin.Context) {
 	for i := range req.Vars {
 		v := &req.Vars[i]
 		if !validEnvKey(v.Key) {
-			respondError(c, http.StatusBadRequest, fmt.Sprintf("invalid key %q: expected letters, digits and underscore, not starting with a digit", v.Key))
+			rejectEnv(http.StatusBadRequest, "invalid_key", fmt.Sprintf("invalid key %q: expected letters, digits and underscore, not starting with a digit", v.Key))
 			return
 		}
 		if _, dup := seen[v.Key]; dup {
-			respondError(c, http.StatusBadRequest, fmt.Sprintf("duplicate key %q", v.Key))
+			rejectEnv(http.StatusBadRequest, "duplicate_key", fmt.Sprintf("duplicate key %q", v.Key))
 			return
 		}
 		seen[v.Key] = struct{}{}
 		if len(v.Value) > 4*1024 {
-			respondError(c, http.StatusBadRequest, fmt.Sprintf("value for %q exceeds 4KiB limit", v.Key))
+			rejectEnv(http.StatusBadRequest, "value_too_large", fmt.Sprintf("value for %q exceeds 4KiB limit", v.Key))
 			return
 		}
 		if v.Scope == "" {
 			v.Scope = "runtime"
 		}
 		if v.Scope != "build" && v.Scope != "runtime" && v.Scope != "both" {
-			respondError(c, http.StatusBadRequest, "scope must be one of: build, runtime, both")
+			rejectEnv(http.StatusBadRequest, "invalid_scope", "scope must be one of: build, runtime, both")
 			return
 		}
 	}
@@ -484,7 +510,7 @@ func (h *Handler) BulkSetEnvVars(c *gin.Context) {
 	for _, v := range req.Vars {
 		ev, err := h.upsertEnvVar(c.Request.Context(), envID, appName, v.Key, v.Value, v.IsSecret, v.Scope, claims.UserID.String())
 		if err != nil {
-			respondError(c, http.StatusInternalServerError, "failed to save env var")
+			rejectEnv(http.StatusInternalServerError, "save_failed", "failed to save env var")
 			return
 		}
 		saved = append(saved, ev)
@@ -676,6 +702,19 @@ func (h *Handler) DeleteEnvVar(c *gin.Context) {
 		return
 	}
 
+	rejectEnv := func(status int, reason, msg string) {
+		h.recordAudit(c.Request.Context(), claims.UserID, auditEntry{
+			ProjectID:     projectID,
+			EnvironmentID: envID,
+			Action:        "DeleteEnvVar",
+			ResourceKind:  "EnvVar",
+			ResourceName:  appName,
+			Outcome:       auditOutcomeFailure,
+			Metadata:      map[string]any{"reason": reason, "status": status},
+		})
+		respondError(c, status, msg)
+	}
+
 	if ok, err := h.envBelongsToProject(c.Request.Context(), envID, projectID); err != nil {
 		respondError(c, http.StatusInternalServerError, "failed to verify environment")
 		return
@@ -694,10 +733,19 @@ func (h *Handler) DeleteEnvVar(c *gin.Context) {
 		envID, appName, key,
 	)
 	if err != nil {
-		respondError(c, http.StatusInternalServerError, "failed to delete env var")
+		rejectEnv(http.StatusInternalServerError, "delete_failed", "failed to delete env var")
 		return
 	}
 	if tag.RowsAffected() == 0 {
+		h.recordAudit(c.Request.Context(), claims.UserID, auditEntry{
+			ProjectID:     projectID,
+			EnvironmentID: envID,
+			Action:        "DeleteEnvVar",
+			ResourceKind:  "EnvVar",
+			ResourceName:  appName,
+			Outcome:       auditOutcomeFailure,
+			Metadata:      map[string]any{"reason": "not_found", "status": http.StatusNotFound, "key": key},
+		})
 		respondNotFound(c)
 		return
 	}
@@ -705,6 +753,15 @@ func (h *Handler) DeleteEnvVar(c *gin.Context) {
 	if table == "env_vars" {
 		_, _ = h.queueEnvApply(c, claims, projectID, envID, appName)
 	}
+
+	h.recordAudit(c.Request.Context(), claims.UserID, auditEntry{
+		ProjectID:     projectID,
+		EnvironmentID: envID,
+		Action:        "DeleteEnvVar",
+		ResourceKind:  "EnvVar",
+		ResourceName:  appName,
+		Metadata:      map[string]any{"key": key, "preview_override": table == "preview_env_overrides"},
+	})
 
 	c.Status(http.StatusNoContent)
 }
