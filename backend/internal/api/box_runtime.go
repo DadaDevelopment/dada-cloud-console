@@ -193,6 +193,14 @@ func (h *Handler) initClusterBoxRuntime(cfg *config.Config) {
 		pool.Available(stack.image, stack.region), pool.Target(stack.image, stack.region))
 	h.boxStack = stack
 
+	if reaped, err := rt.ReapOrphans(context.Background()); err != nil {
+		log.Warn().Err(err).Msg("box: startup orphan sweep failed")
+	} else if reaped > 0 {
+		log.Warn().Int("reaped", reaped).
+			Msg("box: startup orphan sweep removed pods/PVCs a previous run abandoned before they became ready")
+	}
+	go boxOrphanReapLoop(rt)
+
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Minute)
 		defer cancel()
@@ -210,6 +218,32 @@ func (h *Handler) initClusterBoxRuntime(cfg *config.Config) {
 		metrics.SetBoxPoolGauges(stack.image, stack.region,
 			pool.Available(stack.image, stack.region), pool.Target(stack.image, stack.region))
 	}()
+}
+
+// clusterOrphanReapInterval is how often the running process re-sweeps the box
+// namespace for pods that never went Ready. It runs independently of Warm: Warm
+// only ever tries to fill the pool once at boot, but a pod can be orphaned at any
+// time the process is restarted mid-create, so the sweep has to keep going for
+// the process's whole life, not just its startup.
+const clusterOrphanReapInterval = 2 * time.Minute
+
+// boxOrphanReapLoop runs ReapOrphans on a ticker for as long as the process
+// lives. It has no cancellation because it has nothing to hand back and nothing
+// to wait on: the process exiting is what stops it, the same way the warm
+// goroutine above stops.
+func boxOrphanReapLoop(rt *box.ClusterRuntime) {
+	ticker := time.NewTicker(clusterOrphanReapInterval)
+	defer ticker.Stop()
+	for range ticker.C {
+		reaped, err := rt.ReapOrphans(context.Background())
+		if err != nil {
+			log.Warn().Err(err).Msg("box: orphan sweep failed")
+			continue
+		}
+		if reaped > 0 {
+			log.Warn().Int("reaped", reaped).Msg("box: orphan sweep removed pods/PVCs that never went ready")
+		}
+	}
 }
 
 // boxSessionBaseURL is where the box's own session surface lives. Derived from the

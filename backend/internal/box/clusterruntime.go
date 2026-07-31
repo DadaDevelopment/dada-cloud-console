@@ -47,6 +47,9 @@ import (
 //   - BrokerPort is the port the box's own door binds inside the pod. It is also
 //     the pod's readiness signal, because a box whose door does not accept is not
 //     a box a tenant can use.
+//   - ReadyTimeout overrides clusterDefaultReadyTimeout when positive. Left at
+//     zero in production; a test shrinks it to keep the failed-create path fast
+//     instead of waiting out the real default.
 type ClusterRuntime struct {
 	clientset kubernetes.Interface
 	restCfg   *rest.Config
@@ -56,6 +59,15 @@ type ClusterRuntime struct {
 	PullSecret   string
 	StorageClass string
 	BrokerPort   int
+	ReadyTimeout time.Duration
+}
+
+// readyTimeout is the bound waitReady applies, defaulting when unset.
+func (c *ClusterRuntime) readyTimeout() time.Duration {
+	if c.ReadyTimeout > 0 {
+		return c.ReadyTimeout
+	}
+	return clusterDefaultReadyTimeout
 }
 
 const (
@@ -68,6 +80,28 @@ const (
 	clusterReadyPollPeriod  = time.Second
 	clusterDestroyGraceSecs = 10
 )
+
+// clusterDefaultReadyTimeout bounds a single pod's wait for its startup probe.
+// It is deliberately much shorter than the 20-minute budget Warm's caller gives
+// the whole pool fill: that budget is sized for warming several slots in
+// sequence, not for how long one stuck pod may sit before createParked gives up
+// and destroys it. A pod stuck in ImagePullBackOff for the full 20 minutes
+// outlives the console backend's own startupProbe deadline (150s, see
+// helm/dada-cloud-console/templates/backend-deployment.yaml) many times over — if
+// the backend gets restarted before its own createParked call reaches this
+// timeout, the pod and its PVC are orphaned with no goroutine left alive to clean
+// them up. Keeping this well under a process's typical lifetime is what lets a
+// failed create clean up after itself instead of depending on staying alive long
+// enough to notice.
+const clusterDefaultReadyTimeout = 3 * time.Minute
+
+// clusterOrphanAfter is the reaper's threshold: a box pod that has not gone Ready
+// this long after creation is treated as abandoned, regardless of which process
+// created it. It matches clusterDefaultReadyTimeout because a healthy create
+// path never leaves a pod parked-and-not-Ready past that point on its own — every
+// pod slower than this is either mid-fix by another createParked call or already
+// dead and simply not yet swept.
+const clusterOrphanAfter = clusterDefaultReadyTimeout
 
 // labelBox, labelBoxID and labelBoxPhase mark every object this adapter owns, so
 // a sweep can find them all without parsing names.
@@ -362,6 +396,8 @@ func clusterDeadlineFor(size boxcatalog.Size) int64 {
 // here is only the door accepting; the toolchain canary in EvaluateReadiness is
 // what decides the box is actually usable, and it runs on the claim path.
 func (c *ClusterRuntime) waitReady(ctx context.Context, inst *Instance) error {
+	ctx, cancel := context.WithTimeout(ctx, c.readyTimeout())
+	defer cancel()
 	ticker := time.NewTicker(clusterReadyPollPeriod)
 	defer ticker.Stop()
 	for {
@@ -540,6 +576,58 @@ func (c *ClusterRuntime) deleteClaim(ctx context.Context, boxID string) error {
 		return fmt.Errorf("delete workspace claim: %w", err)
 	}
 	return nil
+}
+
+// ReapOrphans deletes every box pod in Namespace that has sat not-Ready for
+// longer than clusterOrphanAfter, along with its workspace PVC.
+//
+// This is the backstop for the gap createParked's own cleanup cannot close on
+// its own: that cleanup runs Destroy after waitReady fails, but it only runs if
+// the goroutine that called createParked is still alive to see the failure. A
+// console backend restart — whatever triggers it, including its own
+// startupProbe deadline — kills that goroutine first, leaving the half-created
+// pod and PVC behind with nothing left to notice. ReapOrphans finds them from
+// the outside: it does not care which process created a pod or whether that
+// process still exists, only whether the pod has been sitting there, not
+// accepting traffic, longer than a healthy create path ever takes.
+//
+// A pod that is genuinely mid-create by a live createParked call is not at
+// risk here: clusterOrphanAfter equals that call's own readyTimeout, so by the
+// time this sweep would consider a pod orphaned, the create path that made it
+// has already given up and destroyed it itself. The two never race for a pod
+// that is actually healthy.
+func (c *ClusterRuntime) ReapOrphans(ctx context.Context) (int, error) {
+	pods, err := c.clientset.CoreV1().Pods(c.Namespace).List(ctx, metav1.ListOptions{
+		LabelSelector: labelBox + "=true",
+	})
+	if err != nil {
+		return 0, fmt.Errorf("list box pods: %w", err)
+	}
+	cutoff := c.clock.Now().Add(-clusterOrphanAfter)
+	reaped := 0
+	var firstErr error
+	for i := range pods.Items {
+		pod := pods.Items[i]
+		if clusterPodReady(&pod) {
+			continue
+		}
+		if pod.CreationTimestamp.Time.After(cutoff) {
+			continue
+		}
+		boxID := pod.Labels[labelBoxID]
+		if boxID == "" {
+			continue
+		}
+		inst := &Instance{ID: boxID, InstanceRef: pod.Name}
+		if err := c.Destroy(ctx, inst); err != nil {
+			if firstErr == nil {
+				firstErr = err
+			}
+			continue
+		}
+		reaped++
+	}
+	return reaped, firstErr
 }
 
 // BrokerConfigured reports true: the broker is baked into the warm image and
