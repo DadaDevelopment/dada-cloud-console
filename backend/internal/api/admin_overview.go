@@ -13,8 +13,15 @@ import (
 const (
 	overviewDynamicsDefaultDays = 14
 	overviewDynamicsMaxDays     = 90
-	overviewServiceAccountLike  = "service-account-%"
 )
+
+// overviewCustomerKind is the only account kind a headline user number or a
+// funnel derived from it may count. The verdict itself lives in the
+// user_accounts view (migration 075), which folds in the Keycloak
+// service-account rule these queries used to carry themselves along with the
+// seeds, the @keycloak.local shells, our own probes and the staff accounts —
+// together 10 of the 30 rows in users, i.e. a 55% overstatement of demand.
+const overviewCustomerKind = "customer"
 
 // brokenAppSnapshotPredicate is the single source of truth for "an app the
 // platform can PROVE is currently broken": a live k8s workload the status
@@ -174,9 +181,9 @@ func (h *Handler) overviewUsers(ctx context.Context) (overviewUsers, error) {
 			count(*) FILTER (WHERE created_at >= now() - interval '24 hours'),
 			count(*) FILTER (WHERE created_at >= now() - interval '7 days'),
 			count(*) FILTER (WHERE created_at >= now() - interval '30 days')
-		FROM users
-		WHERE username NOT LIKE $1`,
-		overviewServiceAccountLike,
+		FROM user_accounts
+		WHERE account_kind = $1`,
+		overviewCustomerKind,
 	).Scan(&out.Total, &out.New24h, &out.New7d, &out.New30d)
 	if err != nil {
 		return out, err
@@ -185,10 +192,10 @@ func (h *Handler) overviewUsers(ctx context.Context) (overviewUsers, error) {
 	err = h.pool.QueryRow(ctx, `
 		SELECT count(DISTINCT a.actor_id)
 		FROM audit_events a
-		JOIN users u ON u.id = a.actor_id
+		JOIN user_accounts u ON u.id = a.actor_id
 		WHERE a.created_at >= now() - interval '48 hours'
-		  AND u.username NOT LIKE $1`,
-		overviewServiceAccountLike,
+		  AND u.account_kind = $1`,
+		overviewCustomerKind,
 	).Scan(&out.Active48h)
 	return out, err
 }
@@ -378,10 +385,10 @@ func (h *Handler) overviewDynamics(ctx context.Context, days int) ([]overviewDay
 
 	signupRows, err := h.pool.Query(ctx, `
 		SELECT to_char(created_at, 'YYYY-MM-DD'), count(*)
-		FROM users
-		WHERE created_at >= $1 AND username NOT LIKE $2
+		FROM user_accounts
+		WHERE created_at >= $1 AND account_kind = $2
 		GROUP BY 1`,
-		since, overviewServiceAccountLike,
+		since, overviewCustomerKind,
 	)
 	if err != nil {
 		return nil, err
