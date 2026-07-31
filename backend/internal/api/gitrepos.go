@@ -488,6 +488,14 @@ func (h *Handler) BindInstallation(c *gin.Context) {
 
 	acct, err := h.buildagent.GetInstallationAccount(c.Request.Context(), installID)
 	if err != nil {
+		h.recordAudit(c.Request.Context(), claims.UserID, auditEntry{
+			ProjectID:    projectID,
+			Action:       "BindInstallation",
+			ResourceKind: "GitInstallation",
+			ResourceName: req.InstallationID,
+			Outcome:      auditOutcomeFailure,
+			Metadata:     map[string]any{"reason": "failed to resolve installation"},
+		})
 		respondError(c, http.StatusBadGateway, "failed to resolve installation")
 		return
 	}
@@ -508,10 +516,28 @@ func (h *Handler) BindInstallation(c *gin.Context) {
 	).Scan(&inst.ID, &inst.ProjectID, &inst.Provider, &scanID,
 		&inst.AccountLogin, &inst.AccountType, &inst.CreatedAt)
 	if err != nil {
+		h.recordAudit(c.Request.Context(), claims.UserID, auditEntry{
+			ProjectID:    projectID,
+			Action:       "BindInstallation",
+			ResourceKind: "GitInstallation",
+			ResourceName: acct.AccountLogin,
+			Outcome:      auditOutcomeFailure,
+			Metadata:     map[string]any{"reason": "failed to save installation"},
+		})
 		respondError(c, http.StatusInternalServerError, "failed to save installation")
 		return
 	}
 	inst.InstallationID = strconv.FormatInt(scanID, 10)
+
+	h.recordAudit(c.Request.Context(), claims.UserID, auditEntry{
+		ProjectID:    projectID,
+		Action:       "BindInstallation",
+		ResourceKind: "GitInstallation",
+		ResourceName: acct.AccountLogin,
+		Outcome:      auditOutcomeSuccess,
+		Metadata:     map[string]any{"installation_id": inst.InstallationID, "account_type": acct.AccountType},
+	})
+
 	c.JSON(http.StatusCreated, inst)
 }
 
@@ -1046,18 +1072,39 @@ func (h *Handler) DisconnectGitRepo(c *gin.Context) {
 		return
 	}
 
-	tag, err := h.pool.Exec(c.Request.Context(),
-		`DELETE FROM git_repos WHERE id = $1 AND project_id = $2 AND environment_id = $3`,
+	var appName, repoFullName string
+	err = h.pool.QueryRow(c.Request.Context(),
+		`DELETE FROM git_repos WHERE id = $1 AND project_id = $2 AND environment_id = $3
+		 RETURNING app_name, repo_full_name`,
 		repoID, projectID, envID,
-	)
-	if err != nil {
-		respondError(c, http.StatusInternalServerError, "failed to unlink repository")
-		return
-	}
-	if tag.RowsAffected() == 0 {
+	).Scan(&appName, &repoFullName)
+	if err == pgx.ErrNoRows {
 		respondNotFound(c)
 		return
 	}
+	if err != nil {
+		h.recordAudit(c.Request.Context(), claims.UserID, auditEntry{
+			ProjectID:     projectID,
+			EnvironmentID: envID,
+			Action:        "DisconnectGitRepo",
+			ResourceKind:  "GitRepo",
+			ResourceName:  repoID.String(),
+			Outcome:       auditOutcomeFailure,
+			Metadata:      map[string]any{"reason": "failed to unlink repository"},
+		})
+		respondError(c, http.StatusInternalServerError, "failed to unlink repository")
+		return
+	}
+
+	h.recordAudit(c.Request.Context(), claims.UserID, auditEntry{
+		ProjectID:     projectID,
+		EnvironmentID: envID,
+		Action:        "DisconnectGitRepo",
+		ResourceKind:  "GitRepo",
+		ResourceName:  appName,
+		Outcome:       auditOutcomeSuccess,
+		Metadata:      map[string]any{"repo_full_name": repoFullName},
+	})
 
 	c.Status(http.StatusNoContent)
 }
