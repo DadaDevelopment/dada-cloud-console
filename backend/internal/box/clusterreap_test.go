@@ -216,3 +216,31 @@ func TestWarmReconcilesToTheTarget(t *testing.T) {
 		t.Fatalf("target=%d, want 2: a refill must not rewrite the target to its own shortfall", got)
 	}
 }
+
+// TestDestroyFromDatabaseRowDeletesTheWorkspace pins the leak that made a
+// customer-visible delete cost money forever: the control plane rebuilds an
+// Instance from the boxes table, where ID is the platform uuid and the runtime's
+// own id survives only inside InstanceRef. Deriving the claim name from ID names
+// a claim that never existed, so the pod went away and its 20Gi volume did not.
+func TestDestroyFromDatabaseRowDeletesTheWorkspace(t *testing.T) {
+	cs := fake.NewSimpleClientset()
+	readyOnCreate(cs)
+	rt := newClusterRuntime(cs, nil, "dada-boxes", nil)
+	pool := NewMemoryPool()
+
+	if err := rt.Warm(context.Background(), pool, boxcatalog.DefaultImage().Name, "ru1", 1); err != nil {
+		t.Fatalf("warm: %v", err)
+	}
+	inst, _, err := pool.Claim(context.Background(), boxcatalog.DefaultImage().Name, "ru1")
+	if err != nil {
+		t.Fatalf("claim: %v", err)
+	}
+
+	fromRow := &Instance{ID: "a53392a6-45aa-4ac7-b8c3-f57b1280f7f3", InstanceRef: inst.InstanceRef}
+	if err := rt.Destroy(context.Background(), fromRow); err != nil {
+		t.Fatalf("destroy: %v", err)
+	}
+	if pods, pvcs := countBoxObjects(t, cs, "dada-boxes"); pods != 0 || pvcs != 0 {
+		t.Fatalf("destroy from a database row left %d pods and %d pvcs behind", pods, pvcs)
+	}
+}

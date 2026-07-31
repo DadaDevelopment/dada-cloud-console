@@ -161,6 +161,24 @@ func clusterPodName(boxID string) string { return "box-" + boxID }
 // clusterPVCName is the workspace claim name for a box id.
 func clusterPVCName(boxID string) string { return clusterPodName(boxID) + "-workspace" }
 
+// clusterClaimNameFor is the workspace claim of an instance the caller may have
+// rebuilt from a database row rather than from the pool.
+//
+// It reads InstanceRef first because that is the only identity that survives the
+// round trip. A pooled instance carries the runtime's own id ("w<nanos>"), from
+// which both object names derive; a box loaded out of the boxes table carries the
+// CONTROL PLANE's uuid in ID and the pod name in InstanceRef. Deriving the claim
+// from ID in that second case names a claim that has never existed, the delete
+// succeeds against nothing, and a 20Gi volume is left behind for a box the
+// customer was told is gone — six of those exhaust the fleet quota and every
+// later box fails to create.
+func clusterClaimNameFor(inst *Instance) string {
+	if inst.InstanceRef != "" {
+		return inst.InstanceRef + "-workspace"
+	}
+	return clusterPVCName(inst.ID)
+}
+
 // Warm brings the pool up to n free pods, parking each one once its door accepts.
 //
 // It reconciles rather than creates: n is the TARGET, and only the shortfall is
@@ -218,7 +236,7 @@ func (c *ClusterRuntime) createParked(ctx context.Context, image, region string)
 	}
 	pod := c.BuildPod(boxID, img, size, region)
 	if _, err := c.clientset.CoreV1().Pods(c.Namespace).Create(ctx, pod, metav1.CreateOptions{}); err != nil && !apierrors.IsAlreadyExists(err) {
-		_ = c.deleteClaim(ctx, boxID)
+		_ = c.deleteClaim(ctx, clusterPVCName(boxID))
 		return nil, fmt.Errorf("create box pod: %w", err)
 	}
 
@@ -604,15 +622,15 @@ func (c *ClusterRuntime) Destroy(ctx context.Context, inst *Instance) error {
 	grace := int64(clusterDestroyGraceSecs)
 	err := c.clientset.CoreV1().Pods(c.Namespace).Delete(ctx, inst.InstanceRef, metav1.DeleteOptions{GracePeriodSeconds: &grace})
 	if err != nil && !apierrors.IsNotFound(err) {
-		_ = c.deleteClaim(ctx, inst.ID)
+		_ = c.deleteClaim(ctx, clusterClaimNameFor(inst))
 		return fmt.Errorf("delete box pod: %w", err)
 	}
-	return c.deleteClaim(ctx, inst.ID)
+	return c.deleteClaim(ctx, clusterClaimNameFor(inst))
 }
 
-// deleteClaim removes a box's workspace PVC, tolerating an already-gone claim.
-func (c *ClusterRuntime) deleteClaim(ctx context.Context, boxID string) error {
-	err := c.clientset.CoreV1().PersistentVolumeClaims(c.Namespace).Delete(ctx, clusterPVCName(boxID), metav1.DeleteOptions{})
+// deleteClaim removes a box's workspace PVC by name, tolerating an already-gone claim.
+func (c *ClusterRuntime) deleteClaim(ctx context.Context, claim string) error {
+	err := c.clientset.CoreV1().PersistentVolumeClaims(c.Namespace).Delete(ctx, claim, metav1.DeleteOptions{})
 	if err != nil && !apierrors.IsNotFound(err) {
 		return fmt.Errorf("delete workspace claim: %w", err)
 	}
