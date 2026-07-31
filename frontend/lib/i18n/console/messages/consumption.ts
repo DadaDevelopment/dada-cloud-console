@@ -35,4 +35,11 @@ export const consumption: Messages = {
     en: "Everything you already created keeps running. Limits start applying on {date}.",
   },
   "spend.quota.upgrade": { ru: "Увеличить лимиты", en: "Raise the limits" },
+
+  "grace.banner.text": {
+    ru: "У вас больше ресурсов ({resources}), чем включено в бесплатный тариф. Всё созданное продолжит работать, но с {date} создавать новые не получится.",
+    en: "You have more resources ({resources}) than the free plan includes. Everything you created keeps running, but from {date} you will not be able to create new ones.",
+  },
+  "grace.banner.cta": { ru: "Посмотреть тарифы", en: "See the plans" },
+  "grace.banner.dismiss": { ru: "Скрыть", en: "Dismiss" },
 };

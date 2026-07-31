@@ -8,6 +8,7 @@ import { ConsoleLangProvider } from "@/lib/i18n/console/context";
 import { ThemeProvider } from "@/lib/theme/context";
 import { TopBar } from "@/components/shell/top-bar";
 import { ProjectNav } from "@/components/shell/project-nav";
+import { GraceBanner } from "@/components/shell/grace-banner";
 import { CommandPalette } from "@/components/shell/command-palette";
 import { ConsoleErrorBoundary } from "@/components/shell/console-error-boundary";
 import { GlobalErrorReporter } from "@/components/shell/global-error-reporter";
@@ -58,6 +59,7 @@ function ConsoleShell({ children }: { children: React.ReactNode }) {
         onToggleNav={projectId ? () => setNavOpen((o) => !o) : undefined}
         navOpen={navOpen}
       />
+      <GraceBanner />
       <div className="relative flex flex-1 overflow-hidden">
         {projectId && (
           <>
