@@ -1,0 +1,198 @@
+package api
+
+import (
+	"context"
+	"testing"
+	"time"
+
+	"github.com/dada-tuda/console/backend/internal/box"
+	"github.com/dada-tuda/console/backend/internal/models"
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgxpool"
+)
+
+// boxExpiry reads a box's sleep deadline.
+func boxExpiry(t *testing.T, pool *pgxpool.Pool, boxID uuid.UUID) time.Time {
+	t.Helper()
+	var expires *time.Time
+	if err := pool.QueryRow(context.Background(),
+		`SELECT expires_at FROM boxes WHERE id = $1`, boxID).Scan(&expires); err != nil {
+		t.Fatalf("read expires_at: %v", err)
+	}
+	if expires == nil {
+		return time.Time{}
+	}
+	return *expires
+}
+
+// TestBoxOperationsWorker_SuspendSleepsTheBoxWithoutDestroyingIt is the money
+// test for sleep: the reaper enqueues a SuspendBox for every box past its idle
+// timeout or TTL, and while nothing consumed those operations an abandoned box
+// held a pod and a 20Gi volume forever — six of them and the fleet quota is
+// full and nobody can create a box at all.
+//
+// Destroys() is asserted to be zero because the mistake this guards against is
+// implementing sleep as a delete: that frees the quota too, and silently throws
+// away the customer's work.
+func TestBoxOperationsWorker_SuspendSleepsTheBoxWithoutDestroyingIt(t *testing.T) {
+	pool := testOptimisticPool(t)
+	rt := &box.FakeRuntime{Clock: box.NewFakeClock(fixedWorkerTestTime)}
+
+	boxID, opID, _, _ := seedBoxOperation(t, pool, models.BoxStatusReady, "fc-sleep-1",
+		models.ActionSuspendBox, models.SuspendBoxPayload{})
+	if _, err := pool.Exec(context.Background(),
+		`UPDATE operations SET payload = $2 WHERE id = $1`, opID,
+		mustMarshal(t, models.SuspendBoxPayload{BoxID: boxID, Reason: "idle"})); err != nil {
+		t.Fatalf("fix up payload with the real box id: %v", err)
+	}
+
+	w := &boxOperationsWorker{h: newTestBoxWorkerHandler(pool, rt, box.NewMemoryPool())}
+	w.tick(context.Background())
+
+	if n := rt.Suspends(); n != 1 {
+		t.Errorf("runtime.Suspend called %d times, want exactly 1", n)
+	}
+	if n := rt.Destroys(); n != 0 {
+		t.Errorf("runtime.Destroy called %d times during a suspend, want 0: sleep keeps the workspace disk", n)
+	}
+	if got := boxStatus(t, pool, boxID); got != string(models.BoxStatusSleeping) {
+		t.Errorf("box status = %q after SuspendBox executed, want Sleeping", got)
+	}
+	status, errMsg, _ := operationStatus(t, pool, opID)
+	if status != string(models.OperationStatusReady) {
+		t.Errorf("operation status = %q, want Ready; error_message=%q", status, errMsg)
+	}
+}
+
+// TestBoxOperationsWorker_SuspendIsIdempotentOnASleepingBox: the reaper can
+// enqueue a suspend for a box that another replica already put down, and the
+// spend cap can enqueue one on top of that. Neither is a failure.
+func TestBoxOperationsWorker_SuspendIsIdempotentOnASleepingBox(t *testing.T) {
+	pool := testOptimisticPool(t)
+	rt := &box.FakeRuntime{Clock: box.NewFakeClock(fixedWorkerTestTime)}
+
+	boxID, opID, _, _ := seedBoxOperation(t, pool, models.BoxStatusSleeping, "fc-sleep-2",
+		models.ActionSuspendBox, models.SuspendBoxPayload{})
+	if _, err := pool.Exec(context.Background(),
+		`UPDATE operations SET payload = $2 WHERE id = $1`, opID,
+		mustMarshal(t, models.SuspendBoxPayload{BoxID: boxID, Reason: "ttl"})); err != nil {
+		t.Fatalf("fix up payload with the real box id: %v", err)
+	}
+
+	w := &boxOperationsWorker{h: newTestBoxWorkerHandler(pool, rt, box.NewMemoryPool())}
+	w.tick(context.Background())
+
+	if n := rt.Suspends(); n != 0 {
+		t.Errorf("runtime.Suspend called %d times on an already sleeping box, want 0", n)
+	}
+	status, errMsg, _ := operationStatus(t, pool, opID)
+	if status != string(models.OperationStatusReady) {
+		t.Errorf("operation status = %q, want Ready: suspending a sleeping box is success; error_message=%q", status, errMsg)
+	}
+}
+
+// TestBoxOperationsWorker_ResumeWakesTheBoxAndMovesItsDeadline pins the two
+// things a wake must do beyond calling the runtime.
+//
+// The deadline is the subtle one. A box is put to sleep BECAUSE it reached
+// expires_at, so a resume that leaves that timestamp alone hands back a box the
+// very next reaper pass immediately puts to sleep again — a wake the customer
+// watches succeed and then undo itself. The coordinates matter for the same
+// kind of reason: a resumed box lives in a new pod with a new address, so a row
+// still carrying the old one points at nothing.
+func TestBoxOperationsWorker_ResumeWakesTheBoxAndMovesItsDeadline(t *testing.T) {
+	pool := testOptimisticPool(t)
+	rt := &box.FakeRuntime{Clock: box.NewFakeClock(fixedWorkerTestTime)}
+
+	boxID, opID, _, _ := seedBoxOperation(t, pool, models.BoxStatusSleeping, "fc-sleep-3",
+		models.ActionResumeBox, models.ResumeBoxPayload{})
+	if _, err := pool.Exec(context.Background(),
+		`UPDATE operations SET payload = $2 WHERE id = $1`, opID,
+		mustMarshal(t, models.ResumeBoxPayload{BoxID: boxID})); err != nil {
+		t.Fatalf("fix up payload with the real box id: %v", err)
+	}
+	if _, err := pool.Exec(context.Background(),
+		`UPDATE boxes SET expires_at = now() - INTERVAL '1 hour' WHERE id = $1`, boxID); err != nil {
+		t.Fatalf("expire the box: %v", err)
+	}
+
+	w := &boxOperationsWorker{h: newTestBoxWorkerHandler(pool, rt, box.NewMemoryPool())}
+	w.tick(context.Background())
+
+	status, errMsg, _ := operationStatus(t, pool, opID)
+	if status != string(models.OperationStatusReady) {
+		t.Fatalf("operation status = %q, want Ready; error_message=%q", status, errMsg)
+	}
+	if n := rt.Resumes(); n != 1 {
+		t.Errorf("runtime.Resume called %d times, want exactly 1", n)
+	}
+	if got := boxStatus(t, pool, boxID); got != string(models.BoxStatusReady) {
+		t.Errorf("box status = %q after ResumeBox executed, want Ready", got)
+	}
+	if exp := boxExpiry(t, pool, boxID); !exp.After(time.Now()) {
+		t.Errorf("expires_at = %s after a resume, want a deadline in the future: "+
+			"a woken box that is still expired is put straight back to sleep", exp)
+	}
+
+	var sshHost string
+	if err := pool.QueryRow(context.Background(),
+		`SELECT COALESCE(ssh_host, '') FROM boxes WHERE id = $1`, boxID).Scan(&sshHost); err != nil {
+		t.Fatalf("read ssh_host: %v", err)
+	}
+	if sshHost != "10.244.0.99" {
+		t.Errorf("ssh_host = %q after a resume, want the address the rebuilt body reported", sshHost)
+	}
+}
+
+// TestBoxOperationsWorker_ResumeRebindsIdentityBeforeCallingTheBoxReady.
+// What survives a sleep is the workspace volume — not the environment file, not
+// the authorized key, not the pod's labels, because those live in a container
+// that no longer exists. A resume that skips the rebind returns a box the agent
+// can reach and cannot use, and the canary is what proves it can.
+func TestBoxOperationsWorker_ResumeRebindsIdentityBeforeCallingTheBoxReady(t *testing.T) {
+	pool := testOptimisticPool(t)
+	rt := &box.FakeRuntime{Clock: box.NewFakeClock(fixedWorkerTestTime)}
+
+	boxID, opID, _, _ := seedBoxOperation(t, pool, models.BoxStatusSleeping, "fc-sleep-4",
+		models.ActionResumeBox, models.ResumeBoxPayload{})
+	if _, err := pool.Exec(context.Background(),
+		`UPDATE operations SET payload = $2 WHERE id = $1`, opID,
+		mustMarshal(t, models.ResumeBoxPayload{BoxID: boxID, SSHPublicKey: "ssh-ed25519 AAAAtest woken"})); err != nil {
+		t.Fatalf("fix up payload with the real box id: %v", err)
+	}
+
+	w := &boxOperationsWorker{h: newTestBoxWorkerHandler(pool, rt, box.NewMemoryPool())}
+	w.tick(context.Background())
+
+	if got := len(rt.ExecutedCommands()); got == 0 {
+		t.Error("a resume ran no command inside the box: ready must be proven by the canary, not assumed")
+	}
+}
+
+// TestBoxOperationsWorker_ResumeThatNeverGoesReadyFailsRatherThanLies: a box
+// whose rebuilt body comes back without its toolchain must not be reported
+// Ready. The customer discovering it broken is strictly worse than being told.
+func TestBoxOperationsWorker_ResumeThatNeverGoesReadyFailsRatherThanLies(t *testing.T) {
+	pool := testOptimisticPool(t)
+	missing := box.CanaryMissing("psql")
+	rt := &box.FakeRuntime{Clock: box.NewFakeClock(fixedWorkerTestTime), Canary: &missing}
+
+	boxID, opID, _, _ := seedBoxOperation(t, pool, models.BoxStatusSleeping, "fc-sleep-5",
+		models.ActionResumeBox, models.ResumeBoxPayload{})
+	if _, err := pool.Exec(context.Background(),
+		`UPDATE operations SET payload = $2 WHERE id = $1`, opID,
+		mustMarshal(t, models.ResumeBoxPayload{BoxID: boxID})); err != nil {
+		t.Fatalf("fix up payload with the real box id: %v", err)
+	}
+
+	w := &boxOperationsWorker{h: newTestBoxWorkerHandler(pool, rt, box.NewMemoryPool())}
+	w.tick(context.Background())
+
+	if got := boxStatus(t, pool, boxID); got == string(models.BoxStatusReady) {
+		t.Error("box status = Ready after a resume whose canary failed: a woken box without its toolchain is not ready")
+	}
+	status, _, _ := operationStatus(t, pool, opID)
+	if status == string(models.OperationStatusReady) {
+		t.Error("operation status = Ready after a failed canary: the wake did not succeed")
+	}
+}

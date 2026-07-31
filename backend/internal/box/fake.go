@@ -89,6 +89,8 @@ type FakeRuntime struct {
 	NetworkErr  error
 	UnfreezeErr error
 	ExecErr     error
+	SuspendErr  error
+	ResumeErr   error
 
 	// Canary is what Exec reports. Zero value means a healthy warm box.
 	Canary *CanaryResult
@@ -96,6 +98,8 @@ type FakeRuntime struct {
 	mu       sync.Mutex
 	execCmds []string
 	destroys int
+	suspends int
+	resumes  int
 }
 
 func (f *FakeRuntime) advance(d time.Duration) {
@@ -144,6 +148,45 @@ func (f *FakeRuntime) Destroy(context.Context, *Instance) error {
 	f.destroys++
 	f.mu.Unlock()
 	return nil
+}
+
+// Suspend counts suspensions. It deliberately does NOT touch the destroy
+// counter: the whole point of sleep is that it is not a destroy, and a test that
+// cannot tell the two apart cannot catch the mistake of implementing one as the
+// other.
+func (f *FakeRuntime) Suspend(context.Context, *Instance) error {
+	f.mu.Lock()
+	f.suspends++
+	f.mu.Unlock()
+	return f.SuspendErr
+}
+
+// Resume counts wakes and re-reports coordinates, because a real resume rebuilds
+// the body and so hands back a new address for the same box.
+func (f *FakeRuntime) Resume(_ context.Context, inst *Instance, _ Spec) error {
+	f.mu.Lock()
+	f.resumes++
+	f.mu.Unlock()
+	if f.ResumeErr != nil {
+		return f.ResumeErr
+	}
+	inst.NodeRef = "fake-node-after-resume"
+	inst.SSHHost = "10.244.0.99"
+	return nil
+}
+
+// Suspends returns how many times Suspend was called.
+func (f *FakeRuntime) Suspends() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.suspends
+}
+
+// Resumes returns how many times Resume was called.
+func (f *FakeRuntime) Resumes() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.resumes
 }
 
 // ExecutedCommands returns the commands Exec was asked to run.

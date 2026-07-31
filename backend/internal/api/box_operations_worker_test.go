@@ -195,7 +195,7 @@ func TestBoxOperationsWorker_UnhandledActionFailsImmediately(t *testing.T) {
 	warmPool := box.NewMemoryPool()
 
 	_, opID, _, _ := seedBoxOperation(t, pool, models.BoxStatusReady, "fc-worker-2",
-		models.ActionSuspendBox, models.SuspendBoxPayload{})
+		models.ActionCrystallizeBox, models.CrystallizeBoxPayload{})
 
 	h := newTestBoxWorkerHandler(pool, rt, warmPool)
 	w := &boxOperationsWorker{h: h}

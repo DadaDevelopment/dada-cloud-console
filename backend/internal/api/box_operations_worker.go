@@ -29,11 +29,10 @@ const boxOperationClaimBatch = 10
 const boxOperationMaxAttempts = 3
 
 // errBoxOperationUnimplemented marks an action this worker recognizes but does
-// not yet execute: SuspendBox, ResumeBox, AttachBoxDatabase, AttachBoxS3,
-// DetachBoxAttachment, ExposeBox, UnexposeBox, CrystallizeBox are enqueued by
-// their own handlers (and SuspendBox additionally by the reaper and the spend
-// cap) but have no consumer yet. Left for follow-up work rather than folded
-// into this change; tracked in docs/plans/2026-08-01-box-operations-worker.md.
+// not yet execute: AttachBoxDatabase, AttachBoxS3, DetachBoxAttachment,
+// ExposeBox, UnexposeBox and CrystallizeBox are enqueued by their own handlers
+// but have no consumer yet. Left for follow-up work rather than folded into
+// this change; tracked in docs/plans/2026-08-01-box-operations-worker.md.
 // It is wrapped, never retried: an action nothing implements cannot succeed on
 // attempt two.
 var errBoxOperationUnimplemented = errors.New("box operation action not implemented by the worker")
@@ -153,6 +152,10 @@ func (w *boxOperationsWorker) execute(ctx context.Context, op boxOperationRow) {
 		err = h.executeBoxUp(ctx, op.Payload)
 	case models.ActionDeleteBox:
 		err = h.executeDeleteBox(ctx, op.Payload)
+	case models.ActionSuspendBox:
+		err = h.executeSuspendBox(ctx, op.Payload)
+	case models.ActionResumeBox:
+		err = h.executeResumeBox(ctx, op.Payload)
 	default:
 		err = fmt.Errorf("%w: %s", errBoxOperationUnimplemented, op.Action)
 		log.Warn().Str("operation", op.ID.String()).Str("action", op.Action).
