@@ -16,6 +16,13 @@ import (
 // uxEventTypes is the closed set of accepted event names for the client-side UX
 // telemetry ingest. Closed on purpose: an unbounded event name would open an
 // unbounded dimension in ux_events that every path query then has to filter.
+//
+// "goal" mirrors a Yandex.Metrika reachGoal into our own database. The goal
+// itself still goes to Metrika, but Metrika data never joins a user row, is
+// sampled, and is lost entirely to an ad blocker -- so a conversion that
+// exists only there cannot be placed on the same timeline as the audit action
+// it led to. The mirror carries the goal name in `target` and the same params
+// in `props`.
 var uxEventTypes = map[string]bool{
 	"session_start": true,
 	"pageview":      true,
@@ -24,6 +31,7 @@ var uxEventTypes = map[string]bool{
 	"nav_leave":     true,
 	"visibility":    true,
 	"error_shown":   true,
+	"goal":          true,
 }
 
 // Field caps and batch bounds. The ingest is unauthenticated, so everything

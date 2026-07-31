@@ -73,7 +73,8 @@ export type UxEventType =
   | "input_commit"
   | "nav_leave"
   | "visibility"
-  | "error_shown";
+  | "error_shown"
+  | "goal";
 
 interface UxEvent {
   type: UxEventType;

@@ -5,7 +5,16 @@
  * enough to attribute a page: it is dropped at registration and never lands in
  * the database. Firing a goal on click is what makes per-landing conversion
  * visible in Metrika reports.
+ *
+ * Every goal is ALSO mirrored into our own `ux_events` (lib/ux-telemetry.ts).
+ * Metrika is anonymous, sampled and blocked for a large share of the audience,
+ * and its data never joins a `users` row — so a conversion that lives only
+ * there cannot be put on the same timeline as the audit action it produced.
+ * The mirror is what makes visit → goal → audit action → build → live URL a
+ * single query.
  */
+import { trackUxEvent } from "@/lib/ux-telemetry";
+
 const YM_ID = Number(process.env.NEXT_PUBLIC_YM_ID ?? "110158915");
 
 type MetrikaFn = (id: number, action: string, goal?: string, params?: Record<string, string>) => void;
@@ -17,11 +26,18 @@ export function ctaSource(href: string): string {
 }
 
 /**
- * Sends a Metrika goal. No-op when the counter has not loaded (ad blockers,
- * SSR, local dev) so a missing counter can never break a CTA click.
+ * Sends a Metrika goal and mirrors it into `ux_events`.
+ *
+ * The mirror runs BEFORE the counter check on purpose: a visitor running an ad
+ * blocker never loads `ym`, and those visitors are exactly the ones Metrika
+ * silently drops from every funnel. Our own ingest still records them.
+ *
+ * No-op for Metrika when the counter has not loaded (ad blockers, SSR, local
+ * dev) so a missing counter can never break a CTA click.
  */
 export function reachGoal(goal: string, params?: Record<string, string>) {
   if (typeof window === "undefined") return;
+  trackUxEvent("goal", goal, params ?? {});
   const ym = (window as unknown as { ym?: MetrikaFn }).ym;
   if (typeof ym !== "function") return;
   try {
