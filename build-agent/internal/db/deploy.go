@@ -112,6 +112,27 @@ func capFragment(fragment string, fixedLen int) string {
 	return trimmed + "-" + hash
 }
 
+// workerReplicas caps a worker at a single replica.
+//
+// Replicas default to 2 for HTTP apps, where a second pod is free availability
+// behind the Service. A worker has no Service in front of it: every replica is
+// an independent client of whatever it polls, so two of them are two competing
+// consumers. For the headline case of the upload flow — a Telegram bot — this
+// is not a degradation but a total outage: the Bot API allows exactly one
+// getUpdates stream per token, so both pods sit in a permanent
+// TelegramConflictError loop and the bot answers nobody. Observed live on
+// m2-bot-worker: two replicas, 40+ consecutive conflicts, zero messages served;
+// scaled to one and the same image logged "Connection established" immediately.
+//
+// Applied at CreateApp because that is where the app's shape is decided; the
+// user can still scale a worker up later if their workload actually supports it.
+func workerReplicas(replicas int, worker bool) int {
+	if worker && replicas > 1 {
+		return 1
+	}
+	return replicas
+}
+
 func buildDefaultHostname(base, name, suffix string) string {
 	fixedLen := 1 + len(suffix) + 1 + len(base)
 	label := capFragment(name, fixedLen)
@@ -256,7 +277,7 @@ func HandoffDeploy(ctx context.Context, pool *pgxpool.Pool, b *Build, repo *Repo
 			Image:           imageURI,
 			Framework:       det.Framework,
 			Port:            deployPort,
-			Replicas:        repo.Replicas,
+			Replicas:        workerReplicas(repo.Replicas, repo.Worker),
 			Profile:         repo.Profile,
 			DefaultHostname: defaultHostname,
 			Worker:          repo.Worker,

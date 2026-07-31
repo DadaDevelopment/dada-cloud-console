@@ -241,3 +241,60 @@ func TestHandoffDeploy_WorkerRepoGetsNoDefaultHostname(t *testing.T) {
 		t.Error("Worker = false, want true (the flag must reach gitops-agent, which records it on the snapshot)")
 	}
 }
+
+// TestWorkerReplicas covers the replica cap in isolation, including the case
+// that made a Telegram bot answer nobody: git_repos.replicas defaults to 2, and
+// two pods polling one bot token is a permanent getUpdates conflict, not a
+// degraded-but-working deploy.
+func TestWorkerReplicas(t *testing.T) {
+	cases := []struct {
+		name     string
+		replicas int
+		worker   bool
+		want     int
+	}{
+		{"worker at the default of two is capped", 2, true, 1},
+		{"worker already at one is untouched", 1, true, 1},
+		{"worker scaled high is still capped", 5, true, 1},
+		{"http app keeps its second replica", 2, false, 2},
+		{"http app keeps a high count", 5, false, 5},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := workerReplicas(tc.replicas, tc.worker); got != tc.want {
+				t.Errorf("workerReplicas(%d, %v) = %d, want %d", tc.replicas, tc.worker, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestHandoffDeploy_WorkerGetsSingleReplica proves the cap survives the whole
+// handoff: the repo carries the default of two and the queued CreateApp must
+// still ask for one.
+func TestHandoffDeploy_WorkerGetsSingleReplica(t *testing.T) {
+	pool := testPool(t)
+	projectID, envID := seedProjectEnv(t, pool, "small")
+
+	appName := "m2-bot-worker"
+	gitRepoID := seedGitRepo(t, pool, projectID, envID, appName, "small")
+	repo := &Repo{ProjectID: projectID, EnvironmentID: envID, AppName: appName, Port: 8080, Replicas: 2, Profile: "small", Worker: true}
+	b := seedBuild(t, pool, gitRepoID, envID, appName, "bot456")
+
+	opID, err := HandoffDeploy(context.Background(), pool, b, repo,
+		"nexus.example.com/p/m2-bot-worker@sha256:abc", DeployDetection{Framework: "python"}, DefaultDomainOpts{})
+	if err != nil {
+		t.Fatalf("HandoffDeploy: %v", err)
+	}
+
+	action, payload := readOperation(t, pool, opID)
+	if action != "CreateApp" {
+		t.Fatalf("action = %q, want CreateApp", action)
+	}
+	var p createAppPayload
+	if err := json.Unmarshal(payload, &p); err != nil {
+		t.Fatalf("unmarshal CreateApp payload: %v", err)
+	}
+	if p.Replicas != 1 {
+		t.Errorf("Replicas = %d, want 1 (two workers are two competing consumers of the same stream)", p.Replicas)
+	}
+}
