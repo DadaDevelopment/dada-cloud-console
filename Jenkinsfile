@@ -25,6 +25,10 @@ def PORTAINER_AGENT_IMAGE = "${GITHUB_REGISTRY}/${GITHUB_ORG}/dada-cloud-console
 def BUILD_AGENT_IMAGE     = "${GITHUB_REGISTRY}/${GITHUB_ORG}/dada-cloud-console-build-agent"
 def GATEWAY_IMAGE         = "${GITHUB_REGISTRY}/${GITHUB_ORG}/dada-cloud-console-gateway"
 def EMBED_GATEWAY_IMAGE   = "${GITHUB_REGISTRY}/${GITHUB_ORG}/dada-cloud-console-grafana-embed-gateway"
+// The body a box runs as (ADR-019). Not one of the console components: it is not
+// deployed, it is PULLED by box pods in the dada-boxes namespace, and it is pinned
+// by the boxcatalog entry rather than by the ArgoCD write-back below.
+def BOX_WARM_IMAGE        = "${GITHUB_REGISTRY}/${GITHUB_ORG}/dada-box-warm"
 
 // GitOps write-back: after a successful push, pin the just-built tag into the
 // ArgoCD source so prod actually rolls (there is NO image-updater; the tag is
@@ -62,6 +66,11 @@ properties([
                         name: 'RUN_E2E_AUTHED',
                         defaultValue: false,
                         description: 'Run the authenticated + mutating Playwright e2e (provisions a real DB) against the disposable e2e project. Needs the e2e-console-user + e2e-project-id credentials.'
+                ),
+                booleanParam(
+                        name: 'BUILD_BOX_IMAGE',
+                        defaultValue: false,
+                        description: 'Also build and push the Dada Box warm image (backend/Dockerfile.box-warm). Off by default: it is a multi-GB Ubuntu image with the whole toolchain, it changes far less often than the console, and building it on every main push would add minutes to every deploy.'
                 )
         ])
 ])
@@ -431,6 +440,17 @@ spec:
                             }
                         }
 
+                        // Built on EVERY build, not only when the box image is
+                        // published: these two binaries are the box's init and its
+                        // door, and a compile break in them must fail the build that
+                        // introduced it rather than the next image build, weeks later.
+                        stage('Box binaries build') {
+                            dir('backend') {
+                                sh 'CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -buildvcs=false -ldflags="-s -w" -o bin/box-init ./cmd/box-init'
+                                sh 'CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -buildvcs=false -ldflags="-s -w" -o bin/box-broker ./cmd/box-broker'
+                            }
+                        }
+
                         stage('Grafana-embed-gateway build') {
                             dir('backend') {
                                 sh 'CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -buildvcs=false -ldflags="-s -w" -o bin/grafana-embed-gateway ./cmd/grafana-embed-gateway'
@@ -569,6 +589,14 @@ spec:
                           -t ${BUILD_AGENT_IMAGE}:${resolvedTag} \\
                           -f build-agent/Dockerfile build-agent
                     """
+                    if (params.BUILD_BOX_IMAGE) {
+                        sh """
+                            set -eux
+                            docker build \\
+                              -t ${BOX_WARM_IMAGE}:${resolvedTag} \\
+                              -f backend/Dockerfile.box-warm backend
+                        """
+                    }
                     // Frontend image: npm ci inside the build pulls @dada/* from
                     // Nexus. Auth is passed as a BuildKit secret (never baked into
                     // a layer). NEXT_PUBLIC_* are build args (baked — they are public).
@@ -634,6 +662,21 @@ spec:
                                 docker push ${EMBED_GATEWAY_IMAGE}:latest
                                 docker rmi ${BACKEND_IMAGE}:${resolvedTag} ${FRONTEND_IMAGE}:${resolvedTag} ${GITOPS_AGENT_IMAGE}:${resolvedTag} ${PORTAINER_AGENT_IMAGE}:${resolvedTag} ${BUILD_AGENT_IMAGE}:${resolvedTag} ${GATEWAY_IMAGE}:${resolvedTag} ${EMBED_GATEWAY_IMAGE}:${resolvedTag} || true
                             """
+                            // The box image carries BOTH the build tag and :v1. The
+                            // catalog entry names :v1, so a box pod pulls whatever :v1
+                            // last pointed at; the build tag exists so an operator can
+                            // say which build a live box actually came from. It is
+                            // NOT tagged :latest — nothing pulls :latest, and a third
+                            // moving tag is a third thing to disagree.
+                            if (params.BUILD_BOX_IMAGE) {
+                                sh """
+                                    set -eux
+                                    docker push ${BOX_WARM_IMAGE}:${resolvedTag}
+                                    docker tag ${BOX_WARM_IMAGE}:${resolvedTag} ${BOX_WARM_IMAGE}:v1
+                                    docker push ${BOX_WARM_IMAGE}:v1
+                                    docker rmi ${BOX_WARM_IMAGE}:${resolvedTag} || true
+                                """
+                            }
                         }
                     }
 

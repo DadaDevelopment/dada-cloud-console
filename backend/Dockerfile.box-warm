@@ -1,0 +1,31 @@
+FROM ubuntu:24.04
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    LANG=C.UTF-8 \
+    HOME=/root \
+    PATH=/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:/bin:/sbin
+
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends \
+      ca-certificates curl wget gnupg git openssh-client \
+      build-essential pkg-config \
+      python3 python3-venv python3-pip pipx \
+      nodejs npm \
+      golang-go \
+      rustc cargo \
+      postgresql-client redis-tools \
+      tmux less jq unzip xz-utils rsync procps iproute2 \
+ && rm -rf /var/lib/apt/lists/*
+
+RUN python3 -m pip install --break-system-packages --no-cache-dir uv \
+ && npm cache add npm@latest >/dev/null 2>&1 || true
+
+RUN mkdir -p /workspace /etc/dada /run/dada-broker \
+ && chmod 0700 /run/dada-broker
+
+COPY bin/box-init /usr/local/bin/box-init
+COPY bin/box-broker /usr/local/bin/box-broker
+
+WORKDIR /workspace
+EXPOSE 8080
+ENTRYPOINT ["/usr/local/bin/box-init"]

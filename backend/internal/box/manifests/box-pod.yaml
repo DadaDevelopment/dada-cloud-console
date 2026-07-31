@@ -31,6 +31,8 @@ spec:
   automountServiceAccountToken: false
   enableServiceLinks: false
   serviceAccountName: box-runner
+  imagePullSecrets:
+    - name: github-container-registry
   priorityClassName: other
   restartPolicy: Never
   terminationGracePeriodSeconds: 10
@@ -52,7 +54,7 @@ spec:
         sizeLimit: 64Mi
   containers:
     - name: box
-      image: nexus.dada-tuda.ru/dada/box-warm:v1
+      image: ghcr.io/dadadevelopment/dada-box-warm:v1
       imagePullPolicy: IfNotPresent
       command: ["/usr/local/bin/box-init"]
       workingDir: /workspace

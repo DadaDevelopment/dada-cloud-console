@@ -35,16 +35,35 @@ const CanaryCommand = `echo dada-ready` +
 	` && echo "python=$(python3 -V 2>&1)"` +
 	` && echo "go=$(go version 2>&1)"` +
 	` && echo "git=$(git --version 2>&1)"` +
+	` && echo "psql=$(psql --version 2>&1)"` +
 	` && echo "docker=$(docker info --format '{{.ServerVersion}}' 2>&1)"`
 
 // readyMarker must appear in the canary's output. It proves we are reading this
 // canary's output and not, say, a login banner.
 const readyMarker = "dada-ready"
 
-// requiredToolchain is the set of keys the canary must report non-empty. Changing
-// this list changes what the platform promises is preinstalled, so it is a
-// deliberate edit reviewed alongside the warm image.
-var requiredToolchain = []string{"node", "python", "go", "git", "docker"}
+// requiredToolchain is the set of keys the canary must report a real version for.
+// Changing this list changes what the platform promises is preinstalled, so it is
+// a deliberate edit reviewed alongside the warm image.
+//
+// DOCKER IS DEPROBED HERE AND THE REASON MATTERS. A box's own container daemon is
+// real on LocalRuntime, which starts dockerd inside the box's namespaces. It is
+// NOT real in the cluster: the box pod drops every capability, forbids privilege
+// escalation and runs under PSS restricted, so no daemon starts. Keeping docker
+// required would either block every cluster box from ever being ready or — worse,
+// and what the previous form actually did — pass, because `docker: not found` is
+// a non-empty value. The canary still REPORTS docker so an operator can see which
+// runtime a box came from; it is reportOnlyToolchain, not a promise.
+var requiredToolchain = []string{"node", "python", "go", "git", "psql"}
+
+// toolErrorMarkers are substrings that mean the canary captured a shell error
+// instead of a version.
+//
+// This exists because the canary redirects stderr into the value: without it
+// "not found" satisfies "non-empty" and the toolchain check passes for an image
+// that has none of the toolchain. That is the exact failure the check was written
+// to prevent, and it was live.
+var toolErrorMarkers = []string{"not found", "No such file", "command not found", "cannot execute"}
 
 // ErrNotReady is the sentinel for a box that is not ready. Callers match on it
 // with errors.Is; the wrapped message says which check failed.
@@ -67,7 +86,7 @@ func EvaluateReadiness(res CanaryResult) error {
 	reported := parseCanaryFields(res.Stdout)
 	var missing []string
 	for _, tool := range requiredToolchain {
-		if strings.TrimSpace(reported[tool]) == "" {
+		if !toolReported(reported[tool]) {
 			missing = append(missing, tool)
 		}
 	}
@@ -77,6 +96,21 @@ func EvaluateReadiness(res CanaryResult) error {
 			ErrNotReady, strings.Join(missing, ", "))
 	}
 	return nil
+}
+
+// toolReported answers whether a canary value is a version rather than the shell
+// complaining about a missing binary.
+func toolReported(value string) bool {
+	v := strings.TrimSpace(value)
+	if v == "" {
+		return false
+	}
+	for _, marker := range toolErrorMarkers {
+		if strings.Contains(v, marker) {
+			return false
+		}
+	}
+	return true
 }
 
 // parseCanaryFields reads the canary's key=value lines. Lines without an "=" (the

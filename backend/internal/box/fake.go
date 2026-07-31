@@ -68,6 +68,7 @@ const WarmCanaryStdout = "dada-ready\n" +
 	"python=Python 3.12.7\n" +
 	"go=go version go1.23.4 linux/amd64\n" +
 	"git=git version 2.43.0\n" +
+	"psql=psql (PostgreSQL) 16.4\n" +
 	"docker=27.3.1\n"
 
 // FakeRuntime is a BoxRuntime that costs whatever the test says it costs.

@@ -62,10 +62,10 @@ type Size struct {
 var V1Images = []Image{
 	{
 		Name:        "warm-v1",
-		Ref:         "nexus.dada-tuda.ru/dada/box-warm:v1",
+		Ref:         "ghcr.io/dadadevelopment/dada-box-warm:v1",
 		Digest:      "",
-		Description: "Ubuntu 24.04 with node LTS, python 3.12+uv, go, rust, build tools, psql/redis-cli/mc/aws, tmux, sshd and pre-warmed package caches.",
-		Toolchain:   []string{"node", "python3", "go", "cargo", "git", "docker", "psql"},
+		Description: "Ubuntu 24.04 with node, python 3.12+uv, go, rust, build tools, psql, redis-cli, tmux and git. No container daemon: a box pod drops every capability under PSS restricted, so docker is not part of what this image promises.",
+		Toolchain:   []string{"node", "python3", "go", "cargo", "git", "psql"},
 		Default:     true,
 	},
 }

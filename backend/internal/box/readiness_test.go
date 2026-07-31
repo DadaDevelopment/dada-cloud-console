@@ -73,6 +73,30 @@ func TestReadinessRequiresTheWarmToolchain(t *testing.T) {
 	}
 }
 
+// TestReadinessRejectsAShellErrorAsAVersion closes the hole the non-empty check
+// left open.
+//
+// The canary folds stderr into each value, so a box with no toolchain at all
+// reports `node=sh: 1: node: not found` — non-empty, and therefore ready under a
+// check that only asked for non-empty. That is the exact failure the toolchain
+// check exists to prevent, dressed as a pass, and it was live until this test.
+func TestReadinessRejectsAShellErrorAsAVersion(t *testing.T) {
+	for _, complaint := range []string{
+		"sh: 1: node: not found",
+		"bash: node: command not found",
+		"/bin/sh: node: No such file or directory",
+	} {
+		stdout := strings.Replace(WarmCanaryStdout, "node=v22.11.0", "node="+complaint, 1)
+		err := EvaluateReadiness(CanaryResult{ExitCode: 0, Stdout: stdout})
+		if err == nil {
+			t.Fatalf("a box reporting %q for node must not be ready", complaint)
+		}
+		if !strings.Contains(err.Error(), "node") {
+			t.Errorf("error %q should name node", err)
+		}
+	}
+}
+
 // TestCanaryCommandProbesEveryRequiredTool ties the command and the check
 // together. If someone adds a tool to requiredToolchain but not to the canary,
 // every box would report as not-ready; if they add it to the canary but not the
