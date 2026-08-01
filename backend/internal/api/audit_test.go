@@ -6,6 +6,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/alicebob/miniredis/v2"
+	"github.com/dada-tuda/console/backend/internal/cache"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -129,7 +131,7 @@ func TestWriteSessionStartCleanActorIsFirst(t *testing.T) {
 	h := &Handler{pool: pool}
 	ctx := context.Background()
 
-	h.writeSessionStart(ctx, actorID, "someone", "/api/v1/onboarding", "cold")
+	h.writeSessionStart(ctx, actorID, "someone", "/api/v1/onboarding", "cold", "")
 
 	visit, reason := fetchSessionStartVisitReason(t, pool, actorID)
 	if visit != auditVisitFirst {
@@ -158,7 +160,7 @@ func TestWriteSessionStartReturningActorIsReturn(t *testing.T) {
 	}
 
 	h := &Handler{pool: pool}
-	h.writeSessionStart(ctx, actorID, "someone", "/api/v1/onboarding", "cold")
+	h.writeSessionStart(ctx, actorID, "someone", "/api/v1/onboarding", "cold", "")
 
 	visit, reason := fetchSessionStartVisitReason(t, pool, actorID)
 	if visit != auditVisitReturn {
@@ -179,7 +181,7 @@ func TestWriteSessionStartCarriesIdleAndReloginReason(t *testing.T) {
 
 	for _, reason := range []string{"idle", "relogin"} {
 		actorID, _ := seedAuditActor(t, pool)
-		h.writeSessionStart(ctx, actorID, "someone", "/api/v1/onboarding", reason)
+		h.writeSessionStart(ctx, actorID, "someone", "/api/v1/onboarding", reason, "")
 
 		_, gotReason := fetchSessionStartVisitReason(t, pool, actorID)
 		if gotReason != reason {
@@ -216,4 +218,66 @@ func TestAuditVisitsResetsOnOverflow(t *testing.T) {
 	if len(v.users) > auditSeenLimit {
 		t.Fatalf("tracker must not grow past the cap, got %d", len(v.users))
 	}
+}
+
+// TestWriteSessionStartDedupesConcurrentReplicas is the +22% overstatement:
+// one page load fires several requests, they land on different replicas, and
+// each replica's own memory honestly reports a new visit. Sharing one Redis
+// claim keyed by the Keycloak session id leaves exactly one row.
+func TestWriteSessionStartDedupesConcurrentReplicas(t *testing.T) {
+	pool := testAuditPool(t)
+	actorID, _ := seedAuditActor(t, pool)
+	ctx := context.Background()
+
+	mr, err := miniredis.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer mr.Close()
+
+	replicaA := &Handler{pool: pool, cache: cache.New(mr.Addr())}
+	replicaB := &Handler{pool: pool, cache: cache.New(mr.Addr())}
+	defer replicaA.cache.Close()
+	defer replicaB.cache.Close()
+
+	replicaA.writeSessionStart(ctx, actorID, "someone", "/api/v1/projects", "cold", "sid-1")
+	replicaB.writeSessionStart(ctx, actorID, "someone", "/api/v1/apps", "cold", "sid-1")
+
+	if got := countSessionStarts(t, pool, actorID); got != 1 {
+		t.Fatalf("one page load across two replicas must leave one row, got %d", got)
+	}
+
+	// A re-login within the same window is a genuinely new visit and carries a
+	// new sid, so it must NOT be swallowed by the claim of the previous one.
+	replicaB.writeSessionStart(ctx, actorID, "someone", "/api/v1/projects", "relogin", "sid-2")
+	if got := countSessionStarts(t, pool, actorID); got != 2 {
+		t.Fatalf("a re-login must open a new visit, got %d rows", got)
+	}
+}
+
+// TestWriteSessionStartRecordsWithoutRedis is the fail-open half: no cache
+// configured must degrade to the previous behaviour (every replica records),
+// never to silence.
+func TestWriteSessionStartRecordsWithoutRedis(t *testing.T) {
+	pool := testAuditPool(t)
+	actorID, _ := seedAuditActor(t, pool)
+	h := &Handler{pool: pool}
+
+	h.writeSessionStart(context.Background(), actorID, "someone", "/api/v1/projects", "cold", "sid-1")
+
+	if got := countSessionStarts(t, pool, actorID); got != 1 {
+		t.Fatalf("a disabled cache must not gate the row, got %d", got)
+	}
+}
+
+func countSessionStarts(t *testing.T, pool *pgxpool.Pool, actorID uuid.UUID) int {
+	t.Helper()
+	var n int
+	if err := pool.QueryRow(context.Background(),
+		`SELECT count(*) FROM audit_events WHERE actor_id = $1 AND action = $2`,
+		actorID, auditActionSessionStart,
+	).Scan(&n); err != nil {
+		t.Fatalf("count SessionStart rows: %v", err)
+	}
+	return n
 }

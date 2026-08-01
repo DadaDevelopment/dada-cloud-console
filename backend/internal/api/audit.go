@@ -275,9 +275,37 @@ func (h *Handler) classifyFirstVisit(ctx context.Context, actorID uuid.UUID, now
 	return auditVisitFirst
 }
 
+// claimVisit is the cross-replica half of the visit boundary. auditVisits is
+// per-pod memory, and a browser opening a page fires several requests at once
+// that land on DIFFERENT replicas — each of which then legitimately believes it
+// is seeing a new visit. Live count before this gate: 49 SessionStart rows for
+// 38 distinct (actor, second) pairs, a 22% overstatement of the number every
+// return-rate and activation figure is divided by.
+//
+// The claim is keyed by the Keycloak session id, not by time, so the two cases
+// that must stay distinguishable stay distinguishable: a re-login within
+// seconds brings a new sid and opens a new visit, while a second replica
+// handling the same page load carries the same sid and is dropped. The TTL
+// matches the idle gap, so a genuine return after that gap — which by
+// definition happens at least that long after the visit began — finds the claim
+// expired.
+//
+// Fail-open like the rest of the cache package: no Redis means every replica
+// records, which is the behaviour this replaces, not a worse one.
+func (h *Handler) claimVisit(ctx context.Context, actorID uuid.UUID, sid string) bool {
+	key := "audit:visit:" + actorID.String()
+	if sid != "" {
+		key += ":" + sid
+	}
+	return h.cache.TryClaim(ctx, key, auditSessionIdleGap)
+}
+
 // writeSessionStart is the synchronous body of recordSessionStartAsync,
 // pulled out so tests can drive it without racing a goroutine.
-func (h *Handler) writeSessionStart(ctx context.Context, actorID uuid.UUID, username, path, reason string) {
+func (h *Handler) writeSessionStart(ctx context.Context, actorID uuid.UUID, username, path, reason, sid string) {
+	if !h.claimVisit(ctx, actorID, sid) {
+		return
+	}
 	visit := h.classifyFirstVisit(ctx, actorID, time.Now())
 	h.recordAudit(ctx, actorID, auditEntry{
 		Action:       auditActionSessionStart,
@@ -292,11 +320,11 @@ func (h *Handler) writeSessionStart(ctx context.Context, actorID uuid.UUID, user
 // classifyFirstVisit needs. That round trip happens after the response has
 // already been sent, so it never touches the request's latency budget; it
 // only ever runs once per new visit, never once per request.
-func (h *Handler) recordSessionStartAsync(actorID uuid.UUID, username, path, reason string) {
+func (h *Handler) recordSessionStartAsync(actorID uuid.UUID, username, path, reason, sid string) {
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		h.writeSessionStart(ctx, actorID, username, path, reason)
+		h.writeSessionStart(ctx, actorID, username, path, reason, sid)
 	}()
 }
 
@@ -325,7 +353,7 @@ func (h *Handler) auditSessionMiddleware() gin.HandlerFunc {
 		claims, ok := auth.GetClaims(c)
 		if ok && claims != nil && claims.UserID != uuid.Nil && !isServiceAccountUsername(claims.Username) {
 			if newVisit, reason := auditSessionVisits.observe(claims.UserID.String(), claims.SessionID, time.Now()); newVisit {
-				h.recordSessionStartAsync(claims.UserID, claims.Username, c.FullPath(), reason)
+				h.recordSessionStartAsync(claims.UserID, claims.Username, c.FullPath(), reason, claims.SessionID)
 			}
 		}
 		c.Next()
