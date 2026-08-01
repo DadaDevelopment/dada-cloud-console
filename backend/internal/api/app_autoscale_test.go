@@ -3,6 +3,7 @@ package api
 import (
 	"math"
 	"os"
+	"reflect"
 	"regexp"
 	"sort"
 	"strings"
@@ -118,72 +119,125 @@ func TestCollectStarvedEmptyWhenNothingOverThreshold(t *testing.T) {
 	}
 }
 
-func TestNextProfileWalksTheLadder(t *testing.T) {
+func TestGrowEnvelopeDoublesTheStarvedDimensionOnly(t *testing.T) {
+	from := resourceEnvelope{CPULimit: "500m", MemoryLimit: "512Mi", CPUReq: "100m", MemoryReq: "256Mi"}
+
 	cases := []struct {
-		current string
-		want    string
-		wantOK  bool
+		dimension string
+		want      resourceEnvelope
 	}{
-		{"small", "medium", true},
-		{"medium", "large", true},
-		{"large", "", false},
-		{"", "", false},
-		{"xlarge-handedited", "", false},
+		{"cpu", resourceEnvelope{CPULimit: "1", MemoryLimit: "512Mi", CPUReq: "200m", MemoryReq: "256Mi"}},
+		{"memory", resourceEnvelope{CPULimit: "500m", MemoryLimit: "1Gi", CPUReq: "100m", MemoryReq: "512Mi"}},
 	}
 
 	for _, tc := range cases {
-		t.Run("from="+tc.current, func(t *testing.T) {
-			got, ok := nextProfile(tc.current)
-			if got != tc.want || ok != tc.wantOK {
-				t.Fatalf("nextProfile(%q) = (%q, %v), want (%q, %v)", tc.current, got, ok, tc.want, tc.wantOK)
+		t.Run(tc.dimension, func(t *testing.T) {
+			got, grew, err := growEnvelope(from, tc.dimension)
+			if err != nil {
+				t.Fatalf("growEnvelope: %v", err)
+			}
+			if !grew {
+				t.Fatal("expected room to grow well below the platform cap")
+			}
+			if got != tc.want {
+				t.Fatalf("growEnvelope(%v, %q) = %v, want %v", from, tc.dimension, got, tc.want)
 			}
 		})
 	}
 }
 
-func TestProfileIndexSeparatesOffLadderFromTopOfLadder(t *testing.T) {
-	cases := []struct {
-		profile string
-		want    int
-	}{
-		{"small", 0},
-		{"medium", 1},
-		{"large", 2},
-		{"", -1},
-		{"xlarge-handedited", -1},
+// The request/limit ratio is what keeps the scheduler's view of an app honest:
+// doubling only the limit would let a starved app grow its burst ceiling while
+// still being packed onto a node as if it were tiny.
+func TestGrowEnvelopePreservesTheRequestToLimitRatio(t *testing.T) {
+	from := resourceEnvelope{CPULimit: "1", MemoryLimit: "1Gi", CPUReq: "250m", MemoryReq: "256Mi"}
+
+	got, _, err := growEnvelope(from, "cpu")
+	if err != nil {
+		t.Fatalf("growEnvelope: %v", err)
+	}
+	if got.CPULimit != "2" || got.CPUReq != "500m" {
+		t.Fatalf("cpu grew to %s/%s, want request to stay at a quarter of the limit", got.CPUReq, got.CPULimit)
 	}
 
-	for _, tc := range cases {
-		t.Run("profile="+tc.profile, func(t *testing.T) {
-			if got := profileIndex(tc.profile); got != tc.want {
-				t.Fatalf("profileIndex(%q) = %d, want %d", tc.profile, got, tc.want)
-			}
-		})
+	got, _, err = growEnvelope(from, "memory")
+	if err != nil {
+		t.Fatalf("growEnvelope: %v", err)
+	}
+	if got.MemoryLimit != "2Gi" || got.MemoryReq != "512Mi" {
+		t.Fatalf("memory grew to %s/%s, want request to stay at a quarter of the limit", got.MemoryReq, got.MemoryLimit)
 	}
 }
 
-// An off-ladder app is one somebody gave a hand-tuned resources block. Guessing
-// a rung for it can shrink a limit it depends on, so the watcher must leave it
-// alone rather than assume a position.
-func TestOffLadderProfileIsNeverGuessedIntoTheLadder(t *testing.T) {
-	for _, profile := range []string{"", "xlarge-handedited", "custom"} {
-		if profileIndex(profile) >= 0 {
-			t.Fatalf("profile %q must be off-ladder", profile)
+// Without a cap a crash-looping app that never stops being starved would grow
+// every cooldown until it cannot be scheduled on any node at all.
+func TestGrowEnvelopeStopsAtThePlatformCap(t *testing.T) {
+	at := resourceEnvelope{CPULimit: appAutoscaleMaxCPULimit, MemoryLimit: appAutoscaleMaxMemoryLimit, CPUReq: "2", MemoryReq: "4Gi"}
+
+	for _, dimension := range []string{"cpu", "memory"} {
+		got, grew, err := growEnvelope(at, dimension)
+		if err != nil {
+			t.Fatalf("%s: growEnvelope: %v", dimension, err)
 		}
-		if to, ok := nextProfile(profile); ok {
-			t.Fatalf("nextProfile(%q) offered %q; an off-ladder app must not be moved", profile, to)
+		if grew {
+			t.Fatalf("%s: grew past the platform cap to %v", dimension, got)
 		}
 	}
 }
 
-func TestNextProfileTargetsAreAllKnownRequirements(t *testing.T) {
-	for _, p := range autoscaleProfileLadder {
-		if _, ok := autoscaleProfileRequirements[p]; !ok {
-			t.Fatalf("profile %q is on the ladder but has no quota requirement, so quotaHeadroom would silently compare zeroes", p)
+// A doubling that overshoots must land exactly on the cap rather than be
+// refused: an app one step below the ceiling still deserves the last step.
+func TestGrowEnvelopeClampsTheLastStepToTheCap(t *testing.T) {
+	from := resourceEnvelope{CPULimit: "6", MemoryLimit: "12Gi", CPUReq: "3", MemoryReq: "6Gi"}
+
+	got, grew, err := growEnvelope(from, "cpu")
+	if err != nil || !grew {
+		t.Fatalf("growEnvelope(cpu) = (%v, %v, %v), want a clamped step", got, grew, err)
+	}
+	if got.CPULimit != appAutoscaleMaxCPULimit {
+		t.Fatalf("cpu limit = %q, want the cap %q", got.CPULimit, appAutoscaleMaxCPULimit)
+	}
+
+	got, grew, err = growEnvelope(from, "memory")
+	if err != nil || !grew {
+		t.Fatalf("growEnvelope(memory) = (%v, %v, %v), want a clamped step", got, grew, err)
+	}
+	if got.MemoryLimit != appAutoscaleMaxMemoryLimit {
+		t.Fatalf("memory limit = %q, want the cap %q", got.MemoryLimit, appAutoscaleMaxMemoryLimit)
+	}
+}
+
+// A snapshot written by hand can carry nonsense. Growing off a zero or an
+// unparsable limit would silently produce a zero envelope, which the API server
+// reads as "no limit at all".
+func TestGrowEnvelopeRefusesAnUnusableEnvelope(t *testing.T) {
+	for name, from := range map[string]resourceEnvelope{
+		"unparsable limit": {CPULimit: "lots", MemoryLimit: "1Gi", CPUReq: "250m", MemoryReq: "256Mi"},
+		"zero limit":       {CPULimit: "0", MemoryLimit: "1Gi", CPUReq: "0", MemoryReq: "256Mi"},
+		"empty":            {},
+	} {
+		if _, grew, err := growEnvelope(from, "cpu"); err == nil && grew {
+			t.Fatalf("%s: grew off an unusable envelope %v", name, from)
 		}
 	}
-	if len(autoscaleProfileRequirements) != len(autoscaleProfileLadder) {
-		t.Fatalf("requirements (%d) and ladder (%d) disagree on the set of profiles", len(autoscaleProfileRequirements), len(autoscaleProfileLadder))
+}
+
+// An app that has never been sized falls back to its legacy profile; one that
+// carries an explicit envelope must never be dragged back onto the ladder.
+func TestEnvelopeFallsBackToTheProfileOnlyWhenUnsized(t *testing.T) {
+	explicit := resourceEnvelope{CPULimit: "8", MemoryLimit: "16Gi", CPUReq: "2", MemoryReq: "4Gi"}
+	got, ok := appProfileState{Profile: "small", Resources: &explicit}.Envelope()
+	if !ok || got != explicit {
+		t.Fatalf("Envelope() = (%v, %v), want the explicit envelope", got, ok)
+	}
+
+	got, ok = appProfileState{Profile: "medium"}.Envelope()
+	if !ok || got != autoscaleProfileRequirements["medium"] {
+		t.Fatalf("Envelope() = (%v, %v), want the medium profile", got, ok)
+	}
+
+	if _, ok := (appProfileState{Profile: "xlarge-handedited"}).Envelope(); ok {
+		t.Fatal("an unknown profile with no envelope must be left alone, not guessed at")
 	}
 }
 
@@ -312,6 +366,52 @@ func parseRendererProfiles(t *testing.T, src string) map[string]rendererProfile 
 		out[profile] = p
 	}
 	return out
+}
+
+var rendererAppResourcesRe = regexp.MustCompile(`(?m)^\s*\w+\s+string\s+` + "`" + `json:"([^"]+)"` + "`")
+
+// The autoscaler writes the envelope into resource_snapshots.summary_json and
+// the gitops-agent reads it back out of the same column, but they live in
+// separate Go modules and cannot share the struct. A renamed tag on either side
+// would not fail to compile -- it would make the renderer silently fall back to
+// the profile ceiling on an app that had already been grown past it.
+func TestSnapshotResourceTagsMatchRenderer(t *testing.T) {
+	raw, err := os.ReadFile(rendererProfilePath)
+	if os.IsNotExist(err) {
+		t.Skipf("renderer source not present at %s (partial checkout)", rendererProfilePath)
+	}
+	if err != nil {
+		t.Fatalf("read renderer source: %v", err)
+	}
+
+	src := string(raw)
+	start := strings.Index(src, "type AppResources struct {")
+	if start < 0 {
+		t.Fatal("AppResources not found in the renderer source; the snapshot contract can no longer be cross-checked")
+	}
+	body := src[start:]
+	end := strings.Index(body, "}")
+	if end < 0 {
+		t.Fatal("AppResources declaration is unterminated in the renderer source")
+	}
+
+	var want []string
+	for _, m := range rendererAppResourcesRe.FindAllStringSubmatch(body[:end], -1) {
+		want = append(want, m[1])
+	}
+	if len(want) != 4 {
+		t.Fatalf("expected 4 json tags on renderer.AppResources, found %v", want)
+	}
+
+	typ := reflect.TypeOf(snapshotResources{})
+	if typ.NumField() != len(want) {
+		t.Fatalf("snapshotResources has %d fields, renderer.AppResources has %d", typ.NumField(), len(want))
+	}
+	for i, tag := range want {
+		if got := typ.Field(i).Tag.Get("json"); got != tag {
+			t.Fatalf("field %d: snapshotResources tag %q != renderer.AppResources tag %q", i, got, tag)
+		}
+	}
 }
 
 func TestAutoscaleProfileRequirementsMatchRenderer(t *testing.T) {

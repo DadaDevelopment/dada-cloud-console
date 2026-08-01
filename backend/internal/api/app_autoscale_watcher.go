@@ -87,58 +87,135 @@ var memPressureQuery = fmt.Sprintf(
 	autoscaleLookback,
 )
 
-// autoscaleProfileLadder is the ordered resize path. It intentionally has a
-// top: an app that is still starved on "large" is not resized further but
-// reported to its owner, because past this point the cause is far more often a
-// leak or a runaway loop than a genuine need for more hardware, and silently
-// growing it forever would hide that.
-var autoscaleProfileLadder = []string{"small", "medium", "large"}
+// appAutoscaleGrowthFactor is how much of the starved dimension one resize
+// buys. Doubling rather than stepping a fixed amount because pressure is
+// multiplicative: an app throttled in 60% of its CFS periods does not need 10%
+// more CPU, and a series of small steps costs one 6h cooldown each while the
+// app stays unusable the whole time.
+const appAutoscaleGrowthFactor = 2
 
-// profileIndex is the position of a profile on the ladder, or -1 when the app
-// is not on the ladder at all.
-//
-// Off-ladder is a real state, not a data error: an app can carry a hand-tuned
-// resources block that matches no profile. The first version of this watcher
-// treated off-ladder as "assume medium" and on its very first prod tick pushed
-// a live app from a deliberate 100m/384Mi/1Gi-ephemeral spec onto the medium
-// profile, shrinking its ephemeral storage from 1Gi to 500Mi. Guessing a
-// position on a ladder the app was never on can move it DOWN.
-func profileIndex(current string) int {
-	for i, p := range autoscaleProfileLadder {
-		if p == current {
-			return i
-		}
-	}
-	return -1
-}
+// appAutoscaleMaxCPULimit and appAutoscaleMaxMemoryLimit are the platform's
+// absolute per-app cap, NOT the plan's. The plan's limit is the namespace
+// ResourceQuota, which is checked separately and is the number a customer can
+// actually raise by paying. This cap exists only so an app leaking in a
+// namespace that carries no quota at all cannot grow until it evicts its
+// neighbours off the node.
+const (
+	appAutoscaleMaxCPULimit    = "8"
+	appAutoscaleMaxMemoryLimit = "16Gi"
+)
 
-// nextProfile returns the next profile up the ladder and whether one exists.
-// Only meaningful for a profile already on the ladder; callers must check
-// profileIndex first, since a false here means "already at the top", not
-// "unknown".
-func nextProfile(current string) (string, bool) {
-	i := profileIndex(current)
-	if i < 0 || i+1 >= len(autoscaleProfileLadder) {
-		return "", false
-	}
-	return autoscaleProfileLadder[i+1], true
-}
-
-// profileRequirement is the CPU/memory a profile asks the namespace quota for.
-// Mirrors profileResources in gitops-agent/internal/renderer/renderer.go; the
-// two must move together, and the unit test asserts the values match that
-// renderer's ladder.
-type profileRequirement struct {
+// resourceEnvelope is one app's CPU/memory request and limit, in Kubernetes
+// quantity notation. Mirrors renderer.AppResources in the gitops-agent module,
+// which cannot be imported from here.
+type resourceEnvelope struct {
 	CPULimit    string
 	MemoryLimit string
 	CPUReq      string
 	MemoryReq   string
 }
 
-var autoscaleProfileRequirements = map[string]profileRequirement{
+// autoscaleProfileRequirements resolves the legacy small/medium/large names to
+// the envelope the renderer still emits for apps that predate explicit sizing.
+// Mirrors profileResources in gitops-agent/internal/renderer/renderer.go; the
+// two must move together, and a unit test asserts the values match.
+//
+// This is a starting point, not a ladder. Once an app has been resized it
+// carries its own envelope and never consults this table again.
+var autoscaleProfileRequirements = map[string]resourceEnvelope{
 	"small":  {CPULimit: "250m", MemoryLimit: "256Mi", CPUReq: "10m", MemoryReq: "128Mi"},
 	"medium": {CPULimit: "500m", MemoryLimit: "512Mi", CPUReq: "100m", MemoryReq: "256Mi"},
 	"large":  {CPULimit: "1", MemoryLimit: "1Gi", CPUReq: "250m", MemoryReq: "512Mi"},
+}
+
+// String renders an envelope for a log line, an audit row and the owner's mail.
+func (e resourceEnvelope) String() string {
+	return fmt.Sprintf("cpu %s/%s, mem %s/%s", e.CPUReq, e.CPULimit, e.MemoryReq, e.MemoryLimit)
+}
+
+// growEnvelope returns the envelope one resize up from cur along the starved
+// dimension, and whether there was any room left to grow.
+//
+// Only the dimension under pressure moves. A CPU-throttled app given twice the
+// memory it was not short of is billed for hardware it cannot use, and the
+// resize still would not have relieved anything.
+//
+// Growth stops at the platform cap, clamping to it rather than refusing when
+// the doubled value would overshoot: an app at 6 CPU that needs more should get
+// the remaining 2, not nothing. Only an app already sitting at the cap reports
+// no room. Pure arithmetic over parsed quantities, so it is unit-tested.
+func growEnvelope(cur resourceEnvelope, dimension string) (resourceEnvelope, bool, error) {
+	next := cur
+	switch dimension {
+	case "memory":
+		limit, req, grew, err := growPair(cur.MemoryLimit, cur.MemoryReq, appAutoscaleMaxMemoryLimit, resource.BinarySI)
+		if err != nil || !grew {
+			return cur, false, err
+		}
+		next.MemoryLimit, next.MemoryReq = limit, req
+	default:
+		limit, req, grew, err := growPair(cur.CPULimit, cur.CPUReq, appAutoscaleMaxCPULimit, resource.DecimalSI)
+		if err != nil || !grew {
+			return cur, false, err
+		}
+		next.CPULimit, next.CPUReq = limit, req
+	}
+	return next, true, nil
+}
+
+// growPair doubles a limit and moves its request with it, clamped to max.
+//
+// The request keeps the ratio it had to the limit rather than being doubled on
+// its own. That ratio is the platform's packing economics: the default envelope
+// requests 10m against a 250m limit, so the scheduler fits roughly 25x more
+// pods on a node than the limits alone would suggest. Growing the limit while
+// pinning the request would let a starved app widen that ratio without bound;
+// growing the request to match the limit would collapse it to 1 and cost a
+// node. Deriving from the ratio also means a limit clamped at the cap does not
+// leave the request overshooting past it.
+//
+// The ratio is computed in milli-units for both formats so a sub-unit CPU
+// request survives the round trip; the memory result is converted back to whole
+// bytes, since BinarySI has no milli notation worth emitting.
+func growPair(limitQ, reqQ, maxQ string, format resource.Format) (limit, req string, grew bool, err error) {
+	curLimit, err := resource.ParseQuantity(limitQ)
+	if err != nil {
+		return "", "", false, fmt.Errorf("parse limit %q: %w", limitQ, err)
+	}
+	curReq, err := resource.ParseQuantity(reqQ)
+	if err != nil {
+		return "", "", false, fmt.Errorf("parse request %q: %w", reqQ, err)
+	}
+	capQ, err := resource.ParseQuantity(maxQ)
+	if err != nil {
+		return "", "", false, fmt.Errorf("parse cap %q: %w", maxQ, err)
+	}
+	if curLimit.MilliValue() <= 0 {
+		return "", "", false, fmt.Errorf("limit %q is not a positive quantity", limitQ)
+	}
+	if curLimit.Cmp(capQ) >= 0 {
+		return "", "", false, nil
+	}
+	newLimit := scaleQuantity(curLimit, appAutoscaleGrowthFactor, format)
+	if newLimit.Cmp(capQ) > 0 {
+		newLimit = capQ.DeepCopy()
+	}
+	ratio := float64(curReq.MilliValue()) / float64(curLimit.MilliValue())
+	newReqMilli := int64(float64(newLimit.MilliValue()) * ratio)
+	newReq := resource.NewMilliQuantity(newReqMilli, format)
+	if format == resource.BinarySI {
+		newReq = resource.NewQuantity(newReqMilli/1000, resource.BinarySI)
+	}
+	return newLimit.String(), newReq.String(), true, nil
+}
+
+// scaleQuantity multiplies a quantity, keeping it in the notation its dimension
+// is normally written in.
+func scaleQuantity(q resource.Quantity, factor int64, format resource.Format) resource.Quantity {
+	if format == resource.BinarySI {
+		return *resource.NewQuantity(q.Value()*factor, resource.BinarySI)
+	}
+	return *resource.NewMilliQuantity(q.MilliValue()*factor, resource.DecimalSI)
 }
 
 // pressureSample is one pod's pressure ratio for a single dimension.
@@ -212,7 +289,7 @@ func collectStarved(cpu, mem []pressureSample, cpuThreshold, memThreshold float6
 // with zero running pods. Checking first turns that outage into a logged
 // skip. Pure arithmetic over the parsed quantities, so it is unit-tested
 // without a cluster.
-func quotaHeadroom(hard, used corev1.ResourceList, from, to profileRequirement) (bool, string) {
+func quotaHeadroom(hard, used corev1.ResourceList, from, to resourceEnvelope) (bool, string) {
 	dims := []struct {
 		name     string
 		resource corev1.ResourceName
@@ -431,6 +508,25 @@ type appProfileState struct {
 	EnvironmentID uuid.UUID
 	Profile       string
 	Image         string
+	Resources     *resourceEnvelope
+}
+
+// Envelope resolves the app's current sizing: its own explicit envelope when it
+// has been sized, otherwise the legacy profile's. The second return is false
+// for an app that has neither -- a hand-maintained values.yaml whose profile
+// name matches nothing the console knows.
+//
+// That case is a refusal, not a default. The first version of this watcher
+// treated an unknown profile as "assume medium" and on its very first
+// production tick pushed a live app from a deliberate 100m/384Mi spec onto the
+// medium profile, shrinking its ephemeral storage from 1Gi to 500Mi. Guessing
+// where an app sits can move it DOWN.
+func (s appProfileState) Envelope() (resourceEnvelope, bool) {
+	if s.Resources != nil {
+		return *s.Resources, true
+	}
+	e, ok := autoscaleProfileRequirements[s.Profile]
+	return e, ok
 }
 
 // loadAppProfileState reads the app's live snapshot. Returns pgx.ErrNoRows
@@ -449,23 +545,57 @@ func (h *Handler) loadAppProfileState(ctx context.Context, projectID uuid.UUID, 
 		return st, err
 	}
 	var cur struct {
-		Profile string `json:"profile"`
-		Image   string `json:"image"`
+		Profile   string             `json:"profile"`
+		Image     string             `json:"image"`
+		Resources *snapshotResources `json:"resources"`
 	}
 	if err := json.Unmarshal(summaryRaw, &cur); err != nil {
 		return st, err
 	}
 	st.Profile = cur.Profile
 	st.Image = cur.Image
+	if r := cur.Resources; r != nil &&
+		r.CPURequest != "" && r.MemoryRequest != "" && r.CPULimit != "" && r.MemoryLimit != "" {
+		st.Resources = &resourceEnvelope{
+			CPULimit: r.CPULimit, MemoryLimit: r.MemoryLimit,
+			CPUReq: r.CPURequest, MemoryReq: r.MemoryRequest,
+		}
+	}
 	return st, nil
 }
 
-// applyProfileBump writes the new profile into both the snapshot the renderer
-// reads and git_repos, then enqueues the same DeployImageVersion operation
-// UpdateAppProfile uses, keeping the current image so gitops-agent re-renders
-// the chart with the new limits. One transaction: a snapshot updated without
-// its operation would silently take effect on some unrelated later deploy.
-func (h *Handler) applyProfileBump(ctx context.Context, projectID, envID uuid.UUID, appName, toProfile, image string) (uuid.UUID, error) {
+// snapshotResources is the summary_json["resources"] shape, pinned to
+// renderer.AppResources' json tags in the gitops-agent module. A test asserts
+// the two stay identical; they are separate Go modules and cannot share the
+// type, and a silent drift here means the renderer falls back to the profile
+// ceiling on an app the console had already grown past it.
+type snapshotResources struct {
+	CPURequest    string `json:"cpu_request"`
+	MemoryRequest string `json:"memory_request"`
+	CPULimit      string `json:"cpu_limit"`
+	MemoryLimit   string `json:"memory_limit"`
+}
+
+func (e resourceEnvelope) snapshot() snapshotResources {
+	return snapshotResources{
+		CPURequest:    e.CPUReq,
+		MemoryRequest: e.MemoryReq,
+		CPULimit:      e.CPULimit,
+		MemoryLimit:   e.MemoryLimit,
+	}
+}
+
+// applyResourceGrowth writes the new envelope into the snapshot the renderer
+// reads, then enqueues the same DeployImageVersion operation a console deploy
+// uses, keeping the current image so gitops-agent re-renders the chart with the
+// new numbers. One transaction: a snapshot updated without its operation would
+// silently take effect on some unrelated later deploy.
+//
+// git_repos.profile is deliberately left alone. It is now only the fallback for
+// apps that have never been sized, and rewriting it would make a grown app look
+// like it still sits on a preset -- which is exactly the read the renderer uses
+// to decide the app has no envelope of its own.
+func (h *Handler) applyResourceGrowth(ctx context.Context, projectID, envID uuid.UUID, appName string, to resourceEnvelope, image string) (uuid.UUID, error) {
 	tx, err := h.pool.Begin(ctx)
 	if err != nil {
 		return uuid.Nil, err
@@ -486,7 +616,7 @@ func (h *Handler) applyProfileBump(ctx context.Context, projectID, envID uuid.UU
 	if cur == nil {
 		cur = map[string]any{}
 	}
-	cur["profile"] = toProfile
+	cur["resources"] = to.snapshot()
 	updatedJSON, err := json.Marshal(cur)
 	if err != nil {
 		return uuid.Nil, err
@@ -495,12 +625,6 @@ func (h *Handler) applyProfileBump(ctx context.Context, projectID, envID uuid.UU
 		`UPDATE resource_snapshots SET summary_json = $1
 		 WHERE project_id = $2 AND environment_id = $3 AND kind = 'App' AND name = $4`,
 		updatedJSON, projectID, envID, appName); err != nil {
-		return uuid.Nil, err
-	}
-	if _, err := tx.Exec(ctx,
-		`UPDATE git_repos SET profile = $1
-		 WHERE project_id = $2 AND environment_id = $3 AND app_name = $4`,
-		toProfile, projectID, envID, appName); err != nil {
 		return uuid.Nil, err
 	}
 
@@ -523,8 +647,8 @@ func (h *Handler) applyProfileBump(ctx context.Context, projectID, envID uuid.UU
 	return opID, nil
 }
 
-// maybeResize moves one starved app up the ladder, subject to the ceiling, the
-// namespace quota and the cooldown.
+// maybeResize grows one starved app's resource envelope, subject to the
+// platform cap, the namespace quota and the cooldown.
 //
 // Order matters. The seen-touch runs first and unconditionally, so the
 // console's "still starved" signal never depends on whether a resize actually
@@ -549,47 +673,52 @@ func (w *appAutoscaleWatcher) maybeResize(ctx context.Context, projectID uuid.UU
 		return
 	}
 
-	if profileIndex(st.Profile) < 0 {
-		log.Printf("app-autoscale: %s/%s runs off-ladder profile %q, leaving its resources alone", namespace, appName, st.Profile)
-		w.auditRefusal(ctx, projectID, st, namespace, appName, "off_ladder_profile", s, nil)
+	from, known := st.Envelope()
+	if !known {
+		log.Printf("app-autoscale: %s/%s carries neither an explicit envelope nor a known profile (%q), leaving its resources alone", namespace, appName, st.Profile)
+		w.auditRefusal(ctx, projectID, st, namespace, appName, "unsized_app", s, nil)
 		return
 	}
 
-	to, ok := nextProfile(st.Profile)
-	if !ok {
-		w.auditRefusal(ctx, projectID, st, namespace, appName, "at_ceiling", s, nil)
-		w.notifyCeiling(ctx, projectID, namespace, appName, s)
+	to, room, err := growEnvelope(from, s.Reason)
+	if err != nil {
+		log.Printf("app-autoscale: %s/%s has an unreadable envelope (%s): %v", namespace, appName, from, err)
+		w.auditRefusal(ctx, projectID, st, namespace, appName, "envelope_unreadable", s, map[string]any{"error": err.Error()})
+		return
+	}
+	if !room {
+		w.auditRefusal(ctx, projectID, st, namespace, appName, "at_ceiling", s, map[string]any{"envelope": from.String()})
+		w.notifyCeiling(ctx, projectID, namespace, appName, from, s)
 		return
 	}
 
-	fromReq := autoscaleProfileRequirements[st.Profile]
-	toReq := autoscaleProfileRequirements[to]
 	quota, err := w.namespaceQuota(ctx, namespace)
 	if err != nil {
-		log.Printf("app-autoscale: %s/%s needs %s->%s but its quota could not be read, skipping: %v", namespace, appName, st.Profile, to, err)
-		w.auditRefusal(ctx, projectID, st, namespace, appName, "quota_unreadable", s, map[string]any{"to_profile": to, "error": err.Error()})
+		log.Printf("app-autoscale: %s/%s needs %s -> %s but its quota could not be read, skipping: %v", namespace, appName, from, to, err)
+		w.auditRefusal(ctx, projectID, st, namespace, appName, "quota_unreadable", s, map[string]any{"to_envelope": to.String(), "error": err.Error()})
 		return
 	}
 	if quota != nil {
-		if fits, why := quotaHeadroom(quota.Status.Hard, quota.Status.Used, fromReq, toReq); !fits {
-			log.Printf("app-autoscale: %s/%s needs %s->%s but quota blocks it (%s)", namespace, appName, st.Profile, to, why)
-			w.auditRefusal(ctx, projectID, st, namespace, appName, "quota_blocked", s, map[string]any{"to_profile": to, "detail": why})
+		if fits, why := quotaHeadroom(quota.Status.Hard, quota.Status.Used, from, to); !fits {
+			log.Printf("app-autoscale: %s/%s needs %s -> %s but quota blocks it (%s)", namespace, appName, from, to, why)
+			w.auditRefusal(ctx, projectID, st, namespace, appName, "quota_blocked", s, map[string]any{"to_envelope": to.String(), "detail": why})
+			w.notifyCeiling(ctx, projectID, namespace, appName, from, s)
 			return
 		}
 	}
 
-	if !claimAppAutoscaleSlot(ctx, w.h.pool, namespace, appName, st.Profile, to, s.Reason, s.Ratio, appAutoscaleCooldown) {
+	if !claimAppAutoscaleSlot(ctx, w.h.pool, namespace, appName, from.String(), to.String(), s.Reason, s.Ratio, appAutoscaleCooldown) {
 		return
 	}
 
-	opID, err := w.h.applyProfileBump(ctx, projectID, st.EnvironmentID, appName, to, st.Image)
+	opID, err := w.h.applyResourceGrowth(ctx, projectID, st.EnvironmentID, appName, to, st.Image)
 	if err != nil {
-		log.Printf("app-autoscale: resize %s/%s %s->%s failed: %v", namespace, appName, st.Profile, to, err)
-		w.auditRefusal(ctx, projectID, st, namespace, appName, "resize_failed", s, map[string]any{"to_profile": to, "error": err.Error()})
+		log.Printf("app-autoscale: resize %s/%s %s -> %s failed: %v", namespace, appName, from, to, err)
+		w.auditRefusal(ctx, projectID, st, namespace, appName, "resize_failed", s, map[string]any{"to_envelope": to.String(), "error": err.Error()})
 		return
 	}
-	log.Printf("app-autoscale: resized %s/%s %s->%s reason=%s ratio=%.4f op=%s",
-		namespace, appName, st.Profile, to, s.Reason, s.Ratio, opID)
+	log.Printf("app-autoscale: resized %s/%s %s -> %s reason=%s ratio=%.4f op=%s",
+		namespace, appName, from, to, s.Reason, s.Ratio, opID)
 
 	w.h.recordSystemAudit(ctx, auditEntry{
 		ProjectID:     projectID,
@@ -600,14 +729,14 @@ func (w *appAutoscaleWatcher) maybeResize(ctx context.Context, projectID uuid.UU
 		ResourceName:  appName,
 		Outcome:       auditOutcomeSuccess,
 		Metadata: map[string]any{
-			"from_profile": st.Profile, "to_profile": to,
-			"reason": s.Reason, "ratio": s.Ratio, "pod": s.Pod,
+			"from_envelope": from.String(), "to_envelope": to.String(),
+			"dimension": s.Reason, "ratio": s.Ratio, "pod": s.Pod,
 			"namespace":  namespace,
 			"claimed_by": "app-autoscale-watcher",
 		},
 	})
 
-	w.notifyResized(ctx, projectID, appName, st.Profile, to, s)
+	w.notifyResized(ctx, projectID, appName, from.String(), to.String(), s)
 }
 
 // auditRefusal records a starvation the watcher saw and deliberately did not
@@ -679,14 +808,14 @@ func (w *appAutoscaleWatcher) notifyResized(ctx context.Context, projectID uuid.
 	}
 }
 
-// notifyCeiling tells the owner their app is starved at the top of the ladder,
-// where the platform deliberately stops resizing. Gated by the same cooldown
-// so it cannot become a 15-minute mail loop.
-func (w *appAutoscaleWatcher) notifyCeiling(ctx context.Context, projectID uuid.UUID, namespace, appName string, s starvedPod) {
+// notifyCeiling tells the owner their app is starved but cannot grow: either it
+// already sits at the platform cap or the project quota has no headroom left.
+// Gated by the same cooldown so it cannot become a 15-minute mail loop.
+func (w *appAutoscaleWatcher) notifyCeiling(ctx context.Context, projectID uuid.UUID, namespace, appName string, at resourceEnvelope, s starvedPod) {
 	if w.h.auditNotifier == nil {
 		return
 	}
-	top := autoscaleProfileLadder[len(autoscaleProfileLadder)-1]
+	top := at.String()
 	if !claimAppAutoscaleSlot(ctx, w.h.pool, namespace, appName, top, top, s.Reason, s.Ratio, appAutoscaleCooldown) {
 		return
 	}

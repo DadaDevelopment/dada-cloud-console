@@ -329,7 +329,7 @@ export default function AppDetailPage() {
     );
   }
 
-  const summary = app.summary_json as { image?: string; port?: number; replicas?: number; profile?: string; runtime?: string; volume?: AppVolume; repo_full_name?: string; url?: string; preview_url?: string };
+  const summary = app.summary_json as { image?: string; port?: number; replicas?: number; profile?: string; resources?: { cpu_limit: string; memory_limit: string }; runtime?: string; volume?: AppVolume; repo_full_name?: string; url?: string; preview_url?: string };
   const isCompose = summary.runtime === "compose";
   const resType = classifyVMResource(app);
   const isResource = resType !== "app";
@@ -493,7 +493,7 @@ export default function AppDetailPage() {
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
             {[
               ...(canSeeTechnical(role) ? [{ label: t("apps.detail.spec.image"), value: summary.image ?? "—", mono: true, tip: summary.image }] : []),
-              { label: t("apps.detail.spec.profile"), value: summary.profile ?? "small" },
+              { label: t("apps.detail.spec.size"), value: summary.resources ? `${summary.resources.cpu_limit} CPU · ${summary.resources.memory_limit}` : "—" },
               { label: t("apps.detail.spec.replicas"), value: String(summary.replicas ?? 2) },
               { label: t("apps.detail.spec.port"), value: String(summary.port ?? 8080) },
             ].map(({ label, value, mono, tip }: { label: string; value: string; mono?: boolean; tip?: string }) => (

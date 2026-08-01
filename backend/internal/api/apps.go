@@ -43,6 +43,42 @@ func FillRepoFullName(apps []models.ResourceSnapshot, repoByName map[string]stri
 	}
 }
 
+// FillEffectiveResources adds the resource envelope an app actually runs with
+// to its summary, so the console can show real numbers for every app instead of
+// a profile name.
+//
+// Apps sized by the autoscaler already carry "resources"; an app that has never
+// been resized carries only the legacy profile name, and its numbers live in
+// the gitops-agent renderer. This resolves that fallback on the read path only —
+// nothing is written back, so an unsized app stays unsized and keeps following
+// the renderer's defaults if those ever move.
+func FillEffectiveResources(apps []models.ResourceSnapshot) {
+	for i := range apps {
+		var m map[string]any
+		if len(apps[i].SummaryJSON) > 0 {
+			_ = json.Unmarshal(apps[i].SummaryJSON, &m)
+		}
+		if m == nil {
+			continue
+		}
+		if _, ok := m["resources"]; ok {
+			continue
+		}
+		profile, _ := m["profile"].(string)
+		if profile == "" {
+			profile = "small"
+		}
+		envelope, ok := autoscaleProfileRequirements[profile]
+		if !ok {
+			continue
+		}
+		m["resources"] = envelope.snapshot()
+		if b, err := json.Marshal(m); err == nil {
+			apps[i].SummaryJSON = b
+		}
+	}
+}
+
 // SuppressNonHTTPURL blanks the summary "url" field for apps whose stored
 // port fails servesHTTP (the same gate CreateApp uses to skip the auto
 // surrogate domain). A resource_snapshots row can carry a stale "url" set by
@@ -303,6 +339,7 @@ func (h *Handler) ListApps(c *gin.Context) {
 	apps, repoByName := SynthesizeGitRepoApps(apps, gitRows, seen, projectID, envID)
 
 	FillRepoFullName(apps, repoByName)
+	FillEffectiveResources(apps)
 	RestatePlaceholderPhase(apps, buildStatus)
 	SuppressNonHTTPURL(apps)
 	EnrichPreviewURL(apps, envID, h.cfg)
@@ -934,11 +971,17 @@ type updateAppProfileRequest struct {
 
 var validAppProfiles = map[string]bool{"small": true, "medium": true, "large": true}
 
-// UpdateAppProfile resizes an app's CPU/memory profile. It writes the new
-// profile into the app's resource_snapshots.summary_json (the field the
-// renderer reads on every re-deploy) and enqueues the same DeployImageVersion
-// operation UpdateAppImage uses, keeping the current image, so gitops-agent
-// re-renders the workload chart with the new profile's requests/limits.
+// UpdateAppProfile resizes an app to one of the legacy small/medium/large
+// sizes. It writes both the profile name and the explicit envelope that name
+// resolves to into resource_snapshots.summary_json, then enqueues the same
+// DeployImageVersion operation UpdateAppImage uses, keeping the current image,
+// so gitops-agent re-renders the workload chart with the new requests/limits.
+//
+// Writing the envelope and not just the name is what keeps this endpoint from
+// becoming a silent no-op: the renderer prefers an explicit envelope, so on an
+// app the autoscaler has already grown, a bare profile name would change
+// nothing. This is the operator's way to put such an app back down; the console
+// no longer offers sizes to users, who get autoscaling instead.
 //
 // @ID          updateAppProfile
 // @Summary     Resize an app's CPU/memory profile
@@ -1037,6 +1080,7 @@ func (h *Handler) UpdateAppProfile(c *gin.Context) {
 	}
 
 	cur["profile"] = req.Profile
+	cur["resources"] = autoscaleProfileRequirements[req.Profile].snapshot()
 	updatedJSON, err := json.Marshal(cur)
 	if err != nil {
 		respondError(c, http.StatusInternalServerError, "failed to marshal snapshot")

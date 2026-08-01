@@ -768,8 +768,10 @@ function AppRow({ app, env, projectId, previews, expanded, onToggle, t }: AppRow
                     <dd className="mt-0.5 font-mono text-gray-700 dark:text-gray-200">{summary.port || "—"}</dd>
                   </div>
                   <div>
-                    <dt className="text-xs uppercase tracking-wide text-gray-400 dark:text-gray-500">{t("apps.detail.spec.profile")}</dt>
-                    <dd className="mt-0.5 text-gray-700 dark:text-gray-200">{summary.profile ?? "small"}</dd>
+                    <dt className="text-xs uppercase tracking-wide text-gray-400 dark:text-gray-500">{t("apps.detail.spec.size")}</dt>
+                    <dd className="mt-0.5 text-gray-700 dark:text-gray-200">
+                      {summary.resources ? `${summary.resources.cpu_limit} CPU · ${summary.resources.memory_limit}` : "—"}
+                    </dd>
                   </div>
                   <div>
                     <dt className="text-xs uppercase tracking-wide text-gray-400 dark:text-gray-500">{t("apps.detail.spec.replicas")}</dt>

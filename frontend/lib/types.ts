@@ -374,11 +374,24 @@ export interface AppVolume {
   storage_class?: string;
 }
 
+/**
+ * The CPU/memory envelope an app actually runs with, in Kubernetes quantity
+ * notation. Always present on the read path: the backend resolves it from the
+ * legacy profile name for apps the autoscaler has never resized.
+ */
+export interface AppResources {
+  cpu_request: string;
+  memory_request: string;
+  cpu_limit: string;
+  memory_limit: string;
+}
+
 export interface AppSummary {
   image: string;
   port: number;
   replicas: number;
   profile: string;
+  resources?: AppResources;
   status: string;
   message: string;
   volume?: AppVolume;
@@ -460,16 +473,30 @@ export interface BoxesResponse {
  * response that minted it — it is shown exactly once and never retrievable
  * again, because only its sha256 and prefix are stored.
  */
+/** Which side of the wire a coordinate answers on: the cluster, or the internet. */
+export interface BoxReach {
+  scope: "cluster" | "public";
+  hint: string;
+}
+
 export interface BoxConnect {
   ssh_host?: string;
   ssh_command?: string;
+  ssh_reach?: BoxReach;
   mcp?: {
     url: string;
     available: boolean;
+    reach?: BoxReach;
     reason: string;
-    snippet: string;
+    snippet: unknown;
   };
   session_endpoint?: string;
+}
+
+export interface BoxExposeResponse {
+  exposure: { hostname: string; url: string; port: number };
+  first_response?: { ok: boolean; status: number };
+  expose_ms?: number;
 }
 
 export interface BoxSession {

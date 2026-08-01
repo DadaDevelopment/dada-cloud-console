@@ -140,7 +140,7 @@ export const apps: Messages = {
   "apps.detail.deployImage": { ru: "Деплой образа", en: "Deploy Image" },
 
   "apps.detail.spec.image": { ru: "Образ", en: "Image" },
-  "apps.detail.spec.profile": { ru: "Профиль", en: "Profile" },
+  "apps.detail.spec.size": { ru: "Размер", en: "Size" },
   "apps.detail.spec.replicas": { ru: "Реплики", en: "Replicas" },
   "apps.detail.spec.port": { ru: "Порт", en: "Port" },
   "apps.detail.observability.notDeployed": {
@@ -481,19 +481,24 @@ export const apps: Messages = {
   },
   "apps.resources.title": { ru: "Ресурсы", en: "Resources" },
   "apps.resources.subtitle": {
-    ru: "Размер CPU/RAM для этого приложения. Изменение вызывает передеплой (перезапуск подов).",
-    en: "CPU/RAM size for this app. Changing it triggers a redeploy (pod restart).",
+    ru: "Платформа сама подбирает CPU и память. Когда приложению перестаёт хватать, размер растёт автоматически — вручную ничего указывать не нужно.",
+    en: "The platform sizes CPU and memory for you. When the app runs short, it grows on its own — nothing to set by hand.",
   },
-  "apps.resources.current": { ru: "Текущий план", en: "Current plan" },
+  "apps.resources.auto": { ru: "Автоматически", en: "Automatic" },
+  "apps.resources.current": { ru: "Сейчас", en: "Now" },
   "apps.resources.none": { ru: "Неизвестно", en: "Unknown" },
-  "apps.resources.plan": { ru: "План", en: "Plan" },
-  "apps.resources.save": { ru: "Сохранить", en: "Save" },
-  "apps.resources.warnRestart": {
-    ru: "Приложение будет перезапущено с новым размером. Кратковременный простой возможен.",
-    en: "The app will restart with the new size. Brief downtime may occur.",
+  "apps.resources.cpu": { ru: "CPU", en: "CPU" },
+  "apps.resources.memory": { ru: "Память", en: "Memory" },
+  "apps.resources.request": { ru: "гарантировано", en: "guaranteed" },
+  "apps.resources.limit": { ru: "потолок", en: "limit" },
+  "apps.resources.growth": {
+    ru: "Рост происходит после того, как приложение упирается в потолок дольше нескольких минут. Каждый шаг удваивает нужное измерение и вызывает перезапуск подов; вам придёт письмо.",
+    en: "Growth kicks in after the app sits at its limit for several minutes. Each step doubles the dimension that ran short and restarts the pods; you get an email.",
   },
-  "apps.resources.queued": { ru: "Изменение размера поставлено в очередь", en: "Resize queued" },
-  "apps.resources.error": { ru: "Не удалось изменить размер", en: "Resize failed" },
+  "apps.resources.cap": {
+    ru: "Потолок платформы — {cpu} CPU и {memory} на приложение. Нужно больше — напишите в поддержку.",
+    en: "The platform cap is {cpu} CPU and {memory} per app. Need more — contact support.",
+  },
   "apps.settings.tab.resources": { ru: "Ресурсы", en: "Resources" },
   "apps.settings.git.title": { ru: "Исходный репозиторий", en: "Source repository" },
   "apps.settings.git.subtitle": {
