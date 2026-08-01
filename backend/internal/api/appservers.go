@@ -209,17 +209,31 @@ func (h *Handler) CreateAppServer(c *gin.Context) {
 		return
 	}
 
+	nameAudit := ""
+	reject := func(status int, reason, msg string) {
+		h.recordAudit(c.Request.Context(), claims.UserID, auditEntry{
+			ProjectID:    projectID,
+			Action:       "CreateAppServer",
+			ResourceKind: "AppServer",
+			ResourceName: nameAudit,
+			Outcome:      auditOutcomeFailure,
+			Metadata:     map[string]any{"reason": reason, "status": status},
+		})
+		respondError(c, status, msg)
+	}
+
 	var req createAppServerRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		respondError(c, http.StatusBadRequest, err.Error())
+		reject(http.StatusBadRequest, "malformed_body", err.Error())
 		return
 	}
+	nameAudit = req.Name
 	if req.Name == "" {
-		respondError(c, http.StatusBadRequest, "name is required")
+		reject(http.StatusBadRequest, "missing_name", "name is required")
 		return
 	}
 	if err := validateKubeName(req.Name); err != nil {
-		respondError(c, http.StatusBadRequest, err.Error())
+		reject(http.StatusBadRequest, "invalid_name", err.Error())
 		return
 	}
 
@@ -230,20 +244,20 @@ func (h *Handler) CreateAppServer(c *gin.Context) {
 	switch mode {
 	case "terraform":
 		if req.Region != "" && !isValidAppServerRegion(req.Region) {
-			respondError(c, http.StatusBadRequest, "region must be one of: ru1, ru2, kz1, eu1")
+			reject(http.StatusBadRequest, "invalid_region", "region must be one of: ru1, ru2, kz1, eu1")
 			return
 		}
 	case "manual":
 		if req.VMIP == "" {
-			respondError(c, http.StatusBadRequest, "vm_ip is required for manual mode")
+			reject(http.StatusBadRequest, "missing_vm_ip", "vm_ip is required for manual mode")
 			return
 		}
 		if req.SSHPrivateKey == "" {
-			respondError(c, http.StatusBadRequest, "ssh_private_key is required for manual mode")
+			reject(http.StatusBadRequest, "missing_ssh_key", "ssh_private_key is required for manual mode")
 			return
 		}
 	default:
-		respondError(c, http.StatusBadRequest, "mode must be one of: terraform, manual")
+		reject(http.StatusBadRequest, "invalid_mode", "mode must be one of: terraform, manual")
 		return
 	}
 
@@ -253,11 +267,11 @@ func (h *Handler) CreateAppServer(c *gin.Context) {
 		`SELECT COUNT(*) FROM app_servers WHERE project_id = $1 AND name = $2 AND status != 'Deleted'`,
 		projectID, req.Name,
 	).Scan(&existing); err != nil {
-		respondError(c, http.StatusInternalServerError, "failed to check name uniqueness")
+		reject(http.StatusInternalServerError, "uniqueness_check_failed", "failed to check name uniqueness")
 		return
 	}
 	if existing > 0 {
-		respondError(c, http.StatusConflict, "an app server with that name already exists in this project")
+		reject(http.StatusConflict, "name_taken", "an app server with that name already exists in this project")
 		return
 	}
 
@@ -289,16 +303,26 @@ func (h *Handler) CreateAppServer(c *gin.Context) {
 		claims.UserID, projectID, req.Name, payloadBytes,
 	)
 	if err := scanOperation(row, &op); err != nil {
-		respondError(c, http.StatusInternalServerError, "failed to create operation")
+		reject(http.StatusInternalServerError, "operation_insert_failed", "failed to create operation")
 		return
 	}
 
-	auditMeta, _ := json.Marshal(auditPayload)
-	_, _ = h.pool.Exec(c.Request.Context(),
-		`INSERT INTO audit_events (actor_id, project_id, operation_id, action, resource_kind, resource_name, metadata)
-		 VALUES ($1, $2, $3, 'CreateAppServer', 'AppServer', $4, $5)`,
-		claims.UserID, projectID, op.ID, req.Name, auditMeta,
-	)
+	h.recordAudit(c.Request.Context(), claims.UserID, auditEntry{
+		ProjectID:    projectID,
+		OperationID:  op.ID,
+		Action:       "CreateAppServer",
+		ResourceKind: "AppServer",
+		ResourceName: req.Name,
+		Outcome:      auditOutcomeSuccess,
+		Metadata: map[string]any{
+			"mode":     auditPayload.Mode,
+			"flavor":   auditPayload.Flavor,
+			"os_image": auditPayload.OSImage,
+			"region":   auditPayload.Region,
+			"ssh_user": auditPayload.SSHUser,
+			"ssh_port": auditPayload.SSHPort,
+		},
+	})
 
 	c.JSON(http.StatusAccepted, gin.H{"operation": op, "message": "AppServer creation queued"})
 }
@@ -524,17 +548,36 @@ func (h *Handler) ImportComposeStack(c *gin.Context) {
 		return
 	}
 
+	appAudit := ""
+	var auditEnvID uuid.UUID
+	rejectImport := func(status int, reason string, respond func()) {
+		h.recordAudit(c.Request.Context(), claims.UserID, auditEntry{
+			ProjectID:     projectID,
+			EnvironmentID: auditEnvID,
+			Action:        "ImportComposeStack",
+			ResourceKind:  "App",
+			ResourceName:  appAudit,
+			Outcome:       auditOutcomeFailure,
+			Metadata:      map[string]any{"reason": reason, "status": status, "server": serverName},
+		})
+		respond()
+	}
+	rejectImportErr := func(status int, reason, msg string) {
+		rejectImport(status, reason, func() { respondError(c, status, msg) })
+	}
+
 	var req importComposeStackRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		respondError(c, http.StatusBadRequest, err.Error())
+		rejectImportErr(http.StatusBadRequest, "malformed_body", err.Error())
 		return
 	}
+	appAudit = req.AppName
 	if req.AppName == "" {
-		respondError(c, http.StatusBadRequest, "app_name is required")
+		rejectImportErr(http.StatusBadRequest, "missing_app_name", "app_name is required")
 		return
 	}
 	if err := validateKubeName(req.AppName); err != nil {
-		respondError(c, http.StatusBadRequest, err.Error())
+		rejectImportErr(http.StatusBadRequest, "invalid_app_name", err.Error())
 		return
 	}
 
@@ -545,11 +588,11 @@ func (h *Handler) ImportComposeStack(c *gin.Context) {
 		}
 	}
 	if len(included) == 0 {
-		respondError(c, http.StatusBadRequest, "at least one service must be included")
+		rejectImportErr(http.StatusBadRequest, "no_service_included", "at least one service must be included")
 		return
 	}
 	if len(req.Env) > 0 && !req.AckSecretsInGit {
-		respondError(c, http.StatusConflict, "env is non-empty; set ack_secrets_in_git=true to confirm plaintext .env may land in git")
+		rejectImportErr(http.StatusConflict, "secrets_ack_missing", "env is non-empty; set ack_secrets_in_git=true to confirm plaintext .env may land in git")
 		return
 	}
 
@@ -562,19 +605,19 @@ func (h *Handler) ImportComposeStack(c *gin.Context) {
 		projectID, serverName,
 	).Scan(&serverID, &endpointID, &serverStatus)
 	if err == pgx.ErrNoRows {
-		respondNotFound(c)
+		rejectImport(http.StatusNotFound, "server_not_found", func() { respondNotFound(c) })
 		return
 	}
 	if err != nil {
-		respondError(c, http.StatusInternalServerError, "failed to find app server")
+		rejectImportErr(http.StatusInternalServerError, "server_lookup_failed", "failed to find app server")
 		return
 	}
 	if endpointID == nil {
-		respondError(c, http.StatusConflict, "app server is not enrolled yet (no Portainer endpoint); enroll it before importing")
+		rejectImportErr(http.StatusConflict, "server_not_enrolled", "app server is not enrolled yet (no Portainer endpoint); enroll it before importing")
 		return
 	}
 	if serverStatus != string(models.AppServerStatusReady) {
-		respondError(c, http.StatusConflict, "app server is not Ready yet")
+		rejectImportErr(http.StatusConflict, "server_not_ready", "app server is not Ready yet")
 		return
 	}
 
@@ -591,7 +634,7 @@ func (h *Handler) ImportComposeStack(c *gin.Context) {
 		if err := h.pool.QueryRow(c.Request.Context(),
 			`SELECT name FROM projects WHERE id = $1`, projectID,
 		).Scan(&projectSlug); err != nil {
-			respondError(c, http.StatusInternalServerError, "failed to resolve project for environment")
+			rejectImportErr(http.StatusInternalServerError, "project_lookup_failed", "failed to resolve project for environment")
 			return
 		}
 		if err := h.pool.QueryRow(c.Request.Context(),
@@ -602,13 +645,14 @@ func (h *Handler) ImportComposeStack(c *gin.Context) {
 			 RETURNING id`,
 			projectID, serverName, projectSlug+"-"+serverName, serverID,
 		).Scan(&envID); err != nil {
-			respondError(c, http.StatusInternalServerError, "failed to create app server environment")
+			rejectImportErr(http.StatusInternalServerError, "environment_create_failed", "failed to create app server environment")
 			return
 		}
 	} else if err != nil {
-		respondError(c, http.StatusInternalServerError, "failed to resolve app server environment")
+		rejectImportErr(http.StatusInternalServerError, "environment_lookup_failed", "failed to resolve app server environment")
 		return
 	}
+	auditEnvID = envID
 
 	// Each included service becomes its own first-class Application; reject if any
 	// target app name already exists in this environment.
@@ -619,11 +663,11 @@ func (h *Handler) ImportComposeStack(c *gin.Context) {
 			 WHERE project_id = $1 AND environment_id = $2 AND kind = 'App' AND name = $3`,
 			projectID, envID, svc.ServiceName,
 		).Scan(&existing); err != nil {
-			respondError(c, http.StatusInternalServerError, "failed to check name uniqueness")
+			rejectImportErr(http.StatusInternalServerError, "uniqueness_check_failed", "failed to check name uniqueness")
 			return
 		}
 		if existing > 0 {
-			respondError(c, http.StatusConflict, "an app named '"+svc.ServiceName+"' already exists in this environment")
+			rejectImportErr(http.StatusConflict, "service_name_taken", "an app named '"+svc.ServiceName+"' already exists in this environment")
 			return
 		}
 	}
@@ -635,7 +679,7 @@ func (h *Handler) ImportComposeStack(c *gin.Context) {
 		for key, value := range req.Env {
 			encrypted, encErr := crypto.EncryptToken(h.cfg.GitopsEncryptionKey, []byte(value))
 			if encErr != nil {
-				respondError(c, http.StatusInternalServerError, "failed to encrypt imported env var")
+				rejectImportErr(http.StatusInternalServerError, "env_encrypt_failed", "failed to encrypt imported env var")
 				return
 			}
 			if _, dbErr := h.pool.Exec(c.Request.Context(),
@@ -648,7 +692,7 @@ func (h *Handler) ImportComposeStack(c *gin.Context) {
 				               updated_at = NOW()`,
 				envID, svc.ServiceName, key, encrypted, claims.UserID,
 			); dbErr != nil {
-				respondError(c, http.StatusInternalServerError, "failed to persist imported env var")
+				rejectImportErr(http.StatusInternalServerError, "env_persist_failed", "failed to persist imported env var")
 				return
 			}
 		}
@@ -663,7 +707,7 @@ func (h *Handler) ImportComposeStack(c *gin.Context) {
 	}
 	payloadBytes, err := json.Marshal(payload)
 	if err != nil {
-		respondError(c, http.StatusInternalServerError, "failed to marshal payload")
+		rejectImportErr(http.StatusInternalServerError, "marshal_failed", "failed to marshal payload")
 		return
 	}
 
@@ -677,16 +721,28 @@ func (h *Handler) ImportComposeStack(c *gin.Context) {
 		claims.UserID, projectID, envID, req.AppName, payloadBytes,
 	)
 	if err := scanOperation(row, &op); err != nil {
-		respondError(c, http.StatusInternalServerError, "failed to create operation")
+		rejectImportErr(http.StatusInternalServerError, "operation_insert_failed", "failed to create operation")
 		return
 	}
 
-	auditMeta, _ := json.Marshal(payload)
-	_, _ = h.pool.Exec(c.Request.Context(),
-		`INSERT INTO audit_events (actor_id, project_id, operation_id, action, resource_kind, resource_name, metadata)
-		 VALUES ($1, $2, $3, 'ImportComposeStack', 'App', $4, $5)`,
-		claims.UserID, projectID, op.ID, req.AppName, auditMeta,
-	)
+	importedServices := make([]string, 0, len(included))
+	for _, svc := range included {
+		importedServices = append(importedServices, svc.ServiceName)
+	}
+	h.recordAudit(c.Request.Context(), claims.UserID, auditEntry{
+		ProjectID:     projectID,
+		EnvironmentID: envID,
+		OperationID:   op.ID,
+		Action:        "ImportComposeStack",
+		ResourceKind:  "App",
+		ResourceName:  req.AppName,
+		Outcome:       auditOutcomeSuccess,
+		Metadata: map[string]any{
+			"server":        serverName,
+			"services":      importedServices,
+			"env_var_count": len(req.Env),
+		},
+	})
 
 	c.JSON(http.StatusAccepted, gin.H{"operation": op, "message": "compose stack import queued"})
 }
