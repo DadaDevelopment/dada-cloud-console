@@ -172,6 +172,7 @@ type AppSpec struct {
 	Port               int
 	Replicas           int
 	Profile            string
+	Resources          *AppResources
 	OperationID        string
 	HelmRepoURL        string
 	HelmTargetRevision string
@@ -363,6 +364,46 @@ type appValuesFile struct {
 	Common commonValues `yaml:"common"`
 }
 
+// AppResources is an explicit per-app resource envelope in Kubernetes quantity
+// notation ("250m", "1", "512Mi", "2Gi").
+//
+// It supersedes the small/medium/large profile: a preset ladder cannot express
+// what a build container, an ML worker or a video transcoder actually needs,
+// and its top rung doubles as a platform-wide ceiling that no app can pass.
+// Profile stays only as the fallback for snapshots written before this field
+// existed.
+// The json tags are the on-disk contract: this is exactly how the console
+// writes the envelope into resource_snapshots.summary_json["resources"].
+type AppResources struct {
+	CPURequest    string `json:"cpu_request"`
+	MemoryRequest string `json:"memory_request"`
+	CPULimit      string `json:"cpu_limit"`
+	MemoryLimit   string `json:"memory_limit"`
+}
+
+// Complete reports whether every field is set. A partially filled envelope is
+// treated as absent rather than merged with the profile defaults: a half-known
+// envelope is far more likely to be a snapshot the console wrote wrong than a
+// deliberate request, and merging it would silently shrink whichever dimension
+// went missing.
+func (r *AppResources) Complete() bool {
+	return r != nil &&
+		r.CPURequest != "" && r.MemoryRequest != "" &&
+		r.CPULimit != "" && r.MemoryLimit != ""
+}
+
+// resolveResources prefers an explicit envelope and falls back to the profile
+// ladder for apps that have never been sized.
+func resolveResources(r *AppResources, profile string) commonResources {
+	if !r.Complete() {
+		return profileResources(profile)
+	}
+	return commonResources{
+		Requests: map[string]string{"cpu": r.CPURequest, "memory": r.MemoryRequest},
+		Limits:   map[string]string{"cpu": r.CPULimit, "memory": r.MemoryLimit},
+	}
+}
+
 func profileResources(profile string) commonResources {
 	switch profile {
 	case "medium":
@@ -404,7 +445,7 @@ func RenderAppValues(spec AppSpec) (string, error) {
 		ServicePort:  spec.Port,
 		Replicas:     spec.Replicas,
 		UseDotEnv:    "false",
-		Resources:    profileResources(spec.Profile),
+		Resources:    resolveResources(spec.Resources, spec.Profile),
 		WorkloadType: spec.WorkloadType,
 	}}
 

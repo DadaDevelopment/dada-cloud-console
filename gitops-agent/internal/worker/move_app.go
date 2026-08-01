@@ -123,13 +123,14 @@ func (w *DBWatcher) doMoveApp(ctx context.Context, op db.Operation) error {
 		return fmt.Errorf("src app snapshot lookup: %w", err)
 	}
 	var desired struct {
-		Image        string         `json:"image"`
-		Framework    string         `json:"framework"`
-		Port         int            `json:"port"`
-		Replicas     int            `json:"replicas"`
-		Profile      string         `json:"profile"`
-		WorkloadType string         `json:"workload_type"`
-		Volume       map[string]any `json:"volume"`
+		Image        string                 `json:"image"`
+		Framework    string                 `json:"framework"`
+		Port         int                    `json:"port"`
+		Replicas     int                    `json:"replicas"`
+		Profile      string                 `json:"profile"`
+		Resources    *renderer.AppResources `json:"resources"`
+		WorkloadType string                 `json:"workload_type"`
+		Volume       map[string]any         `json:"volume"`
 	}
 	if err := json.Unmarshal(summaryRaw, &desired); err != nil {
 		return fmt.Errorf("parse src app snapshot: %w", err)
@@ -168,6 +169,7 @@ func (w *DBWatcher) doMoveApp(ctx context.Context, op db.Operation) error {
 		Port:               desired.Port,
 		Replicas:           desired.Replicas,
 		Profile:            desired.Profile,
+		Resources:          desired.Resources,
 		OperationID:        op.ID.String(),
 		HelmRepoURL:        mgr.RepoURL(),
 		HelmTargetRevision: mgr.Branch(),

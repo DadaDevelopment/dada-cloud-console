@@ -1754,6 +1754,7 @@ func (w *DBWatcher) doDeployImageVersion(ctx context.Context, op db.Operation) e
 		Port:               int(portVal),
 		Replicas:           int(replicasVal),
 		Profile:            profileVal,
+		Resources:          resourcesFromSummary(cur),
 		OperationID:        op.ID.String(),
 		HelmRepoURL:        mgr.RepoURL(),
 		HelmTargetRevision: mgr.Branch(),
@@ -1890,6 +1891,34 @@ func volumeFromSummary(cur map[string]any) (path, size, storageClass string) {
 	return path, size, storageClass
 }
 
+// resourcesFromSummary extracts the explicit resource envelope from a
+// resource_snapshot summary_json map, or nil when the app has never been sized
+// and still runs on the profile ladder.
+//
+// Read through JSON rather than by hand off the decoded map so the field names
+// stay pinned to renderer.AppResources' tags -- that struct is the contract the
+// console writes, and a hand-rolled reader here would drift from it silently,
+// which means falling back to the profile ceiling on an app that had already
+// been grown past it.
+func resourcesFromSummary(cur map[string]any) *renderer.AppResources {
+	raw, ok := cur["resources"]
+	if !ok {
+		return nil
+	}
+	encoded, err := json.Marshal(raw)
+	if err != nil {
+		return nil
+	}
+	var out renderer.AppResources
+	if err := json.Unmarshal(encoded, &out); err != nil {
+		return nil
+	}
+	if !out.Complete() {
+		return nil
+	}
+	return &out
+}
+
 func workloadTypeFromSummary(cur map[string]any) string {
 	wt, _ := cur["workload_type"].(string)
 	return wt
@@ -1963,6 +1992,7 @@ func (w *DBWatcher) doUpdateAppStorage(ctx context.Context, op db.Operation) err
 		Port:               int(portVal),
 		Replicas:           int(replicasVal),
 		Profile:            profileVal,
+		Resources:          resourcesFromSummary(cur),
 		OperationID:        op.ID.String(),
 		HelmRepoURL:        mgr.RepoURL(),
 		HelmTargetRevision: mgr.Branch(),
