@@ -11,8 +11,8 @@ export const passkey: Messages = {
     en: "Once created, you can sign in without a password next time.",
   },
   "passkey.note": {
-    ru: "Перед созданием passkey Keycloak может попросить подтвердить, что это ты.",
-    en: "You might be asked to verify your account through a brief security challenge before creating your passkey.",
+    ru: "Устройство попросит отпечаток, Face ID или PIN — это и есть подтверждение.",
+    en: "Your device will ask for a fingerprint, Face ID or PIN — that is the whole setup.",
   },
   "passkey.later": { ru: "Позже", en: "Maybe Later" },
   "passkey.create": { ru: "Создать", en: "Create Now" },

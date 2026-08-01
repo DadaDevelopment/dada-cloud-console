@@ -14,7 +14,7 @@ import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth";
 import { Spinner } from "@/components/ui/spinner";
 import { PENDING_REGISTRATION_KEY } from "@/lib/register-redirect";
-import { capturePasskeyActionStatus } from "@/lib/passkey";
+import { capturePasskeyActionStatus, markFreshAuthentication } from "@/lib/passkey";
 import { GOAL_REGISTRATION_COMPLETE, reachGoal } from "@/lib/metrika";
 
 /**
@@ -22,8 +22,16 @@ import { GOAL_REGISTRATION_COMPLETE, reachGoal } from "@/lib/metrika";
  * enrollment) as `?kc_action_status=…` on this redirect_uri. Snapshot it at
  * module scope, before react-sso's `load()` rewrites the URL and before this
  * route navigates on, so the console can record the result.
+ *
+ * Landing here also means an authorize round-trip just closed, which is the
+ * only moment the passkey offer may appear at all. Whether the user actually
+ * typed anything (versus being waved through by the session cookie) is decided
+ * separately from the token's `auth_time`.
  */
-if (typeof window !== "undefined") capturePasskeyActionStatus();
+if (typeof window !== "undefined") {
+  capturePasskeyActionStatus();
+  markFreshAuthentication();
+}
 
 /**
  * How long a {@link PENDING_REGISTRATION_KEY} marker stays valid. Bounds the
