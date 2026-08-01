@@ -74,7 +74,8 @@ export type UxEventType =
   | "nav_leave"
   | "visibility"
   | "error_shown"
-  | "goal";
+  | "goal"
+  | "view";
 
 interface UxEvent {
   type: UxEventType;

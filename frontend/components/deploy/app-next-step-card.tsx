@@ -1,10 +1,11 @@
 "use client";
 
 import Link from "next/link";
-import type { ReactNode } from "react";
+import { useEffect, useRef, type ReactNode } from "react";
 import { Globe, GitBranch, Rocket } from "lucide-react";
 import { useT } from "@/lib/i18n/console/context";
 import type { NextStepId } from "@/lib/app-next-step";
+import { trackUxEvent } from "@/lib/ux-telemetry";
 
 interface StepDef {
   id: NextStepId;
@@ -45,11 +46,23 @@ interface AppNextStepCardProps {
  * fetched; see `lib/app-next-step.ts` for the selection logic.
  *
  * Each row carries `data-ux` so clicks are distinguishable in `ux_events`
- * via the existing document-click instrumentation (lib/ux-telemetry.ts) -
- * no new analytics transport.
+ * via the existing document-click instrumentation (lib/ux-telemetry.ts).
+ * The card itself reports one `view` event per mount with the same
+ * `app_next_step:<id>` key family the clicks use, so a show->click
+ * conversion can be computed instead of only ever seeing the clicks that
+ * happened -- without that, a card nobody clicked and a card nobody saw
+ * were indistinguishable in the data.
  */
 export function AppNextStepCard({ steps, onConnectDomain, gitSettingsHref, deploymentsHref }: AppNextStepCardProps) {
   const { t } = useT();
+  const viewedRef = useRef(false);
+
+  useEffect(() => {
+    if (viewedRef.current) return;
+    if (steps.length === 0) return;
+    viewedRef.current = true;
+    trackUxEvent("view", `app_next_step:${steps.join(",")}`);
+  }, [steps]);
 
   if (steps.length === 0) return null;
 
