@@ -206,7 +206,7 @@ func (h *Handler) BoxUp(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{
 		"box":     updated,
-		"connect": h.boxConnectBlock(stack, updated, sessionToken),
+		"connect": h.boxConnectBlock(c.Request.Context(), stack, updated, sessionToken),
 		// Shown exactly ONCE. Only the sha256 and a 6-hex prefix are stored, so
 		// there is nothing to reveal later and no scrub step that can be forgotten.
 		"session": gin.H{
@@ -250,12 +250,16 @@ func (h *Handler) failBox(ctx context.Context, boxID any, msg string) {
 // tool would route every keystroke of the customer's work through us, which is the
 // opposite of the promise the product is sold on — so no such tool exists here,
 // and the keep-list being an allowlist is what keeps it that way.
-func (h *Handler) boxConnectBlock(stack *boxRuntimeStack, b models.Box, token string) gin.H {
+func (h *Handler) boxConnectBlock(ctx context.Context, stack *boxRuntimeStack, b models.Box, token string) gin.H {
 	mcpURL := b.MCPURL
 	if mcpURL == "" {
 		mcpURL = fmt.Sprintf("%s/api/v1/box/session/mcp", stack.sessions)
 	}
 	own := boxOwnsItsMCPURL(mcpURL)
+	reach := h.boxReachability(ctx, b, mcpURL)
+	if reach.publicMCPURL != "" {
+		mcpURL = reach.publicMCPURL
+	}
 	reason := "served by cmd/box-broker INSIDE the box: a command run through this endpoint does not pass through the Dada control plane. " +
 		"On LocalRuntime the box shares the host's network namespace, so the address is loopback on the box host rather than the box's own hostname; " +
 		"in production it is the box's Pod address (ADR-019)."
@@ -267,9 +271,11 @@ func (h *Handler) boxConnectBlock(stack *boxRuntimeStack, b models.Box, token st
 	return gin.H{
 		"ssh_host":    b.SSHHost,
 		"ssh_command": boxSSHCommand(b.SSHHost, b.SSHPort),
+		"ssh_reach":   reach.ssh,
 		"mcp": gin.H{
 			"url":       mcpURL,
 			"available": own,
+			"reach":     reach.mcp,
 			"reason":    reason,
 			"snippet":   mcpServersSnippet(b.Name, mcpURL, token),
 		},
@@ -335,7 +341,7 @@ func (h *Handler) GetBoxConnection(c *gin.Context) {
 			"note": "shown exactly once; only its sha256 and prefix are stored",
 		}
 	}
-	resp["connect"] = h.boxConnectBlock(stack, b, token)
+	resp["connect"] = h.boxConnectBlock(c.Request.Context(), stack, b, token)
 	c.JSON(http.StatusOK, resp)
 }
 

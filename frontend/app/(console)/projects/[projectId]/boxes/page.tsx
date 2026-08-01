@@ -18,6 +18,31 @@ import { useT } from "@/lib/i18n/console/context";
 const TTL_CHOICES = [3600, 14400, 43200];
 
 /**
+ * The mcpServers block arrives as JSON, not as text: it is meant to be pasted
+ * into a client config, so it is rendered and copied as formatted JSON rather
+ * than stringified by the renderer.
+ */
+function snippetText(snippet: unknown): string {
+  if (typeof snippet === "string") return snippet;
+  try {
+    return JSON.stringify(snippet, null, 2);
+  } catch {
+    return "";
+  }
+}
+
+/** The port the box's own broker serves on, taken from the endpoint it reported. */
+function brokerPort(mcpURL?: string): number | null {
+  if (!mcpURL) return null;
+  try {
+    const port = new URL(mcpURL).port;
+    return port ? Number(port) : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Boxes: the console's own door to `box up`.
  *
  * Until this page existed the only way to get a box was the REST API or an MCP
@@ -106,6 +131,22 @@ export default function BoxesPage() {
       setConnect(res.connect);
       setSession(res.session ?? null);
       setReadyMs(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "failed");
+    } finally {
+      setBusyBox(null);
+    }
+  }
+
+  async function publish(boxName: string) {
+    const port = brokerPort(connect?.mcp?.url);
+    if (!port) return;
+    setBusyBox(boxName);
+    try {
+      await boxesApi.expose(projectId, boxName, port);
+      const res = await boxesApi.connection(projectId, boxName, true);
+      setConnect(res.connect);
+      setSession(res.session ?? null);
     } catch (err) {
       setError(err instanceof Error ? err.message : "failed");
     } finally {
@@ -340,6 +381,9 @@ export default function BoxesPage() {
               <pre className="overflow-x-auto rounded-lg bg-gray-50 dark:bg-gray-800 p-3 font-mono text-xs text-gray-800 dark:text-gray-200">
                 {connect.ssh_command}
               </pre>
+              {connect.ssh_reach?.scope === "cluster" && (
+                <p className="mt-1.5 text-xs text-amber-700 dark:text-amber-400">{t("boxes.connect.sshInternal")}</p>
+              )}
             </div>
           )}
 
@@ -347,13 +391,31 @@ export default function BoxesPage() {
             <div>
               <div className="mb-1.5 flex items-center justify-between gap-2">
                 <span className="text-xs font-semibold text-gray-700 dark:text-gray-300">{t("boxes.connect.mcp")}</span>
-                <CopyButton value={connect.mcp.snippet} label={t("boxes.connect.copy")} />
+                <CopyButton value={snippetText(connect.mcp.snippet)} label={t("boxes.connect.copy")} />
               </div>
               <pre className="overflow-x-auto rounded-lg bg-gray-50 dark:bg-gray-800 p-3 font-mono text-xs text-gray-800 dark:text-gray-200">
-                {connect.mcp.snippet}
+                {snippetText(connect.mcp.snippet)}
               </pre>
               {!connect.mcp.available && (
                 <p className="mt-1.5 text-xs text-red-600 dark:text-red-400">{t("boxes.connect.mcpUnavailable")}</p>
+              )}
+              {connect.mcp.available && connect.mcp.reach?.scope === "cluster" && (
+                <div className="mt-1.5">
+                  <p className="text-xs text-amber-700 dark:text-amber-400">{t("boxes.connect.mcpInternal")}</p>
+                  {connectBox && canCreate && (
+                    <button
+                      type="button"
+                      onClick={() => publish(connectBox)}
+                      disabled={busyBox === connectBox}
+                      className="mt-2 rounded-md border border-gray-200 dark:border-gray-700 px-2.5 py-1 text-xs font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-50"
+                    >
+                      {busyBox === connectBox ? t("boxes.connect.publishing") : t("boxes.connect.publish")}
+                    </button>
+                  )}
+                </div>
+              )}
+              {connect.mcp.reach?.scope === "public" && (
+                <p className="mt-1.5 text-xs text-emerald-700 dark:text-emerald-400">{t("boxes.connect.mcpPublic")}</p>
               )}
             </div>
           )}

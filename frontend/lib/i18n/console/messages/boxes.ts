@@ -67,6 +67,20 @@ export const boxes: Messages = {
     ru: "У этого бокса нет собственной двери — команды пойдут через control plane. Это деградированный бокс, а не продукт.",
     en: "This box has no door of its own — commands would pass through the control plane. That is a degraded box, not the product.",
   },
+  "boxes.connect.sshInternal": {
+    ru: "Это Pod-адрес: он отвечает только изнутри кластера. Публичный вход — HTTP-прокси, SSH через него не проходит; снаружи работайте через MCP-эндпоинт.",
+    en: "This is a Pod address: it answers from inside the cluster only. The public edge is an HTTP proxy and cannot carry SSH — from outside, drive the box through its MCP endpoint.",
+  },
+  "boxes.connect.mcpInternal": {
+    ru: "Адрес кластерный — снаружи не откроется. Опубликуйте эндпоинт на домене платформы.",
+    en: "This address is cluster-internal — it will not answer from outside. Publish the endpoint on a platform hostname.",
+  },
+  "boxes.connect.mcpPublic": {
+    ru: "Эндпоинт опубликован: адрес отвечает из интернета, доступ закрывает токен бокса.",
+    en: "The endpoint is published: it answers from the internet, and the box's token is what guards it.",
+  },
+  "boxes.connect.publish": { ru: "Опубликовать наружу", en: "Publish to the internet" },
+  "boxes.connect.publishing": { ru: "Публикуем…", en: "Publishing…" },
   "boxes.connect.token": { ru: "Одноразовый токен сессии", en: "One-time session token" },
   "boxes.connect.tokenWarning": {
     ru: "Показывается ровно один раз. Мы храним только его sha256 — восстановить нельзя, можно только выпустить новый.",

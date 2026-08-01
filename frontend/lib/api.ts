@@ -94,6 +94,7 @@ import type {
   BoxesResponse,
   BoxUpResponse,
   BoxConnectionResponse,
+  BoxExposeResponse,
   BoxCatalogResponse,
 } from "./types";
 import type { OnboardingStatus } from "./onboarding/types";
@@ -758,6 +759,13 @@ export const boxesApi = {
     apiFetch<BoxConnectionResponse>(
       `/api/v1/projects/${projectId}/boxes/${boxName}/connection${newSession ? "?new_session=true" : ""}`
     ),
+
+  expose: (projectId: string, boxName: string, port: number) =>
+    apiFetch<BoxExposeResponse>(`/api/v1/projects/${projectId}/boxes/${boxName}/expose`, {
+      method: "POST",
+      body: { port },
+      timeoutMs: 60_000,
+    }),
 
   suspend: (projectId: string, boxName: string) =>
     apiFetch<{ message: string }>(`/api/v1/projects/${projectId}/boxes/${boxName}/suspend`, {
@@ -1540,6 +1548,8 @@ export interface BillingAccount {
   plan: BillingPlanKey;
   plan_expires_at?: string | null;
   quota_grace_until?: string | null;
+  /** Whether quotas actually block new resource creation for this org right now. Absent on older backends -- treat as false (do not alarm). */
+  quota_enforced?: boolean;
   quotas: BillingQuota;
   usage: BillingUsage;
   invoicePreview: InvoicePreview;
