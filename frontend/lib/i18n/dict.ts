@@ -49,7 +49,6 @@ type Plan = {
 };
 type Step = { num: string; title: string; desc: string };
 type Scenario = { tag: string; title: string; desc: string };
-type Proof = { quote: string; author: string };
 type PricingTeaser = { name: string; price: string; tagline: string; bullets: string[]; highlight?: boolean };
 type MappingRow = { from: string; to: string; note: string };
 type StatusService = { id: string; name: string };
@@ -161,9 +160,6 @@ export interface Dict {
     scenariosTitle: string;
     scenariosSubtitle: string;
     scenarios: Scenario[];
-    proofTitle: string;
-    proofSubtitle: string;
-    proof: Proof[];
     pricingTitle: string;
     pricingSubtitle: string;
     pricingTiers: PricingTeaser[];
@@ -217,6 +213,7 @@ export interface Dict {
   streamlitAlt: AltPage;
   vkBotAlt: AltPage;
   uploadDeployAlt: UploadDeployPage;
+  mcpAlt: UploadDeployPage;
   acceptPaymentsAlt: UploadDeployPage;
   migrateVercel: MigrateGuide;
   payVercel: AltPage;
@@ -351,13 +348,6 @@ const ru: Dict = {
       { tag: "Стартап 2–10", title: "Команда без DevOps", desc: "Деплой из GitHub, доступы по ролям, общие логи и откаты. Инженеры катят сами. Отдельный ops под это держать не нужно." },
       { tag: "Агентство", title: "Парк клиентских серверов в одной панели", desc: "Подключаете VM каждого клиента по SSH — домены, базы, деплой и мониторинг всех серверов видно из одной панели, без десятка отдельных логинов." },
     ],
-    proofTitle: "Истории команд",
-    proofSubtitle: "Скоро здесь будут живые кейсы.",
-    proof: [
-      { quote: "Сидели на VPS с compose, релизились по ssh руками. Перенесли в один проект, теперь просто пушим.", author: "Команда · скоро" },
-      { quote: "Раньше поднять новый сервис — это полдня. Сейчас успеваю до обеда выкатить пару штук.", author: "Стартап · скоро" },
-      { quote: "Домены и базы клиентов больше не размазаны по десяти панелям. Всё в одном месте, выдыхаю.", author: "Агентство · скоро" },
-    ],
     pricingTitle: "Прозрачные планы",
     pricingSubtitle: "Без сюрпризов в счёте: понятные квоты плана и оценка стоимости до деплоя.",
     pricingTiers: [
@@ -388,7 +378,7 @@ const ru: Dict = {
         { role: "assistant", text: "Готово, сэр. Приложение живёт по HTTPS, база и домен на месте." },
       ],
       bullets: [
-        "132 действия платформы прямо в чате",
+        "41 инструмент платформы прямо в чате",
         "Вход через браузер — ни токенов, ни ключей вручную",
         "Работает только с вашими проектами, по вашим правам",
       ],
@@ -810,6 +800,7 @@ const ru: Dict = {
     features: [
       { title: "Оплата рублёвой картой", desc: "Российская карта, счёт и закрывающие документы. Не нужны зарубежная карта, посредники и обходные схемы оплаты по usage-billing." },
       { title: "Деплой из GitHub, как в Railway", desc: "Подключаете репозиторий, пуш в основную ветку — автоматическая пересборка и деплой. Фреймворк определяется сам." },
+      { title: "Кнопка «Deploy on Dada» в README", desc: "Прямой аналог кнопки Deploy on Railway: бейдж в README публичного репозитория. Читатель жмёт — и проект разворачивается у него, без терминала, форка и подключения GitHub." },
       { title: "PostgreSQL и хранилище рядом", desc: "Как в Railway: управляемый PostgreSQL и S3-хранилище создаются рядом с приложением, строка подключения прокидывается в сервис автоматически." },
       { title: "Работает без VPN", desc: "И панель, и задеплоенные приложения открываются из России напрямую — ни вам, ни вашим пользователям не нужен VPN." },
       { title: "Данные в России (152-ФЗ)", desc: "Приложения и базы размещаются на серверах в РФ — то, что требует закон о персональных данных." },
@@ -822,6 +813,7 @@ const ru: Dict = {
       { q: "Нужно ли переписывать проект при переходе с Railway?", a: "Нет. Вы подключаете тот же GitHub-репозиторий, платформа сама определяет фреймворк и собирает проект. Пуш в основную ветку пересобирает и деплоит приложение автоматически." },
       { q: "Есть ли база данных, как плагин Postgres в Railway?", a: "Да. Управляемый PostgreSQL создаётся рядом с приложением, DATABASE_URL прокидывается в сервис автоматически — отдельный внешний провайдер не нужен." },
       { q: "Чем цена отличается от usage-billing Railway?", a: "Тарифы фиксированы в рублях, а не считаются по usage в долларах — расходы предсказуемы и не зависят от курса валют." },
+      { q: "Есть ли аналог кнопки Deploy on Railway для README?", a: "Да, кнопка «Deploy on Dada». Вставляете бейдж в README публичного репозитория, и любой читатель по клику разворачивает проект в своём аккаунте — без терминала, форка и установки GitHub-приложения. Снимок кода берётся на момент клика, автодеплой при этом не включается." },
     ],
     howtoTitle: "Как переехать с Railway на Dada Cloud",
     howtoSubtitle: "Код переписывать не нужно — переносится конфигурация деплоя, шесть шагов.",
@@ -882,6 +874,7 @@ const ru: Dict = {
     features: [
       { title: "Оплата рублёвой картой", desc: "Российская карта, счёт и закрывающие документы для юрлиц. Не нужны зарубежная карта и посредники." },
       { title: "Деплой из GitHub, как в Render", desc: "Подключаете репозиторий, пуш в основную ветку — автоматическая пересборка и деплой. Фреймворк определяется сам." },
+      { title: "Кнопка «Deploy on Dada» в README", desc: "Прямой аналог кнопки Deploy to Render: бейдж в README публичного репозитория. Читатель жмёт — и проект разворачивается у него, без терминала, форка и подключения GitHub." },
       { title: "Managed PostgreSQL рядом", desc: "Как Render PostgreSQL: управляемая база создаётся рядом с приложением, DATABASE_URL прокидывается в сервис автоматически." },
       { title: "Приложения не «засыпают»", desc: "В отличие от бесплатного тарифа Render, приложение остаётся живым и отвечает без задержки на первый запрос." },
       { title: "Данные в России (152-ФЗ)", desc: "Приложения и базы размещаются на серверах в РФ — то, что требует закон о персональных данных." },
@@ -898,6 +891,7 @@ const ru: Dict = {
       { q: "Поддерживается ли Docker и свой Dockerfile?", a: "Да. Если в репозитории лежит Dockerfile, сборка идёт по нему. Готовый образ из реестра тоже разворачивается напрямую, без пересборки на платформе." },
       { q: "Что с фоновыми воркерами?", a: "Background worker становится отдельным приложением из того же репозитория, но со своей командой запуска. У него собственные логи, метрики и история деплоев — при разборе инцидента это удобнее, чем общий поток." },
       { q: "Как быть с preview-окружениями?", a: "Превью на pull request поднимаются по метке preview на самом PR — они бесплатные и включаются осознанно, а не для каждой ветки подряд. Каждому превью выдаётся свой адрес, а после закрытия PR окружение убирается само." },
+      { q: "Есть ли аналог кнопки Deploy to Render для README?", a: "Да, кнопка «Deploy on Dada». Вставляете бейдж в README публичного репозитория, и любой читатель по клику разворачивает проект в своём аккаунте — без терминала, форка и установки GitHub-приложения. Снимок кода берётся на момент клика, автодеплой при этом не включается." },
     ],
   },
   netlifyAlt: {
@@ -1568,6 +1562,37 @@ const ru: Dict = {
       { title: "Отката на предыдущий архив нет", desc: "История версий тут - это ваши локальные копии архивов. Если нужен откат одним кликом и сборка по коммиту, подключите к тому же приложению GitHub-репозиторий." },
     ],
   },
+  mcpAlt: {
+    heroTitle: "MCP-сервер DADA Cloud: управляйте облаком из Claude",
+    heroSubtitle:
+      "Подключите платформу к Claude Code, Claude Desktop, Cursor или любому MCP-клиенту — и просите словами: подними сервер, разверни репозиторий, покажи логи упавшего приложения. Агент получает 41 инструмент консоли, входит под вашим аккаунтом DADA ID через браузер и работает ровно с теми правами, что есть у вас. Адрес сервера — https://console.dada-tuda.ru/mcp.",
+    stepsTitle: "Как подключить за две минуты",
+    stepsSubtitle: "Самый быстрый путь — плагин для Claude Code: ни токенов, ни ключей руками.",
+    steps: [
+      { num: "01", title: "Добавьте маркетплейс", desc: "В Claude Code выполните /plugin marketplace add DadaDevelopment/dada-cloud-console — это разовая команда." },
+      { num: "02", title: "Поставьте плагин", desc: "/plugin install dada-cloud@dada-cloud. Для Claude Desktop вместо этого добавьте коннектор с адресом https://console.dada-tuda.ru/mcp и OAuth Client ID dada-mcp." },
+      { num: "03", title: "Войдите через браузер", desc: "При первом обращении откроется вход в DADA ID. Подтвердите — токен получит и будет обновлять сам клиент, вставлять его в конфиг не нужно." },
+      { num: "04", title: "Просите словами", desc: "«Разверни репозиторий в новый проект», «покажи логи за час», «поставь переменную окружения». Агент вызывает нужные действия и отчитывается результатом операции." },
+    ],
+    featuresTitle: "Что агент умеет через MCP",
+    features: [
+      { title: "41 инструмент платформы", desc: "Проекты, приложения, сборки, базы, домены, переменные окружения, серверы, логи и одноразовые песочницы-боксы — тот же API, на котором работает веб-консоль, отобранный до набора, в котором агент не теряется." },
+      { title: "Права ровно как у вас", desc: "Агент видит только проекты, где у вашего аккаунта есть роль. Запись требует того же разрешения, что и клик в консоли — MCP не даёт обходных путей." },
+      { title: "Без токенов в конфиге", desc: "Вход идёт стандартным браузерным OAuth. Ключи не лежат в файлах настроек и не утекают в историю команд; короткоживущий токен клиент обновляет сам." },
+      { title: "Логи для диагностики", desc: "Агент читает логи приложения и VM, статус сборки и состояние операций — этого хватает, чтобы он сам нашёл причину падения и предложил починку. Удалять приложения и базы он при этом не умеет: это осталось в консоли." },
+      { title: "Готовые сценарии", desc: "Сервер отдаёт три подготовленных промпта: deploy-app, configure-env и diagnose-app. Клиент подхватывает их без дополнительной настройки." },
+      { title: "Любой MCP-клиент", desc: "Claude Code, Claude Desktop, Cursor и всё, что говорит по Model Context Protocol. Клиентам без браузерного входа подойдёт заголовок Authorization: Bearer с токеном DADA ID." },
+    ],
+    faqTitle: "Частые вопросы про MCP",
+    faq: [
+      { q: "Что такое MCP простыми словами?", a: "Model Context Protocol — стандарт, по которому AI-клиент подключается к внешнему сервису и получает список действий, которые может вызвать. DADA Cloud публикует свой API как такой набор инструментов, поэтому агент управляет облаком сам, а не подсказывает вам команды." },
+      { q: "Какой адрес у MCP-сервера?", a: "https://console.dada-tuda.ru/mcp. Клиентам, где задаётся статический OAuth client id, укажите dada-mcp — он публичный, секрет не нужен." },
+      { q: "Нужно ли выпускать токен вручную?", a: "Нет. Плагин для Claude Code и коннектор Claude Desktop проходят обычный вход через браузер и сами обновляют короткоживущий токен. Ручной Bearer-токен нужен только клиентам, которые не умеют в браузерный вход." },
+      { q: "Это безопасно?", a: "Агент действует от вашего имени и не получает больше прав, чем есть у вашей учётной записи: чужие проекты ему не видны, а на запись действует та же проверка разрешений, что и в консоли. Каждое изменение остаётся в журнале операций проекта." },
+      { q: "Сколько стоит доступ к MCP?", a: "Сам доступ входит в аккаунт и не тарифицируется отдельно — платите только за ресурсы, которые агент создаст: приложения, базы, серверы, хранилище." },
+      { q: "Агент подтвердит, что деплой прошёл?", a: "Да. Изменения применяются асинхронно: агент получает операцию, следит за ней и сообщает результат, когда приложение отчиталось о здоровье, а не в момент отправки запроса." },
+    ],
+  },
   acceptPaymentsAlt: {
     heroTitle: "Принимай оплату в приложении через ЮKassa",
     heroSubtitle:
@@ -1961,13 +1986,6 @@ const en: Dict = {
       { tag: "Startup 2–10", title: "A team without DevOps", desc: "Deploy from GitHub, role-based access, shared logs and rollbacks. Engineers ship themselves. No dedicated ops needed for it." },
       { tag: "Agency", title: "A whole client fleet, one panel", desc: "Connect each client's VM over SSH — domains, databases, deploys and monitoring for every server show up in one panel, no juggling a dozen separate logins." },
     ],
-    proofTitle: "Team stories",
-    proofSubtitle: "Real cases coming here soon.",
-    proof: [
-      { quote: "We were on a VPS with compose, releasing over ssh by hand. Moved it into one project, now we just push.", author: "Team · soon" },
-      { quote: "Standing up a new service used to eat half a day. Now I ship a couple before lunch.", author: "Startup · soon" },
-      { quote: "Client domains and databases aren't smeared across ten panels anymore. One place, I can breathe.", author: "Agency · soon" },
-    ],
     pricingTitle: "Transparent plans",
     pricingSubtitle: "No billing surprises: clear plan quotas and a cost estimate before you deploy.",
     pricingTiers: [
@@ -1998,7 +2016,7 @@ const en: Dict = {
         { role: "assistant", text: "Done, sir. The app is live over HTTPS, database and domain in place." },
       ],
       bullets: [
-        "132 platform actions right in the chat",
+        "41 platform tools right in the chat",
         "Browser login — no tokens or keys to paste",
         "Scoped to your projects, under your permissions",
       ],
@@ -2368,6 +2386,7 @@ const en: Dict = {
     features: [
       { title: "Pay with a Russian card", desc: "A Russian card, an invoice and closing documents. No foreign card, intermediaries or usage-billing workarounds." },
       { title: "Deploy from GitHub, like Railway", desc: "Connect a repo, push to the main branch — automatic rebuild and deploy. The framework is detected for you." },
+      { title: "A \"Deploy on Dada\" README button", desc: "The direct equivalent of the Deploy on Railway button: a badge in a public repo's README. A reader clicks it and the project deploys into their own account — no terminal, no fork, no GitHub connect." },
       { title: "PostgreSQL and storage alongside", desc: "Like Railway: managed PostgreSQL and S3 storage are created next to the app, and the connection string is injected automatically." },
       { title: "Works without a VPN", desc: "Both the panel and your deployed apps open from Russia directly — neither you nor your users need a VPN." },
       { title: "Data in Russia (152-FZ)", desc: "Apps and databases run on servers inside Russia — what the personal-data law requires." },
@@ -2380,6 +2399,7 @@ const en: Dict = {
       { q: "Do I have to rewrite my project when moving from Railway?", a: "No. You connect the same GitHub repo, the platform detects the framework and builds it. A push to the main branch rebuilds and deploys automatically." },
       { q: "Is there a database, like the Railway Postgres plugin?", a: "Yes. Managed PostgreSQL is created next to the app and DATABASE_URL is injected automatically — no separate external provider needed." },
       { q: "How is pricing different from Railway's usage-billing?", a: "Plans are fixed in rubles rather than metered in dollars — costs are predictable and independent of the exchange rate." },
+      { q: "Is there an equivalent of the Deploy on Railway button?", a: "Yes, the \"Deploy on Dada\" button. Drop the badge into a public repo's README and any reader can deploy the project into their own account in one click — no terminal, no fork, no GitHub App install. The deploy is a snapshot of the code at click time; auto-deploy stays off." },
     ],
     howtoTitle: "How to move from Railway to Dada Cloud",
     howtoSubtitle: "No need to rewrite code — you're moving deploy configuration, six steps.",
@@ -2440,6 +2460,7 @@ const en: Dict = {
     features: [
       { title: "Pay with a Russian card", desc: "A Russian card, an invoice and closing documents for legal entities. No foreign card or intermediaries." },
       { title: "Deploy from GitHub, like Render", desc: "Connect a repo, push to the main branch — automatic rebuild and deploy. The framework is detected for you." },
+      { title: "A \"Deploy on Dada\" README button", desc: "The direct equivalent of the Deploy to Render button: a badge in a public repo's README. A reader clicks it and the project deploys into their own account — no terminal, no fork, no GitHub connect." },
       { title: "Managed PostgreSQL alongside", desc: "Like Render PostgreSQL: a managed database is created next to the app and DATABASE_URL is injected automatically." },
       { title: "Apps don't sleep", desc: "Unlike Render's free tier, your app stays alive and responds without a delay on the first request." },
       { title: "Data in Russia (152-FZ)", desc: "Apps and databases run on servers inside Russia — what the personal-data law requires." },
@@ -2456,6 +2477,7 @@ const en: Dict = {
       { q: "Is Docker and my own Dockerfile supported?", a: "Yes. If the repository has a Dockerfile, the build follows it. A prebuilt image from a registry can also be deployed directly, with no rebuild on the platform." },
       { q: "What about background workers?", a: "A background worker becomes a separate app from the same repository with its own start command. It gets its own logs, metrics and deploy history, which beats one shared stream when you are picking an incident apart." },
       { q: "How do preview environments work?", a: "Pull-request previews come up when the PR carries the preview label — they are free and opt-in rather than firing on every branch. Each preview gets its own address, and the environment is torn down when the PR closes." },
+      { q: "Is there an equivalent of the Deploy to Render button?", a: "Yes, the \"Deploy on Dada\" button. Drop the badge into a public repo's README and any reader can deploy the project into their own account in one click — no terminal, no fork, no GitHub App install. The deploy is a snapshot of the code at click time; auto-deploy stays off." },
     ],
   },
   netlifyAlt: {
@@ -3124,6 +3146,37 @@ const en: Dict = {
       { title: "Secrets inside the archive end up in the image", desc: "A .env file in the archive is baked into the image with your code and shows up in build logs. Set keys as environment variables in the console instead." },
       { title: "The local disk is wiped on every build", desc: "User uploads and a SQLite file will not survive the next archive upload. Data goes to PostgreSQL, files to object storage." },
       { title: "There is no rollback to a previous archive", desc: "Your version history here is the archives on your own machine. If you want one-click rollback and builds per commit, connect a GitHub repo to the same app." },
+    ],
+  },
+  mcpAlt: {
+    heroTitle: "DADA Cloud MCP server: run your cloud from Claude",
+    heroSubtitle:
+      "Connect the platform to Claude Code, Claude Desktop, Cursor or any MCP client and ask in plain language: spin up a server, deploy this repo, show me why the app is down. The agent gets 41 console tools, signs in as you through the browser, and works with exactly the permissions your account has. Server URL: https://console.dada-tuda.ru/mcp.",
+    stepsTitle: "Connect in two minutes",
+    stepsSubtitle: "The fastest path is the Claude Code plugin — no tokens, no keys to paste.",
+    steps: [
+      { num: "01", title: "Add the marketplace", desc: "In Claude Code run /plugin marketplace add DadaDevelopment/dada-cloud-console once." },
+      { num: "02", title: "Install the plugin", desc: "/plugin install dada-cloud@dada-cloud. On Claude Desktop add a custom connector pointing at https://console.dada-tuda.ru/mcp with OAuth Client ID dada-mcp instead." },
+      { num: "03", title: "Log in through the browser", desc: "On first use your browser opens the DADA ID login. Approve it — the client obtains and refreshes the token itself, nothing goes into a config file." },
+      { num: "04", title: "Ask in plain language", desc: "\"Deploy this repo into a new project\", \"show the last hour of logs\", \"set this environment variable\". The agent calls the matching actions and reports the operation result." },
+    ],
+    featuresTitle: "What the agent can do over MCP",
+    features: [
+      { title: "41 platform tools", desc: "Projects, apps, builds, databases, domains and HTTPS, object storage, environment variables, operations — the same API the web console runs on." },
+      { title: "Exactly your permissions", desc: "The agent only sees projects your account has a role on, and every write goes through the same permission check as a click in the console. MCP is not a side door." },
+      { title: "No tokens in config files", desc: "Sign-in is standard browser OAuth. Keys never sit in settings files or shell history, and the short-lived token is refreshed by the client." },
+      { title: "Logs and metrics for diagnosis", desc: "The agent reads build and runtime logs, metrics and recent operations — enough for it to find why an app is failing and propose the fix itself." },
+      { title: "Ready-made playbooks", desc: "The server ships three guided prompts: deploy-app, configure-env and diagnose-app. Clients pick them up with no extra setup." },
+      { title: "Any MCP client", desc: "Claude Code, Claude Desktop, Cursor and anything else that speaks Model Context Protocol. Clients without browser login can send an Authorization: Bearer header with a DADA ID token." },
+    ],
+    faqTitle: "MCP FAQ",
+    faq: [
+      { q: "What is MCP in plain terms?", a: "Model Context Protocol is the standard by which an AI client connects to an external service and receives the list of actions it may call. DADA Cloud publishes its API as such a toolset, so the agent operates the cloud itself instead of suggesting commands for you to type." },
+      { q: "What is the server URL?", a: "https://console.dada-tuda.ru/mcp. For clients that ask for a static OAuth client id, use dada-mcp — it is public and needs no secret." },
+      { q: "Do I have to mint a token by hand?", a: "No. The Claude Code plugin and the Claude Desktop connector run the normal browser login and refresh the short-lived token themselves. A manual Bearer token is only for clients that cannot do browser login." },
+      { q: "Is it safe?", a: "The agent acts as you and gets no more rights than your account has: other people's projects are invisible to it, and writes go through the same permission check as the console. Every change stays in the project's operation log." },
+      { q: "What does MCP access cost?", a: "Access itself is included with your account and is not billed separately — you pay only for the resources the agent creates: apps, databases, servers, storage." },
+      { q: "Will the agent confirm the deploy landed?", a: "Yes. Changes are applied asynchronously: the agent receives an operation, watches it, and reports once the app reports healthy — not at the moment the request was sent." },
     ],
   },
   acceptPaymentsAlt: {

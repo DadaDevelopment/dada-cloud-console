@@ -147,29 +147,6 @@ export default function HomePage() {
       {/* MCP / AI agent */}
       <McpAgentSection copy={t.home.mcp} href={localeHref("/developer/mcp-ai-agents", locale)} />
 
-      {/* Social proof */}
-      <section className="bg-slate-50 py-20">
-        <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-          <div className="mb-12 max-w-2xl">
-            <h2 className="text-3xl font-bold tracking-tight text-slate-900">{t.home.proofTitle}</h2>
-            <p className="mt-3 text-lg text-slate-600">{t.home.proofSubtitle}</p>
-          </div>
-          <div className="grid gap-6 md:grid-cols-3">
-            {t.home.proof.map((p) => (
-              <figure
-                key={p.author}
-                className="flex flex-col justify-between rounded-xl border border-slate-200 bg-white p-7"
-              >
-                <blockquote className="text-base text-slate-800">“{p.quote}”</blockquote>
-                <figcaption className="mt-5 text-sm font-medium text-slate-400">
-                  {p.author}
-                </figcaption>
-              </figure>
-            ))}
-          </div>
-        </div>
-      </section>
-
       {/* Pricing teaser */}
       <section className="bg-white py-20">
         <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
