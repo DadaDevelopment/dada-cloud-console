@@ -5,7 +5,6 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"io"
 	"net/http"
 	"strings"
@@ -133,15 +132,26 @@ func (h *Handler) CreateAIGatewayKey(c *gin.Context) {
 		return
 	}
 
+	reject := func(status int, reason, msg string) {
+		h.recordAudit(c.Request.Context(), claims.UserID, auditEntry{
+			ProjectID:    projectID,
+			Action:       "CreateAIGatewayKey",
+			ResourceKind: "AIGateway",
+			Outcome:      auditOutcomeFailure,
+			Metadata:     map[string]any{"reason": reason, "status": status},
+		})
+		respondError(c, status, msg)
+	}
+
 	var req createAIKeyRequest
 	if err := c.ShouldBindJSON(&req); err != nil && err != io.EOF {
-		respondError(c, http.StatusBadRequest, err.Error())
+		reject(http.StatusBadRequest, "malformed_body", err.Error())
 		return
 	}
 
 	plaintext, hash, prefix, err := generateAIKey()
 	if err != nil {
-		respondError(c, http.StatusInternalServerError, "failed to generate key")
+		reject(http.StatusInternalServerError, "key_generate_failed", "failed to generate key")
 		return
 	}
 
@@ -153,16 +163,18 @@ func (h *Handler) CreateAIGatewayKey(c *gin.Context) {
 		 RETURNING id, created_at`,
 		projectID, req.Name, aiKeyScopes, hash, prefix, claims.UserID,
 	).Scan(&id, &createdAt); err != nil {
-		respondError(c, http.StatusInternalServerError, "failed to create ai key")
+		reject(http.StatusInternalServerError, "key_insert_failed", "failed to create ai key")
 		return
 	}
 
-	auditMeta, _ := json.Marshal(gin.H{"name": req.Name, "token_prefix": prefix})
-	_, _ = h.pool.Exec(c.Request.Context(),
-		`INSERT INTO audit_events (actor_id, project_id, action, resource_kind, resource_name, metadata)
-		 VALUES ($1, $2, 'CreateAIGatewayKey', 'AIGateway', $3, $4)`,
-		claims.UserID, projectID, prefix, auditMeta,
-	)
+	h.recordAudit(c.Request.Context(), claims.UserID, auditEntry{
+		ProjectID:    projectID,
+		Action:       "CreateAIGatewayKey",
+		ResourceKind: "AIGateway",
+		ResourceName: prefix,
+		Outcome:      auditOutcomeSuccess,
+		Metadata:     map[string]any{"name": req.Name, "token_prefix": prefix},
+	})
 
 	c.JSON(http.StatusCreated, createAIKeyResponse{
 		ID:          id,
@@ -287,21 +299,35 @@ func (h *Handler) DeleteAIGatewayKey(c *gin.Context) {
 		  RETURNING token_prefix`,
 		keyID, projectID,
 	).Scan(&tokenPrefix)
+	rejectRevoke := func(status int, reason string, respond func()) {
+		h.recordAudit(c.Request.Context(), claims.UserID, auditEntry{
+			ProjectID:    projectID,
+			Action:       "RevokeAIGatewayKey",
+			ResourceKind: "AIGateway",
+			Outcome:      auditOutcomeFailure,
+			Metadata:     map[string]any{"reason": reason, "status": status, "key_id": keyID},
+		})
+		respond()
+	}
 	if err == pgx.ErrNoRows {
-		respondNotFound(c)
+		rejectRevoke(http.StatusNotFound, "key_not_found_or_revoked", func() { respondNotFound(c) })
 		return
 	}
 	if err != nil {
-		respondError(c, http.StatusInternalServerError, "failed to revoke ai key")
+		rejectRevoke(http.StatusInternalServerError, "revoke_failed", func() {
+			respondError(c, http.StatusInternalServerError, "failed to revoke ai key")
+		})
 		return
 	}
 
-	auditMeta, _ := json.Marshal(gin.H{"key_id": keyID, "token_prefix": tokenPrefix})
-	_, _ = h.pool.Exec(c.Request.Context(),
-		`INSERT INTO audit_events (actor_id, project_id, action, resource_kind, resource_name, metadata)
-		 VALUES ($1, $2, 'RevokeAIGatewayKey', 'AIGateway', $3, $4)`,
-		claims.UserID, projectID, tokenPrefix, auditMeta,
-	)
+	h.recordAudit(c.Request.Context(), claims.UserID, auditEntry{
+		ProjectID:    projectID,
+		Action:       "RevokeAIGatewayKey",
+		ResourceKind: "AIGateway",
+		ResourceName: tokenPrefix,
+		Outcome:      auditOutcomeSuccess,
+		Metadata:     map[string]any{"key_id": keyID, "token_prefix": tokenPrefix},
+	})
 
 	c.Status(http.StatusNoContent)
 }
