@@ -127,8 +127,8 @@ func TestNextProfileWalksTheLadder(t *testing.T) {
 		{"small", "medium", true},
 		{"medium", "large", true},
 		{"large", "", false},
-		{"", "medium", true},
-		{"xlarge-handedited", "medium", true},
+		{"", "", false},
+		{"xlarge-handedited", "", false},
 	}
 
 	for _, tc := range cases {
@@ -138,6 +138,41 @@ func TestNextProfileWalksTheLadder(t *testing.T) {
 				t.Fatalf("nextProfile(%q) = (%q, %v), want (%q, %v)", tc.current, got, ok, tc.want, tc.wantOK)
 			}
 		})
+	}
+}
+
+func TestProfileIndexSeparatesOffLadderFromTopOfLadder(t *testing.T) {
+	cases := []struct {
+		profile string
+		want    int
+	}{
+		{"small", 0},
+		{"medium", 1},
+		{"large", 2},
+		{"", -1},
+		{"xlarge-handedited", -1},
+	}
+
+	for _, tc := range cases {
+		t.Run("profile="+tc.profile, func(t *testing.T) {
+			if got := profileIndex(tc.profile); got != tc.want {
+				t.Fatalf("profileIndex(%q) = %d, want %d", tc.profile, got, tc.want)
+			}
+		})
+	}
+}
+
+// An off-ladder app is one somebody gave a hand-tuned resources block. Guessing
+// a rung for it can shrink a limit it depends on, so the watcher must leave it
+// alone rather than assume a position.
+func TestOffLadderProfileIsNeverGuessedIntoTheLadder(t *testing.T) {
+	for _, profile := range []string{"", "xlarge-handedited", "custom"} {
+		if profileIndex(profile) >= 0 {
+			t.Fatalf("profile %q must be off-ladder", profile)
+		}
+		if to, ok := nextProfile(profile); ok {
+			t.Fatalf("nextProfile(%q) offered %q; an off-ladder app must not be moved", profile, to)
+		}
 	}
 }
 

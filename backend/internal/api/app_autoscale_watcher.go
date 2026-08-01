@@ -94,20 +94,34 @@ var memPressureQuery = fmt.Sprintf(
 // growing it forever would hide that.
 var autoscaleProfileLadder = []string{"small", "medium", "large"}
 
-// nextProfile returns the next profile up the ladder and whether one exists.
-// An unknown current profile resolves to "medium", the value the renderer's
-// own default arm is closest to, so a hand-edited snapshot still scales rather
-// than being skipped forever.
-func nextProfile(current string) (string, bool) {
+// profileIndex is the position of a profile on the ladder, or -1 when the app
+// is not on the ladder at all.
+//
+// Off-ladder is a real state, not a data error: an app can carry a hand-tuned
+// resources block that matches no profile. The first version of this watcher
+// treated off-ladder as "assume medium" and on its very first prod tick pushed
+// a live app from a deliberate 100m/384Mi/1Gi-ephemeral spec onto the medium
+// profile, shrinking its ephemeral storage from 1Gi to 500Mi. Guessing a
+// position on a ladder the app was never on can move it DOWN.
+func profileIndex(current string) int {
 	for i, p := range autoscaleProfileLadder {
 		if p == current {
-			if i+1 >= len(autoscaleProfileLadder) {
-				return "", false
-			}
-			return autoscaleProfileLadder[i+1], true
+			return i
 		}
 	}
-	return "medium", true
+	return -1
+}
+
+// nextProfile returns the next profile up the ladder and whether one exists.
+// Only meaningful for a profile already on the ladder; callers must check
+// profileIndex first, since a false here means "already at the top", not
+// "unknown".
+func nextProfile(current string) (string, bool) {
+	i := profileIndex(current)
+	if i < 0 || i+1 >= len(autoscaleProfileLadder) {
+		return "", false
+	}
+	return autoscaleProfileLadder[i+1], true
 }
 
 // profileRequirement is the CPU/memory a profile asks the namespace quota for.
@@ -298,20 +312,26 @@ func (w *appAutoscaleWatcher) podAppLabels(ctx context.Context, namespace string
 	return out
 }
 
-// namespaceQuota returns the first ResourceQuota in a namespace, or nil when
-// none exists (an unquotaed namespace has nothing to overflow).
-func (w *appAutoscaleWatcher) namespaceQuota(ctx context.Context, namespace string) *corev1.ResourceQuota {
+// namespaceQuota returns the first ResourceQuota in a namespace. A nil quota
+// with a nil error means the namespace genuinely has none and so has nothing
+// to overflow; an error means the quota could not be read at all.
+//
+// The two must stay distinguishable. Collapsing them into a bare nil makes the
+// headroom check fail OPEN, which is how the first prod tick resized two apps
+// without ever consulting a quota: the ServiceAccount lacked list on
+// resourcequotas, the error was logged and swallowed, and nil read as
+// "unquotaed". Callers treat a read failure as a reason to skip the resize.
+func (w *appAutoscaleWatcher) namespaceQuota(ctx context.Context, namespace string) (*corev1.ResourceQuota, error) {
 	listCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 	quotas, err := w.clientset.CoreV1().ResourceQuotas(namespace).List(listCtx, metav1.ListOptions{})
 	if err != nil {
-		log.Printf("app-autoscale: list quota in %s failed: %v", namespace, err)
-		return nil
+		return nil, err
 	}
 	if len(quotas.Items) == 0 {
-		return nil
+		return nil, nil
 	}
-	return &quotas.Items[0]
+	return &quotas.Items[0], nil
 }
 
 // tick runs one pass: query both pressure dimensions, restrict to user
@@ -528,18 +548,25 @@ func (w *appAutoscaleWatcher) maybeResize(ctx context.Context, projectID uuid.UU
 		return
 	}
 
+	if profileIndex(st.Profile) < 0 {
+		log.Printf("app-autoscale: %s/%s runs off-ladder profile %q, leaving its resources alone", namespace, appName, st.Profile)
+		return
+	}
+
 	to, ok := nextProfile(st.Profile)
 	if !ok {
 		w.notifyCeiling(ctx, projectID, namespace, appName, s)
 		return
 	}
 
-	fromReq, okFrom := autoscaleProfileRequirements[st.Profile]
-	if !okFrom {
-		fromReq = autoscaleProfileRequirements["medium"]
-	}
+	fromReq := autoscaleProfileRequirements[st.Profile]
 	toReq := autoscaleProfileRequirements[to]
-	if quota := w.namespaceQuota(ctx, namespace); quota != nil {
+	quota, err := w.namespaceQuota(ctx, namespace)
+	if err != nil {
+		log.Printf("app-autoscale: %s/%s needs %s->%s but its quota could not be read, skipping: %v", namespace, appName, st.Profile, to, err)
+		return
+	}
+	if quota != nil {
 		if fits, why := quotaHeadroom(quota.Status.Hard, quota.Status.Used, fromReq, toReq); !fits {
 			log.Printf("app-autoscale: %s/%s needs %s->%s but quota blocks it (%s)", namespace, appName, st.Profile, to, why)
 			return
