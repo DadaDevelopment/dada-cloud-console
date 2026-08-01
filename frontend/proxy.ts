@@ -48,6 +48,7 @@ export function proxy(request: NextRequest) {
     const locale = cookieLocale === "en" ? "en" : "ru";
     const headers = new Headers(request.headers);
     headers.set("x-dada-locale", locale);
+    headers.set("x-dada-path", path);
     return NextResponse.next({ request: { headers } });
   }
 
@@ -57,6 +58,7 @@ export function proxy(request: NextRequest) {
   const locale = path === "/en" || path.startsWith("/en/") ? "en" : "ru";
   const headers = new Headers(request.headers);
   headers.set("x-dada-locale", locale);
+  headers.set("x-dada-path", path);
   const response = NextResponse.next({ request: { headers } });
 
   // Issue the anonymous Box visitor id on the first hit of the landing, so every

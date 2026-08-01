@@ -13,6 +13,7 @@ import { CommandPalette } from "@/components/shell/command-palette";
 import { ConsoleErrorBoundary } from "@/components/shell/console-error-boundary";
 import { GlobalErrorReporter } from "@/components/shell/global-error-reporter";
 import { SupportButton } from "@/components/shell/support-button";
+import { DocumentTitle } from "@/components/shell/document-title";
 import { AgentChatPanel } from "@/components/agent-chat-panel";
 import { OnboardingProvider } from "@/components/onboarding/onboarding-provider";
 import { PasskeyPrompt } from "@/components/passkey/passkey-prompt";
@@ -56,6 +57,7 @@ function ConsoleShell({ children }: { children: React.ReactNode }) {
 
   return (
     <div className="flex h-dvh flex-col overflow-hidden">
+      <DocumentTitle />
       <TopBar
         onOpenPalette={() => setPaletteOpenSignal((n) => n + 1)}
         onToggleNav={projectId ? () => setNavOpen((o) => !o) : undefined}
