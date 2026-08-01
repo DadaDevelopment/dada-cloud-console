@@ -297,24 +297,65 @@ func (h *Handler) agentChatRecordAuditEvent(ctx context.Context, actorID uuid.UU
 
 	args := map[string]any{}
 	_ = json.Unmarshal([]byte(nonEmptyJSON(row.argsJSON)), &args)
-	metadata, err := json.Marshal(map[string]any{
-		"tool_name": row.toolName,
-		"action_id": row.id,
-		"args":      args,
-		"price_rub": row.priceRub,
-	})
-	if err != nil {
-		log.Printf("agent-chat: failed to marshal audit metadata for action %s: %v", row.id, err)
-		return
+
+	var projectID, envID uuid.UUID
+	if row.projectID != nil {
+		projectID = *row.projectID
+	}
+	if row.envID != nil {
+		envID = *row.envID
 	}
 
-	if _, err := h.pool.Exec(ctx,
-		`INSERT INTO audit_events (actor_id, project_id, action, resource_kind, resource_name, metadata)
-		 VALUES ($1, $2, $3, $4, $5, $6)`,
-		actorID, row.projectID, action, row.toolName, row.toolName, metadata,
-	); err != nil {
-		log.Printf("agent-chat: failed to record audit event for action %s: %v", row.id, err)
+	h.recordAudit(ctx, actorID, auditEntry{
+		ProjectID:     projectID,
+		EnvironmentID: envID,
+		Action:        action,
+		ResourceKind:  row.toolName,
+		ResourceName:  row.toolName,
+		Outcome:       auditOutcomeSuccess,
+		Metadata: map[string]any{
+			"tool_name": row.toolName,
+			"action_id": row.id,
+			"args":      redactAgentChatArgs(args),
+			"price_rub": row.priceRub,
+			"decision":  decision,
+		},
+	})
+}
+
+// agentChatSecretArgKeys are tool-argument names whose value is a user secret
+// (env var values, passwords, tokens, SSH keys). The audit trail records that
+// the agent proposed touching them and the human's decision -- never the value
+// itself, which must not leave the encrypted column it lives in.
+var agentChatSecretArgKeys = map[string]bool{
+	"value":           true,
+	"env":             true,
+	"password":        true,
+	"secret":          true,
+	"token":           true,
+	"api_key":         true,
+	"apikey":          true,
+	"private_key":     true,
+	"privatekey":      true,
+	"ssh_private_key": true,
+	"sshprivatekey":   true,
+	"credentials":     true,
+}
+
+// redactAgentChatArgs returns a copy of a pending action's tool arguments with
+// every secret-bearing value replaced by a fixed marker, so the audit row keeps
+// its forensic value (which tool, which key, which app) without carrying the
+// secret.
+func redactAgentChatArgs(args map[string]any) map[string]any {
+	redacted := make(map[string]any, len(args))
+	for k, v := range args {
+		if agentChatSecretArgKeys[strings.ToLower(k)] {
+			redacted[k] = "[redacted]"
+			continue
+		}
+		redacted[k] = v
 	}
+	return redacted
 }
 
 // agentChatConfirmSummary renders the human-readable line shown on a confirmation

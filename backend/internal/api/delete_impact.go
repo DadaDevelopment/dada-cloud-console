@@ -331,17 +331,35 @@ func (h *Handler) DeleteApp(c *gin.Context) {
 	if !ok {
 		return
 	}
+	appName := c.Param("appName")
+	reject := func(status int, reason string) {
+		h.recordAudit(c.Request.Context(), claims.UserID, auditEntry{
+			ProjectID:     projectID,
+			EnvironmentID: envID,
+			Action:        "DeleteApp",
+			ResourceKind:  "App",
+			ResourceName:  appName,
+			Outcome:       auditOutcomeFailure,
+			Metadata:      map[string]any{"reason": reason, "status": status},
+		})
+	}
+	rejectErr := func(status int, reason, msg string) {
+		reject(status, reason)
+		respondError(c, status, msg)
+	}
+
 	if _, err := h.requireWriter(c, claims.UserID, projectID); err != nil {
+		reject(c.Writer.Status(), "not_a_writer")
 		return
 	}
 	if ok, err := h.envBelongsToProject(c.Request.Context(), envID, projectID); err != nil {
-		respondError(c, http.StatusInternalServerError, "failed to verify environment")
+		rejectErr(http.StatusInternalServerError, "environment_check_failed", "failed to verify environment")
 		return
 	} else if !ok {
+		reject(http.StatusNotFound, "environment_not_in_project")
 		respondNotFound(c)
 		return
 	}
-	appName := c.Param("appName")
 
 	var exists bool
 	if err := h.pool.QueryRow(c.Request.Context(),
@@ -349,10 +367,11 @@ func (h *Handler) DeleteApp(c *gin.Context) {
 		     OR EXISTS(SELECT 1 FROM git_repos WHERE project_id = $1 AND environment_id = $2 AND app_name = $3)`,
 		projectID, envID, appName,
 	).Scan(&exists); err != nil {
-		respondError(c, http.StatusInternalServerError, "failed to look up app")
+		rejectErr(http.StatusInternalServerError, "app_lookup_failed", "failed to look up app")
 		return
 	}
 	if !exists {
+		reject(http.StatusNotFound, "app_not_found")
 		respondNotFound(c)
 		return
 	}
@@ -370,15 +389,19 @@ func (h *Handler) DeleteApp(c *gin.Context) {
 		claims.UserID, projectID, envID, appName, payloadBytes,
 	)
 	if err := scanOperation(row, &op); err != nil {
-		respondError(c, http.StatusInternalServerError, "failed to create operation")
+		rejectErr(http.StatusInternalServerError, "operation_insert_failed", "failed to create operation")
 		return
 	}
 
-	_, _ = h.pool.Exec(c.Request.Context(),
-		`INSERT INTO audit_events (actor_id, project_id, operation_id, action, resource_kind, resource_name)
-		 VALUES ($1, $2, $3, 'DeleteApp', 'App', $4)`,
-		claims.UserID, projectID, op.ID, appName,
-	)
+	h.recordAudit(c.Request.Context(), claims.UserID, auditEntry{
+		ProjectID:     projectID,
+		EnvironmentID: envID,
+		OperationID:   op.ID,
+		Action:        "DeleteApp",
+		ResourceKind:  "App",
+		ResourceName:  appName,
+		Outcome:       auditOutcomeSuccess,
+	})
 	h.notifyAuditEvent(claims, projectID, "DeleteApp", appName)
 
 	_, _ = h.pool.Exec(c.Request.Context(),
