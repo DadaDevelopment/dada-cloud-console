@@ -14,6 +14,15 @@ import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth";
 import { Spinner } from "@/components/ui/spinner";
 import { PENDING_REGISTRATION_KEY } from "@/lib/register-redirect";
+import { capturePasskeyActionStatus } from "@/lib/passkey";
+
+/**
+ * Keycloak reports the outcome of an Application-Initiated Action (passkey
+ * enrollment) as `?kc_action_status=…` on this redirect_uri. Snapshot it at
+ * module scope, before react-sso's `load()` rewrites the URL and before this
+ * route navigates on, so the console can record the result.
+ */
+if (typeof window !== "undefined") capturePasskeyActionStatus();
 
 /**
  * How long a {@link PENDING_REGISTRATION_KEY} marker stays valid. Bounds the

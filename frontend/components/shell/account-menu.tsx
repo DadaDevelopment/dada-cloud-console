@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { useAuth } from "@/lib/auth";
@@ -7,6 +7,13 @@ import { useProjectContext } from "@/lib/project-context";
 import { canApprove, roleColors } from "@/lib/rbac";
 import { adminApi } from "@/lib/api";
 import { useT } from "@/lib/i18n/console/context";
+import { isPasskeyModeEnabled, isPasskeySupported, startPasskeyEnrollment } from "@/lib/passkey";
+
+/**
+ * Stable no-op subscription for {@link useSyncExternalStore} reads of values
+ * that are fixed for the lifetime of the page (browser capabilities).
+ */
+const subscribeNever = () => () => {};
 
 /**
  * Top-right account menu. Consolidates identity, the project role badge, global
@@ -33,6 +40,17 @@ export function AccountMenu() {
   const [isPlatformAdmin, setIsPlatformAdmin] = useState(false);
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
+  /**
+   * WebAuthn availability is a browser fact, so the server snapshot is false
+   * and the client snapshot is the real answer — read through
+   * useSyncExternalStore rather than an effect so the two renders agree
+   * without a hydration mismatch or a cascading setState.
+   */
+  const canUsePasskeys = useSyncExternalStore(
+    subscribeNever,
+    () => isPasskeyModeEnabled() && isPasskeySupported(),
+    () => false,
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -97,6 +115,19 @@ export function AccountMenu() {
             <Link role="menuitem" href="/ai-studio" onClick={() => setOpen(false)} className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 dark:text-gray-200 dark:hover:bg-gray-800">
               AI Studio
             </Link>
+            {canUsePasskeys && (
+              <button
+                role="menuitem"
+                type="button"
+                onClick={() => {
+                  setOpen(false);
+                  void startPasskeyEnrollment(window.location.pathname + window.location.search);
+                }}
+                className="block w-full px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-50 dark:text-gray-200 dark:hover:bg-gray-800"
+              >
+                {t("passkey.menuItem")}
+              </button>
+            )}
             {showApprovals && (
               <Link role="menuitem" href="/admin/approvals" onClick={() => setOpen(false)} className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 dark:text-gray-200 dark:hover:bg-gray-800">
                 {t("shell.account.approvals")}

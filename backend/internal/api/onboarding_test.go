@@ -142,21 +142,30 @@ func TestOnboarding_InvalidStatus400(t *testing.T) {
 }
 
 // TestOnboardingKeysMatchFrontendRegistry guards the sync contract documented
-// on onboardingKeys: a campaign added to the frontend registry but missing
-// from the whitelist makes every progress report 400, so the tour re-runs on
-// every page load forever.
+// on onboardingKeys: a campaign added to the frontend but missing from the
+// whitelist makes every progress report 400, so the prompt re-runs on every
+// page load forever.
+//
+// Two frontend producers use the table. campaigns.ts holds the Joyride tours;
+// the passkey prompt is a modal rather than a tour, so it declares its key in
+// its own component while still storing progress here.
 func TestOnboardingKeysMatchFrontendRegistry(t *testing.T) {
-	const registry = "../../../frontend/lib/onboarding/campaigns.ts"
-	src, err := os.ReadFile(registry)
-	if err != nil {
-		t.Skipf("frontend registry not available (%v); skipping sync check", err)
+	sources := map[string]*regexp.Regexp{
+		"../../../frontend/lib/onboarding/campaigns.ts":           regexp.MustCompile(`key:\s*"([^"]+)"`),
+		"../../../frontend/components/passkey/passkey-prompt.tsx": regexp.MustCompile(`PASSKEY_KEY\s*=\s*"([^"]+)"`),
 	}
 	found := map[string]bool{}
-	for _, m := range regexp.MustCompile(`key:\s*"([^"]+)"`).FindAllStringSubmatch(string(src), -1) {
-		found[m[1]] = true
+	for path, re := range sources {
+		src, err := os.ReadFile(path)
+		if err != nil {
+			t.Skipf("frontend source not available (%v); skipping sync check", err)
+		}
+		for _, m := range re.FindAllStringSubmatch(string(src), -1) {
+			found[m[1]] = true
+		}
 	}
 	if len(found) == 0 {
-		t.Fatalf("no campaign keys parsed from %s", registry)
+		t.Fatalf("no onboarding keys parsed from the frontend sources")
 	}
 	for key := range found {
 		if !onboardingKeys[key] {

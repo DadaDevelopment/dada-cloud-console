@@ -15,6 +15,7 @@ import { GlobalErrorReporter } from "@/components/shell/global-error-reporter";
 import { SupportButton } from "@/components/shell/support-button";
 import { AgentChatPanel } from "@/components/agent-chat-panel";
 import { OnboardingProvider } from "@/components/onboarding/onboarding-provider";
+import { PasskeyPrompt } from "@/components/passkey/passkey-prompt";
 import { useT } from "@/lib/i18n/console/context";
 import { Bot } from "lucide-react";
 
@@ -27,6 +28,7 @@ function ConsoleShell({ children }: { children: React.ReactNode }) {
   const [navOpen, setNavOpen] = useState(false);
   // Agent chat panel is collapsed by default on every viewport.
   const [chatOpen, setChatOpen] = useState(false);
+  const [passkeyOpen, setPasskeyOpen] = useState(false);
 
   // Navigating (tapping a sidebar link) closes the drawer.
   useEffect(() => {
@@ -104,7 +106,8 @@ function ConsoleShell({ children }: { children: React.ReactNode }) {
           </button>
         )}
         <AgentChatPanel open={chatOpen} onClose={() => setChatOpen(false)} />
-        <OnboardingProvider suppressed={chatOpen || navOpen} />
+        <OnboardingProvider suppressed={chatOpen || navOpen || passkeyOpen} />
+        <PasskeyPrompt onOpenChange={setPasskeyOpen} />
       </div>
       {/* key forces the palette to mount/open when the top-bar button is clicked */}
       <CommandPalette key={paletteOpenSignal} initialOpen={paletteOpenSignal > 0} />

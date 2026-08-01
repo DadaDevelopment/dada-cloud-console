@@ -13,6 +13,7 @@ import (
 var onboardingKeys = map[string]bool{
 	"agent":        true,
 	"first-deploy": true,
+	"passkey":      true,
 }
 
 // onboardingStatuses is the set of accepted progress states.

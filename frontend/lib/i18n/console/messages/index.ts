@@ -33,6 +33,7 @@ import { deployHooks } from "./deploy-hooks";
 import { previews } from "./previews";
 import { agentChat } from "./agent-chat";
 import { onboarding } from "./onboarding";
+import { passkey } from "./passkey";
 import { payments } from "./payments";
 
 /**
@@ -76,5 +77,6 @@ export const messages: Messages = {
   ...previews,
   ...agentChat,
   ...onboarding,
+  ...passkey,
   ...payments,
 };
