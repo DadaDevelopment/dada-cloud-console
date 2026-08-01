@@ -17,6 +17,12 @@ export const billing: Messages = {
   "billing.upgradeCta": { ru: "Посмотреть планы", en: "View plans" },
   "billing.alertNearLimit": { ru: "Близко к лимиту", en: "Near limit" },
   "billing.alertText": { ru: "Использование {resource} достигло {pct}% от лимита плана.", en: "{resource} usage has reached {pct}% of your plan limit." },
+  "billing.alertAtLimit": { ru: "Лимит плана достигнут", en: "Plan limit reached" },
+  "billing.alertAtLimitText": { ru: "{resource}: занято {used} из {limit}.", en: "{resource}: {used} of {limit} used." },
+  "billing.alertAtLimitSafe": {
+    ru: "Всё, что уже работает, продолжает работать как обычно — это ограничение касается только создания новых. Чтобы добавить ещё, перейдите на другой тариф.",
+    en: "Everything already running keeps working as usual - this only limits creating new ones. Move to a higher plan to add more.",
+  },
   "billing.quota.apps": { ru: "Приложения", en: "Applications" },
   "billing.quota.databases": { ru: "Базы данных", en: "Databases" },
   "billing.quota.storage_gb": { ru: "Хранилище", en: "Storage" },

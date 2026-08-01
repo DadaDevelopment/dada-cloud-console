@@ -184,11 +184,24 @@ export default function BillingPage() {
     ? expiresAt.toLocaleDateString("ru", { day: "numeric", month: "long", year: "numeric" })
     : null;
 
-  const nearLimitResources = USAGE_KEYS.filter((k) => {
-    const item = usage[k];
-    if (!item || item.limit === null || item.limit === 0) return false;
-    return item.used / item.limit >= 0.8;
-  });
+  const quotaEnforced = account.quota_enforced === true;
+
+  const nearLimitResources = quotaEnforced
+    ? USAGE_KEYS.filter((k) => {
+        const item = usage[k];
+        if (!item || item.limit === null || item.limit === 0) return false;
+        const ratio = item.used / item.limit;
+        return ratio >= 0.8 && ratio < 1;
+      })
+    : [];
+
+  const atLimitResources = quotaEnforced
+    ? USAGE_KEYS.filter((k) => {
+        const item = usage[k];
+        if (!item || item.limit === null || item.limit === 0) return false;
+        return item.used / item.limit >= 1;
+      })
+    : [];
 
   const quotaLabel = (k: UsageKey): string => t(`billing.quota.${k}`);
 
@@ -235,7 +248,10 @@ export default function BillingPage() {
       )}
 
       {nearLimitResources.length > 0 && (
-        <div className="mb-6 rounded-xl border border-amber-200 dark:border-amber-900 bg-amber-50 dark:bg-amber-950/40 px-5 py-4">
+        <div
+          className="mb-6 rounded-xl border border-amber-200 dark:border-amber-900 bg-amber-50 dark:bg-amber-950/40 px-5 py-4"
+          data-ux="billing_quota_banner:near_limit"
+        >
           <p className="text-sm font-semibold text-amber-800 dark:text-amber-300">{t("billing.alertNearLimit")}</p>
           <ul className="mt-1 space-y-0.5">
             {nearLimitResources.map((k) => {
@@ -253,8 +269,38 @@ export default function BillingPage() {
         </div>
       )}
 
+      {atLimitResources.length > 0 && (
+        <div
+          className="mb-6 rounded-xl border border-blue-200 dark:border-blue-900 bg-blue-50 dark:bg-blue-950/40 px-5 py-4"
+          data-ux="billing_quota_banner:at_limit"
+        >
+          <p className="text-sm font-semibold text-blue-800 dark:text-blue-300">{t("billing.alertAtLimit")}</p>
+          <ul className="mt-1 space-y-0.5">
+            {atLimitResources.map((k) => {
+              const item = usage[k];
+              return (
+                <li key={k} className="text-sm text-blue-700 dark:text-blue-400">
+                  {t("billing.alertAtLimitText")
+                    .replace("{resource}", quotaLabel(k))
+                    .replace("{used}", String(formatUsedValue(k, item.used)))
+                    .replace("{limit}", String(formatLimitValue(k, item.limit) ?? item.limit))}
+                </li>
+              );
+            })}
+          </ul>
+          <p className="mt-2 text-sm text-blue-700 dark:text-blue-400">{t("billing.alertAtLimitSafe")}</p>
+          <a
+            href="#billing-plans"
+            data-ux="billing_quota_banner:view_plans"
+            className="mt-3 inline-block text-sm font-semibold text-blue-700 dark:text-blue-400 hover:underline"
+          >
+            {t("billing.upgradeCta")}
+          </a>
+        </div>
+      )}
+
       <div className="grid gap-6 lg:grid-cols-2">
-        <div className="rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-6 shadow-sm">
+        <div id="billing-plans" className="rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-6 shadow-sm">
           <p className="text-xs font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500">{t("billing.currentPlan")}</p>
           <p className="mt-2 text-3xl font-bold text-gray-900 dark:text-gray-100">{planName}</p>
           {account.plan !== "enterprise" && currentPlanInfo?.price_rub !== undefined && currentPlanInfo?.price_rub !== null && (

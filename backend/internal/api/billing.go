@@ -220,7 +220,7 @@ func (h *Handler) GetBillingPlans(c *gin.Context) {
 //
 // @ID          getBillingAccount
 // @Summary     Get billing account
-// @Description Returns the plan, quota usage, and monthly invoice preview for the org that owns the project.
+// @Description Returns the plan, quota usage, and monthly invoice preview for the org that owns the project. quota_enforced tells the caller whether quotas actually block new resource creation for this org right now (false when billing is disabled platform-wide, the org is exempt, or the org is inside its grace window) -- used=limit is informational, not a blocker, unless this is true.
 // @Tags        billing
 // @Produce     json
 // @Security    BearerAuth
@@ -267,6 +267,7 @@ func (h *Handler) GetBillingAccount(c *gin.Context) {
 		quotaGraceUntil = nil
 	}
 	period := fmt.Sprintf("%d-%02d", now.Year(), now.Month())
+	quotaEnforced := h.cfg.BillingEnabled && !h.quotaExempt(orgID) && !h.quotaGraceActive(c.Request.Context(), orgID)
 
 	lineItems := []gin.H{
 		{"kind": "plan", "label": plan.Key, "amount": plan.PriceRUB},
@@ -291,6 +292,7 @@ func (h *Handler) GetBillingAccount(c *gin.Context) {
 		"plan":              plan.Key,
 		"plan_expires_at":   planExpiresAt,
 		"quota_grace_until": quotaGraceUntil,
+		"quota_enforced":    quotaEnforced,
 		"quotas":            plan.Quotas,
 		"usage":             usage,
 		"invoicePreview": gin.H{
