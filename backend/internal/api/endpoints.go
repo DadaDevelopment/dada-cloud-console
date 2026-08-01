@@ -150,19 +150,34 @@ func (h *Handler) CreateEndpoint(c *gin.Context) {
 		return
 	}
 
+	fqdnAudit := ""
+	reject := func(status int, reason, msg string) {
+		h.recordAudit(c.Request.Context(), claims.UserID, auditEntry{
+			ProjectID:     projectID,
+			EnvironmentID: envID,
+			Action:        "CreatePublicApi",
+			ResourceKind:  "PublicApi",
+			ResourceName:  fqdnAudit,
+			Outcome:       auditOutcomeFailure,
+			Metadata:      map[string]any{"reason": reason, "status": status, "app_name": appName},
+		})
+		respondError(c, status, msg)
+	}
+
 	var req createEndpointRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		respondError(c, http.StatusBadRequest, err.Error())
+		reject(http.StatusBadRequest, "malformed_body", err.Error())
 		return
 	}
 
 	req.FQDN = normalizeDomain(req.FQDN)
+	fqdnAudit = req.FQDN
 	if req.FQDN == "" {
-		respondError(c, http.StatusBadRequest, "fqdn is required")
+		reject(http.StatusBadRequest, "missing_fqdn", "fqdn is required")
 		return
 	}
 	if !isValidDomain(req.FQDN) {
-		respondError(c, http.StatusBadRequest, "fqdn must be a valid domain name")
+		reject(http.StatusBadRequest, "invalid_fqdn", "fqdn must be a valid domain name")
 		return
 	}
 
@@ -179,7 +194,7 @@ func (h *Handler) CreateEndpoint(c *gin.Context) {
 
 	validSchemes := map[string]bool{"none": true, "platform-jwt": true, "internal": true}
 	if !validSchemes[req.AuthScheme] {
-		respondError(c, http.StatusBadRequest, "auth_scheme must be none, platform-jwt, or internal")
+		reject(http.StatusBadRequest, "invalid_auth_scheme", "auth_scheme must be none, platform-jwt, or internal")
 		return
 	}
 
@@ -189,11 +204,11 @@ func (h *Handler) CreateEndpoint(c *gin.Context) {
 		 WHERE project_id = $1 AND environment_id = $2 AND kind = 'App' AND name = $3`,
 		projectID, envID, appName,
 	).Scan(&appCount); err != nil {
-		respondError(c, http.StatusInternalServerError, "failed to verify app")
+		reject(http.StatusInternalServerError, "app_check_failed", "failed to verify app")
 		return
 	}
 	if appCount == 0 {
-		respondError(c, http.StatusNotFound, "app not found")
+		reject(http.StatusNotFound, "app_not_found", "app not found")
 		return
 	}
 
@@ -205,11 +220,11 @@ func (h *Handler) CreateEndpoint(c *gin.Context) {
 		 WHERE project_id = $1 AND environment_id = $2 AND kind = 'PublicApi' AND name = $3`,
 		projectID, envID, publicApiName,
 	).Scan(&existing); err != nil {
-		respondError(c, http.StatusInternalServerError, "failed to check uniqueness")
+		reject(http.StatusInternalServerError, "uniqueness_check_failed", "failed to check uniqueness")
 		return
 	}
 	if existing > 0 {
-		respondError(c, http.StatusConflict, "a domain with that FQDN already exists in this environment")
+		reject(http.StatusConflict, "fqdn_taken", "a domain with that FQDN already exists in this environment")
 		return
 	}
 
@@ -226,13 +241,13 @@ func (h *Handler) CreateEndpoint(c *gin.Context) {
 	}
 	payloadBytes, err := json.Marshal(payload)
 	if err != nil {
-		respondError(c, http.StatusInternalServerError, "failed to marshal payload")
+		reject(http.StatusInternalServerError, "marshal_failed", "failed to marshal payload")
 		return
 	}
 
 	tx, err := h.pool.Begin(c.Request.Context())
 	if err != nil {
-		respondError(c, http.StatusInternalServerError, "failed to create operation")
+		reject(http.StatusInternalServerError, "operation_begin_failed", "failed to create operation")
 		return
 	}
 	defer func() { _ = tx.Rollback(c.Request.Context()) }()
@@ -247,26 +262,36 @@ func (h *Handler) CreateEndpoint(c *gin.Context) {
 		claims.UserID, projectID, envID, publicApiName, payloadBytes,
 	), &op)
 	if err != nil {
-		respondError(c, http.StatusInternalServerError, "failed to create operation")
+		reject(http.StatusInternalServerError, "operation_insert_failed", "failed to create operation")
 		return
 	}
 
 	if err = seedOptimisticSnapshot(c.Request.Context(), tx, projectID, envID, "PublicApi", publicApiName, nil); err != nil {
-		respondError(c, http.StatusInternalServerError, "failed to create operation")
+		reject(http.StatusInternalServerError, "snapshot_seed_failed", "failed to create operation")
 		return
 	}
 
 	if err = tx.Commit(c.Request.Context()); err != nil {
-		respondError(c, http.StatusInternalServerError, "failed to create operation")
+		reject(http.StatusInternalServerError, "operation_commit_failed", "failed to create operation")
 		return
 	}
 
-	auditMeta, _ := json.Marshal(payload)
-	_, _ = h.pool.Exec(c.Request.Context(),
-		`INSERT INTO audit_events (actor_id, project_id, operation_id, action, resource_kind, resource_name, metadata)
-		 VALUES ($1, $2, $3, 'CreatePublicApi', 'PublicApi', $4, $5)`,
-		claims.UserID, projectID, op.ID, publicApiName, auditMeta,
-	)
+	h.recordAudit(c.Request.Context(), claims.UserID, auditEntry{
+		ProjectID:     projectID,
+		EnvironmentID: envID,
+		OperationID:   op.ID,
+		Action:        "CreatePublicApi",
+		ResourceKind:  "PublicApi",
+		ResourceName:  publicApiName,
+		Outcome:       auditOutcomeSuccess,
+		Metadata: map[string]any{
+			"app_name":        appName,
+			"fqdn":            req.FQDN,
+			"auth_enabled":    req.AuthEnabled,
+			"auth_scheme":     req.AuthScheme,
+			"swagger_enabled": req.SwaggerEnabled,
+		},
+	})
 
 	c.JSON(http.StatusAccepted, gin.H{
 		"operation": op,

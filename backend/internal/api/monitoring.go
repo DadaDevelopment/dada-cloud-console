@@ -96,18 +96,33 @@ func (h *Handler) CreateMonitoringApp(c *gin.Context) {
 		return
 	}
 
+	nameAudit := ""
+	reject := func(status int, reason, msg string) {
+		h.recordAudit(c.Request.Context(), claims.UserID, auditEntry{
+			ProjectID:     projectID,
+			EnvironmentID: envID,
+			Action:        "CreateMonitoringApp",
+			ResourceKind:  "Monitoring",
+			ResourceName:  nameAudit,
+			Outcome:       auditOutcomeFailure,
+			Metadata:      map[string]any{"reason": reason, "status": status},
+		})
+		respondError(c, status, msg)
+	}
+
 	var req createMonitoringRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		respondError(c, http.StatusBadRequest, err.Error())
+		reject(http.StatusBadRequest, "malformed_body", err.Error())
 		return
 	}
 	req.Name = strings.TrimSpace(req.Name)
+	nameAudit = req.Name
 	if req.Name == "" {
-		respondError(c, http.StatusBadRequest, "name is required")
+		reject(http.StatusBadRequest, "missing_name", "name is required")
 		return
 	}
 	if err := validateKubeName(req.Name); err != nil {
-		respondError(c, http.StatusBadRequest, err.Error())
+		reject(http.StatusBadRequest, "invalid_name", err.Error())
 		return
 	}
 
@@ -117,17 +132,17 @@ func (h *Handler) CreateMonitoringApp(c *gin.Context) {
 		`SELECT COUNT(*) FROM monitoring_apps WHERE project_id = $1 AND environment_id = $2 AND name = $3`,
 		projectID, envID, req.Name,
 	).Scan(&existing); err != nil {
-		respondError(c, http.StatusInternalServerError, "failed to check name uniqueness")
+		reject(http.StatusInternalServerError, "uniqueness_check_failed", "failed to check name uniqueness")
 		return
 	}
 	if existing > 0 {
-		respondError(c, http.StatusConflict, "a monitoring resource with that name already exists in this environment")
+		reject(http.StatusConflict, "name_taken", "a monitoring resource with that name already exists in this environment")
 		return
 	}
 
 	full, prefix, hash, err := generateMonitoringKey()
 	if err != nil {
-		respondError(c, http.StatusInternalServerError, "failed to issue api key")
+		reject(http.StatusInternalServerError, "key_generate_failed", "failed to issue api key")
 		return
 	}
 	scopes := []string{"metrics:write", "logs:write"}
@@ -140,16 +155,19 @@ func (h *Handler) CreateMonitoringApp(c *gin.Context) {
 		projectID, envID, req.Name, prefix, hash, scopes,
 	)
 	if err := row.Scan(&app.ID, &app.ProjectID, &app.EnvironmentID, &app.Name, &app.APIKeyPrefix, &app.Scopes, &app.CreatedAt); err != nil {
-		respondError(c, http.StatusInternalServerError, "failed to create monitoring resource")
+		reject(http.StatusInternalServerError, "monitoring_insert_failed", "failed to create monitoring resource")
 		return
 	}
 
-	// Best-effort audit trail.
-	_, _ = h.pool.Exec(c.Request.Context(),
-		`INSERT INTO audit_events (actor_id, project_id, action, resource_kind, resource_name, metadata)
-		 VALUES ($1, $2, 'CreateMonitoringApp', 'Monitoring', $3, '{}')`,
-		claims.UserID, projectID, req.Name,
-	)
+	h.recordAudit(c.Request.Context(), claims.UserID, auditEntry{
+		ProjectID:     projectID,
+		EnvironmentID: envID,
+		Action:        "CreateMonitoringApp",
+		ResourceKind:  "Monitoring",
+		ResourceName:  req.Name,
+		Outcome:       auditOutcomeSuccess,
+		Metadata:      map[string]any{"key_prefix": app.APIKeyPrefix},
+	})
 
 	c.JSON(http.StatusCreated, gin.H{
 		"monitoring_app": app,

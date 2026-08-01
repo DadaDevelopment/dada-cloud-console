@@ -214,9 +214,24 @@ func (h *Handler) CreateDeployHook(c *gin.Context) {
 		return
 	}
 
+	reject := func(status int, reason string, respond func()) {
+		h.recordAudit(c.Request.Context(), claims.UserID, auditEntry{
+			ProjectID:     projectID,
+			EnvironmentID: envID,
+			Action:        "CreateDeployHook",
+			ResourceKind:  "App",
+			ResourceName:  appName,
+			Outcome:       auditOutcomeFailure,
+			Metadata:      map[string]any{"reason": reason, "status": status},
+		})
+		respond()
+	}
+
 	var req createDeployHookRequest
 	if err := c.ShouldBindJSON(&req); err != nil && err != io.EOF {
-		respondError(c, http.StatusBadRequest, err.Error())
+		reject(http.StatusBadRequest, "malformed_body", func() {
+			respondError(c, http.StatusBadRequest, err.Error())
+		})
 		return
 	}
 
@@ -227,17 +242,21 @@ func (h *Handler) CreateDeployHook(c *gin.Context) {
 		projectID, envID, appName,
 	).Scan(&count)
 	if err != nil {
-		respondError(c, http.StatusInternalServerError, "failed to check app existence")
+		reject(http.StatusInternalServerError, "app_check_failed", func() {
+			respondError(c, http.StatusInternalServerError, "failed to check app existence")
+		})
 		return
 	}
 	if count == 0 {
-		respondNotFound(c)
+		reject(http.StatusNotFound, "app_not_found", func() { respondNotFound(c) })
 		return
 	}
 
 	plaintext, hash, prefix, err := generateDeployToken()
 	if err != nil {
-		respondError(c, http.StatusInternalServerError, "failed to generate token")
+		reject(http.StatusInternalServerError, "token_generate_failed", func() {
+			respondError(c, http.StatusInternalServerError, "failed to generate token")
+		})
 		return
 	}
 
@@ -250,16 +269,21 @@ func (h *Handler) CreateDeployHook(c *gin.Context) {
 		projectID, envID, appName, req.Name, hash, prefix, claims.UserID,
 	)
 	if err := scanDeployHook(row, &hook); err != nil {
-		respondError(c, http.StatusInternalServerError, "failed to create deploy hook")
+		reject(http.StatusInternalServerError, "hook_insert_failed", func() {
+			respondError(c, http.StatusInternalServerError, "failed to create deploy hook")
+		})
 		return
 	}
 
-	auditMeta, _ := json.Marshal(gin.H{"name": hook.Name, "token_prefix": hook.TokenPrefix})
-	_, _ = h.pool.Exec(c.Request.Context(),
-		`INSERT INTO audit_events (actor_id, project_id, action, resource_kind, resource_name, metadata)
-		 VALUES ($1, $2, 'CreateDeployHook', 'App', $3, $4)`,
-		claims.UserID, projectID, appName, auditMeta,
-	)
+	h.recordAudit(c.Request.Context(), claims.UserID, auditEntry{
+		ProjectID:     projectID,
+		EnvironmentID: envID,
+		Action:        "CreateDeployHook",
+		ResourceKind:  "App",
+		ResourceName:  appName,
+		Outcome:       auditOutcomeSuccess,
+		Metadata:      map[string]any{"name": hook.Name, "token_prefix": hook.TokenPrefix},
+	})
 	h.notifyDeployHook(projectID, "CreateDeployHook", appName, actorLabelFromClaims(claims))
 
 	baseURL := strings.TrimRight(h.cfg.PublicBaseURL, "/")
@@ -407,6 +431,19 @@ func (h *Handler) DeleteDeployHook(c *gin.Context) {
 		return
 	}
 
+	rejectRevoke := func(status int, reason string, respond func()) {
+		h.recordAudit(c.Request.Context(), claims.UserID, auditEntry{
+			ProjectID:     projectID,
+			EnvironmentID: envID,
+			Action:        "RevokeDeployHook",
+			ResourceKind:  "App",
+			ResourceName:  appName,
+			Outcome:       auditOutcomeFailure,
+			Metadata:      map[string]any{"reason": reason, "status": status, "hook_id": hookID},
+		})
+		respond()
+	}
+
 	var tokenPrefix string
 	err = h.pool.QueryRow(c.Request.Context(),
 		`UPDATE app_deploy_hooks SET revoked_at = now()
@@ -415,20 +452,25 @@ func (h *Handler) DeleteDeployHook(c *gin.Context) {
 		hookID, projectID, envID, appName,
 	).Scan(&tokenPrefix)
 	if err == pgx.ErrNoRows {
-		respondNotFound(c)
+		rejectRevoke(http.StatusNotFound, "hook_not_found_or_revoked", func() { respondNotFound(c) })
 		return
 	}
 	if err != nil {
-		respondError(c, http.StatusInternalServerError, "failed to revoke deploy hook")
+		rejectRevoke(http.StatusInternalServerError, "revoke_failed", func() {
+			respondError(c, http.StatusInternalServerError, "failed to revoke deploy hook")
+		})
 		return
 	}
 
-	revokeMeta, _ := json.Marshal(gin.H{"hook_id": hookID, "token_prefix": tokenPrefix})
-	_, _ = h.pool.Exec(c.Request.Context(),
-		`INSERT INTO audit_events (actor_id, project_id, action, resource_kind, resource_name, metadata)
-		 VALUES ($1, $2, 'RevokeDeployHook', 'App', $3, $4)`,
-		claims.UserID, projectID, appName, revokeMeta,
-	)
+	h.recordAudit(c.Request.Context(), claims.UserID, auditEntry{
+		ProjectID:     projectID,
+		EnvironmentID: envID,
+		Action:        "RevokeDeployHook",
+		ResourceKind:  "App",
+		ResourceName:  appName,
+		Outcome:       auditOutcomeSuccess,
+		Metadata:      map[string]any{"hook_id": hookID, "token_prefix": tokenPrefix},
+	})
 	h.notifyDeployHook(projectID, "RevokeDeployHook", appName, actorLabelFromClaims(claims))
 
 	c.Status(http.StatusNoContent)
