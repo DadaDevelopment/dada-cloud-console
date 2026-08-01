@@ -156,30 +156,51 @@ func (h *Handler) CreateDBBackup(c *gin.Context) {
 	if !ok {
 		return
 	}
+	name := c.Param("name")
+	reject := func(status int, reason string) {
+		h.recordAudit(c.Request.Context(), claims.UserID, auditEntry{
+			ProjectID:     projectID,
+			EnvironmentID: envID,
+			Action:        "CreateDatabaseBackup",
+			ResourceKind:  "ServiceDatabaseV2",
+			ResourceName:  name,
+			Outcome:       auditOutcomeFailure,
+			Metadata:      map[string]any{"reason": reason, "status": status},
+		})
+	}
+	rejectErr := func(status int, reason, msg string) {
+		reject(status, reason)
+		respondError(c, status, msg)
+	}
+
 	if _, err := h.requireWriter(c, claims.UserID, projectID); err != nil {
+		reject(c.Writer.Status(), "not_a_writer")
 		return
 	}
-	name := c.Param("name")
 	database, ok := h.lookupManagedDatabase(c, projectID, envID, name)
 	if !ok {
+		reject(c.Writer.Status(), "database_not_found")
 		return
 	}
 	if !h.kanister.Enabled() {
-		respondError(c, http.StatusServiceUnavailable, "database backups are not configured for this environment")
+		rejectErr(http.StatusServiceUnavailable, "backups_not_configured", "database backups are not configured for this environment")
 		return
 	}
 
 	backup, err := h.startDBBackup(c.Request.Context(), projectID, envID, name, database, models.DBBackupKindManual, &claims.UserID)
 	if err != nil {
-		respondError(c, http.StatusInternalServerError, "failed to start backup")
+		rejectErr(http.StatusInternalServerError, "backup_start_failed", "failed to start backup")
 		return
 	}
-	auditMeta, _ := json.Marshal(map[string]any{"backup_id": backup.ID, "database": database})
-	_, _ = h.pool.Exec(c.Request.Context(),
-		`INSERT INTO audit_events (actor_id, project_id, action, resource_kind, resource_name, metadata)
-		 VALUES ($1, $2, 'CreateDatabaseBackup', 'ServiceDatabaseV2', $3, $4)`,
-		claims.UserID, projectID, name, auditMeta,
-	)
+	h.recordAudit(c.Request.Context(), claims.UserID, auditEntry{
+		ProjectID:     projectID,
+		EnvironmentID: envID,
+		Action:        "CreateDatabaseBackup",
+		ResourceKind:  "ServiceDatabaseV2",
+		ResourceName:  name,
+		Outcome:       auditOutcomeSuccess,
+		Metadata:      map[string]any{"backup_id": backup.ID, "database": database},
+	})
 	c.JSON(http.StatusAccepted, gin.H{"backup": backup})
 }
 
@@ -265,27 +286,45 @@ func (h *Handler) RestoreServiceDatabase(c *gin.Context) {
 	if !ok {
 		return
 	}
+	name := c.Param("name")
+	reject := func(status int, reason string) {
+		h.recordAudit(c.Request.Context(), claims.UserID, auditEntry{
+			ProjectID:     projectID,
+			EnvironmentID: envID,
+			Action:        "RestoreServiceDatabase",
+			ResourceKind:  "ServiceDatabaseV2",
+			ResourceName:  name,
+			Outcome:       auditOutcomeFailure,
+			Metadata:      map[string]any{"reason": reason, "status": status},
+		})
+	}
+	rejectErr := func(status int, reason, msg string) {
+		reject(status, reason)
+		respondError(c, status, msg)
+	}
+
 	if _, err := h.requireWriter(c, claims.UserID, projectID); err != nil {
+		reject(c.Writer.Status(), "not_a_writer")
 		return
 	}
-	name := c.Param("name")
 	database, ok := h.lookupManagedDatabase(c, projectID, envID, name)
 	if !ok {
+		reject(c.Writer.Status(), "database_not_found")
 		return
 	}
 	if !h.kanister.Enabled() {
-		respondError(c, http.StatusServiceUnavailable, "database restore is not configured for this environment")
+		rejectErr(http.StatusServiceUnavailable, "restore_not_configured", "database restore is not configured for this environment")
 		return
 	}
 
 	var req restoreDatabaseRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		respondError(c, http.StatusBadRequest, err.Error())
+		rejectErr(http.StatusBadRequest, "malformed_body", err.Error())
 		return
 	}
 	backupID, err := uuid.Parse(req.BackupID)
 	if err != nil {
-		respondError(c, http.StatusBadRequest, "backup_id is required")
+		rejectErr(http.StatusBadRequest, "missing_backup_id", "backup_id is required")
 		return
 	}
 
@@ -294,15 +333,16 @@ func (h *Handler) RestoreServiceDatabase(c *gin.Context) {
 		dbBackupSelect+` WHERE id = $1 AND project_id = $2 AND environment_id = $3 AND resource_name = $4`,
 		backupID, projectID, envID, name), &backup)
 	if err == pgx.ErrNoRows {
+		reject(http.StatusNotFound, "backup_not_found")
 		respondNotFound(c)
 		return
 	}
 	if err != nil {
-		respondError(c, http.StatusInternalServerError, "failed to look up backup")
+		rejectErr(http.StatusInternalServerError, "backup_lookup_failed", "failed to look up backup")
 		return
 	}
 	if backup.Status != models.DBBackupStatusReady {
-		respondError(c, http.StatusBadRequest, "backup is not ready to restore")
+		rejectErr(http.StatusBadRequest, "backup_not_ready", "backup is not ready to restore")
 		return
 	}
 
@@ -322,7 +362,7 @@ func (h *Handler) RestoreServiceDatabase(c *gin.Context) {
 		claims.UserID, projectID, envID, name, payloadBytes,
 	)
 	if err = scanOperation(row, &op); err != nil {
-		respondError(c, http.StatusInternalServerError, "failed to create operation")
+		rejectErr(http.StatusInternalServerError, "operation_insert_failed", "failed to create operation")
 		return
 	}
 
@@ -339,16 +379,20 @@ func (h *Handler) RestoreServiceDatabase(c *gin.Context) {
 		_, _ = h.pool.Exec(c.Request.Context(),
 			`UPDATE operations SET status = 'Failed', error_message = $2, updated_at = NOW() WHERE id = $1`,
 			op.ID, err.Error())
-		respondError(c, http.StatusInternalServerError, "failed to start restore")
+		rejectErr(http.StatusInternalServerError, "actionset_create_failed", "failed to start restore")
 		return
 	}
 
-	auditMeta, _ := json.Marshal(payload)
-	_, _ = h.pool.Exec(c.Request.Context(),
-		`INSERT INTO audit_events (actor_id, project_id, operation_id, action, resource_kind, resource_name, metadata)
-		 VALUES ($1, $2, $3, 'RestoreServiceDatabase', 'ServiceDatabaseV2', $4, $5)`,
-		claims.UserID, projectID, op.ID, name, auditMeta,
-	)
+	h.recordAudit(c.Request.Context(), claims.UserID, auditEntry{
+		ProjectID:     projectID,
+		EnvironmentID: envID,
+		OperationID:   op.ID,
+		Action:        "RestoreServiceDatabase",
+		ResourceKind:  "ServiceDatabaseV2",
+		ResourceName:  name,
+		Outcome:       auditOutcomeSuccess,
+		Metadata:      map[string]any{"database": database, "backup_id": backup.ID.String()},
+	})
 	c.JSON(http.StatusAccepted, gin.H{"operation": op, "message": "ServiceDatabase restore queued"})
 }
 
@@ -387,17 +431,34 @@ func (h *Handler) DownloadDBBackup(c *gin.Context) {
 	if !ok {
 		return
 	}
+	name := c.Param("name")
+	reject := func(status int, reason string) {
+		h.recordAudit(c.Request.Context(), claims.UserID, auditEntry{
+			ProjectID:     projectID,
+			EnvironmentID: envID,
+			Action:        "DownloadServiceDatabaseBackup",
+			ResourceKind:  "ServiceDatabaseV2",
+			ResourceName:  name,
+			Outcome:       auditOutcomeFailure,
+			Metadata:      map[string]any{"reason": reason, "status": status},
+		})
+	}
+	rejectErr := func(status int, reason, msg string) {
+		reject(status, reason)
+		respondError(c, status, msg)
+	}
+
 	if _, err := h.requireWriter(c, claims.UserID, projectID); err != nil {
+		reject(c.Writer.Status(), "not_a_writer")
 		return
 	}
-	name := c.Param("name")
 	backupID, err := uuid.Parse(c.Param("backupId"))
 	if err != nil {
-		respondError(c, http.StatusBadRequest, "invalid backup id")
+		rejectErr(http.StatusBadRequest, "invalid_backup_id", "invalid backup id")
 		return
 	}
 	if !h.dbBackupPresigner.Enabled() {
-		respondError(c, http.StatusServiceUnavailable, "backup download is not configured for this environment")
+		rejectErr(http.StatusServiceUnavailable, "download_not_configured", "backup download is not configured for this environment")
 		return
 	}
 
@@ -406,15 +467,16 @@ func (h *Handler) DownloadDBBackup(c *gin.Context) {
 		dbBackupSelect+` WHERE id = $1 AND project_id = $2 AND environment_id = $3 AND resource_name = $4`,
 		backupID, projectID, envID, name), &backup)
 	if err == pgx.ErrNoRows {
+		reject(http.StatusNotFound, "backup_not_found")
 		respondNotFound(c)
 		return
 	}
 	if err != nil {
-		respondError(c, http.StatusInternalServerError, "failed to look up backup")
+		rejectErr(http.StatusInternalServerError, "backup_lookup_failed", "failed to look up backup")
 		return
 	}
 	if backup.Status != models.DBBackupStatusReady {
-		respondError(c, http.StatusConflict, "backup is not ready to download")
+		rejectErr(http.StatusConflict, "backup_not_ready", "backup is not ready to download")
 		return
 	}
 
@@ -425,16 +487,19 @@ func (h *Handler) DownloadDBBackup(c *gin.Context) {
 	filename := fmt.Sprintf("%s-%s.dump", backup.DatabaseName, backupID.String()[:8])
 	downloadURL, err := h.dbBackupPresigner.PresignGet(c.Request.Context(), objectKey, filename, dbBackupDownloadTTL)
 	if err != nil {
-		respondError(c, http.StatusInternalServerError, "failed to prepare download")
+		rejectErr(http.StatusInternalServerError, "presign_failed", "failed to prepare download")
 		return
 	}
 
-	auditMeta, _ := json.Marshal(map[string]any{"backup_id": backup.ID.String()})
-	_, _ = h.pool.Exec(c.Request.Context(),
-		`INSERT INTO audit_events (actor_id, project_id, action, resource_kind, resource_name, metadata)
-		 VALUES ($1, $2, 'DownloadServiceDatabaseBackup', 'ServiceDatabaseV2', $3, $4)`,
-		claims.UserID, projectID, name, auditMeta,
-	)
+	h.recordAudit(c.Request.Context(), claims.UserID, auditEntry{
+		ProjectID:     projectID,
+		EnvironmentID: envID,
+		Action:        "DownloadServiceDatabaseBackup",
+		ResourceKind:  "ServiceDatabaseV2",
+		ResourceName:  name,
+		Outcome:       auditOutcomeSuccess,
+		Metadata:      map[string]any{"backup_id": backup.ID.String()},
+	})
 
 	c.JSON(http.StatusOK, gin.H{
 		"url":        downloadURL,
