@@ -52,6 +52,13 @@ func newFakePodFS() *fakePodFS {
 
 func (f *fakePodFS) Enabled() bool { return true }
 
+// disabledPodFS stands for an environment without pod exec. It is spelled out
+// instead of calling cloudtask.NewPodFS(), which reports itself enabled
+// whenever the process happens to run inside a cluster - as CI does.
+type disabledPodFS struct{ *fakePodFS }
+
+func (disabledPodFS) Enabled() bool { return false }
+
 func (f *fakePodFS) FindRunningPod(context.Context, string, string) (string, string, error) {
 	return "pod-1", "app", nil
 }
@@ -480,7 +487,7 @@ func TestListAppFiles_NotConfigured_ServiceUnavailable(t *testing.T) {
 	pool := testVolumeExportPool(t)
 	projectID, envID, appName := seedVolumeExportApp(t, pool, `{"volume":{"path":"/data","size":"1Gi"}}`)
 
-	h := newAppFilesHandler(pool, cloudtask.NewPodFS())
+	h := newAppFilesHandler(pool, disabledPodFS{newFakePodFS()})
 	c, rec := newAppFilesCtx(t, http.MethodGet, "", projectID, envID, appName, nil)
 	h.ListAppFiles(c)
 
