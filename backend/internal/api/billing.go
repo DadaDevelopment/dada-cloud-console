@@ -95,7 +95,7 @@ func (h *Handler) countResource(ctx context.Context, orgID, resource string) (in
 		// Two queries here would eventually disagree, and a customer refused a box
 		// while their own usage page shows them under the limit has been given a
 		// reason to distrust every other number we publish.
-		return countOrgBoxMinutes(ctx, h.pool, orgID, time.Now().UTC())
+		return countOrgBoxMinutes(ctx, h.pool, orgID, h.clock())
 
 	case "team_members":
 		return 0, nil

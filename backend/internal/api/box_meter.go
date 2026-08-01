@@ -793,7 +793,7 @@ func (h *Handler) GetBoxUsage(c *gin.Context) {
 	if !ok {
 		return
 	}
-	from, to, err := parseBoxUsageWindow(c.Query("from"), c.Query("to"), time.Now().UTC())
+	from, to, err := parseBoxUsageWindow(c.Query("from"), c.Query("to"), h.clock())
 	if err != nil {
 		respondError(c, http.StatusBadRequest, err.Error())
 		return

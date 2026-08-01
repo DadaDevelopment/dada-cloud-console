@@ -790,6 +790,16 @@ func TestSpendCap_DiskAccrualWarnsBeforeItDeletes(t *testing.T) {
 
 // --- the box_minutes quota, through the existing gate ---
 
+// boxQuotaTestClock is a fixed instant safely inside a calendar month, for tests
+// that inject Handler.now. countOrgBoxMinutes and GetBoxUsage both window on
+// monthStart(now); a fixture built from a real time.Now() reach-backs 12 to 500+
+// minutes into the past, which crosses into the previous month whenever the test
+// happens to run in the first few hours after a UTC month rollover, failing for a
+// reason that has nothing to do with the code under test.
+func boxQuotaTestClock() time.Time {
+	return time.Date(2026, time.June, 15, 12, 0, 0, 0, time.UTC)
+}
+
 // testPlansWithBoxMinutes is testPlans() with a box-minute allowance, small enough
 // that a fixture can exhaust it.
 func testPlansWithBoxMinutes() []pricing.Plan {
@@ -829,25 +839,24 @@ func TestCreateBox_BoxMinutesQuotaUsesTheExistingForbiddenShape(t *testing.T) {
 	}
 	t.Cleanup(func() { _, _ = pool.Exec(context.Background(), `DELETE FROM projects WHERE id = $1`, projectID) })
 
+	fixedNow := boxQuotaTestClock()
 	h := &Handler{
 		pool:         pool,
 		cfg:          &config.Config{BillingEnabled: true},
 		billingPlans: testPlansWithBoxMinutes(),
+		now:          func() time.Time { return fixedNow },
 	}
 	claims := godClaims(seedUser(t, pool))
 
-	// Under the allowance: a box is created.
 	c, rec := newBoxCtx(t, http.MethodPost, `{}`, boxParams(projectID, ""), claims)
 	h.CreateBox(c)
 	if rec.Code != http.StatusAccepted {
 		t.Fatalf("first box: code = %d, want 202; body=%s", rec.Code, rec.Body.String())
 	}
 
-	// Burn the free plan's 30 minutes. The ledger is what the gate reads, so this is
-	// the same path a real month of use takes.
 	billedBox := uuid.New()
 	t.Cleanup(func() { _, _ = pool.Exec(context.Background(), `DELETE FROM box_usage WHERE box_id = $1`, billedBox) })
-	seedBoxUsage(t, pool, billedBox, projectID, orgID, boxUsageKindActive, 30, 0.05, time.Now().UTC())
+	seedBoxUsage(t, pool, billedBox, projectID, orgID, boxUsageKindActive, 30, 0.05, fixedNow)
 
 	c2, rec2 := newBoxCtx(t, http.MethodPost, `{}`, boxParams(projectID, ""), claims)
 	h.CreateBox(c2)
@@ -876,7 +885,7 @@ func TestBoxMinutesQuotaIgnoresSleepingDiskAccrual(t *testing.T) {
 
 	boxID := uuid.New()
 	t.Cleanup(func() { _, _ = pool.Exec(context.Background(), `DELETE FROM box_usage WHERE box_id = $1`, boxID) })
-	now := time.Now().UTC()
+	now := boxQuotaTestClock()
 	seedBoxUsage(t, pool, boxID, projectID, orgID, boxUsageKindSuspendedDisk, 500, 0.001, now)
 	seedBoxUsage(t, pool, boxID, projectID, orgID, boxUsageKindActive, 7, 0.05, now.Add(-time.Hour))
 
@@ -923,10 +932,15 @@ func TestGetBoxUsage_ReportsActualBasisAndTheWindow(t *testing.T) {
 	pool := testOptimisticPool(t)
 	orgID := "org-usage-" + uuid.NewString()[:8]
 	projectID, boxID, boxName := seedMeteredBox(t, pool, orgID, models.BoxStatusReady)
-	h := &Handler{pool: pool, cfg: boxMeterTestConfig(), billingPlans: testPlansWithBoxMinutes()}
+	now := boxQuotaTestClock()
+	h := &Handler{
+		pool:         pool,
+		cfg:          boxMeterTestConfig(),
+		billingPlans: testPlansWithBoxMinutes(),
+		now:          func() time.Time { return now },
+	}
 	claims := godClaims(seedUser(t, pool))
 
-	now := time.Now().UTC()
 	seedBoxUsage(t, pool, boxID, projectID, orgID, boxUsageKindActive, 12, 0.05, now)
 	seedBoxUsage(t, pool, boxID, projectID, orgID, boxUsageKindSuspendedDisk, 4, 0.001, now)
 

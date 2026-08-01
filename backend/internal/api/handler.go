@@ -158,6 +158,20 @@ type Handler struct {
 	// Portainer, Kanister and the S3 resolvers. See box_runtime.go, and note that
 	// the production adapter per ADR-019 is a Pod in the existing cluster, NOT this.
 	boxStack *boxRuntimeStack
+
+	now func() time.Time
+}
+
+// clock is the injected clock, mirroring BoxMeter's: box_minutes quota
+// (checkQuota) and GetBoxUsage both window on the current calendar month, and a
+// test that cannot choose "now" can only assert on wall-clock coincidence with the
+// next UTC month boundary. h.now is nil in every real Handler, so production
+// always takes the time.Now() branch; only a test sets it.
+func (h *Handler) clock() time.Time {
+	if h.now != nil {
+		return h.now()
+	}
+	return time.Now().UTC()
 }
 
 func (h *Handler) optionalClaims(c *gin.Context) (*auth.Claims, bool) {
