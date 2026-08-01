@@ -1,5 +1,6 @@
 "use client";
 import { useCallback, useEffect, useState } from "react";
+import Link from "next/link";
 import { useParams, useSearchParams } from "next/navigation";
 import { buildsApi } from "@/lib/api";
 import type { Build } from "@/lib/types";
@@ -123,6 +124,19 @@ export default function BuildDetailPage() {
 
           {error && (
             <div className="mb-4 rounded-lg border border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-950/40 px-4 py-3 text-sm text-red-700 dark:text-red-300">{error}</div>
+          )}
+
+          {build.status === "success" && (
+            <div className="mb-4 flex items-center justify-between gap-4 rounded-lg border border-green-200 dark:border-green-900 bg-green-50 dark:bg-green-950/40 px-4 py-3 text-sm text-green-700 dark:text-green-300">
+              <p className="font-medium">{t("apps.builds.success.heading")}</p>
+              <Link
+                href={`/projects/${projectId}/apps/${appName}${envId ? `?envId=${envId}` : ""}`}
+                data-ux="build_success_cta:open_app"
+                className="shrink-0 rounded-lg bg-green-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-green-700"
+              >
+                {t("apps.builds.success.openApp")}
+              </Link>
+            </div>
           )}
 
           {build.status === "failed" && (build.fail_reason || build.error_message) && (

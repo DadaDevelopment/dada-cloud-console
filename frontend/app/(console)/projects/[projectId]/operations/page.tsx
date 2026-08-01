@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { useParams, useSearchParams } from "next/navigation";
 import { projectsApi } from "@/lib/api";
 import type { Operation, OperationStatus } from "@/lib/types";
@@ -30,6 +31,17 @@ function isInProgress(status: OperationStatus): boolean {
 
 function isSucceeded(status: OperationStatus): boolean {
   return status === "Ready" || status === "Committed";
+}
+
+/**
+ * Actions after which the app named in `resource_name` no longer exists (or
+ * moved out of this project), so linking to `/apps/{resource_name}` would
+ * 404. Everything else on an App-kind operation is safe to route back to.
+ */
+const APP_GONE_ACTIONS = new Set(["DeleteApp", "MoveApp"]);
+
+function canOpenApp(op: Operation): boolean {
+  return op.resource_kind === "App" && !APP_GONE_ACTIONS.has(op.action);
 }
 
 function statusColor(status: OperationStatus): string {
@@ -291,6 +303,18 @@ export default function OperationsPage() {
 
                 {isExpanded && (
                   <div className="border-t border-gray-100 dark:border-gray-800 bg-gray-50 dark:bg-gray-900 px-5 py-4">
+                    {isHighlighted && isSucceeded(op.status) && canOpenApp(op) && (
+                      <div className="mb-4 flex items-center justify-between gap-4 rounded-lg border border-green-200 dark:border-green-900 bg-green-50 dark:bg-green-950/40 px-4 py-3 text-sm text-green-700 dark:text-green-300">
+                        <p className="font-medium">{t("operations.success.heading")}</p>
+                        <Link
+                          href={`/projects/${projectId}/apps/${op.resource_name}`}
+                          data-ux="operation_success_cta:open_app"
+                          className="shrink-0 rounded-lg bg-green-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-green-700"
+                        >
+                          {t("operations.success.openApp", { name: op.resource_name })}
+                        </Link>
+                      </div>
+                    )}
                     <dl className="grid grid-cols-2 gap-x-6 gap-y-3 text-sm sm:grid-cols-3">
                       <div>
                         <dt className="text-xs font-medium uppercase tracking-wide text-gray-400 dark:text-gray-500">{t("operations.detail.operationId")}</dt>

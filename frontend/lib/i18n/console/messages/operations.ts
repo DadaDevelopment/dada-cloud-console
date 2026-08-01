@@ -45,6 +45,9 @@ export const operations: Messages = {
   "operations.detail.updated": { ru: "Обновлено", en: "Updated" },
   "operations.detail.error": { ru: "Ошибка", en: "Error" },
 
+  "operations.success.heading": { ru: "Готово", en: "Done" },
+  "operations.success.openApp": { ru: "Открыть приложение {name}", en: "Open application {name}" },
+
   "operations.error.load": {
     ru: "Не удалось загрузить операции",
     en: "Failed to load operations",
