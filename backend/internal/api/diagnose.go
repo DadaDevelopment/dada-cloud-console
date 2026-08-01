@@ -224,7 +224,8 @@ func (h *Handler) diagnoseCore(ctx context.Context, appName, reason string, entr
 	if len(lines) == 0 {
 		return noLogsDiagnosis(reason), []string{}, nil
 	}
-	truncated := truncateLogLines(lines, diagnoseMaxLogChars)
+	collapsed := collapseRepeatedBlocks(lines)
+	truncated := truncateLogLines(collapsed, diagnoseMaxLogChars)
 	excerpt = lastLines(truncated, diagnoseExcerptLines)
 	messages := buildDiagnoseMessages(appName, reason, strings.Join(truncated, "\n"))
 	result, err := h.agentChatLLM.StreamChatCompletion(ctx, messages, nil, endUser, nil)
@@ -246,6 +247,81 @@ func buildLogLines(entries []logsearch.LogEntry) []string {
 		lines[len(entries)-1-i] = strings.TrimSpace(e.Timestamp + " " + e.Message)
 	}
 	return lines
+}
+
+// crashloopRepeatMarkerFormat renders the marker line left in place of a
+// collapsed repeating block. It carries no timestamp of its own: it stands
+// for a span of time, not a single moment.
+const crashloopRepeatMarkerFormat = "... предыдущие %d строк повторились ещё %d раз (крашлуп)"
+
+// collapseRepeatedBlocks folds a crash-loop's identical restart cycles into a
+// single copy plus a marker line, so neither the model's token budget nor the
+// user's excerpt is spent re-reading the same traceback fifty times. Lines
+// are compared by message text only (the part after the first space), since
+// the timestamp differs on every restart and would otherwise defeat any
+// comparison. At each position it searches block periods from 1 up to half
+// the remaining lines, keeps the period whose (period * repeat-count) covers
+// the most lines, and requires at least two full repeats before collapsing --
+// anything less is just an ordinary non-repeating line, which is copied
+// through untouched. A trailing partial repeat (fewer lines than a full
+// period) is never counted as a repeat, so it survives in the output instead
+// of being silently dropped.
+func collapseRepeatedBlocks(lines []string) []string {
+	n := len(lines)
+	if n == 0 {
+		return lines
+	}
+	messages := make([]string, n)
+	for i, l := range lines {
+		messages[i] = logLineMessage(l)
+	}
+
+	out := make([]string, 0, n)
+	for i := 0; i < n; {
+		bestPeriod, bestReps := 0, 1
+		maxPeriod := (n - i) / 2
+		for p := 1; p <= maxPeriod; p++ {
+			reps := 1
+			for i+(reps+1)*p <= n && blockRepeatsAt(messages, i, p, reps) {
+				reps++
+			}
+			if reps >= 2 && p*reps > bestPeriod*bestReps {
+				bestPeriod, bestReps = p, reps
+			}
+		}
+		if bestReps >= 2 {
+			out = append(out, lines[i:i+bestPeriod]...)
+			out = append(out, fmt.Sprintf(crashloopRepeatMarkerFormat, bestPeriod, bestReps-1))
+			i += bestPeriod * bestReps
+			continue
+		}
+		out = append(out, lines[i])
+		i++
+	}
+	return out
+}
+
+// blockRepeatsAt reports whether the p-line block starting at i also occurs,
+// unchanged, at occurrence number reps counted from i (i.e. at
+// i+reps*p..i+reps*p+p).
+func blockRepeatsAt(messages []string, i, p, reps int) bool {
+	base := i + reps*p
+	for k := 0; k < p; k++ {
+		if messages[base+k] != messages[i+k] {
+			return false
+		}
+	}
+	return true
+}
+
+// logLineMessage strips the leading timestamp off a "<ts> <message>" line
+// built by buildLogLines, returning just the message part that
+// collapseRepeatedBlocks compares on.
+func logLineMessage(line string) string {
+	if idx := strings.IndexByte(line, ' '); idx >= 0 {
+		return line[idx+1:]
+	}
+	return ""
 }
 
 // truncateLogLines keeps the most recent lines within a maxChars budget,

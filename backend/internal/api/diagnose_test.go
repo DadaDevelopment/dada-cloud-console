@@ -49,6 +49,105 @@ func TestBuildLogLines(t *testing.T) {
 	}
 }
 
+func TestCollapseRepeatedBlocks(t *testing.T) {
+	t.Run("5 identical 4-line traceback cycles collapse to one block plus marker", func(t *testing.T) {
+		cycleMessages := []string{
+			"panic: nil pointer dereference",
+			"goroutine 1 [running]:",
+			"main.run()",
+			"/app/main.go:42 +0x1a",
+		}
+		var lines []string
+		ts := 0
+		for rep := 0; rep < 5; rep++ {
+			for _, msg := range cycleMessages {
+				lines = append(lines, fmt.Sprintf("2026-08-01T10:00:%02dZ %s", ts, msg))
+				ts++
+			}
+		}
+		got := collapseRepeatedBlocks(lines)
+		if len(got) != 5 {
+			t.Fatalf("expected 4 cycle lines + 1 marker = 5 lines, got %d: %#v", len(got), got)
+		}
+		marker := got[4]
+		if !strings.Contains(marker, "ещё 4 раз") || !strings.Contains(marker, "крашлуп") {
+			t.Fatalf("expected marker to say 'ещё 4 раз' and mention крашлуп, got %q", marker)
+		}
+		if !strings.Contains(marker, "4 строк") {
+			t.Fatalf("expected marker to report a 4-line period, got %q", marker)
+		}
+	})
+
+	t.Run("non-repeating logs are left completely unchanged", func(t *testing.T) {
+		lines := []string{
+			"2026-08-01T10:00:00Z boot",
+			"2026-08-01T10:00:01Z connecting to db",
+			"2026-08-01T10:00:02Z listening on :8080",
+			"2026-08-01T10:00:03Z request GET /health",
+		}
+		got := collapseRepeatedBlocks(lines)
+		if !reflect.DeepEqual(got, lines) {
+			t.Fatalf("collapseRepeatedBlocks() = %#v, want unchanged %#v", got, lines)
+		}
+	})
+
+	t.Run("a trailing partial cycle is not lost", func(t *testing.T) {
+		lines := []string{
+			"2026-08-01T10:00:00Z panic: boom",
+			"2026-08-01T10:00:01Z stack trace line",
+			"2026-08-01T10:00:02Z panic: boom",
+			"2026-08-01T10:00:03Z stack trace line",
+			"2026-08-01T10:00:04Z panic: boom",
+		}
+		got := collapseRepeatedBlocks(lines)
+		last := got[len(got)-1]
+		if !strings.Contains(last, "panic: boom") {
+			t.Fatalf("expected the trailing partial repeat to survive in the output, got %#v", got)
+		}
+		joined := strings.Join(got, "\n")
+		if !strings.Contains(joined, "крашлуп") {
+			t.Fatalf("expected the full pair to still be collapsed with a marker, got %#v", got)
+		}
+	})
+
+	t.Run("excerpt built from collapsed text contains the marker", func(t *testing.T) {
+		cycle := []string{"error: connection refused", "retrying in 5s"}
+		var lines []string
+		for rep := 0; rep < 6; rep++ {
+			for j, msg := range cycle {
+				lines = append(lines, fmt.Sprintf("2026-08-01T10:%02d:%02dZ %s", rep, j, msg))
+			}
+		}
+		collapsed := collapseRepeatedBlocks(lines)
+		excerpt := lastLines(collapsed, diagnoseExcerptLines)
+		found := false
+		for _, l := range excerpt {
+			if strings.Contains(l, "крашлуп") {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatalf("expected the user-facing excerpt to contain the collapse marker, got %#v", excerpt)
+		}
+	})
+
+	t.Run("a single repeating line (period 1) also collapses", func(t *testing.T) {
+		lines := []string{
+			"2026-08-01T10:00:00Z connection refused, retrying",
+			"2026-08-01T10:00:01Z connection refused, retrying",
+			"2026-08-01T10:00:02Z connection refused, retrying",
+			"2026-08-01T10:00:03Z connection refused, retrying",
+		}
+		got := collapseRepeatedBlocks(lines)
+		if len(got) != 2 {
+			t.Fatalf("expected 1 line + 1 marker = 2 lines, got %d: %#v", len(got), got)
+		}
+		if !strings.Contains(got[1], "ещё 3 раз") || !strings.Contains(got[1], "1 строк") {
+			t.Fatalf("expected marker for a 1-line period repeated 4 times total, got %q", got[1])
+		}
+	})
+}
+
 func TestTruncateLogLines(t *testing.T) {
 	lines := []string{"aaaaa", "bbbbb", "ccccc", "ddddd"}
 	cases := []struct {
