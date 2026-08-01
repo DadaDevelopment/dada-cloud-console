@@ -1,9 +1,9 @@
 import type { Metadata } from "next";
 
 const SITE_URL = "https://cloud.dada-tuda.ru";
-const TITLE = "Dada Box — a body for your agent | Private preview";
+const TITLE = "Dada Box — a body for your agent";
 const DESCRIPTION =
-  "A root box in seconds: your Claude, Cursor or Codex connects and works like it owns the machine. Attach a database and S3 mid-flight, then crystallize a surviving prototype into a permanent VM with a domain. Private preview.";
+  "A root box boots itself in seconds from a warm pool: your Claude, Cursor or Codex connects and works like it owns the machine. A public address with TLS, billed per active minute. Crystallizing into a permanent VM is next.";
 
 export const metadata: Metadata = {
   title: TITLE,

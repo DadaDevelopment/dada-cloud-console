@@ -44,6 +44,24 @@ export interface BoxCopy {
     steps: { cmd: string; title: string; desc: string }[];
   };
 
+  /** "Connect in 60 seconds" — the actual working path, right after "how it works". */
+  connect: {
+    title: string;
+    subtitle: string;
+    tabClaude: string;
+    tabOther: string;
+    claudeStep1Label: string;
+    claudeStep1Cmd: string;
+    claudeStep2Label: string;
+    claudeStep2Cmd: string;
+    otherLabel: string;
+    otherCmd: string;
+    otherNote: string;
+    copyLabel: string;
+    footNote: string;
+    helpLink: string;
+  };
+
   demo: {
     title: string;
     subtitle: string;
@@ -122,11 +140,11 @@ export interface BoxCopy {
 }
 
 const ru: BoxCopy = {
-  badge: "Приватный превью",
+  badge: "Доступно сейчас",
   heroTitle: "Тело для твоего агента",
   heroSubtitle:
     "Бокс с рутом поднимается за секунды. Твой Claude, Cursor или Codex подключается и работает как на своей машине — только это не твоя машина. Прототип выжил — кристаллизуй его в постоянную VM с доменом.",
-  heroPrimary: "Получить доступ",
+  heroPrimary: "Подключить агента",
   heroSecondary: "Посмотреть, как это работает",
   heroNote: "Своего агента приводишь сам. Токены мы не перепродаём.",
 
@@ -187,6 +205,27 @@ const ru: BoxCopy = {
         desc: "Прототип выжил — тот же объект становится постоянной VM с доменом и TLS. Не пересоздание, не миграция: продолжение жизни того же окружения.",
       },
     ],
+  },
+
+  connect: {
+    title: "Подключить за 60 секунд",
+    subtitle:
+      "Без формы и без ожидания оператора: агент сам поднимает бокс, как только у него есть доступ к платформе.",
+    tabClaude: "Claude Code",
+    tabOther: "Любой другой агент",
+    claudeStep1Label: "Добавь маркетплейс",
+    claudeStep1Cmd: "/plugin marketplace add DadaDevelopment/dada-cloud-console",
+    claudeStep2Label: "Поставь плагин",
+    claudeStep2Cmd: "/plugin install dada-cloud@dada-cloud",
+    otherLabel: "Cursor, Codex, Claude Desktop — любой MCP-клиент. Конфиг руками:",
+    otherCmd:
+      '{\n  "mcpServers": {\n    "dada": {\n      "command": "npx",\n      "args": [\n        "-y",\n        "mcp-remote",\n        "https://console.dada-tuda.ru/mcp",\n        "--static-oauth-client-info",\n        "{\\"client_id\\":\\"dada-mcp\\"}"\n      ]\n    }\n  }\n}',
+    otherNote:
+      "client_id прибит явно — анонимная авто-регистрация клиента у нас закрыта, без этого флага клиент не подключится.",
+    copyLabel: "Скопировать",
+    footNote:
+      "Нужен аккаунт Dada Cloud, вход через браузер. Free-план даёт 300 box-минут — этого хватит попробовать.",
+    helpLink: "Нужна помощь с переездом — поговорим",
   },
 
   demo: {
@@ -286,22 +325,20 @@ const ru: BoxCopy = {
   honesty: {
     title: "Что уже работает, а что нет",
     subtitle:
-      "Это приватный превью, а не готовый сервис. Не хотим, чтобы кто-то узнал границу продукта на своём проекте.",
+      "Box — не приватный превью на ручной выдаче, это работает прямо сейчас, самообслуживанием. Кристаллизация — ещё нет, вот честная граница.",
     worksTitle: "Работает сейчас",
     works: [
-      "управляемый Postgres, S3, домены и TLS — это наша основная платформа, она в проде",
-      "поднятие и настройка постоянных VM — работает, этим живут текущие клиенты",
-      "MCP-доступ агента к ресурсам платформы",
-      "выдача боксов на превью — вручную, оператором, после заявки",
+      "самообслуживание — бокс поднимается по вызову агента, без оператора и без заявки",
+      "старт из тёплого пула — Ready за 350-450 мс, проверено живым MCP-вызовом",
+      "публичный адрес с TLS — https://<box>-<port>.box.dada-tuda.ru отдаёт 200 с валидным сертификатом",
+      "тарификация по активным минутам — считаем реальные деньги, не оценку",
+      "управляемый Postgres, S3, домены и TLS для постоянных VM — основная платформа, в проде",
     ],
     notYetTitle: "Ещё нет",
     notYet: [
-      "самообслуживание: бокс пока не поднимается по кнопке без нас",
-      "кристаллизация в один шаг — сейчас это несколько операций с нашим участием",
-      "тарификация за минуты",
-      "гарантии по времени старта: обещать секунды публично будем, когда это будет правдой всегда",
-      "перенос без простоя: простой есть, он короткий — десятки секунд, больше на объёмных данных. Называем его цифрой, а не «без перезапуска»",
-      "перенос процессов без перезапуска: спрос измеряем, но пока считаем это честно нереализуемым",
+      "кристаллизация в один шаг — инструмент есть, но сквозной прогон бокс → прод вживую не доказан",
+      "перенос без простоя — короткая пауза на финальной синхронизации остаётся, это не ноль",
+      "гарантии времени старта в худшем случае — публично называем медиану, не SLA на хвост",
     ],
   },
 
@@ -386,11 +423,11 @@ const ru: BoxCopy = {
 };
 
 const en: BoxCopy = {
-  badge: "Private preview",
+  badge: "Available now",
   heroTitle: "A body for your agent",
   heroSubtitle:
     "A root box boots in seconds. Your Claude, Cursor or Codex connects and works like it owns the machine — except it isn't your machine. Prototype survived? Crystallize it into a permanent VM with a domain.",
-  heroPrimary: "Request access",
+  heroPrimary: "Connect your agent",
   heroSecondary: "See how it works",
   heroNote: "You bring your own agent. We don't resell tokens.",
 
@@ -451,6 +488,27 @@ const en: BoxCopy = {
         desc: "The prototype survived — the same object becomes a permanent VM with a domain and TLS. Not a rebuild, not a migration: the same environment, continued.",
       },
     ],
+  },
+
+  connect: {
+    title: "Connect in 60 seconds",
+    subtitle:
+      "No form, no waiting on an operator: the agent boots its own box the moment it has access to the platform.",
+    tabClaude: "Claude Code",
+    tabOther: "Any other agent",
+    claudeStep1Label: "Add the marketplace",
+    claudeStep1Cmd: "/plugin marketplace add DadaDevelopment/dada-cloud-console",
+    claudeStep2Label: "Install the plugin",
+    claudeStep2Cmd: "/plugin install dada-cloud@dada-cloud",
+    otherLabel: "Cursor, Codex, Claude Desktop — any MCP client. Config by hand:",
+    otherCmd:
+      '{\n  "mcpServers": {\n    "dada": {\n      "command": "npx",\n      "args": [\n        "-y",\n        "mcp-remote",\n        "https://console.dada-tuda.ru/mcp",\n        "--static-oauth-client-info",\n        "{\\"client_id\\":\\"dada-mcp\\"}"\n      ]\n    }\n  }\n}',
+    otherNote:
+      "client_id is pinned on purpose — anonymous client auto-registration is closed on our side, and a client without this flag will not connect.",
+    copyLabel: "Copy",
+    footNote:
+      "Needs a Dada Cloud account, signed in through the browser. The free plan gives 300 box-minutes — enough to try it.",
+    helpLink: "Need help migrating instead — let's talk",
   },
 
   demo: {
@@ -550,22 +608,20 @@ const en: BoxCopy = {
   honesty: {
     title: "What works today and what doesn't",
     subtitle:
-      "This is a private preview, not a finished service. We'd rather you didn't discover the product's edges on your own project.",
+      "Box isn't a hand-provisioned private preview anymore — it's self-service, working right now. Crystallization is the honest edge that's still open.",
     worksTitle: "Works today",
     works: [
-      "managed Postgres, S3, domains and TLS — our core platform, in production",
-      "provisioning and configuring permanent VMs — running customers rely on it",
-      "MCP access from an agent to platform resources",
-      "preview boxes — provisioned by hand, by an operator, after your request",
+      "self-service — a box boots on the agent's own call, no operator and no request",
+      "boot from a warm pool — Ready in 350-450ms, verified with a live MCP call",
+      "a public address with TLS — https://<box>-<port>.box.dada-tuda.ru serves 200 with a valid certificate",
+      "per-active-minute billing — we track real money, not an estimate",
+      "managed Postgres, S3, domains and TLS for permanent VMs — our core platform, in production",
     ],
     notYetTitle: "Not yet",
     notYet: [
-      "self-service: a box doesn't boot on a button press without us",
-      "one-step crystallization — today it's several operations with us involved",
-      "per-minute billing",
-      "start-time guarantees: we'll advertise seconds once it's always true",
-      "zero-downtime promotion: there is downtime, it is short — tens of seconds, longer on heavy data. We quote the number rather than claiming \"no restart\"",
-      "moving processes without a restart: we're measuring demand, but today we consider it honestly out of reach",
+      "one-step crystallization — the tool exists, but an end-to-end box-to-production run hasn't been proven live",
+      "zero-downtime promotion — there's still a short pause on the final sync, that's not zero",
+      "worst-case start-time guarantees — we quote the median publicly, not a tail SLA",
     ],
   },
 

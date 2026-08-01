@@ -9,17 +9,22 @@ import { BOX_UTM_SOURCE, reportBoxPageView } from "@/lib/box-events";
 import { boxCopy } from "@/lib/box-copy";
 import { localeHref } from "@/lib/site";
 import { BoxDemo } from "@/components/marketing/box-demo";
+import { BoxConnect } from "@/components/marketing/box-connect";
 import { BoxAccessForm } from "@/components/marketing/box-access-form";
 import { FaqList } from "@/components/marketing/sections";
 import { FaqJsonLd } from "@/components/marketing/faq-jsonld";
 
 /**
- * Dada Box private-preview landing, rendered at /box (RU) and /en/box (EN).
+ * Dada Box landing, rendered at /box (RU) and /en/box (EN).
  *
- * This is a fake-door experiment, not a shipped product page — see
- * docs/product/box-product-brief.md for what it tests and for the honesty rules
- * the copy has to keep (§6). The "what works / what doesn't" section is not
- * filler: it is the reason we can run a door test without burning trust.
+ * Started as a fake-door experiment (docs/product/box-product-brief.md) but the
+ * mechanics it was testing — self-service boot from a warm pool, public TLS
+ * addresses, per-minute billing — are live now, proven against the production
+ * MCP endpoint. The "connect in 60 seconds" section carries the primary CTA
+ * because that is the door that now actually opens; the request form stays as
+ * the fallback for anyone who wants a hand instead of a config snippet. The
+ * "what works / what doesn't" section keeps the remaining honesty rules: it is
+ * not filler, it is what stops the copy from claiming more than we've proven.
  */
 
 const STEP_ICONS = [Zap, Plug, Database, Gem];
@@ -42,6 +47,7 @@ function ctaHref(path: string, locale: "ru" | "en", hash: string): string {
 export function BoxLanding() {
   const { locale } = useLang();
   const copy = boxCopy[locale];
+  const ctaConnect = ctaHref("/box", locale, "connect");
   const ctaAccess = ctaHref("/box", locale, "access");
   const ctaDemo = ctaHref("/box", locale, "demo");
 
@@ -71,7 +77,8 @@ export function BoxLanding() {
             <p className="mt-6 max-w-2xl text-lg text-white/70 sm:text-xl">{copy.heroSubtitle}</p>
             <div className="mt-9 flex flex-wrap items-center gap-3">
               <Link
-                href={ctaAccess}
+                href={ctaConnect}
+                data-ux="box_connect:hero_cta"
                 className="inline-flex items-center gap-2 rounded-md bg-blue-600 px-7 py-3 text-sm font-semibold text-white transition-colors hover:bg-blue-700"
               >
                 <Box className="h-4 w-4" />
@@ -138,6 +145,9 @@ export function BoxLanding() {
           </div>
         </div>
       </section>
+
+      {/* Connect in 60 seconds — the door that actually opens */}
+      <BoxConnect copy={copy.connect} helpHref={ctaAccess} />
 
       {/* Scripted terminal replay */}
       <BoxDemo
@@ -256,7 +266,8 @@ export function BoxLanding() {
           </h2>
           <p className="mx-auto mt-4 max-w-xl text-lg text-white/70">{copy.heroNote}</p>
           <Link
-            href={ctaAccess}
+            href={ctaConnect}
+            data-ux="box_connect:closing_cta"
             className="mt-8 inline-flex items-center gap-2 rounded-md bg-blue-600 px-8 py-3 text-sm font-semibold text-white transition-colors hover:bg-blue-700"
           >
             <Rocket className="h-4 w-4" />
