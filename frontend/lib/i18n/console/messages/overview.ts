@@ -86,6 +86,16 @@ export const overview: Messages = {
   "overview.secondary.git.hint": { ru: "Репозитории и билды", en: "Repositories and builds" },
   "overview.secondary.billing.hint": { ru: "Тарифный план и квоты", en: "Plan and quotas" },
 
+  "overview.health.title": { ru: "Приложения", en: "Apps" },
+  "overview.health.unhealthyCount": { ru: "{count} с проблемой", en: "{count} unhealthy" },
+  "overview.health.view": { ru: "Смотреть →", en: "View →" },
+  "overview.health.unknown": { ru: "нет данных", en: "no data" },
+  "overview.health.reason.crash": { ru: "падает в цикле (CrashLoopBackOff)", en: "crash looping (CrashLoopBackOff)" },
+  "overview.health.reason.oom": { ru: "убито нехваткой памяти (OOMKilled)", en: "killed for running out of memory (OOMKilled)" },
+  "overview.health.reason.image": { ru: "не может скачать образ (ImagePullBackOff)", en: "can't pull its image (ImagePullBackOff)" },
+  "overview.health.reason.volume": { ru: "заканчивается место на диске", en: "running out of disk space" },
+  "overview.health.reason.failed": { ru: "сборка не удалась", en: "build failed" },
+
   "overview.section.recentOps": { ru: "Последние операции", en: "Recent operations" },
   "overview.allOps": { ru: "Все операции →", en: "All operations →" },
 

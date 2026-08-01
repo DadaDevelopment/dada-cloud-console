@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import { projectsApi, appsApi, databasesApi, customDomainsApi } from "@/lib/api";
-import type { Project, Environment } from "@/lib/types";
+import type { Project, Environment, ResourceSnapshot } from "@/lib/types";
 import { StateChip } from "@/components/ui/state-chip";
 import { Spinner } from "@/components/ui/spinner";
 import { Breadcrumb } from "@/components/ui/breadcrumb";
@@ -13,6 +13,7 @@ import { useT } from "@/lib/i18n/console/context";
 import { CostCard } from "@/components/cost/cost-card";
 import { TemplateDeployCards } from "@/components/console/template-deploy-cards";
 import { UploadDeployCard } from "@/components/deploy/upload-deploy";
+import { ProjectAppHealthList } from "@/components/console/project-app-health-list";
 
 type Counts = { apps: number; appsReady: number; dbs: number; domainsVerified: number; domainsPending: number };
 
@@ -23,6 +24,7 @@ export default function ProjectOverviewPage() {
 
   const [project, setProject] = useState<Project | null>(null);
   const [counts, setCounts] = useState<Counts | null>(null);
+  const [projectApps, setProjectApps] = useState<ResourceSnapshot[]>([]);
   const [envId, setEnvId] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -45,6 +47,7 @@ export default function ProjectOverviewPage() {
           customDomainsApi.listAuthorizations(projectId).then((r) => r.authorizations).catch(() => []),
         ]);
         if (cancelled) return;
+        setProjectApps(apps);
         setCounts({
           apps: apps.length,
           appsReady: apps.filter((a) => a.phase === "Ready").length,
@@ -133,6 +136,8 @@ export default function ProjectOverviewPage() {
           )}
         </div>
       )}
+
+      {projectApps.length > 0 && <ProjectAppHealthList apps={projectApps} projectId={projectId} />}
 
       <CostCard projectId={projectId} />
 
