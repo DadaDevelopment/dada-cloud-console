@@ -3,12 +3,14 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"sync"
 	"time"
 
 	"github.com/dada-tuda/console/backend/internal/auth"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 // Audit actions for the passive steps of a user path. Until these existed the
@@ -162,13 +164,63 @@ func (h *Handler) recordAudit(ctx context.Context, actorID uuid.UUID, e auditEnt
 			meta = b
 		}
 	}
-	_, _ = h.pool.Exec(ctx,
-		`INSERT INTO audit_events
-		   (actor_id, project_id, environment_id, operation_id, action, resource_kind, resource_name, outcome, metadata)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
-		actorID, nullableUUID(e.ProjectID), nullableUUID(e.EnvironmentID), nullableUUID(e.OperationID),
-		e.Action, e.ResourceKind, e.ResourceName, outcome, meta,
-	)
+	projectID, environmentID, operationID := e.ProjectID, e.EnvironmentID, e.OperationID
+	unresolved := map[string]string{}
+
+	for attempt := 0; attempt < 4; attempt++ {
+		payload := meta
+		if len(unresolved) > 0 {
+			payload = mergeAuditMetadata(meta, unresolved)
+		}
+		_, err := h.pool.Exec(ctx,
+			`INSERT INTO audit_events
+			   (actor_id, project_id, environment_id, operation_id, action, resource_kind, resource_name, outcome, metadata)
+			 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+			actorID, nullableUUID(projectID), nullableUUID(environmentID), nullableUUID(operationID),
+			e.Action, e.ResourceKind, e.ResourceName, outcome, payload,
+		)
+		if err == nil {
+			return
+		}
+		var pgErr *pgconn.PgError
+		if !errors.As(err, &pgErr) || pgErr.Code != pgForeignKeyViolation {
+			return
+		}
+		switch pgErr.ConstraintName {
+		case "audit_events_project_id_fkey":
+			unresolved["unresolved_project_id"] = projectID.String()
+			projectID = uuid.Nil
+		case "audit_events_environment_id_fkey":
+			unresolved["unresolved_environment_id"] = environmentID.String()
+			environmentID = uuid.Nil
+		case "audit_events_operation_id_fkey":
+			unresolved["unresolved_operation_id"] = operationID.String()
+			operationID = uuid.Nil
+		default:
+			return
+		}
+	}
+}
+
+// pgForeignKeyViolation is PostgreSQL's SQLSTATE for a violated foreign key.
+const pgForeignKeyViolation = "23503"
+
+// mergeAuditMetadata folds the unresolved-reference notes into an already
+// marshalled metadata object, so the id that could not be stored in its column
+// is still readable on the row.
+func mergeAuditMetadata(meta []byte, extra map[string]string) []byte {
+	merged := map[string]any{}
+	if err := json.Unmarshal(meta, &merged); err != nil {
+		merged = map[string]any{}
+	}
+	for k, v := range extra {
+		merged[k] = v
+	}
+	out, err := json.Marshal(merged)
+	if err != nil {
+		return meta
+	}
+	return out
 }
 
 // recordAuditAsync writes the row off the request's hot path with its own
