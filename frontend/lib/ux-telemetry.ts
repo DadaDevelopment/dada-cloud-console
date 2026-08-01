@@ -235,22 +235,68 @@ export function trackPageview(path: string): void {
   trackUxEvent("pageview", p, from ? { from } : {});
 }
 
+const LABEL_MAX = 40;
+
+const IDENTIFIER_TOKEN =
+  /(^|\s)(\S*@\S*|\S*\.(ru|com|net|org|io|dev|app|local|cloud)\b\S*|[0-9a-f]{8}-[0-9a-f]{4}\S*|\S*[-.][a-z0-9]*(gmail|yandex|mail|icloud|outlook|proton)[-.]\S*|\S*\d{4,}\S*)(?=\s|$)/gi;
+
+/**
+ * Strips anything that could name a person or a resource out of a click label.
+ *
+ * Labels are read off the page, so whatever the page renders can end up in
+ * telemetry: a prod row read `div:fonbet-valueReadynexus.dada-tuda.ru/artem<...>-gmail-com`
+ * -- one app row's whole text, carrying the owner's email in a registry path.
+ * A telemetry column is the wrong place for that under 152-FZ, and it is also
+ * unusable for analysis: every row becomes its own unique target.
+ *
+ * Anything that looks like an address, a host, a uuid or a long number is
+ * dropped rather than masked, because a masked identifier is still one bucket
+ * per user. An empty result means the caller falls back to a structural name.
+ */
+export function sanitizeLabel(raw: string): string {
+  const cleaned = raw.replace(IDENTIFIER_TOKEN, " ").replace(/\s+/g, " ").trim();
+  return cleaned.slice(0, LABEL_MAX);
+}
+
+/**
+ * Reads the control's own words, not its subtree's.
+ *
+ * `textContent` on a row-shaped control (a card with role="button") returns
+ * every descendant's text glued together, which is both a leak and a label
+ * nobody can group by. Direct child text nodes are what the author actually
+ * wrote on this control.
+ */
+function ownText(el: Element): string {
+  let out = "";
+  el.childNodes.forEach((node) => {
+    if (node.nodeType === 3) out += node.nodeValue ?? "";
+  });
+  return out.replace(/\s+/g, " ").trim();
+}
+
 function textLabel(el: Element): string {
   const aria = el.getAttribute("aria-label");
-  if (aria) return aria;
+  if (aria) return sanitizeLabel(aria);
   const title = el.getAttribute("title");
-  if (title) return title;
+  if (title) return sanitizeLabel(title);
+  const own = ownText(el);
+  if (own) return sanitizeLabel(own);
   const text = (el.textContent ?? "").replace(/\s+/g, " ").trim();
-  return text.slice(0, 60);
+  if (text.length > LABEL_MAX * 2) return "";
+  return sanitizeLabel(text);
 }
 
 /**
  * Describes the clicked control by NAME, never by content the user typed.
  *
  * Preference order: an explicit `data-ux` marker, then `data-testid`, then the
- * accessible label. For fields only the tag/type/name is reported -- the value
- * is never read, and password fields return "" so the click is dropped
- * entirely.
+ * accessible label, sanitized. For fields only the tag/type/name is reported --
+ * the value is never read, and password fields return "" so the click is
+ * dropped entirely.
+ *
+ * A control with no safe label keeps its structural name (`div[role=button]`)
+ * instead of borrowing its children's text: the click still counts, it just
+ * stops carrying whoever was rendered inside it.
  */
 function describeTarget(el: Element): { target: string; props: Record<string, unknown> } {
   const marked = el.closest("[data-ux]");
@@ -267,8 +313,14 @@ function describeTarget(el: Element): { target: string; props: Record<string, un
   if (tag === "input" || tag === "textarea" || tag === "select") {
     const type = control.getAttribute("type") ?? tag;
     if (type === "password") return { target: "", props: {} };
-    const name = control.getAttribute("name") ?? control.getAttribute("id") ?? "";
-    return { target: `${tag}:${type}${name ? `:${name}` : ""}`, props: { kind: "field" } };
+    const name =
+      control.getAttribute("name") ??
+      control.getAttribute("id") ??
+      control.getAttribute("aria-label") ??
+      control.getAttribute("placeholder") ??
+      "";
+    const named = name ? sanitizeLabel(name) : "";
+    return { target: `${tag}:${type}${named ? `:${named}` : ""}`, props: { kind: "field" } };
   }
 
   const testid = control.getAttribute("data-testid");
@@ -283,7 +335,8 @@ function describeTarget(el: Element): { target: string; props: Record<string, un
   const disabled =
     control.hasAttribute("disabled") || control.getAttribute("aria-disabled") === "true";
   if (disabled) props.disabled = true;
-  return { target: label ? `${tag}:${label}` : tag, props };
+  const role = control.getAttribute("role");
+  return { target: label ? `${tag}:${label}` : role ? `${tag}[${role}]` : tag, props };
 }
 
 function onDocumentClick(ev: Event): void {

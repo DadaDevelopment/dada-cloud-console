@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"regexp"
 	"strings"
 	"time"
 
@@ -123,6 +124,39 @@ func (h *Handler) uxUserFromCookie(ctx context.Context, c *gin.Context) *uuid.UU
 	return &id
 }
 
+// uxTargetIdentifier matches the fragments a control label must never carry
+// into telemetry: an address, a host, a uuid, or a long number.
+var uxTargetIdentifier = regexp.MustCompile(`(?i)\S*@\S*|\S*\.(?:ru|com|net|org|io|dev|app|local|cloud)\b\S*|[0-9a-f]{8}-[0-9a-f]{4}\S*|\S*(?:gmail|yandex|icloud|outlook|proton)\S*|\S*[0-9]{4,}\S*`)
+
+// scrubUXTarget strips identifiers out of a click label before it is stored.
+//
+// The client already sanitizes, but this ingest is unauthenticated and older
+// bundles stay cached in browsers for days, so the client is not where this can
+// be enforced. A prod row read `div:fonbet-valueReadynexus.dada-tuda.ru/<user's
+// email as a registry path>` -- one app row's whole text, carrying a customer's
+// address into a telemetry column that has no business holding it (152-FZ).
+//
+// Dropped rather than masked: a masked identifier is still one bucket per user,
+// which is also what made those rows useless for path analysis. The event
+// itself survives with whatever safe words remain, or with none.
+func scrubUXTarget(target string) string {
+	if target == "" {
+		return target
+	}
+	prefix, label := "", target
+	if i := strings.Index(target, ":"); i > 0 && i <= uxTargetPrefixMax {
+		prefix, label = target[:i+1], target[i+1:]
+	}
+	if !uxTargetIdentifier.MatchString(label) {
+		return target
+	}
+	return prefix + strings.Join(strings.Fields(uxTargetIdentifier.ReplaceAllString(label, " ")), " ")
+}
+
+// uxTargetPrefixMax bounds the `tag:` part the scrub keeps verbatim. Knowing a
+// click was on a link is worth keeping even when its label is dropped whole.
+const uxTargetPrefixMax = 16
+
 // RecordUXEvents stores a batch of client-side UX events into ux_events.
 //
 // This is the half of the user path that audit_events cannot see. That journal
@@ -191,7 +225,7 @@ func (h *Handler) RecordUXEvents(c *gin.Context) {
 			 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
 			userID, anonID, sessionID, typ,
 			trimTo(e.Path, uxPathMax),
-			trimTo(e.Target, uxTargetMax),
+			scrubUXTarget(trimTo(e.Target, uxTargetMax)),
 			props,
 			parseUXTime(e.At, now),
 		)
