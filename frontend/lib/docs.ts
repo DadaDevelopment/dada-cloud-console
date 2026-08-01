@@ -3,8 +3,11 @@ import path from "node:path";
 import type { Metadata } from "next";
 
 const DOCS_DIR = path.join(process.cwd(), "content/docs");
+const RU_DOCS_DIR = path.join(DOCS_DIR, "ru");
 const SLUG_RE = /^[a-z0-9-]+$/i;
 const SITE_URL = "https://cloud.dada-tuda.ru";
+
+export type DocLocale = "ru" | "en";
 
 function isArticle(file: string): boolean {
   return file.endsWith(".md") && file.toLowerCase() !== "readme.md";
@@ -26,12 +29,28 @@ export function getDocSlugs(): string[] {
 /**
  * Raw Markdown for a guide, or `null` when the slug is unknown or unsafe. The
  * slug is validated against a strict allowlist to prevent path traversal.
+ *
+ * `content/docs/<slug>.md` is the English original and the source of truth for
+ * which guides exist; `content/docs/ru/<slug>.md` is its translation. A RU
+ * request falls back to the English body when the translation is missing, so a
+ * half-translated tree still serves every guide.
  */
-export function getDocMarkdown(slug: string): string | null {
+export function getDocMarkdown(slug: string, locale: DocLocale = "en"): string | null {
   if (!SLUG_RE.test(slug) || slug.toLowerCase() === "readme") return null;
   const file = path.join(DOCS_DIR, `${slug}.md`);
   if (path.dirname(file) !== DOCS_DIR || !fs.existsSync(file)) return null;
+  if (locale === "ru") {
+    const ru = path.join(RU_DOCS_DIR, `${slug}.md`);
+    if (path.dirname(ru) === RU_DOCS_DIR && fs.existsSync(ru)) return fs.readFileSync(ru, "utf8");
+  }
   return fs.readFileSync(file, "utf8");
+}
+
+/** Whether a RU reader gets the English original because no translation exists yet. */
+export function isDocTranslated(slug: string): boolean {
+  if (!SLUG_RE.test(slug) || slug.toLowerCase() === "readme") return false;
+  const ru = path.join(RU_DOCS_DIR, `${slug}.md`);
+  return path.dirname(ru) === RU_DOCS_DIR && fs.existsSync(ru);
 }
 
 /**
@@ -99,7 +118,7 @@ export function getDocTitle(markdown: string): string {
  * section (its purpose statement), so every guide gets a unique, on-topic snippet.
  */
 export function getDocSummary(markdown: string): string {
-  const body = bodyAfterHeading(markdown, /^##\s+What it's for/i)
+  const body = bodyAfterHeading(markdown, /^##\s+(What it's for|Зачем это нужно)/i)
     .filter((l) => !/^\s*>/.test(l))
     .map((l) => l.replace(/^\s*([-*+]|\d+\.)\s+/, ""))
     .join(" ");
@@ -116,11 +135,11 @@ export function getDocSummary(markdown: string): string {
 export function getDocSteps(markdown: string): Array<{ name: string; text: string }> {
   const lines = markdown.split(/\r?\n/);
 
-  const stepHeadings = lines.filter((l) => /^##\s+Step\s+\d+/i.test(l));
+  const stepHeadings = lines.filter((l) => /^##\s+(Step|Шаг)\s+\d+/i.test(l));
   if (stepHeadings.length >= 2) {
     return stepHeadings
       .map((heading) => {
-        const title = heading.replace(/^##\s+Step\s+\d+\s*[—-]\s*/i, "").trim();
+        const title = heading.replace(/^##\s+(Step|Шаг)\s+\d+\s*[—-]\s*/i, "").trim();
         const first = bodyAfterHeading(markdown, new RegExp(`^${escapeRe(heading)}`))
           .map((l) => l.replace(/^\s*([-*+]|\d+\.)\s+/, "").trim())
           .find((l) => l.length > 0) ?? title;
@@ -132,7 +151,7 @@ export function getDocSteps(markdown: string): Array<{ name: string; text: strin
       .filter((s) => s.name.length > 0);
   }
 
-  const howIdx = lines.findIndex((l) => /^##\s+How\b/i.test(l));
+  const howIdx = lines.findIndex((l) => /^##\s+(How|Как)\b/i.test(l));
   if (howIdx < 0) return [];
   const steps: Array<{ name: string; text: string }> = [];
   let current: string | null = null;
@@ -170,9 +189,13 @@ function finishStep(raw: string): { name: string; text: string } {
  * Full per-guide `Metadata` for a `/developer/<slug>` article: a unique title and
  * description mined from the guide, self-canonical for the given locale, with
  * ru/en hreflang alternates and Open Graph / Twitter cards.
+ *
+ * Deliberately sets no `images`: the sibling `opengraph-image.tsx` draws the
+ * article's own headline, and metadata declared here would take precedence over
+ * the file convention and pin every guide back to the landing page's banner.
  */
-export function docMetadata(slug: string, locale: "ru" | "en"): Metadata {
-  const markdown = getDocMarkdown(slug);
+export function docMetadata(slug: string, locale: DocLocale): Metadata {
+  const markdown = getDocMarkdown(slug, locale);
   if (markdown === null) return {};
   const title = getDocTitle(markdown);
   const description = getDocSummary(markdown);
@@ -198,13 +221,11 @@ export function docMetadata(slug: string, locale: "ru" | "en"): Metadata {
       title,
       description,
       locale: locale === "en" ? "en_US" : "ru_RU",
-      images: [{ url: "/og.png", width: 1200, height: 630, alt: title }],
     },
     twitter: {
       card: "summary_large_image",
       title,
       description,
-      images: ["/og.png"],
     },
   };
 }
