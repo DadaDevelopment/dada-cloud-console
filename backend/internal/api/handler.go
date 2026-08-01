@@ -316,6 +316,7 @@ func NewHandler(pool *pgxpool.Pool, cfg *config.Config) *Handler {
 	// when SMTP is unconfigured.
 	h.StartAppHealthWatcher(context.Background())
 	h.StartAppVolumeWatcher(context.Background())
+	h.StartAppAutoscaleWatcher(context.Background())
 
 	h.agentChatLLM = llmchat.New(cfg.AgentChatGatewayURL, cfg.AgentChatGatewayKey, cfg.AgentChatModel)
 	selfURL := cfg.MCPSelfURL

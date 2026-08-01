@@ -25,12 +25,13 @@ import (
 // Keys are arbitrary but must stay distinct and stable across versions: a
 // rolling deploy briefly runs old and new pods against the same database.
 const (
-	lockKeyDomainReconcile int64 = 0x64616461_0001
-	lockKeyBackupReconcile int64 = 0x64616461_0002
-	lockKeyAppHealthWatch  int64 = 0x64616461_0003
-	lockKeyAppVolumeWatch  int64 = 0x64616461_0004
-	lockKeyCostWarmFast    int64 = 0x64616461_0005
-	lockKeyCostWarmSlow    int64 = 0x64616461_0006
+	lockKeyDomainReconcile   int64 = 0x64616461_0001
+	lockKeyBackupReconcile   int64 = 0x64616461_0002
+	lockKeyAppHealthWatch    int64 = 0x64616461_0003
+	lockKeyAppVolumeWatch    int64 = 0x64616461_0004
+	lockKeyCostWarmFast      int64 = 0x64616461_0005
+	lockKeyCostWarmSlow      int64 = 0x64616461_0006
+	lockKeyAppAutoscaleWatch int64 = 0x64616461_0007
 )
 
 // runWithAdvisoryLock executes fn while holding the session-scoped Postgres

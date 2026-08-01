@@ -228,6 +228,48 @@ func ComposeVolumeAlert(appName string, ratio float64, declaredSize, consoleLink
 	return subject, b.String()
 }
 
+// autoscaleReasonRU renders the tripped dimension in the same words the
+// console uses, so an owner reading the email and then opening the app sees
+// one vocabulary rather than two.
+func autoscaleReasonRU(reason string) string {
+	if reason == "memory" {
+		return "нехватка памяти"
+	}
+	return "нехватка процессорного времени"
+}
+
+// ComposeAutoscaleNotice reports a resize that ALREADY HAPPENED. It leads with
+// the fact and the new size, because the owner's first question on seeing an
+// unexpected rollout is "what changed and who changed it", and states the
+// no-charge fact explicitly: a message about being given more hardware reads
+// as a bill unless it says otherwise.
+func ComposeAutoscaleNotice(appName, from, to, reason string, ratio float64, consoleLink string) (subject, body string) {
+	subject = fmt.Sprintf("Dada Cloud: приложению %s увеличены ресурсы (%s → %s)", appName, from, to)
+	var b strings.Builder
+	fmt.Fprintf(&b, "Приложению %s не хватало ресурсов, поэтому платформа автоматически увеличила его профиль: %s → %s.\n\n", appName, from, to)
+	fmt.Fprintf(&b, "Причина: %s (показатель %.0f%%).\n\n", autoscaleReasonRU(reason), ratio*100)
+	b.WriteString("Приложение перезапустилось с новыми лимитами — это короткий перерыв в работе, после которого оно должно отвечать быстрее.\n\n")
+	b.WriteString("Тарификация не изменилась: счёт зависит от количества приложений, баз и доменов, а не от их размера.\n\n")
+	fmt.Fprintf(&b, "Открыть приложение в консоли: %s\n\n", consoleLink)
+	b.WriteString("Профиль можно изменить вручную там же. Автоматическое увеличение происходит не чаще раза в 6 часов на приложение.\n")
+	return subject, b.String()
+}
+
+// ComposeAutoscaleCeiling reports starvation at the top of the ladder, where
+// the platform stops resizing on purpose. It says plainly that NOTHING was
+// changed and why, and points at the likelier cause: past this size the
+// problem is usually a leak or a runaway loop, not a need for more hardware.
+func ComposeAutoscaleCeiling(appName, profile, reason string, ratio float64, consoleLink string) (subject, body string) {
+	subject = fmt.Sprintf("Dada Cloud: приложению %s не хватает ресурсов на максимальном профиле", appName)
+	var b strings.Builder
+	fmt.Fprintf(&b, "Приложение %s испытывает нехватку ресурсов, но уже работает на максимальном профиле (%s), поэтому платформа НИЧЕГО не меняла.\n\n", appName, profile)
+	fmt.Fprintf(&b, "Причина: %s (показатель %.0f%%).\n\n", autoscaleReasonRU(reason), ratio*100)
+	b.WriteString("На таком размере причина обычно не в нехватке железа, а в утечке памяти или зациклившейся задаче в самом приложении. Стоит посмотреть логи и метрики.\n\n")
+	fmt.Fprintf(&b, "Открыть приложение в консоли: %s\n\n", consoleLink)
+	b.WriteString("Это письмо приходит не чаще раза в 6 часов на приложение.\n")
+	return subject, b.String()
+}
+
 // Dada Box notifications.
 //
 // Every one of these says WHAT WILL HAPPEN TO THE DATA, in the first paragraph,
