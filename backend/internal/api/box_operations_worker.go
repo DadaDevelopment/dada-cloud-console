@@ -230,7 +230,7 @@ func (h *Handler) executeBoxUp(ctx context.Context, payload json.RawMessage) err
 		return fmt.Errorf("record ready box: %w", err)
 	}
 
-	h.recordAudit(ctx, boxSystemActorID, auditEntry{
+	h.recordSystemAudit(ctx, auditEntry{
 		ProjectID:     b.ProjectID,
 		EnvironmentID: b.EnvironmentID,
 		Action:        models.ActionBoxUp,
@@ -289,7 +289,7 @@ func (h *Handler) executeDeleteBox(ctx context.Context, payload json.RawMessage)
 		return fmt.Errorf("mark box deleted: %w", err)
 	}
 
-	h.recordAudit(ctx, boxSystemActorID, auditEntry{
+	h.recordSystemAudit(ctx, auditEntry{
 		ProjectID:     b.ProjectID,
 		EnvironmentID: b.EnvironmentID,
 		Action:        models.ActionDeleteBox,

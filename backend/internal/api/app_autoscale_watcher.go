@@ -545,16 +545,19 @@ func (w *appAutoscaleWatcher) maybeResize(ctx context.Context, projectID uuid.UU
 	}
 	if st.Image == "" {
 		log.Printf("app-autoscale: %s/%s has no deployed image, skipping", namespace, appName)
+		w.auditRefusal(ctx, projectID, st, namespace, appName, "no_deployed_image", s, nil)
 		return
 	}
 
 	if profileIndex(st.Profile) < 0 {
 		log.Printf("app-autoscale: %s/%s runs off-ladder profile %q, leaving its resources alone", namespace, appName, st.Profile)
+		w.auditRefusal(ctx, projectID, st, namespace, appName, "off_ladder_profile", s, nil)
 		return
 	}
 
 	to, ok := nextProfile(st.Profile)
 	if !ok {
+		w.auditRefusal(ctx, projectID, st, namespace, appName, "at_ceiling", s, nil)
 		w.notifyCeiling(ctx, projectID, namespace, appName, s)
 		return
 	}
@@ -564,11 +567,13 @@ func (w *appAutoscaleWatcher) maybeResize(ctx context.Context, projectID uuid.UU
 	quota, err := w.namespaceQuota(ctx, namespace)
 	if err != nil {
 		log.Printf("app-autoscale: %s/%s needs %s->%s but its quota could not be read, skipping: %v", namespace, appName, st.Profile, to, err)
+		w.auditRefusal(ctx, projectID, st, namespace, appName, "quota_unreadable", s, map[string]any{"to_profile": to, "error": err.Error()})
 		return
 	}
 	if quota != nil {
 		if fits, why := quotaHeadroom(quota.Status.Hard, quota.Status.Used, fromReq, toReq); !fits {
 			log.Printf("app-autoscale: %s/%s needs %s->%s but quota blocks it (%s)", namespace, appName, st.Profile, to, why)
+			w.auditRefusal(ctx, projectID, st, namespace, appName, "quota_blocked", s, map[string]any{"to_profile": to, "detail": why})
 			return
 		}
 	}
@@ -580,24 +585,74 @@ func (w *appAutoscaleWatcher) maybeResize(ctx context.Context, projectID uuid.UU
 	opID, err := w.h.applyProfileBump(ctx, projectID, st.EnvironmentID, appName, to, st.Image)
 	if err != nil {
 		log.Printf("app-autoscale: resize %s/%s %s->%s failed: %v", namespace, appName, st.Profile, to, err)
+		w.auditRefusal(ctx, projectID, st, namespace, appName, "resize_failed", s, map[string]any{"to_profile": to, "error": err.Error()})
 		return
 	}
 	log.Printf("app-autoscale: resized %s/%s %s->%s reason=%s ratio=%.4f op=%s",
 		namespace, appName, st.Profile, to, s.Reason, s.Ratio, opID)
 
-	auditMeta, _ := json.Marshal(map[string]any{
-		"from_profile": st.Profile, "to_profile": to,
-		"reason": s.Reason, "ratio": s.Ratio, "pod": s.Pod,
-		"claimed_by": "app-autoscale-watcher",
+	w.h.recordSystemAudit(ctx, auditEntry{
+		ProjectID:     projectID,
+		EnvironmentID: st.EnvironmentID,
+		OperationID:   opID,
+		Action:        auditActionAutoscaleApp,
+		ResourceKind:  "App",
+		ResourceName:  appName,
+		Outcome:       auditOutcomeSuccess,
+		Metadata: map[string]any{
+			"from_profile": st.Profile, "to_profile": to,
+			"reason": s.Reason, "ratio": s.Ratio, "pod": s.Pod,
+			"namespace":  namespace,
+			"claimed_by": "app-autoscale-watcher",
+		},
 	})
-	if _, err := w.h.pool.Exec(ctx,
-		`INSERT INTO audit_events (actor_id, project_id, operation_id, action, resource_kind, resource_name, metadata)
-		 VALUES ($1, $2, $3, 'AutoscaleApp', 'App', $4, $5)`,
-		systemDeployActorID, projectID, opID, appName, auditMeta); err != nil {
-		log.Printf("app-autoscale: audit for %s/%s failed: %v", namespace, appName, err)
-	}
 
 	w.notifyResized(ctx, projectID, appName, st.Profile, to, s)
+}
+
+// auditRefusal records a starvation the watcher saw and deliberately did not
+// act on. Every branch above it used to end in a log line and nothing else, so
+// "the autoscaler never looked at this app" and "the autoscaler looked, and the
+// namespace quota refused to let it grow" produced the same audit trail: none.
+// That is the difference between a platform bug and a plan limit, and support
+// could not tell them apart from the customer's history.
+//
+// The environment id comes from the profile state rather than being left NULL,
+// so a refusal lands on the same axis as the deploy it failed to become.
+//
+// Gated by a shared Redis claim keyed on app AND reason, with the resize
+// cooldown as its TTL: the watcher ticks every 15 minutes, and an app parked
+// against its quota would otherwise write four identical rows an hour forever.
+// A different reason claims its own key, because a refusal that changed cause
+// is news. The claim deliberately does NOT touch app_autoscale_events: burning
+// the resize slot on a decision that changed nothing is exactly what
+// maybeResize's ordering exists to prevent. Redis down means the gate opens and
+// the rows are written anyway -- duplicate history beats missing history.
+func (w *appAutoscaleWatcher) auditRefusal(ctx context.Context, projectID uuid.UUID, st appProfileState, namespace, appName, reason string, s starvedPod, extra map[string]any) {
+	if !w.h.cache.TryClaim(ctx, "audit:autoscale-refusal:"+namespace+"/"+appName+":"+reason, appAutoscaleCooldown) {
+		return
+	}
+	meta := map[string]any{
+		"refusal":      reason,
+		"from_profile": st.Profile,
+		"pressure":     s.Reason,
+		"ratio":        s.Ratio,
+		"pod":          s.Pod,
+		"namespace":    namespace,
+		"claimed_by":   "app-autoscale-watcher",
+	}
+	for k, v := range extra {
+		meta[k] = v
+	}
+	w.h.recordSystemAudit(ctx, auditEntry{
+		ProjectID:     projectID,
+		EnvironmentID: st.EnvironmentID,
+		Action:        auditActionAutoscaleApp,
+		ResourceKind:  "App",
+		ResourceName:  appName,
+		Outcome:       auditOutcomeFailure,
+		Metadata:      meta,
+	})
 }
 
 // notifyResized tells the owner their app was resized. Best-effort: a resize

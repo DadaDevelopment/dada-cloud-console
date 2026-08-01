@@ -80,7 +80,7 @@ func (h *Handler) executeSuspendBox(ctx context.Context, payload json.RawMessage
 		return fmt.Errorf("mark box sleeping: %w", err)
 	}
 
-	h.recordAudit(ctx, boxSystemActorID, auditEntry{
+	h.recordSystemAudit(ctx, auditEntry{
 		ProjectID:     b.ProjectID,
 		EnvironmentID: b.EnvironmentID,
 		Action:        models.ActionSuspendBox,
@@ -201,7 +201,7 @@ func (h *Handler) executeResumeBox(ctx context.Context, payload json.RawMessage)
 	}
 	h.republishBoxExposures(ctx, stack, b)
 
-	h.recordAudit(ctx, boxSystemActorID, auditEntry{
+	h.recordSystemAudit(ctx, auditEntry{
 		ProjectID:     b.ProjectID,
 		EnvironmentID: b.EnvironmentID,
 		Action:        models.ActionResumeBox,

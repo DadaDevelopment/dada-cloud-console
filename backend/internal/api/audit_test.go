@@ -270,6 +270,56 @@ func TestWriteSessionStartRecordsWithoutRedis(t *testing.T) {
 	}
 }
 
+// TestRecordSystemAuditWritesRow guards the trap that ate the box worker's
+// history: the platform's own actor id IS the zero uuid, which recordAudit
+// treats as "nobody named an actor" and drops. Anything the platform does on
+// its own must land, and it must land attributed to the system user.
+func TestRecordSystemAuditWritesRow(t *testing.T) {
+	pool := testAuditPool(t)
+	_, projectID := seedAuditActor(t, pool)
+	h := &Handler{pool: pool}
+
+	h.recordSystemAudit(context.Background(), auditEntry{
+		ProjectID:    projectID,
+		Action:       "DeleteBox",
+		ResourceKind: "Box",
+		ResourceName: "probe",
+		Outcome:      auditOutcomeSuccess,
+	})
+
+	var actor uuid.UUID
+	if err := pool.QueryRow(context.Background(),
+		`SELECT actor_id FROM audit_events WHERE project_id = $1 AND action = 'DeleteBox'`,
+		projectID,
+	).Scan(&actor); err != nil {
+		t.Fatalf("platform work must leave a row: %v", err)
+	}
+	if actor != systemDeployActorID {
+		t.Fatalf("expected the system actor, got %s", actor)
+	}
+}
+
+// TestRecordAuditDropsNilActor is the other half, and the reason the split
+// exists: a caller that could not name who acted still writes nothing.
+func TestRecordAuditDropsNilActor(t *testing.T) {
+	pool := testAuditPool(t)
+	_, projectID := seedAuditActor(t, pool)
+	h := &Handler{pool: pool}
+
+	h.recordAudit(context.Background(), uuid.Nil, auditEntry{
+		ProjectID: projectID, Action: "DeleteBox", ResourceKind: "Box", ResourceName: "probe",
+	})
+
+	var n int
+	if err := pool.QueryRow(context.Background(),
+		`SELECT count(*) FROM audit_events WHERE project_id = $1`, projectID).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 0 {
+		t.Fatalf("an unnamed actor must not be recorded as the system, got %d rows", n)
+	}
+}
+
 func countSessionStarts(t *testing.T, pool *pgxpool.Pool, actorID uuid.UUID) int {
 	t.Helper()
 	var n int

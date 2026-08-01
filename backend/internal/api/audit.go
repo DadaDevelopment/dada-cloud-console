@@ -22,6 +22,7 @@ const (
 	auditActionViewAppLogs   = "ViewAppLogs"
 	auditActionViewProject   = "ViewProject"
 	auditActionViewApp       = "ViewApp"
+	auditActionAutoscaleApp  = "AutoscaleApp"
 )
 
 const (
@@ -156,8 +157,31 @@ func nullableUUID(id uuid.UUID) any {
 
 // recordAudit writes one audit row best-effort: an audit failure must never
 // change the outcome of the request that triggered it.
+//
+// A nil actor is dropped on purpose. It means the caller could not name who did
+// this, and a row that claims an action happened without saying who did it is
+// worse than no row -- it pollutes every per-user count downstream.
 func (h *Handler) recordAudit(ctx context.Context, actorID uuid.UUID, e auditEntry) {
-	if h.pool == nil || actorID == uuid.Nil || e.Action == "" {
+	if actorID == uuid.Nil {
+		return
+	}
+	h.writeAudit(ctx, actorID, e)
+}
+
+// recordSystemAudit writes a row for work the platform did on its own -- the
+// autoscaler, the box loops, deploy hooks -- under the seeded "system" user.
+//
+// It exists because that user's id IS the zero uuid (migration 010_system_user.sql), which
+// recordAudit reads as "no actor" and drops. The two cases are opposites: a nil
+// actor there means the caller does not know who acted, while here the platform
+// itself acted and is named. Routing system work through recordAudit would
+// silently discard every row it wrote.
+func (h *Handler) recordSystemAudit(ctx context.Context, e auditEntry) {
+	h.writeAudit(ctx, systemDeployActorID, e)
+}
+
+func (h *Handler) writeAudit(ctx context.Context, actorID uuid.UUID, e auditEntry) {
+	if h.pool == nil || e.Action == "" {
 		return
 	}
 	outcome := e.Outcome
