@@ -2,7 +2,6 @@ package api
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"time"
@@ -12,6 +11,7 @@ import (
 	"github.com/dada-tuda/console/backend/internal/boxcatalog"
 	"github.com/dada-tuda/console/backend/internal/models"
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 )
 
 // The single-call door: `box up`.
@@ -77,21 +77,50 @@ func (h *Handler) BoxUp(c *gin.Context) {
 	if !ok {
 		return
 	}
+	var req boxUpRequest
+	resourceName := ""
+	var envID uuid.UUID
+
+	// Every rejection is recorded before the error is written, because the
+	// single-call door is the one place where a refusal IS the product
+	// experience: "no warm body available" and "never asked for one" have to be
+	// distinguishable in the trail.
+	reject := func(status int, reason string, extra map[string]any) {
+		meta := map[string]any{"reason": reason, "status": status}
+		for k, v := range extra {
+			meta[k] = v
+		}
+		h.recordAudit(c.Request.Context(), claims.UserID, auditEntry{
+			ProjectID:     projectID,
+			EnvironmentID: envID,
+			Action:        models.ActionBoxUp,
+			ResourceKind:  models.ResourceKindBox,
+			ResourceName:  resourceName,
+			Outcome:       auditOutcomeFailure,
+			Metadata:      meta,
+		})
+	}
+	rejectErr := func(status int, reason, msg string) {
+		reject(status, reason, nil)
+		respondError(c, status, msg)
+	}
+
 	stack, ok := h.requireBoxRuntime(c)
 	if !ok {
+		reject(c.Writer.Status(), "box_runtime_unavailable", nil)
 		return
 	}
-	var req boxUpRequest
 	if err := c.ShouldBindJSON(&req); err != nil && c.Request.ContentLength > 0 {
-		respondError(c, http.StatusBadRequest, err.Error())
+		rejectErr(http.StatusBadRequest, "malformed_body", err.Error())
 		return
 	}
+	resourceName = req.Name
 	wait := req.WaitSeconds
 	if wait <= 0 {
 		wait = 120
 	}
 	if wait > 120 {
-		respondError(c, http.StatusBadRequest, "wait_seconds must be between 0 and 120")
+		rejectErr(http.StatusBadRequest, "invalid_wait_seconds", "wait_seconds must be between 0 and 120")
 		return
 	}
 
@@ -105,8 +134,11 @@ func (h *Handler) BoxUp(c *gin.Context) {
 		SSHPublicKey: req.SSHPublicKey,
 	})
 	if !ok {
+		reject(c.Writer.Status(), "box_not_provisioned", nil)
 		return
 	}
+	resourceName = b.Name
+	envID = b.EnvironmentID
 
 	// The credential is minted BEFORE the body is claimed so its hash is on record
 	// before anything can hand the body out. The plaintext exists only in this
@@ -115,13 +147,13 @@ func (h *Handler) BoxUp(c *gin.Context) {
 		c.Request.Context(), b.ID, projectID, &claims.UserID, boxSessionTTL(req.SessionTTLHours))
 	if err != nil {
 		h.failBox(c.Request.Context(), b.ID, "failed to mint box session")
-		respondError(c, http.StatusInternalServerError, "failed to mint box session")
+		rejectErr(http.StatusInternalServerError, "session_mint_failed", "failed to mint box session")
 		return
 	}
 
 	if _, err := h.pool.Exec(c.Request.Context(),
 		`UPDATE boxes SET status = 'Booting', updated_at = now() WHERE id = $1`, b.ID); err != nil {
-		respondError(c, http.StatusInternalServerError, "failed to mark box booting")
+		rejectErr(http.StatusInternalServerError, "mark_booting_failed", "failed to mark box booting")
 		return
 	}
 
@@ -138,6 +170,10 @@ func (h *Handler) BoxUp(c *gin.Context) {
 		if res != nil && res.PoolHit {
 			status = http.StatusInternalServerError
 		}
+		reject(status, "box_not_ready", map[string]any{
+			"error": spawnErr.Error(),
+			"pool":  poolLabelFor(res != nil && res.PoolHit),
+		})
 		respondError(c, status, "box did not become ready: "+spawnErr.Error())
 		return
 	}
@@ -145,7 +181,7 @@ func (h *Handler) BoxUp(c *gin.Context) {
 
 	updated, err := h.markBoxReady(c.Request.Context(), b.ID, inst, mcpURL, sshHost)
 	if err != nil {
-		respondError(c, http.StatusInternalServerError, "failed to record the ready box")
+		rejectErr(http.StatusInternalServerError, "record_ready_failed", "failed to record the ready box")
 		return
 	}
 
@@ -154,16 +190,19 @@ func (h *Handler) BoxUp(c *gin.Context) {
 		phases[phase] = d.Milliseconds()
 	}
 
-	auditMeta, _ := json.Marshal(map[string]any{
-		"box_id": b.ID, "instance_ref": inst.InstanceRef,
-		"pool": poolLabelFor(res.PoolHit), "time_to_ready_ms": res.Timeline.Total().Milliseconds(),
-		"session_token_prefix": sessionPrefix,
+	h.recordAudit(c.Request.Context(), claims.UserID, auditEntry{
+		ProjectID:     projectID,
+		EnvironmentID: envID,
+		Action:        models.ActionBoxUp,
+		ResourceKind:  models.ResourceKindBox,
+		ResourceName:  b.Name,
+		Outcome:       auditOutcomeSuccess,
+		Metadata: map[string]any{
+			"box_id": b.ID, "instance_ref": inst.InstanceRef,
+			"pool": poolLabelFor(res.PoolHit), "time_to_ready_ms": res.Timeline.Total().Milliseconds(),
+			"session_token_prefix": sessionPrefix,
+		},
 	})
-	_, _ = h.pool.Exec(c.Request.Context(),
-		`INSERT INTO audit_events (actor_id, project_id, action, resource_kind, resource_name, metadata)
-		 VALUES ($1, $2, $3, $4, $5, $6)`,
-		claims.UserID, projectID, models.ActionBoxUp, models.ResourceKindBox, b.Name, auditMeta,
-	)
 
 	c.JSON(http.StatusOK, gin.H{
 		"box":     updated,

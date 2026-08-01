@@ -230,15 +230,19 @@ func (h *Handler) executeBoxUp(ctx context.Context, payload json.RawMessage) err
 		return fmt.Errorf("record ready box: %w", err)
 	}
 
-	auditMeta, _ := json.Marshal(map[string]any{
-		"box_id": updated.ID, "instance_ref": res.Instance.InstanceRef,
-		"pool": poolLabelFor(res.PoolHit), "time_to_ready_ms": res.Timeline.Total().Milliseconds(),
-		"claimed_by": "box-operations-worker",
+	h.recordAudit(ctx, boxSystemActorID, auditEntry{
+		ProjectID:     b.ProjectID,
+		EnvironmentID: b.EnvironmentID,
+		Action:        models.ActionBoxUp,
+		ResourceKind:  models.ResourceKindBox,
+		ResourceName:  b.Name,
+		Outcome:       auditOutcomeSuccess,
+		Metadata: map[string]any{
+			"box_id": updated.ID, "instance_ref": res.Instance.InstanceRef,
+			"pool": poolLabelFor(res.PoolHit), "time_to_ready_ms": res.Timeline.Total().Milliseconds(),
+			"claimed_by": "box-operations-worker",
+		},
 	})
-	_, _ = h.pool.Exec(ctx,
-		`INSERT INTO audit_events (actor_id, project_id, action, resource_kind, resource_name, metadata)
-		 VALUES ($1, $2, $3, $4, $5, $6)`,
-		boxSystemActorID, b.ProjectID, models.ActionBoxUp, models.ResourceKindBox, b.Name, auditMeta)
 	return nil
 }
 
@@ -285,11 +289,15 @@ func (h *Handler) executeDeleteBox(ctx context.Context, payload json.RawMessage)
 		return fmt.Errorf("mark box deleted: %w", err)
 	}
 
-	auditMeta, _ := json.Marshal(p)
-	_, _ = h.pool.Exec(ctx,
-		`INSERT INTO audit_events (actor_id, project_id, action, resource_kind, resource_name, metadata)
-		 VALUES ($1, $2, $3, $4, $5, $6)`,
-		boxSystemActorID, b.ProjectID, models.ActionDeleteBox, models.ResourceKindBox, b.Name, auditMeta)
+	h.recordAudit(ctx, boxSystemActorID, auditEntry{
+		ProjectID:     b.ProjectID,
+		EnvironmentID: b.EnvironmentID,
+		Action:        models.ActionDeleteBox,
+		ResourceKind:  models.ResourceKindBox,
+		ResourceName:  b.Name,
+		Outcome:       auditOutcomeSuccess,
+		Metadata:      p,
+	})
 	return nil
 }
 

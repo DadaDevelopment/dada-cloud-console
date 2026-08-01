@@ -80,13 +80,17 @@ func (h *Handler) executeSuspendBox(ctx context.Context, payload json.RawMessage
 		return fmt.Errorf("mark box sleeping: %w", err)
 	}
 
-	auditMeta, _ := json.Marshal(map[string]any{
-		"box_id": p.BoxID, "reason": p.Reason, "claimed_by": "box-operations-worker",
+	h.recordAudit(ctx, boxSystemActorID, auditEntry{
+		ProjectID:     b.ProjectID,
+		EnvironmentID: b.EnvironmentID,
+		Action:        models.ActionSuspendBox,
+		ResourceKind:  models.ResourceKindBox,
+		ResourceName:  b.Name,
+		Outcome:       auditOutcomeSuccess,
+		Metadata: map[string]any{
+			"box_id": p.BoxID, "reason": p.Reason, "claimed_by": "box-operations-worker",
+		},
 	})
-	_, _ = h.pool.Exec(ctx,
-		`INSERT INTO audit_events (actor_id, project_id, action, resource_kind, resource_name, metadata)
-		 VALUES ($1, $2, $3, $4, $5, $6)`,
-		boxSystemActorID, b.ProjectID, models.ActionSuspendBox, models.ResourceKindBox, b.Name, auditMeta)
 	return nil
 }
 
@@ -197,13 +201,17 @@ func (h *Handler) executeResumeBox(ctx context.Context, payload json.RawMessage)
 	}
 	h.republishBoxExposures(ctx, stack, b)
 
-	auditMeta, _ := json.Marshal(map[string]any{
-		"box_id": p.BoxID, "instance_ref": inst.InstanceRef, "claimed_by": "box-operations-worker",
+	h.recordAudit(ctx, boxSystemActorID, auditEntry{
+		ProjectID:     b.ProjectID,
+		EnvironmentID: b.EnvironmentID,
+		Action:        models.ActionResumeBox,
+		ResourceKind:  models.ResourceKindBox,
+		ResourceName:  b.Name,
+		Outcome:       auditOutcomeSuccess,
+		Metadata: map[string]any{
+			"box_id": p.BoxID, "instance_ref": inst.InstanceRef, "claimed_by": "box-operations-worker",
+		},
 	})
-	_, _ = h.pool.Exec(ctx,
-		`INSERT INTO audit_events (actor_id, project_id, action, resource_kind, resource_name, metadata)
-		 VALUES ($1, $2, $3, $4, $5, $6)`,
-		boxSystemActorID, b.ProjectID, models.ActionResumeBox, models.ResourceKindBox, b.Name, auditMeta)
 	return nil
 }
 

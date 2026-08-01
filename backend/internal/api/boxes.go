@@ -322,18 +322,37 @@ func (h *Handler) CreateBox(c *gin.Context) {
 	}
 
 	var req createBoxRequest
+	resourceName := ""
+	var envID uuid.UUID
+	reject := func(status int, reason string) {
+		h.recordAudit(c.Request.Context(), claims.UserID, auditEntry{
+			ProjectID:     projectID,
+			EnvironmentID: envID,
+			Action:        models.ActionBoxUp,
+			ResourceKind:  models.ResourceKindBox,
+			ResourceName:  resourceName,
+			Outcome:       auditOutcomeFailure,
+			Metadata:      map[string]any{"reason": reason, "status": status},
+		})
+	}
+
 	// Every field is optional, so an empty body is legal; only malformed JSON is
 	// a 400. Requiring a body would make "give me a box" more than one step, and
 	// if the entrance is more than one step we built a VPS with extra steps.
 	if err := c.ShouldBindJSON(&req); err != nil && c.Request.ContentLength > 0 {
+		reject(http.StatusBadRequest, "malformed_body")
 		respondError(c, http.StatusBadRequest, err.Error())
 		return
 	}
+	resourceName = req.Name
 
 	b, ok := h.provisionBoxRecord(c, claims.UserID, projectID, req)
 	if !ok {
+		reject(c.Writer.Status(), "box_not_provisioned")
 		return
 	}
+	resourceName = b.Name
+	envID = b.EnvironmentID
 
 	payload := models.BoxUpPayload{
 		BoxID:        b.ID,
@@ -347,16 +366,21 @@ func (h *Handler) CreateBox(c *gin.Context) {
 	}
 	op, err := h.enqueueBoxOperation(c.Request.Context(), claims.UserID, b, models.ActionBoxUp, payload)
 	if err != nil {
+		reject(http.StatusInternalServerError, "operation_insert_failed")
 		respondError(c, http.StatusInternalServerError, "failed to create operation")
 		return
 	}
 
-	auditMeta, _ := json.Marshal(payload)
-	_, _ = h.pool.Exec(c.Request.Context(),
-		`INSERT INTO audit_events (actor_id, project_id, operation_id, action, resource_kind, resource_name, metadata)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-		claims.UserID, projectID, op.ID, models.ActionBoxUp, models.ResourceKindBox, b.Name, auditMeta,
-	)
+	h.recordAudit(c.Request.Context(), claims.UserID, auditEntry{
+		ProjectID:     projectID,
+		EnvironmentID: envID,
+		OperationID:   op.ID,
+		Action:        models.ActionBoxUp,
+		ResourceKind:  models.ResourceKindBox,
+		ResourceName:  b.Name,
+		Outcome:       auditOutcomeSuccess,
+		Metadata:      payload,
+	})
 
 	c.JSON(http.StatusAccepted, gin.H{"box": b, "operation": op, "message": "box creation queued"})
 }
@@ -522,12 +546,44 @@ func (h *Handler) DeleteBox(c *gin.Context) {
 	if !ok {
 		return
 	}
-	b, ok := h.resolveBox(c, projectID, c.Param("boxName"))
+	boxName := c.Param("boxName")
+	var envID uuid.UUID
+	reject := func(status int, reason string) {
+		h.recordAudit(c.Request.Context(), claims.UserID, auditEntry{
+			ProjectID:     projectID,
+			EnvironmentID: envID,
+			Action:        models.ActionDeleteBox,
+			ResourceKind:  models.ResourceKindBox,
+			ResourceName:  boxName,
+			Outcome:       auditOutcomeFailure,
+			Metadata:      map[string]any{"reason": reason, "status": status},
+		})
+	}
+	rejectErr := func(status int, reason, msg string) {
+		reject(status, reason)
+		respondError(c, status, msg)
+	}
+
+	b, ok := h.resolveBox(c, projectID, boxName)
 	if !ok {
+		reject(c.Writer.Status(), "box_not_found")
 		return
 	}
+	envID = b.EnvironmentID
 	if b.Status == models.BoxStatusDeleting {
 		// Idempotent: a repeated delete is not an error, it is the same intent.
+		// It is still recorded: a customer pressing delete four times because
+		// nothing appeared to happen is a signal, and an idempotent no-op that
+		// writes nothing hides it.
+		h.recordAudit(c.Request.Context(), claims.UserID, auditEntry{
+			ProjectID:     projectID,
+			EnvironmentID: envID,
+			Action:        models.ActionDeleteBox,
+			ResourceKind:  models.ResourceKindBox,
+			ResourceName:  b.Name,
+			Outcome:       auditOutcomeSuccess,
+			Metadata:      map[string]any{"box_id": b.ID, "already_queued": true},
+		})
 		c.JSON(http.StatusAccepted, gin.H{"message": "box deletion already queued"})
 		return
 	}
@@ -537,7 +593,7 @@ func (h *Handler) DeleteBox(c *gin.Context) {
 	if _, err := h.pool.Exec(c.Request.Context(),
 		`UPDATE boxes SET status = 'Deleting', updated_at = now() WHERE id = $1`, b.ID,
 	); err != nil {
-		respondError(c, http.StatusInternalServerError, "failed to mark box deleting")
+		rejectErr(http.StatusInternalServerError, "mark_deleting_failed", "failed to mark box deleting")
 		return
 	}
 
@@ -550,23 +606,27 @@ func (h *Handler) DeleteBox(c *gin.Context) {
 	// teardown that could not withdraw the credential must not proceed.
 	revoked, err := h.revokeBoxSessions(c.Request.Context(), b.ID)
 	if err != nil {
-		respondError(c, http.StatusInternalServerError, "failed to revoke box sessions")
+		rejectErr(http.StatusInternalServerError, "session_revoke_failed", "failed to revoke box sessions")
 		return
 	}
 
 	op, err := h.enqueueBoxOperation(c.Request.Context(), claims.UserID, b,
 		models.ActionDeleteBox, models.DeleteBoxPayload{BoxID: b.ID, Reason: "user"})
 	if err != nil {
-		respondError(c, http.StatusInternalServerError, "failed to create operation")
+		rejectErr(http.StatusInternalServerError, "operation_insert_failed", "failed to create operation")
 		return
 	}
 
-	auditMeta, _ := json.Marshal(models.DeleteBoxPayload{BoxID: b.ID, Reason: "user"})
-	_, _ = h.pool.Exec(c.Request.Context(),
-		`INSERT INTO audit_events (actor_id, project_id, operation_id, action, resource_kind, resource_name, metadata)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-		claims.UserID, projectID, op.ID, models.ActionDeleteBox, models.ResourceKindBox, b.Name, auditMeta,
-	)
+	h.recordAudit(c.Request.Context(), claims.UserID, auditEntry{
+		ProjectID:     projectID,
+		EnvironmentID: envID,
+		OperationID:   op.ID,
+		Action:        models.ActionDeleteBox,
+		ResourceKind:  models.ResourceKindBox,
+		ResourceName:  b.Name,
+		Outcome:       auditOutcomeSuccess,
+		Metadata:      models.DeleteBoxPayload{BoxID: b.ID, Reason: "user"},
+	})
 
 	c.JSON(http.StatusAccepted, gin.H{
 		"operation":        op,

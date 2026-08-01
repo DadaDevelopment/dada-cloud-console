@@ -67,27 +67,55 @@ func (h *Handler) CrystallizeBox(c *gin.Context) {
 	if !ok {
 		return
 	}
+	boxName := c.Param("boxName")
+	var envID uuid.UUID
+
+	// Crystallization is the step that converts a per-minute box into a monthly
+	// VM bill, so a refused promotion is a billing-relevant event, not just a
+	// failed request. The consent gate in particular has to be visible: a
+	// customer who reached the price and backed out looks identical to one who
+	// never tried, and those are opposite product signals.
+	reject := func(status int, reason string) {
+		h.recordAudit(c.Request.Context(), claims.UserID, auditEntry{
+			ProjectID:     projectID,
+			EnvironmentID: envID,
+			Action:        models.ActionCrystallizeBox,
+			ResourceKind:  models.ResourceKindBox,
+			ResourceName:  boxName,
+			Outcome:       auditOutcomeFailure,
+			Metadata:      map[string]any{"reason": reason, "status": status},
+		})
+	}
+	rejectErr := func(status int, reason, msg string) {
+		reject(status, reason)
+		respondError(c, status, msg)
+	}
+
 	stack, ok := h.requireBoxRuntime(c)
 	if !ok {
+		reject(c.Writer.Status(), "box_runtime_unavailable")
 		return
 	}
 	local, ok := stack.requireLocalRuntime(c, "crystallization")
 	if !ok {
+		reject(c.Writer.Status(), "local_runtime_unavailable")
 		return
 	}
-	b, ok := h.resolveBox(c, projectID, c.Param("boxName"))
+	b, ok := h.resolveBox(c, projectID, boxName)
 	if !ok {
+		reject(c.Writer.Status(), "box_not_found")
 		return
 	}
+	envID = b.EnvironmentID
 	var req crystallizeBoxRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		respondError(c, http.StatusBadRequest, err.Error())
+		rejectErr(http.StatusBadRequest, "malformed_body", err.Error())
 		return
 	}
 	if !req.AckMonthlyCharge {
 		// A consent gate, not a validation error: the caller is being told what the
 		// action costs, not that they filled in a form wrong.
-		respondError(c, http.StatusConflict,
+		rejectErr(http.StatusConflict, "monthly_charge_not_acknowledged",
 			"crystallization converts a per-minute box into a monthly VM bill; set ack_monthly_charge=true to consent")
 		return
 	}
@@ -96,16 +124,16 @@ func (h *Handler) CrystallizeBox(c *gin.Context) {
 		name = b.Name + "-vm"
 	}
 	if err := validateKubeName(name); err != nil {
-		respondError(c, http.StatusBadRequest, err.Error())
+		rejectErr(http.StatusBadRequest, "invalid_vm_name", err.Error())
 		return
 	}
 	if !models.CanTransitionBoxStatus(b.Status, models.BoxStatusCrystallizing) {
-		respondError(c, http.StatusConflict,
+		rejectErr(http.StatusConflict, "box_not_promotable",
 			fmt.Sprintf("a box in phase %s cannot be crystallized", b.Status))
 		return
 	}
 	if b.InstanceRef == "" {
-		respondError(c, http.StatusConflict, "the box has no runtime instance to crystallize")
+		rejectErr(http.StatusConflict, "no_runtime_instance", "the box has no runtime instance to crystallize")
 		return
 	}
 	domain := req.Domain
@@ -123,14 +151,14 @@ func (h *Handler) CrystallizeBox(c *gin.Context) {
 		// The partial unique index refuses a second in-flight crystallization of the
 		// same box: two promotions would race on the same VM root and the same ports,
 		// and the DATABASE is what must refuse that rather than two API replicas.
-		respondError(c, http.StatusConflict,
+		rejectErr(http.StatusConflict, "crystallization_already_in_flight",
 			"a crystallization of this box is already in flight")
 		return
 	}
 
 	if _, err := h.pool.Exec(c.Request.Context(),
 		`UPDATE boxes SET status = 'Crystallizing', updated_at = now() WHERE id = $1`, b.ID); err != nil {
-		respondError(c, http.StatusInternalServerError, "failed to mark box crystallizing")
+		rejectErr(http.StatusInternalServerError, "mark_crystallizing_failed", "failed to mark box crystallizing")
 		return
 	}
 
@@ -166,7 +194,7 @@ func (h *Handler) CrystallizeBox(c *gin.Context) {
 		  WHERE id = $1`,
 		crystID, status, stage, verified, errMsg, reportJSON, carryJSON, durationMS,
 	); err != nil {
-		respondError(c, http.StatusInternalServerError, "failed to store the verification report")
+		rejectErr(http.StatusInternalServerError, "report_store_failed", "failed to store the verification report")
 		return
 	}
 
@@ -178,19 +206,31 @@ func (h *Handler) CrystallizeBox(c *gin.Context) {
 		`UPDATE boxes SET status = 'Ready', error_message = $2, updated_at = now() WHERE id = $1`,
 		b.ID, errMsg,
 	); err != nil {
-		respondError(c, http.StatusInternalServerError, "failed to return the box to Ready")
+		rejectErr(http.StatusInternalServerError, "return_to_ready_failed", "failed to return the box to Ready")
 		return
 	}
 
-	auditMeta, _ := json.Marshal(map[string]any{
-		"box_id": b.ID, "vm_name": name, "domain": domain,
-		"verified": verified, "stage": stage, "duration_ms": durationMS,
+	// An unverified promotion answers 422 and leaves the customer with a VM that
+	// did not prove itself. Recording it as a plain success -- which is what the
+	// raw insert did -- makes exactly the case worth reviewing the one that reads
+	// as fine.
+	outcome := auditOutcomeSuccess
+	if !verified {
+		outcome = auditOutcomeFailure
+	}
+	h.recordAudit(c.Request.Context(), claims.UserID, auditEntry{
+		ProjectID:     projectID,
+		EnvironmentID: envID,
+		Action:        models.ActionCrystallizeBox,
+		ResourceKind:  models.ResourceKindBox,
+		ResourceName:  b.Name,
+		Outcome:       outcome,
+		Metadata: map[string]any{
+			"box_id": b.ID, "vm_name": name, "domain": domain,
+			"verified": verified, "stage": stage, "duration_ms": durationMS,
+			"crystallization_id": crystID,
+		},
 	})
-	_, _ = h.pool.Exec(c.Request.Context(),
-		`INSERT INTO audit_events (actor_id, project_id, action, resource_kind, resource_name, metadata)
-		 VALUES ($1, $2, $3, $4, $5, $6)`,
-		claims.UserID, projectID, models.ActionCrystallizeBox, models.ResourceKindBox, b.Name, auditMeta,
-	)
 
 	body := gin.H{
 		"crystallization_id": crystID,
