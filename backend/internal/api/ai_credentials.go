@@ -1,7 +1,6 @@
 package api
 
 import (
-	"encoding/json"
 	"errors"
 	"net/http"
 	"strings"
@@ -251,20 +250,32 @@ func (h *Handler) PutAIProviderCredential(c *gin.Context) {
 		return
 	}
 
+	reject := func(status int, reason, msg string) {
+		h.recordAudit(c.Request.Context(), claims.UserID, auditEntry{
+			ProjectID:    projectID,
+			Action:       "SetAIProviderCredential",
+			ResourceKind: "AIGateway",
+			ResourceName: provider,
+			Outcome:      auditOutcomeFailure,
+			Metadata:     map[string]any{"reason": reason, "status": status, "provider": provider},
+		})
+		respondError(c, status, msg)
+	}
+
 	var req putAICredentialRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		respondError(c, http.StatusBadRequest, "invalid request body")
+		reject(http.StatusBadRequest, "malformed_body", "invalid request body")
 		return
 	}
 	apiKey := strings.TrimSpace(req.APIKey)
 	if apiKey == "" {
-		respondError(c, http.StatusBadRequest, "api_key is required")
+		reject(http.StatusBadRequest, "missing_api_key", "api_key is required")
 		return
 	}
 
 	enc, err := crypto.EncryptToken(h.cfg.GitopsEncryptionKey, []byte(apiKey))
 	if err != nil {
-		respondError(c, http.StatusInternalServerError, "encrypt credential: "+err.Error())
+		reject(http.StatusInternalServerError, "encrypt_failed", "encrypt credential: "+err.Error())
 		return
 	}
 
@@ -281,16 +292,18 @@ func (h *Handler) PutAIProviderCredential(c *gin.Context) {
 		       api_key_encrypted = EXCLUDED.api_key_encrypted,
 		       updated_at        = NOW()
 	`, projectID, provider, apiBase, enc); err != nil {
-		respondError(c, http.StatusInternalServerError, "store credential: "+err.Error())
+		reject(http.StatusInternalServerError, "store_failed", "store credential: "+err.Error())
 		return
 	}
 
-	auditMeta, _ := json.Marshal(gin.H{"provider": provider, "key_hint": maskAIKey(apiKey)})
-	_, _ = h.pool.Exec(c.Request.Context(),
-		`INSERT INTO audit_events (actor_id, project_id, action, resource_kind, resource_name, metadata)
-		 VALUES ($1, $2, 'SetAIProviderCredential', 'AIGateway', $3, $4)`,
-		claims.UserID, projectID, provider, auditMeta,
-	)
+	h.recordAudit(c.Request.Context(), claims.UserID, auditEntry{
+		ProjectID:    projectID,
+		Action:       "SetAIProviderCredential",
+		ResourceKind: "AIGateway",
+		ResourceName: provider,
+		Outcome:      auditOutcomeSuccess,
+		Metadata:     map[string]any{"provider": provider, "key_hint": maskAIKey(apiKey), "custom_api_base": apiBase != nil},
+	})
 
 	c.JSON(http.StatusOK, gin.H{"status": "ok"})
 }
@@ -343,20 +356,36 @@ func (h *Handler) DeleteAIProviderCredential(c *gin.Context) {
 		`DELETE FROM ai_provider_credentials WHERE project_id = $1 AND provider = $2`,
 		projectID, provider,
 	)
+	rejectDelete := func(status int, reason string, respond func()) {
+		h.recordAudit(c.Request.Context(), claims.UserID, auditEntry{
+			ProjectID:    projectID,
+			Action:       "DeleteAIProviderCredential",
+			ResourceKind: "AIGateway",
+			ResourceName: provider,
+			Outcome:      auditOutcomeFailure,
+			Metadata:     map[string]any{"reason": reason, "status": status, "provider": provider},
+		})
+		respond()
+	}
 	if err != nil {
-		respondError(c, http.StatusInternalServerError, "delete credential: "+err.Error())
+		rejectDelete(http.StatusInternalServerError, "delete_failed", func() {
+			respondError(c, http.StatusInternalServerError, "delete credential: "+err.Error())
+		})
 		return
 	}
 	if tag.RowsAffected() == 0 {
-		respondNotFound(c)
+		rejectDelete(http.StatusNotFound, "credential_not_found", func() { respondNotFound(c) })
 		return
 	}
 
-	_, _ = h.pool.Exec(c.Request.Context(),
-		`INSERT INTO audit_events (actor_id, project_id, action, resource_kind, resource_name, metadata)
-		 VALUES ($1, $2, 'DeleteAIProviderCredential', 'AIGateway', $3, '{}'::jsonb)`,
-		claims.UserID, projectID, provider,
-	)
+	h.recordAudit(c.Request.Context(), claims.UserID, auditEntry{
+		ProjectID:    projectID,
+		Action:       "DeleteAIProviderCredential",
+		ResourceKind: "AIGateway",
+		ResourceName: provider,
+		Outcome:      auditOutcomeSuccess,
+		Metadata:     map[string]any{"provider": provider},
+	})
 
 	c.Status(http.StatusNoContent)
 }
