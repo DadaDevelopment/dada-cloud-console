@@ -149,15 +149,31 @@ func (h *Handler) CreateProject(c *gin.Context) {
 		return
 	}
 
+	slugAudit := ""
+	reject := func(status int, reason string, respond func()) {
+		h.recordAudit(c.Request.Context(), claims.UserID, auditEntry{
+			Action:       "CreateProject",
+			ResourceKind: "Project",
+			ResourceName: slugAudit,
+			Outcome:      auditOutcomeFailure,
+			Metadata:     map[string]any{"reason": reason, "status": status},
+		})
+		respond()
+	}
+	rejectErr := func(status int, reason, msg string) {
+		reject(status, reason, func() { respondError(c, status, msg) })
+	}
+
 	var req createProjectRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		respondError(c, http.StatusBadRequest, "invalid request body")
+		rejectErr(http.StatusBadRequest, "malformed_body", "invalid request body")
 		return
 	}
 
 	slug := strings.ToLower(strings.TrimSpace(req.Slug))
+	slugAudit = slug
 	if !projectSlugRe.MatchString(slug) {
-		respondError(c, http.StatusBadRequest, "invalid slug: use 3-40 chars, lowercase letters/digits/dashes, starting with a letter")
+		rejectErr(http.StatusBadRequest, "invalid_slug", "invalid slug: use 3-40 chars, lowercase letters/digits/dashes, starting with a letter")
 		return
 	}
 
@@ -167,11 +183,11 @@ func (h *Handler) CreateProject(c *gin.Context) {
 	if org == "" {
 		org = claims.Username
 		if org == "" {
-			respondError(c, http.StatusBadRequest, "no username in token; cannot derive a personal org")
+			rejectErr(http.StatusBadRequest, "no_personal_org", "no username in token; cannot derive a personal org")
 			return
 		}
 	} else if !isGod(claims) && !isOrgAdmin(models.MemberRole(claims.OrgRole(org))) {
-		respondForbidden(c)
+		reject(http.StatusForbidden, "not_org_admin", func() { respondForbidden(c) })
 		return
 	}
 
@@ -187,10 +203,10 @@ func (h *Handler) CreateProject(c *gin.Context) {
 	projectID, envID, err := h.insertProject(c.Request.Context(), claims.UserID, slug, displayName, org, defaultEnv)
 	if err != nil {
 		if isUniqueViolation(err) {
-			respondError(c, http.StatusConflict, "a project with this slug already exists")
+			rejectErr(http.StatusConflict, "slug_taken", "a project with this slug already exists")
 			return
 		}
-		respondError(c, http.StatusInternalServerError, "failed to create project")
+		rejectErr(http.StatusInternalServerError, "project_insert_failed", "failed to create project")
 		return
 	}
 
@@ -200,11 +216,15 @@ func (h *Handler) CreateProject(c *gin.Context) {
 	}
 	h.ensureProjectGroupsAsync(org, projectID.String(), slug, displayName, claims.Subject)
 
-	_, _ = h.pool.Exec(c.Request.Context(),
-		`INSERT INTO audit_events (actor_id, project_id, action, resource_kind, resource_name)
-		 VALUES ($1, $2, 'CreateProject', 'Project', $3)`,
-		claims.UserID, projectID, slug,
-	)
+	h.recordAudit(c.Request.Context(), claims.UserID, auditEntry{
+		ProjectID:     projectID,
+		EnvironmentID: envID,
+		Action:        "CreateProject",
+		ResourceKind:  "Project",
+		ResourceName:  slug,
+		Outcome:       auditOutcomeSuccess,
+		Metadata:      map[string]any{"org": org, "default_environment": defaultEnv},
+	})
 	h.notifyAuditEvent(claims, projectID, "CreateProject", slug)
 
 	c.JSON(http.StatusCreated, gin.H{

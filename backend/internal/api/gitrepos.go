@@ -867,22 +867,40 @@ func (h *Handler) ConnectGitRepo(c *gin.Context) {
 		return
 	}
 
-	var req connectGitRepoRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		respondError(c, http.StatusBadRequest, err.Error())
-		return
+	appAudit := ""
+	reject := func(status int, reason string, respond func()) {
+		h.recordAudit(c.Request.Context(), claims.UserID, auditEntry{
+			ProjectID:     projectID,
+			EnvironmentID: envID,
+			Action:        "ConnectGitRepo",
+			ResourceKind:  "GitRepo",
+			ResourceName:  appAudit,
+			Outcome:       auditOutcomeFailure,
+			Metadata:      map[string]any{"reason": reason, "status": status},
+		})
+		respond()
+	}
+	rejectErr := func(status int, reason, msg string) {
+		reject(status, reason, func() { respondError(c, status, msg) })
 	}
 
+	var req connectGitRepoRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		rejectErr(http.StatusBadRequest, "malformed_body", err.Error())
+		return
+	}
+	appAudit = req.AppName
+
 	if req.RepoFullName == "" {
-		respondError(c, http.StatusBadRequest, "repo_full_name is required")
+		rejectErr(http.StatusBadRequest, "missing_repo_full_name", "repo_full_name is required")
 		return
 	}
 	if req.AppName == "" {
-		respondError(c, http.StatusBadRequest, "app_name is required")
+		rejectErr(http.StatusBadRequest, "missing_app_name", "app_name is required")
 		return
 	}
 	if err := validateKubeName(req.AppName); err != nil {
-		respondError(c, http.StatusBadRequest, err.Error())
+		rejectErr(http.StatusBadRequest, "invalid_app_name", err.Error())
 		return
 	}
 	provider := req.Provider
@@ -890,7 +908,7 @@ func (h *Handler) ConnectGitRepo(c *gin.Context) {
 		provider = "github"
 	}
 	if provider != "github" && provider != "gitlab" {
-		respondError(c, http.StatusBadRequest, "provider must be github or gitlab")
+		rejectErr(http.StatusBadRequest, "invalid_provider", "provider must be github or gitlab")
 		return
 	}
 	if req.ProductionBranch == "" {
@@ -910,15 +928,15 @@ func (h *Handler) ConnectGitRepo(c *gin.Context) {
 		req.Profile = "small"
 	}
 	if req.Port < 1 || req.Port > 65535 {
-		respondError(c, http.StatusBadRequest, "port must be between 1 and 65535")
+		rejectErr(http.StatusBadRequest, "invalid_port", "port must be between 1 and 65535")
 		return
 	}
 	if req.Replicas < 1 || req.Replicas > 10 {
-		respondError(c, http.StatusBadRequest, "replicas must be between 1 and 10")
+		rejectErr(http.StatusBadRequest, "invalid_replicas", "replicas must be between 1 and 10")
 		return
 	}
 	if req.Profile != "small" && req.Profile != "medium" && req.Profile != "large" {
-		respondError(c, http.StatusBadRequest, "profile must be one of: small, medium, large")
+		rejectErr(http.StatusBadRequest, "invalid_profile", "profile must be one of: small, medium, large")
 		return
 	}
 	cloneURL := req.CloneURL
@@ -950,15 +968,15 @@ func (h *Handler) ConnectGitRepo(c *gin.Context) {
 				numeric, projectID,
 			).Scan(&resolved)
 		} else {
-			respondError(c, http.StatusBadRequest, "installation_id must be the installation id (UUID) or its numeric GitHub installation id")
+			rejectErr(http.StatusBadRequest, "invalid_installation_id", "installation_id must be the installation id (UUID) or its numeric GitHub installation id")
 			return
 		}
 		if qerr == pgx.ErrNoRows {
-			respondNotFound(c)
+			reject(http.StatusNotFound, "installation_not_found", func() { respondNotFound(c) })
 			return
 		}
 		if qerr != nil {
-			respondError(c, http.StatusInternalServerError, "failed to verify installation")
+			rejectErr(http.StatusInternalServerError, "installation_check_failed", "failed to verify installation")
 			return
 		}
 		installationID = &resolved
@@ -969,7 +987,7 @@ func (h *Handler) ConnectGitRepo(c *gin.Context) {
 	if req.Token != "" {
 		tokenEncrypted, err = crypto.EncryptToken(h.cfg.GitopsEncryptionKey, []byte(req.Token))
 		if err != nil {
-			respondError(c, http.StatusInternalServerError, "failed to encrypt token")
+			rejectErr(http.StatusInternalServerError, "token_encrypt_failed", "failed to encrypt token")
 			return
 		}
 	}
@@ -1002,19 +1020,27 @@ func (h *Handler) ConnectGitRepo(c *gin.Context) {
 		&r.RootDir, &r.FrameworkOverride, &r.AutoDeploy,
 		&r.Port, &r.Replicas, &r.Profile, &r.CreatedAt, &r.UpdatedAt); err != nil {
 		if isUniqueViolation(err) {
-			respondError(c, http.StatusConflict, "this app already has a linked repository in this environment")
+			rejectErr(http.StatusConflict, "repo_already_linked", "this app already has a linked repository in this environment")
 			return
 		}
-		respondError(c, http.StatusInternalServerError, "failed to link repository")
+		rejectErr(http.StatusInternalServerError, "link_insert_failed", "failed to link repository")
 		return
 	}
 
-	// Best-effort audit.
-	_, _ = h.pool.Exec(c.Request.Context(),
-		`INSERT INTO audit_events (actor_id, project_id, action, resource_kind, resource_name)
-		 VALUES ($1, $2, 'ConnectGitRepo', 'GitRepo', $3)`,
-		claims.UserID, projectID, req.AppName,
-	)
+	h.recordAudit(c.Request.Context(), claims.UserID, auditEntry{
+		ProjectID:     projectID,
+		EnvironmentID: envID,
+		Action:        "ConnectGitRepo",
+		ResourceKind:  "GitRepo",
+		ResourceName:  req.AppName,
+		Outcome:       auditOutcomeSuccess,
+		Metadata: map[string]any{
+			"provider":    provider,
+			"repo":        req.RepoFullName,
+			"branch":      req.ProductionBranch,
+			"auto_deploy": req.AutoDeploy,
+		},
+	})
 	h.notifyAuditEvent(claims, projectID, "ConnectGitRepo", req.AppName)
 
 	c.JSON(http.StatusCreated, gin.H{"repos": []gitRepo{r}})
