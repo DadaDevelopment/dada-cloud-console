@@ -204,10 +204,17 @@ func clusterClaimNameFor(inst *Instance) string {
 // fewer slots, and reporting the shortfall is more useful than refusing to serve.
 func (c *ClusterRuntime) Warm(ctx context.Context, pool ParkingPool, image, region string, n int) error {
 	pool.SetTarget(image, region, n)
-	deficit := n - pool.Available(image, region)
-	if deficit <= 0 {
+	have, err := poolInventory(ctx, pool, image, region)
+	if err != nil {
+		return fmt.Errorf("count warm boxes: %w", err)
+	}
+	if have > n {
+		if _, err := poolTrim(ctx, pool, image, region, n); err != nil {
+			return err
+		}
 		return nil
 	}
+	deficit := n - have
 	var firstErr error
 	created := 0
 	for i := 0; i < deficit; i++ {

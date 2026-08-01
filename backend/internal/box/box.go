@@ -150,6 +150,42 @@ type ParkingPool interface {
 	SetTarget(image, region string, n int)
 }
 
+// ReconcilingPool is the extra a pool whose state lives outside this process can
+// offer the warmer, and it is optional because a pool whose state IS this process
+// does not need it: MemoryPool's Available already counts everything it has.
+//
+// Inventory is not Available. Available answers a claimer — how many bodies can be
+// handed over right now — and must exclude a pod that is still coming up.
+// Inventory answers the warmer — how many bodies exist — and a warmer that asks
+// the claimer's question builds a second box during the ninety seconds the first
+// one takes to become Ready. With two console replicas reconciling on the same
+// interval that is not a corner case, it is what happens.
+//
+// Trim exists because a pool that only grows is a leak. Every over-fill is
+// permanent otherwise, and the surplus holds fleet quota a customer's box needs.
+type ReconcilingPool interface {
+	Inventory(ctx context.Context, image, region string) (int, error)
+	Trim(ctx context.Context, image, region string, keep int) (int, error)
+}
+
+// poolInventory asks a pool how many bodies it has, falling back to the claimable
+// count for a pool that keeps its state in memory and cannot tell the difference.
+func poolInventory(ctx context.Context, pool ParkingPool, image, region string) (int, error) {
+	if rp, ok := pool.(ReconcilingPool); ok {
+		return rp.Inventory(ctx, image, region)
+	}
+	return pool.Available(image, region), nil
+}
+
+// poolTrim removes surplus bodies from a pool that can, and reports zero for one
+// that cannot: an in-memory pool's surplus disappears with the process anyway.
+func poolTrim(ctx context.Context, pool ParkingPool, image, region string, keep int) (int, error) {
+	if rp, ok := pool.(ReconcilingPool); ok {
+		return rp.Trim(ctx, image, region, keep)
+	}
+	return 0, nil
+}
+
 // Warmer fills a pool ahead of demand. Separate from BoxRuntime because warming is
 // startup, not a request: an adapter is asked to warm once, and asked to bind and
 // exec for the rest of its life.

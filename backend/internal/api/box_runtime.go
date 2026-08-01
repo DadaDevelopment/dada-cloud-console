@@ -237,15 +237,19 @@ func boxPoolFillLoop(rt *box.ClusterRuntime, pool box.ParkingPool, image, region
 		if err := rt.Warm(ctx, pool, image, region, target); err != nil {
 			log.Error().Err(err).Int("available", pool.Available(image, region)).Int("target", target).
 				Msg("box: filling the cluster pool failed; spawns report pool_exhausted until the next attempt")
-		} else if added := pool.Available(image, region) - before; added > 0 {
+		} else if changed := pool.Available(image, region) - before; changed != 0 {
+			msg := "box: cluster warm pool filled"
+			if changed < 0 {
+				msg = "box: cluster warm pool trimmed back to target; surplus warm boxes were holding fleet quota"
+			}
 			log.Info().
 				Str("namespace", rt.Namespace).
 				Str("image", image).
-				Int("added", added).
+				Int("changed", changed).
 				Int("available", pool.Available(image, region)).
 				Int("target", target).
 				Dur("took", time.Since(started)).
-				Msg("box: cluster warm pool filled")
+				Msg(msg)
 		}
 		metrics.SetBoxPoolGauges(image, region, pool.Available(image, region), pool.Target(image, region))
 	}

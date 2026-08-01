@@ -3,6 +3,7 @@ package box
 import (
 	"context"
 	"fmt"
+	"sort"
 	"sync"
 	"time"
 
@@ -153,6 +154,61 @@ func (p *ClusterPool) coldStart(ctx context.Context, image, region string) (*Ins
 	return inst, false, nil
 }
 
+// Inventory counts every parked pod for one image and region, including the ones
+// still coming up.
+//
+// Available cannot answer this and must not: a pod that is not Ready is not a
+// pool slot, so a claimer has to ignore it. The warmer's question is the other
+// one — how many bodies EXIST — and answering it with Available is what put two
+// warm pods in production against a target of one. A cluster pod takes about
+// ninety seconds to become Ready, both console replicas reconcile every minute,
+// and for that whole window each of them saw zero and built one. The pod count is
+// the number that stops the second replica from repeating the first one's work.
+func (p *ClusterPool) Inventory(ctx context.Context, image, region string) (int, error) {
+	pods, err := p.parkedAll(ctx, image, region)
+	if err != nil {
+		return 0, err
+	}
+	return len(pods), nil
+}
+
+// Trim destroys surplus parked pods, oldest first, and reports how many it took.
+//
+// Without it the pool only ever grows. Warm creates and nothing removes, so every
+// over-fill — a racing replica, a lowered target, a burst that got refilled twice
+// — is permanent, and the surplus holds fleet quota that a real customer's box
+// needs. Oldest first because a parked pod carries an ActiveDeadlineSeconds it is
+// already burning: the oldest is the slot with the least life left in it.
+//
+// Only parked pods are candidates, so this cannot reach a tenant's box, and a pod
+// that is not yet Ready is never trimmed — it is somebody's create still in
+// flight, and destroying it would race that goroutine's own cleanup.
+func (p *ClusterPool) Trim(ctx context.Context, image, region string, keep int) (int, error) {
+	pods, err := p.parked(ctx, image, region)
+	if err != nil {
+		return 0, err
+	}
+	if len(pods) <= keep {
+		return 0, nil
+	}
+	sort.Slice(pods, func(i, j int) bool {
+		return pods[i].CreationTimestamp.Time.Before(pods[j].CreationTimestamp.Time)
+	})
+	trimmed := 0
+	var firstErr error
+	for _, pod := range pods[:len(pods)-keep] {
+		inst := &Instance{ID: pod.Labels[labelBoxID], InstanceRef: pod.Name}
+		if err := p.rt.Destroy(ctx, inst); err != nil {
+			if firstErr == nil {
+				firstErr = fmt.Errorf("trim surplus box %s: %w", pod.Name, err)
+			}
+			continue
+		}
+		trimmed++
+	}
+	return trimmed, firstErr
+}
+
 // parked lists the claimable pods for one image and region.
 //
 // Readiness is part of being claimable, not a detail: a parked pod is only
@@ -160,6 +216,22 @@ func (p *ClusterPool) coldStart(ctx context.Context, image, region string) (*Ins
 // that is still pulling would move the cold start into the customer's request
 // while reporting a pool hit.
 func (p *ClusterPool) parked(ctx context.Context, image, region string) ([]corev1.Pod, error) {
+	pods, err := p.parkedAll(ctx, image, region)
+	if err != nil {
+		return nil, err
+	}
+	var out []corev1.Pod
+	for _, pod := range pods {
+		if clusterPodReady(&pod) {
+			out = append(out, pod)
+		}
+	}
+	return out, nil
+}
+
+// parkedAll lists the pods parked for one image and region whatever their state,
+// which is the warmer's view rather than a claimer's.
+func (p *ClusterPool) parkedAll(ctx context.Context, image, region string) ([]corev1.Pod, error) {
 	list, err := p.rt.clientset.CoreV1().Pods(p.rt.Namespace).List(ctx, metav1.ListOptions{
 		LabelSelector: labelBox + "=true," + labelBoxPhase + "=" + phaseParked,
 	})
@@ -169,7 +241,7 @@ func (p *ClusterPool) parked(ctx context.Context, image, region string) ([]corev
 	var out []corev1.Pod
 	for i := range list.Items {
 		pod := list.Items[i]
-		if pod.DeletionTimestamp != nil || !clusterPodReady(&pod) {
+		if pod.DeletionTimestamp != nil {
 			continue
 		}
 		if pod.Annotations["dada.io/box-image"] != image || pod.Annotations["dada.io/box-region"] != region {

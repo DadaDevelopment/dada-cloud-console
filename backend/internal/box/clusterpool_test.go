@@ -260,3 +260,92 @@ func TestClusterPoolWarmCountsWhatIsAlreadyThere(t *testing.T) {
 		t.Fatalf("warm created %d extra pods, want none: the pool was already at target", len(pods.Items)-1)
 	}
 }
+
+// TestWarmCountsBoxesThatAreStillComingUp pins the fix for an over-fill seen in
+// production on 2026-08-01: with a target of one, two console replicas produced
+// two warm pods. A cluster pod needs about ninety seconds to go Ready, and for
+// that whole window both replicas asked Available — the CLAIMABLE count — saw
+// zero, and each built one. Nothing trims, so the surplus held fleet quota until
+// someone deleted it by hand.
+func TestWarmCountsBoxesThatAreStillComingUp(t *testing.T) {
+	image := boxcatalog.DefaultImage().Name
+	cs := fake.NewSimpleClientset(parkedPod("box-w1", image, "", false))
+	rt := newClusterRuntime(cs, nil, "dada-boxes", nil)
+	rt.ReadyTimeout = 30 * time.Millisecond
+	pool := NewClusterPool(rt)
+
+	if err := rt.Warm(context.Background(), pool, image, "", 1); err != nil {
+		t.Fatalf("Warm while the only warm box was still coming up: %v", err)
+	}
+	pods, err := cs.CoreV1().Pods("dada-boxes").List(context.Background(), metav1.ListOptions{})
+	if err != nil {
+		t.Fatalf("list pods: %v", err)
+	}
+	if len(pods.Items) != 1 {
+		t.Fatalf("warm built %d extra pods against a target of 1; a box that is not Ready yet still exists",
+			len(pods.Items)-1)
+	}
+}
+
+// TestWarmTrimsSurplusParkedBoxes is the other half: a pool that only grows is a
+// leak. However the surplus arrived — a racing replica, a lowered target — it
+// must go, because those pods hold quota a customer's box needs.
+func TestWarmTrimsSurplusParkedBoxes(t *testing.T) {
+	image := boxcatalog.DefaultImage().Name
+	old := parkedPod("box-w1", image, "", true)
+	old.CreationTimestamp = metav1.NewTime(time.Date(2026, 8, 1, 10, 0, 0, 0, time.UTC))
+	mid := parkedPod("box-w2", image, "", true)
+	mid.CreationTimestamp = metav1.NewTime(time.Date(2026, 8, 1, 11, 0, 0, 0, time.UTC))
+	newest := parkedPod("box-w3", image, "", true)
+	newest.CreationTimestamp = metav1.NewTime(time.Date(2026, 8, 1, 12, 0, 0, 0, time.UTC))
+	cs := fake.NewSimpleClientset(old, mid, newest)
+	rt := newClusterRuntime(cs, nil, "dada-boxes", nil)
+	pool := NewClusterPool(rt)
+
+	if err := rt.Warm(context.Background(), pool, image, "", 1); err != nil {
+		t.Fatalf("Warm against a pool over target: %v", err)
+	}
+	pods, err := cs.CoreV1().Pods("dada-boxes").List(context.Background(), metav1.ListOptions{})
+	if err != nil {
+		t.Fatalf("list pods: %v", err)
+	}
+	if len(pods.Items) != 1 {
+		t.Fatalf("%d warm boxes survived a target of 1", len(pods.Items))
+	}
+	if pods.Items[0].Name != "box-w3" {
+		t.Errorf("trim kept %s, want box-w3: the oldest parked box has the least of its deadline left",
+			pods.Items[0].Name)
+	}
+	if _, pvcs := countBoxObjects(t, cs, "dada-boxes"); pvcs != 0 {
+		t.Errorf("trim left %d workspace claims behind", pvcs)
+	}
+}
+
+// TestTrimNeverTakesABoxSomebodyIsUsing is the guard the whole subsystem is
+// built around: Destroy takes the workspace PVC with the pod, so a trim that
+// could reach a live box would erase a customer's work. Only a parked and Ready
+// pod is a candidate — a pod still coming up belongs to a create still in flight.
+func TestTrimNeverTakesABoxSomebodyIsUsing(t *testing.T) {
+	image := boxcatalog.DefaultImage().Name
+	live := parkedPod("box-live", image, "", true)
+	live.Labels[labelBoxPhase] = phaseLive
+	claimed := parkedPod("box-claimed", image, "", true)
+	claimed.Labels[labelBoxPhase] = phaseClaimed
+	coming := parkedPod("box-coming", image, "", false)
+	cs := fake.NewSimpleClientset(live, claimed, coming, parkedPod("box-free", image, "", true))
+	rt := newClusterRuntime(cs, nil, "dada-boxes", nil)
+	pool := NewClusterPool(rt)
+
+	trimmed, err := pool.Trim(context.Background(), image, "", 0)
+	if err != nil {
+		t.Fatalf("Trim: %v", err)
+	}
+	if trimmed != 1 {
+		t.Fatalf("trimmed %d boxes, want exactly the one free parked box", trimmed)
+	}
+	for _, name := range []string{"box-live", "box-claimed", "box-coming"} {
+		if _, err := cs.CoreV1().Pods("dada-boxes").Get(context.Background(), name, metav1.GetOptions{}); err != nil {
+			t.Errorf("trim destroyed %s: %v", name, err)
+		}
+	}
+}
