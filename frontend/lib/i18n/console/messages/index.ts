@@ -6,6 +6,7 @@ import { projects } from "./projects";
 import { overview } from "./overview";
 import { databases } from "./databases";
 import { apps } from "./apps";
+import { files } from "./files";
 import { operations } from "./operations";
 import { git } from "./git";
 import { domains } from "./domains";
@@ -50,6 +51,7 @@ export const messages: Messages = {
   ...overview,
   ...databases,
   ...apps,
+  ...files,
   ...operations,
   ...git,
   ...domains,

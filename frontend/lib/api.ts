@@ -18,6 +18,8 @@ import type {
   S3BucketCredentialsResponse,
   DatabaseCredentialsResponse,
   AppsResponse,
+  AppFileListResponse,
+  AppFileContent,
   UploadSourceArchiveResponse,
   InfraResponse,
   AppServersResponse,
@@ -540,6 +542,128 @@ export const appsApi = {
       { method: "POST", body: { target_project_id: targetProjectId } }
     ),
 };
+
+/**
+ * Browse and edit an app's persistent volume live, through a running pod.
+ *
+ * Every `path` is relative to the volume mount ("/" is the volume root), which
+ * is also what the backend echoes back — so a path from a listing can be fed
+ * straight into the next call.
+ */
+export const filesApi = {
+  list: (projectId: string, envId: string, appName: string, path: string) =>
+    apiFetch<AppFileListResponse>(
+      `${volumeFilesBase(projectId, envId, appName)}?path=${encodeURIComponent(path)}`
+    ),
+
+  read: (projectId: string, envId: string, appName: string, path: string) =>
+    apiFetch<AppFileContent>(
+      `${volumeFilesBase(projectId, envId, appName)}/content?path=${encodeURIComponent(path)}`
+    ),
+
+  write: (
+    projectId: string,
+    envId: string,
+    appName: string,
+    body: { path: string; content: string; modified?: number }
+  ) =>
+    apiFetch<{ path: string; modified: number }>(
+      `${volumeFilesBase(projectId, envId, appName)}/content`,
+      { method: "PUT", body, timeoutMs: 120_000 }
+    ),
+
+  mkdir: (projectId: string, envId: string, appName: string, path: string) =>
+    apiFetch<{ path: string }>(`${volumeFilesBase(projectId, envId, appName)}/mkdir`, {
+      method: "POST",
+      body: { path },
+    }),
+
+  move: (projectId: string, envId: string, appName: string, from: string, to: string) =>
+    apiFetch<{ from: string; to: string }>(`${volumeFilesBase(projectId, envId, appName)}/move`, {
+      method: "POST",
+      body: { from, to },
+    }),
+
+  remove: (projectId: string, envId: string, appName: string, path: string, recursive: boolean) =>
+    apiFetch<{ path: string }>(`${volumeFilesBase(projectId, envId, appName)}/delete`, {
+      method: "POST",
+      body: { path, recursive },
+      timeoutMs: 120_000,
+    }),
+
+  upload: (
+    projectId: string,
+    envId: string,
+    appName: string,
+    dir: string,
+    file: File,
+    onProgress?: (percent: number) => void
+  ) => {
+    const formData = new FormData();
+    formData.append("path", dir);
+    formData.append("file", file);
+    return apiUpload<{ path: string; size: number }>(
+      `${volumeFilesBase(projectId, envId, appName)}/upload`,
+      formData,
+      onProgress
+    );
+  },
+
+  downloadFile: (projectId: string, envId: string, appName: string, path: string) =>
+    downloadAuthed(
+      `${volumeFilesBase(projectId, envId, appName)}/raw?path=${encodeURIComponent(path)}`,
+      path.split("/").pop() || "download"
+    ),
+
+  downloadDirectory: (projectId: string, envId: string, appName: string, path: string) =>
+    downloadAuthed(
+      `${volumeFilesBase(projectId, envId, appName)}/archive?path=${encodeURIComponent(path)}`,
+      `${path.split("/").filter(Boolean).pop() || appName}.tar.gz`
+    ),
+
+  /**
+   * Object URL for inline previews (images). The caller owns the URL and must
+   * revoke it — a leaked blob URL pins the whole file in memory.
+   */
+  objectUrl: (projectId: string, envId: string, appName: string, path: string) =>
+    fetchAuthedBlob(
+      `${volumeFilesBase(projectId, envId, appName)}/raw?path=${encodeURIComponent(path)}`
+    ).then((blob) => URL.createObjectURL(blob)),
+};
+
+function volumeFilesBase(projectId: string, envId: string, appName: string): string {
+  return `/api/v1/projects/${projectId}/environments/${envId}/apps/${appName}/volume/files`;
+}
+
+/**
+ * Fetch a binary endpoint with the bearer token attached. Plain navigation
+ * cannot carry the Authorization header, so downloads go through a blob.
+ */
+async function fetchAuthedBlob(path: string): Promise<Blob> {
+  const token = await getToken();
+  const res = await fetch(`${API_BASE_URL}${path}`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}) as { error?: string; message?: string });
+    const err = new Error(body.message ?? body.error ?? "Download failed") as Error & { status?: number };
+    err.status = res.status;
+    throw err;
+  }
+  return res.blob();
+}
+
+async function downloadAuthed(path: string, filename: string): Promise<void> {
+  const blob = await fetchAuthedBlob(path);
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 30_000);
+}
 
 /** CI deploy tokens ("deploy hooks") — lets an external CI push a new image without console access. */
 export const deployHooksApi = {

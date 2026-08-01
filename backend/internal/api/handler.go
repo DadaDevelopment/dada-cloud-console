@@ -109,6 +109,8 @@ type Handler struct {
 	// (Enabled() == false) and the export handler returns 503.
 	podTarExporter cloudtask.PodTarExporter
 
+	podFS cloudtask.PodFS
+
 	// billingPlans is the full plan catalog loaded once at startup from the
 	// embedded plans.yaml. Always populated (the embedded file is compiled in);
 	// handlers degrade gracefully if somehow empty.
@@ -275,6 +277,7 @@ func NewHandler(pool *pgxpool.Pool, cfg *config.Config) *Handler {
 		cfg.SourceUploadS3AccessKey, cfg.SourceUploadS3SecretKey, cfg.SourceUploadS3Insecure,
 	)
 	h.podTarExporter = cloudtask.NewPodTarExporter()
+	h.podFS = cloudtask.NewPodFS()
 
 	plans, err := billing.LoadPlans("")
 	if err != nil {

@@ -427,6 +427,17 @@ export default function AppDetailPage() {
             </svg>
             {t("apps.detail.settings")}
           </Link>
+          {summary.volume?.path && (
+            <Link
+              href={`/projects/${projectId}/apps/${appName}/files${envId ? `?envId=${envId}` : ""}`}
+              className="inline-flex items-center gap-2 rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 px-3 py-2 text-sm font-medium text-gray-700 dark:text-gray-200 hover:border-blue-300 hover:text-blue-600 transition-colors shadow-sm"
+            >
+              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V7z" />
+              </svg>
+              {t("apps.files.title")}
+            </Link>
+          )}
           {canEditYaml(role) && !isCompose && (
           <Link
             href={`/projects/${projectId}/apps/${appName}/values${envId ? `?envId=${envId}` : ""}`}

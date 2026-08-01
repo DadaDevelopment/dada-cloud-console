@@ -390,6 +390,30 @@ export interface AppsResponse {
   apps: ResourceSnapshot[];
 }
 
+/** One entry of an app's persistent volume, as read live from a running pod. */
+export interface AppFileEntry {
+  name: string;
+  kind: "file" | "dir" | "symlink" | "other";
+  size: number;
+  modified: number;
+  mode: string;
+}
+
+/** One directory listing; `truncated` when the directory has more entries than the cap. */
+export interface AppFileListResponse {
+  path: string;
+  entries: AppFileEntry[];
+  truncated: boolean;
+}
+
+/** A text file's content, plus the mtime to echo back on save for conflict detection. */
+export interface AppFileContent {
+  path: string;
+  content: string;
+  size: number;
+  modified: number;
+}
+
 /** Generic infrastructure resources (kind='Infra'), e.g. a VM stack's pg/nginx. */
 export interface InfraResponse {
   infra: ResourceSnapshot[];

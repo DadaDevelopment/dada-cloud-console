@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { appsApi, getToken, API_BASE_URL } from "@/lib/api";
 import type { AppVolume } from "@/lib/types";
 import { useT } from "@/lib/i18n/console/context";
@@ -241,6 +242,12 @@ export function StorageManager({ projectId, envId, appName, canEdit }: Props) {
 
       {current && (
         <div className="mt-6 border-t border-gray-200 dark:border-gray-800 pt-5">
+          <Link
+            href={`/projects/${projectId}/apps/${appName}/files?envId=${envId}`}
+            className="mr-2 inline-flex items-center gap-2 rounded-lg border border-gray-300 dark:border-gray-700 px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800"
+          >
+            {t("apps.files.open")}
+          </Link>
           <button
             onClick={exportVolume}
             disabled={exportBusy}
