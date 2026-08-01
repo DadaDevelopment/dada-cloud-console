@@ -11,6 +11,7 @@ Deploy and run an application.
 
 - [Deploy an app from GitHub](applications-deploy-from-github.md)
 - [Deploy from an image or Compose](applications-deploy-image-and-compose.md)
+- [Add a "Deploy on Dada" button to your repository](deploy-button-badge.md)
 - [Managed Postgres databases](databases-postgres.md)
 - [Custom domains and HTTPS](domains-and-https.md)
 - [Monitoring: metrics, logs, alerts](monitoring-metrics-logs-alerts.md)

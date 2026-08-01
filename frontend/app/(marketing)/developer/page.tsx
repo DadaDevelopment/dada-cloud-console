@@ -16,6 +16,7 @@ const GUIDE_GROUPS: {
     items: [
       { slug: "applications-deploy-from-github", label: "Deploy an app from GitHub" },
       { slug: "applications-deploy-image-and-compose", label: "Deploy from an image or Compose" },
+      { slug: "deploy-button-badge", label: 'Add a "Deploy on Dada" button to your repo' },
       { slug: "databases-postgres", label: "Managed Postgres databases" },
       { slug: "domains-and-https", label: "Custom domains and HTTPS" },
       { slug: "monitoring-metrics-logs-alerts", label: "Monitoring: metrics, logs, alerts" },

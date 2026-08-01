@@ -2,6 +2,26 @@
 
 GitOps-backed self-service cloud console for managing Kubernetes platform resources.
 
+## One-click deploy button
+
+Any public GitHub repository can carry a "Deploy on Dada" badge. A reader clicks it and the
+repository is built and deployed into *their own* Dada Cloud account — no terminal, no fork, no
+GitHub App install, and the reader does not need to own the repository.
+
+Live example (deploys the starter template, not this monorepo):
+
+[![Deploy on Dada](https://console.dada-tuda.ru/deploy-button.svg)](https://console.dada-tuda.ru/deploy?repo=DadaDevelopment/dadatuda-starter)
+
+Add it to your own README:
+
+```markdown
+[![Deploy on Dada](https://console.dada-tuda.ru/deploy-button.svg)](https://console.dada-tuda.ru/deploy?repo=OWNER/REPO)
+```
+
+Optional query parameters: `branch` (default `main`) and `rootDir` (default `.`) for monorepos.
+The console renders a ready-made snippet for you on any app that has a linked repository.
+Full guide: [Add a "Deploy on Dada" button](frontend/content/docs/deploy-button-badge.md).
+
 ## Architecture
 
 ```
