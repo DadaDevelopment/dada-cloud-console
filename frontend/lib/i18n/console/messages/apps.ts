@@ -436,6 +436,14 @@ export const apps: Messages = {
   "apps.detail.config.storageNone": { ru: "Не подключено", en: "Not configured" },
   "apps.detail.config.git": { ru: "Репозиторий", en: "Repository" },
   "apps.detail.config.gitNone": { ru: "Не привязан", en: "Not connected" },
+
+  "apps.nextStep.title": { ru: "Что дальше", en: "What's next" },
+  "apps.nextStep.domain.title": { ru: "Подключить свой домен", en: "Connect your own domain" },
+  "apps.nextStep.domain.desc": { ru: "Сейчас приложение доступно только по временному адресу dada-tuda.ru.", en: "Right now the app is only reachable at a temporary dada-tuda.ru address." },
+  "apps.nextStep.connectGit.title": { ru: "Подключить репозиторий", en: "Connect a repository" },
+  "apps.nextStep.connectGit.desc": { ru: "Деплой по каждому push, без ручной загрузки образа.", en: "Deploy on every push - no more manual image uploads." },
+  "apps.nextStep.deploy.title": { ru: "Задеплоить свежий коммит", en: "Deploy your latest commit" },
+  "apps.nextStep.deploy.desc": { ru: "Посмотреть историю деплоев и выпустить новую версию.", en: "Check deployment history and ship a new version." },
   "apps.storage.title": { ru: "Постоянное хранилище", en: "Persistent storage" },
   "apps.storage.subtitle": {
     ru: "Подключить постоянную директорию данных (ReadWriteMany) к приложению. Общий том для всех реплик.",

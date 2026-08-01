@@ -19,6 +19,8 @@ import { DeployHooksCard } from "@/components/deploy/deploy-hooks-card";
 import { AppPreviewPane } from "@/components/app-preview-pane";
 import { AppAlertsBanner } from "@/components/deploy/app-alerts-banner";
 import { getAppAlerts } from "@/lib/app-alerts";
+import { AppNextStepCard } from "@/components/deploy/app-next-step-card";
+import { getAppNextSteps } from "@/lib/app-next-step";
 import { useT } from "@/lib/i18n/console/context";
 import { Globe, Database, GitPullRequest } from "lucide-react";
 import { classifyVMResource } from "@/lib/vm-resources";
@@ -78,6 +80,7 @@ export default function AppDetailPage() {
   const [endpoints, setEndpoints] = useState<ResourceSnapshot[]>([]);
   const [isLoadingEndpoints, setIsLoadingEndpoints] = useState(true);
   const [hostnames, setHostnames] = useState<DomainHostname[]>([]);
+  const [isLoadingHostnames, setIsLoadingHostnames] = useState(true);
   const [envCount, setEnvCount] = useState<number | null>(null);
 
   const [isImageModalOpen, setIsImageModalOpen] = useState(false);
@@ -167,7 +170,8 @@ export default function AppDetailPage() {
     customDomainsApi
       .listHostnames(projectId, envId, appName)
       .then((data) => setHostnames(data.hostnames ?? []))
-      .catch(() => setHostnames([]));
+      .catch(() => setHostnames([]))
+      .finally(() => setIsLoadingHostnames(false));
 
     envVarsApi
       .list(projectId, envId, appName)
@@ -331,6 +335,15 @@ export default function AppDetailPage() {
   const isCompose = summary.runtime === "compose";
   const resType = classifyVMResource(app);
   const isResource = resType !== "app";
+  const alerts = getAppAlerts(app);
+  const isReadyNoAlerts = (app.phase ?? "").toLowerCase() === "ready" && alerts.length === 0;
+  const nextSteps =
+    !isResource && isReadyNoAlerts && !isLoadingHostnames
+      ? getAppNextSteps({
+          hasCustomDomain: hostnames.some((h) => !h.managed),
+          hasGitRepo: !!summary.repo_full_name,
+        })
+      : [];
 
   return (
     <div>
@@ -439,12 +452,19 @@ export default function AppDetailPage() {
       </div>
 
       <AppAlertsBanner
-        alerts={getAppAlerts(app)}
+        alerts={alerts}
         logsHref={`/projects/${projectId}/apps/${appName}${envId ? `?envId=${envId}` : ""}#logs`}
         storageHref={`/projects/${projectId}/apps/${appName}/settings?tab=storage${envId ? `&envId=${envId}` : ""}`}
         projectId={projectId}
         envId={envId}
         appName={appName}
+      />
+
+      <AppNextStepCard
+        steps={nextSteps}
+        onConnectDomain={() => { setDomainForm(defaultDomainForm(appName)); setIsDomainModalOpen(true); }}
+        gitSettingsHref={`/projects/${projectId}/apps/${appName}/settings?tab=git${envId ? `&envId=${envId}` : ""}`}
+        deploymentsHref={`/projects/${projectId}/apps/${appName}/deployments${envId ? `?envId=${envId}` : ""}`}
       />
 
       {!isResource && summary.url && (
