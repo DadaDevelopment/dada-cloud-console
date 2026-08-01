@@ -1787,6 +1787,9 @@ func (w *DBWatcher) doDeployImageVersion(ctx context.Context, op db.Operation) e
 		{Path: gitPath, Content: yaml},
 		{Path: valuesPath, Content: valuesYAML},
 	}
+	if err := w.guardUnattendedClobber(op, mgr, valuesPath, valuesYAML); err != nil {
+		return err
+	}
 	secretFile, err := w.renderEnvSecretFile(mgr, projectName, envName, envNamespace, p.AppName, op.ID.String(), env)
 	if err != nil {
 		return err
@@ -1811,6 +1814,44 @@ func (w *DBWatcher) doDeployImageVersion(ctx context.Context, op db.Operation) e
 		op.ProjectID, op.EnvironmentID,
 		"App", p.AppName, "Pending", updatedJSON, time.Now(),
 	)
+}
+
+// guardUnattendedClobber refuses an unattended deploy that would delete parts
+// of an app's values.yaml which only exist in git.
+//
+// values.yaml is regenerated from the database on every deploy, so an app whose
+// manifests are hand-maintained loses those edits on the next render. When a
+// person clicks Deploy they see that happen and can put it back. When the
+// platform deploys on its own -- the autoscaler raising a starved app's profile,
+// a deploy hook -- nobody is looking, and the loss lands on a live app: the
+// autoscaler's first production run stripped nine environment variables, two
+// volumes and a managed-database declaration from one, and ArgoCD then pruned
+// the database.
+//
+// So the check is scoped to unattended operations and to deletions only. Its
+// failure leaves the operation Failed with the exact paths at stake, which is a
+// resize that did not happen -- strictly better than a resize that took the
+// app's configuration with it.
+func (w *DBWatcher) guardUnattendedClobber(op db.Operation, mgr *git.Manager, valuesPath, renderedValues string) error {
+	if !op.Unattended() {
+		return nil
+	}
+	if _, err := mgr.Pull(); err != nil {
+		return fmt.Errorf("pull before clobber check: %w", err)
+	}
+	existing, err := mgr.ReadFile(valuesPath)
+	if err != nil {
+		return nil
+	}
+	dropped := renderer.DroppedPaths(existing, renderedValues)
+	if len(dropped) == 0 {
+		return nil
+	}
+	log.Printf("gitops: refusing unattended deploy of %s: rendering %s would drop %s",
+		op.ResourceName, valuesPath, renderer.DescribeDropped(dropped))
+	return fmt.Errorf(
+		"unattended deploy would delete hand-maintained values from %s (%s); deploy this app from the console to re-render it deliberately",
+		valuesPath, renderer.DescribeDropped(dropped))
 }
 
 // appProfileFallback resolves the resource profile for an environment whose App

@@ -13,6 +13,7 @@ import (
 // Operation mirrors the columns the agent needs from the operations table.
 type Operation struct {
 	ID            uuid.UUID
+	ActorID       uuid.UUID
 	ProjectID     uuid.UUID
 	EnvironmentID *uuid.UUID
 	Action        string
@@ -21,6 +22,17 @@ type Operation struct {
 	Payload       json.RawMessage
 	CreatedAt     time.Time
 }
+
+// SystemActorID is the fixed-UUID non-loginable user (migration 010) the
+// platform files its own operations under: deploy hooks, the app autoscaler,
+// preview reaping. An operation carrying it has no human watching its result,
+// which is why the render-clobber guard applies to it and not to a deploy a
+// person clicked.
+var SystemActorID = uuid.MustParse(systemActorID)
+
+// Unattended reports whether the platform, rather than a person, asked for this
+// operation.
+func (o Operation) Unattended() bool { return o.ActorID == SystemActorID }
 
 const claimBatchSize = 10
 
@@ -69,7 +81,7 @@ func ClaimPending(ctx context.Context, pool *pgxpool.Pool) ([]Operation, error) 
 			LIMIT  $1
 			FOR UPDATE SKIP LOCKED
 		)
-		RETURNING id, project_id, environment_id, action, resource_kind, resource_name, payload, created_at
+		RETURNING id, actor_id, project_id, environment_id, action, resource_kind, resource_name, payload, created_at
 	`, claimBatchSize)
 	if err != nil {
 		return nil, fmt.Errorf("claim query: %w", err)
@@ -80,7 +92,7 @@ func ClaimPending(ctx context.Context, pool *pgxpool.Pool) ([]Operation, error) 
 	for rows.Next() {
 		var op Operation
 		if err := rows.Scan(
-			&op.ID, &op.ProjectID, &op.EnvironmentID,
+			&op.ID, &op.ActorID, &op.ProjectID, &op.EnvironmentID,
 			&op.Action, &op.ResourceKind, &op.ResourceName,
 			&op.Payload, &op.CreatedAt,
 		); err != nil {
