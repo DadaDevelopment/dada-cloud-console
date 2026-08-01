@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -153,6 +154,57 @@ func TestBillingCheckout_HappyPath_ReturnsConfirmationURL(t *testing.T) {
 	if resp.PaymentID == "" || resp.ConfirmationURL == "" {
 		t.Fatalf("resp=%+v want both payment_id and confirmation_url set", resp)
 	}
+}
+
+func seedPaymentsProjectNoOrg(t *testing.T, pool *pgxpool.Pool) uuid.UUID {
+	t.Helper()
+	var projectID uuid.UUID
+	suffix := uuid.NewString()[:8]
+	err := pool.QueryRow(context.Background(),
+		`INSERT INTO projects (name, display_name, org_id) VALUES ($1, $1, NULL) RETURNING id`,
+		"payments-noorg-"+suffix,
+	).Scan(&projectID)
+	if err != nil {
+		t.Fatalf("seed org-less project: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM projects WHERE id = $1`, projectID)
+	})
+	return projectID
+}
+
+func TestBillingCheckout_OrgUnresolved_409NoPaymentRow(t *testing.T) {
+	pool := testPaymentsPool(t)
+	projectID := seedPaymentsProjectNoOrg(t, pool)
+	checkStart := time.Now().Add(-1 * time.Second)
+
+	h := &Handler{pool: pool, billingPlans: testPlans(), yookassa: nonNilProvider(pool)}
+	c, rec := newBillingCtx(http.MethodPost, "/", `{"plan":"startup"}`, godClaims(uuid.New()), projectID)
+	h.BillingCheckout(c)
+
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("code=%d body=%s want 409 when the project's org_id is NULL", rec.Code, rec.Body.String())
+	}
+	var body map[string]string
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode response: %v (body=%s)", err, rec.Body.String())
+	}
+	if body["error"] != "org_unresolved" {
+		t.Fatalf("error=%q want org_unresolved", body["error"])
+	}
+
+	var count int
+	if err := pool.QueryRow(context.Background(),
+		`SELECT COUNT(*) FROM payments WHERE org_id = '' AND created_at >= $1`, checkStart,
+	).Scan(&count); err != nil {
+		t.Fatalf("count payments: %v", err)
+	}
+	if count != 0 {
+		t.Fatalf("payments count=%d want 0: BillingCheckout must refuse BEFORE creating a payment for an org-less project", count)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM payments WHERE org_id = '' AND created_at >= $1`, checkStart)
+	})
 }
 
 func TestYooKassaWebhook_Unconfigured_StillReturns200(t *testing.T) {

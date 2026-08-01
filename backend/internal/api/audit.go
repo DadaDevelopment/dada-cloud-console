@@ -11,6 +11,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // Audit actions for the passive steps of a user path. Until these existed the
@@ -181,7 +182,18 @@ func (h *Handler) recordSystemAudit(ctx context.Context, e auditEntry) {
 }
 
 func (h *Handler) writeAudit(ctx context.Context, actorID uuid.UUID, e auditEntry) {
-	if h.pool == nil || e.Action == "" {
+	if h.pool == nil {
+		return
+	}
+	writeAuditRow(ctx, h.pool, actorID, e)
+}
+
+// writeAuditRow is writeAudit's pool-only twin, for the background sweepers
+// that have no Handler (SweepPlanExpiry, SweepQuotaGrace, and the payment-
+// plan-mismatch detector all run off a bare *pgxpool.Pool). Same best-effort
+// contract: a write failure is never surfaced to the caller.
+func writeAuditRow(ctx context.Context, pool *pgxpool.Pool, actorID uuid.UUID, e auditEntry) {
+	if pool == nil || e.Action == "" {
 		return
 	}
 	outcome := e.Outcome
@@ -202,7 +214,7 @@ func (h *Handler) writeAudit(ctx context.Context, actorID uuid.UUID, e auditEntr
 		if len(unresolved) > 0 {
 			payload = mergeAuditMetadata(meta, unresolved)
 		}
-		_, err := h.pool.Exec(ctx,
+		_, err := pool.Exec(ctx,
 			`INSERT INTO audit_events
 			   (actor_id, project_id, environment_id, operation_id, action, resource_kind, resource_name, outcome, metadata)
 			 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,

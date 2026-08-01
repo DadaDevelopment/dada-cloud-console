@@ -478,7 +478,7 @@ export default function AppDetailPage() {
 
       {!isResource && summary.url && (
         <div className="mb-6">
-          <AppPreviewPane url={summary.preview_url ?? summary.url} openUrl={summary.url} defaultOpen />
+          <AppPreviewPane url={summary.preview_url ?? summary.url} openUrl={summary.url} />
         </div>
       )}
 
@@ -626,7 +626,7 @@ export default function AppDetailPage() {
         </div>
         {activePreview && (
           <div className="mt-4">
-            <AppPreviewPane key={activePreview.url} url={activePreview.url} openUrl={activePreview.openUrl} title={activePreview.label} defaultOpen />
+            <AppPreviewPane key={activePreview.url} url={activePreview.url} openUrl={activePreview.openUrl} title={activePreview.label} />
           </div>
         )}
       </div>

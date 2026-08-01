@@ -217,6 +217,7 @@ func main() {
 					now := time.Now().UTC()
 					api.SweepPlanExpiry(meterCtx, pool, expiryNotifier, cfg.AuditNotifyEmail, now)
 					api.SweepQuotaGrace(meterCtx, pool, expiryNotifier, cfg.AuditNotifyEmail, billingPlans, now)
+					api.SweepPaymentPlanMismatch(meterCtx, pool, cfg.AuditNotifyEmail, now)
 				}
 			}
 		}()

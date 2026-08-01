@@ -42,4 +42,16 @@ export const previews: Messages = {
     ru: "Это бот без веб-сервера? Пересоздайте приложение в worker-режиме — ему не нужен домен.",
     en: "Is this a bot with no web server? Recreate the app as a background worker — it does not need a domain.",
   },
+
+  "previewPane.card.open": { ru: "Открыть живой просмотр", en: "Open live preview" },
+  "previewPane.card.hide": { ru: "Свернуть живой просмотр", en: "Hide live preview" },
+  "previewPane.card.loading": { ru: "Читаем страницу…", en: "Reading the page…" },
+  "previewPane.card.empty": {
+    ru: "Страница не отдала описание. Откройте живой просмотр, чтобы увидеть приложение.",
+    en: "The page returned no summary. Open the live preview to see the app.",
+  },
+  "previewPane.card.down": {
+    ru: "Приложение не ответило страницей.",
+    en: "The app did not answer with a page.",
+  },
 };

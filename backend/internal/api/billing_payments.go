@@ -106,6 +106,11 @@ func (h *Handler) BillingCheckout(c *gin.Context) {
 		respondNotFound(c)
 		return
 	}
+	if orgID == "" {
+		log.Printf("payments: checkout refused, project=%s has no org_id", projectID)
+		respondError(c, http.StatusConflict, "org_unresolved")
+		return
+	}
 
 	paymentID, confirmationURL, err := h.yookassa.Checkout(c.Request.Context(), orgID, *plan, claims.Email, claims.Subject, projectID.String())
 	if err != nil {
@@ -172,8 +177,41 @@ func (h *Handler) YooKassaWebhook(c *gin.Context) {
 	case yookassa.OutcomeCanceled:
 		log.Printf("payments: canceled org=%s plan=%s amount=%s", result.OrgID, result.Plan, result.AmountValue)
 	}
+	h.recordPaymentOutcomeAudit(c.Request.Context(), payload.Object.ID, result)
 
 	c.JSON(http.StatusOK, gin.H{"ok": true})
+}
+
+// recordPaymentOutcomeAudit writes one audit_events row per terminal webhook
+// outcome (succeeded / canceled / already_processed / unknown_payment). This
+// is the only durable trail a payment leaves outside the payments table
+// itself -- before this, a payment that succeeded without the plan landing
+// (P0-PAY-5) left zero rows anywhere and was only found a week later by
+// manually joining two tables. Best-effort: an audit failure must never flip
+// the webhook's HTTP response, so writeAudit's own swallow-and-log is relied
+// on here rather than re-implemented.
+func (h *Handler) recordPaymentOutcomeAudit(ctx context.Context, ykPaymentID string, result yookassa.WebhookResult) {
+	meta := map[string]string{
+		"yk_payment_id": ykPaymentID,
+		"outcome":       string(result.Outcome),
+	}
+	if result.Plan != "" {
+		meta["plan"] = result.Plan
+	}
+	if result.AmountValue != "" {
+		meta["amount_value"] = result.AmountValue
+	}
+	outcome := auditOutcomeSuccess
+	if result.Outcome == yookassa.OutcomeUnknownPayment {
+		outcome = auditOutcomeFailure
+	}
+	h.recordSystemAudit(ctx, auditEntry{
+		Action:       "PaymentWebhook",
+		ResourceKind: "Payment",
+		ResourceName: result.OrgID,
+		Outcome:      outcome,
+		Metadata:     meta,
+	})
 }
 
 // notifyPaymentSuccess sends the customer receipt email and an operator copy
