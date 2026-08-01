@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"strings"
@@ -9,6 +10,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/dada-tuda/console/backend/internal/auth"
 	"github.com/dada-tuda/console/backend/internal/crypto"
@@ -64,9 +66,40 @@ func (h *Handler) AISetProviderCredential(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"status": "ok"})
 }
 
-// AIGetProviderCredential returns the decrypted project-scoped provider credential
-// for the AI Gateway runtime to inject per request. Server-to-server only; the
-// plaintext key leaves the backend only over the internal-token-guarded channel.
+// loadAIProviderCredential resolves which stored credential serves this
+// project/provider pair, still encrypted.
+//
+// The ORDER BY is the whole contract: false sorts before true, so a row with a
+// concrete project_id is returned ahead of the platform row (project_id IS
+// NULL) whenever the project brought its own key. Split out of the handler so
+// the precedence is exercised by a test against the real schema rather than by
+// a second copy of this query that could drift away from it.
+func loadAIProviderCredential(ctx context.Context, pool *pgxpool.Pool,
+	projectID uuid.UUID, provider string) ([]byte, *string, error) {
+	var enc []byte
+	var apiBase *string
+	err := pool.QueryRow(ctx, `
+		SELECT api_key_encrypted, api_base
+		  FROM ai_provider_credentials
+		 WHERE provider = $2
+		   AND (project_id = $1 OR project_id IS NULL)
+		 ORDER BY (project_id IS NULL)
+		 LIMIT 1
+	`, projectID, provider).Scan(&enc, &apiBase)
+	if err != nil {
+		return nil, nil, err
+	}
+	return enc, apiBase, nil
+}
+
+// AIGetProviderCredential returns the decrypted provider credential for the AI
+// Gateway runtime to inject per request. Server-to-server only; the plaintext
+// key leaves the backend only over the internal-token-guarded channel.
+//
+// The project's own BYOK row wins. Falling back to the platform row
+// (project_id IS NULL, see migration 079) is what lets every project reach the
+// free-tier tier aliases the gateway serves without configuring anything, while
+// a project that brought its own key keeps being billed to that key.
 //
 // POST /internal/ai/credential/get  (guarded by requireInternalToken)
 func (h *Handler) AIGetProviderCredential(c *gin.Context) {
@@ -76,13 +109,8 @@ func (h *Handler) AIGetProviderCredential(c *gin.Context) {
 		return
 	}
 
-	var enc []byte
-	var apiBase *string
-	err := h.pool.QueryRow(c.Request.Context(), `
-		SELECT api_key_encrypted, api_base
-		  FROM ai_provider_credentials
-		 WHERE project_id = $1 AND provider = $2
-	`, req.ProjectID, req.Provider).Scan(&enc, &apiBase)
+	enc, apiBase, err := loadAIProviderCredential(
+		c.Request.Context(), h.pool, req.ProjectID, req.Provider)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			respondError(c, http.StatusNotFound, "no credential for project/provider")
