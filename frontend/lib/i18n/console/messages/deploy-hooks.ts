@@ -53,6 +53,15 @@ export const deployHooks: Messages = {
     en: "Store the token as a repo secret named DADA_DEPLOY_TOKEN.",
   },
 
+  "deployBadge.title": { ru: "Кнопка «Deploy on Dada»", en: "\"Deploy on Dada\" button" },
+  "deployBadge.subtitle": {
+    ru: "Вставьте бейдж в README репозитория — по клику любой читатель развернёт этот публичный репозиторий у себя в Dada Cloud.",
+    en: "Drop this badge into the repo README — one click deploys this public repository into any reader's own Dada Cloud.",
+  },
+  "deployBadge.markdown": { ru: "Markdown", en: "Markdown" },
+  "deployBadge.html": { ru: "HTML", en: "HTML" },
+  "deployBadge.preview": { ru: "Предпросмотр", en: "Preview" },
+
   "deployHooks.wizard.cta": {
     ru: "Уже собираете образы в своём CI? Деплой из готового образа →",
     en: "Already build images in your own CI? Deploy a prebuilt image →",

@@ -952,6 +952,16 @@ export const gitApi = {
       `/api/v1/projects/${projectId}/git/installations/${installationId}/detect?repo=${encodeURIComponent(repoFullName)}&root_dir=${encodeURIComponent(rootDir)}`
     ),
 
+  /**
+   * Framework detection for a public repo the caller has no installation for.
+   * Backs the "Deploy on Dada" badge flow, where the visitor typically does not
+   * own the repository they are deploying.
+   */
+  detectPublic: (projectId: string, repoFullName: string, rootDir = ".") =>
+    apiFetch<FrameworkDetection>(
+      `/api/v1/projects/${projectId}/git/detect?repo=${encodeURIComponent(repoFullName)}&root_dir=${encodeURIComponent(rootDir)}`
+    ),
+
   linkRepo: (
     projectId: string,
     envId: string,

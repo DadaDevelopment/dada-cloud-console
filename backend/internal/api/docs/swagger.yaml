@@ -10539,6 +10539,64 @@ paths:
       summary: Reveal an S3 bucket's access credentials
       tags:
       - storage
+  /projects/{projectId}/git/detect:
+    get:
+      description: Best-effort framework detection for a public GitHub repository
+        with no App installation, backing the one-click "Deploy on Dada" badge flow.
+        Requires write access to the project.
+      operationId: detectPublicFramework
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      - description: Repository full name (owner/name)
+        in: query
+        name: repo
+        required: true
+        type: string
+      - description: Subdirectory to inspect (default repo root)
+        in: query
+        name: root_dir
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: framework detection result
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "502":
+          description: Bad Gateway
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Detect the framework of a public repository
+      tags:
+      - git
   /projects/{projectId}/git/github/authorize:
     get:
       description: Returns a GitHub OAuth authorize URL. After the user authorizes,

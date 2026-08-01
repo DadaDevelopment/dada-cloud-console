@@ -16,6 +16,7 @@ import { LogsViewer } from "@/components/logs-viewer";
 import { PhaseBadge } from "@/components/ui/phase-badge";
 import { CloudTaskPanel } from "@/components/cloud-task/cloud-task-panel";
 import { DeployHooksCard } from "@/components/deploy/deploy-hooks-card";
+import { DeployBadgeCard } from "@/components/deploy/deploy-badge-card";
 import { AppPreviewPane } from "@/components/app-preview-pane";
 import { AppAlertsBanner } from "@/components/deploy/app-alerts-banner";
 import { getAppAlerts } from "@/lib/app-alerts";
@@ -654,6 +655,12 @@ export default function AppDetailPage() {
           appName={appName}
           canMutate={canMutate(role)}
         />
+      </div>
+      )}
+
+      {!isResource && summary.repo_full_name && (
+      <div className="mt-10">
+        <DeployBadgeCard repoFullName={summary.repo_full_name} />
       </div>
       )}
 

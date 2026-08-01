@@ -6,14 +6,17 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/dada-tuda/console/backend/internal/auth"
 	"github.com/dada-tuda/console/backend/internal/buildagent"
+	"github.com/dada-tuda/console/backend/internal/cache"
 	"github.com/dada-tuda/console/backend/internal/crypto"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -715,6 +718,96 @@ func (h *Handler) DetectFramework(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, det)
 }
+
+// DetectPublicFramework proxies framework auto-detection for a public repository
+// the caller has no GitHub App installation for. Installation id 0 tells the
+// build-agent to inspect the repo anonymously — the same credential path the
+// build job already uses for a git_repos row without an installation — which is
+// what backs the one-click "Deploy on Dada" badge flow.
+//
+// @ID          detectPublicFramework
+// @Summary     Detect the framework of a public repository
+// @Description Best-effort framework detection for a public GitHub repository with no App installation, backing the one-click "Deploy on Dada" badge flow. Requires write access to the project.
+// @Tags        git
+// @Produce     json
+// @Security    BearerAuth
+// @Param       projectId path     string true  "Project UUID"
+// @Param       repo      query    string true  "Repository full name (owner/name)"
+// @Param       root_dir  query    string false "Subdirectory to inspect (default repo root)"
+// @Success     200       {object} map[string]interface{} "framework detection result"
+// @Failure     400       {object} map[string]string
+// @Failure     403       {object} map[string]string
+// @Failure     404       {object} map[string]string
+// @Failure     502       {object} map[string]string
+// @Router      /projects/{projectId}/git/detect [get]
+func (h *Handler) DetectPublicFramework(c *gin.Context) {
+	if h.buildagent == nil {
+		respondError(c, http.StatusServiceUnavailable, "git integration not configured")
+		return
+	}
+
+	claims, ok := auth.GetClaims(c)
+	if !ok {
+		respondUnauthorized(c)
+		return
+	}
+
+	projectID, err := uuid.Parse(c.Param("projectId"))
+	if err != nil {
+		respondNotFound(c)
+		return
+	}
+
+	role, err := h.effectiveRole(c.Request.Context(), claims, projectID)
+	if err == pgx.ErrNoRows {
+		respondNotFound(c)
+		return
+	}
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, "failed to check project membership")
+		return
+	}
+	if !canWrite(role) {
+		respondForbidden(c)
+		return
+	}
+
+	repo := strings.TrimSpace(c.Query("repo"))
+	if repo == "" {
+		respondError(c, http.StatusBadRequest, "repo is required")
+		return
+	}
+	if !publicRepoFullName.MatchString(repo) {
+		respondError(c, http.StatusBadRequest, "repo must be owner/name")
+		return
+	}
+	rootDir := c.Query("root_dir")
+	if rootDir == "" {
+		rootDir = "."
+	}
+
+	det, err := cache.Fetch(c.Request.Context(), h.cache,
+		fmt.Sprintf("git:detect:public:%s:%s", repo, rootDir), publicDetectCacheTTL,
+		func() (*buildagent.FrameworkDetection, error) {
+			return h.buildagent.DetectFramework(c.Request.Context(), 0, repo, rootDir)
+		})
+	if err != nil {
+		respondError(c, http.StatusBadGateway, "failed to detect framework via build-agent")
+		return
+	}
+	c.JSON(http.StatusOK, det)
+}
+
+// publicDetectCacheTTL caches anonymous detections per repo. Unauthenticated
+// GitHub API calls are rate-limited per source IP (60/hour for the whole
+// cluster egress), and one detection spends several of them, so a popular badge
+// would exhaust the budget within a handful of clicks without this. Detection
+// only shifts when the repo's build files change, so a long TTL is safe.
+const publicDetectCacheTTL = 6 * time.Hour
+
+// publicRepoFullName bounds the anonymous detect proxy to a plausible GitHub
+// "owner/name" so the query cannot be steered at other build-agent paths.
+var publicRepoFullName = regexp.MustCompile(`^[A-Za-z0-9._-]{1,39}/[A-Za-z0-9._-]{1,100}$`)
 
 // ListGitRepos returns the git-linked repos in an environment.
 //

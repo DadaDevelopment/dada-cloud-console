@@ -820,10 +820,20 @@ func (s *Server) handleDetect(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, det)
 }
 
+// detectFramework resolves an installation token and inspects the repo tree.
+// installationID 0 means "no installation" (the one-click public-repo deploy
+// path): detect anonymously, exactly like the anonymous clone the build job
+// already performs for such repos. githubAPI omits an empty Authorization
+// header, so this hits GitHub's unauthenticated API — public repos only, and
+// subject to the lower anonymous rate limit.
 func (s *Server) detectFramework(ctx context.Context, installationID int64, repoFullName, rootDir string) (frameworkDetection, error) {
-	token, err := s.gh.InstallToken(ctx, installationID)
-	if err != nil {
-		return frameworkDetection{}, err
+	token := ""
+	if installationID != 0 {
+		var err error
+		token, err = s.gh.InstallToken(ctx, installationID)
+		if err != nil {
+			return frameworkDetection{}, err
+		}
 	}
 	return detectWithToken(ctx, token, repoFullName, rootDir)
 }
