@@ -6,6 +6,14 @@ import { visibleNavItems, projectHref, type IconName } from "@/lib/resources";
 import { useT } from "@/lib/i18n/console/context";
 import { ResourceIcon } from "./icons";
 
+/**
+ * The MCP setup guide lives on the marketing host, and until now the console
+ * never mentioned MCP at all -- a user told us they went looking for the server
+ * and gave up. ⌘K is the cheapest place to make it findable from inside the
+ * product.
+ */
+const MCP_DOCS_URL = "https://cloud.dada-tuda.ru/developer/mcp-ai-agents";
+
 interface Command {
   id: string;
   label: string;
@@ -68,6 +76,12 @@ export function CommandPalette({ initialOpen = false }: { initialOpen?: boolean 
         run: () => router.push(`/projects/${p.id}`),
       });
     }
+    cmds.push({
+      id: "docs-mcp",
+      label: t("shell.palette.mcp"),
+      hint: t("shell.palette.docs"),
+      run: () => window.open(MCP_DOCS_URL, "_blank", "noopener,noreferrer"),
+    });
     return cmds;
   }, [projectId, role, projects, router, t]);
 

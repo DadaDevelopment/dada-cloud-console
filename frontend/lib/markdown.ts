@@ -4,9 +4,9 @@
  * CommonMark implementation: it supports headings (`#`..`######`), paragraphs,
  * ordered/unordered lists with one level of nesting and wrapped continuation
  * lines, fenced ```code``` blocks, `inline code`, **bold**, *italic*,
- * `[text](url)` links, blockquotes and horizontal rules. Every piece of text is
- * HTML-escaped before formatting markers are applied, so the output is safe to
- * inject with `dangerouslySetInnerHTML`.
+ * `[text](url)` links, blockquotes, horizontal rules and pipe tables. Every
+ * piece of text is HTML-escaped before formatting markers are applied, so the
+ * output is safe to inject with `dangerouslySetInnerHTML`.
  *
  * Internal links that point at another guide (`something.md`) are rewritten to a
  * document-relative slug (`something`) so navigation stays inside the current
@@ -49,8 +49,54 @@ function isBlockStart(line: string): boolean {
     /^#{1,6}\s/.test(line) ||
     /^\s*>/.test(line) ||
     isHr(line) ||
-    isListItem(line)
+    isListItem(line) ||
+    isTableRow(line)
   );
+}
+
+function isTableRow(line: string): boolean {
+  return /^\s*\|.*\|\s*$/.test(line);
+}
+
+/** A GFM delimiter row: `| --- | :--- | ---: |`. */
+function isTableDelimiter(line: string): boolean {
+  return isTableRow(line) && /^\s*\|(\s*:?-{3,}:?\s*\|)+\s*$/.test(line);
+}
+
+function splitRow(line: string): string[] {
+  return line
+    .trim()
+    .replace(/^\||\|$/g, "")
+    .split("|")
+    .map((cell) => cell.trim());
+}
+
+/**
+ * Render a pipe table starting at `start` (a header row followed by a delimiter
+ * row). Cell counts are normalised to the header's, so a short or long body row
+ * degrades into a well-formed table instead of broken HTML.
+ */
+function renderTable(lines: string[], start: number): [string, number] {
+  const headers = splitRow(lines[start]);
+  const cells = (row: string[]): string[] =>
+    headers.map((_, idx) => (idx < row.length ? row[idx] : ""));
+
+  const body: string[] = [];
+  let i = start + 2;
+  while (i < lines.length && isTableRow(lines[i]) && !isTableDelimiter(lines[i])) {
+    const row = cells(splitRow(lines[i]))
+      .map((cell) => `<td>${inline(cell)}</td>`)
+      .join("");
+    body.push(`<tr>${row}</tr>`);
+    i++;
+  }
+
+  const head = headers.map((cell) => `<th>${inline(cell)}</th>`).join("");
+  return [
+    `<div class="dada-doc-tablewrap"><table class="dada-doc-table">` +
+      `<thead><tr>${head}</tr></thead><tbody>${body.join("")}</tbody></table></div>`,
+    i,
+  ];
 }
 
 function sanitizeUrl(url: string): string {
@@ -176,6 +222,13 @@ function renderBlocks(lines: string[]): string {
         i++;
       }
       out.push(`<blockquote class="dada-doc-quote">${renderBlocks(quote)}</blockquote>`);
+      continue;
+    }
+
+    if (isTableRow(line) && i + 1 < lines.length && isTableDelimiter(lines[i + 1])) {
+      const [html, next] = renderTable(lines, i);
+      out.push(html);
+      i = next;
       continue;
     }
 

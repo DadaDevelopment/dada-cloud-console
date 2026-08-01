@@ -7,15 +7,22 @@
 # an allowlist: only the ~20 tools an agent needs for the core spin-up / deploy /
 # configure / diagnose loop are exposed. New backend operations do NOT leak in.
 #
-# Async note: mutations return an operation id, but the operation* tools are NOT
-# exposed on purpose (kept lean). Confirm results by polling listApps for the
-# app phase instead.
+# Async note: mutations return an operation id. `getOperation` is exposed so a
+# caller can watch one to a terminal status; the rest of the operation* family
+# (list/retry/approve/reject) stays out. "Committed" means written, not running —
+# confirm the real outcome by polling listApps for the app phase.
 #
 # To expose the full set, mount a file at MCP_OVERRIDES_PATH with an empty `keep`.
 
 keep:
-  # Projects
+  # Projects. getProject is not a nice-to-have: twelve tools below take an envId
+  # path parameter and this is the ONLY operation in the whole surface that hands
+  # one out for a project that already exists (listProjects returns the default
+  # environment's NAME, and createProject's default_environment_id is visible once
+  # and only to whoever made the call). Without it the documented deploy path is
+  # unreachable from a cold start, which is exactly how it shipped for months.
   - listProjects
+  - getProject
   - createProject
   # Apps (no delete/restart on purpose: delete is destructive, restart is not
   # needed — env/image changes reconcile on their own)

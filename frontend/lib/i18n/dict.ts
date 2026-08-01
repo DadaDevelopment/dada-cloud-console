@@ -1919,6 +1919,7 @@ const ru: Dict = {
     resourcesTitle: "Ресурсы",
     resources: [
       { label: "Документация", href: "/developer" },
+      { label: "MCP-сервер", href: "/mcp" },
       { label: "Управление из AI-агента (MCP)", href: "/developer/mcp-ai-agents" },
       { label: "Статус", href: "/status" },
     ],
@@ -3162,10 +3163,10 @@ const en: Dict = {
     ],
     featuresTitle: "What the agent can do over MCP",
     features: [
-      { title: "41 platform tools", desc: "Projects, apps, builds, databases, domains and HTTPS, object storage, environment variables, operations — the same API the web console runs on." },
+      { title: "41 platform tools", desc: "Projects, apps, builds, databases, domains, environment variables, servers, logs and throwaway sandbox boxes — the same API the web console runs on, cut down to a set an agent does not get lost in." },
       { title: "Exactly your permissions", desc: "The agent only sees projects your account has a role on, and every write goes through the same permission check as a click in the console. MCP is not a side door." },
       { title: "No tokens in config files", desc: "Sign-in is standard browser OAuth. Keys never sit in settings files or shell history, and the short-lived token is refreshed by the client." },
-      { title: "Logs and metrics for diagnosis", desc: "The agent reads build and runtime logs, metrics and recent operations — enough for it to find why an app is failing and propose the fix itself." },
+      { title: "Logs for diagnosis", desc: "The agent reads app and VM logs, build status and operation state — enough for it to find why an app is failing and propose the fix itself. It cannot delete apps or databases: that stayed in the console." },
       { title: "Ready-made playbooks", desc: "The server ships three guided prompts: deploy-app, configure-env and diagnose-app. Clients pick them up with no extra setup." },
       { title: "Any MCP client", desc: "Claude Code, Claude Desktop, Cursor and anything else that speaks Model Context Protocol. Clients without browser login can send an Authorization: Bearer header with a DADA ID token." },
     ],
@@ -3505,6 +3506,7 @@ const en: Dict = {
     resourcesTitle: "Resources",
     resources: [
       { label: "Documentation", href: "/developer" },
+      { label: "MCP server", href: "/mcp" },
       { label: "Control from an AI agent (MCP)", href: "/developer/mcp-ai-agents" },
       { label: "Status", href: "/status" },
     ],

@@ -159,6 +159,31 @@ body {
   border-top: 1px solid #e2e8f0;
   margin: 2rem 0;
 }
+.dada-doc .dada-doc-tablewrap {
+  overflow-x: auto;
+  margin: 0 0 1.25rem;
+}
+.dada-doc table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 0.92rem;
+}
+.dada-doc th,
+.dada-doc td {
+  border-bottom: 1px solid #e2e8f0;
+  padding: 0.5rem 0.75rem;
+  text-align: left;
+  vertical-align: top;
+}
+.dada-doc th {
+  color: #0f172a;
+  font-weight: 600;
+  white-space: nowrap;
+  border-bottom: 1px solid #cbd5e1;
+}
+.dada-doc td code {
+  white-space: nowrap;
+}
 
 /* Compact markdown rendering for assistant messages in the agent chat panel
    (lib/markdown.ts renderMarkdown output). Deliberately separate from

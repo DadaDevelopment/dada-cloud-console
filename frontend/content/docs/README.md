@@ -16,6 +16,17 @@ Deploy and run an application.
 - [Custom domains and HTTPS](domains-and-https.md)
 - [Monitoring: metrics, logs, alerts](monitoring-metrics-logs-alerts.md)
 
+## AI agents (MCP)
+
+Drive the platform from Claude or any other MCP client.
+
+- [Control DADA Cloud from an AI agent (MCP)](mcp-ai-agents.md) — endpoint, auth,
+  and how to connect each client.
+- [MCP tool reference](mcp-tool-reference.md) — all 41 tools, their arguments, and
+  what is deliberately not exposed.
+- [MCP recipes: worked flows](mcp-recipes.md) — the exact tool sequences behind
+  deploy, database, sandbox and diagnose.
+
 ## Servers (App Servers / VMs)
 
 Bring or order a VM and run workloads on it directly.

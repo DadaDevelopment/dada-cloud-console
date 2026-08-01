@@ -14,6 +14,19 @@ const RENAMED_LANDINGS: [string, string][] = [
 ];
 
 /**
+ * Paths people guess when they are looking for the MCP server and cannot find
+ * it. A user told us in as many words that they went looking and gave up, so
+ * every plausible spelling answers instead of 404ing: the landing for the
+ * product-shaped guesses, the setup guide for the docs-shaped ones.
+ */
+const MCP_ALIASES: [string, string][] = [
+  ["/mcp-server", "/mcp"],
+  ["/claude", "/mcp"],
+  ["/developer/mcp", "/developer/mcp-ai-agents"],
+  ["/docs/mcp", "/developer/mcp-ai-agents"],
+];
+
+/**
  * Brand hosts that must consolidate onto the canonical marketing host. The
  * ingress can only 301 to a literal URL, so every apex path collapsed onto the
  * homepage and `dada-tuda.ru/robots.txt` answered with the landing page's HTML.
@@ -40,7 +53,7 @@ const nextConfig: NextConfig = {
         destination: `${CANONICAL_HOST}/:path*`,
         statusCode: 301,
       })),
-      ...RENAMED_LANDINGS.flatMap(([from, to]) => [
+      ...[...RENAMED_LANDINGS, ...MCP_ALIASES].flatMap(([from, to]) => [
         { source: from, destination: to, statusCode: 301 },
         { source: `/en${from}`, destination: `/en${to}`, statusCode: 301 },
       ]),

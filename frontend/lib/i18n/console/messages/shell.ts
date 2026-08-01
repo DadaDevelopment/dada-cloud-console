@@ -16,6 +16,11 @@ export const shell: Messages = {
   "shell.palette.open": { ru: "открыть", en: "open" },
   "shell.palette.close": { ru: "закрыть", en: "close" },
   "shell.palette.label": { ru: "Командная палитра", en: "Command palette" },
+  "shell.palette.mcp": {
+    ru: "MCP-сервер: управление из AI-агента",
+    en: "MCP server: drive the cloud from an AI agent",
+  },
+  "shell.palette.docs": { ru: "Документация", en: "Docs" },
 
   "shell.project.select": { ru: "Выберите проект", en: "Select project" },
   "shell.project.none": { ru: "Нет проектов", en: "No projects" },

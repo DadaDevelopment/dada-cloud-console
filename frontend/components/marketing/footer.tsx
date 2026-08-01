@@ -36,6 +36,7 @@ const MARKETING_PATHS = new Set([
   "/migrate-vercel",
   "/status",
   "/developer",
+  "/mcp",
   "/developer/mcp-ai-agents",
   "/privacy",
   "/terms",
