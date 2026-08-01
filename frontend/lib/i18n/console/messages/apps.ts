@@ -111,7 +111,6 @@ export const apps: Messages = {
     en: "For long-poll bots and queue workers with no incoming HTTP traffic: the app will not get a public domain.",
   },
   "apps.modal.create.replicas.label": { ru: "Реплики", en: "Replicas" },
-  "apps.modal.create.profile.label": { ru: "Профиль", en: "Profile" },
   "apps.modal.create.workloadType.label": { ru: "Тип нагрузки", en: "Workload type" },
   "apps.modal.create.workloadType.deployment": { ru: "Deployment (без состояния)", en: "Deployment (stateless)" },
   "apps.modal.create.workloadType.statefulset": { ru: "StatefulSet (с состоянием)", en: "StatefulSet (stateful)" },

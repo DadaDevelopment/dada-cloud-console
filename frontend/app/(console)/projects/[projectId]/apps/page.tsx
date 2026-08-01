@@ -31,7 +31,6 @@ interface CreateAppForm {
   image: string;
   port: number;
   replicas: number;
-  profile: string;
   workloadType: string;
   worker: boolean;
 }
@@ -70,7 +69,6 @@ export default function AppsPage() {
     image: "",
     port: 8080,
     replicas: 1,
-    profile: "small",
     workloadType: "Deployment",
     worker: false,
   });
@@ -163,12 +161,11 @@ export default function AppsPage() {
         image: form.image,
         port: form.port,
         replicas: form.replicas,
-        profile: form.profile,
         workload_type: form.workloadType,
         worker: form.worker,
       });
       setIsModalOpen(false);
-      setForm({ name: "", image: "", port: 8080, replicas: 1, profile: "small", workloadType: "Deployment", worker: false });
+      setForm({ name: "", image: "", port: 8080, replicas: 1, workloadType: "Deployment", worker: false });
       void result;
       router.push(`/projects/${projectId}/apps/${form.name}`);
     } catch (err) {
@@ -413,19 +410,6 @@ export default function AppsPage() {
                 className="mt-1 block w-full rounded-lg border border-gray-300 dark:border-gray-700 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
               />
             </div>
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-200">{t("apps.modal.create.profile.label")}</label>
-            <select
-              value={form.profile}
-              onChange={(e) => handleFormChange("profile", e.target.value)}
-              className="mt-1 block w-full rounded-lg border border-gray-300 dark:border-gray-700 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-            >
-              <option value="small">small</option>
-              <option value="medium">medium</option>
-              <option value="large">large</option>
-            </select>
           </div>
 
           <div>
@@ -705,7 +689,7 @@ function AppRow({ app, env, projectId, previews, expanded, onToggle, t }: AppRow
             <span className="max-w-40 truncate font-mono">{db?.volume || db?.database || "—"}</span>
           ) : (
             <>
-              <span>{summary.profile ?? "small"}</span>
+              <span>{summary.resources ? `${summary.resources.cpu_limit} CPU · ${summary.resources.memory_limit}` : "—"}</span>
               <span>·</span>
               <span>{t("apps.card.replicas", { count: String(summary.replicas ?? 1) })}</span>
             </>
@@ -749,7 +733,7 @@ function AppRow({ app, env, projectId, previews, expanded, onToggle, t }: AppRow
           <div className="grid gap-4 xl:grid-cols-[1fr_320px]">
             <div className="min-w-0">
               {summary.url ? (
-                <AppPreviewPane key={summary.preview_url ?? summary.url} url={summary.preview_url ?? summary.url} openUrl={summary.url} title={app.name} defaultOpen />
+                <AppPreviewPane key={summary.preview_url ?? summary.url} url={summary.preview_url ?? summary.url} openUrl={summary.url} title={app.name} />
               ) : (
                 <div className="flex h-40 items-center justify-center rounded-lg border border-dashed border-gray-200 dark:border-gray-800 text-sm text-gray-400 dark:text-gray-500">
                   {t("apps.row.noUrl")}

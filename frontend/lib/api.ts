@@ -401,7 +401,6 @@ export const appsApi = {
     image: string;
     port: number;
     replicas: number;
-    profile: string;
     workload_type?: string;
     volume?: { path: string; size: string; storage_class?: string };
     worker?: boolean;
