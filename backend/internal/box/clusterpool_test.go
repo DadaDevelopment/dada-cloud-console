@@ -3,6 +3,7 @@ package box
 import (
 	"context"
 	"errors"
+	"strconv"
 	"sync"
 	"testing"
 	"time"
@@ -72,6 +73,39 @@ func TestClusterPoolAdoptsPodsThisProcessDidNotCreate(t *testing.T) {
 	}
 }
 
+// enforceOptimisticConcurrency makes the fake clientset reject a pod update that
+// carries a stale resourceVersion, which is the one thing a real API server does
+// here and the fake does not: its tracker overwrites whatever it is handed.
+//
+// Without this the claim race has no arbiter at all, so every claimer that
+// listed the pod before the winner's write also "won", and the count came out at
+// two or three instead of one — a red build that says nothing about the code
+// under test. The check and the bump happen under one lock, so exactly one
+// version of a pod can ever be current, and the losers take the same 409 path
+// they take against a real cluster.
+func enforceOptimisticConcurrency(cs *fake.Clientset) {
+	var mu sync.Mutex
+	current := map[string]string{}
+	next := 0
+	cs.PrependReactor("update", "pods", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		pod, ok := action.(k8stesting.UpdateAction).GetObject().(*corev1.Pod)
+		if !ok {
+			return false, nil, nil
+		}
+		mu.Lock()
+		defer mu.Unlock()
+		if have, seen := current[pod.Name]; seen && have != pod.ResourceVersion {
+			return true, nil, apierrors.NewConflict(
+				schema.GroupResource{Resource: "pods"}, pod.Name,
+				errors.New("the object has been modified; please apply your changes to the latest version"))
+		}
+		next++
+		pod.ResourceVersion = strconv.Itoa(next)
+		current[pod.Name] = pod.ResourceVersion
+		return false, nil, nil
+	})
+}
+
 // TestClusterPoolDoesNotHandOutAPodTwice pins the property two console replicas
 // depend on: the claim is an atomic label transition, so the API server picks
 // one winner per pod. Two tenants in one body is the worst failure this
@@ -84,6 +118,7 @@ func TestClusterPoolAdoptsPodsThisProcessDidNotCreate(t *testing.T) {
 // a second winner.
 func TestClusterPoolDoesNotHandOutAPodTwice(t *testing.T) {
 	cs := fake.NewSimpleClientset(parkedPod("box-w1", "warm-v1", "", true))
+	enforceOptimisticConcurrency(cs)
 	rt := newClusterRuntime(cs, nil, "dada-boxes", nil)
 	rt.ReadyTimeout = time.Millisecond
 	pool := NewClusterPool(rt)
