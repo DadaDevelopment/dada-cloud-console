@@ -15,6 +15,7 @@ import { useAuth } from "@/lib/auth";
 import { Spinner } from "@/components/ui/spinner";
 import { PENDING_REGISTRATION_KEY } from "@/lib/register-redirect";
 import { capturePasskeyActionStatus } from "@/lib/passkey";
+import { GOAL_REGISTRATION_COMPLETE, reachGoal } from "@/lib/metrika";
 
 /**
  * Keycloak reports the outcome of an Application-Initiated Action (passkey
@@ -62,11 +63,7 @@ export default function CallbackPage() {
       if (!pending) return;
       const startedAt = Number(pending);
       if (!Number.isFinite(startedAt) || Date.now() - startedAt > REGISTRATION_WINDOW_MS) return;
-      (window as { ym?: (id: number, action: string, target: string) => void }).ym?.(
-        110158915,
-        "reachGoal",
-        "registration_complete",
-      );
+      reachGoal(GOAL_REGISTRATION_COMPLETE);
     } catch {}
   }, [isLoading, token]);
 

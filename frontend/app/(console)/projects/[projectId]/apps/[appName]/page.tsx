@@ -23,6 +23,7 @@ import { getAppAlerts } from "@/lib/app-alerts";
 import { AppNextStepCard } from "@/components/deploy/app-next-step-card";
 import { getAppNextSteps } from "@/lib/app-next-step";
 import { useT } from "@/lib/i18n/console/context";
+import { GOAL_DEPLOY_SUCCESS, reachGoal } from "@/lib/metrika";
 import { Globe, Database, GitPullRequest } from "lucide-react";
 import { classifyVMResource } from "@/lib/vm-resources";
 import { IngressDetail } from "@/components/resources/ingress-detail";
@@ -136,11 +137,7 @@ export default function AppDetailPage() {
                 try {
                   window.localStorage.setItem(deployGoalKey, "1");
                 } catch {}
-                (window as { ym?: (id: number, action: string, target: string) => void }).ym?.(
-                  110158915,
-                  "reachGoal",
-                  "deploy_success",
-                );
+                reachGoal(GOAL_DEPLOY_SUCCESS);
               }
             }
             const settled = TERMINAL.has(phase);

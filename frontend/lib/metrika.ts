@@ -53,6 +53,12 @@ export const GOAL_LANDING_CTA = "landing_cta_click";
 /** Goal fired on `/register`, just before the visitor is handed to Keycloak. */
 export const GOAL_SIGNUP_STARTED = "signup_started";
 
+/** Goal fired once a returning OIDC callback completes a fresh registration. */
+export const GOAL_REGISTRATION_COMPLETE = "registration_complete";
+
+/** Goal fired the first time an app of this user reaches a running phase. */
+export const GOAL_DEPLOY_SUCCESS = "deploy_success";
+
 /** Name of the first-party cookie carrying the acquisition source. */
 export const SOURCE_COOKIE = "dada_src";
 
