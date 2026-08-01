@@ -62,8 +62,23 @@ func (h *Handler) ExportAppVolume(c *gin.Context) {
 	if _, err := h.requireWriter(c, claims.UserID, projectID); err != nil {
 		return
 	}
+	reject := func(status int, reason string, respond func()) {
+		h.recordAudit(c.Request.Context(), claims.UserID, auditEntry{
+			ProjectID:     projectID,
+			EnvironmentID: envID,
+			Action:        "ExportAppVolume",
+			ResourceKind:  "App",
+			ResourceName:  appName,
+			Outcome:       auditOutcomeFailure,
+			Metadata:      map[string]any{"reason": reason, "status": status},
+		})
+		respond()
+	}
+	rejectErr := func(status int, reason, msg string) {
+		reject(status, reason, func() { respondError(c, status, msg) })
+	}
 	if !h.podTarExporter.Enabled() || !h.dbBackupPresigner.Enabled() {
-		respondError(c, http.StatusServiceUnavailable, "volume export is not configured for this environment")
+		rejectErr(http.StatusServiceUnavailable, "exporter_disabled", "volume export is not configured for this environment")
 		return
 	}
 	if !h.requireK8sRuntime(c, projectID, envID) {
@@ -76,15 +91,15 @@ func (h *Handler) ExportAppVolume(c *gin.Context) {
 		envID, projectID,
 	).Scan(&namespace)
 	if err == pgx.ErrNoRows {
-		respondNotFound(c)
+		reject(http.StatusNotFound, "environment_not_found", func() { respondNotFound(c) })
 		return
 	}
 	if err != nil {
-		respondError(c, http.StatusInternalServerError, "failed to load environment")
+		rejectErr(http.StatusInternalServerError, "environment_load_failed", "failed to load environment")
 		return
 	}
 	if namespace == "" {
-		respondError(c, http.StatusConflict, "environment has no namespace")
+		rejectErr(http.StatusConflict, "no_namespace", "environment has no namespace")
 		return
 	}
 
@@ -95,11 +110,11 @@ func (h *Handler) ExportAppVolume(c *gin.Context) {
 		projectID, envID, appName,
 	).Scan(&summaryRaw)
 	if err == pgx.ErrNoRows {
-		respondNotFound(c)
+		reject(http.StatusNotFound, "app_not_found", func() { respondNotFound(c) })
 		return
 	}
 	if err != nil {
-		respondError(c, http.StatusInternalServerError, "failed to load app")
+		rejectErr(http.StatusInternalServerError, "app_load_failed", "failed to load app")
 		return
 	}
 
@@ -108,7 +123,7 @@ func (h *Handler) ExportAppVolume(c *gin.Context) {
 	}
 	_ = json.Unmarshal(summaryRaw, &cur)
 	if cur.Volume == nil || cur.Volume.Path == "" {
-		respondError(c, http.StatusConflict, "app has no volume")
+		rejectErr(http.StatusConflict, "no_volume", "app has no volume")
 		return
 	}
 
@@ -117,7 +132,7 @@ func (h *Handler) ExportAppVolume(c *gin.Context) {
 
 	podName, containerName, err := h.podTarExporter.FindRunningPod(ctx, namespace, appName)
 	if err != nil {
-		respondError(c, http.StatusNotFound, "no running pod found for this app: "+err.Error())
+		rejectErr(http.StatusNotFound, "no_running_pod", "no running pod found for this app: "+err.Error())
 		return
 	}
 
@@ -146,27 +161,30 @@ func (h *Handler) ExportAppVolume(c *gin.Context) {
 		if errors.As(execErr, &pe) {
 			msg = "volume export failed: " + pe.Error()
 		}
-		respondError(c, http.StatusBadGateway, msg)
+		rejectErr(http.StatusBadGateway, "tar_stream_failed", msg)
 		return
 	}
 	if putErr != nil {
-		respondError(c, http.StatusInternalServerError, "failed to store volume export: "+putErr.Error())
+		rejectErr(http.StatusInternalServerError, "store_failed", "failed to store volume export: "+putErr.Error())
 		return
 	}
 
 	filename := fmt.Sprintf("%s-volume-%s.tar.gz", appName, time.Now().UTC().Format("20060102-150405"))
 	downloadURL, err := h.dbBackupPresigner.PresignGet(ctx, objectKey, filename, volumeExportDownloadTTL)
 	if err != nil {
-		respondError(c, http.StatusInternalServerError, "failed to prepare download")
+		rejectErr(http.StatusInternalServerError, "presign_failed", "failed to prepare download")
 		return
 	}
 
-	auditMeta, _ := json.Marshal(map[string]any{"export_id": exportID.String(), "object_key": objectKey})
-	_, _ = h.pool.Exec(c.Request.Context(),
-		`INSERT INTO audit_events (actor_id, project_id, action, resource_kind, resource_name, metadata)
-		 VALUES ($1, $2, 'ExportAppVolume', 'App', $3, $4)`,
-		claims.UserID, projectID, appName, auditMeta,
-	)
+	h.recordAudit(c.Request.Context(), claims.UserID, auditEntry{
+		ProjectID:     projectID,
+		EnvironmentID: envID,
+		Action:        "ExportAppVolume",
+		ResourceKind:  "App",
+		ResourceName:  appName,
+		Outcome:       auditOutcomeSuccess,
+		Metadata:      map[string]any{"export_id": exportID.String(), "object_key": objectKey},
+	})
 
 	c.JSON(http.StatusOK, gin.H{
 		"url":        downloadURL,

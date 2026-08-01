@@ -1,7 +1,6 @@
 package api
 
 import (
-	"encoding/json"
 	"errors"
 	"net/http"
 	"strconv"
@@ -154,18 +153,45 @@ func (h *Handler) approvalDecision(c *gin.Context, target models.OperationStatus
 		return
 	}
 
+	var auditEnvID uuid.UUID
+	if op.EnvironmentID != nil {
+		auditEnvID = *op.EnvironmentID
+	}
+	reject := func(status int, reason string, respond func()) {
+		h.recordAudit(c.Request.Context(), claims.UserID, auditEntry{
+			ProjectID:     op.ProjectID,
+			EnvironmentID: auditEnvID,
+			OperationID:   op.ID,
+			Action:        "ApprovalDecision",
+			ResourceKind:  op.ResourceKind,
+			ResourceName:  op.ResourceName,
+			Outcome:       auditOutcomeFailure,
+			Metadata: map[string]any{
+				"reason":       reason,
+				"status":       status,
+				"decision":     string(target),
+				"requested_by": op.ActorID,
+			},
+		})
+		respond()
+	}
+
 	role, err := h.effectiveRole(c.Request.Context(), claims, op.ProjectID)
 	if errors.Is(err, pgx.ErrNoRows) || !isOrgAdmin(role) {
-		respondForbidden(c)
+		reject(http.StatusForbidden, "not_org_admin", func() { respondForbidden(c) })
 		return
 	}
 	if err != nil {
-		respondError(c, http.StatusInternalServerError, "failed to check project membership")
+		reject(http.StatusInternalServerError, "membership_check_failed", func() {
+			respondError(c, http.StatusInternalServerError, "failed to check project membership")
+		})
 		return
 	}
 
 	if op.Status != models.OperationStatusWaitingForApproval {
-		respondError(c, http.StatusConflict, "operation is not awaiting approval")
+		reject(http.StatusConflict, "not_awaiting_approval", func() {
+			respondError(c, http.StatusConflict, "operation is not awaiting approval")
+		})
 		return
 	}
 
@@ -184,27 +210,33 @@ func (h *Handler) approvalDecision(c *gin.Context, target models.OperationStatus
 		target, reason, opID, models.OperationStatusWaitingForApproval,
 	)
 	if err := scanOperation(updateRow, &updated); errors.Is(err, pgx.ErrNoRows) {
-		// Lost the race — someone else decided first.
-		respondError(c, http.StatusConflict, "operation already decided")
+		reject(http.StatusConflict, "already_decided", func() {
+			respondError(c, http.StatusConflict, "operation already decided")
+		})
 		return
 	} else if err != nil {
-		respondError(c, http.StatusInternalServerError, "failed to update operation")
+		reject(http.StatusInternalServerError, "update_failed", func() {
+			respondError(c, http.StatusInternalServerError, "failed to update operation")
+		})
 		return
 	}
 
 	// Immutable audit row referencing both the admin (actor_id) and the
 	// original requester (metadata.requested_by). D17 / S6 require this.
-	auditMeta, _ := json.Marshal(map[string]any{
-		"decision":     string(target),
-		"reason":       reason,
-		"requested_by": op.ActorID,
+	h.recordAudit(c.Request.Context(), claims.UserID, auditEntry{
+		ProjectID:     op.ProjectID,
+		EnvironmentID: auditEnvID,
+		OperationID:   op.ID,
+		Action:        "ApprovalDecision",
+		ResourceKind:  op.ResourceKind,
+		ResourceName:  op.ResourceName,
+		Outcome:       auditOutcomeSuccess,
+		Metadata: map[string]any{
+			"decision":     string(target),
+			"reason":       reason,
+			"requested_by": op.ActorID,
+		},
 	})
-	_, _ = h.pool.Exec(c.Request.Context(),
-		`INSERT INTO audit_events (actor_id, project_id, operation_id, action, resource_kind, resource_name, metadata)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-		claims.UserID, op.ProjectID, op.ID, "ApprovalDecision",
-		op.ResourceKind, op.ResourceName, auditMeta,
-	)
 
 	c.JSON(http.StatusOK, gin.H{"operation": updated})
 }
