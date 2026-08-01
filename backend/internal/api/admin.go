@@ -125,6 +125,10 @@ func (h *Handler) ListAdminApprovals(c *gin.Context) {
 // Verifies the caller is platform-admin in the operation's project and that
 // the operation is still in WaitingForApproval. Records who decided + why.
 func (h *Handler) approvalDecision(c *gin.Context, target models.OperationStatus, reason string) {
+	decision := "reject"
+	if target == models.OperationStatusCreated {
+		decision = "approve"
+	}
 	claims, ok := auth.GetClaims(c)
 	if !ok {
 		respondUnauthorized(c)
@@ -167,10 +171,11 @@ func (h *Handler) approvalDecision(c *gin.Context, target models.OperationStatus
 			ResourceName:  op.ResourceName,
 			Outcome:       auditOutcomeFailure,
 			Metadata: map[string]any{
-				"reason":       reason,
-				"status":       status,
-				"decision":     string(target),
-				"requested_by": op.ActorID,
+				"reason":        reason,
+				"status":        status,
+				"decision":      decision,
+				"target_status": string(target),
+				"requested_by":  op.ActorID,
 			},
 		})
 		respond()
@@ -232,9 +237,10 @@ func (h *Handler) approvalDecision(c *gin.Context, target models.OperationStatus
 		ResourceName:  op.ResourceName,
 		Outcome:       auditOutcomeSuccess,
 		Metadata: map[string]any{
-			"decision":     string(target),
-			"reason":       reason,
-			"requested_by": op.ActorID,
+			"decision":      decision,
+			"target_status": string(target),
+			"reason":        reason,
+			"requested_by":  op.ActorID,
 		},
 	})
 
