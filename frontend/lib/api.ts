@@ -91,6 +91,10 @@ import type {
   AIProviderCredential,
   AICatalogResponse,
   ProjectAIUsage,
+  BoxesResponse,
+  BoxUpResponse,
+  BoxConnectionResponse,
+  BoxCatalogResponse,
 } from "./types";
 import type { OnboardingStatus } from "./onboarding/types";
 
@@ -728,6 +732,49 @@ export const costApi = {
     apiFetch<CostResponse>(`/api/v1/projects/${projectId}/cost?window=${encodeURIComponent(window)}`),
 };
 
+/**
+ * Boxes: ephemeral root sandboxes.
+ *
+ * `up` is synchronous by design — the backend returns only once a command has
+ * actually run inside the box — so it gets its own timeout well above the
+ * 30s default. The bound the server honours is wait_seconds; the client
+ * timeout sits above it so the caller sees the server's classified failure
+ * rather than a generic "Request timed out".
+ */
+export const boxesApi = {
+  list: (projectId: string) =>
+    apiFetch<BoxesResponse>(`/api/v1/projects/${projectId}/boxes`),
+
+  catalog: () => apiFetch<BoxCatalogResponse>(`/api/v1/box/catalog`),
+
+  up: (projectId: string, data: { name?: string; ttl_seconds?: number; wait_seconds?: number }) =>
+    apiFetch<BoxUpResponse>(`/api/v1/projects/${projectId}/box-up`, {
+      method: "POST",
+      body: data,
+      timeoutMs: 150_000,
+    }),
+
+  connection: (projectId: string, boxName: string, newSession = false) =>
+    apiFetch<BoxConnectionResponse>(
+      `/api/v1/projects/${projectId}/boxes/${boxName}/connection${newSession ? "?new_session=true" : ""}`
+    ),
+
+  suspend: (projectId: string, boxName: string) =>
+    apiFetch<{ message: string }>(`/api/v1/projects/${projectId}/boxes/${boxName}/suspend`, {
+      method: "POST",
+    }),
+
+  resume: (projectId: string, boxName: string) =>
+    apiFetch<{ message: string }>(`/api/v1/projects/${projectId}/boxes/${boxName}/resume`, {
+      method: "POST",
+    }),
+
+  remove: (projectId: string, boxName: string) =>
+    apiFetch<{ message: string }>(`/api/v1/projects/${projectId}/boxes/${boxName}`, {
+      method: "DELETE",
+    }),
+};
+
 export const appServersApi = {
   list: (projectId: string) =>
     apiFetch<AppServersResponse>(`/api/v1/projects/${projectId}/app-servers`),
@@ -1025,10 +1072,11 @@ export const adminApi = {
       method: "POST",
       body: { reason },
     }),
-  listAuditEvents: (params: { action?: string; user?: string; limit?: number; offset?: number } = {}) => {
+  listAuditEvents: (params: { action?: string; user?: string; kind?: string; limit?: number; offset?: number } = {}) => {
     const q = new URLSearchParams();
     if (params.action) q.set("action", params.action);
     if (params.user) q.set("user", params.user);
+    if (params.kind) q.set("kind", params.kind);
     q.set("limit", String(params.limit ?? 50));
     q.set("offset", String(params.offset ?? 0));
     return apiFetch<AuditEventsResponse>(`/api/v1/admin/audit?${q.toString()}`);

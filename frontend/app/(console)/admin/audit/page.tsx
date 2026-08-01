@@ -9,6 +9,14 @@ import { DataTable, type Column } from "@/components/ui/data-table";
 import { useT } from "@/lib/i18n/console/context";
 
 const PAGE_SIZE = 50;
+const COHORTS = ["", "customer", "internal", "synthetic", "platform"] as const;
+
+const COHORT_BADGE: Record<string, string> = {
+  customer: "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-400",
+  internal: "bg-blue-50 text-blue-700 dark:bg-blue-950/40 dark:text-blue-400",
+  synthetic: "bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400",
+  platform: "bg-purple-50 text-purple-700 dark:bg-purple-950/40 dark:text-purple-400",
+};
 const REFRESH_MS = 30_000;
 
 function formatUTC(iso: string): string {
@@ -48,8 +56,10 @@ export default function AuditPage() {
 
   const [actionFilter, setActionFilter] = useState("");
   const [userFilter, setUserFilter] = useState("");
+  const [kindFilter, setKindFilter] = useState("");
   const [appliedAction, setAppliedAction] = useState("");
   const [appliedUser, setAppliedUser] = useState("");
+  const [appliedKind, setAppliedKind] = useState("");
 
   const load = useCallback(async (opts: { silent?: boolean } = {}) => {
     if (!opts.silent) setIsLoading(true);
@@ -58,6 +68,7 @@ export default function AuditPage() {
       const data = await adminApi.listAuditEvents({
         action: appliedAction || undefined,
         user: appliedUser || undefined,
+        kind: appliedKind || undefined,
         limit: PAGE_SIZE,
         offset,
       });
@@ -74,7 +85,7 @@ export default function AuditPage() {
     } finally {
       setIsLoading(false);
     }
-  }, [appliedAction, appliedUser, offset, t]);
+  }, [appliedAction, appliedUser, appliedKind, offset, t]);
 
   useEffect(() => {
     void load();
@@ -90,14 +101,17 @@ export default function AuditPage() {
     setOffset(0);
     setAppliedAction(actionFilter.trim());
     setAppliedUser(userFilter.trim());
+    setAppliedKind(kindFilter);
   }
 
   function clearFilters() {
     setActionFilter("");
     setUserFilter("");
+    setKindFilter("");
     setOffset(0);
     setAppliedAction("");
     setAppliedUser("");
+    setAppliedKind("");
   }
 
   const columns: Column<AuditEvent>[] = [
@@ -107,7 +121,20 @@ export default function AuditPage() {
       sortValue: (r) => new Date(r.created_at).getTime(),
       render: (r) => <span className="text-xs text-gray-500 dark:text-gray-400">{formatUTC(r.created_at)}</span>,
     },
-    { key: "user", header: t("audit.col.user"), render: (r) => <span className="text-gray-700 dark:text-gray-200">{r.actor_email}</span> },
+    {
+      key: "user",
+      header: t("audit.col.user"),
+      render: (r) => (
+        <span className="flex items-center gap-2">
+          <span className="text-gray-700 dark:text-gray-200">{r.actor_email}</span>
+          {r.account_kind && r.account_kind !== "customer" ? (
+            <span className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${COHORT_BADGE[r.account_kind] ?? COHORT_BADGE.synthetic}`}>
+              {t(`audit.filter.kind.${r.account_kind}`)}
+            </span>
+          ) : null}
+        </span>
+      ),
+    },
     { key: "action", header: t("audit.col.action"), render: (r) => <span className="font-mono text-xs text-gray-900 dark:text-gray-100">{r.action}</span> },
     {
       key: "resource",
@@ -204,6 +231,15 @@ export default function AuditPage() {
           placeholder={t("audit.filter.userPlaceholder")}
           className="rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-1.5 text-sm text-gray-900 dark:text-gray-100 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
         />
+        <select
+          value={kindFilter}
+          onChange={(e) => setKindFilter(e.target.value)}
+          className="rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-1.5 text-sm text-gray-900 dark:text-gray-100 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+        >
+          {COHORTS.map((k) => (
+            <option key={k || "all"} value={k}>{k ? t(`audit.filter.kind.${k}`) : t("audit.filter.kind.all")}</option>
+          ))}
+        </select>
         <button
           onClick={applyFilters}
           className="rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700 transition-colors"

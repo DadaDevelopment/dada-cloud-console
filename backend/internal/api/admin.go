@@ -317,12 +317,27 @@ type auditEventRow struct {
 	ProjectID    *uuid.UUID `json:"project_id,omitempty"`
 	ProjectName  string     `json:"project_name"`
 	ProjectSlug  string     `json:"project_slug,omitempty"`
+	AccountKind  string     `json:"account_kind"`
 }
 
 const (
 	auditEventsDefaultLimit = 50
 	auditEventsMaxLimit     = 200
 )
+
+// auditCohortKinds is the allowlist behind the audit viewer's ?kind= filter.
+//
+// The trail mixes real customers with our own probes and with work the platform
+// did on its own, and reading a user's path means being able to drop the other
+// two. The values come from the user_accounts view (migrations 075 and 078);
+// an unknown value is treated as no filter rather than as an error, so a stale
+// bookmark shows everything instead of an empty page.
+var auditCohortKinds = map[string]bool{
+	"customer":  true,
+	"internal":  true,
+	"synthetic": true,
+	"platform":  true,
+}
 
 // ListAuditEvents returns a paginated, filterable view of audit_events for the
 // god-admin dashboard. Platform-admin only (/orgs/*/... membership does not
@@ -336,6 +351,7 @@ const (
 // @Security    BearerAuth
 // @Param       action query    string false "Exact audit_events.action value"
 // @Param       user   query    string false "Case-insensitive substring match on the actor's email"
+// @Param       kind   query    string false "Actor cohort: customer, internal, synthetic or platform (default: all)"
 // @Param       limit  query    int    false "Max rows to return (default 50, max 200)"
 // @Param       offset query    int    false "Rows to skip"
 // @Success     200 {object} map[string]interface{} "object with an events array and a total count"
@@ -355,6 +371,10 @@ func (h *Handler) ListAuditEvents(c *gin.Context) {
 
 	action := strings.TrimSpace(c.Query("action"))
 	userSubstr := strings.TrimSpace(c.Query("user"))
+	kind := strings.TrimSpace(c.Query("kind"))
+	if !auditCohortKinds[kind] {
+		kind = ""
+	}
 
 	limit := auditEventsDefaultLimit
 	if v, err := strconv.Atoi(c.Query("limit")); err == nil && v > 0 {
@@ -375,31 +395,37 @@ func (h *Handler) ListAuditEvents(c *gin.Context) {
 	if userSubstr != "" {
 		userFilter = &userSubstr
 	}
+	var kindFilter *string
+	if kind != "" {
+		kindFilter = &kind
+	}
 
 	var total int
 	if err := h.pool.QueryRow(c.Request.Context(), `
 		SELECT count(*)
 		FROM audit_events a
-		JOIN users u ON u.id = a.actor_id
+		JOIN user_accounts u ON u.id = a.actor_id
 		WHERE ($1::text IS NULL OR a.action = $1)
-		  AND ($2::text IS NULL OR u.email ILIKE '%' || $2 || '%')`,
-		actionFilter, userFilter,
+		  AND ($2::text IS NULL OR u.email ILIKE '%' || $2 || '%')
+		  AND ($3::text IS NULL OR u.account_kind = $3)`,
+		actionFilter, userFilter, kindFilter,
 	).Scan(&total); err != nil {
 		respondError(c, http.StatusInternalServerError, "failed to count audit events")
 		return
 	}
 
 	rows, err := h.pool.Query(c.Request.Context(), `
-		SELECT a.id, a.created_at, u.email, a.action, a.resource_kind, a.resource_name,
+		SELECT a.id, a.created_at, u.email, u.account_kind, a.action, a.resource_kind, a.resource_name,
 		       p.id, COALESCE(p.display_name, ''), COALESCE(p.name, '')
 		FROM audit_events a
-		JOIN users u        ON u.id = a.actor_id
+		JOIN user_accounts u ON u.id = a.actor_id
 		LEFT JOIN projects p ON p.id = a.project_id
 		WHERE ($1::text IS NULL OR a.action = $1)
 		  AND ($2::text IS NULL OR u.email ILIKE '%' || $2 || '%')
+		  AND ($3::text IS NULL OR u.account_kind = $3)
 		ORDER BY a.created_at DESC
-		LIMIT $3 OFFSET $4`,
-		actionFilter, userFilter, limit, offset,
+		LIMIT $4 OFFSET $5`,
+		actionFilter, userFilter, kindFilter, limit, offset,
 	)
 	if err != nil {
 		respondError(c, http.StatusInternalServerError, "failed to list audit events")
@@ -411,7 +437,7 @@ func (h *Handler) ListAuditEvents(c *gin.Context) {
 	for rows.Next() {
 		var e auditEventRow
 		var resourceKind, resourceName *string
-		if err := rows.Scan(&e.ID, &e.CreatedAt, &e.ActorEmail, &e.Action, &resourceKind, &resourceName, &e.ProjectID, &e.ProjectName, &e.ProjectSlug); err != nil {
+		if err := rows.Scan(&e.ID, &e.CreatedAt, &e.ActorEmail, &e.AccountKind, &e.Action, &resourceKind, &resourceName, &e.ProjectID, &e.ProjectName, &e.ProjectSlug); err != nil {
 			respondError(c, http.StatusInternalServerError, "failed to scan audit event")
 			return
 		}

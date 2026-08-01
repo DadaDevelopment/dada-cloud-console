@@ -427,6 +427,80 @@ export interface InfraSummary {
   status?: string;
 }
 
+/**
+ * A box: an ephemeral root sandbox an agent works in. Mirrors models.Box; only
+ * the fields the console renders are declared.
+ */
+export interface Box {
+  id: string;
+  project_id: string;
+  environment_id: string;
+  name: string;
+  image: string;
+  profile: string;
+  region: string;
+  status: string;
+  error_message?: string;
+  ssh_host?: string;
+  ssh_port?: number;
+  mcp_url?: string;
+  ttl_seconds: number;
+  expires_at?: string;
+  last_active_at?: string;
+  slept_at?: string;
+  created_at: string;
+}
+
+export interface BoxesResponse {
+  boxes: Box[];
+}
+
+/**
+ * Connection coordinates for one box. `session.token` is present only in the
+ * response that minted it — it is shown exactly once and never retrievable
+ * again, because only its sha256 and prefix are stored.
+ */
+export interface BoxConnect {
+  ssh_host?: string;
+  ssh_command?: string;
+  mcp?: {
+    url: string;
+    available: boolean;
+    reason: string;
+    snippet: string;
+  };
+  session_endpoint?: string;
+}
+
+export interface BoxSession {
+  token: string;
+  token_prefix: string;
+  expires_at: string;
+}
+
+/** What one synchronous `box up` returned, including the measured time to ready. */
+export interface BoxUpResponse {
+  box: Box;
+  connect: BoxConnect;
+  session: BoxSession;
+  ready: {
+    time_to_ready_ms: number;
+    pool: string;
+    budget_ms: number;
+  };
+}
+
+export interface BoxConnectionResponse {
+  box?: { name: string; status: string };
+  connect: BoxConnect;
+  session?: BoxSession;
+}
+
+export interface BoxCatalogResponse {
+  images: { name: string; description?: string }[];
+  sizes: { name: string; description?: string }[];
+}
+
 export interface AppServersResponse {
   app_servers: AppServer[];
 }
@@ -732,6 +806,7 @@ export interface AuditEvent {
   id: string;
   created_at: string;
   actor_email: string;
+  account_kind: string;
   action: string;
   resource_kind: string;
   resource_name: string;

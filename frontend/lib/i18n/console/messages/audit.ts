@@ -18,6 +18,11 @@ export const audit: Messages = {
 
   "audit.filter.actionPlaceholder": { ru: "Действие (например CreateApp)", en: "Action (e.g. CreateApp)" },
   "audit.filter.userPlaceholder": { ru: "Email пользователя", en: "User email" },
+  "audit.filter.kind.all": { ru: "Все когорты", en: "All cohorts" },
+  "audit.filter.kind.customer": { ru: "Клиенты", en: "Customers" },
+  "audit.filter.kind.internal": { ru: "Свои", en: "Internal" },
+  "audit.filter.kind.synthetic": { ru: "Тестовые", en: "Test accounts" },
+  "audit.filter.kind.platform": { ru: "Платформа", en: "Platform" },
   "audit.filter.apply": { ru: "Применить", en: "Apply" },
   "audit.filter.clear": { ru: "Сбросить", en: "Clear" },
 
