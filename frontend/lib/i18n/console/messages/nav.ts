@@ -10,6 +10,7 @@ export const nav: Messages = {
   "nav.apps": { ru: "Приложения", en: "Applications" },
   "nav.databases": { ru: "Базы данных", en: "Databases" },
   "nav.storage": { ru: "Объектное хранилище", en: "Object Storage" },
+  "nav.boxes": { ru: "Боксы", en: "Boxes" },
   "nav.domains": { ru: "Домены", en: "Domains" },
   "nav.monitoring": { ru: "Мониторинг", en: "Monitoring" },
   "nav.ai": { ru: "AI API", en: "AI API" },

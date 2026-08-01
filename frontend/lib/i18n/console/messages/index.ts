@@ -11,6 +11,7 @@ import { operations } from "./operations";
 import { git } from "./git";
 import { domains } from "./domains";
 import { storage } from "./storage";
+import { boxes } from "./boxes";
 import { members } from "./members";
 import { monitoring } from "./monitoring";
 import { models } from "./models";
@@ -56,6 +57,7 @@ export const messages: Messages = {
   ...git,
   ...domains,
   ...storage,
+  ...boxes,
   ...members,
   ...monitoring,
   ...models,

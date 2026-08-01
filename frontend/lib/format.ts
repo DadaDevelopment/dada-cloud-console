@@ -12,6 +12,22 @@ export function timeAgo(dateStr: string): string {
 }
 
 /**
+ * Compact time remaining, e.g. "in 45m", "in 3h". Returns null once the instant
+ * has passed, so a caller renders "expired" in its own words rather than
+ * timeAgo's negative counter.
+ */
+export function timeUntil(dateStr: string): string | null {
+  const secs = Math.floor((new Date(dateStr).getTime() - Date.now()) / 1000);
+  if (secs <= 0) return null;
+  if (secs < 60) return `in ${secs}s`;
+  const mins = Math.floor(secs / 60);
+  if (mins < 60) return `in ${mins}m`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `in ${hours}h`;
+  return `in ${Math.floor(hours / 24)}d`;
+}
+
+/**
  * Formats a ruble amount with a ru-locale thousands separator and no decimals,
  * suffixed with the ₽ sign, e.g. `1234.5` → "1 235 ₽". Fractional kopecks are
  * rounded away because consumption estimates are shown at whole-ruble grain.
