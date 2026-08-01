@@ -99,7 +99,13 @@ func newAuditVisits(idleGap time.Duration) *auditVisits {
 }
 
 // observe records the request and reports whether it starts a new visit,
-// together with the reason ("first", "idle", "relogin") for the audit metadata.
+// together with the reason ("cold", "idle", "relogin") a new visit was opened.
+// The reason answers ONLY "why did this pod's memory decide to start a new
+// visit" — "cold" means this pod has no memory of the user at all, which is
+// true on every pod restart and every second replica, not just a user's true
+// first-ever visit. Whether the user has ever been seen before, anywhere, is a
+// question process memory cannot answer; the caller resolves that separately
+// against the database before writing the audit row.
 func (v *auditVisits) observe(userID, sid string, now time.Time) (bool, string) {
 	v.mu.Lock()
 	defer v.mu.Unlock()
@@ -113,7 +119,7 @@ func (v *auditVisits) observe(userID, sid string, now time.Time) (bool, string) 
 
 	switch {
 	case !known:
-		return true, "first"
+		return true, "cold"
 	case now.Sub(prev.lastSeen) >= v.idleGap:
 		return true, "idle"
 	case sid != "" && prev.sid != "" && sid != prev.sid:
@@ -234,6 +240,66 @@ func (h *Handler) recordAuditAsync(actorID uuid.UUID, e auditEntry) {
 	}()
 }
 
+// auditVisitFirst/Return/Unknown are the only values ever written to the
+// "visit" metadata key. "unknown" exists because a database miss must degrade
+// to an honest "can't tell" rather than a guessed "first" — guessing would
+// have reproduced the exact bug this classification replaces.
+const (
+	auditVisitFirst   = "first"
+	auditVisitReturn  = "return"
+	auditVisitUnknown = "unknown"
+)
+
+// classifyFirstVisit answers "has actorID ever appeared in audit_events
+// before now", which per-pod memory cannot answer but a single indexed row
+// lookup can. It runs ONLY from the async SessionStart path, and ONLY when
+// observe() already decided the request opens a new visit — every other
+// authenticated request skips this query entirely. A query failure must not
+// invent an answer, so it reports "unknown" rather than falling back to
+// "first" or "return".
+func (h *Handler) classifyFirstVisit(ctx context.Context, actorID uuid.UUID, now time.Time) string {
+	if h.pool == nil {
+		return auditVisitUnknown
+	}
+	var exists bool
+	err := h.pool.QueryRow(ctx,
+		`SELECT EXISTS(SELECT 1 FROM audit_events WHERE actor_id = $1 AND created_at < $2 LIMIT 1)`,
+		actorID, now,
+	).Scan(&exists)
+	if err != nil {
+		return auditVisitUnknown
+	}
+	if exists {
+		return auditVisitReturn
+	}
+	return auditVisitFirst
+}
+
+// writeSessionStart is the synchronous body of recordSessionStartAsync,
+// pulled out so tests can drive it without racing a goroutine.
+func (h *Handler) writeSessionStart(ctx context.Context, actorID uuid.UUID, username, path, reason string) {
+	visit := h.classifyFirstVisit(ctx, actorID, time.Now())
+	h.recordAudit(ctx, actorID, auditEntry{
+		Action:       auditActionSessionStart,
+		ResourceKind: "Session",
+		ResourceName: username,
+		Metadata:     map[string]any{"path": path, "visit": visit, "reason": reason},
+	})
+}
+
+// recordSessionStartAsync writes the SessionStart row off the request's hot
+// path, same as recordAuditAsync, plus the one extra database round trip
+// classifyFirstVisit needs. That round trip happens after the response has
+// already been sent, so it never touches the request's latency budget; it
+// only ever runs once per new visit, never once per request.
+func (h *Handler) recordSessionStartAsync(actorID uuid.UUID, username, path, reason string) {
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		h.writeSessionStart(ctx, actorID, username, path, reason)
+	}()
+}
+
 // recordViewAudit records a passive view (build logs, app logs), collapsed to
 // one row per user+resource per auditViewWindow so console polling does not
 // flood the table.
@@ -259,12 +325,7 @@ func (h *Handler) auditSessionMiddleware() gin.HandlerFunc {
 		claims, ok := auth.GetClaims(c)
 		if ok && claims != nil && claims.UserID != uuid.Nil && !isServiceAccountUsername(claims.Username) {
 			if newVisit, reason := auditSessionVisits.observe(claims.UserID.String(), claims.SessionID, time.Now()); newVisit {
-				h.recordAuditAsync(claims.UserID, auditEntry{
-					Action:       auditActionSessionStart,
-					ResourceKind: "Session",
-					ResourceName: claims.Username,
-					Metadata:     map[string]any{"path": c.FullPath(), "visit": reason},
-				})
+				h.recordSessionStartAsync(claims.UserID, claims.Username, c.FullPath(), reason)
 			}
 		}
 		c.Next()

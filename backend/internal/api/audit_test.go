@@ -1,10 +1,13 @@
 package api
 
 import (
+	"context"
+	"encoding/json"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 func TestAuditSeenCollapsesWithinWindow(t *testing.T) {
@@ -58,7 +61,7 @@ func TestAuditVisitsKeepsOneRowPerVisit(t *testing.T) {
 	now := time.Now()
 
 	newVisit, reason := v.observe("user-a", "sid-1", now)
-	if !newVisit || reason != "first" {
+	if !newVisit || reason != "cold" {
 		t.Fatalf("first request must open a visit, got %v/%q", newVisit, reason)
 	}
 	if newVisit, _ = v.observe("user-a", "sid-1", now.Add(20*time.Minute)); newVisit {
@@ -90,6 +93,117 @@ func TestAuditVisitsSeparatesRelogin(t *testing.T) {
 	if newVisit, _ := v.observe("user-b", "sid-9", now.Add(6*time.Minute)); !newVisit {
 		t.Fatal("another user's visit is independent")
 	}
+}
+
+// TestClassifyFirstVisitUnknownWithoutPool covers the fail-open path: no
+// database connection must yield "unknown", never a guessed "first".
+func TestClassifyFirstVisitUnknownWithoutPool(t *testing.T) {
+	h := &Handler{}
+	got := h.classifyFirstVisit(context.Background(), uuid.New(), time.Now())
+	if got != auditVisitUnknown {
+		t.Fatalf("expected unknown without a pool, got %q", got)
+	}
+}
+
+// TestClassifyFirstVisitUnknownOnQueryError covers a live query failure —
+// here, a context already cancelled before the call — degrading to
+// "unknown" rather than any guessed value.
+func TestClassifyFirstVisitUnknownOnQueryError(t *testing.T) {
+	pool := testAuditPool(t)
+	h := &Handler{pool: pool}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	got := h.classifyFirstVisit(ctx, uuid.New(), time.Now())
+	if got != auditVisitUnknown {
+		t.Fatalf("expected unknown on query error, got %q", got)
+	}
+}
+
+// TestWriteSessionStartCleanActorIsFirst is a brand-new actor with zero prior
+// audit_events rows: the honest answer is "first", and reason travels through
+// unchanged as the metadata's separate "why a new visit" key.
+func TestWriteSessionStartCleanActorIsFirst(t *testing.T) {
+	pool := testAuditPool(t)
+	actorID, _ := seedAuditActor(t, pool)
+	h := &Handler{pool: pool}
+	ctx := context.Background()
+
+	h.writeSessionStart(ctx, actorID, "someone", "/api/v1/onboarding", "cold")
+
+	visit, reason := fetchSessionStartVisitReason(t, pool, actorID)
+	if visit != auditVisitFirst {
+		t.Fatalf("expected visit=first for a clean actor, got %q", visit)
+	}
+	if reason != "cold" {
+		t.Fatalf("expected reason to pass through unchanged, got %q", reason)
+	}
+}
+
+// TestWriteSessionStartReturningActorIsReturn is the bug this change fixes:
+// a user with an older audit_events row who now opens a new visit purely
+// because this pod's memory is cold must be recorded as a RETURN, not a new
+// user — "cold" is the reason the visit is new, "return" is who the user is.
+func TestWriteSessionStartReturningActorIsReturn(t *testing.T) {
+	pool := testAuditPool(t)
+	actorID, projectID := seedAuditActor(t, pool)
+	ctx := context.Background()
+
+	if _, err := pool.Exec(ctx,
+		`INSERT INTO audit_events (actor_id, project_id, action, resource_kind, resource_name, outcome, metadata, created_at)
+		 VALUES ($1, $2, 'ViewProject', 'Project', 'p', 'success', '{}', now() - interval '8 days')`,
+		actorID, projectID,
+	); err != nil {
+		t.Fatalf("seed prior audit row: %v", err)
+	}
+
+	h := &Handler{pool: pool}
+	h.writeSessionStart(ctx, actorID, "someone", "/api/v1/onboarding", "cold")
+
+	visit, reason := fetchSessionStartVisitReason(t, pool, actorID)
+	if visit != auditVisitReturn {
+		t.Fatalf("a returning user with an 8-day-old row must be visit=return, got %q", visit)
+	}
+	if reason != "cold" {
+		t.Fatalf("expected reason=cold to survive, got %q", reason)
+	}
+}
+
+// TestWriteSessionStartCarriesIdleAndReloginReason checks that reason is not
+// hard-coded to the first-visit case — it must reflect whatever observe()
+// decided actually triggered the new visit.
+func TestWriteSessionStartCarriesIdleAndReloginReason(t *testing.T) {
+	pool := testAuditPool(t)
+	h := &Handler{pool: pool}
+	ctx := context.Background()
+
+	for _, reason := range []string{"idle", "relogin"} {
+		actorID, _ := seedAuditActor(t, pool)
+		h.writeSessionStart(ctx, actorID, "someone", "/api/v1/onboarding", reason)
+
+		_, gotReason := fetchSessionStartVisitReason(t, pool, actorID)
+		if gotReason != reason {
+			t.Fatalf("expected reason=%q to be recorded, got %q", reason, gotReason)
+		}
+	}
+}
+
+func fetchSessionStartVisitReason(t *testing.T, pool *pgxpool.Pool, actorID uuid.UUID) (string, string) {
+	t.Helper()
+	var metaRaw []byte
+	if err := pool.QueryRow(context.Background(),
+		`SELECT metadata FROM audit_events WHERE actor_id = $1 AND action = $2 ORDER BY created_at DESC LIMIT 1`,
+		actorID, auditActionSessionStart,
+	).Scan(&metaRaw); err != nil {
+		t.Fatalf("fetch SessionStart row: %v", err)
+	}
+	var meta map[string]any
+	if err := json.Unmarshal(metaRaw, &meta); err != nil {
+		t.Fatalf("unmarshal metadata: %v", err)
+	}
+	visit, _ := meta["visit"].(string)
+	reason, _ := meta["reason"].(string)
+	return visit, reason
 }
 
 func TestAuditVisitsResetsOnOverflow(t *testing.T) {
