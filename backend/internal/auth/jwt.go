@@ -35,6 +35,8 @@ type Claims struct {
 	Roles  []string `json:"roles,omitempty"`
 	Scope  string   `json:"scope,omitempty"`
 
+	SessionID string `json:"sid,omitempty"`
+
 	// decoded view (not serialized).
 	decoded       bool
 	orgRoles      map[string]string

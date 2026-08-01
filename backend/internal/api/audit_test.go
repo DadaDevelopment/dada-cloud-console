@@ -52,3 +52,54 @@ func TestNullableUUID(t *testing.T) {
 		t.Fatal("a real uuid must be passed through unchanged")
 	}
 }
+
+func TestAuditVisitsKeepsOneRowPerVisit(t *testing.T) {
+	v := newAuditVisits(30 * time.Minute)
+	now := time.Now()
+
+	newVisit, reason := v.observe("user-a", "sid-1", now)
+	if !newVisit || reason != "first" {
+		t.Fatalf("first request must open a visit, got %v/%q", newVisit, reason)
+	}
+	if newVisit, _ = v.observe("user-a", "sid-1", now.Add(20*time.Minute)); newVisit {
+		t.Fatal("continued activity inside the same visit must not open a new one")
+	}
+	if newVisit, _ = v.observe("user-a", "sid-1", now.Add(40*time.Minute)); newVisit {
+		t.Fatal("gap is measured from the last request, not the last recorded row")
+	}
+	newVisit, reason = v.observe("user-a", "sid-1", now.Add(1*time.Hour+20*time.Minute))
+	if !newVisit || reason != "idle" {
+		t.Fatalf("a real idle gap must open a new visit, got %v/%q", newVisit, reason)
+	}
+}
+
+func TestAuditVisitsSeparatesRelogin(t *testing.T) {
+	v := newAuditVisits(30 * time.Minute)
+	now := time.Now()
+
+	if newVisit, _ := v.observe("user-a", "sid-1", now); !newVisit {
+		t.Fatal("first request must open a visit")
+	}
+	newVisit, reason := v.observe("user-a", "sid-2", now.Add(6*time.Minute))
+	if !newVisit || reason != "relogin" {
+		t.Fatalf("a new keycloak session six minutes later is a second visit, got %v/%q", newVisit, reason)
+	}
+	if newVisit, _ := v.observe("user-a", "", now.Add(7*time.Minute)); newVisit {
+		t.Fatal("a missing sid must not be read as a session change")
+	}
+	if newVisit, _ := v.observe("user-b", "sid-9", now.Add(6*time.Minute)); !newVisit {
+		t.Fatal("another user's visit is independent")
+	}
+}
+
+func TestAuditVisitsResetsOnOverflow(t *testing.T) {
+	v := newAuditVisits(time.Hour)
+	now := time.Now()
+
+	for i := 0; i < auditSeenLimit+1; i++ {
+		v.observe(uuid.NewString(), "sid", now)
+	}
+	if len(v.users) > auditSeenLimit {
+		t.Fatalf("tracker must not grow past the cap, got %d", len(v.users))
+	}
+}

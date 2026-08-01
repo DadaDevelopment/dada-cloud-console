@@ -62,6 +62,7 @@ func authMiddleware(pool *pgxpool.Pool, cfg *config.Config) gin.HandlerFunc {
 			Groups:      kc.Groups,
 			Roles:       kc.Roles,
 			Scope:       kc.Scope,
+			SessionID:   kc.SessionID,
 		}, nil
 	}
 

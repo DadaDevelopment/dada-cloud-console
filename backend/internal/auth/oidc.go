@@ -37,6 +37,10 @@ type KeycloakClaims struct {
 	// ResourceAccessClients lists the clients present under resource_access; used
 	// as a fallback identity check for the webhook gate.
 	ResourceAccessClients []string
+
+	// SessionID is the Keycloak SSO session id (sid). Not used for authz — it
+	// only lets the audit trail tell two visits apart when a user re-logs in.
+	SessionID string
 }
 
 // rawKeycloakClaims mirrors the JSON shape of a Keycloak access token. Only the
@@ -48,6 +52,7 @@ type rawKeycloakClaims struct {
 	Name              string   `json:"name"`
 	Groups            []string `json:"groups"`
 	Scope             string   `json:"scope"`
+	SessionID         string   `json:"sid"`
 	Azp               string   `json:"azp"`
 	RealmAccess       struct {
 		Roles []string `json:"roles"`
@@ -191,6 +196,7 @@ func (v *KeycloakVerifier) Verify(ctx context.Context, rawToken string) (*Keyclo
 		Scope:                 rc.Scope,
 		Azp:                   rc.Azp,
 		ResourceAccessClients: clients,
+		SessionID:             rc.SessionID,
 	}, nil
 }
 

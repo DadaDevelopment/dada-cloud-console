@@ -554,6 +554,12 @@ func (h *Handler) GetProject(c *gin.Context) {
 		envs = []models.Environment{}
 	}
 
+	h.recordViewAudit(claims, auditActionViewProject, auditEntry{
+		ProjectID:    p.ID,
+		ResourceKind: "Project",
+		ResourceName: p.Name,
+	})
+
 	c.JSON(http.StatusOK, gin.H{
 		"project":      p,
 		"role":         role,

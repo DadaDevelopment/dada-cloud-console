@@ -85,6 +85,14 @@ func (h *Handler) ListEndpoints(c *gin.Context) {
 	if endpoints == nil {
 		endpoints = []models.ResourceSnapshot{}
 	}
+
+	h.recordViewAudit(claims, auditActionViewApp, auditEntry{
+		ProjectID:     projectID,
+		EnvironmentID: envID,
+		ResourceKind:  "App",
+		ResourceName:  appName,
+	})
+
 	c.JSON(http.StatusOK, gin.H{"endpoints": endpoints})
 }
 
