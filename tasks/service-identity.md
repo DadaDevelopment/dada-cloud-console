@@ -62,12 +62,23 @@ currently lives. A move re-points that row and re-mints nothing.
 ## Phase 5 — migrate the pasted keys
 
 - [ ] Inventory apps whose `env_vars` hold an `sk-dada` literal.
-- [ ] `reels-tracker` first: declare the identity, cut over to `secretKeyRef`,
-      drop `OPENROUTER_API_KEY` from argo-infra, revoke the user-service key.
-- [ ] Restore its direct-provider models once the identity resolves to a project
-      holding an openrouter credential — `OPENROUTER_MODEL` is pinned to the
-      `medium` tier alias meanwhile, and `OCR_VISION_MODEL` / `WEB_SEARCH_MODEL`
-      have no working tier equivalent at all.
+- [x] `reels-tracker` cut over to an identity token (2026-08-03). Still a
+      literal in argo-infra — `secretKeyRef` waits on Phase 2 — but the value is
+      now the app's own credential, so the next move re-points instead of
+      orphaning it.
+- [ ] Revoke reels-tracker's old user-service key, now unused.
+- [x] Its direct-provider models are back: `OPENROUTER_MODEL=or-gpt-41-mini`,
+      `OCR_VISION_MODEL`, `WEB_SEARCH_MODEL` all answer through the identity.
+      This needed project `internal` to hold an openrouter credential at all —
+      the identity fixes *whose* credential it is, not whether the destination
+      project has one. See the Phase 3 MoveImpact warning.
+- [ ] Issue project `internal` its own openrouter key. It currently shares
+      `platform`'s (same ciphertext copied on 2026-08-03 to unblock prod), which
+      makes per-project spend unattributable.
+- [ ] Mint identities through `POST .../apps/:appName/identity` rather than SQL.
+      reels-tracker's row was inserted directly because prod runs
+      `AUTH_MODE=keycloak` and the console service account is not a member of
+      project `internal`, so the HTTP route answers 404 to it.
 - [ ] Drop `ai_gateway_keys.project_id` once nothing reads it.
 
 ## Phase 6 — generic identity
