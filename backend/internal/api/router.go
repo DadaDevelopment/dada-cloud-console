@@ -614,6 +614,8 @@ func SetupRouter(pool *pgxpool.Pool, cfg *config.Config) *gin.Engine {
 		api.POST("/projects/:projectId/billing/checkout", h.BillingCheckout)
 		api.GET("/projects/:projectId/billing/payments", h.GetBillingPayments)
 
+		registerPayGatewayRoutes(r, api, h)
+
 		// Informational real-consumption + money-equivalent (always on, viewer+).
 		api.GET("/projects/:projectId/billing/consumption", h.GetProjectConsumption)
 		api.GET("/billing/account/summary", h.GetAccountSummary)

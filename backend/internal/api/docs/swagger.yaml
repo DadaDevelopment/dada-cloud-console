@@ -438,6 +438,22 @@ definitions:
         description: TTLSeconds is when the box goes to sleep, not when it is destroyed.
         type: integer
     type: object
+  api.createChargeRequest:
+    properties:
+      amount:
+        type: number
+      currency:
+        type: string
+      description:
+        type: string
+      external_ref:
+        type: string
+      metadata:
+        additionalProperties: {}
+        type: object
+      return_url:
+        type: string
+    type: object
   api.createCloudTaskRequest:
     properties:
       task_type:
@@ -517,6 +533,26 @@ definitions:
   api.createMonitoringRequest:
     properties:
       name:
+        type: string
+    type: object
+  api.createPayServiceKeyRequest:
+    properties:
+      service:
+        type: string
+    required:
+    - service
+    type: object
+  api.createPayServiceKeyResponse:
+    properties:
+      created_at:
+        type: string
+      id:
+        type: string
+      key:
+        type: string
+      service:
+        type: string
+      token_prefix:
         type: string
     type: object
   api.createProjectRequest:
@@ -850,6 +886,27 @@ definitions:
         type: string
     type: object
   api.saveDashboardRequest:
+    type: object
+  api.serviceChargeResponse:
+    properties:
+      amount:
+        type: string
+      confirmation_url:
+        type: string
+      created_at:
+        type: string
+      currency:
+        type: string
+      description:
+        type: string
+      external_ref:
+        type: string
+      id:
+        type: string
+      paid_at:
+        type: string
+      status:
+        type: string
     type: object
   api.setAIRoutingRequest:
     properties:
@@ -1537,6 +1594,105 @@ paths:
       summary: Platform state overview (platform-admin only)
       tags:
       - admin
+  /admin/pay/keys:
+    get:
+      description: Lists every service key minted for the payment gateway, including
+        revoked ones. Platform-admin only.
+      operationId: listPayServiceKeys
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: List internal payment-gateway service keys (platform-admin only)
+      tags:
+      - pay-gateway-admin
+    post:
+      consumes:
+      - application/json
+      description: Mints a revocable key for one internal service (e.g. dada-vpn-bot).
+        The plaintext key is returned ONLY in this response. Platform-admin only.
+      operationId: createPayServiceKey
+      parameters:
+      - description: Service slug
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/api.createPayServiceKeyRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/api.createPayServiceKeyResponse'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "409":
+          description: Conflict
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Mint an internal payment-gateway service key (platform-admin only)
+      tags:
+      - pay-gateway-admin
+  /admin/pay/keys/{keyId}:
+    delete:
+      description: Permanently revokes the key. Platform-admin only.
+      operationId: deletePayServiceKey
+      parameters:
+      - description: Key UUID
+        in: path
+        name: keyId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "204":
+          description: no content
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Revoke an internal payment-gateway service key (platform-admin only)
+      tags:
+      - pay-gateway-admin
   /agent/chat:
     post:
       consumes:
@@ -2370,6 +2526,118 @@ paths:
       summary: Report onboarding progress for a campaign
       tags:
       - onboarding
+  /pay/charges:
+    get:
+      description: Lists charges created by the calling service key, newest first.
+      operationId: listServiceCharges
+      parameters:
+      - description: Max rows (default 50, max 200)
+        in: query
+        name: limit
+        type: integer
+      - description: Filter by status (pending|succeeded|canceled)
+        in: query
+        name: status
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: List an internal service's charges
+      tags:
+      - pay-gateway
+    post:
+      consumes:
+      - application/json
+      description: 'Phase 1 of the internal payment gateway: lets one of our own key-authenticated
+        services (not customer apps) create a YooKassa payment and poll its status.
+        Idempotent on external_ref.'
+      operationId: createServiceCharge
+      parameters:
+      - description: Charge request
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/api.createChargeRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/api.serviceChargeResponse'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "409":
+          description: Conflict
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "503":
+          description: Service Unavailable
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Create an internal-service payment charge
+      tags:
+      - pay-gateway
+  /pay/charges/{chargeId}:
+    get:
+      description: Returns one charge's current status, reconciling against YooKassa
+        first if it is still pending. 404 if the charge does not belong to the calling
+        key.
+      operationId: getServiceCharge
+      parameters:
+      - description: Charge UUID
+        in: path
+        name: chargeId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/api.serviceChargeResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Get an internal-service charge
+      tags:
+      - pay-gateway
   /payments/oauth/callback:
     get:
       description: Public endpoint YooKassa redirects to after partner OAuth authorization.

@@ -769,6 +769,157 @@ const docTemplate = `{
                 }
             }
         },
+        "/admin/pay/keys": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Lists every service key minted for the payment gateway, including revoked ones. Platform-admin only.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "pay-gateway-admin"
+                ],
+                "summary": "List internal payment-gateway service keys (platform-admin only)",
+                "operationId": "listPayServiceKeys",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            },
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Mints a revocable key for one internal service (e.g. dada-vpn-bot). The plaintext key is returned ONLY in this response. Platform-admin only.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "pay-gateway-admin"
+                ],
+                "summary": "Mint an internal payment-gateway service key (platform-admin only)",
+                "operationId": "createPayServiceKey",
+                "parameters": [
+                    {
+                        "description": "Service slug",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/api.createPayServiceKeyRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/api.createPayServiceKeyResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/admin/pay/keys/{keyId}": {
+            "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Permanently revokes the key. Platform-admin only.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "pay-gateway-admin"
+                ],
+                "summary": "Revoke an internal payment-gateway service key (platform-admin only)",
+                "operationId": "deletePayServiceKey",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Key UUID",
+                        "name": "keyId",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "no content"
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/agent/chat": {
             "post": {
                 "security": [
@@ -1928,6 +2079,168 @@ const docTemplate = `{
                     },
                     "400": {
                         "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/pay/charges": {
+            "get": {
+                "description": "Lists charges created by the calling service key, newest first.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "pay-gateway"
+                ],
+                "summary": "List an internal service's charges",
+                "operationId": "listServiceCharges",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Max rows (default 50, max 200)",
+                        "name": "limit",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by status (pending|succeeded|canceled)",
+                        "name": "status",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            },
+            "post": {
+                "description": "Phase 1 of the internal payment gateway: lets one of our own key-authenticated services (not customer apps) create a YooKassa payment and poll its status. Idempotent on external_ref.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "pay-gateway"
+                ],
+                "summary": "Create an internal-service payment charge",
+                "operationId": "createServiceCharge",
+                "parameters": [
+                    {
+                        "description": "Charge request",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/api.createChargeRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/api.serviceChargeResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/pay/charges/{chargeId}": {
+            "get": {
+                "description": "Returns one charge's current status, reconciling against YooKassa first if it is still pending. 404 if the charge does not belong to the calling key.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "pay-gateway"
+                ],
+                "summary": "Get an internal-service charge",
+                "operationId": "getServiceCharge",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Charge UUID",
+                        "name": "chargeId",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/api.serviceChargeResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
                         "schema": {
                             "type": "object",
                             "additionalProperties": {
@@ -17366,6 +17679,30 @@ const docTemplate = `{
                 }
             }
         },
+        "api.createChargeRequest": {
+            "type": "object",
+            "properties": {
+                "amount": {
+                    "type": "number"
+                },
+                "currency": {
+                    "type": "string"
+                },
+                "description": {
+                    "type": "string"
+                },
+                "external_ref": {
+                    "type": "string"
+                },
+                "metadata": {
+                    "type": "object",
+                    "additionalProperties": {}
+                },
+                "return_url": {
+                    "type": "string"
+                }
+            }
+        },
         "api.createCloudTaskRequest": {
             "type": "object",
             "properties": {
@@ -17487,6 +17824,37 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "name": {
+                    "type": "string"
+                }
+            }
+        },
+        "api.createPayServiceKeyRequest": {
+            "type": "object",
+            "required": [
+                "service"
+            ],
+            "properties": {
+                "service": {
+                    "type": "string"
+                }
+            }
+        },
+        "api.createPayServiceKeyResponse": {
+            "type": "object",
+            "properties": {
+                "created_at": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "key": {
+                    "type": "string"
+                },
+                "service": {
+                    "type": "string"
+                },
+                "token_prefix": {
                     "type": "string"
                 }
             }
@@ -17976,6 +18344,38 @@ const docTemplate = `{
         },
         "api.saveDashboardRequest": {
             "type": "object"
+        },
+        "api.serviceChargeResponse": {
+            "type": "object",
+            "properties": {
+                "amount": {
+                    "type": "string"
+                },
+                "confirmation_url": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "currency": {
+                    "type": "string"
+                },
+                "description": {
+                    "type": "string"
+                },
+                "external_ref": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "paid_at": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                }
+            }
         },
         "api.setAIRoutingRequest": {
             "type": "object",

@@ -170,7 +170,17 @@ func (h *Handler) YooKassaWebhook(c *gin.Context) {
 
 	switch result.Outcome {
 	case yookassa.OutcomeUnknownPayment:
-		log.Printf("payments: webhook for unknown yk_payment_id=%s", payload.Object.ID)
+		scOutcome, scErr := h.processServiceChargeWebhook(c.Request.Context(), payload.Object.ID)
+		if scErr != nil {
+			log.Printf("payments: service-charge webhook re-fetch failed yk_id=%s: %v", payload.Object.ID, scErr)
+			respondError(c, http.StatusInternalServerError, "failed to verify payment")
+			return
+		}
+		if scOutcome == "unknown_charge" || scOutcome == "unconfigured" {
+			log.Printf("payments: webhook for unknown yk_payment_id=%s", payload.Object.ID)
+		} else {
+			log.Printf("payments: service charge outcome=%s yk_id=%s", scOutcome, payload.Object.ID)
+		}
 	case yookassa.OutcomeSucceeded:
 		log.Printf("payments: succeeded org=%s plan=%s amount=%s", result.OrgID, result.Plan, result.AmountValue)
 		h.notifyPaymentSuccess(result)
