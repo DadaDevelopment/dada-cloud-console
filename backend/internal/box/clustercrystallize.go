@@ -281,11 +281,15 @@ func (c *ClusterCrystallizer) CrystallizeWithReport(ctx context.Context, inst *I
 		len(rootList), crystalRootDelta, len(workList), crystalWorkTree)
 	seedCtx, cancelSeed := context.WithTimeout(ctx, c.seedTimeout())
 	defer cancelSeed()
-	if err := c.transfer(seedCtx, inst.InstanceRef, target, rootList, crystalRootDelta, 0); err != nil {
+	skippedRoot, err := c.transfer(seedCtx, inst.InstanceRef, target, rootList, delta, crystalRootDelta, 0)
+	rep.SkippedPaths = append(rep.SkippedPaths, skippedRoot...)
+	if err != nil {
 		return fail("seed", err)
 	}
 	if len(workList) > 0 {
-		if err := c.transfer(seedCtx, inst.InstanceRef, target, workList, crystalWorkTree, pathDepth(workDir)); err != nil {
+		skippedWork, err := c.transfer(seedCtx, inst.InstanceRef, target, workList, delta, crystalWorkTree, pathDepth(workDir))
+		rep.SkippedPaths = append(rep.SkippedPaths, skippedWork...)
+		if err != nil {
 			return fail("seed", err)
 		}
 	}
@@ -659,33 +663,44 @@ func pathDepth(p string) int {
 }
 
 // transfer streams a tar of the listed paths out of the box and into the
-// permanent disk, without staging it in the control plane.
+// permanent disk, without staging it in the control plane. It returns the paths
+// the box refused to hand over.
 //
 // The path list goes in through stdin rather than a command line: an argv of a
 // hundred thousand paths does not fit in one, and a file list also keeps paths
 // with spaces intact.
-func (c *ClusterCrystallizer) transfer(ctx context.Context, boxPod, targetPod string, paths []string, dest string, strip int) error {
+//
+// A box container runs as uid 0 with every capability dropped, so root there is
+// root in name only: it cannot open a directory owned by a service user, and a
+// box that installed redis or postgres has several. Without --ignore-failed-read
+// the first such directory ends the archive with exit 2 and the whole promotion
+// dies at the seed stage - which is to say crystallization would be impossible
+// for any box that runs software as a non-root user, i.e. for almost all of them.
+// The flag turns those into warnings; the warnings are parsed, not discarded, and
+// travel into the report, because carrying less than the box holds is exactly the
+// kind of loss ADR-019 requires to be loud rather than convenient.
+func (c *ClusterCrystallizer) transfer(ctx context.Context, boxPod, targetPod string, paths []string, entries map[string]FileEntry, dest string, strip int) ([]string, error) {
 	if len(paths) == 0 {
-		return nil
+		return nil, nil
 	}
 	listPath := fmt.Sprintf("/tmp/crystal-%d-%d.list", len(paths), strip)
 	list := bytes.NewBufferString(strings.Join(paths, "\n") + "\n")
 	if err := c.shell.execStream(ctx, boxPod, clusterContainerName, "cat > "+listPath, list, io.Discard, io.Discard); err != nil {
-		return fmt.Errorf("crystallize: write transfer list into the box: %w", err)
+		return nil, fmt.Errorf("crystallize: write transfer list into the box: %w", err)
 	}
 
 	if _, err := c.run(ctx, targetPod, crystalContainer, "mkdir -p "+dest); err != nil {
-		return err
+		return nil, err
 	}
 
 	pr, pw := io.Pipe()
 	srcErr := make(chan error, 1)
+	srcLog := &bytes.Buffer{}
 	go func() {
-		stderr := &bytes.Buffer{}
 		err := c.shell.execStream(ctx, boxPod, clusterContainerName,
-			"tar -c --numeric-owner --no-recursion -T "+listPath+" -f - 2>/dev/null", nil, pw, stderr)
+			"tar -c --numeric-owner --no-recursion --ignore-failed-read -T "+listPath+" -f -", nil, pw, srcLog)
 		if err != nil {
-			err = fmt.Errorf("crystallize: tar out of the box: %w: %s", err, stderr.String())
+			err = fmt.Errorf("crystallize: tar out of the box: %w: %s", err, srcLog.String())
 		}
 		_ = pw.CloseWithError(err)
 		srcErr <- err
@@ -699,12 +714,86 @@ func (c *ClusterCrystallizer) transfer(ctx context.Context, boxPod, targetPod st
 	dstErr := c.shell.execStream(ctx, targetPod, crystalContainer, extract, pr, io.Discard, stderr)
 	_ = pr.Close()
 	if err := <-srcErr; err != nil {
-		return err
+		return nil, err
 	}
 	if dstErr != nil {
-		return fmt.Errorf("crystallize: untar onto the permanent disk: %w: %s", dstErr, stderr.String())
+		return nil, fmt.Errorf("crystallize: untar onto the permanent disk: %w: %s", dstErr, stderr.String())
+	}
+
+	skipped := parseTarSkips(srcLog.String())
+	if err := c.recreateSkippedDirs(ctx, targetPod, skipped, entries, dest, strip); err != nil {
+		return skipped, err
+	}
+	return skipped, nil
+}
+
+// tarSkipMarkers are the ways GNU tar says it could not read something it was
+// told to archive.
+var tarSkipMarkers = []string{": Cannot open:", ": Cannot read:", ": Cannot stat:", ": Cannot savedir:"}
+
+// parseTarSkips pulls the paths out of tar's warnings. Anything it did not
+// understand is left alone: a warning nobody can attribute to a path is still a
+// warning, but it is not a path, and inventing one would put a lie in the report.
+func parseTarSkips(log string) []string {
+	var out []string
+	seen := map[string]bool{}
+	for _, line := range strings.Split(log, "\n") {
+		line = strings.TrimPrefix(strings.TrimSpace(line), "tar: ")
+		for _, marker := range tarSkipMarkers {
+			idx := strings.Index(line, marker)
+			if idx <= 0 {
+				continue
+			}
+			p := line[:idx]
+			if !strings.HasPrefix(p, "/") || seen[p] {
+				break
+			}
+			seen[p] = true
+			out = append(out, p)
+			break
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+// recreateSkippedDirs puts back the directories the archive could not open.
+//
+// A directory's whole content in the manifest is its mode - the walk records no
+// checksum for one - so a directory tar refused to open can be reproduced exactly
+// by making it and setting that mode. Files are a different matter: their content
+// is genuinely lost, they stay in the skipped list, and verification will report
+// them missing, which is the truth and should stay visible.
+func (c *ClusterCrystallizer) recreateSkippedDirs(ctx context.Context, targetPod string, skipped []string, entries map[string]FileEntry, dest string, strip int) error {
+	var cmds []string
+	for _, p := range skipped {
+		e, ok := entries[p]
+		if !ok || e.SHA256 != "dir" {
+			continue
+		}
+		target := stripComponents(p, strip)
+		if target == "" {
+			continue
+		}
+		full := strings.TrimSuffix(dest, "/") + "/" + target
+		cmds = append(cmds, fmt.Sprintf("mkdir -p '%s' && chmod %s '%s'", full, e.Mode, full))
+	}
+	if len(cmds) == 0 {
+		return nil
+	}
+	if _, err := c.run(ctx, targetPod, crystalContainer, strings.Join(cmds, "; ")); err != nil {
+		return fmt.Errorf("crystallize: recreate directories the box would not open: %w", err)
 	}
 	return nil
+}
+
+// stripComponents applies tar's --strip-components to one path.
+func stripComponents(p string, strip int) string {
+	parts := strings.Split(strings.Trim(p, "/"), "/")
+	if strip >= len(parts) {
+		return ""
+	}
+	return strings.Join(parts[strip:], "/")
 }
 
 func crystalName(vmName string) string { return "crystal-" + vmName }

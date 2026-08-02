@@ -165,6 +165,11 @@ type UnitRender struct {
 // against, or says none was available; BaselineFiles is how many files that
 // baseline held. A small delta transfer and a fallback full transfer must be
 // distinguishable by whoever reads the report.
+//
+// SkippedPaths are the paths the box would not hand over. A box container has no
+// capabilities, so root inside it cannot open a directory or file owned by a
+// service user; directories are reproduced from their recorded mode, and anything
+// else listed there is content the artifact genuinely does not have.
 type CrystallizationReport struct {
 	BoxID       string `json:"box_id"`
 	InstanceRef string `json:"instance_ref"`
@@ -193,6 +198,7 @@ type CrystallizationReport struct {
 	BaselineSource  string             `json:"baseline_source"`
 	BaselineFiles   int                `json:"baseline_files"`
 	StoppedServices []string           `json:"stopped_services"`
+	SkippedPaths    []string           `json:"skipped_paths"`
 
 	Carry CarryManifest `json:"carry"`
 	// Honest scope of the stand-in, carried in the report itself so no reader has
@@ -1075,6 +1081,10 @@ func (r *CrystallizationReport) Text() string {
 	fmt.Fprintf(&b, "  listening after cutover %v\n", r.Sockets.ListeningAfterCutover)
 	fmt.Fprintf(&b, "  SET EQUAL              %t\n", r.Sockets.Equal)
 	fmt.Fprintf(&b, "  stopped at freeze      %v (restarted once on the VM)\n", r.StoppedServices)
+	fmt.Fprintf(&b, "%s\nPATHS THE BOX WOULD NOT HAND OVER (%d)\n", line, len(r.SkippedPaths))
+	for _, p := range firstN(r.SkippedPaths, 20) {
+		fmt.Fprintf(&b, "  * %s\n", p)
+	}
 	fmt.Fprintf(&b, "%s\nEND-TO-END HTTP PROBE AGAINST THE CRYSTALLIZED ARTIFACT\n", line)
 	fmt.Fprintf(&b, "  GET %s   Host: %s\n", r.Probe.URL, r.Probe.Host)
 	fmt.Fprintf(&b, "  status %d   ok=%t\n", r.Probe.Status, r.Probe.OK)

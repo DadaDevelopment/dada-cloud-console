@@ -280,3 +280,49 @@ func TestSplitDeltaRoutesTheWorkingTreeToThePersistentMount(t *testing.T) {
 		t.Fatalf("strip depth for /workspace must be 1, got %d", pathDepth("/workspace"))
 	}
 }
+
+// TestParseTarSkipsReadsWarnings pins the parse of what a box refused to hand
+// over: real tar output, including a line about leading slashes that names no
+// path and a duplicate that must not be reported twice.
+func TestParseTarSkipsReadsWarnings(t *testing.T) {
+	log := "tar: Removing leading `/' from member names\n" +
+		"tar: /etc/redis: Cannot open: Permission denied\n" +
+		"tar: /home/ubuntu: Cannot open: Permission denied\n" +
+		"tar: /etc/redis: Cannot open: Permission denied\n" +
+		"tar: /var/lib/redis/dump.rdb: Cannot read: Permission denied\n" +
+		"tar: Exiting with failure status due to previous errors\n"
+	got := parseTarSkips(log)
+	want := []string{"/etc/redis", "/home/ubuntu", "/var/lib/redis/dump.rdb"}
+	if len(got) != len(want) {
+		t.Fatalf("parseTarSkips = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("parseTarSkips = %v, want %v", got, want)
+		}
+	}
+}
+
+func TestParseTarSkipsIgnoresChatter(t *testing.T) {
+	if got := parseTarSkips("tar: Removing leading `/' from hard link targets\n"); len(got) != 0 {
+		t.Fatalf("parseTarSkips = %v, want none", got)
+	}
+}
+
+func TestStripComponents(t *testing.T) {
+	cases := []struct {
+		path  string
+		strip int
+		want  string
+	}{
+		{"/etc/redis", 0, "etc/redis"},
+		{"/workspace/app/data", 1, "app/data"},
+		{"/workspace", 1, ""},
+		{"/workspace/app", 3, ""},
+	}
+	for _, c := range cases {
+		if got := stripComponents(c.path, c.strip); got != c.want {
+			t.Fatalf("stripComponents(%q, %d) = %q, want %q", c.path, c.strip, got, c.want)
+		}
+	}
+}
