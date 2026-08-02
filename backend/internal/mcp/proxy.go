@@ -17,7 +17,35 @@ import (
 // ToolHandler matches the SDK's AddTool handler signature.
 type ToolHandler func(context.Context, *sdkmcp.CallToolRequest) (*sdkmcp.CallToolResult, error)
 
-var proxyClient = &http.Client{Timeout: 60 * time.Second}
+// proxyClient carries no Timeout of its own: a client-wide deadline would apply
+// the same bound to a listing and to a promotion, and those differ by two orders
+// of magnitude. The bound is set per call instead, from proxyDeadline.
+var proxyClient = &http.Client{}
+
+// proxyTimeout is the bound for an ordinary tool call. Every verb this API
+// exposes either answers inside the latency budget or hands back a 202 with an
+// operation to poll, so a minute is already generous.
+const proxyTimeout = 60 * time.Second
+
+// proxySlowTimeout is the bound for the verbs that do their work inline instead
+// of behind an operation. Crystallization manifests a box's whole delta, streams
+// it into a fresh workload, waits for that workload to come up and then verifies
+// it file by file — minutes of honest work in one request. Under the ordinary
+// bound the agent got "context deadline exceeded" every time and the feature was
+// unreachable through MCP no matter how well it worked.
+const proxySlowTimeout = 15 * time.Minute
+
+// slowTools names the verbs that get proxySlowTimeout. It is a list rather than a
+// heuristic so that making a tool slow is a decision someone writes down.
+var slowTools = map[string]bool{"crystallizeBox": true}
+
+// proxyDeadline picks the bound for one tool call.
+func proxyDeadline(toolName string) time.Duration {
+	if slowTools[toolName] {
+		return proxySlowTimeout
+	}
+	return proxyTimeout
+}
 
 // bearerKey is a context key for the inbound bearer token.
 type bearerKey struct{}
@@ -96,7 +124,10 @@ func MakeHandler(g GeneratedTool, backendURL, basePath string) ToolHandler {
 			fullURL += "?" + enc
 		}
 
-		httpReq, err := http.NewRequestWithContext(ctx, g.Method, fullURL, bodyReader)
+		callCtx, cancel := context.WithTimeout(ctx, proxyDeadline(g.Name))
+		defer cancel()
+
+		httpReq, err := http.NewRequestWithContext(callCtx, g.Method, fullURL, bodyReader)
 		if err != nil {
 			return errResult(fmt.Sprintf("build request: %v", err)), nil
 		}

@@ -1,9 +1,11 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/dada-tuda/console/backend/internal/box"
 	"github.com/dada-tuda/console/backend/internal/models"
@@ -29,6 +31,25 @@ import (
 // separate column from `status`; and every carry disposition of "lost" increments
 // dada_box_crystallize_state_loss_total, the only critical box alert, because one
 // loss teaches distrust and severs the monetization ladder at step two.
+
+// crystallizeBudget bounds one promotion. It is generous because the work is
+// genuinely long — manifest, stream, wait for the workload, verify file by file —
+// and because the alternative to a bound is a goroutine that never returns.
+const crystallizeBudget = 15 * time.Minute
+
+// crystallizeContext derives the context the promotion runs on: it keeps the
+// request's values but drops its cancellation, and adds a deadline of its own.
+//
+// On the request context, a caller whose HTTP client gave up mid-flight aborted
+// the crystallization wherever it happened to be — a PVC bound, a Deployment
+// half-created, the crystallization row left 'Running' forever and the box stuck
+// in 'Crystallizing', which the partial unique index then reads as "already in
+// flight" and refuses every retry. A caller hanging up is not a reason to leave
+// debris in the cluster and a lock nobody can clear: the work finishes and the
+// report is stored, so the next caller reads what happened.
+func crystallizeContext(reqCtx context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.WithoutCancel(reqCtx), crystallizeBudget)
+}
 
 type crystallizeBoxRequest struct {
 	// AppServerName names the permanent artifact.
@@ -170,7 +191,11 @@ func (h *Handler) CrystallizeBox(c *gin.Context) {
 	}
 
 	inst := instanceFor(b.ID.String(), b.InstanceRef, b.NodeRef, b.Image, b.Region, b.SSHHost, b.SSHPort, b.MCPURL)
-	report, cErr := cz.CrystallizeWithReport(c.Request.Context(), inst, box.CrystallizeOptions{
+
+	crystCtx, cancelCryst := crystallizeContext(c.Request.Context())
+	defer cancelCryst()
+
+	report, cErr := cz.CrystallizeWithReport(crystCtx, inst, box.CrystallizeOptions{
 		VMName:     name,
 		Domain:     domain,
 		OSSlug:     box.WarmImageOSSlug,
