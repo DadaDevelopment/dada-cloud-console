@@ -78,6 +78,7 @@ const (
 	crystalMountPath  = "/crystal"
 	crystalRootDelta  = crystalMountPath + "/rootdelta"
 	crystalWorkTree   = crystalMountPath + "/work"
+	crystalCopyLog    = crystalMountPath + "/rootdelta-copy.err"
 	crystalSeeded     = crystalMountPath + "/.seeded"
 	crystalSeedGlob   = crystalSeeded + "-*"
 	crystalDefaultGB  = 10
@@ -94,6 +95,15 @@ var (
 	schemeHTTPS  = "https:" + crystalSlash + crystalSlash
 	servicesGlob = "/etc/dada/services/" + "*.json"
 )
+
+// ClusterBoxEnvPath is where a pod-backed box keeps its injected environment.
+//
+// It is NOT BoxEnvPath: the local runtime writes etc/dada/box.env into a rootfs
+// it owns, while ClusterRuntime.Bind writes etc/dada/env into a live container.
+// Reading the wrong one is silent — the file simply is not there — so the crystal
+// used to start with an empty environment and the env comparison used to compare
+// nothing against nothing and call it equal.
+const ClusterBoxEnvPath = "etc/dada/env"
 
 // crystalDeltaRoots are the trees a box's work can land in. Everything outside
 // them belongs to the image, which both sides share by digest.
@@ -345,7 +355,7 @@ func (c *ClusterCrystallizer) CrystallizeWithReport(ctx context.Context, inst *I
 	if err != nil {
 		return fail("verify", err)
 	}
-	mode, _ := c.run(ctx, target, crystalContainer, "stat -c %a /"+BoxEnvPath+" 2>/dev/null")
+	mode, _ := c.run(ctx, target, crystalContainer, "stat -c %a /"+ClusterBoxEnvPath+" 2>/dev/null")
 	rep.Env = compareEnvMaps(boxEnv, targetEnv, normalizeMode(mode))
 	if rep.Env.Equal {
 		rep.Carry["env"] = CarryPreserved
@@ -473,7 +483,7 @@ func (c *ClusterCrystallizer) waitListening(ctx context.Context, pod string, wan
 
 // envSnapshot reads the box env file from inside a pod.
 func (c *ClusterCrystallizer) envSnapshot(ctx context.Context, pod, container string) (map[string]string, error) {
-	out, err := c.run(ctx, pod, container, "cat /"+BoxEnvPath+" 2>/dev/null || true")
+	out, err := c.run(ctx, pod, container, "cat /"+ClusterBoxEnvPath+" 2>/dev/null || true")
 	if err != nil {
 		return nil, err
 	}
@@ -842,14 +852,28 @@ func (c *ClusterCrystallizer) ensurePVC(ctx context.Context, vmName string) erro
 // seed stage needs then lands in a container that is dying, so the retry cannot
 // finish, and the failure looks like a slow transfer instead of a marker from an
 // hour ago. A per-attempt name makes a stale marker unmatchable by construction.
+//
+// Every step guards its own precondition instead of trusting a trailing `|| true`,
+// because `.` on a missing file is FATAL in dash: the shell exits 2 before the
+// `||` is ever evaluated. Paired with a blanket `2>/dev/null` that produced the
+// worst diagnostic this mechanism can produce — a container that dies instantly,
+// with an empty log and an exit code that names nothing.
+//
+// The copy is `cp -af` because the pod drops every capability: root here has no
+// CAP_DAC_OVERRIDE, so a destination the image ships read-only (npm's cache writes
+// its content files 0444) cannot be opened for writing at all. Without -f those
+// paths silently fall out of the copy and the manifest comparison reports a lost
+// volume for files whose content never actually differed.
 func crystalCommand(d ServiceDescriptor, workDir, marker string) string {
 	var b strings.Builder
 	b.WriteString("while [ ! -f " + marker + " ]; do sleep 1; done\n")
-	b.WriteString("cp -a " + crystalRootDelta + "/. / 2>/dev/null || true\n")
+	b.WriteString("cp -af " + crystalRootDelta + "/. / 2>" + crystalCopyLog + " || echo \"crystal: часть файлов не скопировалась, подробности в " + crystalCopyLog + "\" >&2\n")
 	b.WriteString("set -a\n")
-	b.WriteString(". /" + BoxEnvPath + " 2>/dev/null || true\n")
+	for _, p := range []string{ClusterBoxEnvPath, BoxEnvPath} {
+		b.WriteString("[ -r /" + p + " ] && . /" + p + "\n")
+	}
 	b.WriteString("set +a\n")
-	b.WriteString("cd " + shellQuote(workDir) + " 2>/dev/null || true\n")
+	b.WriteString("cd " + shellQuote(workDir) + " || { echo \"crystal: нет рабочего каталога \"" + shellQuote(workDir) + " >&2; exit 1; }\n")
 	b.WriteString("exec /bin/sh -c " + shellQuote(d.Command) + "\n")
 	return b.String()
 }

@@ -91,7 +91,7 @@ func crystalReply(t *testing.T) func(pod, cmd string) (string, error) {
 			return `{"name":"web","command":"node app.js","working_dir":"/workspace","ports":[8080]}` + "\n", nil
 		case strings.Contains(cmd, "/proc/net/tcp"):
 			return "8080\n", nil
-		case strings.HasPrefix(cmd, "cat /etc/dada/box.env"):
+		case strings.HasPrefix(cmd, "cat /"+ClusterBoxEnvPath):
 			return "DATABASE_URL=postgres://u:p@h/db\nPORT=8080\n", nil
 		case strings.HasPrefix(cmd, "stat -c %a"):
 			return "600\n", nil
@@ -271,6 +271,26 @@ func TestCrystalCommandWaitsForTheSeedMarker(t *testing.T) {
 	}
 	if !strings.Contains(cmd, "exec /bin/sh -c 'node app.js'") {
 		t.Fatalf("the declared command must be what the artifact runs, got:\n%s", cmd)
+	}
+}
+
+// TestCrystalCommandSurvivesAMissingEnvFile pins the shape that cost a promotion:
+// `.` on a missing file is fatal in dash, so a trailing `|| true` never runs and
+// the container dies with exit 2. With stderr sent to /dev/null on the same line,
+// the log was empty too. The guard must be the test, not the recovery.
+func TestCrystalCommandSurvivesAMissingEnvFile(t *testing.T) {
+	cmd := crystalCommand(ServiceDescriptor{Name: "web", Command: "node app.js"}, "/workspace", crystalSeeded+"-7")
+	for _, p := range []string{ClusterBoxEnvPath, BoxEnvPath} {
+		want := "[ -r /" + p + " ] && . /" + p
+		if !strings.Contains(cmd, want) {
+			t.Fatalf("env sourcing must be guarded by a readability test, want %q in:\n%s", want, cmd)
+		}
+	}
+	if strings.Contains(cmd, ". /"+ClusterBoxEnvPath+" 2>/dev/null") {
+		t.Fatalf("an unguarded, silenced source is the exact failure being fixed:\n%s", cmd)
+	}
+	if !strings.Contains(cmd, "cd '/workspace' || {") {
+		t.Fatalf("a missing working directory must stop the container loudly, not run the command from /:\n%s", cmd)
 	}
 }
 
