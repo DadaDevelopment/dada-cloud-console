@@ -202,6 +202,131 @@ func TestApplyPodCrashState(t *testing.T) {
 			t.Fatalf("healthy pod flagged crashLooping")
 		}
 	})
+
+	t.Run("plain exit code 1 with a restart sets reasonError and crashLooping", func(t *testing.T) {
+		la := &liveApp{desired: 1, ready: 1}
+		pod := &corev1.Pod{Status: corev1.PodStatus{ContainerStatuses: []corev1.ContainerStatus{
+			{
+				Name:                 "profi",
+				RestartCount:         1,
+				State:                corev1.ContainerState{Waiting: &corev1.ContainerStateWaiting{Reason: "ContainerCreating"}},
+				LastTerminationState: corev1.ContainerState{Terminated: &corev1.ContainerStateTerminated{ExitCode: 1}},
+			},
+		}}}
+		applyPodCrashState(la, pod)
+		if !la.crashLooping || la.reason != reasonError {
+			t.Fatalf("got crashLooping=%v reason=%q, want crashLooping=true reason=%q", la.crashLooping, la.reason, reasonError)
+		}
+		if livePhase(la) != "CrashLoop" {
+			t.Fatalf("livePhase = %q, want CrashLoop", livePhase(la))
+		}
+		if la.lastExitCode == nil || *la.lastExitCode != 1 {
+			t.Fatalf("lastExitCode = %v, want 1", la.lastExitCode)
+		}
+	})
+
+	t.Run("exit code 0 is not a crash", func(t *testing.T) {
+		la := &liveApp{}
+		pod := &corev1.Pod{Status: corev1.PodStatus{ContainerStatuses: []corev1.ContainerStatus{
+			{
+				Name:                 "profi",
+				RestartCount:         1,
+				State:                corev1.ContainerState{Running: &corev1.ContainerStateRunning{}},
+				LastTerminationState: corev1.ContainerState{Terminated: &corev1.ContainerStateTerminated{ExitCode: 0}},
+			},
+		}}}
+		applyPodCrashState(la, pod)
+		if la.crashLooping {
+			t.Fatalf("exit code 0 should not be a crash")
+		}
+	})
+
+	t.Run("exit code 1 with no restart yet is not a crash", func(t *testing.T) {
+		la := &liveApp{}
+		pod := &corev1.Pod{Status: corev1.PodStatus{ContainerStatuses: []corev1.ContainerStatus{
+			{
+				Name:                 "profi",
+				RestartCount:         0,
+				State:                corev1.ContainerState{Waiting: &corev1.ContainerStateWaiting{Reason: "ContainerCreating"}},
+				LastTerminationState: corev1.ContainerState{Terminated: &corev1.ContainerStateTerminated{ExitCode: 1}},
+			},
+		}}}
+		applyPodCrashState(la, pod)
+		if la.crashLooping {
+			t.Fatalf("a first attempt still in progress (RestartCount=0) should not be a crash")
+		}
+	})
+
+	t.Run("crashloopbackoff still wins over plain exit code", func(t *testing.T) {
+		la := &liveApp{}
+		pod := &corev1.Pod{Status: corev1.PodStatus{ContainerStatuses: []corev1.ContainerStatus{
+			{
+				Name:                 "profi",
+				RestartCount:         3,
+				State:                corev1.ContainerState{Waiting: &corev1.ContainerStateWaiting{Reason: reasonCrashLoopBackOff}},
+				LastTerminationState: corev1.ContainerState{Terminated: &corev1.ContainerStateTerminated{ExitCode: 1}},
+			},
+		}}}
+		applyPodCrashState(la, pod)
+		if la.reason != reasonCrashLoopBackOff {
+			t.Fatalf("reason = %q, want %q (existing reasons must keep winning over reasonError)", la.reason, reasonCrashLoopBackOff)
+		}
+	})
+
+	t.Run("oomkilled still wins over plain exit code", func(t *testing.T) {
+		la := &liveApp{}
+		pod := &corev1.Pod{Status: corev1.PodStatus{ContainerStatuses: []corev1.ContainerStatus{
+			{
+				Name:                 "profi",
+				RestartCount:         1,
+				State:                corev1.ContainerState{Running: &corev1.ContainerStateRunning{}},
+				LastTerminationState: corev1.ContainerState{Terminated: &corev1.ContainerStateTerminated{Reason: reasonOOMKilled, ExitCode: 137}},
+			},
+		}}}
+		applyPodCrashState(la, pod)
+		if la.reason != reasonOOMKilled {
+			t.Fatalf("reason = %q, want %q", la.reason, reasonOOMKilled)
+		}
+	})
+
+	t.Run("reasonError from one pod does not get overwritten downgraded then reasserted, and a later named reason still wins", func(t *testing.T) {
+		la := &liveApp{}
+		errPod := &corev1.Pod{Status: corev1.PodStatus{ContainerStatuses: []corev1.ContainerStatus{
+			{
+				Name:                 "profi",
+				RestartCount:         1,
+				State:                corev1.ContainerState{Waiting: &corev1.ContainerStateWaiting{Reason: "ContainerCreating"}},
+				LastTerminationState: corev1.ContainerState{Terminated: &corev1.ContainerStateTerminated{ExitCode: 1}},
+			},
+		}}}
+		crashPod := &corev1.Pod{Status: corev1.PodStatus{ContainerStatuses: []corev1.ContainerStatus{
+			{Name: "profi", State: corev1.ContainerState{Waiting: &corev1.ContainerStateWaiting{Reason: reasonCrashLoopBackOff}}},
+		}}}
+		applyPodCrashState(la, errPod)
+		if la.reason != reasonError {
+			t.Fatalf("reason after errPod = %q, want %q", la.reason, reasonError)
+		}
+		applyPodCrashState(la, crashPod)
+		if la.reason != reasonCrashLoopBackOff {
+			t.Fatalf("reason after crashPod = %q, want %q (named reason must override reasonError from an earlier pod)", la.reason, reasonCrashLoopBackOff)
+		}
+	})
+
+	t.Run("fluent sidecar plain exit code ignored", func(t *testing.T) {
+		la := &liveApp{}
+		pod := &corev1.Pod{Status: corev1.PodStatus{ContainerStatuses: []corev1.ContainerStatus{
+			{
+				Name:                 "fluent-container",
+				RestartCount:         5,
+				State:                corev1.ContainerState{Waiting: &corev1.ContainerStateWaiting{Reason: "ContainerCreating"}},
+				LastTerminationState: corev1.ContainerState{Terminated: &corev1.ContainerStateTerminated{ExitCode: 1}},
+			},
+		}}}
+		applyPodCrashState(la, pod)
+		if la.crashLooping {
+			t.Fatalf("sidecar plain exit code should be ignored")
+		}
+	})
 }
 
 func TestIsLivePod(t *testing.T) {
@@ -225,8 +350,8 @@ func TestIsLivePod(t *testing.T) {
 	}
 
 	failed := &corev1.Pod{Status: corev1.PodStatus{Phase: corev1.PodFailed}}
-	if isLivePod(failed) {
-		t.Fatalf("Failed pod should not be live")
+	if !isLivePod(failed) {
+		t.Fatalf("Failed pod should stay live: a plain non-zero exit lands the pod in Phase=Failed and that is exactly the signal the exit-code crash case needs")
 	}
 }
 

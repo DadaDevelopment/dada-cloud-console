@@ -86,3 +86,87 @@ func TestDetectPodAlertPendingPullNotYetBackoffIgnored(t *testing.T) {
 		t.Fatalf("expected ContainerCreating (normal transient state) to not alert")
 	}
 }
+
+func TestDetectPodAlertPlainExitCodeWithRestartDetected(t *testing.T) {
+	pod := podWithStatus("web", corev1.ContainerStatus{
+		Name:         "web",
+		RestartCount: 1,
+		LastTerminationState: corev1.ContainerState{
+			Terminated: &corev1.ContainerStateTerminated{ExitCode: 1},
+		},
+		State: corev1.ContainerState{Waiting: &corev1.ContainerStateWaiting{Reason: "CrashLoopBackOff"}},
+	})
+	alert, bad := detectPodAlert(pod)
+	if !bad || alert.Reason != reasonCrashLoopBackOff {
+		t.Fatalf("expected CrashLoopBackOff to still win over plain exit code, got bad=%v alert=%+v", bad, alert)
+	}
+}
+
+func TestDetectPodAlertPlainExitCodeNoWaitingReasonDetected(t *testing.T) {
+	pod := podWithStatus("web", corev1.ContainerStatus{
+		Name:         "web",
+		RestartCount: 1,
+		LastTerminationState: corev1.ContainerState{
+			Terminated: &corev1.ContainerStateTerminated{ExitCode: 1},
+		},
+		State: corev1.ContainerState{Waiting: &corev1.ContainerStateWaiting{Reason: "ContainerCreating"}},
+	})
+	alert, bad := detectPodAlert(pod)
+	if !bad || alert.Reason != reasonError || alert.ExitCode != 1 {
+		t.Fatalf("expected reasonError alert with exit code 1, got bad=%v alert=%+v", bad, alert)
+	}
+}
+
+func TestDetectPodAlertExitCodeZeroIgnored(t *testing.T) {
+	pod := podWithStatus("web", corev1.ContainerStatus{
+		Name:         "web",
+		RestartCount: 1,
+		LastTerminationState: corev1.ContainerState{
+			Terminated: &corev1.ContainerStateTerminated{ExitCode: 0},
+		},
+		State: corev1.ContainerState{Running: &corev1.ContainerStateRunning{}},
+	})
+	if _, bad := detectPodAlert(pod); bad {
+		t.Fatalf("expected exit code 0 to not alert")
+	}
+}
+
+func TestDetectPodAlertExitCodeNoRestartYetIgnored(t *testing.T) {
+	pod := podWithStatus("web", corev1.ContainerStatus{
+		Name:         "web",
+		RestartCount: 0,
+		LastTerminationState: corev1.ContainerState{
+			Terminated: &corev1.ContainerStateTerminated{ExitCode: 1},
+		},
+		State: corev1.ContainerState{Waiting: &corev1.ContainerStateWaiting{Reason: "ContainerCreating"}},
+	})
+	if _, bad := detectPodAlert(pod); bad {
+		t.Fatalf("expected exit code with RestartCount=0 (still first attempt) to not alert")
+	}
+}
+
+func TestDetectPodAlertOOMKilledStillWinsOverPlainExitCode(t *testing.T) {
+	pod := podWithStatus("web", corev1.ContainerStatus{
+		Name:         "web",
+		RestartCount: 1,
+		LastTerminationState: corev1.ContainerState{
+			Terminated: &corev1.ContainerStateTerminated{Reason: "OOMKilled", ExitCode: 137},
+		},
+		State: corev1.ContainerState{Running: &corev1.ContainerStateRunning{}},
+	})
+	alert, bad := detectPodAlert(pod)
+	if !bad || alert.Reason != reasonOOMKilled {
+		t.Fatalf("expected OOMKilled to win over plain exit code, got bad=%v alert=%+v", bad, alert)
+	}
+}
+
+func TestEmailableReasonExcludesPlainExitCode(t *testing.T) {
+	if emailableReason(reasonError) {
+		t.Fatalf("expected reasonError to not be emailable")
+	}
+	for _, r := range []string{reasonOOMKilled, reasonCrashLoopBackOff, reasonImagePullBackOff, reasonErrImagePull} {
+		if !emailableReason(r) {
+			t.Fatalf("expected %s to remain emailable", r)
+		}
+	}
+}

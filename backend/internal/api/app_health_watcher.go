@@ -50,15 +50,33 @@ const (
 	reasonCrashLoopBackOff = "CrashLoopBackOff"
 	reasonImagePullBackOff = "ImagePullBackOff"
 	reasonErrImagePull     = "ErrImagePull"
+	reasonError            = "Error"
 )
 
+// emailableReason gates which detected reasons still send an owner email.
+// reasonError (a plain non-zero exit, no named waiting reason involved) is
+// deliberately excluded: the owner asked to stop being emailed on every
+// crash, so this class is recorded in app_health_alerts and shown in the
+// console UI, same as the other four, but never mailed. The other four keep
+// their existing email behaviour unchanged.
+func emailableReason(reason string) bool {
+	switch reason {
+	case reasonOOMKilled, reasonCrashLoopBackOff, reasonImagePullBackOff, reasonErrImagePull:
+		return true
+	default:
+		return false
+	}
+}
+
 // appHealthAlert is one detected bad-state container, ready to notify on.
+// ExitCode is only meaningful when Reason is reasonError.
 type appHealthAlert struct {
 	Namespace string
 	AppName   string
 	PodName   string
 	Container string
 	Reason    string
+	ExitCode  int32
 }
 
 // appHealthWatcher polls user-project namespaces for pods stuck in a bad
@@ -323,7 +341,10 @@ func (w *appHealthWatcher) tick(ctx context.Context) {
 // statuses (no cluster needed). Pods without the dada.io/app label are not
 // console-managed apps and are skipped. OOMKilled takes priority over
 // CrashLoopBackOff when both are present: it is the actual root cause, the
-// backoff state is just its symptom.
+// backoff state is just its symptom. reasonError is checked last, after
+// OOMKilled and the named waiting reasons, and only fires on a container that
+// has already restarted at least once (RestartCount >= 1) so a first attempt
+// still mid-flight is not misread as crashing.
 func detectPodAlert(pod *corev1.Pod) (appHealthAlert, bool) {
 	appName := pod.Labels["dada.io/app"]
 	if appName == "" {
@@ -354,6 +375,26 @@ func detectPodAlert(pod *corev1.Pod) (appHealthAlert, bool) {
 				Reason:    cs.State.Waiting.Reason,
 			}, true
 		}
+	}
+	for _, cs := range pod.Status.ContainerStatuses {
+		term := cs.LastTerminationState.Terminated
+		if term == nil {
+			term = cs.State.Terminated
+		}
+		if term == nil || term.ExitCode == 0 {
+			continue
+		}
+		if cs.RestartCount < 1 {
+			continue
+		}
+		return appHealthAlert{
+			Namespace: pod.Namespace,
+			AppName:   appName,
+			PodName:   pod.Name,
+			Container: cs.Name,
+			Reason:    reasonError,
+			ExitCode:  term.ExitCode,
+		}, true
 	}
 	return appHealthAlert{}, false
 }
@@ -422,7 +463,15 @@ func touchAppHealthAlertSeen(ctx context.Context, pool *pgxpool.Pool, namespace,
 // still happening" signal never depends on whether an email actually goes
 // out this tick.
 func (w *appHealthWatcher) maybeNotify(ctx context.Context, projectID uuid.UUID, alert appHealthAlert) {
-	touchAppHealthAlertSeen(ctx, w.h.pool, alert.Namespace, alert.AppName, alert.Reason, alert.PodName+"/"+alert.Container)
+	detail := alert.PodName + "/" + alert.Container
+	if alert.Reason == reasonError {
+		detail = fmt.Sprintf("%s exit=%d", detail, alert.ExitCode)
+	}
+	touchAppHealthAlertSeen(ctx, w.h.pool, alert.Namespace, alert.AppName, alert.Reason, detail)
+
+	if !emailableReason(alert.Reason) {
+		return
+	}
 
 	to, source := w.h.resolveAlertRecipient(ctx, projectID)
 	if to == "" {
@@ -434,7 +483,7 @@ func (w *appHealthWatcher) maybeNotify(ctx context.Context, projectID uuid.UUID,
 		return
 	}
 
-	if !claimAppHealthAlertSlot(ctx, w.h.pool, alert.Namespace, alert.AppName, alert.Reason, alert.PodName+"/"+alert.Container, appHealthAlertCooldown) {
+	if !claimAppHealthAlertSlot(ctx, w.h.pool, alert.Namespace, alert.AppName, alert.Reason, detail, appHealthAlertCooldown) {
 		return
 	}
 

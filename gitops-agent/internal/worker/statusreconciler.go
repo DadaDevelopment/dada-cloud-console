@@ -46,6 +46,7 @@ const (
 	reasonCrashLoopBackOff = "CrashLoopBackOff"
 	reasonImagePullBackOff = "ImagePullBackOff"
 	reasonErrImagePull     = "ErrImagePull"
+	reasonError            = "Error"
 )
 
 // StatusReconciler periodically reads Deployment status from each k8s
@@ -565,31 +566,38 @@ func imageFromContainers(cs []corev1.Container) string {
 
 // isLivePod excludes a pod from crash-state aggregation once it is no longer
 // the app's current revision: a Terminating pod (DeletionTimestamp set) or one
-// that already reached a terminal Phase (Succeeded/Failed) can keep carrying a
-// stale waiting.reason=CrashLoopBackOff from before a fix landed and a fresh,
+// that already reached Phase=Succeeded can keep carrying a stale
+// waiting.reason=CrashLoopBackOff from before a fix landed and a fresh,
 // healthy ReplicaSet replaced it. Without this guard a resolved crashloop reads
 // CrashLoop forever until the old pod is garbage-collected. A genuinely
 // crashlooping container's pod stays Phase=Running throughout (verified live:
 // the pod object itself never restarts, only the container inside it does).
+//
+// Phase=Failed is deliberately NOT excluded here: a container that exits
+// non-zero without ever entering CrashLoopBackOff (a plain crash, no restart
+// backoff yet) lands its pod in Phase=Failed, and that pod is exactly the
+// signal applyPodCrashState's exit-code case needs. desired/ready (Stopped
+// detection) come from the Deployment/StatefulSet/DaemonSet spec/status
+// above, not from this pod list, so including Failed pods here does not
+// affect desired==0 -> "Stopped".
 func isLivePod(p *corev1.Pod) bool {
 	if p.DeletionTimestamp != nil {
 		return false
 	}
-	switch p.Status.Phase {
-	case corev1.PodSucceeded, corev1.PodFailed:
-		return false
-	}
-	return true
+	return p.Status.Phase != corev1.PodSucceeded
 }
 
 // applyPodCrashState folds one pod's container statuses onto its app's
 // aggregate, mirroring detectPodAlert's reason vocabulary and precedence
 // (backend/internal/api/app_health_watcher.go): OOMKilled beats
 // CrashLoopBackOff/ImagePullBackOff/ErrImagePull because it is the actual root
-// cause, the backoff state is just its symptom. The well-known logging sidecar
-// is skipped, same convention as imageFromContainers. restarts is a max across
-// containers/pods, not a sum, since the signal that matters is "is anything
-// still crashing", not a cluster-wide counter.
+// cause, the backoff state is just its symptom, and all four of those beat the
+// last-resort reasonError case (a plain non-zero exit that never reached a
+// named waiting reason at all, e.g. a container killed with exit code 1 before
+// the kubelet ever applied a CrashLoopBackOff backoff). The well-known logging
+// sidecar is skipped, same convention as imageFromContainers. restarts is a
+// max across containers/pods, not a sum, since the signal that matters is "is
+// anything still crashing", not a cluster-wide counter.
 func applyPodCrashState(la *liveApp, p *corev1.Pod) {
 	for _, cs := range p.Status.ContainerStatuses {
 		if cs.Name == "fluent-container" {
@@ -628,6 +636,29 @@ func applyPodCrashState(la *liveApp, p *corev1.Pod) {
 			}
 			return
 		}
+	}
+	if la.reason != "" {
+		return
+	}
+	for _, cs := range p.Status.ContainerStatuses {
+		if cs.Name == "fluent-container" {
+			continue
+		}
+		term := cs.LastTerminationState.Terminated
+		if term == nil {
+			term = cs.State.Terminated
+		}
+		if term == nil || term.ExitCode == 0 {
+			continue
+		}
+		if cs.RestartCount < 1 {
+			continue
+		}
+		la.crashLooping = true
+		la.reason = reasonError
+		code := term.ExitCode
+		la.lastExitCode = &code
+		return
 	}
 }
 
