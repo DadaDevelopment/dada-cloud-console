@@ -100,7 +100,7 @@ func (h *Handler) PreviewZoneImport(c *gin.Context) {
 // @Failure     503       {object} map[string]string
 // @Router      /projects/{projectId}/domains/authorizations/{authId}/zone/import [post]
 func (h *Handler) ImportZone(c *gin.Context) {
-	projectID, authID, apex, ok := h.managedDNSAuth(c)
+	projectID, authID, apex, ok := h.managedDNSAuthFor(c, "ImportZone")
 	if !ok {
 		return
 	}

@@ -36,39 +36,88 @@ type managedZone struct {
 	Status          string    `json:"status"`
 }
 
-// managedDNSAuth resolves the authorization the request targets, enforcing the
+// managedDNSAuth resolves the authorization the request targets for a read-only
+// handler: a refusal is answered but not journalled, because a rejected GET says
+// nothing about intent and would bury the writes in noise.
+func (h *Handler) managedDNSAuth(c *gin.Context) (projectID, authID uuid.UUID, apex string, ok bool) {
+	return h.managedDNSAuthFor(c, "")
+}
+
+// managedDNSAuthFor resolves the authorization the request targets, enforcing the
 // managed-DNS feature gate and project write access. On any failure it writes the
 // response and returns ok=false. It returns the apex the authorization owns.
-func (h *Handler) managedDNSAuth(c *gin.Context) (projectID, authID uuid.UUID, apex string, ok bool) {
-	if h.cfg.PowerDNSAPIKey == "" || h.pdns == nil {
-		respondError(c, http.StatusServiceUnavailable, "managed DNS not configured")
-		return uuid.Nil, uuid.Nil, "", false
+//
+// When action is non-empty the refusal itself is journalled as a failed audit row
+// for that action. The gate answers before the handler body runs, so until now an
+// attempt a shared gate rejected -- a read-only member editing a zone, a member of
+// another project probing an authorization id, a call arriving while PowerDNS is
+// unconfigured -- was indistinguishable from no attempt at all. That is exactly
+// the blindness the audit path exists to remove, and a zone edit is the one change
+// that can take a user's whole domain off the internet.
+//
+// Only mutating handlers pass an action. The unauthenticated case stays silent on
+// purpose: there is no actor to name, and recordAudit drops such rows anyway.
+//
+// The path ids are parsed before the feature gate is checked, so a refusal raised
+// while managed DNS is unconfigured still carries the project it was aimed at. In
+// the other order that row lands with project_id NULL and drops out of every
+// per-project read of the audit path -- the same invisibility, one step later.
+func (h *Handler) managedDNSAuthFor(c *gin.Context, action string) (projectID, authID uuid.UUID, apex string, ok bool) {
+	var actorID uuid.UUID
+	refuse := func(status int, reason string) {
+		if action == "" || actorID == uuid.Nil {
+			return
+		}
+		name := apex
+		if name == "" {
+			name = c.Param("authId")
+		}
+		h.recordAudit(c.Request.Context(), actorID, auditEntry{
+			ProjectID:    projectID,
+			Action:       action,
+			ResourceKind: "ManagedZone",
+			ResourceName: name,
+			Outcome:      auditOutcomeFailure,
+			Metadata:     map[string]any{"reason": reason, "status": status, "refused_by": "gate"},
+		})
 	}
 	claims, has := auth.GetClaims(c)
 	if !has {
 		respondUnauthorized(c)
 		return uuid.Nil, uuid.Nil, "", false
 	}
+	actorID = claims.UserID
 	projectID, err := uuid.Parse(c.Param("projectId"))
 	if err != nil {
+		projectID = uuid.Nil
+		refuse(http.StatusNotFound, "bad_project_id")
 		respondNotFound(c)
 		return uuid.Nil, uuid.Nil, "", false
 	}
 	authID, err = uuid.Parse(c.Param("authId"))
 	if err != nil {
+		refuse(http.StatusNotFound, "bad_authorization_id")
 		respondNotFound(c)
+		return uuid.Nil, uuid.Nil, "", false
+	}
+	if h.cfg.PowerDNSAPIKey == "" || h.pdns == nil {
+		refuse(http.StatusServiceUnavailable, "managed_dns_not_configured")
+		respondError(c, http.StatusServiceUnavailable, "managed DNS not configured")
 		return uuid.Nil, uuid.Nil, "", false
 	}
 	role, err := h.effectiveRole(c.Request.Context(), claims, projectID)
 	if err == pgx.ErrNoRows {
+		refuse(http.StatusNotFound, "not_a_member")
 		respondNotFound(c)
 		return uuid.Nil, uuid.Nil, "", false
 	}
 	if err != nil {
+		refuse(http.StatusInternalServerError, "membership_check_failed")
 		respondError(c, http.StatusInternalServerError, "failed to check project membership")
 		return uuid.Nil, uuid.Nil, "", false
 	}
 	if !canWrite(role) {
+		refuse(http.StatusForbidden, "read_only_role")
 		respondForbidden(c)
 		return uuid.Nil, uuid.Nil, "", false
 	}
@@ -77,10 +126,12 @@ func (h *Handler) managedDNSAuth(c *gin.Context) (projectID, authID uuid.UUID, a
 		authID, projectID,
 	).Scan(&apex)
 	if err == pgx.ErrNoRows {
+		refuse(http.StatusNotFound, "authorization_not_found")
 		respondNotFound(c)
 		return uuid.Nil, uuid.Nil, "", false
 	}
 	if err != nil {
+		refuse(http.StatusInternalServerError, "authorization_load_failed")
 		respondError(c, http.StatusInternalServerError, "failed to load authorization")
 		return uuid.Nil, uuid.Nil, "", false
 	}
@@ -138,7 +189,7 @@ func (h *Handler) dnsAudit(c *gin.Context, projectID uuid.UUID, action, apex str
 // @Failure     503       {object} map[string]string
 // @Router      /projects/{projectId}/domains/authorizations/{authId}/delegate [post]
 func (h *Handler) DelegateAuthorization(c *gin.Context) {
-	_, authID, apex, ok := h.managedDNSAuth(c)
+	_, authID, apex, ok := h.managedDNSAuthFor(c, "DelegateAuthorization")
 	if !ok {
 		return
 	}
@@ -315,7 +366,7 @@ func rrsetsToView(rrsets []pdns.RRSet) []managedRecordView {
 // @Failure     503       {object} map[string]string
 // @Router      /projects/{projectId}/domains/authorizations/{authId}/zone/records [post]
 func (h *Handler) UpsertManagedRecord(c *gin.Context) {
-	projectID, authID, apex, ok := h.managedDNSAuth(c)
+	projectID, authID, apex, ok := h.managedDNSAuthFor(c, "UpsertManagedRecord")
 	if !ok {
 		return
 	}
@@ -411,7 +462,7 @@ type deleteRecordRequest struct {
 // @Failure     503       {object} map[string]string
 // @Router      /projects/{projectId}/domains/authorizations/{authId}/zone/records [delete]
 func (h *Handler) DeleteManagedRecord(c *gin.Context) {
-	projectID, authID, apex, ok := h.managedDNSAuth(c)
+	projectID, authID, apex, ok := h.managedDNSAuthFor(c, "DeleteManagedRecord")
 	if !ok {
 		return
 	}
