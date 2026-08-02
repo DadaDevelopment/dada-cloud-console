@@ -230,3 +230,44 @@ those says nothing was *displaced*, which is a different question from whether t
 are fair game inside the platform's own zone; the apex and `www` are the brand's front door.
 Before claiming one, ask what is supposed to live there — and if the answer is "nothing
 yet," that is still an answer someone else gets to give.
+
+## 2026-08-02 — A page-wide grep is not a deploy check, and a pipe hides the exit code
+
+Two ways I told the user something was true while it was not, in the same hour.
+
+**The deploy marker.** I waited for the RU docs to reach prod by polling
+`curl … | grep -q "Объектное хранилище"`. It matched immediately — because that
+string is in the nav and the footer of every page, including the old English one.
+I announced the deploy was live and started submitting URLs to IndexNow while
+prod was still serving `<title>Object Storage (S3-compatible)</title>`. The
+marker has to be a string that exists *only* in the new version and only in the
+place the change lives: `<title>`, a version stamp, a build id. "The word appears
+somewhere on the page" is not evidence that the page changed.
+
+**The swallowed exit code.** `if python3 submit.py … | tail -6; then echo OK; fi`
+tests the exit status of `tail`, which is 0 no matter how the script died. It
+printed "indexnow OK attempt 1" over a Python traceback that was right there in
+the same output. Redirect to a file and test `$?` on the command itself, or set
+`pipefail` — never let a formatter be the last stage of a pipeline you branch on.
+
+**Rule.** Both failures share a shape: I checked something adjacent to the claim
+instead of the claim. Before trusting a probe, ask what it would print if the
+thing had *not* happened. If the answer is "the same thing," it is not a probe.
+
+## 2026-08-02 — The fallback that never fails is the one that stays broken
+
+The docs served English when a Russian translation was missing. Nothing errored,
+nothing 404'd, the page looked complete — it was just English prose inside a
+`lang="ru"` document, invisible in review and unrankable in the Russian SERP.
+That is how the entire `/developer` tree stayed unfound for a query like "s3".
+
+Graceful degradation removes the symptom, so the only thing left that can notice
+is a check that knows the rule. Fixed the content, then checked in
+`frontend/scripts/check-doc-translations.mjs` wired into `prebuild` (verified in
+reverse: hid `ru/builds.md`, got rc=1 naming the file).
+
+**Rule.** When you add a fallback, add the guard in the same change. Otherwise
+you have not built resilience, you have built a blind spot with good manners.
+Corollary: put the guard where the project's trusted signal already runs — mine
+went to `prebuild` rather than `test:unit` because CI builds on node 20, which
+has no `--experimental-strip-types` and therefore never runs `test:unit` at all.
