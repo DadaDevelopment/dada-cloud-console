@@ -80,4 +80,37 @@ export const billing: Messages = {
   "billing.expiresOn": { ru: "действует до {date}", en: "active until {date}" },
   "billing.expiresSoon": { ru: "истекает {date} — продлите, чтобы сохранить тариф", en: "expires {date} - renew to keep your plan" },
   "billing.renew": { ru: "Продлить за {price} ₽", en: "Renew for {price} rub" },
+
+  "billing.overLimitTitle": { ru: "Вы превысили лимиты тарифа", en: "You are over your plan limits" },
+  "billing.overLimitLine": { ru: "{resource}: {used} при лимите {limit}.", en: "{resource}: {used} against a limit of {limit}." },
+  "billing.overLimitGrace": {
+    ru: "Сейчас это ничего не ломает: до {date} создание новых ресурсов не блокируется. После этой даты создать новое приложение, базу или домен уже не получится, пока вы не перейдёте на подходящий тариф или не удалите лишнее.",
+    en: "Nothing is broken right now: creating new resources is not blocked until {date}. After that date you will not be able to create a new app, database or domain until you move to a plan that fits, or remove what is extra.",
+  },
+  "billing.overLimitNoGrace": {
+    ru: "Создание новых ресурсов уже заблокировано. Перейдите на подходящий тариф или освободите лишнее.",
+    en: "Creating new resources is already blocked. Move to a plan that fits, or free up what is extra.",
+  },
+
+  "billing.autopayTitle": { ru: "Автопродление", en: "Automatic renewal" },
+  "billing.autopayOn": { ru: "Включено — {method}", en: "On - {method}" },
+  "billing.autopayNextCharge": { ru: "Следующее списание {date}", en: "Next charge on {date}" },
+  "billing.autopayOff": { ru: "Выключено. Тариф придётся продлевать вручную.", en: "Off. You will need to renew the plan by hand." },
+  "billing.autopayFailures": {
+    ru: "Неудачных попыток списания: {count}. Проверьте карту — после третьей автопродление отключится.",
+    en: "Failed charge attempts: {count}. Check the card - after the third one automatic renewal switches off.",
+  },
+  "billing.autopayDisable": { ru: "Отключить автопродление", en: "Turn off automatic renewal" },
+  "billing.autopayEnable": { ru: "Включить автопродление", en: "Turn on automatic renewal" },
+  "billing.autopaySaving": { ru: "Сохраняем...", en: "Saving..." },
+  "billing.autopayNoMethod": {
+    ru: "Нет сохранённой карты. Отметьте «Продлевать автоматически» при следующей оплате.",
+    en: "No saved card. Tick \"Renew automatically\" at your next payment.",
+  },
+  "billing.autopayError": { ru: "Не удалось изменить настройку", en: "Could not change the setting" },
+  "billing.autopayConsent": { ru: "Продлевать автоматически каждый месяц", en: "Renew automatically every month" },
+  "billing.autopayConsentHint": {
+    ru: "Карта сохранится у ЮKassa, списание — за сутки до конца оплаченного периода. Отключить можно в любой момент на этой странице.",
+    en: "The card is stored by YooKassa and charged a day before the paid period ends. You can turn this off any time on this page.",
+  },
 };

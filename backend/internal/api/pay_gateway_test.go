@@ -98,7 +98,7 @@ func newCountingYooKassaClient(t *testing.T, status string) (*yookassa.Client, *
 func testPayHandler(pool *pgxpool.Pool, client *yookassa.Client) *Handler {
 	h := &Handler{pool: pool, cfg: &config.Config{YooKassaReturnURL: "https://console.dada-tuda.ru/pay/return"}}
 	if client != nil {
-		h.yookassa = yookassa.NewProvider(pool, client, h.cfg.YooKassaReturnURL, false)
+		h.yookassa = yookassa.NewProvider(pool, client, h.cfg.YooKassaReturnURL, false, 1, 0)
 	}
 	return h
 }

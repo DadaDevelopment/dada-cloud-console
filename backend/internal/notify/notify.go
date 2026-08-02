@@ -63,12 +63,60 @@ func ComposeAudit(action, actorEmail, resourceName, projectName, createdAtUTC st
 }
 
 // ComposePaymentSuccess builds the subject and plaintext body for the
-// customer-facing payment-success email (YooKassa checkout, payments slice 1).
-func ComposePaymentSuccess(planName, amountValue string) (subject, body string) {
+// customer-facing payment-success email (YooKassa checkout).
+//
+// autopayArmed says the customer also agreed to automatic renewal. Saying so
+// here, in writing, on the day they agreed — together with how to turn it off
+// — is what separates a subscription from a surprise.
+func ComposePaymentSuccess(planName, amountValue string, autopayArmed bool) (subject, body string) {
 	subject = fmt.Sprintf("Dada Cloud: оплата тарифа %s прошла успешно", planName)
 	var b strings.Builder
 	fmt.Fprintf(&b, "Спасибо! Платёж на тариф %s (%s ₽) успешно проведён.\n\n", planName, amountValue)
 	b.WriteString("Новый тариф уже активен в консоли.\n")
+	if autopayArmed {
+		b.WriteString("\nВы включили автопродление: за день до окончания месяца мы спишем ")
+		fmt.Fprintf(&b, "%s ₽ с той же карты и продлим тариф ещё на 30 дней.\n", amountValue)
+		b.WriteString("Отключить автопродление можно в любой момент: консоль → проект → Billing.\n")
+	}
+	return subject, b.String()
+}
+
+// ComposeAutopayCharged builds the customer-facing notice that automatic
+// renewal took money without them being present. It is sent on every
+// successful auto-charge, never batched and never suppressed: a silent
+// recurring debit is the single fastest way to earn a chargeback.
+func ComposeAutopayCharged(planName, amountValue, expiresAtUTC string) (subject, body string) {
+	subject = fmt.Sprintf("Dada Cloud: тариф %s продлён автоматически", planName)
+	var b strings.Builder
+	fmt.Fprintf(&b, "Списали %s ₽ по автопродлению тарифа %s.\n\n", amountValue, planName)
+	fmt.Fprintf(&b, "Тариф активен до %s (UTC).\n", expiresAtUTC)
+	b.WriteString("Чек отправлен отдельным письмом от ЮKassa.\n")
+	b.WriteString("Отключить автопродление: консоль → проект → Billing.\n")
+	return subject, b.String()
+}
+
+// ComposeAutopayFailed builds the customer-facing notice that an automatic
+// renewal was declined. attempt/maxAttempts are stated plainly so the
+// customer knows whether anything will be retried, and final says the account
+// is now on the manual path — the difference decides whether they need to act
+// today.
+func ComposeAutopayFailed(planName, amountValue, reason, expiresAtUTC string, attempt, maxAttempts int, final bool) (subject, body string) {
+	subject = fmt.Sprintf("Dada Cloud: не удалось продлить тариф %s", planName)
+	var b strings.Builder
+	fmt.Fprintf(&b, "Автосписание %s ₽ за тариф %s не прошло (попытка %d из %d).\n", amountValue, planName, attempt, maxAttempts)
+	if reason != "" {
+		fmt.Fprintf(&b, "Причина: %s\n", reason)
+	}
+	b.WriteString("\n")
+	fmt.Fprintf(&b, "Тариф действует до %s (UTC), после этого ещё 3 дня работает как есть.\n", expiresAtUTC)
+	if final {
+		b.WriteString("Больше автоматических попыток не будет — автопродление отключено.\n")
+		b.WriteString("Продлите вручную: консоль → проект → Billing → «Оплатить».\n")
+	} else {
+		b.WriteString("Мы повторим попытку автоматически. Если карта больше не действует, оплатите вручную:\n")
+		b.WriteString("консоль → проект → Billing → «Оплатить».\n")
+	}
+	b.WriteString("Работающие приложения не останавливаются.\n")
 	return subject, b.String()
 }
 

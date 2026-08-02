@@ -206,6 +206,7 @@ func main() {
 		}
 
 		expiryNotifier := notify.New(cfg.SMTPHost, cfg.SMTPPort, cfg.SMTPUser, cfg.SMTPPass, cfg.SMTPFrom)
+		autopayCharger := api.NewAutopayCharger(pool, cfg)
 		go func() {
 			ticker := time.NewTicker(1 * time.Hour)
 			defer ticker.Stop()
@@ -215,13 +216,14 @@ func main() {
 					return
 				case <-ticker.C:
 					now := time.Now().UTC()
+					api.SweepAutopay(meterCtx, pool, autopayCharger, expiryNotifier, cfg.AuditNotifyEmail, billingPlans, now)
 					api.SweepPlanExpiry(meterCtx, pool, expiryNotifier, cfg.AuditNotifyEmail, now)
 					api.SweepQuotaGrace(meterCtx, pool, expiryNotifier, cfg.AuditNotifyEmail, billingPlans, now)
 					api.SweepPaymentPlanMismatch(meterCtx, pool, cfg.AuditNotifyEmail, now)
 				}
 			}
 		}()
-		log.Info().Msg("billing plan-expiry and quota-grace sweepers started")
+		log.Info().Msg("billing autopay, plan-expiry and quota-grace sweepers started")
 	}
 
 	<-quit

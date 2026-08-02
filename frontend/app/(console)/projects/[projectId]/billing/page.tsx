@@ -68,6 +68,9 @@ export default function BillingPage() {
   const [notConfiguredPlan, setNotConfiguredPlan] = useState<BillingPlanKey | null>(null);
   const [checkoutUrl, setCheckoutUrl] = useState<{ plan: BillingPlanKey; url: string } | null>(null);
   const [loadedAtMs] = useState(() => Date.now());
+  const [autopayConsent, setAutopayConsent] = useState(true);
+  const [autopayBusy, setAutopayBusy] = useState(false);
+  const [autopayError, setAutopayError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -130,7 +133,7 @@ export default function BillingPage() {
     setCheckoutUrl(null);
     setCheckoutingPlan(plan);
     try {
-      const resp = await billingApi.checkout(projectId, plan);
+      const resp = await billingApi.checkout(projectId, plan, autopayConsent);
       setCheckoutUrl({ plan, url: resp.confirmation_url });
       window.location.assign(resp.confirmation_url);
     } catch (err) {
@@ -142,6 +145,35 @@ export default function BillingPage() {
       }
     } finally {
       setCheckoutingPlan(null);
+    }
+  }
+
+  async function handleAutopay(enabled: boolean) {
+    setAutopayError(null);
+    setAutopayBusy(true);
+    try {
+      const resp = await billingApi.setAutopay(projectId, enabled);
+      setAccount((prev) =>
+        prev
+          ? {
+              ...prev,
+              autopay: {
+                enabled: resp.autopay_enabled,
+                methodTitle: resp.autopay_method_title,
+                failures: 0,
+                nextChargeAt:
+                  resp.autopay_enabled && prev.plan_expires_at
+                    ? new Date(new Date(prev.plan_expires_at).getTime() - 24 * 60 * 60 * 1000).toISOString()
+                    : null,
+              },
+            }
+          : prev,
+      );
+    } catch (err) {
+      const status = (err as { status?: number } | undefined)?.status;
+      setAutopayError(status === 409 ? t("billing.autopayNoMethod") : t("billing.autopayError"));
+    } finally {
+      setAutopayBusy(false);
     }
   }
 
@@ -185,6 +217,11 @@ export default function BillingPage() {
     : null;
 
   const quotaEnforced = account.quota_enforced === true;
+  const overLimit = account.quota_over_limit ?? [];
+  const autopay = account.autopay;
+  const autopayNextDate = autopay?.nextChargeAt
+    ? new Date(autopay.nextChargeAt).toLocaleDateString("ru", { day: "numeric", month: "long", year: "numeric" })
+    : null;
 
   const nearLimitResources = quotaEnforced
     ? USAGE_KEYS.filter((k) => {
@@ -204,6 +241,13 @@ export default function BillingPage() {
     : [];
 
   const quotaLabel = (k: UsageKey): string => t(`billing.quota.${k}`);
+
+  const overLimitLabel = (resource: string): string => {
+    const key = resource === "team_members" ? "members" : resource;
+    const i18nKey = `billing.quota.${key}`;
+    const label = t(i18nKey);
+    return label === i18nKey ? resource : label;
+  };
 
   const storageLabel = (v: number) => {
     if (v >= 1024) return `${(v / 1024).toFixed(1)} ТБ`;
@@ -244,6 +288,36 @@ export default function BillingPage() {
         <div className="mb-6 rounded-xl border border-blue-200 dark:border-blue-900 bg-blue-50 dark:bg-blue-950/40 px-5 py-4">
           <p className="text-sm font-semibold text-blue-800 dark:text-blue-300">{t("billing.graceTitle")}</p>
           <p className="mt-1 text-sm text-blue-700 dark:text-blue-400">{t("billing.graceText", { date: graceDate })}</p>
+        </div>
+      )}
+
+      {overLimit.length > 0 && (
+        <div
+          className="mb-6 rounded-xl border-2 border-red-300 dark:border-red-800 bg-red-50 dark:bg-red-950/40 px-5 py-4"
+          data-ux="billing_quota_banner:over_limit"
+        >
+          <p className="text-sm font-bold text-red-800 dark:text-red-300">{t("billing.overLimitTitle")}</p>
+          <ul className="mt-1 space-y-0.5">
+            {overLimit.map((row) => (
+              <li key={row.resource} className="text-sm text-red-700 dark:text-red-400">
+                {t("billing.overLimitLine", {
+                  resource: overLimitLabel(row.resource),
+                  used: String(row.used),
+                  limit: String(row.limit),
+                })}
+              </li>
+            ))}
+          </ul>
+          <p className="mt-2 text-sm text-red-700 dark:text-red-400">
+            {graceDate ? t("billing.overLimitGrace", { date: graceDate }) : t("billing.overLimitNoGrace")}
+          </p>
+          <a
+            href="#billing-plans"
+            data-ux="billing_quota_banner:over_limit_plans"
+            className="mt-3 inline-block text-sm font-semibold text-red-700 dark:text-red-400 hover:underline"
+          >
+            {t("billing.upgradeCta")}
+          </a>
         </div>
       )}
 
@@ -316,6 +390,68 @@ export default function BillingPage() {
             </p>
           )}
           <p className="mt-3 text-xs text-gray-400 dark:text-gray-500">{t("billing.orgScope")}</p>
+
+          {account.plan !== "free" && autopay && (
+            <div className="mt-4 rounded-lg border border-gray-100 dark:border-gray-800 bg-gray-50 dark:bg-gray-900/60 px-4 py-3">
+              <p className="text-xs font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500">
+                {t("billing.autopayTitle")}
+              </p>
+              {autopay.enabled ? (
+                <>
+                  <p className="mt-1 text-sm font-medium text-gray-900 dark:text-gray-100">
+                    {t("billing.autopayOn", { method: autopay.methodTitle })}
+                  </p>
+                  {autopayNextDate && (
+                    <p className="mt-0.5 text-sm text-gray-500 dark:text-gray-400">
+                      {t("billing.autopayNextCharge", { date: autopayNextDate })}
+                    </p>
+                  )}
+                  {autopay.failures > 0 && (
+                    <p className="mt-1 text-sm font-medium text-amber-600 dark:text-amber-400">
+                      {t("billing.autopayFailures", { count: String(autopay.failures) })}
+                    </p>
+                  )}
+                </>
+              ) : (
+                <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">{t("billing.autopayOff")}</p>
+              )}
+              <button
+                type="button"
+                disabled={autopayBusy}
+                onClick={() => handleAutopay(!autopay.enabled)}
+                data-ux={autopay.enabled ? "billing_autopay:disable" : "billing_autopay:enable"}
+                className="mt-2 text-sm font-semibold text-blue-600 dark:text-blue-400 hover:underline disabled:opacity-60"
+              >
+                {autopayBusy
+                  ? t("billing.autopaySaving")
+                  : autopay.enabled
+                    ? t("billing.autopayDisable")
+                    : t("billing.autopayEnable")}
+              </button>
+              {autopayError && <p className="mt-1 text-xs text-red-600 dark:text-red-400">{autopayError}</p>}
+            </div>
+          )}
+
+          {(upgradeCandidates.length > 0 ||
+            (expirySoon && currentPlanInfo?.price_rub !== null && (currentPlanInfo?.price_rub ?? 0) > 0)) && (
+            <label className="mt-4 flex cursor-pointer items-start gap-2.5">
+              <input
+                type="checkbox"
+                checked={autopayConsent}
+                onChange={(e) => setAutopayConsent(e.target.checked)}
+                data-ux="billing_checkout:autopay_consent"
+                className="mt-0.5 h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-800"
+              />
+              <span>
+                <span className="block text-sm font-medium text-gray-700 dark:text-gray-200">
+                  {t("billing.autopayConsent")}
+                </span>
+                <span className="mt-0.5 block text-xs text-gray-400 dark:text-gray-500">
+                  {t("billing.autopayConsentHint")}
+                </span>
+              </span>
+            </label>
+          )}
 
           {expirySoon && currentPlanInfo && currentPlanInfo.price_rub !== null && currentPlanInfo.price_rub > 0 && (
             <div className="mt-4">
@@ -418,7 +554,6 @@ export default function BillingPage() {
             if (!item) return null;
             const rawLimit = item.limit;
             const displayUsed = formatUsedValue(k, item.used);
-            const displayLimit = formatLimitValue(k, rawLimit);
             return (
               <UsageBar
                 key={k}

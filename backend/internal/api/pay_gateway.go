@@ -363,7 +363,7 @@ func (h *Handler) linkServiceChargePayment(ctx context.Context, sc serviceCharge
 	payment, err := h.yookassa.Client.CreatePayment(ctx, sc.ID.String(), yookassa.CreatePaymentRequest{
 		Amount:       yookassa.Amount{Value: sc.AmountValue, Currency: sc.Currency},
 		Capture:      true,
-		Confirmation: yookassa.Confirmation{Type: "redirect", ReturnURL: returnURL},
+		Confirmation: &yookassa.Confirmation{Type: "redirect", ReturnURL: returnURL},
 		Description:  sc.Description,
 		Metadata: map[string]any{
 			"kind":      "service_charge",

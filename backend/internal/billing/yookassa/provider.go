@@ -49,27 +49,67 @@ const (
 
 // YooKassaProvider implements billing.PaymentProvider (via the embedded
 // ManualProvider.AssignPlan, used on the payment-success path) and adds the
-// money-collection flow: checkout (create a redirect payment) and webhook
-// processing (authoritative re-fetch, never trust the payload).
+// money-collection flow: checkout (create a redirect payment), webhook
+// processing (authoritative re-fetch, never trust the payload) and the
+// recurring charge against a saved payment method.
+//
+// SendReceipt turns on the 54-FZ fiscal receipt block. It must stay off for a
+// shop without fiscalization enabled — YooKassa rejects the create call
+// outright — and on for any shop taking real money from Russian customers,
+// where issuing a receipt is a legal duty rather than a nicety. VatCode and
+// TaxSystemCode come from configuration because both depend on the merchant's
+// own tax registration, not on anything this code can derive.
 type YooKassaProvider struct {
 	billing.ManualProvider
-	Client      *Client
-	ReturnURL   string
-	SendReceipt bool
+	Client        *Client
+	ReturnURL     string
+	SendReceipt   bool
+	VatCode       int
+	TaxSystemCode int
 }
 
-// NewProvider builds a YooKassaProvider.
-func NewProvider(pool *pgxpool.Pool, client *Client, returnURL string, sendReceipt bool) *YooKassaProvider {
+// NewProvider builds a YooKassaProvider. vatCode 0 falls back to 1 ("no VAT"),
+// the only value that is safe for a merchant on a simplified tax regime;
+// taxSystemCode 0 means the shop has a single tax system and the field is
+// omitted from the receipt.
+func NewProvider(pool *pgxpool.Pool, client *Client, returnURL string, sendReceipt bool, vatCode, taxSystemCode int) *YooKassaProvider {
+	if vatCode == 0 {
+		vatCode = 1
+	}
 	return &YooKassaProvider{
 		ManualProvider: billing.ManualProvider{Pool: pool},
 		Client:         client,
 		ReturnURL:      returnURL,
 		SendReceipt:    sendReceipt,
+		VatCode:        vatCode,
+		TaxSystemCode:  taxSystemCode,
 	}
 }
 
-// Checkout starts a one-off payment for a paid plan: inserts a pending
-// payments row keyed by a fresh UUID (also sent to YooKassa as the
+// receiptFor builds the 54-FZ receipt block for one plan charge, or nil when
+// fiscalization is off or no customer email is known — a receipt without a
+// delivery address is not a receipt the customer will ever see, and YooKassa
+// rejects it.
+func (p *YooKassaProvider) receiptFor(plan pricing.Plan, amount Amount, customerEmail string) *Receipt {
+	if !p.SendReceipt || customerEmail == "" {
+		return nil
+	}
+	return &Receipt{
+		Customer:      ReceiptCustomer{Email: customerEmail},
+		TaxSystemCode: p.TaxSystemCode,
+		Items: []ReceiptItem{{
+			Description:    fmt.Sprintf("Тариф %s, доступ на 30 дней", plan.Name),
+			Quantity:       "1.00",
+			Amount:         amount,
+			VatCode:        p.VatCode,
+			PaymentMode:    "full_payment",
+			PaymentSubject: "service",
+		}},
+	}
+}
+
+// Checkout starts a customer-present payment for a paid plan: inserts a
+// pending payments row keyed by a fresh UUID (also sent to YooKassa as the
 // Idempotence-Key), creates the YooKassa payment, then stores the returned
 // yk_payment_id and confirmation_url on the row. The caller resolves plan
 // server-side (never trusts a client-supplied amount).
@@ -77,7 +117,12 @@ func NewProvider(pool *pgxpool.Pool, client *Client, returnURL string, sendRecei
 // projectID, when non-empty, is carried onto the return URL as
 // ?project=...&payment=... so the console's return page can poll this exact
 // payment's status instead of showing a blind thank-you.
-func (p *YooKassaProvider) Checkout(ctx context.Context, orgID string, plan pricing.Plan, customerEmail, createdBySub, projectID string) (paymentID, confirmationURL string, err error) {
+//
+// saveMethod asks YooKassa to keep the payment method reusable so the plan
+// can renew itself later. It reflects a checkbox the customer ticked, and
+// nothing else: a recurring charge the payer did not agree to is a chargeback
+// with extra steps.
+func (p *YooKassaProvider) Checkout(ctx context.Context, orgID string, plan pricing.Plan, customerEmail, createdBySub, projectID string, saveMethod bool) (paymentID, confirmationURL string, err error) {
 	id := uuid.New()
 	amountValue := fmt.Sprintf("%.2f", plan.PriceRUB)
 
@@ -100,23 +145,12 @@ func (p *YooKassaProvider) Checkout(ctx context.Context, orgID string, plan pric
 
 	amount := Amount{Value: amountValue, Currency: "RUB"}
 	req := CreatePaymentRequest{
-		Amount:       amount,
-		Capture:      true,
-		Confirmation: Confirmation{Type: "redirect", ReturnURL: returnURL},
-		Description:  fmt.Sprintf("Dada Cloud: тариф %s", plan.Name),
-	}
-	if p.SendReceipt && customerEmail != "" {
-		req.Receipt = &Receipt{
-			Customer: ReceiptCustomer{Email: customerEmail},
-			Items: []ReceiptItem{{
-				Description:    fmt.Sprintf("Тариф %s", plan.Name),
-				Quantity:       "1.00",
-				Amount:         amount,
-				VatCode:        1,
-				PaymentMode:    "full_payment",
-				PaymentSubject: "service",
-			}},
-		}
+		Amount:            amount,
+		Capture:           true,
+		Confirmation:      &Confirmation{Type: "redirect", ReturnURL: returnURL},
+		Description:       fmt.Sprintf("Dada Cloud: тариф %s", plan.Name),
+		Receipt:           p.receiptFor(plan, amount, customerEmail),
+		SavePaymentMethod: saveMethod,
 	}
 
 	payment, err := p.Client.CreatePayment(ctx, id.String(), req)
@@ -138,12 +172,17 @@ func (p *YooKassaProvider) Checkout(ctx context.Context, orgID string, plan pric
 // CustomerEmail are populated whenever a local row was matched (every
 // Outcome except OutcomeUnknownPayment), so the caller can log and notify
 // without a second query.
+// AutopayArmed reports that this payment also left the org with a reusable
+// payment method, so the plan will renew itself instead of lapsing. The
+// caller says so in the success mail: a charge the customer forgot they
+// authorised is the most expensive kind of support ticket.
 type WebhookResult struct {
 	Outcome       WebhookOutcome
 	OrgID         string
 	Plan          string
 	AmountValue   string
 	CustomerEmail string
+	AutopayArmed  bool
 }
 
 // ProcessWebhook handles one inbound YooKassa webhook delivery. ykPaymentID
@@ -199,6 +238,12 @@ func (p *YooKassaProvider) ProcessWebhook(ctx context.Context, ykPaymentID strin
 		if err := assignPlanTx(ctx, tx, orgID, plan, now); err != nil {
 			return WebhookResult{}, fmt.Errorf("yookassa: assign plan: %w", err)
 		}
+		if payment.PaymentMethod.Saved && payment.PaymentMethod.ID != "" {
+			if err := storeAutopayMethodTx(ctx, tx, orgID, payment.PaymentMethod, now); err != nil {
+				return WebhookResult{}, fmt.Errorf("yookassa: store payment method: %w", err)
+			}
+			result.AutopayArmed = true
+		}
 		if err := tx.Commit(ctx); err != nil {
 			return WebhookResult{}, fmt.Errorf("yookassa: commit: %w", err)
 		}
@@ -225,6 +270,150 @@ func (p *YooKassaProvider) ProcessWebhook(ctx context.Context, ykPaymentID strin
 		result.Outcome = OutcomeNoop
 		return result, nil
 	}
+}
+
+// ChargeOutcome is what one recurring charge attempt did.
+//
+// ChargeSucceeded: YooKassa took the money synchronously and the plan term
+// was extended in the same transaction. Nothing further is expected.
+//
+// ChargePending: the charge was accepted but is not final yet. The payments
+// row stays pending and the webhook finishes it; the caller must NOT count
+// this as a failure and must not retry, or the customer pays twice.
+//
+// ChargeFailed: YooKassa refused (declined card, expired method, no funds).
+// The caller counts the failure and eventually tells the customer to renew
+// by hand.
+type ChargeOutcome string
+
+const (
+	ChargeSucceeded ChargeOutcome = "succeeded"
+	ChargePending   ChargeOutcome = "pending"
+	ChargeFailed    ChargeOutcome = "failed"
+)
+
+// ChargeResult reports one recurring charge. Reason is the YooKassa-supplied
+// explanation on ChargeFailed, safe to put in front of a customer.
+type ChargeResult struct {
+	Outcome     ChargeOutcome
+	PaymentID   string
+	AmountValue string
+	Reason      string
+}
+
+// autopayCreatedBySub marks the payments rows nobody clicked for. Every other
+// row carries the OIDC subject of the person who pressed Pay; a renewal has no
+// such person, and inventing one would put a customer's name on a charge they
+// were asleep for.
+const autopayCreatedBySub = "system:autopay"
+
+// ChargeSaved renews a plan without the customer present, using the payment
+// method saved during their last checkout. The amount always comes from the
+// plan catalog passed in by the caller, never from the stored payments
+// history: a price change must take effect on renewal, and a stale amount
+// copied forward is how a subscription quietly charges the wrong number.
+//
+// The payments row is inserted BEFORE the API call, with the same UUID used
+// as the Idempotence-Key, so a timeout between the call and its answer cannot
+// produce a second charge on retry: YooKassa collapses the retry onto the
+// same payment, and the row is already there to match it.
+//
+// A synchronously succeeded charge extends the term here. Anything else is
+// left to the webhook, which is the authoritative path for every payment.
+func (p *YooKassaProvider) ChargeSaved(ctx context.Context, orgID string, plan pricing.Plan, methodID, customerEmail string) (ChargeResult, error) {
+	if methodID == "" {
+		return ChargeResult{}, errors.New("yookassa: charge without a saved payment method")
+	}
+	id := uuid.New()
+	amountValue := fmt.Sprintf("%.2f", plan.PriceRUB)
+
+	if _, err := p.Pool.Exec(ctx, `
+		INSERT INTO payments (id, org_id, plan, amount_value, currency, status, customer_email, created_by_sub, is_recurring)
+		VALUES ($1, $2, $3, $4, 'RUB', 'pending', $5, $6, TRUE)
+	`, id, orgID, plan.Key, amountValue, customerEmail, autopayCreatedBySub); err != nil {
+		return ChargeResult{}, fmt.Errorf("yookassa: insert recurring payment: %w", err)
+	}
+
+	amount := Amount{Value: amountValue, Currency: "RUB"}
+	payment, err := p.Client.CreatePayment(ctx, id.String(), CreatePaymentRequest{
+		Amount:          amount,
+		Capture:         true,
+		Description:     fmt.Sprintf("Dada Cloud: продление тарифа %s", plan.Name),
+		Receipt:         p.receiptFor(plan, amount, customerEmail),
+		PaymentMethodID: methodID,
+	})
+	if err != nil {
+		reason := err.Error()
+		var apiErr *Error
+		if errors.As(err, &apiErr) && apiErr.Description != "" {
+			reason = apiErr.Description
+		}
+		if _, uerr := p.Pool.Exec(ctx, `
+			UPDATE payments SET status = 'canceled', updated_at = $1 WHERE id = $2
+		`, time.Now().UTC(), id); uerr != nil {
+			return ChargeResult{}, fmt.Errorf("yookassa: mark recurring payment failed: %w", uerr)
+		}
+		return ChargeResult{Outcome: ChargeFailed, PaymentID: id.String(), AmountValue: amountValue, Reason: reason}, nil
+	}
+
+	now := time.Now().UTC()
+	if _, err := p.Pool.Exec(ctx, `
+		UPDATE payments SET yk_payment_id = $1, updated_at = $2 WHERE id = $3
+	`, payment.ID, now, id); err != nil {
+		return ChargeResult{}, fmt.Errorf("yookassa: store recurring yk payment id: %w", err)
+	}
+
+	switch payment.Status {
+	case "succeeded":
+		tx, err := p.Pool.Begin(ctx)
+		if err != nil {
+			return ChargeResult{}, fmt.Errorf("yookassa: begin recurring tx: %w", err)
+		}
+		defer tx.Rollback(ctx)
+		tag, err := tx.Exec(ctx, `
+			UPDATE payments SET status = 'succeeded', paid_at = $1, updated_at = $1 WHERE id = $2 AND status = 'pending'
+		`, now, id)
+		if err != nil {
+			return ChargeResult{}, fmt.Errorf("yookassa: mark recurring succeeded: %w", err)
+		}
+		if tag.RowsAffected() == 0 {
+			return ChargeResult{Outcome: ChargeSucceeded, PaymentID: id.String(), AmountValue: amountValue}, nil
+		}
+		if err := assignPlanTx(ctx, tx, orgID, plan.Key, now); err != nil {
+			return ChargeResult{}, fmt.Errorf("yookassa: extend plan after recurring charge: %w", err)
+		}
+		if err := tx.Commit(ctx); err != nil {
+			return ChargeResult{}, fmt.Errorf("yookassa: commit recurring charge: %w", err)
+		}
+		return ChargeResult{Outcome: ChargeSucceeded, PaymentID: id.String(), AmountValue: amountValue}, nil
+
+	case "canceled":
+		if _, err := p.Pool.Exec(ctx, `
+			UPDATE payments SET status = 'canceled', updated_at = $1 WHERE id = $2 AND status = 'pending'
+		`, now, id); err != nil {
+			return ChargeResult{}, fmt.Errorf("yookassa: mark recurring canceled: %w", err)
+		}
+		return ChargeResult{Outcome: ChargeFailed, PaymentID: id.String(), AmountValue: amountValue, Reason: "платёж отклонён"}, nil
+
+	default:
+		return ChargeResult{Outcome: ChargePending, PaymentID: id.String(), AmountValue: amountValue}, nil
+	}
+}
+
+// storeAutopayMethodTx arms auto-renewal for an org: the saved method handle,
+// its display title, consent switched on, and the failure counter cleared so
+// a card replaced after three declines gets a full set of retries again.
+func storeAutopayMethodTx(ctx context.Context, tx pgx.Tx, orgID string, method PaymentMethod, now time.Time) error {
+	_, err := tx.Exec(ctx, `
+		UPDATE billing_accounts
+		SET autopay_enabled = TRUE,
+		    autopay_method_id = $2,
+		    autopay_method_title = $3,
+		    autopay_failures = 0,
+		    updated_at = $4
+		WHERE org_id = $1
+	`, orgID, method.ID, method.Title, now)
+	return err
 }
 
 // assignPlanTx mirrors billing.ManualProvider.AssignPlan's upsert, scoped to

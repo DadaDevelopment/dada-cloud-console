@@ -94,7 +94,7 @@ func TestProcessWebhook_SpoofedSucceeded_AuthoritativeStatusIsPending_NoFlip(t *
 	id := seedPendingPayment(t, pool, orgID, "startup", ykID)
 
 	client := newFakeYooKassaServer(t, "pending")
-	p := NewProvider(pool, client, "https://console.dada-tuda.ru/billing/return", false)
+	p := NewProvider(pool, client, "https://console.dada-tuda.ru/billing/return", false, 1, 0)
 
 	result, err := p.ProcessWebhook(context.Background(), ykID)
 	if err != nil {
@@ -118,7 +118,7 @@ func TestProcessWebhook_Succeeded_FlipsPaymentAndAssignsPlan(t *testing.T) {
 	id := seedPendingPayment(t, pool, orgID, "startup", ykID)
 
 	client := newFakeYooKassaServer(t, "succeeded")
-	p := NewProvider(pool, client, "https://console.dada-tuda.ru/billing/return", false)
+	p := NewProvider(pool, client, "https://console.dada-tuda.ru/billing/return", false, 1, 0)
 
 	result, err := p.ProcessWebhook(context.Background(), ykID)
 	if err != nil {
@@ -146,7 +146,7 @@ func TestProcessWebhook_Canceled_FlipsPaymentOnly(t *testing.T) {
 	id := seedPendingPayment(t, pool, orgID, "startup", ykID)
 
 	client := newFakeYooKassaServer(t, "canceled")
-	p := NewProvider(pool, client, "https://console.dada-tuda.ru/billing/return", false)
+	p := NewProvider(pool, client, "https://console.dada-tuda.ru/billing/return", false, 1, 0)
 
 	result, err := p.ProcessWebhook(context.Background(), ykID)
 	if err != nil {
@@ -170,7 +170,7 @@ func TestProcessWebhook_DoubleDelivery_IsIdempotent(t *testing.T) {
 	id := seedPendingPayment(t, pool, orgID, "startup", ykID)
 
 	client := newFakeYooKassaServer(t, "succeeded")
-	p := NewProvider(pool, client, "https://console.dada-tuda.ru/billing/return", false)
+	p := NewProvider(pool, client, "https://console.dada-tuda.ru/billing/return", false, 1, 0)
 
 	first, err := p.ProcessWebhook(context.Background(), ykID)
 	if err != nil {
@@ -195,7 +195,7 @@ func TestProcessWebhook_DoubleDelivery_IsIdempotent(t *testing.T) {
 func TestProcessWebhook_UnknownPayment_ReturnsUnknownOutcome(t *testing.T) {
 	pool := testProviderPool(t)
 	client := newFakeYooKassaServer(t, "succeeded")
-	p := NewProvider(pool, client, "https://console.dada-tuda.ru/billing/return", false)
+	p := NewProvider(pool, client, "https://console.dada-tuda.ru/billing/return", false, 1, 0)
 
 	result, err := p.ProcessWebhook(context.Background(), "ykid-does-not-exist-"+uuid.NewString()[:8])
 	if err != nil {
@@ -214,10 +214,10 @@ func TestCheckout_InsertsPendingRowThenStoresYkPaymentID(t *testing.T) {
 	})
 
 	client := newFakeYooKassaServer(t, "pending")
-	p := NewProvider(pool, client, "https://console.dada-tuda.ru/billing/return", false)
+	p := NewProvider(pool, client, "https://console.dada-tuda.ru/billing/return", false, 1, 0)
 	plan := pricing.Plan{Key: "startup", Name: "Startup", PriceRUB: 990}
 
-	paymentID, confirmationURL, err := p.Checkout(context.Background(), orgID, plan, "buyer@example.com", "sub-checkout", uuid.NewString())
+	paymentID, confirmationURL, err := p.Checkout(context.Background(), orgID, plan, "buyer@example.com", "sub-checkout", uuid.NewString(), false)
 	if err != nil {
 		t.Fatalf("Checkout: %v", err)
 	}
@@ -263,7 +263,7 @@ func TestProcessWebhook_Succeeded_SetsThirtyDayExpiry(t *testing.T) {
 	seedPendingPayment(t, pool, orgID, "startup", ykID)
 
 	client := newFakeYooKassaServer(t, "succeeded")
-	p := NewProvider(pool, client, "https://console.dada-tuda.ru/billing/return", false)
+	p := NewProvider(pool, client, "https://console.dada-tuda.ru/billing/return", false, 1, 0)
 
 	if _, err := p.ProcessWebhook(context.Background(), ykID); err != nil {
 		t.Fatalf("ProcessWebhook: %v", err)
@@ -295,7 +295,7 @@ func TestProcessWebhook_Renewal_ExtendsFromCurrentExpiry(t *testing.T) {
 	}
 
 	client := newFakeYooKassaServer(t, "succeeded")
-	p := NewProvider(pool, client, "https://console.dada-tuda.ru/billing/return", false)
+	p := NewProvider(pool, client, "https://console.dada-tuda.ru/billing/return", false, 1, 0)
 	if _, err := p.ProcessWebhook(context.Background(), ykID); err != nil {
 		t.Fatalf("ProcessWebhook: %v", err)
 	}

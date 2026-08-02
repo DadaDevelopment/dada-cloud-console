@@ -171,7 +171,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.grantBoxRequest"
+                            "$ref": "#/definitions/internal_api.grantBoxRequest"
                         }
                     }
                 ],
@@ -458,7 +458,7 @@ const docTemplate = `{
                         "name": "body",
                         "in": "body",
                         "schema": {
-                            "$ref": "#/definitions/api.resolveFeedbackRequest"
+                            "$ref": "#/definitions/internal_api.resolveFeedbackRequest"
                         }
                     }
                 ],
@@ -829,7 +829,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.createPayServiceKeyRequest"
+                            "$ref": "#/definitions/internal_api.createPayServiceKeyRequest"
                         }
                     }
                 ],
@@ -837,7 +837,7 @@ const docTemplate = `{
                     "201": {
                         "description": "Created",
                         "schema": {
-                            "$ref": "#/definitions/api.createPayServiceKeyResponse"
+                            "$ref": "#/definitions/internal_api.createPayServiceKeyResponse"
                         }
                     },
                     "400": {
@@ -946,7 +946,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.agentChatRequest"
+                            "$ref": "#/definitions/internal_api.agentChatRequest"
                         }
                     }
                 ],
@@ -1004,7 +1004,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.agentChatConfirmRequest"
+                            "$ref": "#/definitions/internal_api.agentChatConfirmRequest"
                         }
                     }
                 ],
@@ -1062,7 +1062,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.agentChatClearContextRequest"
+                            "$ref": "#/definitions/internal_api.agentChatClearContextRequest"
                         }
                     }
                 ],
@@ -1122,7 +1122,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/api.agentChatHistoryResponse"
+                            "$ref": "#/definitions/internal_api.agentChatHistoryResponse"
                         }
                     },
                     "401": {
@@ -1194,7 +1194,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.loginRequest"
+                            "$ref": "#/definitions/internal_api.loginRequest"
                         }
                     }
                 ],
@@ -1361,7 +1361,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/pricing.Need"
+                            "$ref": "#/definitions/github_com_dada-tuda_console_backend_internal_billing_pricing.Need"
                         }
                     }
                 ],
@@ -1442,7 +1442,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.recordBoxFunnelEventRequest"
+                            "$ref": "#/definitions/internal_api.recordBoxFunnelEventRequest"
                         }
                     }
                 ],
@@ -1502,7 +1502,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.clientErrorReport"
+                            "$ref": "#/definitions/internal_api.clientErrorReport"
                         }
                     }
                 ],
@@ -1534,7 +1534,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.deployTriggerRequest"
+                            "$ref": "#/definitions/internal_api.deployTriggerRequest"
                         }
                     }
                 ],
@@ -1542,7 +1542,7 @@ const docTemplate = `{
                     "202": {
                         "description": "Accepted",
                         "schema": {
-                            "$ref": "#/definitions/api.deployTriggerResponse"
+                            "$ref": "#/definitions/internal_api.deployTriggerResponse"
                         }
                     },
                     "400": {
@@ -1599,7 +1599,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/api.deployOperationStatusResponse"
+                            "$ref": "#/definitions/internal_api.deployOperationStatusResponse"
                         }
                     },
                     "401": {
@@ -1649,7 +1649,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.submitFeedbackRequest"
+                            "$ref": "#/definitions/internal_api.submitFeedbackRequest"
                         }
                     }
                 ],
@@ -2063,7 +2063,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.reportOnboardingRequest"
+                            "$ref": "#/definitions/internal_api.reportOnboardingRequest"
                         }
                     }
                 ],
@@ -2153,7 +2153,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.createChargeRequest"
+                            "$ref": "#/definitions/internal_api.createChargeRequest"
                         }
                     }
                 ],
@@ -2161,7 +2161,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/api.serviceChargeResponse"
+                            "$ref": "#/definitions/internal_api.serviceChargeResponse"
                         }
                     },
                     "400": {
@@ -2227,7 +2227,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/api.serviceChargeResponse"
+                            "$ref": "#/definitions/internal_api.serviceChargeResponse"
                         }
                     },
                     "401": {
@@ -2342,7 +2342,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.createProjectRequest"
+                            "$ref": "#/definitions/internal_api.createProjectRequest"
                         }
                     }
                 ],
@@ -2645,7 +2645,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.putAICredentialRequest"
+                            "$ref": "#/definitions/internal_api.putAICredentialRequest"
                         }
                     }
                 ],
@@ -2828,7 +2828,7 @@ const docTemplate = `{
                         "name": "body",
                         "in": "body",
                         "schema": {
-                            "$ref": "#/definitions/api.createAIKeyRequest"
+                            "$ref": "#/definitions/internal_api.createAIKeyRequest"
                         }
                     }
                 ],
@@ -2836,7 +2836,7 @@ const docTemplate = `{
                     "201": {
                         "description": "Created",
                         "schema": {
-                            "$ref": "#/definitions/api.createAIKeyResponse"
+                            "$ref": "#/definitions/internal_api.createAIKeyResponse"
                         }
                     },
                     "400": {
@@ -2955,7 +2955,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/api.aiRoutingResponse"
+                            "$ref": "#/definitions/internal_api.aiRoutingResponse"
                         }
                     },
                     "401": {
@@ -3010,7 +3010,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.setAIRoutingRequest"
+                            "$ref": "#/definitions/internal_api.setAIRoutingRequest"
                         }
                     }
                 ],
@@ -3018,7 +3018,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/api.aiRoutingResponse"
+                            "$ref": "#/definitions/internal_api.aiRoutingResponse"
                         }
                     },
                     "400": {
@@ -3196,7 +3196,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.createAppServerRequest"
+                            "$ref": "#/definitions/internal_api.createAppServerRequest"
                         }
                     }
                 ],
@@ -3486,7 +3486,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.importComposeStackRequest"
+                            "$ref": "#/definitions/internal_api.importComposeStackRequest"
                         }
                     }
                 ],
@@ -3727,6 +3727,111 @@ const docTemplate = `{
                     },
                     "404": {
                         "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/projects/{projectId}/billing/autopay": {
+            "put": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Switches YooKassa recurring charges for the org that owns the project. Disabling also deletes the saved payment method. Enabling requires a payment method saved by an earlier checkout. Requires write role on the project.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "billing"
+                ],
+                "summary": "Enable or disable automatic renewal",
+                "operationId": "setBillingAutopay",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Project UUID",
+                        "name": "projectId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Autopay flag",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "boolean"
+                            }
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
                         "schema": {
                             "type": "object",
                             "additionalProperties": {
@@ -4168,7 +4273,7 @@ const docTemplate = `{
                         "name": "body",
                         "in": "body",
                         "schema": {
-                            "$ref": "#/definitions/api.boxUpRequest"
+                            "$ref": "#/definitions/internal_api.boxUpRequest"
                         }
                     }
                 ],
@@ -4322,7 +4427,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.createBoxRequest"
+                            "$ref": "#/definitions/internal_api.createBoxRequest"
                         }
                     }
                 ],
@@ -4550,7 +4655,7 @@ const docTemplate = `{
                         "name": "body",
                         "in": "body",
                         "schema": {
-                            "$ref": "#/definitions/api.attachBoxDatabaseRequest"
+                            "$ref": "#/definitions/internal_api.attachBoxDatabaseRequest"
                         }
                     }
                 ],
@@ -4857,7 +4962,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.crystallizeBoxRequest"
+                            "$ref": "#/definitions/internal_api.crystallizeBoxRequest"
                         }
                     }
                 ],
@@ -4975,7 +5080,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.exposeBoxRequest"
+                            "$ref": "#/definitions/internal_api.exposeBoxRequest"
                         }
                     }
                 ],
@@ -5084,7 +5189,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.extendBoxRequest"
+                            "$ref": "#/definitions/internal_api.extendBoxRequest"
                         }
                     }
                 ],
@@ -5183,7 +5288,7 @@ const docTemplate = `{
                         "name": "body",
                         "in": "body",
                         "schema": {
-                            "$ref": "#/definitions/api.resumeBoxRequest"
+                            "$ref": "#/definitions/internal_api.resumeBoxRequest"
                         }
                     }
                 ],
@@ -6305,7 +6410,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.addDomainAuthorizationRequest"
+                            "$ref": "#/definitions/internal_api.addDomainAuthorizationRequest"
                         }
                     }
                 ],
@@ -6660,7 +6765,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.importZoneRequest"
+                            "$ref": "#/definitions/internal_api.importZoneRequest"
                         }
                     }
                 ],
@@ -6888,7 +6993,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.upsertRecordRequest"
+                            "$ref": "#/definitions/internal_api.upsertRecordRequest"
                         }
                     }
                 ],
@@ -7126,7 +7231,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.createAppRequest"
+                            "$ref": "#/definitions/internal_api.createAppRequest"
                         }
                     }
                 ],
@@ -7377,7 +7482,7 @@ const docTemplate = `{
                         "name": "body",
                         "in": "body",
                         "schema": {
-                            "$ref": "#/definitions/api.autofixRequest"
+                            "$ref": "#/definitions/internal_api.autofixRequest"
                         }
                     }
                 ],
@@ -7711,7 +7816,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.createCloudTaskRequest"
+                            "$ref": "#/definitions/internal_api.createCloudTaskRequest"
                         }
                     }
                 ],
@@ -7818,7 +7923,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.updateComposeConfigRequest"
+                            "$ref": "#/definitions/internal_api.updateComposeConfigRequest"
                         }
                     }
                 ],
@@ -7916,7 +8021,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.updateComposeVolumeRequest"
+                            "$ref": "#/definitions/internal_api.updateComposeVolumeRequest"
                         }
                     }
                 ],
@@ -8010,7 +8115,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/api.DeleteImpact"
+                            "$ref": "#/definitions/internal_api.DeleteImpact"
                         }
                     },
                     "401": {
@@ -8146,7 +8251,7 @@ const docTemplate = `{
                         "name": "body",
                         "in": "body",
                         "schema": {
-                            "$ref": "#/definitions/api.createDeployHookRequest"
+                            "$ref": "#/definitions/internal_api.createDeployHookRequest"
                         }
                     }
                 ],
@@ -8154,7 +8259,7 @@ const docTemplate = `{
                     "201": {
                         "description": "Created",
                         "schema": {
-                            "$ref": "#/definitions/api.createDeployHookResponse"
+                            "$ref": "#/definitions/internal_api.createDeployHookResponse"
                         }
                     },
                     "400": {
@@ -8375,7 +8480,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/api.diagnoseResponse"
+                            "$ref": "#/definitions/internal_api.diagnoseResponse"
                         }
                     },
                     "400": {
@@ -8539,7 +8644,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.createEndpointRequest"
+                            "$ref": "#/definitions/internal_api.createEndpointRequest"
                         }
                     }
                 ],
@@ -8705,7 +8810,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.bulkSetEnvVarsRequest"
+                            "$ref": "#/definitions/internal_api.bulkSetEnvVarsRequest"
                         }
                     }
                 ],
@@ -8898,7 +9003,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.setEnvVarRequest"
+                            "$ref": "#/definitions/internal_api.setEnvVarRequest"
                         }
                     }
                 ],
@@ -9127,7 +9232,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.attachHostnameRequest"
+                            "$ref": "#/definitions/internal_api.attachHostnameRequest"
                         }
                     }
                 ],
@@ -9308,7 +9413,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.updateAppImageRequest"
+                            "$ref": "#/definitions/internal_api.updateAppImageRequest"
                         }
                     }
                 ],
@@ -9588,7 +9693,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.moveAppRequest"
+                            "$ref": "#/definitions/internal_api.moveAppRequest"
                         }
                     }
                 ],
@@ -9696,7 +9801,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/api.MoveImpact"
+                            "$ref": "#/definitions/internal_api.MoveImpact"
                         }
                     },
                     "400": {
@@ -10003,7 +10108,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.updateAppProfileRequest"
+                            "$ref": "#/definitions/internal_api.updateAppProfileRequest"
                         }
                     }
                 ],
@@ -10252,7 +10357,7 @@ const docTemplate = `{
                     "202": {
                         "description": "Accepted",
                         "schema": {
-                            "$ref": "#/definitions/api.uploadSourceResponse"
+                            "$ref": "#/definitions/internal_api.uploadSourceResponse"
                         }
                     },
                     "400": {
@@ -10522,7 +10627,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.appVolumeReq"
+                            "$ref": "#/definitions/internal_api.appVolumeReq"
                         }
                     }
                 ],
@@ -11189,7 +11294,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.writeAppFileRequest"
+                            "$ref": "#/definitions/internal_api.writeAppFileRequest"
                         }
                     }
                 ],
@@ -11323,7 +11428,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.appFilePathRequest"
+                            "$ref": "#/definitions/internal_api.appFilePathRequest"
                         }
                     }
                 ],
@@ -11448,7 +11553,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.appFilePathRequest"
+                            "$ref": "#/definitions/internal_api.appFilePathRequest"
                         }
                     }
                 ],
@@ -11573,7 +11678,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.moveAppFileRequest"
+                            "$ref": "#/definitions/internal_api.moveAppFileRequest"
                         }
                     }
                 ],
@@ -12093,7 +12198,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.createServiceDatabaseRequest"
+                            "$ref": "#/definitions/internal_api.createServiceDatabaseRequest"
                         }
                     }
                 ],
@@ -12633,7 +12738,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.restoreDatabaseRequest"
+                            "$ref": "#/definitions/internal_api.restoreDatabaseRequest"
                         }
                     }
                 ],
@@ -12794,7 +12899,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.createIngressRequest"
+                            "$ref": "#/definitions/internal_api.createIngressRequest"
                         }
                     }
                 ],
@@ -12935,7 +13040,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.createAIModelRequest"
+                            "$ref": "#/definitions/internal_api.createAIModelRequest"
                         }
                     }
                 ],
@@ -13696,7 +13801,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.createMonitoringRequest"
+                            "$ref": "#/definitions/internal_api.createMonitoringRequest"
                         }
                     }
                 ],
@@ -14522,7 +14627,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.saveDashboardRequest"
+                            "$ref": "#/definitions/internal_api.saveDashboardRequest"
                         }
                     }
                 ],
@@ -15375,7 +15480,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.connectGitRepoRequest"
+                            "$ref": "#/definitions/internal_api.connectGitRepoRequest"
                         }
                     }
                 ],
@@ -15589,7 +15694,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.createS3BucketRequest"
+                            "$ref": "#/definitions/internal_api.createS3BucketRequest"
                         }
                     }
                 ],
@@ -16031,7 +16136,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.bindInstallationRequest"
+                            "$ref": "#/definitions/internal_api.bindInstallationRequest"
                         }
                     }
                 ],
@@ -16039,7 +16144,7 @@ const docTemplate = `{
                     "201": {
                         "description": "Created",
                         "schema": {
-                            "$ref": "#/definitions/api.gitInstallation"
+                            "$ref": "#/definitions/internal_api.gitInstallation"
                         }
                     },
                     "400": {
@@ -16493,7 +16598,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.ingestLogsRequest"
+                            "$ref": "#/definitions/internal_api.ingestLogsRequest"
                         }
                     }
                 ],
@@ -16611,7 +16716,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.ingestMetricsRequest"
+                            "$ref": "#/definitions/internal_api.ingestMetricsRequest"
                         }
                     }
                 ],
@@ -16958,7 +17063,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.recordUXEventsRequest"
+                            "$ref": "#/definitions/internal_api.recordUXEventsRequest"
                         }
                     }
                 ],
@@ -17036,7 +17141,82 @@ const docTemplate = `{
         }
     },
     "definitions": {
-        "api.DeleteImpact": {
+        "github_com_dada-tuda_console_backend_internal_billing_pricing.Need": {
+            "type": "object",
+            "properties": {
+                "apps": {
+                    "type": "integer"
+                },
+                "databases": {
+                    "type": "integer"
+                },
+                "domains": {
+                    "type": "integer"
+                },
+                "members": {
+                    "type": "integer"
+                },
+                "storageGB": {
+                    "type": "integer"
+                }
+            }
+        },
+        "github_com_dada-tuda_console_backend_internal_models.AIModelAuthMode": {
+            "type": "string",
+            "enum": [
+                "apikey",
+                "jwt",
+                "public"
+            ],
+            "x-enum-varnames": [
+                "AIModelAuthAPIKey",
+                "AIModelAuthJWT",
+                "AIModelAuthPublic"
+            ]
+        },
+        "github_com_dada-tuda_console_backend_internal_models.AIModelSource": {
+            "type": "string",
+            "enum": [
+                "mlflow",
+                "s3",
+                "custom"
+            ],
+            "x-enum-varnames": [
+                "AIModelSourceMLflow",
+                "AIModelSourceS3",
+                "AIModelSourceCustom"
+            ]
+        },
+        "github_com_dada-tuda_console_backend_internal_models.ImportServiceSpec": {
+            "type": "object",
+            "properties": {
+                "container_name": {
+                    "type": "string"
+                },
+                "image": {
+                    "type": "string"
+                },
+                "include": {
+                    "type": "boolean"
+                },
+                "ports": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "service_name": {
+                    "type": "string"
+                },
+                "volumes": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                }
+            }
+        },
+        "internal_api.DeleteImpact": {
             "type": "object",
             "properties": {
                 "app": {
@@ -17051,7 +17231,7 @@ const docTemplate = `{
                 "items": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/api.ImpactItem"
+                        "$ref": "#/definitions/internal_api.ImpactItem"
                     }
                 },
                 "namespace": {
@@ -17059,7 +17239,7 @@ const docTemplate = `{
                 }
             }
         },
-        "api.ImpactItem": {
+        "internal_api.ImpactItem": {
             "type": "object",
             "properties": {
                 "group": {
@@ -17076,7 +17256,7 @@ const docTemplate = `{
                 }
             }
         },
-        "api.MoveBlockerItem": {
+        "internal_api.MoveBlockerItem": {
             "type": "object",
             "properties": {
                 "kind": {
@@ -17090,7 +17270,7 @@ const docTemplate = `{
                 }
             }
         },
-        "api.MoveImpact": {
+        "internal_api.MoveImpact": {
             "type": "object",
             "properties": {
                 "app": {
@@ -17099,7 +17279,7 @@ const docTemplate = `{
                 "blockers": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/api.MoveBlockerItem"
+                        "$ref": "#/definitions/internal_api.MoveBlockerItem"
                     }
                 },
                 "can_move": {
@@ -17108,7 +17288,7 @@ const docTemplate = `{
                 "movable": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/api.MoveMovableItem"
+                        "$ref": "#/definitions/internal_api.MoveMovableItem"
                     }
                 },
                 "name_collision": {
@@ -17128,7 +17308,7 @@ const docTemplate = `{
                 }
             }
         },
-        "api.MoveMovableItem": {
+        "internal_api.MoveMovableItem": {
             "type": "object",
             "properties": {
                 "group": {
@@ -17142,7 +17322,7 @@ const docTemplate = `{
                 }
             }
         },
-        "api.addDomainAuthorizationRequest": {
+        "internal_api.addDomainAuthorizationRequest": {
             "type": "object",
             "properties": {
                 "apex_domain": {
@@ -17150,7 +17330,7 @@ const docTemplate = `{
                 }
             }
         },
-        "api.agentChatClearContextRequest": {
+        "internal_api.agentChatClearContextRequest": {
             "type": "object",
             "properties": {
                 "envId": {
@@ -17161,7 +17341,7 @@ const docTemplate = `{
                 }
             }
         },
-        "api.agentChatConfirmRequest": {
+        "internal_api.agentChatConfirmRequest": {
             "type": "object",
             "properties": {
                 "action_id": {
@@ -17172,7 +17352,7 @@ const docTemplate = `{
                 }
             }
         },
-        "api.agentChatHistoryMessage": {
+        "internal_api.agentChatHistoryMessage": {
             "type": "object",
             "properties": {
                 "content": {
@@ -17186,21 +17366,21 @@ const docTemplate = `{
                 }
             }
         },
-        "api.agentChatHistoryResponse": {
+        "internal_api.agentChatHistoryResponse": {
             "type": "object",
             "properties": {
                 "messages": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/api.agentChatHistoryMessage"
+                        "$ref": "#/definitions/internal_api.agentChatHistoryMessage"
                     }
                 },
                 "pendingAction": {
-                    "$ref": "#/definitions/api.agentChatPendingActionDTO"
+                    "$ref": "#/definitions/internal_api.agentChatPendingActionDTO"
                 }
             }
         },
-        "api.agentChatPendingActionDTO": {
+        "internal_api.agentChatPendingActionDTO": {
             "type": "object",
             "properties": {
                 "actionId": {
@@ -17221,7 +17401,7 @@ const docTemplate = `{
                 }
             }
         },
-        "api.agentChatRequest": {
+        "internal_api.agentChatRequest": {
             "type": "object",
             "properties": {
                 "appName": {
@@ -17238,7 +17418,7 @@ const docTemplate = `{
                 }
             }
         },
-        "api.aiRoutingResponse": {
+        "internal_api.aiRoutingResponse": {
             "type": "object",
             "properties": {
                 "markup": {
@@ -17252,7 +17432,7 @@ const docTemplate = `{
                 }
             }
         },
-        "api.appFilePathRequest": {
+        "internal_api.appFilePathRequest": {
             "type": "object",
             "required": [
                 "path"
@@ -17266,7 +17446,7 @@ const docTemplate = `{
                 }
             }
         },
-        "api.appVolumeReq": {
+        "internal_api.appVolumeReq": {
             "type": "object",
             "properties": {
                 "path": {
@@ -17280,7 +17460,7 @@ const docTemplate = `{
                 }
             }
         },
-        "api.attachBoxDatabaseRequest": {
+        "internal_api.attachBoxDatabaseRequest": {
             "type": "object",
             "properties": {
                 "env_prefix": {
@@ -17293,7 +17473,7 @@ const docTemplate = `{
                 }
             }
         },
-        "api.attachHostnameRequest": {
+        "internal_api.attachHostnameRequest": {
             "type": "object",
             "properties": {
                 "hostname": {
@@ -17301,7 +17481,7 @@ const docTemplate = `{
                 }
             }
         },
-        "api.autofixRequest": {
+        "internal_api.autofixRequest": {
             "type": "object",
             "properties": {
                 "error": {
@@ -17309,7 +17489,7 @@ const docTemplate = `{
                 }
             }
         },
-        "api.bindInstallationRequest": {
+        "internal_api.bindInstallationRequest": {
             "type": "object",
             "properties": {
                 "installation_id": {
@@ -17318,7 +17498,7 @@ const docTemplate = `{
                 }
             }
         },
-        "api.boxUpRequest": {
+        "internal_api.boxUpRequest": {
             "type": "object",
             "properties": {
                 "image": {
@@ -17354,7 +17534,7 @@ const docTemplate = `{
                 }
             }
         },
-        "api.build": {
+        "internal_api.build": {
             "type": "object",
             "properties": {
                 "app_name": {
@@ -17413,7 +17593,7 @@ const docTemplate = `{
                 }
             }
         },
-        "api.bulkEnvVarItem": {
+        "internal_api.bulkEnvVarItem": {
             "type": "object",
             "properties": {
                 "is_secret": {
@@ -17430,18 +17610,18 @@ const docTemplate = `{
                 }
             }
         },
-        "api.bulkSetEnvVarsRequest": {
+        "internal_api.bulkSetEnvVarsRequest": {
             "type": "object",
             "properties": {
                 "vars": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/api.bulkEnvVarItem"
+                        "$ref": "#/definitions/internal_api.bulkEnvVarItem"
                     }
                 }
             }
         },
-        "api.clientErrorReport": {
+        "internal_api.clientErrorReport": {
             "type": "object",
             "properties": {
                 "component_stack": {
@@ -17461,7 +17641,7 @@ const docTemplate = `{
                 }
             }
         },
-        "api.connectGitRepoRequest": {
+        "internal_api.connectGitRepoRequest": {
             "type": "object",
             "properties": {
                 "app_name": {
@@ -17508,7 +17688,7 @@ const docTemplate = `{
                 }
             }
         },
-        "api.createAIKeyRequest": {
+        "internal_api.createAIKeyRequest": {
             "type": "object",
             "properties": {
                 "name": {
@@ -17516,7 +17696,7 @@ const docTemplate = `{
                 }
             }
         },
-        "api.createAIKeyResponse": {
+        "internal_api.createAIKeyResponse": {
             "type": "object",
             "properties": {
                 "base_url": {
@@ -17542,7 +17722,7 @@ const docTemplate = `{
                 }
             }
         },
-        "api.createAIModelRequest": {
+        "internal_api.createAIModelRequest": {
             "type": "object",
             "properties": {
                 "artifact_uri": {
@@ -17552,7 +17732,7 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "auth_mode": {
-                    "$ref": "#/definitions/models.AIModelAuthMode"
+                    "$ref": "#/definitions/github_com_dada-tuda_console_backend_internal_models.AIModelAuthMode"
                 },
                 "container_image": {
                     "type": "string"
@@ -17573,14 +17753,14 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "source": {
-                    "$ref": "#/definitions/models.AIModelSource"
+                    "$ref": "#/definitions/github_com_dada-tuda_console_backend_internal_models.AIModelSource"
                 },
                 "version": {
                     "type": "string"
                 }
             }
         },
-        "api.createAppRequest": {
+        "internal_api.createAppRequest": {
             "type": "object",
             "properties": {
                 "framework": {
@@ -17602,7 +17782,7 @@ const docTemplate = `{
                     "type": "integer"
                 },
                 "volume": {
-                    "$ref": "#/definitions/api.appVolumeReq"
+                    "$ref": "#/definitions/internal_api.appVolumeReq"
                 },
                 "worker": {
                     "type": "boolean"
@@ -17612,7 +17792,7 @@ const docTemplate = `{
                 }
             }
         },
-        "api.createAppServerRequest": {
+        "internal_api.createAppServerRequest": {
             "type": "object",
             "properties": {
                 "flavor": {
@@ -17649,7 +17829,7 @@ const docTemplate = `{
                 }
             }
         },
-        "api.createBoxRequest": {
+        "internal_api.createBoxRequest": {
             "type": "object",
             "properties": {
                 "image": {
@@ -17679,7 +17859,7 @@ const docTemplate = `{
                 }
             }
         },
-        "api.createChargeRequest": {
+        "internal_api.createChargeRequest": {
             "type": "object",
             "properties": {
                 "amount": {
@@ -17703,7 +17883,7 @@ const docTemplate = `{
                 }
             }
         },
-        "api.createCloudTaskRequest": {
+        "internal_api.createCloudTaskRequest": {
             "type": "object",
             "properties": {
                 "task_type": {
@@ -17711,7 +17891,7 @@ const docTemplate = `{
                 }
             }
         },
-        "api.createDeployHookRequest": {
+        "internal_api.createDeployHookRequest": {
             "type": "object",
             "properties": {
                 "name": {
@@ -17719,7 +17899,7 @@ const docTemplate = `{
                 }
             }
         },
-        "api.createDeployHookResponse": {
+        "internal_api.createDeployHookResponse": {
             "type": "object",
             "properties": {
                 "base_url": {
@@ -17745,7 +17925,7 @@ const docTemplate = `{
                 }
             }
         },
-        "api.createEndpointRequest": {
+        "internal_api.createEndpointRequest": {
             "type": "object",
             "properties": {
                 "auth_enabled": {
@@ -17774,7 +17954,7 @@ const docTemplate = `{
                 }
             }
         },
-        "api.createIngressRequest": {
+        "internal_api.createIngressRequest": {
             "type": "object",
             "properties": {
                 "aliases": {
@@ -17795,7 +17975,7 @@ const docTemplate = `{
                 "rules": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/api.ingressRuleReq"
+                        "$ref": "#/definitions/internal_api.ingressRuleReq"
                     }
                 },
                 "ssl_redirect": {
@@ -17820,7 +18000,7 @@ const docTemplate = `{
                 }
             }
         },
-        "api.createMonitoringRequest": {
+        "internal_api.createMonitoringRequest": {
             "type": "object",
             "properties": {
                 "name": {
@@ -17828,7 +18008,7 @@ const docTemplate = `{
                 }
             }
         },
-        "api.createPayServiceKeyRequest": {
+        "internal_api.createPayServiceKeyRequest": {
             "type": "object",
             "required": [
                 "service"
@@ -17839,7 +18019,7 @@ const docTemplate = `{
                 }
             }
         },
-        "api.createPayServiceKeyResponse": {
+        "internal_api.createPayServiceKeyResponse": {
             "type": "object",
             "properties": {
                 "created_at": {
@@ -17859,7 +18039,7 @@ const docTemplate = `{
                 }
             }
         },
-        "api.createProjectRequest": {
+        "internal_api.createProjectRequest": {
             "type": "object",
             "required": [
                 "slug"
@@ -17883,7 +18063,7 @@ const docTemplate = `{
                 }
             }
         },
-        "api.createS3BucketRequest": {
+        "internal_api.createS3BucketRequest": {
             "type": "object",
             "properties": {
                 "app_ref": {
@@ -17910,7 +18090,7 @@ const docTemplate = `{
                 }
             }
         },
-        "api.createServiceDatabaseRequest": {
+        "internal_api.createServiceDatabaseRequest": {
             "type": "object",
             "properties": {
                 "app_ref": {
@@ -17933,7 +18113,7 @@ const docTemplate = `{
                 }
             }
         },
-        "api.crystallizeBoxRequest": {
+        "internal_api.crystallizeBoxRequest": {
             "type": "object",
             "properties": {
                 "ack_monthly_charge": {
@@ -17967,7 +18147,7 @@ const docTemplate = `{
                 }
             }
         },
-        "api.deployOperationStatusResponse": {
+        "internal_api.deployOperationStatusResponse": {
             "type": "object",
             "properties": {
                 "error_code": {
@@ -17987,7 +18167,7 @@ const docTemplate = `{
                 }
             }
         },
-        "api.deployTriggerRequest": {
+        "internal_api.deployTriggerRequest": {
             "type": "object",
             "properties": {
                 "image": {
@@ -17995,7 +18175,7 @@ const docTemplate = `{
                 }
             }
         },
-        "api.deployTriggerResponse": {
+        "internal_api.deployTriggerResponse": {
             "type": "object",
             "properties": {
                 "message": {
@@ -18006,7 +18186,7 @@ const docTemplate = `{
                 }
             }
         },
-        "api.diagnoseResponse": {
+        "internal_api.diagnoseResponse": {
             "type": "object",
             "properties": {
                 "can_autofix": {
@@ -18029,7 +18209,7 @@ const docTemplate = `{
                 }
             }
         },
-        "api.exposeBoxRequest": {
+        "internal_api.exposeBoxRequest": {
             "type": "object",
             "properties": {
                 "port": {
@@ -18038,7 +18218,7 @@ const docTemplate = `{
                 }
             }
         },
-        "api.extendBoxRequest": {
+        "internal_api.extendBoxRequest": {
             "type": "object",
             "properties": {
                 "ttl_seconds": {
@@ -18047,7 +18227,7 @@ const docTemplate = `{
                 }
             }
         },
-        "api.gitInstallation": {
+        "internal_api.gitInstallation": {
             "type": "object",
             "properties": {
                 "account_login": {
@@ -18074,7 +18254,7 @@ const docTemplate = `{
                 }
             }
         },
-        "api.grantBoxRequest": {
+        "internal_api.grantBoxRequest": {
             "type": "object",
             "properties": {
                 "box_id": {
@@ -18088,7 +18268,7 @@ const docTemplate = `{
                 }
             }
         },
-        "api.importComposeStackRequest": {
+        "internal_api.importComposeStackRequest": {
             "type": "object",
             "properties": {
                 "ack_secrets_in_git": {
@@ -18106,12 +18286,12 @@ const docTemplate = `{
                 "services": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/models.ImportServiceSpec"
+                        "$ref": "#/definitions/github_com_dada-tuda_console_backend_internal_models.ImportServiceSpec"
                     }
                 }
             }
         },
-        "api.importRecord": {
+        "internal_api.importRecord": {
             "type": "object",
             "properties": {
                 "contents": {
@@ -18131,18 +18311,18 @@ const docTemplate = `{
                 }
             }
         },
-        "api.importZoneRequest": {
+        "internal_api.importZoneRequest": {
             "type": "object",
             "properties": {
                 "records": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/api.importRecord"
+                        "$ref": "#/definitions/internal_api.importRecord"
                     }
                 }
             }
         },
-        "api.ingestLogsRequest": {
+        "internal_api.ingestLogsRequest": {
             "type": "object",
             "properties": {
                 "level": {
@@ -18156,7 +18336,7 @@ const docTemplate = `{
                 }
             }
         },
-        "api.ingestMetricsRequest": {
+        "internal_api.ingestMetricsRequest": {
             "type": "object",
             "properties": {
                 "metrics": {
@@ -18174,7 +18354,7 @@ const docTemplate = `{
                 }
             }
         },
-        "api.ingressRuleReq": {
+        "internal_api.ingressRuleReq": {
             "type": "object",
             "properties": {
                 "app": {
@@ -18188,7 +18368,7 @@ const docTemplate = `{
                 }
             }
         },
-        "api.loginRequest": {
+        "internal_api.loginRequest": {
             "type": "object",
             "required": [
                 "password"
@@ -18205,7 +18385,7 @@ const docTemplate = `{
                 }
             }
         },
-        "api.moveAppFileRequest": {
+        "internal_api.moveAppFileRequest": {
             "type": "object",
             "required": [
                 "from",
@@ -18220,7 +18400,7 @@ const docTemplate = `{
                 }
             }
         },
-        "api.moveAppRequest": {
+        "internal_api.moveAppRequest": {
             "type": "object",
             "properties": {
                 "target_project_id": {
@@ -18228,7 +18408,7 @@ const docTemplate = `{
                 }
             }
         },
-        "api.putAICredentialRequest": {
+        "internal_api.putAICredentialRequest": {
             "type": "object",
             "required": [
                 "api_key"
@@ -18242,7 +18422,7 @@ const docTemplate = `{
                 }
             }
         },
-        "api.recordBoxFunnelEventRequest": {
+        "internal_api.recordBoxFunnelEventRequest": {
             "type": "object",
             "properties": {
                 "agent": {
@@ -18289,7 +18469,7 @@ const docTemplate = `{
                 }
             }
         },
-        "api.recordUXEventsRequest": {
+        "internal_api.recordUXEventsRequest": {
             "type": "object",
             "properties": {
                 "anon_id": {
@@ -18298,7 +18478,7 @@ const docTemplate = `{
                 "events": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/api.uxEventPayload"
+                        "$ref": "#/definitions/internal_api.uxEventPayload"
                     }
                 },
                 "session_id": {
@@ -18306,7 +18486,7 @@ const docTemplate = `{
                 }
             }
         },
-        "api.reportOnboardingRequest": {
+        "internal_api.reportOnboardingRequest": {
             "type": "object",
             "properties": {
                 "status": {
@@ -18317,7 +18497,7 @@ const docTemplate = `{
                 }
             }
         },
-        "api.resolveFeedbackRequest": {
+        "internal_api.resolveFeedbackRequest": {
             "type": "object",
             "properties": {
                 "resolution": {
@@ -18325,7 +18505,7 @@ const docTemplate = `{
                 }
             }
         },
-        "api.restoreDatabaseRequest": {
+        "internal_api.restoreDatabaseRequest": {
             "type": "object",
             "properties": {
                 "backup_id": {
@@ -18333,7 +18513,7 @@ const docTemplate = `{
                 }
             }
         },
-        "api.resumeBoxRequest": {
+        "internal_api.resumeBoxRequest": {
             "type": "object",
             "properties": {
                 "ssh_public_key": {
@@ -18342,10 +18522,21 @@ const docTemplate = `{
                 }
             }
         },
-        "api.saveDashboardRequest": {
-            "type": "object"
+        "internal_api.saveDashboardRequest": {
+            "type": "object",
+            "properties": {
+                "config": {
+                    "type": "array",
+                    "items": {
+                        "type": "integer"
+                    }
+                },
+                "version": {
+                    "type": "integer"
+                }
+            }
         },
-        "api.serviceChargeResponse": {
+        "internal_api.serviceChargeResponse": {
             "type": "object",
             "properties": {
                 "amount": {
@@ -18377,7 +18568,7 @@ const docTemplate = `{
                 }
             }
         },
-        "api.setAIRoutingRequest": {
+        "internal_api.setAIRoutingRequest": {
             "type": "object",
             "required": [
                 "mode"
@@ -18388,7 +18579,7 @@ const docTemplate = `{
                 }
             }
         },
-        "api.setEnvVarRequest": {
+        "internal_api.setEnvVarRequest": {
             "type": "object",
             "properties": {
                 "is_secret": {
@@ -18405,7 +18596,7 @@ const docTemplate = `{
                 }
             }
         },
-        "api.submitFeedbackRequest": {
+        "internal_api.submitFeedbackRequest": {
             "type": "object",
             "properties": {
                 "message": {
@@ -18416,7 +18607,7 @@ const docTemplate = `{
                 }
             }
         },
-        "api.updateAppImageRequest": {
+        "internal_api.updateAppImageRequest": {
             "type": "object",
             "properties": {
                 "image": {
@@ -18424,7 +18615,7 @@ const docTemplate = `{
                 }
             }
         },
-        "api.updateAppProfileRequest": {
+        "internal_api.updateAppProfileRequest": {
             "type": "object",
             "properties": {
                 "profile": {
@@ -18432,7 +18623,7 @@ const docTemplate = `{
                 }
             }
         },
-        "api.updateComposeConfigRequest": {
+        "internal_api.updateComposeConfigRequest": {
             "type": "object",
             "properties": {
                 "image": {
@@ -18446,7 +18637,7 @@ const docTemplate = `{
                 }
             }
         },
-        "api.updateComposeVolumeRequest": {
+        "internal_api.updateComposeVolumeRequest": {
             "type": "object",
             "properties": {
                 "volumes": {
@@ -18457,7 +18648,7 @@ const docTemplate = `{
                 }
             }
         },
-        "api.uploadSourceDetect": {
+        "internal_api.uploadSourceDetect": {
             "type": "object",
             "properties": {
                 "framework": {
@@ -18468,21 +18659,21 @@ const docTemplate = `{
                 }
             }
         },
-        "api.uploadSourceResponse": {
+        "internal_api.uploadSourceResponse": {
             "type": "object",
             "properties": {
                 "artifact_uri": {
                     "type": "string"
                 },
                 "build": {
-                    "$ref": "#/definitions/api.build"
+                    "$ref": "#/definitions/internal_api.build"
                 },
                 "detected": {
-                    "$ref": "#/definitions/api.uploadSourceDetect"
+                    "$ref": "#/definitions/internal_api.uploadSourceDetect"
                 }
             }
         },
-        "api.upsertRecordRequest": {
+        "internal_api.upsertRecordRequest": {
             "type": "object",
             "properties": {
                 "contents": {
@@ -18502,7 +18693,7 @@ const docTemplate = `{
                 }
             }
         },
-        "api.uxEventPayload": {
+        "internal_api.uxEventPayload": {
             "type": "object",
             "properties": {
                 "at": {
@@ -18523,7 +18714,7 @@ const docTemplate = `{
                 }
             }
         },
-        "api.writeAppFileRequest": {
+        "internal_api.writeAppFileRequest": {
             "type": "object",
             "required": [
                 "path"
@@ -18537,81 +18728,6 @@ const docTemplate = `{
                 },
                 "path": {
                     "type": "string"
-                }
-            }
-        },
-        "models.AIModelAuthMode": {
-            "type": "string",
-            "enum": [
-                "apikey",
-                "jwt",
-                "public"
-            ],
-            "x-enum-varnames": [
-                "AIModelAuthAPIKey",
-                "AIModelAuthJWT",
-                "AIModelAuthPublic"
-            ]
-        },
-        "models.AIModelSource": {
-            "type": "string",
-            "enum": [
-                "mlflow",
-                "s3",
-                "custom"
-            ],
-            "x-enum-varnames": [
-                "AIModelSourceMLflow",
-                "AIModelSourceS3",
-                "AIModelSourceCustom"
-            ]
-        },
-        "models.ImportServiceSpec": {
-            "type": "object",
-            "properties": {
-                "container_name": {
-                    "type": "string"
-                },
-                "image": {
-                    "type": "string"
-                },
-                "include": {
-                    "type": "boolean"
-                },
-                "ports": {
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    }
-                },
-                "service_name": {
-                    "type": "string"
-                },
-                "volumes": {
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    }
-                }
-            }
-        },
-        "pricing.Need": {
-            "type": "object",
-            "properties": {
-                "apps": {
-                    "type": "integer"
-                },
-                "databases": {
-                    "type": "integer"
-                },
-                "domains": {
-                    "type": "integer"
-                },
-                "members": {
-                    "type": "integer"
-                },
-                "storageGB": {
-                    "type": "integer"
                 }
             }
         }

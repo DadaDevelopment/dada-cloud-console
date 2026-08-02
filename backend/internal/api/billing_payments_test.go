@@ -135,7 +135,7 @@ func TestBillingCheckout_HappyPath_ReturnsConfirmationURL(t *testing.T) {
 	})
 
 	client := newFakeYooKassaClient(t, "pending")
-	provider := yookassa.NewProvider(pool, client, "https://console.dada-tuda.ru/billing/return", false)
+	provider := yookassa.NewProvider(pool, client, "https://console.dada-tuda.ru/billing/return", false, 1, 0)
 	h := &Handler{pool: pool, billingPlans: testPlans(), yookassa: provider}
 
 	c, rec := newBillingCtx(http.MethodPost, "/", `{"plan":"startup"}`, godClaims(uuid.New()), projectID)
@@ -249,5 +249,5 @@ func newFakeYooKassaClient(t *testing.T, status string) *yookassa.Client {
 }
 
 func nonNilProvider(pool *pgxpool.Pool) *yookassa.YooKassaProvider {
-	return yookassa.NewProvider(pool, &yookassa.Client{ShopID: "shop", SecretKey: "secret"}, "https://console.dada-tuda.ru/billing/return", false)
+	return yookassa.NewProvider(pool, &yookassa.Client{ShopID: "shop", SecretKey: "secret"}, "https://console.dada-tuda.ru/billing/return", false, 1, 0)
 }

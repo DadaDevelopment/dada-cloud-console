@@ -74,7 +74,8 @@ func (h *Handler) BillingCheckout(c *gin.Context) {
 	}
 
 	var body struct {
-		Plan string `json:"plan" binding:"required"`
+		Plan    string `json:"plan" binding:"required"`
+		Autopay bool   `json:"autopay"`
 	}
 	if err := c.ShouldBindJSON(&body); err != nil {
 		respondError(c, http.StatusBadRequest, err.Error())
@@ -112,7 +113,7 @@ func (h *Handler) BillingCheckout(c *gin.Context) {
 		return
 	}
 
-	paymentID, confirmationURL, err := h.yookassa.Checkout(c.Request.Context(), orgID, *plan, claims.Email, claims.Subject, projectID.String())
+	paymentID, confirmationURL, err := h.yookassa.Checkout(c.Request.Context(), orgID, *plan, claims.Email, claims.Subject, projectID.String(), body.Autopay)
 	if err != nil {
 		log.Printf("payments: checkout failed org=%s plan=%s: %v", orgID, body.Plan, err)
 		respondError(c, http.StatusInternalServerError, "failed to start checkout")
@@ -241,7 +242,7 @@ func (h *Handler) notifyPaymentSuccess(result yookassa.WebhookResult) {
 		defer cancel()
 
 		if res.CustomerEmail != "" {
-			subject, body := notify.ComposePaymentSuccess(res.Plan, res.AmountValue)
+			subject, body := notify.ComposePaymentSuccess(res.Plan, res.AmountValue, res.AutopayArmed)
 			if err := notifier.Send(res.CustomerEmail, subject, body); err != nil {
 				log.Printf("payments: customer receipt send to %s failed: %v", res.CustomerEmail, err)
 			}

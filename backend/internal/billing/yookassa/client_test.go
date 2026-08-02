@@ -68,7 +68,7 @@ func TestCreatePayment_HappyPath_DecodesPayment(t *testing.T) {
 
 	payment, err := c.CreatePayment(context.Background(), "idem-key-2", CreatePaymentRequest{
 		Amount:       Amount{Value: "990.00", Currency: "RUB"},
-		Confirmation: Confirmation{Type: "redirect", ReturnURL: "https://console.dada-tuda.ru/billing/return"},
+		Confirmation: &Confirmation{Type: "redirect", ReturnURL: "https://console.dada-tuda.ru/billing/return"},
 	})
 	if err != nil {
 		t.Fatalf("CreatePayment: %v", err)

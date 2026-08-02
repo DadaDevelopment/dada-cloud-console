@@ -1,8 +1,9 @@
 // Package yookassa is a thin client for the YooKassa v3 Payments API
-// (https://yookassa.ru/developers/api). It implements only what slice 1
-// needs: create a one-off redirect-confirmation payment and re-fetch a
-// payment by id. Webhooks carry no signature, so callers must always
-// re-fetch via GetPayment before trusting a webhook payload.
+// (https://yookassa.ru/developers/api). It covers creating a payment — both
+// the redirect-confirmation kind a customer completes in a browser and the
+// recurring kind charged against a previously saved payment method — and
+// re-fetching a payment by id. Webhooks carry no signature, so callers must
+// always re-fetch via GetPayment before trusting a webhook payload.
 package yookassa
 
 import (
@@ -72,30 +73,57 @@ type ReceiptItem struct {
 }
 
 // Receipt is the optional 54-FZ fiscal receipt block, included in the create
-// request only when the shop has fiscalization enabled.
+// request only when the shop has fiscalization enabled. TaxSystemCode is
+// required only for merchants registered under more than one tax system;
+// sending it when the shop has a single one is rejected, hence omitempty.
 type Receipt struct {
-	Customer ReceiptCustomer `json:"customer"`
-	Items    []ReceiptItem   `json:"items"`
+	Customer      ReceiptCustomer `json:"customer"`
+	Items         []ReceiptItem   `json:"items"`
+	TaxSystemCode int             `json:"tax_system_code,omitempty"`
 }
 
-// CreatePaymentRequest is the body of POST /v3/payments.
+// CreatePaymentRequest is the body of POST /v3/payments. It covers both
+// flows:
+//
+// The customer-present flow sets Confirmation (redirect) and, when the
+// customer consented to auto-renewal, SavePaymentMethod — YooKassa then
+// returns a reusable payment_method on the succeeded payment.
+//
+// The recurring flow sets PaymentMethodID to that saved id and omits
+// Confirmation entirely: nobody is at the keyboard to confirm anything, and
+// sending a confirmation block with a payment_method_id is an API error.
 type CreatePaymentRequest struct {
-	Amount       Amount         `json:"amount"`
-	Capture      bool           `json:"capture"`
-	Confirmation Confirmation   `json:"confirmation"`
-	Description  string         `json:"description,omitempty"`
-	Receipt      *Receipt       `json:"receipt,omitempty"`
-	Metadata     map[string]any `json:"metadata,omitempty"`
+	Amount            Amount         `json:"amount"`
+	Capture           bool           `json:"capture"`
+	Confirmation      *Confirmation  `json:"confirmation,omitempty"`
+	Description       string         `json:"description,omitempty"`
+	Receipt           *Receipt       `json:"receipt,omitempty"`
+	SavePaymentMethod bool           `json:"save_payment_method,omitempty"`
+	PaymentMethodID   string         `json:"payment_method_id,omitempty"`
+	Metadata          map[string]any `json:"metadata,omitempty"`
 }
 
-// Payment is the subset of the YooKassa payment object slice 1 reads back.
+// PaymentMethod is the payment instrument YooKassa used. Saved reports
+// whether it may be charged again without the customer present; when it is
+// true, ID is the handle to store and send as PaymentMethodID later. Title is
+// a display string such as "Bank card *4444", shown in the console so the
+// customer knows what will be charged.
+type PaymentMethod struct {
+	ID    string `json:"id"`
+	Type  string `json:"type"`
+	Saved bool   `json:"saved"`
+	Title string `json:"title"`
+}
+
+// Payment is the subset of the YooKassa payment object this client reads back.
 type Payment struct {
-	ID           string            `json:"id"`
-	Status       string            `json:"status"`
-	Paid         bool              `json:"paid"`
-	Amount       Amount            `json:"amount"`
-	Confirmation Confirmation      `json:"confirmation"`
-	Metadata     map[string]string `json:"metadata"`
+	ID            string            `json:"id"`
+	Status        string            `json:"status"`
+	Paid          bool              `json:"paid"`
+	Amount        Amount            `json:"amount"`
+	Confirmation  Confirmation      `json:"confirmation"`
+	PaymentMethod PaymentMethod     `json:"payment_method"`
+	Metadata      map[string]string `json:"metadata"`
 }
 
 // apiError is the YooKassa error envelope returned on non-2xx responses.

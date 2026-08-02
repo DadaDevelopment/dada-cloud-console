@@ -291,7 +291,7 @@ func NewHandler(pool *pgxpool.Pool, cfg *config.Config) *Handler {
 
 	if cfg.YooKassaShopID != "" && cfg.YooKassaSecretKey != "" {
 		ykClient := yookassa.New(cfg.YooKassaShopID, cfg.YooKassaSecretKey)
-		h.yookassa = yookassa.NewProvider(pool, ykClient, cfg.YooKassaReturnURL, cfg.YooKassaSendReceipt)
+		h.yookassa = yookassa.NewProvider(pool, ykClient, cfg.YooKassaReturnURL, cfg.YooKassaSendReceipt, cfg.YooKassaVatCode, cfg.YooKassaTaxSystemCode)
 	}
 	h.yookassaOAuth = yookassa.NewOAuthClient()
 

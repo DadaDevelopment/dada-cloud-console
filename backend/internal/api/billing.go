@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/dada-tuda/console/backend/internal/auth"
@@ -137,15 +138,27 @@ func (h *Handler) quotaGraceActive(ctx context.Context, orgID string) bool {
 // checkQuota is the hard gate for countable resources. It returns a
 // *quotaExceededError when the org is at or over its plan limit. A limit of 0
 // means unlimited (Enterprise).
+//
+// Grace does not skip the count. An org inside its grandfathering window is
+// still allowed through -- that promise is not being taken back -- but the
+// breach is now recorded rather than passed over in silence. Silence was the
+// bug: an org could drift three apps past a one-app plan for weeks, see
+// nothing anywhere, and then hit a wall the day grace ended. recordQuotaBreach
+// gives the console banner and the grace reminder mail something factual to
+// shout about while there is still time to act.
 func (h *Handler) checkQuota(ctx context.Context, orgID, resource string) error {
 	if !h.cfg.BillingEnabled {
 		return nil
 	}
-	if h.quotaExempt(orgID) || h.quotaGraceActive(ctx, orgID) {
+	if h.quotaExempt(orgID) {
 		return nil
 	}
+	inGrace := h.quotaGraceActive(ctx, orgID)
 	plan, err := h.planFor(ctx, orgID)
 	if err != nil {
+		if inGrace {
+			return nil
+		}
 		return err
 	}
 	limit, known := pricing.Quota(plan, resource)
@@ -154,12 +167,79 @@ func (h *Handler) checkQuota(ctx context.Context, orgID, resource string) error 
 	}
 	count, err := h.countResource(ctx, orgID, resource)
 	if err != nil {
+		if inGrace {
+			return nil
+		}
 		return err
 	}
-	if count >= limit {
-		return &quotaExceededError{Resource: resource, Limit: limit}
+	if count < limit {
+		return nil
 	}
-	return nil
+	if inGrace {
+		h.recordQuotaBreach(ctx, orgID, plan.Key, resource, count, limit)
+		return nil
+	}
+	return &quotaExceededError{Resource: resource, Limit: limit}
+}
+
+// recordQuotaBreach is the loud half of grandfathering: a warning line in the
+// server log, a counter on the account, and an audit event, every time grace
+// lets a resource through that the plan does not cover. None of it blocks the
+// request -- it exists so the over-limit state is visible somewhere other than
+// the customer's future error message.
+func (h *Handler) recordQuotaBreach(ctx context.Context, orgID, planKey, resource string, count, limit int) {
+	log.Printf("billing: QUOTA BREACH ALLOWED BY GRACE org=%s plan=%s resource=%s used=%d limit=%d -- creation will start failing when the grace window ends",
+		orgID, planKey, resource, count+1, limit)
+	if _, err := h.pool.Exec(ctx, `
+		UPDATE billing_accounts
+		SET quota_breach_count = quota_breach_count + 1, quota_breach_last_at = $2, updated_at = $2
+		WHERE org_id = $1
+	`, orgID, time.Now().UTC()); err != nil {
+		log.Printf("billing: record quota breach for org %s: %v", orgID, err)
+	}
+	h.recordSystemAudit(ctx, auditEntry{
+		Action:       "QuotaBreachAllowed",
+		ResourceKind: "BillingAccount",
+		ResourceName: orgID,
+		Outcome:      auditOutcomeSuccess,
+		Metadata: map[string]string{
+			"plan":     planKey,
+			"resource": resource,
+			"used":     strconv.Itoa(count + 1),
+			"limit":    strconv.Itoa(limit),
+		},
+	})
+}
+
+// autopayNextCharge is when automatic renewal will next take money, or nil
+// when it will not. The console shows this instead of the term end date: what
+// a customer with autopay on needs to know is the day their card is charged,
+// which is a day earlier.
+func autopayNextCharge(enabled bool, methodTitle string, planExpiresAt *time.Time) *time.Time {
+	if !enabled || methodTitle == "" || planExpiresAt == nil {
+		return nil
+	}
+	at := planExpiresAt.Add(-autopayLeadTime)
+	return &at
+}
+
+// overQuotaLines lists the resources an org is currently over the limit on,
+// with the numbers the console needs to name them. Empty means compliant.
+func overQuotaLines(usage map[string]gin.H) []gin.H {
+	over := make([]gin.H, 0)
+	for _, res := range []string{"apps", "databases", "domains", "team_members"} {
+		row, ok := usage[res]
+		if !ok {
+			continue
+		}
+		used, uok := row["used"].(int)
+		limit, lok := row["limit"].(int)
+		if !uok || !lok || limit == 0 || used <= limit {
+			continue
+		}
+		over = append(over, gin.H{"resource": res, "used": used, "limit": limit})
+	}
+	return over
 }
 
 // respondQuotaExceeded writes the quota-exceeded 403 JSON body.
@@ -258,9 +338,13 @@ func (h *Handler) GetBillingAccount(c *gin.Context) {
 	}
 	now := time.Now().UTC()
 	var planExpiresAt, quotaGraceUntil *time.Time
-	if err := h.pool.QueryRow(c.Request.Context(),
-		`SELECT plan_expires_at, quota_grace_until FROM billing_accounts WHERE org_id = $1`, orgID,
-	).Scan(&planExpiresAt, &quotaGraceUntil); err != nil && !errors.Is(err, pgx.ErrNoRows) {
+	var autopayEnabled bool
+	var autopayMethodTitle string
+	var autopayFailures int
+	if err := h.pool.QueryRow(c.Request.Context(), `
+		SELECT plan_expires_at, quota_grace_until, autopay_enabled, autopay_method_title, autopay_failures
+		FROM billing_accounts WHERE org_id = $1
+	`, orgID).Scan(&planExpiresAt, &quotaGraceUntil, &autopayEnabled, &autopayMethodTitle, &autopayFailures); err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		log.Printf("billing: plan term lookup skipped for org %s: %v", orgID, err)
 	}
 	if quotaGraceUntil != nil && !quotaGraceUntil.After(now) {
@@ -293,8 +377,15 @@ func (h *Handler) GetBillingAccount(c *gin.Context) {
 		"plan_expires_at":   planExpiresAt,
 		"quota_grace_until": quotaGraceUntil,
 		"quota_enforced":    quotaEnforced,
-		"quotas":            plan.Quotas,
-		"usage":             usage,
+		"quota_over_limit":  overQuotaLines(usage),
+		"autopay": gin.H{
+			"enabled":      autopayEnabled,
+			"methodTitle":  autopayMethodTitle,
+			"failures":     autopayFailures,
+			"nextChargeAt": autopayNextCharge(autopayEnabled, autopayMethodTitle, planExpiresAt),
+		},
+		"quotas": plan.Quotas,
+		"usage":  usage,
 		"invoicePreview": gin.H{
 			"period":    period,
 			"amount":    total,

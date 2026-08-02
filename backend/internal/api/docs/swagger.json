@@ -164,7 +164,7 @@
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.grantBoxRequest"
+                            "$ref": "#/definitions/internal_api.grantBoxRequest"
                         }
                     }
                 ],
@@ -451,7 +451,7 @@
                         "name": "body",
                         "in": "body",
                         "schema": {
-                            "$ref": "#/definitions/api.resolveFeedbackRequest"
+                            "$ref": "#/definitions/internal_api.resolveFeedbackRequest"
                         }
                     }
                 ],
@@ -822,7 +822,7 @@
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.createPayServiceKeyRequest"
+                            "$ref": "#/definitions/internal_api.createPayServiceKeyRequest"
                         }
                     }
                 ],
@@ -830,7 +830,7 @@
                     "201": {
                         "description": "Created",
                         "schema": {
-                            "$ref": "#/definitions/api.createPayServiceKeyResponse"
+                            "$ref": "#/definitions/internal_api.createPayServiceKeyResponse"
                         }
                     },
                     "400": {
@@ -939,7 +939,7 @@
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.agentChatRequest"
+                            "$ref": "#/definitions/internal_api.agentChatRequest"
                         }
                     }
                 ],
@@ -997,7 +997,7 @@
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.agentChatConfirmRequest"
+                            "$ref": "#/definitions/internal_api.agentChatConfirmRequest"
                         }
                     }
                 ],
@@ -1055,7 +1055,7 @@
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.agentChatClearContextRequest"
+                            "$ref": "#/definitions/internal_api.agentChatClearContextRequest"
                         }
                     }
                 ],
@@ -1115,7 +1115,7 @@
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/api.agentChatHistoryResponse"
+                            "$ref": "#/definitions/internal_api.agentChatHistoryResponse"
                         }
                     },
                     "401": {
@@ -1187,7 +1187,7 @@
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.loginRequest"
+                            "$ref": "#/definitions/internal_api.loginRequest"
                         }
                     }
                 ],
@@ -1354,7 +1354,7 @@
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/pricing.Need"
+                            "$ref": "#/definitions/github_com_dada-tuda_console_backend_internal_billing_pricing.Need"
                         }
                     }
                 ],
@@ -1435,7 +1435,7 @@
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.recordBoxFunnelEventRequest"
+                            "$ref": "#/definitions/internal_api.recordBoxFunnelEventRequest"
                         }
                     }
                 ],
@@ -1495,7 +1495,7 @@
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.clientErrorReport"
+                            "$ref": "#/definitions/internal_api.clientErrorReport"
                         }
                     }
                 ],
@@ -1527,7 +1527,7 @@
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.deployTriggerRequest"
+                            "$ref": "#/definitions/internal_api.deployTriggerRequest"
                         }
                     }
                 ],
@@ -1535,7 +1535,7 @@
                     "202": {
                         "description": "Accepted",
                         "schema": {
-                            "$ref": "#/definitions/api.deployTriggerResponse"
+                            "$ref": "#/definitions/internal_api.deployTriggerResponse"
                         }
                     },
                     "400": {
@@ -1592,7 +1592,7 @@
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/api.deployOperationStatusResponse"
+                            "$ref": "#/definitions/internal_api.deployOperationStatusResponse"
                         }
                     },
                     "401": {
@@ -1642,7 +1642,7 @@
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.submitFeedbackRequest"
+                            "$ref": "#/definitions/internal_api.submitFeedbackRequest"
                         }
                     }
                 ],
@@ -2056,7 +2056,7 @@
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.reportOnboardingRequest"
+                            "$ref": "#/definitions/internal_api.reportOnboardingRequest"
                         }
                     }
                 ],
@@ -2146,7 +2146,7 @@
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.createChargeRequest"
+                            "$ref": "#/definitions/internal_api.createChargeRequest"
                         }
                     }
                 ],
@@ -2154,7 +2154,7 @@
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/api.serviceChargeResponse"
+                            "$ref": "#/definitions/internal_api.serviceChargeResponse"
                         }
                     },
                     "400": {
@@ -2220,7 +2220,7 @@
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/api.serviceChargeResponse"
+                            "$ref": "#/definitions/internal_api.serviceChargeResponse"
                         }
                     },
                     "401": {
@@ -2335,7 +2335,7 @@
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.createProjectRequest"
+                            "$ref": "#/definitions/internal_api.createProjectRequest"
                         }
                     }
                 ],
@@ -2638,7 +2638,7 @@
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.putAICredentialRequest"
+                            "$ref": "#/definitions/internal_api.putAICredentialRequest"
                         }
                     }
                 ],
@@ -2821,7 +2821,7 @@
                         "name": "body",
                         "in": "body",
                         "schema": {
-                            "$ref": "#/definitions/api.createAIKeyRequest"
+                            "$ref": "#/definitions/internal_api.createAIKeyRequest"
                         }
                     }
                 ],
@@ -2829,7 +2829,7 @@
                     "201": {
                         "description": "Created",
                         "schema": {
-                            "$ref": "#/definitions/api.createAIKeyResponse"
+                            "$ref": "#/definitions/internal_api.createAIKeyResponse"
                         }
                     },
                     "400": {
@@ -2948,7 +2948,7 @@
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/api.aiRoutingResponse"
+                            "$ref": "#/definitions/internal_api.aiRoutingResponse"
                         }
                     },
                     "401": {
@@ -3003,7 +3003,7 @@
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.setAIRoutingRequest"
+                            "$ref": "#/definitions/internal_api.setAIRoutingRequest"
                         }
                     }
                 ],
@@ -3011,7 +3011,7 @@
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/api.aiRoutingResponse"
+                            "$ref": "#/definitions/internal_api.aiRoutingResponse"
                         }
                     },
                     "400": {
@@ -3189,7 +3189,7 @@
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.createAppServerRequest"
+                            "$ref": "#/definitions/internal_api.createAppServerRequest"
                         }
                     }
                 ],
@@ -3479,7 +3479,7 @@
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.importComposeStackRequest"
+                            "$ref": "#/definitions/internal_api.importComposeStackRequest"
                         }
                     }
                 ],
@@ -3720,6 +3720,111 @@
                     },
                     "404": {
                         "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/projects/{projectId}/billing/autopay": {
+            "put": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Switches YooKassa recurring charges for the org that owns the project. Disabling also deletes the saved payment method. Enabling requires a payment method saved by an earlier checkout. Requires write role on the project.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "billing"
+                ],
+                "summary": "Enable or disable automatic renewal",
+                "operationId": "setBillingAutopay",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Project UUID",
+                        "name": "projectId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Autopay flag",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "boolean"
+                            }
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
                         "schema": {
                             "type": "object",
                             "additionalProperties": {
@@ -4161,7 +4266,7 @@
                         "name": "body",
                         "in": "body",
                         "schema": {
-                            "$ref": "#/definitions/api.boxUpRequest"
+                            "$ref": "#/definitions/internal_api.boxUpRequest"
                         }
                     }
                 ],
@@ -4315,7 +4420,7 @@
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.createBoxRequest"
+                            "$ref": "#/definitions/internal_api.createBoxRequest"
                         }
                     }
                 ],
@@ -4543,7 +4648,7 @@
                         "name": "body",
                         "in": "body",
                         "schema": {
-                            "$ref": "#/definitions/api.attachBoxDatabaseRequest"
+                            "$ref": "#/definitions/internal_api.attachBoxDatabaseRequest"
                         }
                     }
                 ],
@@ -4850,7 +4955,7 @@
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.crystallizeBoxRequest"
+                            "$ref": "#/definitions/internal_api.crystallizeBoxRequest"
                         }
                     }
                 ],
@@ -4968,7 +5073,7 @@
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.exposeBoxRequest"
+                            "$ref": "#/definitions/internal_api.exposeBoxRequest"
                         }
                     }
                 ],
@@ -5077,7 +5182,7 @@
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.extendBoxRequest"
+                            "$ref": "#/definitions/internal_api.extendBoxRequest"
                         }
                     }
                 ],
@@ -5176,7 +5281,7 @@
                         "name": "body",
                         "in": "body",
                         "schema": {
-                            "$ref": "#/definitions/api.resumeBoxRequest"
+                            "$ref": "#/definitions/internal_api.resumeBoxRequest"
                         }
                     }
                 ],
@@ -6298,7 +6403,7 @@
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.addDomainAuthorizationRequest"
+                            "$ref": "#/definitions/internal_api.addDomainAuthorizationRequest"
                         }
                     }
                 ],
@@ -6653,7 +6758,7 @@
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.importZoneRequest"
+                            "$ref": "#/definitions/internal_api.importZoneRequest"
                         }
                     }
                 ],
@@ -6881,7 +6986,7 @@
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.upsertRecordRequest"
+                            "$ref": "#/definitions/internal_api.upsertRecordRequest"
                         }
                     }
                 ],
@@ -7119,7 +7224,7 @@
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.createAppRequest"
+                            "$ref": "#/definitions/internal_api.createAppRequest"
                         }
                     }
                 ],
@@ -7370,7 +7475,7 @@
                         "name": "body",
                         "in": "body",
                         "schema": {
-                            "$ref": "#/definitions/api.autofixRequest"
+                            "$ref": "#/definitions/internal_api.autofixRequest"
                         }
                     }
                 ],
@@ -7704,7 +7809,7 @@
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.createCloudTaskRequest"
+                            "$ref": "#/definitions/internal_api.createCloudTaskRequest"
                         }
                     }
                 ],
@@ -7811,7 +7916,7 @@
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.updateComposeConfigRequest"
+                            "$ref": "#/definitions/internal_api.updateComposeConfigRequest"
                         }
                     }
                 ],
@@ -7909,7 +8014,7 @@
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.updateComposeVolumeRequest"
+                            "$ref": "#/definitions/internal_api.updateComposeVolumeRequest"
                         }
                     }
                 ],
@@ -8003,7 +8108,7 @@
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/api.DeleteImpact"
+                            "$ref": "#/definitions/internal_api.DeleteImpact"
                         }
                     },
                     "401": {
@@ -8139,7 +8244,7 @@
                         "name": "body",
                         "in": "body",
                         "schema": {
-                            "$ref": "#/definitions/api.createDeployHookRequest"
+                            "$ref": "#/definitions/internal_api.createDeployHookRequest"
                         }
                     }
                 ],
@@ -8147,7 +8252,7 @@
                     "201": {
                         "description": "Created",
                         "schema": {
-                            "$ref": "#/definitions/api.createDeployHookResponse"
+                            "$ref": "#/definitions/internal_api.createDeployHookResponse"
                         }
                     },
                     "400": {
@@ -8368,7 +8473,7 @@
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/api.diagnoseResponse"
+                            "$ref": "#/definitions/internal_api.diagnoseResponse"
                         }
                     },
                     "400": {
@@ -8532,7 +8637,7 @@
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.createEndpointRequest"
+                            "$ref": "#/definitions/internal_api.createEndpointRequest"
                         }
                     }
                 ],
@@ -8698,7 +8803,7 @@
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.bulkSetEnvVarsRequest"
+                            "$ref": "#/definitions/internal_api.bulkSetEnvVarsRequest"
                         }
                     }
                 ],
@@ -8891,7 +8996,7 @@
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.setEnvVarRequest"
+                            "$ref": "#/definitions/internal_api.setEnvVarRequest"
                         }
                     }
                 ],
@@ -9120,7 +9225,7 @@
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.attachHostnameRequest"
+                            "$ref": "#/definitions/internal_api.attachHostnameRequest"
                         }
                     }
                 ],
@@ -9301,7 +9406,7 @@
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.updateAppImageRequest"
+                            "$ref": "#/definitions/internal_api.updateAppImageRequest"
                         }
                     }
                 ],
@@ -9581,7 +9686,7 @@
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.moveAppRequest"
+                            "$ref": "#/definitions/internal_api.moveAppRequest"
                         }
                     }
                 ],
@@ -9689,7 +9794,7 @@
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/api.MoveImpact"
+                            "$ref": "#/definitions/internal_api.MoveImpact"
                         }
                     },
                     "400": {
@@ -9996,7 +10101,7 @@
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.updateAppProfileRequest"
+                            "$ref": "#/definitions/internal_api.updateAppProfileRequest"
                         }
                     }
                 ],
@@ -10245,7 +10350,7 @@
                     "202": {
                         "description": "Accepted",
                         "schema": {
-                            "$ref": "#/definitions/api.uploadSourceResponse"
+                            "$ref": "#/definitions/internal_api.uploadSourceResponse"
                         }
                     },
                     "400": {
@@ -10515,7 +10620,7 @@
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.appVolumeReq"
+                            "$ref": "#/definitions/internal_api.appVolumeReq"
                         }
                     }
                 ],
@@ -11182,7 +11287,7 @@
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.writeAppFileRequest"
+                            "$ref": "#/definitions/internal_api.writeAppFileRequest"
                         }
                     }
                 ],
@@ -11316,7 +11421,7 @@
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.appFilePathRequest"
+                            "$ref": "#/definitions/internal_api.appFilePathRequest"
                         }
                     }
                 ],
@@ -11441,7 +11546,7 @@
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.appFilePathRequest"
+                            "$ref": "#/definitions/internal_api.appFilePathRequest"
                         }
                     }
                 ],
@@ -11566,7 +11671,7 @@
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.moveAppFileRequest"
+                            "$ref": "#/definitions/internal_api.moveAppFileRequest"
                         }
                     }
                 ],
@@ -12086,7 +12191,7 @@
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.createServiceDatabaseRequest"
+                            "$ref": "#/definitions/internal_api.createServiceDatabaseRequest"
                         }
                     }
                 ],
@@ -12626,7 +12731,7 @@
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.restoreDatabaseRequest"
+                            "$ref": "#/definitions/internal_api.restoreDatabaseRequest"
                         }
                     }
                 ],
@@ -12787,7 +12892,7 @@
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.createIngressRequest"
+                            "$ref": "#/definitions/internal_api.createIngressRequest"
                         }
                     }
                 ],
@@ -12928,7 +13033,7 @@
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.createAIModelRequest"
+                            "$ref": "#/definitions/internal_api.createAIModelRequest"
                         }
                     }
                 ],
@@ -13689,7 +13794,7 @@
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.createMonitoringRequest"
+                            "$ref": "#/definitions/internal_api.createMonitoringRequest"
                         }
                     }
                 ],
@@ -14515,7 +14620,7 @@
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.saveDashboardRequest"
+                            "$ref": "#/definitions/internal_api.saveDashboardRequest"
                         }
                     }
                 ],
@@ -15368,7 +15473,7 @@
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.connectGitRepoRequest"
+                            "$ref": "#/definitions/internal_api.connectGitRepoRequest"
                         }
                     }
                 ],
@@ -15582,7 +15687,7 @@
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.createS3BucketRequest"
+                            "$ref": "#/definitions/internal_api.createS3BucketRequest"
                         }
                     }
                 ],
@@ -16024,7 +16129,7 @@
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.bindInstallationRequest"
+                            "$ref": "#/definitions/internal_api.bindInstallationRequest"
                         }
                     }
                 ],
@@ -16032,7 +16137,7 @@
                     "201": {
                         "description": "Created",
                         "schema": {
-                            "$ref": "#/definitions/api.gitInstallation"
+                            "$ref": "#/definitions/internal_api.gitInstallation"
                         }
                     },
                     "400": {
@@ -16486,7 +16591,7 @@
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.ingestLogsRequest"
+                            "$ref": "#/definitions/internal_api.ingestLogsRequest"
                         }
                     }
                 ],
@@ -16604,7 +16709,7 @@
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.ingestMetricsRequest"
+                            "$ref": "#/definitions/internal_api.ingestMetricsRequest"
                         }
                     }
                 ],
@@ -16951,7 +17056,7 @@
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.recordUXEventsRequest"
+                            "$ref": "#/definitions/internal_api.recordUXEventsRequest"
                         }
                     }
                 ],
@@ -17029,7 +17134,82 @@
         }
     },
     "definitions": {
-        "api.DeleteImpact": {
+        "github_com_dada-tuda_console_backend_internal_billing_pricing.Need": {
+            "type": "object",
+            "properties": {
+                "apps": {
+                    "type": "integer"
+                },
+                "databases": {
+                    "type": "integer"
+                },
+                "domains": {
+                    "type": "integer"
+                },
+                "members": {
+                    "type": "integer"
+                },
+                "storageGB": {
+                    "type": "integer"
+                }
+            }
+        },
+        "github_com_dada-tuda_console_backend_internal_models.AIModelAuthMode": {
+            "type": "string",
+            "enum": [
+                "apikey",
+                "jwt",
+                "public"
+            ],
+            "x-enum-varnames": [
+                "AIModelAuthAPIKey",
+                "AIModelAuthJWT",
+                "AIModelAuthPublic"
+            ]
+        },
+        "github_com_dada-tuda_console_backend_internal_models.AIModelSource": {
+            "type": "string",
+            "enum": [
+                "mlflow",
+                "s3",
+                "custom"
+            ],
+            "x-enum-varnames": [
+                "AIModelSourceMLflow",
+                "AIModelSourceS3",
+                "AIModelSourceCustom"
+            ]
+        },
+        "github_com_dada-tuda_console_backend_internal_models.ImportServiceSpec": {
+            "type": "object",
+            "properties": {
+                "container_name": {
+                    "type": "string"
+                },
+                "image": {
+                    "type": "string"
+                },
+                "include": {
+                    "type": "boolean"
+                },
+                "ports": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "service_name": {
+                    "type": "string"
+                },
+                "volumes": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                }
+            }
+        },
+        "internal_api.DeleteImpact": {
             "type": "object",
             "properties": {
                 "app": {
@@ -17044,7 +17224,7 @@
                 "items": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/api.ImpactItem"
+                        "$ref": "#/definitions/internal_api.ImpactItem"
                     }
                 },
                 "namespace": {
@@ -17052,7 +17232,7 @@
                 }
             }
         },
-        "api.ImpactItem": {
+        "internal_api.ImpactItem": {
             "type": "object",
             "properties": {
                 "group": {
@@ -17069,7 +17249,7 @@
                 }
             }
         },
-        "api.MoveBlockerItem": {
+        "internal_api.MoveBlockerItem": {
             "type": "object",
             "properties": {
                 "kind": {
@@ -17083,7 +17263,7 @@
                 }
             }
         },
-        "api.MoveImpact": {
+        "internal_api.MoveImpact": {
             "type": "object",
             "properties": {
                 "app": {
@@ -17092,7 +17272,7 @@
                 "blockers": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/api.MoveBlockerItem"
+                        "$ref": "#/definitions/internal_api.MoveBlockerItem"
                     }
                 },
                 "can_move": {
@@ -17101,7 +17281,7 @@
                 "movable": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/api.MoveMovableItem"
+                        "$ref": "#/definitions/internal_api.MoveMovableItem"
                     }
                 },
                 "name_collision": {
@@ -17121,7 +17301,7 @@
                 }
             }
         },
-        "api.MoveMovableItem": {
+        "internal_api.MoveMovableItem": {
             "type": "object",
             "properties": {
                 "group": {
@@ -17135,7 +17315,7 @@
                 }
             }
         },
-        "api.addDomainAuthorizationRequest": {
+        "internal_api.addDomainAuthorizationRequest": {
             "type": "object",
             "properties": {
                 "apex_domain": {
@@ -17143,7 +17323,7 @@
                 }
             }
         },
-        "api.agentChatClearContextRequest": {
+        "internal_api.agentChatClearContextRequest": {
             "type": "object",
             "properties": {
                 "envId": {
@@ -17154,7 +17334,7 @@
                 }
             }
         },
-        "api.agentChatConfirmRequest": {
+        "internal_api.agentChatConfirmRequest": {
             "type": "object",
             "properties": {
                 "action_id": {
@@ -17165,7 +17345,7 @@
                 }
             }
         },
-        "api.agentChatHistoryMessage": {
+        "internal_api.agentChatHistoryMessage": {
             "type": "object",
             "properties": {
                 "content": {
@@ -17179,21 +17359,21 @@
                 }
             }
         },
-        "api.agentChatHistoryResponse": {
+        "internal_api.agentChatHistoryResponse": {
             "type": "object",
             "properties": {
                 "messages": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/api.agentChatHistoryMessage"
+                        "$ref": "#/definitions/internal_api.agentChatHistoryMessage"
                     }
                 },
                 "pendingAction": {
-                    "$ref": "#/definitions/api.agentChatPendingActionDTO"
+                    "$ref": "#/definitions/internal_api.agentChatPendingActionDTO"
                 }
             }
         },
-        "api.agentChatPendingActionDTO": {
+        "internal_api.agentChatPendingActionDTO": {
             "type": "object",
             "properties": {
                 "actionId": {
@@ -17214,7 +17394,7 @@
                 }
             }
         },
-        "api.agentChatRequest": {
+        "internal_api.agentChatRequest": {
             "type": "object",
             "properties": {
                 "appName": {
@@ -17231,7 +17411,7 @@
                 }
             }
         },
-        "api.aiRoutingResponse": {
+        "internal_api.aiRoutingResponse": {
             "type": "object",
             "properties": {
                 "markup": {
@@ -17245,7 +17425,7 @@
                 }
             }
         },
-        "api.appFilePathRequest": {
+        "internal_api.appFilePathRequest": {
             "type": "object",
             "required": [
                 "path"
@@ -17259,7 +17439,7 @@
                 }
             }
         },
-        "api.appVolumeReq": {
+        "internal_api.appVolumeReq": {
             "type": "object",
             "properties": {
                 "path": {
@@ -17273,7 +17453,7 @@
                 }
             }
         },
-        "api.attachBoxDatabaseRequest": {
+        "internal_api.attachBoxDatabaseRequest": {
             "type": "object",
             "properties": {
                 "env_prefix": {
@@ -17286,7 +17466,7 @@
                 }
             }
         },
-        "api.attachHostnameRequest": {
+        "internal_api.attachHostnameRequest": {
             "type": "object",
             "properties": {
                 "hostname": {
@@ -17294,7 +17474,7 @@
                 }
             }
         },
-        "api.autofixRequest": {
+        "internal_api.autofixRequest": {
             "type": "object",
             "properties": {
                 "error": {
@@ -17302,7 +17482,7 @@
                 }
             }
         },
-        "api.bindInstallationRequest": {
+        "internal_api.bindInstallationRequest": {
             "type": "object",
             "properties": {
                 "installation_id": {
@@ -17311,7 +17491,7 @@
                 }
             }
         },
-        "api.boxUpRequest": {
+        "internal_api.boxUpRequest": {
             "type": "object",
             "properties": {
                 "image": {
@@ -17347,7 +17527,7 @@
                 }
             }
         },
-        "api.build": {
+        "internal_api.build": {
             "type": "object",
             "properties": {
                 "app_name": {
@@ -17406,7 +17586,7 @@
                 }
             }
         },
-        "api.bulkEnvVarItem": {
+        "internal_api.bulkEnvVarItem": {
             "type": "object",
             "properties": {
                 "is_secret": {
@@ -17423,18 +17603,18 @@
                 }
             }
         },
-        "api.bulkSetEnvVarsRequest": {
+        "internal_api.bulkSetEnvVarsRequest": {
             "type": "object",
             "properties": {
                 "vars": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/api.bulkEnvVarItem"
+                        "$ref": "#/definitions/internal_api.bulkEnvVarItem"
                     }
                 }
             }
         },
-        "api.clientErrorReport": {
+        "internal_api.clientErrorReport": {
             "type": "object",
             "properties": {
                 "component_stack": {
@@ -17454,7 +17634,7 @@
                 }
             }
         },
-        "api.connectGitRepoRequest": {
+        "internal_api.connectGitRepoRequest": {
             "type": "object",
             "properties": {
                 "app_name": {
@@ -17501,7 +17681,7 @@
                 }
             }
         },
-        "api.createAIKeyRequest": {
+        "internal_api.createAIKeyRequest": {
             "type": "object",
             "properties": {
                 "name": {
@@ -17509,7 +17689,7 @@
                 }
             }
         },
-        "api.createAIKeyResponse": {
+        "internal_api.createAIKeyResponse": {
             "type": "object",
             "properties": {
                 "base_url": {
@@ -17535,7 +17715,7 @@
                 }
             }
         },
-        "api.createAIModelRequest": {
+        "internal_api.createAIModelRequest": {
             "type": "object",
             "properties": {
                 "artifact_uri": {
@@ -17545,7 +17725,7 @@
                     "type": "string"
                 },
                 "auth_mode": {
-                    "$ref": "#/definitions/models.AIModelAuthMode"
+                    "$ref": "#/definitions/github_com_dada-tuda_console_backend_internal_models.AIModelAuthMode"
                 },
                 "container_image": {
                     "type": "string"
@@ -17566,14 +17746,14 @@
                     "type": "string"
                 },
                 "source": {
-                    "$ref": "#/definitions/models.AIModelSource"
+                    "$ref": "#/definitions/github_com_dada-tuda_console_backend_internal_models.AIModelSource"
                 },
                 "version": {
                     "type": "string"
                 }
             }
         },
-        "api.createAppRequest": {
+        "internal_api.createAppRequest": {
             "type": "object",
             "properties": {
                 "framework": {
@@ -17595,7 +17775,7 @@
                     "type": "integer"
                 },
                 "volume": {
-                    "$ref": "#/definitions/api.appVolumeReq"
+                    "$ref": "#/definitions/internal_api.appVolumeReq"
                 },
                 "worker": {
                     "type": "boolean"
@@ -17605,7 +17785,7 @@
                 }
             }
         },
-        "api.createAppServerRequest": {
+        "internal_api.createAppServerRequest": {
             "type": "object",
             "properties": {
                 "flavor": {
@@ -17642,7 +17822,7 @@
                 }
             }
         },
-        "api.createBoxRequest": {
+        "internal_api.createBoxRequest": {
             "type": "object",
             "properties": {
                 "image": {
@@ -17672,7 +17852,7 @@
                 }
             }
         },
-        "api.createChargeRequest": {
+        "internal_api.createChargeRequest": {
             "type": "object",
             "properties": {
                 "amount": {
@@ -17696,7 +17876,7 @@
                 }
             }
         },
-        "api.createCloudTaskRequest": {
+        "internal_api.createCloudTaskRequest": {
             "type": "object",
             "properties": {
                 "task_type": {
@@ -17704,7 +17884,7 @@
                 }
             }
         },
-        "api.createDeployHookRequest": {
+        "internal_api.createDeployHookRequest": {
             "type": "object",
             "properties": {
                 "name": {
@@ -17712,7 +17892,7 @@
                 }
             }
         },
-        "api.createDeployHookResponse": {
+        "internal_api.createDeployHookResponse": {
             "type": "object",
             "properties": {
                 "base_url": {
@@ -17738,7 +17918,7 @@
                 }
             }
         },
-        "api.createEndpointRequest": {
+        "internal_api.createEndpointRequest": {
             "type": "object",
             "properties": {
                 "auth_enabled": {
@@ -17767,7 +17947,7 @@
                 }
             }
         },
-        "api.createIngressRequest": {
+        "internal_api.createIngressRequest": {
             "type": "object",
             "properties": {
                 "aliases": {
@@ -17788,7 +17968,7 @@
                 "rules": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/api.ingressRuleReq"
+                        "$ref": "#/definitions/internal_api.ingressRuleReq"
                     }
                 },
                 "ssl_redirect": {
@@ -17813,7 +17993,7 @@
                 }
             }
         },
-        "api.createMonitoringRequest": {
+        "internal_api.createMonitoringRequest": {
             "type": "object",
             "properties": {
                 "name": {
@@ -17821,7 +18001,7 @@
                 }
             }
         },
-        "api.createPayServiceKeyRequest": {
+        "internal_api.createPayServiceKeyRequest": {
             "type": "object",
             "required": [
                 "service"
@@ -17832,7 +18012,7 @@
                 }
             }
         },
-        "api.createPayServiceKeyResponse": {
+        "internal_api.createPayServiceKeyResponse": {
             "type": "object",
             "properties": {
                 "created_at": {
@@ -17852,7 +18032,7 @@
                 }
             }
         },
-        "api.createProjectRequest": {
+        "internal_api.createProjectRequest": {
             "type": "object",
             "required": [
                 "slug"
@@ -17876,7 +18056,7 @@
                 }
             }
         },
-        "api.createS3BucketRequest": {
+        "internal_api.createS3BucketRequest": {
             "type": "object",
             "properties": {
                 "app_ref": {
@@ -17903,7 +18083,7 @@
                 }
             }
         },
-        "api.createServiceDatabaseRequest": {
+        "internal_api.createServiceDatabaseRequest": {
             "type": "object",
             "properties": {
                 "app_ref": {
@@ -17926,7 +18106,7 @@
                 }
             }
         },
-        "api.crystallizeBoxRequest": {
+        "internal_api.crystallizeBoxRequest": {
             "type": "object",
             "properties": {
                 "ack_monthly_charge": {
@@ -17960,7 +18140,7 @@
                 }
             }
         },
-        "api.deployOperationStatusResponse": {
+        "internal_api.deployOperationStatusResponse": {
             "type": "object",
             "properties": {
                 "error_code": {
@@ -17980,7 +18160,7 @@
                 }
             }
         },
-        "api.deployTriggerRequest": {
+        "internal_api.deployTriggerRequest": {
             "type": "object",
             "properties": {
                 "image": {
@@ -17988,7 +18168,7 @@
                 }
             }
         },
-        "api.deployTriggerResponse": {
+        "internal_api.deployTriggerResponse": {
             "type": "object",
             "properties": {
                 "message": {
@@ -17999,7 +18179,7 @@
                 }
             }
         },
-        "api.diagnoseResponse": {
+        "internal_api.diagnoseResponse": {
             "type": "object",
             "properties": {
                 "can_autofix": {
@@ -18022,7 +18202,7 @@
                 }
             }
         },
-        "api.exposeBoxRequest": {
+        "internal_api.exposeBoxRequest": {
             "type": "object",
             "properties": {
                 "port": {
@@ -18031,7 +18211,7 @@
                 }
             }
         },
-        "api.extendBoxRequest": {
+        "internal_api.extendBoxRequest": {
             "type": "object",
             "properties": {
                 "ttl_seconds": {
@@ -18040,7 +18220,7 @@
                 }
             }
         },
-        "api.gitInstallation": {
+        "internal_api.gitInstallation": {
             "type": "object",
             "properties": {
                 "account_login": {
@@ -18067,7 +18247,7 @@
                 }
             }
         },
-        "api.grantBoxRequest": {
+        "internal_api.grantBoxRequest": {
             "type": "object",
             "properties": {
                 "box_id": {
@@ -18081,7 +18261,7 @@
                 }
             }
         },
-        "api.importComposeStackRequest": {
+        "internal_api.importComposeStackRequest": {
             "type": "object",
             "properties": {
                 "ack_secrets_in_git": {
@@ -18099,12 +18279,12 @@
                 "services": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/models.ImportServiceSpec"
+                        "$ref": "#/definitions/github_com_dada-tuda_console_backend_internal_models.ImportServiceSpec"
                     }
                 }
             }
         },
-        "api.importRecord": {
+        "internal_api.importRecord": {
             "type": "object",
             "properties": {
                 "contents": {
@@ -18124,18 +18304,18 @@
                 }
             }
         },
-        "api.importZoneRequest": {
+        "internal_api.importZoneRequest": {
             "type": "object",
             "properties": {
                 "records": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/api.importRecord"
+                        "$ref": "#/definitions/internal_api.importRecord"
                     }
                 }
             }
         },
-        "api.ingestLogsRequest": {
+        "internal_api.ingestLogsRequest": {
             "type": "object",
             "properties": {
                 "level": {
@@ -18149,7 +18329,7 @@
                 }
             }
         },
-        "api.ingestMetricsRequest": {
+        "internal_api.ingestMetricsRequest": {
             "type": "object",
             "properties": {
                 "metrics": {
@@ -18167,7 +18347,7 @@
                 }
             }
         },
-        "api.ingressRuleReq": {
+        "internal_api.ingressRuleReq": {
             "type": "object",
             "properties": {
                 "app": {
@@ -18181,7 +18361,7 @@
                 }
             }
         },
-        "api.loginRequest": {
+        "internal_api.loginRequest": {
             "type": "object",
             "required": [
                 "password"
@@ -18198,7 +18378,7 @@
                 }
             }
         },
-        "api.moveAppFileRequest": {
+        "internal_api.moveAppFileRequest": {
             "type": "object",
             "required": [
                 "from",
@@ -18213,7 +18393,7 @@
                 }
             }
         },
-        "api.moveAppRequest": {
+        "internal_api.moveAppRequest": {
             "type": "object",
             "properties": {
                 "target_project_id": {
@@ -18221,7 +18401,7 @@
                 }
             }
         },
-        "api.putAICredentialRequest": {
+        "internal_api.putAICredentialRequest": {
             "type": "object",
             "required": [
                 "api_key"
@@ -18235,7 +18415,7 @@
                 }
             }
         },
-        "api.recordBoxFunnelEventRequest": {
+        "internal_api.recordBoxFunnelEventRequest": {
             "type": "object",
             "properties": {
                 "agent": {
@@ -18282,7 +18462,7 @@
                 }
             }
         },
-        "api.recordUXEventsRequest": {
+        "internal_api.recordUXEventsRequest": {
             "type": "object",
             "properties": {
                 "anon_id": {
@@ -18291,7 +18471,7 @@
                 "events": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/api.uxEventPayload"
+                        "$ref": "#/definitions/internal_api.uxEventPayload"
                     }
                 },
                 "session_id": {
@@ -18299,7 +18479,7 @@
                 }
             }
         },
-        "api.reportOnboardingRequest": {
+        "internal_api.reportOnboardingRequest": {
             "type": "object",
             "properties": {
                 "status": {
@@ -18310,7 +18490,7 @@
                 }
             }
         },
-        "api.resolveFeedbackRequest": {
+        "internal_api.resolveFeedbackRequest": {
             "type": "object",
             "properties": {
                 "resolution": {
@@ -18318,7 +18498,7 @@
                 }
             }
         },
-        "api.restoreDatabaseRequest": {
+        "internal_api.restoreDatabaseRequest": {
             "type": "object",
             "properties": {
                 "backup_id": {
@@ -18326,7 +18506,7 @@
                 }
             }
         },
-        "api.resumeBoxRequest": {
+        "internal_api.resumeBoxRequest": {
             "type": "object",
             "properties": {
                 "ssh_public_key": {
@@ -18335,10 +18515,21 @@
                 }
             }
         },
-        "api.saveDashboardRequest": {
-            "type": "object"
+        "internal_api.saveDashboardRequest": {
+            "type": "object",
+            "properties": {
+                "config": {
+                    "type": "array",
+                    "items": {
+                        "type": "integer"
+                    }
+                },
+                "version": {
+                    "type": "integer"
+                }
+            }
         },
-        "api.serviceChargeResponse": {
+        "internal_api.serviceChargeResponse": {
             "type": "object",
             "properties": {
                 "amount": {
@@ -18370,7 +18561,7 @@
                 }
             }
         },
-        "api.setAIRoutingRequest": {
+        "internal_api.setAIRoutingRequest": {
             "type": "object",
             "required": [
                 "mode"
@@ -18381,7 +18572,7 @@
                 }
             }
         },
-        "api.setEnvVarRequest": {
+        "internal_api.setEnvVarRequest": {
             "type": "object",
             "properties": {
                 "is_secret": {
@@ -18398,7 +18589,7 @@
                 }
             }
         },
-        "api.submitFeedbackRequest": {
+        "internal_api.submitFeedbackRequest": {
             "type": "object",
             "properties": {
                 "message": {
@@ -18409,7 +18600,7 @@
                 }
             }
         },
-        "api.updateAppImageRequest": {
+        "internal_api.updateAppImageRequest": {
             "type": "object",
             "properties": {
                 "image": {
@@ -18417,7 +18608,7 @@
                 }
             }
         },
-        "api.updateAppProfileRequest": {
+        "internal_api.updateAppProfileRequest": {
             "type": "object",
             "properties": {
                 "profile": {
@@ -18425,7 +18616,7 @@
                 }
             }
         },
-        "api.updateComposeConfigRequest": {
+        "internal_api.updateComposeConfigRequest": {
             "type": "object",
             "properties": {
                 "image": {
@@ -18439,7 +18630,7 @@
                 }
             }
         },
-        "api.updateComposeVolumeRequest": {
+        "internal_api.updateComposeVolumeRequest": {
             "type": "object",
             "properties": {
                 "volumes": {
@@ -18450,7 +18641,7 @@
                 }
             }
         },
-        "api.uploadSourceDetect": {
+        "internal_api.uploadSourceDetect": {
             "type": "object",
             "properties": {
                 "framework": {
@@ -18461,21 +18652,21 @@
                 }
             }
         },
-        "api.uploadSourceResponse": {
+        "internal_api.uploadSourceResponse": {
             "type": "object",
             "properties": {
                 "artifact_uri": {
                     "type": "string"
                 },
                 "build": {
-                    "$ref": "#/definitions/api.build"
+                    "$ref": "#/definitions/internal_api.build"
                 },
                 "detected": {
-                    "$ref": "#/definitions/api.uploadSourceDetect"
+                    "$ref": "#/definitions/internal_api.uploadSourceDetect"
                 }
             }
         },
-        "api.upsertRecordRequest": {
+        "internal_api.upsertRecordRequest": {
             "type": "object",
             "properties": {
                 "contents": {
@@ -18495,7 +18686,7 @@
                 }
             }
         },
-        "api.uxEventPayload": {
+        "internal_api.uxEventPayload": {
             "type": "object",
             "properties": {
                 "at": {
@@ -18516,7 +18707,7 @@
                 }
             }
         },
-        "api.writeAppFileRequest": {
+        "internal_api.writeAppFileRequest": {
             "type": "object",
             "required": [
                 "path"
@@ -18530,81 +18721,6 @@
                 },
                 "path": {
                     "type": "string"
-                }
-            }
-        },
-        "models.AIModelAuthMode": {
-            "type": "string",
-            "enum": [
-                "apikey",
-                "jwt",
-                "public"
-            ],
-            "x-enum-varnames": [
-                "AIModelAuthAPIKey",
-                "AIModelAuthJWT",
-                "AIModelAuthPublic"
-            ]
-        },
-        "models.AIModelSource": {
-            "type": "string",
-            "enum": [
-                "mlflow",
-                "s3",
-                "custom"
-            ],
-            "x-enum-varnames": [
-                "AIModelSourceMLflow",
-                "AIModelSourceS3",
-                "AIModelSourceCustom"
-            ]
-        },
-        "models.ImportServiceSpec": {
-            "type": "object",
-            "properties": {
-                "container_name": {
-                    "type": "string"
-                },
-                "image": {
-                    "type": "string"
-                },
-                "include": {
-                    "type": "boolean"
-                },
-                "ports": {
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    }
-                },
-                "service_name": {
-                    "type": "string"
-                },
-                "volumes": {
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    }
-                }
-            }
-        },
-        "pricing.Need": {
-            "type": "object",
-            "properties": {
-                "apps": {
-                    "type": "integer"
-                },
-                "databases": {
-                    "type": "integer"
-                },
-                "domains": {
-                    "type": "integer"
-                },
-                "members": {
-                    "type": "integer"
-                },
-                "storageGB": {
-                    "type": "integer"
                 }
             }
         }

@@ -612,6 +612,7 @@ func SetupRouter(pool *pgxpool.Pool, cfg *config.Config) *gin.Engine {
 		api.GET("/projects/:projectId/billing/usage", h.GetBillingUsage)
 		api.PUT("/projects/:projectId/billing/plan", h.AssignPlan)
 		api.POST("/projects/:projectId/billing/checkout", h.BillingCheckout)
+		api.PUT("/projects/:projectId/billing/autopay", h.SetBillingAutopay)
 		api.GET("/projects/:projectId/billing/payments", h.GetBillingPayments)
 
 		registerPayGatewayRoutes(r, api, h)

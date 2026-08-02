@@ -1568,12 +1568,34 @@ export interface InvoicePreview {
   status: "preview";
 }
 
+/** One resource the org already holds more of than its plan allows. */
+export interface QuotaOverLimit {
+  resource: string;
+  used: number;
+  limit: number;
+}
+
+/**
+ * Automatic renewal state. `enabled` without a `methodTitle` cannot happen --
+ * the backend deletes the saved method when consent is withdrawn.
+ */
+export interface AutopayState {
+  enabled: boolean;
+  methodTitle: string;
+  failures: number;
+  /** When the card is charged next, a day before the term ends. Null when autopay is off. */
+  nextChargeAt: string | null;
+}
+
 export interface BillingAccount {
   plan: BillingPlanKey;
   plan_expires_at?: string | null;
   quota_grace_until?: string | null;
   /** Whether quotas actually block new resource creation for this org right now. Absent on older backends -- treat as false (do not alarm). */
   quota_enforced?: boolean;
+  /** Resources currently over the plan limit. Non-empty during grace means creation breaks the day grace ends. */
+  quota_over_limit?: QuotaOverLimit[];
+  autopay?: AutopayState;
   quotas: BillingQuota;
   usage: BillingUsage;
   invoicePreview: InvoicePreview;
@@ -1620,11 +1642,17 @@ export const billingApi = {
   getPlans: () =>
     apiFetch<{ plans: BillingPlan[] }>("/api/v1/billing/plans"),
 
-  checkout: (projectId: string, plan: BillingPlanKey) =>
+  checkout: (projectId: string, plan: BillingPlanKey, autopay = false) =>
     apiFetch<CheckoutResponse>(`/api/v1/projects/${projectId}/billing/checkout`, {
       method: "POST",
-      body: { plan },
+      body: { plan, autopay },
     }),
+
+  setAutopay: (projectId: string, enabled: boolean) =>
+    apiFetch<{ autopay_enabled: boolean; autopay_method_title: string }>(
+      `/api/v1/projects/${projectId}/billing/autopay`,
+      { method: "PUT", body: { enabled } },
+    ),
 
   payments: (projectId: string) =>
     apiFetch<{ payments: Payment[] }>(`/api/v1/projects/${projectId}/billing/payments`),

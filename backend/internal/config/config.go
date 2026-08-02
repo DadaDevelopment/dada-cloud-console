@@ -489,6 +489,15 @@ type Config struct {
 	YooKassaReturnURL   string // YOOKASSA_RETURN_URL (default https://console.dada-tuda.ru/billing/return)
 	YooKassaSendReceipt bool   // YOOKASSA_SEND_RECEIPT (default false; 54-FZ fiscal receipt block)
 
+	// Fiscal receipt shape. Both depend on the merchant's own tax
+	// registration, so neither has a defensible hardcoded value:
+	// YooKassaVatCode 1 is "no VAT" (simplified regime), 2/3/4 are the 0/10/20
+	// percent rates. YooKassaTaxSystemCode is required only for a merchant
+	// registered under more than one tax system; 0 omits it, which is what a
+	// single-regime shop needs.
+	YooKassaVatCode       int // YOOKASSA_VAT_CODE (default 1)
+	YooKassaTaxSystemCode int // YOOKASSA_TAX_SYSTEM_CODE (default 0 = omit)
+
 	// YooKassa Partners API OAuth (payments slice 2, "Connect payments" app
 	// resource -- a merchant connects their OWN YooKassa shop via OAuth, no
 	// platform shop/keys involved). Empty YooKassaPartnerClientID/Secret means
@@ -711,6 +720,8 @@ func Load() (*Config, error) {
 		YooKassaSecretKey:           getEnv("YOOKASSA_SECRET_KEY", ""),
 		YooKassaReturnURL:           getEnv("YOOKASSA_RETURN_URL", "https://console.dada-tuda.ru/billing/return"),
 		YooKassaSendReceipt:         getEnv("YOOKASSA_SEND_RECEIPT", "false") == "true",
+		YooKassaVatCode:             getEnvInt("YOOKASSA_VAT_CODE", 1),
+		YooKassaTaxSystemCode:       getEnvInt("YOOKASSA_TAX_SYSTEM_CODE", 0),
 		YooKassaPartnerClientID:     getEnv("YOOKASSA_PARTNER_CLIENT_ID", ""),
 		YooKassaPartnerClientSecret: getEnv("YOOKASSA_PARTNER_CLIENT_SECRET", ""),
 

@@ -106,6 +106,76 @@ func TestCheckQuota_ActiveGrace_Allows(t *testing.T) {
 	}
 }
 
+// TestCheckQuota_ActiveGrace_RecordsTheBreach pins the loud half of the grace
+// window. Allowing the create is the product decision; doing it silently is
+// how a grandfathered org sits three apps over its plan for months with nobody
+// on either side aware, and then hits a wall the day the window closes.
+func TestCheckQuota_ActiveGrace_RecordsTheBreach(t *testing.T) {
+	pool := quotaGatePool(t)
+	future := time.Now().UTC().Add(30 * 24 * time.Hour)
+	orgID := seedOverQuotaOrg(t, pool, &future)
+	h := quotaGateHandler(pool, nil)
+
+	if err := h.checkQuota(context.Background(), orgID, "apps"); err != nil {
+		t.Fatalf("grandfathered org was blocked during its grace window: %v", err)
+	}
+
+	var count int
+	var lastAt *time.Time
+	if err := pool.QueryRow(context.Background(),
+		`SELECT quota_breach_count, quota_breach_last_at FROM billing_accounts WHERE org_id = $1`, orgID,
+	).Scan(&count, &lastAt); err != nil {
+		t.Fatalf("read breach counters: %v", err)
+	}
+	if count != 1 || lastAt == nil {
+		t.Fatalf("quota_breach_count=%d last_at=%v want 1 and a timestamp; an over-limit create during grace must leave a trace", count, lastAt)
+	}
+
+	var audits int
+	if err := pool.QueryRow(context.Background(),
+		`SELECT count(*) FROM audit_events WHERE action = 'QuotaBreachAllowed' AND resource_name = $1`, orgID,
+	).Scan(&audits); err != nil {
+		t.Fatalf("read audit events: %v", err)
+	}
+	if audits != 1 {
+		t.Fatalf("QuotaBreachAllowed audit events=%d want 1", audits)
+	}
+
+	if err := h.checkQuota(context.Background(), orgID, "apps"); err != nil {
+		t.Fatalf("second over-limit create was blocked during grace: %v", err)
+	}
+	if err := pool.QueryRow(context.Background(),
+		`SELECT quota_breach_count FROM billing_accounts WHERE org_id = $1`, orgID,
+	).Scan(&count); err != nil {
+		t.Fatalf("re-read breach count: %v", err)
+	}
+	if count != 2 {
+		t.Fatalf("quota_breach_count=%d want 2; the counter is how loud the banner gets", count)
+	}
+}
+
+// TestCheckQuota_UnderLimit_RecordsNothing keeps the noise honest: a compliant
+// org inside a grace window must not accumulate breaches.
+func TestCheckQuota_UnderLimit_RecordsNothing(t *testing.T) {
+	pool := quotaGatePool(t)
+	future := time.Now().UTC().Add(30 * 24 * time.Hour)
+	orgID := seedOverQuotaOrg(t, pool, &future)
+	h := quotaGateHandler(pool, nil)
+
+	if err := h.checkQuota(context.Background(), orgID, "databases"); err != nil {
+		t.Fatalf("under-limit resource was blocked: %v", err)
+	}
+	var count int
+	if err := pool.QueryRow(context.Background(),
+		`SELECT quota_breach_count FROM billing_accounts WHERE org_id = $1`, orgID,
+	).Scan(&count); err != nil {
+		t.Fatalf("read breach count: %v", err)
+	}
+	if count != 0 {
+		t.Fatalf("quota_breach_count=%d want 0 for a resource that is within its limit", count)
+	}
+}
+
 func TestCheckQuota_ExpiredGrace_Blocks(t *testing.T) {
 	pool := quotaGatePool(t)
 	past := time.Now().UTC().Add(-24 * time.Hour)
