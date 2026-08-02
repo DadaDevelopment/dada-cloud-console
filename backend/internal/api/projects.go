@@ -673,16 +673,35 @@ func (h *Handler) SetNamespacePolicy(c *gin.Context) {
 		return
 	}
 
+	audit := func(opID uuid.UUID, outcome string, meta map[string]any) {
+		h.recordAudit(c.Request.Context(), claims.UserID, auditEntry{
+			ProjectID:     projectID,
+			EnvironmentID: envID,
+			OperationID:   opID,
+			Action:        "SetNamespacePolicy",
+			ResourceKind:  "NamespacePolicy",
+			ResourceName:  "namespace-policy",
+			Outcome:       outcome,
+			Metadata:      meta,
+		})
+	}
+	reject := func(status int, reason string) {
+		audit(uuid.Nil, auditOutcomeFailure, map[string]any{"reason": reason, "status": status})
+	}
+
 	role, err := h.effectiveRole(c.Request.Context(), claims, projectID)
 	if err == pgx.ErrNoRows {
+		reject(http.StatusNotFound, "not_a_member")
 		respondNotFound(c)
 		return
 	}
 	if err != nil {
+		reject(http.StatusInternalServerError, "membership_check_failed")
 		respondError(c, http.StatusInternalServerError, "failed to check project membership")
 		return
 	}
 	if !isOrgAdmin(role) {
+		reject(http.StatusForbidden, "not_an_admin")
 		respondForbidden(c)
 		return
 	}
@@ -692,6 +711,7 @@ func (h *Handler) SetNamespacePolicy(c *gin.Context) {
 		ResourceQuota json.RawMessage `json:"resource_quota"`
 	}
 	if err := c.ShouldBindJSON(&body); err != nil {
+		reject(http.StatusBadRequest, "malformed_body")
 		respondError(c, http.StatusBadRequest, "invalid request body")
 		return
 	}
@@ -706,9 +726,15 @@ func (h *Handler) SetNamespacePolicy(c *gin.Context) {
 		INSERT INTO operations (id, actor_id, project_id, environment_id, action, resource_kind, resource_name, status, payload)
 		VALUES ($1, $2, $3, $4, 'SetNamespacePolicy', 'NamespacePolicy', 'namespace-policy', 'pending', $5)
 	`, opID, claims.UserID, projectID, envID, payload); err != nil {
+		reject(http.StatusInternalServerError, "operation_insert_failed")
 		respondError(c, http.StatusInternalServerError, "failed to create operation")
 		return
 	}
+
+	audit(opID, auditOutcomeSuccess, map[string]any{
+		"has_limit_range":    len(body.LimitRange) > 0,
+		"has_resource_quota": len(body.ResourceQuota) > 0,
+	})
 
 	c.JSON(http.StatusAccepted, gin.H{"operation_id": opID})
 }

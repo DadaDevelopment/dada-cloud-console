@@ -325,28 +325,56 @@ func (h *Handler) MoveApp(c *gin.Context) {
 	if !ok {
 		return
 	}
+	appName := c.Param("appName")
+	var req moveAppRequest
+
+	audit := func(opID uuid.UUID, outcome string, meta map[string]any) {
+		h.recordAudit(c.Request.Context(), claims.UserID, auditEntry{
+			ProjectID:     projectID,
+			EnvironmentID: envID,
+			OperationID:   opID,
+			Action:        "MoveApp",
+			ResourceKind:  "App",
+			ResourceName:  appName,
+			Outcome:       outcome,
+			Metadata:      meta,
+		})
+	}
+	reject := func(status int, reason string) {
+		meta := map[string]any{"reason": reason, "status": status}
+		if req.TargetProjectID != uuid.Nil {
+			meta["target_project_id"] = req.TargetProjectID.String()
+		}
+		audit(uuid.Nil, auditOutcomeFailure, meta)
+	}
+	rejectErr := func(status int, reason, msg string) {
+		reject(status, reason)
+		respondError(c, status, msg)
+	}
+
 	if _, err := h.requireWriter(c, claims.UserID, projectID); err != nil {
+		reject(http.StatusForbidden, "not_a_writer_on_source")
 		return
 	}
 	if ok, err := h.envBelongsToProject(c.Request.Context(), envID, projectID); err != nil {
-		respondError(c, http.StatusInternalServerError, "failed to verify environment")
+		rejectErr(http.StatusInternalServerError, "env_check_failed", "failed to verify environment")
 		return
 	} else if !ok {
+		reject(http.StatusNotFound, "env_not_in_project")
 		respondNotFound(c)
 		return
 	}
-	appName := c.Param("appName")
 
-	var req moveAppRequest
 	if err := c.ShouldBindJSON(&req); err != nil || req.TargetProjectID == uuid.Nil {
-		respondError(c, http.StatusBadRequest, "target_project_id is required")
+		rejectErr(http.StatusBadRequest, "target_project_required", "target_project_id is required")
 		return
 	}
 	if req.TargetProjectID == projectID {
-		respondError(c, http.StatusBadRequest, "target_project_id must differ from the app's current project")
+		rejectErr(http.StatusBadRequest, "target_equals_source", "target_project_id must differ from the app's current project")
 		return
 	}
 	if _, err := h.requireWriter(c, claims.UserID, req.TargetProjectID); err != nil {
+		reject(http.StatusForbidden, "not_a_writer_on_target")
 		return
 	}
 
@@ -355,20 +383,27 @@ func (h *Handler) MoveApp(c *gin.Context) {
 		`SELECT EXISTS(SELECT 1 FROM resource_snapshots WHERE project_id = $1 AND environment_id = $2 AND kind = 'App' AND name = $3)`,
 		projectID, envID, appName,
 	).Scan(&exists); err != nil {
-		respondError(c, http.StatusInternalServerError, "failed to look up app")
+		rejectErr(http.StatusInternalServerError, "lookup_failed", "failed to look up app")
 		return
 	}
 	if !exists {
+		reject(http.StatusNotFound, "not_found")
 		respondNotFound(c)
 		return
 	}
 
 	impact, err := h.computeMoveImpact(c.Request.Context(), projectID, envID, appName, req.TargetProjectID)
 	if err != nil {
-		respondError(c, http.StatusInternalServerError, "failed to compute move impact")
+		rejectErr(http.StatusInternalServerError, "impact_failed", "failed to compute move impact")
 		return
 	}
 	if !impact.CanMove {
+		audit(uuid.Nil, auditOutcomeFailure, map[string]any{
+			"reason":            "blocked",
+			"status":            http.StatusConflict,
+			"target_project_id": req.TargetProjectID.String(),
+			"blockers":          impact.Blockers,
+		})
 		c.JSON(http.StatusConflict, gin.H{"error": "app cannot be moved", "blockers": impact.Blockers})
 		return
 	}
@@ -392,9 +427,14 @@ func (h *Handler) MoveApp(c *gin.Context) {
 		claims.UserID, projectID, envID, appName, payloadBytes,
 	)
 	if err := scanOperation(row, &op); err != nil {
-		respondError(c, http.StatusInternalServerError, "failed to create operation")
+		rejectErr(http.StatusInternalServerError, "operation_insert_failed", "failed to create operation")
 		return
 	}
+
+	audit(op.ID, auditOutcomeSuccess, map[string]any{
+		"target_project_id": req.TargetProjectID.String(),
+		"target_env_id":     impact.TargetEnvID.String(),
+	})
 
 	c.JSON(http.StatusAccepted, gin.H{"operation": op, "message": "App move queued"})
 }

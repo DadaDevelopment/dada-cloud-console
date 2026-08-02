@@ -400,28 +400,49 @@ func (h *Handler) AssignPlan(c *gin.Context) {
 		respondUnauthorized(c)
 		return
 	}
-	if !isGod(claims) {
-		respondForbidden(c)
-		return
-	}
-	projectID, err := uuid.Parse(c.Param("projectId"))
-	if err != nil {
-		respondNotFound(c)
-		return
-	}
-	_, err = h.effectiveRole(c.Request.Context(), claims, projectID)
-	if errors.Is(err, pgx.ErrNoRows) {
-		respondNotFound(c)
-		return
-	}
-	if err != nil {
-		respondError(c, http.StatusInternalServerError, "failed to check project membership")
-		return
-	}
+	projectID, parseErr := uuid.Parse(c.Param("projectId"))
+
 	var body struct {
 		Plan string `json:"plan" binding:"required"`
 	}
+	audit := func(outcome string, meta map[string]any) {
+		h.recordAudit(c.Request.Context(), claims.UserID, auditEntry{
+			ProjectID:    projectID,
+			Action:       "AssignPlan",
+			ResourceKind: "BillingAccount",
+			ResourceName: body.Plan,
+			Outcome:      outcome,
+			Metadata:     meta,
+		})
+	}
+	reject := func(status int, reason string) {
+		audit(auditOutcomeFailure, map[string]any{"reason": reason, "status": status})
+	}
+
+	if !isGod(claims) {
+		reject(http.StatusForbidden, "not_a_platform_admin")
+		respondForbidden(c)
+		return
+	}
+	if parseErr != nil {
+		projectID = uuid.Nil
+		reject(http.StatusNotFound, "bad_project_id")
+		respondNotFound(c)
+		return
+	}
+	_, err := h.effectiveRole(c.Request.Context(), claims, projectID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		reject(http.StatusNotFound, "not_a_member")
+		respondNotFound(c)
+		return
+	}
+	if err != nil {
+		reject(http.StatusInternalServerError, "membership_check_failed")
+		respondError(c, http.StatusInternalServerError, "failed to check project membership")
+		return
+	}
 	if err := c.ShouldBindJSON(&body); err != nil {
+		reject(http.StatusBadRequest, "malformed_body")
 		respondError(c, http.StatusBadRequest, err.Error())
 		return
 	}
@@ -433,19 +454,23 @@ func (h *Handler) AssignPlan(c *gin.Context) {
 		}
 	}
 	if !found {
+		reject(http.StatusBadRequest, "unknown_plan")
 		respondError(c, http.StatusBadRequest, "unknown plan key: "+body.Plan)
 		return
 	}
 	orgID, err := h.projectOrg(c.Request.Context(), projectID)
 	if err != nil {
+		reject(http.StatusNotFound, "org_lookup_failed")
 		respondNotFound(c)
 		return
 	}
 	provider := &billing.ManualProvider{Pool: h.pool}
 	if err := provider.AssignPlan(c.Request.Context(), orgID, body.Plan); err != nil {
+		reject(http.StatusInternalServerError, "assign_failed")
 		respondError(c, http.StatusInternalServerError, "failed to assign plan")
 		return
 	}
+	audit(auditOutcomeSuccess, map[string]any{"org_id": orgID, "plan": body.Plan})
 	c.JSON(http.StatusOK, gin.H{"org_id": orgID, "plan": body.Plan})
 }
 

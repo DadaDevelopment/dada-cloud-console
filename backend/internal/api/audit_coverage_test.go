@@ -28,7 +28,6 @@ var auditMutationVerbs = []string{
 // handler shipped without an audit row. Closing one is a one-line deletion here
 // plus the recordAudit call. Tracked as the audit-coverage backlog item.
 var auditCoverageKnownGaps = map[string]bool{
-	"AssignPlan":          true,
 	"AttachBoxDatabase":   true,
 	"CreateAlertRule":     true,
 	"CreateChannel":       true,
@@ -39,9 +38,7 @@ var auditCoverageKnownGaps = map[string]bool{
 	"DeleteMonitoringApp": true,
 	"ExposeBox":           true,
 	"ImportZone":          true,
-	"MoveApp":             true,
 	"RetryOperation":      true,
-	"SetNamespacePolicy":  true,
 	"TriggerAutofix":      true,
 }
 
