@@ -271,3 +271,31 @@ you have not built resilience, you have built a blind spot with good manners.
 Corollary: put the guard where the project's trusted signal already runs — mine
 went to `prebuild` rather than `test:unit` because CI builds on node 20, which
 has no `--experimental-strip-types` and therefore never runs `test:unit` at all.
+
+## 2026-08-02 — A control loop that only decides has not shipped
+
+The vertical autoscaler measured pressure correctly, picked correct envelopes,
+logged them and wrote audit rows. It resized nothing. Nine `AutoscaleApp` audit
+rows on prod: two successes from an earlier code path, seven refusals — five
+`unsized_app`, then, after the ladder was removed, four starving apps refused
+across three ticks. The owner's verdict was one line: "recommender-only —
+полная хуета." It was right.
+
+The failure was not in the decision, it was in every step after it. The write
+path went through `DeployImageVersion`, which regenerates values.yaml from the
+database; for a hand-maintained app the database holds almost nothing the file
+holds, so the render dropped env/volumes/serviceDatabase and the agent's clobber
+guard refused the operation. Both the decision and the guard were correct, and
+the loop still did nothing.
+
+**Rule.** For any actuator, verify the ACT step against production evidence, not
+the decide step. "The logs show it chose to grow" is not the same claim as "the
+app got bigger" — go find the commit, the rollout, the new limits. Until you
+have those, an autoscaler is a logger.
+
+**Corollary.** When an operation must not disturb what it is not changing, patch
+the artefact instead of regenerating it. `ResizeApp` rewrites six scalars inside
+the existing values.yaml via a yaml-node round-trip; on the real 244-line
+internal-prod/gateway file the diff is exactly three lines and every comment and
+block scalar survives. Nothing is re-derived, so nothing can be lost, and there
+is no guard left to trip.
