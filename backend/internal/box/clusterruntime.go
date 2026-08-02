@@ -508,6 +508,9 @@ func clusterPodReady(pod *corev1.Pod) bool {
 // into it. Env goes to a file rather than to the pod spec because a container's
 // env is fixed at creation, and re-creating the pod to set a variable would throw
 // away the warm pull that makes a claim fast.
+//
+// The file is 0600: it holds credentials handed to this tenant, and the default
+// mask on the pod's setgid tree would otherwise leave them group-readable.
 func (c *ClusterRuntime) Bind(ctx context.Context, inst *Instance, spec Spec) error {
 	var b strings.Builder
 	b.WriteString("set -e\n")
@@ -517,6 +520,9 @@ func (c *ClusterRuntime) Bind(ctx context.Context, inst *Instance, spec Spec) er
 			return fmt.Errorf("invalid environment key %q", k)
 		}
 		fmt.Fprintf(&b, "printf '%%s\\n' %s >> /etc/dada/env\n", shellQuote(k+"="+v))
+	}
+	if len(spec.Env) > 0 {
+		b.WriteString("chmod 600 /etc/dada/env\n")
 	}
 	if spec.SSHPublicKey != "" {
 		fmt.Fprintf(&b, "printf '%%s\\n' %s >> /root/.ssh/authorized_keys\n", shellQuote(spec.SSHPublicKey))

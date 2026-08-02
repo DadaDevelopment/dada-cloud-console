@@ -864,12 +864,18 @@ func (c *ClusterCrystallizer) ensurePVC(ctx context.Context, vmName string) erro
 // its content files 0444) cannot be opened for writing at all. Without -f those
 // paths silently fall out of the copy and the manifest comparison reports a lost
 // volume for files whose content never actually differed.
+//
+// The env file is forced to 0600 on the way in. ADR-019 requires the promoted
+// artifact to hold injected credentials at 0600 root, and verification enforces
+// exactly that, so a file that arrived group-readable would be reported as a lost
+// environment even though every value in it matched.
 func crystalCommand(d ServiceDescriptor, workDir, marker string) string {
 	var b strings.Builder
 	b.WriteString("while [ ! -f " + marker + " ]; do sleep 1; done\n")
 	b.WriteString("cp -af " + crystalRootDelta + "/. / 2>" + crystalCopyLog + " || echo \"crystal: часть файлов не скопировалась, подробности в " + crystalCopyLog + "\" >&2\n")
 	b.WriteString("set -a\n")
 	for _, p := range []string{ClusterBoxEnvPath, BoxEnvPath} {
+		b.WriteString("[ -f /" + p + " ] && chmod 600 /" + p + "\n")
 		b.WriteString("[ -r /" + p + " ] && . /" + p + "\n")
 	}
 	b.WriteString("set +a\n")
