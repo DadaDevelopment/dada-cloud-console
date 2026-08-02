@@ -1,8 +1,8 @@
 "use client";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useParams, useSearchParams } from "next/navigation";
-import { buildsApi } from "@/lib/api";
+import { buildsApi, appsApi } from "@/lib/api";
 import type { Build } from "@/lib/types";
 import { Spinner } from "@/components/ui/spinner";
 import { Breadcrumb } from "@/components/ui/breadcrumb";
@@ -12,6 +12,7 @@ import { timeAgo } from "@/lib/format";
 import { BuildStatusBadge, isBuildActive } from "@/components/deploy/build-status-badge";
 import { BuildLogViewer } from "@/components/deploy/build-log-viewer";
 import { useT } from "@/lib/i18n/console/context";
+import { trackUxEvent } from "@/lib/ux-telemetry";
 
 const PYTHON_BOT_DOCKERFILE = `FROM python:3.12-slim
 WORKDIR /app
@@ -32,6 +33,9 @@ export default function BuildDetailPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [canceling, setCanceling] = useState(false);
+  const [appUrl, setAppUrl] = useState<string | null>(null);
+  const successViewedRef = useRef(false);
+  const appUrlFetchedRef = useRef(false);
 
   const canDeploy = canMutate(role);
 
@@ -61,6 +65,40 @@ export default function BuildDetailPage() {
     const interval = setInterval(() => void load(true), 3000);
     return () => clearInterval(interval);
   }, [build, load]);
+
+  /**
+   * Reports one `view` event for the success panel, guarded so the 3s poll
+   * and re-renders after it don't multiply rows. Same key family as the
+   * `open_app` click (build_success_cta:*) so a show->click conversion can
+   * be computed the way app-next-step-card.tsx already does.
+   */
+  useEffect(() => {
+    if (build?.status !== "success") return;
+    if (successViewedRef.current) return;
+    successViewedRef.current = true;
+    trackUxEvent("view", "build_success_cta:panel");
+  }, [build?.status]);
+
+  /**
+   * Fetches the app's live URL only once the build succeeds, and only once
+   * (guarded), instead of folding it into the 3s status poll. A failure here
+   * must never surface as an error -- the build itself succeeded -- so the
+   * catch is silent and the panel just falls back to its URL-less layout.
+   */
+  useEffect(() => {
+    if (build?.status !== "success") return;
+    if (appUrlFetchedRef.current) return;
+    if (!envId) return;
+    appUrlFetchedRef.current = true;
+    appsApi
+      .list(projectId, envId)
+      .then((data) => {
+        const found = (data.apps ?? []).find((a) => a.name === appName);
+        const summary = found?.summary_json as { url?: string } | undefined;
+        if (summary?.url) setAppUrl(summary.url);
+      })
+      .catch(() => {});
+  }, [build?.status, envId, projectId, appName]);
 
   async function handleCancel() {
     setCanceling(true);
@@ -128,7 +166,20 @@ export default function BuildDetailPage() {
 
           {build.status === "success" && (
             <div className="mb-4 flex items-center justify-between gap-4 rounded-lg border border-green-200 dark:border-green-900 bg-green-50 dark:bg-green-950/40 px-4 py-3 text-sm text-green-700 dark:text-green-300">
-              <p className="font-medium">{t("apps.builds.success.heading")}</p>
+              <div className="min-w-0">
+                <p className="font-medium">{t("apps.builds.success.heading")}</p>
+                {appUrl && (
+                  <a
+                    href={appUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    data-ux="build_success_cta:open_url"
+                    className="mt-1 block truncate font-mono text-xs underline underline-offset-2 hover:text-green-800 dark:hover:text-green-200"
+                  >
+                    {appUrl}
+                  </a>
+                )}
+              </div>
               <Link
                 href={`/projects/${projectId}/apps/${appName}${envId ? `?envId=${envId}` : ""}`}
                 data-ux="build_success_cta:open_app"
