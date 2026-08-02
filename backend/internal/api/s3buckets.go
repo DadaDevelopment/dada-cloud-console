@@ -3,8 +3,10 @@ package api
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/dada-tuda/console/backend/internal/auth"
 	"github.com/dada-tuda/console/backend/internal/cloudtask"
@@ -91,6 +93,13 @@ func (h *Handler) ListS3Buckets(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{"buckets": buckets})
 }
+
+// maxS3BucketDescriptionLen mirrors the hard limit of the upstream Beget
+// provider: beget_s3_bucket.description rejects anything longer than 45
+// characters. Exceeding it does not fail the API call — it strands the
+// Terraform workspace in ReconcileError, so the connection secret is never
+// created and every credential reveal answers 404 "still provisioning".
+const maxS3BucketDescriptionLen = 45
 
 type createS3BucketRequest struct {
 	Name          string `json:"name"`
@@ -183,6 +192,11 @@ func (h *Handler) CreateS3Bucket(c *gin.Context) {
 	}
 	if err := validateKubeName(req.Name); err != nil {
 		reject(http.StatusBadRequest, "invalid_name", err.Error())
+		return
+	}
+	if n := utf8.RuneCountInString(req.Description); n > maxS3BucketDescriptionLen {
+		reject(http.StatusBadRequest, "description_too_long",
+			fmt.Sprintf("description must be at most %d characters, got %d", maxS3BucketDescriptionLen, n))
 		return
 	}
 

@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strings"
 	"text/template"
+	"unicode/utf8"
 
 	"gopkg.in/yaml.v3"
 )
@@ -1151,7 +1152,18 @@ spec:
   ftpSftpEnable: {{ .FtpSftpEnable }}
 `))
 
+// maxS3BucketDescriptionLen mirrors the upstream Beget provider limit:
+// beget_s3_bucket.description rejects more than 45 characters. A longer value
+// does not fail the render — it strands the Terraform workspace in
+// ReconcileError, so the bucket never provisions and its credentials never
+// appear. Truncating here keeps a legacy or hand-edited snapshot from wedging
+// a bucket; the console rejects over-long input at the API boundary.
+const maxS3BucketDescriptionLen = 45
+
 func RenderS3Bucket(spec S3BucketSpec) (string, error) {
+	if utf8.RuneCountInString(spec.Description) > maxS3BucketDescriptionLen {
+		spec.Description = string([]rune(spec.Description)[:maxS3BucketDescriptionLen])
+	}
 	var buf bytes.Buffer
 	if err := s3BucketTmpl.Execute(&buf, spec); err != nil {
 		return "", fmt.Errorf("rendering S3Bucket: %w", err)

@@ -4,6 +4,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/dada-tuda/console/gitops-agent/internal/renderer"
 	"gopkg.in/yaml.v3"
@@ -950,5 +951,31 @@ func TestChartForAndDefaultPort(t *testing.T) {
 		if got := renderer.DefaultPortForFramework(fw); got != 8080 {
 			t.Errorf("DefaultPortForFramework(%q) = %d, want 8080", fw, got)
 		}
+	}
+}
+
+func TestRenderS3BucketTruncatesOverLongDescription(t *testing.T) {
+	long := strings.Repeat("я", 70)
+	out, err := renderer.RenderS3Bucket(renderer.S3BucketSpec{
+		Name:        "raw-archive",
+		BucketName:  "raw-archive",
+		Region:      "ru1",
+		Description: long,
+		ProjectSlug: "p",
+		EnvSlug:     "prod",
+	})
+	if err != nil {
+		t.Fatalf("render: %v", err)
+	}
+	var rendered struct {
+		Spec struct {
+			Description string `yaml:"description"`
+		} `yaml:"spec"`
+	}
+	if err := yaml.Unmarshal([]byte(out), &rendered); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if n := utf8.RuneCountInString(rendered.Spec.Description); n != 45 {
+		t.Fatalf("description length = %d, want 45", n)
 	}
 }
