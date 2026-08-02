@@ -168,6 +168,7 @@ export default function AppDeploymentsPage() {
     return dep.is_current ? (
       <button
         onClick={() => handleDeployAction(dep.id, "promote")}
+        data-ux="app_deploy_feed:promote"
         disabled={actionId === dep.id}
         className="rounded-lg border border-gray-300 dark:border-gray-700 px-3 py-1.5 text-xs font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-50"
       >
@@ -176,6 +177,7 @@ export default function AppDeploymentsPage() {
     ) : (
       <button
         onClick={() => handleDeployAction(dep.id, "rollback")}
+        data-ux="app_deploy_feed:rollback"
         disabled={actionId === dep.id}
         className="rounded-lg border border-gray-300 dark:border-gray-700 px-3 py-1.5 text-xs font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-50"
       >
@@ -213,6 +215,7 @@ export default function AppDeploymentsPage() {
         {canDeploy && !unavailable && (
           <button
             onClick={handleTrigger}
+            data-ux="app_deploy_feed:trigger_build"
             disabled={triggering}
             className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50 transition-colors"
           >
@@ -264,7 +267,11 @@ export default function AppDeploymentsPage() {
                         isCurrent ? "border-green-300 ring-1 ring-green-200 dark:ring-green-900" : "border-gray-200 dark:border-gray-800"
                       }`}
                     >
-                      <Link href={`/projects/${projectId}/apps/${appName}/builds/${b.id}${envId ? `?envId=${envId}` : ""}`} className="min-w-0 flex-1">
+                      <Link
+                        href={`/projects/${projectId}/apps/${appName}/builds/${b.id}${envId ? `?envId=${envId}` : ""}`}
+                        data-ux="app_deploy_feed:open_build_row"
+                        className="min-w-0 flex-1"
+                      >
                         <div className="flex flex-wrap items-center gap-2">
                           {isCurrent && <CurrentBadge />}
                           <BuildStatusBadge status={b.status} />
@@ -287,6 +294,7 @@ export default function AppDeploymentsPage() {
                         {canDeploy && isBuildActive(b.status) && (
                           <button
                             onClick={() => handleCancel(b.id)}
+                            data-ux="app_deploy_feed:cancel_build"
                             disabled={actionId === b.id}
                             className="rounded-lg border border-gray-300 dark:border-gray-700 px-3 py-1.5 text-xs font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-50"
                           >
@@ -296,6 +304,7 @@ export default function AppDeploymentsPage() {
                         {canDeploy && b.status === "failed" && (
                           <button
                             onClick={() => handleAutofix(b)}
+                            data-ux="app_deploy_feed:autofix"
                             disabled={actionId === b.id}
                             className="rounded-lg border border-blue-300 dark:border-blue-800 px-3 py-1.5 text-xs font-medium text-blue-700 dark:text-blue-300 hover:bg-blue-50 dark:hover:bg-blue-950/40 disabled:opacity-50"
                           >
@@ -305,6 +314,7 @@ export default function AppDeploymentsPage() {
                         {dep && <DeployActions dep={dep} />}
                         <Link
                           href={`/projects/${projectId}/apps/${appName}/builds/${b.id}${envId ? `?envId=${envId}` : ""}`}
+                          data-ux="app_deploy_feed:build_logs"
                           className="text-sm font-medium text-blue-600 dark:text-blue-400 hover:text-blue-700"
                         >
                           {t("apps.deployments.logs")}
