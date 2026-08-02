@@ -51,6 +51,18 @@ func crystallizeContext(reqCtx context.Context) (context.Context, context.Cancel
 	return context.WithTimeout(context.WithoutCancel(reqCtx), crystallizeBudget)
 }
 
+// crystallizeBookkeepingContext is the context the writes AFTER the promotion run
+// on. They need their own, for the same reason and one more: by the time the work
+// is done the caller has often been gone for minutes, and on the request context
+// every one of those writes fails at once — the report is never stored, the box is
+// never returned to Ready, and the audit entry never lands. The result is the exact
+// wedge this whole change exists to remove: a row stuck 'Running', a box stuck
+// 'Crystallizing', and a partial unique index that refuses every retry. Recording
+// what happened is not optional work that a disconnect may skip.
+func crystallizeBookkeepingContext(reqCtx context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.WithoutCancel(reqCtx), 30*time.Second)
+}
+
 type crystallizeBoxRequest struct {
 	// AppServerName names the permanent artifact.
 	AppServerName string `json:"app_server_name"`
@@ -205,6 +217,9 @@ func (h *Handler) CrystallizeBox(c *gin.Context) {
 		Ports:      req.Ports,
 	})
 
+	bookCtx, cancelBook := crystallizeBookkeepingContext(c.Request.Context())
+	defer cancelBook()
+
 	verified := cErr == nil
 	status := "Verified"
 	errMsg := ""
@@ -221,7 +236,7 @@ func (h *Handler) CrystallizeBox(c *gin.Context) {
 	if report != nil {
 		stage, durationMS = report.Stage, report.DurationMS
 	}
-	if _, err := h.pool.Exec(c.Request.Context(),
+	if _, err := h.pool.Exec(bookCtx,
 		`UPDATE box_crystallizations
 		    SET status = $2, stage = $3, verified = $4, error_message = $5,
 		        report = $6, carry = $7, duration_ms = $8, finished_at = now()
@@ -236,7 +251,7 @@ func (h *Handler) CrystallizeBox(c *gin.Context) {
 	// for 72 hours after a promotion precisely so a customer who finds something
 	// missing still has the original — and a FAILED verification is the case where
 	// that matters most, so the box must not be torn down on failure.
-	if _, err := h.pool.Exec(c.Request.Context(),
+	if _, err := h.pool.Exec(bookCtx,
 		`UPDATE boxes SET status = 'Ready', error_message = $2, updated_at = now() WHERE id = $1`,
 		b.ID, errMsg,
 	); err != nil {
@@ -252,7 +267,7 @@ func (h *Handler) CrystallizeBox(c *gin.Context) {
 	if !verified {
 		outcome = auditOutcomeFailure
 	}
-	h.recordAudit(c.Request.Context(), claims.UserID, auditEntry{
+	h.recordAudit(bookCtx, claims.UserID, auditEntry{
 		ProjectID:     projectID,
 		EnvironmentID: envID,
 		Action:        models.ActionCrystallizeBox,
