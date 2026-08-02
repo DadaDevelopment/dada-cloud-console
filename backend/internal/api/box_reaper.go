@@ -44,6 +44,11 @@ const (
 	boxReapFinalWarnAfter = 66 * time.Hour
 )
 
+// staleCrystallizationGrace is the slack added on top of crystallizeBudget before a
+// still-'Running' promotion is declared dead. A run that is one second from its own
+// deadline is alive, and stealing its row would make two writers of one outcome.
+const staleCrystallizationGrace = 2 * time.Minute
+
 // BoxReaper is the lifecycle sweep. Like BoxMeter it carries an injected clock, so
 // a test can put a box 71 hours asleep without waiting.
 type BoxReaper struct {
@@ -70,6 +75,7 @@ func NewBoxReaper(pool *pgxpool.Pool, cfg *config.Config, notifier *notify.Notif
 // main's box ticker, beside the meter.
 func (r *BoxReaper) RunBoxMaintenanceTick(ctx context.Context) {
 	runWithAdvisoryLock(ctx, r.pool, lockKeyBoxReaper, "box-reaper", func(ctx context.Context) {
+		r.reapStaleCrystallizations(ctx)
 		r.reapIdle(ctx)
 		r.reapExpired(ctx)
 		r.reapSleeping(ctx)
@@ -88,6 +94,65 @@ type boxReapCandidate struct {
 	SleptAt       *time.Time
 	WarnedAt      *time.Time
 	FinalWarnedAt *time.Time
+}
+
+// reapStaleCrystallizations closes out promotions whose process is gone.
+//
+// A crystallization is bounded by crystallizeBudget, and the handler that started
+// it is the only thing that ever writes its ending. So a row still 'Running' long
+// after that budget means the process that owned it no longer exists: the backend
+// was rolled, the pod was evicted, the node died. Nothing will ever finish that row.
+//
+// The consequence is not cosmetic. The box stays 'Crystallizing', the partial
+// unique index reads that row as "already in flight", and every retry is refused
+// with 409 — the customer's box is permanently unpromotable because of an event
+// that happened on our side and that they cannot see. That is the worst possible
+// shape for the one action that converts a box into a paid VM.
+//
+// The grace on top of the budget is deliberate: a run at 14m59s is alive and must
+// not have its row stolen out from under it while it is still writing files.
+func (r *BoxReaper) reapStaleCrystallizations(ctx context.Context) {
+	cutoff := r.now().UTC().Add(-(crystallizeBudget + staleCrystallizationGrace))
+	rows, err := r.pool.Query(ctx, `
+		UPDATE box_crystallizations
+		   SET status = 'Failed', verified = false, finished_at = now(),
+		       error_message = 'прервано перезапуском control-plane: процесс, который вёл кристаллизацию, не дожил до конца'
+		 WHERE status = 'Running' AND created_at < $1
+		RETURNING id, box_id`, cutoff)
+	if err != nil {
+		log.Warn().Err(err).Msg("box reaper: stale crystallization sweep failed")
+		return
+	}
+	type stale struct{ crystID, boxID uuid.UUID }
+	var found []stale
+	for rows.Next() {
+		var s stale
+		if err := rows.Scan(&s.crystID, &s.boxID); err != nil {
+			log.Warn().Err(err).Msg("box reaper: stale crystallization scan failed")
+			rows.Close()
+			return
+		}
+		found = append(found, s)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		log.Warn().Err(err).Msg("box reaper: stale crystallization rows failed")
+		return
+	}
+	for _, s := range found {
+		if _, err := r.pool.Exec(ctx, `
+			UPDATE boxes
+			   SET status = 'Ready',
+			       error_message = 'кристаллизация прервана перезапуском control-plane; можно повторить',
+			       updated_at = now()
+			 WHERE id = $1 AND status = 'Crystallizing'`, s.boxID); err != nil {
+			log.Warn().Err(err).Str("box", s.boxID.String()).
+				Msg("box reaper: failed to release a box from Crystallizing")
+			continue
+		}
+		log.Warn().Str("box", s.boxID.String()).Str("crystallization", s.crystID.String()).
+			Msg("box reaper: closed out a crystallization whose process is gone")
+	}
 }
 
 // reapIdle puts awake-but-untouched boxes to sleep.

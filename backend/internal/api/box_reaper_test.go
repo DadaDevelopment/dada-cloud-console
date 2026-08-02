@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -417,5 +418,79 @@ func TestBoxReaperConfigDefaults(t *testing.T) {
 	if cfg.BoxDefaultSpendCapRub <= 0 {
 		t.Errorf("BOX_DEFAULT_SPEND_CAP_RUB default = %v, want a positive cap: an unlimited default would "+
 			"leave exactly the customers who did not think about caps unprotected", cfg.BoxDefaultSpendCapRub)
+	}
+}
+
+// seedCrystallization inserts one promotion row for a box, aged by age.
+func seedCrystallization(t *testing.T, pool *pgxpool.Pool, boxID uuid.UUID, age time.Duration) uuid.UUID {
+	t.Helper()
+	var envID, userID uuid.UUID
+	if err := pool.QueryRow(context.Background(),
+		`SELECT environment_id, created_by FROM boxes WHERE id = $1`, boxID).Scan(&envID, &userID); err != nil {
+		t.Fatalf("read the box: %v", err)
+	}
+	var id uuid.UUID
+	if err := pool.QueryRow(context.Background(),
+		`INSERT INTO box_crystallizations (box_id, environment_id, vm_name, domain, os_slug, status, stage, created_by, created_at)
+		 VALUES ($1, $2, $3, $4, 'ubuntu-24-04', 'Running', 'capture', $5, now() - $6::interval)
+		 RETURNING id`,
+		boxID, envID, "vm-"+uuid.NewString()[:8], "vm.example.test", userID,
+		fmt.Sprintf("%d seconds", int(age.Seconds())),
+	).Scan(&id); err != nil {
+		t.Fatalf("seed the crystallization: %v", err)
+	}
+	if _, err := pool.Exec(context.Background(),
+		`UPDATE boxes SET status = 'Crystallizing' WHERE id = $1`, boxID); err != nil {
+		t.Fatalf("mark the box crystallizing: %v", err)
+	}
+	return id
+}
+
+func crystallizationStatus(t *testing.T, pool *pgxpool.Pool, id uuid.UUID) string {
+	t.Helper()
+	var s string
+	if err := pool.QueryRow(context.Background(),
+		`SELECT status FROM box_crystallizations WHERE id = $1`, id).Scan(&s); err != nil {
+		t.Fatalf("read the crystallization: %v", err)
+	}
+	return s
+}
+
+// TestBoxReaper_ClosesOutACrystallizationWhoseProcessIsGone: a backend roll during a
+// promotion used to leave the row 'Running' forever and the box 'Crystallizing'
+// forever, and the partial unique index then refused every retry with 409. The
+// customer's box became permanently unpromotable because of an event on our side.
+func TestBoxReaper_ClosesOutACrystallizationWhoseProcessIsGone(t *testing.T) {
+	pool := testOptimisticPool(t)
+	_, boxID, _ := seedMeteredBox(t, pool, "org-cryst-"+uuid.NewString()[:8], models.BoxStatusReady)
+	crystID := seedCrystallization(t, pool, boxID, crystallizeBudget+staleCrystallizationGrace+time.Minute)
+
+	clock := time.Now().UTC()
+	newTestBoxReaper(t, pool, &clock).RunBoxMaintenanceTick(context.Background())
+
+	if got := crystallizationStatus(t, pool, crystID); got != "Failed" {
+		t.Errorf("crystallization status = %q, want Failed: nothing will ever finish a row whose process died", got)
+	}
+	if got := boxStatus(t, pool, boxID); got != string(models.BoxStatusReady) {
+		t.Errorf("box status = %q, want Ready: a box left in Crystallizing can never be promoted again", got)
+	}
+}
+
+// TestBoxReaper_LeavesALiveCrystallizationAlone: a promotion one second from its own
+// deadline is still writing files into the permanent workload. Stealing its row would
+// make two writers of one outcome and would report a failure that did not happen.
+func TestBoxReaper_LeavesALiveCrystallizationAlone(t *testing.T) {
+	pool := testOptimisticPool(t)
+	_, boxID, _ := seedMeteredBox(t, pool, "org-cryst-"+uuid.NewString()[:8], models.BoxStatusReady)
+	crystID := seedCrystallization(t, pool, boxID, crystallizeBudget-time.Minute)
+
+	clock := time.Now().UTC()
+	newTestBoxReaper(t, pool, &clock).RunBoxMaintenanceTick(context.Background())
+
+	if got := crystallizationStatus(t, pool, crystID); got != "Running" {
+		t.Errorf("crystallization status = %q, want Running: the run is still inside its budget", got)
+	}
+	if got := boxStatus(t, pool, boxID); got != string(models.BoxStatusCrystallizing) {
+		t.Errorf("box status = %q, want Crystallizing", got)
 	}
 }
