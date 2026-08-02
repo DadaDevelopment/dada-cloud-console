@@ -4,7 +4,9 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
+    "prebuild": "npm run check:docs",
     "build": "next build",
+    "check:docs": "node scripts/check-doc-translations.mjs",
     "start": "next start",
     "lint": "eslint",
     "test:unit": "node --experimental-strip-types --test \"lib/**/*.test.ts\"",
