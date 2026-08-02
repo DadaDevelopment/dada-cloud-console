@@ -207,6 +207,10 @@ export const apps: Messages = {
   "apps.builds.error.notCancelable": { ru: "Эту сборку больше нельзя отменить.", en: "This build can no longer be canceled." },
   "apps.builds.success.heading": { ru: "Сборка готова", en: "Build ready" },
   "apps.builds.success.openApp": { ru: "Открыть приложение", en: "Open application" },
+  "apps.builds.success.notReady": { ru: "Приложение ещё запускается, ссылка появится, когда оно поднимется", en: "App is still starting, the link will appear once it is up" },
+  "apps.builds.rebuild": { ru: "Пересобрать", en: "Rebuild" },
+  "apps.builds.rebuilding": { ru: "Запуск…", en: "Rebuilding…" },
+  "apps.builds.error.rebuild": { ru: "Не удалось запустить пересборку", en: "Failed to start rebuild" },
   "apps.builds.fail.heading": { ru: "Сборка не удалась", en: "Build failed" },
   "apps.builds.fail.noDockerfile.hint": {
     ru: "В репозитории нет Dockerfile — добавьте его в корень (подойдёт и имя dockerfile).",

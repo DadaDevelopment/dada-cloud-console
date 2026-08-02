@@ -1,7 +1,7 @@
 "use client";
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { useParams, useSearchParams } from "next/navigation";
+import { useParams, useSearchParams, useRouter } from "next/navigation";
 import { buildsApi, appsApi } from "@/lib/api";
 import type { Build } from "@/lib/types";
 import { Spinner } from "@/components/ui/spinner";
@@ -21,10 +21,14 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
 CMD ["python", "main.py"]`;
 
+const appReadyPollMs = 5000;
+const appReadyMaxPolls = 60;
+
 export default function BuildDetailPage() {
   const params = useParams<{ projectId: string; appName: string; buildId: string }>();
   const { projectId, appName, buildId } = params;
   const searchParams = useSearchParams();
+  const router = useRouter();
   const { selectedEnv, role } = useProjectContext();
   const envId = searchParams.get("envId") || selectedEnv?.id || "";
   const { t } = useT();
@@ -33,9 +37,12 @@ export default function BuildDetailPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [canceling, setCanceling] = useState(false);
+  const [rebuilding, setRebuilding] = useState(false);
   const [appUrl, setAppUrl] = useState<string | null>(null);
+  const [appReady, setAppReady] = useState(false);
   const successViewedRef = useRef(false);
-  const appUrlFetchedRef = useRef(false);
+  const readyCtaViewedRef = useRef(false);
+  const appUrlPollsRef = useRef(0);
 
   const canDeploy = canMutate(role);
 
@@ -80,25 +87,76 @@ export default function BuildDetailPage() {
   }, [build?.status]);
 
   /**
-   * Fetches the app's live URL only once the build succeeds, and only once
-   * (guarded), instead of folding it into the 3s status poll. A failure here
-   * must never surface as an error -- the build itself succeeded -- so the
-   * catch is silent and the panel just falls back to its URL-less layout.
+   * Fetches the app's live URL and phase once the build succeeds. A rollout
+   * lags its build, so this polls until the app reports `ready` rather than
+   * reading the phase once: the URL-less panel promises the link will appear
+   * on its own, and a one-shot read would make that promise false until a
+   * manual reload. Polling stops on ready and is capped so a permanently
+   * crashing app cannot poll forever. A failure here must never surface as
+   * an error -- the build itself succeeded -- so the catch is silent and the
+   * panel just falls back to its URL-less layout.
    */
   useEffect(() => {
     if (build?.status !== "success") return;
-    if (appUrlFetchedRef.current) return;
     if (!envId) return;
-    appUrlFetchedRef.current = true;
-    appsApi
-      .list(projectId, envId)
-      .then((data) => {
-        const found = (data.apps ?? []).find((a) => a.name === appName);
-        const summary = found?.summary_json as { url?: string } | undefined;
-        if (summary?.url) setAppUrl(summary.url);
-      })
-      .catch(() => {});
-  }, [build?.status, envId, projectId, appName]);
+    if (appReady) return;
+    let canceled = false;
+    const read = () => {
+      if (appUrlPollsRef.current >= appReadyMaxPolls) return;
+      appUrlPollsRef.current += 1;
+      appsApi
+        .list(projectId, envId)
+        .then((data) => {
+          if (canceled) return;
+          const found = (data.apps ?? []).find((a) => a.name === appName);
+          const summary = found?.summary_json as { url?: string } | undefined;
+          if (summary?.url) setAppUrl(summary.url);
+          setAppReady((found?.phase ?? "").toLowerCase() === "ready");
+        })
+        .catch(() => {});
+    };
+    read();
+    const timer = setInterval(read, appReadyPollMs);
+    return () => {
+      canceled = true;
+      clearInterval(timer);
+    };
+  }, [build?.status, envId, projectId, appName, appReady]);
+
+  /**
+   * Same gate as `app-latest-build-card.tsx`: a build can succeed while the
+   * rollout it produced is still crashing, so "Open application" must wait
+   * for the app's own phase, not just the build outcome (see 9fbee62). The
+   * `app_ready_cta:panel` view is guarded so the 3s poll never inflates it,
+   * and shares the key family with the other panel so a show->click
+   * conversion can be read across both surfaces.
+   */
+  useEffect(() => {
+    if (build?.status !== "success") return;
+    if (!appReady || !appUrl) return;
+    if (readyCtaViewedRef.current) return;
+    readyCtaViewedRef.current = true;
+    trackUxEvent("view", "app_ready_cta:panel");
+  }, [build?.status, appReady, appUrl]);
+
+  async function handleRebuild() {
+    if (!envId || !build) return;
+    setRebuilding(true);
+    setError(null);
+    try {
+      const { build: newBuild } = await buildsApi.trigger(projectId, envId, appName);
+      if (newBuild?.id) {
+        router.push(`/projects/${projectId}/apps/${appName}/builds/${newBuild.id}${envId ? `?envId=${envId}` : ""}`);
+        return;
+      }
+      await load(true);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : t("apps.builds.error.rebuild");
+      setError(/409|not connected/i.test(msg) ? t("apps.deployments.error.noRepo") : msg);
+    } finally {
+      setRebuilding(false);
+    }
+  }
 
   async function handleCancel() {
     setCanceling(true);
@@ -158,6 +216,16 @@ export default function BuildDetailPage() {
                 {canceling ? t("apps.builds.canceling") : t("apps.builds.cancel")}
               </button>
             )}
+            {canDeploy && (build.status === "failed" || build.status === "canceled") && envId && (
+              <button
+                onClick={handleRebuild}
+                disabled={rebuilding}
+                data-ux="apps_build_detail:rebuild"
+                className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50 transition-colors"
+              >
+                {rebuilding ? t("apps.builds.rebuilding") : t("apps.builds.rebuild")}
+              </button>
+            )}
           </div>
 
           {error && (
@@ -168,7 +236,7 @@ export default function BuildDetailPage() {
             <div className="mb-4 flex items-center justify-between gap-4 rounded-lg border border-green-200 dark:border-green-900 bg-green-50 dark:bg-green-950/40 px-4 py-3 text-sm text-green-700 dark:text-green-300">
               <div className="min-w-0">
                 <p className="font-medium">{t("apps.builds.success.heading")}</p>
-                {appUrl && (
+                {appUrl && appReady && (
                   <a
                     href={appUrl}
                     target="_blank"
@@ -178,6 +246,9 @@ export default function BuildDetailPage() {
                   >
                     {appUrl}
                   </a>
+                )}
+                {appUrl && !appReady && (
+                  <p className="mt-1 text-xs text-green-600 dark:text-green-400">{t("apps.builds.success.notReady")}</p>
                 )}
               </div>
               <Link
