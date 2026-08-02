@@ -295,7 +295,7 @@ func (h *Handler) CreateS3Bucket(c *gin.Context) {
 //
 // @ID          getS3BucketCredentials
 // @Summary     Reveal an S3 bucket's access credentials
-// @Description Reveals the S3 endpoint, access key and secret key for a bucket by reading its Crossplane connection secret. Requires reveal=true and write access; every reveal is audited. Returns 404 while the bucket is still provisioning (no secret yet) and 503 when in-cluster credential access is not configured.
+// @Description Reveals the S3 endpoint, access key and secret key for a bucket by reading its Crossplane connection secret. Requires reveal=true and write access; every reveal is audited. Returns 404 while the bucket is still provisioning (no secret yet), 409 with the provider's own error text when provisioning has failed outright, and 503 when in-cluster credential access is not configured.
 // @Tags        storage
 // @Produce     json
 // @Security    BearerAuth
@@ -374,6 +374,24 @@ func (h *Handler) GetS3BucketCredentials(c *gin.Context) {
 	}
 	if err != nil {
 		if errors.Is(err, cloudtask.ErrS3CredentialsNotReady) {
+			if provisionErr, reason := s3ProvisionError(summaryRaw); provisionErr != "" {
+				h.recordAudit(c.Request.Context(), claims.UserID, auditEntry{
+					ProjectID:     projectID,
+					EnvironmentID: envID,
+					Action:        "RevealS3Credentials",
+					ResourceKind:  "S3Bucket",
+					ResourceName:  name,
+					Outcome:       auditOutcomeFailure,
+					Metadata: map[string]any{
+						"reason":           "provisioning_failed",
+						"status":           http.StatusConflict,
+						"provider_reason":  reason,
+						"provider_message": provisionErr,
+					},
+				})
+				c.JSON(http.StatusConflict, gin.H{"error": "provisioning_failed", "message": provisionErr})
+				return
+			}
 			rejectReveal(http.StatusNotFound, "credentials_not_ready", "credentials not available yet — the bucket is still provisioning")
 			return
 		}
@@ -399,6 +417,28 @@ func (h *Handler) GetS3BucketCredentials(c *gin.Context) {
 		"ftp_host":    creds.FtpHost,
 		"sftp_host":   creds.SftpHost,
 	})
+}
+
+// s3ProvisionError extracts the upstream provider's own failure text from a
+// bucket's resource-snapshot summary, where the gitops agent mirrors the
+// blocking Crossplane condition (provision_error is the condition message,
+// provision_error_reason its reason, e.g. ReconcileError). A bucket whose
+// provisioning died — a description the provider rejects is the common case —
+// never gets a connection secret, so without this the reveal endpoint answers
+// "still provisioning" forever and the failure is invisible to its owner.
+// Returns empty strings while the bucket is genuinely still being built.
+func s3ProvisionError(summaryRaw []byte) (message, reason string) {
+	if len(summaryRaw) == 0 {
+		return "", ""
+	}
+	var s struct {
+		ProvisionError       string `json:"provision_error"`
+		ProvisionErrorReason string `json:"provision_error_reason"`
+	}
+	if err := json.Unmarshal(summaryRaw, &s); err != nil {
+		return "", ""
+	}
+	return strings.TrimSpace(s.ProvisionError), strings.TrimSpace(s.ProvisionErrorReason)
 }
 
 // declaredS3ConnectionSecret extracts a bucket's explicitly-declared

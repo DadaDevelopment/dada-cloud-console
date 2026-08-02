@@ -131,6 +131,10 @@ func (r *StatusReconciler) discover(ctx context.Context) {
 				"live_source": "crd",
 				"live_at":     time.Now().UTC().Format(time.RFC3339),
 			}
+			if msg, reason, ok := crProvisionError(o); ok {
+				fields["provision_error"] = msg
+				fields["provision_error_reason"] = reason
+			}
 			if spec.kind == "ServiceDatabaseV2" {
 				fields["backup_last_at"] = backup.lastAt
 				fields["backup_count"] = backup.count
@@ -219,4 +223,51 @@ func crConditions(o *unstructured.Unstructured) map[string]string {
 		}
 	}
 	return out
+}
+
+// crProvisionError extracts the human-readable failure text a Crossplane
+// provider attaches to a blocking condition (status "False" with a non-empty
+// message) — the only place text like "Attribute description string length
+// must be at most 45" actually lives, since crConditions() collapses each
+// condition down to its status. Priority: Synced, then Ready, then any other
+// False condition with a message. Returns ok=false when nothing qualifies
+// (no False condition, or its message is empty).
+func crProvisionError(o *unstructured.Unstructured) (message string, reason string, ok bool) {
+	conds, found, _ := unstructured.NestedSlice(o.Object, "status", "conditions")
+	if !found {
+		return "", "", false
+	}
+	byType := make(map[string]map[string]any, len(conds))
+	var fallback map[string]any
+	for _, c := range conds {
+		m, isMap := c.(map[string]any)
+		if !isMap {
+			continue
+		}
+		status, _ := m["status"].(string)
+		msg, _ := m["message"].(string)
+		if status != "False" || msg == "" {
+			continue
+		}
+		t, _ := m["type"].(string)
+		if t != "" {
+			byType[t] = m
+		}
+		if fallback == nil {
+			fallback = m
+		}
+	}
+	chosen := byType["Synced"]
+	if chosen == nil {
+		chosen = byType["Ready"]
+	}
+	if chosen == nil {
+		chosen = fallback
+	}
+	if chosen == nil {
+		return "", "", false
+	}
+	msg, _ := chosen["message"].(string)
+	reason, _ = chosen["reason"].(string)
+	return msg, reason, true
 }
