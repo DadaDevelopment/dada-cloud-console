@@ -14,6 +14,7 @@ import { CostCard } from "@/components/cost/cost-card";
 import { TemplateDeployCards } from "@/components/console/template-deploy-cards";
 import { UploadDeployCard } from "@/components/deploy/upload-deploy";
 import { ProjectAppHealthList } from "@/components/console/project-app-health-list";
+import { ProjectBoxesPanel } from "@/components/console/project-boxes-panel";
 
 type Counts = { apps: number; appsReady: number; dbs: number; domainsVerified: number; domainsPending: number };
 
@@ -218,10 +219,11 @@ export default function ProjectOverviewPage() {
         />
       </div>
 
+      <ProjectBoxesPanel projectId={projectId} />
+
       <div className="mb-8">
         <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">{t("overview.section.more")}</h2>
         <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-          <SecondaryLink icon="boxes" label={t("nav.boxes")} hint={t("overview.secondary.boxes.hint")} href={`/projects/${projectId}/boxes`} />
           <SecondaryLink icon="ai" label={t("nav.ai")} hint={t("overview.secondary.ai.hint")} href={`/projects/${projectId}/ai`} />
           <SecondaryLink icon="monitoring" label={t("nav.monitoring")} hint={t("overview.secondary.monitoring.hint")} href={`/projects/${projectId}/monitoring`} />
           <SecondaryLink icon="storage" label={t("nav.storage")} hint={t("overview.secondary.storage.hint")} href={`/projects/${projectId}/storage`} />

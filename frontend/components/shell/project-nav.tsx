@@ -12,7 +12,11 @@ function isActive(pathname: string, projectId: string, item: ResourceNavItem): b
     // Overview matches the project root exactly (not its children).
     return pathname === `/projects/${projectId}` || pathname === href;
   }
-  return pathname === href || pathname.startsWith(href + "/");
+  if (pathname === href || pathname.startsWith(href + "/")) return true;
+  return (item.alsoMatches ?? []).some((seg) => {
+    const alt = `/projects/${projectId}${seg}`;
+    return pathname === alt || pathname.startsWith(alt + "/");
+  });
 }
 
 /**

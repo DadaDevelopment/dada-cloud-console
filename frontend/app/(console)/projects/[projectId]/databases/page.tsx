@@ -8,6 +8,7 @@ import type { ResourceSnapshot } from "@/lib/types";
 import { Modal } from "@/components/ui/modal";
 import { Spinner } from "@/components/ui/spinner";
 import { Breadcrumb } from "@/components/ui/breadcrumb";
+import { DataTabs } from "@/components/data/data-tabs";
 import { useProjectContext } from "@/lib/project-context";
 import { canMutate } from "@/lib/rbac";
 import { timeAgo } from "@/lib/format";
@@ -167,6 +168,7 @@ export default function DatabasesPage() {
           />
           <h1 className="mt-2 text-2xl font-bold text-gray-900 dark:text-gray-100">{t("databases.title")}</h1>
           <p className="mt-0.5 text-sm text-gray-500 dark:text-gray-400">{t("databases.subtitle")}</p>
+          <DataTabs projectId={projectId} active="databases" />
         </div>
         {canCreate && (
         <button

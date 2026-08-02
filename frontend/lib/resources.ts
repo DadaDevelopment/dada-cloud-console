@@ -1,13 +1,13 @@
-// Declarative registry of project-scoped resources.
-//
-// The project left-nav and the ⌘K command palette are both rendered from this
-// list. Adding a v2–v4 surface (Redis, RabbitMQ, Object Storage, Marketplace,
-// Cost, Observability) is a single entry here — no layout rewrite. Items can be
-// gated by capability (`visible`) and flagged `comingSoon` to render disabled
-// with a tooltip rather than being silently hidden.
+/**
+ * Declarative registry of project-scoped resources.
+ *
+ * The project left-nav and the palette are both rendered from this list, so a
+ * new surface is a single entry here rather than a layout change. Items can be
+ * gated by capability (`visible`) and flagged `comingSoon` to render disabled
+ * with a tooltip rather than being silently hidden.
+ */
 
 import type { MemberRole } from "./types";
-import { canSeeManifests, isAdmin } from "./rbac";
 
 export type IconName =
   | "overview"
@@ -34,6 +34,12 @@ export interface ResourceNavItem {
   icon: IconName;
   /** Path suffix appended after /projects/[projectId]. "" = overview. */
   segment: string;
+  /**
+   * Extra path suffixes this item owns for highlighting purposes. Used when one
+   * nav entry fronts several routes (Data = databases + object storage), so the
+   * sidebar still marks itself active on the sibling route.
+   */
+  alsoMatches?: string[];
   group: "resources" | "infra" | "admin";
   /** Absolute path that ignores the project scope (e.g. global admin pages). */
   absoluteHref?: string;
@@ -42,34 +48,31 @@ export interface ResourceNavItem {
   comingSoon?: boolean;
 }
 
+/**
+ * Sidebar registry, deliberately short.
+ *
+ * Primary group is the task path: GitHub -> app -> data -> AI. Databases and
+ * object storage share one "Data" entry fronting two tabs, since both answer
+ * "where does my app keep things" and neither was a destination on its own.
+ * Domains, Inference and Managed VM sit under "Advanced".
+ *
+ * Monitoring, Builds, Boxes, Operations, Approvals, Redis, Message Queues,
+ * Members and Billing hold no sidebar slot: telemetry over 07-31..08-02 (841
+ * events, 24 identities) recorded zero navigations and zero clicks on
+ * Monitoring, Builds and Inference, and two clicks on Boxes. Every route stays
+ * reachable -- Monitoring and Builds from the overview's secondary links and
+ * from post-action redirects, Boxes as a read-only overview panel (creating and
+ * driving a box is an agent/MCP job), Members and Billing from the account menu.
+ */
 export const PROJECT_NAV: ResourceNavItem[] = [
-  // --- primary, task-oriented surfaces: the GitHub→app→db→domain→logs path.
-  // Kept short on purpose so the first screen reads as "what do I do next",
-  // not "here is a catalog of infra entities".
   { key: "overview", label: "Overview", icon: "overview", segment: "", group: "resources" },
   { key: "apps", label: "Applications", icon: "apps", segment: "/apps", group: "resources" },
-  { key: "databases", label: "Databases", icon: "databases", segment: "/databases", group: "resources" },
+  { key: "data", label: "Data", icon: "databases", segment: "/databases", alsoMatches: ["/storage"], group: "resources" },
   { key: "ai", label: "AI API", icon: "ai", segment: "/ai", group: "resources" },
-  { key: "boxes", label: "Boxes", icon: "boxes", segment: "/boxes", group: "resources" },
-  { key: "storage", label: "Object Storage", icon: "storage", segment: "/storage", group: "resources" },
-  { key: "domains", label: "Domains", icon: "domains", segment: "/domains", group: "resources" },
-  { key: "monitoring", label: "Monitoring", icon: "monitoring", segment: "/monitoring", group: "resources" },
-  // App Servers is the primary differentiator (bring-your-own VM / order a VM /
-  // adopt existing workloads) — it belongs on the primary path, not folded away.
-  { key: "app-servers", label: "App Servers", icon: "app-servers", segment: "/app-servers", group: "resources" },
-  // --- advanced / infrastructure: still one click away, but folded under an
-  // "Advanced" header so they don't crowd the primary path.
+  { key: "domains", label: "Domains", icon: "domains", segment: "/domains", group: "infra" },
   { key: "models", label: "AI Models", icon: "models", segment: "/models", group: "infra" },
-  { key: "git", label: "Builds", icon: "git", segment: "/git", group: "infra", visible: canSeeManifests },
-  // Operations, Approvals, Redis and Message Queues were removed from the sidebar
-  // to keep the nav to real, task-oriented surfaces. Operations still runs — its
-  // route stays reachable via post-action redirects and deep links — it just no
-  // longer occupies a top-level nav slot.
-  // --- admin group (global, cross-project) ---
-  { key: "members", label: "Members", icon: "members", segment: "/members", group: "admin", visible: isAdmin },
-  { key: "billing", label: "Billing", icon: "billing", segment: "/billing", group: "admin", visible: isAdmin },
+  { key: "app-servers", label: "App Servers", icon: "app-servers", segment: "/app-servers", group: "infra" },
 ];
-
 export function projectHref(projectId: string, item: ResourceNavItem): string {
   return item.absoluteHref ?? `/projects/${projectId}${item.segment}`;
 }

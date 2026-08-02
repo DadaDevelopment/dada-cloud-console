@@ -87,6 +87,15 @@ export const overview: Messages = {
   "overview.secondary.git.hint": { ru: "Репозитории и билды", en: "Repositories and builds" },
   "overview.secondary.billing.hint": { ru: "Тарифный план и квоты", en: "Plan and quotas" },
 
+  "overview.boxes.col.name": { ru: "Имя", en: "Name" },
+  "overview.boxes.col.status": { ru: "Статус", en: "Status" },
+  "overview.boxes.col.profile": { ru: "Профиль", en: "Profile" },
+  "overview.boxes.col.active": { ru: "Активность", en: "Last active" },
+  "overview.boxes.readonly": {
+    ru: "Боксами управляет агент через MCP — консоль их только показывает.",
+    en: "Boxes are driven by agents over MCP; the console only shows them.",
+  },
+
   "overview.health.title": { ru: "Приложения", en: "Apps" },
   "overview.health.unhealthyCount": { ru: "{count} с проблемой", en: "{count} unhealthy" },
   "overview.health.view": { ru: "Смотреть →", en: "View →" },
