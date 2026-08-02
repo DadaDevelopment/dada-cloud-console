@@ -678,7 +678,7 @@ func (h *Handler) DeleteBox(c *gin.Context) {
 //
 // @ID          suspendBox
 // @Summary     Suspend (sleep) a box
-// @Description Freezes the box so compute billing stops while its disk survives. Not destructive and not a delete: resume brings the same box back. This is also what a reached spend cap does, deliberately — a runaway must cost the customer money, never their data. Asynchronous: returns 202 with an operation.
+// @Description Freezes the box so compute billing stops while its /workspace disk survives. Not destructive and not a delete: resume brings the same box back, with the persistent volume re-attached — but on a fresh body, so only /workspace crosses the sleep. Anything written outside it is released with the old instance. This is also what a reached spend cap does, deliberately — a runaway must cost the customer money, never their data. Asynchronous: returns 202 with an operation.
 // @Tags        box
 // @Produce     json
 // @Security    BearerAuth
@@ -754,7 +754,7 @@ type resumeBoxRequest struct {
 //
 // @ID          resumeBox
 // @Summary     Resume (wake) a sleeping box
-// @Description Thaws a sleeping box and waits for its exec channel to accept again. The same box, the same disk, the same injected credentials. Optionally rebinds a fresh SSH public key so the caller need not keep one alive across the sleep. Asynchronous: returns 202 with an operation.
+// @Description Thaws a sleeping box and waits for its exec channel to accept again. The same box, the same /workspace disk, the same injected credentials — and NOT the same root filesystem: sleeping releases the body, so a resumed box is a fresh instance of the same pinned image with the persistent volume re-attached at /workspace. Anything written outside /workspace (packages installed into /usr, files under /srv or /etc, a service descriptor in /etc/dada/services) is gone after a sleep, so work that must outlive an idle window belongs in /workspace. Optionally rebinds a fresh SSH public key so the caller need not keep one alive across the sleep. Asynchronous: returns 202 with an operation.
 // @Tags        box
 // @Accept      json
 // @Produce     json
