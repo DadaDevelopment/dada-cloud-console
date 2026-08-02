@@ -351,7 +351,7 @@ const ru: Dict = {
     pricingTitle: "Прозрачные планы",
     pricingSubtitle: "Без сюрпризов в счёте: понятные квоты плана и оценка стоимости до деплоя.",
     pricingTiers: [
-      { name: "Free", price: "0 ₽", tagline: "Попробовать и пет-проекты", bullets: ["2 приложения", "1 база данных", "Деплой из GitHub", "Базовые логи"] },
+      { name: "Free", price: "0 ₽", tagline: "Попробовать и пет-проекты", bullets: ["1 приложение", "1 база данных", "Деплой из GitHub", "Базовые логи"] },
       { name: "Startup", price: "990 ₽/мес", tagline: "Один разработчик в продакшене", bullets: ["5 приложений", "2 базы данных", "5 доменов", "Бэкапы 7 дней"], highlight: true },
       { name: "Business", price: "2 900 ₽/мес", tagline: "Растущая команда с продакшеном", bullets: ["20 приложений", "10 баз данных", "Бэкапы 30 дней", "Приоритетная поддержка"] },
     ],
@@ -686,7 +686,7 @@ const ru: Dict = {
     faqTitle: "Частые вопросы про переезд с Vercel",
     faq: [
       { q: "Заработает ли мой Next.js-проект без изменений?", a: "В большинстве случаев да — Dada определяет Next.js автоматически и использует стандартную команду сборки и запуска. Если в проекте были rewrites/headers в vercel.json, эти правила нужно перенести в код (например, next.config.js) — готового 1:1 переноса такого конфига нет." },
-      { q: "Нужна ли карта для оплаты?", a: "Нет, если хватает бесплатного тарифа (2 приложения, 1 база, 1 домен). Платные тарифы оплачиваются российской картой, счётом или по договору с закрывающими документами для юрлиц — зарубежная карта не нужна." },
+      { q: "Нужна ли карта для оплаты?", a: "Нет, если хватает бесплатного тарифа (1 приложение, 1 база, 1 домен). Платные тарифы оплачиваются российской картой, счётом или по договору с закрывающими документами для юрлиц — зарубежная карта не нужна." },
       { q: "Куда переносить переменные окружения из Vercel?", a: "В настройки приложения → «Переменные окружения» в Dada Cloud, скопировав значения из Vercel Project Settings вручную — автоматического импорта из Vercel нет." },
       { q: "Поддерживается ли свой домен и HTTPS?", a: "Да. Домен подключается во вкладке Domains (apex — TXT-запись, поддомен — CNAME), сертификат Let's Encrypt выпускается автоматически после подтверждения владения." },
     ],
@@ -788,7 +788,7 @@ const ru: Dict = {
       { q: "Будут ли приложения «засыпать», как бесплатные dyno?", a: "Нет. Приложение остаётся запущенным и отвечает без холодного старта на первый запрос." },
       { q: "Сколько занимает переезд с Heroku на практике?", a: "Простое приложение с одной базой — вечер: подключить репозиторий, перенести config vars, залить дамп, переключить DNS. Дольше всего обычно идёт не сам перенос, а инвентаризация аддонов: почта, очереди и внешние сервисы, про которые вспоминают уже после первого деплоя." },
       { q: "Нужно ли переписывать Procfile?", a: "Файл как таковой не используется, но команда запуска из него переносится в настройки приложения один в один. Веб-процесс становится приложением, воркеры и периодические задачи — отдельными приложениями со своими логами и метриками." },
-      { q: "Что будет с бесплатным тарифом?", a: "Бесплатный план здесь есть и не отключается: два приложения, база PostgreSQL, 2 ГБ хранилища и домен. Приложение не засыпает после получаса простоя, как это было на старых бесплатных dyno." },
+      { q: "Что будет с бесплатным тарифом?", a: "Бесплатный план здесь есть и не отключается: одно приложение, база PostgreSQL, 2 ГБ хранилища и домен. Приложение не засыпает после получаса простоя, как это было на старых бесплатных dyno." },
       { q: "Можно ли оставить часть сервисов на Heroku?", a: "Да, переезд не обязан быть одномоментным. Приложение может жить здесь, а обращаться к базе или сервису, который пока остался на Heroku, — при условии, что тот доступен по публичному адресу. Так обычно и переезжают: сначала веб, потом данные." },
     ],
   },
@@ -1100,7 +1100,7 @@ const ru: Dict = {
       { q: "Нужен ли GitHub, если я не работаю с git?", a: "Нет. Проект загружается архивом прямо в консоль — ни аккаунта на GitHub, ни терминала, ни знания git не требуется. Если позже захотите автодеплой на каждый коммит, репозиторий можно подключить, не пересоздавая приложение." },
       { q: "Мой проект из Lovable или v0 точно поднимется?", a: "Типовой фронтенд на Next.js, React или Vite определяется автоматически. Если сборка падает, в логах видно, на каком шаге — чаще всего это захардкоженный порт, отсутствующая переменная окружения или зависимость, которая не попала в package.json." },
       { q: "Куда девать ключи от OpenAI и прочих сервисов?", a: "В переменные окружения приложения. ИИ-редакторы охотно вписывают ключи в исходники — оттуда их надо убрать до первой публикации, иначе ключ уедет вместе с архивом или всплывёт в публичном репозитории." },
-      { q: "Сколько это стоит на старте?", a: "Бесплатный план покрывает два приложения, базу и 2 ГБ хранилища — этого достаточно, чтобы выложить прототип и показать его людям. Карта на старте не нужна, и приложение не засыпает от простоя." },
+      { q: "Сколько это стоит на старте?", a: "Бесплатный план покрывает одно приложение, базу и 2 ГБ хранилища — этого достаточно, чтобы выложить прототип и показать его людям. Карта на старте не нужна, и приложение не засыпает от простоя." },
     ],
   },
   telegramBotAlt: {
@@ -1223,7 +1223,7 @@ const ru: Dict = {
       { q: "Где хранить BOT_TOKEN?", a: "В переменных окружения приложения - они задаются в консоли. В репозиторий токен класть нельзя: Telegram отзывает засветившиеся токены." },
       { q: "Почему бот теряет состояние диалога после деплоя?", a: "Скорее всего используется MemoryStorage: состояния FSM живут в памяти процесса и стираются при перезапуске. Подключите PostgreSQL или Redis как хранилище - тогда сценарий продолжится с того же шага." },
       { q: "Нужен ли Dockerfile?", a: "Нет, если aiogram-бот собирается по requirements.txt. Dockerfile пригодится, если нужна нестандартная системная зависимость - например ffmpeg для обработки голосовых." },
-      { q: "Можно запустить два бота - тестового и боевого?", a: "Да, это два приложения с разными токенами. Один и тот же токен в двух процессах использовать нельзя: Telegram будет отдавать апдейты то одному, то другому." },
+      { q: "Можно запустить два бота - тестового и боевого?", a: "Да, это два приложения с разными токенами. На бесплатном тарифе помещается одно, второе — на Startup. Один и тот же токен в двух процессах использовать нельзя: Telegram будет отдавать апдейты то одному, то другому." },
       { q: "Как посмотреть, почему бот молчит?", a: "Логи процесса видны в панели. Частые причины: упал на старте из-за неверного токена, конфликт getUpdates с локально запущенной копией, или необработанное исключение в хендлере." },
       { q: "Сколько стоит?", a: "Первого бота можно держать на бесплатном тарифе Free без привязки карты. Дальше - Startup 990 ₽/мес или Business 2 900 ₽/мес, оплата рублёвой картой." },
     ],
@@ -1733,7 +1733,7 @@ const ru: Dict = {
   pricing: {
     faqTitle: "Вопросы о тарифах и оплате",
     faq: [
-      { q: "Что входит в бесплатный тариф?", a: "Два приложения, одна база PostgreSQL, 2 ГБ хранилища и один домен. Этого достаточно, чтобы выкатить пет-проект или бота и посмотреть, как всё работает, до любых платежей. Карта на старте не нужна." },
+      { q: "Что входит в бесплатный тариф?", a: "Одно приложение, одна база PostgreSQL, 2 ГБ хранилища и один домен. Этого достаточно, чтобы выкатить пет-проект или бота и посмотреть, как всё работает, до любых платежей. Карта на старте не нужна." },
       { q: "Тариф считается по ресурсам или по количеству объектов?", a: "По квотам плана: сколько приложений, баз, доменов, участников и гигабайт хранилища вы можете держать. Это предсказуемее почасовой оплаты за процессорное время — в конце месяца не приходит счёт, которого никто не ждал." },
       { q: "Чем платить и какие документы будут?", a: "Российской картой или по счёту для юридического лица. Закрывающие документы выставляются на компанию, зарубежная карта и посредники не нужны." },
       { q: "Что произойдёт, когда я упрусь в квоту?", a: "Платформа не удаляет то, что уже работает. Создать новый ресурс сверх квоты не получится — план меняется в панели, и лимиты применяются сразу, переносить приложения при этом никуда не нужно." },
@@ -1752,7 +1752,7 @@ const ru: Dict = {
         period: "",
         tagline: "Попробовать и пет-проекты",
         features: [
-          "2 приложения",
+          "1 приложение",
           "1 база данных",
           "2 ГБ хранилища",
           "1 домен",
@@ -1990,7 +1990,7 @@ const en: Dict = {
     pricingTitle: "Transparent plans",
     pricingSubtitle: "No billing surprises: clear plan quotas and a cost estimate before you deploy.",
     pricingTiers: [
-      { name: "Free", price: "$0", tagline: "Trials and pet projects", bullets: ["2 applications", "1 database", "Deploy from GitHub", "Basic logs"] },
+      { name: "Free", price: "$0", tagline: "Trials and pet projects", bullets: ["1 application", "1 database", "Deploy from GitHub", "Basic logs"] },
       { name: "Startup", price: "$12/mo", tagline: "Solo developer in production", bullets: ["5 applications", "2 databases", "5 domains", "7-day backups"], highlight: true },
       { name: "Business", price: "$35/mo", tagline: "Growing team with production load", bullets: ["20 applications", "10 databases", "30-day backups", "Priority support"] },
     ],
@@ -2273,7 +2273,7 @@ const en: Dict = {
     faqTitle: "Migrating from Vercel — FAQ",
     faq: [
       { q: "Will my Next.js project work without changes?", a: "In most cases yes — Dada detects Next.js automatically and uses the standard build and start commands. If the project used rewrites/headers in vercel.json, those rules need to move into code (e.g. next.config.js) — there's no ready-made 1:1 import for that config." },
-      { q: "Do I need a card to pay?", a: "No, if the free plan (2 apps, 1 database, 1 domain) covers you. Paid plans are billed with a Russian card, an invoice, or a contract with closing documents for legal entities — no foreign card needed." },
+      { q: "Do I need a card to pay?", a: "No, if the free plan (1 app, 1 database, 1 domain) covers you. Paid plans are billed with a Russian card, an invoice, or a contract with closing documents for legal entities — no foreign card needed." },
       { q: "Where do I move the environment variables from Vercel?", a: "Into app settings -> \"Environment variables\" in Dada Cloud, copying values from Vercel Project Settings by hand — there's no automatic import from Vercel." },
       { q: "Is a custom domain with HTTPS supported?", a: "Yes. Add the domain in the Domains tab (apex via a TXT record, subdomain via CNAME); the Let's Encrypt certificate is issued automatically once ownership is verified." },
     ],
@@ -2375,7 +2375,7 @@ const en: Dict = {
       { q: "Will apps sleep like free dynos?", a: "No. The app stays running and responds without a cold start on the first request." },
       { q: "How long does a move off Heroku actually take?", a: "A simple app with one database is an evening: connect the repo, move the config vars, load the dump, switch DNS. The long part is usually not the move itself but taking stock of the add-ons — mail, queues and third-party services people only remember after the first deploy." },
       { q: "Do I have to rewrite the Procfile?", a: "The file itself is not used, but the start command from it carries over into the app settings one for one. The web process becomes an app; workers and scheduled jobs become their own apps with their own logs and metrics." },
-      { q: "What about the free tier?", a: "There is a free plan here and it is not going away: two apps, a PostgreSQL database, 2 GB of storage and a domain. The app does not fall asleep after half an hour of idling the way the old free dynos did." },
+      { q: "What about the free tier?", a: "There is a free plan here and it is not going away: one app, a PostgreSQL database, 2 GB of storage and a domain. The app does not fall asleep after half an hour of idling the way the old free dynos did." },
       { q: "Can I leave some services on Heroku?", a: "Yes, the migration does not have to be atomic. An app can run here and still talk to a database or service that is still on Heroku, as long as that one is reachable at a public address. That is the usual order: web first, data second." },
     ],
   },
@@ -2687,7 +2687,7 @@ const en: Dict = {
       { q: "Do I need GitHub if I do not use git?", a: "No. The project uploads as an archive straight into the console — no GitHub account, no terminal, no git knowledge. If you later want auto-deploys on every commit, a repository can be connected without recreating the app." },
       { q: "Will my Lovable or v0 project actually run?", a: "A typical Next.js, React or Vite frontend is detected automatically. If the build fails, the logs show at which step — most often a hardcoded port, a missing environment variable, or a dependency that never made it into package.json." },
       { q: "Where do the OpenAI and other keys go?", a: "Into the app’s environment variables. AI editors happily write keys into the source, and they need to come out before the first publish, or the key travels with the archive or surfaces in a public repository." },
-      { q: "What does it cost to start?", a: "The free plan covers two apps, a database and 2 GB of storage — enough to publish a prototype and put it in front of people. No card to start, and the app does not go to sleep when idle." },
+      { q: "What does it cost to start?", a: "The free plan covers one app, a database and 2 GB of storage — enough to publish a prototype and put it in front of people. No card to start, and the app does not go to sleep when idle." },
     ],
   },
   telegramBotAlt: {
@@ -2810,7 +2810,7 @@ const en: Dict = {
       { q: "Where do I keep BOT_TOKEN?", a: "In the app's environment variables, set in the console. Never commit it: Telegram revokes leaked tokens." },
       { q: "Why does the bot lose conversation state after a deploy?", a: "Most likely MemoryStorage: FSM state lives in process memory and is wiped on restart. Attach PostgreSQL or Redis as storage and the scenario continues from the same step." },
       { q: "Do I need a Dockerfile?", a: "No, not if the bot builds from requirements.txt. A Dockerfile helps when you need an unusual system dependency - ffmpeg for voice messages, for example." },
-      { q: "Can I run a test bot and a production bot?", a: "Yes, that is two apps with two different tokens. The same token cannot run in two processes: Telegram would hand updates to one or the other at random." },
+      { q: "Can I run a test bot and a production bot?", a: "Yes, that is two apps with two different tokens. The free plan fits one; the second needs Startup. The same token cannot run in two processes: Telegram would hand updates to one or the other at random." },
       { q: "How do I find out why the bot is silent?", a: "Process logs are in the panel. Common causes: it died on startup from a bad token, a getUpdates conflict with a copy still running locally, or an unhandled exception in a handler." },
       { q: "What does it cost?", a: "Your first bot runs on the Free tier with no card. After that it is Startup at 990 ₽/mo or Business at 2,900 ₽/mo, paid by ruble card." },
     ],
@@ -3320,7 +3320,7 @@ const en: Dict = {
   pricing: {
     faqTitle: "Pricing and billing questions",
     faq: [
-      { q: "What is in the free plan?", a: "Two apps, one PostgreSQL database, 2 GB of storage and one domain. Enough to ship a side project or a bot and see how the whole thing behaves before any payment. No card needed to start." },
+      { q: "What is in the free plan?", a: "One app, one PostgreSQL database, 2 GB of storage and one domain. Enough to ship a side project or a bot and see how the whole thing behaves before any payment. No card needed to start." },
       { q: "Is the plan metered by resources or by object count?", a: "By plan quotas: how many apps, databases, domains, members and gigabytes of storage you may hold. That is more predictable than per-hour CPU billing — no invoice at the end of the month that nobody was expecting." },
       { q: "How do I pay and what documents do I get?", a: "A Russian card, or an invoice for a legal entity. Closing documents are issued to the company, with no foreign card or intermediary involved." },
       { q: "What happens when I hit a quota?", a: "The platform does not delete what is already running. You simply cannot create a new resource past the quota — change the plan in the console and the new limits apply immediately, with nothing to migrate." },
@@ -3339,7 +3339,7 @@ const en: Dict = {
         period: "",
         tagline: "Try it out and pet projects",
         features: [
-          "2 applications",
+          "1 application",
           "1 database",
           "2 GB storage",
           "1 domain",

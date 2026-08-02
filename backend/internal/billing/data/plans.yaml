@@ -3,7 +3,7 @@ plans:
     name: Free
     price_rub: 0
     quotas:
-      apps: 2
+      apps: 1
       databases: 1
       storage_gb: 2
       domains: 1
