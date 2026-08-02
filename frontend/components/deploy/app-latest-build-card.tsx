@@ -17,6 +17,7 @@ interface AppLatestBuildCardProps {
   envId: string;
   appName: string;
   appUrl?: string;
+  appReady: boolean;
   buildHref: (buildId: string) => string;
 }
 
@@ -27,12 +28,20 @@ interface AppLatestBuildCardProps {
  * `POLL_MS` only while the latest build is still in flight; once it settles
  * the poll stops so this never runs alongside the page's own app poll for
  * no reason.
+ *
+ * The "open the live app" CTA additionally requires `appReady` (the app's own
+ * phase is `Ready`, not just "the build that produced this image succeeded"):
+ * a build can succeed and the rollout can still be crashing, in which case
+ * the URL has nothing to answer yet. The `app_ready_cta:panel` view is
+ * guarded per build id so polling never inflates it, mirroring the pattern
+ * used for `BuildViewKey` below.
  */
-export function AppLatestBuildCard({ projectId, envId, appName, appUrl, buildHref }: AppLatestBuildCardProps) {
+export function AppLatestBuildCard({ projectId, envId, appName, appUrl, appReady, buildHref }: AppLatestBuildCardProps) {
   const { t } = useT();
   const [build, setBuild] = useState<Build | null>(null);
   const [loaded, setLoaded] = useState(false);
   const viewedRef = useRef<BuildViewKey | null>(null);
+  const readyCtaViewedRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (!envId) return;
@@ -72,6 +81,14 @@ export function AppLatestBuildCard({ projectId, envId, appName, appUrl, buildHre
     trackUxEvent("view", `app_latest_build:${key}`);
   }, [build]);
 
+  useEffect(() => {
+    if (!build || build.status !== "success") return;
+    if (!appReady || !appUrl) return;
+    if (readyCtaViewedRef.current === build.id) return;
+    readyCtaViewedRef.current = build.id;
+    trackUxEvent("view", "app_ready_cta:panel");
+  }, [build, appReady, appUrl]);
+
   if (!loaded || !build) return null;
 
   if (isBuildActive(build.status)) {
@@ -107,7 +124,7 @@ export function AppLatestBuildCard({ projectId, envId, appName, appUrl, buildHre
               {build.commit_sha && build.branch && " · "}
               {build.branch}
             </p>
-            {appUrl && (
+            {appUrl && appReady && (
               <a
                 href={appUrl}
                 target="_blank"
@@ -118,6 +135,9 @@ export function AppLatestBuildCard({ projectId, envId, appName, appUrl, buildHre
                 {appUrl}
               </a>
             )}
+            {appUrl && !appReady && (
+              <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">{t("apps.latestBuild.success.notReady")}</p>
+            )}
           </div>
           <div className="flex shrink-0 items-center gap-2">
             <Link
@@ -127,7 +147,7 @@ export function AppLatestBuildCard({ projectId, envId, appName, appUrl, buildHre
             >
               {t("apps.latestBuild.viewLogs")}
             </Link>
-            {appUrl && (
+            {appUrl && appReady && (
               <a
                 href={appUrl}
                 target="_blank"

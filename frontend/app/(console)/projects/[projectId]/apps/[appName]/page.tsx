@@ -339,7 +339,8 @@ export default function AppDetailPage() {
   const resType = classifyVMResource(app);
   const isResource = resType !== "app";
   const alerts = getAppAlerts(app);
-  const isReadyNoAlerts = (app.phase ?? "").toLowerCase() === "ready" && alerts.length === 0;
+  const appPhaseReady = (app.phase ?? "").toLowerCase() === "ready";
+  const isReadyNoAlerts = appPhaseReady && alerts.length === 0;
   const nextSteps =
     !isResource && isReadyNoAlerts && !isLoadingHostnames
       ? getAppNextSteps({
@@ -493,6 +494,7 @@ export default function AppDetailPage() {
           envId={envId}
           appName={appName}
           appUrl={summary.url}
+          appReady={appPhaseReady}
           buildHref={(buildId) => `/projects/${projectId}/apps/${appName}/builds/${buildId}${envId ? `?envId=${envId}` : ""}`}
         />
       )}

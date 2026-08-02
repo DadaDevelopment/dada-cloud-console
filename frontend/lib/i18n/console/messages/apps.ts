@@ -229,6 +229,7 @@ export const apps: Messages = {
   "apps.latestBuild.viewLogs": { ru: "Логи сборки", en: "Build logs" },
   "apps.latestBuild.success.heading": { ru: "Сборка готова", en: "Build ready" },
   "apps.latestBuild.success.openApp": { ru: "Открыть приложение", en: "Open application" },
+  "apps.latestBuild.success.notReady": { ru: "Приложение ещё запускается, ссылка появится, когда оно поднимется", en: "App is still starting, the link will appear once it is up" },
   "apps.latestBuild.failed.heading": { ru: "Сборка не удалась", en: "Build failed" },
   "apps.latestBuild.failed.unknown": { ru: "Причина неизвестна", en: "Reason unknown" },
   "apps.latestBuild.canceled": { ru: "Последняя сборка отменена", en: "Last build was canceled" },
