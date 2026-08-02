@@ -1,0 +1,26 @@
+-- Why a custom hostname is not live yet.
+--
+-- Until now domain_hostnames carried status/cert_status and nothing else, so a
+-- hostname stuck on the user's side (A record still pointing at the previous
+-- host) looked exactly like a hostname whose certificate is simply still being
+-- issued: both were the bare word "pending". The console had nothing to render
+-- but that word, so the only actionable half of the story -- "your DNS has not
+-- moved yet" -- was invisible, and the user waited on us for something only
+-- they could do.
+--
+-- The value is a stable machine code, never a prose string: the console maps it
+-- through i18n (ru/en), the same rule that made the domain-limit message a code
+-- rather than raw English. Codes written by ReconcilePendingHostnames:
+--
+--   dns_not_pointed  public DNS for the hostname does not resolve to the
+--                    address we told the user to point it at, so ACME's HTTP-01
+--                    challenge cannot reach us and no certificate can issue
+--   cert_pending     DNS resolves to us, the certificate is not being served
+--                    yet (issuance in flight)
+--   attach_timeout   still not serving past hostnamePendingFailAfter; the row
+--                    was failed and must be re-attached to retry
+--
+-- NULL means "no outstanding reason" -- set on every row that goes active.
+-- VARCHAR(40) rather than TEXT to keep it an enum-ish code by construction;
+-- no CHECK constraint so a new code does not need a migration to be written.
+ALTER TABLE domain_hostnames ADD COLUMN IF NOT EXISTS status_reason VARCHAR(40);

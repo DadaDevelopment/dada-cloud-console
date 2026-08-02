@@ -22,6 +22,7 @@ import { StateChip } from "@/components/ui/state-chip";
 import type { ChipTone } from "@/components/ui/state-chip";
 import { PhaseBadge } from "@/components/ui/phase-badge";
 import { ManagedDnsPanel } from "@/components/deploy/managed-dns";
+import { hostnameReason } from "@/lib/hostname-status";
 import { useT } from "@/lib/i18n/console/context";
 
 type TFn = (key: string, params?: Record<string, string>) => string;
@@ -445,6 +446,11 @@ export default function ProjectDomainsPage() {
                         {t("domains.row.pointsTo", { app: h.app_name })}
                         {h.managed ? ` · ${t("domains.hm.defaultBadge")}` : ""}
                       </p>
+                      {hostnameReason(h.status_reason, t) && (
+                        <p className="mt-1 text-xs text-amber-700 dark:text-amber-500">
+                          {hostnameReason(h.status_reason, t)}
+                        </p>
+                      )}
                     </div>
                     {canEdit && (
                       <div className="flex shrink-0 items-center gap-2">

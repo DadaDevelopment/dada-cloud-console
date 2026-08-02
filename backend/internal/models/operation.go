@@ -319,6 +319,7 @@ type DomainHostname struct {
 	RecordType      string     `json:"record_type"            db:"record_type"`
 	Status          string     `json:"status"                 db:"status"`
 	CertStatus      string     `json:"cert_status"            db:"cert_status"`
+	StatusReason    *string    `json:"status_reason,omitempty" db:"status_reason"`
 	OperationID     *uuid.UUID `json:"operation_id,omitempty" db:"operation_id"`
 	CreatedAt       time.Time  `json:"created_at"             db:"created_at"`
 	UpdatedAt       time.Time  `json:"updated_at"             db:"updated_at"`

@@ -104,6 +104,18 @@ export const domains: Messages = {
   "domains.hm.thStatus": { ru: "Статус", en: "Status" },
   "domains.hm.thCert": { ru: "Сертификат", en: "Certificate" },
   "domains.hm.defaultBadge": { ru: "по умолчанию", en: "default" },
+  "domains.hm.reason.dns_not_pointed": {
+    ru: "DNS ещё не указывает на платформу — пока запись не переедет, сертификат выпустить нельзя.",
+    en: "DNS does not point at the platform yet — the certificate cannot be issued until the record moves.",
+  },
+  "domains.hm.reason.cert_pending": {
+    ru: "DNS на месте, выпускаем сертификат — обычно занимает минуту.",
+    en: "DNS is in place, the certificate is being issued — usually takes a minute.",
+  },
+  "domains.hm.reason.attach_timeout": {
+    ru: "Домен так и не заработал за 48 часов. Проверьте DNS-запись и привяжите хост заново.",
+    en: "The domain never came up within 48 hours. Check the DNS record and attach the hostname again.",
+  },
   "domains.hm.detach": { ru: "Отвязать", en: "Detach" },
   "domains.hm.detaching": { ru: "Отвязывание…", en: "Detaching…" },
   "domains.hm.detachError": { ru: "Не удалось отвязать хост", en: "Failed to detach hostname" },

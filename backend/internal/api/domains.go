@@ -649,11 +649,11 @@ func (h *Handler) AttachHostname(c *gin.Context) {
 		`INSERT INTO domain_hostnames (authorization_id, environment_id, app_name, hostname, record_type, operation_id)
 		 VALUES ($1, $2, $3, $4, $5, $6)
 		 RETURNING id, authorization_id, environment_id, app_name, hostname, record_type,
-		           status, cert_status, operation_id, created_at, updated_at`,
+		           status, cert_status, status_reason, operation_id, created_at, updated_at`,
 		authID, envID, appName, hostname, recordType, op.ID,
 	).Scan(
 		&hn.ID, &hn.AuthorizationID, &hn.EnvironmentID, &hn.AppName, &hn.Hostname, &hn.RecordType,
-		&hn.Status, &hn.CertStatus, &hn.OperationID, &hn.CreatedAt, &hn.UpdatedAt,
+		&hn.Status, &hn.CertStatus, &hn.StatusReason, &hn.OperationID, &hn.CreatedAt, &hn.UpdatedAt,
 	)
 	if isUniqueViolation(err) {
 		rejectAttach(http.StatusConflict, "hostname_already_attached", "that hostname is already attached")
@@ -750,7 +750,7 @@ func (h *Handler) ListHostnames(c *gin.Context) {
 
 	rows, err := h.pool.Query(c.Request.Context(),
 		`SELECT id, authorization_id, managed, environment_id, app_name, hostname, record_type,
-		        status, cert_status, operation_id, created_at, updated_at
+		        status, cert_status, status_reason, operation_id, created_at, updated_at
 		 FROM domain_hostnames
 		 WHERE environment_id = $1 AND app_name = $2 ORDER BY managed DESC, hostname`,
 		envID, appName,
@@ -766,7 +766,7 @@ func (h *Handler) ListHostnames(c *gin.Context) {
 		var hn models.DomainHostname
 		if err := rows.Scan(
 			&hn.ID, &hn.AuthorizationID, &hn.Managed, &hn.EnvironmentID, &hn.AppName, &hn.Hostname, &hn.RecordType,
-			&hn.Status, &hn.CertStatus, &hn.OperationID, &hn.CreatedAt, &hn.UpdatedAt,
+			&hn.Status, &hn.CertStatus, &hn.StatusReason, &hn.OperationID, &hn.CreatedAt, &hn.UpdatedAt,
 		); err != nil {
 			respondError(c, http.StatusInternalServerError, "failed to scan hostname")
 			return
@@ -1049,6 +1049,24 @@ const hostnameReissueCooldown = 15 * time.Minute
 // hostnameDNSLookupTimeout bounds each verify-resolve check.
 const hostnameDNSLookupTimeout = 3 * time.Second
 
+// hostnameReasonDNSNotPointed is the status_reason (migration 084) for a
+// hostname whose public DNS does not resolve to the address we told the user to
+// point it at. Nothing on our side can progress while that is true -- ACME's
+// HTTP-01 challenge is answered by whoever the record still points at -- so
+// this is the one pending state where the user, not the platform, is the
+// blocker, and saying so is the whole point of the column. The value is a
+// machine code the console translates, never prose.
+const hostnameReasonDNSNotPointed = "dns_not_pointed"
+
+// hostnameReasonCertPending is the status_reason for a hostname whose DNS
+// already points at us and whose certificate is simply not being served yet:
+// ordinary in-flight issuance, no user action.
+const hostnameReasonCertPending = "cert_pending"
+
+// hostnameReasonAttachTimeout is the status_reason left on a hostname failed
+// for never serving its certificate within hostnamePendingFailAfter.
+const hostnameReasonAttachTimeout = "attach_timeout"
+
 // reissueActorID is the fixed system-user id (see migration 010_system_user.sql)
 // used as actor_id for operations the reconciler enqueues on its own, with no
 // human actor behind them.
@@ -1065,19 +1083,26 @@ var reissueActorID = uuid.MustParse("00000000-0000-0000-0000-000000000000")
 // write was dropped (e.g. a Beget-API egress block at write time) stays
 // NXDOMAIN forever with no auto-recovery.
 //
-// The cert probe is an external TLS handshake to hostname:443 with SNI: it
-// only succeeds when the leaf cert is publicly trusted (LE issued) and valid
-// for the hostname, which proves DNS -> ingress -> cert all resolved. A failed
-// probe within the attach window leaves the row pending to be retried on the
-// next tick; past the window the row is marked failed. Both UPDATEs are
-// guarded on status='pending' so a concurrent detach or a row that just went
-// active is never clobbered.
+// The cert probe is a TLS handshake with SNI set to the hostname, aimed at our
+// OWN ingress (cfg.IngressTLSProbeAddr), not at the hostname's public address.
+// Aiming it at the public address is what this function used to do and it is
+// unsound in exactly the case custom domains exist for: a domain being migrated
+// from another provider still answers its own name with a valid publicly
+// trusted certificate, so the probe passed seconds after attach and the console
+// showed a green "active" domain that served the OLD host. Dialling our ingress
+// instead proves the certificate is issued AND being served by us, which is the
+// only thing "active" can honestly mean. A failed probe within the attach
+// window leaves the row pending with a status_reason to be retried on the next
+// tick; past the window the row is marked failed. Every UPDATE is guarded on
+// status='pending' so a concurrent detach or a row that just went active is
+// never clobbered.
 func ReconcilePendingHostnames(ctx context.Context, pool *pgxpool.Pool, cfg *config.Config) error {
 	rows, err := pool.Query(ctx,
 		`SELECT dh.id, dh.hostname, dh.created_at, dh.managed, dh.environment_id, dh.app_name,
-		        dh.last_reissue_at, e.project_id
+		        dh.last_reissue_at, dh.status_reason, e.project_id, e.runtime, a.vm_ip
 		   FROM domain_hostnames dh
 		   JOIN environments e ON e.id = dh.environment_id
+		   LEFT JOIN app_servers a ON a.id = e.app_server_id
 		  WHERE dh.status = 'pending'`)
 	if err != nil {
 		return err
@@ -1090,13 +1115,16 @@ func ReconcilePendingHostnames(ctx context.Context, pool *pgxpool.Pool, cfg *con
 		environmentID uuid.UUID
 		appName       string
 		lastReissue   *time.Time
+		statusReason  *string
 		projectID     uuid.UUID
+		runtime       models.EnvironmentRuntime
+		vmIP          *string
 	}
 	var pending []pendingHost
 	for rows.Next() {
 		var p pendingHost
 		if err := rows.Scan(&p.id, &p.hostname, &p.createdAt, &p.managed, &p.environmentID,
-			&p.appName, &p.lastReissue, &p.projectID); err != nil {
+			&p.appName, &p.lastReissue, &p.statusReason, &p.projectID, &p.runtime, &p.vmIP); err != nil {
 			rows.Close()
 			return err
 		}
@@ -1106,23 +1134,37 @@ func ReconcilePendingHostnames(ctx context.Context, pool *pgxpool.Pool, cfg *con
 
 	now := time.Now()
 	for _, p := range pending {
-		if hostnameCertLive(ctx, p.hostname) {
+		probeAddr, dnsTarget, probeable := hostnameProbeTargets(cfg, p.hostname, p.runtime, p.vmIP)
+		if !probeable {
+			continue
+		}
+		if hostnameCertLive(ctx, p.hostname, probeAddr) {
 			_, _ = pool.Exec(ctx,
-				`UPDATE domain_hostnames SET status='active', cert_status='active', updated_at=now()
+				`UPDATE domain_hostnames SET status='active', cert_status='active', status_reason=NULL, updated_at=now()
 				  WHERE id=$1 AND status='pending'`, p.id)
 			continue
 		}
+		reason := hostnameReasonCertPending
+		if dnsTarget != "" && !hostnameDNSResolved(ctx, p.hostname, dnsTarget) {
+			reason = hostnameReasonDNSNotPointed
+		}
 		if hostnamePendingExpired(p.createdAt, now) {
 			ct, err := pool.Exec(ctx,
-				`UPDATE domain_hostnames SET status='failed', cert_status='failed', updated_at=now()
-				  WHERE id=$1 AND status='pending'`, p.id)
+				`UPDATE domain_hostnames SET status='failed', cert_status='failed', status_reason=$2, updated_at=now()
+				  WHERE id=$1 AND status='pending'`, p.id, hostnameReasonAttachTimeout)
 			if err == nil && ct.RowsAffected() > 0 {
 				log.Warn().
 					Str("hostname", p.hostname).
+					Str("last_reason", reason).
 					Dur("pending_for", time.Since(p.createdAt)).
-					Msg("hostname failed: pending past attach window (app retired or Ingress missing) -- re-attach to retry")
+					Msg("hostname failed: pending past attach window (DNS never moved, app retired or Ingress missing) -- re-attach to retry")
 			}
 			continue
+		}
+		if p.statusReason == nil || *p.statusReason != reason {
+			_, _ = pool.Exec(ctx,
+				`UPDATE domain_hostnames SET status_reason=$2, updated_at=now()
+				  WHERE id=$1 AND status='pending'`, p.id, reason)
 		}
 		if !p.managed || cfg == nil || cfg.ClusterLBIP == "" {
 			continue
@@ -1353,18 +1395,65 @@ func enqueueDefaultDomainBackfill(ctx context.Context, pool *pgxpool.Pool, proje
 	return tx.Commit(ctx)
 }
 
-// hostnameCertLive reports whether hostname:443 completes a TLS handshake with a
-// publicly-trusted certificate valid for that hostname. The default (verifying)
-// tls.Config means a self-signed / ingress-default / expired cert fails the
-// handshake, so only a genuinely issued LE cert returns true.
-func hostnameCertLive(ctx context.Context, hostname string) bool {
+// hostnameProbeTargets resolves where to aim the two checks for one pending
+// hostname: probeAddr is the host:port to hand hostnameCertLive, dnsTarget is
+// the IP the user's own record must resolve to for the reason code. It reports
+// probeable=false when neither can be determined, in which case the row is left
+// untouched rather than probed at an address that cannot answer for it.
+//
+// Kubernetes environments terminate TLS at our shared ingress, so the probe
+// goes to cfg.IngressTLSProbeAddr and the record must point at
+// cfg.CustomDomainATarget. VM environments terminate on the VM itself, so both
+// follow the enrolled app server's IP -- probing the cluster ingress for a VM
+// hostname would report "not live" forever. A VM environment with no IP
+// recorded yet has nothing to probe at all.
+//
+// With no config (tests) the probe falls back to the public hostname and no DNS
+// target is claimed, so the reason stays cert_pending rather than asserting a
+// DNS fault it has no target to check against.
+func hostnameProbeTargets(cfg *config.Config, hostname string, runtime models.EnvironmentRuntime, vmIP *string) (probeAddr, dnsTarget string, probeable bool) {
+	if runtime == models.EnvironmentRuntimeVM {
+		if vmIP == nil || *vmIP == "" {
+			return "", "", false
+		}
+		return net.JoinHostPort(*vmIP, "443"), *vmIP, true
+	}
+	if cfg == nil {
+		return net.JoinHostPort(hostname, "443"), "", true
+	}
+	probeAddr = cfg.IngressTLSProbeAddr
+	if probeAddr == "" {
+		probeAddr = net.JoinHostPort(hostname, "443")
+	}
+	dnsTarget = cfg.CustomDomainATarget
+	if dnsTarget == "" {
+		dnsTarget = cfg.ClusterLBIP
+	}
+	return probeAddr, dnsTarget, true
+}
+
+// hostnameCertLive reports whether addr completes a TLS handshake, with SNI set
+// to hostname, using a publicly-trusted certificate valid for that hostname.
+// The default (verifying) tls.Config means a self-signed / ingress-default /
+// expired cert fails the handshake, so only a genuinely issued LE cert returns
+// true.
+//
+// addr is deliberately a separate argument from hostname: it points at the
+// server WE expect to serve the name (our ingress, or the VM host), so a
+// successful handshake proves we serve it. Dialling the hostname itself proves
+// only that somebody does, which for a domain still delegated to its previous
+// provider is always true and always wrong.
+func hostnameCertLive(ctx context.Context, hostname, addr string) bool {
+	if addr == "" {
+		addr = net.JoinHostPort(hostname, "443")
+	}
 	dctx, cancel := context.WithTimeout(ctx, 6*time.Second)
 	defer cancel()
 	dialer := tls.Dialer{
 		NetDialer: &net.Dialer{Timeout: 5 * time.Second},
 		Config:    &tls.Config{ServerName: hostname},
 	}
-	conn, err := dialer.DialContext(dctx, "tcp", hostname+":443")
+	conn, err := dialer.DialContext(dctx, "tcp", addr)
 	if err != nil {
 		return false
 	}

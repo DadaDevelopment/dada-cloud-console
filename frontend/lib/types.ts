@@ -611,6 +611,8 @@ export interface DomainHostname {
   record_type: "A" | "CNAME";
   status: "pending" | "active" | "failed";
   cert_status: string;
+  /** Machine code for why the hostname is not live yet; translated via domains.hm.reason.*. */
+  status_reason?: string;
   operation_id?: string;
   created_at: string;
   updated_at: string;

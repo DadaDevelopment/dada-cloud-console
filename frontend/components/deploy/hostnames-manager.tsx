@@ -6,6 +6,7 @@ import type { DomainAuthorization, DomainHostname } from "@/lib/types";
 import { Spinner } from "@/components/ui/spinner";
 import { PhaseBadge } from "@/components/ui/phase-badge";
 import { ManagedDnsPanel } from "@/components/deploy/managed-dns";
+import { hostnameReason } from "@/lib/hostname-status";
 import { useT } from "@/lib/i18n/console/context";
 
 type ConnectPath = "advanced" | "delegate";
@@ -269,6 +270,9 @@ export function HostnamesManager({ projectId, envId, appName, canEdit, verifiedA
                     <span className={`rounded-full border px-2 py-0.5 text-xs font-medium capitalize ${statusStyle(h.status)}`}>
                       {h.status}
                     </span>
+                    {hostnameReason(h.status_reason, t) && (
+                      <p className="mt-1 max-w-xs text-xs text-gray-500">{hostnameReason(h.status_reason, t)}</p>
+                    )}
                   </td>
                   <td className="px-5 py-3">
                     <PhaseBadge phase={h.cert_status} />

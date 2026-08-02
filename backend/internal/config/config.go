@@ -27,6 +27,18 @@ type Config struct {
 	CustomDomainCNAMETarget string // CUSTOM_DOMAIN_CNAME_TARGET
 	CustomDomainVerifyLabel string // CUSTOM_DOMAIN_VERIFY_LABEL
 
+	// IngressTLSProbeAddr is the host:port ReconcilePendingHostnames dials, with
+	// SNI set to the hostname, to decide whether a hostname's certificate is
+	// really being served — i.e. served BY US. It must address our own ingress
+	// controller directly, never the public hostname: a domain being migrated
+	// from another provider still answers its own name with a valid publicly
+	// trusted certificate, so a probe that follows public DNS reports "live"
+	// for a domain we do not serve at all. Defaults to the in-cluster Service
+	// (no hairpin through the provider LB, and unaffected by any SNI-routing
+	// edge in front of it). Set empty to fall back to dialing the public
+	// hostname, which is only meaningful outside the cluster (dev, tests).
+	IngressTLSProbeAddr string // INGRESS_TLS_PROBE_ADDR
+
 	// Managed DNS via NS delegation (design: docs/plans/2026-07-13-ns-delegation-managed-dns.md).
 	// PowerDNSAPIURL is the in-cluster PowerDNS API root; PowerDNSAPIKey is the
 	// X-API-Key. An empty PowerDNSAPIKey disables all managed-DNS endpoints (503).
@@ -403,6 +415,15 @@ type Config struct {
 	AgentChatModel       string // AGENT_CHAT_MODEL (default "claude")
 	AgentChatDailyMsgCap int64  // AGENT_CHAT_DAILY_MSG_CAP (default 50)
 
+	// Langfuse turn tracing for the console agent. An empty public or secret
+	// key means disabled: the client is a no-op and the SSE path never waits on
+	// it. Turn rows in agent_chat_turns are written either way, so the database
+	// side of observability does not depend on Langfuse being reachable.
+	LangfuseHost      string // LANGFUSE_HOST
+	LangfusePublicKey string // LANGFUSE_PUBLIC_KEY
+	LangfuseSecretKey string // LANGFUSE_SECRET_KEY
+	LangfuseEnabled   bool   // LANGFUSE_ENABLED (default true; keys still required)
+
 	// DadaAgent cloud-task integration (ADR-cloud-task). The console fires
 	// autonomous agent tasks from an app chip: it mints a short-lived GitHub App
 	// install token + a Keycloak client-credentials token, submits + executes a
@@ -583,6 +604,7 @@ func Load() (*Config, error) {
 		CustomDomainATarget:         getEnv("CUSTOM_DOMAIN_A_TARGET", getEnv("CLUSTER_LB_IP", "155.212.223.198")),
 		CustomDomainCNAMETarget:     getEnv("CUSTOM_DOMAIN_CNAME_TARGET", "cloud.dada-tuda.ru"),
 		CustomDomainVerifyLabel:     getEnv("CUSTOM_DOMAIN_VERIFY_LABEL", "_dada-verify"),
+		IngressTLSProbeAddr:         getEnv("INGRESS_TLS_PROBE_ADDR", "ingress-nginx-pub-controller.network.svc.cluster.local:443"),
 		PowerDNSAPIURL:              getEnv("POWERDNS_API_URL", "http://powerdns-api.powerdns.svc:8081"),
 		PowerDNSAPIKey:              getEnv("POWERDNS_API_KEY", ""),
 		PlatformNameservers:         splitList(getEnv("PLATFORM_NAMESERVERS", "ns1.dada-tuda.ru,ns2.dada-tuda.ru")),
@@ -696,6 +718,10 @@ func Load() (*Config, error) {
 		AgentChatGatewayKey:         getEnv("AGENT_CHAT_GATEWAY_KEY", ""),
 		AgentChatModel:              getEnv("AGENT_CHAT_MODEL", "claude"),
 		AgentChatDailyMsgCap:        getEnvInt64("AGENT_CHAT_DAILY_MSG_CAP", 50),
+		LangfuseHost:                getEnv("LANGFUSE_HOST", "https://cloud.langfuse.com"),
+		LangfusePublicKey:           getEnv("LANGFUSE_PUBLIC_KEY", ""),
+		LangfuseSecretKey:           getEnv("LANGFUSE_SECRET_KEY", ""),
+		LangfuseEnabled:             getEnv("LANGFUSE_ENABLED", "true") == "true",
 		DadaAgentBaseURL:            getEnv("DADA_AGENT_BASE_URL", ""),
 		KeycloakTokenURL:            getEnv("KEYCLOAK_TOKEN_URL", ""),
 		CloudAgentClientID:          getEnv("CLOUD_AGENT_CLIENT_ID", ""),
