@@ -141,15 +141,20 @@ func (h *Handler) RetryOperation(c *gin.Context) {
 		return
 	}
 
+	// Filled once the operation row is read: a retry belongs to the environment
+	// the operation targeted, and without it the row cannot be lined up with the
+	// deploy it was retrying.
+	var envID uuid.UUID
 	audit := func(outcome string, meta map[string]any) {
 		h.recordAudit(c.Request.Context(), claims.UserID, auditEntry{
-			ProjectID:    projectID,
-			OperationID:  operationID,
-			Action:       "RetryOperation",
-			ResourceKind: "Operation",
-			ResourceName: operationID.String(),
-			Outcome:      outcome,
-			Metadata:     meta,
+			ProjectID:     projectID,
+			EnvironmentID: envID,
+			OperationID:   operationID,
+			Action:        "RetryOperation",
+			ResourceKind:  "Operation",
+			ResourceName:  operationID.String(),
+			Outcome:       outcome,
+			Metadata:      meta,
 		})
 	}
 	reject := func(status int, reason string) {
@@ -176,10 +181,14 @@ func (h *Handler) RetryOperation(c *gin.Context) {
 
 	// Fetch current status
 	var currentStatus models.OperationStatus
+	var opEnvID *uuid.UUID
 	err = h.pool.QueryRow(c.Request.Context(),
-		`SELECT status FROM operations WHERE id = $1 AND project_id = $2`,
+		`SELECT status, environment_id FROM operations WHERE id = $1 AND project_id = $2`,
 		operationID, projectID,
-	).Scan(&currentStatus)
+	).Scan(&currentStatus, &opEnvID)
+	if opEnvID != nil {
+		envID = *opEnvID
+	}
 	if err == pgx.ErrNoRows {
 		reject(http.StatusNotFound, "not_found")
 		respondNotFound(c)

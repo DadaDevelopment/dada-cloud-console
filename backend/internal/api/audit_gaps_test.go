@@ -128,9 +128,12 @@ func TestRetryOperation_SuccessIsAudited(t *testing.T) {
 		t.Fatalf("status = %d, want 202; body=%s", rec.Code, rec.Body.String())
 	}
 
-	outcome, reason, _ := lastAuditRow(t, pool, projectID, "RetryOperation")
+	outcome, reason, gotEnv := lastAuditRow(t, pool, projectID, "RetryOperation")
 	if outcome != auditOutcomeSuccess || reason != "" {
 		t.Errorf("audit row = (%q, %q), want (success, no reason)", outcome, reason)
+	}
+	if gotEnv == nil || *gotEnv != envID {
+		t.Errorf("environment_id = %v, want %v", gotEnv, envID)
 	}
 }
 
