@@ -209,6 +209,49 @@ func TestIdentityDelivery_LeavesUnmanagedSecretAlone(t *testing.T) {
 	}
 }
 
+// TestIdentityDelivery_NeverRevokesAnInvisibleLiveToken is the pre-deployment
+// safety net for every app that predates delivery. reels-tracker's plaintext
+// lives as a literal in argo-infra, so its identity holds a live token with no
+// Secret to adopt; minting there would revoke the credential the running bot
+// is using and take prod down the moment this loop first ticks.
+func TestIdentityDelivery_NeverRevokesAnInvisibleLiveToken(t *testing.T) {
+	pool := testPaymentsPool(t)
+	ns := "delivery-ns-" + uuid.NewString()[:8]
+	appName, projectID, envID := seedDeliveryApp(t, pool, ns)
+	ctx := context.Background()
+
+	pt, hash, prefix, err := generateIdentityToken()
+	if err != nil {
+		t.Fatalf("generateIdentityToken: %v", err)
+	}
+	var identityID uuid.UUID
+	if err := pool.QueryRow(ctx,
+		`INSERT INTO service_identities (app_name, project_id, environment_id, display_name, scopes)
+		 VALUES ($1, $2, $3, $1, $4) RETURNING id`,
+		appName, projectID, envID, identityDefaultScopes).Scan(&identityID); err != nil {
+		t.Fatalf("seed pre-existing identity: %v", err)
+	}
+	if _, err := pool.Exec(ctx,
+		`INSERT INTO service_identity_tokens (identity_id, token_hash, token_prefix) VALUES ($1, $2, $3)`,
+		identityID, hash, prefix); err != nil {
+		t.Fatalf("seed pre-existing token: %v", err)
+	}
+
+	w, cs := newDeliveryWatcher(t, pool)
+	w.tick(ctx)
+
+	live, err := w.tokenIsLive(ctx, identityID, pt)
+	if err != nil {
+		t.Fatalf("tokenIsLive: %v", err)
+	}
+	if !live {
+		t.Fatal("the loop revoked a live token it could not see; every pre-delivery app would 401 on the first tick")
+	}
+	if _, err := cs.CoreV1().Secrets(ns).Get(ctx, appName+identitySecretSuffix, metav1.GetOptions{}); err == nil {
+		t.Fatal("delivered a Secret whose token is not the one the app is actually using")
+	}
+}
+
 // TestIdentityDelivery_MoveKeepsTokenAndClearsOldNamespace is the regression
 // test for 2026-08-02: an app that changes project keeps the exact credential
 // it had, and no live copy is left readable in the namespace it left.

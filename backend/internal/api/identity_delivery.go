@@ -192,6 +192,13 @@ func (w *identityDeliveryWatcher) ensureIdentity(ctx context.Context, t delivera
 // revoked or rotated token leaves the app holding a credential that 401s, and
 // nothing else in the system would notice.
 //
+// Minting is the last resort and only happens when the identity holds no live
+// token at all. An identity whose token exists but is invisible to this loop
+// is the pre-delivery world -- reels-tracker's plaintext still sits as a
+// literal in argo-infra -- and minting there would revoke the credential a
+// running app is using this second. That app is repaired by delivering to it,
+// not by silently rotating it out from under itself.
+//
 // The payload goes in Data, not StringData: StringData is a write-only
 // convenience the API server folds into Data, so a Secret written that way
 // reads back with an empty Data on the very next tick and the loop would
@@ -221,6 +228,15 @@ func (w *identityDeliveryWatcher) ensureSecret(ctx context.Context, t deliverabl
 		return false, err
 	}
 	if plaintext == "" {
+		held, err := w.liveTokenCount(ctx, identityID)
+		if err != nil {
+			return false, err
+		}
+		if held > 0 {
+			log.Printf("identity-delivery: %s/%s holds %d live token(s) this loop cannot see; not minting",
+				t.Namespace, t.Name, held)
+			return false, nil
+		}
 		if plaintext, err = w.mintToken(ctx, identityID); err != nil {
 			return false, err
 		}
@@ -308,6 +324,19 @@ func (w *identityDeliveryWatcher) adoptToken(ctx context.Context, identityID uui
 		}
 	}
 	return "", nil
+}
+
+// liveTokenCount reports how many unrevoked tokens the identity holds. It is
+// the guard on minting: a non-zero count with nothing to adopt means a live
+// credential exists somewhere this loop cannot read.
+func (w *identityDeliveryWatcher) liveTokenCount(ctx context.Context, identityID uuid.UUID) (int, error) {
+	var n int
+	err := w.h.pool.QueryRow(ctx,
+		`SELECT COUNT(*) FROM service_identity_tokens
+		  WHERE identity_id = $1 AND revoked_at IS NULL`,
+		identityID,
+	).Scan(&n)
+	return n, err
 }
 
 // mintToken revokes the identity's previous tokens and returns a new
