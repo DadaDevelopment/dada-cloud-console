@@ -554,3 +554,35 @@ func (s *shellRecorder) ran(substr string) bool {
 	}
 	return false
 }
+
+// TestTheControlPlanesOwnBookkeepingIsNotCarried pins the fix for a second
+// crystallization of the same box dying at the seed stage: /etc/dada/services is
+// a symlink into the box's workspace disk, the previous seed left a directory
+// there, and tar stops the whole untar with "File exists". It is the control
+// plane's bookkeeping, not the customer's work — every descriptor it holds is
+// already rendered into the artifact's units.
+func TestTheControlPlanesOwnBookkeepingIsNotCarried(t *testing.T) {
+	script := manifestScript()
+	if !strings.Contains(script, "-path "+clusterServicesLink) {
+		t.Errorf("the manifest still walks the control plane's service store: %s", script)
+	}
+}
+
+// TestASecondCrystallizationOverwritesTheFirstSeed: the permanent disk survives
+// between attempts, so the untar must replace what an earlier attempt wrote
+// rather than refuse.
+func TestASecondCrystallizationOverwritesTheFirstSeed(t *testing.T) {
+	rec := &shellRecorder{reply: func(string, string) (string, error) { return "", nil }}
+	c := &ClusterCrystallizer{shell: rec, Namespace: "dada-boxes"}
+	_, _ = c.transfer(context.Background(), "box", "target", []string{"/srv/app"},
+		map[string]FileEntry{"/srv/app": {Path: "/srv/app"}}, crystalRootDelta, 0)
+	var extract string
+	for _, cmd := range rec.commands {
+		if strings.Contains(cmd, "tar -x") {
+			extract = cmd
+		}
+	}
+	if !strings.Contains(extract, "--overwrite") {
+		t.Errorf("untar refuses to replace an earlier seed: %q", extract)
+	}
+}

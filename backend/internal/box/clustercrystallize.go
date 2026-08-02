@@ -122,7 +122,18 @@ var crystalDeltaRoots = []string{"/srv", "/root", "/home", "/opt", "/usr/local",
 
 // crystalPrunedPaths are ADR-019's machine-owned files that fall inside the delta
 // roots and must not be carried: they are the target's identity, not the box's.
-var crystalPrunedPaths = []string{"/etc/fstab", "/etc/machine-id", "/etc/hostname", "/etc/resolv.conf", "/etc/hosts"}
+//
+// /etc/dada/services is on the list for the same reason, one level up: it is the
+// control plane's own bookkeeping, a symlink into the box's workspace disk. On the
+// artifact that target does not exist, and carrying a symlink onto a path the
+// previous seed left as a directory is what made a second crystallization of the
+// same box fail outright with "tar: etc/dada/services: Cannot open: File exists".
+// Nothing is lost by pruning it — every descriptor it holds is already rendered
+// into the artifact's units, which is the form the artifact actually runs.
+var crystalPrunedPaths = []string{
+	"/etc/fstab", "/etc/machine-id", "/etc/hostname", "/etc/resolv.conf", "/etc/hosts",
+	clusterServicesLink,
+}
 
 // NewClusterCrystallizer builds a crystallizer sharing the runtime's API client,
 // so both speak to the cluster as the same service account and an RBAC gap shows
@@ -761,6 +772,11 @@ func pathDepth(p string) int {
 // The flag turns those into warnings; the warnings are parsed, not discarded, and
 // travel into the report, because carrying less than the box holds is exactly the
 // kind of loss ADR-019 requires to be loud rather than convenient.
+//
+// The extraction side takes --overwrite for a related reason: a second
+// crystallization of the same box writes onto a disk the first one already seeded,
+// and without it any entry whose type changed since — a directory that is now a
+// symlink — stops the whole untar with "File exists" instead of being replaced.
 func (c *ClusterCrystallizer) transfer(ctx context.Context, boxPod, targetPod string, paths []string, entries map[string]FileEntry, dest string, strip int) ([]string, error) {
 	if len(paths) == 0 {
 		return nil, nil
@@ -788,7 +804,7 @@ func (c *ClusterCrystallizer) transfer(ctx context.Context, boxPod, targetPod st
 		srcErr <- err
 	}()
 
-	extract := fmt.Sprintf("tar -x --numeric-owner -f - -C %s", dest)
+	extract := fmt.Sprintf("tar -x --numeric-owner --overwrite -f - -C %s", dest)
 	if strip > 0 {
 		extract += fmt.Sprintf(" --strip-components=%d", strip)
 	}
