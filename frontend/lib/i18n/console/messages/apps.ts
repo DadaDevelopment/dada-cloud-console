@@ -326,7 +326,7 @@ export const apps: Messages = {
   "apps.deployments.heading.suffix": { ru: "/ deployments", en: "/ deployments" },
   "apps.deployments.trigger": { ru: "Запустить сборку", en: "Trigger build" },
   "apps.deployments.queuing": { ru: "В очереди…", en: "Queuing…" },
-  "apps.deployments.notice.queued": { ru: "Сборка в очереди · {sha}", en: "Build queued · {sha}" },
+  "apps.deployments.notice.queued": { ru: "Сборка в очереди · {ref}", en: "Build queued · {ref}" },
   "apps.deployments.error.load": { ru: "Не удалось загрузить деплои", en: "Failed to load deployments" },
   "apps.deployments.error.cancel": { ru: "Не удалось отменить сборку", en: "Failed to cancel build" },
   "apps.deployments.error.noRepo": {

@@ -1149,6 +1149,8 @@ export interface Build {
   trigger: DeployTrigger;
   commit_sha: string;
   commit_message?: string;
+  /** Resolved real HEAD sha for manually triggered builds; null/absent when unresolved or the app has no git branch (uploaded archive). */
+  head_sha?: string | null;
   branch: string;
   pr_number?: number;
   image_uri?: string;

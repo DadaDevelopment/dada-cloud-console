@@ -32,4 +32,7 @@ export const common: Messages = {
   "common.status.status": { ru: "Статус", en: "Status" },
   "common.status.action": { ru: "Действие", en: "Action" },
   "common.status.synced": { ru: "Синхронизировано {ago}", en: "Synced {ago}" },
+
+  "common.commit.branchLatest": { ru: "последний коммит ветки {branch}", en: "latest commit on branch {branch}" },
+  "common.commit.archive": { ru: "загруженный архив", en: "uploaded archive" },
 };

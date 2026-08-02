@@ -12,6 +12,7 @@ import { useProjectContext } from "@/lib/project-context";
 import { canMutate } from "@/lib/rbac";
 import { useT } from "@/lib/i18n/console/context";
 import { trackUxEvent } from "@/lib/ux-telemetry";
+import { resolveCommit } from "@/lib/build-commit";
 
 const POLL_MS = 3000;
 
@@ -152,11 +153,20 @@ export function AppLatestBuildCard({ projectId, envId, appName, appUrl, appReady
           <div className="min-w-0">
             <p className="text-sm font-semibold text-green-700 dark:text-green-400">{t("apps.latestBuild.success.heading")}</p>
             <p className="mt-0.5 truncate text-xs text-gray-500 dark:text-gray-400">
-              {build.commit_sha && (
-                <span className="font-mono">{build.commit_sha.slice(0, 7)}</span>
-              )}
-              {build.commit_sha && build.branch && " · "}
-              {build.branch}
+              {(() => {
+                const resolved = resolveCommit(build);
+                if (resolved.kind === "sha") {
+                  return (
+                    <>
+                      <span className="font-mono">{resolved.sha.slice(0, 7)}</span> · {build.branch}
+                    </>
+                  );
+                }
+                if (resolved.kind === "branch") {
+                  return t("common.commit.branchLatest", { branch: resolved.branch });
+                }
+                return t("common.commit.archive");
+              })()}
             </p>
             {appUrl && appReady && (
               <a

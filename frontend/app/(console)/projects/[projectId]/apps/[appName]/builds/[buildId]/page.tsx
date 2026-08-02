@@ -13,6 +13,7 @@ import { BuildStatusBadge, isBuildActive } from "@/components/deploy/build-statu
 import { BuildLogViewer } from "@/components/deploy/build-log-viewer";
 import { useT } from "@/lib/i18n/console/context";
 import { trackUxEvent } from "@/lib/ux-telemetry";
+import { resolveCommit } from "@/lib/build-commit";
 
 const PYTHON_BOT_DOCKERFILE = `FROM python:3.12-slim
 WORKDIR /app
@@ -199,8 +200,22 @@ export default function BuildDetailPage() {
                 <BuildStatusBadge status={build.status} />
               </div>
               <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
-                <span className="font-mono">{build.commit_sha?.slice(0, 7) ?? "—"}</span> {t("apps.builds.meta.on")}{" "}
-                <span className="font-mono">{build.branch}</span> · {build.trigger} · {timeAgo(build.created_at)}
+                {(() => {
+                  const resolved = resolveCommit(build);
+                  if (resolved.kind === "sha") {
+                    return (
+                      <>
+                        <span className="font-mono">{resolved.sha.slice(0, 7)}</span> {t("apps.builds.meta.on")}{" "}
+                        <span className="font-mono">{build.branch}</span>
+                      </>
+                    );
+                  }
+                  if (resolved.kind === "branch") {
+                    return <span>{t("common.commit.branchLatest", { branch: resolved.branch })}</span>;
+                  }
+                  return <span>{t("common.commit.archive")}</span>;
+                })()}{" "}
+                · {build.trigger} · {timeAgo(build.created_at)}
               </p>
               {build.commit_message && <p className="mt-1 text-sm text-gray-700 dark:text-gray-200">{build.commit_message}</p>}
               {build.image_uri && (

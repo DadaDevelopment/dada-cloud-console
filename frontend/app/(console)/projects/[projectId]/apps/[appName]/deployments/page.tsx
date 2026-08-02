@@ -11,6 +11,7 @@ import { canMutate } from "@/lib/rbac";
 import { timeAgo } from "@/lib/format";
 import { BuildStatusBadge, isBuildActive } from "@/components/deploy/build-status-badge";
 import { useT } from "@/lib/i18n/console/context";
+import { formatCommitLabel, resolveCommit } from "@/lib/build-commit";
 
 /**
  * A single row in the unified deploy feed. Either a build attempt (every
@@ -111,7 +112,7 @@ export default function AppDeploymentsPage() {
         router.push(`/projects/${projectId}/apps/${appName}/builds/${build.id}${envId ? `?envId=${envId}` : ""}`);
         return;
       }
-      setNotice(t("apps.deployments.notice.queued", { sha: build.commit_sha?.slice(0, 7) ?? build.id.slice(0, 7) }));
+      setNotice(t("apps.deployments.notice.queued", { ref: formatCommitLabel(resolveCommit(build), t) }));
       await load(true);
     } catch (err) {
       const msg = err instanceof Error ? err.message : t("apps.deployments.error.load");
@@ -153,8 +154,9 @@ export default function AppDeploymentsPage() {
     setActionId(build.id);
     setError(null);
     try {
-      const shaOrId = build.commit_sha ? build.commit_sha.slice(0, 12) : build.id.slice(0, 12);
-      const summary = `Build failed on branch ${build.branch} (${shaOrId})${build.commit_message ? `: ${build.commit_message}` : ""}`;
+      const resolved = resolveCommit(build);
+      const ref = resolved.kind === "sha" ? resolved.sha.slice(0, 12) : formatCommitLabel(resolved, t);
+      const summary = `Build failed on branch ${build.branch} (${ref})${build.commit_message ? `: ${build.commit_message}` : ""}`;
       await cloudTasksApi.triggerAutofix(projectId, envId, appName, summary);
       router.push(`/projects/${projectId}/apps/${appName}${envId ? `?envId=${envId}` : ""}#agent`);
     } catch (err) {
@@ -260,6 +262,7 @@ export default function AppDeploymentsPage() {
                   const dep = row.dep;
                   const isCurrent = dep?.is_current ?? false;
                   const image = dep?.image_uri ?? b.image_uri;
+                  const resolved = resolveCommit(b);
                   return (
                     <div
                       key={b.id}
@@ -275,8 +278,16 @@ export default function AppDeploymentsPage() {
                         <div className="flex flex-wrap items-center gap-2">
                           {isCurrent && <CurrentBadge />}
                           <BuildStatusBadge status={b.status} />
-                          <span className="font-mono text-xs text-gray-500 dark:text-gray-400">{b.commit_sha?.slice(0, 7) ?? "—"}</span>
-                          <span className="text-xs text-gray-400 dark:text-gray-500">{b.branch}</span>
+                          {resolved.kind === "sha" ? (
+                            <>
+                              <span className="font-mono text-xs text-gray-500 dark:text-gray-400">{resolved.sha.slice(0, 7)}</span>
+                              <span className="text-xs text-gray-400 dark:text-gray-500">{b.branch}</span>
+                            </>
+                          ) : (
+                            <span className="text-xs text-gray-400 dark:text-gray-500">
+                              {resolved.kind === "branch" ? t("common.commit.branchLatest", { branch: resolved.branch }) : t("common.commit.archive")}
+                            </span>
+                          )}
                           <span className="inline-flex items-center rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600 dark:bg-slate-800 dark:text-slate-300">
                             {b.trigger}
                           </span>
@@ -325,6 +336,7 @@ export default function AppDeploymentsPage() {
                 }
 
                 const dep = row.dep;
+                const depResolved = resolveCommit(dep);
                 return (
                   <div
                     key={dep.id}
@@ -338,8 +350,14 @@ export default function AppDeploymentsPage() {
                         <span className="inline-flex items-center rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600 dark:bg-slate-800 dark:text-slate-300">
                           {dep.trigger}
                         </span>
-                        {dep.commit_sha && <span className="font-mono text-xs text-gray-500 dark:text-gray-400">{dep.commit_sha.slice(0, 7)}</span>}
-                        {dep.branch && <span className="text-xs text-gray-400 dark:text-gray-500">{dep.branch}</span>}
+                        {depResolved.kind === "sha" && (
+                          <span className="font-mono text-xs text-gray-500 dark:text-gray-400">{depResolved.sha.slice(0, 7)}</span>
+                        )}
+                        {depResolved.kind === "sha" && dep.branch && <span className="text-xs text-gray-400 dark:text-gray-500">{dep.branch}</span>}
+                        {depResolved.kind === "branch" && (
+                          <span className="text-xs text-gray-400 dark:text-gray-500">{t("common.commit.branchLatest", { branch: depResolved.branch })}</span>
+                        )}
+                        {depResolved.kind === "none" && <span className="text-xs text-gray-400 dark:text-gray-500">{t("common.commit.archive")}</span>}
                       </div>
                       <p className="mt-1 truncate font-mono text-xs text-gray-400 dark:text-gray-500">{dep.image_uri}</p>
                       <p className="mt-0.5 text-xs text-gray-400 dark:text-gray-500">{timeAgo(dep.created_at)}</p>

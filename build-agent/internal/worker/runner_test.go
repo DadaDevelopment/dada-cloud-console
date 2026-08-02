@@ -14,6 +14,28 @@ func TestInjectToken(t *testing.T) {
 	}
 }
 
+func TestShouldResolveHeadCommit(t *testing.T) {
+	cases := []struct {
+		name      string
+		provider  string
+		commitSHA string
+		want      bool
+	}{
+		{"github manual", "github", "manual-20260101120000.000000", true},
+		{"github push", "github", "abcdef1234567890", false},
+		{"archive manual", "archive", "manual-20260101120000.000000", false},
+		{"gitlab manual", "gitlab", "manual-20260101120000.000000", false},
+		{"github empty sha", "github", "", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := shouldResolveHeadCommit(tc.provider, tc.commitSHA); got != tc.want {
+				t.Errorf("shouldResolveHeadCommit(%q, %q) = %v, want %v", tc.provider, tc.commitSHA, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestParseMarkerImage(t *testing.T) {
 	var out buildOutcome
 	parseMarker("==> image: nexus.dada/proj/app@sha256:abc123", &out)

@@ -23,6 +23,9 @@ func (a *liveTokenApp) ListInstallations(_ context.Context) ([]github.Installati
 	return nil, nil
 }
 func (a *liveTokenApp) PostStatus(_ context.Context, _ int64, _, _, _, _, _ string) error { return nil }
+func (a *liveTokenApp) BranchHead(_ context.Context, _, _, _ string) (string, string, error) {
+	return "", "", nil
+}
 
 func TestLiveDetectFrameworks(t *testing.T) {
 	tok := os.Getenv("GITHUB_TOKEN")

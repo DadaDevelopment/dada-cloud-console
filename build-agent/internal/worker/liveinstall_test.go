@@ -24,6 +24,9 @@ func (f *fakeApp) ListInstallations(context.Context) ([]github.InstallationAccou
 func (f *fakeApp) PostStatus(context.Context, int64, string, string, string, string, string) error {
 	return nil
 }
+func (f *fakeApp) BranchHead(context.Context, string, string, string) (string, string, error) {
+	return "", "", nil
+}
 
 func TestLiveInstallationForOwner(t *testing.T) {
 	app := &fakeApp{installs: []github.InstallationAccount{

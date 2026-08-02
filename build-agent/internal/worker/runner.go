@@ -696,6 +696,20 @@ func (r *Runner) execute(ctx context.Context, b *db.Build, repo *db.Repo, llog *
 		return buildOutcome{}, fmt.Errorf("git creds: %w", err)
 	}
 
+	if shouldResolveHeadCommit(repo.Provider, b.CommitSHA) {
+		sha, message, herr := r.github.BranchHead(ctx, token, repo.RepoFullName, b.Branch)
+		switch {
+		case herr != nil:
+			llog.Warn().Err(herr).Msg("resolve manual build head commit failed")
+		case sha == "":
+			llog.Warn().Str("branch", b.Branch).Msg("resolve manual build head commit returned no sha")
+		default:
+			if serr := db.SetHeadCommit(ctx, r.pool, b.ID, sha, message); serr != nil {
+				llog.Warn().Err(serr).Msg("store manual build head commit failed")
+			}
+		}
+	}
+
 	// detecting → building
 	if ok, err := db.Transition(ctx, r.pool, b.ID, db.StatusDetecting, db.StatusBuilding); err != nil || !ok {
 		return buildOutcome{}, fmt.Errorf("transition detecting→building: %w", err)
@@ -1121,6 +1135,14 @@ func imageDigest(uri string) string {
 		return ""
 	}
 	return d
+}
+
+// shouldResolveHeadCommit reports whether a build's commit_sha is the synthetic
+// manual-trigger placeholder (see migration 091) on a provider we can resolve a
+// real HEAD sha for. Only github is supported: archive builds have no branch to
+// look up, and gitlab support was never added to BranchHead.
+func shouldResolveHeadCommit(provider, commitSHA string) bool {
+	return provider == "github" && strings.HasPrefix(commitSHA, "manual-")
 }
 
 // gitCreds returns a clone token and the authenticated clone URL. GitHub uses a

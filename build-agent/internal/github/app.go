@@ -43,6 +43,9 @@ type App interface {
 	// PostStatus reports a commit status back to GitHub on each build-state
 	// transition, with a details URL → console build page.
 	PostStatus(ctx context.Context, installationID int64, repoFullName, sha, state, detailsURL, description string) error
+	// BranchHead resolves the current HEAD commit sha and message for a branch.
+	// token may be empty for anonymous access to a public repo.
+	BranchHead(ctx context.Context, token, repoFullName, branch string) (sha, message string, err error)
 }
 
 // InstallationAccount identifies the org/user a GitHub App installation belongs
@@ -337,6 +340,53 @@ func (c *Client) PostStatus(ctx context.Context, installationID int64, repoFullN
 		return fmt.Errorf("post status: %s", readErr(resp))
 	}
 	return nil
+}
+
+// BranchHead resolves the current HEAD commit sha and message for a branch via
+// GET /repos/{repo}/commits/{branch}. token may be empty: public repos are
+// readable anonymously, and manual builds on repos without a live installation
+// token must still resolve a display commit rather than fail outright.
+func (c *Client) BranchHead(ctx context.Context, token, repoFullName, branch string) (sha, message string, err error) {
+	url := fmt.Sprintf("%s/repos/%s/commits/%s", apiBase, repoFullName, branch)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return "", "", err
+	}
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+	req.Header.Set("Accept", "application/vnd.github+json")
+	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
+
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return "", "", fmt.Errorf("branch head: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return "", "", fmt.Errorf("branch head: %s", readErr(resp))
+	}
+
+	var out struct {
+		SHA    string `json:"sha"`
+		Commit struct {
+			Message string `json:"message"`
+		} `json:"commit"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return "", "", fmt.Errorf("decode branch head: %w", err)
+	}
+	return out.SHA, truncate(firstLine(out.Commit.Message), 200), nil
+}
+
+// firstLine returns the text before the first newline, trimmed of surrounding
+// whitespace. Commit messages carry a subject line plus an optional body; only
+// the subject is useful as a short display string.
+func firstLine(s string) string {
+	if i := strings.IndexByte(s, '\n'); i >= 0 {
+		s = s[:i]
+	}
+	return strings.TrimSpace(s)
 }
 
 func truncate(s string, n int) string {

@@ -71,6 +71,24 @@ func SetJenkinsBuildNumber(ctx context.Context, pool *pgxpool.Pool, id uuid.UUID
 	return nil
 }
 
+// SetHeadCommit records the real HEAD commit sha (and message, if none is
+// already stored) resolved for a manual build whose commit_sha column holds the
+// synthetic "manual-<ts>" placeholder (see migration 091). It never clobbers an
+// existing commit_message, since a webhook-originated row may already have one.
+// Best-effort: callers should log and continue on error rather than fail the
+// build over a display detail.
+func SetHeadCommit(ctx context.Context, pool *pgxpool.Pool, buildID uuid.UUID, sha, message string) error {
+	_, err := pool.Exec(ctx, `
+		UPDATE builds
+		SET    head_sha = $2, commit_message = COALESCE(NULLIF(commit_message, ''), $3), updated_at = NOW()
+		WHERE  id = $1
+	`, buildID, sha, message)
+	if err != nil {
+		return fmt.Errorf("set head commit %s: %w", buildID, err)
+	}
+	return nil
+}
+
 // MarkPushing moves a build to pushing from building (or leaves it pushing).
 // Unlike a strict building→pushing Transition it tolerates an already-pushing
 // row so restart reconciliation can re-drive a build that died mid-confirm. It

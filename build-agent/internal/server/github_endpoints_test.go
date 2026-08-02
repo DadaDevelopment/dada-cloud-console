@@ -36,6 +36,9 @@ func (f *fakeApp) ListInstallations(_ context.Context) ([]github.InstallationAcc
 	return f.insts, nil
 }
 func (f *fakeApp) PostStatus(_ context.Context, _ int64, _, _, _, _, _ string) error { return nil }
+func (f *fakeApp) BranchHead(_ context.Context, _, _, _ string) (string, string, error) {
+	return "", "", nil
+}
 
 func newTestServer(gh github.App) http.Handler {
 	s := New(":0", &Options{GitHub: gh})

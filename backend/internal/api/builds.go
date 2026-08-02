@@ -21,6 +21,7 @@ type build struct {
 	Trigger       string     `json:"trigger"`
 	CommitSHA     string     `json:"commit_sha"`
 	CommitMessage *string    `json:"commit_message,omitempty"`
+	HeadSHA       *string    `json:"head_sha,omitempty"`
 	Branch        string     `json:"branch"`
 	ImageURI      *string    `json:"image_uri,omitempty"`
 	LogsRef       *string    `json:"logs_ref,omitempty"`
@@ -34,14 +35,14 @@ type build struct {
 }
 
 const buildSelectCols = `id, git_repo_id, environment_id, app_name, status, trigger,
-		commit_sha, commit_message, branch, image_uri, logs_ref, pr_number,
+		commit_sha, commit_message, head_sha, branch, image_uri, logs_ref, pr_number,
 		started_at, finished_at, created_at, updated_at, error_message, fail_reason`
 
 func scanBuild(s interface {
 	Scan(dest ...any) error
 }, b *build) error {
 	return s.Scan(&b.ID, &b.GitRepoID, &b.EnvironmentID, &b.AppName, &b.Status, &b.Trigger,
-		&b.CommitSHA, &b.CommitMessage, &b.Branch, &b.ImageURI, &b.LogsRef, &b.PRNumber,
+		&b.CommitSHA, &b.CommitMessage, &b.HeadSHA, &b.Branch, &b.ImageURI, &b.LogsRef, &b.PRNumber,
 		&b.StartedAt, &b.FinishedAt, &b.CreatedAt, &b.UpdatedAt, &b.ErrorMessage, &b.FailReason)
 }
 
@@ -209,6 +210,16 @@ func (h *Handler) GetBuild(c *gin.Context) {
 // @Failure     404       {object} map[string]string
 // @Failure     409       {object} map[string]string
 // @Router      /projects/{projectId}/environments/{envId}/apps/{appName}/builds [post]
+// placeholderCommitSHA mints the synthetic commit_sha a manual build starts with.
+// The schema requires commit_sha (UNIQUE(git_repo_id, commit_sha)) but a manual
+// trigger has no commit yet, and the value is never overwritten later — doing so
+// would collide with a push build already sitting on the real commit. build-agent
+// resolves the real HEAD afterwards into the separate head_sha column, which is
+// what the console renders.
+func placeholderCommitSHA() string {
+	return "manual-" + time.Now().UTC().Format("20060102150405.000000")
+}
+
 func (h *Handler) TriggerBuild(c *gin.Context) {
 	claims, ok := auth.GetClaims(c)
 	if !ok {
@@ -268,10 +279,7 @@ func (h *Handler) TriggerBuild(c *gin.Context) {
 		return
 	}
 
-	// commit_sha is required by the schema (UNIQUE(git_repo_id, commit_sha)). For a
-	// manual trigger the agent resolves the real HEAD sha; we pin a unique synthetic
-	// placeholder ("manual-<ts>") so the idempotency constraint never collides.
-	commitSHA := "manual-" + time.Now().UTC().Format("20060102150405.000000")
+	commitSHA := placeholderCommitSHA()
 
 	var b build
 	row := h.pool.QueryRow(c.Request.Context(),
