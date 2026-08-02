@@ -243,17 +243,39 @@ func (h *Handler) CreateServiceDatabase(c *gin.Context) {
 		return
 	}
 
+	var req createServiceDatabaseRequest
+	dbName := func() string { return req.Name }
+
+	audit := func(opID uuid.UUID, outcome string, meta map[string]any) {
+		h.recordAudit(c.Request.Context(), claims.UserID, auditEntry{
+			ProjectID:     projectID,
+			EnvironmentID: envID,
+			OperationID:   opID,
+			Action:        "CreateServiceDatabase",
+			ResourceKind:  "ServiceDatabaseV2",
+			ResourceName:  dbName(),
+			Outcome:       outcome,
+			Metadata:      meta,
+		})
+	}
+	rejectErr := func(status int, reason, msg string) {
+		audit(uuid.Nil, auditOutcomeFailure, map[string]any{"reason": reason, "status": status})
+		respondError(c, status, msg)
+	}
+
 	// Check write permission
 	role, err := h.effectiveRole(c.Request.Context(), claims, projectID)
 	if err == pgx.ErrNoRows {
+		audit(uuid.Nil, auditOutcomeFailure, map[string]any{"reason": "not_a_member", "status": http.StatusNotFound})
 		respondNotFound(c)
 		return
 	}
 	if err != nil {
-		respondError(c, http.StatusInternalServerError, "failed to check project membership")
+		rejectErr(http.StatusInternalServerError, "membership_check_failed", "failed to check project membership")
 		return
 	}
 	if !canWrite(role) {
+		audit(uuid.Nil, auditOutcomeFailure, map[string]any{"reason": "read_only_role", "status": http.StatusForbidden})
 		respondForbidden(c)
 		return
 	}
@@ -261,35 +283,38 @@ func (h *Handler) CreateServiceDatabase(c *gin.Context) {
 	if orgID, orgErr := h.projectOrg(c.Request.Context(), projectID); orgErr == nil {
 		if qErr := h.checkQuota(c.Request.Context(), orgID, "databases"); qErr != nil {
 			if qe, ok := qErr.(*quotaExceededError); ok {
+				audit(uuid.Nil, auditOutcomeFailure, map[string]any{
+					"reason": "quota_exceeded", "status": http.StatusPaymentRequired,
+					"resource": qe.Resource, "limit": qe.Limit,
+				})
 				respondQuotaExceeded(c, qe.Resource, qe.Limit)
 				return
 			}
 		}
 	}
 
-	var req createServiceDatabaseRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		respondError(c, http.StatusBadRequest, err.Error())
+		rejectErr(http.StatusBadRequest, "malformed_body", err.Error())
 		return
 	}
 
 	// Validate fields
 	if req.Name == "" {
-		respondError(c, http.StatusBadRequest, "name is required")
+		rejectErr(http.StatusBadRequest, "name_required", "name is required")
 		return
 	}
 	if req.Database == "" {
-		respondError(c, http.StatusBadRequest, "database is required")
+		rejectErr(http.StatusBadRequest, "database_required", "database is required")
 		return
 	}
 	// app_ref is optional: empty = standalone, environment-level database that
 	// owns its own chart. When set, the database is bound to that app's chart.
 	if err := validateKubeName(req.Name); err != nil {
-		respondError(c, http.StatusBadRequest, err.Error())
+		rejectErr(http.StatusBadRequest, "invalid_name", err.Error())
 		return
 	}
 	if err := validatePgName(req.Database); err != nil {
-		respondError(c, http.StatusBadRequest, err.Error())
+		rejectErr(http.StatusBadRequest, "invalid_database_name", err.Error())
 		return
 	}
 
@@ -301,11 +326,11 @@ func (h *Handler) CreateServiceDatabase(c *gin.Context) {
 		projectID, envID, req.Name,
 	).Scan(&existing)
 	if err != nil {
-		respondError(c, http.StatusInternalServerError, "failed to check name uniqueness")
+		rejectErr(http.StatusInternalServerError, "uniqueness_check_failed", "failed to check name uniqueness")
 		return
 	}
 	if existing > 0 {
-		respondError(c, http.StatusConflict, "a database with that name already exists in this environment")
+		rejectErr(http.StatusConflict, "name_taken", "a database with that name already exists in this environment")
 		return
 	}
 
@@ -323,7 +348,7 @@ func (h *Handler) CreateServiceDatabase(c *gin.Context) {
 		engine = "postgres"
 		password, perr := randomPassword()
 		if perr != nil {
-			respondError(c, http.StatusInternalServerError, "failed to generate database credential")
+			rejectErr(http.StatusInternalServerError, "credential_generation_failed", "failed to generate database credential")
 			return
 		}
 		const dbUser = "dada"
@@ -333,14 +358,14 @@ func (h *Handler) CreateServiceDatabase(c *gin.Context) {
 			{"POSTGRES_USER", dbUser},
 		} {
 			if err := h.seedEnvVar(c.Request.Context(), envID, req.Name, kv[0], kv[1], claims.UserID); err != nil {
-				respondError(c, http.StatusInternalServerError, "failed to seed database credentials")
+				rejectErr(http.StatusInternalServerError, "seed_credentials_failed", "failed to seed database credentials")
 				return
 			}
 		}
 		if req.AppRef != "" {
 			dsn := fmt.Sprintf("postgres://%s:%s@%s:5432/%s", dbUser, password, req.Name, req.Database)
 			if err := h.seedEnvVar(c.Request.Context(), envID, req.AppRef, "DATABASE_URL", dsn, claims.UserID); err != nil {
-				respondError(c, http.StatusInternalServerError, "failed to inject database connection string")
+				rejectErr(http.StatusInternalServerError, "seed_dsn_failed", "failed to inject database connection string")
 				return
 			}
 		}
@@ -358,13 +383,13 @@ func (h *Handler) CreateServiceDatabase(c *gin.Context) {
 	}
 	payloadBytes, err := json.Marshal(payload)
 	if err != nil {
-		respondError(c, http.StatusInternalServerError, "failed to marshal payload")
+		rejectErr(http.StatusInternalServerError, "payload_marshal_failed", "failed to marshal payload")
 		return
 	}
 
 	tx, err := h.pool.Begin(c.Request.Context())
 	if err != nil {
-		respondError(c, http.StatusInternalServerError, "failed to create operation")
+		rejectErr(http.StatusInternalServerError, "tx_begin_failed", "failed to create operation")
 		return
 	}
 	defer func() { _ = tx.Rollback(c.Request.Context()) }()
@@ -379,7 +404,7 @@ func (h *Handler) CreateServiceDatabase(c *gin.Context) {
 		claims.UserID, projectID, envID, req.Name, payloadBytes,
 	)
 	if err = scanOperation(row, &op); err != nil {
-		respondError(c, http.StatusInternalServerError, "failed to create operation")
+		rejectErr(http.StatusInternalServerError, "operation_insert_failed", "failed to create operation")
 		return
 	}
 
@@ -393,22 +418,24 @@ func (h *Handler) CreateServiceDatabase(c *gin.Context) {
 			"database": req.Database,
 		},
 	}); err != nil {
-		respondError(c, http.StatusInternalServerError, "failed to create operation")
+		rejectErr(http.StatusInternalServerError, "snapshot_seed_failed", "failed to create operation")
 		return
 	}
 
 	if err = tx.Commit(c.Request.Context()); err != nil {
-		respondError(c, http.StatusInternalServerError, "failed to create operation")
+		rejectErr(http.StatusInternalServerError, "tx_commit_failed", "failed to create operation")
 		return
 	}
 
-	// Insert AuditEvent (best-effort — don't fail the request if this fails)
-	auditMeta, _ := json.Marshal(payload)
-	_, _ = h.pool.Exec(c.Request.Context(),
-		`INSERT INTO audit_events (actor_id, project_id, operation_id, action, resource_kind, resource_name, metadata)
-		 VALUES ($1, $2, $3, 'CreateServiceDatabase', 'ServiceDatabaseV2', $4, $5)`,
-		claims.UserID, projectID, op.ID, req.Name, auditMeta,
-	)
+	audit(op.ID, auditOutcomeSuccess, map[string]any{
+		"database":         req.Database,
+		"app_ref":          req.AppRef,
+		"engine":           engine,
+		"runtime":          runtime,
+		"backup_enabled":   req.BackupEnabled,
+		"backup_schedule":  req.BackupSchedule,
+		"backup_retention": req.BackupRetention,
+	})
 	h.notifyAuditEvent(claims, projectID, "CreateServiceDatabase", req.Name)
 
 	c.JSON(http.StatusAccepted, gin.H{
@@ -444,10 +471,29 @@ func (h *Handler) DeleteServiceDatabase(c *gin.Context) {
 	if !ok {
 		return
 	}
+	name := c.Param("name")
+
+	audit := func(opID uuid.UUID, outcome string, meta map[string]any) {
+		h.recordAudit(c.Request.Context(), claims.UserID, auditEntry{
+			ProjectID:     projectID,
+			EnvironmentID: envID,
+			OperationID:   opID,
+			Action:        "DeleteServiceDatabase",
+			ResourceKind:  "ServiceDatabaseV2",
+			ResourceName:  name,
+			Outcome:       outcome,
+			Metadata:      meta,
+		})
+	}
+	rejectErr := func(status int, reason, msg string) {
+		audit(uuid.Nil, auditOutcomeFailure, map[string]any{"reason": reason, "status": status})
+		respondError(c, status, msg)
+	}
+
 	if _, err := h.requireWriter(c, claims.UserID, projectID); err != nil {
+		audit(uuid.Nil, auditOutcomeFailure, map[string]any{"reason": "not_a_writer"})
 		return
 	}
-	name := c.Param("name")
 
 	var summaryRaw []byte
 	err := h.pool.QueryRow(c.Request.Context(),
@@ -456,11 +502,12 @@ func (h *Handler) DeleteServiceDatabase(c *gin.Context) {
 		projectID, envID, name,
 	).Scan(&summaryRaw)
 	if err == pgx.ErrNoRows {
+		audit(uuid.Nil, auditOutcomeFailure, map[string]any{"reason": "not_found", "status": http.StatusNotFound})
 		respondNotFound(c)
 		return
 	}
 	if err != nil {
-		respondError(c, http.StatusInternalServerError, "failed to look up database")
+		rejectErr(http.StatusInternalServerError, "lookup_failed", "failed to look up database")
 		return
 	}
 
@@ -469,7 +516,7 @@ func (h *Handler) DeleteServiceDatabase(c *gin.Context) {
 	payload := models.DeleteServiceDatabasePayload{Name: name, AppRef: appRef}
 	payloadBytes, err := json.Marshal(payload)
 	if err != nil {
-		respondError(c, http.StatusInternalServerError, "failed to marshal payload")
+		rejectErr(http.StatusInternalServerError, "payload_marshal_failed", "failed to marshal payload")
 		return
 	}
 
@@ -483,16 +530,11 @@ func (h *Handler) DeleteServiceDatabase(c *gin.Context) {
 		claims.UserID, projectID, envID, name, payloadBytes,
 	)
 	if err = scanOperation(row, &op); err != nil {
-		respondError(c, http.StatusInternalServerError, "failed to create operation")
+		rejectErr(http.StatusInternalServerError, "operation_insert_failed", "failed to create operation")
 		return
 	}
 
-	auditMeta, _ := json.Marshal(payload)
-	_, _ = h.pool.Exec(c.Request.Context(),
-		`INSERT INTO audit_events (actor_id, project_id, operation_id, action, resource_kind, resource_name, metadata)
-		 VALUES ($1, $2, $3, 'DeleteServiceDatabase', 'ServiceDatabaseV2', $4, $5)`,
-		claims.UserID, projectID, op.ID, name, auditMeta,
-	)
+	audit(op.ID, auditOutcomeSuccess, map[string]any{"app_ref": appRef})
 
 	c.JSON(http.StatusAccepted, gin.H{
 		"operation": op,
@@ -546,12 +588,30 @@ func (h *Handler) GetDatabaseCredentials(c *gin.Context) {
 	if !ok {
 		return
 	}
+	name := c.Param("name")
+
+	audit := func(outcome string, meta map[string]any) {
+		h.recordAudit(c.Request.Context(), claims.UserID, auditEntry{
+			ProjectID:     projectID,
+			EnvironmentID: envID,
+			Action:        auditActionRevealDBCreds,
+			ResourceKind:  "ServiceDatabaseV2",
+			ResourceName:  name,
+			Outcome:       outcome,
+			Metadata:      meta,
+		})
+	}
+	rejectErr := func(status int, reason, msg string) {
+		audit(auditOutcomeFailure, map[string]any{"reason": reason, "status": status})
+		respondError(c, status, msg)
+	}
+
 	if _, err := h.requireWriter(c, claims.UserID, projectID); err != nil {
+		audit(auditOutcomeFailure, map[string]any{"reason": "not_a_writer"})
 		return
 	}
-	name := c.Param("name")
 	if c.Query("reveal") != "true" {
-		respondError(c, http.StatusBadRequest, "reveal=true is required")
+		rejectErr(http.StatusBadRequest, "reveal_not_confirmed", "reveal=true is required")
 		return
 	}
 
@@ -562,10 +622,11 @@ func (h *Handler) GetDatabaseCredentials(c *gin.Context) {
 		projectID, envID, name,
 	).Scan(&summaryRaw); err != nil {
 		if err == pgx.ErrNoRows {
+			audit(auditOutcomeFailure, map[string]any{"reason": "not_found", "status": http.StatusNotFound})
 			respondNotFound(c)
 			return
 		}
-		respondError(c, http.StatusInternalServerError, "failed to look up database")
+		rejectErr(http.StatusInternalServerError, "lookup_failed", "failed to look up database")
 		return
 	}
 
@@ -581,10 +642,10 @@ func (h *Handler) GetDatabaseCredentials(c *gin.Context) {
 	creds, err := h.dbcreds.Resolve(c.Request.Context(), namespace, secretOwner)
 	if err != nil {
 		if errors.Is(err, cloudtask.ErrDBCredentialsNotReady) {
-			respondError(c, http.StatusNotFound, "credentials not available yet — the database is still provisioning")
+			rejectErr(http.StatusNotFound, "secret_not_ready", "credentials not available yet — the database is still provisioning")
 			return
 		}
-		respondError(c, http.StatusServiceUnavailable, "database credential access is not configured for this environment")
+		rejectErr(http.StatusServiceUnavailable, "credential_access_unconfigured", "database credential access is not configured for this environment")
 		return
 	}
 
@@ -606,12 +667,7 @@ func (h *Handler) GetDatabaseCredentials(c *gin.Context) {
 		port = "5432"
 	}
 
-	auditMeta, _ := json.Marshal(map[string]any{"revealed": true})
-	_, _ = h.pool.Exec(c.Request.Context(),
-		`INSERT INTO audit_events (actor_id, project_id, action, resource_kind, resource_name, metadata)
-		 VALUES ($1, $2, 'RevealDatabaseCredentials', 'ServiceDatabaseV2', $3, $4)`,
-		claims.UserID, projectID, name, auditMeta,
-	)
+	audit(auditOutcomeSuccess, map[string]any{"revealed": true, "namespace": namespace})
 
 	resp := gin.H{
 		"host":     host,
