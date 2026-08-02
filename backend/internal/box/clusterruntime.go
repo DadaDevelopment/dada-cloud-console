@@ -786,13 +786,16 @@ func (c *ClusterRuntime) Resume(ctx context.Context, inst *Instance, spec Spec) 
 		return fmt.Errorf("recreate box pod: %w", err)
 	}
 	inst.InstanceRef = pod.Name
-	if err := c.waitReady(ctx, inst); err != nil {
-		return err
-	}
-	return c.RestartServices(ctx, inst)
+	return c.waitReady(ctx, inst)
 }
 
 // RestartServices brings the box's declared services back up in a fresh body.
+//
+// It is NOT called from Resume, and the order is the reason: a resume rebinds the
+// tenant's environment into the new body AFTER the body exists, so a service
+// started inside Resume would come up before its own credentials were written and
+// would be the one process on the box running blind. The resume operation calls
+// this once the box is whole.
 //
 // Waking a box that answers its door but runs nothing is the failure this closes:
 // the pod is Ready, its Service has an endpoint, and every request to the box's

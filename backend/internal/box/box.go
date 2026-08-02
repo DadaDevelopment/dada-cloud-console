@@ -127,6 +127,17 @@ type Sleeper interface {
 	Resume(ctx context.Context, inst *Instance, spec Spec) error
 }
 
+// ServiceRestarter is a runtime that can bring a box's declared services back up
+// after its body was replaced.
+//
+// Separate from Sleeper because it is a step of the RESUME OPERATION rather than
+// of the resume itself: the services have to start after the tenant's environment
+// is rebound into the new body, and a runtime whose bodies never lose their
+// processes has nothing to implement here.
+type ServiceRestarter interface {
+	RestartServices(ctx context.Context, inst *Instance) error
+}
+
 // WarmPool hands out pre-warmed instances. Boxes are not created on demand:
 // creation is what costs minutes, so it happens ahead of demand and a spawn is a
 // claim. Claim reports whether it was a warm hit, because a miss must be

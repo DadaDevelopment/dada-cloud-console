@@ -166,6 +166,12 @@ func (h *Handler) executeResumeBox(ctx context.Context, payload json.RawMessage)
 	if err := stack.runtime.ProgramNetwork(ctx, inst); err != nil {
 		return fmt.Errorf("program resumed box network: %w", err)
 	}
+	if restarter, ok := stack.runtime.(box.ServiceRestarter); ok {
+		if err := restarter.RestartServices(ctx, inst); err != nil {
+			log.Warn().Err(err).Str("box", b.Name).
+				Msg("box: the box is awake but not everything it declared came back up")
+		}
+	}
 	canary, err := stack.runtime.Exec(ctx, inst, box.CanaryCommand)
 	if err != nil {
 		return fmt.Errorf("canary a resumed box: %w", err)
