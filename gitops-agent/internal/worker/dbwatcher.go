@@ -274,6 +274,8 @@ func (w *DBWatcher) dispatch(ctx context.Context, op db.Operation) error {
 		return w.doDeleteProject(ctx, op)
 	case "DeployImageVersion":
 		return w.doDeployImageVersion(ctx, op)
+	case "ResizeApp":
+		return w.doResizeApp(ctx, op)
 	case "UpdateAppStorage":
 		return w.doUpdateAppStorage(ctx, op)
 	case "CreatePublicApi":

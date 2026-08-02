@@ -101,6 +101,31 @@ type DeployImageVersionPayload struct {
 	Port      int    `json:"port,omitempty"`
 }
 
+// AppResourceEnvelope is the CPU/memory sizing of a single app container.
+// Ephemeral storage travels with it so a resize carries an app's existing
+// ephemeral limit through instead of dropping it.
+type AppResourceEnvelope struct {
+	CPURequest       string `json:"cpu_request"`
+	MemoryRequest    string `json:"memory_request"`
+	CPULimit         string `json:"cpu_limit"`
+	MemoryLimit      string `json:"memory_limit"`
+	EphemeralRequest string `json:"ephemeral_request,omitempty"`
+	EphemeralLimit   string `json:"ephemeral_limit,omitempty"`
+}
+
+// ResizeAppPayload is the typed payload for ResizeApp operations: change one
+// app's resource envelope and nothing else.
+//
+// It exists as its own operation because a deploy cannot do this safely. A
+// deploy regenerates values.yaml from the database, which for a hand-maintained
+// app drops everything the database does not know about, so the agent's clobber
+// guard has to refuse it. ResizeApp patches the six resource scalars inside the
+// file already in git, leaving the rest byte-for-byte intact.
+type ResizeAppPayload struct {
+	AppName   string              `json:"app_name"`
+	Resources AppResourceEnvelope `json:"resources"`
+}
+
 // UpdateAppStoragePayload is the typed payload for UpdateAppStorage operations:
 // attach or resize the persistent data directory of an existing Helm app.
 type UpdateAppStoragePayload struct {

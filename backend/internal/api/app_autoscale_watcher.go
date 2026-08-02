@@ -907,7 +907,7 @@ func (w *appAutoscaleWatcher) maybeShrink(ctx context.Context, projectID uuid.UU
 		return
 	}
 
-	opID, err := w.h.applyResourceEnvelope(ctx, projectID, st.EnvironmentID, appName, to, st.Image)
+	opID, err := w.h.applyResourceEnvelope(ctx, projectID, st.EnvironmentID, appName, to)
 	if err != nil {
 		log.Printf("app-autoscale: shrink %s/%s %s -> %s failed: %v", namespace, appName, from, to, err)
 		return
@@ -1039,14 +1039,9 @@ func (h *Handler) loadAppProfileState(ctx context.Context, projectID uuid.UUID, 
 // the two stay identical; they are separate Go modules and cannot share the
 // type, and a silent drift here means the renderer falls back to the profile
 // ceiling on an app the console had already grown past it.
-type snapshotResources struct {
-	CPURequest       string `json:"cpu_request"`
-	MemoryRequest    string `json:"memory_request"`
-	CPULimit         string `json:"cpu_limit"`
-	MemoryLimit      string `json:"memory_limit"`
-	EphemeralRequest string `json:"ephemeral_request,omitempty"`
-	EphemeralLimit   string `json:"ephemeral_limit,omitempty"`
-}
+// It is an alias rather than a copy so the shape written into the snapshot and
+// the shape sent in a ResizeApp payload cannot drift apart.
+type snapshotResources = models.AppResourceEnvelope
 
 func (e resourceEnvelope) snapshot() snapshotResources {
 	return snapshotResources{
@@ -1060,10 +1055,17 @@ func (e resourceEnvelope) snapshot() snapshotResources {
 }
 
 // applyResourceEnvelope writes a new envelope into the snapshot the renderer
-// reads, then enqueues the same DeployImageVersion operation a console deploy
-// uses, keeping the current image so gitops-agent re-renders the chart with the
-// new numbers. One transaction: a snapshot updated without its operation would
-// silently take effect on some unrelated later deploy.
+// reads, then enqueues a ResizeApp operation carrying the same numbers. One
+// transaction: a snapshot updated without its operation would silently take
+// effect on some unrelated later deploy.
+//
+// It deliberately does not enqueue a deploy. A deploy regenerates values.yaml
+// out of the database, and for the hand-maintained apps on this cluster that
+// render drops env vars, volumes and managed-database declarations the database
+// never knew about -- so the agent's clobber guard refuses the operation, and
+// the autoscaler resizes nothing. ResizeApp patches the resource scalars inside
+// the file that is already in git, which has nothing to drop and nothing to
+// refuse.
 //
 // Direction-agnostic: growing and shrinking differ only in the numbers handed
 // in, and both cost the app exactly one rollout.
@@ -1072,7 +1074,7 @@ func (e resourceEnvelope) snapshot() snapshotResources {
 // apps that have never been sized, and rewriting it would make a grown app look
 // like it still sits on a preset -- which is exactly the read the renderer uses
 // to decide the app has no envelope of its own.
-func (h *Handler) applyResourceEnvelope(ctx context.Context, projectID, envID uuid.UUID, appName string, to resourceEnvelope, image string) (uuid.UUID, error) {
+func (h *Handler) applyResourceEnvelope(ctx context.Context, projectID, envID uuid.UUID, appName string, to resourceEnvelope) (uuid.UUID, error) {
 	tx, err := h.pool.Begin(ctx)
 	if err != nil {
 		return uuid.Nil, err
@@ -1105,14 +1107,14 @@ func (h *Handler) applyResourceEnvelope(ctx context.Context, projectID, envID uu
 		return uuid.Nil, err
 	}
 
-	payloadBytes, err := json.Marshal(models.DeployImageVersionPayload{AppName: appName, Image: image})
+	payloadBytes, err := json.Marshal(models.ResizeAppPayload{AppName: appName, Resources: to.snapshot()})
 	if err != nil {
 		return uuid.Nil, err
 	}
 	var opID uuid.UUID
 	if err := tx.QueryRow(ctx,
 		`INSERT INTO operations (actor_id, project_id, environment_id, action, resource_kind, resource_name, status, payload)
-		 VALUES ($1, $2, $3, 'DeployImageVersion', 'App', $4, 'Created', $5)
+		 VALUES ($1, $2, $3, 'ResizeApp', 'App', $4, 'Created', $5)
 		 RETURNING id`,
 		systemDeployActorID, projectID, envID, appName, payloadBytes,
 	).Scan(&opID); err != nil {
@@ -1192,7 +1194,7 @@ func (w *appAutoscaleWatcher) maybeResize(ctx context.Context, projectID uuid.UU
 		return
 	}
 
-	opID, err := w.h.applyResourceEnvelope(ctx, projectID, st.EnvironmentID, appName, to, st.Image)
+	opID, err := w.h.applyResourceEnvelope(ctx, projectID, st.EnvironmentID, appName, to)
 	if err != nil {
 		log.Printf("app-autoscale: resize %s/%s %s -> %s failed: %v", namespace, appName, from, to, err)
 		w.auditRefusal(ctx, projectID, st, namespace, appName, "resize_failed", s, map[string]any{"to_envelope": to.String(), "error": err.Error()})
