@@ -87,6 +87,69 @@ func TestBoxReaper_GuestHeartbeatDefersSuspension(t *testing.T) {
 	}
 }
 
+// TestBoxReaper_PublishedPortDefersSuspension pins the fix for a box that fell
+// asleep while its published URL was serving traffic.
+//
+// Requests to an exposed hostname go ingress -> pod and never reach the control
+// plane, so last_active_at stays where the last console call left it. Before this,
+// a box whose port had been published for a demo went to sleep fifteen minutes in
+// and the URL started answering 503 with nobody having done anything wrong. The
+// exposure itself is what defers the sleep; the hard TTL still bounds the box.
+func TestBoxReaper_PublishedPortDefersSuspension(t *testing.T) {
+	pool := testOptimisticPool(t)
+	projectID, boxID, boxName := seedMeteredBox(t, pool, "org-reap-"+uuid.NewString()[:8], models.BoxStatusReady)
+
+	now := time.Now().UTC()
+	if _, err := pool.Exec(context.Background(),
+		`UPDATE boxes SET idle_timeout_seconds = 900, last_active_at = $2 WHERE id = $1`,
+		boxID, now.Add(-20*time.Minute)); err != nil {
+		t.Fatalf("age the box: %v", err)
+	}
+	if _, err := pool.Exec(context.Background(),
+		`INSERT INTO box_exposures (box_id, port, hostname, url, cert)
+		 VALUES ($1, 8000, $2, $3, 'box-wildcard-tls')`,
+		boxID, boxName+"-8000.box.example.test", "https://"+boxName+"-8000.box.example.test"); err != nil {
+		t.Fatalf("publish a port: %v", err)
+	}
+
+	clock := now
+	r := newTestBoxReaper(t, pool, &clock)
+	r.RunBoxMaintenanceTick(context.Background())
+
+	if n := countBoxOperations(t, pool, projectID, boxName, models.ActionSuspendBox); n != 0 {
+		t.Errorf("%d suspends enqueued for a box with a published port, want 0: "+
+			"traffic to the published hostname never touches last_active_at, so the idle clock cannot see it", n)
+	}
+}
+
+// TestBoxReaper_WithdrawnExposureStopsDeferringSuspension is the other half: an
+// exposure that was taken down must not keep a body alive forever.
+func TestBoxReaper_WithdrawnExposureStopsDeferringSuspension(t *testing.T) {
+	pool := testOptimisticPool(t)
+	projectID, boxID, boxName := seedMeteredBox(t, pool, "org-reap-"+uuid.NewString()[:8], models.BoxStatusReady)
+
+	now := time.Now().UTC()
+	if _, err := pool.Exec(context.Background(),
+		`UPDATE boxes SET idle_timeout_seconds = 900, last_active_at = $2 WHERE id = $1`,
+		boxID, now.Add(-20*time.Minute)); err != nil {
+		t.Fatalf("age the box: %v", err)
+	}
+	if _, err := pool.Exec(context.Background(),
+		`INSERT INTO box_exposures (box_id, port, hostname, url, cert, withdrawn_at)
+		 VALUES ($1, 8000, $2, $3, 'box-wildcard-tls', now())`,
+		boxID, boxName+"-8000.box.example.test", "https://"+boxName+"-8000.box.example.test"); err != nil {
+		t.Fatalf("publish and withdraw a port: %v", err)
+	}
+
+	clock := now
+	r := newTestBoxReaper(t, pool, &clock)
+	r.RunBoxMaintenanceTick(context.Background())
+
+	if n := countBoxOperations(t, pool, projectID, boxName, models.ActionSuspendBox); n != 1 {
+		t.Errorf("%d suspends enqueued for a box whose exposure was withdrawn, want 1", n)
+	}
+}
+
 // TestBoxReaper_ExpiredTTLSleepsAndDoesNotDestroy pins the TTL semantics against the
 // promise already published in swagger.json for ExtendBox: "Reaching the TTL puts a
 // box to sleep, it never destroys it".

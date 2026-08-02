@@ -98,6 +98,16 @@ type boxReapCandidate struct {
 // signal may ask to keep running (and therefore to be billed more), it may never
 // claim idleness to be billed less. A guest that stops heartbeating simply loses
 // its ability to defer; it does not gain the ability to look busy.
+//
+// A box with a LIVE EXPOSURE is not an idle candidate at all. Requests to a
+// published hostname go ingress -> pod and never touch the control plane, so
+// last_active_at does not move under real traffic: the idle clock cannot see the
+// one kind of use that a published port exists for, and the box fell asleep under
+// load while its URL was being served. Until the request counters of the edge are
+// a signal this process can read, "the operator published a port" is the honest
+// proxy for "this body is in use", and the hard TTL — not the idle clock — is what
+// bounds it. That keeps the asymmetry intact: an exposure can only DEFER
+// suspension, never claim idleness.
 func (r *BoxReaper) reapIdle(ctx context.Context) {
 	now := r.now().UTC()
 	rows, err := r.pool.Query(ctx, `
@@ -105,6 +115,9 @@ func (r *BoxReaper) reapIdle(ctx context.Context) {
 		  FROM boxes b
 		 WHERE b.status IN ('Ready', 'Idle')
 		   AND b.idle_timeout_seconds > 0
+		   AND NOT EXISTS (
+		         SELECT 1 FROM box_exposures e
+		          WHERE e.box_id = b.id AND e.withdrawn_at IS NULL)
 		   AND COALESCE(GREATEST(b.last_active_at, b.guest_heartbeat_at), b.created_at)
 		       < $1::timestamptz - (b.idle_timeout_seconds * INTERVAL '1 second')`,
 		now)
