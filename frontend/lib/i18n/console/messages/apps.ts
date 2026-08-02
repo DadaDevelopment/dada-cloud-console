@@ -228,6 +228,19 @@ export const apps: Messages = {
     ru: "Пошаговый гайд деплоя бота",
     en: "Step-by-step bot deploy guide",
   },
+  "apps.builds.fail.reason.noDockerfile": {
+    ru: "В репозитории нет Dockerfile.",
+    en: "No Dockerfile in the repository.",
+  },
+  "apps.builds.fail.reason.dockerfileBuildFailed": {
+    ru: "Сборка образа упала внутри Dockerfile — смотрите лог.",
+    en: "The image build failed inside the Dockerfile — check the log.",
+  },
+  "apps.builds.fail.reason.buildFailed": {
+    ru: "Сборка не удалась — смотрите лог.",
+    en: "Build failed — check the log.",
+  },
+  "apps.builds.fail.reason.detailsLink": { ru: "подробнее", en: "details" },
 
   "apps.latestBuild.running": { ru: "Собираю…", en: "Building…" },
   "apps.latestBuild.viewLogs": { ru: "Логи сборки", en: "Build logs" },
