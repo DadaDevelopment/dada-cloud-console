@@ -79,6 +79,7 @@ const (
 	crystalRootDelta  = crystalMountPath + "/rootdelta"
 	crystalWorkTree   = crystalMountPath + "/work"
 	crystalSeeded     = crystalMountPath + "/.seeded"
+	crystalSeedGlob   = crystalSeeded + "-*"
 	crystalDefaultGB  = 10
 	crystalReadyPoll  = time.Second
 	crystalDefaultTMO = 5 * time.Minute
@@ -268,7 +269,8 @@ func (c *ClusterCrystallizer) CrystallizeWithReport(ctx context.Context, inst *I
 	if err := c.ensurePVC(ctx, opts.VMName); err != nil {
 		return fail("provision", err)
 	}
-	if err := c.ensureDeployment(ctx, opts.VMName, image, descs[0], workDir); err != nil {
+	marker := fmt.Sprintf("%s-%d", crystalSeeded, c.now().UnixNano())
+	if err := c.ensureDeployment(ctx, opts.VMName, image, descs[0], workDir, marker); err != nil {
 		return fail("provision", err)
 	}
 	target, err := c.waitForCrystalPod(ctx, opts.VMName)
@@ -293,7 +295,7 @@ func (c *ClusterCrystallizer) CrystallizeWithReport(ctx context.Context, inst *I
 			return fail("seed", err)
 		}
 	}
-	if _, err := c.run(ctx, target, crystalContainer, "touch "+crystalSeeded); err != nil {
+	if _, err := c.run(ctx, target, crystalContainer, "rm -f "+crystalSeeded+" "+crystalSeedGlob+"; touch "+marker); err != nil {
 		return fail("seed", err)
 	}
 
@@ -831,9 +833,18 @@ func (c *ClusterCrystallizer) ensurePVC(ctx context.Context, vmName string) erro
 // into. Starting the application against a half-copied disk is the one way this
 // mechanism could produce a corrupt artifact, and the marker is what makes that
 // impossible rather than unlikely.
-func crystalCommand(d ServiceDescriptor, workDir string) string {
+//
+// The marker belongs to ONE attempt, and that is not a detail. The disk outlives
+// an attempt: a second run against the same artifact finds the previous run's
+// marker already there, starts the application against the old userland before a
+// byte of the new one arrives, and — since a half-promoted artifact usually cannot
+// start at all — spends the rest of the attempt in a restart loop. Every exec the
+// seed stage needs then lands in a container that is dying, so the retry cannot
+// finish, and the failure looks like a slow transfer instead of a marker from an
+// hour ago. A per-attempt name makes a stale marker unmatchable by construction.
+func crystalCommand(d ServiceDescriptor, workDir, marker string) string {
 	var b strings.Builder
-	b.WriteString("while [ ! -f " + crystalSeeded + " ]; do sleep 1; done\n")
+	b.WriteString("while [ ! -f " + marker + " ]; do sleep 1; done\n")
 	b.WriteString("cp -a " + crystalRootDelta + "/. / 2>/dev/null || true\n")
 	b.WriteString("set -a\n")
 	b.WriteString(". /" + BoxEnvPath + " 2>/dev/null || true\n")
@@ -843,7 +854,7 @@ func crystalCommand(d ServiceDescriptor, workDir string) string {
 	return b.String()
 }
 
-func (c *ClusterCrystallizer) ensureDeployment(ctx context.Context, vmName, image string, d ServiceDescriptor, workDir string) error {
+func (c *ClusterCrystallizer) ensureDeployment(ctx context.Context, vmName, image string, d ServiceDescriptor, workDir, marker string) error {
 	name := crystalName(vmName)
 	labels := map[string]string{labelCrystal: vmName}
 	dep := &appsv1.Deployment{
@@ -873,7 +884,7 @@ func (c *ClusterCrystallizer) ensureDeployment(ctx context.Context, vmName, imag
 						Name:            crystalContainer,
 						Image:           image,
 						ImagePullPolicy: corev1.PullIfNotPresent,
-						Command:         []string{"/bin/sh", "-c", crystalCommand(d, workDir)},
+						Command:         []string{"/bin/sh", "-c", crystalCommand(d, workDir, marker)},
 						SecurityContext: &corev1.SecurityContext{
 							RunAsUser:                ptr.To(int64(0)),
 							RunAsGroup:               ptr.To(int64(0)),
@@ -923,7 +934,7 @@ func (c *ClusterCrystallizer) waitForCrystalPod(ctx context.Context, vmName stri
 			return "", fmt.Errorf("crystallize: list permanent pods: %w", err)
 		}
 		for _, p := range pods.Items {
-			if p.Status.Phase == corev1.PodRunning && p.DeletionTimestamp == nil {
+			if p.Status.Phase == corev1.PodRunning && p.DeletionTimestamp == nil && crystalContainerRunning(p) {
 				return p.Name, nil
 			}
 		}
@@ -936,6 +947,22 @@ func (c *ClusterCrystallizer) waitForCrystalPod(ctx context.Context, vmName stri
 		case <-time.After(crystalReadyPoll):
 		}
 	}
+}
+
+// crystalContainerRunning reports whether the container the seed stage will exec
+// into is actually running.
+//
+// A pod's phase is Running while its only container sits in CrashLoopBackOff, so
+// the phase alone would hand the seed stage a target that is between two deaths:
+// every exec into it either fails or is killed halfway, and the transfer reads as
+// mysteriously slow rather than as a workload that never started.
+func crystalContainerRunning(p corev1.Pod) bool {
+	for _, cs := range p.Status.ContainerStatuses {
+		if cs.Name == crystalContainer {
+			return cs.State.Running != nil
+		}
+	}
+	return false
 }
 
 func (c *ClusterCrystallizer) ensureService(ctx context.Context, vmName string, port int) error {

@@ -127,8 +127,14 @@ func crystalClientset() *fake.Clientset {
 				Namespace: dep.Namespace,
 				Labels:    dep.Spec.Template.Labels,
 			},
-			Spec:   corev1.PodSpec{Containers: []corev1.Container{{Name: crystalContainer, Image: dep.Spec.Template.Spec.Containers[0].Image}}},
-			Status: corev1.PodStatus{Phase: corev1.PodRunning},
+			Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: crystalContainer, Image: dep.Spec.Template.Spec.Containers[0].Image}}},
+			Status: corev1.PodStatus{
+				Phase: corev1.PodRunning,
+				ContainerStatuses: []corev1.ContainerStatus{{
+					Name:  crystalContainer,
+					State: corev1.ContainerState{Running: &corev1.ContainerStateRunning{}},
+				}},
+			},
 		}
 		go func() {
 			_, _ = cs.CoreV1().Pods(dep.Namespace).Create(context.Background(), pod, metav1.CreateOptions{})
@@ -254,9 +260,14 @@ func TestClusterCrystallizeFailsWhenTheArtifactNeverListens(t *testing.T) {
 // produce a corrupt artifact: the workload is created before the userland is
 // transferred, so its command must block until the transfer says it is done.
 func TestCrystalCommandWaitsForTheSeedMarker(t *testing.T) {
-	cmd := crystalCommand(ServiceDescriptor{Name: "web", Command: "node app.js"}, "/workspace")
-	if !strings.HasPrefix(strings.TrimSpace(cmd), "while [ ! -f "+crystalSeeded) {
-		t.Fatalf("the command must wait for the seed marker first, got:\n%s", cmd)
+	marker := crystalSeeded + "-1785663584849200063"
+	cmd := crystalCommand(ServiceDescriptor{Name: "web", Command: "node app.js"}, "/workspace", marker)
+	if !strings.HasPrefix(strings.TrimSpace(cmd), "while [ ! -f "+marker) {
+		t.Fatalf("the command must wait for THIS attempt's seed marker first, got:\n%s", cmd)
+	}
+	other := crystalCommand(ServiceDescriptor{Name: "web", Command: "node app.js"}, "/workspace", crystalSeeded+"-1")
+	if cmd == other {
+		t.Fatal("two attempts must not wait on the same marker: a marker left on the disk by the previous run would start the application before the new userland arrives")
 	}
 	if !strings.Contains(cmd, "exec /bin/sh -c 'node app.js'") {
 		t.Fatalf("the declared command must be what the artifact runs, got:\n%s", cmd)
@@ -324,5 +335,24 @@ func TestStripComponents(t *testing.T) {
 		if got := stripComponents(c.path, c.strip); got != c.want {
 			t.Fatalf("stripComponents(%q, %d) = %q, want %q", c.path, c.strip, got, c.want)
 		}
+	}
+}
+
+// TestCrystalContainerRunningRejectsACrashLoop keeps the seed stage from execing
+// into a container that is between two deaths: the pod phase says Running while
+// the container is waiting in CrashLoopBackOff, and that pod is not a target.
+func TestCrystalContainerRunningRejectsACrashLoop(t *testing.T) {
+	crashing := corev1.Pod{Status: corev1.PodStatus{
+		Phase: corev1.PodRunning,
+		ContainerStatuses: []corev1.ContainerStatus{{
+			Name:  crystalContainer,
+			State: corev1.ContainerState{Waiting: &corev1.ContainerStateWaiting{Reason: "CrashLoopBackOff"}},
+		}},
+	}}
+	if crystalContainerRunning(crashing) {
+		t.Fatal("a container in CrashLoopBackOff must not be handed to the seed stage")
+	}
+	if crystalContainerRunning(corev1.Pod{Status: corev1.PodStatus{Phase: corev1.PodRunning}}) {
+		t.Fatal("a pod with no container status yet is not a target either")
 	}
 }
