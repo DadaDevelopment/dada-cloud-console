@@ -460,3 +460,47 @@ func TestReapOrphansNeverDestroysALiveBoxWorkspace(t *testing.T) {
 		t.Fatalf("the sweep took a live box's body or disk: pods=%d pvcs=%d", pods, pvcs)
 	}
 }
+
+// TestAFailingWarmSlotStopsAskingForDisks pins the churn the pool showed in
+// production: a warm pod that could not attach its volume was destroyed and
+// rebuilt on every ticker pass, so a storage layer already failing to attach one
+// 20Gi volume was handed a new one every couple of minutes. The second pass must
+// do nothing at all, and the pool must come back on its own once the cooldown
+// has passed.
+func TestAFailingWarmSlotStopsAskingForDisks(t *testing.T) {
+	cs := fake.NewSimpleClientset()
+	clock := NewFakeClock(time.Date(2026, 8, 2, 12, 0, 0, 0, time.UTC))
+	rt := newClusterRuntime(cs, nil, "dada-boxes", clock)
+	rt.ReadyTimeout = 30 * time.Millisecond
+	pool := NewMemoryPool()
+	image := boxcatalog.DefaultImage().Name
+
+	creates := 0
+	cs.PrependReactor("create", "pods", func(k8stesting.Action) (bool, runtime.Object, error) {
+		creates++
+		return false, nil, nil
+	})
+
+	if err := rt.Warm(context.Background(), pool, image, "ru-1", 1); err == nil {
+		t.Fatal("Warm succeeded against a pod that never went ready; want an error")
+	}
+	if creates != 1 {
+		t.Fatalf("first fill created %d pods, want 1", creates)
+	}
+
+	clock.Advance(time.Minute)
+	if err := rt.Warm(context.Background(), pool, image, "ru-1", 1); err != nil {
+		t.Fatalf("a held pool must report no error, got %v", err)
+	}
+	if creates != 1 {
+		t.Fatalf("the ticker rebuilt the failing slot: %d creates, want 1 while the cooldown holds", creates)
+	}
+
+	clock.Advance(warmFailureCooldown)
+	if err := rt.Warm(context.Background(), pool, image, "ru-1", 1); err == nil {
+		t.Fatal("after the cooldown the pool must try again")
+	}
+	if creates != 2 {
+		t.Fatalf("the pool did not retry after the cooldown: %d creates, want 2", creates)
+	}
+}

@@ -64,6 +64,42 @@ type ClusterRuntime struct {
 	StorageClass string
 	BrokerPort   int
 	ReadyTimeout time.Duration
+
+	warmMu      sync.Mutex
+	warmRetryAt map[poolKey]time.Time
+}
+
+// warmFailureCooldown is how long Warm stops rebuilding a pool slot after a
+// create failed.
+//
+// Without it a warm slot that cannot come up costs storage forever: the warmer
+// runs on a minute ticker, createParked waits out its ready timeout, destroys the
+// pod and its 20Gi PVC, and the next tick starts the identical attempt. In
+// production that showed up as a create/FailedAttachVolume/destroy cycle every
+// couple of minutes, each round asking Longhorn for a fresh volume it was already
+// struggling to attach — the retry made the condition it was retrying worse. The
+// pool is an optimisation, so pausing it is cheap: a claim that finds no parked
+// pod cold-starts instead, which is the same path the customer would have taken
+// anyway.
+const warmFailureCooldown = 5 * time.Minute
+
+// warmAllowed reports whether the cooldown from a previous failed fill has
+// passed for this image and region.
+func (c *ClusterRuntime) warmAllowed(image, region string) bool {
+	c.warmMu.Lock()
+	defer c.warmMu.Unlock()
+	until, ok := c.warmRetryAt[poolKey{image, region}]
+	return !ok || !c.clock.Now().Before(until)
+}
+
+// holdWarm starts the cooldown after a fill produced no usable slot.
+func (c *ClusterRuntime) holdWarm(image, region string) {
+	c.warmMu.Lock()
+	defer c.warmMu.Unlock()
+	if c.warmRetryAt == nil {
+		c.warmRetryAt = map[poolKey]time.Time{}
+	}
+	c.warmRetryAt[poolKey{image, region}] = c.clock.Now().Add(warmFailureCooldown)
 }
 
 // readyTimeout is the bound waitReady applies, defaulting when unset.
@@ -218,6 +254,9 @@ func (c *ClusterRuntime) Warm(ctx context.Context, pool ParkingPool, image, regi
 		return nil
 	}
 	deficit := n - have
+	if deficit > 0 && !c.warmAllowed(image, region) {
+		return nil
+	}
 	var firstErr error
 	created := 0
 	for i := 0; i < deficit; i++ {
@@ -232,6 +271,7 @@ func (c *ClusterRuntime) Warm(ctx context.Context, pool ParkingPool, image, regi
 		created++
 	}
 	if created == 0 && firstErr != nil {
+		c.holdWarm(image, region)
 		return fmt.Errorf("warm %d boxes: %w", deficit, firstErr)
 	}
 	if firstErr != nil {
