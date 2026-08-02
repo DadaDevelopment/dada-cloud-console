@@ -2613,6 +2613,131 @@ const docTemplate = `{
                 }
             }
         },
+        "/projects/{projectId}/ai/routing": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Returns whether the project routes on its own provider keys (byok) or on the platform's, and the markup applied to platform-routed calls.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "ai-gateway"
+                ],
+                "summary": "A project's AI routing mode",
+                "operationId": "getAIRoutingMode",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Project UUID",
+                        "name": "projectId",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/api.aiRoutingResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            },
+            "put": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Sets the project to route on its own provider keys (byok) or on the platform's keys, billed per call at the routing markup.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "ai-gateway"
+                ],
+                "summary": "Switch a project's AI routing mode",
+                "operationId": "setAIRoutingMode",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Project UUID",
+                        "name": "projectId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Routing mode",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/api.setAIRoutingRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/api.aiRoutingResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/projects/{projectId}/ai/usage": {
             "get": {
                 "security": [
@@ -16800,6 +16925,20 @@ const docTemplate = `{
                 }
             }
         },
+        "api.aiRoutingResponse": {
+            "type": "object",
+            "properties": {
+                "markup": {
+                    "type": "number"
+                },
+                "mode": {
+                    "type": "string"
+                },
+                "updated_by": {
+                    "type": "string"
+                }
+            }
+        },
         "api.appFilePathRequest": {
             "type": "object",
             "required": [
@@ -17824,6 +17963,17 @@ const docTemplate = `{
         },
         "api.saveDashboardRequest": {
             "type": "object"
+        },
+        "api.setAIRoutingRequest": {
+            "type": "object",
+            "required": [
+                "mode"
+            ],
+            "properties": {
+                "mode": {
+                    "type": "string"
+                }
+            }
         },
         "api.setEnvVarRequest": {
             "type": "object",

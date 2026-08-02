@@ -12,6 +12,7 @@ import (
 // frontend/lib/onboarding/campaigns.ts. Adding a campaign = add its key here.
 var onboardingKeys = map[string]bool{
 	"agent":        true,
+	"ai-routing":   true,
 	"first-deploy": true,
 	"passkey":      true,
 }
