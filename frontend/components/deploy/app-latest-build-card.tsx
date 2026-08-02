@@ -290,6 +290,8 @@ function failReasonFor(build: Build, t: ReturnType<typeof useT>["t"]): FailReaso
       return { text: t("apps.builds.fail.reason.noDockerfile"), showDetailsLink: true };
     case "dockerfile_build_failed":
       return { text: t("apps.builds.fail.reason.dockerfileBuildFailed") };
+    case "git_auth_failed":
+      return { text: t("apps.builds.fail.reason.gitAuthFailed") };
     case "build_failed":
       return { text: t("apps.builds.fail.reason.buildFailed") };
     default:

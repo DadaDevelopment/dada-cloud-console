@@ -281,6 +281,20 @@ export default function BuildDetailPage() {
                     </a>
                   </p>
                 </div>
+              ) : build.fail_reason === "git_auth_failed" ? (
+                <div className="mt-1 space-y-2">
+                  <p>{t("apps.builds.fail.reason.gitAuthFailed")}</p>
+                  <Link
+                    href={`/projects/${projectId}/apps/${appName}/settings${envId ? `?envId=${envId}` : ""}`}
+                    data-ux="build_fail_cta:reconnect_repo"
+                    className="inline-block font-medium underline underline-offset-2"
+                  >
+                    {t("apps.builds.fail.gitAuth.reconnect")}
+                  </Link>
+                  {build.error_message ? (
+                    <p className="whitespace-pre-wrap break-words font-mono text-xs opacity-80">{build.error_message}</p>
+                  ) : null}
+                </div>
               ) : build.error_message ? (
                 <p className="mt-1 whitespace-pre-wrap break-words font-mono text-xs">{build.error_message}</p>
               ) : null}

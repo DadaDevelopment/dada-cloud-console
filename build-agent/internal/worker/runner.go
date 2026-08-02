@@ -54,10 +54,43 @@ const buildFailNoDockerfile = "no_dockerfile"
 // build/buildx step (a bad Dockerfile, missing base image, failed RUN, etc).
 const buildFailDockerfileBuild = "dockerfile_build_failed"
 
+// buildFailGitAuth marks a build that never got as far as reading the repo:
+// git could not authenticate to the remote.
+//
+// It is its own code because the fix is nothing like any other build failure.
+// The user changes no code and no Dockerfile -- the repo is private and the
+// platform holds no credential for it, so the connection has to be re-made.
+// Left unclassified this surfaced as "script returned exit code 128", which
+// tells the owner of a private repo precisely nothing.
+const buildFailGitAuth = "git_auth_failed"
+
 // buildFailGeneric marks a failure that matched no specific signature but
 // still produced an ERROR line in the Jenkins console; the detail carries
 // that line so the user sees the real cause instead of a bare result code.
 const buildFailGeneric = "build_failed"
+
+// gitAuthSignatures are the lines git itself prints when the remote refused
+// the clone. Every one is emitted by git (not by a build step), which keeps a
+// package manager failing to reach a private registry from being mistaken for
+// a repository the platform cannot read.
+var gitAuthSignatures = []string{
+	"could not read Username for",
+	"Authentication failed for",
+	"remote: Repository not found",
+	"Permission denied (publickey)",
+	"terminal prompts disabled",
+}
+
+// isGitAuthFailure reports whether one console line is git refusing to clone
+// for lack of credentials.
+func isGitAuthFailure(line string) bool {
+	for _, sig := range gitAuthSignatures {
+		if strings.Contains(line, sig) {
+			return true
+		}
+	}
+	return false
+}
 
 // classifyFailure scans a completed Jenkins build's full console text for
 // known failure signatures and returns a stable code plus a one-line detail
@@ -69,6 +102,12 @@ func classifyFailure(console string) (code string, detail string) {
 		line := stripLogTimestamp(strings.TrimSpace(raw))
 		if strings.Contains(line, "has no template and repo ships no Dockerfile") {
 			return buildFailNoDockerfile, line
+		}
+	}
+	for _, raw := range lines {
+		line := stripLogTimestamp(strings.TrimSpace(raw))
+		if isGitAuthFailure(line) {
+			return buildFailGitAuth, line
 		}
 	}
 	for _, raw := range lines {

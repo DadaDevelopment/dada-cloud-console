@@ -236,6 +236,14 @@ export const apps: Messages = {
     ru: "Сборка образа упала внутри Dockerfile — смотрите лог.",
     en: "The image build failed inside the Dockerfile — check the log.",
   },
+  "apps.builds.fail.gitAuth.reconnect": {
+    ru: "Переподключить репозиторий",
+    en: "Reconnect the repository",
+  },
+  "apps.builds.fail.reason.gitAuthFailed": {
+    ru: "Не удалось получить доступ к репозиторию: он приватный, а у платформы нет действующего доступа. Переподключите репозиторий в настройках приложения.",
+    en: "Could not read the repository: it is private and the platform holds no valid access. Reconnect the repository in the app settings.",
+  },
   "apps.builds.fail.reason.buildFailed": {
     ru: "Сборка не удалась — смотрите лог.",
     en: "Build failed — check the log.",
