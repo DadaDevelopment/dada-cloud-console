@@ -577,9 +577,11 @@ func (w *appHealthWatcher) maybeNotify(ctx context.Context, projectID uuid.UUID,
 	if err := w.h.auditNotifier.Send(to, subject, body); err != nil {
 		log.Printf("app-health: send to %s failed for app=%s: %v", to, alert.AppName, err)
 		recordAppHealthAlertSend(ctx, w.h.pool, alert.Namespace, alert.AppName, to, err)
+		w.h.recordNotifySend(ctx, projectID, "AppHealthAlert", alert.AppName, source, err)
 		return
 	}
 	recordAppHealthAlertSend(ctx, w.h.pool, alert.Namespace, alert.AppName, to, nil)
+	w.h.recordNotifySend(ctx, projectID, "AppHealthAlert", alert.AppName, source, nil)
 	log.Printf("app-health: alerted %s (source=%s) for app=%s reason=%s pod=%s", to, source, alert.AppName, alert.Reason, alert.PodName)
 }
 

@@ -2,10 +2,12 @@ package db
 
 import (
 	"context"
+	"encoding/json"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/rs/zerolog/log"
 )
 
 // OwnerEmail resolves the notification recipient for a build: the email of the
@@ -53,3 +55,56 @@ func ManagedHostname(ctx context.Context, pool *pgxpool.Pool, envID uuid.UUID, a
 	}
 	return host, nil
 }
+
+// RecordBuildNotify writes the outcome of one build-result email into
+// audit_events, so "was this owner told their build failed" becomes a query.
+//
+// Until this existed the answer lived only in the agent's log line, and the
+// build-agent pod restarts far more often than the gap between two reads of it:
+// asked in retrospect whether three specific users were mailed about their
+// stuck builds, nobody could tell, because the logs were already gone.
+//
+// The recipient address is deliberately not stored -- the project id already
+// identifies whose build it was, and an address in a telemetry table is
+// personal data (152-FZ). Status and, on a failure, the transport error are
+// what make the row worth reading.
+//
+// Best-effort by contract: a failure here is logged and swallowed, exactly like
+// the deploy audit row. Notification bookkeeping must never break a build.
+func RecordBuildNotify(ctx context.Context, pool *pgxpool.Pool, projectID, envID, buildID uuid.UUID, appName, buildStatus, failReason string, detail error) {
+	if pool == nil {
+		return
+	}
+	outcome := "success"
+	meta := map[string]any{"build_status": buildStatus, "build_id": buildID.String()}
+	if failReason != "" {
+		outcome = "failure"
+		meta["reason"] = failReason
+		if detail != nil {
+			errText := detail.Error()
+			if runes := []rune(errText); len(runes) > buildNotifyErrorMaxLen {
+				errText = string(runes[:buildNotifyErrorMaxLen])
+			}
+			meta["detail"] = errText
+		}
+	}
+	payload, err := json.Marshal(meta)
+	if err != nil {
+		payload = []byte("{}")
+	}
+	var env any
+	if envID != uuid.Nil {
+		env = envID
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO audit_events (actor_id, project_id, environment_id, action, resource_kind, resource_name, outcome, metadata)
+		VALUES ($1, $2, $3, 'SendBuildNotification', 'Notification', $4, $5, $6)
+	`, SystemUserID, projectID, env, appName, outcome, payload); err != nil {
+		log.Warn().Err(err).Str("app", appName).Msg("deploy-notify: audit row insert failed")
+	}
+}
+
+// buildNotifyErrorMaxLen bounds the transport error kept in audit metadata. The
+// cut is rune-safe: slicing bytes can split a multi-byte rune and hand Postgres
+// invalid UTF-8, failing the very row meant to record the failure.
+const buildNotifyErrorMaxLen = 300

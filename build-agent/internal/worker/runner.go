@@ -393,9 +393,11 @@ func (r *Runner) notifyResult(repo *db.Repo, b *db.Build, status, reason string)
 		to, err := db.OwnerEmail(ctx, r.pool, repo.ProjectID)
 		if err != nil {
 			log.Warn().Err(err).Str("app", b.AppName).Msg("deploy-notify: owner email lookup failed")
+			db.RecordBuildNotify(ctx, r.pool, repo.ProjectID, b.EnvironmentID, b.ID, b.AppName, status, "owner_lookup_failed", err)
 			return
 		}
 		if to == "" {
+			db.RecordBuildNotify(ctx, r.pool, repo.ProjectID, b.EnvironmentID, b.ID, b.AppName, status, "no_recipient", nil)
 			return
 		}
 		var hostname string
@@ -405,8 +407,10 @@ func (r *Runner) notifyResult(repo *db.Repo, b *db.Build, status, reason string)
 		subject, body := r.notify.Compose(b.AppName, status, hostname, reason, repo.ProjectID.String(), b.ID.String())
 		if err := r.notify.Send(to, subject, body); err != nil {
 			log.Warn().Err(err).Str("app", b.AppName).Str("status", status).Msg("deploy-notify: send failed")
+			db.RecordBuildNotify(ctx, r.pool, repo.ProjectID, b.EnvironmentID, b.ID, b.AppName, status, "send_failed", err)
 			return
 		}
+		db.RecordBuildNotify(ctx, r.pool, repo.ProjectID, b.EnvironmentID, b.ID, b.AppName, status, "", nil)
 		log.Info().Str("app", b.AppName).Str("status", status).Msg("deploy-notify: sent")
 	}()
 }

@@ -70,8 +70,10 @@ func (h *Handler) sendAutofixOutcome(ctx context.Context, tr cloudTaskTransition
 		}
 		if err := h.auditNotifier.Send(to, subject, body); err != nil {
 			log.Printf("autofix: PR notice to %s for app=%s failed: %v", to, tr.AppName, err)
+			h.recordNotifySend(ctx, tr.ProjectID, "AutofixReady", tr.AppName, source, err)
 			return
 		}
+		h.recordNotifySend(ctx, tr.ProjectID, "AutofixReady", tr.AppName, source, nil)
 		log.Printf("autofix: told %s (source=%s) about PR %s for app=%s", to, source, tr.PRURL, tr.AppName)
 		return
 	}
@@ -89,7 +91,10 @@ func (h *Handler) sendAutofixOutcome(ctx context.Context, tr cloudTaskTransition
 	subject, body := notify.ComposeAutofixFailed(tr.AppName, reason, consoleLink)
 	if err := h.auditNotifier.Send(h.auditNotifyEmail, subject, body); err != nil {
 		log.Printf("autofix: failure notice for app=%s to %s failed: %v", tr.AppName, h.auditNotifyEmail, err)
+		h.recordNotifySend(ctx, tr.ProjectID, "AutofixFailed", tr.AppName, alertSourceOperator, err)
+		return
 	}
+	h.recordNotifySend(ctx, tr.ProjectID, "AutofixFailed", tr.AppName, alertSourceOperator, nil)
 }
 
 // settleFeedbackForTask moves a support ticket on when the auto-fix run it

@@ -1298,5 +1298,8 @@ func (w *appAutoscaleWatcher) notifyCeiling(ctx context.Context, projectID uuid.
 	}
 	if err := w.h.auditNotifier.Send(to, subject, body); err != nil {
 		log.Printf("app-autoscale: ceiling send to %s failed for app=%s: %v", to, appName, err)
+		w.h.recordNotifySend(ctx, projectID, "AutoscaleCeiling", appName, source, err)
+		return
 	}
+	w.h.recordNotifySend(ctx, projectID, "AutoscaleCeiling", appName, source, nil)
 }

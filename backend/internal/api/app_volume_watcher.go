@@ -298,8 +298,10 @@ func (w *appVolumeWatcher) maybeNotify(ctx context.Context, projectID uuid.UUID,
 	}
 	if err := w.h.auditNotifier.Send(to, subject, body); err != nil {
 		log.Printf("app-volume: send to %s failed for app=%s: %v", to, appName, err)
+		w.h.recordNotifySend(ctx, projectID, "VolumeAlert", appName, source, err)
 		return
 	}
+	w.h.recordNotifySend(ctx, projectID, "VolumeAlert", appName, source, nil)
 	log.Printf("app-volume: alerted %s (source=%s) for app=%s ratio=%.3f", to, source, appName, ratio)
 }
 
