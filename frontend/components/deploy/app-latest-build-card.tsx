@@ -294,6 +294,8 @@ function failReasonFor(build: Build, t: ReturnType<typeof useT>["t"]): FailReaso
       return { text: t("apps.builds.fail.reason.gitAuthFailed") };
     case "build_failed":
       return { text: t("apps.builds.fail.reason.buildFailed") };
+    case "platform_error":
+      return { text: t("apps.builds.fail.reason.platformError") };
     default:
       if (build.error_message) return { text: build.error_message };
       if (build.fail_reason) return { text: t("apps.builds.fail.reason.buildFailed") };

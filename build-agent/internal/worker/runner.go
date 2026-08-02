@@ -69,6 +69,16 @@ const buildFailGitAuth = "git_auth_failed"
 // that line so the user sees the real cause instead of a bare result code.
 const buildFailGeneric = "build_failed"
 
+// buildFailPlatformError marks a failure that never reached "the repo's code
+// or Dockerfile didn't build": Jenkins unreachable/timed out, the console
+// stream/poll dropped, the queued build's number never resolved, the Nexus
+// push never confirmed, or the repo failed to load. None of these are
+// something a commit can fix, so the code has to say "our side", not "your
+// build" -- otherwise a platform outage reads to the owner as their own
+// broken code and sends them hunting through a Dockerfile that was never at
+// fault.
+const buildFailPlatformError = "platform_error"
+
 // gitAuthSignatures are the lines git itself prints when the remote refused
 // the clone. Every one is emitted by git (not by a build step), which keeps a
 // package manager failing to reach a private registry from being mistaken for
@@ -90,6 +100,61 @@ func isGitAuthFailure(line string) bool {
 		}
 	}
 	return false
+}
+
+// platformFailureSignatures are the wrap prefixes and phrases left on an
+// error by every step of execute/attach/reattach/confirm that dies before or
+// around the actual Jenkins build result: minting git credentials, triggering
+// the job, resolving its queue item to a build number, bridging the console,
+// and confirming the pushed image or artifact in Nexus. Every one of them
+// means the platform's own machinery -- not the user's repo -- failed to do
+// its job, so a build that dies here has to read as "try again", never as
+// "fix your code".
+var platformFailureSignatures = []string{
+	"load repo:", "git creds:", "trigger jenkins build:", "resolve build number:",
+	"stream console:", "poll build:", "verify image in nexus:", "not found in nexus",
+	"head artifact", "finalize success:", "transition detecting", "transition building",
+	"presign archive url:", "archive presign not configured", "list installations:",
+	"decrypt gitlab token:",
+}
+
+// reconnectSignatures are the failures that no retry can clear and no commit
+// can fix: the platform holds no usable credential for the repo any more,
+// because the GitHub App was uninstalled, the GitLab token went missing, or
+// the repo's owner can no longer be resolved to an installation. They share a
+// single next step with a refused clone -- reconnect the repository -- so
+// they carry the same code, which is the one the console already explains.
+var reconnectSignatures = []string{
+	"revoked and no live installation", "no live installation for owner",
+	"gitlab repo missing token", "cannot derive owner from repo",
+}
+
+// needsReconnect reports whether an error means the repository connection
+// itself has to be re-made, rather than the build retried.
+func needsReconnect(cause error) bool {
+	s := cause.Error()
+	for _, sig := range reconnectSignatures {
+		if strings.Contains(s, sig) {
+			return true
+		}
+	}
+	return false
+}
+
+// isPlatformFailure reports whether an unclassified build error came from one
+// of the platform's own steps (see platformFailureSignatures) or from a
+// transient transport fault already recognized by isRetryable -- a build can
+// exhaust its retries on a genuinely flaky Jenkins ingress and still need a
+// reason code, even though isRetryable itself no longer applies once the
+// attempt budget is spent.
+func isPlatformFailure(cause error) bool {
+	s := cause.Error()
+	for _, sig := range platformFailureSignatures {
+		if strings.Contains(s, sig) {
+			return true
+		}
+	}
+	return isRetryable(cause)
 }
 
 // classifyFailure scans a completed Jenkins build's full console text for
@@ -1200,9 +1265,12 @@ func (r *Runner) failFromCurrent(ctx context.Context, b *db.Build, cause error) 
 }
 
 // failureMessageAndReason extracts the error_message text and fail_reason code
-// to persist for a build failure. A classified failure gets "code: detail"
-// (detail trimmed to its first line); anything else keeps the plain error
-// text and an empty reason code.
+// to persist for a build failure. A classified failure (the Jenkins job ran
+// and its console named a signature) gets "code: detail" (detail trimmed to
+// its first line). Everything else still gets a code: isGitAuthFailure and
+// isPlatformFailure classify by the error text itself, so the reason column
+// is never empty for a failed build -- the console always has something more
+// actionable to show than a bare error string.
 func failureMessageAndReason(cause error) (msg string, reason string) {
 	if cause == nil {
 		return "", ""
@@ -1215,7 +1283,15 @@ func failureMessageAndReason(cause error) (msg string, reason string) {
 		}
 		return cf.code + ": " + detail, cf.code
 	}
-	return cause.Error(), ""
+	switch text := cause.Error(); {
+	case isGitAuthFailure(text), needsReconnect(cause):
+		reason = buildFailGitAuth
+	case isPlatformFailure(cause):
+		reason = buildFailPlatformError
+	default:
+		reason = buildFailGeneric
+	}
+	return cause.Error(), reason
 }
 
 // Supersede cancels an in-flight build (newer commit on same repo+branch).

@@ -248,6 +248,10 @@ export const apps: Messages = {
     ru: "Сборка не удалась — смотрите лог.",
     en: "Build failed — check the log.",
   },
+  "apps.builds.fail.reason.platformError": {
+    ru: "Сбой на нашей стороне, не в вашем коде — нажмите «Пересобрать».",
+    en: "This failed on our side, not in your code — hit Rebuild.",
+  },
   "apps.builds.fail.reason.detailsLink": { ru: "подробнее", en: "details" },
 
   "apps.latestBuild.running": { ru: "Собираю…", en: "Building…" },
@@ -256,7 +260,7 @@ export const apps: Messages = {
   "apps.latestBuild.success.openApp": { ru: "Открыть приложение", en: "Open application" },
   "apps.latestBuild.success.notReady": { ru: "Приложение ещё запускается, ссылка появится, когда оно поднимется", en: "App is still starting, the link will appear once it is up" },
   "apps.latestBuild.failed.heading": { ru: "Сборка не удалась", en: "Build failed" },
-  "apps.latestBuild.failed.unknown": { ru: "Причина неизвестна", en: "Reason unknown" },
+  "apps.latestBuild.failed.unknown": { ru: "Причина в логе ниже", en: "See the reason in the log below" },
   "apps.latestBuild.canceled": { ru: "Последняя сборка отменена", en: "Last build was canceled" },
 
   "apps.compose.crumb": { ru: "compose", en: "compose" },

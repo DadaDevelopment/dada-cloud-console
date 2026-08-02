@@ -323,6 +323,7 @@ func ReapStuckBuilds(ctx context.Context, pool *pgxpool.Pool, olderThan time.Dur
 		UPDATE builds
 		SET    status = 'failed',
 		       error_message = 'build orphaned: build-agent restarted before completion; retry',
+		       fail_reason = 'platform_error',
 		       finished_at = NOW(), updated_at = NOW()
 		WHERE  status IN ('detecting','building','pushing')
 		  AND  started_at < NOW() - make_interval(secs => $1)

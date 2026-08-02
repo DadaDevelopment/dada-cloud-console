@@ -295,6 +295,13 @@ export default function BuildDetailPage() {
                     <p className="whitespace-pre-wrap break-words font-mono text-xs opacity-80">{build.error_message}</p>
                   ) : null}
                 </div>
+              ) : build.fail_reason === "platform_error" ? (
+                <div className="mt-1 space-y-2">
+                  <p>{t("apps.builds.fail.reason.platformError")}</p>
+                  {build.error_message ? (
+                    <p className="whitespace-pre-wrap break-words font-mono text-xs opacity-80">{build.error_message}</p>
+                  ) : null}
+                </div>
               ) : build.error_message ? (
                 <p className="mt-1 whitespace-pre-wrap break-words font-mono text-xs">{build.error_message}</p>
               ) : null}
