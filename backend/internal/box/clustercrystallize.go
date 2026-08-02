@@ -744,7 +744,7 @@ func parseTarSkips(log string) []string {
 			if idx <= 0 {
 				continue
 			}
-			p := line[:idx]
+			p := strings.TrimSuffix(line[:idx], ": Warning")
 			if !strings.HasPrefix(p, "/") || seen[p] {
 				break
 			}

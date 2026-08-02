@@ -286,11 +286,11 @@ func TestSplitDeltaRoutesTheWorkingTreeToThePersistentMount(t *testing.T) {
 // path and a duplicate that must not be reported twice.
 func TestParseTarSkipsReadsWarnings(t *testing.T) {
 	log := "tar: Removing leading `/' from member names\n" +
-		"tar: /etc/redis: Cannot open: Permission denied\n" +
-		"tar: /home/ubuntu: Cannot open: Permission denied\n" +
-		"tar: /etc/redis: Cannot open: Permission denied\n" +
-		"tar: /var/lib/redis/dump.rdb: Cannot read: Permission denied\n" +
-		"tar: Exiting with failure status due to previous errors\n"
+		"tar: Removing leading `/' from hard link targets\n" +
+		"tar: /etc/redis: Warning: Cannot open: Permission denied\n" +
+		"tar: /home/ubuntu: Warning: Cannot open: Permission denied\n" +
+		"tar: /etc/redis: Warning: Cannot open: Permission denied\n" +
+		"tar: /var/lib/redis/dump.rdb: Cannot read: Permission denied\n"
 	got := parseTarSkips(log)
 	want := []string{"/etc/redis", "/home/ubuntu", "/var/lib/redis/dump.rdb"}
 	if len(got) != len(want) {
