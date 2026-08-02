@@ -70,19 +70,53 @@ func (h *Handler) listCloudTasks(ctx context.Context, projectID uuid.UUID, appNa
 	return out, rows.Err()
 }
 
+// cloudTaskTransition reports what one status update did to a row. OldStatus
+// is the status the row held before the update, which is what makes a terminal
+// transition distinguishable from a repeat callback about an already-terminal
+// task -- the agent can and does send more than one, and an outcome email must
+// go out exactly once.
+type cloudTaskTransition struct {
+	Matched   bool
+	ID        uuid.UUID
+	ProjectID uuid.UUID
+	AppName   string
+	TaskType  string
+	OldStatus string
+	NewStatus string
+	PRURL     string
+	Error     string
+}
+
 // updateCloudTaskByIntent applies a webhook/agent status update. Each field is
 // only overwritten when a non-empty value is supplied (idempotent COALESCE).
-func (h *Handler) updateCloudTaskByIntent(ctx context.Context, intentID, status, prURL string, artifacts []byte, errMsg string) error {
-	_, err := h.pool.Exec(ctx,
-		`UPDATE cloud_tasks SET
-		   status = COALESCE(NULLIF($2,''), status),
-		   pr_url = COALESCE(NULLIF($3,''), pr_url),
-		   artifacts = CASE WHEN $4::jsonb IS NULL THEN artifacts ELSE $4::jsonb END,
-		   error = COALESCE(NULLIF($5,''), error),
+// The pre-update status is captured in the same statement so callers can react
+// to a transition without a racy read-then-write.
+func (h *Handler) updateCloudTaskByIntent(ctx context.Context, intentID, status, prURL string, artifacts []byte, errMsg string) (cloudTaskTransition, error) {
+	var tr cloudTaskTransition
+	var prURLCol, errCol *string
+	err := h.pool.QueryRow(ctx,
+		`WITH prev AS (SELECT id, status FROM cloud_tasks WHERE intent_id = $1)
+		 UPDATE cloud_tasks t SET
+		   status = COALESCE(NULLIF($2,''), t.status),
+		   pr_url = COALESCE(NULLIF($3,''), t.pr_url),
+		   artifacts = CASE WHEN $4::jsonb IS NULL THEN t.artifacts ELSE $4::jsonb END,
+		   error = COALESCE(NULLIF($5,''), t.error),
 		   updated_at = NOW()
-		 WHERE intent_id = $1`,
-		intentID, status, prURL, artifacts, errMsg)
-	return err
+		 FROM prev
+		 WHERE t.id = prev.id
+		 RETURNING t.id, t.project_id, t.app_name, t.task_type, prev.status, t.status, t.pr_url, t.error`,
+		intentID, status, prURL, artifacts, errMsg).
+		Scan(&tr.ID, &tr.ProjectID, &tr.AppName, &tr.TaskType, &tr.OldStatus, &tr.NewStatus, &prURLCol, &errCol)
+	if err == pgx.ErrNoRows {
+		return cloudTaskTransition{}, nil
+	}
+	if err != nil {
+		return cloudTaskTransition{}, err
+	}
+	tr.Matched = true
+	tr.PRURL = derefOr(prURLCol, "")
+	tr.Error = derefOr(errCol, "")
+	return tr, nil
 }
 
 // setCloudTaskWorkflow records the agent workflow id once submission returns it.

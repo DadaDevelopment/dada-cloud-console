@@ -849,6 +849,28 @@ export interface AuditEventsResponse {
   offset: number;
 }
 
+export interface FeedbackItem {
+  id: string;
+  created_at: string;
+  age_hours: number;
+  email: string;
+  org_id: string;
+  route: string;
+  message: string;
+  status: string;
+  project_id?: string | null;
+  app_name: string;
+  cloud_task_id?: string | null;
+  resolution: string;
+  resolved_at?: string | null;
+  autofixable: boolean;
+}
+
+export interface FeedbackListResponse {
+  items: FeedbackItem[];
+  new_count: number;
+}
+
 export interface AdminOverviewUsers {
   total: number;
   new_24h: number;

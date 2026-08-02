@@ -72,3 +72,57 @@ func TestComposeAppAlertIncludesAgentURL(t *testing.T) {
 		t.Fatalf("expected body to mention the AI agent, got: %s", body)
 	}
 }
+
+func TestComposeFeedbackLeadsWithTheMessage(t *testing.T) {
+	subject, body := ComposeFeedback("dev@example.com", "org-1", "/projects/p1/apps/web", "не могу забрать файлы", "web", "https://console.dada-tuda.ru/admin/feedback")
+	if !strings.HasPrefix(body, "не могу забрать файлы") {
+		t.Fatalf("expected the body to open with the customer's words, got: %s", body)
+	}
+	if !strings.Contains(subject, "dev@example.com") {
+		t.Fatalf("expected the sender in the subject, got: %s", subject)
+	}
+	if !strings.Contains(body, "web") || !strings.Contains(body, "/admin/feedback") {
+		t.Fatalf("expected app name and admin link in body, got: %s", body)
+	}
+}
+
+func TestComposeFeedbackAnonymousSender(t *testing.T) {
+	subject, body := ComposeFeedback("", "", "/pricing", "дорого", "", "https://console.dada-tuda.ru/admin/feedback")
+	if !strings.Contains(subject, "аноним") {
+		t.Fatalf("expected an anonymous sender label in subject, got: %s", subject)
+	}
+	if strings.Contains(body, "Приложение:") {
+		t.Fatalf("expected no app line when the route names none, got: %s", body)
+	}
+}
+
+func TestComposeAutofixReadySaysNothingWasDeployed(t *testing.T) {
+	prURL := "https://github.com/acme/web/pull/7"
+	subject, body := ComposeAutofixReady("web", prURL, "https://console.dada-tuda.ru/projects/p1/apps/web")
+	if !strings.Contains(body, prURL) {
+		t.Fatalf("expected the PR link in body, got: %s", body)
+	}
+	if !strings.Contains(body, "Ничего не задеплоено") {
+		t.Fatalf("expected the body to state nothing was deployed, got: %s", body)
+	}
+	if !strings.Contains(subject, "web") {
+		t.Fatalf("expected the app name in subject, got: %s", subject)
+	}
+}
+
+func TestComposeAutofixFailedCarriesTheReason(t *testing.T) {
+	subject, body := ComposeAutofixFailed("web", "Command not found on PATH: git", "https://console.dada-tuda.ru/projects/p1/apps/web")
+	if !strings.Contains(body, "Command not found on PATH: git") {
+		t.Fatalf("expected the failure reason in body, got: %s", body)
+	}
+	if !strings.Contains(subject, "АВТОФИКС УПАЛ") {
+		t.Fatalf("expected an operator-facing subject, got: %s", subject)
+	}
+}
+
+func TestComposeAutofixFailedOmitsEmptyReason(t *testing.T) {
+	_, body := ComposeAutofixFailed("web", "", "https://console.dada-tuda.ru/projects/p1/apps/web")
+	if strings.Contains(body, "Причина:") {
+		t.Fatalf("expected no reason line when none is known, got: %s", body)
+	}
+}

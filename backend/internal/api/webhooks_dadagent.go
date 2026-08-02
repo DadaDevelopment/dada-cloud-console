@@ -109,10 +109,12 @@ func (h *Handler) dadaAgentWebhook(c *gin.Context, verifier tokenVerifier) {
 	if len(cb.Artifacts) > 0 {
 		artifactsJSON, _ = json.Marshal(cb.Artifacts)
 	}
-	if err := h.updateCloudTaskByIntent(c.Request.Context(), key,
-		mapAgentStatus(cb.Event, cb.Status), cb.PRURL, artifactsJSON, cb.Error); err != nil {
+	tr, err := h.updateCloudTaskByIntent(c.Request.Context(), key,
+		mapAgentStatus(cb.Event, cb.Status), cb.PRURL, artifactsJSON, cb.Error)
+	if err != nil {
 		respondError(c, http.StatusInternalServerError, "update failed")
 		return
 	}
+	h.notifyAutofixOutcome(tr)
 	c.JSON(http.StatusOK, gin.H{"ok": true})
 }

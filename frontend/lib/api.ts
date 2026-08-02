@@ -51,6 +51,7 @@ import type {
   RevealAPIKeyResponse,
   PendingApprovalsResponse,
   AuditEventsResponse,
+  FeedbackListResponse,
   AdminOverviewResponse,
   AdminCostsResponse,
   AIGatewayUsageResponse,
@@ -1099,6 +1100,19 @@ export const adminApi = {
     q.set("offset", String(params.offset ?? 0));
     return apiFetch<AuditEventsResponse>(`/api/v1/admin/audit?${q.toString()}`);
   },
+  listFeedback: (params: { status?: string; limit?: number } = {}) => {
+    const q = new URLSearchParams();
+    if (params.status) q.set("status", params.status);
+    q.set("limit", String(params.limit ?? 50));
+    return apiFetch<FeedbackListResponse>(`/api/v1/admin/feedback?${q.toString()}`);
+  },
+  resolveFeedback: (id: string, resolution: string) =>
+    apiFetch<{ status: string }>(`/api/v1/admin/feedback/${id}/resolve`, {
+      method: "POST",
+      body: { resolution },
+    }),
+  autofixFeedback: (id: string) =>
+    apiFetch<CreateCloudTaskResponse>(`/api/v1/admin/feedback/${id}/autofix`, { method: "POST" }),
   getOverview: (days = 14) =>
     apiFetch<AdminOverviewResponse>(`/api/v1/admin/overview?days=${days}`),
   getCosts: (days: 7 | 30 = 30) =>

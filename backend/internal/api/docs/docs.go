@@ -98,6 +98,12 @@ const docTemplate = `{
                         "in": "query"
                     },
                     {
+                        "type": "string",
+                        "description": "Actor cohort: customer, internal, synthetic or platform (default: all)",
+                        "name": "kind",
+                        "in": "query"
+                    },
+                    {
                         "type": "integer",
                         "description": "Max rows to return (default 50, max 200)",
                         "name": "limit",
@@ -261,6 +267,231 @@ const docTemplate = `{
                     },
                     "403": {
                         "description": "Forbidden",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/admin/feedback": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Returns feedback rows with the sender's email, how long the ticket has been waiting, the project/app its route named, and whether that app has a connected repo (which is what makes an auto-fix run possible). Platform-admin only; every other caller gets 403.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin"
+                ],
+                "summary": "List in-product feedback (platform-admin only)",
+                "operationId": "listFeedback",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Filter by status: new, resolved (default: all)",
+                        "name": "status",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Max rows to return (default 50, max 200)",
+                        "name": "limit",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "object with an items array and a new_count",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/admin/feedback/{id}/autofix": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Launches a DadaAgent auto-fix run against the repo connected to the app the ticket's route named, using the customer's own words as the failure context, and links the resulting cloud task back to the ticket. Requires the ticket to name a project and an app with a connected repo. Platform-admin only.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin"
+                ],
+                "summary": "Auto-fix the app a feedback ticket is about (platform-admin only)",
+                "operationId": "autofixFeedback",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Feedback UUID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "202": {
+                        "description": "object with the created cloud_task",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "502": {
+                        "description": "Bad Gateway",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/admin/feedback/{id}/resolve": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Marks the ticket resolved and stores what was done about it, so the queue reflects reality instead of memory. Platform-admin only.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin"
+                ],
+                "summary": "Resolve a feedback ticket (platform-admin only)",
+                "operationId": "resolveFeedback",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Feedback UUID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Resolution note",
+                        "name": "body",
+                        "in": "body",
+                        "schema": {
+                            "$ref": "#/definitions/api.resolveFeedbackRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
                         "schema": {
                             "type": "object",
                             "additionalProperties": {
@@ -1248,7 +1479,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Records a short feedback message with the console route it was sent from. Works with or without a bearer token; if present, the caller's identity is attached.",
+                "description": "Records a short feedback message with the console route it was sent from, resolves the project/app that route names, and emails the operator so a ticket cannot sit unread. Works with or without a bearer token; if present, the caller's identity is attached.",
                 "consumes": [
                     "application/json"
                 ],
@@ -3021,7 +3252,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Returns the plan, quota usage, and monthly invoice preview for the org that owns the project.",
+                "description": "Returns the plan, quota usage, and monthly invoice preview for the org that owns the project. quota_enforced tells the caller whether quotas actually block new resource creation for this org right now (false when billing is disabled platform-wide, the org is exempt, or the org is inside its grace window) -- used=limit is informational, not a blocker, unless this is true.",
                 "produces": [
                     "application/json"
                 ],
@@ -17563,6 +17794,14 @@ const docTemplate = `{
                 },
                 "step": {
                     "type": "integer"
+                }
+            }
+        },
+        "api.resolveFeedbackRequest": {
+            "type": "object",
+            "properties": {
+                "resolution": {
+                    "type": "string"
                 }
             }
         },

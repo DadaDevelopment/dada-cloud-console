@@ -164,13 +164,13 @@ func (h *Handler) runCloudTaskIntent(intentID string, in dadagent.IntentRequest)
 	res, err := h.dadagent.SubmitIntent(ctx, in)
 	if err != nil {
 		log.Printf("cloud-task: intent %s submit failed: %v", intentID, err)
-		_ = h.updateCloudTaskByIntent(ctx, intentID, "failed", "", nil, err.Error())
+		_, _ = h.updateCloudTaskByIntent(ctx, intentID, "failed", "", nil, err.Error())
 		return
 	}
 	_ = h.setCloudTaskWorkflow(ctx, intentID, res.WorkflowID)
 	if err := h.dadagent.ExecuteIntent(ctx, intentID); err != nil {
 		log.Printf("cloud-task: intent %s execute failed: %v", intentID, err)
-		_ = h.updateCloudTaskByIntent(ctx, intentID, "failed", "", nil, err.Error())
+		_, _ = h.updateCloudTaskByIntent(ctx, intentID, "failed", "", nil, err.Error())
 		return
 	}
 }

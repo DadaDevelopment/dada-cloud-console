@@ -18,6 +18,7 @@ import (
 	"github.com/dada-tuda/console/backend/internal/dadagent"
 	gh "github.com/dada-tuda/console/backend/internal/github"
 	"github.com/dada-tuda/console/backend/internal/logsearch"
+	"github.com/dada-tuda/console/backend/internal/models"
 )
 
 type autofixRequest struct {
@@ -81,10 +82,6 @@ func (h *Handler) TriggerAutofix(c *gin.Context) {
 		respondForbidden(c)
 		return
 	}
-	if h.dadagent == nil {
-		respondError(c, http.StatusServiceUnavailable, "dadagent integration not configured")
-		return
-	}
 
 	var req autofixRequest
 	if err := c.ShouldBindJSON(&req); err != nil && !errors.Is(err, io.EOF) {
@@ -101,53 +98,105 @@ func (h *Handler) TriggerAutofix(c *gin.Context) {
 		}
 	}
 
-	repo, instID, gitRepoID, err := h.resolveGitRepo(c.Request.Context(), projectID, envID, appName)
+	row, err := h.launchAutofix(c.Request.Context(), autofixLaunch{
+		ProjectID: projectID, EnvID: envID, AppName: appName,
+		ErrText: errText, ActorID: claims.UserID,
+	})
 	if err != nil {
-		respondError(c, http.StatusBadRequest, "no connected git repo for app")
+		respondAutofixError(c, err)
 		return
 	}
 
-	token, _, err := gh.MintInstallToken(c.Request.Context(), h.cfg.GithubAppID, h.cfg.GithubAppPrivateKey, instID)
-	if err != nil {
-		respondError(c, http.StatusBadGateway, "failed to mint install token")
+	c.JSON(http.StatusAccepted, gin.H{"cloud_task": row})
+}
+
+type autofixLaunch struct {
+	ProjectID uuid.UUID
+	EnvID     uuid.UUID
+	AppName   string
+	ErrText   string
+	ActorID   uuid.UUID
+}
+
+// autofixError carries the HTTP status a launch failure should surface, so the
+// engine below stays transport-agnostic while its callers -- the app page's
+// explicit action and the support-ticket triage endpoint -- still answer with
+// the same status codes for the same causes.
+type autofixError struct {
+	status  int
+	message string
+}
+
+func (e *autofixError) Error() string { return e.message }
+
+// respondAutofixError maps a launch failure onto the response, defaulting to
+// 500 for anything the engine did not classify.
+func respondAutofixError(c *gin.Context, err error) {
+	var af *autofixError
+	if errors.As(err, &af) {
+		respondError(c, af.status, af.message)
 		return
 	}
+	respondError(c, http.StatusInternalServerError, "failed to launch auto-fix run")
+}
 
-	logs := h.fetchAutofixLogs(c.Request.Context(), projectID, envID, appName)
+// launchAutofix is the auto-fix engine: it mints a repo-scoped install token,
+// gathers runtime log context, starts the DadaAgent run and records the
+// cloud_tasks row keyed by the agent's cloud_task_id so the existing webhook
+// can drive it to completion.
+//
+// It takes the failure as plain text and nothing else, which is what lets a
+// support ticket drive it. The error context used to be produced only by the
+// platform -- a build-failure summary or an LLM crash diagnosis -- so the
+// engine only ever fired from an alert. A customer describing the same bug in
+// their own words is the same input.
+func (h *Handler) launchAutofix(ctx context.Context, in autofixLaunch) (models.CloudTask, error) {
+	if h.dadagent == nil {
+		return models.CloudTask{}, &autofixError{http.StatusServiceUnavailable, "dadagent integration not configured"}
+	}
 
-	res, err := h.dadagent.Autofix(c.Request.Context(), dadagent.AutofixRequest{
+	repo, instID, gitRepoID, err := h.resolveGitRepo(ctx, in.ProjectID, in.EnvID, in.AppName)
+	if err != nil {
+		return models.CloudTask{}, &autofixError{http.StatusBadRequest, "no connected git repo for app"}
+	}
+
+	token, _, err := gh.MintInstallToken(ctx, h.cfg.GithubAppID, h.cfg.GithubAppPrivateKey, instID)
+	if err != nil {
+		return models.CloudTask{}, &autofixError{http.StatusBadGateway, "failed to mint install token"}
+	}
+
+	logs := h.fetchAutofixLogs(ctx, in.ProjectID, in.EnvID, in.AppName)
+
+	res, err := h.dadagent.Autofix(ctx, dadagent.AutofixRequest{
 		RepoFullName: repo,
 		InstallToken: token,
-		Error:        errText,
+		Error:        in.ErrText,
 		CallbackURL:  h.cfg.CloudTaskCallbackURL,
 		Logs:         logs,
 	})
 	if err != nil {
-		log.Printf("autofix: app %s (project %s) launch failed: %v", appName, projectID, err)
-		respondError(c, http.StatusBadGateway, "failed to launch auto-fix run")
-		return
+		log.Printf("autofix: app %s (project %s) launch failed: %v", in.AppName, in.ProjectID, err)
+		return models.CloudTask{}, &autofixError{http.StatusBadGateway, "failed to launch auto-fix run"}
 	}
 
 	cloudTaskID := ""
-	if info, err := h.dadagent.GetRun(c.Request.Context(), res.RunID); err != nil {
+	if info, err := h.dadagent.GetRun(ctx, res.RunID); err != nil {
 		log.Printf("autofix: run %s: failed to read back cloud_task_id, webhook updates will not match this row: %v", res.RunID, err)
 	} else {
 		cloudTaskID = info.CloudTaskID
 	}
 
 	gitRepoUUID := gitRepoID
-	row, err := h.insertCloudTask(c.Request.Context(), cloudTaskInsert{
-		ProjectID: projectID, EnvironmentID: envID, AppName: appName,
+	row, err := h.insertCloudTask(ctx, cloudTaskInsert{
+		ProjectID: in.ProjectID, EnvironmentID: in.EnvID, AppName: in.AppName,
 		GitRepoID: &gitRepoUUID, TaskType: "autofix",
 		IntentID: cloudTaskID, WorkflowID: res.RunID,
-		ActorID: claims.UserID,
+		ActorID: in.ActorID,
 	})
 	if err != nil {
-		respondError(c, http.StatusInternalServerError, "failed to record cloud task")
-		return
+		return models.CloudTask{}, &autofixError{http.StatusInternalServerError, "failed to record cloud task"}
 	}
-
-	c.JSON(http.StatusAccepted, gin.H{"cloud_task": row})
+	return row, nil
 }
 
 // formatBuildFailureSummary renders a short natural-language failure summary

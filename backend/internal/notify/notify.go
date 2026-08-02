@@ -378,6 +378,69 @@ func ComposeNoOwnerFallback(projectID, projectName, origSubject, origBody string
 	return subject, b.String()
 }
 
+// ComposeFeedback builds the operator notice for one in-product support
+// ticket. It leads with the message itself: the operator's decision is
+// "does this need me right now", and that is answered by the words the
+// customer wrote, not by metadata. Sender/org/route follow so the ticket can
+// be answered without opening anything, and appName is called out separately
+// because it is the field that decides whether the auto-fix engine can be
+// pointed at this ticket at all.
+func ComposeFeedback(senderEmail, orgID, route, message, appName, adminLink string) (subject, body string) {
+	who := senderEmail
+	if who == "" {
+		who = "аноним"
+	}
+	subject = fmt.Sprintf("Dada Cloud: обращение от %s", who)
+	var b strings.Builder
+	b.WriteString(message)
+	b.WriteString("\n\n---\n")
+	fmt.Fprintf(&b, "От: %s\n", who)
+	if orgID != "" {
+		fmt.Fprintf(&b, "Организация: %s\n", orgID)
+	}
+	if appName != "" {
+		fmt.Fprintf(&b, "Приложение: %s\n", appName)
+	}
+	if route != "" {
+		fmt.Fprintf(&b, "Страница: %s\n", route)
+	}
+	fmt.Fprintf(&b, "\nОбращения в консоли: %s\n", adminLink)
+	return subject, b.String()
+}
+
+// ComposeAutofixReady tells the owner an auto-fix run finished and left a pull
+// request waiting. Without this email the run is invisible: on prod three
+// auto-fix PRs were opened and none was merged, because the only place the
+// link appeared was a cloud_tasks row and a console panel nobody reloaded.
+// The body says plainly that nothing was deployed -- an unexpected "we fixed
+// your app" reads as "someone pushed to my repo" unless it says otherwise.
+func ComposeAutofixReady(appName, prURL, consoleLink string) (subject, body string) {
+	subject = fmt.Sprintf("Dada Cloud: готово исправление для %s", appName)
+	var b strings.Builder
+	fmt.Fprintf(&b, "AI разобрал проблему приложения %s и подготовил исправление.\n\n", appName)
+	if prURL != "" {
+		fmt.Fprintf(&b, "Pull request: %s\n\n", prURL)
+	}
+	b.WriteString("Ничего не задеплоено и в вашу основную ветку не записано: это отдельная ветка и PR. Посмотрите диф, и если он верный - влейте его, дальше платформа соберёт и выкатит как обычный пуш.\n\n")
+	fmt.Fprintf(&b, "Приложение в консоли: %s\n", consoleLink)
+	return subject, b.String()
+}
+
+// ComposeAutofixFailed is the operator-only counterpart. Six of the first nine
+// prod auto-fix runs died on infrastructure (agent pod restart, git missing
+// from PATH, a 500 from the model gateway) and every one of those failures was
+// silent, so the feature looked unused rather than broken.
+func ComposeAutofixFailed(appName, reason, consoleLink string) (subject, body string) {
+	subject = fmt.Sprintf("[АВТОФИКС УПАЛ] %s", appName)
+	var b strings.Builder
+	fmt.Fprintf(&b, "Запуск авто-исправления для приложения %s завершился неудачей.\n\n", appName)
+	if reason != "" {
+		fmt.Fprintf(&b, "Причина: %s\n\n", reason)
+	}
+	fmt.Fprintf(&b, "Приложение в консоли: %s\n", consoleLink)
+	return subject, b.String()
+}
+
 // Send delivers one message to a single recipient over SMTP with STARTTLS
 // (net/smtp negotiates STARTTLS automatically when the server advertises it,
 // as Postbox does on 587). Returns an error the caller logs and swallows.

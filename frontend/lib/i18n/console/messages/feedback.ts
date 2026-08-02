@@ -25,4 +25,50 @@ export const feedback: Messages = {
   "feedback.widget.success": { ru: "Спасибо! Мы получили ваше сообщение.", en: "Thanks! We got your message." },
   "feedback.widget.error": { ru: "Не удалось отправить. Попробуйте ещё раз.", en: "Couldn't send it. Try again." },
   "feedback.widget.retry": { ru: "Повторить", en: "Retry" },
+
+  "adminFeedback.crumb.feedback": { ru: "Обращения", en: "Feedback" },
+  "adminFeedback.title": { ru: "Обращения пользователей", en: "User feedback" },
+  "adminFeedback.subtitle": {
+    ru: "Всё, что люди присылают из консоли. Доступно только администраторам платформы.",
+    en: "Everything people send from inside the console. Platform-admin only.",
+  },
+
+  "adminFeedback.filter.all": { ru: "Все", en: "All" },
+  "adminFeedback.filter.new": { ru: "Новые", en: "New" },
+  "adminFeedback.filter.inProgress": { ru: "В работе", en: "In progress" },
+  "adminFeedback.filter.resolved": { ru: "Закрытые", en: "Resolved" },
+
+  "adminFeedback.status.new": { ru: "новое", en: "new" },
+  "adminFeedback.status.in_progress": { ru: "в работе", en: "in progress" },
+  "adminFeedback.status.resolved": { ru: "закрыто", en: "resolved" },
+
+  "adminFeedback.age.hours": { ru: "{count} ч назад", en: "{count}h ago" },
+  "adminFeedback.age.days": { ru: "{count} дн назад", en: "{count}d ago" },
+  "adminFeedback.anonymous": { ru: "аноним", en: "anonymous" },
+
+  "adminFeedback.action.autofix": { ru: "Починить AI", en: "Auto-fix with AI" },
+  "adminFeedback.action.autofixRunning": { ru: "Запускаем…", en: "Starting…" },
+  "adminFeedback.action.resolve": { ru: "Закрыть", en: "Resolve" },
+  "adminFeedback.resolvePrompt": { ru: "Что сделали по обращению?", en: "What was done about this ticket?" },
+  "adminFeedback.autofixStarted": {
+    ru: "Запустили авто-исправление. Письмо с PR придёт, когда агент закончит.",
+    en: "Auto-fix started. An email with the PR arrives when the agent finishes.",
+  },
+  "adminFeedback.notAutofixable": {
+    ru: "Нечего чинить автоматически: обращение не привязано к приложению с подключённым репозиторием.",
+    en: "Nothing to auto-fix: this ticket is not tied to an app with a connected repo.",
+  },
+
+  "adminFeedback.empty.title": { ru: "Обращений нет", en: "No feedback" },
+  "adminFeedback.empty.body": {
+    ru: "Сообщения из виджета обратной связи появятся здесь.",
+    en: "Messages from the feedback widget will appear here.",
+  },
+
+  "adminFeedback.accessDenied": {
+    ru: "Нет доступа. Обращения видны только администраторам платформы.",
+    en: "No access. Feedback is available to platform admins only.",
+  },
+  "adminFeedback.error.load": { ru: "Не удалось загрузить обращения", en: "Failed to load feedback" },
+  "adminFeedback.error.action": { ru: "Действие не выполнено", en: "The action failed" },
 };
