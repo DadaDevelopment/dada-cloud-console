@@ -10,6 +10,7 @@ import (
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes/fake"
@@ -403,5 +404,67 @@ func TestCrystalContainerRunningRejectsACrashLoop(t *testing.T) {
 	}
 	if crystalContainerRunning(corev1.Pod{Status: corev1.PodStatus{Phase: corev1.PodRunning}}) {
 		t.Fatal("a pod with no container status yet is not a target either")
+	}
+}
+
+// TestCrystallizeGivesTheDiskBackWhenTheWorkloadNeverStarts covers the failure
+// that made the incident self-sustaining: the usual reason a promotion dies at
+// the provision stage is a full storage pool, and an abandoned disk keeps holding
+// exactly the space the next attempt needs.
+func TestCrystallizeGivesTheDiskBackWhenTheWorkloadNeverStarts(t *testing.T) {
+	shell := &fakeShell{reply: crystalReply(t)}
+	cs := crystalClientset()
+	cs.PrependReactor("create", "pods", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		pod := action.(k8stesting.CreateAction).GetObject().(*corev1.Pod)
+		if strings.HasPrefix(pod.Name, "crystal-") {
+			pod.Status.Phase = corev1.PodPending
+			pod.Status.ContainerStatuses = []corev1.ContainerStatus{{
+				Name: crystalContainer,
+				State: corev1.ContainerState{Waiting: &corev1.ContainerStateWaiting{
+					Reason:  "ContainerCreating",
+					Message: "no available disk for replica",
+				}},
+			}}
+		}
+		return false, nil, nil
+	})
+	cz := newTestCrystallizer(t, cs, shell)
+
+	_, err := cz.CrystallizeWithReport(context.Background(),
+		&Instance{ID: "b-1", InstanceRef: crystalTestBoxPod},
+		CrystallizeOptions{VMName: "shop", Domain: "localhost", ProbePath: "/"})
+	if err == nil {
+		t.Fatal("a workload that never starts must fail the promotion")
+	}
+	if !strings.Contains(err.Error(), "no available disk for replica") {
+		t.Fatalf("the timeout must carry the reason k8s already recorded, got %q", err)
+	}
+	if _, err := cs.CoreV1().PersistentVolumeClaims("dada-boxes").Get(context.Background(), "crystal-shop", metav1.GetOptions{}); !apierrors.IsNotFound(err) {
+		t.Fatalf("the unused disk must be released, got %v", err)
+	}
+	if _, err := cs.AppsV1().Deployments("dada-boxes").Get(context.Background(), "crystal-shop", metav1.GetOptions{}); !apierrors.IsNotFound(err) {
+		t.Fatalf("the workload that never ran must be removed, got %v", err)
+	}
+}
+
+// TestCrystallizeKeepsADiskItDidNotCreate is the other half: a second promotion of
+// a name that already has a live artifact must not delete that artifact's disk on
+// its way out.
+func TestCrystallizeKeepsADiskItDidNotCreate(t *testing.T) {
+	cs := crystalClientset()
+	cz := newTestCrystallizer(t, cs, &fakeShell{reply: crystalReply(t)})
+	if _, err := cz.ensurePVC(context.Background(), "shop"); err != nil {
+		t.Fatalf("first ensurePVC: %v", err)
+	}
+	created, err := cz.ensurePVC(context.Background(), "shop")
+	if err != nil {
+		t.Fatalf("second ensurePVC: %v", err)
+	}
+	if created {
+		t.Fatal("a disk that already existed must not be reported as created by this attempt")
+	}
+	cz.releaseProvisioned(context.Background(), "shop", created)
+	if _, err := cs.CoreV1().PersistentVolumeClaims("dada-boxes").Get(context.Background(), "crystal-shop", metav1.GetOptions{}); err != nil {
+		t.Fatalf("a pre-existing disk belongs to a live artifact and must survive: %v", err)
 	}
 }

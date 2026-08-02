@@ -276,16 +276,21 @@ func (c *ClusterCrystallizer) CrystallizeWithReport(ctx context.Context, inst *I
 	rootList, workList := splitDelta(delta, workDir)
 
 	rep.Stage = "provision"
-	if err := c.ensurePVC(ctx, opts.VMName); err != nil {
+	pvcCreated, err := c.ensurePVC(ctx, opts.VMName)
+	if err != nil {
+		return fail("provision", err)
+	}
+	failProvision := func(err error) (*CrystallizationReport, error) {
+		c.releaseProvisioned(ctx, opts.VMName, pvcCreated)
 		return fail("provision", err)
 	}
 	marker := fmt.Sprintf("%s-%d", crystalSeeded, c.now().UnixNano())
 	if err := c.ensureDeployment(ctx, opts.VMName, image, descs[0], workDir, marker); err != nil {
-		return fail("provision", err)
+		return failProvision(err)
 	}
 	target, err := c.waitForCrystalPod(ctx, opts.VMName, marker)
 	if err != nil {
-		return fail("provision", err)
+		return failProvision(err)
 	}
 
 	rep.Stage = "seed"
@@ -824,7 +829,13 @@ func stripComponents(p string, strip int) string {
 
 func crystalName(vmName string) string { return "crystal-" + vmName }
 
-func (c *ClusterCrystallizer) ensurePVC(ctx context.Context, vmName string) error {
+// ensurePVC creates the permanent disk and reports whether THIS call created it.
+//
+// The answer matters on the failure path: a promotion that dies before it seeds
+// anything must give the disk back, and a disk that already existed belongs to an
+// earlier, live artifact of the same name. Deleting that one would destroy the
+// very thing the promotion promised keeps living.
+func (c *ClusterCrystallizer) ensurePVC(ctx context.Context, vmName string) (bool, error) {
 	gb := c.DiskGB
 	if gb <= 0 {
 		gb = crystalDefaultGB
@@ -844,10 +855,33 @@ func (c *ClusterCrystallizer) ensurePVC(ctx context.Context, vmName string) erro
 		},
 	}
 	_, err := c.clientset.CoreV1().PersistentVolumeClaims(c.Namespace).Create(ctx, pvc, metav1.CreateOptions{})
-	if err != nil && !apierrors.IsAlreadyExists(err) {
-		return fmt.Errorf("crystallize: create permanent disk: %w", err)
+	if apierrors.IsAlreadyExists(err) {
+		return false, nil
 	}
-	return nil
+	if err != nil {
+		return false, fmt.Errorf("crystallize: create permanent disk: %w", err)
+	}
+	return true, nil
+}
+
+// releaseProvisioned gives back what a promotion reserved but never used.
+//
+// A promotion that never reached the seed stage carries no data: the disk it
+// asked for was empty, and the workload it declared never ran. Leaving both
+// behind is not caution, it is a leak -- on a storage pool that is already full,
+// the abandoned disk keeps holding the space that would let the NEXT attempt
+// succeed, and the usual cause of dying at this stage is exactly a full pool.
+// Only a disk this attempt created is released; one that predates the attempt
+// belongs to a live artifact and is never touched.
+func (c *ClusterCrystallizer) releaseProvisioned(ctx context.Context, vmName string, pvcCreated bool) {
+	if !pvcCreated {
+		return
+	}
+	name := crystalName(vmName)
+	if err := c.clientset.AppsV1().Deployments(c.Namespace).Delete(ctx, name, metav1.DeleteOptions{}); err != nil && !apierrors.IsNotFound(err) {
+		return
+	}
+	_ = c.clientset.CoreV1().PersistentVolumeClaims(c.Namespace).Delete(ctx, name, metav1.DeleteOptions{})
 }
 
 // crystalCommand is what the promoted container runs.
@@ -996,7 +1030,7 @@ func (c *ClusterCrystallizer) waitForCrystalPod(ctx context.Context, vmName, mar
 			}
 		}
 		if c.now().After(deadline) {
-			return "", fmt.Errorf("crystallize: the permanent workload did not start within %s", c.readyTimeout())
+			return "", fmt.Errorf("crystallize: the permanent workload did not start within %s%s", c.readyTimeout(), c.whyNotStarted(ctx, vmName, marker))
 		}
 		select {
 		case <-ctx.Done():
@@ -1004,6 +1038,50 @@ func (c *ClusterCrystallizer) waitForCrystalPod(ctx context.Context, vmName, mar
 		case <-time.After(crystalReadyPoll):
 		}
 	}
+}
+
+// whyNotStarted turns a bare timeout into a diagnosis.
+//
+// "the permanent workload did not start within 5m" says nothing a caller can act
+// on, and the cause is usually not the promotion at all: a full Longhorn pool
+// answers "no available disk for replica", and the pod then sits in
+// ContainerCreating until something frees space. The reason k8s already recorded
+// is right there in the pod's waiting state and in the events on its object, so
+// the timeout carries it instead of hiding it. Best effort by construction: a
+// diagnosis that cannot be read must not replace the timeout it decorates.
+func (c *ClusterCrystallizer) whyNotStarted(ctx context.Context, vmName, marker string) string {
+	pods, err := c.clientset.CoreV1().Pods(c.Namespace).List(ctx, metav1.ListOptions{
+		LabelSelector: labelCrystal + "=" + vmName,
+	})
+	if err != nil {
+		return ""
+	}
+	for _, p := range pods.Items {
+		if !podRunsAttempt(p, marker) {
+			continue
+		}
+		for _, cs := range p.Status.ContainerStatuses {
+			if cs.State.Waiting != nil && cs.State.Waiting.Message != "" {
+				return fmt.Sprintf(" (%s: %s)", cs.State.Waiting.Reason, cs.State.Waiting.Message)
+			}
+		}
+		events, err := c.clientset.CoreV1().Events(c.Namespace).List(ctx, metav1.ListOptions{
+			FieldSelector: "involvedObject.name=" + p.Name,
+		})
+		if err != nil {
+			return ""
+		}
+		for i := len(events.Items) - 1; i >= 0; i-- {
+			e := events.Items[i]
+			if e.Type == corev1.EventTypeWarning && e.Message != "" {
+				return fmt.Sprintf(" (%s: %s)", e.Reason, e.Message)
+			}
+		}
+		if len(p.Status.ContainerStatuses) == 0 {
+			return fmt.Sprintf(" (pod %s is %s)", p.Name, p.Status.Phase)
+		}
+	}
+	return ""
 }
 
 // podRunsAttempt reports whether a pod was created from the template this attempt
