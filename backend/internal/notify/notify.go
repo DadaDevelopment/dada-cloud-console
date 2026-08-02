@@ -251,7 +251,25 @@ func ComposeAutoscaleNotice(appName, from, to, reason string, ratio float64, con
 	b.WriteString("Приложение перезапустилось с новыми лимитами — это короткий перерыв в работе, после которого оно должно отвечать быстрее.\n\n")
 	b.WriteString("Тарификация не изменилась: счёт зависит от количества приложений, баз и доменов, а не от их размера.\n\n")
 	fmt.Fprintf(&b, "Открыть приложение в консоли: %s\n\n", consoleLink)
-	b.WriteString("Профиль можно изменить вручную там же. Автоматическое увеличение происходит не чаще раза в 6 часов на приложение.\n")
+	b.WriteString("Размер подбирается платформой, вручную указывать его не нужно. Увеличение происходит не чаще раза в 6 часов на приложение.\n")
+	return subject, b.String()
+}
+
+// ComposeAutoscaleShrink reports a resize DOWN, which needs a different first
+// paragraph than a resize up: the owner sees an unexplained restart of an app
+// that was working fine, and the obvious wrong conclusion — "they are taking
+// resources away because I am not paying enough" — has to be closed immediately.
+// So the evidence comes first (a week of measured peaks), then the fact that the
+// app can grow straight back, then the reason it matters to them: the surplus
+// was holding project quota their other apps could not use.
+func ComposeAutoscaleShrink(appName, from, to, detail string, consoleLink string) (subject, body string) {
+	subject = fmt.Sprintf("Dada Cloud: приложению %s уменьшены ресурсы (%s → %s)", appName, from, to)
+	var b strings.Builder
+	fmt.Fprintf(&b, "Приложение %s всю последнюю неделю использовало заметно меньше, чем занимало, поэтому платформа вернула излишек: %s → %s.\n\n", appName, from, to)
+	fmt.Fprintf(&b, "Замеры за неделю: %s. Новый размер оставляет как минимум двукратный запас над пиком.\n\n", detail)
+	b.WriteString("Приложение перезапустилось с новыми лимитами. Если нагрузка вырастет, платформа увеличит размер обратно автоматически — ничего указывать не нужно.\n\n")
+	b.WriteString("Тарификация не изменилась: счёт зависит от количества приложений, баз и доменов, а не от их размера. Освободившийся запас вернулся в квоту проекта, и его смогут занять другие ваши приложения.\n\n")
+	fmt.Fprintf(&b, "Открыть приложение в консоли: %s\n", consoleLink)
 	return subject, b.String()
 }
 

@@ -436,3 +436,166 @@ func TestAutoscaleProfileRequirementsMatchRenderer(t *testing.T) {
 		}
 	}
 }
+
+// An app idle on both dimensions must pay for one rollout, not two, so both
+// halve in the same call.
+func TestShrinkEnvelopeHalvesEveryIdleDimensionInOneStep(t *testing.T) {
+	from := resourceEnvelope{CPULimit: "2", MemoryLimit: "2Gi", CPUReq: "500m", MemoryReq: "512Mi"}
+	want := resourceEnvelope{CPULimit: "1", MemoryLimit: "1Gi", CPUReq: "250m", MemoryReq: "256Mi"}
+
+	got, moved, err := shrinkEnvelope(from, []string{"cpu", "memory"})
+	if err != nil {
+		t.Fatalf("shrinkEnvelope: %v", err)
+	}
+	if !moved {
+		t.Fatal("expected room to shrink well above the floor")
+	}
+	if got != want {
+		t.Fatalf("shrinkEnvelope(%v) = %v, want %v", from, got, want)
+	}
+}
+
+// Shrinking is the exact reverse of growing, so an app that grew on CPU and
+// then went idle on CPU alone must keep every byte of the memory it holds.
+func TestShrinkEnvelopeTouchesOnlyTheIdleDimensions(t *testing.T) {
+	from := resourceEnvelope{CPULimit: "2", MemoryLimit: "2Gi", CPUReq: "500m", MemoryReq: "512Mi"}
+
+	got, moved, err := shrinkEnvelope(from, []string{"cpu"})
+	if err != nil || !moved {
+		t.Fatalf("shrinkEnvelope(cpu) = (%v, %v, %v), want a step down", got, moved, err)
+	}
+	if got.MemoryLimit != from.MemoryLimit || got.MemoryReq != from.MemoryReq {
+		t.Fatalf("memory moved to %s/%s on a cpu-only shrink", got.MemoryReq, got.MemoryLimit)
+	}
+	if got.CPULimit != "1" || got.CPUReq != "250m" {
+		t.Fatalf("cpu shrank to %s/%s, want 250m/1", got.CPUReq, got.CPULimit)
+	}
+}
+
+// Without a floor an app that is idle because nobody uses it yet would be
+// shrunk until its first real request cannot start at all.
+func TestShrinkEnvelopeStopsAtTheFloor(t *testing.T) {
+	at := autoscaleProfileRequirements[autoscaleFloorProfile]
+
+	got, moved, err := shrinkEnvelope(at, []string{"cpu", "memory"})
+	if err != nil {
+		t.Fatalf("shrinkEnvelope: %v", err)
+	}
+	if moved {
+		t.Fatalf("shrank below the floor to %v", got)
+	}
+}
+
+// A halving that undershoots must land exactly on the floor rather than be
+// refused, the same way growth clamps to the cap.
+func TestShrinkEnvelopeClampsTheLastStepToTheFloor(t *testing.T) {
+	from := resourceEnvelope{CPULimit: "300m", MemoryLimit: "384Mi", CPUReq: "150m", MemoryReq: "192Mi"}
+	floor := autoscaleProfileRequirements[autoscaleFloorProfile]
+
+	got, moved, err := shrinkEnvelope(from, []string{"cpu", "memory"})
+	if err != nil || !moved {
+		t.Fatalf("shrinkEnvelope = (%v, %v, %v), want a clamped step", got, moved, err)
+	}
+	if got.CPULimit != floor.CPULimit || got.MemoryLimit != floor.MemoryLimit {
+		t.Fatalf("limits landed at %s/%s, want the floor %s/%s", got.CPULimit, got.MemoryLimit, floor.CPULimit, floor.MemoryLimit)
+	}
+}
+
+// An envelope can reach the floor limit while its own ratio would put the
+// request below what a new app is given, which the scheduler would read as an
+// app that needs nothing.
+func TestShrinkEnvelopeFloorsTheRequestIndependently(t *testing.T) {
+	from := resourceEnvelope{CPULimit: "1", MemoryLimit: "2Gi", CPUReq: "10m", MemoryReq: "512Mi"}
+	floor := autoscaleProfileRequirements[autoscaleFloorProfile]
+
+	got, moved, err := shrinkEnvelope(from, []string{"cpu"})
+	if err != nil || !moved {
+		t.Fatalf("shrinkEnvelope(cpu) = (%v, %v, %v), want a step down", got, moved, err)
+	}
+	if got.CPULimit != "500m" {
+		t.Fatalf("cpu limit = %q, want 500m", got.CPULimit)
+	}
+	if got.CPUReq != floor.CPUReq {
+		t.Fatalf("cpu request = %q, want the floor %q", got.CPUReq, floor.CPUReq)
+	}
+}
+
+// Shrinking off a zero or unparsable limit would write a zero envelope, which
+// the API server reads as "no limit at all" — the opposite of housekeeping.
+func TestShrinkEnvelopeRefusesAnUnusableEnvelope(t *testing.T) {
+	for name, from := range map[string]resourceEnvelope{
+		"unparsable limit": {CPULimit: "lots", MemoryLimit: "1Gi", CPUReq: "250m", MemoryReq: "256Mi"},
+		"zero limit":       {CPULimit: "0", MemoryLimit: "1Gi", CPUReq: "0", MemoryReq: "256Mi"},
+		"empty":            {},
+	} {
+		if _, moved, err := shrinkEnvelope(from, []string{"cpu"}); err == nil && moved {
+			t.Fatalf("%s: shrank an unusable envelope %v", name, from)
+		}
+	}
+}
+
+func sortIdle(in []idlePod) []idlePod {
+	out := append([]idlePod(nil), in...)
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Namespace != out[j].Namespace {
+			return out[i].Namespace < out[j].Namespace
+		}
+		return out[i].Pod < out[j].Pod
+	})
+	return out
+}
+
+func TestCollectIdleAppliesTheThreshold(t *testing.T) {
+	cpu := []pressureSample{
+		{Namespace: "a-prod", Pod: "at-threshold", Ratio: appAutoscaleShrinkThreshold},
+		{Namespace: "a-prod", Pod: "busy", Ratio: 0.80},
+		{Namespace: "a-prod", Pod: "idle", Ratio: 0.05},
+	}
+	mem := []pressureSample{
+		{Namespace: "a-prod", Pod: "idle", Ratio: 0.10},
+		{Namespace: "a-prod", Pod: "busy", Ratio: 0.90},
+	}
+
+	got := sortIdle(collectIdle(cpu, mem, appAutoscaleShrinkThreshold))
+
+	if len(got) != 2 {
+		t.Fatalf("expected 2 idle pods, got %+v", got)
+	}
+	if got[0].Pod != "at-threshold" || !reflect.DeepEqual(got[0].Dimensions, []string{"cpu"}) {
+		t.Fatalf("at-threshold: got %+v, want cpu idle", got[0])
+	}
+	if got[1].Pod != "idle" || !reflect.DeepEqual(got[1].Dimensions, []string{"cpu", "memory"}) {
+		t.Fatalf("idle: got %+v, want both dimensions", got[1])
+	}
+}
+
+// The one failure mode that costs an owner real availability is shrinking on a
+// query that returned nothing, so a dimension with no sample is never idle.
+func TestCollectIdleTreatsAMissingSampleAsNotIdle(t *testing.T) {
+	cpu := []pressureSample{{Namespace: "a-prod", Pod: "web", Ratio: 0.02}}
+
+	got := collectIdle(cpu, nil, appAutoscaleShrinkThreshold)
+
+	if len(got) != 1 {
+		t.Fatalf("expected 1 idle pod, got %+v", got)
+	}
+	if !reflect.DeepEqual(got[0].Dimensions, []string{"cpu"}) {
+		t.Fatalf("dimensions = %v, want cpu alone when memory did not resolve", got[0].Dimensions)
+	}
+	if _, ok := got[0].Ratios["memory"]; ok {
+		t.Fatal("a memory ratio appeared out of an empty result set")
+	}
+}
+
+func TestIdlePodDetailReadsAsEvidence(t *testing.T) {
+	p := idlePod{
+		Namespace:  "a-prod",
+		Pod:        "web",
+		Dimensions: []string{"cpu", "memory"},
+		Ratios:     map[string]float64{"cpu": 0.08, "memory": 0.12},
+	}
+
+	if got, want := p.Detail(), "cpu peak 8% of limit, memory peak 12% of limit"; got != want {
+		t.Fatalf("Detail() = %q, want %q", got, want)
+	}
+}

@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"log"
 	"math"
+	"sort"
+	"strings"
 	"time"
 
 	"github.com/dada-tuda/console/backend/internal/models"
@@ -103,6 +105,70 @@ const appAutoscaleGrowthFactor = 2
 const (
 	appAutoscaleMaxCPULimit    = "8"
 	appAutoscaleMaxMemoryLimit = "16Gi"
+)
+
+// appAutoscaleShrinkThreshold is the peak-usage/limit ratio below which an app
+// is considered oversized. A quarter, so halving the dimension still leaves the
+// observed peak twice the room it ever used.
+const appAutoscaleShrinkThreshold = 0.25
+
+// appAutoscaleShrinkWindow is how far back the peak is measured. A week rather
+// than the grow path's twenty minutes because the question is the opposite one:
+// growing asks "is this app suffering right now", shrinking asks "has this app
+// been provably idle long enough that nothing it does needs this size" — and a
+// workload that only runs on Mondays is not idle.
+const appAutoscaleShrinkWindow = "7d"
+
+// appAutoscaleShrinkMinAge is the minimum age of both the pod and the app's last
+// resize before shrinking is allowed.
+//
+// It exists because the ratio is measured against the CURRENT limit over a
+// window that may predate it. An app grown an hour ago has spent 167 of the last
+// 168 hours under its old, smaller limit, so its peak against the new limit
+// reads as idle and the watcher would immediately undo the growth it just
+// performed. A pod younger than the window has the same defect from the other
+// side: its series only covers its own lifetime, so a pod born ten minutes ago
+// looks like a week of idleness.
+const appAutoscaleShrinkMinAge = 7 * 24 * time.Hour
+
+// appAutoscaleShrinkCooldown is the minimum spacing between two shrinks of the
+// same app, held in the shared cache rather than in app_autoscale_events on
+// purpose: a shrink must never occupy the row whose age gates the next GROW.
+// Starvation relief is urgent, shrinking is housekeeping, and housekeeping must
+// not be able to mute the urgent path.
+const appAutoscaleShrinkCooldown = 48 * time.Hour
+
+// appAutoscaleShrinkPassInterval is how often the shrink sweep runs. Far slower
+// than the grow tick: its query window is a week, so a more frequent pass would
+// re-ask a question whose answer cannot have changed, at the price of a
+// week-wide range query per pass.
+const appAutoscaleShrinkPassInterval = 6 * time.Hour
+
+// autoscaleFloorProfile is the envelope shrinking stops at: the size a brand new
+// app is given. Below it the platform saves nothing worth the rollout, and an
+// app that idles for a week is not evidence that the default is too generous.
+const autoscaleFloorProfile = "small"
+
+// cpuIdleQuery is the highest five-minute CPU rate the pod reached over the
+// window, over its declared CPU limit.
+//
+// The peak, not the average: an app that runs a heavy job for two minutes every
+// hour averages near zero and would be shrunk into permanent throttling. Summing
+// per-container maxima rather than taking the max of the sum overstates usage
+// slightly, which is the safe direction — it can only prevent a shrink.
+var cpuIdleQuery = fmt.Sprintf(
+	`sum by (namespace,pod) (max_over_time(rate(container_cpu_usage_seconds_total{container!="",container!="POD"}[5m])[%[1]s:5m]))
+	 / sum by (namespace,pod) (last_over_time(kube_pod_container_resource_limits{resource="cpu"}[1h]))`,
+	appAutoscaleShrinkWindow,
+)
+
+// memIdleQuery is the highest working set the pod reached over the window, over
+// its declared memory limit. The denominator comes from kube-state-metrics for
+// the same reason memPressureQuery's does.
+var memIdleQuery = fmt.Sprintf(
+	`sum by (namespace,pod) (max_over_time(container_memory_working_set_bytes{container!="",container!="POD"}[%[1]s]))
+	 / sum by (namespace,pod) (last_over_time(kube_pod_container_resource_limits{resource="memory"}[1h]))`,
+	appAutoscaleShrinkWindow,
 )
 
 // resourceEnvelope is one app's CPU/memory request and limit, in Kubernetes
@@ -209,6 +275,100 @@ func growPair(limitQ, reqQ, maxQ string, format resource.Format) (limit, req str
 	return newLimit.String(), newReq.String(), true, nil
 }
 
+// shrinkEnvelope halves every dimension the caller found idle, floored at the
+// size a new app starts from, and reports whether anything actually moved.
+//
+// Both dimensions can move in one call on purpose: each resize costs the app a
+// rollout, so an app idle on CPU and memory should pay for one restart, not two.
+// Pure arithmetic over parsed quantities, so it is unit-tested.
+func shrinkEnvelope(cur resourceEnvelope, dimensions []string) (resourceEnvelope, bool, error) {
+	floor, ok := autoscaleProfileRequirements[autoscaleFloorProfile]
+	if !ok {
+		return cur, false, fmt.Errorf("floor profile %q is not defined", autoscaleFloorProfile)
+	}
+	next := cur
+	moved := false
+	for _, dim := range dimensions {
+		switch dim {
+		case "cpu":
+			limit, req, shrank, err := shrinkPair(cur.CPULimit, cur.CPUReq, floor.CPULimit, floor.CPUReq, resource.DecimalSI)
+			if err != nil {
+				return cur, false, err
+			}
+			if shrank {
+				next.CPULimit, next.CPUReq = limit, req
+				moved = true
+			}
+		case "memory":
+			limit, req, shrank, err := shrinkPair(cur.MemoryLimit, cur.MemoryReq, floor.MemoryLimit, floor.MemoryReq, resource.BinarySI)
+			if err != nil {
+				return cur, false, err
+			}
+			if shrank {
+				next.MemoryLimit, next.MemoryReq = limit, req
+				moved = true
+			}
+		}
+	}
+	return next, moved, nil
+}
+
+// shrinkPair halves a limit and moves its request with it, floored at the
+// default envelope's own numbers.
+//
+// The request follows the limit's ratio exactly as it does when growing, so an
+// app that grew and then idled walks back down the same path it came up. The
+// floor is applied to the request independently because an envelope can reach
+// the floor limit while its ratio would put the request below the floor's.
+func shrinkPair(limitQ, reqQ, floorLimitQ, floorReqQ string, format resource.Format) (limit, req string, shrank bool, err error) {
+	curLimit, err := resource.ParseQuantity(limitQ)
+	if err != nil {
+		return "", "", false, fmt.Errorf("parse limit %q: %w", limitQ, err)
+	}
+	curReq, err := resource.ParseQuantity(reqQ)
+	if err != nil {
+		return "", "", false, fmt.Errorf("parse request %q: %w", reqQ, err)
+	}
+	floorLimit, err := resource.ParseQuantity(floorLimitQ)
+	if err != nil {
+		return "", "", false, fmt.Errorf("parse floor limit %q: %w", floorLimitQ, err)
+	}
+	floorReq, err := resource.ParseQuantity(floorReqQ)
+	if err != nil {
+		return "", "", false, fmt.Errorf("parse floor request %q: %w", floorReqQ, err)
+	}
+	if curLimit.MilliValue() <= 0 {
+		return "", "", false, fmt.Errorf("limit %q is not a positive quantity", limitQ)
+	}
+	if curLimit.Cmp(floorLimit) <= 0 {
+		return "", "", false, nil
+	}
+	newLimit := halveQuantity(curLimit, format)
+	if newLimit.Cmp(floorLimit) < 0 {
+		newLimit = floorLimit.DeepCopy()
+	}
+	ratio := float64(curReq.MilliValue()) / float64(curLimit.MilliValue())
+	newReqMilli := int64(float64(newLimit.MilliValue()) * ratio)
+	newReq := resource.NewMilliQuantity(newReqMilli, format)
+	if format == resource.BinarySI {
+		newReq = resource.NewQuantity(newReqMilli/1000, resource.BinarySI)
+	}
+	if newReq.Cmp(floorReq) < 0 {
+		atFloor := floorReq.DeepCopy()
+		newReq = &atFloor
+	}
+	return newLimit.String(), newReq.String(), true, nil
+}
+
+// halveQuantity divides a quantity in two, keeping it in the notation its
+// dimension is normally written in.
+func halveQuantity(q resource.Quantity, format resource.Format) resource.Quantity {
+	if format == resource.BinarySI {
+		return *resource.NewQuantity(q.Value()/2, resource.BinarySI)
+	}
+	return *resource.NewMilliQuantity(q.MilliValue()/2, resource.DecimalSI)
+}
+
 // scaleQuantity multiplies a quantity, keeping it in the notation its dimension
 // is normally written in.
 func scaleQuantity(q resource.Quantity, factor int64, format resource.Format) resource.Quantity {
@@ -276,6 +436,61 @@ func collectStarved(cpu, mem []pressureSample, cpuThreshold, memThreshold float6
 	out := make([]starvedPod, 0, len(byKey))
 	for _, v := range byKey {
 		out = append(out, v)
+	}
+	return out
+}
+
+// idlePod is one pod whose peak usage stayed far below what it holds, carrying
+// which dimensions were idle and by how much for the audit trail and the email.
+type idlePod struct {
+	Namespace  string
+	Pod        string
+	Dimensions []string
+	Ratios     map[string]float64
+}
+
+// Detail renders the idle dimensions for a log line and an audit row.
+func (p idlePod) Detail() string {
+	parts := make([]string, 0, len(p.Dimensions))
+	for _, d := range p.Dimensions {
+		parts = append(parts, fmt.Sprintf("%s peak %.0f%% of limit", d, p.Ratios[d]*100))
+	}
+	return strings.Join(parts, ", ")
+}
+
+// collectIdle merges the CPU and memory peak result sets into one list of pods
+// sitting below the threshold, per dimension.
+//
+// A missing sample is never idleness. A pod whose CPU series did not resolve
+// simply has no CPU dimension in the result, so it keeps the CPU it has: the
+// only thing worse than an oversized app is one shrunk on the strength of a
+// query that returned nothing. Dimensions come out in a fixed order so the audit
+// metadata and the email read the same way every time. Pure and unit-tested.
+func collectIdle(cpu, mem []pressureSample, threshold float64) []idlePod {
+	byKey := map[string]*idlePod{}
+	add := func(s pressureSample, dimension string) {
+		if s.Ratio > threshold {
+			return
+		}
+		key := s.Namespace + "/" + s.Pod
+		p, ok := byKey[key]
+		if !ok {
+			p = &idlePod{Namespace: s.Namespace, Pod: s.Pod, Ratios: map[string]float64{}}
+			byKey[key] = p
+		}
+		p.Dimensions = append(p.Dimensions, dimension)
+		p.Ratios[dimension] = s.Ratio
+	}
+	for _, s := range cpu {
+		add(s, "cpu")
+	}
+	for _, s := range mem {
+		add(s, "memory")
+	}
+	out := make([]idlePod, 0, len(byKey))
+	for _, p := range byKey {
+		sort.Strings(p.Dimensions)
+		out = append(out, *p)
 	}
 	return out
 }
@@ -370,9 +585,17 @@ func (h *Handler) StartAppAutoscaleWatcher(ctx context.Context) {
 	}()
 }
 
+// podApp is the app a pod belongs to and how long that pod has been alive. The
+// age is what lets the shrink path tell a week of measured idleness from a pod
+// that was created ten minutes ago and has a week-shaped query window.
+type podApp struct {
+	App string
+	Age time.Duration
+}
+
 // podAppLabels maps pod names in namespace to the app they belong to, via the
 // dada.io/app label the workload chart stamps on every pod template.
-func (w *appAutoscaleWatcher) podAppLabels(ctx context.Context, namespace string) map[string]string {
+func (w *appAutoscaleWatcher) podAppLabels(ctx context.Context, namespace string) map[string]podApp {
 	listCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 	pods, err := w.clientset.CoreV1().Pods(namespace).List(listCtx, metav1.ListOptions{LabelSelector: "dada.io/app"})
@@ -380,11 +603,17 @@ func (w *appAutoscaleWatcher) podAppLabels(ctx context.Context, namespace string
 		log.Printf("app-autoscale: list pods in %s failed: %v", namespace, err)
 		return nil
 	}
-	out := map[string]string{}
+	out := map[string]podApp{}
 	for i := range pods.Items {
-		if name := pods.Items[i].Labels["dada.io/app"]; name != "" {
-			out[pods.Items[i].Name] = name
+		name := pods.Items[i].Labels["dada.io/app"]
+		if name == "" {
+			continue
 		}
+		var age time.Duration
+		if started := pods.Items[i].CreationTimestamp.Time; !started.IsZero() {
+			age = time.Since(started)
+		}
+		out[pods.Items[i].Name] = podApp{App: name, Age: age}
 	}
 	return out
 }
@@ -457,7 +686,7 @@ func (w *appAutoscaleWatcher) tick(ctx context.Context) {
 		}
 		seen := map[string]bool{}
 		for _, s := range hot {
-			appName := podApp[s.Pod]
+			appName := podApp[s.Pod].App
 			if appName == "" || seen[appName] {
 				continue
 			}
@@ -465,6 +694,168 @@ func (w *appAutoscaleWatcher) tick(ctx context.Context) {
 			w.maybeResize(ctx, env.ProjectID, ns, appName, s)
 		}
 	}
+
+	if w.h.cache.TryClaim(ctx, "autoscale:shrink-pass", appAutoscaleShrinkPassInterval) {
+		w.shrinkPass(ctx, nsProjects)
+	}
+}
+
+// shrinkPass runs one housekeeping sweep: find apps whose peak usage over a week
+// stayed far below what they hold, and hand the surplus back.
+//
+// This is the half of autoscaling that has no customer asking for it, and it is
+// the half that decides whether the other half keeps working. Growth is one-way
+// without it: every app that ever spiked keeps the size that spike bought it
+// forever, the namespace ResourceQuota fills up with headroom nobody uses, and
+// the next app that genuinely starves is refused with quota_blocked while an
+// idle neighbour sits on eight cores. The customer's bill does not change either
+// way — plans are priced per app, database and domain, not per core — so the
+// only thing shrinking buys is exactly that: room for the app that needs it.
+//
+// Failures are logged and swallowed, like the grow tick's: this pass is
+// housekeeping and must never take the watcher down with it.
+func (w *appAutoscaleWatcher) shrinkPass(ctx context.Context, nsProjects map[string]namespaceEnv) {
+	cpuSamples, err := w.h.prometheus.QueryInstant(ctx, cpuIdleQuery, time.Time{}, "")
+	if err != nil {
+		log.Printf("app-autoscale: cpu idle query failed: %v", err)
+		return
+	}
+	memSamples, err := w.h.prometheus.QueryInstant(ctx, memIdleQuery, time.Time{}, "")
+	if err != nil {
+		log.Printf("app-autoscale: memory idle query failed: %v", err)
+		return
+	}
+
+	idle := collectIdle(
+		parsePressureSamples(cpuSamples), parsePressureSamples(memSamples),
+		appAutoscaleShrinkThreshold,
+	)
+
+	byNamespace := map[string][]idlePod{}
+	for _, p := range idle {
+		if _, ok := nsProjects[p.Namespace]; !ok {
+			continue
+		}
+		byNamespace[p.Namespace] = append(byNamespace[p.Namespace], p)
+	}
+	log.Printf("app-autoscale: shrink pass cpu_series=%d mem_series=%d idle=%d idle_user_ns=%d",
+		len(cpuSamples), len(memSamples), len(idle), len(byNamespace))
+
+	for ns, cold := range byNamespace {
+		env := nsProjects[ns]
+		pods := w.podAppLabels(ctx, ns)
+		if pods == nil {
+			continue
+		}
+		seen := map[string]bool{}
+		for _, p := range cold {
+			ref := pods[p.Pod]
+			if ref.App == "" || seen[ref.App] {
+				continue
+			}
+			if ref.Age < appAutoscaleShrinkMinAge {
+				continue
+			}
+			seen[ref.App] = true
+			w.maybeShrink(ctx, env.ProjectID, ns, ref.App, p)
+		}
+	}
+}
+
+// lastAutoscaleResize reports how long ago the watcher last resized this app.
+// A missing row means it never has, which is reported as a very long time so a
+// never-touched app is free to shrink.
+func lastAutoscaleResize(ctx context.Context, pool *pgxpool.Pool, namespace, appName string) (time.Duration, error) {
+	var since time.Duration
+	var seconds float64
+	err := pool.QueryRow(ctx,
+		`SELECT EXTRACT(EPOCH FROM (now() - last_sent_at))::float8 FROM app_autoscale_events
+		 WHERE namespace = $1 AND app_name = $2`,
+		namespace, appName).Scan(&seconds)
+	if err == pgx.ErrNoRows {
+		return time.Duration(math.MaxInt64), nil
+	}
+	if err != nil {
+		return since, err
+	}
+	return time.Duration(seconds * float64(time.Second)), nil
+}
+
+// maybeShrink hands back the surplus of one idle app.
+//
+// The guards are all about not undoing a decision that was right. The app must
+// carry a readable envelope (guessing where an app sits can move it DOWN, which
+// is precisely the direction this function moves), its last resize must be older
+// than the measurement window, and the shrink cooldown must be free. No quota
+// check is needed in this direction: giving resources back cannot overflow
+// anything.
+func (w *appAutoscaleWatcher) maybeShrink(ctx context.Context, projectID uuid.UUID, namespace, appName string, p idlePod) {
+	st, err := w.h.loadAppProfileState(ctx, projectID, appName)
+	if err == pgx.ErrNoRows {
+		return
+	}
+	if err != nil {
+		log.Printf("app-autoscale: load state for %s/%s failed: %v", namespace, appName, err)
+		return
+	}
+	if st.Image == "" {
+		return
+	}
+
+	from, known := st.Envelope()
+	if !known {
+		return
+	}
+
+	since, err := lastAutoscaleResize(ctx, w.h.pool, namespace, appName)
+	if err != nil {
+		log.Printf("app-autoscale: last-resize lookup for %s/%s failed: %v", namespace, appName, err)
+		return
+	}
+	if since < appAutoscaleShrinkMinAge {
+		return
+	}
+
+	to, moved, err := shrinkEnvelope(from, p.Dimensions)
+	if err != nil {
+		log.Printf("app-autoscale: %s/%s has an unreadable envelope (%s): %v", namespace, appName, from, err)
+		return
+	}
+	if !moved {
+		return
+	}
+
+	if !w.h.cache.TryClaim(ctx, "autoscale:shrink:"+namespace+"/"+appName, appAutoscaleShrinkCooldown) {
+		return
+	}
+
+	opID, err := w.h.applyResourceEnvelope(ctx, projectID, st.EnvironmentID, appName, to, st.Image)
+	if err != nil {
+		log.Printf("app-autoscale: shrink %s/%s %s -> %s failed: %v", namespace, appName, from, to, err)
+		return
+	}
+	log.Printf("app-autoscale: shrank %s/%s %s -> %s (%s) op=%s",
+		namespace, appName, from, to, p.Detail(), opID)
+
+	w.h.recordSystemAudit(ctx, auditEntry{
+		ProjectID:     projectID,
+		EnvironmentID: st.EnvironmentID,
+		OperationID:   opID,
+		Action:        auditActionAutoscaleApp,
+		ResourceKind:  "App",
+		ResourceName:  appName,
+		Outcome:       auditOutcomeSuccess,
+		Metadata: map[string]any{
+			"direction":     "down",
+			"from_envelope": from.String(), "to_envelope": to.String(),
+			"dimensions": p.Dimensions, "ratios": p.Ratios, "pod": p.Pod,
+			"window":     appAutoscaleShrinkWindow,
+			"namespace":  namespace,
+			"claimed_by": "app-autoscale-watcher",
+		},
+	})
+
+	w.notifyShrunk(ctx, projectID, appName, from.String(), to.String(), p)
 }
 
 // claimAppAutoscaleSlot atomically claims the right to resize (namespace, app)
@@ -585,17 +976,20 @@ func (e resourceEnvelope) snapshot() snapshotResources {
 	}
 }
 
-// applyResourceGrowth writes the new envelope into the snapshot the renderer
+// applyResourceEnvelope writes a new envelope into the snapshot the renderer
 // reads, then enqueues the same DeployImageVersion operation a console deploy
 // uses, keeping the current image so gitops-agent re-renders the chart with the
 // new numbers. One transaction: a snapshot updated without its operation would
 // silently take effect on some unrelated later deploy.
 //
+// Direction-agnostic: growing and shrinking differ only in the numbers handed
+// in, and both cost the app exactly one rollout.
+//
 // git_repos.profile is deliberately left alone. It is now only the fallback for
 // apps that have never been sized, and rewriting it would make a grown app look
 // like it still sits on a preset -- which is exactly the read the renderer uses
 // to decide the app has no envelope of its own.
-func (h *Handler) applyResourceGrowth(ctx context.Context, projectID, envID uuid.UUID, appName string, to resourceEnvelope, image string) (uuid.UUID, error) {
+func (h *Handler) applyResourceEnvelope(ctx context.Context, projectID, envID uuid.UUID, appName string, to resourceEnvelope, image string) (uuid.UUID, error) {
 	tx, err := h.pool.Begin(ctx)
 	if err != nil {
 		return uuid.Nil, err
@@ -711,7 +1105,7 @@ func (w *appAutoscaleWatcher) maybeResize(ctx context.Context, projectID uuid.UU
 		return
 	}
 
-	opID, err := w.h.applyResourceGrowth(ctx, projectID, st.EnvironmentID, appName, to, st.Image)
+	opID, err := w.h.applyResourceEnvelope(ctx, projectID, st.EnvironmentID, appName, to, st.Image)
 	if err != nil {
 		log.Printf("app-autoscale: resize %s/%s %s -> %s failed: %v", namespace, appName, from, to, err)
 		w.auditRefusal(ctx, projectID, st, namespace, appName, "resize_failed", s, map[string]any{"to_envelope": to.String(), "error": err.Error()})
@@ -729,6 +1123,7 @@ func (w *appAutoscaleWatcher) maybeResize(ctx context.Context, projectID uuid.UU
 		ResourceName:  appName,
 		Outcome:       auditOutcomeSuccess,
 		Metadata: map[string]any{
+			"direction":     "up",
 			"from_envelope": from.String(), "to_envelope": to.String(),
 			"dimension": s.Reason, "ratio": s.Ratio, "pod": s.Pod,
 			"namespace":  namespace,
@@ -805,6 +1200,30 @@ func (w *appAutoscaleWatcher) notifyResized(ctx context.Context, projectID uuid.
 	}
 	if err := w.h.auditNotifier.Send(to_, subject, body); err != nil {
 		log.Printf("app-autoscale: notice send to %s failed for app=%s: %v", to_, appName, err)
+	}
+}
+
+// notifyShrunk tells the owner their app was given back. Best-effort for the
+// same reason notifyResized is: the rollout already happened.
+func (w *appAutoscaleWatcher) notifyShrunk(ctx context.Context, projectID uuid.UUID, appName, from, to string, p idlePod) {
+	if w.h.auditNotifier == nil {
+		return
+	}
+	to_, source := w.h.resolveAlertRecipient(ctx, projectID)
+	if to_ == "" {
+		to_ = w.h.auditNotifyEmail
+		source = alertSourceOperator
+	}
+	if to_ == "" {
+		return
+	}
+	link := fmt.Sprintf("%s/projects/%s/apps/%s/settings", w.h.cfg.PublicBaseURL, projectID, appName)
+	subject, body := notify.ComposeAutoscaleShrink(appName, from, to, p.Detail(), link)
+	if source == alertSourceOperator {
+		subject, body = notify.ComposeNoOwnerFallback(projectID.String(), w.h.projectDisplayName(ctx, projectID), subject, body)
+	}
+	if err := w.h.auditNotifier.Send(to_, subject, body); err != nil {
+		log.Printf("app-autoscale: shrink notice send to %s failed for app=%s: %v", to_, appName, err)
 	}
 }
 
