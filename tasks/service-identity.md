@@ -64,6 +64,19 @@ currently lives. A move re-points that row and re-mints nothing.
       `service_identity_tokens` row, so delivery adopts instead of minting
       whichever build lands first. Nothing consumes the Secret yet — that is
       the `secretKeyRef` step below.
+- [x] Verified in prod on 2026-08-03, console `fcaeaadb`: the loop logs
+      `started interval=10m0s secret=<app>-identity-credentials
+      key=DADA_SERVICE_TOKEN` on both replicas, and the first tick reports
+      `apps=72 delivered=71 pruned=0` — 71 apps got a credential they never
+      had, and the one skipped is reels-tracker, whose Secret was already
+      there. Its token is unchanged and still the only live row for identity
+      `6dc328c6` (secret sha256 still matches, revoked count 0), so the guard
+      held on the run that mattered. `internal-prod` now carries eight
+      `*-identity-credentials` Secrets, one per app.
+- [x] Both audiences re-checked on that build: reels-tracker's in-pod LLM call
+      returns `IDENTITY_OK` through `ai-gateway-service` (200), the same token
+      gets 403 `identity is not granted the pay:charge scope` on
+      `POST /api/v1/pay/charges`, and an unknown `sk-dada-id-` is 401.
 - [ ] CRD `ServiceIdentity` (cluster-scoped) + renderer entry in
       `resources.values.yaml`. Not needed for delivery — the console writes the
       Secret through the API directly, which keeps the token out of git, unlike
