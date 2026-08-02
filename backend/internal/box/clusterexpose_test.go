@@ -83,6 +83,35 @@ func TestExposeOpensTheIngressPathAndTheNetworkPolicy(t *testing.T) {
 	}
 }
 
+// TestExposePublishesWithNoindex pins the pair that keeps a temporary hostname
+// out of search results: the ConfigMap holding the header and the annotation that
+// points at it. Either one alone is a silent failure — an unreferenced ConfigMap
+// sets no header, and an annotation naming a missing ConfigMap makes the hostname
+// answer 503 instead of serving the box.
+func TestExposePublishesWithNoindex(t *testing.T) {
+	e, cs := newExposerFixture(t)
+
+	if _, err := e.Expose("sunny-otter", 3000); err != nil {
+		t.Fatalf("expose: %v", err)
+	}
+
+	cm, err := cs.CoreV1().ConfigMaps("dada-boxes").Get(context.Background(), noindexConfigMap, metav1.GetOptions{})
+	if err != nil {
+		t.Fatalf("noindex configmap: %v", err)
+	}
+	if cm.Data["X-Robots-Tag"] != noindexHeader {
+		t.Errorf("configmap carries %q, want %q", cm.Data["X-Robots-Tag"], noindexHeader)
+	}
+
+	ing, err := cs.NetworkingV1().Ingresses("dada-boxes").Get(context.Background(), "box-sunny-otter-3000", metav1.GetOptions{})
+	if err != nil {
+		t.Fatalf("ingress: %v", err)
+	}
+	if got := ing.Annotations["nginx.ingress.kubernetes.io/custom-headers"]; got != "dada-boxes/"+noindexConfigMap {
+		t.Errorf("ingress points at %q, want the namespaced noindex configmap", got)
+	}
+}
+
 // TestExposeIsIdempotent covers the retry. A caller that repeats expose after a
 // timeout must not get a 500 for a box that is already published.
 func TestExposeIsIdempotent(t *testing.T) {

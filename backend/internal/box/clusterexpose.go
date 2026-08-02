@@ -51,6 +51,27 @@ const labelBoxName = "dada.io/box-name"
 // labelBoxExposed is what the box-ingress-from-nginx NetworkPolicy selects.
 const labelBoxExposed = "dada.io/box-exposed"
 
+// noindexConfigMap holds the response headers every exposed box hostname carries.
+//
+// It is one ConfigMap for the whole namespace rather than one per exposure: the
+// content is identical for every box, and ingress-nginx reads it by name from the
+// annotation, so a shared object cannot drift between two boxes.
+const noindexConfigMap = "box-noindex-headers"
+
+// noindexHeader keeps a box hostname out of search results.
+//
+// A box hostname is a temporary body handed to one operator. Without this, an
+// indexed URL outlives the box it named and turns into a permanent public record
+// of a sandbox that no longer exists — or, worse, of one that does.
+//
+// The header is delivered through the controller's custom-headers annotation, and
+// that annotation is refused unless X-Robots-Tag is on the controller's
+// global-allowed-response-headers allowlist. A refused annotation does not
+// degrade to "no header": the server block fails to render and the hostname
+// answers 503. The allowlist therefore has to be in the cluster BEFORE this code
+// runs against it; it lives in argo-infra with the ingress-nginx-pub values.
+const noindexHeader = "noindex, nofollow"
+
 var _ Exposer = (*ClusterExposer)(nil)
 
 // NewClusterExposer builds an exposer sharing the runtime's API client, so both
@@ -104,6 +125,9 @@ func (e *ClusterExposer) Expose(boxName string, port int) (Exposure, error) {
 	if err := e.applyService(ctx, svc); err != nil {
 		return Exposure{}, err
 	}
+	if err := e.applyNoindexHeaders(ctx); err != nil {
+		return Exposure{}, err
+	}
 
 	ing := &networkingv1.Ingress{
 		ObjectMeta: metav1.ObjectMeta{
@@ -114,6 +138,7 @@ func (e *ClusterExposer) Expose(boxName string, port int) (Exposure, error) {
 				"nginx.ingress.kubernetes.io/proxy-read-timeout": "3600",
 				"nginx.ingress.kubernetes.io/proxy-send-timeout": "3600",
 				"nginx.ingress.kubernetes.io/proxy-body-size":    "64m",
+				"nginx.ingress.kubernetes.io/custom-headers":     e.Namespace + "/" + noindexConfigMap,
 			},
 		},
 		Spec: networkingv1.IngressSpec{
@@ -247,6 +272,42 @@ func (e *ClusterExposer) applyService(ctx context.Context, svc *corev1.Service) 
 	existing.Spec.Ports = svc.Spec.Ports
 	if _, err := e.clientset.CoreV1().Services(e.Namespace).Update(ctx, existing, metav1.UpdateOptions{}); err != nil {
 		return fmt.Errorf("update box service: %w", err)
+	}
+	return nil
+}
+
+// applyNoindexHeaders makes sure the ConfigMap the Ingress annotation points at
+// exists before the annotation does.
+//
+// Order matters in one direction only: an annotation naming a missing ConfigMap
+// is a broken exposure, while a ConfigMap nobody references is inert. So this
+// runs ahead of the Ingress, and a failure here fails the exposure rather than
+// publishing a hostname that answers 503.
+func (e *ClusterExposer) applyNoindexHeaders(ctx context.Context) error {
+	cm := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      noindexConfigMap,
+			Namespace: e.Namespace,
+			Labels:    map[string]string{labelBox: "true"},
+		},
+		Data: map[string]string{"X-Robots-Tag": noindexHeader},
+	}
+	existing, err := e.clientset.CoreV1().ConfigMaps(e.Namespace).Get(ctx, cm.Name, metav1.GetOptions{})
+	if apierrors.IsNotFound(err) {
+		if _, err := e.clientset.CoreV1().ConfigMaps(e.Namespace).Create(ctx, cm, metav1.CreateOptions{}); err != nil && !apierrors.IsAlreadyExists(err) {
+			return fmt.Errorf("create box noindex configmap: %w", err)
+		}
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("get box noindex configmap: %w", err)
+	}
+	if existing.Data["X-Robots-Tag"] == noindexHeader {
+		return nil
+	}
+	existing.Data = cm.Data
+	if _, err := e.clientset.CoreV1().ConfigMaps(e.Namespace).Update(ctx, existing, metav1.UpdateOptions{}); err != nil {
+		return fmt.Errorf("update box noindex configmap: %w", err)
 	}
 	return nil
 }
