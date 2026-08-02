@@ -927,7 +927,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Streams Server-Sent Events for a single chat turn. Runs a server-side ReAct loop against the ADR-015 LLM gateway, grounding answers with a curated read-only subset of the console's own API (plus create_support_ticket) executed under the caller's own bearer. Emits token events (assistant text deltas), tool_call events (tool name only), an error event on a friendly failure (gateway not configured, daily cap reached, upstream error), and a final done event. Sending the literal message \"__slowtest__\" instead streams a 75s heartbeat run to prove the endpoint survives the ingress proxy-read-timeout.",
+                "description": "Streams Server-Sent Events for a single chat turn. Runs a server-side ReAct loop against the ADR-015 LLM gateway, grounding answers with a curated subset of the console's own API (read tools plus confirmation-gated write tools and create_support_ticket) executed under the caller's own bearer. The model starts with a small navigation toolset and pulls in the rest via the search_tools meta-tool. Emits token events (assistant text deltas), tool_call events (tool name only), a confirm_request event when a write tool needs the user's approval, an error event on a friendly failure (gateway not configured, daily cap reached, upstream error), an optional trace event with this turn's own metrics when the request sets \"trace\": true, and a final done event. Sending the literal message \"__slowtest__\" instead streams a 75s heartbeat run to prove the endpoint survives the ingress proxy-read-timeout.",
                 "consumes": [
                     "application/json"
                 ],
@@ -17472,6 +17472,9 @@ const docTemplate = `{
                 },
                 "decision": {
                     "type": "string"
+                },
+                "trace": {
+                    "type": "boolean"
                 }
             }
         },
@@ -17538,6 +17541,9 @@ const docTemplate = `{
                 },
                 "projectId": {
                     "type": "string"
+                },
+                "trace": {
+                    "type": "boolean"
                 }
             }
         },

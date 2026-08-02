@@ -1,12 +1,14 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { X, Send, Bot, Loader2, Wrench, AlertTriangle, Check, Ban, RotateCcw } from "lucide-react";
 import { useT } from "@/lib/i18n/console/context";
 import { useProjectContext } from "@/lib/project-context";
 import { getToken } from "@/lib/api";
 import { renderMarkdown } from "@/lib/markdown";
+import { autolinkConsolePaths, isInternalConsolePath } from "@/lib/agent-chat-links";
+import { confirmArgEntries } from "@/lib/agent-chat-redact";
 
 type ChatMessage =
   | { id: string; kind: "message"; role: "user" | "assistant"; content: string; pending?: boolean }
@@ -48,12 +50,6 @@ const TOOL_NAME_KEYS: Record<string, string> = {
   createEndpoint: "agentChat.tool.createEndpoint",
   createS3Bucket: "agentChat.tool.createS3Bucket",
 };
-
-function formatArgValue(value: unknown): string {
-  if (typeof value === "string") return value;
-  if (value === null || value === undefined) return "";
-  return JSON.stringify(value);
-}
 
 function appNameFromPath(pathname: string): string | undefined {
   const segs = pathname.split("/").filter(Boolean);
@@ -275,6 +271,8 @@ async function clearContext(projectId?: string, envId?: string): Promise<boolean
   return res.ok;
 }
 
+const PRESET_KEYS = ["deploy", "buildFailed", "billing"] as const;
+
 interface AgentChatPanelProps {
   open: boolean;
   onClose: () => void;
@@ -284,6 +282,7 @@ export function AgentChatPanel({ open, onClose }: AgentChatPanelProps) {
   const { t } = useT();
   const { projectId, selectedEnv } = useProjectContext();
   const pathname = usePathname();
+  const router = useRouter();
   const appName = appNameFromPath(pathname);
 
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -346,8 +345,8 @@ export function AgentChatPanel({ open, onClose }: AgentChatPanelProps) {
 
   const hasPendingConfirm = messages.some((m) => m.kind === "confirm" && !m.resolved);
 
-  async function handleSend() {
-    const text = input.trim();
+  async function handleSend(preset?: string) {
+    const text = (preset ?? input).trim();
     if (!text || sending || hasPendingConfirm) return;
 
     const userMsg: ChatMessage = { id: newId(), kind: "message", role: "user", content: text };
@@ -512,6 +511,24 @@ export function AgentChatPanel({ open, onClose }: AgentChatPanelProps) {
     }
   }
 
+  /**
+   * Routes clicks on console links the assistant produced through the Next
+   * router. The answer HTML comes from dangerouslySetInnerHTML, so there is no
+   * <Link> to attach to; a delegated handler on the container is what keeps a
+   * suggested path from reloading the whole console and losing this panel.
+   * Modified clicks and external hrefs keep the browser's own behaviour.
+   */
+  function handleMarkdownClick(e: React.MouseEvent<HTMLDivElement>) {
+    if (e.defaultPrevented || e.button !== 0) return;
+    if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+    const anchor = (e.target as HTMLElement).closest("a");
+    if (!anchor) return;
+    const href = anchor.getAttribute("href") ?? "";
+    if (!isInternalConsolePath(href)) return;
+    e.preventDefault();
+    router.push(href);
+  }
+
   return (
     <aside
       className={`absolute inset-y-0 right-0 z-40 flex w-full max-w-sm shrink-0 flex-col border-l border-gray-200 bg-white shadow-2xl transition-transform duration-200 dark:border-gray-800 dark:bg-gray-950 lg:static lg:w-[28vw] lg:min-w-[320px] lg:shadow-none ${
@@ -547,7 +564,23 @@ export function AgentChatPanel({ open, onClose }: AgentChatPanelProps) {
 
       <div ref={listRef} className="flex-1 space-y-3 overflow-y-auto px-4 py-4">
         {messages.length === 0 && (
-          <p className="text-sm text-gray-400 dark:text-gray-500">{t("agentChat.emptyState")}</p>
+          <div className="space-y-3">
+            <p className="text-sm text-gray-400 dark:text-gray-500">{t("agentChat.emptyState")}</p>
+            <p className="text-xs text-gray-400 dark:text-gray-500">{t("agentChat.preset.hint")}</p>
+            <div className="flex flex-wrap gap-2">
+              {PRESET_KEYS.map((key) => (
+                <button
+                  key={key}
+                  type="button"
+                  onClick={() => handleSend(t(`agentChat.preset.${key}`))}
+                  disabled={sending || hasPendingConfirm}
+                  className="rounded-full border border-gray-200 px-3 py-1.5 text-xs text-gray-600 transition-colors hover:border-blue-400 hover:text-blue-600 disabled:cursor-not-allowed disabled:opacity-40 dark:border-gray-800 dark:text-gray-300 dark:hover:border-blue-500 dark:hover:text-blue-400"
+                >
+                  {t(`agentChat.preset.${key}`)}
+                </button>
+              ))}
+            </div>
+          </div>
         )}
         {messages.map((m) => {
           if (m.kind === "tool_call") {
@@ -573,7 +606,7 @@ export function AgentChatPanel({ open, onClose }: AgentChatPanelProps) {
           if (m.kind === "confirm") {
             const toolLabelKey = TOOL_NAME_KEYS[m.toolName];
             const toolLabel = toolLabelKey ? t(toolLabelKey) : m.toolName;
-            const argEntries = Object.entries(m.args);
+            const argEntries = confirmArgEntries(m.args, m.summary);
             const isPriced = typeof m.priceRub === "number" && m.priceRub > 0;
             const confirmBlocked = isPriced && !m.acknowledged;
             return (
@@ -586,7 +619,7 @@ export function AgentChatPanel({ open, onClose }: AgentChatPanelProps) {
                     <ul className="mt-1.5 space-y-0.5 rounded-lg bg-white/60 px-2 py-1.5 font-mono text-xs text-amber-900 dark:bg-black/20 dark:text-amber-100">
                       {argEntries.map(([key, value]) => (
                         <li key={key} className="truncate">
-                          <span className="text-amber-600 dark:text-amber-400">{key}:</span> {formatArgValue(value)}
+                          <span className="text-amber-600 dark:text-amber-400">{key}:</span> {value}
                         </li>
                       ))}
                     </ul>
@@ -651,7 +684,11 @@ export function AgentChatPanel({ open, onClose }: AgentChatPanelProps) {
                 }`}
               >
                 {m.role === "assistant" && m.content ? (
-                  <div className="agent-chat-md" dangerouslySetInnerHTML={{ __html: renderMarkdown(m.content) }} />
+                  <div
+                    className="agent-chat-md"
+                    onClick={handleMarkdownClick}
+                    dangerouslySetInnerHTML={{ __html: renderMarkdown(autolinkConsolePaths(m.content)) }}
+                  />
                 ) : (
                   m.content
                 )}
@@ -683,7 +720,7 @@ export function AgentChatPanel({ open, onClose }: AgentChatPanelProps) {
           />
           <button
             type="button"
-            onClick={handleSend}
+            onClick={() => handleSend()}
             disabled={sending || !input.trim() || hasPendingConfirm}
             aria-label={t("agentChat.send")}
             className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-blue-600 text-white transition-colors hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-40"

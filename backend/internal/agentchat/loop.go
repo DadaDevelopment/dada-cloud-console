@@ -3,6 +3,7 @@ package agentchat
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/dada-tuda/console/backend/internal/llmchat"
 )
@@ -17,10 +18,18 @@ const writeInterruptSkipMessage = "skipped: this turn paused for a pending user 
 
 const writeBudgetExhaustedMessage = "write action budget exhausted for this turn; answer with what you already know or offer create_support_ticket"
 
+// ToolLogEntry is one executed tool call. ArgsJSON holds the raw arguments and
+// may contain secrets (setEnvVar values, database credentials): any consumer
+// that persists or renders it must redact it first. DurationMs is wall time
+// measured around Toolset.Execute. Preflight marks entries the engine produced
+// itself before the first LLM call -- those spend none of MaxToolCallsPerTurn.
 type ToolLogEntry struct {
-	Name    string
-	Result  string
-	IsError bool
+	Name       string
+	ArgsJSON   string
+	Result     string
+	IsError    bool
+	DurationMs int64
+	Preflight  bool
 }
 
 type PendingWrite struct {
@@ -49,59 +58,114 @@ type Usage struct {
 	Calls            int
 }
 
+// TurnResult is everything one turn produced. ToolCallCount/WriteCallCount are
+// the budget counters as of the end of the turn (preflight calls excluded, they
+// are free). Inventory* report what the engine saw on its own before the first
+// LLM call: InventoryAppsLookedUp distinguishes "zero apps" from "listApps was
+// never reached".
+type TurnResult struct {
+	AssistantText         string
+	ToolLog               []ToolLogEntry
+	Pending               *PendingWrite
+	Usage                 Usage
+	ToolCallCount         int
+	WriteCallCount        int
+	InventoryProjects     int
+	InventoryApps         int
+	InventoryAppsLookedUp bool
+	PreflightCalls        int
+}
+
+// RunTurn runs one user turn. Before the first LLM call it grounds itself with
+// runInventoryPreflight and, when anything was found, injects the inventory as
+// a system message immediately before the user's message.
+//
+// tools is a per-turn ToolView, not the whole catalog: the model is offered a
+// handful of navigation tools plus search_tools and grows its own list from
+// there, so a prompt costs a fraction of shipping every definition every round.
 func RunTurn(
 	ctx context.Context,
 	llm *llmchat.Client,
-	tools *Toolset,
+	tools *ToolView,
 	bearer string,
 	endUser string,
 	systemPrompt string,
 	history []llmchat.Message,
 	userMessage string,
+	turnCtx TurnContext,
 	emit Emitter,
-) (assistantText string, toolLog []ToolLogEntry, pending *PendingWrite, usage Usage, err error) {
-	messages := make([]llmchat.Message, 0, len(history)+2)
+) (TurnResult, error) {
+	inv, preflightLog := runInventoryPreflight(ctx, tools, bearer, turnCtx, emit)
+
+	messages := make([]llmchat.Message, 0, len(history)+3)
 	messages = append(messages, llmchat.Message{Role: "system", Content: systemPrompt})
 	messages = append(messages, history...)
+	if inv != nil {
+		if invMsg := inv.systemMessage(); invMsg != "" {
+			messages = append(messages, llmchat.Message{Role: "system", Content: invMsg})
+		}
+	}
 	messages = append(messages, llmchat.Message{Role: "user", Content: userMessage})
 
-	return runLoop(ctx, llm, tools, bearer, endUser, messages, 0, 0, emit)
+	res, err := runLoop(ctx, llm, tools, bearer, endUser, messages, 0, 0, emit)
+
+	res.ToolLog = append(append([]ToolLogEntry{}, preflightLog...), res.ToolLog...)
+	res.PreflightCalls = len(preflightLog)
+	if inv != nil {
+		res.InventoryProjects = len(inv.Projects)
+		res.InventoryApps = len(inv.Apps)
+		res.InventoryAppsLookedUp = inv.AppsLookedUp
+	}
+	return res, err
 }
 
+// ResumeTurn continues a turn that paused on a write confirmation. It runs no
+// inventory preflight: the turn context is already baked into the messages
+// snapshot taken when the turn paused, and re-grounding would both duplicate
+// the inventory and contradict the snapshot.
 func ResumeTurn(
 	ctx context.Context,
 	llm *llmchat.Client,
-	tools *Toolset,
+	tools *ToolView,
 	bearer string,
 	endUser string,
 	messages []llmchat.Message,
 	toolCallCount int,
 	writeCallCount int,
 	emit Emitter,
-) (assistantText string, toolLog []ToolLogEntry, pending *PendingWrite, usage Usage, err error) {
+) (TurnResult, error) {
 	return runLoop(ctx, llm, tools, bearer, endUser, messages, toolCallCount, writeCallCount, emit)
 }
 
 func runLoop(
 	ctx context.Context,
 	llm *llmchat.Client,
-	tools *Toolset,
+	tools *ToolView,
 	bearer string,
 	endUser string,
 	messages []llmchat.Message,
 	toolCallCount int,
 	writeCallCount int,
 	emit Emitter,
-) (assistantText string, toolLog []ToolLogEntry, pending *PendingWrite, usage Usage, err error) {
+) (TurnResult, error) {
+	var toolLog []ToolLogEntry
+	var pending *PendingWrite
+	var usage Usage
+
 	for round := 0; round < maxRounds; round++ {
 		var toolDefs []llmchat.ToolDef
 		if toolCallCount < MaxToolCallsPerTurn {
-			toolDefs = tools.Defs
+			toolDefs = tools.Defs()
 		}
 
 		result, streamErr := llm.StreamChatCompletion(ctx, messages, toolDefs, endUser, emit.Token)
 		if streamErr != nil {
-			return "", toolLog, nil, usage, streamErr
+			return TurnResult{
+				ToolLog:        toolLog,
+				Usage:          usage,
+				ToolCallCount:  toolCallCount,
+				WriteCallCount: writeCallCount,
+			}, streamErr
 		}
 		usage.PromptTokens += result.PromptTokens
 		usage.CompletionTokens += result.CompletionTokens
@@ -112,7 +176,13 @@ func runLoop(
 		}
 
 		if len(result.ToolCalls) == 0 {
-			return result.Content, toolLog, nil, usage, nil
+			return TurnResult{
+				AssistantText:  result.Content,
+				ToolLog:        toolLog,
+				Usage:          usage,
+				ToolCallCount:  toolCallCount,
+				WriteCallCount: writeCallCount,
+			}, nil
 		}
 
 		messages = append(messages, llmchat.Message{
@@ -166,12 +236,21 @@ func runLoop(
 				break
 			}
 
-			toolCallCount++
+			if !IsMetaTool(call.Function.Name) {
+				toolCallCount++
+			}
 			if emit.ToolCall != nil {
 				emit.ToolCall(call.Function.Name)
 			}
+			started := time.Now()
 			text, isError := tools.Execute(ctx, bearer, call.Function.Name, call.Function.Arguments)
-			toolLog = append(toolLog, ToolLogEntry{Name: call.Function.Name, Result: text, IsError: isError})
+			toolLog = append(toolLog, ToolLogEntry{
+				Name:       call.Function.Name,
+				ArgsJSON:   call.Function.Arguments,
+				Result:     text,
+				IsError:    isError,
+				DurationMs: time.Since(started).Milliseconds(),
+			})
 			messages = append(messages, llmchat.Message{
 				Role:       "tool",
 				ToolCallID: call.ID,
@@ -180,9 +259,20 @@ func runLoop(
 		}
 
 		if pending != nil {
-			return "", toolLog, pending, usage, nil
+			return TurnResult{
+				ToolLog:        toolLog,
+				Pending:        pending,
+				Usage:          usage,
+				ToolCallCount:  toolCallCount,
+				WriteCallCount: writeCallCount,
+			}, nil
 		}
 	}
 
-	return "", toolLog, nil, usage, fmt.Errorf("agent loop exceeded %d rounds without a final answer", maxRounds)
+	return TurnResult{
+		ToolLog:        toolLog,
+		Usage:          usage,
+		ToolCallCount:  toolCallCount,
+		WriteCallCount: writeCallCount,
+	}, fmt.Errorf("agent loop exceeded %d rounds without a final answer", maxRounds)
 }

@@ -9,9 +9,13 @@ export const agentChat: Messages = {
   "agentChat.placeholder": { ru: "Спросите что-нибудь про проект…", en: "Ask something about your project…" },
   "agentChat.send": { ru: "Отправить", en: "Send" },
   "agentChat.emptyState": {
-    ru: "Агент отвечает на вопросы о вашем проекте. Пока это черновик — ответы эхо, реальный разум подключим следующим шагом.",
-    en: "The agent answers questions about your project. This is a skeleton for now — replies echo back; real reasoning lands next.",
+    ru: "Агент видит ваши проекты, приложения, сборки и счета. Спросите — он сам сходит и посмотрит. Всё, что что-то меняет, сначала покажет карточку подтверждения.",
+    en: "The agent can see your projects, apps, builds and bills. Ask, and it goes and looks. Anything that changes something asks for confirmation first.",
   },
+  "agentChat.preset.hint": { ru: "Например:", en: "For example:" },
+  "agentChat.preset.deploy": { ru: "Разверни моё приложение", en: "Deploy my app" },
+  "agentChat.preset.buildFailed": { ru: "Почему упала сборка?", en: "Why did the build fail?" },
+  "agentChat.preset.billing": { ru: "Сколько я плачу и за что?", en: "What am I paying for?" },
   "agentChat.errorGeneric": {
     ru: "Не удалось получить ответ. Попробуйте ещё раз.",
     en: "Could not get a response. Please try again.",
