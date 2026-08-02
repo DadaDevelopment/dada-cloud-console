@@ -17576,12 +17576,25 @@ const docTemplate = `{
                     "description": "AppServerName names the permanent artifact.",
                     "type": "string"
                 },
+                "command": {
+                    "description": "Command, WorkingDir and Ports are the fallback for a box that never\nregistered a service descriptor of its own. Without either the descriptor or\nthese, nothing states what the permanent artifact should keep running, and\nthe request is refused rather than promoting an idle body.",
+                    "type": "string"
+                },
                 "domain": {
                     "description": "Domain is the address the crystallized artifact answers on.",
                     "type": "string"
                 },
+                "ports": {
+                    "type": "array",
+                    "items": {
+                        "type": "integer"
+                    }
+                },
                 "probe_path": {
                     "description": "ProbePath is the path the end-to-end probe requests.",
+                    "type": "string"
+                },
+                "working_dir": {
                     "type": "string"
                 }
             }
