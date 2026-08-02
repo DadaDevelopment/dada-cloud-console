@@ -59,8 +59,15 @@ def agentName = "kubeagent-${env.JOB_BASE_NAME}-${env.BUILD_NUMBER}-${UUID.rando
 // deploy — when main is pushed more often than a build takes (~11 min), every
 // build was superseded (NOT_BUILT) before its GitOps write-back ran, so nothing
 // ever deployed. Queueing lets each build finish + write back its tag in order.
+//
+// It regressed to abortPrevious: true and starved the deploy again: builds #813
+// through #818 covered six pushed commits and four of them died as ERROR "This
+// commit cannot be built" — superseded before the GitOps write-back — so prod sat
+// on the tag of #812 while six commits' worth of work was already on main. The
+// flag now matches the paragraph above it, and this note exists so the next person
+// who reaches for abortPrevious sees what it costs here.
 properties([
-        disableConcurrentBuilds(abortPrevious: true),
+        disableConcurrentBuilds(),
         parameters([
                 booleanParam(
                         name: 'RUN_E2E_AUTHED',
@@ -393,6 +400,20 @@ spec:
                                 go version
                                 apk add --no-cache helm git >/dev/null 2>&1 || true
                                 helm version --short
+                            '''
+                        }
+
+                        stage('Cache hygiene') {
+                            sh '''
+                                set -eu
+                                used=$(df -P /tmp/.cache/go-build | awk 'NR==2 {print $5}' | tr -d '%')
+                                echo "shared build cache is ${used}% full"
+                                if [ "$used" -ge 80 ]; then
+                                    echo "over the 80% mark, dropping the Go build cache before it fills the volume"
+                                    echo "it is regenerable; a full jenkins-build-cache PVC fails every build with ENOSPC (seen 08-02, builds 814-818)"
+                                    go clean -cache
+                                    df -h /tmp/.cache/go-build
+                                fi
                             '''
                         }
 
