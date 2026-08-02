@@ -2,7 +2,7 @@ import type { Messages } from "./common";
 
 /** AI Models list page (models/page.tsx) + model detail page (models/[name]/page.tsx). */
 export const models: Messages = {
-  "models.title": { ru: "AI-модели", en: "AI Models" },
+  "models.title": { ru: "Инференс", en: "Inference" },
   "models.subtitle": { ru: "Сервисы инференса на базе KServe", en: "KServe-backed inference services" },
   "models.deploy": { ru: "Развернуть модель", en: "Deploy Model" },
 

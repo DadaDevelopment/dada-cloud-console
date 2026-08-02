@@ -2,7 +2,7 @@ import type { Messages } from "./common";
 
 /** AI API page (projects/[projectId]/ai/page.tsx) — keys, BYOK credentials, catalog, usage. */
 export const ai: Messages = {
-  "ai.title": { ru: "AI API", en: "AI API" },
+  "ai.title": { ru: "LLM-провайдеры", en: "LLM providers" },
   "ai.subtitle": {
     ru: "OpenAI-совместимый эндпоинт из России — без VPN и без прокси. Свой ключ провайдера, наш роутинг.",
     en: "An OpenAI-compatible endpoint reachable from Russia — no VPN, no proxy. Your provider key, our routing.",
