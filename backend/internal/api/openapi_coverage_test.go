@@ -9,7 +9,6 @@ import (
 
 	"github.com/dada-tuda/console/backend/internal/api"
 	"github.com/dada-tuda/console/backend/internal/config"
-	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // swaggerDoc is the minimal shape of the generated swagger.json we assert on:
@@ -44,8 +43,13 @@ var routesSkippedFromSpec = map[string]bool{
 //
 // SetupRouter/NewHandler do not dereference the pool at setup time (see
 // handler.go: NewHandler only stores it; SetupRouter only registers routes and
-// reads pool inside the /ready closure, which we never invoke). So a zero
-// *pgxpool.Pool is sufficient to build the engine without a live database.
+// reads pool inside the /ready closure, which we never invoke). The
+// background loops NewHandler starts guard against a nil pool (see
+// advisory_lock.go: runWithAdvisoryLock no-ops on nil), so a nil
+// *pgxpool.Pool is sufficient to build the engine without a live database. A
+// zero-value &pgxpool.Pool{} is NOT: it is a non-nil pointer wrapping a
+// never-constructed internal pool, and pool.Acquire on it segfaults instead
+// of erroring.
 func TestOpenAPICoverage(t *testing.T) {
 	raw, err := os.ReadFile("docs/swagger.json")
 	if err != nil {
@@ -75,7 +79,7 @@ func TestOpenAPICoverage(t *testing.T) {
 		DevMode:         true,
 		AIStudioEnabled: true,
 	}
-	engine := api.SetupRouter(&pgxpool.Pool{}, cfg)
+	engine := api.SetupRouter(nil, cfg)
 
 	var missing []string
 	for _, rt := range engine.Routes() {

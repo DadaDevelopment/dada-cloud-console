@@ -39,12 +39,20 @@ const (
 // advisory lock key on a dedicated pooled connection, or does nothing when
 // another session (replica) already holds it. Returns whether fn ran.
 //
+// A nil pool is a no-op: callers construct a Handler for route-enumeration
+// purposes (e.g. the OpenAPI coverage test) without a live database, and the
+// background loops started from NewHandler must not crash a caller who never
+// asked for a working pool.
+//
 // The unlock uses context.WithoutCancel so a canceled tick context cannot
 // leak the lock into the pool; if the unlock still fails, the underlying
 // connection is torn down instead of being returned holding the lock, since a
 // pooled session that silently keeps an advisory lock would starve every
 // replica (including this one) forever.
 func runWithAdvisoryLock(ctx context.Context, pool *pgxpool.Pool, key int64, name string, fn func(context.Context)) bool {
+	if pool == nil {
+		return false
+	}
 	conn, err := pool.Acquire(ctx)
 	if err != nil {
 		log.Warn().Err(err).Str("loop", name).Msg("advisory lock: acquire connection failed")
