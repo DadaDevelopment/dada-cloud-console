@@ -50,6 +50,20 @@ currently lives. A move re-points that row and re-mints nothing.
       delivered token is byte-identical and the source namespace is emptied.
       Plus mint-idempotence (a converged app is never rotated), re-mint of a
       revoked token, and an unmanaged Secret of the same name left untouched.
+- [x] Minting is the last resort: it happens only when the identity holds zero
+      live tokens. An identity whose token is live but invisible to the loop is
+      the pre-delivery world — reels-tracker's plaintext is a literal in
+      argo-infra — and minting there would revoke the credential the running
+      bot is using. Caught by reading the loop's target set against the prod
+      database before the first tick, not by a test: the tests modelled only
+      the world after delivery.
+- [x] Prod pre-seeded on 2026-08-03: `internal-prod` now holds
+      `reels-tracker-identity-credentials` carrying the token already live for
+      identity `6dc328c6`, labelled `dada.io/managed-by=dada-cloud-console` and
+      `dada.io/identity=<id>`. Verified the Secret's sha256 matches the live
+      `service_identity_tokens` row, so delivery adopts instead of minting
+      whichever build lands first. Nothing consumes the Secret yet — that is
+      the `secretKeyRef` step below.
 - [ ] CRD `ServiceIdentity` (cluster-scoped) + renderer entry in
       `resources.values.yaml`. Not needed for delivery — the console writes the
       Secret through the API directly, which keeps the token out of git, unlike
