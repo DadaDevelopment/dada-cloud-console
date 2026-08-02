@@ -1171,12 +1171,31 @@ func (w *DBWatcher) doDeleteProject(ctx context.Context, op db.Operation) error 
 // project/operation rows are deleted explicitly before the operations row they
 // point at. Missing any operation_id child here re-triggers
 // deployments_operation_id_fkey (SQLSTATE 23503) on the operations delete.
+//
+// Deleting those children by project scope is NOT enough on its own: an app that
+// moved projects (MoveApp, or a hand migration) carries its deployments and
+// domain_hostnames rows to the new project while their operation_id still points
+// at an operation owned by the OLD one. Those rows survive the scoped delete and
+// then block the operations delete from a project they no longer belong to, so
+// operation_id is detached platform-wide first — same treatment git_commits gets.
 func wipeProjectRows(ctx context.Context, tx pgx.Tx, projectID uuid.UUID) error {
 	if _, err := tx.Exec(ctx,
 		`UPDATE git_commits SET operation_id = NULL WHERE operation_id IN (SELECT id FROM operations WHERE project_id = $1)`,
 		projectID,
 	); err != nil {
 		return fmt.Errorf("detach git_commits: %w", err)
+	}
+	if _, err := tx.Exec(ctx,
+		`UPDATE deployments SET operation_id = NULL WHERE operation_id IN (SELECT id FROM operations WHERE project_id = $1)`,
+		projectID,
+	); err != nil {
+		return fmt.Errorf("detach deployments: %w", err)
+	}
+	if _, err := tx.Exec(ctx,
+		`UPDATE domain_hostnames SET operation_id = NULL WHERE operation_id IN (SELECT id FROM operations WHERE project_id = $1)`,
+		projectID,
+	); err != nil {
+		return fmt.Errorf("detach domain_hostnames: %w", err)
 	}
 	if _, err := tx.Exec(ctx,
 		`UPDATE environments SET parent_env_id = NULL WHERE project_id = $1`,

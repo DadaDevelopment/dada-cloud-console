@@ -196,3 +196,79 @@ func exec(t *testing.T, ctx context.Context, pool *pgxpool.Pool, sql string, arg
 		t.Fatalf("seed exec failed: %v\nsql: %s", err, sql)
 	}
 }
+
+// TestWipeProjectRows_ForeignOperationChildren covers the app-moved-projects
+// case: a surviving project's deployments and domain_hostnames rows still point
+// at an operation owned by the project being deleted. Scoped deletes never touch
+// them, so without a platform-wide detach the operations delete dies with
+// domain_hostnames_operation_id_fkey (SQLSTATE 23503). Asserts the wipe succeeds,
+// the survivor's rows are still there, and their operation_id is NULL.
+func TestWipeProjectRows_ForeignOperationChildren(t *testing.T) {
+	dsn := os.Getenv("TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("TEST_DATABASE_URL not set; skipping DB integration test")
+	}
+
+	ctx := context.Background()
+	pool, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	defer pool.Close()
+
+	applyMigrations(t, ctx, pool)
+
+	doomedID := uuid.New()
+	seedProjectTrail(t, ctx, pool, doomedID)
+
+	survivorID := uuid.New()
+	seedProjectTrail(t, ctx, pool, survivorID)
+
+	var doomedOp uuid.UUID
+	if err := pool.QueryRow(ctx,
+		`SELECT id FROM operations WHERE project_id = $1`, doomedID,
+	).Scan(&doomedOp); err != nil {
+		t.Fatalf("read doomed operation: %v", err)
+	}
+
+	repoint := func(table string) {
+		exec(t, ctx, pool,
+			`UPDATE `+table+` SET operation_id = $1
+			  WHERE environment_id IN (SELECT id FROM environments WHERE project_id = $2)`,
+			doomedOp, survivorID)
+	}
+	repoint("deployments")
+	repoint("domain_hostnames")
+
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin: %v", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	if err := wipeProjectRows(ctx, tx, doomedID); err != nil {
+		t.Fatalf("wipeProjectRows: %v", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		t.Fatalf("commit: %v", err)
+	}
+
+	assertNoRows(t, ctx, pool, doomedID)
+
+	for _, table := range []string{"deployments", "domain_hostnames"} {
+		var total, detached int
+		if err := pool.QueryRow(ctx,
+			`SELECT count(*), count(*) FILTER (WHERE operation_id IS NULL) FROM `+table+`
+			  WHERE environment_id IN (SELECT id FROM environments WHERE project_id = $1)`,
+			survivorID,
+		).Scan(&total, &detached); err != nil {
+			t.Fatalf("count survivor %s: %v", table, err)
+		}
+		if total != 1 {
+			t.Errorf("survivor %s rows: got %d, want 1", table, total)
+		}
+		if detached != total {
+			t.Errorf("survivor %s still references the deleted operation: %d of %d detached", table, detached, total)
+		}
+	}
+}
