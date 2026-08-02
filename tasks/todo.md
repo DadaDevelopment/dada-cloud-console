@@ -104,3 +104,35 @@ Plan and evidence: `tasks/seo/PLAN.md`, baseline `tasks/seo/2026-07-30.md` / `.j
 - [ ] **Only remaining Google lever: backlinks.** A fresh third-level domain with none will not
       rank no matter how many pages it has
 - [ ] 2026-08-06: re-run `scripts/seo-weekly.py`, grade the three standing predictions in PLAN.md
+
+## Review 2026-08-02 — Russian docs (069f0b0, 39eca8e)
+
+**Diagnosis.** The docs were never missing from the index, so "add to sitemap" was
+the wrong fix. `/developer/*` and `/en/developer/*` shipped byte-identical English
+bodies; the Russian route just carried `lang="ru"` around English prose. Yandex
+sees an English page for a Russian query and near-duplicate hosts for the pair.
+
+**Done.**
+- [x] 18 of 20 guides translated (`frontend/content/docs/ru/`); `mcp-tool-reference.md`
+      stays English on purpose (machine reference), README is not a routed page
+- [x] Split the two routes — each owns `generateStaticParams`/`generateMetadata`
+      and renders the shared `DocArticle` with its own locale
+- [x] Untranslated slug degrades to the English original with an explicit note,
+      not a 404
+- [x] Widened the MCP tool-count anti-rot guard to read Russian (`\p{Cyrillic}`,
+      Go RE2 `\w` is ASCII-only) so a translated page cannot rot the count unwatched
+- [x] Landing → doc cross-links: `/storage`, `/databases`, `/cloud-servers`,
+      `/pricing` each now feed their guide
+- [x] Verified live by `<title>`: `Объектное хранилище S3`, `Управляемый PostgreSQL`,
+      `Рецепты MCP`; `/en/*` still `Object Storage (S3-compatible)`
+- [x] 24 URLs to IndexNow (Yandex + Bing 200/202) — chunked 4 at a time after the
+      full batch died on a TLS handshake timeout
+- [x] Guard so it cannot silently regress: `npm run check:docs`, wired into
+      `prebuild` so CI and `docker build` both run it
+
+**Not done / next.**
+- [ ] No Google lever here either — IndexNow does not reach it, and the backlink
+      gap above is still the binding constraint
+- [ ] 2026-08-06 pull: watch whether the RU doc pages enter the Yandex index at all.
+      They were the 32 thin pages flagged above; they are no longer thin, but they
+      are newly Russian, so treat 08-06 as their first honest measurement
