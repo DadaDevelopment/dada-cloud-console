@@ -63,16 +63,22 @@ func (h *Handler) AttachBoxDatabase(c *gin.Context) {
 	if !ok {
 		return
 	}
+	boxName := c.Param("boxName")
+	audit := h.boxAudit(c, projectID, models.ActionAttachBoxDatabase, boxName)
 	stack, ok := h.requireBoxRuntime(c)
 	if !ok {
+		audit(uuid.Nil, auditOutcomeFailure, map[string]any{"reason": "box_runtime_unavailable", "status": c.Writer.Status()})
 		return
 	}
-	b, ok := h.resolveBox(c, projectID, c.Param("boxName"))
+	b, ok := h.resolveBox(c, projectID, boxName)
 	if !ok {
+		audit(uuid.Nil, auditOutcomeFailure, map[string]any{"reason": "box_not_found", "status": c.Writer.Status()})
 		return
 	}
+	audit = h.boxAuditFor(c, projectID, b, models.ActionAttachBoxDatabase)
 	var req attachBoxDatabaseRequest
 	if err := c.ShouldBindJSON(&req); err != nil && c.Request.ContentLength > 0 {
+		audit(uuid.Nil, auditOutcomeFailure, map[string]any{"reason": "malformed_body", "status": http.StatusBadRequest})
 		respondError(c, http.StatusBadRequest, err.Error())
 		return
 	}
@@ -80,6 +86,7 @@ func (h *Handler) AttachBoxDatabase(c *gin.Context) {
 		req.Name = "db"
 	}
 	if err := validateKubeName(req.Name); err != nil {
+		audit(uuid.Nil, auditOutcomeFailure, map[string]any{"reason": "invalid_name", "status": http.StatusBadRequest})
 		respondError(c, http.StatusBadRequest, err.Error())
 		return
 	}
@@ -87,16 +94,19 @@ func (h *Handler) AttachBoxDatabase(c *gin.Context) {
 	// is a 409 rather than a queued intent, because the injection has to land in a
 	// filesystem that exists.
 	if b.Status != models.BoxStatusReady && b.Status != models.BoxStatusIdle {
+		audit(uuid.Nil, auditOutcomeFailure, map[string]any{"reason": "phase_cannot_attach", "phase": string(b.Status), "status": http.StatusConflict})
 		respondError(c, http.StatusConflict,
 			"a box in phase "+string(b.Status)+" cannot accept an attachment; it must be Ready or Idle")
 		return
 	}
 	if b.InstanceRef == "" {
+		audit(uuid.Nil, auditOutcomeFailure, map[string]any{"reason": "no_runtime_instance", "status": http.StatusConflict})
 		respondError(c, http.StatusConflict, "the box has no runtime instance yet")
 		return
 	}
 	attach, ok := stack.requireAttachProvider(c)
 	if !ok {
+		audit(uuid.Nil, auditOutcomeFailure, map[string]any{"reason": "attach_provider_unavailable", "status": c.Writer.Status()})
 		return
 	}
 
@@ -109,6 +119,7 @@ func (h *Handler) AttachBoxDatabase(c *gin.Context) {
 		 RETURNING id`,
 		b.ID, b.EnvironmentID, req.Name, req.EnvPrefix, claims.UserID,
 	).Scan(&attachmentID); err != nil {
+		audit(uuid.Nil, auditOutcomeFailure, map[string]any{"reason": "attachment_insert_failed", "status": http.StatusInternalServerError})
 		respondError(c, http.StatusInternalServerError, "failed to record the attachment")
 		return
 	}
@@ -127,6 +138,10 @@ func (h *Handler) AttachBoxDatabase(c *gin.Context) {
 		if !attach.ManagedPostgresConfigured() {
 			status = http.StatusServiceUnavailable
 		}
+		audit(uuid.Nil, auditOutcomeFailure, map[string]any{
+			"reason": "provision_failed", "attachment_id": attachmentID, "name": req.Name,
+			"detail": err.Error(), "status": status,
+		})
 		respondError(c, status, "failed to attach database: "+err.Error())
 		return
 	}
@@ -139,9 +154,18 @@ func (h *Handler) AttachBoxDatabase(c *gin.Context) {
 		  WHERE id = $1`,
 		attachmentID, injected, resourceName,
 	); err != nil {
+		audit(uuid.Nil, auditOutcomeFailure, map[string]any{"reason": "injected_keys_update_failed", "attachment_id": attachmentID, "status": http.StatusInternalServerError})
 		respondError(c, http.StatusInternalServerError, "failed to record the injected keys")
 		return
 	}
+
+	audit(uuid.Nil, auditOutcomeSuccess, map[string]any{
+		"attachment_id":      attachmentID,
+		"name":               req.Name,
+		"resource_name":      resourceName,
+		"injected_key_count": len(injected),
+		"attach_ms":          elapsed.Milliseconds(),
+	})
 
 	c.JSON(http.StatusOK, gin.H{
 		"attachment": gin.H{

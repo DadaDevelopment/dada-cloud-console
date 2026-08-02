@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/dada-tuda/console/backend/internal/config"
+	"github.com/dada-tuda/console/backend/internal/models"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -170,4 +171,77 @@ func seedOperation(t *testing.T, pool *pgxpool.Pool, actorID, projectID, envID u
 		t.Fatalf("seed operation: %v", err)
 	}
 	return id
+}
+
+// A box is where a beginner's first session happens, and its two most useful
+// verbs left no trace: publishing a port and attaching a database. A user who
+// asked for a URL on a platform with no box runtime, or for a database the
+// wired adapter cannot provision, produced the same blank as a user who never
+// opened the product.
+func TestExposeBox_NoRuntimeIsAudited(t *testing.T) {
+	pool := testOptimisticPool(t)
+	h := &Handler{pool: pool, cfg: &config.Config{}}
+	userID := seedUser(t, pool)
+	projectID := seedBoxFixture(t, pool)
+
+	c, rec := newBoxCtx(t, http.MethodPost, `{"port":8080}`, boxParams(projectID, "ghost-box"), godClaims(userID))
+	h.ExposeBox(c)
+
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503; body=%s", rec.Code, rec.Body.String())
+	}
+	outcome, reason, _ := lastAuditRow(t, pool, projectID, models.ActionExposeBox)
+	if outcome != auditOutcomeFailure || reason != "box_runtime_unavailable" {
+		t.Errorf("audit row = (%q, %q), want (failure, box_runtime_unavailable)", outcome, reason)
+	}
+}
+
+func TestExposeBox_UnknownBoxIsAudited(t *testing.T) {
+	pool := testOptimisticPool(t)
+	h := &Handler{pool: pool, cfg: &config.Config{}, boxStack: &boxRuntimeStack{}}
+	userID := seedUser(t, pool)
+	projectID := seedBoxFixture(t, pool)
+
+	c, rec := newBoxCtx(t, http.MethodPost, `{"port":8080}`, boxParams(projectID, "ghost-box"), godClaims(userID))
+	h.ExposeBox(c)
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404; body=%s", rec.Code, rec.Body.String())
+	}
+	outcome, reason, _ := lastAuditRow(t, pool, projectID, models.ActionExposeBox)
+	if outcome != auditOutcomeFailure || reason != "box_not_found" {
+		t.Errorf("audit row = (%q, %q), want (failure, box_not_found)", outcome, reason)
+	}
+}
+
+// The attach refusal that matters most is the one on a REAL box: the adapter is
+// wired, the box is Ready, and the platform still cannot hand over a database.
+// That row now carries the box's environment, which is what ties it to the rest
+// of the box's lifecycle.
+func TestAttachBoxDatabase_NoAttachProviderIsAudited(t *testing.T) {
+	pool := testOptimisticPool(t)
+	h := &Handler{pool: pool, cfg: &config.Config{}, boxStack: &boxRuntimeStack{}}
+	userID := seedUser(t, pool)
+	projectID, boxID, _ := seedBoxWithInstanceRef(t, pool, models.BoxStatusReady)
+
+	var boxName string
+	var envID uuid.UUID
+	if err := pool.QueryRow(context.Background(),
+		`SELECT name, environment_id FROM boxes WHERE id = $1`, boxID).Scan(&boxName, &envID); err != nil {
+		t.Fatalf("read seeded box: %v", err)
+	}
+
+	c, rec := newBoxCtx(t, http.MethodPost, `{"name":"db"}`, boxParams(projectID, boxName), godClaims(userID))
+	h.AttachBoxDatabase(c)
+
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503; body=%s", rec.Code, rec.Body.String())
+	}
+	outcome, reason, gotEnv := lastAuditRow(t, pool, projectID, models.ActionAttachBoxDatabase)
+	if outcome != auditOutcomeFailure || reason != "attach_provider_unavailable" {
+		t.Errorf("audit row = (%q, %q), want (failure, attach_provider_unavailable)", outcome, reason)
+	}
+	if gotEnv == nil || *gotEnv != envID {
+		t.Errorf("environment_id = %v, want %v", gotEnv, envID)
+	}
 }

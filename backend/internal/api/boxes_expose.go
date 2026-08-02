@@ -52,24 +52,32 @@ func (h *Handler) ExposeBox(c *gin.Context) {
 	if !ok {
 		return
 	}
+	boxName := c.Param("boxName")
+	audit := h.boxAudit(c, projectID, models.ActionExposeBox, boxName)
 	stack, ok := h.requireBoxRuntime(c)
 	if !ok {
+		audit(uuid.Nil, auditOutcomeFailure, map[string]any{"reason": "box_runtime_unavailable", "status": c.Writer.Status()})
 		return
 	}
-	b, ok := h.resolveBox(c, projectID, c.Param("boxName"))
+	b, ok := h.resolveBox(c, projectID, boxName)
 	if !ok {
+		audit(uuid.Nil, auditOutcomeFailure, map[string]any{"reason": "box_not_found", "status": c.Writer.Status()})
 		return
 	}
+	audit = h.boxAuditFor(c, projectID, b, models.ActionExposeBox)
 	var req exposeBoxRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
+		audit(uuid.Nil, auditOutcomeFailure, map[string]any{"reason": "malformed_body", "status": http.StatusBadRequest})
 		respondError(c, http.StatusBadRequest, err.Error())
 		return
 	}
 	if req.Port < 1 || req.Port > 65535 {
+		audit(uuid.Nil, auditOutcomeFailure, map[string]any{"reason": "port_out_of_range", "port": req.Port, "status": http.StatusBadRequest})
 		respondError(c, http.StatusBadRequest, "port must be between 1 and 65535")
 		return
 	}
 	if b.Status != models.BoxStatusReady && b.Status != models.BoxStatusIdle {
+		audit(uuid.Nil, auditOutcomeFailure, map[string]any{"reason": "phase_cannot_expose", "phase": string(b.Status), "port": req.Port, "status": http.StatusConflict})
 		respondError(c, http.StatusConflict,
 			"a box in phase "+string(b.Status)+" cannot publish a port; it must be Ready or Idle")
 		return
@@ -78,6 +86,9 @@ func (h *Handler) ExposeBox(c *gin.Context) {
 	started := time.Now()
 	exp, err := stack.exposer.Expose(b.Name, req.Port)
 	if err != nil {
+		audit(uuid.Nil, auditOutcomeFailure, map[string]any{
+			"reason": "expose_failed", "port": req.Port, "detail": err.Error(), "status": http.StatusInternalServerError,
+		})
 		respondError(c, http.StatusInternalServerError, "failed to publish the port: "+err.Error())
 		return
 	}
@@ -96,9 +107,20 @@ func (h *Handler) ExposeBox(c *gin.Context) {
 		 RETURNING id`,
 		b.ID, req.Port, exp.Hostname, exp.URL, exp.Cert,
 	).Scan(&exposureID); err != nil {
+		audit(uuid.Nil, auditOutcomeFailure, map[string]any{"reason": "exposure_insert_failed", "port": req.Port, "status": http.StatusInternalServerError})
 		respondError(c, http.StatusInternalServerError, "failed to record the exposure")
 		return
 	}
+
+	audit(uuid.Nil, auditOutcomeSuccess, map[string]any{
+		"exposure_id":  exposureID,
+		"port":         req.Port,
+		"hostname":     exp.Hostname,
+		"cert":         exp.Cert,
+		"answered":     probe.ok,
+		"probe_status": probe.status,
+		"expose_ms":    elapsed.Milliseconds(),
+	})
 
 	c.JSON(http.StatusOK, gin.H{
 		"exposure": gin.H{
