@@ -82,9 +82,20 @@ currently lives. A move re-points that row and re-mints nothing.
       Secret through the API directly, which keeps the token out of git, unlike
       the renderer's `AppEnvSecretSpec` channel that commits `stringData`
       plaintext to argo-infra.
-- [ ] App render: consume the token via `secretKeyRef`, never a literal.
+- [x] App render: consume the token via `secretKeyRef`, never a literal.
       Deliberately after delivery ships: a `secretKeyRef` to a Secret that is
-      not there yet wedges the pod in `CreateContainerConfigError`.
+      not there yet wedges the pod in `CreateContainerConfigError`. Done for
+      reels-tracker on 2026-08-03 (argo-infra `5afdddbf`). The `env` block was
+      the wrong home twice over — it renders into a **ConfigMap** mounted at
+      `/app/.env`, so the token was plaintext in git *and* in a ConfigMap.
+      `extraEnv` is real container env, and pydantic-settings reads `os.environ`
+      before the dotenv source, so the name defined there wins. `LLM_ENDPOINTS`
+      was deleted rather than rewritten: its single entry carried the same key
+      and base_url that `_llm_endpoints()` already derives from
+      `OPENROUTER_API_KEY` + `OPENROUTER_BASE_URL`, so keeping it meant pasting
+      the token a second time. Verified live: `.env` ConfigMap holds zero
+      `sk-dada` strings, the container env resolves the key from the Secret, and
+      the in-pod call is `200` with `IDENTITY_OK`.
 
 ## Phase 3 — second audience, proving the generalisation
 
@@ -125,10 +136,16 @@ currently lives. A move re-points that row and re-mints nothing.
 ## Phase 5 — migrate the pasted keys
 
 - [ ] Inventory apps whose `env_vars` hold an `sk-dada` literal.
-- [x] `reels-tracker` cut over to an identity token (2026-08-03). Still a
-      literal in argo-infra — `secretKeyRef` waits on Phase 2 — but the value is
-      now the app's own credential, so the next move re-points instead of
-      orphaning it.
+- [x] `reels-tracker` cut over to an identity token (2026-08-03) and, later the
+      same day, off the literal entirely — argo-infra now carries a
+      `secretKeyRef`, not a value. Its next move re-points the identity row and
+      the delivered Secret; git changes nothing.
+- [ ] Duplicate `reels-tracker` App in project `platform`, created 2026-08-02
+      while chasing the 401 and never removed. It has no database, no `env` and
+      no ingress traffic, so both pods CrashLoop on the missing
+      `TELEGRAM_BOT_TOKEN`; delivery counted it as a real app and minted it an
+      identity. Delete through the console (not by hand in git) so the
+      `resource_snapshots` rows go with it.
 - [ ] Revoke reels-tracker's old user-service key, now unused.
 - [x] Its direct-provider models are back: `OPENROUTER_MODEL=or-gpt-41-mini`,
       `OCR_VISION_MODEL`, `WEB_SEARCH_MODEL` all answer through the identity.
