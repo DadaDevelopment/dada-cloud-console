@@ -55,6 +55,12 @@ const maxServiceChargeAmount = 100000.00
 // genuine backend outage (503), not "unknown" vs. "revoked".
 var errPayKeyUnknown = errors.New("pay: unknown or revoked service key")
 
+// payScopeCharge is the scope a ServiceIdentity must carry to spend money
+// (ADR-021 phase 3). It is deliberately absent from identityDefaultScopes: an
+// app gets AI for free because every app infers, but an app that can charge a
+// customer has to say so at mint time.
+const payScopeCharge = "pay:charge"
+
 // generatePayServiceKey mints a new plaintext pay-gateway key plus its
 // derived hash and prefix, mirroring generateAIKey exactly. The plaintext is
 // payKeyPrefix followed by 48 hex characters (24 random bytes) and is
@@ -120,33 +126,100 @@ func extractPayServiceKey(c *gin.Context) string {
 	return strings.TrimSpace(c.GetHeader("X-API-Key"))
 }
 
-// resolvePayCaller authenticates a phase-1 pay-gateway request. On failure it
-// writes the response itself (401 for a missing/unknown/revoked key, 503 for
-// a backend failure) and returns ok=false; callers must return immediately.
-func (h *Handler) resolvePayCaller(c *gin.Context) (keyID uuid.UUID, service string, ok bool) {
+// payCaller is whoever a pay-gateway request authenticated as: either a
+// phase-1 pay_service_keys row or a ServiceIdentity holding pay:charge.
+// Exactly one of the two ids is set, which is the same invariant migration
+// 089 enforces on the row the caller goes on to own.
+type payCaller struct {
+	KeyID      *uuid.UUID
+	IdentityID *uuid.UUID
+	Service    string
+}
+
+// ownerColumn names the service_charges column that scopes this caller's
+// rows. The value comes from a closed set of two literals, never from a
+// request, so interpolating it into SQL adds no injection surface.
+func (pc payCaller) ownerColumn() string {
+	if pc.IdentityID != nil {
+		return "identity_id"
+	}
+	return "service_key_id"
+}
+
+// ownerID is the value ownerColumn is compared against.
+func (pc payCaller) ownerID() uuid.UUID {
+	if pc.IdentityID != nil {
+		return *pc.IdentityID
+	}
+	if pc.KeyID != nil {
+		return *pc.KeyID
+	}
+	return uuid.Nil
+}
+
+// resolvePayCaller authenticates a pay-gateway request from either credential
+// family, told apart by prefix alone. On failure it writes the response itself
+// (401 for a missing/unknown/revoked credential, 403 for an identity without
+// pay:charge, 503 for a backend failure) and returns ok=false; callers must
+// return immediately.
+//
+// An identity that resolves but lacks the scope is 403, not 401: the
+// credential is genuine and the caller should stop retrying and re-mint with
+// the scope, which a 401 would not tell it.
+func (h *Handler) resolvePayCaller(c *gin.Context) (pc payCaller, ok bool) {
 	token := extractPayServiceKey(c)
 	if token == "" {
 		respondError(c, http.StatusUnauthorized, "invalid api key")
-		return uuid.Nil, "", false
+		return payCaller{}, false
+	}
+	if strings.HasPrefix(token, identityTokenPrefix) {
+		return h.resolvePayIdentity(c, token)
 	}
 	id, svc, err := resolvePayServiceKey(c.Request.Context(), h.pool, token)
 	if err != nil {
 		if errors.Is(err, errPayKeyUnknown) {
 			respondError(c, http.StatusUnauthorized, "invalid api key")
-			return uuid.Nil, "", false
+			return payCaller{}, false
 		}
 		log.Printf("pay: key resolution failed: %v", err)
 		respondError(c, http.StatusServiceUnavailable, "auth backend unavailable")
-		return uuid.Nil, "", false
+		return payCaller{}, false
 	}
 	h.touchPayServiceKey(c.Request.Context(), id)
-	return id, svc, true
+	return payCaller{KeyID: &id, Service: svc}, true
+}
+
+// resolvePayIdentity is the sk-dada-id- half of resolvePayCaller.
+func (h *Handler) resolvePayIdentity(c *gin.Context, token string) (payCaller, bool) {
+	ctx := c.Request.Context()
+	ident, err := resolveIdentityToken(ctx, h.pool, token)
+	if errors.Is(err, pgx.ErrNoRows) {
+		respondError(c, http.StatusUnauthorized, "invalid api key")
+		return payCaller{}, false
+	}
+	if err != nil {
+		log.Printf("pay: identity resolution failed: %v", err)
+		respondError(c, http.StatusServiceUnavailable, "auth backend unavailable")
+		return payCaller{}, false
+	}
+	if !identityHasScope(ident.Scopes, payScopeCharge) {
+		respondError(c, http.StatusForbidden, "identity is not granted the "+payScopeCharge+" scope")
+		return payCaller{}, false
+	}
+	h.touchIdentityToken(ctx, ident.TokenID)
+	service := ident.AppName
+	if service == "" {
+		service = "identity:" + ident.IdentityID.String()
+	}
+	identityID := ident.IdentityID
+	return payCaller{IdentityID: &identityID, Service: service}, true
 }
 
 // serviceCharge is one service_charges row.
 type serviceCharge struct {
 	ID              uuid.UUID
-	ServiceKeyID    uuid.UUID
+	ServiceKeyID    *uuid.UUID
+	IdentityID      *uuid.UUID
 	Service         string
 	ExternalRef     string
 	AmountValue     string
@@ -188,34 +261,34 @@ func toChargeResponse(sc serviceCharge) serviceChargeResponse {
 	}
 }
 
-const serviceChargeColumns = `id, service_key_id, service, external_ref, amount_value::text, currency, description, status, coalesce(yk_payment_id, ''), coalesce(confirmation_url, ''), created_at, updated_at, paid_at`
+const serviceChargeColumns = `id, service_key_id, identity_id, service, external_ref, amount_value::text, currency, description, status, coalesce(yk_payment_id, ''), coalesce(confirmation_url, ''), created_at, updated_at, paid_at`
 
 func scanServiceCharge(row pgx.Row) (serviceCharge, error) {
 	var sc serviceCharge
-	err := row.Scan(&sc.ID, &sc.ServiceKeyID, &sc.Service, &sc.ExternalRef, &sc.AmountValue, &sc.Currency,
+	err := row.Scan(&sc.ID, &sc.ServiceKeyID, &sc.IdentityID, &sc.Service, &sc.ExternalRef, &sc.AmountValue, &sc.Currency,
 		&sc.Description, &sc.Status, &sc.YKPaymentID, &sc.ConfirmationURL, &sc.CreatedAt, &sc.UpdatedAt, &sc.PaidAt)
 	return sc, err
 }
 
-// loadServiceCharge loads a charge scoped to the calling key. Scoping the
-// WHERE clause by service_key_id (not just id) is the cross-service
-// isolation guard: a charge that belongs to another service answers
-// pgx.ErrNoRows here, which callers map to 404 -- never leaking that the
-// charge id exists at all.
-func (h *Handler) loadServiceCharge(ctx context.Context, chargeID, keyID uuid.UUID) (serviceCharge, error) {
+// loadServiceCharge loads a charge scoped to the caller. Scoping the WHERE
+// clause by the owner column (not just id) is the cross-service isolation
+// guard: a charge that belongs to another service answers pgx.ErrNoRows here,
+// which callers map to 404 -- never leaking that the charge id exists at all.
+func (h *Handler) loadServiceCharge(ctx context.Context, chargeID uuid.UUID, pc payCaller) (serviceCharge, error) {
 	row := h.pool.QueryRow(ctx,
-		`SELECT `+serviceChargeColumns+` FROM service_charges WHERE id = $1 AND service_key_id = $2`,
-		chargeID, keyID,
+		`SELECT `+serviceChargeColumns+` FROM service_charges WHERE id = $1 AND `+pc.ownerColumn()+` = $2`,
+		chargeID, pc.ownerID(),
 	)
 	return scanServiceCharge(row)
 }
 
 // loadServiceChargeByRef loads a charge by the caller's own idempotency key,
-// (service_key_id, external_ref) -- the pair the UNIQUE constraint enforces.
-func (h *Handler) loadServiceChargeByRef(ctx context.Context, keyID uuid.UUID, externalRef string) (serviceCharge, error) {
+// (owner, external_ref) -- the pair a UNIQUE constraint enforces on both
+// halves: 083's for a service key, 089's partial index for an identity.
+func (h *Handler) loadServiceChargeByRef(ctx context.Context, pc payCaller, externalRef string) (serviceCharge, error) {
 	row := h.pool.QueryRow(ctx,
-		`SELECT `+serviceChargeColumns+` FROM service_charges WHERE service_key_id = $1 AND external_ref = $2`,
-		keyID, externalRef,
+		`SELECT `+serviceChargeColumns+` FROM service_charges WHERE `+pc.ownerColumn()+` = $1 AND external_ref = $2`,
+		pc.ownerID(), externalRef,
 	)
 	return scanServiceCharge(row)
 }
@@ -227,7 +300,7 @@ func (h *Handler) loadServiceChargeByRef(ctx context.Context, keyID uuid.UUID, e
 // concurrent webhook delivery and a concurrent poll can never both apply the
 // same transition twice. Never trusts cached state -- this always re-asks
 // YooKassa before answering "succeeded".
-func (h *Handler) reconcileServiceCharge(ctx context.Context, chargeID, keyID uuid.UUID) (serviceCharge, error) {
+func (h *Handler) reconcileServiceCharge(ctx context.Context, chargeID uuid.UUID, pc payCaller) (serviceCharge, error) {
 	tx, err := h.pool.Begin(ctx)
 	if err != nil {
 		return serviceCharge{}, fmt.Errorf("pay: begin reconcile tx: %w", err)
@@ -235,8 +308,8 @@ func (h *Handler) reconcileServiceCharge(ctx context.Context, chargeID, keyID uu
 	defer tx.Rollback(ctx)
 
 	row := tx.QueryRow(ctx,
-		`SELECT `+serviceChargeColumns+` FROM service_charges WHERE id = $1 AND service_key_id = $2 FOR UPDATE`,
-		chargeID, keyID,
+		`SELECT `+serviceChargeColumns+` FROM service_charges WHERE id = $1 AND `+pc.ownerColumn()+` = $2 FOR UPDATE`,
+		chargeID, pc.ownerID(),
 	)
 	sc, err := scanServiceCharge(row)
 	if err != nil {
@@ -397,7 +470,8 @@ type createChargeRequest struct {
 // inside the handler -- see resolvePayCaller -- not the console JWT
 // middleware; the caller is a bare-VPS Telegram bot with no console session.
 //
-// Idempotent by design: (service_key_id, external_ref) is UNIQUE, so a
+// Idempotent by design: (owner, external_ref) is UNIQUE -- 083's constraint
+// for a service key, 089's partial index for an identity -- so a
 // caller that retries a create (e.g. after a timeout) with the same ref gets
 // back the SAME charge and its existing confirmation_url instead of a second
 // YooKassa payment -- this is the whole point for a bot with no reliable
@@ -405,7 +479,7 @@ type createChargeRequest struct {
 //
 // @ID          createServiceCharge
 // @Summary     Create an internal-service payment charge
-// @Description Phase 1 of the internal payment gateway: lets one of our own key-authenticated services (not customer apps) create a YooKassa payment and poll its status. Idempotent on external_ref.
+// @Description Internal payment gateway: lets one of our own credential-authenticated services (a pay service key, or a ServiceIdentity holding pay:charge) create a YooKassa payment and poll its status. Idempotent on external_ref.
 // @Tags        pay-gateway
 // @Accept      json
 // @Produce     json
@@ -413,14 +487,16 @@ type createChargeRequest struct {
 // @Success     200  {object} serviceChargeResponse
 // @Failure     400  {object} map[string]string
 // @Failure     401  {object} map[string]string
+// @Failure     403  {object} map[string]string
 // @Failure     409  {object} map[string]string
 // @Failure     503  {object} map[string]string
 // @Router      /pay/charges [post]
 func (h *Handler) CreateServiceCharge(c *gin.Context) {
-	keyID, service, ok := h.resolvePayCaller(c)
+	pc, ok := h.resolvePayCaller(c)
 	if !ok {
 		return
 	}
+	service := pc.Service
 
 	var req createChargeRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -457,7 +533,7 @@ func (h *Handler) CreateServiceCharge(c *gin.Context) {
 
 	ctx := c.Request.Context()
 
-	if existing, err := h.loadServiceChargeByRef(ctx, keyID, req.ExternalRef); err == nil {
+	if existing, err := h.loadServiceChargeByRef(ctx, pc, req.ExternalRef); err == nil {
 		if existing.YKPaymentID != "" || existing.Status != "pending" {
 			c.JSON(http.StatusOK, toChargeResponse(existing))
 			return
@@ -467,7 +543,7 @@ func (h *Handler) CreateServiceCharge(c *gin.Context) {
 			respondError(c, http.StatusInternalServerError, "failed to create payment")
 			return
 		}
-		healed, err := h.loadServiceCharge(ctx, existing.ID, keyID)
+		healed, err := h.loadServiceCharge(ctx, existing.ID, pc)
 		if err != nil {
 			respondError(c, http.StatusInternalServerError, "failed to load charge")
 			return
@@ -491,12 +567,12 @@ func (h *Handler) CreateServiceCharge(c *gin.Context) {
 	}
 
 	_, err = h.pool.Exec(ctx, `
-		INSERT INTO service_charges (id, service_key_id, service, external_ref, amount_value, currency, description, status, metadata)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, 'pending', $8)
-	`, id, keyID, service, req.ExternalRef, amountValue, currency, req.Description, metadataJSON)
+		INSERT INTO service_charges (id, service_key_id, identity_id, service, external_ref, amount_value, currency, description, status, metadata)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'pending', $9)
+	`, id, pc.KeyID, pc.IdentityID, service, req.ExternalRef, amountValue, currency, req.Description, metadataJSON)
 	if err != nil {
 		if isUniqueViolation(err) {
-			if existing, err2 := h.loadServiceChargeByRef(ctx, keyID, req.ExternalRef); err2 == nil {
+			if existing, err2 := h.loadServiceChargeByRef(ctx, pc, req.ExternalRef); err2 == nil {
 				c.JSON(http.StatusOK, toChargeResponse(existing))
 				return
 			}
@@ -517,7 +593,7 @@ func (h *Handler) CreateServiceCharge(c *gin.Context) {
 		respondError(c, http.StatusInternalServerError, "failed to create payment")
 		return
 	}
-	created, err := h.loadServiceCharge(ctx, id, keyID)
+	created, err := h.loadServiceCharge(ctx, id, pc)
 	if err != nil {
 		respondError(c, http.StatusInternalServerError, "failed to load charge")
 		return
@@ -530,6 +606,7 @@ func (h *Handler) CreateServiceCharge(c *gin.Context) {
 		Outcome:      auditOutcomeSuccess,
 		Metadata: map[string]string{
 			"service":       service,
+			"owner":         pc.ownerColumn() + "=" + pc.ownerID().String(),
 			"external_ref":  req.ExternalRef,
 			"amount_value":  amountValue,
 			"yk_payment_id": created.YKPaymentID,
@@ -540,7 +617,7 @@ func (h *Handler) CreateServiceCharge(c *gin.Context) {
 }
 
 // GetServiceCharge returns the status of one charge, scoped to the calling
-// key -- a charge belonging to another service answers 404, not 403, so a
+// credential -- a charge belonging to another service answers 404, not 403, so a
 // probing caller cannot even learn that the id exists. This is the MVP
 // delivery mechanism for a caller with no inbound HTTP endpoint of its own
 // (the VPN bot on a bare VPS): it polls this endpoint instead of receiving a
@@ -556,10 +633,11 @@ func (h *Handler) CreateServiceCharge(c *gin.Context) {
 // @Param       chargeId path     string true "Charge UUID"
 // @Success     200      {object} serviceChargeResponse
 // @Failure     401      {object} map[string]string
+// @Failure     403      {object} map[string]string
 // @Failure     404      {object} map[string]string
 // @Router      /pay/charges/{chargeId} [get]
 func (h *Handler) GetServiceCharge(c *gin.Context) {
-	keyID, _, ok := h.resolvePayCaller(c)
+	pc, ok := h.resolvePayCaller(c)
 	if !ok {
 		return
 	}
@@ -570,7 +648,7 @@ func (h *Handler) GetServiceCharge(c *gin.Context) {
 	}
 
 	ctx := c.Request.Context()
-	sc, err := h.loadServiceCharge(ctx, chargeID, keyID)
+	sc, err := h.loadServiceCharge(ctx, chargeID, pc)
 	if errors.Is(err, pgx.ErrNoRows) {
 		respondNotFound(c)
 		return
@@ -581,7 +659,7 @@ func (h *Handler) GetServiceCharge(c *gin.Context) {
 	}
 
 	if sc.Status == "pending" && sc.YKPaymentID != "" {
-		if reconciled, err := h.reconcileServiceCharge(ctx, chargeID, keyID); err != nil {
+		if reconciled, err := h.reconcileServiceCharge(ctx, chargeID, pc); err != nil {
 			log.Printf("pay: reconcile charge %s failed: %v", chargeID, err)
 		} else {
 			sc = reconciled
@@ -593,7 +671,7 @@ func (h *Handler) GetServiceCharge(c *gin.Context) {
 
 // ListServiceCharges lists the calling service's own charges, newest first.
 // Never spans services -- there is no query parameter that widens this past
-// the calling key's own rows.
+// the calling credential's own rows.
 //
 // @ID          listServiceCharges
 // @Summary     List an internal service's charges
@@ -604,9 +682,10 @@ func (h *Handler) GetServiceCharge(c *gin.Context) {
 // @Param       status query    string false "Filter by status (pending|succeeded|canceled)"
 // @Success     200    {object} map[string]interface{}
 // @Failure     401    {object} map[string]string
+// @Failure     403    {object} map[string]string
 // @Router      /pay/charges [get]
 func (h *Handler) ListServiceCharges(c *gin.Context) {
-	keyID, _, ok := h.resolvePayCaller(c)
+	pc, ok := h.resolvePayCaller(c)
 	if !ok {
 		return
 	}
@@ -627,13 +706,13 @@ func (h *Handler) ListServiceCharges(c *gin.Context) {
 	var err error
 	if status != "" {
 		rows, err = h.pool.Query(ctx,
-			`SELECT `+serviceChargeColumns+` FROM service_charges WHERE service_key_id = $1 AND status = $2 ORDER BY created_at DESC LIMIT $3`,
-			keyID, status, limit,
+			`SELECT `+serviceChargeColumns+` FROM service_charges WHERE `+pc.ownerColumn()+` = $1 AND status = $2 ORDER BY created_at DESC LIMIT $3`,
+			pc.ownerID(), status, limit,
 		)
 	} else {
 		rows, err = h.pool.Query(ctx,
-			`SELECT `+serviceChargeColumns+` FROM service_charges WHERE service_key_id = $1 ORDER BY created_at DESC LIMIT $2`,
-			keyID, limit,
+			`SELECT `+serviceChargeColumns+` FROM service_charges WHERE `+pc.ownerColumn()+` = $1 ORDER BY created_at DESC LIMIT $2`,
+			pc.ownerID(), limit,
 		)
 	}
 	if err != nil {

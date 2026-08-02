@@ -46,9 +46,18 @@ currently lives. A move re-points that row and re-mints nothing.
 
 ## Phase 3 — second audience, proving the generalisation
 
-- [ ] Payment gateway resolves `pay:charge` through the identity instead of
+- [x] Payment gateway resolves `pay:charge` through the identity instead of
       `pay_service_keys.service` free text; `service_charges` gains a real
-      owner.
+      owner (2026-08-03, migration 089). Both owner families stay valid --
+      dada-vpn-bot's live `sk-dada-pay-` key keeps working -- and a CHECK makes
+      the pair exclusive, so every charge has exactly one owner. 083's
+      idempotency contract needed its own partial unique index on the identity
+      half: `UNIQUE (service_key_id, external_ref)` is vacuous when
+      service_key_id is NULL, so without it every retry would have created a
+      second YooKassa payment.
+- [x] `POST .../apps/:appName/identity` accepts a `scopes` array, validated
+      against a grantable set. `pay:charge` stays out of the defaults: an app
+      that can spend money says so at mint time.
 - [ ] MoveImpact: per attached identity, list providers the source project has
       an `ai_provider_credentials` row for and the destination does not.
       Warning, not a blocker — the half no identity fixes.

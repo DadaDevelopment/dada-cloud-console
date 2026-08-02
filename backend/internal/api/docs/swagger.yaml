@@ -556,6 +556,13 @@ definitions:
       swagger_title:
         type: string
     type: object
+  internal_api.createIdentityRequest:
+    properties:
+      scopes:
+        items:
+          type: string
+        type: array
+    type: object
   internal_api.createIdentityResponse:
     properties:
       app_name:
@@ -2598,15 +2605,21 @@ paths:
             additionalProperties:
               type: string
             type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
       summary: List an internal service's charges
       tags:
       - pay-gateway
     post:
       consumes:
       - application/json
-      description: 'Phase 1 of the internal payment gateway: lets one of our own key-authenticated
-        services (not customer apps) create a YooKassa payment and poll its status.
-        Idempotent on external_ref.'
+      description: 'Internal payment gateway: lets one of our own credential-authenticated
+        services (a pay service key, or a ServiceIdentity holding pay:charge) create
+        a YooKassa payment and poll its status. Idempotent on external_ref.'
       operationId: createServiceCharge
       parameters:
       - description: Charge request
@@ -2630,6 +2643,12 @@ paths:
             type: object
         "401":
           description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "403":
+          description: Forbidden
           schema:
             additionalProperties:
               type: string
@@ -2670,6 +2689,12 @@ paths:
             $ref: '#/definitions/internal_api.serviceChargeResponse'
         "401":
           description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "403":
+          description: Forbidden
           schema:
             additionalProperties:
               type: string
@@ -7610,10 +7635,13 @@ paths:
       tags:
       - service-identity
     post:
+      consumes:
+      - application/json
       description: Mints a revocable token for the app's ServiceIdentity -- one credential
         accepted by every platform service, bounded by the identity's scopes. Rotating
-        replaces the token and keeps the identity. The plaintext token is returned
-        ONLY in this response.
+        replaces the token and keeps the identity. An optional scopes array sets what
+        the identity may do (ai:chat, ai:embeddings, pay:charge); omitting it keeps
+        the current scopes. The plaintext token is returned ONLY in this response.
       operationId: createAppServiceIdentity
       parameters:
       - description: Project UUID
@@ -7631,6 +7659,11 @@ paths:
         name: appName
         required: true
         type: string
+      - description: Requested scopes
+        in: body
+        name: body
+        schema:
+          $ref: '#/definitions/internal_api.createIdentityRequest'
       produces:
       - application/json
       responses:
@@ -7638,6 +7671,12 @@ paths:
           description: Created
           schema:
             $ref: '#/definitions/internal_api.createIdentityResponse'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
         "403":
           description: Forbidden
           schema:

@@ -5,6 +5,8 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -251,6 +253,47 @@ func (h *Handler) introspectIdentityAsAIKey(c *gin.Context, token string) {
 	c.JSON(http.StatusOK, resp)
 }
 
+// createIdentityRequest is the optional body of the mint/rotate route. An
+// empty body keeps identityDefaultScopes on a new identity and leaves an
+// existing identity's scopes alone, so rotation never silently widens or
+// narrows what a live token may do.
+type createIdentityRequest struct {
+	Scopes []string `json:"scopes"`
+}
+
+// identityGrantableScopes is every scope the mint route will hand out. An
+// unknown scope is rejected rather than stored: a typo that ends up in the
+// scopes column would fail closed at the audience, far from its cause, and a
+// scope no service checks is a permission nobody can revoke meaningfully.
+var identityGrantableScopes = map[string]bool{
+	"ai:chat":       true,
+	"ai:embeddings": true,
+	payScopeCharge:  true,
+}
+
+// normalizeIdentityScopes validates requested scopes and renders them in the
+// stored form: whitespace-separated, deduplicated, order preserved.
+func normalizeIdentityScopes(requested []string) (string, error) {
+	seen := map[string]bool{}
+	out := make([]string, 0, len(requested))
+	for _, raw := range requested {
+		for _, s := range strings.Fields(raw) {
+			if !identityGrantableScopes[s] {
+				return "", fmt.Errorf("unknown scope %q", s)
+			}
+			if seen[s] {
+				continue
+			}
+			seen[s] = true
+			out = append(out, s)
+		}
+	}
+	if len(out) == 0 {
+		return "", errors.New("scopes must not be empty")
+	}
+	return strings.Join(out, " "), nil
+}
+
 type createIdentityResponse struct {
 	IdentityID  uuid.UUID `json:"identity_id"`
 	AppName     string    `json:"app_name"`
@@ -275,14 +318,17 @@ type identityView struct {
 //
 // @ID          createAppServiceIdentity
 // @Summary     Declare or rotate an app's platform service identity
-// @Description Mints a revocable token for the app's ServiceIdentity -- one credential accepted by every platform service, bounded by the identity's scopes. Rotating replaces the token and keeps the identity. The plaintext token is returned ONLY in this response.
+// @Description Mints a revocable token for the app's ServiceIdentity -- one credential accepted by every platform service, bounded by the identity's scopes. Rotating replaces the token and keeps the identity. An optional scopes array sets what the identity may do (ai:chat, ai:embeddings, pay:charge); omitting it keeps the current scopes. The plaintext token is returned ONLY in this response.
 // @Tags        service-identity
+// @Accept      json
 // @Produce     json
 // @Security    BearerAuth
 // @Param       projectId path     string true "Project UUID"
 // @Param       envId     path     string true "Environment UUID"
 // @Param       appName   path     string true "App name"
+// @Param       body      body     createIdentityRequest false "Requested scopes"
 // @Success     201       {object} createIdentityResponse
+// @Failure     400       {object} map[string]string
 // @Failure     403       {object} map[string]string
 // @Failure     404       {object} map[string]string
 // @Router      /projects/{projectId}/environments/{envId}/apps/{appName}/identity [post]
@@ -303,6 +349,22 @@ func (h *Handler) CreateAppServiceIdentity(c *gin.Context) {
 		return
 	}
 	appName := c.Param("appName")
+
+	var req createIdentityRequest
+	if c.Request.Body != nil && c.Request.ContentLength > 0 {
+		if err := c.ShouldBindJSON(&req); err != nil {
+			respondError(c, http.StatusBadRequest, "invalid request body")
+			return
+		}
+	}
+	requestedScopes := ""
+	if len(req.Scopes) > 0 {
+		requestedScopes, err = normalizeIdentityScopes(req.Scopes)
+		if err != nil {
+			respondError(c, http.StatusBadRequest, err.Error())
+			return
+		}
+	}
 
 	role, err := h.effectiveRole(c.Request.Context(), claims, projectID)
 	if err == pgx.ErrNoRows {
@@ -356,6 +418,9 @@ func (h *Handler) CreateAppServiceIdentity(c *gin.Context) {
 	).Scan(&identityID, &scopes, &createdAt)
 	if err == pgx.ErrNoRows {
 		scopes = identityDefaultScopes
+		if requestedScopes != "" {
+			scopes = requestedScopes
+		}
 		if err := tx.QueryRow(ctx,
 			`INSERT INTO service_identities (app_name, project_id, environment_id, display_name, scopes, created_by)
 			 VALUES ($1, $2, $3, $4, $5, $6)
@@ -368,6 +433,15 @@ func (h *Handler) CreateAppServiceIdentity(c *gin.Context) {
 	} else if err != nil {
 		respondError(c, http.StatusInternalServerError, "load identity: "+err.Error())
 		return
+	} else if requestedScopes != "" && requestedScopes != scopes {
+		if _, err := tx.Exec(ctx,
+			`UPDATE service_identities SET scopes = $1 WHERE id = $2`,
+			requestedScopes, identityID,
+		); err != nil {
+			respondError(c, http.StatusInternalServerError, "update scopes: "+err.Error())
+			return
+		}
+		scopes = requestedScopes
 	}
 
 	if _, err := tx.Exec(ctx,

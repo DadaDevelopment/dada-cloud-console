@@ -163,7 +163,7 @@ func TestResolvePayCaller_MissingHeader_401(t *testing.T) {
 	h := &Handler{}
 	c, rec := newPayCtx(http.MethodGet, "/api/v1/pay/charges", "", nil, nil)
 
-	if _, _, ok := h.resolvePayCaller(c); ok {
+	if _, ok := h.resolvePayCaller(c); ok {
 		t.Fatal("resolvePayCaller returned ok=true with no auth header")
 	}
 	if rec.Code != http.StatusUnauthorized {
@@ -187,7 +187,7 @@ func TestResolvePayCaller_DBError_503(t *testing.T) {
 		"Authorization": "Bearer " + payKeyPrefix + "0000000000000000000000000000000000000000000000",
 	}, nil)
 
-	if _, _, ok := h.resolvePayCaller(c); ok {
+	if _, ok := h.resolvePayCaller(c); ok {
 		t.Fatal("resolvePayCaller returned ok=true against a closed pool")
 	}
 	if rec.Code != http.StatusServiceUnavailable {
@@ -493,5 +493,214 @@ func TestYooKassaWebhook_UnknownToBothPlansAndServiceCharges_Returns200(t *testi
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("code=%d body=%s want 200 even when the id is unknown to both tables (must never make YooKassa retry forever)", rec.Code, rec.Body.String())
+	}
+}
+
+// --- ServiceIdentity as the paying caller (ADR-021 phase 3) ---
+
+func seedPayIdentity(t *testing.T, pool *pgxpool.Pool, appName, scopes string) (identityID uuid.UUID, plaintext string) {
+	t.Helper()
+	pt, hash, prefix, err := generateIdentityToken()
+	if err != nil {
+		t.Fatalf("generateIdentityToken: %v", err)
+	}
+	err = pool.QueryRow(context.Background(),
+		`INSERT INTO service_identities (app_name, display_name, scopes) VALUES ($1, $1, $2) RETURNING id`,
+		appName, scopes,
+	).Scan(&identityID)
+	if err != nil {
+		t.Fatalf("seed service identity: %v", err)
+	}
+	if _, err := pool.Exec(context.Background(),
+		`INSERT INTO service_identity_tokens (identity_id, token_hash, token_prefix) VALUES ($1, $2, $3)`,
+		identityID, hash, prefix,
+	); err != nil {
+		t.Fatalf("seed identity token: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM service_charges WHERE identity_id = $1`, identityID)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM service_identities WHERE id = $1`, identityID)
+	})
+	return identityID, pt
+}
+
+// TestPayCaller_OwnerColumnIsDisjoint pins the invariant migration 089's CHECK
+// enforces on the row: a caller scopes its charges by exactly one column, and
+// the two families never share one. A payCaller that answered service_key_id
+// for an identity would hand that identity another service's charges.
+func TestPayCaller_OwnerColumnIsDisjoint(t *testing.T) {
+	keyID, identityID := uuid.New(), uuid.New()
+
+	key := payCaller{KeyID: &keyID, Service: "svc"}
+	if key.ownerColumn() != "service_key_id" || key.ownerID() != keyID {
+		t.Fatalf("key caller column=%q id=%v want service_key_id/%v", key.ownerColumn(), key.ownerID(), keyID)
+	}
+
+	ident := payCaller{IdentityID: &identityID, Service: "app"}
+	if ident.ownerColumn() != "identity_id" || ident.ownerID() != identityID {
+		t.Fatalf("identity caller column=%q id=%v want identity_id/%v", ident.ownerColumn(), ident.ownerID(), identityID)
+	}
+	if key.ownerColumn() == ident.ownerColumn() {
+		t.Fatal("the two credential families must not scope charges by the same column")
+	}
+}
+
+// TestNormalizeIdentityScopes covers the mint route's only new input. An
+// unknown scope must be rejected at mint time: stored, it would fail closed at
+// whichever audience checks it, far from the typo that caused it.
+func TestNormalizeIdentityScopes(t *testing.T) {
+	got, err := normalizeIdentityScopes([]string{"ai:chat", "pay:charge", "ai:chat"})
+	if err != nil {
+		t.Fatalf("normalizeIdentityScopes: %v", err)
+	}
+	if got != "ai:chat pay:charge" {
+		t.Fatalf("got=%q want %q (deduplicated, order preserved)", got, "ai:chat pay:charge")
+	}
+	if _, err := normalizeIdentityScopes([]string{"ai:chat  pay:charge"}); err != nil {
+		t.Fatalf("whitespace-separated scopes in one element must be accepted: %v", err)
+	}
+	if _, err := normalizeIdentityScopes([]string{"pay:chrage"}); err == nil {
+		t.Fatal("a misspelled scope must be rejected, not stored")
+	}
+	if _, err := normalizeIdentityScopes([]string{"  "}); err == nil {
+		t.Fatal("an empty scope set must be rejected")
+	}
+	if identityHasScope(identityDefaultScopes, payScopeCharge) {
+		t.Fatalf("identityDefaultScopes=%q must not grant %q: spending money is opt-in", identityDefaultScopes, payScopeCharge)
+	}
+}
+
+func TestResolvePayCaller_IdentityWithoutPayScope_403(t *testing.T) {
+	pool := testPaymentsPool(t)
+	_, plaintext := seedPayIdentity(t, pool, "noscope-"+uuid.NewString()[:8], identityDefaultScopes)
+
+	h := testPayHandler(pool, nil)
+	c, rec := newPayCtx(http.MethodGet, "/api/v1/pay/charges", "", map[string]string{"Authorization": "Bearer " + plaintext}, nil)
+
+	if _, ok := h.resolvePayCaller(c); ok {
+		t.Fatal("resolvePayCaller accepted an identity without pay:charge")
+	}
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("code=%d body=%s want 403: a genuine credential missing a scope is not a bad key", rec.Code, rec.Body.String())
+	}
+}
+
+func TestResolvePayCaller_RevokedIdentityToken_401(t *testing.T) {
+	pool := testPaymentsPool(t)
+	identityID, plaintext := seedPayIdentity(t, pool, "revoked-"+uuid.NewString()[:8], identityDefaultScopes+" "+payScopeCharge)
+	if _, err := pool.Exec(context.Background(),
+		`UPDATE service_identity_tokens SET revoked_at = now() WHERE identity_id = $1`, identityID,
+	); err != nil {
+		t.Fatalf("revoke token: %v", err)
+	}
+
+	h := testPayHandler(pool, nil)
+	c, rec := newPayCtx(http.MethodGet, "/api/v1/pay/charges", "", map[string]string{"Authorization": "Bearer " + plaintext}, nil)
+
+	if _, ok := h.resolvePayCaller(c); ok {
+		t.Fatal("resolvePayCaller accepted a revoked identity token")
+	}
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("code=%d body=%s want 401", rec.Code, rec.Body.String())
+	}
+}
+
+// TestCreateServiceCharge_Identity_IdempotentReplay is the phase-3 half of the
+// idempotency contract: 083's UNIQUE (service_key_id, external_ref) is vacuous
+// for an identity-owned charge (service_key_id is NULL there), so without 089's
+// partial index every retry would create a second YooKassa payment.
+func TestCreateServiceCharge_Identity_IdempotentReplay(t *testing.T) {
+	pool := testPaymentsPool(t)
+	identityID, plaintext := seedPayIdentity(t, pool, "payer-"+uuid.NewString()[:8], identityDefaultScopes+" "+payScopeCharge)
+	client, calls := newCountingYooKassaClient(t, "pending")
+	h := testPayHandler(pool, client)
+
+	ref := "id:" + uuid.NewString()[:8]
+	body := `{"external_ref":"` + ref + `","amount":499.00,"description":"identity charge"}`
+
+	c1, rec1 := newPayCtx(http.MethodPost, "/api/v1/pay/charges", body, map[string]string{"Authorization": "Bearer " + plaintext}, nil)
+	h.CreateServiceCharge(c1)
+	if rec1.Code != http.StatusOK {
+		t.Fatalf("1st create code=%d body=%s want 200", rec1.Code, rec1.Body.String())
+	}
+	var first serviceChargeResponse
+	if err := json.Unmarshal(rec1.Body.Bytes(), &first); err != nil {
+		t.Fatalf("decode 1st: %v", err)
+	}
+	if first.ConfirmationURL == "" {
+		t.Fatal("1st create returned no confirmation_url")
+	}
+
+	c2, rec2 := newPayCtx(http.MethodPost, "/api/v1/pay/charges", body, map[string]string{"Authorization": "Bearer " + plaintext}, nil)
+	h.CreateServiceCharge(c2)
+	if rec2.Code != http.StatusOK {
+		t.Fatalf("replay code=%d body=%s want 200", rec2.Code, rec2.Body.String())
+	}
+	var second serviceChargeResponse
+	if err := json.Unmarshal(rec2.Body.Bytes(), &second); err != nil {
+		t.Fatalf("decode replay: %v", err)
+	}
+	if second.ID != first.ID {
+		t.Fatalf("replay charge id=%s want the original %s", second.ID, first.ID)
+	}
+	if n := atomic.LoadInt32(calls); n != 1 {
+		t.Fatalf("yookassa calls=%d want 1: the replay must not create a second payment", n)
+	}
+
+	var ownerIdentity *uuid.UUID
+	var ownerKey *uuid.UUID
+	if err := pool.QueryRow(context.Background(),
+		`SELECT identity_id, service_key_id FROM service_charges WHERE id = $1`, first.ID,
+	).Scan(&ownerIdentity, &ownerKey); err != nil {
+		t.Fatalf("load charge owner: %v", err)
+	}
+	if ownerIdentity == nil || *ownerIdentity != identityID {
+		t.Fatalf("charge identity_id=%v want %v", ownerIdentity, identityID)
+	}
+	if ownerKey != nil {
+		t.Fatalf("charge service_key_id=%v want NULL: a charge has exactly one owner", *ownerKey)
+	}
+}
+
+// TestGetServiceCharge_IdentityAndKeyIsolation_404 pins that adding a second
+// credential family did not widen the isolation guard: an identity must not
+// read a key-owned charge, and a key must not read an identity-owned one.
+func TestGetServiceCharge_IdentityAndKeyIsolation_404(t *testing.T) {
+	pool := testPaymentsPool(t)
+	keyID, keyPlaintext := seedPayServiceKey(t, pool, "svc-iso-"+uuid.NewString()[:8])
+	identityID, idPlaintext := seedPayIdentity(t, pool, "iso-"+uuid.NewString()[:8], payScopeCharge)
+
+	keyCharge := seedServiceCharge(t, pool, keyID, "svc-iso", "ref-key-"+uuid.NewString()[:8], "pending", "")
+
+	var identityCharge uuid.UUID
+	if err := pool.QueryRow(context.Background(), `
+		INSERT INTO service_charges (identity_id, service, external_ref, amount_value, currency, description, status)
+		VALUES ($1, 'iso-app', $2, '500.00', 'RUB', 'identity charge', 'pending')
+		RETURNING id
+	`, identityID, "ref-id-"+uuid.NewString()[:8]).Scan(&identityCharge); err != nil {
+		t.Fatalf("seed identity charge: %v", err)
+	}
+
+	h := testPayHandler(pool, nil)
+
+	c1, rec1 := newPayCtx(http.MethodGet, "/api/v1/pay/charges/"+keyCharge.String(), "",
+		map[string]string{"Authorization": "Bearer " + idPlaintext}, gin.Params{{Key: "chargeId", Value: keyCharge.String()}})
+	h.GetServiceCharge(c1)
+	if rec1.Code != http.StatusNotFound {
+		t.Fatalf("identity reading a key-owned charge: code=%d body=%s want 404", rec1.Code, rec1.Body.String())
+	}
+
+	c2, rec2 := newPayCtx(http.MethodGet, "/api/v1/pay/charges/"+identityCharge.String(), "",
+		map[string]string{"Authorization": "Bearer " + keyPlaintext}, gin.Params{{Key: "chargeId", Value: identityCharge.String()}})
+	h.GetServiceCharge(c2)
+	if rec2.Code != http.StatusNotFound {
+		t.Fatalf("key reading an identity-owned charge: code=%d body=%s want 404", rec2.Code, rec2.Body.String())
+	}
+
+	c3, rec3 := newPayCtx(http.MethodGet, "/api/v1/pay/charges/"+identityCharge.String(), "",
+		map[string]string{"Authorization": "Bearer " + idPlaintext}, gin.Params{{Key: "chargeId", Value: identityCharge.String()}})
+	h.GetServiceCharge(c3)
+	if rec3.Code != http.StatusOK {
+		t.Fatalf("identity reading its own charge: code=%d body=%s want 200", rec3.Code, rec3.Body.String())
 	}
 }

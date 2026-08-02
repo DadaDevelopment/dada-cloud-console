@@ -2130,11 +2130,20 @@ const docTemplate = `{
                                 "type": "string"
                             }
                         }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
                     }
                 }
             },
             "post": {
-                "description": "Phase 1 of the internal payment gateway: lets one of our own key-authenticated services (not customer apps) create a YooKassa payment and poll its status. Idempotent on external_ref.",
+                "description": "Internal payment gateway: lets one of our own credential-authenticated services (a pay service key, or a ServiceIdentity holding pay:charge) create a YooKassa payment and poll its status. Idempotent on external_ref.",
                 "consumes": [
                     "application/json"
                 ],
@@ -2175,6 +2184,15 @@ const docTemplate = `{
                     },
                     "401": {
                         "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
                         "schema": {
                             "type": "object",
                             "additionalProperties": {
@@ -2232,6 +2250,15 @@ const docTemplate = `{
                     },
                     "401": {
                         "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
                         "schema": {
                             "type": "object",
                             "additionalProperties": {
@@ -9429,7 +9456,10 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Mints a revocable token for the app's ServiceIdentity -- one credential accepted by every platform service, bounded by the identity's scopes. Rotating replaces the token and keeps the identity. The plaintext token is returned ONLY in this response.",
+                "description": "Mints a revocable token for the app's ServiceIdentity -- one credential accepted by every platform service, bounded by the identity's scopes. Rotating replaces the token and keeps the identity. An optional scopes array sets what the identity may do (ai:chat, ai:embeddings, pay:charge); omitting it keeps the current scopes. The plaintext token is returned ONLY in this response.",
+                "consumes": [
+                    "application/json"
+                ],
                 "produces": [
                     "application/json"
                 ],
@@ -9459,6 +9489,14 @@ const docTemplate = `{
                         "name": "appName",
                         "in": "path",
                         "required": true
+                    },
+                    {
+                        "description": "Requested scopes",
+                        "name": "body",
+                        "in": "body",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.createIdentityRequest"
+                        }
                     }
                 ],
                 "responses": {
@@ -9466,6 +9504,15 @@ const docTemplate = `{
                         "description": "Created",
                         "schema": {
                             "$ref": "#/definitions/internal_api.createIdentityResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
                         }
                     },
                     "403": {
@@ -18080,6 +18127,17 @@ const docTemplate = `{
                 },
                 "swagger_title": {
                     "type": "string"
+                }
+            }
+        },
+        "internal_api.createIdentityRequest": {
+            "type": "object",
+            "properties": {
+                "scopes": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
                 }
             }
         },
