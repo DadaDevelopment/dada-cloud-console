@@ -26,8 +26,8 @@ func TestLookupSize(t *testing.T) {
 	if !ok {
 		t.Fatal("box-standard not found in the catalog")
 	}
-	if s.VCPU != 2 || s.MemoryMB != 4096 || s.DiskGB != 20 {
-		t.Errorf("box-standard = %d vCPU / %d MB / %d GB, want 2 / 4096 / 20 (the host arithmetic behind 6-8 boxes per host)", s.VCPU, s.MemoryMB, s.DiskGB)
+	if s.VCPU != 2 || s.MemoryMB != 4096 || s.DiskGB != 10 {
+		t.Errorf("box-standard = %d vCPU / %d MB / %d GB, want 2 / 4096 / 10 (host arithmetic for 6-8 boxes per host, Longhorn placement for the disk)", s.VCPU, s.MemoryMB, s.DiskGB)
 	}
 	if _, ok := LookupSize("box-enormous"); ok {
 		t.Error("LookupSize accepted an unknown name")

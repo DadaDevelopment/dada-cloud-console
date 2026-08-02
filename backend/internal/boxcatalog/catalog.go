@@ -72,13 +72,22 @@ var V1Images = []Image{
 
 // V1Sizes is the v1 size catalog. Frozen at deploy time.
 //
-// The standard box is 2 vCPU / 4GiB / 20GiB because that fits 6-8 boxes on the
-// 8 vCPU / 16GB / 200GB host flavour at ~3x CPU oversubscription and ZERO memory
+// The standard box is 2 vCPU / 4GiB because that fits 6-8 boxes on the 8 vCPU /
+// 16GB / 200GB host flavour at ~3x CPU oversubscription and ZERO memory
 // oversubscription. The numbers are host arithmetic, not a price list.
+//
+// The disk figures are half of what the first cut assumed, and the reason is that
+// on the cluster runtime DiskGB stopped being a quota and became a reservation: a
+// box workspace is a Longhorn volume, and Longhorn refuses to place one unless the
+// node keeps 15% of its disk free afterwards. At 20GiB a box the fleet ran out of
+// placements while every node still had a quarter of its disk unused, and the
+// symptom was the worst one there is - a new customer asks for a box and does not
+// get one. A workspace holds a checkout and a node_modules, not an image, so 10GiB
+// is a working size rather than a concession.
 var V1Sizes = []Size{
-	{Name: "box-standard", VCPU: 2, MemoryMB: 4096, DiskGB: 20, MaxTTLSeconds: 8 * 3600, Default: true},
-	{Name: "box-large", VCPU: 4, MemoryMB: 8192, DiskGB: 40, MaxTTLSeconds: 8 * 3600},
-	{Name: "box-xl", VCPU: 8, MemoryMB: 16384, DiskGB: 80, MaxTTLSeconds: 8 * 3600},
+	{Name: "box-standard", VCPU: 2, MemoryMB: 4096, DiskGB: 10, MaxTTLSeconds: 8 * 3600, Default: true},
+	{Name: "box-large", VCPU: 4, MemoryMB: 8192, DiskGB: 20, MaxTTLSeconds: 8 * 3600},
+	{Name: "box-xl", VCPU: 8, MemoryMB: 16384, DiskGB: 40, MaxTTLSeconds: 8 * 3600},
 }
 
 // LookupImage returns the Image by name. Second return is false if name is unknown.
