@@ -40,9 +40,10 @@ func TestAdvertisedToolCountMatchesTheKeepList(t *testing.T) {
 		if err != nil {
 			t.Fatalf("read %s: %v", path, err)
 		}
-		// "40 curated platform tools", "40 curated MCP tools", "40 tools" — the
-		// wording differs per file, the number must not.
-		matches := regexp.MustCompile(`(\d+)\s+(?:curated\s+)?(?:platform\s+|MCP\s+)?tools`).FindAllStringSubmatch(string(body), -1)
+		// "40 curated platform tools", "40 curated MCP tools", "40 tools",
+		// "40 отобранных инструментов" — the wording differs per file and per
+		// language, the number must not.
+		matches := advertisedCount.FindAllStringSubmatch(string(body), -1)
 		if len(matches) == 0 {
 			t.Errorf("%s advertises no tool count; it should say how many tools the plugin exposes", path)
 			continue
@@ -71,9 +72,16 @@ var advertisedCountFiles = []string{
 	"../../../frontend/content/docs/mcp-ai-agents.md",
 	"../../../frontend/content/docs/mcp-tool-reference.md",
 	"../../../frontend/content/docs/README.md",
+	"../../../frontend/content/docs/ru/mcp-ai-agents.md",
 	"../../../frontend/lib/i18n/dict.ts",
 	"../../../frontend/app/(marketing)/developer/page.tsx",
 }
+
+// The Russian translations advertise the same number in their own words, so the
+// pattern has to read both languages or a translated page becomes a place the
+// count can rot unguarded.
+var advertisedCount = regexp.MustCompile(
+	`(\d+)\s+(?:(?:curated\s+)?(?:platform\s+|MCP\s+)?tools|(?:отобранн\p{Cyrillic}+\s+)?инструмент\p{Cyrillic}*)`)
 
 // TestToolReferenceDocumentsEveryKeptTool checks the published tool reference
 // against the allowlist the server actually loads, in both directions.

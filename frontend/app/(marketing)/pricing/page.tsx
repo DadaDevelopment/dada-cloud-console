@@ -244,6 +244,10 @@ export default function PricingPage() {
       <FaqList title={t.pricing.faqTitle} items={t.pricing.faq} />
       <RelatedLinks
         links={[
+          {
+            label: locale === "en" ? "Guide: plans, limits and spend" : "Руководство: тарифы, лимиты и расход",
+            href: "/developer/billing-plans-and-limits",
+          },
           { label: t.databases.heroTitle, href: "/databases" },
           { label: t.storage.heroTitle, href: "/storage" },
           { label: t.servers.heroTitle, href: "/cloud-servers" },

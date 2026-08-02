@@ -6,15 +6,15 @@ import { useLang } from "@/lib/i18n/context";
 import { localeHref } from "@/lib/site";
 
 /**
- * Muted note shown only on the RU docs pages: the guides are English-only for
- * now, so RU readers get a heads-up. English pages render nothing.
+ * Muted note rendered by DocArticle on a RU page that has no translation yet and
+ * is therefore serving the English original. Translated pages render nothing.
  */
 export function DocLangNote() {
   const { locale } = useLang();
   if (locale !== "ru") return null;
   return (
     <p className="mb-6 rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-500">
-      Документация пока доступна только на английском.
+      Это руководство пока доступно только на английском.
     </p>
   );
 }

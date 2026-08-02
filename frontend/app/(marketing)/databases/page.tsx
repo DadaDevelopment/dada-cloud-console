@@ -58,6 +58,10 @@ export default function DatabasesPage() {
       <FaqList title={t.databases.faqTitle} items={t.databases.faq} />
       <RelatedLinks
         links={[
+          {
+            label: locale === "en" ? "Guide: managed PostgreSQL" : "Руководство: управляемый PostgreSQL",
+            href: "/developer/databases-postgres",
+          },
           { label: t.storage.heroTitle, href: "/storage" },
           { label: t.servers.heroTitle, href: "/cloud-servers" },
           { label: t.pricing.heroTitle, href: "/pricing" },

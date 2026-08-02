@@ -14,7 +14,7 @@ import { FaqJsonLd } from "@/components/marketing/faq-jsonld";
 import { HowToJsonLd } from "@/components/marketing/howto-jsonld";
 
 export default function StoragePage() {
-  const { t } = useLang();
+  const { t, locale } = useLang();
   return (
     <>
       <FaqJsonLd path="/storage" items={t.storage.faq} />
@@ -44,6 +44,10 @@ export default function StoragePage() {
       <FaqList title={t.storage.faqTitle} items={t.storage.faq} />
       <RelatedLinks
         links={[
+          {
+            label: locale === "en" ? "Guide: object storage (S3)" : "Руководство: объектное хранилище S3",
+            href: "/developer/object-storage",
+          },
           { label: t.databases.heroTitle, href: "/databases" },
           { label: t.servers.heroTitle, href: "/cloud-servers" },
           { label: t.pricing.heroTitle, href: "/pricing" },

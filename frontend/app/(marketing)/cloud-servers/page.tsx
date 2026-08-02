@@ -14,7 +14,7 @@ import { FaqJsonLd } from "@/components/marketing/faq-jsonld";
 import { HowToJsonLd } from "@/components/marketing/howto-jsonld";
 
 export default function CloudServersPage() {
-  const { t } = useLang();
+  const { t, locale } = useLang();
   return (
     <>
       <FaqJsonLd path="/cloud-servers" items={t.servers.faq} />
@@ -44,6 +44,10 @@ export default function CloudServersPage() {
       <FaqList title={t.servers.faqTitle} items={t.servers.faq} />
       <RelatedLinks
         links={[
+          {
+            label: locale === "en" ? "Guide: connect your own VM" : "Руководство: подключить свой сервер",
+            href: "/developer/app-servers-bring-your-own-vm",
+          },
           { label: t.databases.heroTitle, href: "/databases" },
           { label: t.storage.heroTitle, href: "/storage" },
           { label: t.pricing.heroTitle, href: "/pricing" },

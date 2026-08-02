@@ -21,8 +21,8 @@ const connectBlocks = (isEn: boolean) => [
 
 /**
  * `/mcp` and `/en/mcp`. A guessable, Russian-language entry point for the MCP
- * server: the guide at `/developer/mcp-ai-agents` is English-only and buried in
- * a list, so anyone told "DADA has an MCP" had nowhere to land.
+ * server: the guide at `/developer/mcp-ai-agents` is buried in a list, so anyone
+ * told "DADA has an MCP" had nowhere to land.
  */
 export function McpLanding() {
   const { t, locale } = useLang();
