@@ -283,7 +283,7 @@ func (c *ClusterCrystallizer) CrystallizeWithReport(ctx context.Context, inst *I
 	if err := c.ensureDeployment(ctx, opts.VMName, image, descs[0], workDir, marker); err != nil {
 		return fail("provision", err)
 	}
-	target, err := c.waitForCrystalPod(ctx, opts.VMName)
+	target, err := c.waitForCrystalPod(ctx, opts.VMName, marker)
 	if err != nil {
 		return fail("provision", err)
 	}
@@ -948,7 +948,17 @@ func (c *ClusterCrystallizer) ensureDeployment(ctx context.Context, vmName, imag
 	return nil
 }
 
-func (c *ClusterCrystallizer) waitForCrystalPod(ctx context.Context, vmName string) (string, error) {
+// waitForCrystalPod returns the pod THIS attempt created, never merely a pod that
+// carries the artifact's label.
+//
+// A second promotion of the same box updates the Deployment, and the Recreate
+// strategy then deletes the previous pod. A wait that accepted any labelled
+// running pod would hand back the doomed one: the seed and verify stages exec
+// into a pod that k8s is already tearing down, and the run dies with "pods ...
+// not found" — an error that names the symptom and hides the race entirely.
+// The per-attempt marker is already unique per run, so the pod's own command is
+// the identity check, and it needs no ReplicaSet bookkeeping to be exact.
+func (c *ClusterCrystallizer) waitForCrystalPod(ctx context.Context, vmName, marker string) (string, error) {
 	deadline := c.now().Add(c.readyTimeout())
 	for {
 		pods, err := c.clientset.CoreV1().Pods(c.Namespace).List(ctx, metav1.ListOptions{
@@ -958,6 +968,9 @@ func (c *ClusterCrystallizer) waitForCrystalPod(ctx context.Context, vmName stri
 			return "", fmt.Errorf("crystallize: list permanent pods: %w", err)
 		}
 		for _, p := range pods.Items {
+			if !podRunsAttempt(p, marker) {
+				continue
+			}
 			if p.Status.Phase == corev1.PodRunning && p.DeletionTimestamp == nil && crystalContainerRunning(p) {
 				return p.Name, nil
 			}
@@ -971,6 +984,22 @@ func (c *ClusterCrystallizer) waitForCrystalPod(ctx context.Context, vmName stri
 		case <-time.After(crystalReadyPoll):
 		}
 	}
+}
+
+// podRunsAttempt reports whether a pod was created from the template this attempt
+// wrote, judged by the per-attempt seed marker baked into its command.
+func podRunsAttempt(p corev1.Pod, marker string) bool {
+	for _, ct := range p.Spec.Containers {
+		if ct.Name != crystalContainer {
+			continue
+		}
+		for _, arg := range ct.Command {
+			if strings.Contains(arg, marker) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // crystalContainerRunning reports whether the container the seed stage will exec

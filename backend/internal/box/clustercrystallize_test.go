@@ -127,7 +127,11 @@ func crystalClientset() *fake.Clientset {
 				Namespace: dep.Namespace,
 				Labels:    dep.Spec.Template.Labels,
 			},
-			Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: crystalContainer, Image: dep.Spec.Template.Spec.Containers[0].Image}}},
+			Spec: corev1.PodSpec{Containers: []corev1.Container{{
+				Name:    crystalContainer,
+				Image:   dep.Spec.Template.Spec.Containers[0].Image,
+				Command: dep.Spec.Template.Spec.Containers[0].Command,
+			}}},
 			Status: corev1.PodStatus{
 				Phase: corev1.PodRunning,
 				ContainerStatuses: []corev1.ContainerStatus{{
@@ -271,6 +275,31 @@ func TestCrystalCommandWaitsForTheSeedMarker(t *testing.T) {
 	}
 	if !strings.Contains(cmd, "exec /bin/sh -c 'node app.js'") {
 		t.Fatalf("the declared command must be what the artifact runs, got:\n%s", cmd)
+	}
+}
+
+// TestWaitForCrystalPodIgnoresThePreviousAttemptsPod pins the race that made a
+// second promotion fail with "pods ... not found": the previous attempt's pod is
+// still Running and still carries the artifact's label while Recreate deletes it,
+// and every exec this run makes would land in a container being torn down.
+func TestWaitForCrystalPodIgnoresThePreviousAttemptsPod(t *testing.T) {
+	stale := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: "crystal-web-old", Namespace: "dada-boxes", Labels: map[string]string{labelCrystal: "web"}},
+		Spec: corev1.PodSpec{Containers: []corev1.Container{{
+			Name:    crystalContainer,
+			Command: []string{"/bin/sh", "-c", crystalCommand(ServiceDescriptor{Command: "node app.js"}, "/workspace", crystalSeeded+"-1")},
+		}}},
+		Status: corev1.PodStatus{
+			Phase:             corev1.PodRunning,
+			ContainerStatuses: []corev1.ContainerStatus{{Name: crystalContainer, State: corev1.ContainerState{Running: &corev1.ContainerStateRunning{}}}},
+		},
+	}
+	c := newTestCrystallizer(t, fake.NewSimpleClientset(stale), &fakeShell{})
+	if _, err := c.waitForCrystalPod(context.Background(), "web", crystalSeeded+"-2"); err == nil {
+		t.Fatal("a pod from the previous attempt must not be accepted: this run's exec would land in a pod k8s is deleting")
+	}
+	if name, err := c.waitForCrystalPod(context.Background(), "web", crystalSeeded+"-1"); err != nil || name != "crystal-web-old" {
+		t.Fatalf("the pod of THIS attempt must be returned, got %q err %v", name, err)
 	}
 }
 
