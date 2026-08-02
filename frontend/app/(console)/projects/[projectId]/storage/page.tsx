@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState, FormEvent } from "react";
+import { useEffect, useRef, useState, FormEvent } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import { s3bucketsApi } from "@/lib/api";
@@ -17,6 +17,7 @@ import { PhaseBadge } from "@/components/ui/phase-badge";
 import { ResourceZeroState } from "@/components/ui/resource-zero-state";
 import { HardDrive } from "lucide-react";
 import { useT } from "@/lib/i18n/console/context";
+import { trackUxEvent } from "@/lib/ux-telemetry";
 
 interface CreateBucketForm {
   name: string;
@@ -54,6 +55,7 @@ export default function StoragePage() {
   const [form, setForm] = useState<CreateBucketForm>(DEFAULT_FORM);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  const trackedProvisionErrorsRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     /* eslint-disable react-hooks/set-state-in-effect */
@@ -83,6 +85,16 @@ export default function StoragePage() {
     }, 4000);
     return () => clearTimeout(id);
   }, [buckets, projectId, selectedEnvId]);
+
+  useEffect(() => {
+    for (const b of buckets) {
+      const summary = b.summary_json as Record<string, unknown>;
+      if (summary.provision_error && !trackedProvisionErrorsRef.current.has(b.id)) {
+        trackedProvisionErrorsRef.current.add(b.id);
+        trackUxEvent("view", "s3_provision_error");
+      }
+    }
+  }, [buckets]);
 
   function handleFormChange(field: keyof CreateBucketForm, value: string | boolean) {
     setForm((prev) => ({ ...prev, [field]: value }));
@@ -185,6 +197,7 @@ export default function StoragePage() {
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {buckets.map((b) => {
             const summary = b.summary_json as Record<string, unknown>;
+            const provisionError = typeof summary.provision_error === "string" ? summary.provision_error : "";
             return (
               <Link
                 key={b.id}
@@ -212,6 +225,22 @@ export default function StoragePage() {
                       : t("storage.badge.envLevel")}
                   </span>
                 </div>
+                {provisionError && (
+                  <div
+                    data-ux="s3_provision_error"
+                    className="mt-3 rounded-lg border border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-950/40 px-3 py-2"
+                  >
+                    <p className="text-xs font-semibold text-red-700 dark:text-red-300">
+                      {t("storage.list.provisionError.title")}
+                    </p>
+                    <p className="mt-1 break-words font-mono text-xs text-red-700 dark:text-red-300">
+                      {provisionError}
+                    </p>
+                    <p className="mt-1.5 text-xs text-red-600/90 dark:text-red-400/90">
+                      {t("storage.list.provisionError.hint")}
+                    </p>
+                  </div>
+                )}
                 <p className="mt-2 text-xs text-gray-400 dark:text-gray-500">
                   {t("common.status.synced", { ago: timeAgo(b.last_synced_at) })}
                 </p>

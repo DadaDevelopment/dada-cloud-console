@@ -21,7 +21,7 @@ interface BucketSummary {
   app_ref?: string;
 }
 
-type CredsErrorKind = "notReady" | "notConfigured" | "generic";
+type CredsErrorKind = "notReady" | "notConfigured" | "failed" | "generic";
 
 /**
  * Object-storage bucket detail. Bucket metadata comes from `summary_json`; S3
@@ -54,10 +54,16 @@ export default function BucketDetailPage() {
       const r = await s3bucketsApi.credentials(projectId, envId, name);
       setCreds(r);
     } catch (e) {
-      const status = (e as { status?: number } | undefined)?.status;
-      if (status === 404) setCredsError({ kind: "notReady" });
-      else if (status === 503) setCredsError({ kind: "notConfigured" });
-      else setCredsError({ kind: "generic", message: e instanceof Error ? e.message : t("storage.detail.access.error") });
+      const err = e as { status?: number; code?: string } | undefined;
+      if (err?.status === 409 || err?.code === "provisioning_failed") {
+        setCredsError({ kind: "failed", message: e instanceof Error ? e.message : t("storage.detail.access.error") });
+      } else if (err?.status === 404) {
+        setCredsError({ kind: "notReady" });
+      } else if (err?.status === 503) {
+        setCredsError({ kind: "notConfigured" });
+      } else {
+        setCredsError({ kind: "generic", message: e instanceof Error ? e.message : t("storage.detail.access.error") });
+      }
     } finally {
       setCredsLoading(false);
     }
@@ -185,7 +191,23 @@ aws --endpoint-url ${endpointPlaceholder} s3 cp s3://${bucketName}/file.txt ./`;
               >
                 {credsLoading ? <><Spinner size="sm" /> {t("storage.detail.access.revealing")}</> : t("storage.detail.access.revealBtn")}
               </button>
-              {credsError && (
+              {credsError && credsError.kind === "failed" && (
+                <div
+                  data-ux="s3_provision_error"
+                  className="mt-3 rounded-lg border border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-950/40 px-3 py-2"
+                >
+                  <p className="text-sm font-semibold text-red-700 dark:text-red-300">
+                    {t("storage.detail.access.failedTitle")}
+                  </p>
+                  <p className="mt-1 break-words font-mono text-xs text-red-700 dark:text-red-300">
+                    {credsError.message}
+                  </p>
+                  <p className="mt-1.5 text-xs text-red-600/90 dark:text-red-400/90">
+                    {t("storage.detail.access.failedHint")}
+                  </p>
+                </div>
+              )}
+              {credsError && credsError.kind !== "failed" && (
                 <p className={`mt-3 text-sm ${credsError.kind === "generic" ? "text-red-600 dark:text-red-400" : "text-gray-500 dark:text-gray-400"}`}>
                   {credsError.kind === "notReady"
                     ? t("storage.detail.access.notReady")

@@ -21,6 +21,12 @@ export const storage: Messages = {
   "storage.badge.appRef": { ru: "приложение: {name}", en: "app: {name}" },
   "storage.badge.envLevel": { ru: "уровень окружения", en: "environment-level" },
 
+  "storage.list.provisionError.title": { ru: "Провижининг не удался", en: "Provisioning failed" },
+  "storage.list.provisionError.hint": {
+    ru: "Чаще всего дело в описании: провайдер принимает не больше 45 символов и не всю пунктуацию. Описание уже созданного бакета изменить нельзя — создайте бакет заново с коротким описанием без знаков препинания.",
+    en: "Usually the description: the provider accepts at most 45 characters and rejects some punctuation. An existing bucket's description cannot be edited — create the bucket again with a short, punctuation-free description.",
+  },
+
   "storage.modal.title": { ru: "Создать S3-бакет", en: "Create S3 Bucket" },
   "storage.modal.resourceName": { ru: "Имя ресурса", en: "Resource Name" },
   "storage.modal.resourceNameSub": { ru: "(строчные буквы, цифры и дефисы)", en: "(lowercase letters, digits and hyphens)" },
@@ -94,6 +100,11 @@ export const storage: Messages = {
     en: "Credential access isn't configured for this environment.",
   },
   "storage.detail.access.error": { ru: "Не удалось показать учётные данные", en: "Failed to reveal credentials" },
+  "storage.detail.access.failedTitle": { ru: "Провижининг бакета не удался", en: "Bucket provisioning failed" },
+  "storage.detail.access.failedHint": {
+    ru: "Чаще всего дело в описании: провайдер принимает не больше 45 символов и не всю пунктуацию. Описание уже созданного бакета изменить нельзя — создайте бакет заново с коротким описанием без знаков препинания.",
+    en: "Usually the description: the provider accepts at most 45 characters and rejects some punctuation. An existing bucket's description cannot be edited — create the bucket again with a short, punctuation-free description.",
+  },
 
   "storage.detail.cli.title": { ru: "Пример aws-cli", en: "aws-cli example" },
   "storage.detail.cli.hint": {
