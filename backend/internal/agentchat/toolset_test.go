@@ -53,6 +53,36 @@ func TestIsWrite_AllWriteKeepToolsRegisteredAndClassified(t *testing.T) {
 	}
 }
 
+func TestKeepTools_AllRegisteredAndClassifiedAsRead(t *testing.T) {
+	ts := loadTestToolset(t)
+	for _, name := range keepTools {
+		if denyTools[name] {
+			continue
+		}
+		registered := name
+		if name == "submitFeedback" {
+			registered = SupportTicketTool
+		}
+		if !ts.Has(registered) {
+			t.Errorf("read tool %q is not registered: it must match an operationId in the embedded swagger spec, otherwise the assistant silently loses the capability", registered)
+			continue
+		}
+		if ts.IsWrite(registered) {
+			t.Errorf("read tool %q was classified as a write tool", registered)
+		}
+	}
+}
+
+func TestKeepTools_SourceArchiveDownloadReachableFromChat(t *testing.T) {
+	ts := loadTestToolset(t)
+	if !ts.Has("downloadSourceArchive") {
+		t.Fatal("downloadSourceArchive must be reachable from chat: without it the assistant tells upload-deploy users that recovering their own source is impossible and files a support ticket instead")
+	}
+	if ts.IsWrite("downloadSourceArchive") {
+		t.Fatal("downloadSourceArchive mutates nothing and must not require a write confirmation card")
+	}
+}
+
 func TestSecretDenyList_WinsOverReadAndWrite(t *testing.T) {
 	ts := loadTestToolset(t)
 	for name := range denyTools {

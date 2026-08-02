@@ -18,6 +18,7 @@ var keepTools = []string{
 	"listEnvVars", "listHostnames", "listEndpoints", "listDatabases",
 	"listOperations", "getOperation",
 	"searchLogs", "getProjectCost", "getCurrentUser",
+	"downloadSourceArchive",
 	"submitFeedback",
 	"deleteAppImpact", "deleteProjectImpact", "moveAppImpact",
 }
