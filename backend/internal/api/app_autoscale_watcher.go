@@ -174,11 +174,18 @@ var memIdleQuery = fmt.Sprintf(
 // resourceEnvelope is one app's CPU/memory request and limit, in Kubernetes
 // quantity notation. Mirrors renderer.AppResources in the gitops-agent module,
 // which cannot be imported from here.
+//
+// EphemeralLimit and EphemeralReq are carried, never sized: the autoscaler has
+// no signal for disk pressure, but a render that omits an ephemeral-storage
+// limit an app was given by hand deletes it, and the container is then evicted
+// the first time it writes past the node default.
 type resourceEnvelope struct {
-	CPULimit    string
-	MemoryLimit string
-	CPUReq      string
-	MemoryReq   string
+	CPULimit       string
+	MemoryLimit    string
+	CPUReq         string
+	MemoryReq      string
+	EphemeralLimit string
+	EphemeralReq   string
 }
 
 // autoscaleProfileRequirements resolves the legacy small/medium/large names to
@@ -640,6 +647,74 @@ func (w *appAutoscaleWatcher) namespaceQuota(ctx context.Context, namespace stri
 	return &quotas.Items[0], nil
 }
 
+// adoptEnvelope reads an app's CURRENT sizing off the running pod, for apps
+// whose snapshot carries neither an explicit envelope nor a known profile.
+//
+// Those apps predate console-side sizing: their numbers live only in a
+// hand-maintained values.yaml. The watcher used to refuse them outright, which
+// left every one of them permanently unmanaged -- on this cluster that was five
+// of the seven apps the autoscaler had ever looked at, every one of them
+// refused with "unsized_app" while starving.
+//
+// Refusing was right for the first version, which guessed a PROFILE and pushed
+// a live app from a deliberate 100m/384Mi spec down onto a preset. Reading the
+// live spec is the opposite of a guess: it is the number the app is running on
+// right now, so adopting it and then growing the starved dimension can only
+// move that dimension up.
+//
+// Adoption is also a repair. The renderer falls back to the SMALL preset for an
+// app with no envelope, so the next deploy of one of these apps -- by anyone,
+// for any reason -- silently downsizes it. Writing the live numbers into the
+// snapshot is what stops that.
+func (w *appAutoscaleWatcher) adoptEnvelope(ctx context.Context, namespace, pod string) (resourceEnvelope, bool) {
+	getCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	p, err := w.clientset.CoreV1().Pods(namespace).Get(getCtx, pod, metav1.GetOptions{})
+	if err != nil {
+		log.Printf("app-autoscale: reading live sizing of %s/%s failed: %v", namespace, pod, err)
+		return resourceEnvelope{}, false
+	}
+	return envelopeFromPodSpec(p.Spec.Containers)
+}
+
+// envelopeFromPodSpec derives an envelope from a pod's containers. Pure, so it
+// is unit-tested.
+//
+// Exactly one container, with all four of cpu/memory request and limit set.
+// A pod with a sidecar is refused rather than summed: the snapshot renders a
+// single container's resources, so summing would hand the app the sidecar's
+// share as well and doubling would compound it. A container missing a limit is
+// refused because there is no current value to grow from.
+func envelopeFromPodSpec(containers []corev1.Container) (resourceEnvelope, bool) {
+	if len(containers) != 1 {
+		return resourceEnvelope{}, false
+	}
+	res := containers[0].Resources
+	cpuLimit, okCPULimit := res.Limits[corev1.ResourceCPU]
+	memLimit, okMemLimit := res.Limits[corev1.ResourceMemory]
+	cpuReq, okCPUReq := res.Requests[corev1.ResourceCPU]
+	memReq, okMemReq := res.Requests[corev1.ResourceMemory]
+	if !okCPULimit || !okMemLimit || !okCPUReq || !okMemReq {
+		return resourceEnvelope{}, false
+	}
+	if cpuLimit.IsZero() || memLimit.IsZero() {
+		return resourceEnvelope{}, false
+	}
+	e := resourceEnvelope{
+		CPULimit:    cpuLimit.String(),
+		MemoryLimit: memLimit.String(),
+		CPUReq:      cpuReq.String(),
+		MemoryReq:   memReq.String(),
+	}
+	if q, ok := res.Limits[corev1.ResourceEphemeralStorage]; ok {
+		e.EphemeralLimit = q.String()
+	}
+	if q, ok := res.Requests[corev1.ResourceEphemeralStorage]; ok {
+		e.EphemeralReq = q.String()
+	}
+	return e, true
+}
+
 // tick runs one pass: query both pressure dimensions, restrict to user
 // namespaces, resolve pods to apps, and resize whatever is starved and out of
 // cooldown. Every failure is logged and swallowed — one bad namespace must
@@ -804,7 +879,10 @@ func (w *appAutoscaleWatcher) maybeShrink(ctx context.Context, projectID uuid.UU
 
 	from, known := st.Envelope()
 	if !known {
-		return
+		from, known = w.adoptEnvelope(ctx, namespace, p.Pod)
+		if !known {
+			return
+		}
 	}
 
 	since, err := lastAutoscaleResize(ctx, w.h.pool, namespace, appName)
@@ -950,6 +1028,7 @@ func (h *Handler) loadAppProfileState(ctx context.Context, projectID uuid.UUID, 
 		st.Resources = &resourceEnvelope{
 			CPULimit: r.CPULimit, MemoryLimit: r.MemoryLimit,
 			CPUReq: r.CPURequest, MemoryReq: r.MemoryRequest,
+			EphemeralLimit: r.EphemeralLimit, EphemeralReq: r.EphemeralRequest,
 		}
 	}
 	return st, nil
@@ -961,18 +1040,22 @@ func (h *Handler) loadAppProfileState(ctx context.Context, projectID uuid.UUID, 
 // type, and a silent drift here means the renderer falls back to the profile
 // ceiling on an app the console had already grown past it.
 type snapshotResources struct {
-	CPURequest    string `json:"cpu_request"`
-	MemoryRequest string `json:"memory_request"`
-	CPULimit      string `json:"cpu_limit"`
-	MemoryLimit   string `json:"memory_limit"`
+	CPURequest       string `json:"cpu_request"`
+	MemoryRequest    string `json:"memory_request"`
+	CPULimit         string `json:"cpu_limit"`
+	MemoryLimit      string `json:"memory_limit"`
+	EphemeralRequest string `json:"ephemeral_request,omitempty"`
+	EphemeralLimit   string `json:"ephemeral_limit,omitempty"`
 }
 
 func (e resourceEnvelope) snapshot() snapshotResources {
 	return snapshotResources{
-		CPURequest:    e.CPUReq,
-		MemoryRequest: e.MemoryReq,
-		CPULimit:      e.CPULimit,
-		MemoryLimit:   e.MemoryLimit,
+		CPURequest:       e.CPUReq,
+		MemoryRequest:    e.MemoryReq,
+		CPULimit:         e.CPULimit,
+		MemoryLimit:      e.MemoryLimit,
+		EphemeralRequest: e.EphemeralReq,
+		EphemeralLimit:   e.EphemeralLimit,
 	}
 }
 
@@ -1069,9 +1152,13 @@ func (w *appAutoscaleWatcher) maybeResize(ctx context.Context, projectID uuid.UU
 
 	from, known := st.Envelope()
 	if !known {
-		log.Printf("app-autoscale: %s/%s carries neither an explicit envelope nor a known profile (%q), leaving its resources alone", namespace, appName, st.Profile)
-		w.auditRefusal(ctx, projectID, st, namespace, appName, "unsized_app", s, nil)
-		return
+		from, known = w.adoptEnvelope(ctx, namespace, s.Pod)
+		if !known {
+			log.Printf("app-autoscale: %s/%s carries neither an explicit envelope nor a known profile (%q), and its live pod has no readable sizing either", namespace, appName, st.Profile)
+			w.auditRefusal(ctx, projectID, st, namespace, appName, "unsized_app", s, nil)
+			return
+		}
+		log.Printf("app-autoscale: %s/%s had no envelope in its snapshot, adopting its live sizing (%s)", namespace, appName, from)
 	}
 
 	to, room, err := growEnvelope(from, s.Reason)

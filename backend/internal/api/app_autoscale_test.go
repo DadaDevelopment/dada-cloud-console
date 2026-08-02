@@ -399,8 +399,8 @@ func TestSnapshotResourceTagsMatchRenderer(t *testing.T) {
 	for _, m := range rendererAppResourcesRe.FindAllStringSubmatch(body[:end], -1) {
 		want = append(want, m[1])
 	}
-	if len(want) != 4 {
-		t.Fatalf("expected 4 json tags on renderer.AppResources, found %v", want)
+	if len(want) != 6 {
+		t.Fatalf("expected 6 json tags on renderer.AppResources, found %v", want)
 	}
 
 	typ := reflect.TypeOf(snapshotResources{})
@@ -597,5 +597,99 @@ func TestIdlePodDetailReadsAsEvidence(t *testing.T) {
 
 	if got, want := p.Detail(), "cpu peak 8% of limit, memory peak 12% of limit"; got != want {
 		t.Fatalf("Detail() = %q, want %q", got, want)
+	}
+}
+
+func container(name string, limits, requests map[corev1.ResourceName]string) corev1.Container {
+	c := corev1.Container{Name: name}
+	if limits != nil {
+		c.Resources.Limits = corev1.ResourceList{}
+		for k, v := range limits {
+			c.Resources.Limits[k] = resource.MustParse(v)
+		}
+	}
+	if requests != nil {
+		c.Resources.Requests = corev1.ResourceList{}
+		for k, v := range requests {
+			c.Resources.Requests[k] = resource.MustParse(v)
+		}
+	}
+	return c
+}
+
+func TestEnvelopeFromPodSpecAdoptsTheLiveSizing(t *testing.T) {
+	got, ok := envelopeFromPodSpec([]corev1.Container{container("gateway-container",
+		map[corev1.ResourceName]string{"cpu": "500m", "memory": "384Mi", "ephemeral-storage": "200Mi"},
+		map[corev1.ResourceName]string{"cpu": "75m", "memory": "256Mi", "ephemeral-storage": "50Mi"})})
+	if !ok {
+		t.Fatal("a single fully specified container is exactly what adoption is for")
+	}
+	want := resourceEnvelope{
+		CPULimit: "500m", MemoryLimit: "384Mi", CPUReq: "75m", MemoryReq: "256Mi",
+		EphemeralLimit: "200Mi", EphemeralReq: "50Mi",
+	}
+	if got != want {
+		t.Fatalf("adopted %+v, want %+v", got, want)
+	}
+}
+
+func TestEnvelopeFromPodSpecCarriesNoEphemeralWhenTheAppHasNone(t *testing.T) {
+	got, ok := envelopeFromPodSpec([]corev1.Container{container("app-container",
+		map[corev1.ResourceName]string{"cpu": "250m", "memory": "256Mi"},
+		map[corev1.ResourceName]string{"cpu": "10m", "memory": "128Mi"})})
+	if !ok {
+		t.Fatal("ephemeral storage is optional, not required")
+	}
+	if got.EphemeralLimit != "" || got.EphemeralReq != "" {
+		t.Fatalf("invented an ephemeral envelope out of nothing: %+v", got)
+	}
+}
+
+func TestEnvelopeFromPodSpecRefusesASidecarPod(t *testing.T) {
+	sized := map[corev1.ResourceName]string{"cpu": "250m", "memory": "256Mi"}
+	if _, ok := envelopeFromPodSpec([]corev1.Container{
+		container("app-container", sized, sized),
+		container("sidecar", sized, sized),
+	}); ok {
+		t.Fatal("a two-container pod cannot be attributed to the single container the snapshot renders")
+	}
+}
+
+func TestEnvelopeFromPodSpecRefusesAContainerWithoutLimits(t *testing.T) {
+	if _, ok := envelopeFromPodSpec([]corev1.Container{container("app-container",
+		map[corev1.ResourceName]string{"cpu": "250m"},
+		map[corev1.ResourceName]string{"cpu": "10m", "memory": "128Mi"})}); ok {
+		t.Fatal("a missing memory limit leaves nothing to grow from")
+	}
+	if _, ok := envelopeFromPodSpec(nil); ok {
+		t.Fatal("no containers is not an envelope")
+	}
+}
+
+func TestGrowKeepsTheEphemeralEnvelopeUntouched(t *testing.T) {
+	from := resourceEnvelope{
+		CPULimit: "500m", MemoryLimit: "384Mi", CPUReq: "75m", MemoryReq: "256Mi",
+		EphemeralLimit: "1Gi", EphemeralReq: "200Mi",
+	}
+	to, room, err := growEnvelope(from, "memory")
+	if err != nil || !room {
+		t.Fatalf("growEnvelope(%+v) = room %v, err %v", from, room, err)
+	}
+	if to.EphemeralLimit != "1Gi" || to.EphemeralReq != "200Mi" {
+		t.Fatalf("growing memory rewrote the ephemeral envelope: %+v", to)
+	}
+	if to.MemoryLimit != "768Mi" {
+		t.Fatalf("memory limit = %q, want 768Mi", to.MemoryLimit)
+	}
+}
+
+func TestSnapshotRoundTripsTheEphemeralEnvelope(t *testing.T) {
+	e := resourceEnvelope{
+		CPULimit: "500m", MemoryLimit: "384Mi", CPUReq: "75m", MemoryReq: "256Mi",
+		EphemeralLimit: "1Gi", EphemeralReq: "200Mi",
+	}
+	s := e.snapshot()
+	if s.EphemeralLimit != "1Gi" || s.EphemeralRequest != "200Mi" {
+		t.Fatalf("snapshot dropped the ephemeral envelope: %+v", s)
 	}
 }

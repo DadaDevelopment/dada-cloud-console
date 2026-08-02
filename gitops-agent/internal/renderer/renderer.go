@@ -374,11 +374,17 @@ type appValuesFile struct {
 // existed.
 // The json tags are the on-disk contract: this is exactly how the console
 // writes the envelope into resource_snapshots.summary_json["resources"].
+// EphemeralRequest and EphemeralLimit are optional and are carried through
+// verbatim rather than being sized by anything. They exist because a render
+// that omits them deletes an ephemeral-storage limit an app was given by hand,
+// and a container that then writes past the node default is evicted.
 type AppResources struct {
-	CPURequest    string `json:"cpu_request"`
-	MemoryRequest string `json:"memory_request"`
-	CPULimit      string `json:"cpu_limit"`
-	MemoryLimit   string `json:"memory_limit"`
+	CPURequest       string `json:"cpu_request"`
+	MemoryRequest    string `json:"memory_request"`
+	CPULimit         string `json:"cpu_limit"`
+	MemoryLimit      string `json:"memory_limit"`
+	EphemeralRequest string `json:"ephemeral_request,omitempty"`
+	EphemeralLimit   string `json:"ephemeral_limit,omitempty"`
 }
 
 // Complete reports whether every field is set. A partially filled envelope is
@@ -395,13 +401,22 @@ func (r *AppResources) Complete() bool {
 // resolveResources prefers an explicit envelope and falls back to the profile
 // ladder for apps that have never been sized.
 func resolveResources(r *AppResources, profile string) commonResources {
-	if !r.Complete() {
-		return profileResources(profile)
+	out := profileResources(profile)
+	if r.Complete() {
+		out = commonResources{
+			Requests: map[string]string{"cpu": r.CPURequest, "memory": r.MemoryRequest},
+			Limits:   map[string]string{"cpu": r.CPULimit, "memory": r.MemoryLimit},
+		}
 	}
-	return commonResources{
-		Requests: map[string]string{"cpu": r.CPURequest, "memory": r.MemoryRequest},
-		Limits:   map[string]string{"cpu": r.CPULimit, "memory": r.MemoryLimit},
+	if r != nil {
+		if r.EphemeralRequest != "" {
+			out.Requests["ephemeral-storage"] = r.EphemeralRequest
+		}
+		if r.EphemeralLimit != "" {
+			out.Limits["ephemeral-storage"] = r.EphemeralLimit
+		}
 	}
+	return out
 }
 
 func profileResources(profile string) commonResources {
