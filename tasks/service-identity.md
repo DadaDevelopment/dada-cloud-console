@@ -58,6 +58,18 @@ currently lives. A move re-points that row and re-mints nothing.
 - [x] `POST .../apps/:appName/identity` accepts a `scopes` array, validated
       against a grantable set. `pay:charge` stays out of the defaults: an app
       that can spend money says so at mint time.
+- [x] Verified in prod on 2026-08-03, console `2bc4af01`: migration 089 is the
+      head of `schema_migrations`, `service_charges` carries `identity_id`,
+      a nullable `service_key_id`, the `service_charges_one_owner` CHECK and
+      `uq_service_charges_identity_ref`. Against `console.dada-tuda.ru`:
+      reels-tracker's token (scopes `ai:chat ai:embeddings`) gets 403 "identity
+      is not granted the pay:charge scope"; a probe identity holding
+      `pay:charge` lists its own charges (200, empty), reads a foreign charge id
+      as 404 and reaches body validation (400 `external_ref is required`); an
+      unknown `sk-dada-id-` is 401. Both tokens' `last_used_at` advanced, so the
+      pay path touches the same token row the AI path does. The probe identity
+      was deleted after the run. The money-moving half (a real YooKassa payment)
+      is deliberately unexercised in prod.
 - [ ] MoveImpact: per attached identity, list providers the source project has
       an `ai_provider_credentials` row for and the destination does not.
       Warning, not a blocker — the half no identity fixes.
