@@ -468,3 +468,89 @@ func TestCrystallizeKeepsADiskItDidNotCreate(t *testing.T) {
 		t.Fatalf("a pre-existing disk belongs to a live artifact and must survive: %v", err)
 	}
 }
+
+// TestTheEnvironmentIsCarriedOntoTheArtifact pins the step that keeps a promoted
+// artifact from booting blind.
+//
+// The env file is pruned from the manifest, so it is also absent from the delta
+// the transfer is built from: without a step of its own, the artifact starts with
+// no environment at all while every other check reports green. The content must
+// travel through stdin — it is credentials, and an argv is readable from the node
+// — and must be tightened to 0600 before the artifact's start applies it.
+func TestTheEnvironmentIsCarriedOntoTheArtifact(t *testing.T) {
+	const blob = "BOX_NAME=demo\nTOKEN=s3cr3t\n"
+	var wrote string
+	sh := &shellRecorder{onStdin: func(pod, cmd, body string) {
+		if strings.Contains(cmd, crystalRootDelta+"/"+ClusterBoxEnvPath) {
+			wrote = body
+		}
+	}, reply: func(pod, cmd string) (string, error) {
+		if strings.HasPrefix(cmd, "cat /"+ClusterBoxEnvPath) {
+			return blob, nil
+		}
+		return "", nil
+	}}
+	c := &ClusterCrystallizer{shell: sh}
+	if err := c.seedEnv(context.Background(), "box-1", "crystal-1"); err != nil {
+		t.Fatalf("seedEnv: %v", err)
+	}
+	if wrote != blob {
+		t.Fatalf("the artifact did not receive the box environment: %q", wrote)
+	}
+	if !sh.ran("chmod 600 " + crystalRootDelta + "/" + ClusterBoxEnvPath) {
+		t.Fatalf("the carried environment was not tightened to 0600: %v", sh.commands)
+	}
+	for _, cmd := range sh.commands {
+		if strings.Contains(cmd, "s3cr3t") {
+			t.Fatalf("a credential reached a command line: %q", cmd)
+		}
+	}
+}
+
+// TestAnEmptyEnvironmentIsNotCarried keeps the step from creating a file the box
+// never had, which the verification would then compare against nothing.
+func TestAnEmptyEnvironmentIsNotCarried(t *testing.T) {
+	sh := &shellRecorder{reply: func(pod, cmd string) (string, error) { return "", nil }}
+	c := &ClusterCrystallizer{shell: sh}
+	if err := c.seedEnv(context.Background(), "box-1", "crystal-1"); err != nil {
+		t.Fatalf("seedEnv: %v", err)
+	}
+	if sh.ran(crystalRootDelta + "/" + ClusterBoxEnvPath) {
+		t.Fatalf("an absent environment was written anyway: %v", sh.commands)
+	}
+}
+
+// shellRecorder is a podShell that records commands and the bodies written to
+// them, which is what an out-of-band write has to be asserted on.
+type shellRecorder struct {
+	commands []string
+	reply    func(pod, cmd string) (string, error)
+	onStdin  func(pod, cmd, body string)
+}
+
+func (s *shellRecorder) execStream(ctx context.Context, pod, container, cmd string, stdin io.Reader, stdout, stderr io.Writer) error {
+	s.commands = append(s.commands, pod+"|"+cmd)
+	if stdin != nil {
+		body, _ := io.ReadAll(stdin)
+		if s.onStdin != nil {
+			s.onStdin(pod, cmd, string(body))
+		}
+	}
+	out, err := s.reply(pod, cmd)
+	if err != nil {
+		return err
+	}
+	if stdout != nil && out != "" {
+		_, _ = io.WriteString(stdout, out)
+	}
+	return nil
+}
+
+func (s *shellRecorder) ran(substr string) bool {
+	for _, c := range s.commands {
+		if strings.Contains(c, substr) {
+			return true
+		}
+	}
+	return false
+}

@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"path"
 	"sort"
 	"strconv"
 	"strings"
@@ -84,6 +85,16 @@ const (
 	crystalDefaultGB  = 10
 	crystalReadyPoll  = time.Second
 	crystalDefaultTMO = 5 * time.Minute
+)
+
+// The public probe waits for the edge to program a brand-new hostname and its
+// certificate, which is seconds to tens of seconds after the ingress object
+// exists. Measured in production: a first crystallization reported the address
+// lost with the controller's default certificate on an artifact that answered 200
+// well inside the following minute.
+const (
+	crystalPublicProbeBudget   = 90 * time.Second
+	crystalPublicProbeInterval = 2 * time.Second
 )
 
 // crystalSlash keeps scheme prefixes and shell globs out of the source as literal
@@ -310,6 +321,9 @@ func (c *ClusterCrystallizer) CrystallizeWithReport(ctx context.Context, inst *I
 			return fail("seed", err)
 		}
 	}
+	if err := c.seedEnv(seedCtx, inst.InstanceRef, target); err != nil {
+		return fail("seed", err)
+	}
 	if _, err := c.run(ctx, target, crystalContainer, "rm -f "+crystalSeeded+" "+crystalSeedGlob+"; touch "+marker); err != nil {
 		return fail("seed", err)
 	}
@@ -374,7 +388,7 @@ func (c *ClusterCrystallizer) CrystallizeWithReport(ctx context.Context, inst *I
 	if len(after) > 0 {
 		rep.ProbeInternal = c.probeInside(ctx, target, after[0], opts.Domain, opts.ProbePath)
 	}
-	rep.Probe = probeHTTPS(opts.Domain, opts.ProbePath)
+	rep.Probe = awaitHTTPS(opts.Domain, opts.ProbePath, crystalPublicProbeBudget, crystalPublicProbeInterval)
 	if rep.Probe.OK {
 		rep.Carry["address"] = CarryRecreated
 	} else {
@@ -484,6 +498,43 @@ func (c *ClusterCrystallizer) waitListening(ctx context.Context, pod string, wan
 		case <-time.After(crystalReadyPoll):
 		}
 	}
+}
+
+// seedEnv carries the box's injected environment onto the permanent disk.
+//
+// It is a step of its own because the env file is PRUNED from the manifest — the
+// promotion tightens its mode, so comparing it as a file would mismatch by
+// construction — and pruning it from the manifest also takes it out of the delta
+// that the transfer is built from. Without this the artifact boots with no
+// environment at all: the process comes up, answers on its port, and every value
+// the customer injected is simply absent, which verification reports as a lost
+// environment and a customer discovers as an application talking to nothing.
+//
+// The content moves through stdin rather than a command line, because these are
+// credentials and an argv is visible in a node's process list. It lands in the
+// staging tree rather than at its final path so the artifact's own start applies
+// it with everything else, and it is written 0600 before the copy so it is never
+// group-readable, not even for the seconds between the write and the start.
+func (c *ClusterCrystallizer) seedEnv(ctx context.Context, boxPod, targetPod string) error {
+	out := &syncBuffer{}
+	if err := c.shell.execStream(ctx, boxPod, clusterContainerName,
+		"cat /"+ClusterBoxEnvPath+" 2>/dev/null || true", nil, out, io.Discard); err != nil {
+		if _, ok := exitCodeFrom(err); !ok {
+			return fmt.Errorf("crystallize: read the box environment: %w", err)
+		}
+	}
+	blob := out.String()
+	if strings.TrimSpace(blob) == "" {
+		return nil
+	}
+	dest := crystalRootDelta + "/" + ClusterBoxEnvPath
+	script := "mkdir -p " + path.Dir(dest) + " && cat > " + dest + " && chmod 600 " + dest
+	stderr := &bytes.Buffer{}
+	if err := c.shell.execStream(ctx, targetPod, crystalContainer, script,
+		strings.NewReader(blob), io.Discard, stderr); err != nil {
+		return fmt.Errorf("crystallize: write the environment onto the permanent disk: %w: %s", err, stderr.String())
+	}
+	return nil
 }
 
 // envSnapshot reads the box env file from inside a pod.
@@ -1245,6 +1296,24 @@ func (c *ClusterCrystallizer) probeInside(ctx context.Context, pod string, port 
 	res.Status = code
 	res.OK = code >= 200 && code < 400
 	return res
+}
+
+// awaitHTTPS probes the public address until it answers or the budget runs out.
+//
+// A single shot measures the edge's programming delay rather than the artifact:
+// the ingress and its certificate land seconds after the object is created, so the
+// first request gets the controller's default certificate and the report says the
+// address was LOST on an artifact that answers 200 half a minute later. The budget
+// is how long a customer would wait for their own new address.
+func awaitHTTPS(domain, path string, budget, interval time.Duration) HTTPProbeResult {
+	deadline := time.Now().Add(budget)
+	for {
+		res := probeHTTPS(domain, path)
+		if res.OK || !time.Now().Add(interval).Before(deadline) {
+			return res
+		}
+		time.Sleep(interval)
+	}
 }
 
 // probeHTTPS is the end-to-end request a customer would make: the public name,
