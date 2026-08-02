@@ -287,6 +287,42 @@ func TestSuspendKeepsTheWorkspaceAndResumeReattachesIt(t *testing.T) {
 	}
 }
 
+// TestResumeRebuildsThePodWearingItsBoxNameLabel pins what a published box
+// needs to survive a sleep: the Service that fronts its exposure selects on
+// dada.io/box-name, so a rebuilt pod without that label has no endpoint behind
+// its public hostname and the box answers 503 to the world.
+func TestResumeRebuildsThePodWearingItsBoxNameLabel(t *testing.T) {
+	cs := fake.NewSimpleClientset()
+	readyOnCreate(cs)
+	rt := newClusterRuntime(cs, nil, "dada-boxes", nil)
+	pool := NewMemoryPool()
+	image := boxcatalog.DefaultImage().Name
+
+	if err := rt.Warm(context.Background(), pool, image, "ru1", 1); err != nil {
+		t.Fatalf("warm: %v", err)
+	}
+	inst, _, err := pool.Claim(context.Background(), image, "ru1")
+	if err != nil {
+		t.Fatalf("claim: %v", err)
+	}
+	fromRow := &Instance{ID: "0d5f2b8e-2c2e-4f27-9a5a-0a4bb2a55b4c", InstanceRef: inst.InstanceRef, Image: image, Region: "ru1"}
+	if err := rt.Suspend(context.Background(), fromRow); err != nil {
+		t.Fatalf("suspend: %v", err)
+	}
+	if err := rt.Resume(context.Background(), fromRow, Spec{Image: image, Region: "ru1", Env: map[string]string{"BOX_NAME": "sunny-otter"}}); err != nil {
+		t.Fatalf("resume: %v", err)
+	}
+
+	pod, err := cs.CoreV1().Pods("dada-boxes").Get(context.Background(), fromRow.InstanceRef, metav1.GetOptions{})
+	if err != nil {
+		t.Fatalf("get resumed pod: %v", err)
+	}
+	if pod.Labels[labelBoxName] != "sunny-otter" {
+		t.Errorf("resumed pod carries %s=%q, want the box name: its exposure Service selects on this label",
+			labelBoxName, pod.Labels[labelBoxName])
+	}
+}
+
 // TestReapOrphansRemovesAbandonedClaim closes the second way a pod is abandoned.
 // A claim is a label flip out of the parked set, and Spawn moves the pod on to
 // live seconds later; a pod still claimed long afterwards belongs to a spawn that

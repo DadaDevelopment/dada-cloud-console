@@ -697,6 +697,12 @@ func (c *ClusterRuntime) Suspend(ctx context.Context, inst *Instance) error {
 // ProgramNetwork gets around to relabelling it — a window in which another
 // tenant's spawn can be handed a body that already holds this customer's disk.
 // ProgramNetwork still runs after this and simply finds nothing to change.
+//
+// The name label is written at creation rather than left to the Bind that
+// follows, for the same class of reason: a box's published Service selects on
+// it, so every second the rebuilt pod goes without it is a second the box's
+// public hostname answers 503 with no endpoint behind it — and a resume that
+// dies before Bind leaves it that way for good.
 func (c *ClusterRuntime) Resume(ctx context.Context, inst *Instance, spec Spec) error {
 	boxID := clusterBoxIDFromPodName(inst.InstanceRef)
 	if boxID == "" {
@@ -716,6 +722,9 @@ func (c *ClusterRuntime) Resume(ctx context.Context, inst *Instance, spec Spec) 
 	}
 	pod := c.BuildPod(boxID, img, boxcatalog.DefaultSize(), region)
 	pod.Labels[labelBoxPhase] = phaseLive
+	if boxName := spec.Env["BOX_NAME"]; boxName != "" {
+		pod.Labels[labelBoxName] = boxName
+	}
 	if _, err := c.clientset.CoreV1().Pods(c.Namespace).Create(ctx, pod, metav1.CreateOptions{}); err != nil && !apierrors.IsAlreadyExists(err) {
 		return fmt.Errorf("recreate box pod: %w", err)
 	}
