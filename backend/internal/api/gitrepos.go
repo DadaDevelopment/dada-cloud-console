@@ -53,6 +53,7 @@ type gitRepo struct {
 	AppName           string     `json:"app_name"`
 	Provider          string     `json:"provider"`
 	InstallationID    *uuid.UUID `json:"installation_id,omitempty"`
+	PlatformAccess    string     `json:"platform_access"`
 	RepoFullName      string     `json:"repo_full_name"`
 	ProductionBranch  string     `json:"production_branch"`
 	RootDir           string     `json:"root_dir"`
@@ -63,6 +64,36 @@ type gitRepo struct {
 	Profile           string     `json:"profile"`
 	CreatedAt         time.Time  `json:"created_at"`
 	UpdatedAt         time.Time  `json:"updated_at"`
+}
+
+// platformAccessInstallation means the platform holds a credential for this
+// repo (a GitHub App installation, or a stored GitLab token) and can
+// clone/pull it even if it turns private.
+// platformAccessAnonymous means the platform has no credential for this repo
+// (provider=github with no installation bound): it clones over an
+// unauthenticated URL, which works only while the repo stays public.
+// platformAccessArchive means the repo was not connected via a provider at
+// all (uploaded source), so credential access does not apply.
+const (
+	platformAccessInstallation = "installation"
+	platformAccessAnonymous    = "anonymous"
+	platformAccessArchive      = "archive"
+)
+
+// classifyPlatformAccess derives the platform_access value the console
+// shows to users from the stored provider and installation binding.
+func classifyPlatformAccess(provider string, installationID *uuid.UUID) string {
+	switch provider {
+	case "github":
+		if installationID == nil {
+			return platformAccessAnonymous
+		}
+		return platformAccessInstallation
+	case "gitlab":
+		return platformAccessInstallation
+	default:
+		return platformAccessArchive
+	}
 }
 
 // ListGitInstallations returns the GitHub/GitLab App installations bound to a project.
@@ -881,6 +912,7 @@ func (h *Handler) ListGitRepos(c *gin.Context) {
 			respondError(c, http.StatusInternalServerError, "failed to scan repo")
 			return
 		}
+		r.PlatformAccess = classifyPlatformAccess(r.Provider, r.InstallationID)
 		repos = append(repos, r)
 	}
 	if err := rows.Err(); err != nil {
@@ -1168,6 +1200,7 @@ func (h *Handler) ConnectGitRepo(c *gin.Context) {
 		rejectErr(http.StatusInternalServerError, "link_insert_failed", "failed to link repository")
 		return
 	}
+	r.PlatformAccess = classifyPlatformAccess(r.Provider, r.InstallationID)
 
 	h.recordAudit(c.Request.Context(), claims.UserID, auditEntry{
 		ProjectID:     projectID,

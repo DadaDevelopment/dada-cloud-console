@@ -1115,6 +1115,7 @@ export interface GitRepo {
   app_name: string;
   provider: GitProvider;
   installation_id?: string;
+  platform_access: "installation" | "anonymous" | "archive";
   repo_full_name: string;
   production_branch: string;
   root_dir: string;

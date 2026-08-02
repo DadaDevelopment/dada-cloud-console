@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useParams, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { Breadcrumb } from "@/components/ui/breadcrumb";
@@ -7,6 +7,7 @@ import { useProjectContext } from "@/lib/project-context";
 import { canMutate } from "@/lib/rbac";
 import { customDomainsApi, appsApi, gitApi } from "@/lib/api";
 import type { DomainAuthorization } from "@/lib/types";
+import { trackUxEvent } from "@/lib/ux-telemetry";
 import { EnvVarsEditor } from "@/components/deploy/env-vars-editor";
 import { HostnamesManager } from "@/components/deploy/hostnames-manager";
 import { StorageManager } from "@/components/deploy/storage-manager";
@@ -39,9 +40,11 @@ export default function AppSettingsPage() {
   const [tab, setTab] = useState<Tab>(initialTab);
   const [verifiedApexes, setVerifiedApexes] = useState<DomainAuthorization[]>([]);
   const [isUploadedSource, setIsUploadedSource] = useState(false);
+  const [anonymousAccessRepo, setAnonymousAccessRepo] = useState(false);
   const [sourceDownloadBusy, setSourceDownloadBusy] = useState(false);
   const [sourceDownloadError, setSourceDownloadError] = useState<string | null>(null);
   const canEdit = canMutate(role);
+  const anonymousAccessViewedRef = useRef(false);
 
   useEffect(() => {
     customDomainsApi
@@ -57,9 +60,20 @@ export default function AppSettingsPage() {
       .then((d) => {
         const repo = (d.repos ?? []).find((r) => r.app_name === appName);
         setIsUploadedSource(repo?.provider === "archive");
+        setAnonymousAccessRepo(repo?.platform_access === "anonymous");
       })
-      .catch(() => setIsUploadedSource(false));
+      .catch(() => {
+        setIsUploadedSource(false);
+        setAnonymousAccessRepo(false);
+      });
   }, [projectId, envId, appName]);
+
+  useEffect(() => {
+    if (tab !== "git" || !anonymousAccessRepo) return;
+    if (anonymousAccessViewedRef.current) return;
+    anonymousAccessViewedRef.current = true;
+    trackUxEvent("view", "git_platform_access_cta:panel");
+  }, [tab, anonymousAccessRepo]);
 
   async function downloadSource() {
     setSourceDownloadBusy(true);
@@ -155,6 +169,20 @@ export default function AppSettingsPage() {
               {t("apps.settings.git.viewDeployments")}
             </Link>
           </div>
+
+          {anonymousAccessRepo && (
+            <div className="mt-5 rounded-lg border border-amber-200 dark:border-amber-900 bg-amber-50 dark:bg-amber-950/40 px-4 py-3 text-sm text-amber-800 dark:text-amber-300">
+              <p className="font-medium">{t("apps.settings.git.anonAccess.title")}</p>
+              <p className="mt-1">{t("apps.settings.git.anonAccess.body")}</p>
+              <Link
+                href={`/projects/${projectId}/git${envId ? `?envId=${envId}` : ""}`}
+                data-ux="git_platform_access_cta:reconnect_repo"
+                className="mt-2 inline-block font-medium underline underline-offset-2"
+              >
+                {t("apps.settings.git.anonAccess.cta")}
+              </Link>
+            </div>
+          )}
 
           {isUploadedSource && (
             <div className="mt-6 border-t border-gray-200 dark:border-gray-800 pt-5">

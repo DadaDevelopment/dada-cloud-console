@@ -544,6 +544,18 @@ export const apps: Messages = {
   },
   "apps.settings.git.manageRepos": { ru: "Управление репозиториями", en: "Manage repositories" },
   "apps.settings.git.viewDeployments": { ru: "Просмотр деплоев", en: "View deployments" },
+  "apps.settings.git.anonAccess.title": {
+    ru: "Платформа клонирует репозиторий без доступа",
+    en: "The platform clones this repository without access",
+  },
+  "apps.settings.git.anonAccess.body": {
+    ru: "У платформы нет установленного доступа к этому репозиторию — сборки сейчас работают только потому, что репозиторий публичный. Как только он станет приватным (или доступ отзовут), следующая сборка упадёт с ошибкой доступа.",
+    en: "The platform has no installed access to this repository — builds work right now only because it is public. The moment it turns private (or access is revoked), the next build will fail with an access error.",
+  },
+  "apps.settings.git.anonAccess.cta": {
+    ru: "Подключить доступ к GitHub",
+    en: "Connect GitHub access",
+  },
   "apps.settings.source.title": { ru: "Загруженный исходник", en: "Uploaded source" },
   "apps.settings.source.subtitle": {
     ru: "Это приложение задеплоено из загруженного архива, а не из Git-репозитория. Скачайте архив, если потеряли локальную копию.",
