@@ -91,6 +91,8 @@ import type {
   AIProviderCredential,
   AICatalogResponse,
   ProjectAIUsage,
+  AIRoutingMode,
+  AIRoutingSettings,
   BoxesResponse,
   BoxUpResponse,
   BoxConnectionResponse,
@@ -725,6 +727,15 @@ export const aiGatewayApi = {
 
   usage: (projectId: string, days: 7 | 30 = 7) =>
     apiFetch<ProjectAIUsage>(`/api/v1/projects/${projectId}/ai/usage?days=${days}`),
+
+  routing: (projectId: string) =>
+    apiFetch<AIRoutingSettings>(`/api/v1/projects/${projectId}/ai/routing`),
+
+  setRouting: (projectId: string, mode: AIRoutingMode) =>
+    apiFetch<AIRoutingSettings>(`/api/v1/projects/${projectId}/ai/routing`, {
+      method: "PUT",
+      body: { mode },
+    }),
 };
 
 export const costApi = {

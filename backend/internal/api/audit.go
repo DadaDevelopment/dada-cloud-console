@@ -35,6 +35,7 @@ const (
 	auditActionRevealEnvVar   = "RevealEnvVar"
 	auditActionRevealModelKey = "RevealAIModelAPIKey"
 	auditActionExtendBox      = "ExtendBox"
+	auditActionSetAIRouting   = "SetAIRoutingMode"
 )
 
 const (

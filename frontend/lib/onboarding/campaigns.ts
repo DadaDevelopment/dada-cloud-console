@@ -14,6 +14,19 @@ export const ONBOARDING_CAMPAIGNS: OnboardingCampaign[] = [
     ],
   },
   {
+    key: "ai-routing",
+    docsUrl: "/developer/llm-providers",
+    delayMs: 1500,
+    route: (pathname) => pathname.endsWith("/ai"),
+    steps: [
+      {
+        target: '[data-onboarding="ai-routing"]',
+        titleKey: "onboarding.aiRouting.title",
+        bodyKey: "onboarding.aiRouting.body",
+      },
+    ],
+  },
+  {
     key: "agent",
     docsUrl: "/developer/mcp-ai-agents",
     delayMs: 3000,

@@ -8,6 +8,38 @@ export const ai: Messages = {
     en: "An OpenAI-compatible endpoint reachable from Russia — no VPN, no proxy. Your provider key, our routing.",
   },
 
+  "ai.mode.title": { ru: "Чей ключ платит провайдеру", en: "Whose key pays the provider" },
+  "ai.mode.subtitle": {
+    ru: "Один выбор, от него зависит всё остальное на странице. Поменять можно в любой момент.",
+    en: "One choice, and everything below follows from it. You can change it at any time.",
+  },
+  "ai.mode.byok.title": { ru: "Свои ключи", en: "Your own keys" },
+  "ai.mode.byok.body": {
+    ru: "У вас уже есть ключ OpenAI или Anthropic. Мы только маршрутизируем запрос из России и берём за это ноль.",
+    en: "You already have an OpenAI or Anthropic key. We only route the request out of Russia, and charge nothing for it.",
+  },
+  "ai.mode.byok.bullet1": { ru: "Шлюз бесплатный", en: "The gateway is free" },
+  "ai.mode.byok.bullet2": { ru: "Нужно завести ключ провайдера", en: "You need to add a provider key" },
+  "ai.mode.byok.cta": { ru: "Использовать свои ключи", en: "Use my own keys" },
+  "ai.mode.platform.title": { ru: "Наши ключи", en: "Our keys" },
+  "ai.mode.platform.body": {
+    ru: "Ключей нет и заводить не хочется. Берите наш — работает сразу, платите нам по факту расхода.",
+    en: "No keys, and no wish to get any. Use ours: it works immediately and you pay us for what you spend.",
+  },
+  "ai.mode.platform.bullet1": { ru: "Ничего настраивать не нужно", en: "Nothing to configure" },
+  "ai.mode.platform.bullet2": {
+    ru: "Наценка ×{markup} к цене провайдера, списание по расходу",
+    en: "A ×{markup} markup on the provider price, charged as you spend",
+  },
+  "ai.mode.platform.cta": { ru: "Взять наш ключ", en: "Use our key" },
+  "ai.mode.platform.enabling": { ru: "Включаем…", en: "Enabling…" },
+  "ai.mode.platform.on": { ru: "Работаете на нашем ключе", en: "Running on our key" },
+  "ai.mode.platform.off": { ru: "Работаете на своих ключах", en: "Running on your own keys" },
+  "ai.mode.platform.active": { ru: "Вернуться на свои ключи", en: "Switch back to my own keys" },
+  "ai.mode.platform.pending": { ru: "Переключаем…", en: "Switching…" },
+  "ai.mode.back": { ru: "← Другой способ", en: "← The other way" },
+  "ai.mode.error.save": { ru: "Не удалось переключить режим", en: "Failed to switch the mode" },
+
   "ai.quickstart.title": { ru: "Быстрый старт", en: "Quickstart" },
   "ai.quickstart.body": {
     ru: "Две строки в вашем коде. Любой SDK, который умеет OpenAI, умеет и это.",
@@ -107,6 +139,11 @@ export const ai: Messages = {
   "ai.usage.costHint": {
     ru: "Считается по вашему ключу провайдера. Мы за шлюз не берём денег.",
     en: "Billed on your own provider key. We do not charge for the gateway.",
+  },
+  "ai.usage.billed": { ru: "К оплате нам", en: "Billed by us" },
+  "ai.usage.billedHint": {
+    ru: "Роутинг на нашем ключе: цена провайдера плюс наценка.",
+    en: "Routing on our key: the provider price plus the markup.",
   },
   "ai.usage.empty": { ru: "За это окно вызовов не было.", en: "No calls in this window." },
   "ai.usage.byModel": { ru: "По моделям", en: "By model" },

@@ -474,6 +474,13 @@ type Config struct {
 	// origin).
 	AIGatewayPublicURL string // AI_GATEWAY_PUBLIC_URL
 
+	// AIRoutingMarkup is the multiplier applied to a routed call's provider cost
+	// to get what the customer is billed when the project runs on the platform's
+	// own provider key. 1.0 means routing is passed through at cost. Pricing
+	// lives here and never in the gateway: the gateway routes, the platform
+	// decides what a route is worth (ADR-015).
+	AIRoutingMarkup float64 // AI_ROUTING_MARKUP
+
 	// YooKassa (payments slice 1, own shop/keys, no multi-tenant OAuth). Empty
 	// YooKassaShopID/YooKassaSecretKey means payments are unconfigured and
 	// checkout returns 409 payments_not_configured instead of attempting a call.
@@ -693,6 +700,7 @@ func Load() (*Config, error) {
 		BoxDefaultSpendCapRub:       getEnvFloat("BOX_DEFAULT_SPEND_CAP_RUB", 500),
 		PublicBaseURL:               getEnv("PUBLIC_BASE_URL", "https://console.dada-tuda.ru"),
 		AIGatewayPublicURL:          getEnv("AI_GATEWAY_PUBLIC_URL", "https://ai.dada-tuda.ru/v1"),
+		AIRoutingMarkup:             getEnvFloat("AI_ROUTING_MARKUP", 1.3),
 		YooKassaShopID:              getEnv("YOOKASSA_SHOP_ID", ""),
 		YooKassaSecretKey:           getEnv("YOOKASSA_SECRET_KEY", ""),
 		YooKassaReturnURL:           getEnv("YOOKASSA_RETURN_URL", "https://console.dada-tuda.ru/billing/return"),

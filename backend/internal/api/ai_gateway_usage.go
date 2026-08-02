@@ -28,6 +28,54 @@ type aiUsageRecordRequest struct {
 	PlatformRequestID string     `json:"platform_request_id" binding:"required"`
 	EndUser           string     `json:"end_user"`
 	Source            string     `json:"source"`
+	KeyOwner          string     `json:"key_owner"`
+}
+
+// aiKeyOwnerFor decides whose provider key paid for a call. The gateway may
+// declare it outright; when it does not, a project credential row for that
+// provider is the only way the call could have gone out on the customer's own
+// key, so its absence means the platform key served it. Anything we cannot
+// establish stays "unknown" and is never billed.
+func (h *Handler) aiKeyOwnerFor(ctx context.Context, projectID uuid.UUID, provider, declared string) string {
+	switch declared {
+	case aiKeyOwnerBYOK, aiKeyOwnerPlatform, aiKeyOwnerUnknown:
+		return declared
+	}
+	if provider == "" {
+		return aiKeyOwnerUnknown
+	}
+	var own bool
+	if err := h.pool.QueryRow(ctx, `
+		SELECT EXISTS (
+			SELECT 1 FROM ai_provider_credentials
+			 WHERE project_id = $1 AND provider = $2
+		)`, projectID, provider,
+	).Scan(&own); err != nil {
+		return aiKeyOwnerUnknown
+	}
+	if own {
+		return aiKeyOwnerBYOK
+	}
+	return aiKeyOwnerPlatform
+}
+
+// aiBilledUSD is what the customer owes for one routed call. Three conditions
+// all have to hold before a single cent is charged: the call actually went out
+// on the platform's key, it cost us something, and the project explicitly opted
+// into platform routing. A project that never touched the setting keeps the
+// free platform fallback it has had since migration 079.
+func (h *Handler) aiBilledUSD(ctx context.Context, projectID uuid.UUID, keyOwner string, costUSD float64) float64 {
+	if keyOwner != aiKeyOwnerPlatform || costUSD <= 0 {
+		return 0
+	}
+	if h.aiRoutingMode(ctx, projectID) != aiRoutingModePlatform {
+		return 0
+	}
+	markup := h.cfg.AIRoutingMarkup
+	if markup <= 0 {
+		markup = 1
+	}
+	return costUSD * markup
 }
 
 // AIRecordUsage persists one gateway-observed usage row into the shared
@@ -59,14 +107,20 @@ func (h *Handler) AIRecordUsage(c *gin.Context) {
 		userArg = req.EndUser
 	}
 
-	if _, err := h.pool.Exec(c.Request.Context(), `
+	ctx := c.Request.Context()
+	keyOwner := h.aiKeyOwnerFor(ctx, req.ProjectID, req.Provider, req.KeyOwner)
+	billed := h.aiBilledUSD(ctx, req.ProjectID, keyOwner, req.CostUSD)
+
+	if _, err := h.pool.Exec(ctx, `
 		INSERT INTO agent_token_usage
 			(source, org_id, project_id, env_id, user_sub, model, provider,
-			 prompt_tokens, completion_tokens, total_tokens, cost_usd, platform_request_id)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+			 prompt_tokens, completion_tokens, total_tokens, cost_usd, platform_request_id,
+			 key_owner, billed_usd)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
 		ON CONFLICT (platform_request_id) WHERE platform_request_id IS NOT NULL DO NOTHING
 	`, source, orgArg, req.ProjectID, req.EnvID, userArg, req.Model, req.Provider,
 		req.PromptTokens, req.CompletionTokens, req.TotalTokens, req.CostUSD, req.PlatformRequestID,
+		keyOwner, billed,
 	); err != nil {
 		respondError(c, http.StatusInternalServerError, "record usage: "+err.Error())
 		return
@@ -337,17 +391,19 @@ func (h *Handler) GetProjectAIUsage(c *gin.Context) {
 	from := to.AddDate(0, 0, -days)
 	ctx := c.Request.Context()
 
-	var calls, promptTokens, completionTokens int64
-	var cost float64
+	var calls, promptTokens, completionTokens, routedCalls int64
+	var cost, billed float64
 	if err := h.pool.QueryRow(ctx, `
 		SELECT COUNT(*),
 		       COALESCE(SUM(prompt_tokens), 0),
 		       COALESCE(SUM(completion_tokens), 0),
-		       COALESCE(SUM(cost_usd), 0)::float8
+		       COALESCE(SUM(cost_usd), 0)::float8,
+		       COALESCE(SUM(billed_usd), 0)::float8,
+		       COUNT(*) FILTER (WHERE key_owner = 'platform')
 		  FROM agent_token_usage
 		 WHERE project_id = $1 AND created_at >= $2 AND created_at < $3`,
 		projectID, from, to,
-	).Scan(&calls, &promptTokens, &completionTokens, &cost); err != nil {
+	).Scan(&calls, &promptTokens, &completionTokens, &cost, &billed, &routedCalls); err != nil {
 		respondError(c, http.StatusInternalServerError, "load usage totals: "+err.Error())
 		return
 	}
@@ -408,6 +464,9 @@ func (h *Handler) GetProjectAIUsage(c *gin.Context) {
 		"currency":          "usd",
 		"total_calls":       calls,
 		"total_cost":        round2(cost),
+		"total_billed":      round2(billed),
+		"routed_calls":      routedCalls,
+		"routing_mode":      h.aiRoutingMode(ctx, projectID),
 		"prompt_tokens":     promptTokens,
 		"completion_tokens": completionTokens,
 		"models":            models,

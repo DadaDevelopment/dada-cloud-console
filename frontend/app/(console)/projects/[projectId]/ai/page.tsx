@@ -8,6 +8,8 @@ import type {
   AIGatewayKey,
   AIGatewayKeyCreated,
   AIProviderCredential,
+  AIRoutingMode,
+  AIRoutingSettings,
   ProjectAIUsage,
 } from "@/lib/types";
 import { useProjectContext } from "@/lib/project-context";
@@ -24,13 +26,25 @@ type SnippetLang = "python" | "node" | "curl";
 const KEY_PLACEHOLDER = "sk-dada-ai-...";
 
 /**
- * Project AI API page. The product here is a single working configuration:
- * an OpenAI-compatible base_url plus a project key, with the customer's own
- * provider key injected gateway-side. The page is ordered as the three things
- * a developer must do -- mint a key, add a provider key, call a model -- and
- * the quickstart snippet is rendered with the real values so it is
- * copy-paste-runnable rather than a template to fill in.
+ * Project LLM-providers page. The product here is a single working
+ * configuration: an OpenAI-compatible base_url plus a project key. The page
+ * opens on the one decision everything else follows from -- whose provider key
+ * pays -- because a user who has no key of their own used to land on a form
+ * demanding one and leave. After that it is ordered as the things a developer
+ * must actually do, and the quickstart snippet is rendered with the real values
+ * so it is copy-paste-runnable rather than a template to fill in.
  */
+
+/**
+ * Which side of the chooser to show on arrival. A project already routing on
+ * our key, or one that has keys of its own, has answered the question; anyone
+ * else sees the two cards.
+ */
+function initialView(mode: AIRoutingMode, credentialCount: number): AIRoutingMode | null {
+  if (mode === "platform") return "platform";
+  if (credentialCount > 0) return "byok";
+  return null;
+}
 export default function ProjectAIPage() {
   const params = useParams<{ projectId: string }>();
   const projectId = params.projectId;
@@ -43,6 +57,10 @@ export default function ProjectAIPage() {
   const [credentials, setCredentials] = useState<AIProviderCredential[]>([]);
   const [usage, setUsage] = useState<ProjectAIUsage | null>(null);
   const [usageDays, setUsageDays] = useState<7 | 30>(7);
+  const [routing, setRouting] = useState<AIRoutingSettings | null>(null);
+  const [view, setView] = useState<AIRoutingMode | null>(null);
+  const [isSwitching, setIsSwitching] = useState(false);
+  const [routingError, setRoutingError] = useState<string | null>(null);
 
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -66,11 +84,14 @@ export default function ProjectAIPage() {
       aiGatewayApi.catalog(),
       aiGatewayApi.listKeys(projectId),
       aiGatewayApi.listCredentials(projectId),
+      aiGatewayApi.routing(projectId),
     ])
-      .then(([cat, keyResp, credResp]) => {
+      .then(([cat, keyResp, credResp, routeResp]) => {
         setCatalog(cat);
         setKeys(keyResp.keys ?? []);
         setCredentials(credResp.credentials ?? []);
+        setRouting(routeResp);
+        setView((prev) => prev ?? initialView(routeResp.mode, credResp.credentials?.length ?? 0));
         setError(null);
       })
       .catch((e) => setError(e instanceof Error ? e.message : t("ai.keys.error.load")))
@@ -106,6 +127,20 @@ export default function ProjectAIPage() {
     if (lang === "curl") return curlSnippet(baseURL, snippetKey, defaultModel);
     return pythonSnippet(baseURL, snippetKey, defaultModel);
   }, [lang, baseURL, snippetKey, defaultModel]);
+
+  async function handleSetRouting(mode: AIRoutingMode) {
+    setIsSwitching(true);
+    setRoutingError(null);
+    try {
+      const next = await aiGatewayApi.setRouting(projectId, mode);
+      setRouting(next);
+      setView(next.mode);
+    } catch (e) {
+      setRoutingError(e instanceof Error ? e.message : t("ai.mode.error.save"));
+    } finally {
+      setIsSwitching(false);
+    }
+  }
 
   async function handleCreateKey() {
     setIsCreatingKey(true);
@@ -208,6 +243,87 @@ export default function ProjectAIPage() {
         </div>
       )}
 
+      <section className="mb-10" data-onboarding="ai-routing">
+        {routingError && (
+          <div className="mb-4 rounded-lg border border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-950/40 px-4 py-3 text-sm text-red-700 dark:text-red-300">
+            {routingError}
+          </div>
+        )}
+
+        {view === null ? (
+          <>
+            <div className="mb-4">
+              <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">{t("ai.mode.title")}</h2>
+              <p className="text-sm text-gray-500 dark:text-gray-400">{t("ai.mode.subtitle")}</p>
+            </div>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div className="flex flex-col rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-6 shadow-sm">
+                <h3 className="text-base font-semibold text-gray-900 dark:text-gray-100">{t("ai.mode.byok.title")}</h3>
+                <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">{t("ai.mode.byok.body")}</p>
+                <ul className="mt-3 space-y-1 text-sm text-gray-600 dark:text-gray-400">
+                  <li>· {t("ai.mode.byok.bullet1")}</li>
+                  <li>· {t("ai.mode.byok.bullet2")}</li>
+                </ul>
+                <button
+                  type="button"
+                  onClick={() => setView("byok")}
+                  className="mt-5 inline-flex items-center justify-center rounded-lg border border-gray-300 dark:border-gray-700 px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
+                >
+                  {t("ai.mode.byok.cta")}
+                </button>
+              </div>
+              <div className="flex flex-col rounded-xl border border-blue-200 dark:border-blue-900 bg-blue-50/50 dark:bg-blue-950/20 p-6 shadow-sm">
+                <h3 className="text-base font-semibold text-gray-900 dark:text-gray-100">{t("ai.mode.platform.title")}</h3>
+                <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">{t("ai.mode.platform.body")}</p>
+                <ul className="mt-3 space-y-1 text-sm text-gray-600 dark:text-gray-400">
+                  <li>· {t("ai.mode.platform.bullet1")}</li>
+                  <li>· {t("ai.mode.platform.bullet2", { markup: (routing?.markup ?? 1).toFixed(1) })}</li>
+                </ul>
+                <button
+                  type="button"
+                  onClick={() => handleSetRouting("platform")}
+                  disabled={!canWrite || isSwitching}
+                  className="mt-5 inline-flex items-center justify-center rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50 transition-colors"
+                >
+                  {isSwitching ? t("ai.mode.platform.enabling") : t("ai.mode.platform.cta")}
+                </button>
+              </div>
+            </div>
+          </>
+        ) : (
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 px-5 py-4 shadow-sm">
+            <div>
+              <p className="text-sm font-medium text-gray-900 dark:text-gray-100">
+                {routing?.mode === "platform" ? t("ai.mode.platform.on") : t("ai.mode.platform.off")}
+              </p>
+              <button
+                type="button"
+                onClick={() => setView(null)}
+                className="mt-0.5 text-xs font-medium text-blue-600 dark:text-blue-400 hover:underline"
+              >
+                {t("ai.mode.back")}
+              </button>
+            </div>
+            {canWrite && (
+              <button
+                type="button"
+                onClick={() => handleSetRouting(routing?.mode === "platform" ? "byok" : "platform")}
+                disabled={isSwitching}
+                className="shrink-0 rounded-lg border border-gray-300 dark:border-gray-700 px-3 py-1.5 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-50 transition-colors"
+              >
+                {isSwitching
+                  ? t("ai.mode.platform.pending")
+                  : routing?.mode === "platform"
+                    ? t("ai.mode.platform.active")
+                    : t("ai.mode.platform.cta")}
+              </button>
+            )}
+          </div>
+        )}
+      </section>
+
+      {view !== null && (
+      <>
       <section className="mb-10 rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-6 shadow-sm">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
@@ -355,6 +471,7 @@ export default function ProjectAIPage() {
         )}
       </section>
 
+      {view === "byok" && (
       <section className="mb-10">
         <div className="mb-4">
           <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
@@ -470,11 +587,12 @@ export default function ProjectAIPage() {
           })}
         </div>
       </section>
+      )}
 
       <section className="mb-10">
         <div className="mb-4">
           <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
-            3. {t("ai.models.title")}
+            {view === "byok" ? 3 : 2}. {t("ai.models.title")}
           </h2>
           <p className="text-sm text-gray-500 dark:text-gray-400">{t("ai.models.subtitle")}</p>
         </div>
@@ -497,7 +615,7 @@ export default function ProjectAIPage() {
                   </td>
                   <td className="px-5 py-3 text-gray-600 dark:text-gray-400">
                     {m.provider}
-                    {!configuredProviders.has(m.provider) && (
+                    {view === "byok" && !configuredProviders.has(m.provider) && (
                       <span className="ml-2 rounded-full bg-amber-100 dark:bg-amber-950/50 px-2 py-0.5 text-xs text-amber-700 dark:text-amber-300">
                         {t("ai.models.needsKey")}
                       </span>
@@ -533,7 +651,7 @@ export default function ProjectAIPage() {
           </div>
         </div>
 
-        <div className="grid gap-4 sm:grid-cols-3">
+        <div className={view === "platform" ? "grid gap-4 sm:grid-cols-4" : "grid gap-4 sm:grid-cols-3"}>
           <div className="rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 px-5 py-4 shadow-sm">
             <p className="text-xs uppercase tracking-wide text-gray-400 dark:text-gray-500">{t("ai.usage.calls")}</p>
             <p className="mt-1 text-2xl font-semibold text-gray-900 dark:text-gray-100">{usage?.total_calls ?? 0}</p>
@@ -551,6 +669,15 @@ export default function ProjectAIPage() {
             </p>
             <p className="mt-1 text-xs text-gray-400 dark:text-gray-500">{t("ai.usage.costHint")}</p>
           </div>
+          {view === "platform" && (
+            <div className="rounded-xl border border-blue-200 dark:border-blue-900 bg-blue-50/50 dark:bg-blue-950/20 px-5 py-4 shadow-sm">
+              <p className="text-xs uppercase tracking-wide text-gray-400 dark:text-gray-500">{t("ai.usage.billed")}</p>
+              <p className="mt-1 text-2xl font-semibold text-gray-900 dark:text-gray-100">
+                ${(usage?.total_billed ?? 0).toFixed(2)}
+              </p>
+              <p className="mt-1 text-xs text-gray-400 dark:text-gray-500">{t("ai.usage.billedHint")}</p>
+            </div>
+          )}
         </div>
 
         {usage && usage.models.length > 0 ? (
@@ -578,6 +705,8 @@ export default function ProjectAIPage() {
           <p className="mt-4 text-sm text-gray-400 dark:text-gray-500">{t("ai.usage.empty")}</p>
         )}
       </section>
+      </>
+      )}
     </div>
   );
 }

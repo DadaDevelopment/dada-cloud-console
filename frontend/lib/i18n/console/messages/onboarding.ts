@@ -14,6 +14,15 @@ export const onboarding: Messages = {
     en: "Pick a starter — we build and run it in about two minutes, no GitHub connection needed. Your own code can simply be uploaded as a folder. Domain and HTTPS come out of the box.",
   },
 
+  "onboarding.aiRouting.title": {
+    ru: "GPT и Claude из России — двумя способами",
+    en: "GPT and Claude from Russia — two ways",
+  },
+  "onboarding.aiRouting.body": {
+    ru: "Есть свой ключ провайдера — маршрутизируем бесплатно. Ключа нет — возьмите наш, платите нам по факту расхода. Выбор меняется в любой момент.",
+    en: "Have a provider key of your own? We route it for free. No key? Use ours and pay us for what you spend. The choice can be changed at any time.",
+  },
+
   "onboarding.agent.title": { ru: "Познакомься с AI-агентом", en: "Meet the AI agent" },
   "onboarding.agent.body": {
     ru: "Чинит билды, деплоит, ставит переменные окружения. Просто опиши задачу словами.",

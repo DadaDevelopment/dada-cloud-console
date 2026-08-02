@@ -223,6 +223,15 @@ const GUIDE_GROUPS: { title: Bilingual; items: GuideCard[] }[] = [
         },
       },
       {
+        slug: "llm-providers",
+        icon: BrainCircuit,
+        title: { ru: "LLM-провайдеры: GPT и Claude из России", en: "LLM providers: GPT and Claude from Russia" },
+        desc: {
+          ru: "OpenAI-совместимый эндпоинт без VPN: со своим ключом провайдера бесплатно или на нашем ключе за роутинг.",
+          en: "An OpenAI-compatible endpoint with no VPN: free on your own provider key, or on ours for a routing fee.",
+        },
+      },
+      {
         slug: "ai-models",
         icon: BrainCircuit,
         title: { ru: "AI Models: свои модели", en: "AI Models (model serving)" },

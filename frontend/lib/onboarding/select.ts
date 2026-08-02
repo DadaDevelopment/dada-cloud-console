@@ -13,6 +13,10 @@ export const DEFAULT_DELAY_MS = 3000;
  * mount. Page-level anchors appear only after the page's data loads, while
  * shell-level anchors (the agent FAB) exist from the first paint — without this
  * grace the shell campaign always wins the race.
+ *
+ * Only campaigns whose route matches the current page count as higher priority:
+ * a campaign that belongs to another page is never going to mount here, so
+ * making anything wait on it would be waiting on nothing.
  */
 export const LOWER_PRIORITY_GRACE_MS = 4000;
 
@@ -32,7 +36,9 @@ export function selectCampaignToFire(
   elapsedMs: number,
 ): OnboardingCampaign | null {
   if (elapsedMs > SELECT_WINDOW_MS) return null;
-  const pending = campaigns.filter((c) => !statusMap[c.key]);
+  const pending = campaigns.filter(
+    (c) => !statusMap[c.key] && (!c.route || c.route(ctx.pathname)),
+  );
   const campaign = selectPendingCampaign(pending, statusMap, ctx);
   if (!campaign) return null;
   if (elapsedMs < (campaign.delayMs ?? DEFAULT_DELAY_MS)) return null;

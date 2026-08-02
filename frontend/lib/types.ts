@@ -1303,8 +1303,19 @@ export interface ProjectAIUsage {
   total_cost: number;
   prompt_tokens: number;
   completion_tokens: number;
+  total_billed: number;
+  routed_calls: number;
+  routing_mode: AIRoutingMode;
   models: AIUsageModelStat[];
   daily: AIUsageDayStat[];
+}
+
+/** Whose provider key a project's AI calls go out on. */
+export type AIRoutingMode = "byok" | "platform";
+
+export interface AIRoutingSettings {
+  mode: AIRoutingMode;
+  markup: number;
 }
 
 // Monitoring (Grafana-backed observability apps) -----------------------------

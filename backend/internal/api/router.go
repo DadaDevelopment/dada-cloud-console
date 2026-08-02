@@ -447,6 +447,8 @@ func SetupRouter(pool *pgxpool.Pool, cfg *config.Config) *gin.Engine {
 		api.PUT("/projects/:projectId/ai/credentials/:provider", h.PutAIProviderCredential)
 		api.DELETE("/projects/:projectId/ai/credentials/:provider", h.DeleteAIProviderCredential)
 		api.GET("/projects/:projectId/ai/usage", h.GetProjectAIUsage)
+		api.GET("/projects/:projectId/ai/routing", h.GetAIRoutingMode)
+		api.PUT("/projects/:projectId/ai/routing", h.SetAIRoutingMode)
 
 		// Cloud tasks (DadaAgent integration).
 		api.GET("/projects/:projectId/environments/:envId/apps/:appName/cloud-tasks", h.ListCloudTasks)

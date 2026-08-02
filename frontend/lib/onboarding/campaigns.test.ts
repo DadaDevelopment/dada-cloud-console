@@ -94,6 +94,25 @@ test("a skipped first-deploy promotes agent to top priority immediately", () => 
   assert.equal(picked?.key, "agent");
 });
 
+test("ai-routing is confined to the LLM-providers page", () => {
+  const campaign = ONBOARDING_CAMPAIGNS.find((c) => c.key === "ai-routing");
+  assert.ok(campaign?.route);
+  assert.equal(campaign.route("/projects/p1/ai"), true);
+  assert.equal(campaign.route("/projects/p1"), false);
+  assert.equal(campaign.route("/projects/p1/ai/models"), false);
+});
+
+test("a page-scoped campaign does not hold up campaigns on other pages", () => {
+  const picked = selectCampaignToFire(ONBOARDING_CAMPAIGNS, { "first-deploy": "skipped" }, shellOnly, 3000);
+  assert.equal(picked?.key, "agent");
+});
+
+test("the LLM-providers tour fires on its own page once the grace passes", () => {
+  const onAiPage = { pathname: "/projects/p1/ai", hasTarget: () => true };
+  const picked = selectCampaignToFire(ONBOARDING_CAMPAIGNS, { "first-deploy": "skipped" }, onAiPage, LOWER_PRIORITY_GRACE_MS);
+  assert.equal(picked?.key, "ai-routing");
+});
+
 test("every campaign key is url-path safe", () => {
   for (const c of ONBOARDING_CAMPAIGNS) {
     assert.equal(c.key, encodeURIComponent(c.key));
