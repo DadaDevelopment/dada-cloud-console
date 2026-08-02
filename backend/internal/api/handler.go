@@ -320,6 +320,7 @@ func NewHandler(pool *pgxpool.Pool, cfg *config.Config) *Handler {
 	h.StartAppHealthWatcher(context.Background())
 	h.StartAppVolumeWatcher(context.Background())
 	h.StartAppAutoscaleWatcher(context.Background())
+	h.StartIdentityDeliveryWatcher(context.Background())
 
 	h.agentChatLLM = llmchat.New(cfg.AgentChatGatewayURL, cfg.AgentChatGatewayKey, cfg.AgentChatModel)
 	selfURL := cfg.MCPSelfURL

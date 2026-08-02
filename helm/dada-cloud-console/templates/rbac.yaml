@@ -206,4 +206,41 @@ roleRef:
   name: {{ include "dada-cloud-console.fullname" . }}-db-creds-reader
   apiGroup: rbac.authorization.k8s.io
 {{- end }}
+{{- if .Values.rbac.identityDelivery | default true }}
+---
+# Identity delivery (ADR-021 phase 2): the console mints each app's service
+# token and writes it into that app's own namespace as
+# "<app>-identity-credentials", so the credential never passes through git and
+# the console never stores its plaintext. App namespaces are created per
+# project, so like db-creds-reader this cannot be a per-namespace Role.
+# Write verbs are limited to the Secret resource; list is what lets the
+# reconciler find and delete copies left behind in a namespace an app has moved
+# out of, which is the difference between a move that rotates nothing and a
+# move that leaves a live credential readable by the old project.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "dada-cloud-console.fullname" . }}-identity-delivery
+  labels:
+    {{- include "dada-cloud-console.labels" . | nindent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "list", "create", "update", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "dada-cloud-console.fullname" . }}-identity-delivery
+  labels:
+    {{- include "dada-cloud-console.labels" . | nindent 4 }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "dada-cloud-console.fullname" . }}
+    namespace: {{ .Release.Namespace }}
+roleRef:
+  kind: ClusterRole
+  name: {{ include "dada-cloud-console.fullname" . }}-identity-delivery
+  apiGroup: rbac.authorization.k8s.io
+{{- end }}
 {{- end }}

@@ -28,21 +28,36 @@ currently lives. A move re-points that row and re-mints nothing.
 
 ## Phase 2 — delivery, so the token stops living in git
 
-- [ ] CRD `ServiceIdentity` (cluster-scoped) + RBAC for the console SA to
-      **write** Secrets in app namespaces (it only reads them today,
-      `cloudtask/dbcreds.go`).
-- [ ] Renderer: `ServiceIdentity` entry in `resources.values.yaml`
-      (`gitops-agent/internal/renderer/resources_values.go`), golden test
-      alongside the ServiceDatabaseV2 goldens.
-- [ ] Reconciler: no live token → mint + deliver `<appRef>-identity-credentials`
-      (`DADA_SERVICE_TOKEN`, plus the base URLs the scopes imply). No
-      project-change branch — that is the point of the grain.
-- [ ] `classifyMoveChildren`: `ServiceIdentity` joins the movable set; MoveApp
-      re-renders it with `spec.namespace=<dstNs>` so the secret lands in the
-      destination namespace. Golden test on the moved manifest.
-- [ ] Move rehearsal on a throwaway app asserting the **same** token still
-      authenticates after the move — the regression test for 2026-08-02.
+- [x] RBAC for the console SA to **write** Secrets in app namespaces (it only
+      read them before, `cloudtask/dbcreds.go`). Cluster-wide on Secrets for
+      the same reason `db-creds-reader` is: app namespaces are created per
+      project, so no per-namespace Role can cover them.
+- [x] Reconciler `api/identity_delivery.go`: every k8s app gets a
+      `service_identities` row, and its namespace gets
+      `<app>-identity-credentials` (`DADA_SERVICE_TOKEN`, `DADA_AI_BASE_URL`).
+      Convergent on a 10m tick under advisory lock `0x64616461_0008`, so
+      nothing has to remember to deliver. A Secret whose token no longer
+      resolves counts as missing — that is the only repair path for a dead
+      credential, since the console keeps the hash and the cluster keeps the
+      sole plaintext.
+- [x] No project-change branch, as designed: on a move the destination is
+      empty while the old namespace still holds a live token, so delivery
+      **adopts** that plaintext instead of minting, and the stale copy is
+      pruned. Minting there would kill the token the running pod is using —
+      exactly the 2026-08-02 breakage. The first version did mint, and the
+      move test caught it.
+- [x] Regression test for 2026-08-02: after an app changes namespace the
+      delivered token is byte-identical and the source namespace is emptied.
+      Plus mint-idempotence (a converged app is never rotated), re-mint of a
+      revoked token, and an unmanaged Secret of the same name left untouched.
+- [ ] CRD `ServiceIdentity` (cluster-scoped) + renderer entry in
+      `resources.values.yaml`. Not needed for delivery — the console writes the
+      Secret through the API directly, which keeps the token out of git, unlike
+      the renderer's `AppEnvSecretSpec` channel that commits `stringData`
+      plaintext to argo-infra.
 - [ ] App render: consume the token via `secretKeyRef`, never a literal.
+      Deliberately after delivery ships: a `secretKeyRef` to a Secret that is
+      not there yet wedges the pod in `CreateContainerConfigError`.
 
 ## Phase 3 — second audience, proving the generalisation
 
