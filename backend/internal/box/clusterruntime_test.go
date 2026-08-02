@@ -232,3 +232,24 @@ func TestAResumedServiceStartsWhereItsDiskIs(t *testing.T) {
 		t.Fatalf("the restarted command is not the declared one: %s", script)
 	}
 }
+
+// TestAStartedServiceGetsTheBoxEnvironment pins what a declared service is
+// entitled to: the environment the box was given. attachBoxDatabase writes the
+// connection string into that file and nowhere else, so a service started without
+// it comes up with no credentials and fails on its first query. Both runtimes'
+// file names must be honoured, because the rendering is shared.
+func TestAStartedServiceGetsTheBoxEnvironment(t *testing.T) {
+	script := startServiceScript(ServiceDescriptor{
+		Name:       "api",
+		Command:    "python3 server.py",
+		WorkingDir: "/workspace/app",
+	})
+	for _, want := range []string{". /" + ClusterBoxEnvPath, ". /" + BoxEnvPath, "set -a", "set +a"} {
+		if !strings.Contains(script, want) {
+			t.Errorf("start script does not load the box environment: missing %q in %s", want, script)
+		}
+	}
+	if !strings.Contains(script, "exec python3 server.py") {
+		t.Errorf("the declared command must still be the process that survives: %s", script)
+	}
+}

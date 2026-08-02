@@ -901,6 +901,24 @@ func (c *ClusterRuntime) declaredServices(ctx context.Context, inst *Instance) (
 	return descs, nil
 }
 
+// serviceEnvPreamble loads the box's injected environment into a service before
+// it execs.
+//
+// A declared service that starts without it is the customer's own process running
+// blind: attachBoxDatabase writes the connection string into this file and
+// nowhere else, so a service started without it comes up with no DATABASE_URL and
+// fails on its first query. Measured in production on 2026-08-02: the demo
+// service in box e2e-zero-0802 answered `box=?` because BOX_NAME was absent from
+// its /proc/<pid>/environ.
+//
+// Both paths are tried because the two runtimes disagree on the name — a pod-backed
+// box keeps /etc/dada/env, a local rootfs keeps /etc/dada/box.env — and a start
+// must not care which runtime it is running under. Missing files are skipped
+// rather than fatal; set -a exports every assignment the file makes, which is the
+// same contract systemd's EnvironmentFile gives the crystallized unit.
+const serviceEnvPreamble = "set -a; [ -r /" + ClusterBoxEnvPath + " ] && . /" + ClusterBoxEnvPath + "; " +
+	"[ -r /" + BoxEnvPath + " ] && . /" + BoxEnvPath + "; set +a; "
+
 // startServiceScript renders one descriptor into the same start the box performed
 // when the service was first declared, so what a resume brings back is the process
 // the customer started rather than an approximation of it.
@@ -910,7 +928,7 @@ func startServiceScript(d ServiceDescriptor) string {
 		workdir = clusterWorkspacePath
 	}
 	logPath := "/var/log/" + d.Name + ".log"
-	inner := fmt.Sprintf("echo $$ > %s; exec %s", ServicePIDFile(d.Name), d.Command)
+	inner := fmt.Sprintf("%secho $$ > %s; exec %s", serviceEnvPreamble, ServicePIDFile(d.Name), d.Command)
 	return fmt.Sprintf("mkdir -p /var/log /run && cd %s && setsid /bin/sh -c %s >%s 2>&1 </dev/null & echo started",
 		shellQuote(workdir), shellQuote(inner), shellQuote(logPath))
 }
