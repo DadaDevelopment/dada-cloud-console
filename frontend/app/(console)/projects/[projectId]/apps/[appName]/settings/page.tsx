@@ -41,10 +41,11 @@ export default function AppSettingsPage() {
   const [verifiedApexes, setVerifiedApexes] = useState<DomainAuthorization[]>([]);
   const [isUploadedSource, setIsUploadedSource] = useState(false);
   const [anonymousAccessRepo, setAnonymousAccessRepo] = useState(false);
+  const [platformAccess, setPlatformAccess] = useState<string | null>(null);
   const [sourceDownloadBusy, setSourceDownloadBusy] = useState(false);
   const [sourceDownloadError, setSourceDownloadError] = useState<string | null>(null);
   const canEdit = canMutate(role);
-  const anonymousAccessViewedRef = useRef(false);
+  const gitTabViewedRef = useRef<string | null>(null);
 
   useEffect(() => {
     customDomainsApi
@@ -61,19 +62,24 @@ export default function AppSettingsPage() {
         const repo = (d.repos ?? []).find((r) => r.app_name === appName);
         setIsUploadedSource(repo?.provider === "archive");
         setAnonymousAccessRepo(repo?.platform_access === "anonymous");
+        setPlatformAccess(repo ? repo.platform_access || "unknown" : "none");
       })
       .catch(() => {
         setIsUploadedSource(false);
         setAnonymousAccessRepo(false);
+        setPlatformAccess("load_failed");
       });
   }, [projectId, envId, appName]);
 
   useEffect(() => {
-    if (tab !== "git" || !anonymousAccessRepo) return;
-    if (anonymousAccessViewedRef.current) return;
-    anonymousAccessViewedRef.current = true;
-    trackUxEvent("view", "git_platform_access_cta:panel");
-  }, [tab, anonymousAccessRepo]);
+    if (tab !== "git" || platformAccess === null) return;
+    if (gitTabViewedRef.current === platformAccess) return;
+    gitTabViewedRef.current = platformAccess;
+    trackUxEvent("view", `app_git_tab:${platformAccess}`);
+    if (platformAccess === "anonymous") {
+      trackUxEvent("view", "git_platform_access_cta:panel");
+    }
+  }, [tab, platformAccess]);
 
   async function downloadSource() {
     setSourceDownloadBusy(true);
