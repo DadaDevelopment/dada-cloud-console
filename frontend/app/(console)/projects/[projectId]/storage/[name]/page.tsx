@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useParams, useSearchParams } from "next/navigation";
 import { s3bucketsApi } from "@/lib/api";
 import type { ResourceSnapshot, S3BucketCredentialsResponse } from "@/lib/types";
@@ -47,8 +47,11 @@ export default function BucketDetailPage() {
   const [credsLoading, setCredsLoading] = useState(false);
   const [credsError, setCredsError] = useState<{ kind: CredsErrorKind; message?: string } | null>(null);
 
-  async function revealCreds() {
-    setCredsLoading(true);
+  const [waitingSince, setWaitingSince] = useState<number | null>(null);
+  const [waitedMin, setWaitedMin] = useState(0);
+
+  async function revealCreds(silent = false) {
+    if (!silent) setCredsLoading(true);
     setCredsError(null);
     try {
       const r = await s3bucketsApi.credentials(projectId, envId, name);
@@ -59,15 +62,42 @@ export default function BucketDetailPage() {
         setCredsError({ kind: "failed", message: e instanceof Error ? e.message : t("storage.detail.access.error") });
       } else if (err?.status === 404) {
         setCredsError({ kind: "notReady" });
+        setWaitingSince((prev) => prev ?? Date.now());
       } else if (err?.status === 503) {
         setCredsError({ kind: "notConfigured" });
       } else {
         setCredsError({ kind: "generic", message: e instanceof Error ? e.message : t("storage.detail.access.error") });
       }
     } finally {
-      setCredsLoading(false);
+      if (!silent) setCredsLoading(false);
     }
   }
+
+  const revealRef = useRef(revealCreds);
+  useEffect(() => {
+    revealRef.current = revealCreds;
+  });
+
+  /**
+   * Beget provisions an S3 bucket through Terraform and it can take over an
+   * hour; the credentials endpoint answers 404 until the connection secret
+   * lands. Users were re-clicking "Reveal" by hand and giving up minutes before
+   * the bucket went live, so once we know the bucket is merely not ready we
+   * keep asking on their behalf until it is (or until it fails for real).
+   */
+  useEffect(() => {
+    if (credsError?.kind !== "notReady" || creds) return;
+    const id = setInterval(() => void revealRef.current(true), 15000);
+    return () => clearInterval(id);
+  }, [credsError?.kind, creds]);
+
+  useEffect(() => {
+    if (waitingSince === null || creds) return;
+    const tick = () => setWaitedMin(Math.floor((Date.now() - waitingSince) / 60000));
+    tick();
+    const id = setInterval(tick, 30000);
+    return () => clearInterval(id);
+  }, [waitingSince, creds]);
 
   useEffect(() => {
     if (!envId) return;
@@ -185,7 +215,7 @@ aws --endpoint-url ${endpointPlaceholder} s3 cp s3://${bucketName}/file.txt ./`;
             <div>
               <button
                 type="button"
-                onClick={revealCreds}
+                onClick={() => void revealCreds()}
                 disabled={credsLoading}
                 className="inline-flex items-center gap-2 rounded-lg bg-amber-600 px-4 py-2 text-sm font-medium text-white hover:bg-amber-700 disabled:opacity-50 transition-colors"
               >
@@ -210,7 +240,7 @@ aws --endpoint-url ${endpointPlaceholder} s3 cp s3://${bucketName}/file.txt ./`;
               {credsError && credsError.kind !== "failed" && (
                 <p className={`mt-3 text-sm ${credsError.kind === "generic" ? "text-red-600 dark:text-red-400" : "text-gray-500 dark:text-gray-400"}`}>
                   {credsError.kind === "notReady"
-                    ? t("storage.detail.access.notReady")
+                    ? t("storage.detail.access.waiting", { min: String(waitedMin) })
                     : credsError.kind === "notConfigured"
                       ? t("storage.detail.access.notConfigured")
                       : credsError.message}

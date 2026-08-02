@@ -95,6 +95,10 @@ export const storage: Messages = {
     ru: "Учётные данные пока недоступны — бакет ещё создаётся.",
     en: "Credentials aren't available yet — the bucket is still provisioning.",
   },
+  "storage.detail.access.waiting": {
+    ru: "Бакет ещё создаётся на стороне провайдера — ждём и проверяем сами каждые 15 секунд, страницу обновлять не нужно. Ждём уже {min} мин; у Beget это иногда занимает больше часа.",
+    en: "The provider is still building the bucket — we keep checking every 15 seconds, no need to refresh. Waiting {min} min so far; with Beget this sometimes takes over an hour.",
+  },
   "storage.detail.access.notConfigured": {
     ru: "Доступ к учётным данным не настроен для этого окружения.",
     en: "Credential access isn't configured for this environment.",

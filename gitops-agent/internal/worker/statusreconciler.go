@@ -97,6 +97,7 @@ func (r *StatusReconciler) tick(ctx context.Context) {
 	r.reconcileModels(ctx)
 	r.reconcileDatabases(ctx)
 	r.reconcilePublicApis(ctx)
+	r.reconcileS3Buckets(ctx)
 	if r.cfg.OrphanGCEnabled {
 		r.reconcileOrphans(ctx, live)
 	}
@@ -263,6 +264,61 @@ func (r *StatusReconciler) reconcilePublicApis(ctx context.Context) {
 	}
 	if updated > 0 {
 		log.Debug().Int("updated", updated).Msg("status-reconciler: synced publicapi statuses")
+	}
+}
+
+// reconcileS3Buckets mirrors S3Bucket readiness — and, when the provider
+// refuses to build the bucket, its own rejection text — onto EXISTING bucket
+// snapshots. It deliberately never creates rows: project/env stay whatever git
+// assigned, so a bucket cannot leak into a project it was not committed under
+// (the same reason discover() is off by default). Without this pass an S3Bucket
+// snapshot is written once at git-sync time and then never moves, which is why
+// buckets sat at "Pending" for days after the cluster had them Ready, and why a
+// provider rejection had no path to the console at all.
+func (r *StatusReconciler) reconcileS3Buckets(ctx context.Context) {
+	bucketEnvs, err := db.SnapshotEnvsByKind(ctx, r.pool, "S3Bucket")
+	if err != nil {
+		log.Error().Err(err).Msg("status-reconciler: list s3bucket envs")
+		return
+	}
+	if len(bucketEnvs) == 0 {
+		return
+	}
+
+	list, err := r.clients.Dynamic.Resource(pgvr("s3buckets")).Namespace("").List(ctx, metav1.ListOptions{})
+	if err != nil {
+		log.Warn().Err(err).Msg("status-reconciler: list s3buckets")
+		return
+	}
+
+	updated := 0
+	for i := range list.Items {
+		cr := &list.Items[i]
+		name := cr.GetName()
+		ids := bucketEnvs[name]
+		if len(ids) != 1 {
+			continue
+		}
+		phase := crPhase(cr)
+		msg, reason, _ := crProvisionError(cr)
+		fields := map[string]any{
+			"status":                 phase,
+			"conditions":             crConditions(cr),
+			"live_source":            "crossplane",
+			"live_at":                time.Now().UTC().Format(time.RFC3339),
+			"provision_error":        msg,
+			"provision_error_reason": reason,
+		}
+		patch, _ := json.Marshal(fields)
+		n, err := db.UpdateLiveStatus(ctx, r.pool, ids[0], "S3Bucket", name, phase, patch)
+		if err != nil {
+			log.Error().Err(err).Str("s3bucket", name).Msg("status-reconciler: update s3bucket")
+			continue
+		}
+		updated += int(n)
+	}
+	if updated > 0 {
+		log.Debug().Int("updated", updated).Msg("status-reconciler: synced s3bucket statuses")
 	}
 }
 
