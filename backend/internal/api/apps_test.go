@@ -74,6 +74,41 @@ func TestFillRepoFullName(t *testing.T) {
 	}
 }
 
+func TestFillRepoFullNameAndSource(t *testing.T) {
+	apps := []models.ResourceSnapshot{
+		{Name: "uploaded-app", SummaryJSON: json.RawMessage(`{"repo_full_name":"upload/uploaded-app"}`)},
+		{Name: "git-app", SummaryJSON: json.RawMessage(`{"repo_full_name":"acme/git-app"}`)},
+		{Name: "already-set", SummaryJSON: json.RawMessage(`{"repo_full_name":"acme/x","source":"archive"}`)},
+	}
+	repoByName := map[string]string{
+		"uploaded-app": "upload/uploaded-app",
+		"git-app":      "acme/git-app",
+		"already-set":  "acme/x",
+	}
+	sourceByName := map[string]string{
+		"uploaded-app": "archive",
+		"git-app":      "git",
+		"already-set":  "git",
+	}
+	api.FillRepoFullNameAndSource(apps, repoByName, sourceByName)
+
+	get := func(raw json.RawMessage) string {
+		var m map[string]any
+		_ = json.Unmarshal(raw, &m)
+		s, _ := m["source"].(string)
+		return s
+	}
+	if got := get(apps[0].SummaryJSON); got != "archive" {
+		t.Errorf("uploaded-app: source = %q, want archive", got)
+	}
+	if got := get(apps[1].SummaryJSON); got != "git" {
+		t.Errorf("git-app: source = %q, want git", got)
+	}
+	if got := get(apps[2].SummaryJSON); got != "archive" {
+		t.Errorf("already-set: overwrote existing source -> %q, want archive kept", got)
+	}
+}
+
 func TestSynthesizeGitRepoApps(t *testing.T) {
 	projectID := uuid.New()
 	envID := uuid.New()
@@ -82,14 +117,15 @@ func TestSynthesizeGitRepoApps(t *testing.T) {
 	seen := map[string]struct{}{"deployed": {}}
 
 	rows := []api.GitRepoRow{
-		{ID: uuid.New(), Name: "deployed", Repo: "acme/deployed", Profile: "small", Replicas: 1, Port: 8080, LatestStatus: "success"},
-		{ID: uuid.New(), Name: "linked-no-build", Repo: "acme/linked", Profile: "small", Replicas: 1, Port: 3000, LatestStatus: ""},
-		{ID: uuid.New(), Name: "building", Repo: "acme/building", Profile: "small", Replicas: 1, Port: 3000, LatestStatus: "building"},
-		{ID: uuid.New(), Name: "failed-first", Repo: "acme/failed", Profile: "small", Replicas: 1, Port: 3000, LatestStatus: "failed"},
-		{ID: uuid.New(), Name: "canceled-ghost", Repo: "acme/canceled", Profile: "small", Replicas: 1, Port: 3000, LatestStatus: "canceled"},
+		{ID: uuid.New(), Name: "deployed", Repo: "acme/deployed", Provider: "github", Profile: "small", Replicas: 1, Port: 8080, LatestStatus: "success"},
+		{ID: uuid.New(), Name: "linked-no-build", Repo: "acme/linked", Provider: "github", Profile: "small", Replicas: 1, Port: 3000, LatestStatus: ""},
+		{ID: uuid.New(), Name: "building", Repo: "acme/building", Provider: "github", Profile: "small", Replicas: 1, Port: 3000, LatestStatus: "building"},
+		{ID: uuid.New(), Name: "failed-first", Repo: "acme/failed", Provider: "github", Profile: "small", Replicas: 1, Port: 3000, LatestStatus: "failed"},
+		{ID: uuid.New(), Name: "canceled-ghost", Repo: "acme/canceled", Provider: "github", Profile: "small", Replicas: 1, Port: 3000, LatestStatus: "canceled"},
+		{ID: uuid.New(), Name: "uploaded", Repo: "upload/uploaded", Provider: "archive", Profile: "small", Replicas: 1, Port: 3000, LatestStatus: "success"},
 	}
 
-	out, repoByName := api.SynthesizeGitRepoApps(apps, rows, seen, projectID, envID)
+	out, repoByName, sourceByName := api.SynthesizeGitRepoApps(apps, rows, seen, projectID, envID)
 
 	names := map[string]models.ResourceSnapshot{}
 	for _, a := range out {
@@ -117,6 +153,21 @@ func TestSynthesizeGitRepoApps(t *testing.T) {
 	}
 	if repoByName["deployed"] != "acme/deployed" {
 		t.Errorf("repoByName[deployed] = %q, want acme/deployed", repoByName["deployed"])
+	}
+	if sourceByName["uploaded"] != "archive" {
+		t.Errorf("sourceByName[uploaded] = %q, want archive", sourceByName["uploaded"])
+	}
+	if sourceByName["deployed"] != "git" {
+		t.Errorf("sourceByName[deployed] = %q, want git", sourceByName["deployed"])
+	}
+	uploaded, ok := names["uploaded"]
+	if !ok {
+		t.Fatalf("uploaded: expected a NotDeployed placeholder")
+	}
+	var uploadedSummary map[string]any
+	_ = json.Unmarshal(uploaded.SummaryJSON, &uploadedSummary)
+	if got, _ := uploadedSummary["source"].(string); got != "archive" {
+		t.Errorf("uploaded placeholder summary source = %q, want archive", got)
 	}
 }
 

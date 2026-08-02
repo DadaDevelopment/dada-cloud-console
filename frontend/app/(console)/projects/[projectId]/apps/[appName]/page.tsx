@@ -105,6 +105,9 @@ export default function AppDetailPage() {
   const [previewDeleteError, setPreviewDeleteError] = useState<string | null>(null);
   const [activePreview, setActivePreview] = useState<{ url: string; openUrl?: string; label: string } | null>(null);
 
+  const [sourceDownloadBusy, setSourceDownloadBusy] = useState(false);
+  const [sourceDownloadError, setSourceDownloadError] = useState<string | null>(null);
+
   const deployGoalFiredRef = useRef(false);
 
   useEffect(() => {
@@ -330,7 +333,8 @@ export default function AppDetailPage() {
     );
   }
 
-  const summary = app.summary_json as { image?: string; port?: number; replicas?: number; profile?: string; resources?: { cpu_limit: string; memory_limit: string }; runtime?: string; volume?: AppVolume; repo_full_name?: string; url?: string; preview_url?: string };
+  const summary = app.summary_json as { image?: string; port?: number; replicas?: number; profile?: string; resources?: { cpu_limit: string; memory_limit: string }; runtime?: string; volume?: AppVolume; repo_full_name?: string; source?: string; url?: string; preview_url?: string };
+  const isUploadedSource = summary.source === "archive";
   const isCompose = summary.runtime === "compose";
   const resType = classifyVMResource(app);
   const isResource = resType !== "app";
@@ -343,6 +347,19 @@ export default function AppDetailPage() {
           hasGitRepo: !!summary.repo_full_name,
         })
       : [];
+
+  async function downloadSource() {
+    setSourceDownloadBusy(true);
+    setSourceDownloadError(null);
+    try {
+      const d = await appsApi.downloadSourceArchive(projectId, envId, appName);
+      window.location.href = d.url;
+    } catch (e) {
+      setSourceDownloadError(e instanceof Error ? e.message : t("apps.settings.source.error"));
+    } finally {
+      setSourceDownloadBusy(false);
+    }
+  }
 
   return (
     <div>
@@ -478,6 +495,29 @@ export default function AppDetailPage() {
           appUrl={summary.url}
           buildHref={(buildId) => `/projects/${projectId}/apps/${appName}/builds/${buildId}${envId ? `?envId=${envId}` : ""}`}
         />
+      )}
+
+      {!isResource && isUploadedSource && (
+        <div className="mb-6 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 px-5 py-4 shadow-sm">
+          <div className="min-w-0">
+            <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">{t("apps.settings.source.title")}</p>
+            <p className="mt-0.5 truncate text-xs text-gray-500 dark:text-gray-400">{t("apps.settings.source.subtitle")}</p>
+          </div>
+          <div className="flex shrink-0 flex-col items-end gap-1">
+            <button
+              type="button"
+              onClick={downloadSource}
+              disabled={sourceDownloadBusy}
+              data-ux="app_source_download:click"
+              className="rounded-lg border border-gray-300 dark:border-gray-700 px-3 py-1.5 text-xs font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-50 transition-colors"
+            >
+              {sourceDownloadBusy ? t("apps.settings.source.busy") : t("apps.settings.source.download")}
+            </button>
+            {sourceDownloadError && (
+              <p className="text-xs text-red-600 dark:text-red-400">{sourceDownloadError}</p>
+            )}
+          </div>
+        </div>
       )}
 
       <AppNextStepCard

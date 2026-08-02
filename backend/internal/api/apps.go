@@ -22,9 +22,21 @@ import (
 // A deployed app's resource-snapshot summary omits the linked repo, so without
 // this the UI shows "not linked" even though the repo is connected in git_repos.
 func FillRepoFullName(apps []models.ResourceSnapshot, repoByName map[string]string) {
+	FillRepoFullNameAndSource(apps, repoByName, nil)
+}
+
+// FillRepoFullNameAndSource is FillRepoFullName plus a "source" backfill
+// (the provider behind the linked repo, e.g. "git" or "archive"). The console
+// needs "source" to know whether a deployed app has an uploaded archive it can
+// offer to download - DownloadSourceArchive 404s for anything else, so the UI
+// condition must track this field, not the mere presence of repo_full_name
+// (an uploaded archive also carries a repo_full_name, "upload/"+appName).
+// sourceByName may be nil, in which case only repo_full_name is backfilled.
+func FillRepoFullNameAndSource(apps []models.ResourceSnapshot, repoByName, sourceByName map[string]string) {
 	for i := range apps {
 		repo := repoByName[apps[i].Name]
-		if repo == "" {
+		source := sourceByName[apps[i].Name]
+		if repo == "" && source == "" {
 			continue
 		}
 		var m map[string]any
@@ -34,8 +46,20 @@ func FillRepoFullName(apps []models.ResourceSnapshot, repoByName map[string]stri
 		if m == nil {
 			m = map[string]any{}
 		}
-		if cur, _ := m["repo_full_name"].(string); cur == "" {
-			m["repo_full_name"] = repo
+		changed := false
+		if repo != "" {
+			if cur, _ := m["repo_full_name"].(string); cur == "" {
+				m["repo_full_name"] = repo
+				changed = true
+			}
+		}
+		if source != "" {
+			if cur, _ := m["source"].(string); cur == "" {
+				m["source"] = source
+				changed = true
+			}
+		}
+		if changed {
 			if b, err := json.Marshal(m); err == nil {
 				apps[i].SummaryJSON = b
 			}
@@ -172,6 +196,7 @@ type GitRepoRow struct {
 	ID           uuid.UUID
 	Name         string
 	Repo         string
+	Provider     string
 	Profile      string
 	Replicas     int
 	Port         int
@@ -184,13 +209,22 @@ type GitRepoRow struct {
 // whose latest build was canceled is skipped so a canceled first deploy leaves
 // no visible app — the connect+build+deploy flow then reads as atomic. Failed
 // builds are kept so the user can still see and retry them. It returns the
-// extended app slice and a name→repo map covering every row (used to backfill
-// repo_full_name on deployed apps, independent of which placeholders are shown).
-func SynthesizeGitRepoApps(apps []models.ResourceSnapshot, rows []GitRepoRow, seen map[string]struct{}, projectID, envID uuid.UUID) ([]models.ResourceSnapshot, map[string]string) {
+// extended app slice, a name->repo map, and a name->source map covering every
+// row (used to backfill repo_full_name/source on deployed apps, independent
+// of which placeholders are shown). source is the row's git_repos.provider
+// ("github", "gitlab", "archive"), collapsed to "git" for github/gitlab since
+// the console only needs to distinguish "uploaded archive" from everything
+// else.
+func SynthesizeGitRepoApps(apps []models.ResourceSnapshot, rows []GitRepoRow, seen map[string]struct{}, projectID, envID uuid.UUID) ([]models.ResourceSnapshot, map[string]string, map[string]string) {
 	repoByName := make(map[string]string, len(rows))
+	sourceByName := make(map[string]string, len(rows))
 	for _, r := range rows {
+		source := sourceForProvider(r.Provider)
 		if r.Repo != "" {
 			repoByName[r.Name] = r.Repo
+		}
+		if source != "" {
+			sourceByName[r.Name] = source
 		}
 		if _, ok := seen[r.Name]; ok {
 			continue
@@ -204,7 +238,7 @@ func SynthesizeGitRepoApps(apps []models.ResourceSnapshot, rows []GitRepoRow, se
 			"replicas":       r.Replicas,
 			"port":           r.Port,
 			"repo_full_name": r.Repo,
-			"source":         "git",
+			"source":         source,
 		})
 		envRef := envID
 		apps = append(apps, models.ResourceSnapshot{
@@ -219,7 +253,19 @@ func SynthesizeGitRepoApps(apps []models.ResourceSnapshot, rows []GitRepoRow, se
 		})
 		seen[r.Name] = struct{}{}
 	}
-	return apps, repoByName
+	return apps, repoByName, sourceByName
+}
+
+// sourceForProvider maps a git_repos.provider value to the "source" the
+// console shows/keys logic on. "archive" is kept distinct (it drives the
+// source-download button); "github"/"gitlab" collapse to "git"; an unknown
+// or empty provider yields "git" as the historical default so behavior for
+// existing rows (before this field existed) is unchanged.
+func sourceForProvider(provider string) string {
+	if provider == "archive" {
+		return "archive"
+	}
+	return "git"
 }
 
 // ListApps returns all App resources in a project environment.
@@ -308,7 +354,7 @@ func (h *Handler) ListApps(c *gin.Context) {
 		seen[a.Name] = struct{}{}
 	}
 	grows, gerr := h.pool.Query(c.Request.Context(),
-		`SELECT gr.id, gr.app_name, gr.repo_full_name,
+		`SELECT gr.id, gr.app_name, gr.repo_full_name, gr.provider,
 		        COALESCE(gr.profile, 'small'), COALESCE(gr.replicas, 1), COALESCE(gr.port, 8080),
 		        gr.updated_at, COALESCE(lb.status, '')
 		 FROM git_repos gr
@@ -326,7 +372,7 @@ func (h *Handler) ListApps(c *gin.Context) {
 		defer grows.Close()
 		for grows.Next() {
 			var r GitRepoRow
-			if scanErr := grows.Scan(&r.ID, &r.Name, &r.Repo, &r.Profile, &r.Replicas, &r.Port, &r.Updated, &r.LatestStatus); scanErr != nil {
+			if scanErr := grows.Scan(&r.ID, &r.Name, &r.Repo, &r.Provider, &r.Profile, &r.Replicas, &r.Port, &r.Updated, &r.LatestStatus); scanErr != nil {
 				continue
 			}
 			gitRows = append(gitRows, r)
@@ -336,9 +382,9 @@ func (h *Handler) ListApps(c *gin.Context) {
 	for _, r := range gitRows {
 		buildStatus[r.Name] = r.LatestStatus
 	}
-	apps, repoByName := SynthesizeGitRepoApps(apps, gitRows, seen, projectID, envID)
+	apps, repoByName, sourceByName := SynthesizeGitRepoApps(apps, gitRows, seen, projectID, envID)
 
-	FillRepoFullName(apps, repoByName)
+	FillRepoFullNameAndSource(apps, repoByName, sourceByName)
 	FillEffectiveResources(apps)
 	RestatePlaceholderPhase(apps, buildStatus)
 	SuppressNonHTTPURL(apps)
