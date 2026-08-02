@@ -147,8 +147,13 @@ func (h *Handler) ExposeBox(c *gin.Context) {
 // gap rather than the outcome: callers saw ok=false with a certificate error on
 // an address that answered 200 three seconds later. The budget is what an agent
 // is willing to wait for its own URL, not a retry policy for a broken edge.
+//
+// 25s was measured too short in production: a first exposure on a brand-new
+// hostname reported ok=false after six attempts on an address that answered 200
+// well inside the following minute. A single hung connect also costs a whole
+// probe timeout, so the budget buys far fewer samples than its size suggests.
 const (
-	exposeProbeBudget   = 25 * time.Second
+	exposeProbeBudget   = 90 * time.Second
 	exposeProbeInterval = 500 * time.Millisecond
 )
 
