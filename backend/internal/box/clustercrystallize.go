@@ -340,7 +340,7 @@ func (c *ClusterCrystallizer) CrystallizeWithReport(ctx context.Context, inst *I
 		rep.Carry["process"] = CarryLost
 	}
 
-	targetManifest, err := c.manifest(ctx, target, crystalContainer)
+	targetManifest, err := c.manifest(ctx, target, crystalContainer, workDir)
 	if err != nil {
 		return fail("verify", err)
 	}
@@ -518,13 +518,27 @@ func (c *ClusterCrystallizer) podImage(ctx context.Context, pod string) (string,
 // target. Three passes rather than a per-file shell loop: forking stat and
 // sha256sum once per file turns a manifest of a hundred thousand files into
 // minutes of exec.
-func manifestScript() string {
+// The scan stays -xdev so a stray mount cannot drag an unrelated filesystem into
+// the comparison, and extraRoots is how the one mount that MUST be scanned gets
+// in. On the artifact the working tree is a subPath mount inside the workload's
+// own root, so a walk that starts at /workspace stops at the mount boundary and
+// reports every file the user actually wrote as missing. Starting a walk at the
+// mount point itself sees it, because -xdev bounds crossings, not roots.
+//
+// The env file is left out on purpose: the promotion tightens its mode to 0600,
+// so a box that kept it at 0644 would mismatch by construction. It is not skipped
+// verification — it gets a stricter one of its own, per key by sha256 plus the
+// mode the ADR demands.
+func manifestScript(extraRoots ...string) string {
 	var prune []string
 	for _, p := range crystalPrunedPaths {
 		prune = append(prune, "-path "+p)
 	}
+	for _, p := range []string{"/" + ClusterBoxEnvPath, "/" + BoxEnvPath} {
+		prune = append(prune, "-path "+p)
+	}
 	pruneExpr := strings.Join(prune, " -o ")
-	roots := strings.Join(crystalDeltaRoots, " ")
+	roots := strings.Join(append(append([]string(nil), crystalDeltaRoots...), extraRoots...), " ")
 	return fmt.Sprintf(`ROOTS="%s"
 for r in $ROOTS; do [ -e "$r" ] || continue; find "$r" -xdev \( %s \) -prune -o \( -type f -o -type l -o -type d \) -printf 'M|%%y|%%m|%%s|%%p\n'; done
 for r in $ROOTS; do [ -e "$r" ] || continue; find "$r" -xdev \( %s \) -prune -o -type f -print0; done | xargs -0 -r -n 128 sha256sum 2>/dev/null | sed 's/^/H|/'
@@ -532,10 +546,10 @@ for r in $ROOTS; do [ -e "$r" ] || continue; find "$r" -xdev \( %s \) -prune -o 
 		roots, pruneExpr, pruneExpr, pruneExpr)
 }
 
-func (c *ClusterCrystallizer) manifest(ctx context.Context, pod, container string) (map[string]FileEntry, error) {
+func (c *ClusterCrystallizer) manifest(ctx context.Context, pod, container string, extraRoots ...string) (map[string]FileEntry, error) {
 	out := &bytes.Buffer{}
 	errBuf := &bytes.Buffer{}
-	if err := c.shell.execStream(ctx, pod, container, manifestScript(), nil, out, errBuf); err != nil {
+	if err := c.shell.execStream(ctx, pod, container, manifestScript(extraRoots...), nil, out, errBuf); err != nil {
 		if _, ok := exitCodeFrom(err); !ok {
 			return nil, fmt.Errorf("crystallize: manifest in %s: %w", pod, err)
 		}
