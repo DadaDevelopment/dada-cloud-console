@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/dada-tuda/console/backend/internal/config"
@@ -171,6 +172,145 @@ func seedOperation(t *testing.T, pool *pgxpool.Pool, actorID, projectID, envID u
 		t.Fatalf("seed operation: %v", err)
 	}
 	return id
+}
+
+// Alerting configuration is the platform's "tell me when it breaks" promise, and
+// all of it was silent: a channel Grafana refused, a rule that never provisioned
+// and a deleted resource left the same blank as a user who never configured
+// anything -- while the user went on believing they were subscribed.
+func TestCreateChannel_NoGrafanaIsAudited(t *testing.T) {
+	pool := testOptimisticPool(t)
+	h := &Handler{pool: pool, cfg: &config.Config{}}
+	userID := seedUser(t, pool)
+	projectID, envID := seedOptimisticFixture(t, pool)
+
+	path := "/projects/" + projectID.String() + "/environments/" + envID.String() + "/monitoring/channels"
+	rec := routeDatabaseCall(t, http.MethodPost,
+		"/projects/:projectId/environments/:envId/monitoring/channels", path,
+		`{"name":"ops","type":"telegram","bot_token":"secret","chat_id":"42"}`, godClaims(userID), h.CreateChannel)
+
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503; body=%s", rec.Code, rec.Body.String())
+	}
+
+	outcome, reason, gotEnv := lastAuditRow(t, pool, projectID, "CreateChannel")
+	if outcome != auditOutcomeFailure || reason != "grafana_unavailable" {
+		t.Errorf("audit row = (%q, %q), want (failure, grafana_unavailable)", outcome, reason)
+	}
+	if gotEnv == nil || *gotEnv != envID {
+		t.Errorf("environment_id = %v, want %v", gotEnv, envID)
+	}
+	assertNoChannelSecretsInAudit(t, pool, projectID, "CreateChannel")
+}
+
+func TestDeleteChannel_UnknownIsAudited(t *testing.T) {
+	pool := testOptimisticPool(t)
+	h := &Handler{pool: pool, cfg: &config.Config{}}
+	userID := seedUser(t, pool)
+	projectID, envID := seedOptimisticFixture(t, pool)
+
+	ghost := uuid.New()
+	path := "/projects/" + projectID.String() + "/environments/" + envID.String() + "/monitoring/channels/" + ghost.String()
+	rec := routeDatabaseCall(t, http.MethodDelete,
+		"/projects/:projectId/environments/:envId/monitoring/channels/:id", path,
+		"", godClaims(userID), h.DeleteChannel)
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404; body=%s", rec.Code, rec.Body.String())
+	}
+
+	outcome, reason, _ := lastAuditRow(t, pool, projectID, "DeleteChannel")
+	if outcome != auditOutcomeFailure || reason != "not_found" {
+		t.Errorf("audit row = (%q, %q), want (failure, not_found)", outcome, reason)
+	}
+}
+
+func TestDeleteAlertRule_UnknownIsAudited(t *testing.T) {
+	pool := testOptimisticPool(t)
+	h := &Handler{pool: pool, cfg: &config.Config{}}
+	userID := seedUser(t, pool)
+	projectID, envID := seedOptimisticFixture(t, pool)
+	appID := seedMonitoringApp(t, pool, projectID, envID)
+
+	ghost := uuid.New()
+	path := "/projects/" + projectID.String() + "/environments/" + envID.String() +
+		"/monitoring/" + appID.String() + "/alert-rules/" + ghost.String()
+	rec := routeDatabaseCall(t, http.MethodDelete,
+		"/projects/:projectId/environments/:envId/monitoring/:appId/alert-rules/:ruleId", path,
+		"", godClaims(userID), h.DeleteAlertRule)
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404; body=%s", rec.Code, rec.Body.String())
+	}
+
+	outcome, reason, gotEnv := lastAuditRow(t, pool, projectID, "DeleteAlertRule")
+	if outcome != auditOutcomeFailure || reason != "not_found" {
+		t.Errorf("audit row = (%q, %q), want (failure, not_found)", outcome, reason)
+	}
+	if gotEnv == nil || *gotEnv != envID {
+		t.Errorf("environment_id = %v, want %v", gotEnv, envID)
+	}
+}
+
+// Deleting the monitoring resource takes the dashboard and every alert rule with
+// it, which is the one alerting change a user can make by accident.
+func TestDeleteMonitoringApp_SuccessIsAudited(t *testing.T) {
+	pool := testOptimisticPool(t)
+	h := &Handler{pool: pool, cfg: &config.Config{}}
+	userID := seedUser(t, pool)
+	projectID, envID := seedOptimisticFixture(t, pool)
+	appID := seedMonitoringApp(t, pool, projectID, envID)
+
+	path := "/projects/" + projectID.String() + "/environments/" + envID.String() + "/monitoring/" + appID.String()
+	rec := routeDatabaseCall(t, http.MethodDelete,
+		"/projects/:projectId/environments/:envId/monitoring/:appId", path,
+		"", godClaims(userID), h.DeleteMonitoringApp)
+
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want 204; body=%s", rec.Code, rec.Body.String())
+	}
+
+	outcome, reason, gotEnv := lastAuditRow(t, pool, projectID, "DeleteMonitoringApp")
+	if outcome != auditOutcomeSuccess || reason != "" {
+		t.Errorf("audit row = (%q, %q), want (success, no reason)", outcome, reason)
+	}
+	if gotEnv == nil || *gotEnv != envID {
+		t.Errorf("environment_id = %v, want %v", gotEnv, envID)
+	}
+}
+
+// seedMonitoringApp inserts a monitoring resource and returns its id.
+func seedMonitoringApp(t *testing.T, pool *pgxpool.Pool, projectID, envID uuid.UUID) uuid.UUID {
+	t.Helper()
+	var id uuid.UUID
+	if err := pool.QueryRow(context.Background(),
+		`INSERT INTO monitoring_apps (project_id, environment_id, name, api_key_prefix, api_key_hash, scopes)
+		 VALUES ($1, $2, 'seeded-monitor', 'dmon_seed', 'hash', ARRAY['metrics:write']) RETURNING id`,
+		projectID, envID,
+	).Scan(&id); err != nil {
+		t.Fatalf("seed monitoring app: %v", err)
+	}
+	return id
+}
+
+// assertNoChannelSecretsInAudit is the 152-FZ guard on this batch: a channel is
+// configured with a bot token, a recipient address or a webhook URL, and none of
+// those may ever reach audit metadata.
+func assertNoChannelSecretsInAudit(t *testing.T, pool *pgxpool.Pool, projectID uuid.UUID, action string) {
+	t.Helper()
+	var meta string
+	if err := pool.QueryRow(context.Background(),
+		`SELECT metadata::text FROM audit_events
+		  WHERE project_id = $1 AND action = $2 ORDER BY created_at DESC LIMIT 1`,
+		projectID, action,
+	).Scan(&meta); err != nil {
+		t.Fatalf("read audit metadata: %v", err)
+	}
+	for _, forbidden := range []string{"secret", "bot_token", "bottoken", "addresses", "chat_id", "chatid", "url"} {
+		if strings.Contains(meta, forbidden) {
+			t.Errorf("audit metadata leaks %q: %s", forbidden, meta)
+		}
+	}
 }
 
 // A box is where a beginner's first session happens, and its two most useful

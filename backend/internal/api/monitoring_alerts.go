@@ -23,6 +23,45 @@ import (
 
 // ---- shared helpers --------------------------------------------------------
 
+// monitoringAuditFn records one audit row for a monitoring configuration change.
+type monitoringAuditFn func(outcome string, meta map[string]any)
+
+// monitoringAudit builds the recorder for an alerting-configuration handler.
+//
+// Alerting setup is the platform's "tell me when it breaks" promise, and every
+// refusal here used to be silent: a user who configured a channel Grafana never
+// accepted looked exactly like a user who never configured one, and then went on
+// believing they were subscribed.
+//
+// name is read at record time, so a handler can record a refusal that happened
+// before the body was parsed and still name the resource once it knows it.
+//
+// The metadata a caller passes must carry the channel TYPE and never its
+// settings: bot tokens, recipient addresses and webhook URLs are credentials and
+// personal data, and audit_events is not where they belong.
+func (h *Handler) monitoringAudit(c *gin.Context, projectID, envID uuid.UUID, action, kind string, name *string) monitoringAuditFn {
+	claims, ok := auth.GetClaims(c)
+	if !ok {
+		return func(string, map[string]any) {}
+	}
+	actorID := claims.UserID
+	return func(outcome string, meta map[string]any) {
+		resourceName := ""
+		if name != nil {
+			resourceName = *name
+		}
+		h.recordAudit(c.Request.Context(), actorID, auditEntry{
+			ProjectID:     projectID,
+			EnvironmentID: envID,
+			Action:        action,
+			ResourceKind:  kind,
+			ResourceName:  resourceName,
+			Outcome:       outcome,
+			Metadata:      meta,
+		})
+	}
+}
+
 // requireProjectWriter gates write surfaces: caller must be a project member AND
 // hold a write-capable role (Owner/Admin/Developer). Writes the response and
 // returns false on any failure.
@@ -264,25 +303,32 @@ func (h *Handler) ListChannels(c *gin.Context) {
 // @Failure     503       {object} map[string]string
 // @Router      /projects/{projectId}/environments/{envId}/monitoring/channels [post]
 func (h *Handler) CreateChannel(c *gin.Context) {
-	projectID, _, ok := h.resolveMonitoringProject(c, true)
+	projectID, envID, ok := h.resolveMonitoringProject(c, true)
 	if !ok {
 		return
 	}
+	channelName := ""
+	audit := h.monitoringAudit(c, projectID, envID, "CreateChannel", "MonitoringChannel", &channelName)
 	if h.grafana == nil {
+		audit(auditOutcomeFailure, map[string]any{"reason": "grafana_unavailable", "status": http.StatusServiceUnavailable})
 		respondError(c, http.StatusServiceUnavailable, "grafana not configured")
 		return
 	}
 	var req createChannelReq
 	if err := c.ShouldBindJSON(&req); err != nil {
+		audit(auditOutcomeFailure, map[string]any{"reason": "malformed_body", "status": http.StatusBadRequest})
 		respondError(c, http.StatusBadRequest, "invalid body")
 		return
 	}
+	channelName = req.Name
 	if req.Name == "" {
+		audit(auditOutcomeFailure, map[string]any{"reason": "name_required", "type": req.Type, "status": http.StatusBadRequest})
 		respondError(c, http.StatusBadRequest, "name is required")
 		return
 	}
 	settings, err := channelSettings(req)
 	if err != nil {
+		audit(auditOutcomeFailure, map[string]any{"reason": "invalid_settings", "type": req.Type, "status": http.StatusBadRequest})
 		respondError(c, http.StatusBadRequest, err.Error())
 		return
 	}
@@ -294,6 +340,7 @@ func (h *Handler) CreateChannel(c *gin.Context) {
 		`INSERT INTO monitoring_channels (id, project_id, name, type) VALUES ($1, $2, $3, $4)`,
 		channelID, projectID, req.Name, req.Type,
 	); err != nil {
+		audit(auditOutcomeFailure, map[string]any{"reason": "channel_insert_failed", "type": req.Type, "status": http.StatusConflict})
 		respondError(c, http.StatusConflict, "channel name already exists or insert failed")
 		return
 	}
@@ -306,15 +353,28 @@ func (h *Handler) CreateChannel(c *gin.Context) {
 	if err != nil {
 		// Roll back the mirror row so we don't leave an unroutable channel.
 		_, _ = h.pool.Exec(ctx, `DELETE FROM monitoring_channels WHERE id = $1`, channelID)
+		audit(auditOutcomeFailure, map[string]any{
+			"reason": "contact_point_failed", "type": req.Type,
+			"channel_id": channelID, "detail": err.Error(), "status": http.StatusBadGateway,
+		})
 		respondError(c, http.StatusBadGateway, "grafana contact point failed: "+err.Error())
 		return
 	}
 	if _, err := h.pool.Exec(ctx,
 		`UPDATE monitoring_channels SET grafana_contactpoint_uid = $1 WHERE id = $2`, uid, channelID,
 	); err != nil {
+		audit(auditOutcomeFailure, map[string]any{
+			"reason": "contact_point_uid_update_failed", "type": req.Type,
+			"channel_id": channelID, "status": http.StatusInternalServerError,
+		})
 		respondError(c, http.StatusInternalServerError, "failed to persist contact point uid")
 		return
 	}
+
+	audit(auditOutcomeSuccess, map[string]any{
+		"channel_id": channelID,
+		"type":       req.Type,
+	})
 
 	c.JSON(http.StatusCreated, gin.H{"channel": models.MonitoringChannel{
 		ID:                     channelID,
@@ -378,12 +438,15 @@ func channelSettings(req createChannelReq) (map[string]any, error) {
 // @Failure     502       {object} map[string]string
 // @Router      /projects/{projectId}/environments/{envId}/monitoring/channels/{id} [delete]
 func (h *Handler) DeleteChannel(c *gin.Context) {
-	projectID, _, ok := h.resolveMonitoringProject(c, true)
+	projectID, envID, ok := h.resolveMonitoringProject(c, true)
 	if !ok {
 		return
 	}
-	channelID, err := uuid.Parse(c.Param("id"))
+	channelRef := c.Param("id")
+	audit := h.monitoringAudit(c, projectID, envID, "DeleteChannel", "MonitoringChannel", &channelRef)
+	channelID, err := uuid.Parse(channelRef)
 	if err != nil {
+		audit(auditOutcomeFailure, map[string]any{"reason": "malformed_id", "status": http.StatusNotFound})
 		respondNotFound(c)
 		return
 	}
@@ -394,23 +457,30 @@ func (h *Handler) DeleteChannel(c *gin.Context) {
 		channelID, projectID,
 	).Scan(&uid)
 	if err == pgx.ErrNoRows {
+		audit(auditOutcomeFailure, map[string]any{"reason": "not_found", "status": http.StatusNotFound})
 		respondNotFound(c)
 		return
 	}
 	if err != nil {
+		audit(auditOutcomeFailure, map[string]any{"reason": "lookup_failed", "status": http.StatusInternalServerError})
 		respondError(c, http.StatusInternalServerError, "failed to load channel")
 		return
 	}
 	if h.grafana != nil {
 		if err := h.grafana.DeleteContactPoint(ctx, uid); err != nil {
+			audit(auditOutcomeFailure, map[string]any{
+				"reason": "contact_point_delete_failed", "detail": err.Error(), "status": http.StatusBadGateway,
+			})
 			respondError(c, http.StatusBadGateway, "grafana delete failed: "+err.Error())
 			return
 		}
 	}
 	if _, err := h.pool.Exec(ctx, `DELETE FROM monitoring_channels WHERE id = $1`, channelID); err != nil {
+		audit(auditOutcomeFailure, map[string]any{"reason": "channel_delete_failed", "status": http.StatusInternalServerError})
 		respondError(c, http.StatusInternalServerError, "failed to delete channel")
 		return
 	}
+	audit(auditOutcomeSuccess, map[string]any{"channel_id": channelID})
 	c.Status(http.StatusNoContent)
 }
 
@@ -496,27 +566,36 @@ func (h *Handler) ListAlertRules(c *gin.Context) {
 // @Failure     503       {object} map[string]string
 // @Router      /projects/{projectId}/environments/{envId}/monitoring/{appId}/alert-rules [post]
 func (h *Handler) CreateAlertRule(c *gin.Context) {
-	app, projectID, _ := h.resolveMonitoringApp(c)
+	app, projectID, envID := h.resolveMonitoringApp(c)
 	if app == nil {
 		return
 	}
 	if !h.requireProjectWriter(c, projectID) {
 		return
 	}
+	ruleName := ""
+	audit := h.monitoringAudit(c, projectID, envID, "CreateAlertRule", "MonitoringAlertRule", &ruleName)
 	if h.grafana == nil {
+		audit(auditOutcomeFailure, map[string]any{"reason": "grafana_unavailable", "status": http.StatusServiceUnavailable})
 		respondError(c, http.StatusServiceUnavailable, "grafana not configured")
 		return
 	}
 	var req createAlertRuleReq
 	if err := c.ShouldBindJSON(&req); err != nil {
+		audit(auditOutcomeFailure, map[string]any{"reason": "malformed_body", "status": http.StatusBadRequest})
 		respondError(c, http.StatusBadRequest, "invalid body")
 		return
 	}
+	ruleName = req.Name
 	if req.Name == "" || req.Metric == "" {
+		audit(auditOutcomeFailure, map[string]any{"reason": "name_or_metric_missing", "status": http.StatusBadRequest})
 		respondError(c, http.StatusBadRequest, "name and metric are required")
 		return
 	}
 	if !validConditions[req.Condition] {
+		audit(auditOutcomeFailure, map[string]any{
+			"reason": "invalid_condition", "condition": req.Condition, "status": http.StatusBadRequest,
+		})
 		respondError(c, http.StatusBadRequest, "condition must be one of >, <, >=, <=")
 		return
 	}
@@ -536,10 +615,14 @@ func (h *Handler) CreateAlertRule(c *gin.Context) {
 			`SELECT EXISTS(SELECT 1 FROM monitoring_channels WHERE id = $1 AND project_id = $2)`,
 			*req.ChannelID, projectID,
 		).Scan(&exists); err != nil {
+			audit(auditOutcomeFailure, map[string]any{"reason": "channel_check_failed", "status": http.StatusInternalServerError})
 			respondError(c, http.StatusInternalServerError, "failed to verify channel")
 			return
 		}
 		if !exists {
+			audit(auditOutcomeFailure, map[string]any{
+				"reason": "channel_not_in_project", "channel_id": *req.ChannelID, "status": http.StatusBadRequest,
+			})
 			respondError(c, http.StatusBadRequest, "channel not found in this project")
 			return
 		}
@@ -548,12 +631,18 @@ func (h *Handler) CreateAlertRule(c *gin.Context) {
 
 	// Folder + per-project Mimir datasource must exist before the rule references them.
 	if err := h.ensureGrafanaResource(ctx, app, projectID, orgID); err != nil {
+		audit(auditOutcomeFailure, map[string]any{
+			"reason": "grafana_provisioning_failed", "detail": err.Error(), "status": http.StatusBadGateway,
+		})
 		respondError(c, http.StatusBadGateway, "grafana provisioning failed: "+err.Error())
 		return
 	}
 	tenant := monitoringReadTenant(projectID, orgID)
 	dsUID, err := h.userMetricsDatasourceUID(ctx, projectID, tenant)
 	if err != nil {
+		audit(auditOutcomeFailure, map[string]any{
+			"reason": "datasource_provisioning_failed", "detail": err.Error(), "status": http.StatusBadGateway,
+		})
 		respondError(c, http.StatusBadGateway, "grafana datasource provisioning failed: "+err.Error())
 		return
 	}
@@ -575,6 +664,10 @@ func (h *Handler) CreateAlertRule(c *gin.Context) {
 	})
 	grafanaUID, err := h.grafana.CreateAlertRule(ctx, rule)
 	if err != nil {
+		audit(auditOutcomeFailure, map[string]any{
+			"reason": "alert_rule_create_failed", "metric": req.Metric,
+			"detail": err.Error(), "status": http.StatusBadGateway,
+		})
 		respondError(c, http.StatusBadGateway, "grafana alert rule failed: "+err.Error())
 		return
 	}
@@ -590,9 +683,21 @@ func (h *Handler) CreateAlertRule(c *gin.Context) {
 	); err != nil {
 		// Don't orphan the Grafana rule if the mirror insert fails.
 		_ = h.grafana.DeleteAlertRule(ctx, grafanaUID)
+		audit(auditOutcomeFailure, map[string]any{
+			"reason": "alert_rule_insert_failed", "metric": req.Metric, "status": http.StatusConflict,
+		})
 		respondError(c, http.StatusConflict, "rule name already exists or insert failed")
 		return
 	}
+
+	audit(auditOutcomeSuccess, map[string]any{
+		"rule_id":   ruleID,
+		"metric":    req.Metric,
+		"condition": req.Condition,
+		"threshold": req.Threshold,
+		"duration":  duration,
+		"routed":    req.ChannelID != nil,
+	})
 
 	c.JSON(http.StatusCreated, gin.H{"alert_rule": models.MonitoringAlertRule{
 		ID:              ruleID,
@@ -628,15 +733,18 @@ func (h *Handler) CreateAlertRule(c *gin.Context) {
 // @Failure     502       {object} map[string]string
 // @Router      /projects/{projectId}/environments/{envId}/monitoring/{appId}/alert-rules/{ruleId} [delete]
 func (h *Handler) DeleteAlertRule(c *gin.Context) {
-	app, projectID, _ := h.resolveMonitoringApp(c)
+	app, projectID, envID := h.resolveMonitoringApp(c)
 	if app == nil {
 		return
 	}
 	if !h.requireProjectWriter(c, projectID) {
 		return
 	}
-	ruleID, err := uuid.Parse(c.Param("ruleId"))
+	ruleRef := c.Param("ruleId")
+	audit := h.monitoringAudit(c, projectID, envID, "DeleteAlertRule", "MonitoringAlertRule", &ruleRef)
+	ruleID, err := uuid.Parse(ruleRef)
 	if err != nil {
+		audit(auditOutcomeFailure, map[string]any{"reason": "malformed_id", "status": http.StatusNotFound})
 		respondNotFound(c)
 		return
 	}
@@ -647,23 +755,30 @@ func (h *Handler) DeleteAlertRule(c *gin.Context) {
 		  WHERE id = $1 AND monitoring_app_id = $2`, ruleID, app.ID,
 	).Scan(&uid)
 	if err == pgx.ErrNoRows {
+		audit(auditOutcomeFailure, map[string]any{"reason": "not_found", "status": http.StatusNotFound})
 		respondNotFound(c)
 		return
 	}
 	if err != nil {
+		audit(auditOutcomeFailure, map[string]any{"reason": "lookup_failed", "status": http.StatusInternalServerError})
 		respondError(c, http.StatusInternalServerError, "failed to load alert rule")
 		return
 	}
 	if h.grafana != nil {
 		if err := h.grafana.DeleteAlertRule(ctx, uid); err != nil {
+			audit(auditOutcomeFailure, map[string]any{
+				"reason": "alert_rule_delete_failed", "detail": err.Error(), "status": http.StatusBadGateway,
+			})
 			respondError(c, http.StatusBadGateway, "grafana delete failed: "+err.Error())
 			return
 		}
 	}
 	if _, err := h.pool.Exec(ctx, `DELETE FROM monitoring_alert_rules WHERE id = $1`, ruleID); err != nil {
+		audit(auditOutcomeFailure, map[string]any{"reason": "mirror_delete_failed", "status": http.StatusInternalServerError})
 		respondError(c, http.StatusInternalServerError, "failed to delete alert rule")
 		return
 	}
+	audit(auditOutcomeSuccess, map[string]any{"rule_id": ruleID, "monitoring_app_id": app.ID})
 	c.Status(http.StatusNoContent)
 }
 
@@ -689,13 +804,15 @@ func (h *Handler) DeleteAlertRule(c *gin.Context) {
 // @Failure     404       {object} map[string]string
 // @Router      /projects/{projectId}/environments/{envId}/monitoring/{appId} [delete]
 func (h *Handler) DeleteMonitoringApp(c *gin.Context) {
-	app, projectID, _ := h.resolveMonitoringApp(c)
+	app, projectID, envID := h.resolveMonitoringApp(c)
 	if app == nil {
 		return
 	}
 	if !h.requireProjectWriter(c, projectID) {
 		return
 	}
+	appName := app.Name
+	audit := h.monitoringAudit(c, projectID, envID, "DeleteMonitoringApp", "MonitoringApp", &appName)
 	ctx := c.Request.Context()
 
 	if h.grafana != nil {
@@ -723,8 +840,10 @@ func (h *Handler) DeleteMonitoringApp(c *gin.Context) {
 	}
 
 	if _, err := h.pool.Exec(ctx, `DELETE FROM monitoring_apps WHERE id = $1`, app.ID); err != nil {
+		audit(auditOutcomeFailure, map[string]any{"reason": "monitoring_app_delete_failed", "status": http.StatusInternalServerError})
 		respondError(c, http.StatusInternalServerError, "failed to delete monitoring resource")
 		return
 	}
+	audit(auditOutcomeSuccess, map[string]any{"monitoring_app_id": app.ID})
 	c.Status(http.StatusNoContent)
 }
