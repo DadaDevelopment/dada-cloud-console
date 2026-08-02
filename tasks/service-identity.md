@@ -4,52 +4,67 @@ Spec: [ADR-021](../docs/adr/ADR-021-service-identity.md).
 Trigger: `reels-tracker` moved project on 2026-08-02, its pasted gateway key
 stayed bound to the old (now deleted) project, and every inference call returned
 `401 no credential for project/provider openrouter`.
+Principal is the **app**, not the project — a move must not touch credentials.
 
-## Phase 1 — identity owns the AI gateway key
+## Phase 1 — the credential names an app
 
 - [ ] Migration: `service_identities (id, app_name, environment_id, scopes,
-      created_at)` + `ai_gateway_keys.identity_id UUID REFERENCES
-      service_identities(id) ON DELETE SET NULL`. Keys keep working when an
-      identity is dropped; they just stop being reconciled.
+      created_at)`, unique on `(app_name, environment_id)`. Add
+      `ai_gateway_keys.identity_id UUID REFERENCES service_identities(id) ON
+      DELETE CASCADE`; backfill existing keys to an identity per app; drop
+      `ai_gateway_keys.project_id` last, in its own migration, once nothing
+      reads it.
+- [ ] `AIIntrospectKey`: resolve the project from
+      `resource_snapshots (kind='App', name, environment_id)` instead of
+      `k.project_id`. Hot path of every inference call — cache it, with the same
+      TTL discipline as the gateway's own introspect cache.
+- [ ] Test first, before the migration lands: an identity whose App snapshot row
+      is missing introspects as **invalid**, never as a default project.
 - [ ] CRD `ServiceIdentity` (cluster-scoped) + RBAC for the console SA to write
       Secrets in app namespaces (it already reads them, `cloudtask/dbcreds.go`).
 - [ ] Renderer: `ServiceIdentity` entry in `resources.values.yaml`
       (`gitops-agent/internal/renderer/resources_values.go`), golden test
       alongside the ServiceDatabaseV2 goldens.
-- [ ] Reconciler in the console backend: mint → deliver
-      `<appRef>-identity-credentials` → revoke keys bound to any other project.
-      Order matters; a test must assert the old key is still valid at the moment
-      the new secret lands.
+- [ ] Reconciler: no active key → mint + deliver `<appRef>-identity-credentials`.
+      No project-change branch — that is the point of the grain.
 - [ ] App render: consume `DADA_AI_API_KEY` / `DADA_AI_BASE_URL` via
       `secretKeyRef`, never a literal.
 
 ## Phase 2 — moves and preflight
 
 - [ ] `classifyMoveChildren`: `ServiceIdentity` joins the movable set.
-- [ ] MoveApp: re-render with `spec.namespace=<dstNs>` + dst labels, same edit
-      as the ServiceDatabaseV2 re-point. Golden test on the moved manifest.
+- [ ] MoveApp: re-render with `spec.namespace=<dstNs>` + dst labels, so the
+      secret lands in the destination namespace. No re-mint, no revoke. Golden
+      test on the moved manifest.
+- [ ] Move rehearsal on a throwaway app that asserts the **same** token keeps
+      working across the move — the regression test for 2026-08-02.
 - [ ] MoveImpact: per attached identity, list providers the source project has
-      an `ai_provider_credentials` row for and the destination does not. Warning,
-      not a blocker — this is the half of the reels failure no identity fixes.
-- [ ] Live rehearsal on a throwaway app before any real app is migrated.
+      an `ai_provider_credentials` row for and the destination does not.
+      Warning, not a blocker — the half no identity fixes.
 
-## Phase 3 — migrate the pasted keys
+## Phase 3 — attribution follows the grain
+
+- [ ] `agent_token_usage` gains `identity_id` (and so the app), so per-app cost
+      stops being unanswerable.
+- [ ] Per-app scopes and quota on the identity.
+
+## Phase 4 — migrate the pasted keys
 
 - [ ] Inventory apps whose `env_vars` hold an `sk-dada` literal.
 - [ ] `reels-tracker` first: declare the identity, cut over to `secretKeyRef`,
       drop `OPENROUTER_API_KEY` from argo-infra, revoke the user-service key.
-- [ ] Restore its direct-provider models once the identity lands in a project
-      that holds an openrouter credential — `OPENROUTER_MODEL` is pinned to the
-      `medium` tier alias meanwhile, and `OCR_VISION_MODEL` /
-      `WEB_SEARCH_MODEL` have no working tier equivalent at all.
+- [ ] Restore its direct-provider models once the identity resolves to a project
+      holding an openrouter credential — `OPENROUTER_MODEL` is pinned to the
+      `medium` tier alias meanwhile, and `OCR_VISION_MODEL` / `WEB_SEARCH_MODEL`
+      have no working tier equivalent at all.
 
-## Phase 4 — generic identity
+## Phase 5 — generic identity
 
 - [ ] Keycloak service-account client per identity for service-to-service auth,
       delivered into the same secret. Same resource, second payload.
 
 ## Out of scope
 
-Rotation on a schedule. Reconcile already mints, delivers and revokes in the
-right order, so a scheduled rotation is a trigger on top of Phase 1 rather than
-new machinery — but it is not needed to close the failure that started this.
+Scheduled rotation. Mint-and-deliver already exists in reconcile, so rotation is
+a trigger on top of Phase 1 rather than new machinery, and it is not needed to
+close the failure that started this.
