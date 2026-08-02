@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
@@ -910,6 +911,48 @@ type connectGitRepoRequest struct {
 	CloneURL string `json:"clone_url"`
 }
 
+// resolveInstallationByOwner finds the GitHub App installation that already
+// covers the owner of repoFullName, so a caller who omits installation_id
+// still gets an authenticated clone.
+//
+// Without this, an omitted installation_id stored NULL and the build agent fell
+// back to an anonymous clone: fine while the repo is public, but a silent
+// auto-deploy outage the moment it is private (observed on prod as builds
+// failing git_auth_failed with no user-visible cause). Matching is by
+// account_login against the owner segment, scoped to the project's org exactly
+// like availableInstallations — never widen past that boundary, it is what
+// keeps another org's installation invisible here. Ambiguity (two rows for the
+// same login) resolves to no match rather than a guess.
+func (h *Handler) resolveInstallationByOwner(ctx context.Context, projectID uuid.UUID, repoFullName string) (uuid.UUID, bool) {
+	owner, _, found := strings.Cut(repoFullName, "/")
+	if !found || owner == "" {
+		return uuid.Nil, false
+	}
+	rows, err := h.pool.Query(ctx,
+		`SELECT DISTINCT gai.id FROM git_app_installations gai
+		 JOIN projects p ON p.org_id = gai.org_id
+		 WHERE p.id = $1 AND gai.provider = 'github' AND lower(gai.account_login) = lower($2)
+		 LIMIT 2`,
+		projectID, owner,
+	)
+	if err != nil {
+		return uuid.Nil, false
+	}
+	defer rows.Close()
+	var ids []uuid.UUID
+	for rows.Next() {
+		var id uuid.UUID
+		if err := rows.Scan(&id); err != nil {
+			return uuid.Nil, false
+		}
+		ids = append(ids, id)
+	}
+	if rows.Err() != nil || len(ids) != 1 {
+		return uuid.Nil, false
+	}
+	return ids[0], true
+}
+
 // ConnectGitRepo links a repository to an app in an environment.
 //
 // @ID          connectGitRepo
@@ -1073,6 +1116,12 @@ func (h *Handler) ConnectGitRepo(c *gin.Context) {
 			return
 		}
 		installationID = &resolved
+	}
+
+	if installationID == nil && provider == "github" {
+		if resolved, ok := h.resolveInstallationByOwner(c.Request.Context(), projectID, req.RepoFullName); ok {
+			installationID = &resolved
+		}
 	}
 
 	// GitLab token (optional) — store encrypted.
