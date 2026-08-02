@@ -3,9 +3,11 @@ package box
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -528,6 +530,7 @@ func (c *ClusterRuntime) Bind(ctx context.Context, inst *Instance, spec Spec) er
 		fmt.Fprintf(&b, "printf '%%s\\n' %s >> /root/.ssh/authorized_keys\n", shellQuote(spec.SSHPublicKey))
 		b.WriteString("chmod 700 /root/.ssh && chmod 600 /root/.ssh/authorized_keys\n")
 	}
+	b.WriteString(linkServicesScript)
 	res, err := c.Exec(ctx, inst, b.String())
 	if err != nil {
 		return fmt.Errorf("bind identity: %w", err)
@@ -537,6 +540,35 @@ func (c *ClusterRuntime) Bind(ctx context.Context, inst *Instance, spec Spec) er
 	}
 	return c.labelBoxName(ctx, inst, spec.Env["BOX_NAME"])
 }
+
+// The declared-services directory of a cluster box lives ON THE DISK and is only
+// SEEN at /etc/dada/services.
+//
+// A pod's root filesystem dies with the body, and sleeping a box deletes the body
+// on purpose. A descriptor written straight into /etc/dada/services therefore
+// survives exactly until the first idle window, after which the box wakes with no
+// record of what it runs, nothing listening, and a published hostname that answers
+// 502 forever. Putting the descriptors on the persistent claim and linking the
+// documented path to them keeps ONE path for everything that reads services —
+// crystallization's glob included — while making the content outlive the body.
+const (
+	clusterServicesLink  = "/etc/dada/services"
+	clusterServicesStore = clusterWorkspacePath + "/.dada/services"
+)
+
+// linkServicesScript makes the documented path point at the persistent store. It
+// is idempotent, and it MOVES an existing real directory's contents rather than
+// deleting them, so a descriptor written before the link existed is not thrown
+// away by the act of creating the link.
+const linkServicesScript = `mkdir -p ` + clusterServicesStore + ` /etc/dada
+if [ ! -L ` + clusterServicesLink + ` ]; then
+  if [ -d ` + clusterServicesLink + ` ]; then
+    find ` + clusterServicesLink + ` -mindepth 1 -maxdepth 1 -exec mv -f {} ` + clusterServicesStore + `/ \;
+  fi
+  rm -rf ` + clusterServicesLink + `
+  ln -s ` + clusterServicesStore + ` ` + clusterServicesLink + `
+fi
+`
 
 // labelBoxName puts the control plane's name for this box on the pod, because
 // that is what a Service selector can be built from. The pool's own id changes
@@ -754,7 +786,103 @@ func (c *ClusterRuntime) Resume(ctx context.Context, inst *Instance, spec Spec) 
 		return fmt.Errorf("recreate box pod: %w", err)
 	}
 	inst.InstanceRef = pod.Name
-	return c.waitReady(ctx, inst)
+	if err := c.waitReady(ctx, inst); err != nil {
+		return err
+	}
+	return c.RestartServices(ctx, inst)
+}
+
+// RestartServices brings the box's declared services back up in a fresh body.
+//
+// Waking a box that answers its door but runs nothing is the failure this closes:
+// the pod is Ready, its Service has an endpoint, and every request to the box's
+// published hostname gets a 502 because the process the customer declared died
+// with the previous body. A resume that does not restart what the box declared is
+// a resume of the disk, not of the box.
+//
+// Failures are reported but do not fail the resume. The body IS back and the disk
+// IS attached; a descriptor whose command no longer works — its working directory
+// was outside the persistent claim, say — must leave the customer with a live box
+// to fix it in, not with a resume that refuses to complete.
+//
+// A runtime built without a rest config has no exec channel at all, which is the
+// shape the object-level tests construct; there is nothing to restart through, so
+// this is a no-op there rather than a panic.
+func (c *ClusterRuntime) RestartServices(ctx context.Context, inst *Instance) error {
+	if c.restCfg == nil {
+		return nil
+	}
+	if err := c.execOK(ctx, inst, linkServicesScript); err != nil {
+		return err
+	}
+	descs, err := c.declaredServices(ctx, inst)
+	if err != nil || len(descs) == 0 {
+		return err
+	}
+	var failed []string
+	for _, d := range descs {
+		if err := c.execOK(ctx, inst, startServiceScript(d)); err != nil {
+			failed = append(failed, d.Name)
+		}
+	}
+	if len(failed) > 0 {
+		return fmt.Errorf("resume: the box is awake but these declared services did not restart: %s", strings.Join(failed, ", "))
+	}
+	return nil
+}
+
+// declaredServices reads the descriptors the box itself records, which is the same
+// source crystallization reads, so a resumed box runs exactly the set a crystal
+// would carry.
+func (c *ClusterRuntime) declaredServices(ctx context.Context, inst *Instance) ([]ServiceDescriptor, error) {
+	res, err := c.Exec(ctx, inst, `for f in `+servicesGlob+`; do [ -f "$f" ] || continue; cat "$f"; echo; done`)
+	if err != nil {
+		return nil, fmt.Errorf("resume: read declared services: %w", err)
+	}
+	if res.ExitCode != 0 {
+		return nil, nil
+	}
+	var descs []ServiceDescriptor
+	dec := json.NewDecoder(strings.NewReader(res.Stdout))
+	for {
+		var d ServiceDescriptor
+		if err := dec.Decode(&d); err != nil {
+			if errors.Is(err, io.EOF) {
+				break
+			}
+			return nil, fmt.Errorf("resume: malformed service descriptor in the box: %w", err)
+		}
+		descs = append(descs, d)
+	}
+	sort.Slice(descs, func(i, j int) bool { return descs[i].Name < descs[j].Name })
+	return descs, nil
+}
+
+// startServiceScript renders one descriptor into the same start the box performed
+// when the service was first declared, so what a resume brings back is the process
+// the customer started rather than an approximation of it.
+func startServiceScript(d ServiceDescriptor) string {
+	workdir := d.WorkingDir
+	if workdir == "" {
+		workdir = clusterWorkspacePath
+	}
+	logPath := "/var/log/" + d.Name + ".log"
+	inner := fmt.Sprintf("echo $$ > %s; exec %s", ServicePIDFile(d.Name), d.Command)
+	return fmt.Sprintf("mkdir -p /var/log /run && cd %s && setsid /bin/sh -c %s >%s 2>&1 </dev/null & echo started",
+		shellQuote(workdir), shellQuote(inner), shellQuote(logPath))
+}
+
+// execOK runs a script inside the box and turns a non-zero exit into an error, so
+// callers that only care whether a step worked do not each re-check ExitCode.
+func (c *ClusterRuntime) execOK(ctx context.Context, inst *Instance, script string) error {
+	res, err := c.Exec(ctx, inst, script)
+	if err != nil {
+		return err
+	}
+	if res.ExitCode != 0 {
+		return fmt.Errorf("exit %d: %s", res.ExitCode, strings.TrimSpace(res.Stdout))
+	}
+	return nil
 }
 
 // clusterBoxIDFromPodName recovers the runtime's box id from a pod name, which is

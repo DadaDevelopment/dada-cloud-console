@@ -952,11 +952,7 @@ func ServicePIDFile(name string) string { return "/run/dada-service-" + name + "
 // root. One code path means the process the VM restarts is started the same way
 // the box started it, which is the claim ADR-019 makes about carried processes.
 func (r *LocalRuntime) startDescriptor(_ context.Context, run func(string) (RunResult, error), desc ServiceDescriptor) error {
-	logPath := "/var/log/" + desc.Name + ".log"
-	inner := fmt.Sprintf("echo $$ > %s; exec %s", ServicePIDFile(desc.Name), desc.Command)
-	start := fmt.Sprintf("mkdir -p /var/log /run && cd %s && setsid /bin/sh -c %s >%s 2>&1 </dev/null & echo started",
-		shellQuote(desc.WorkingDir), shellQuote(inner), shellQuote(logPath))
-	res, err := run(start)
+	res, err := run(startServiceScript(desc))
 	if err != nil {
 		return err
 	}

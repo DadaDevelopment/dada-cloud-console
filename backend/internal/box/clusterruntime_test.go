@@ -3,6 +3,7 @@ package box
 import (
 	"bytes"
 	"os"
+	"os/exec"
 	"strings"
 	"testing"
 
@@ -172,4 +173,62 @@ func TestBindRefusesAnEnvironmentKeyThatIsShell(t *testing.T) {
 // then fail loudly, since false is what the canon requires to be explicit.
 func ptrBool(p *bool) bool {
 	return p != nil && *p
+}
+
+// TestServiceDescriptorsSurviveLosingTheBody runs the real link script against a
+// throwaway root and proves the two properties a sleeping box depends on: a
+// descriptor written before the link existed is carried into the persistent store
+// rather than deleted, and running the script again on a fresh body re-attaches
+// the documented path to descriptors that were already there.
+func TestServiceDescriptorsSurviveLosingTheBody(t *testing.T) {
+	root := t.TempDir()
+	script := strings.ReplaceAll(linkServicesScript, clusterServicesLink, root+clusterServicesLink)
+	script = strings.ReplaceAll(script, "/etc/dada\n", root+"/etc/dada\n")
+	script = strings.ReplaceAll(script, clusterServicesStore, root+clusterServicesStore)
+
+	if err := os.MkdirAll(root+clusterServicesLink, 0o755); err != nil {
+		t.Fatalf("seed body-local services dir: %v", err)
+	}
+	if err := os.WriteFile(root+clusterServicesLink+"/demo.json", []byte(`{"name":"demo"}`), 0o644); err != nil {
+		t.Fatalf("seed descriptor: %v", err)
+	}
+
+	runScript(t, script)
+	stored, err := os.ReadFile(root + clusterServicesStore + "/demo.json")
+	if err != nil {
+		t.Fatalf("descriptor was not carried onto the persistent store: %v", err)
+	}
+	if string(stored) != `{"name":"demo"}` {
+		t.Fatalf("carried descriptor changed: %s", stored)
+	}
+
+	if err := os.RemoveAll(root + "/etc"); err != nil {
+		t.Fatalf("simulate losing the body: %v", err)
+	}
+	runScript(t, script)
+	if _, err := os.ReadFile(root + clusterServicesLink + "/demo.json"); err != nil {
+		t.Fatalf("a woken body cannot see its declared services: %v", err)
+	}
+}
+
+func runScript(t *testing.T, script string) {
+	t.Helper()
+	cmd := exec.Command("/bin/sh", "-c", script)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("link script failed: %v: %s", err, out)
+	}
+}
+
+// TestAResumedServiceStartsWhereItsDiskIs pins the default working directory of a
+// restarted service to the persistent claim. A descriptor with no working
+// directory that restarted in an ephemeral path would come back in a tree that no
+// longer holds the customer's code.
+func TestAResumedServiceStartsWhereItsDiskIs(t *testing.T) {
+	script := startServiceScript(ServiceDescriptor{Name: "demo", Command: "python3 server.py"})
+	if !strings.Contains(script, "cd '"+clusterWorkspacePath+"'") {
+		t.Fatalf("a service with no declared working directory does not restart on the disk: %s", script)
+	}
+	if !strings.Contains(script, "python3 server.py") {
+		t.Fatalf("the restarted command is not the declared one: %s", script)
+	}
 }
