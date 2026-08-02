@@ -59,43 +59,70 @@ func (h *Handler) CreateCloudTask(c *gin.Context) {
 	}
 	appName := c.Param("appName")
 
+	audit := func(outcome string, meta map[string]any) {
+		h.recordAudit(c.Request.Context(), claims.UserID, auditEntry{
+			ProjectID:     projectID,
+			EnvironmentID: envID,
+			Action:        "CreateCloudTask",
+			ResourceKind:  "CloudTask",
+			ResourceName:  appName,
+			Outcome:       outcome,
+			Metadata:      meta,
+		})
+	}
+	reject := func(status int, reason string, extra map[string]any) {
+		meta := map[string]any{"reason": reason, "status": status}
+		for k, v := range extra {
+			meta[k] = v
+		}
+		audit(auditOutcomeFailure, meta)
+	}
+
 	role, err := h.effectiveRole(c.Request.Context(), claims, projectID)
 	if err == pgx.ErrNoRows {
+		reject(http.StatusNotFound, "not_a_member", nil)
 		respondNotFound(c)
 		return
 	}
 	if err != nil {
+		reject(http.StatusInternalServerError, "membership_check_failed", nil)
 		respondError(c, http.StatusInternalServerError, "failed to check project membership")
 		return
 	}
 	if !canWrite(role) {
+		reject(http.StatusForbidden, "read_only_role", nil)
 		respondForbidden(c)
 		return
 	}
 	if h.dadagent == nil {
+		reject(http.StatusServiceUnavailable, "dadagent_unavailable", nil)
 		respondError(c, http.StatusServiceUnavailable, "dadagent integration not configured")
 		return
 	}
 
 	var req createCloudTaskRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
+		reject(http.StatusBadRequest, "malformed_body", nil)
 		respondError(c, http.StatusBadRequest, err.Error())
 		return
 	}
 	entry, ok := cloudtask.Lookup(req.TaskType)
 	if !ok {
+		reject(http.StatusBadRequest, "unknown_task_type", map[string]any{"task_type": req.TaskType})
 		respondError(c, http.StatusBadRequest, "unknown task_type")
 		return
 	}
 
 	repo, instID, gitRepoID, err := h.resolveGitRepo(c.Request.Context(), projectID, envID, appName)
 	if err != nil {
+		reject(http.StatusBadRequest, "no_connected_repo", map[string]any{"task_type": entry.TaskType})
 		respondError(c, http.StatusBadRequest, "no connected git repo for app")
 		return
 	}
 
 	token, _, err := gh.MintInstallToken(c.Request.Context(), h.cfg.GithubAppID, h.cfg.GithubAppPrivateKey, instID)
 	if err != nil {
+		reject(http.StatusBadGateway, "install_token_failed", map[string]any{"task_type": entry.TaskType, "repo": repo})
 		respondError(c, http.StatusBadGateway, "failed to mint install token")
 		return
 	}
@@ -106,6 +133,7 @@ func (h *Handler) CreateCloudTask(c *gin.Context) {
 	if entry.NeedsCounter {
 		counterID, err := h.counters.Resolve(c.Request.Context(), appName)
 		if err != nil {
+			reject(http.StatusFailedDependency, "counter_unresolved", map[string]any{"task_type": entry.TaskType})
 			respondError(c, http.StatusFailedDependency, err.Error())
 			return
 		}
@@ -113,6 +141,7 @@ func (h *Handler) CreateCloudTask(c *gin.Context) {
 	}
 	params, err := entry.ResolveParams(cfg)
 	if err != nil {
+		reject(http.StatusFailedDependency, "params_unresolved", map[string]any{"task_type": entry.TaskType})
 		respondError(c, http.StatusFailedDependency, err.Error())
 		return
 	}
@@ -125,6 +154,7 @@ func (h *Handler) CreateCloudTask(c *gin.Context) {
 		ActorID: claims.UserID,
 	})
 	if err != nil {
+		reject(http.StatusInternalServerError, "cloud_task_insert_failed", map[string]any{"task_type": entry.TaskType})
 		respondError(c, http.StatusInternalServerError, "failed to record cloud task")
 		return
 	}
@@ -147,6 +177,13 @@ func (h *Handler) CreateCloudTask(c *gin.Context) {
 	}
 
 	go h.runCloudTaskIntent(intentID, in)
+
+	audit(auditOutcomeSuccess, map[string]any{
+		"cloud_task_id": row.ID,
+		"task_type":     entry.TaskType,
+		"intent_id":     intentID,
+		"repo":          repo,
+	})
 
 	c.JSON(http.StatusAccepted, gin.H{"cloud_task": row})
 }

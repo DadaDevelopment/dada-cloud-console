@@ -100,22 +100,30 @@ func (h *Handler) PreviewZoneImport(c *gin.Context) {
 // @Failure     503       {object} map[string]string
 // @Router      /projects/{projectId}/domains/authorizations/{authId}/zone/import [post]
 func (h *Handler) ImportZone(c *gin.Context) {
-	_, authID, apex, ok := h.managedDNSAuth(c)
+	projectID, authID, apex, ok := h.managedDNSAuth(c)
 	if !ok {
 		return
 	}
 	ctx := c.Request.Context()
 
+	audit := h.dnsAudit(c, projectID, "ImportZone", apex)
+	reject := func(status int, reason string) {
+		audit(auditOutcomeFailure, map[string]any{"reason": reason, "status": status})
+	}
+
 	var req importZoneRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
+		reject(http.StatusBadRequest, "malformed_body")
 		respondError(c, http.StatusBadRequest, err.Error())
 		return
 	}
 
 	if _, found, err := h.loadManagedZone(ctx, authID); err != nil {
+		reject(http.StatusInternalServerError, "zone_lookup_failed")
 		respondError(c, http.StatusInternalServerError, "failed to load managed zone")
 		return
 	} else if !found {
+		reject(http.StatusNotFound, "zone_not_delegated")
 		respondNotFound(c)
 		return
 	}
@@ -150,6 +158,14 @@ func (h *Handler) ImportZone(c *gin.Context) {
 		}
 		imported++
 	}
+
+	skippedNames := make([]string, 0, len(skipped))
+	for _, s := range skipped {
+		skippedNames = append(skippedNames, fmt.Sprintf("%v/%v", s["name"], s["type"]))
+	}
+	audit(auditOutcomeSuccess, map[string]any{
+		"imported": imported, "skipped": len(skipped), "skipped_records": skippedNames,
+	})
 
 	c.JSON(http.StatusOK, gin.H{"imported": imported, "skipped": skipped})
 }

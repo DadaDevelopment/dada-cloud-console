@@ -19,7 +19,7 @@ var auditMutationVerbs = []string{
 	"Enable", "Expose", "Extend", "Generate", "Import", "Move", "Patch",
 	"Pin", "Promote", "Redeploy", "Register", "Remove", "Rename", "Reset",
 	"Restore", "Resume", "Retry", "Reveal", "Revoke", "Rotate", "Scale",
-	"Set", "Suspend", "Sync", "Trigger", "Update", "Upload", "Verify", "Write",
+	"Set", "Suspend", "Sync", "Trigger", "Update", "Upload", "Upsert", "Verify", "Write",
 }
 
 // auditCoverageKnownGaps are the mutating handlers that still leave no trace.
@@ -27,11 +27,7 @@ var auditMutationVerbs = []string{
 // The list is a ratchet, not permission: it may shrink, and a new entry means a
 // handler shipped without an audit row. Closing one is a one-line deletion here
 // plus the recordAudit call. Tracked as the audit-coverage backlog item.
-var auditCoverageKnownGaps = map[string]bool{
-	"CreateCloudTask":     true,
-	"DeleteManagedRecord": true,
-	"ImportZone":          true,
-}
+var auditCoverageKnownGaps = map[string]bool{}
 
 // auditWriters are the roots of the "this function ends in an audit row" set.
 // Coverage is resolved transitively from them because most handlers audit

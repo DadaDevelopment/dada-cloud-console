@@ -87,6 +87,37 @@ func (h *Handler) managedDNSAuth(c *gin.Context) (projectID, authID uuid.UUID, a
 	return projectID, authID, apex, true
 }
 
+// dnsAuditFn records one audit row for a change to a delegated zone.
+type dnsAuditFn func(outcome string, meta map[string]any)
+
+// dnsAudit builds the recorder for a managed-DNS write handler.
+//
+// A zone edit is the one change a user can make that takes their whole domain
+// off the internet, and until now none of them left a trace: a rejected record
+// type, a protected-rrset refusal and a PowerDNS outage all looked identical
+// from the outside -- nothing happened, no reason given, nothing to read back.
+//
+// Record contents stay out of the metadata: an rrset can hold verification
+// secrets (ACME challenges, mail signing keys), and audit_events is not the
+// place for them. Name and type are enough to line a row up with the zone.
+func (h *Handler) dnsAudit(c *gin.Context, projectID uuid.UUID, action, apex string) dnsAuditFn {
+	claims, ok := auth.GetClaims(c)
+	if !ok {
+		return func(string, map[string]any) {}
+	}
+	actorID := claims.UserID
+	return func(outcome string, meta map[string]any) {
+		h.recordAudit(c.Request.Context(), actorID, auditEntry{
+			ProjectID:    projectID,
+			Action:       action,
+			ResourceKind: "ManagedZone",
+			ResourceName: apex,
+			Outcome:      outcome,
+			Metadata:     meta,
+		})
+	}
+}
+
 // DelegateAuthorization switches an apex authorization to delegated mode. It
 // creates a PowerDNS zone delegated to the platform nameservers, seeds apex/www
 // A records pointing at the ingress LB, records a managed_zones row, and returns
@@ -284,27 +315,40 @@ func rrsetsToView(rrsets []pdns.RRSet) []managedRecordView {
 // @Failure     503       {object} map[string]string
 // @Router      /projects/{projectId}/domains/authorizations/{authId}/zone/records [post]
 func (h *Handler) UpsertManagedRecord(c *gin.Context) {
-	_, authID, apex, ok := h.managedDNSAuth(c)
+	projectID, authID, apex, ok := h.managedDNSAuth(c)
 	if !ok {
 		return
 	}
 	ctx := c.Request.Context()
 
+	audit := h.dnsAudit(c, projectID, "UpsertManagedRecord", apex)
+	recordName, rrType := "", ""
+	reject := func(status int, reason string) {
+		audit(auditOutcomeFailure, map[string]any{
+			"reason": reason, "status": status, "record_name": recordName, "record_type": rrType,
+		})
+	}
+
 	var req upsertRecordRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
+		reject(http.StatusBadRequest, "malformed_body")
 		respondError(c, http.StatusBadRequest, err.Error())
 		return
 	}
-	rrType := strings.ToUpper(strings.TrimSpace(req.Type))
+	recordName = req.Name
+	rrType = strings.ToUpper(strings.TrimSpace(req.Type))
 	if !allowedRecordTypes[rrType] {
+		reject(http.StatusBadRequest, "unsupported_record_type")
 		respondError(c, http.StatusBadRequest, "unsupported record type")
 		return
 	}
 	if len(req.Contents) == 0 {
+		reject(http.StatusBadRequest, "empty_contents")
 		respondError(c, http.StatusBadRequest, "contents must not be empty")
 		return
 	}
 	if msg, protected := protectedRecord(apex, req.Name, rrType); protected {
+		reject(http.StatusBadRequest, "protected_record")
 		respondError(c, http.StatusBadRequest, msg)
 		return
 	}
@@ -314,17 +358,24 @@ func (h *Handler) UpsertManagedRecord(c *gin.Context) {
 	}
 
 	if _, found, err := h.loadManagedZone(ctx, authID); err != nil {
+		reject(http.StatusInternalServerError, "zone_lookup_failed")
 		respondError(c, http.StatusInternalServerError, "failed to load managed zone")
 		return
 	} else if !found {
+		reject(http.StatusNotFound, "zone_not_delegated")
 		respondNotFound(c)
 		return
 	}
 
 	if err := h.pdns.UpsertRecord(ctx, apex, req.Name, rrType, ttl, req.Contents); err != nil {
+		reject(http.StatusBadGateway, "pdns_upsert_failed")
 		respondError(c, http.StatusBadGateway, "failed to upsert record: "+err.Error())
 		return
 	}
+	audit(auditOutcomeSuccess, map[string]any{
+		"record_name": pdns.QualifyName(apex, req.Name), "record_type": rrType, "ttl": ttl,
+		"content_count": len(req.Contents),
+	})
 	c.JSON(http.StatusOK, gin.H{
 		"record": gin.H{
 			"name":     pdns.QualifyName(apex, req.Name),
@@ -360,7 +411,7 @@ type deleteRecordRequest struct {
 // @Failure     503       {object} map[string]string
 // @Router      /projects/{projectId}/domains/authorizations/{authId}/zone/records [delete]
 func (h *Handler) DeleteManagedRecord(c *gin.Context) {
-	_, authID, apex, ok := h.managedDNSAuth(c)
+	projectID, authID, apex, ok := h.managedDNSAuth(c)
 	if !ok {
 		return
 	}
@@ -376,27 +427,41 @@ func (h *Handler) DeleteManagedRecord(c *gin.Context) {
 	if rrType == "" {
 		rrType = strings.ToUpper(strings.TrimSpace(c.Query("type")))
 	}
+
+	audit := h.dnsAudit(c, projectID, "DeleteManagedRecord", apex)
+	reject := func(status int, reason string) {
+		audit(auditOutcomeFailure, map[string]any{
+			"reason": reason, "status": status, "record_name": name, "record_type": rrType,
+		})
+	}
+
 	if rrType == "" || !allowedRecordTypes[rrType] {
+		reject(http.StatusBadRequest, "unsupported_record_type")
 		respondError(c, http.StatusBadRequest, "unsupported or missing record type")
 		return
 	}
 	if msg, protected := protectedRecord(apex, name, rrType); protected {
+		reject(http.StatusBadRequest, "protected_record")
 		respondError(c, http.StatusBadRequest, msg)
 		return
 	}
 
 	if _, found, err := h.loadManagedZone(ctx, authID); err != nil {
+		reject(http.StatusInternalServerError, "zone_lookup_failed")
 		respondError(c, http.StatusInternalServerError, "failed to load managed zone")
 		return
 	} else if !found {
+		reject(http.StatusNotFound, "zone_not_delegated")
 		respondNotFound(c)
 		return
 	}
 
 	if err := h.pdns.DeleteRecord(ctx, apex, name, rrType); err != nil {
+		reject(http.StatusBadGateway, "pdns_delete_failed")
 		respondError(c, http.StatusBadGateway, "failed to delete record: "+err.Error())
 		return
 	}
+	audit(auditOutcomeSuccess, map[string]any{"record_name": name, "record_type": rrType})
 	c.Status(http.StatusNoContent)
 }
 
