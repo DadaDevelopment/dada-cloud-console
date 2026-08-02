@@ -27,6 +27,19 @@ const appHealthWatchInterval = 3 * time.Minute
 // crashloop does not spam the owner's inbox every tick.
 const appHealthAlertCooldown = 24 * time.Hour
 
+// appHealthAlertRetryBackoff is how much of the 24h cooldown a failed send
+// gives back. The claim happens before the send (see claimAppHealthAlertSlot
+// and maybeNotify), so a send that errors out must not simply re-arm the
+// full cooldown for "now" — that would fire the very next tick and turn a
+// flaky SMTP relay into a retry storm, which is exactly what claiming before
+// sending was built to prevent. But leaving the full 24h burned on a send
+// that never reached the owner is its own bug (the one this migration
+// fixes): an app that stays broken would then go silent for a full day on
+// nothing but a transient mail-relay hiccup. Rolling last_sent_at back by
+// this fixed amount splits the difference: the next attempt is a bounded 15
+// minutes out, not immediate and not a day away.
+const appHealthAlertRetryBackoff = 15 * time.Minute
+
 // appHealthAlertFreshWindow is how recently last_seen_at must have been
 // touched for the console to still show a crash alert as current
 // (P1-ALERTS-IN-UI-FRESHNESS). Tied to appHealthWatchInterval (3m) with a 5x
@@ -421,6 +434,64 @@ func claimAppHealthAlertSlot(ctx context.Context, pool *pgxpool.Pool, namespace,
 	return ct.RowsAffected() > 0
 }
 
+// appHealthSendErrorMaxLen bounds how much of a send error's text is
+// persisted, so a verbose SMTP client error never grows the row (or a log
+// line derived from it) without limit. Counted in runes, not bytes: the
+// relay this goes through returns Cyrillic error text, and a byte-index
+// slice can land inside a multi-byte rune and hand Postgres invalid UTF-8,
+// which fails the very UPDATE meant to record the failure.
+const appHealthSendErrorMaxLen = 500
+
+// recordAppHealthAlertSend writes the real outcome of one send attempt for
+// (namespace, appName), on the same row claimAppHealthAlertSlot already
+// created. It is the answer to "did this app owner actually get the email",
+// which until this migration only existed as a log line — and the pod that
+// wrote that log line to app bruzas.85's alerts had already rotated it away
+// by the time anyone went looking (P1-LOUD-CONSOLE-NOBODY-OPENS).
+//
+// On success, last_sent_at is left exactly as claimAppHealthAlertSlot set it
+// (now()): the 24h cooldown behaves as it always did.
+//
+// On failure, last_sent_at is rolled back by appHealthAlertRetryBackoff
+// instead of being cleared or left at "just now". Clearing it would let the
+// very next tick re-claim and re-send immediately — a retry storm on a
+// flaky relay, the exact failure mode claiming before sending exists to
+// avoid. Leaving it at "just now" burns the full 24h cooldown on an app that
+// never got its owner notified, which is this ticket's root bug in a new
+// shape. The partial rollback is the compromise: bounded backoff, not an
+// immediate retry and not a lost day.
+func recordAppHealthAlertSend(ctx context.Context, pool *pgxpool.Pool, namespace, appName, recipient string, sendErr error) {
+	if sendErr == nil {
+		_, err := pool.Exec(ctx,
+			`UPDATE app_health_alerts
+			 SET last_send_attempt_at = now(), last_recipient = $3,
+			     last_send_ok = true, last_send_error = NULL, send_failures = 0
+			 WHERE namespace = $1 AND app_name = $2`,
+			namespace, appName, recipient)
+		if err != nil {
+			log.Printf("app-health: record send outcome for %s/%s failed: %v", namespace, appName, err)
+		}
+		return
+	}
+
+	errText := sendErr.Error()
+	if runes := []rune(errText); len(runes) > appHealthSendErrorMaxLen {
+		errText = string(runes[:appHealthSendErrorMaxLen])
+	}
+	_, err := pool.Exec(ctx,
+		`UPDATE app_health_alerts
+		 SET last_send_attempt_at = now(), last_recipient = $3,
+		     last_send_ok = false, last_send_error = $4,
+		     send_failures = send_failures + 1,
+		     last_sent_at = now() - make_interval(secs => $5) + make_interval(secs => $6)
+		 WHERE namespace = $1 AND app_name = $2`,
+		namespace, appName, recipient, errText,
+		appHealthAlertCooldown.Seconds(), appHealthAlertRetryBackoff.Seconds())
+	if err != nil {
+		log.Printf("app-health: record send outcome for %s/%s failed: %v", namespace, appName, err)
+	}
+}
+
 // touchAppHealthAlertSeen unconditionally records "this bad state was
 // observed right now", independent of the 24h email cooldown
 // (P1-ALERTS-IN-UI-FRESHNESS). Without this, app_health_alerts only ever
@@ -462,6 +533,13 @@ func touchAppHealthAlertSeen(ctx context.Context, pool *pgxpool.Pool, namespace,
 // recipient resolution and the cooldown claim, so the console's "is this
 // still happening" signal never depends on whether an email actually goes
 // out this tick.
+//
+// The claim itself only ever meant "slot taken", never "email delivered" —
+// recordAppHealthAlertSend is what turns "did this app owner get notified"
+// into a query instead of a log grep. It runs after every Send call, success
+// or failure, and a failed send additionally gives back part of the
+// cooldown (appHealthAlertRetryBackoff) rather than either the full 24h or
+// an immediate retry.
 func (w *appHealthWatcher) maybeNotify(ctx context.Context, projectID uuid.UUID, alert appHealthAlert) {
 	detail := alert.PodName + "/" + alert.Container
 	if alert.Reason == reasonError {
@@ -498,8 +576,10 @@ func (w *appHealthWatcher) maybeNotify(ctx context.Context, projectID uuid.UUID,
 	}
 	if err := w.h.auditNotifier.Send(to, subject, body); err != nil {
 		log.Printf("app-health: send to %s failed for app=%s: %v", to, alert.AppName, err)
+		recordAppHealthAlertSend(ctx, w.h.pool, alert.Namespace, alert.AppName, to, err)
 		return
 	}
+	recordAppHealthAlertSend(ctx, w.h.pool, alert.Namespace, alert.AppName, to, nil)
 	log.Printf("app-health: alerted %s (source=%s) for app=%s reason=%s pod=%s", to, source, alert.AppName, alert.Reason, alert.PodName)
 }
 
