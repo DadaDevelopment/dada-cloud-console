@@ -38,8 +38,6 @@ var auditCoverageKnownGaps = map[string]bool{
 	"DeleteMonitoringApp": true,
 	"ExposeBox":           true,
 	"ImportZone":          true,
-	"RetryOperation":      true,
-	"TriggerAutofix":      true,
 }
 
 // auditWriters are the roots of the "this function ends in an audit row" set.

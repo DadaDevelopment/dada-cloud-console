@@ -1,10 +1,13 @@
 package api
 
 import (
+	"context"
 	"net/http"
 	"testing"
 
 	"github.com/dada-tuda/console/backend/internal/config"
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // Three handlers that mutated silently, against a real database.
@@ -80,4 +83,91 @@ func TestAssignPlan_UnknownPlanIsAudited(t *testing.T) {
 	if outcome != auditOutcomeFailure || reason != "unknown_plan" {
 		t.Errorf("audit row = (%q, %q), want (failure, unknown_plan)", outcome, reason)
 	}
+}
+
+// The retry button is what a user presses when the platform already failed them
+// once, and pressing it left no trace at all -- neither the press nor a refusal.
+// That is exactly the moment the path analysis needs to see.
+func TestRetryOperation_NonFailedIsAudited(t *testing.T) {
+	pool := testOptimisticPool(t)
+	h := &Handler{pool: pool, cfg: &config.Config{}}
+	userID := seedUser(t, pool)
+	projectID, envID := seedOptimisticFixture(t, pool)
+	opID := seedOperation(t, pool, userID, projectID, envID, "Created")
+
+	path := "/projects/" + projectID.String() + "/operations/" + opID.String() + "/retry"
+	rec := routeDatabaseCall(t, http.MethodPost,
+		"/projects/:projectId/operations/:operationId/retry", path,
+		"", godClaims(userID), h.RetryOperation)
+
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want 409; body=%s", rec.Code, rec.Body.String())
+	}
+
+	outcome, reason, _ := lastAuditRow(t, pool, projectID, "RetryOperation")
+	if outcome != auditOutcomeFailure || reason != "not_failed" {
+		t.Errorf("audit row = (%q, %q), want (failure, not_failed)", outcome, reason)
+	}
+}
+
+func TestRetryOperation_SuccessIsAudited(t *testing.T) {
+	pool := testOptimisticPool(t)
+	h := &Handler{pool: pool, cfg: &config.Config{}}
+	userID := seedUser(t, pool)
+	projectID, envID := seedOptimisticFixture(t, pool)
+	opID := seedOperation(t, pool, userID, projectID, envID, "Failed")
+
+	path := "/projects/" + projectID.String() + "/operations/" + opID.String() + "/retry"
+	rec := routeDatabaseCall(t, http.MethodPost,
+		"/projects/:projectId/operations/:operationId/retry", path,
+		"", godClaims(userID), h.RetryOperation)
+
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, want 202; body=%s", rec.Code, rec.Body.String())
+	}
+
+	outcome, reason, _ := lastAuditRow(t, pool, projectID, "RetryOperation")
+	if outcome != auditOutcomeSuccess || reason != "" {
+		t.Errorf("audit row = (%q, %q), want (success, no reason)", outcome, reason)
+	}
+}
+
+// Auto-fix is the platform's own promise to repair a broken deploy. A launch
+// that never reaches DadaAgent looked identical to a user who never asked.
+func TestTriggerAutofix_LaunchFailureIsAudited(t *testing.T) {
+	pool := testOptimisticPool(t)
+	h := &Handler{pool: pool, cfg: &config.Config{}}
+	userID := seedUser(t, pool)
+	projectID, envID := seedOptimisticFixture(t, pool)
+
+	path := "/projects/" + projectID.String() + "/environments/" + envID.String() + "/apps/ghost/autofix"
+	rec := routeDatabaseCall(t, http.MethodPost,
+		"/projects/:projectId/environments/:envId/apps/:appName/autofix", path,
+		`{"error":"boom"}`, godClaims(userID), h.TriggerAutofix)
+
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503; body=%s", rec.Code, rec.Body.String())
+	}
+
+	outcome, reason, gotEnv := lastAuditRow(t, pool, projectID, "TriggerAutofix")
+	if outcome != auditOutcomeFailure || reason != "launch_failed" {
+		t.Errorf("audit row = (%q, %q), want (failure, launch_failed)", outcome, reason)
+	}
+	if gotEnv == nil || *gotEnv != envID {
+		t.Errorf("environment_id = %v, want %v", gotEnv, envID)
+	}
+}
+
+// seedOperation inserts an operations row in the given status and returns its id.
+func seedOperation(t *testing.T, pool *pgxpool.Pool, actorID, projectID, envID uuid.UUID, status string) uuid.UUID {
+	t.Helper()
+	var id uuid.UUID
+	if err := pool.QueryRow(context.Background(),
+		`INSERT INTO operations (actor_id, project_id, environment_id, action, resource_kind, resource_name, status, payload)
+		 VALUES ($1, $2, $3, 'CreateApp', 'App', 'seeded', $4, '{}'::jsonb) RETURNING id`,
+		actorID, projectID, envID, status,
+	).Scan(&id); err != nil {
+		t.Fatalf("seed operation: %v", err)
+	}
+	return id
 }

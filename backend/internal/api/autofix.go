@@ -69,30 +69,51 @@ func (h *Handler) TriggerAutofix(c *gin.Context) {
 	}
 	appName := c.Param("appName")
 
+	audit := func(outcome string, meta map[string]any) {
+		h.recordAudit(c.Request.Context(), claims.UserID, auditEntry{
+			ProjectID:     projectID,
+			EnvironmentID: envID,
+			Action:        "TriggerAutofix",
+			ResourceKind:  "App",
+			ResourceName:  appName,
+			Outcome:       outcome,
+			Metadata:      meta,
+		})
+	}
+	reject := func(status int, reason string) {
+		audit(auditOutcomeFailure, map[string]any{"reason": reason, "status": status})
+	}
+
 	role, err := h.effectiveRole(c.Request.Context(), claims, projectID)
 	if err == pgx.ErrNoRows {
+		reject(http.StatusNotFound, "not_a_member")
 		respondNotFound(c)
 		return
 	}
 	if err != nil {
+		reject(http.StatusInternalServerError, "membership_check_failed")
 		respondError(c, http.StatusInternalServerError, "failed to check project membership")
 		return
 	}
 	if !canWrite(role) {
+		reject(http.StatusForbidden, "read_only_role")
 		respondForbidden(c)
 		return
 	}
 
 	var req autofixRequest
 	if err := c.ShouldBindJSON(&req); err != nil && !errors.Is(err, io.EOF) {
+		reject(http.StatusBadRequest, "malformed_body")
 		respondError(c, http.StatusBadRequest, err.Error())
 		return
 	}
 
 	errText := req.Error
+	suppliedError := errText != ""
 	if errText == "" {
 		errText, err = h.latestFailedBuildSummary(c.Request.Context(), envID, appName)
 		if err != nil {
+			reject(http.StatusBadRequest, "no_error_context")
 			respondError(c, http.StatusBadRequest, "no error supplied and no failed build found for this app")
 			return
 		}
@@ -103,9 +124,22 @@ func (h *Handler) TriggerAutofix(c *gin.Context) {
 		ErrText: errText, ActorID: claims.UserID,
 	})
 	if err != nil {
+		status := http.StatusInternalServerError
+		var af *autofixError
+		if errors.As(err, &af) {
+			status = af.status
+		}
+		audit(auditOutcomeFailure, map[string]any{
+			"reason": "launch_failed", "status": status, "detail": err.Error(),
+		})
 		respondAutofixError(c, err)
 		return
 	}
+
+	audit(auditOutcomeSuccess, map[string]any{
+		"cloud_task_id":  row.ID,
+		"error_supplied": suppliedError,
+	})
 
 	c.JSON(http.StatusAccepted, gin.H{"cloud_task": row})
 }

@@ -141,17 +141,35 @@ func (h *Handler) RetryOperation(c *gin.Context) {
 		return
 	}
 
+	audit := func(outcome string, meta map[string]any) {
+		h.recordAudit(c.Request.Context(), claims.UserID, auditEntry{
+			ProjectID:    projectID,
+			OperationID:  operationID,
+			Action:       "RetryOperation",
+			ResourceKind: "Operation",
+			ResourceName: operationID.String(),
+			Outcome:      outcome,
+			Metadata:     meta,
+		})
+	}
+	reject := func(status int, reason string) {
+		audit(auditOutcomeFailure, map[string]any{"reason": reason, "status": status})
+	}
+
 	// Verify project membership
 	role, err := h.effectiveRole(c.Request.Context(), claims, projectID)
 	if err == pgx.ErrNoRows {
+		reject(http.StatusNotFound, "not_a_member")
 		respondNotFound(c)
 		return
 	}
 	if err != nil {
+		reject(http.StatusInternalServerError, "membership_check_failed")
 		respondError(c, http.StatusInternalServerError, "failed to check project membership")
 		return
 	}
 	if !canWrite(role) {
+		reject(http.StatusForbidden, "read_only_role")
 		respondForbidden(c)
 		return
 	}
@@ -163,15 +181,20 @@ func (h *Handler) RetryOperation(c *gin.Context) {
 		operationID, projectID,
 	).Scan(&currentStatus)
 	if err == pgx.ErrNoRows {
+		reject(http.StatusNotFound, "not_found")
 		respondNotFound(c)
 		return
 	}
 	if err != nil {
+		reject(http.StatusInternalServerError, "lookup_failed")
 		respondError(c, http.StatusInternalServerError, "failed to fetch operation")
 		return
 	}
 
 	if currentStatus != models.OperationStatusFailed {
+		audit(auditOutcomeFailure, map[string]any{
+			"reason": "not_failed", "status": http.StatusConflict, "current_status": string(currentStatus),
+		})
 		respondError(c, http.StatusConflict, "only failed operations can be retried")
 		return
 	}
@@ -189,9 +212,16 @@ func (h *Handler) RetryOperation(c *gin.Context) {
 		operationID, projectID,
 	)
 	if err = scanOperation(retryRow, &op); err != nil {
+		reject(http.StatusInternalServerError, "retry_update_failed")
 		respondError(c, http.StatusInternalServerError, "failed to retry operation")
 		return
 	}
+
+	audit(auditOutcomeSuccess, map[string]any{
+		"retried_action": op.Action,
+		"resource_kind":  op.ResourceKind,
+		"resource_name":  op.ResourceName,
+	})
 
 	c.JSON(http.StatusAccepted, gin.H{"operation": op})
 }
