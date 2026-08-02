@@ -48,10 +48,32 @@ type boxRuntimeStack struct {
 	exposer  box.Exposer
 	door     box.Door
 	local    *box.LocalRuntime
+	cryst    reportingCrystallizer
 	image    string
 	region   string
 	sessions string // base URL of the box session surface (the broker's stand-in)
 	warmed   bool
+}
+
+// reportingCrystallizer is the crystallizer the control plane actually needs.
+//
+// box.Crystallizer returns the carry manifest alone, and the carry manifest is
+// the smaller half of the answer: ADR-019 §7 makes the verification report the
+// deliverable. Both adapters implement this, so the handler holds one interface
+// and neither adapter's type is named outside its wiring.
+type reportingCrystallizer interface {
+	CrystallizeWithReport(ctx context.Context, inst *box.Instance, opts box.CrystallizeOptions) (*box.CrystallizationReport, error)
+}
+
+// requireCrystallizer answers 503 when no adapter can promote a box, rather than
+// letting the handler dereference nil.
+func (s *boxRuntimeStack) requireCrystallizer(c *gin.Context) (reportingCrystallizer, bool) {
+	if s.cryst == nil {
+		respondError(c, http.StatusServiceUnavailable,
+			"the wired box runtime cannot crystallize: no crystallizer is configured (ADR-019)")
+		return nil, false
+	}
+	return s.cryst, true
 }
 
 // requireLocalRuntime answers 503 for the two paths that only the local adapter
@@ -97,6 +119,7 @@ func (h *Handler) initBoxRuntime(cfg *config.Config) {
 		runtime: rt,
 		door:    rt,
 		local:   rt,
+		cryst:   &box.LocalCrystallizer{Runtime: rt, Clock: box.SystemClock{}},
 		pool:    pool,
 		attach: &box.LocalAttachProvider{
 			Runtime:       rt,
@@ -179,10 +202,15 @@ func (h *Handler) initClusterBoxRuntime(cfg *config.Config) {
 	}
 
 	pool := box.NewClusterPool(rt)
+	cryst := box.NewClusterCrystallizer(rt, cfg.BoxHostnameBase)
+	if cfg.BoxClusterTLSSecret != "" {
+		cryst.TLSSecret = cfg.BoxClusterTLSSecret
+	}
 	stack := &boxRuntimeStack{
 		runtime:  rt,
 		door:     rt,
 		pool:     pool,
+		cryst:    cryst,
 		exposer:  exposer,
 		image:    cfg.BoxWarmImage,
 		region:   cfg.BoxRegion,

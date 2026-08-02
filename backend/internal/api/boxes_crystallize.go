@@ -39,6 +39,13 @@ type crystallizeBoxRequest struct {
 	AckMonthlyCharge bool `json:"ack_monthly_charge"`
 	// ProbePath is the path the end-to-end probe requests.
 	ProbePath string `json:"probe_path"`
+	// Command, WorkingDir and Ports are the fallback for a box that never
+	// registered a service descriptor of its own. Without either the descriptor or
+	// these, nothing states what the permanent artifact should keep running, and
+	// the request is refused rather than promoting an idle body.
+	Command    string `json:"command"`
+	WorkingDir string `json:"working_dir"`
+	Ports      []int  `json:"ports"`
 }
 
 // CrystallizeBox materializes the box's userland onto a permanent VM and verifies it.
@@ -96,9 +103,9 @@ func (h *Handler) CrystallizeBox(c *gin.Context) {
 		reject(c.Writer.Status(), "box_runtime_unavailable")
 		return
 	}
-	local, ok := stack.requireLocalRuntime(c, "crystallization")
+	cz, ok := stack.requireCrystallizer(c)
 	if !ok {
-		reject(c.Writer.Status(), "local_runtime_unavailable")
+		reject(c.Writer.Status(), "crystallizer_unavailable")
 		return
 	}
 	b, ok := h.resolveBox(c, projectID, boxName)
@@ -163,12 +170,14 @@ func (h *Handler) CrystallizeBox(c *gin.Context) {
 	}
 
 	inst := instanceFor(b.ID.String(), b.InstanceRef, b.NodeRef, b.Image, b.Region, b.SSHHost, b.SSHPort, b.MCPURL)
-	cz := &box.LocalCrystallizer{Runtime: local, Clock: box.SystemClock{}}
 	report, cErr := cz.CrystallizeWithReport(c.Request.Context(), inst, box.CrystallizeOptions{
-		VMName:    name,
-		Domain:    domain,
-		OSSlug:    box.WarmImageOSSlug,
-		ProbePath: req.ProbePath,
+		VMName:     name,
+		Domain:     domain,
+		OSSlug:     box.WarmImageOSSlug,
+		ProbePath:  req.ProbePath,
+		Command:    req.Command,
+		WorkingDir: req.WorkingDir,
+		Ports:      req.Ports,
 	})
 
 	verified := cErr == nil

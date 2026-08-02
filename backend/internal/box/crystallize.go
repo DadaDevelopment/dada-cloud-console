@@ -71,6 +71,15 @@ type CrystallizeOptions struct {
 	OSSlug string
 	// ProbePath is the HTTP path the end-to-end probe requests.
 	ProbePath string
+	// Command is the fallback the caller supplies when the box declares no
+	// service descriptor of its own. Without it a box that never registered a
+	// service cannot be promoted, because nothing states what should keep running.
+	Command string
+	// WorkingDir is the directory Command runs in, and the subtree whose files
+	// stay writable on the permanent disk.
+	WorkingDir string
+	// Ports are the ports Command listens on, used when the box declares none.
+	Ports []int
 }
 
 // FileEntry is one file in a manifest: exactly the tuple ADR-019 §7 names.
@@ -148,6 +157,14 @@ type UnitRender struct {
 }
 
 // CrystallizationReport is the full verification report.
+//
+// Three fields exist for the cluster adapter and are empty on the local one:
+// ProbeInternal is the request made from inside the artifact's own network
+// namespace, the one check neither DNS nor the ingress can satisfy on its behalf;
+// BaselineSource names the pristine copy of the image the delta was computed
+// against, or says none was available; BaselineFiles is how many files that
+// baseline held. A small delta transfer and a fallback full transfer must be
+// distinguishable by whoever reads the report.
 type CrystallizationReport struct {
 	BoxID       string `json:"box_id"`
 	InstanceRef string `json:"instance_ref"`
@@ -172,6 +189,9 @@ type CrystallizationReport struct {
 	Units           []UnitRender       `json:"units"`
 	Sockets         SocketComparison   `json:"sockets"`
 	Probe           HTTPProbeResult    `json:"probe"`
+	ProbeInternal   HTTPProbeResult    `json:"probe_internal"`
+	BaselineSource  string             `json:"baseline_source"`
+	BaselineFiles   int                `json:"baseline_files"`
 	StoppedServices []string           `json:"stopped_services"`
 
 	Carry CarryManifest `json:"carry"`

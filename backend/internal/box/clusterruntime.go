@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"strings"
 	"sync"
 	"time"
@@ -580,31 +581,13 @@ func (c *ClusterRuntime) Exec(ctx context.Context, inst *Instance, cmd string) (
 // box goes through stdin rather than through a shell heredoc, so a token never
 // appears in a command line that a node's process list would show.
 func (c *ClusterRuntime) execWithStdin(ctx context.Context, inst *Instance, cmd string, stdin *bytes.Buffer) (CanaryResult, error) {
-	opts := &corev1.PodExecOptions{
-		Container: clusterContainerName,
-		Command:   []string{"/bin/sh", "-c", cmd},
-		Stdout:    true,
-		Stderr:    true,
-	}
 	out := &syncBuffer{}
-	streams := remotecommand.StreamOptions{Stdout: out, Stderr: out}
+	var in io.Reader
 	if stdin != nil {
-		opts.Stdin = true
-		streams.Stdin = stdin
+		in = stdin
 	}
-
-	req := c.clientset.CoreV1().RESTClient().Post().
-		Resource("pods").
-		Namespace(c.Namespace).
-		Name(inst.InstanceRef).
-		SubResource("exec").
-		VersionedParams(opts, scheme.ParameterCodec)
-
-	exec, err := remotecommand.NewSPDYExecutor(c.restCfg, "POST", req.URL())
+	err := c.execStream(ctx, inst.InstanceRef, clusterContainerName, cmd, in, out, out)
 	if err != nil {
-		return CanaryResult{}, fmt.Errorf("build box exec: %w", err)
-	}
-	if err := exec.StreamWithContext(ctx, streams); err != nil {
 		if code, ok := exitCodeFrom(err); ok {
 			return CanaryResult{ExitCode: code, Stdout: out.String()}, nil
 		}
@@ -614,6 +597,42 @@ func (c *ClusterRuntime) execWithStdin(ctx context.Context, inst *Instance, cmd 
 		return CanaryResult{Stdout: out.String()}, fmt.Errorf("exec in box: %w", err)
 	}
 	return CanaryResult{ExitCode: 0, Stdout: out.String()}, nil
+}
+
+// execStream is the raw pods/exec call: a shell command in a named container with
+// caller-supplied streams.
+//
+// Crystallization needs this shape rather than execWithStdin's: a userland
+// transfer is a tar of hundreds of megabytes piped out of one pod and into
+// another, and buffering that in a bytes.Buffer inside the control plane would
+// make the transfer's memory cost the size of the customer's data. Streams also
+// keep stdout and stderr APART here, because a tar stream with a warning folded
+// into it is a corrupt tar.
+//
+// The error is returned unwrapped so callers can still classify a non-zero exit
+// with exitCodeFrom.
+func (c *ClusterRuntime) execStream(ctx context.Context, podName, container, cmd string, stdin io.Reader, stdout, stderr io.Writer) error {
+	opts := &corev1.PodExecOptions{
+		Container: container,
+		Command:   []string{"/bin/sh", "-c", cmd},
+		Stdout:    stdout != nil,
+		Stderr:    stderr != nil,
+		Stdin:     stdin != nil,
+	}
+	req := c.clientset.CoreV1().RESTClient().Post().
+		Resource("pods").
+		Namespace(c.Namespace).
+		Name(podName).
+		SubResource("exec").
+		VersionedParams(opts, scheme.ParameterCodec)
+
+	exec, err := remotecommand.NewSPDYExecutor(c.restCfg, "POST", req.URL())
+	if err != nil {
+		return fmt.Errorf("build box exec: %w", err)
+	}
+	return exec.StreamWithContext(ctx, remotecommand.StreamOptions{
+		Stdin: stdin, Stdout: stdout, Stderr: stderr,
+	})
 }
 
 // syncBuffer is a bytes.Buffer that survives being written from two goroutines at
