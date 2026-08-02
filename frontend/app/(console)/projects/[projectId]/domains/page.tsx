@@ -2,6 +2,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, FormEvent } from "react";
 import { useParams } from "next/navigation";
 import { customDomainsApi, appsApi, managedDnsApi } from "@/lib/api";
+import { QuotaUpsell } from "@/components/billing/quota-upsell";
 import { docsHref } from "@/lib/site";
 import type {
   DomainAuthorization,
@@ -634,6 +635,7 @@ function AddDomainFunnel({
   const [auth, setAuth] = useState<DomainAuthorization | null>(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [quotaBlocked, setQuotaBlocked] = useState<{ resource: string; limit?: number } | null>(null);
 
   const [path, setPath] = useState<"app" | "delegate">("app");
   const [appName, setAppName] = useState(apps.length === 1 ? apps[0].name : "");
@@ -667,6 +669,7 @@ function AddDomainFunnel({
   async function handleContinue(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setErr(null);
+    setQuotaBlocked(null);
     const host = normalizeDomain(domainInput);
     if (!host) return;
     setTargetHost(host);
@@ -687,7 +690,12 @@ function AddDomainFunnel({
         setStep(created.status === "verified" ? "path" : "verify");
       }
     } catch (e2) {
-      setErr(e2 instanceof Error ? e2.message : t("domains.error.add"));
+      const quota = e2 as { code?: string; resource?: string; limit?: number } | undefined;
+      if (quota?.code === "quota_exceeded") {
+        setQuotaBlocked({ resource: quota.resource ?? "domains", limit: quota.limit });
+      } else {
+        setErr(e2 instanceof Error ? e2.message : t("domains.error.add"));
+      }
     } finally {
       setBusy(false);
     }
@@ -749,6 +757,9 @@ function AddDomainFunnel({
           />
           <p className="mt-1 text-xs text-gray-400 dark:text-gray-500">{t("domains.funnel.inputHelp")}</p>
         </div>
+        {quotaBlocked && (
+          <QuotaUpsell resource={quotaBlocked.resource} limit={quotaBlocked.limit} projectId={projectId} />
+        )}
         {err && (
           <div role="alert" className="rounded-lg border border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-950/40 px-4 py-3 text-sm text-red-700 dark:text-red-300">
             {err}

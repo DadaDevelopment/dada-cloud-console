@@ -1,10 +1,11 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { billingApi } from "@/lib/api";
 import type { BillingPlan, BillingQuota } from "@/lib/api";
 import { useT } from "@/lib/i18n/console/context";
+import { trackUxEvent } from "@/lib/ux-telemetry";
 
 /** Resources the quota gate can refuse, mapped to the plan quota that raises them. */
 const QUOTA_FIELD: Record<string, keyof BillingQuota> = {
@@ -41,6 +42,7 @@ export function QuotaUpsell({
   const [plans, setPlans] = useState<BillingPlan[] | null>(null);
   const [starting, setStarting] = useState(false);
   const [checkoutError, setCheckoutError] = useState<string | null>(null);
+  const viewedRef = useRef<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -54,6 +56,12 @@ export function QuotaUpsell({
       cancelled = true;
     };
   }, []);
+
+  useEffect(() => {
+    if (viewedRef.current === resource) return;
+    viewedRef.current = resource;
+    trackUxEvent("view", `quota_upsell:${resource}`);
+  }, [resource]);
 
   const field = QUOTA_FIELD[resource];
   const target = plans
@@ -95,6 +103,7 @@ export function QuotaUpsell({
             type="button"
             onClick={startCheckout}
             disabled={starting}
+            data-ux="quota_upsell:checkout"
             className="mt-3 inline-flex items-center gap-1.5 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-blue-700 disabled:opacity-60"
           >
             {starting
@@ -109,6 +118,7 @@ export function QuotaUpsell({
       ) : (
         <Link
           href="/pricing"
+          data-ux="quota_upsell:pricing"
           className="mt-3 inline-flex items-center gap-1.5 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-blue-700"
         >
           {t("quota.upsell.plansCta")}
