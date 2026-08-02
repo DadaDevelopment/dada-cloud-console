@@ -57,7 +57,7 @@ func declineServer(t *testing.T) *Client {
 func TestChargeSaved_Succeeded_ExtendsTermAndRecordsRecurringPayment(t *testing.T) {
 	pool := testProviderPool(t)
 	orgID := "org-autopay-ok-" + uuid.NewString()[:8]
-	expiresAt := time.Now().UTC().Add(20 * time.Hour)
+	expiresAt := time.Now().UTC().Add(20 * time.Hour).Truncate(time.Microsecond)
 	seedPaidAccount(t, pool, orgID, expiresAt)
 
 	p := NewProvider(pool, newFakeYooKassaServer(t, "succeeded"), "https://console.dada-tuda.ru/billing/return", false, 1, 0)
@@ -92,10 +92,15 @@ func TestChargeSaved_Succeeded_ExtendsTermAndRecordsRecurringPayment(t *testing.
 	}
 }
 
+// TestChargeSaved_Declined_LeavesTermAloneAndReportsReason asserts a declined
+// charge changes nothing about the running term. The seeded expiry is truncated
+// to microseconds because that is all a Postgres timestamptz keeps: seeding a
+// nanosecond-precision instant makes the read-back equality unreachable and the
+// test fails on rounding rather than on behaviour.
 func TestChargeSaved_Declined_LeavesTermAloneAndReportsReason(t *testing.T) {
 	pool := testProviderPool(t)
 	orgID := "org-autopay-decline-" + uuid.NewString()[:8]
-	expiresAt := time.Now().UTC().Add(20 * time.Hour)
+	expiresAt := time.Now().UTC().Add(20 * time.Hour).Truncate(time.Microsecond)
 	seedPaidAccount(t, pool, orgID, expiresAt)
 
 	p := NewProvider(pool, declineServer(t), "https://console.dada-tuda.ru/billing/return", false, 1, 0)
