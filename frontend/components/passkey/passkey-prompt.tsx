@@ -47,10 +47,17 @@ const SETTLE_MS = 800;
  *
  * Three things settle the campaign without ever showing the modal: returning
  * from the identity provider with a `kc_action_status` (the user just answered
- * the offer — `success` records `done`, `cancelled`/`error` records `skipped`),
- * a page load that is not a fresh sign-in, and another campaign sitting at
- * `seen`, which means its Joyride tour is mid-flight and a modal would bury the
+ * the offer — `success` records `done`, `cancelled` records `skipped`), a page
+ * load that is not a fresh sign-in, and another campaign sitting at `seen`,
+ * which means its Joyride tour is mid-flight and a modal would bury the
  * spotlight.
+ *
+ * `error` is deliberately NOT recorded. The enrollment blew up on the identity
+ * provider's side (no authenticator, a WebAuthn exception, a credential that
+ * already exists) — treating that as a deliberate "no thanks" burns the
+ * campaign permanently on a failure the user never chose, so the offer would
+ * never come back. Leaving the campaign untouched re-offers it at the next
+ * sign-in; the account menu stays available for an immediate retry.
  */
 export function PasskeyPrompt({ onOpenChange }: { onOpenChange?: (open: boolean) => void }) {
   const { token } = useAuth();
@@ -73,7 +80,8 @@ export function PasskeyPrompt({ onOpenChange }: { onOpenChange?: (open: boolean)
 
     const actionStatus = consumePasskeyActionStatus();
     if (actionStatus) {
-      report(actionStatus === "success" ? "done" : "skipped");
+      if (actionStatus === "success") report("done");
+      else if (actionStatus === "cancelled") report("skipped");
       return;
     }
 
