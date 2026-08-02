@@ -8,9 +8,9 @@ import type { Messages } from "./common";
 export const nav: Messages = {
   "nav.overview": { ru: "Обзор", en: "Overview" },
   "nav.apps": { ru: "Приложения", en: "Applications" },
-  "nav.data": { ru: "Данные", en: "Data" },
+  "nav.data": { ru: "Базы данных и S3", en: "Databases & S3" },
   "nav.databases": { ru: "Базы данных", en: "Databases" },
-  "nav.storage": { ru: "Объектное хранилище", en: "Object Storage" },
+  "nav.storage": { ru: "S3", en: "S3" },
   "nav.boxes": { ru: "Боксы", en: "Boxes" },
   "nav.domains": { ru: "Домены", en: "Domains" },
   "nav.monitoring": { ru: "Мониторинг", en: "Monitoring" },
