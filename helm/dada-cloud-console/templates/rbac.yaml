@@ -51,6 +51,16 @@ rules:
     resources:
       - pods/exec
     verbs: ["create"]
+  # The autoscaler applies a grow decision to the running pod through the resize
+  # subresource, which changes the container's cgroup limits in place. Without
+  # it the only way to enlarge a starving app is to rewrite its Deployment
+  # template, and a template change always rolls a new ReplicaSet -- so the
+  # platform's answer to "this app is being throttled" would be to restart it
+  # while it is under load.
+  - apiGroups: [""]
+    resources:
+      - pods/resize
+    verbs: ["patch", "update"]
   # Delete-impact scan lists app-owned Ingresses and cert-manager Certificates so
   # the blast-radius preview shows raw resources not modelled as platform CRs.
   - apiGroups: ["networking.k8s.io"]

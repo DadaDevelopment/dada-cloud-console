@@ -44,9 +44,10 @@ const appAutoscaleCPUThreshold = 0.25
 const appAutoscaleMemThreshold = 0.90
 
 // appAutoscaleCooldown is the minimum spacing between two resizes of the same
-// app. Much longer than the watch interval because a resize re-renders the
-// workload chart and rolls the pod: the new size needs time to be observed
-// under real traffic before the watcher is allowed to judge it again. It also
+// app. Much longer than the watch interval because the new size needs time to
+// be observed under real traffic before the watcher is allowed to judge it
+// again -- a doubling takes effect on the running pod within seconds, but the
+// throttling ratio that justified it is a 20m rate and lags well behind. It also
 // bounds the blast radius of a mis-calibrated threshold to one rollout per app
 // per 6h.
 const appAutoscaleCooldown = 6 * time.Hour
@@ -770,8 +771,62 @@ func (w *appAutoscaleWatcher) tick(ctx context.Context) {
 		}
 	}
 
+	w.convergeLiveSizes(ctx, nsProjects)
+
 	if w.h.cache.TryClaim(ctx, "autoscale:shrink-pass", appAutoscaleShrinkPassInterval) {
 		w.shrinkPass(ctx, nsProjects)
+	}
+}
+
+// convergeLiveSizes puts back a size the app already earned but lost.
+//
+// A grown app keeps its numbers in two places: in git, which is what a fresh
+// pod is built from, and in the running pod, which is where the resize was
+// actuated without a restart. Those two agree until the Deployment's template
+// is the one that gets read -- a node drain, an eviction, a manual rollout --
+// and the replacement pod comes back on whatever the template still says.
+//
+// Without this pass that regression waits for the app to starve again AND for
+// its 6h cooldown to expire, so an app could sit throttled for hours on a size
+// the platform had already decided it should not have. Converging is not a new
+// decision and deliberately claims no cooldown, writes no audit row and sends
+// nothing: it only re-asserts the envelope already recorded for the app, and
+// only ever upwards.
+func (w *appAutoscaleWatcher) convergeLiveSizes(ctx context.Context, nsProjects map[string]namespaceEnv) {
+	for ns, env := range nsProjects {
+		listCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+		pods, err := w.clientset.CoreV1().Pods(ns).List(listCtx, metav1.ListOptions{LabelSelector: "dada.io/app"})
+		cancel()
+		if err != nil {
+			continue
+		}
+		live := map[string]resourceEnvelope{}
+		for i := range pods.Items {
+			pod := &pods.Items[i]
+			appName := pod.Labels["dada.io/app"]
+			if appName == "" || pod.Status.Phase != corev1.PodRunning || pod.DeletionTimestamp != nil {
+				continue
+			}
+			if _, seen := live[appName]; seen {
+				continue
+			}
+			if e, ok := envelopeFromPodSpec(pod.Spec.Containers); ok {
+				live[appName] = e
+			}
+		}
+		for appName, have := range live {
+			st, err := w.h.loadAppProfileState(ctx, env.ProjectID, appName)
+			if err != nil {
+				continue
+			}
+			want, known := st.Envelope()
+			if !known || !want.exceeds(have) {
+				continue
+			}
+			out := w.resizeLivePods(ctx, ns, appName, want)
+			log.Printf("app-autoscale: converged %s/%s %s -> %s (pod had drifted below its recorded envelope) %s",
+				ns, appName, have, want, out)
+		}
 	}
 }
 
@@ -912,8 +967,9 @@ func (w *appAutoscaleWatcher) maybeShrink(ctx context.Context, projectID uuid.UU
 		log.Printf("app-autoscale: shrink %s/%s %s -> %s failed: %v", namespace, appName, from, to, err)
 		return
 	}
-	log.Printf("app-autoscale: shrank %s/%s %s -> %s (%s) op=%s",
-		namespace, appName, from, to, p.Detail(), opID)
+	live := w.resizeLivePods(ctx, namespace, appName, to)
+	log.Printf("app-autoscale: shrank %s/%s %s -> %s (%s) op=%s in_place=%s",
+		namespace, appName, from, to, p.Detail(), opID, live)
 
 	w.h.recordSystemAudit(ctx, auditEntry{
 		ProjectID:     projectID,
@@ -1066,7 +1122,14 @@ func (e resourceEnvelope) snapshot() snapshotResources {
 // refuse.
 //
 // Direction-agnostic: growing and shrinking differ only in the numbers handed
-// in, and both cost the app exactly one rollout.
+// in.
+//
+// The commit is durability, not delivery. What actually changes the app's size
+// now is resizeLivePods, which patches the running pod through the resize
+// subresource; this writes the same numbers where a pod built later will read
+// them. The tenant ApplicationSet ignores container resources when deciding
+// whether an app is out of sync precisely so that this commit does not roll a
+// new ReplicaSet behind the in-place resize.
 //
 // git_repos.profile is deliberately left alone. It is now only the fallback for
 // apps that have never been sized, and rewriting it would make a grown app look
@@ -1198,8 +1261,9 @@ func (w *appAutoscaleWatcher) maybeResize(ctx context.Context, projectID uuid.UU
 		w.auditRefusal(ctx, projectID, st, namespace, appName, "resize_failed", s, map[string]any{"to_envelope": to.String(), "error": err.Error()})
 		return
 	}
-	log.Printf("app-autoscale: resized %s/%s %s -> %s reason=%s ratio=%.4f op=%s",
-		namespace, appName, from, to, s.Reason, s.Ratio, opID)
+	live := w.resizeLivePods(ctx, namespace, appName, to)
+	log.Printf("app-autoscale: resized %s/%s %s -> %s reason=%s ratio=%.4f op=%s in_place=%s",
+		namespace, appName, from, to, s.Reason, s.Ratio, opID, live)
 
 	w.h.recordSystemAudit(ctx, auditEntry{
 		ProjectID:     projectID,
@@ -1213,8 +1277,10 @@ func (w *appAutoscaleWatcher) maybeResize(ctx context.Context, projectID uuid.UU
 			"direction":     "up",
 			"from_envelope": from.String(), "to_envelope": to.String(),
 			"dimension": s.Reason, "ratio": s.Ratio, "pod": s.Pod,
-			"namespace":  namespace,
-			"claimed_by": "app-autoscale-watcher",
+			"namespace":     namespace,
+			"claimed_by":    "app-autoscale-watcher",
+			"in_place_pods": live.Resized + live.Pending,
+			"restarted":     live.Total() == 0 || live.Failed > 0,
 		},
 	})
 }
