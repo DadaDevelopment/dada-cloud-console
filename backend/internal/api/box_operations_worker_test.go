@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -315,6 +316,108 @@ func TestBoxOperationsWorker_BoxUpBringsTheBoxReady(t *testing.T) {
 	status, errMsg, _ := operationStatus(t, pool, opID)
 	if status != string(models.OperationStatusReady) {
 		t.Errorf("operation status = %q, want Ready; error_message=%q", status, errMsg)
+	}
+}
+
+// hangingRuntime is a runtime whose Destroy never returns on its own: it waits
+// for the caller's context, exactly like a kubelet exec stream nothing ever
+// closes. It is how the deadline is proven without waiting six minutes.
+type hangingRuntime struct {
+	*box.FakeRuntime
+}
+
+func (hangingRuntime) Destroy(ctx context.Context, _ *box.Instance) error {
+	<-ctx.Done()
+	return ctx.Err()
+}
+
+// TestBoxOperationsWorker_HungOperationIsCancelledAndLeavesReconciling pins the
+// wedge found in production: a ResumeBox operation sat in Reconciling for hours
+// because execute ran on the process context, so nothing ever cut the call off
+// and no replica could ever pick the row back up. With a per-operation deadline
+// the call is cancelled and the row lands on a status the queue can act on.
+func TestBoxOperationsWorker_HungOperationIsCancelledAndLeavesReconciling(t *testing.T) {
+	pool := testOptimisticPool(t)
+	rt := hangingRuntime{FakeRuntime: &box.FakeRuntime{Clock: box.NewFakeClock(fixedWorkerTestTime)}}
+
+	boxID, opID, _, _ := seedBoxOperation(t, pool, models.BoxStatusReady, "fc-worker-hang",
+		models.ActionDeleteBox, models.DeleteBoxPayload{Reason: "user"})
+	if _, err := pool.Exec(context.Background(),
+		`UPDATE operations SET payload = $2 WHERE id = $1`, opID,
+		mustMarshal(t, models.DeleteBoxPayload{BoxID: boxID, Reason: "user"})); err != nil {
+		t.Fatalf("fix up payload with the real box id: %v", err)
+	}
+
+	w := &boxOperationsWorker{h: newTestBoxWorkerHandler(pool, rt, box.NewMemoryPool()), timeout: 200 * time.Millisecond}
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		w.tick(context.Background())
+	}()
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("tick never returned: a hung operation must be cut off by its deadline, not wedge the worker")
+	}
+
+	status, errMsg, _ := operationStatus(t, pool, opID)
+	if status == string(models.OperationStatusReconciling) {
+		t.Errorf("operation left in Reconciling after the deadline fired: nothing would ever move it again")
+	}
+	if status != string(models.OperationStatusCreated) {
+		t.Errorf("operation status = %q, want Created (retryable) after a timeout; error_message=%q", status, errMsg)
+	}
+	if errMsg == "" {
+		t.Error("error_message empty after a timeout: the caller must be told why the attempt died")
+	}
+}
+
+// TestBoxOperationsWorker_ClaimTakesBackAnAbandonedReconcilingRow covers the
+// other half of the same wedge: a replica killed mid-operation cannot write a
+// terminal status, and the claim query used to look only at Created, so its row
+// stayed Reconciling forever. Past the lease, another tick must take it back.
+func TestBoxOperationsWorker_ClaimTakesBackAnAbandonedReconcilingRow(t *testing.T) {
+	pool := testOptimisticPool(t)
+	_, opID, _, _ := seedBoxOperation(t, pool, models.BoxStatusReady, "fc-worker-lease",
+		models.ActionDeleteBox, models.DeleteBoxPayload{Reason: "user"})
+	if _, err := pool.Exec(context.Background(),
+		`UPDATE operations SET status = 'Reconciling', updated_at = now() - $2::interval WHERE id = $1`,
+		opID, fmt.Sprintf("%d seconds", int(boxOperationLease.Seconds())+60)); err != nil {
+		t.Fatalf("age the reconciling row past its lease: %v", err)
+	}
+
+	w := &boxOperationsWorker{h: newTestBoxWorkerHandler(pool, &box.FakeRuntime{Clock: box.NewFakeClock(fixedWorkerTestTime)}, box.NewMemoryPool())}
+	ops, err := w.claim(context.Background())
+	if err != nil {
+		t.Fatalf("claim: %v", err)
+	}
+	if len(ops) != 1 || ops[0].ID != opID {
+		t.Fatalf("claim returned %d rows, want the abandoned one back: a row stranded in Reconciling must be reclaimable", len(ops))
+	}
+}
+
+// TestBoxOperationsWorker_ClaimLeavesAFreshReconcilingRowAlone is the guard on
+// the test above: the lease must never steal an operation from the replica that
+// is still running it, or two replicas destroy the same box at once.
+func TestBoxOperationsWorker_ClaimLeavesAFreshReconcilingRowAlone(t *testing.T) {
+	pool := testOptimisticPool(t)
+	_, opID, _, _ := seedBoxOperation(t, pool, models.BoxStatusReady, "fc-worker-fresh",
+		models.ActionDeleteBox, models.DeleteBoxPayload{Reason: "user"})
+	if _, err := pool.Exec(context.Background(),
+		`UPDATE operations SET status = 'Reconciling', updated_at = now() WHERE id = $1`, opID); err != nil {
+		t.Fatalf("mark the row in flight: %v", err)
+	}
+
+	w := &boxOperationsWorker{h: newTestBoxWorkerHandler(pool, &box.FakeRuntime{Clock: box.NewFakeClock(fixedWorkerTestTime)}, box.NewMemoryPool())}
+	ops, err := w.claim(context.Background())
+	if err != nil {
+		t.Fatalf("claim: %v", err)
+	}
+	for _, op := range ops {
+		if op.ID == opID {
+			t.Fatal("claim took an operation that is still in flight: the lease must be longer than the deadline")
+		}
 	}
 }
 

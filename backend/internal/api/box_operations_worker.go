@@ -22,6 +22,25 @@ const boxOperationPollInterval = 5 * time.Second
 // tick run unboundedly long and starve the next poll.
 const boxOperationClaimBatch = 10
 
+// boxOperationTimeout bounds ONE operation. Without it a call that never
+// returns — an exec stream the API server keeps open, a wait on a pod that
+// never schedules — leaves its row in Reconciling with nothing that can move
+// it, and, because tick executes its batch in series, wedges every other box
+// operation this replica would have run behind it. Six minutes is above the
+// slowest honest path (a cold resume waiting on a pod pull) and far below the
+// hours a hang would otherwise cost.
+const boxOperationTimeout = 6 * time.Minute
+
+// boxOperationLease is how long a row may sit in Reconciling before another
+// tick treats it as abandoned and claims it again.
+//
+// A replica that is killed mid-operation cannot write a terminal status, and
+// the claim query only ever looked for Created — so its row stayed Reconciling
+// forever, which is the same stuck-forever bug this worker was built to end,
+// one status further along. The lease is longer than the timeout on purpose:
+// a live operation must never be stolen from the replica still running it.
+const boxOperationLease = 2 * boxOperationTimeout
+
 // boxOperationMaxAttempts is how many times a box operation is retried before
 // it is given up on and marked Failed, so a persistently failing operation
 // cannot recreate the "stuck in Created forever" bug this worker exists to
@@ -54,8 +73,20 @@ var errBoxOperationUnimplemented = errors.New("box operation action not implemen
 // SKIP LOCKED lets both console replicas run the same claim loop
 // concurrently, each taking a disjoint slice of the queue, matching how
 // gitops-agent already claims its own slice of this same table.
+// The timeout field overrides boxOperationTimeout; zero means the constant.
+// Only tests set it, so a hang can be proven in milliseconds rather than the
+// six minutes production waits.
 type boxOperationsWorker struct {
-	h *Handler
+	h       *Handler
+	timeout time.Duration
+}
+
+// opTimeout is the deadline one operation runs under.
+func (w *boxOperationsWorker) opTimeout() time.Duration {
+	if w.timeout > 0 {
+		return w.timeout
+	}
+	return boxOperationTimeout
 }
 
 // StartBoxOperationsWorker starts the polling loop, or does nothing when the
@@ -115,14 +146,16 @@ func (w *boxOperationsWorker) claim(ctx context.Context) ([]boxOperationRow, err
 		   SET status = $1, attempts = attempts + 1, updated_at = now()
 		 WHERE id IN (
 			SELECT id FROM operations
-			 WHERE status = $2 AND resource_kind = $3
+			 WHERE resource_kind = $3
+			   AND (status = $2
+			        OR (status = $1 AND updated_at < now() - ($5 * INTERVAL '1 second')))
 			 ORDER BY created_at
 			 LIMIT $4
 			   FOR UPDATE SKIP LOCKED
 		 )
 		RETURNING id, action, payload, attempts`,
 		string(models.OperationStatusReconciling), string(models.OperationStatusCreated),
-		models.ResourceKindBox, boxOperationClaimBatch,
+		models.ResourceKindBox, boxOperationClaimBatch, boxOperationLease.Seconds(),
 	)
 	if err != nil {
 		return nil, err
@@ -144,8 +177,15 @@ func (w *boxOperationsWorker) claim(ctx context.Context) ([]boxOperationRow, err
 // resulting status: Ready on success, Created (retried on the next tick, by
 // any replica) on a failure still within budget, or Failed once the budget or
 // an unimplemented action makes a retry pointless.
-func (w *boxOperationsWorker) execute(ctx context.Context, op boxOperationRow) {
+//
+// The handler runs under a boxOperationTimeout deadline, but the status write
+// deliberately runs on the parent: once the deadline fires, the derived
+// context is dead, and writing the outcome through it would fail — leaving the
+// row in Reconciling, which is exactly the wedge the deadline exists to end.
+func (w *boxOperationsWorker) execute(parent context.Context, op boxOperationRow) {
 	h := w.h
+	ctx, cancel := context.WithTimeout(parent, w.opTimeout())
+	defer cancel()
 	var err error
 	switch op.Action {
 	case models.ActionBoxUp:
@@ -163,17 +203,17 @@ func (w *boxOperationsWorker) execute(ctx context.Context, op boxOperationRow) {
 	}
 
 	if err == nil {
-		w.markTerminal(ctx, op.ID, models.OperationStatusReady, "")
+		w.markTerminal(parent, op.ID, models.OperationStatusReady, "")
 		return
 	}
 
 	if errors.Is(err, errBoxOperationUnimplemented) || op.Attempts >= boxOperationMaxAttempts {
-		w.markTerminal(ctx, op.ID, models.OperationStatusFailed, err.Error())
+		w.markTerminal(parent, op.ID, models.OperationStatusFailed, err.Error())
 		log.Warn().Err(err).Str("operation", op.ID.String()).Str("action", op.Action).
 			Int("attempts", op.Attempts).Msg("box worker: operation failed terminally")
 		return
 	}
-	w.markTerminal(ctx, op.ID, models.OperationStatusCreated, err.Error())
+	w.markTerminal(parent, op.ID, models.OperationStatusCreated, err.Error())
 	log.Warn().Err(err).Str("operation", op.ID.String()).Str("action", op.Action).
 		Int("attempts", op.Attempts).Msg("box worker: operation failed, will retry")
 }
