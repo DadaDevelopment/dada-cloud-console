@@ -1019,15 +1019,31 @@ var validAppProfiles = map[string]bool{"small": true, "medium": true, "large": t
 
 // UpdateAppProfile resizes an app to one of the legacy small/medium/large
 // sizes. It writes both the profile name and the explicit envelope that name
-// resolves to into resource_snapshots.summary_json, then enqueues the same
-// DeployImageVersion operation UpdateAppImage uses, keeping the current image,
-// so gitops-agent re-renders the workload chart with the new requests/limits.
+// resolves to into resource_snapshots.summary_json, then enqueues a ResizeApp
+// operation carrying the same numbers.
 //
 // Writing the envelope and not just the name is what keeps this endpoint from
 // becoming a silent no-op: the renderer prefers an explicit envelope, so on an
 // app the autoscaler has already grown, a bare profile name would change
 // nothing. This is the operator's way to put such an app back down; the console
 // no longer offers sizes to users, who get autoscaling instead.
+//
+// It used to enqueue DeployImageVersion with the app's current image, letting
+// the agent re-render the chart. On 2026-08-02 that took internal/telemost-bot
+// apart on production: its values.yaml is hand-maintained, the database knows
+// only the image, port and resources, and the re-render committed exactly those
+// three -- dropping the whole .env block, the managed-database declaration, the
+// Postgres and Keycloak secret references, the 8000 service port and the
+// single-poller recreate strategy, and moving the chart from helm/python to
+// helm/app. ArgoCD applied it and the bot came back up with no environment at
+// all. guardUnattendedClobber did not stop it because the operation had a human
+// actor, and its premise -- that a person who clicks Deploy watches the result
+// and can put it back -- does not hold for an endpoint whose stated job is
+// changing two numbers.
+//
+// ResizeApp rewrites the six resource scalars inside the values.yaml already in
+// git and re-derives nothing, so there is nothing to drop, and it behaves the
+// same on a console-owned app and a hand-maintained one.
 //
 // @ID          updateAppProfile
 // @Summary     Resize an app's CPU/memory profile
@@ -1150,7 +1166,7 @@ func (h *Handler) UpdateAppProfile(c *gin.Context) {
 		return
 	}
 
-	payload := models.DeployImageVersionPayload{AppName: appName, Image: image}
+	payload := models.ResizeAppPayload{AppName: appName, Resources: autoscaleProfileRequirements[req.Profile].snapshot()}
 	payloadBytes, err := json.Marshal(payload)
 	if err != nil {
 		respondError(c, http.StatusInternalServerError, "failed to marshal payload")
@@ -1160,7 +1176,7 @@ func (h *Handler) UpdateAppProfile(c *gin.Context) {
 	var op models.Operation
 	row := tx.QueryRow(c.Request.Context(),
 		`INSERT INTO operations (actor_id, project_id, environment_id, action, resource_kind, resource_name, status, payload)
-		 VALUES ($1, $2, $3, 'DeployImageVersion', 'App', $4, 'Created', $5)
+		 VALUES ($1, $2, $3, 'ResizeApp', 'App', $4, 'Created', $5)
 		 RETURNING id, actor_id, project_id, environment_id, action, resource_kind, resource_name,
 		           status, payload, validation_result, git_commit, git_path, argo_application,
 		           error_code, error_message, created_at, updated_at`,
