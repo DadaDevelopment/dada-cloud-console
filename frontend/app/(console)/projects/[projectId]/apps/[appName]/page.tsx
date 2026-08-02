@@ -21,6 +21,7 @@ import { AppPreviewPane } from "@/components/app-preview-pane";
 import { AppAlertsBanner } from "@/components/deploy/app-alerts-banner";
 import { getAppAlerts } from "@/lib/app-alerts";
 import { AppNextStepCard } from "@/components/deploy/app-next-step-card";
+import { AppLatestBuildCard } from "@/components/deploy/app-latest-build-card";
 import { getAppNextSteps } from "@/lib/app-next-step";
 import { useT } from "@/lib/i18n/console/context";
 import { GOAL_DEPLOY_SUCCESS, reachGoal } from "@/lib/metrika";
@@ -468,6 +469,16 @@ export default function AppDetailPage() {
         envId={envId}
         appName={appName}
       />
+
+      {!isResource && (
+        <AppLatestBuildCard
+          projectId={projectId}
+          envId={envId}
+          appName={appName}
+          appUrl={summary.url}
+          buildHref={(buildId) => `/projects/${projectId}/apps/${appName}/builds/${buildId}${envId ? `?envId=${envId}` : ""}`}
+        />
+      )}
 
       <AppNextStepCard
         steps={nextSteps}

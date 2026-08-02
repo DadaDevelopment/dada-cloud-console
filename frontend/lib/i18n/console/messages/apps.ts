@@ -225,6 +225,14 @@ export const apps: Messages = {
     en: "Step-by-step bot deploy guide",
   },
 
+  "apps.latestBuild.running": { ru: "Собираю…", en: "Building…" },
+  "apps.latestBuild.viewLogs": { ru: "Логи сборки", en: "Build logs" },
+  "apps.latestBuild.success.heading": { ru: "Сборка готова", en: "Build ready" },
+  "apps.latestBuild.success.openApp": { ru: "Открыть приложение", en: "Open application" },
+  "apps.latestBuild.failed.heading": { ru: "Сборка не удалась", en: "Build failed" },
+  "apps.latestBuild.failed.unknown": { ru: "Причина неизвестна", en: "Reason unknown" },
+  "apps.latestBuild.canceled": { ru: "Последняя сборка отменена", en: "Last build was canceled" },
+
   "apps.compose.crumb": { ru: "compose", en: "compose" },
   "apps.compose.heading.suffix": { ru: "/ compose", en: "/ compose" },
   "apps.compose.subtitle": {
