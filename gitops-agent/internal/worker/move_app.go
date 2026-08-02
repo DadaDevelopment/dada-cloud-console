@@ -313,9 +313,19 @@ func loadAppValuesVerbatim(mgr *git.Manager, srcValuesPath string, fallback rend
 	return content, nil
 }
 
-// repointMovedAppSnapshots re-parents the App row and every child
+// repointMovedAppSnapshots re-parents the App row, every child
 // resource_snapshots row (the exact set db.AppMoveSnapshots returned pre-move)
-// onto the target project/environment. Per row it falls back to deleting the
+// and the app's ServiceIdentity onto the target project/environment.
+//
+// The identity update is deliberately inside this transaction (ADR-021). The
+// identity's id is the principal a platform token names; project_id and
+// environment_id only record where it currently lives, so a move re-points a
+// row instead of re-minting a credential — and if the snapshots move while the
+// identity does not, the app keeps a token that resolves to the project it just
+// left, which is the exact failure this design exists to remove. It also runs
+// when there are no snapshots to repoint, hence no early return above.
+//
+// Per row it falls back to deleting the
 // src row when the target already holds a same-named row for the same
 // (kind,name) — the unique_violation path on (project_id,environment_id,kind,
 // name) — so a partial prior run (crash between commit and repoint) can be
@@ -331,9 +341,6 @@ func (w *DBWatcher) repointMovedAppSnapshots(ctx context.Context, srcProjectID, 
 	refs, err := db.AppMoveSnapshots(ctx, w.pool, srcProjectID, srcEnvID, appName)
 	if err != nil {
 		return fmt.Errorf("load snapshots to repoint: %w", err)
-	}
-	if len(refs) == 0 {
-		return nil
 	}
 
 	tx, err := w.pool.Begin(ctx)
@@ -367,6 +374,17 @@ func (w *DBWatcher) repointMovedAppSnapshots(ctx context.Context, srcProjectID, 
 		}
 		return fmt.Errorf("repoint snapshot %s/%s: %w", ref.Kind, ref.Name, err)
 	}
+
+	if _, err := tx.Exec(ctx,
+		`UPDATE service_identities
+		    SET project_id = $1, environment_id = $2
+		  WHERE app_name = $3 AND project_id = $4 AND environment_id = $5
+		    AND revoked_at IS NULL`,
+		dstProjectID, dstEnvID, appName, srcProjectID, srcEnvID,
+	); err != nil {
+		return fmt.Errorf("repoint service identity: %w", err)
+	}
+
 	return tx.Commit(ctx)
 }
 

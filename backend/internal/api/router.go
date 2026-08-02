@@ -314,6 +314,7 @@ func SetupRouter(pool *pgxpool.Pool, cfg *config.Config) *gin.Engine {
 		internal.POST("/ai/credential/get", h.AIGetProviderCredential)
 		internal.POST("/ai/usage/record", h.AIRecordUsage)
 		internal.POST("/ai/key/introspect", h.AIIntrospectKey)
+		internal.POST("/identity/introspect", h.IntrospectServiceIdentity)
 		log.Printf("internal: provisioning API enabled at /internal")
 	}
 
@@ -408,6 +409,8 @@ func SetupRouter(pool *pgxpool.Pool, cfg *config.Config) *gin.Engine {
 		api.PUT("/projects/:projectId/environments/:envId/apps/:appName/compose-volume", h.UpdateComposeVolume)
 		api.POST("/projects/:projectId/environments/:envId/apps/:appName/rollback", h.RollbackApp)
 		api.POST("/projects/:projectId/environments/:envId/apps/:appName/restart", h.RestartApp)
+		api.POST("/projects/:projectId/environments/:envId/apps/:appName/identity", h.CreateAppServiceIdentity)
+		api.GET("/projects/:projectId/environments/:envId/apps/:appName/identity", h.GetAppServiceIdentity)
 		api.POST("/projects/:projectId/environments/:envId/apps/:appName/adopt", h.AdoptApp)
 		api.POST("/projects/:projectId/environments/:envId/apps/:appName/values-token", h.GetValuesToken)
 		api.GET("/projects/:projectId/environments/:envId/apps/:appName/delete-impact", h.DeleteAppImpact)

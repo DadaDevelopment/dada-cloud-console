@@ -4,51 +4,62 @@ Spec: [ADR-021](../docs/adr/ADR-021-service-identity.md).
 Trigger: `reels-tracker` moved project on 2026-08-02, its pasted gateway key
 stayed bound to the old (now deleted) project, and every inference call returned
 `401 no credential for project/provider openrouter`.
-Principal is the **app**, not the project — a move must not touch credentials.
+The principal is the identity **row**; project/environment are only where it
+currently lives. A move re-points that row and re-mints nothing.
 
-## Phase 1 — the credential names an app
+## Phase 1 — the principal exists
 
-- [ ] Migration: `service_identities (id, app_name, environment_id, scopes,
-      created_at)`, unique on `(app_name, environment_id)`. Add
-      `ai_gateway_keys.identity_id UUID REFERENCES service_identities(id) ON
-      DELETE CASCADE`; backfill existing keys to an identity per app; drop
-      `ai_gateway_keys.project_id` last, in its own migration, once nothing
-      reads it.
-- [ ] `AIIntrospectKey`: resolve the project from
-      `resource_snapshots (kind='App', name, environment_id)` instead of
-      `k.project_id`. Hot path of every inference call — cache it, with the same
-      TTL discipline as the gateway's own introspect cache.
-- [ ] Test first, before the migration lands: an identity whose App snapshot row
-      is missing introspects as **invalid**, never as a default project.
-- [ ] CRD `ServiceIdentity` (cluster-scoped) + RBAC for the console SA to write
-      Secrets in app namespaces (it already reads them, `cloudtask/dbcreds.go`).
+- [x] Migration `087_service_identity.sql`: `service_identities` (surrogate id +
+      nullable location) and `service_identity_tokens`; nullable `identity_id`
+      on `ai_gateway_keys` and `pay_service_keys`. Nothing dropped — 058's
+      `project_id` stays until introspection stops reading it.
+- [x] `POST /internal/identity/introspect`: one endpoint every platform service
+      calls to turn a bearer token into a principal + scopes.
+- [x] `AIIntrospectKey` accepts an `sk-dada-id-` token and answers in the shape
+      the gateway plugin already parses, so the AI path needs no new format.
+      A project-less identity answers invalid rather than a default project.
+- [x] Mint/rotate and read routes on the app
+      (`.../apps/:appName/identity`), rotation reusing the identity row.
+- [x] MoveApp re-points `service_identities` in the same transaction as
+      `repointMovedAppSnapshots`.
+- [x] Unit tests: token format, prefix routability and disjointness from
+      `sk-dada-ai-`, scope matching (no prefix/substring satisfaction), and the
+      resolution query's live-row and LEFT JOIN invariants.
+
+## Phase 2 — delivery, so the token stops living in git
+
+- [ ] CRD `ServiceIdentity` (cluster-scoped) + RBAC for the console SA to
+      **write** Secrets in app namespaces (it only reads them today,
+      `cloudtask/dbcreds.go`).
 - [ ] Renderer: `ServiceIdentity` entry in `resources.values.yaml`
       (`gitops-agent/internal/renderer/resources_values.go`), golden test
       alongside the ServiceDatabaseV2 goldens.
-- [ ] Reconciler: no active key → mint + deliver `<appRef>-identity-credentials`.
-      No project-change branch — that is the point of the grain.
-- [ ] App render: consume `DADA_AI_API_KEY` / `DADA_AI_BASE_URL` via
-      `secretKeyRef`, never a literal.
+- [ ] Reconciler: no live token → mint + deliver `<appRef>-identity-credentials`
+      (`DADA_SERVICE_TOKEN`, plus the base URLs the scopes imply). No
+      project-change branch — that is the point of the grain.
+- [ ] `classifyMoveChildren`: `ServiceIdentity` joins the movable set; MoveApp
+      re-renders it with `spec.namespace=<dstNs>` so the secret lands in the
+      destination namespace. Golden test on the moved manifest.
+- [ ] Move rehearsal on a throwaway app asserting the **same** token still
+      authenticates after the move — the regression test for 2026-08-02.
+- [ ] App render: consume the token via `secretKeyRef`, never a literal.
 
-## Phase 2 — moves and preflight
+## Phase 3 — second audience, proving the generalisation
 
-- [ ] `classifyMoveChildren`: `ServiceIdentity` joins the movable set.
-- [ ] MoveApp: re-render with `spec.namespace=<dstNs>` + dst labels, so the
-      secret lands in the destination namespace. No re-mint, no revoke. Golden
-      test on the moved manifest.
-- [ ] Move rehearsal on a throwaway app that asserts the **same** token keeps
-      working across the move — the regression test for 2026-08-02.
+- [ ] Payment gateway resolves `pay:charge` through the identity instead of
+      `pay_service_keys.service` free text; `service_charges` gains a real
+      owner.
 - [ ] MoveImpact: per attached identity, list providers the source project has
       an `ai_provider_credentials` row for and the destination does not.
       Warning, not a blocker — the half no identity fixes.
 
-## Phase 3 — attribution follows the grain
+## Phase 4 — attribution follows the grain
 
 - [ ] `agent_token_usage` gains `identity_id` (and so the app), so per-app cost
       stops being unanswerable.
 - [ ] Per-app scopes and quota on the identity.
 
-## Phase 4 — migrate the pasted keys
+## Phase 5 — migrate the pasted keys
 
 - [ ] Inventory apps whose `env_vars` hold an `sk-dada` literal.
 - [ ] `reels-tracker` first: declare the identity, cut over to `secretKeyRef`,
@@ -57,14 +68,15 @@ Principal is the **app**, not the project — a move must not touch credentials.
       holding an openrouter credential — `OPENROUTER_MODEL` is pinned to the
       `medium` tier alias meanwhile, and `OCR_VISION_MODEL` / `WEB_SEARCH_MODEL`
       have no working tier equivalent at all.
+- [ ] Drop `ai_gateway_keys.project_id` once nothing reads it.
 
-## Phase 5 — generic identity
+## Phase 6 — generic identity
 
 - [ ] Keycloak service-account client per identity for service-to-service auth,
       delivered into the same secret. Same resource, second payload.
 
 ## Out of scope
 
-Scheduled rotation. Mint-and-deliver already exists in reconcile, so rotation is
-a trigger on top of Phase 1 rather than new machinery, and it is not needed to
-close the failure that started this.
+Scheduled rotation. Mint-and-deliver already exists, so rotation is a trigger on
+top of Phase 2 rather than new machinery, and it is not needed to close the
+failure that started this.

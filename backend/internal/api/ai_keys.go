@@ -364,6 +364,10 @@ func (h *Handler) AIIntrospectKey(c *gin.Context) {
 	}
 
 	token := strings.TrimSpace(req.APIKey)
+	if strings.HasPrefix(token, identityTokenPrefix) {
+		h.introspectIdentityAsAIKey(c, token)
+		return
+	}
 	if !strings.HasPrefix(token, aiKeyPrefix) {
 		c.JSON(http.StatusOK, aiKeyIntrospectResponse{Valid: false})
 		return

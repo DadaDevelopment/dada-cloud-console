@@ -9359,6 +9359,129 @@
                 }
             }
         },
+        "/projects/{projectId}/environments/{envId}/apps/{appName}/identity": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Returns the app's ServiceIdentity and its live token prefix. Never returns the token itself.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "service-identity"
+                ],
+                "summary": "Show an app's platform service identity",
+                "operationId": "getAppServiceIdentity",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Project UUID",
+                        "name": "projectId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Environment UUID",
+                        "name": "envId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "App name",
+                        "name": "appName",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.identityView"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            },
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Mints a revocable token for the app's ServiceIdentity -- one credential accepted by every platform service, bounded by the identity's scopes. Rotating replaces the token and keeps the identity. The plaintext token is returned ONLY in this response.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "service-identity"
+                ],
+                "summary": "Declare or rotate an app's platform service identity",
+                "operationId": "createAppServiceIdentity",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Project UUID",
+                        "name": "projectId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Environment UUID",
+                        "name": "envId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "App name",
+                        "name": "appName",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.createIdentityResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/projects/{projectId}/environments/{envId}/apps/{appName}/image": {
             "patch": {
                 "security": [
@@ -17947,6 +18070,29 @@
                 }
             }
         },
+        "internal_api.createIdentityResponse": {
+            "type": "object",
+            "properties": {
+                "app_name": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "identity_id": {
+                    "type": "string"
+                },
+                "scopes": {
+                    "type": "string"
+                },
+                "token": {
+                    "type": "string"
+                },
+                "token_prefix": {
+                    "type": "string"
+                }
+            }
+        },
         "internal_api.createIngressRequest": {
             "type": "object",
             "properties": {
@@ -18257,6 +18403,29 @@
                     "type": "string"
                 },
                 "org_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "internal_api.identityView": {
+            "type": "object",
+            "properties": {
+                "app_name": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "identity_id": {
+                    "type": "string"
+                },
+                "last_used_at": {
+                    "type": "string"
+                },
+                "scopes": {
+                    "type": "string"
+                },
+                "token_prefix": {
                     "type": "string"
                 }
             }

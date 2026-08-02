@@ -552,6 +552,21 @@ definitions:
       swagger_title:
         type: string
     type: object
+  internal_api.createIdentityResponse:
+    properties:
+      app_name:
+        type: string
+      created_at:
+        type: string
+      identity_id:
+        type: string
+      scopes:
+        type: string
+      token:
+        type: string
+      token_prefix:
+        type: string
+    type: object
   internal_api.createIngressRequest:
     properties:
       aliases:
@@ -768,6 +783,21 @@ definitions:
       claim:
         type: string
       org_id:
+        type: string
+    type: object
+  internal_api.identityView:
+    properties:
+      app_name:
+        type: string
+      created_at:
+        type: string
+      identity_id:
+        type: string
+      last_used_at:
+        type: string
+      scopes:
+        type: string
+      token_prefix:
         type: string
     type: object
   internal_api.importComposeStackRequest:
@@ -7532,6 +7562,91 @@ paths:
       summary: Detach a custom hostname from an app
       tags:
       - domain
+  /projects/{projectId}/environments/{envId}/apps/{appName}/identity:
+    get:
+      description: Returns the app's ServiceIdentity and its live token prefix. Never
+        returns the token itself.
+      operationId: getAppServiceIdentity
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      - description: Environment UUID
+        in: path
+        name: envId
+        required: true
+        type: string
+      - description: App name
+        in: path
+        name: appName
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_api.identityView'
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Show an app's platform service identity
+      tags:
+      - service-identity
+    post:
+      description: Mints a revocable token for the app's ServiceIdentity -- one credential
+        accepted by every platform service, bounded by the identity's scopes. Rotating
+        replaces the token and keeps the identity. The plaintext token is returned
+        ONLY in this response.
+      operationId: createAppServiceIdentity
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      - description: Environment UUID
+        in: path
+        name: envId
+        required: true
+        type: string
+      - description: App name
+        in: path
+        name: appName
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/internal_api.createIdentityResponse'
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Declare or rotate an app's platform service identity
+      tags:
+      - service-identity
   /projects/{projectId}/environments/{envId}/apps/{appName}/image:
     patch:
       consumes:
