@@ -556,28 +556,47 @@ func (h *Handler) DeleteProject(c *gin.Context) {
 		return
 	}
 
+	slug := ""
+	audit := func(opID uuid.UUID, outcome string, meta map[string]any) {
+		h.recordAudit(c.Request.Context(), claims.UserID, auditEntry{
+			ProjectID:    projectID,
+			OperationID:  opID,
+			Action:       "DeleteProject",
+			ResourceKind: "Project",
+			ResourceName: slug,
+			Outcome:      outcome,
+			Metadata:     meta,
+		})
+	}
+	rejectErr := func(status int, reason, msg string) {
+		audit(uuid.Nil, auditOutcomeFailure, map[string]any{"reason": reason, "status": status})
+		respondError(c, status, msg)
+	}
+
 	role, err := h.effectiveRole(c.Request.Context(), claims, projectID)
 	if err == pgx.ErrNoRows {
+		audit(uuid.Nil, auditOutcomeFailure, map[string]any{"reason": "not_a_member", "status": http.StatusNotFound})
 		respondNotFound(c)
 		return
 	}
 	if err != nil {
-		respondError(c, http.StatusInternalServerError, "failed to check project membership")
+		rejectErr(http.StatusInternalServerError, "membership_check_failed", "failed to check project membership")
 		return
 	}
 	if !canWrite(role) {
+		audit(uuid.Nil, auditOutcomeFailure, map[string]any{"reason": "read_only_role", "status": http.StatusForbidden})
 		respondForbidden(c)
 		return
 	}
 
-	var slug string
 	if err := h.pool.QueryRow(c.Request.Context(),
 		`SELECT name FROM projects WHERE id = $1`, projectID,
 	).Scan(&slug); err == pgx.ErrNoRows {
+		audit(uuid.Nil, auditOutcomeFailure, map[string]any{"reason": "project_not_found", "status": http.StatusNotFound})
 		respondNotFound(c)
 		return
 	} else if err != nil {
-		respondError(c, http.StatusInternalServerError, "failed to look up project")
+		rejectErr(http.StatusInternalServerError, "project_lookup_failed", "failed to look up project")
 		return
 	}
 
@@ -594,9 +613,11 @@ func (h *Handler) DeleteProject(c *gin.Context) {
 		claims.UserID, projectID, slug, payloadBytes,
 	)
 	if err := scanOperation(row, &op); err != nil {
-		respondError(c, http.StatusInternalServerError, "failed to create operation")
+		rejectErr(http.StatusInternalServerError, "operation_insert_failed", "failed to create operation")
 		return
 	}
+
+	audit(op.ID, auditOutcomeSuccess, nil)
 
 	c.JSON(http.StatusAccepted, gin.H{"operation": op, "message": "Project deletion queued"})
 }

@@ -26,6 +26,17 @@ const (
 	auditActionAutoscaleApp  = "AutoscaleApp"
 )
 
+// Audit actions for reads of a secret and for the box lifecycle steps that had
+// no row at all. A secret handed to a caller is the one read that must leave a
+// trace whether it succeeded or not: "who saw this value, and when" is
+// unanswerable after the fact otherwise, and a run of refusals against one key
+// is the shape a probe makes.
+const (
+	auditActionRevealEnvVar   = "RevealEnvVar"
+	auditActionRevealModelKey = "RevealAIModelAPIKey"
+	auditActionExtendBox      = "ExtendBox"
+)
+
 const (
 	auditOutcomeSuccess = "success"
 	auditOutcomeFailure = "failure"

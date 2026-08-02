@@ -594,29 +594,50 @@ func (h *Handler) RevealEnvVar(c *gin.Context) {
 	appName := c.Param("appName")
 	key := c.Param("key")
 
+	audit := func(outcome string, meta map[string]any) {
+		meta["app"] = appName
+		meta["key"] = key
+		h.recordAudit(c.Request.Context(), claims.UserID, auditEntry{
+			ProjectID:     projectID,
+			EnvironmentID: envID,
+			Action:        auditActionRevealEnvVar,
+			ResourceKind:  "EnvVar",
+			ResourceName:  key,
+			Outcome:       outcome,
+			Metadata:      meta,
+		})
+	}
+	rejectErr := func(status int, reason, msg string) {
+		audit(auditOutcomeFailure, map[string]any{"reason": reason, "status": status})
+		respondError(c, status, msg)
+	}
+
 	if c.Query("reveal") != "true" {
-		respondError(c, http.StatusBadRequest, "reveal=true is required")
+		rejectErr(http.StatusBadRequest, "reveal_flag_missing", "reveal=true is required")
 		return
 	}
 
 	role, err := h.effectiveRole(c.Request.Context(), claims, projectID)
 	if err == pgx.ErrNoRows {
+		audit(auditOutcomeFailure, map[string]any{"reason": "not_a_member", "status": http.StatusNotFound})
 		respondNotFound(c)
 		return
 	}
 	if err != nil {
-		respondError(c, http.StatusInternalServerError, "failed to check project membership")
+		rejectErr(http.StatusInternalServerError, "membership_check_failed", "failed to check project membership")
 		return
 	}
 	if !canWrite(role) {
+		audit(auditOutcomeFailure, map[string]any{"reason": "read_only_role", "status": http.StatusForbidden})
 		respondForbidden(c)
 		return
 	}
 
 	if ok, err := h.envBelongsToProject(c.Request.Context(), envID, projectID); err != nil {
-		respondError(c, http.StatusInternalServerError, "failed to verify environment")
+		rejectErr(http.StatusInternalServerError, "env_check_failed", "failed to verify environment")
 		return
 	} else if !ok {
+		audit(auditOutcomeFailure, map[string]any{"reason": "env_not_in_project", "status": http.StatusNotFound})
 		respondNotFound(c)
 		return
 	}
@@ -633,19 +654,22 @@ func (h *Handler) RevealEnvVar(c *gin.Context) {
 		envID, appName, key,
 	).Scan(&encrypted)
 	if err == pgx.ErrNoRows {
+		audit(auditOutcomeFailure, map[string]any{"reason": "var_not_found", "status": http.StatusNotFound})
 		respondNotFound(c)
 		return
 	}
 	if err != nil {
-		respondError(c, http.StatusInternalServerError, "failed to load env var")
+		rejectErr(http.StatusInternalServerError, "load_failed", "failed to load env var")
 		return
 	}
 
 	plain, err := crypto.DecryptToken(h.cfg.GitopsEncryptionKey, encrypted)
 	if err != nil {
-		respondError(c, http.StatusInternalServerError, "failed to decrypt value")
+		rejectErr(http.StatusInternalServerError, "decrypt_failed", "failed to decrypt value")
 		return
 	}
+
+	audit(auditOutcomeSuccess, map[string]any{"preview_override": table == "preview_env_overrides"})
 
 	c.JSON(http.StatusOK, gin.H{"value": string(plain), "preview_override": table == "preview_env_overrides"})
 }

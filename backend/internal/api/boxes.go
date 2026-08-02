@@ -125,6 +125,45 @@ func (h *Handler) boxWriteGate(c *gin.Context, write bool) (*auth.Claims, uuid.U
 	return claims, projectID, true
 }
 
+// boxAuditFn writes one audit row for a box action. opID is optional: the
+// synchronous mutations (extend) and every refusal have no operation to point at.
+type boxAuditFn func(opID uuid.UUID, outcome string, meta map[string]any)
+
+// boxAudit builds an audit writer for a box action before the box row is known.
+//
+// The refusals matter as much as the successes here: a customer whose suspend
+// keeps bouncing off a phase check, or whose resume 404s on a name they believe
+// exists, produced no trace at all until this existed -- the request simply
+// ended, and the path analysis showed a user who did nothing.
+func (h *Handler) boxAudit(c *gin.Context, projectID uuid.UUID, action, boxName string) boxAuditFn {
+	return h.boxAuditRow(c, projectID, uuid.Nil, action, boxName)
+}
+
+// boxAuditFor is boxAudit once the box has been resolved, so the row also
+// carries the environment the box's whole lifecycle hangs off.
+func (h *Handler) boxAuditFor(c *gin.Context, projectID uuid.UUID, b models.Box, action string) boxAuditFn {
+	return h.boxAuditRow(c, projectID, b.EnvironmentID, action, b.Name)
+}
+
+func (h *Handler) boxAuditRow(c *gin.Context, projectID, envID uuid.UUID, action, boxName string) boxAuditFn {
+	claims, _ := auth.GetClaims(c)
+	return func(opID uuid.UUID, outcome string, meta map[string]any) {
+		if claims == nil {
+			return
+		}
+		h.recordAudit(c.Request.Context(), claims.UserID, auditEntry{
+			ProjectID:     projectID,
+			EnvironmentID: envID,
+			OperationID:   opID,
+			Action:        action,
+			ResourceKind:  models.ResourceKindBox,
+			ResourceName:  boxName,
+			Outcome:       outcome,
+			Metadata:      meta,
+		})
+	}
+}
+
 // enqueueBoxOperation inserts one box operation bound to the box's environment.
 //
 // environment_id is always stamped: it is the identity carrier the whole
@@ -656,15 +695,21 @@ func (h *Handler) SuspendBox(c *gin.Context) {
 	if !ok {
 		return
 	}
-	b, ok := h.resolveBox(c, projectID, c.Param("boxName"))
+	boxName := c.Param("boxName")
+	audit := h.boxAudit(c, projectID, models.ActionSuspendBox, boxName)
+	b, ok := h.resolveBox(c, projectID, boxName)
 	if !ok {
+		audit(uuid.Nil, auditOutcomeFailure, map[string]any{"reason": "box_not_found", "status": c.Writer.Status()})
 		return
 	}
+	audit = h.boxAuditFor(c, projectID, b, models.ActionSuspendBox)
 	if b.Status == models.BoxStatusSleeping {
+		audit(uuid.Nil, auditOutcomeSuccess, map[string]any{"box_id": b.ID, "already_sleeping": true})
 		c.JSON(http.StatusAccepted, gin.H{"message": "box is already sleeping"})
 		return
 	}
 	if !models.CanTransitionBoxStatus(b.Status, models.BoxStatusSleeping) {
+		audit(uuid.Nil, auditOutcomeFailure, map[string]any{"reason": "phase_not_suspendable", "phase": string(b.Status), "status": http.StatusConflict})
 		respondError(c, http.StatusConflict,
 			fmt.Sprintf("a box in phase %s cannot be suspended", b.Status))
 		return
@@ -677,6 +722,7 @@ func (h *Handler) SuspendBox(c *gin.Context) {
 	// hands out a fresh one rather than reviving an old one.
 	revoked, err := h.revokeBoxSessions(c.Request.Context(), b.ID)
 	if err != nil {
+		audit(uuid.Nil, auditOutcomeFailure, map[string]any{"reason": "session_revoke_failed", "status": http.StatusInternalServerError})
 		respondError(c, http.StatusInternalServerError, "failed to revoke box sessions")
 		return
 	}
@@ -684,9 +730,13 @@ func (h *Handler) SuspendBox(c *gin.Context) {
 	op, err := h.enqueueBoxOperation(c.Request.Context(), claims.UserID, b,
 		models.ActionSuspendBox, models.SuspendBoxPayload{BoxID: b.ID, Reason: "user"})
 	if err != nil {
+		audit(uuid.Nil, auditOutcomeFailure, map[string]any{"reason": "operation_insert_failed", "status": http.StatusInternalServerError})
 		respondError(c, http.StatusInternalServerError, "failed to create operation")
 		return
 	}
+
+	audit(op.ID, auditOutcomeSuccess, map[string]any{"box_id": b.ID, "sessions_revoked": revoked, "reason": "user"})
+
 	c.JSON(http.StatusAccepted, gin.H{
 		"operation":        op,
 		"sessions_revoked": revoked,
@@ -723,20 +773,27 @@ func (h *Handler) ResumeBox(c *gin.Context) {
 	if !ok {
 		return
 	}
-	b, ok := h.resolveBox(c, projectID, c.Param("boxName"))
+	boxName := c.Param("boxName")
+	audit := h.boxAudit(c, projectID, models.ActionResumeBox, boxName)
+	b, ok := h.resolveBox(c, projectID, boxName)
 	if !ok {
+		audit(uuid.Nil, auditOutcomeFailure, map[string]any{"reason": "box_not_found", "status": c.Writer.Status()})
 		return
 	}
+	audit = h.boxAuditFor(c, projectID, b, models.ActionResumeBox)
 	var req resumeBoxRequest
 	if err := c.ShouldBindJSON(&req); err != nil && c.Request.ContentLength > 0 {
+		audit(uuid.Nil, auditOutcomeFailure, map[string]any{"reason": "malformed_body", "status": http.StatusBadRequest})
 		respondError(c, http.StatusBadRequest, err.Error())
 		return
 	}
 	if b.Status == models.BoxStatusReady || b.Status == models.BoxStatusIdle {
+		audit(uuid.Nil, auditOutcomeSuccess, map[string]any{"box_id": b.ID, "already_awake": true})
 		c.JSON(http.StatusAccepted, gin.H{"message": "box is already awake"})
 		return
 	}
 	if b.Status != models.BoxStatusSleeping {
+		audit(uuid.Nil, auditOutcomeFailure, map[string]any{"reason": "phase_not_resumable", "phase": string(b.Status), "status": http.StatusConflict})
 		respondError(c, http.StatusConflict,
 			fmt.Sprintf("a box in phase %s cannot be resumed", b.Status))
 		return
@@ -745,9 +802,13 @@ func (h *Handler) ResumeBox(c *gin.Context) {
 	op, err := h.enqueueBoxOperation(c.Request.Context(), claims.UserID, b,
 		models.ActionResumeBox, models.ResumeBoxPayload{BoxID: b.ID, SSHPublicKey: req.SSHPublicKey})
 	if err != nil {
+		audit(uuid.Nil, auditOutcomeFailure, map[string]any{"reason": "operation_insert_failed", "status": http.StatusInternalServerError})
 		respondError(c, http.StatusInternalServerError, "failed to create operation")
 		return
 	}
+
+	audit(op.ID, auditOutcomeSuccess, map[string]any{"box_id": b.ID, "rebound_ssh_key": req.SSHPublicKey != ""})
+
 	c.JSON(http.StatusAccepted, gin.H{"operation": op, "message": "box resume queued"})
 }
 
@@ -780,21 +841,28 @@ func (h *Handler) ExtendBox(c *gin.Context) {
 	if !ok {
 		return
 	}
-	b, ok := h.resolveBox(c, projectID, c.Param("boxName"))
+	boxName := c.Param("boxName")
+	audit := h.boxAudit(c, projectID, auditActionExtendBox, boxName)
+	b, ok := h.resolveBox(c, projectID, boxName)
 	if !ok {
+		audit(uuid.Nil, auditOutcomeFailure, map[string]any{"reason": "box_not_found", "status": c.Writer.Status()})
 		return
 	}
+	audit = h.boxAuditFor(c, projectID, b, auditActionExtendBox)
 	var req extendBoxRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
+		audit(uuid.Nil, auditOutcomeFailure, map[string]any{"reason": "malformed_body", "status": http.StatusBadRequest})
 		respondError(c, http.StatusBadRequest, err.Error())
 		return
 	}
 	if req.TTLSeconds <= 0 || req.TTLSeconds > maxBoxTTLSeconds {
+		audit(uuid.Nil, auditOutcomeFailure, map[string]any{"reason": "ttl_out_of_range", "ttl_seconds": req.TTLSeconds, "status": http.StatusBadRequest})
 		respondError(c, http.StatusBadRequest,
 			fmt.Sprintf("ttl_seconds must be between 1 and %d", maxBoxTTLSeconds))
 		return
 	}
 	if !models.BoxIsLive(b.Status) {
+		audit(uuid.Nil, auditOutcomeFailure, map[string]any{"reason": "phase_not_extendable", "phase": string(b.Status), "status": http.StatusConflict})
 		respondError(c, http.StatusConflict,
 			fmt.Sprintf("a box in phase %s cannot be extended", b.Status))
 		return
@@ -814,8 +882,12 @@ func (h *Handler) ExtendBox(c *gin.Context) {
 		b.ID, req.TTLSeconds,
 	)
 	if err := scanBox(row, &updated); err != nil {
+		audit(uuid.Nil, auditOutcomeFailure, map[string]any{"reason": "extend_update_failed", "status": http.StatusInternalServerError})
 		respondError(c, http.StatusInternalServerError, "failed to extend box")
 		return
 	}
+
+	audit(uuid.Nil, auditOutcomeSuccess, map[string]any{"box_id": b.ID, "ttl_seconds": req.TTLSeconds, "expires_at": updated.ExpiresAt})
+
 	c.JSON(http.StatusOK, gin.H{"box": updated, "message": "box TTL extended"})
 }

@@ -727,11 +727,28 @@ func (h *Handler) RevealAIModelAPIKey(c *gin.Context) {
 	if _, err := h.requireWriter(c, claims.UserID, projectID); err != nil {
 		return
 	}
+	name := c.Param("name")
+
+	audit := func(outcome string, meta map[string]any) {
+		h.recordAudit(c.Request.Context(), claims.UserID, auditEntry{
+			ProjectID:     projectID,
+			EnvironmentID: envID,
+			Action:        auditActionRevealModelKey,
+			ResourceKind:  "AIModel",
+			ResourceName:  name,
+			Outcome:       outcome,
+			Metadata:      meta,
+		})
+	}
+	rejectErr := func(status int, reason, msg string) {
+		audit(auditOutcomeFailure, map[string]any{"reason": reason, "status": status})
+		respondError(c, status, msg)
+	}
+
 	if c.Query("reveal") != "true" {
-		respondError(c, http.StatusBadRequest, "reveal=true is required")
+		rejectErr(http.StatusBadRequest, "reveal_flag_missing", "reveal=true is required")
 		return
 	}
-	name := c.Param("name")
 
 	var apiKeyID uuid.UUID
 	var plaintext []byte
@@ -748,27 +765,34 @@ func (h *Handler) RevealAIModelAPIKey(c *gin.Context) {
 		projectID, envID, name,
 	).Scan(&apiKeyID, &plaintext, &actorID)
 	if errors.Is(err, pgx.ErrNoRows) {
+		audit(auditOutcomeFailure, map[string]any{"reason": "reveal_consumed_or_expired", "status": http.StatusGone})
 		c.JSON(http.StatusGone, gin.H{"error": "API key reveal window expired or already consumed; rotate the key to issue a new one"})
 		return
 	}
 	if err != nil {
-		respondError(c, http.StatusInternalServerError, "failed to fetch reveal")
+		rejectErr(http.StatusInternalServerError, "reveal_fetch_failed", "failed to fetch reveal")
 		return
 	}
 	// Only the original requester (or an org Owner/Admin) can consume the reveal.
+	onBehalf := false
 	if actorID != claims.UserID {
 		role, _ := h.effectiveRole(c.Request.Context(), claims, projectID)
 		if !isOrgAdmin(role) {
+			audit(auditOutcomeFailure, map[string]any{"reason": "not_the_requester", "status": http.StatusForbidden})
 			respondForbidden(c)
 			return
 		}
+		onBehalf = true
 	}
 	if _, err := h.pool.Exec(c.Request.Context(),
 		`DELETE FROM aimodel_api_key_reveals WHERE api_key_id = $1`, apiKeyID,
 	); err != nil {
-		respondError(c, http.StatusInternalServerError, "failed to consume reveal")
+		rejectErr(http.StatusInternalServerError, "reveal_consume_failed", "failed to consume reveal")
 		return
 	}
+
+	audit(auditOutcomeSuccess, map[string]any{"api_key_id": apiKeyID, "admin_on_behalf": onBehalf})
+
 	c.JSON(http.StatusOK, gin.H{
 		"api_key":    string(plaintext),
 		"expires_at": time.Now(),

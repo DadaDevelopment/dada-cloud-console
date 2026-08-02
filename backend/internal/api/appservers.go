@@ -355,16 +355,34 @@ func (h *Handler) DeleteAppServer(c *gin.Context) {
 	}
 	serverName := c.Param("serverName")
 
+	audit := func(opID uuid.UUID, outcome string, meta map[string]any) {
+		h.recordAudit(c.Request.Context(), claims.UserID, auditEntry{
+			ProjectID:    projectID,
+			OperationID:  opID,
+			Action:       "DeleteAppServer",
+			ResourceKind: "AppServer",
+			ResourceName: serverName,
+			Outcome:      outcome,
+			Metadata:     meta,
+		})
+	}
+	rejectErr := func(status int, reason, msg string) {
+		audit(uuid.Nil, auditOutcomeFailure, map[string]any{"reason": reason, "status": status})
+		respondError(c, status, msg)
+	}
+
 	role, err := h.effectiveRole(c.Request.Context(), claims, projectID)
 	if err == pgx.ErrNoRows {
+		audit(uuid.Nil, auditOutcomeFailure, map[string]any{"reason": "not_a_member", "status": http.StatusNotFound})
 		respondNotFound(c)
 		return
 	}
 	if err != nil {
-		respondError(c, http.StatusInternalServerError, "failed to check project membership")
+		rejectErr(http.StatusInternalServerError, "membership_check_failed", "failed to check project membership")
 		return
 	}
 	if !canWrite(role) {
+		audit(uuid.Nil, auditOutcomeFailure, map[string]any{"reason": "read_only_role", "status": http.StatusForbidden})
 		respondForbidden(c)
 		return
 	}
@@ -376,11 +394,12 @@ func (h *Handler) DeleteAppServer(c *gin.Context) {
 		projectID, serverName,
 	).Scan(&serverID)
 	if err == pgx.ErrNoRows {
+		audit(uuid.Nil, auditOutcomeFailure, map[string]any{"reason": "server_not_found_or_already_deleting", "status": http.StatusNotFound})
 		respondNotFound(c)
 		return
 	}
 	if err != nil {
-		respondError(c, http.StatusInternalServerError, "failed to find app server")
+		rejectErr(http.StatusInternalServerError, "server_lookup_failed", "failed to find app server")
 		return
 	}
 
@@ -397,9 +416,11 @@ func (h *Handler) DeleteAppServer(c *gin.Context) {
 		claims.UserID, projectID, serverName, payloadBytes,
 	)
 	if err := scanOperation(row, &op); err != nil {
-		respondError(c, http.StatusInternalServerError, "failed to create operation")
+		rejectErr(http.StatusInternalServerError, "operation_insert_failed", "failed to create operation")
 		return
 	}
+
+	audit(op.ID, auditOutcomeSuccess, map[string]any{"app_server_id": serverID})
 
 	c.JSON(http.StatusAccepted, gin.H{"operation": op, "message": "AppServer deletion queued"})
 }
