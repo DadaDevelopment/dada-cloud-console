@@ -413,7 +413,7 @@ func parsePressureSamples(samples []prometheus.Sample) []pressureSample {
 }
 
 // starvedPod is one pod that crossed at least one pressure threshold, carrying
-// which dimension tripped and by how much for the audit trail and the email.
+// which dimension tripped and by how much for the audit trail.
 type starvedPod struct {
 	Namespace string
 	Pod       string
@@ -448,7 +448,7 @@ func collectStarved(cpu, mem []pressureSample, cpuThreshold, memThreshold float6
 }
 
 // idlePod is one pod whose peak usage stayed far below what it holds, carrying
-// which dimensions were idle and by how much for the audit trail and the email.
+// which dimensions were idle and by how much for the audit trail.
 type idlePod struct {
 	Namespace  string
 	Pod        string
@@ -472,7 +472,7 @@ func (p idlePod) Detail() string {
 // simply has no CPU dimension in the result, so it keeps the CPU it has: the
 // only thing worse than an oversized app is one shrunk on the strength of a
 // query that returned nothing. Dimensions come out in a fixed order so the audit
-// metadata and the email read the same way every time. Pure and unit-tested.
+// metadata reads the same way every time. Pure and unit-tested.
 func collectIdle(cpu, mem []pressureSample, threshold float64) []idlePod {
 	byKey := map[string]*idlePod{}
 	add := func(s pressureSample, dimension string) {
@@ -932,8 +932,6 @@ func (w *appAutoscaleWatcher) maybeShrink(ctx context.Context, projectID uuid.UU
 			"claimed_by": "app-autoscale-watcher",
 		},
 	})
-
-	w.notifyShrunk(ctx, projectID, appName, from.String(), to.String(), p)
 }
 
 // claimAppAutoscaleSlot atomically claims the right to resize (namespace, app)
@@ -1219,8 +1217,6 @@ func (w *appAutoscaleWatcher) maybeResize(ctx context.Context, projectID uuid.UU
 			"claimed_by": "app-autoscale-watcher",
 		},
 	})
-
-	w.notifyResized(ctx, projectID, appName, from.String(), to.String(), s)
 }
 
 // auditRefusal records a starvation the watcher saw and deliberately did not
@@ -1268,57 +1264,17 @@ func (w *appAutoscaleWatcher) auditRefusal(ctx context.Context, projectID uuid.U
 	})
 }
 
-// notifyResized tells the owner their app was resized. Best-effort: a resize
-// that happened must not be rolled back because an email could not be sent.
-func (w *appAutoscaleWatcher) notifyResized(ctx context.Context, projectID uuid.UUID, appName, from, to string, s starvedPod) {
-	if w.h.auditNotifier == nil {
-		return
-	}
-	to_, source := w.h.resolveAlertRecipient(ctx, projectID)
-	if to_ == "" {
-		to_ = w.h.auditNotifyEmail
-		source = alertSourceOperator
-	}
-	if to_ == "" {
-		return
-	}
-	link := fmt.Sprintf("%s/projects/%s/apps/%s/settings", w.h.cfg.PublicBaseURL, projectID, appName)
-	subject, body := notify.ComposeAutoscaleNotice(appName, from, to, s.Reason, s.Ratio, link)
-	if source == alertSourceOperator {
-		subject, body = notify.ComposeNoOwnerFallback(projectID.String(), w.h.projectDisplayName(ctx, projectID), subject, body)
-	}
-	if err := w.h.auditNotifier.Send(to_, subject, body); err != nil {
-		log.Printf("app-autoscale: notice send to %s failed for app=%s: %v", to_, appName, err)
-	}
-}
-
-// notifyShrunk tells the owner their app was given back. Best-effort for the
-// same reason notifyResized is: the rollout already happened.
-func (w *appAutoscaleWatcher) notifyShrunk(ctx context.Context, projectID uuid.UUID, appName, from, to string, p idlePod) {
-	if w.h.auditNotifier == nil {
-		return
-	}
-	to_, source := w.h.resolveAlertRecipient(ctx, projectID)
-	if to_ == "" {
-		to_ = w.h.auditNotifyEmail
-		source = alertSourceOperator
-	}
-	if to_ == "" {
-		return
-	}
-	link := fmt.Sprintf("%s/projects/%s/apps/%s/settings", w.h.cfg.PublicBaseURL, projectID, appName)
-	subject, body := notify.ComposeAutoscaleShrink(appName, from, to, p.Detail(), link)
-	if source == alertSourceOperator {
-		subject, body = notify.ComposeNoOwnerFallback(projectID.String(), w.h.projectDisplayName(ctx, projectID), subject, body)
-	}
-	if err := w.h.auditNotifier.Send(to_, subject, body); err != nil {
-		log.Printf("app-autoscale: shrink notice send to %s failed for app=%s: %v", to_, appName, err)
-	}
-}
-
 // notifyCeiling tells the owner their app is starved but cannot grow: either it
 // already sits at the platform cap or the project quota has no headroom left.
 // Gated by the same cooldown so it cannot become a 15-minute mail loop.
+//
+// It is the ONLY email this watcher sends, and deliberately so. A resize that
+// worked is not news: the owner never asked for a size, cannot set one, and has
+// nothing to do about it, so announcing "we gave you another gigabyte" is spam
+// that also invites the wrong worry about the bill. Successful resizes leave a
+// log line and an audit row and nothing else. This one is different because the
+// platform gave up: the app is degraded, nothing was changed, and the fix is in
+// the owner's code. Do not add resize notifications back.
 func (w *appAutoscaleWatcher) notifyCeiling(ctx context.Context, projectID uuid.UUID, namespace, appName string, at resourceEnvelope, s starvedPod) {
 	if w.h.auditNotifier == nil {
 		return
