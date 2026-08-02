@@ -198,6 +198,8 @@ def run_case(case, scope, repeat, args, token, base):
     }
     if args.trace:
         body["trace"] = True
+    if args.model:
+        body["model"] = args.model
 
     record = {
         "tc_id": case["id"],
@@ -254,6 +256,8 @@ def run_case(case, scope, repeat, args, token, base):
         confirm_body = {"action_id": pending["action_id"], "decision": decision}
         if args.trace:
             confirm_body["trace"] = True
+        if args.model:
+            confirm_body["model"] = args.model
         try:
             pending = stream_turn(
                 "%s/agent/chat/confirm" % base, token, confirm_body, collector, started_at, args.timeout
@@ -292,6 +296,17 @@ def main() -> int:
     parser.add_argument("--allow-writes", action="store_true", help="allow approving confirm cards (spends money)")
     parser.add_argument("--trace", action="store_true", help="ask the backend for the trace SSE event")
     parser.add_argument("--no-clear", action="store_true", help="do not clear agent context between cases")
+    parser.add_argument(
+        "--model",
+        default="",
+        help=(
+            "ask the backend to run these turns on a specific gateway model "
+            "(A/B). Honoured only for models the deployment allowlisted in "
+            "AGENT_CHAT_MODEL_ALLOWLIST; otherwise the turn silently runs on "
+            "the deployment default, so always read model= in the trace before "
+            "comparing two runs."
+        ),
+    )
     args = parser.parse_args()
 
     token = bearer()
@@ -380,6 +395,8 @@ def main() -> int:
         "concurrency": args.concurrency,
         "allow_writes": bool(args.allow_writes),
         "trace_requested": bool(args.trace),
+        "model_requested": args.model or None,
+        "models_seen": sorted({(r.get("trace") or {}).get("model") for r in results if (r.get("trace") or {}).get("model")}),
         "trace_seen": any(r.get("trace") for r in results),
         "cases_total": len(jobs),
         "cases_failed": sum(1 for r in results if not r["ok"]),

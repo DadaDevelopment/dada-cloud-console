@@ -30,13 +30,16 @@ const agentChatConfirmDeclineMessage = "The user chose to decline this action in
 
 // agentChatRequest is one chat turn. Trace opts the caller into a final trace
 // SSE event carrying this turn's own metrics (tool calls, tokens, latency,
-// outcome); the eval harness sets it, the console panel does not.
+// outcome); the eval harness sets it, the console panel does not. Model asks
+// for a specific gateway model group and is honoured only for models the
+// deployment allowlisted (see Handler.agentChatModelFor).
 type agentChatRequest struct {
 	Message   string `json:"message"`
 	ProjectID string `json:"projectId"`
 	EnvID     string `json:"envId"`
 	AppName   string `json:"appName"`
 	Trace     bool   `json:"trace"`
+	Model     string `json:"model"`
 }
 
 // writeSSEEvent frames one Server-Sent Event via the spec-compliant gin sse
@@ -51,6 +54,50 @@ type agentChatRequest struct {
 func writeSSEEvent(c *gin.Context, flusher http.Flusher, event string, data string) {
 	_ = sse.Encode(c.Writer, sse.Event{Event: event, Data: data})
 	flusher.Flush()
+}
+
+// agentChatModelFor picks the model group this turn runs on. A request may name
+// one only if the deployment listed it in AGENT_CHAT_MODEL_ALLOWLIST; anything
+// else falls back to the configured default. That is what makes a model swap
+// measurable: the eval harness can drive one model against the live tool
+// catalog and compare traces, instead of the swap reaching every user at once
+// the way the 2026-08-03 sonnet attempt did.
+func (h *Handler) agentChatModelFor(requested string) string {
+	requested = strings.TrimSpace(requested)
+	if requested == "" {
+		return ""
+	}
+	for _, allowed := range h.cfg.AgentChatModelAllowlist {
+		if strings.EqualFold(strings.TrimSpace(allowed), requested) {
+			return requested
+		}
+	}
+	return ""
+}
+
+// agentChatUpstreamErrorCode compresses a gateway failure into a trace-sized
+// code. A flat "upstream" told nobody why a turn died: a provider rate limit,
+// an expired key and a network blip all looked the same in agent_chat_turns,
+// and the only way to tell them apart was calling the gateway by hand.
+func agentChatUpstreamErrorCode(err error) string {
+	if err == nil {
+		return "upstream"
+	}
+	msg := err.Error()
+	const marker = "gateway status "
+	idx := strings.Index(msg, marker)
+	if idx < 0 {
+		return "upstream"
+	}
+	rest := msg[idx+len(marker):]
+	end := 0
+	for end < len(rest) && rest[end] >= '0' && rest[end] <= '9' {
+		end++
+	}
+	if end == 0 {
+		return "upstream"
+	}
+	return "upstream_" + rest[:end]
 }
 
 func agentChatOrgID(claims *auth.Claims) string {
@@ -210,10 +257,15 @@ func (h *Handler) agentChatHistory(ctx context.Context, userSub string, projectI
 	return out
 }
 
+// agentChatConfirmRequest resolves a pending write. Model mirrors
+// agentChatRequest.Model so the continuation of an A/B turn runs on the same
+// model that produced the confirmation card, instead of silently switching back
+// to the deployment default halfway through the turn.
 type agentChatConfirmRequest struct {
 	ActionID string `json:"action_id"`
 	Decision string `json:"decision"`
 	Trace    bool   `json:"trace"`
+	Model    string `json:"model"`
 }
 
 type agentChatPendingRow struct {
@@ -931,10 +983,13 @@ func (h *Handler) AgentChat(c *gin.Context) {
 	view := h.agentChatTools.NewView()
 	turnCtx := agentchat.TurnContext{ProjectID: req.ProjectID, EnvID: req.EnvID, AppName: req.AppName}
 
-	res, err := agentchat.RunTurn(ctx, h.agentChatLLM, view, bearer, userSub, systemPrompt, history, message, turnCtx, emit)
+	llm := h.agentChatLLM.WithModel(h.agentChatModelFor(req.Model))
+	res, err := agentchat.RunTurn(ctx, llm, view, bearer, userSub, systemPrompt, history, message, turnCtx, emit)
 	trace.AbsorbResult(res)
+	trace.EnsureModel(llm.Model)
 	if err != nil {
-		trace.Finish(agentchat.OutcomeError, "upstream")
+		log.Printf("agent-chat: turn %s on model %s failed: %v", trace.TraceID, llm.Model, err)
+		trace.Finish(agentchat.OutcomeError, agentChatUpstreamErrorCode(err))
 		h.agentChatRecordTurn(trace)
 		writeSSEEvent(c, flusher, "error", fmt.Sprintf(`{"code":"upstream","message":%q}`, "agent could not complete this turn, please try again"))
 		h.agentChatEmitTrace(c, flusher, req.Trace, trace)
@@ -1308,10 +1363,13 @@ func (h *Handler) AgentChatConfirm(c *gin.Context) {
 		},
 	}
 
-	res, err := agentchat.ResumeTurn(ctx, h.agentChatLLM, view, bearer, userSub, messages, toolCallCount, writeCallCount, emit)
+	llm := h.agentChatLLM.WithModel(h.agentChatModelFor(req.Model))
+	res, err := agentchat.ResumeTurn(ctx, llm, view, bearer, userSub, messages, toolCallCount, writeCallCount, emit)
 	trace.AbsorbResult(res)
+	trace.EnsureModel(llm.Model)
 	if err != nil {
-		trace.Finish(agentchat.OutcomeError, "upstream")
+		log.Printf("agent-chat: resumed turn %s on model %s failed: %v", trace.TraceID, llm.Model, err)
+		trace.Finish(agentchat.OutcomeError, agentChatUpstreamErrorCode(err))
 		h.agentChatRecordTurn(trace)
 		writeSSEEvent(c, flusher, "error", `{"code":"upstream","message":"agent could not complete this turn, please try again"}`)
 		h.agentChatEmitTrace(c, flusher, req.Trace, trace)

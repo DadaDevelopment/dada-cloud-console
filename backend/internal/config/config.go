@@ -415,6 +415,14 @@ type Config struct {
 	AgentChatModel       string // AGENT_CHAT_MODEL (default "claude")
 	AgentChatDailyMsgCap int64  // AGENT_CHAT_DAILY_MSG_CAP (default 50)
 
+	// AgentChatModelAllowlist names the models a chat request may ask for by
+	// hand ("model" in the request body), comma-separated. It exists so a
+	// model swap can be MEASURED against the live tool catalog before it is
+	// made the default -- the 2026-08-03 sonnet attempt shipped to every user
+	// and had to be reverted the same hour when the provider answered 429.
+	// Empty (the default) means no request may override AgentChatModel.
+	AgentChatModelAllowlist []string // AGENT_CHAT_MODEL_ALLOWLIST
+
 	// Langfuse turn tracing for the console agent. An empty public or secret
 	// key means disabled: the client is a no-op and the SSE path never waits on
 	// it. Turn rows in agent_chat_turns are written either way, so the database
@@ -718,6 +726,7 @@ func Load() (*Config, error) {
 		AgentChatGatewayKey:         getEnv("AGENT_CHAT_GATEWAY_KEY", ""),
 		AgentChatModel:              getEnv("AGENT_CHAT_MODEL", "claude"),
 		AgentChatDailyMsgCap:        getEnvInt64("AGENT_CHAT_DAILY_MSG_CAP", 50),
+		AgentChatModelAllowlist:     splitList(getEnv("AGENT_CHAT_MODEL_ALLOWLIST", "")),
 		LangfuseHost:                getEnv("LANGFUSE_HOST", "https://cloud.langfuse.com"),
 		LangfusePublicKey:           getEnv("LANGFUSE_PUBLIC_KEY", ""),
 		LangfuseSecretKey:           getEnv("LANGFUSE_SECRET_KEY", ""),

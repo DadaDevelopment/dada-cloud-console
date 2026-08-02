@@ -142,6 +142,18 @@ func (t *TurnTrace) SetUsage(u Usage) {
 	t.Usage = u
 }
 
+// EnsureModel names the model the turn was sent to when the gateway never got
+// far enough to report one back. Without it a turn that failed upstream is
+// stored with an empty model, which is exactly the row where knowing the model
+// matters most: a provider that refuses one model group and serves another is
+// indistinguishable from a dead gateway.
+func (t *TurnTrace) EnsureModel(model string) {
+	if t == nil || t.Usage.Model != "" {
+		return
+	}
+	t.Usage.Model = model
+}
+
 // AbsorbResult folds a whole TurnResult into the trace: usage, tool log, budget
 // counters and the inventory the engine established for itself. It is the one
 // call the HTTP layer needs after RunTurn or ResumeTurn, and it is safe on a

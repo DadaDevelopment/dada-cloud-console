@@ -504,3 +504,24 @@ func TestToolSpanErrorDropsMintedSecret(t *testing.T) {
 		t.Fatalf("minted token survived into span.Error: %q", tr.ToolSpans[0].Error)
 	}
 }
+
+// TestEnsureModel_FillsOnlyWhatTheGatewayNeverReported pins that a turn which
+// died before the gateway answered still records which model it was sent to,
+// and that a model the gateway did report is never overwritten.
+func TestEnsureModel_FillsOnlyWhatTheGatewayNeverReported(t *testing.T) {
+	failed := NewTurnTrace(TurnKindTurn)
+	failed.EnsureModel("claude")
+	if failed.Usage.Model != "claude" {
+		t.Fatalf("failed turn model = %q, want claude", failed.Usage.Model)
+	}
+
+	answered := NewTurnTrace(TurnKindTurn)
+	answered.SetUsage(Usage{Model: "claude-haiku"})
+	answered.EnsureModel("claude")
+	if answered.Usage.Model != "claude-haiku" {
+		t.Fatalf("reported model was overwritten: %q", answered.Usage.Model)
+	}
+
+	var nilTrace *TurnTrace
+	nilTrace.EnsureModel("claude")
+}

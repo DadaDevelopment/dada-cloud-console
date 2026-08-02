@@ -62,6 +62,19 @@ func (c *Client) Configured() bool {
 	return c != nil && c.BaseURL != "" && c.APIKey != ""
 }
 
+// WithModel returns a shallow copy of the client that talks to a different
+// model group, sharing the same HTTP client and credentials. Callers use it to
+// run one turn against another model without touching the process-wide default;
+// an empty model or a nil receiver returns the receiver unchanged.
+func (c *Client) WithModel(model string) *Client {
+	if c == nil || strings.TrimSpace(model) == "" || model == c.Model {
+		return c
+	}
+	clone := *c
+	clone.Model = model
+	return &clone
+}
+
 type streamOptions struct {
 	IncludeUsage bool `json:"include_usage"`
 }
