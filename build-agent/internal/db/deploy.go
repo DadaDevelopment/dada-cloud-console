@@ -353,11 +353,16 @@ func handoffActor(b *Build, repo *Repo) (uuid.UUID, string) {
 // already succeeded. Inside the deploy tx a single failing INSERT would poison
 // the whole transaction and drop the operation, leaving a successful build
 // stuck NotDeployed.
+//
+// The audit row carries environment_id: this is the path every git deploy takes
+// (push and manual alike), so without it the terminal step of the funnel cannot
+// be attributed to an environment at all, and a deploy into a preview reads the
+// same as a deploy into prod.
 func optionalDeploySideEffects(ctx context.Context, pool *pgxpool.Pool, b *Build, repo *Repo, opID uuid.UUID, action string, payload []byte, defaultHostname string, actor uuid.UUID, initiator string) {
 	if _, err := pool.Exec(ctx, `
-		INSERT INTO audit_events (actor_id, project_id, operation_id, action, resource_kind, resource_name, metadata)
-		VALUES ($1, $2, $3, $4, 'App', $5, $6::jsonb || jsonb_build_object('initiator', $7::text))
-	`, actor, repo.ProjectID, opID, action, b.AppName, payload, initiator); err != nil {
+		INSERT INTO audit_events (actor_id, project_id, environment_id, operation_id, action, resource_kind, resource_name, metadata)
+		VALUES ($1, $2, $3, $4, $5, 'App', $6, $7::jsonb || jsonb_build_object('initiator', $8::text))
+	`, actor, repo.ProjectID, b.EnvironmentID, opID, action, b.AppName, payload, initiator); err != nil {
 		log.Warn().Err(err).Str("app", b.AppName).Str("operation", opID.String()).Msg("deploy audit event insert failed (deploy already committed)")
 	}
 
