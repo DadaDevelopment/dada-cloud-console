@@ -2,13 +2,14 @@
 
 import { useEffect, useRef, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
-import { X, Send, Bot, Loader2, Wrench, AlertTriangle, Check, Ban, RotateCcw } from "lucide-react";
+import { X, Send, Bot, Loader2, Wrench, AlertTriangle, Check, Ban, Trash2 } from "lucide-react";
 import { useT } from "@/lib/i18n/console/context";
 import { useProjectContext } from "@/lib/project-context";
 import { getToken } from "@/lib/api";
 import { renderMarkdown } from "@/lib/markdown";
 import { autolinkConsolePaths, isInternalConsolePath } from "@/lib/agent-chat-links";
 import { confirmArgEntries } from "@/lib/agent-chat-redact";
+import { Tooltip } from "@/components/ui/tooltip";
 
 type ChatMessage =
   | { id: string; kind: "message"; role: "user" | "assistant"; content: string; pending?: boolean }
@@ -541,16 +542,17 @@ export function AgentChatPanel({ open, onClose }: AgentChatPanelProps) {
           <span className="text-sm font-semibold text-gray-900 dark:text-gray-100">{t("agentChat.title")}</span>
         </div>
         <div className="flex items-center gap-1">
-          <button
-            type="button"
-            onClick={handleClearContext}
-            disabled={sending || messages.length === 0}
-            aria-label={t("agentChat.clearContext")}
-            title={t("agentChat.clearContext")}
-            className="rounded-md p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-600 disabled:cursor-not-allowed disabled:opacity-40 dark:text-gray-500 dark:hover:bg-gray-900 dark:hover:text-gray-300"
-          >
-            <RotateCcw className="h-4 w-4" />
-          </button>
+          <Tooltip label={t("agentChat.clearContext")}>
+            <button
+              type="button"
+              onClick={handleClearContext}
+              disabled={sending || messages.length === 0}
+              aria-label={t("agentChat.clearContext")}
+              className="rounded-md p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-600 disabled:cursor-not-allowed disabled:opacity-40 dark:text-gray-500 dark:hover:bg-gray-900 dark:hover:text-gray-300"
+            >
+              <Trash2 className="h-4 w-4" />
+            </button>
+          </Tooltip>
           <button
             type="button"
             onClick={onClose}
