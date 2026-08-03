@@ -158,7 +158,31 @@ currently lives. A move re-points that row and re-mints nothing.
       project `internal`. Every row written before the rollout is NULL, which
       is the intended shape: nothing was backfilled, so "not attributable"
       never masquerades as an attribution.
-- [ ] Per-app scopes and quota on the identity.
+- [x] Per-app scopes and quota on the identity. Scopes were already the
+      enforced part: the gateway refuses a token with no `ai:*` scope at auth
+      and a call whose type needs a scope the identity lacks at pre-call, so
+      nothing was missing there. The quota was: migration 095 puts
+      `ai_monthly_limit_usd` on the identity (NULL = no ceiling, which is what
+      every existing identity gets — a migration must not start refusing live
+      traffic), console `776c7ea` checks it at introspection, ai-gateway
+      `854f43c` turns the refusal into a message about budget rather than about
+      a broken key. The ceiling belongs to the identity because the identity is
+      the app; on the project it would only mean "whoever gets there first eats
+      the shared limit".
+      It is a soft ceiling and overshoots on purpose: usage rows are written
+      after the response is out and the gateway caches introspection for up to
+      a minute, so it stops the next minute of traffic, not the next cent.
+      Exactness would need spend reserved before the call — a different feature
+      from a runaway-cost guard.
+      Setting it is `PATCH .../apps/:appName/identity`, deliberately not the
+      POST route: POST rotates the token, and setting a budget must not cost an
+      app its credential.
+- [ ] Verify the ceiling in prod once console `776c7ea` and gateway `854f43c`
+      are live: set a tiny `ai_monthly_limit_usd` on a throwaway identity,
+      confirm the gateway refuses with the budget message, then clear it.
+- [ ] No UI for the ceiling yet — `GET .../identity` returns
+      `ai_monthly_limit_usd` and `ai_month_spend_usd`, but the console has no
+      identity panel at all, so today the only way to set one is the API.
 
 ## Phase 5 — migrate the pasted keys
 
