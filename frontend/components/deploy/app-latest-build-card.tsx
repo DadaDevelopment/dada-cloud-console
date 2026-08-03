@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ExternalLink, Rocket } from "lucide-react";
-import { buildsApi } from "@/lib/api";
+import { buildsApi, cloudTasksApi } from "@/lib/api";
 import type { Build } from "@/lib/types";
 import { Spinner } from "@/components/ui/spinner";
 import { BuildStatusBadge, isBuildActive } from "@/components/deploy/build-status-badge";
@@ -12,7 +12,7 @@ import { useProjectContext } from "@/lib/project-context";
 import { canMutate } from "@/lib/rbac";
 import { useT } from "@/lib/i18n/console/context";
 import { trackUxEvent } from "@/lib/ux-telemetry";
-import { resolveCommit } from "@/lib/build-commit";
+import { resolveCommit, formatCommitLabel } from "@/lib/build-commit";
 
 const POLL_MS = 3000;
 
@@ -22,6 +22,7 @@ interface AppLatestBuildCardProps {
   appName: string;
   appUrl?: string;
   appReady: boolean;
+  hasGitRepo: boolean;
   buildHref: (buildId: string) => string;
 }
 
@@ -40,7 +41,7 @@ interface AppLatestBuildCardProps {
  * guarded per build id so polling never inflates it, mirroring the pattern
  * used for `BuildViewKey` below.
  */
-export function AppLatestBuildCard({ projectId, envId, appName, appUrl, appReady, buildHref }: AppLatestBuildCardProps) {
+export function AppLatestBuildCard({ projectId, envId, appName, appUrl, appReady, hasGitRepo, buildHref }: AppLatestBuildCardProps) {
   const { t } = useT();
   const router = useRouter();
   const { role } = useProjectContext();
@@ -49,6 +50,7 @@ export function AppLatestBuildCard({ projectId, envId, appName, appUrl, appReady
   const [loaded, setLoaded] = useState(false);
   const [rebuilding, setRebuilding] = useState(false);
   const [rebuildError, setRebuildError] = useState<string | null>(null);
+  const [autofixing, setAutofixing] = useState(false);
   const viewedRef = useRef<BuildViewKey | null>(null);
   const readyCtaViewedRef = useRef<string | null>(null);
 
@@ -121,6 +123,33 @@ export function AppLatestBuildCard({ projectId, envId, appName, appUrl, appReady
       setRebuildError(/409|not connected/i.test(msg) ? t("apps.deployments.error.noRepo") : msg);
     } finally {
       setRebuilding(false);
+    }
+  }
+
+  /**
+   * Hands the failed build to the auto-fix agent from the surface the user is
+   * actually on. The same action already existed in the deployments feed
+   * (deployments/page.tsx handleAutofix), but that tab gets near-zero traffic
+   * -- `TriggerAutofix` had not a single audit row across the platform's whole
+   * history while git-connected apps kept failing to build -- so the flagship
+   * fix path was unreachable in practice. Sends the same one-line failure
+   * summary the feed sends, then lands the user on the agent panel where the
+   * run reports back.
+   */
+  async function handleAutofix() {
+    if (!envId || !build) return;
+    setAutofixing(true);
+    setRebuildError(null);
+    try {
+      const resolved = resolveCommit(build);
+      const ref = resolved.kind === "sha" ? resolved.sha.slice(0, 12) : formatCommitLabel(resolved, t);
+      const summary = `Build failed on branch ${build.branch} (${ref})${build.commit_message ? `: ${build.commit_message}` : ""}`;
+      await cloudTasksApi.triggerAutofix(projectId, envId, appName, summary);
+      router.push(`/projects/${projectId}/apps/${appName}${envId ? `?envId=${envId}` : ""}#agent`);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : t("apps.deployments.error.autofix");
+      setRebuildError(/no connected git repo/i.test(msg) ? t("apps.deployments.error.noRepo") : msg);
+      setAutofixing(false);
     }
   }
 
@@ -229,13 +258,29 @@ export function AppLatestBuildCard({ projectId, envId, appName, appUrl, appReady
             </p>
           </div>
           <div className="flex shrink-0 items-center gap-2">
+            {canDeploy && hasGitRepo && (
+              <button
+                type="button"
+                onClick={handleAutofix}
+                disabled={autofixing || rebuilding}
+                data-ux="app_latest_build:autofix"
+                className="inline-flex items-center gap-1.5 rounded-lg bg-red-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-red-700 transition-colors disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {autofixing && <Spinner size="sm" />}
+                {autofixing ? t("apps.deployments.autofixing") : t("apps.deployments.autofix")}
+              </button>
+            )}
             {canDeploy && (
               <button
                 type="button"
                 onClick={handleRebuild}
-                disabled={rebuilding}
+                disabled={rebuilding || autofixing}
                 data-ux="app_latest_build:rebuild"
-                className="rounded-lg bg-red-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-red-700 transition-colors disabled:cursor-not-allowed disabled:opacity-60"
+                className={
+                  hasGitRepo
+                    ? "rounded-lg border border-red-200 dark:border-red-900 bg-white dark:bg-gray-900 px-3 py-1.5 text-xs font-medium text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/30 transition-colors disabled:cursor-not-allowed disabled:opacity-60"
+                    : "rounded-lg bg-red-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-red-700 transition-colors disabled:cursor-not-allowed disabled:opacity-60"
+                }
               >
                 {rebuilding ? t("apps.builds.rebuilding") : t("apps.builds.rebuild")}
               </button>

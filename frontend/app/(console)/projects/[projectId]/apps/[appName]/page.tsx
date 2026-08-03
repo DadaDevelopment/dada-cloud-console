@@ -495,6 +495,7 @@ export default function AppDetailPage() {
           appName={appName}
           appUrl={summary.url}
           appReady={appPhaseReady}
+          hasGitRepo={!!summary.repo_full_name}
           buildHref={(buildId) => `/projects/${projectId}/apps/${appName}/builds/${buildId}${envId ? `?envId=${envId}` : ""}`}
         />
       )}
