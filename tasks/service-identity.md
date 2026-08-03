@@ -146,8 +146,18 @@ currently lives. A move re-points that row and re-mints nothing.
       Read side: `GET /projects/{id}/ai/usage` gains `apps[]`, and the project
       AI page renders it with the unattributed remainder spelled out. That
       remainder is the interesting number until every app is on an identity.
-- [ ] Verify in prod: a reels-tracker call lands in `agent_token_usage` with
-      its `identity_id` set, and the project page splits the spend.
+- [x] Verify in prod: a reels-tracker call lands in `agent_token_usage` with
+      its `identity_id` set, and the project page splits the spend. Done
+      2026-08-03 on console `4a28e462` (build #882, pinned by the platform bot)
+      and ai-gateway `master-1.0.0-16`. Migration 094 is the head of
+      `schema_migrations` and `agent_token_usage.identity_id` is a uuid.
+      Three in-pod calls on reels-tracker's `sk-dada-id-` token — a raw
+      `/v1/chat/completions` probe, the OCR path (`or-gpt-4o-mini`) and
+      `web_search` (`or-gpt-41-mini-online`) — all returned 200 and all three
+      rows carry `identity_id`, grouping to `reels-tracker | 3 | $0.015649` in
+      project `internal`. Every row written before the rollout is NULL, which
+      is the intended shape: nothing was backfilled, so "not attributable"
+      never masquerades as an attribution.
 - [ ] Per-app scopes and quota on the identity.
 
 ## Phase 5 — migrate the pasted keys
