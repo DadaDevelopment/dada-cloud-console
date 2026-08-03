@@ -18,6 +18,24 @@ import { ProjectBoxesPanel } from "@/components/console/project-boxes-panel";
 
 type Counts = { apps: number; appsReady: number; dbs: number; domainsVerified: number; domainsPending: number };
 
+/**
+ * Picks the environment this page summarises.
+ *
+ * `type` alone cannot answer that. A torn-down PR preview can come back as a
+ * type=prod row (incident 2026-08-03), and "pr-6-fonbet-value" sorts ahead of
+ * "prod", so `find(e => e.type === "prod")` landed on an empty preview and the
+ * page reported "no apps" for a project serving live traffic. The project's own
+ * `default_environment` is the only authoritative answer; type and list order
+ * stay as fallbacks for projects that never set one.
+ */
+function pickDefaultEnv(envs: Environment[], defaultEnvironment?: string): Environment | undefined {
+  return (
+    (defaultEnvironment ? envs.find((e) => e.name === defaultEnvironment) : undefined) ??
+    envs.find((e) => e.type === "prod") ??
+    envs[0]
+  );
+}
+
 export default function ProjectOverviewPage() {
   const params = useParams<{ projectId: string }>();
   const projectId = params.projectId;
@@ -39,7 +57,7 @@ export default function ProjectOverviewPage() {
         setProject(detail.project);
 
         const envs: Environment[] = detail.environments ?? [];
-        const prod = envs.find((e) => e.type === "prod") ?? envs[0];
+        const prod = pickDefaultEnv(envs, detail.project.default_environment);
         setEnvId(prod?.id ?? null);
 
         const [apps, dbs, domains] = await Promise.all([

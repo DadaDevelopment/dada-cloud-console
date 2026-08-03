@@ -52,6 +52,13 @@ var resourcesValuesPathRe = regexp.MustCompile(`^clusters/[^/]+/projects/([^/]+)
 // 1=project, 2=env, 3=app.
 var chartTemplatePathRe = regexp.MustCompile(`^clusters/[^/]+/projects/([^/]+)/environments/([^/]+)/apps/([^/]+)/chart/templates/[^/]+\.ya?ml$`)
 
+// previewEnvNameRe matches the "pr-<n>-<app>" environment name that
+// build-agent's EnsurePreviewEnv and gitops-agent's doCreatePreviewEnv both
+// mint for a PR preview. A preview environment is owned by the database, never
+// by git: its row carries type=preview, is_ephemeral and the TTL the reaper
+// keys on, none of which a git path can supply.
+var previewEnvNameRe = regexp.MustCompile(`^pr-\d+-`)
+
 // ValuesNotifier is implemented by server.Hub to push live file updates to WS clients.
 type ValuesNotifier interface {
 	Notify(project, env, app, file, yaml string)
@@ -388,10 +395,25 @@ func (w *GitWatcher) syncProjectFile(ctx context.Context, mgr *git.Manager, file
 	log.Info().Str("project", name).Str("path", filePath).Msg("git-watcher: synced project manifest")
 }
 
+// errPreviewEnvGone reports that a git path names a torn-down preview
+// environment. It is not a sync failure: the caller skips the file.
+var errPreviewEnvGone = errors.New("preview environment no longer exists")
+
 // resolveOrCreateProjectEnv returns the project + environment IDs for the given
 // slugs, auto-creating both (and granting platform admins) when the git path
 // references a project/env not yet known to the DB. Git is the source of truth,
 // so a manually-committed manifest can introduce a new project/env.
+//
+// Preview environments are the one exception, and auto-creating them was a real
+// bug (incident 2026-08-03): the watcher replayed the historical commits that
+// once added clusters/*/projects/*/environments/pr-6-fonbet-value/apps/**, and
+// each replayed add resurrected an environments row for a preview torn down
+// days earlier. UpsertEnvironment has no way to know it is looking at a
+// preview, so the resurrected rows came back as type=prod with is_ephemeral
+// false and expires_at NULL — invisible to the TTL reaper (which requires both)
+// and sorting ahead of the real "prod" env, which is what made the project
+// overview report "0 apps" for a project serving live traffic. A preview whose
+// row is gone is gone; git holds no state that can bring it back.
 func (w *GitWatcher) resolveOrCreateProjectEnv(ctx context.Context, projectSlug, envSlug string) (uuid.UUID, uuid.UUID, error) {
 	var projectID, environmentID uuid.UUID
 	err := w.pool.QueryRow(ctx, `
@@ -401,6 +423,10 @@ func (w *GitWatcher) resolveOrCreateProjectEnv(ctx context.Context, projectSlug,
 	`, projectSlug, envSlug).Scan(&projectID, &environmentID)
 	if err == nil {
 		return projectID, environmentID, nil
+	}
+
+	if previewEnvNameRe.MatchString(envSlug) {
+		return uuid.Nil, uuid.Nil, fmt.Errorf("%w: %s/%s", errPreviewEnvGone, projectSlug, envSlug)
 	}
 
 	log.Info().Str("project", projectSlug).Str("env", envSlug).Msg("git-watcher: auto-creating project/env from git path")
@@ -439,6 +465,11 @@ func isResourceOwnerApp(appName, projectSlug string) bool {
 
 func (w *GitWatcher) syncAppFile(ctx context.Context, mgr *git.Manager, filePath, projectSlug, envSlug, appName string, c git.Commit) {
 	projectID, environmentID, err := w.resolveOrCreateProjectEnv(ctx, projectSlug, envSlug)
+	if errors.Is(err, errPreviewEnvGone) {
+		log.Debug().Str("project", projectSlug).Str("env", envSlug).Str("path", filePath).
+			Msg("git-watcher: skipping file of a torn-down preview environment")
+		return
+	}
 	if err != nil {
 		log.Error().Err(err).Str("project", projectSlug).Str("env", envSlug).Msg("git-watcher: resolve project/env")
 		return
@@ -517,6 +548,11 @@ func (w *GitWatcher) syncResourcesValuesFile(ctx context.Context, mgr *git.Manag
 	}
 
 	projectID, environmentID, err := w.resolveOrCreateProjectEnv(ctx, projectSlug, envSlug)
+	if errors.Is(err, errPreviewEnvGone) {
+		log.Debug().Str("project", projectSlug).Str("env", envSlug).Str("path", filePath).
+			Msg("git-watcher: skipping file of a torn-down preview environment")
+		return
+	}
 	if err != nil {
 		log.Error().Err(err).Str("project", projectSlug).Str("env", envSlug).Msg("git-watcher: resolve project/env")
 		return
@@ -609,6 +645,11 @@ func (w *GitWatcher) syncChartTemplateFile(ctx context.Context, mgr *git.Manager
 	}
 
 	projectID, environmentID, err := w.resolveOrCreateProjectEnv(ctx, projectSlug, envSlug)
+	if errors.Is(err, errPreviewEnvGone) {
+		log.Debug().Str("project", projectSlug).Str("env", envSlug).Str("path", filePath).
+			Msg("git-watcher: skipping file of a torn-down preview environment")
+		return
+	}
 	if err != nil {
 		log.Error().Err(err).Str("project", projectSlug).Str("env", envSlug).Msg("git-watcher: resolve project/env")
 		return
