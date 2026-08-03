@@ -796,51 +796,54 @@ var agentChatConsoleRoutes = []string{
 	"/projects/{projectId}/storage/{name}",
 }
 
-// agentChatSystemPrompt builds the console assistant's system prompt for one
-// turn. It encodes the behaviours the two lost production threads proved were
-// missing: the assistant must never deflect to the console UI without first
-// searching the tool catalog, must act instead of interrogating a user who has
-// nothing deployed, and must hand out real clickable console paths rather than
-// describing buttons. The engine injects a separate INVENTORY system message
-// with this turn's real projects/apps just before the user's message.
-func agentChatSystemPrompt(req agentChatRequest) string {
+// agentChatUserMessage prefixes the user's own text with the console context of
+// the page they are on. This context changes every turn, which is exactly why it
+// lives here and not in the system prompt: the prompt prefix stays byte-stable
+// and cacheable, and the volatile part rides on the message that was going to be
+// appended anyway.
+func agentChatUserMessage(req agentChatRequest, message string) string {
+	var ctxLine strings.Builder
+	if req.ProjectID != "" {
+		ctxLine.WriteString(" projectId=" + req.ProjectID)
+	}
+	if req.EnvID != "" {
+		ctxLine.WriteString(" envId=" + req.EnvID)
+	}
+	if req.AppName != "" {
+		ctxLine.WriteString(" appName=" + req.AppName)
+	}
+	if ctxLine.Len() == 0 {
+		return "[console context: none, the user has not opened a project]\n\n" + message
+	}
+	return "[console context:" + ctxLine.String() + "]\n\n" + message
+}
+
+// agentChatSystemPrompt builds the console assistant's system prompt. It is
+// static for the whole process: the tools block, the system prompt and the
+// history serialize in that order, so anything that changes per turn belongs in
+// the user message, not here -- rebuilding this string would invalidate the
+// gateway's prompt prefix cache on every turn.
+//
+// catalog is the name-only list of tools that exist beyond the fixed tools
+// block. The model reads a schema with load_tool and calls the tool with
+// call_tool; there is no keyword search and no ranking.
+func agentChatSystemPrompt(catalog []string) string {
 	var sb strings.Builder
 	sb.WriteString("You are the Dada Cloud console assistant, embedded in a side panel of the console UI. ")
 	sb.WriteString("Answer in the same language the user writes in (Russian or English). ")
 	sb.WriteString("Use the available tools to look up real project/app/deployment state before making any factual claim about the user's resources; never invent state you have not looked up. ")
 	sb.WriteString("Be concise and concrete. If you cannot resolve the user's problem, offer to file a support ticket with the create_support_ticket tool. ")
-	sb.WriteString("Current console context: ")
-	if req.ProjectID != "" {
-		sb.WriteString("projectId=" + req.ProjectID + " ")
-	}
-	if req.EnvID != "" {
-		sb.WriteString("envId=" + req.EnvID + " ")
-	}
-	if req.AppName != "" {
-		sb.WriteString("appName=" + req.AppName + " ")
-	}
-	if req.ProjectID == "" && req.EnvID == "" && req.AppName == "" {
-		sb.WriteString("none (the user has not selected a project yet).")
-	}
 
-	sb.WriteString(" TOOL DISCOVERY. Your tool list starts small on purpose: it holds only navigation and inventory tools plus search_tools. The full platform catalog is much larger and is NOT in your list. Before you EVER tell the user that something is impossible, not supported, or has to be done in the console UI, you MUST first call search_tools with a keyword for that capability -- in English or Russian (domain/домен, backup/бэкап, files/файлы, box/бокс, git/репозиторий, billing/тариф/квота, s3/хранилище, vm/сервер, ai key/ключ). Any tool search_tools returns becomes immediately callable in this turn. Answering \"there is no such capability\" or \"go to the UI\" without having called search_tools first is a failure. ")
+	sb.WriteString("TOOLS. The tools block holds the navigation tools you need most, plus load_tool and call_tool. Every other tool of the platform exists and is callable, but its schema is not in the tools block: read the schema with load_tool(names) and then call it with call_tool(name, arguments). ")
+	sb.WriteString("call_tool validates arguments against the tool's real schema before anything runs; a validation error comes back with that schema, so fix the call and retry rather than giving up. ")
+	sb.WriteString("This is the complete list of tools reachable through call_tool: ")
+	sb.WriteString(strings.Join(catalog, ", "))
+	sb.WriteString(". ")
+	sb.WriteString("A capability on that list is a capability you have. A capability that is not on it is one you do not have: say so plainly and give the console path for it, and never call a tool name that is not on the list -- an invented name is a wasted call, not a feature. ")
+	sb.WriteString("Reading a schema is free; guessing is not. Load the schema before the first call to any tool outside the tools block. ")
 
-	sb.WriteString("GROUNDING. A separate INVENTORY system message may already list this turn's projects, environment and apps; trust it and do not re-query what it already states. ")
+	sb.WriteString("GROUNDING. The user message carries the console context of the page the user is on (projectId, envId, appName) and, when the engine looked it up, the projects and apps that actually exist. Trust it and do not re-query what it already states. ")
 	sb.WriteString("If it says the user has nothing deployed, do NOT ask \"which application do you mean\" or \"which project\" -- there is none. Say plainly that nothing is deployed yet and go straight to the first concrete step: create a project if there is none (ensureDefaultProject or createProject), then either connect a GitHub repository (connectGitRepo) or create an app from a container image (createApp). Offer to do it yourself rather than describing buttons -- the user gets a confirmation card before anything is actually created. ")
-
-	sb.WriteString("WHAT YOU CAN DO. You CAN create an app (createApp), create a project (createProject, ensureDefaultProject), connect a GitHub repository (connectGitRepo), authorize and attach a custom domain (addDomainAuthorization, verifyDomainAuthorization, attachHostname, upsertManagedRecord), back up, restore and export a managed database (createDatabaseBackup, restoreDatabase, downloadDatabaseBackup -- the export mints a login-free download link, so it is confirmation-gated like any write), set environment variables in bulk (bulkSetEnvVars), issue a deploy-hook token (createDeployHook), and read an app's persistent files (listAppFiles, readAppFile). ")
-
-	sb.WriteString("WHAT YOU CANNOT DO. This is the complete list of things the user may reasonably ask for that you have NO tool for. Never promise them, never call an invented tool name for them; say plainly that this one is done in the console and give the path. ")
-	sb.WriteString("(1) Create or start a virtual machine / app server -- read-only via listAppServers, getAppServer; the user does it at /projects/{projectId}/app-servers. ")
-	sb.WriteString("(2) Create, start, suspend, extend or crystallize a box (dev sandbox) -- read-only via listBoxes, getBox, getBoxState, getBoxCatalog; the user does it at /projects/{projectId}/boxes. A request like \"raise me a box for an hour\" is THIS case: you cannot do it. ")
-	sb.WriteString("(3) Delete an app or a project -- you can only show the consequences with deleteAppImpact / deleteProjectImpact; the deletion itself is on the app page /projects/{projectId}/apps/{appName} for an app and on the project settings page /projects/{projectId}/members for a whole project. ")
-	sb.WriteString("(4) Move an app to another project or environment -- moveAppImpact previews it, nothing performs it. ")
-	sb.WriteString("(5) Upload source code as an archive -- the reverse (downloadSourceArchive) works, but an upload deploy is started by the user at /deploy. ")
-	sb.WriteString("(6) Turn PR preview environments on or off -- that is a label on the pull request, not a platform setting. ")
-	sb.WriteString("(7) Run a diagnosis or an auto-fix of a broken app -- those exist in the console UI on the app page, but not as tools for you. ")
-	sb.WriteString("(8) Reveal any stored secret value (an env var's value, database credentials, an S3 key, a model API key) -- deliberately not available to you at all; the user reveals it themselves in the console. ")
-	sb.WriteString("(9) Change an existing app's replica count, manage project members, mint an AI-gateway key, or change the billing plan -- /projects/{projectId}/apps/{appName}/settings, /projects/{projectId}/members, /projects/{projectId}/ai, /projects/{projectId}/billing respectively. ")
-	sb.WriteString("Everything NOT on this list, you must still check with search_tools before refusing. ")
 
 	sb.WriteString("PLATFORM FACTS. Managed databases are PostgreSQL ONLY -- createDatabase has no engine option. Redis, MySQL, MongoDB and the like are not managed services here: they run as an ordinary app from a container image (createApp with that image, plus persistent storage if the data must survive a restart). Do not offer a \"managed Redis\". ")
 	sb.WriteString("Autoscaling is VERTICAL only: the platform moves a starved app up the resource-profile ladder and shrinks it back when the peak drops, at most once per cooldown window. There is no horizontal autoscaler -- replica count never changes with load. ")
@@ -849,8 +852,8 @@ func agentChatSystemPrompt(req agentChatRequest) string {
 	sb.WriteString("Persistent storage can be grown but never shrunk, and its storage class is fixed once created. ")
 
 	sb.WriteString("You can order a managed PostgreSQL database (createDatabase), a public endpoint for an app (createEndpoint), an S3 storage bucket (createS3Bucket), a new app (createApp) or a connected git repository (connectGitRepo). All of them require a specific projectId and envId (environment), and createEndpoint also requires a real appName -- these are NOT things you may invent. ")
-	sb.WriteString("If envId (or, for createEndpoint, appName) is not already given above or in the INVENTORY message, ask the user before calling any of these tools. ")
-	sb.WriteString("If the user says to choose for them, use the INVENTORY message, or call listProjects/getProject/listApps when it does not cover the question, pick a sensible one (prefer an environment named prod if several exist and the user gave no other hint), and explicitly state what you picked before calling the tool -- never guess an envId or appName you have not looked up. ")
+	sb.WriteString("If envId (or, for createEndpoint, appName) is not already given in the user message's console context, ask the user before calling any of these tools. ")
+	sb.WriteString("If the user says to choose for them, use the console context, or call listProjects/getProject/listApps when it does not cover the question, pick a sensible one (prefer an environment named prod if several exist and the user gave no other hint), and explicitly state what you picked before calling the tool -- never guess an envId or appName you have not looked up. ")
 	sb.WriteString("Every mutating tool always pauses for the user's explicit confirmation in the UI before it actually runs, so propose the call as soon as you have resolved its required fields; you do not need the user to also confirm in chat first. ")
 	sb.WriteString("A new app consumes the plan's app quota (the Free plan allows 1 app) and is then billed by actual consumption -- say so when you propose createApp, and call getProjectQuotas if the user asks whether they still have room. ")
 
@@ -870,7 +873,7 @@ func agentChatSystemPrompt(req agentChatRequest) string {
 
 // @ID          agentChat
 // @Summary     Stream a chat turn with the console agent
-// @Description Streams Server-Sent Events for a single chat turn. Runs a server-side ReAct loop against the ADR-015 LLM gateway, grounding answers with a curated subset of the console's own API (read tools plus confirmation-gated write tools and create_support_ticket) executed under the caller's own bearer. The model starts with a small navigation toolset and pulls in the rest via the search_tools meta-tool. Emits token events (assistant text deltas), tool_call events (tool name only), a confirm_request event when a write tool needs the user's approval, an error event on a friendly failure (gateway not configured, daily cap reached, upstream error), an optional trace event with this turn's own metrics when the request sets "trace": true, and a final done event. Sending the literal message "__slowtest__" instead streams a 75s heartbeat run to prove the endpoint survives the ingress proxy-read-timeout.
+// @Description Streams Server-Sent Events for a single chat turn. Runs a server-side ReAct loop against the ADR-015 LLM gateway, grounding answers with a curated subset of the console's own API (read tools plus confirmation-gated write tools and create_support_ticket) executed under the caller's own bearer. The tools block is fixed for the session (navigation tools plus load_tool and call_tool); the rest of the catalog is listed by name in the system prompt, its schema read with load_tool and dispatched with call_tool. Emits token events (assistant text deltas), tool_call events (tool name only), a confirm_request event when a write tool needs the user's approval, an error event on a friendly failure (gateway not configured, daily cap reached, upstream error), an optional trace event with this turn's own metrics when the request sets "trace": true, and a final done event. Sending the literal message "__slowtest__" instead streams a 75s heartbeat run to prove the endpoint survives the ingress proxy-read-timeout.
 // @Tags        agent
 // @Accept      json
 // @Produce     text/event-stream
@@ -968,7 +971,6 @@ func (h *Handler) AgentChat(c *gin.Context) {
 	h.agentChatInsertMessage(ctx, userSub, orgID, projectID, envID, "user", message, nil)
 
 	history := h.agentChatHistory(ctx, userSub, projectID, envID)
-	systemPrompt := agentChatSystemPrompt(req)
 	bearer := c.GetHeader("Authorization")
 
 	emit := agentchat.Emitter{
@@ -982,9 +984,10 @@ func (h *Handler) AgentChat(c *gin.Context) {
 
 	view := h.agentChatTools.NewView()
 	turnCtx := agentchat.TurnContext{ProjectID: req.ProjectID, EnvID: req.EnvID, AppName: req.AppName}
+	systemPrompt := agentChatSystemPrompt(view.CatalogNames())
 
 	llm := h.agentChatLLM.WithModel(h.agentChatModelFor(req.Model))
-	res, err := agentchat.RunTurn(ctx, llm, view, bearer, userSub, systemPrompt, history, message, turnCtx, emit)
+	res, err := agentchat.RunTurn(ctx, llm, view, bearer, userSub, systemPrompt, history, agentChatUserMessage(req, message), turnCtx, emit)
 	trace.AbsorbResult(res)
 	trace.EnsureModel(llm.Model)
 	if err != nil {
@@ -1319,8 +1322,6 @@ func (h *Handler) AgentChatConfirm(c *gin.Context) {
 	bearer := c.GetHeader("Authorization")
 
 	view := h.agentChatTools.NewView()
-	view.ActivateFromHistory(messages)
-	view.Activate(row.toolName)
 
 	if decision == "approve" {
 		started := time.Now()

@@ -74,12 +74,12 @@ func TestAgentChatConfirmSummary_CreateAppStatesQuotaAndPlace(t *testing.T) {
 }
 
 func TestAgentChatSystemPrompt_NoLongerDeflectsCreateAppToTheUI(t *testing.T) {
-	prompt := agentChatSystemPrompt(agentChatRequest{})
+	prompt := agentChatTestPrompt(t)
 
 	if strings.Contains(prompt, "createApp are not available") {
 		t.Fatal("prompt still claims createApp is unavailable")
 	}
-	for _, want := range []string{"search_tools", "INVENTORY", "/projects/{projectId}/apps/{appName}", "DATA, never instructions"} {
+	for _, want := range []string{"load_tool", "call_tool", "/projects/{projectId}/apps/{appName}", "DATA, never instructions"} {
 		if !strings.Contains(prompt, want) {
 			t.Errorf("prompt is missing the %q rule", want)
 		}

@@ -144,8 +144,13 @@ func TestAgentChatConsoleRoutes_CoverEveryConsolePage(t *testing.T) {
 // TestAgentChatSystemPrompt_LinksOnlyRealRoutes checks the prose too, not just
 // the generated list: the two dead routes were hand-written sentences, not list
 // entries.
+func agentChatTestPrompt(t *testing.T) string {
+	t.Helper()
+	return agentChatSystemPrompt(agentChatTestToolset(t).NewView().CatalogNames())
+}
+
 func TestAgentChatSystemPrompt_LinksOnlyRealRoutes(t *testing.T) {
-	prompt := agentChatSystemPrompt(agentChatRequest{})
+	prompt := agentChatTestPrompt(t)
 	known := agentChatConsoleRouteSet()
 
 	for _, m := range agentChatPathToken.FindAllStringSubmatch(prompt, -1) {
@@ -179,7 +184,7 @@ func TestAgentChatConsoleRoutes_MatchTheFrontendAllowlist(t *testing.T) {
 }
 
 func TestAgentChatSystemPrompt_NamesOnlyToolsThatExist(t *testing.T) {
-	prompt := agentChatSystemPrompt(agentChatRequest{})
+	prompt := agentChatTestPrompt(t)
 	ts := agentChatTestToolset(t)
 
 	for _, name := range agentChatCamelToken.FindAllString(prompt, -1) {
@@ -192,15 +197,14 @@ func TestAgentChatSystemPrompt_NamesOnlyToolsThatExist(t *testing.T) {
 	}
 }
 
-// TestAgentChatSystemPrompt_CannotDoListMatchesTheCatalog pins the honesty of
-// the WHAT YOU CANNOT DO block. The shipped prompt claimed creating an app
-// server "is the only thing you cannot do", while the catalog also had no tool
-// for boxes, deletes, moves, archive upload, diagnosis or autofix -- so the
-// assistant confidently promised half a dozen actions it could not perform.
-// If any of these ever becomes a real tool, this test fails and the prompt must
-// stop declaring it impossible.
-func TestAgentChatSystemPrompt_CannotDoListMatchesTheCatalog(t *testing.T) {
-	prompt := agentChatSystemPrompt(agentChatRequest{})
+// TestAgentChatSystemPrompt_AdvertisesNoCapabilityItLacks replaces the
+// hand-maintained "what you cannot do" list. The prompt now states the catalog
+// and the rule that anything outside it does not exist, so the failure mode to
+// guard is the opposite one: a name appearing in the prompt that the catalog
+// cannot dispatch. These are the capabilities users ask for most and the
+// platform does not expose to the agent.
+func TestAgentChatSystemPrompt_AdvertisesNoCapabilityItLacks(t *testing.T) {
+	prompt := agentChatTestPrompt(t)
 	ts := agentChatTestToolset(t)
 
 	declaredUnavailable := []string{
@@ -214,14 +218,17 @@ func TestAgentChatSystemPrompt_CannotDoListMatchesTheCatalog(t *testing.T) {
 	}
 	for _, name := range declaredUnavailable {
 		if ts.Has(name) {
-			t.Errorf("prompt tells the user %q is impossible for the assistant, but the catalog now exposes it", name)
+			continue
+		}
+		if regexp.MustCompile(`\b` + name + `\b`).MatchString(prompt) {
+			t.Errorf("prompt mentions %q, which the catalog cannot dispatch -- the model will promise it and then call an unknown tool", name)
 		}
 	}
 
 	if strings.Contains(prompt, "is the only thing you cannot do") {
 		t.Error("prompt still claims a single capability gap; the catalog has many")
 	}
-	for _, must := range []string{"WHAT YOU CANNOT DO", "Managed databases are PostgreSQL ONLY", "VERTICAL only", "no cron job", "PR preview environments are free"} {
+	for _, must := range []string{"Managed databases are PostgreSQL ONLY", "VERTICAL only", "no cron job", "PR preview environments are free"} {
 		if !strings.Contains(prompt, must) {
 			t.Errorf("prompt lost the %q statement", must)
 		}
@@ -248,7 +255,7 @@ func TestAgentChatSystemPrompt_FreePlanQuotaMatchesBilling(t *testing.T) {
 		t.Fatal("no free plan in the embedded plan set")
 	}
 
-	prompt := agentChatSystemPrompt(agentChatRequest{})
+	prompt := agentChatTestPrompt(t)
 	want := fmt.Sprintf("the Free plan allows %d app", apps)
 	if !strings.Contains(prompt, want) {
 		t.Fatalf("prompt does not state the real Free app quota (%d): missing %q", apps, want)
@@ -268,7 +275,7 @@ func TestAgentChatSystemPrompt_FreePlanQuotaMatchesBilling(t *testing.T) {
 // generic 63-character rule, which lets the model propose slugs the backend
 // rejects and burn the turn's tool budget on the retry.
 func TestAgentChatSystemPrompt_ProjectSlugRuleMatchesTheValidator(t *testing.T) {
-	prompt := agentChatSystemPrompt(agentChatRequest{})
+	prompt := agentChatTestPrompt(t)
 	if !strings.Contains(prompt, "createProject's slug is stricter still: 3 to 40 characters") {
 		t.Fatal("prompt does not state the project slug length rule")
 	}

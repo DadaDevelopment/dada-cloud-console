@@ -6,8 +6,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-
-	"github.com/dada-tuda/console/backend/internal/llmchat"
 )
 
 func loadTestToolset(t *testing.T) *Toolset {
@@ -127,32 +125,43 @@ func TestToolsetDefs_RemainsFullCatalog(t *testing.T) {
 	for _, d := range ts.Defs {
 		names[d.Function.Name] = true
 	}
-	for _, want := range []string{"createApp", SearchToolsTool, "listProjects"} {
+	for _, want := range []string{"createApp", "listProjects"} {
 		if !names[want] {
-			t.Errorf("Toolset.Defs must stay the full catalog (loop.go still reads the field directly), missing %q", want)
+			t.Errorf("Toolset.Defs must stay the full catalog, missing %q", want)
 		}
 	}
-	if len(ts.Defs) != len(ts.order)+1 {
-		t.Errorf("Toolset.Defs = %d entries, want %d curated tools + search_tools", len(ts.Defs), len(ts.order)+1)
+	if len(ts.Defs) != len(ts.order) {
+		t.Errorf("Toolset.Defs = %d entries, want %d curated tools", len(ts.Defs), len(ts.order))
 	}
 }
 
-func TestBaseView_IsSmall(t *testing.T) {
+func TestView_DefsAreFixedAndSmall(t *testing.T) {
 	ts := loadTestToolset(t)
-	defs := ts.NewView().Defs()
-	if len(defs) < 8 || len(defs) > 14 {
-		t.Fatalf("base view exposes %d tools, want between 8 and 14: the whole point of lazy loading is a small prompt", len(defs))
+	view := ts.NewView()
+	before := view.Defs()
+	if len(before) != len(baseTools)+2 {
+		t.Fatalf("view exposes %d tools, want %d base tools plus load_tool and call_tool", len(before), len(baseTools)+2)
 	}
 	got := map[string]bool{}
-	for _, d := range defs {
+	for _, d := range before {
 		got[d.Function.Name] = true
 	}
-	if !got[SearchToolsTool] {
-		t.Error("base view must expose search_tools, otherwise nothing else is discoverable")
-	}
-	for _, name := range baseTools {
+	for _, name := range append(append([]string{}, baseTools...), LoadToolTool, CallToolTool) {
 		if !got[name] {
-			t.Errorf("base view is missing base tool %q", name)
+			t.Errorf("view is missing %q", name)
+		}
+	}
+
+	if _, isErr := view.Execute(context.Background(), "", LoadToolTool, `{"names":["listDatabaseBackups"]}`); isErr {
+		t.Fatal("load_tool of a real catalog tool must succeed")
+	}
+	after := view.Defs()
+	if len(after) != len(before) {
+		t.Fatalf("the tools block changed after load_tool (%d -> %d); it is serialized ahead of the system prompt, so a change invalidates the whole prefix cache", len(before), len(after))
+	}
+	for i := range after {
+		if after[i].Function.Name != before[i].Function.Name {
+			t.Fatalf("tool order changed at %d: %s -> %s", i, before[i].Function.Name, after[i].Function.Name)
 		}
 	}
 }
@@ -171,244 +180,6 @@ func TestBaseTools_ContainNoWriteTool(t *testing.T) {
 	for _, name := range baseTools {
 		if ts.IsWrite(name) {
 			t.Errorf("base tool %q is a write tool; the always-on set must be read-only", name)
-		}
-	}
-}
-
-func TestSearchAliases_AllTargetsExistInCatalog(t *testing.T) {
-	ts := loadTestToolset(t)
-	for key, names := range searchAliases {
-		for _, name := range names {
-			if !ts.Has(name) {
-				t.Errorf("search alias %q points at %q which is not in the catalog: the search would advertise a tool the model cannot call", key, name)
-			}
-		}
-	}
-}
-
-func TestSearchTools_FindsAndActivatesRussian(t *testing.T) {
-	ts := loadTestToolset(t)
-	view := ts.NewView()
-	if view.IsActive("addDomainAuthorization") {
-		t.Fatal("addDomainAuthorization must not be active before a search")
-	}
-	text, isErr := view.Execute(context.Background(), "", SearchToolsTool, `{"query":"домен biba.ru"}`)
-	if isErr {
-		t.Fatalf("search_tools reported an error: %s", text)
-	}
-	if !strings.Contains(text, "addDomainAuthorization") {
-		t.Fatalf("search for a Russian domain question did not surface addDomainAuthorization, got:\n%s", text)
-	}
-	if !view.IsActive("addDomainAuthorization") {
-		t.Fatal("search_tools must activate what it returns, otherwise the model still cannot call it")
-	}
-	found := false
-	for _, d := range view.Defs() {
-		if d.Function.Name == "addDomainAuthorization" {
-			found = true
-		}
-	}
-	if !found {
-		t.Fatal("activated tool did not appear in view.Defs()")
-	}
-}
-
-func TestSearchTools_FindsEnglish(t *testing.T) {
-	ts := loadTestToolset(t)
-	view := ts.NewView()
-	text, isErr := view.Execute(context.Background(), "", SearchToolsTool, `{"query":"database backup restore"}`)
-	if isErr {
-		t.Fatalf("search_tools reported an error: %s", text)
-	}
-	for _, want := range []string{"listDatabaseBackups", "restoreDatabase"} {
-		if !strings.Contains(text, want) {
-			t.Errorf("search %q did not surface %q, got:\n%s", "database backup restore", want, text)
-		}
-	}
-}
-
-func TestSearchTools_NoMatch(t *testing.T) {
-	ts := loadTestToolset(t)
-	view := ts.NewView()
-	before := len(view.Defs())
-	text, isErr := view.Execute(context.Background(), "", SearchToolsTool, `{"query":"quantum flux capacitor"}`)
-	if isErr {
-		t.Fatalf("an empty result is not a tool error, got isError=true: %s", text)
-	}
-	if !strings.Contains(text, "found no tool") {
-		t.Fatalf("expected a no-match explanation, got:\n%s", text)
-	}
-	if len(view.Defs()) != before {
-		t.Fatalf("a no-match search changed the active set: %d -> %d", before, len(view.Defs()))
-	}
-}
-
-func TestSearchTools_EmptyQuery(t *testing.T) {
-	ts := loadTestToolset(t)
-	view := ts.NewView()
-	_, isErr := view.Execute(context.Background(), "", SearchToolsTool, `{}`)
-	if !isErr {
-		t.Fatal("search_tools without a query must report an error so the model retries with one")
-	}
-}
-
-func TestSearchTools_CallLimit(t *testing.T) {
-	ts := loadTestToolset(t)
-	view := ts.NewView()
-	for i := 0; i < maxSearchCallsPerTurn; i++ {
-		if _, isErr := view.Execute(context.Background(), "", SearchToolsTool, `{"query":"domain"}`); isErr {
-			t.Fatalf("search call %d unexpectedly errored", i+1)
-		}
-	}
-	text, isErr := view.Execute(context.Background(), "", SearchToolsTool, `{"query":"domain"}`)
-	if !isErr {
-		t.Fatal("search_tools must stop after the per-turn limit")
-	}
-	if !strings.Contains(text, "limit") {
-		t.Fatalf("limit message should say so, got: %s", text)
-	}
-}
-
-func TestSearchTools_NeverReturnsDenyTools(t *testing.T) {
-	ts := loadTestToolset(t)
-	for name := range denyTools {
-		view := ts.NewView()
-		text, isErr := view.Execute(context.Background(), "", SearchToolsTool, `{"query":"`+name+`"}`)
-		if isErr {
-			t.Fatalf("search_tools errored for query %q: %s", name, text)
-		}
-		if strings.Contains(text, "- "+name+":") {
-			t.Errorf("search_tools leaked deny-listed tool %q into its results:\n%s", name, text)
-		}
-		if view.IsActive(name) {
-			t.Errorf("deny-listed tool %q became active", name)
-		}
-	}
-}
-
-func TestSearchTools_DoesNotReturnItself(t *testing.T) {
-	ts := loadTestToolset(t)
-	view := ts.NewView()
-	text, isErr := view.Execute(context.Background(), "", SearchToolsTool, `{"query":"search tools"}`)
-	if isErr {
-		t.Fatalf("search_tools errored: %s", text)
-	}
-	if strings.Contains(text, "- "+SearchToolsTool+":") {
-		t.Fatalf("search_tools must not list itself:\n%s", text)
-	}
-}
-
-func TestToolView_AutoActivatesKnownInactiveTool(t *testing.T) {
-	ts := loadTestToolsetAt(t, "http://127.0.0.1:1")
-	view := ts.NewView()
-	if view.IsActive("listHostnames") {
-		t.Fatal("listHostnames should not be part of the base set")
-	}
-	text, _ := view.Execute(context.Background(), "", "listHostnames", `{}`)
-	if strings.Contains(text, "unknown tool") {
-		t.Fatalf("a catalog tool the model guessed correctly must be executed, not rejected: %s", text)
-	}
-	if !view.IsActive("listHostnames") {
-		t.Fatal("a successfully guessed tool must stay active for the rest of the turn")
-	}
-}
-
-func TestToolView_UnknownToolGivesSearchHint(t *testing.T) {
-	ts := loadTestToolset(t)
-	view := ts.NewView()
-	text, isErr := view.Execute(context.Background(), "", "deployMyThing", `{}`)
-	if !isErr {
-		t.Fatal("an unknown tool name must be reported as an error")
-	}
-	if !strings.Contains(text, "unknown tool") || !strings.Contains(text, SearchToolsTool) {
-		t.Fatalf("the unknown-tool message must point at search_tools instead of dead-ending, got: %s", text)
-	}
-}
-
-func TestActivateFromHistory(t *testing.T) {
-	ts := loadTestToolset(t)
-	view := ts.NewView()
-	msgs := []llmchat.Message{
-		{Role: "user", Content: "покажи бэкапы"},
-		{Role: "assistant", ToolCalls: []llmchat.ToolCall{
-			{ID: "1", Function: llmchat.ToolCallFunction{Name: "listDatabaseBackups"}},
-			{ID: "2", Function: llmchat.ToolCallFunction{Name: "thisToolNeverExisted"}},
-		}},
-	}
-	view.ActivateFromHistory(msgs)
-	if !view.IsActive("listDatabaseBackups") {
-		t.Fatal("a tool already called in this conversation must stay callable after a confirm-card resume")
-	}
-	if view.IsActive("thisToolNeverExisted") {
-		t.Fatal("history must not activate a tool that does not exist")
-	}
-}
-
-// TestSearchAliases_EvalCorpusQueries drives searchCatalog with the verbatim
-// "Ввод юзера" lines from docs/product/agent-eval-personas-and-cases.md. The
-// system prompt makes search_tools a hard gate in front of the word "нельзя",
-// so an empty or wrong result set is what turns a live capability into a false
-// denial. Each case names the test case id it comes from.
-func TestSearchAliases_EvalCorpusQueries(t *testing.T) {
-	ts := loadTestToolset(t)
-	cases := []struct {
-		tc    string
-		query string
-		want  []string
-	}{
-		{"TC-35", "я снёс папку на компе, а в облаке сервис работает. код можно как-то достать обратно?", []string{"downloadSourceArchive"}},
-		{"TC-11", "удали всё лишнее, а то бардак", []string{"deleteAppImpact"}},
-		{"TC-37", "перенеси landing из нашего проекта в проект клиента", []string{"moveAppImpact"}},
-		{"TC-29", "клиент снёс таблицу, можно откатить базу на вчера?", []string{"listDatabaseBackups", "restoreDatabase"}},
-		{"TC-24", "мне нужно закинуть датасет прямо в контейнер, файлы как открыть", []string{"listAppFiles", "readAppFile"}},
-		{"TC-30", "домен клиента не подхватывается, висит уже сутки", []string{"listDomainAuthorizations", "verifyDomainAuthorization"}},
-		{"TC-28", "подними мне бокс на час, надо агенту рутовую среду", []string{"listBoxes", "getBoxCatalog"}},
-		{"TC-38", "мне нужен ключ к вашей ллм, из приложения дёргать", []string{"listAIGatewayKeys"}},
-		{"TC-04", "у меня репа на гитхабе github.com/vasya/shop-api, задеплой её", []string{"connectGitRepo"}},
-		{"TC-15", "нужен постгрес и редис, накинь оба", []string{"createDatabase"}},
-		{"TC-21", "перезалить архив", []string{"downloadSourceArchive"}},
-		{"TC-21", "выгрузить исходники", []string{"downloadSourceArchive"}},
-		{"TC-11", "удалить приложение", []string{"deleteAppImpact"}},
-		{"TC-37", "перенести приложение в другой проект", []string{"moveAppImpact"}},
-	}
-	for _, c := range cases {
-		got := ts.searchCatalog(c.query)
-		have := map[string]bool{}
-		for _, n := range got {
-			have[n] = true
-		}
-		for _, want := range c.want {
-			if !have[want] {
-				t.Errorf("%s: search %q did not surface %q; got %v", c.tc, c.query, want, got)
-			}
-		}
-	}
-}
-
-func TestSearchAliases_DeleteAndMoveImpactAreDiscoverableInRussian(t *testing.T) {
-	ts := loadTestToolset(t)
-	for _, q := range []string{"удали", "удалить", "удаление", "снести", "delete", "remove"} {
-		got := ts.searchCatalog(q)
-		found := false
-		for _, n := range got {
-			if n == "deleteAppImpact" {
-				found = true
-			}
-		}
-		if !found {
-			t.Errorf("query %q must reach deleteAppImpact (TC-11 requires impact before any delete advice); got %v", q, got)
-		}
-	}
-	for _, q := range []string{"перенеси", "перенести", "переезд", "move"} {
-		got := ts.searchCatalog(q)
-		found := false
-		for _, n := range got {
-			if n == "moveAppImpact" {
-				found = true
-			}
-		}
-		if !found {
-			t.Errorf("query %q must reach moveAppImpact (TC-37 requires the impact call); got %v", q, got)
 		}
 	}
 }
@@ -517,8 +288,11 @@ func TestTruncateToolResult(t *testing.T) {
 }
 
 func TestIsMetaTool(t *testing.T) {
-	if !IsMetaTool(SearchToolsTool) {
-		t.Fatal("search_tools is a meta-tool and must not be charged to the backend tool budget")
+	if !IsMetaTool(LoadToolTool) {
+		t.Fatal("load_tool is a meta-tool and must not be charged to the backend tool budget")
+	}
+	if IsMetaTool(CallToolTool) {
+		t.Fatal("call_tool performs a real backend call and must be charged as the tool it dispatches to")
 	}
 	if IsMetaTool("listApps") {
 		t.Fatal("a real backend tool must not be reported as a meta-tool")
@@ -553,6 +327,129 @@ func TestKeepAndWriteKeep_DoNotOverlap(t *testing.T) {
 	for _, name := range writeKeepTools {
 		if read[name] {
 			t.Errorf("tool %q is in both keepTools and writeKeepTools; a mutating call would then skip the confirmation card", name)
+		}
+	}
+}
+
+func TestLoadTool_ReturnsRealSchema(t *testing.T) {
+	view := loadTestToolset(t).NewView()
+	out, isErr := view.Execute(context.Background(), "", LoadToolTool, `{"names":["listDatabaseBackups","restoreDatabase"]}`)
+	if isErr {
+		t.Fatalf("load_tool failed: %s", out)
+	}
+	for _, want := range []string{"listDatabaseBackups", "restoreDatabase", "schema:", `"properties"`} {
+		if !strings.Contains(out, want) {
+			t.Errorf("load_tool output is missing %q, the model cannot build a call from it:\n%s", want, out)
+		}
+	}
+	if !strings.Contains(out, "changes state") {
+		t.Error("load_tool must mark mutating tools so the model knows a confirmation card follows")
+	}
+}
+
+func TestLoadTool_UnknownNameIsAnHonestError(t *testing.T) {
+	view := loadTestToolset(t).NewView()
+	out, isErr := view.Execute(context.Background(), "", LoadToolTool, `{"names":["totallyMadeUpTool"]}`)
+	if isErr {
+		t.Fatalf("a partly unknown name list must still return the known ones: %s", out)
+	}
+	if !strings.Contains(out, "not in the catalog") {
+		t.Errorf("the model must be told the name does not exist, got: %s", out)
+	}
+	if _, isErr := view.Execute(context.Background(), "", LoadToolTool, `{"names":[]}`); !isErr {
+		t.Error("an empty names array must be an error, not a silent no-op")
+	}
+}
+
+func TestCallTool_ValidatesArgumentsAgainstTheRealSchema(t *testing.T) {
+	view := loadTestToolsetAt(t, "http://127.0.0.1:1").NewView()
+	out, isErr := view.Execute(context.Background(), "", CallToolTool, `{"name":"getProject","arguments":{}}`)
+	if !isErr {
+		t.Fatalf("a call missing a required argument must fail locally, not reach the backend: %s", out)
+	}
+	if !strings.Contains(out, "schema:") {
+		t.Errorf("a validation error must carry the schema so the model fixes itself on the next attempt, got: %s", out)
+	}
+}
+
+func TestCallTool_UnknownInnerName(t *testing.T) {
+	view := loadTestToolsetAt(t, "http://127.0.0.1:1").NewView()
+	out, isErr := view.Execute(context.Background(), "", CallToolTool, `{"name":"totallyMadeUpTool","arguments":{}}`)
+	if !isErr {
+		t.Fatalf("call_tool of a non-existent tool must fail: %s", out)
+	}
+	if !strings.Contains(out, "unknown tool") {
+		t.Errorf("the error must name the problem, got: %s", out)
+	}
+}
+
+func TestCallTool_AcceptsStringifiedArguments(t *testing.T) {
+	name, args, ok := loadTestToolset(t).NewView().Resolve(CallToolTool, `{"name":"getProject","arguments":"{\"projectId\":\"p1\"}"}`)
+	if !ok {
+		t.Fatal("models frequently send arguments as a JSON string; that must resolve, not dead-end")
+	}
+	if name != "getProject" {
+		t.Fatalf("resolved to %q, want getProject", name)
+	}
+	if !strings.Contains(args, "p1") {
+		t.Fatalf("the stringified arguments were lost: %s", args)
+	}
+}
+
+func TestResolve_UnwrapsWriteToolFromCallTool(t *testing.T) {
+	view := loadTestToolset(t).NewView()
+	name, _, ok := view.Resolve(CallToolTool, `{"name":"restartApp","arguments":{"appId":"a1"}}`)
+	if !ok || name != "restartApp" {
+		t.Fatalf("Resolve returned (%q, %v), want restartApp: a write wrapped in call_tool must be visible to the confirmation gate", name, ok)
+	}
+	if !view.IsWrite(name) {
+		t.Fatal("the unwrapped tool must classify as a write, otherwise the mutation runs without a confirmation card")
+	}
+}
+
+func TestReadOnlyView_RefusesWritesAndHidesThemFromTheCatalog(t *testing.T) {
+	view := loadTestToolsetAt(t, "http://127.0.0.1:1").NewReadOnlyView()
+	out, isErr := view.Execute(context.Background(), "", CallToolTool, `{"name":"restartApp","arguments":{"appId":"a1"}}`)
+	if !isErr {
+		t.Fatalf("a read-only session must refuse a write: %s", out)
+	}
+	for _, name := range view.CatalogNames() {
+		if view.IsWrite(name) {
+			t.Errorf("write tool %q is listed to a read-only session; it would be proposed and then refused", name)
+		}
+	}
+}
+
+func TestCatalogNames_CoversCapabilitiesAndExcludesTheBaseSet(t *testing.T) {
+	view := loadTestToolset(t).NewView()
+	listed := map[string]bool{}
+	for _, name := range view.CatalogNames() {
+		listed[name] = true
+	}
+	cases := []struct{ name, why string }{
+		{"createApp", "TC-01: creating an app from chat"},
+		{"connectGitRepo", "TC-04: linking a repo"},
+		{"addDomainAuthorization", "TC-30: authorizing a custom domain"},
+		{"listAppFiles", "TC-24: inspecting the persistent volume"},
+		{"listDatabaseBackups", "TC-29: grounding a restore in real backups"},
+		{"restoreDatabase", "TC-29: recovering a database"},
+		{"listBoxes", "TC-28: boxes exist and must be reachable"},
+		{"getBillingUsage", "TC-31: money questions answered from data"},
+		{SupportTicketTool, "the escape hatch must always be listed"},
+	}
+	for _, c := range cases {
+		if !listed[c.name] {
+			t.Errorf("catalog is missing %q -- %s", c.name, c.why)
+		}
+	}
+	for _, name := range baseTools {
+		if listed[name] {
+			t.Errorf("base tool %q is repeated in the name-only catalog; it already ships with a full schema", name)
+		}
+	}
+	for name := range denyTools {
+		if listed[name] {
+			t.Errorf("deny-listed tool %q is listed in the catalog", name)
 		}
 	}
 }

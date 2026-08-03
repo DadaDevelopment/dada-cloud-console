@@ -77,12 +77,14 @@ type TurnResult struct {
 }
 
 // RunTurn runs one user turn. Before the first LLM call it grounds itself with
-// runInventoryPreflight and, when anything was found, injects the inventory as
-// a system message immediately before the user's message.
+// runInventoryPreflight and, when anything was found, prefixes the inventory to
+// the user's message. Everything that changes per turn rides on that message on
+// purpose: the system prompt stays byte-stable so the gateway's prompt prefix
+// survives from turn to turn.
 //
-// tools is a per-turn ToolView, not the whole catalog: the model is offered a
-// handful of navigation tools plus search_tools and grows its own list from
-// there, so a prompt costs a fraction of shipping every definition every round.
+// tools is a ToolView, not the whole catalog: the model is offered the base
+// navigation tools plus load_tool and call_tool, a set that stays identical for
+// every round so the serialized tools block never invalidates the prompt cache.
 func RunTurn(
 	ctx context.Context,
 	llm *llmchat.Client,
@@ -97,12 +99,12 @@ func RunTurn(
 ) (TurnResult, error) {
 	inv, preflightLog := runInventoryPreflight(ctx, tools, bearer, turnCtx, emit)
 
-	messages := make([]llmchat.Message, 0, len(history)+3)
+	messages := make([]llmchat.Message, 0, len(history)+2)
 	messages = append(messages, llmchat.Message{Role: "system", Content: systemPrompt})
 	messages = append(messages, history...)
 	if inv != nil {
 		if invMsg := inv.systemMessage(); invMsg != "" {
-			messages = append(messages, llmchat.Message{Role: "system", Content: invMsg})
+			userMessage = invMsg + "\n\n" + userMessage
 		}
 	}
 	messages = append(messages, llmchat.Message{Role: "user", Content: userMessage})
@@ -192,6 +194,8 @@ func runLoop(
 		})
 
 		for i, call := range result.ToolCalls {
+			effName, effArgs, _ := tools.Resolve(call.Function.Name, call.Function.Arguments)
+
 			if toolCallCount >= MaxToolCallsPerTurn {
 				messages = append(messages, llmchat.Message{
 					Role:       "tool",
@@ -201,7 +205,7 @@ func runLoop(
 				continue
 			}
 
-			if tools.IsWrite(call.Function.Name) {
+			if tools.IsWrite(effName) {
 				if writeCallCount >= MaxWriteCallsPerTurn {
 					messages = append(messages, llmchat.Message{
 						Role:       "tool",
@@ -211,9 +215,9 @@ func runLoop(
 					continue
 				}
 
-				pendingToolName := call.Function.Name
+				pendingToolName := effName
 				pendingToolCallID := call.ID
-				pendingArgsJSON := call.Function.Arguments
+				pendingArgsJSON := effArgs
 
 				for j := i + 1; j < len(result.ToolCalls); j++ {
 					messages = append(messages, llmchat.Message{
@@ -236,17 +240,17 @@ func runLoop(
 				break
 			}
 
-			if !IsMetaTool(call.Function.Name) {
+			if !IsMetaTool(effName) {
 				toolCallCount++
 			}
 			if emit.ToolCall != nil {
-				emit.ToolCall(call.Function.Name)
+				emit.ToolCall(effName)
 			}
 			started := time.Now()
 			text, isError := tools.Execute(ctx, bearer, call.Function.Name, call.Function.Arguments)
 			toolLog = append(toolLog, ToolLogEntry{
-				Name:       call.Function.Name,
-				ArgsJSON:   call.Function.Arguments,
+				Name:       effName,
+				ArgsJSON:   effArgs,
 				Result:     text,
 				IsError:    isError,
 				DurationMs: time.Since(started).Milliseconds(),

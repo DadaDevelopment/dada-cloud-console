@@ -4,10 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"sort"
 	"strings"
 	"unicode"
-	"unicode/utf8"
 
 	"github.com/dada-tuda/console/backend/internal/llmchat"
 	internalmcp "github.com/dada-tuda/console/backend/internal/mcp"
@@ -93,8 +91,8 @@ var writeKeepTools = []string{
 }
 
 // denyTools are operations that reveal secret material. The deny-list wins over
-// both allowlists: a denied tool is never registered at all, so it can neither
-// be called nor discovered through search_tools.
+// both allowlists: a denied tool is never registered at all, so it is neither
+// callable nor listed in the catalog the model is shown.
 var denyTools = map[string]bool{
 	"revealEnvVar":           true,
 	"getDatabaseCredentials": true,
@@ -106,180 +104,84 @@ const SupportTicketTool = "create_support_ticket"
 
 const supportTicketRoute = "agent-chat"
 
-// SearchToolsTool is the meta-tool name the model calls to discover tools that
-// are in the catalog but not yet in its per-turn tool list.
-const SearchToolsTool = "search_tools"
+// LoadToolTool is the meta-tool the model calls to read the real JSON schema of
+// catalog tools it wants to use. The schema lands in the conversation as a tool
+// result, never in the tools array: tool definitions are serialized into the
+// head of the prompt (tools, then system, then messages), so mutating the array
+// mid-session would invalidate the whole prefix cache on every discovery.
+const LoadToolTool = "load_tool"
 
-const maxSearchResults = 12
+// CallToolTool invokes any catalog tool by name. Together with LoadToolTool it
+// replaces the previous keyword search: the model picks a tool by reading the
+// honest catalog and the honest schema, not by matching word fragments.
+const CallToolTool = "call_tool"
 
-const maxSearchDescriptionChars = 240
+const maxLoadToolNames = 8
 
-const maxSearchCallsPerTurn = 4
+const maxLoadToolChars = 12000
 
 const maxToolResultChars = 24000
 
 // IsMetaTool reports whether a tool name is a client-side meta-tool that does
 // not touch the backend. The loop must not charge those against the per-turn
-// tool-call budget, otherwise discovering a tool costs the user an answer.
+// tool-call budget, otherwise reading a schema costs the user an answer.
+// CallToolTool is deliberately absent: it performs a real backend call and is
+// charged as the tool it dispatches to.
 func IsMetaTool(name string) bool {
-	return name == SearchToolsTool
+	return name == LoadToolTool
 }
 
-var searchToolsDef = llmchat.ToolDef{
+var loadToolDef = llmchat.ToolDef{
 	Type: "function",
 	Function: llmchat.ToolFunctionDef{
-		Name:        SearchToolsTool,
-		Description: "Search the full catalog of platform tools by keyword (English or Russian) when the tool you need is not in your current tool list. Matching tools become callable immediately in this turn. Call this BEFORE ever telling the user that something is impossible or must be done in the console UI.",
+		Name:        LoadToolTool,
+		Description: "Read the full JSON schema and documentation of one or more platform tools listed in the catalog. Use it before calling a tool you have not used yet in this conversation, so that you send correct arguments.",
 		Parameters: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"query": map[string]any{
-					"type":        "string",
-					"description": "Keywords describing the capability, e.g. 'domain dns', 'database backup restore', 'container files', 'box sandbox', 'github repo', 'billing quota plan', 's3 bucket', 'ai gateway key'.",
+				"names": map[string]any{
+					"type":        "array",
+					"items":       map[string]any{"type": "string"},
+					"description": "Catalog tool names to read, exactly as spelled in the catalog.",
 				},
 			},
-			"required": []string{"query"},
+			"required": []string{"names"},
 		},
 	},
 }
 
-// baseTools is the navigation-and-inventory set every turn starts with. Adding
-// to it is expensive: each entry ships its full JSON schema in every prompt of
-// every turn. Everything else is reached through SearchToolsTool.
+var callToolDef = llmchat.ToolDef{
+	Type: "function",
+	Function: llmchat.ToolFunctionDef{
+		Name:        CallToolTool,
+		Description: "Call any platform tool from the catalog by name. Arguments are validated against the tool's real schema; on a mismatch the schema is returned so the call can be corrected and retried.",
+		Parameters: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"name": map[string]any{
+					"type":        "string",
+					"description": "Catalog tool name.",
+				},
+				"arguments": map[string]any{
+					"type":        "object",
+					"description": "Arguments for that tool, matching its schema.",
+				},
+			},
+			"required": []string{"name"},
+		},
+	},
+}
+
+// baseTools ship their full schema in every prompt of every session. The set is
+// the grounding path -- who the user is, what they own, what state it is in --
+// and stays small on purpose: everything else costs nothing until the model
+// reads it with load_tool.
 var baseTools = []string{
 	"listProjects", "getProject",
 	"listApps", "getAppState",
 	"listDatabases",
 	"getCurrentUser",
 	"searchLogs",
-	SupportTicketTool,
-}
-
-// searchAliases maps a query-term fragment to catalog tool names. Tool
-// descriptions come from the English swagger summaries while users write
-// Russian, so keyword search alone misses the most common asks. Keys of three
-// runes or fewer match a term exactly; longer keys match as a substring, so
-// "домен" also catches "домены" and "доменов".
-//
-// Keys must be word STEMS, not dictionary forms: users type "удали", not
-// "удалить", so the key is "удал". A miss here is not a cosmetic ranking
-// problem. The system prompt makes search_tools the mandatory gate in front of
-// the word "нельзя", so an empty result set is read by the model as proof that
-// the capability does not exist, and it denies a live feature.
-var searchAliases = map[string][]string{
-	"домен":    {"addDomainAuthorization", "verifyDomainAuthorization", "listDomainAuthorizations", "attachHostname", "listHostnames", "getManagedZone", "listManagedRecords", "upsertManagedRecord", "previewZoneImport"},
-	"поддомен": {"addDomainAuthorization", "attachHostname", "listHostnames", "upsertManagedRecord"},
-	"domain":   {"addDomainAuthorization", "verifyDomainAuthorization", "listDomainAuthorizations", "attachHostname", "listHostnames", "getManagedZone", "listManagedRecords", "upsertManagedRecord", "previewZoneImport"},
-	"dns":      {"addDomainAuthorization", "verifyDomainAuthorization", "listDomainAuthorizations", "getManagedZone", "listManagedRecords", "upsertManagedRecord", "previewZoneImport"},
-
-	"бэкап":     {"listDatabaseBackups", "createDatabaseBackup", "restoreDatabase", "downloadDatabaseBackup"},
-	"бекап":     {"listDatabaseBackups", "createDatabaseBackup", "restoreDatabase", "downloadDatabaseBackup"},
-	"backup":    {"listDatabaseBackups", "createDatabaseBackup", "restoreDatabase", "downloadDatabaseBackup"},
-	"restore":   {"listDatabaseBackups", "restoreDatabase", "downloadDatabaseBackup"},
-	"восстанов": {"listDatabaseBackups", "restoreDatabase", "downloadDatabaseBackup"},
-	"откат":     {"rollbackApp", "rollbackDeployment", "restoreDatabase", "listDatabaseBackups"},
-
-	"файл":    {"listAppFiles", "readAppFile", "getAppVolumeUsage", "updateAppStorage"},
-	"file":    {"listAppFiles", "readAppFile", "getAppVolumeUsage", "updateAppStorage"},
-	"датасет": {"listAppFiles", "readAppFile", "getAppVolumeUsage"},
-	"том":     {"listAppFiles", "getAppVolumeUsage", "updateAppStorage"},
-	"volume":  {"listAppFiles", "getAppVolumeUsage", "updateAppStorage"},
-
-	"бокс":     {"listBoxes", "getBox", "getBoxState", "getBoxCatalog", "getBoxUsage", "listBoxAttachments", "listBoxCrystallizations"},
-	"box":      {"listBoxes", "getBox", "getBoxState", "getBoxCatalog", "getBoxUsage", "listBoxAttachments", "listBoxCrystallizations"},
-	"песочниц": {"listBoxes", "getBox", "getBoxState", "getBoxCatalog", "getBoxUsage"},
-	"sandbox":  {"listBoxes", "getBox", "getBoxState", "getBoxCatalog", "getBoxUsage"},
-
-	"гит":       {"listGitInstallations", "listAvailableInstallations", "listInstallationRepos", "getGitInstallUrl", "connectGitRepo", "listGitRepos", "detectFramework", "detectPublicFramework"},
-	"git":       {"listGitInstallations", "listAvailableInstallations", "listInstallationRepos", "getGitInstallUrl", "connectGitRepo", "listGitRepos", "detectFramework", "detectPublicFramework"},
-	"репозитор": {"listGitInstallations", "listAvailableInstallations", "listInstallationRepos", "getGitInstallUrl", "connectGitRepo", "listGitRepos", "detectFramework", "detectPublicFramework"},
-	"github":    {"listGitInstallations", "listAvailableInstallations", "listInstallationRepos", "getGitInstallUrl", "connectGitRepo", "listGitRepos", "detectPublicFramework"},
-	"repo":      {"listGitInstallations", "listInstallationRepos", "getGitInstallUrl", "connectGitRepo", "listGitRepos", "detectFramework", "detectPublicFramework"},
-
-	"деплой":  {"createApp", "createProject", "connectGitRepo", "triggerBuild", "deployTrigger"},
-	"deploy":  {"createApp", "createProject", "connectGitRepo", "triggerBuild", "deployTrigger"},
-	"создать": {"createApp", "createProject", "connectGitRepo", "createDatabase", "createS3Bucket"},
-	"create":  {"createApp", "createProject", "connectGitRepo", "createDatabase", "createS3Bucket"},
-	"развер":  {"createApp", "createProject", "connectGitRepo", "triggerBuild", "deployTrigger"},
-	"захост":  {"createApp", "createProject", "connectGitRepo", "triggerBuild", "deployTrigger"},
-	"поднят":  {"createApp", "createProject", "connectGitRepo", "triggerBuild", "deployTrigger"},
-
-	"приложен": {"createApp", "listApps", "getAppState", "updateAppProfile"},
-	"аппа":     {"createApp", "listApps", "getAppState", "updateAppProfile"},
-	"app":      {"createApp", "listApps", "getAppState", "updateAppProfile"},
-	"сервис":   {"createApp", "listApps", "getAppState", "updateAppProfile"},
-	"бот":      {"createApp", "listApps", "getAppState", "updateAppProfile"},
-
-	"баз":      {"listDatabases", "createDatabase", "listDatabaseBackups", "restoreDatabase"},
-	"бд":       {"listDatabases", "createDatabase", "listDatabaseBackups", "restoreDatabase"},
-	"database": {"listDatabases", "createDatabase", "listDatabaseBackups", "restoreDatabase"},
-	"postgres": {"listDatabases", "createDatabase", "listDatabaseBackups", "restoreDatabase"},
-	"постгрес": {"listDatabases", "createDatabase", "listDatabaseBackups", "restoreDatabase"},
-	"redis":    {"listDatabases", "createDatabase", "listInfra"},
-	"редис":    {"listDatabases", "createDatabase", "listInfra"},
-
-	"счет":    {"getBillingUsage", "getBillingPlans", "getBillingAccount", "getProjectConsumption", "getProjectQuotas", "recommendBillingPlan", "getProjectCost"},
-	"счёт":    {"getBillingUsage", "getBillingPlans", "getBillingAccount", "getProjectConsumption", "getProjectQuotas", "recommendBillingPlan", "getProjectCost"},
-	"деньг":   {"getBillingUsage", "getBillingPlans", "getBillingAccount", "getProjectConsumption", "getProjectCost"},
-	"тариф":   {"getBillingPlans", "getBillingAccount", "recommendBillingPlan", "getProjectQuotas"},
-	"план":    {"getBillingPlans", "getBillingAccount", "recommendBillingPlan", "getProjectQuotas"},
-	"биллинг": {"getBillingUsage", "getBillingPlans", "getBillingAccount", "getProjectConsumption", "getProjectQuotas", "recommendBillingPlan", "getProjectCost"},
-	"квот":    {"getProjectQuotas", "getBillingPlans", "recommendBillingPlan"},
-	"лимит":   {"getProjectQuotas", "getBillingPlans", "recommendBillingPlan"},
-	"billing": {"getBillingUsage", "getBillingPlans", "getBillingAccount", "getProjectConsumption", "getProjectQuotas", "recommendBillingPlan", "getProjectCost"},
-	"plan":    {"getBillingPlans", "getBillingAccount", "recommendBillingPlan", "getProjectQuotas"},
-	"quota":   {"getProjectQuotas", "getBillingPlans", "recommendBillingPlan"},
-	"price":   {"getBillingPlans", "getProjectCost", "getProjectConsumption", "recommendBillingPlan"},
-	"cost":    {"getProjectCost", "getProjectConsumption", "getBillingUsage", "getBillingPlans"},
-
-	"s3":       {"listS3Buckets", "createS3Bucket", "updateAppStorage", "getAppVolumeUsage"},
-	"хранилищ": {"listS3Buckets", "createS3Bucket", "updateAppStorage", "getAppVolumeUsage"},
-	"bucket":   {"listS3Buckets", "createS3Bucket"},
-	"storage":  {"listS3Buckets", "createS3Bucket", "updateAppStorage", "getAppVolumeUsage"},
-
-	"vm":       {"listAppServers", "getAppServer", "getAppServerState", "getAppServerMetrics"},
-	"вм":       {"listAppServers", "getAppServer", "getAppServerState", "getAppServerMetrics"},
-	"виртуалк": {"listAppServers", "getAppServer", "getAppServerState", "getAppServerMetrics"},
-	"сервер":   {"listAppServers", "getAppServer", "getAppServerState", "getAppServerMetrics"},
-	"server":   {"listAppServers", "getAppServer", "getAppServerState", "getAppServerMetrics"},
-
-	"ai":     {"getAIGatewayCatalog", "listAIGatewayKeys", "getProjectAIUsage"},
-	"ллм":    {"getAIGatewayCatalog", "listAIGatewayKeys", "getProjectAIUsage"},
-	"llm":    {"getAIGatewayCatalog", "listAIGatewayKeys", "getProjectAIUsage"},
-	"нейрос": {"getAIGatewayCatalog", "listAIGatewayKeys", "getProjectAIUsage"},
-	"ключ":   {"getAIGatewayCatalog", "listAIGatewayKeys", "getProjectAIUsage"},
-	"key":    {"getAIGatewayCatalog", "listAIGatewayKeys", "getProjectAIUsage"},
-	"токен":  {"listDeployHooks", "createDeployHook", "listAIGatewayKeys"},
-
-	"env":      {"listEnvVars", "setEnvVar", "deleteEnvVar", "bulkSetEnvVars"},
-	"переменн": {"listEnvVars", "setEnvVar", "deleteEnvVar", "bulkSetEnvVars"},
-	"secret":   {"listEnvVars", "setEnvVar", "deleteEnvVar", "bulkSetEnvVars"},
-
-	"хук":  {"listDeployHooks", "createDeployHook", "deployTrigger"},
-	"hook": {"listDeployHooks", "createDeployHook", "deployTrigger"},
-	"ci":   {"listDeployHooks", "createDeployHook", "deployTrigger"},
-
-	"архив":    {"downloadSourceArchive"},
-	"исходн":   {"downloadSourceArchive"},
-	"код":      {"downloadSourceArchive"},
-	"скача":    {"downloadSourceArchive", "downloadDatabaseBackup"},
-	"выгруз":   {"downloadSourceArchive", "downloadDatabaseBackup"},
-	"zip":      {"downloadSourceArchive"},
-	"source":   {"downloadSourceArchive"},
-	"archive":  {"downloadSourceArchive"},
-	"download": {"downloadSourceArchive", "downloadDatabaseBackup"},
-
-	"удал":   {"deleteAppImpact", "deleteProjectImpact", "deleteEnvVar"},
-	"снест":  {"deleteAppImpact", "deleteProjectImpact"},
-	"снос":   {"deleteAppImpact", "deleteProjectImpact"},
-	"delete": {"deleteAppImpact", "deleteProjectImpact", "deleteEnvVar"},
-	"remove": {"deleteAppImpact", "deleteProjectImpact", "deleteEnvVar"},
-	"impact": {"deleteAppImpact", "deleteProjectImpact", "moveAppImpact"},
-
-	"перенес": {"moveAppImpact"},
-	"перенос": {"moveAppImpact"},
-	"переезд": {"moveAppImpact"},
-	"move":    {"moveAppImpact"},
 }
 
 // argDenyFields lists request-body fields the assistant must never fill in, per
@@ -290,20 +192,13 @@ var argDenyFields = map[string]map[string]bool{
 	"connectGitRepo": {"token": true},
 }
 
-type toolSearchEntry struct {
-	name      string
-	lowerName string
-	lowerDesc string
-}
-
 // Toolset is the full curated catalog: every allowlisted tool, its handler and
 // its read/write classification. It is built once at boot and shared across
 // requests.
 //
-// The exported Defs field holds definitions of the ENTIRE catalog. Sending all
-// of them in every prompt is exactly what NewView exists to avoid, but the
-// field stays exported and complete so callers not yet migrated to ToolView
-// keep working unchanged. Per-turn tool exposure belongs to ToolView.Defs().
+// Defs holds the definitions of the entire catalog. What a turn actually sends
+// to the model is ToolView.Defs(), a fixed set of base tools plus the two
+// meta-tools; the full catalog is reachable through them by name.
 type Toolset struct {
 	Defs []llmchat.ToolDef
 
@@ -311,7 +206,6 @@ type Toolset struct {
 	writeSet  map[string]bool
 	defByName map[string]llmchat.ToolDef
 	order     []string
-	index     []toolSearchEntry
 }
 
 func BuildToolset(specBytes []byte, backendURL string) (*Toolset, error) {
@@ -352,16 +246,8 @@ func BuildToolset(specBytes []byte, backendURL string) (*Toolset, error) {
 		ts.Defs = append(ts.Defs, def)
 		ts.defByName[t.Name] = def
 		ts.order = append(ts.order, t.Name)
-		ts.index = append(ts.index, toolSearchEntry{
-			name:      t.Name,
-			lowerName: strings.ToLower(t.Name),
-			lowerDesc: strings.ToLower(t.Description),
-		})
 		ts.handlers[t.Name] = internalmcp.MakeHandler(t, backendURL, spec.BasePath)
 	}
-
-	ts.Defs = append(ts.Defs, searchToolsDef)
-	ts.defByName[SearchToolsTool] = searchToolsDef
 
 	return ts, nil
 }
@@ -373,6 +259,29 @@ func (ts *Toolset) Has(name string) bool {
 
 func (ts *Toolset) IsWrite(name string) bool {
 	return ts.writeSet[name]
+}
+
+// CatalogNames lists the catalog tools the model is told about by name only.
+// Base tools are excluded because their full definitions are already in the
+// prompt. When allowWrite is false the mutating half of the catalog is not
+// listed at all: a caller without write access must not be shown capabilities
+// it cannot exercise, and ToolView refuses to dispatch them anyway.
+func (ts *Toolset) CatalogNames(allowWrite bool) []string {
+	base := make(map[string]bool, len(baseTools))
+	for _, name := range baseTools {
+		base[name] = true
+	}
+	out := make([]string, 0, len(ts.order))
+	for _, name := range ts.order {
+		if base[name] {
+			continue
+		}
+		if !allowWrite && ts.writeSet[name] {
+			continue
+		}
+		out = append(out, name)
+	}
+	return out
 }
 
 func (ts *Toolset) Execute(ctx context.Context, bearer, name, argsJSON string) (text string, isError bool) {
@@ -408,237 +317,308 @@ func (ts *Toolset) Execute(ctx context.Context, bearer, name, argsJSON string) (
 	return truncateToolResult(sb.String()), res.IsError
 }
 
-// searchCatalog ranks catalog tool names against a free-form query. An alias
-// hit outweighs a name match, which outweighs a description match. search_tools
-// itself is not in the index, so the search never finds itself.
-func (ts *Toolset) searchCatalog(query string) []string {
-	terms := searchTerms(query)
-	if len(terms) == 0 {
-		return nil
-	}
-
-	score := map[string]int{}
-	for _, term := range terms {
-		for key, names := range searchAliases {
-			if !aliasMatches(term, key) {
-				continue
-			}
-			for _, n := range names {
-				if _, ok := ts.defByName[n]; ok {
-					score[n] += 5
-				}
-			}
-		}
-		for _, e := range ts.index {
-			switch {
-			case strings.Contains(e.lowerName, term):
-				score[e.name] += 3
-			case strings.Contains(e.lowerDesc, term):
-				score[e.name]++
-			}
-		}
-	}
-
-	out := make([]string, 0, len(score))
-	for name, s := range score {
-		if s > 0 {
-			out = append(out, name)
-		}
-	}
-	sort.SliceStable(out, func(i, j int) bool {
-		if score[out[i]] != score[out[j]] {
-			return score[out[i]] > score[out[j]]
-		}
-		return out[i] < out[j]
-	})
-	if len(out) > maxSearchResults {
-		out = out[:maxSearchResults]
-	}
-	return out
-}
-
-// aliasMatches decides whether a query term hits an alias key. Three tiers,
-// each picked to keep Russian word forms reachable without dragging in
-// accidental substrings:
+// ToolView is the per-turn window onto a Toolset. Unlike its predecessor it
+// never grows: Defs() returns the same fixed list for every round of every
+// turn, which is the whole point -- the tools block sits in front of the system
+// prompt in the serialized request, so a set that changes mid-conversation
+// invalidates the prompt cache for everything behind it.
 //
-//   - keys of two runes or fewer ("бд", "вм", "ai", "s3", "ci") match exactly,
-//     because anything looser turns them into noise generators;
-//   - keys of exactly three runes match as a PREFIX, so "баз" reaches "базу"
-//     and "базы" (an exact rule missed every inflected form, which is how
-//     "откатить базу" failed to find the backup list) while "том" still does
-//     not fire on "поэтому";
-//   - longer keys match anywhere in the term, so "домен" catches "поддомена".
-func aliasMatches(term, key string) bool {
-	switch utf8.RuneCountInString(key) {
-	case 0, 1, 2:
-		return term == key
-	case 3:
-		return strings.HasPrefix(term, key)
-	}
-	return strings.Contains(term, key)
-}
-
-func searchTerms(query string) []string {
-	fields := strings.FieldsFunc(strings.ToLower(query), func(r rune) bool {
-		return !unicode.IsLetter(r) && !unicode.IsDigit(r)
-	})
-	out := make([]string, 0, len(fields))
-	for _, f := range fields {
-		if utf8.RuneCountInString(f) < 2 {
-			continue
-		}
-		out = append(out, f)
-		if len(out) == 8 {
-			break
-		}
-	}
-	return out
-}
-
-// ToolView is the per-turn window onto a Toolset. It starts with baseTools plus
-// search_tools and grows as the model discovers or correctly guesses names, so
-// the prompt carries a handful of schemas instead of the whole catalog.
+// AllowWrite is the mode gate. With it false the view dispatches read tools
+// only, and the catalog the model is shown lists nothing else.
 type ToolView struct {
-	ts          *Toolset
-	active      map[string]bool
-	order       []string
-	searchCalls int
+	ts         *Toolset
+	AllowWrite bool
 }
 
-// NewView opens a fresh per-turn view. One view per HTTP request: a confirm
-// resume arrives as a separate request, so use ActivateFromHistory there to
-// restore what the previous request discovered.
+// NewView opens a per-turn view with write dispatch allowed; the loop still
+// pauses every write for a confirmation card, so this is not an approval.
 func (ts *Toolset) NewView() *ToolView {
-	v := &ToolView{
-		ts:     ts,
-		active: map[string]bool{SearchToolsTool: true},
-		order:  []string{SearchToolsTool},
-	}
-	for _, name := range baseTools {
-		if _, ok := ts.defByName[name]; !ok {
-			continue
-		}
-		if v.active[name] {
-			continue
-		}
-		v.active[name] = true
-		v.order = append(v.order, name)
-	}
-	return v
+	return &ToolView{ts: ts, AllowWrite: true}
 }
 
-// Defs returns the definitions exposed to the model for this turn.
+// NewReadOnlyView opens a view for a caller that holds no write scope.
+func (ts *Toolset) NewReadOnlyView() *ToolView {
+	return &ToolView{ts: ts, AllowWrite: false}
+}
+
+// Defs returns the definitions exposed to the model. Fixed for the lifetime of
+// the session: base tools plus load_tool and call_tool.
 func (v *ToolView) Defs() []llmchat.ToolDef {
-	out := make([]llmchat.ToolDef, 0, len(v.order))
-	for _, name := range v.order {
+	out := make([]llmchat.ToolDef, 0, len(baseTools)+2)
+	for _, name := range baseTools {
 		if def, ok := v.ts.defByName[name]; ok {
 			out = append(out, def)
 		}
 	}
+	out = append(out, loadToolDef, callToolDef)
 	return out
 }
 
 func (v *ToolView) Has(name string) bool {
-	return v.ts.Has(name) || name == SearchToolsTool
+	return v.ts.Has(name) || name == LoadToolTool || name == CallToolTool
 }
 
 func (v *ToolView) IsWrite(name string) bool {
 	return v.ts.IsWrite(name)
 }
 
-func (v *ToolView) IsActive(name string) bool {
-	return v.active[name]
+// CatalogNames is the name-only catalog for this view's permissions.
+func (v *ToolView) CatalogNames() []string {
+	return v.ts.CatalogNames(v.AllowWrite)
 }
 
-// Activate adds a catalog tool to this turn's exposed set. It reports false for
-// names that do not exist in the catalog or that are already active.
-func (v *ToolView) Activate(name string) bool {
-	if _, ok := v.ts.defByName[name]; !ok {
-		return false
+// Resolve maps a model tool call onto the backend tool it actually performs.
+// A direct call resolves to itself; call_tool resolves to its wrapped name and
+// arguments. ok is false when the call carries no dispatchable tool, in which
+// case Execute produces the honest error for the model.
+//
+// The loop resolves before classifying a call as a write, otherwise every
+// mutation wrapped in call_tool would slip past the confirmation gate.
+func (v *ToolView) Resolve(name, argsJSON string) (string, string, bool) {
+	if name != CallToolTool {
+		return name, argsJSON, v.ts.Has(name)
 	}
-	if v.active[name] {
-		return false
+	inner, innerArgs, err := parseCallToolArgs(argsJSON)
+	if err != nil || !v.ts.Has(inner) {
+		return name, argsJSON, false
 	}
-	v.active[name] = true
-	v.order = append(v.order, name)
-	return true
+	return inner, innerArgs, true
 }
 
-func (v *ToolView) ActiveNames() []string {
-	out := make([]string, len(v.order))
-	copy(out, v.order)
-	return out
-}
-
-// ActivateFromHistory re-activates every tool the conversation already called.
-// Without it a confirm-card resume would drop everything search_tools found in
-// the previous request and the assistant would claim the capability is gone.
-func (v *ToolView) ActivateFromHistory(messages []llmchat.Message) {
-	for _, msg := range messages {
-		for _, call := range msg.ToolCalls {
-			v.Activate(call.Function.Name)
-		}
-	}
-}
-
-// Execute is the single tool entry point for a turn. It serves the search_tools
-// meta-tool locally, auto-activates a known but not-yet-exposed tool the model
-// guessed correctly, and answers an unknown name with a pointer to search_tools
-// instead of a dead end.
+// Execute is the single tool entry point for a turn. It serves load_tool
+// locally, dispatches call_tool onto the catalog after validating arguments
+// against the tool's real schema, and answers an unknown name by naming the
+// catalog rather than leaving the model at a dead end.
 func (v *ToolView) Execute(ctx context.Context, bearer, name, argsJSON string) (text string, isError bool) {
-	if name == SearchToolsTool {
-		v.searchCalls++
-		if v.searchCalls > maxSearchCallsPerTurn {
-			return "search_tools call limit reached for this turn; work with the tools you already have", true
+	switch name {
+	case LoadToolTool:
+		return v.loadTools(argsJSON)
+	case CallToolTool:
+		inner, innerArgs, err := parseCallToolArgs(argsJSON)
+		if err != nil {
+			return fmt.Sprintf("call_tool arguments are not valid: %v. Send {\"name\": \"<catalog tool>\", \"arguments\": {...}}.", err), true
 		}
-		var args struct {
-			Query string `json:"query"`
-		}
-		if strings.TrimSpace(argsJSON) != "" {
-			_ = json.Unmarshal([]byte(argsJSON), &args)
-		}
-		if strings.TrimSpace(args.Query) == "" {
-			return "search_tools requires a non-empty query argument", true
-		}
-		return v.searchAndActivate(args.Query), false
+		return v.dispatch(ctx, bearer, inner, innerArgs)
 	}
 
+	return v.dispatch(ctx, bearer, name, argsJSON)
+}
+
+func (v *ToolView) dispatch(ctx context.Context, bearer, name, argsJSON string) (string, bool) {
 	if !v.ts.Has(name) {
-		return fmt.Sprintf("unknown tool %q; call %s with a keyword to find the right tool name, do not invent tool names", name, SearchToolsTool), true
+		return fmt.Sprintf("unknown tool %q. Use only names from the catalog and read the schema with %s first.", name, LoadToolTool), true
 	}
-
-	v.Activate(name)
+	if v.ts.IsWrite(name) && !v.AllowWrite {
+		return fmt.Sprintf("%s changes state and this session has read-only access; tell the user what would need to change and let them do it.", name), true
+	}
+	if err := validateAgainstSchema(v.ts.defByName[name].Function.Parameters, argsJSON); err != nil {
+		return fmt.Sprintf("arguments for %s are invalid: %v\nschema:\n%s", name, err, schemaJSON(v.ts.defByName[name].Function.Parameters)), true
+	}
 	return v.ts.Execute(ctx, bearer, name, argsJSON)
 }
 
-func (v *ToolView) searchAndActivate(query string) string {
-	names := v.ts.searchCatalog(query)
+func (v *ToolView) loadTools(argsJSON string) (string, bool) {
+	var args struct {
+		Names []string `json:"names"`
+	}
+	if strings.TrimSpace(argsJSON) != "" {
+		if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
+			return fmt.Sprintf("load_tool arguments are not valid JSON: %v", err), true
+		}
+	}
+	names := make([]string, 0, len(args.Names))
+	for _, n := range args.Names {
+		n = strings.TrimSpace(n)
+		if n == "" {
+			continue
+		}
+		names = append(names, n)
+	}
 	if len(names) == 0 {
-		return fmt.Sprintf("search_tools found no tool matching %q. Do not invent a tool name. Catalog families: projects, apps, builds, deployments, env vars, databases and backups, domains and DNS, app files, S3 storage, boxes, app servers (VMs), billing and quotas, git repositories, logs, AI gateway.", query)
+		return "load_tool requires a non-empty names array holding catalog tool names", true
+	}
+	if len(names) > maxLoadToolNames {
+		names = names[:maxLoadToolNames]
 	}
 
 	var sb strings.Builder
-	fmt.Fprintf(&sb, "search_tools matched %d tool(s) for %q; they are callable now:", len(names), query)
-	for _, name := range names {
-		v.Activate(name)
-		sb.WriteString("\n- ")
-		sb.WriteString(name)
-		sb.WriteString(": ")
-		sb.WriteString(shortDescription(v.ts.defByName[name].Function.Description))
+	for _, n := range names {
+		def, ok := v.ts.defByName[n]
+		if !ok {
+			fmt.Fprintf(&sb, "%s: not in the catalog. Use a name exactly as listed there.\n\n", n)
+			continue
+		}
+		if v.ts.IsWrite(n) && !v.AllowWrite {
+			fmt.Fprintf(&sb, "%s: not available, this session has read-only access.\n\n", n)
+			continue
+		}
+		fmt.Fprintf(&sb, "%s%s\n%s\nschema:\n%s\n\n", n, writeMarker(v.ts.IsWrite(n)), oneLine(def.Function.Description), schemaJSON(def.Function.Parameters))
 	}
-	if len(names) == maxSearchResults {
-		sb.WriteString("\n(top matches only; refine the query for more)")
+	out := strings.TrimRight(sb.String(), "\n")
+	if len(out) > maxLoadToolChars {
+		out = out[:maxLoadToolChars] + "\n... [truncated, load fewer tools at a time]"
 	}
-	return sb.String()
+	return out, false
 }
 
-func shortDescription(desc string) string {
-	oneLine := strings.Join(strings.Fields(strings.ReplaceAll(desc, "\n", " ")), " ")
-	if utf8.RuneCountInString(oneLine) <= maxSearchDescriptionChars {
-		return oneLine
+func writeMarker(isWrite bool) string {
+	if isWrite {
+		return " (changes state; the user confirms it before it runs)"
 	}
-	runes := []rune(oneLine)
-	return string(runes[:maxSearchDescriptionChars]) + "..."
+	return ""
+}
+
+func oneLine(s string) string {
+	return strings.Join(strings.Fields(strings.ReplaceAll(s, "\n", " ")), " ")
+}
+
+func schemaJSON(schema map[string]any) string {
+	if len(schema) == 0 {
+		return "{}"
+	}
+	b, err := json.MarshalIndent(schema, "", "  ")
+	if err != nil {
+		return "{}"
+	}
+	return string(b)
+}
+
+// parseCallToolArgs unpacks a call_tool payload. The arguments field is
+// accepted both as an object and as a JSON string holding one: models emit the
+// stringified form often enough that rejecting it would burn a round for
+// nothing.
+func parseCallToolArgs(argsJSON string) (string, string, error) {
+	if strings.TrimSpace(argsJSON) == "" {
+		return "", "", fmt.Errorf("no arguments given")
+	}
+	var payload struct {
+		Name      string          `json:"name"`
+		Arguments json.RawMessage `json:"arguments"`
+	}
+	if err := json.Unmarshal([]byte(argsJSON), &payload); err != nil {
+		return "", "", err
+	}
+	name := strings.TrimSpace(payload.Name)
+	if name == "" {
+		return "", "", fmt.Errorf("name is required")
+	}
+
+	inner := strings.TrimSpace(string(payload.Arguments))
+	if inner == "" || inner == "null" {
+		return name, "{}", nil
+	}
+	if strings.HasPrefix(inner, `"`) {
+		var unquoted string
+		if err := json.Unmarshal(payload.Arguments, &unquoted); err == nil {
+			inner = strings.TrimSpace(unquoted)
+			if inner == "" {
+				return name, "{}", nil
+			}
+		}
+	}
+	var probe map[string]any
+	if err := json.Unmarshal([]byte(inner), &probe); err != nil {
+		return name, "", fmt.Errorf("arguments must be an object: %w", err)
+	}
+	return name, inner, nil
+}
+
+// validateAgainstSchema checks a tool call against the tool's own swagger
+// schema before it reaches the backend. It exists because call_tool arguments
+// do not go through the provider's constrained decoding the way a native tool
+// definition does, so the schema has to be enforced on this side. It checks
+// what a model actually gets wrong -- a missing required field or a value of
+// the wrong JSON type -- and deliberately does not attempt full JSON Schema:
+// a false rejection here would block a legal call outright.
+func validateAgainstSchema(schema map[string]any, argsJSON string) error {
+	if len(schema) == 0 {
+		return nil
+	}
+	args := map[string]any{}
+	if trimmed := strings.TrimSpace(argsJSON); trimmed != "" && trimmed != "null" {
+		if err := json.Unmarshal([]byte(trimmed), &args); err != nil {
+			return fmt.Errorf("arguments are not a JSON object: %w", err)
+		}
+	}
+
+	var missing []string
+	for _, req := range schemaRequired(schema) {
+		if v, ok := args[req]; !ok || v == nil {
+			missing = append(missing, req)
+		}
+	}
+	if len(missing) > 0 {
+		return fmt.Errorf("missing required field(s): %s", strings.Join(missing, ", "))
+	}
+
+	props, _ := schema["properties"].(map[string]any)
+	for name, raw := range args {
+		propSchema, ok := props[name].(map[string]any)
+		if !ok {
+			continue
+		}
+		if !valueMatchesSchemaType(propSchema["type"], raw) {
+			return fmt.Errorf("field %q must be of type %v", name, propSchema["type"])
+		}
+	}
+	return nil
+}
+
+func schemaRequired(schema map[string]any) []string {
+	switch req := schema["required"].(type) {
+	case []string:
+		return req
+	case []any:
+		out := make([]string, 0, len(req))
+		for _, r := range req {
+			if s, ok := r.(string); ok {
+				out = append(out, s)
+			}
+		}
+		return out
+	}
+	return nil
+}
+
+func valueMatchesSchemaType(declared any, value any) bool {
+	switch t := declared.(type) {
+	case string:
+		return jsonTypeMatches(t, value)
+	case []any:
+		for _, alt := range t {
+			if s, ok := alt.(string); ok && jsonTypeMatches(s, value) {
+				return true
+			}
+		}
+		return false
+	}
+	return true
+}
+
+func jsonTypeMatches(declared string, value any) bool {
+	switch declared {
+	case "string":
+		_, ok := value.(string)
+		return ok
+	case "number":
+		_, ok := value.(float64)
+		return ok
+	case "integer":
+		f, ok := value.(float64)
+		return ok && f == float64(int64(f))
+	case "boolean":
+		_, ok := value.(bool)
+		return ok
+	case "array":
+		_, ok := value.([]any)
+		return ok
+	case "object":
+		_, ok := value.(map[string]any)
+		return ok
+	case "null":
+		return value == nil
+	}
+	return true
 }
 
 // sanitizeArgs drops argument fields the assistant is never allowed to fill in.
@@ -672,7 +652,7 @@ func sanitizeArgs(toolName, argsJSON string) string {
 // everywhere the result outlives the turn. These operations hand back material
 // the platform itself keeps only hashed: createDeployHook's plaintext bearer
 // token is returned exactly once by the API and is a permanent deploy
-// credential until revoked, so a verbatim copy in agent_chat_messages (neither
+// credential until revoked, so a verbatim copy in the chat archive (neither
 // encrypted nor pruned) outlives the reason it was minted.
 var mintedSecretTools = map[string]string{
 	"createDeployHook": "deploy-hook token issued; the plaintext token is shown once in this turn and is not archived. If it was lost, revoke the hook and mint a new one.",

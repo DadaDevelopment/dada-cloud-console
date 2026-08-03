@@ -133,10 +133,14 @@ func newTestClientCapturing(t *testing.T, turns []scriptedTurn, captured *[]capt
 	return llmchat.New(srv.URL, "test-key", "test-model")
 }
 
-func systemMessagesJoined(req capturedRequest) string {
+// groundingJoined returns everything the model was told outside the tool loop:
+// the system prompt and the user message. The inventory rides on the user
+// message so the system prompt stays byte-stable across turns, so a test that
+// looked at system messages alone would no longer see it.
+func groundingJoined(req capturedRequest) string {
 	var parts []string
 	for _, m := range req.Messages {
-		if m.Role == "system" {
+		if m.Role == "system" || m.Role == "user" {
 			parts = append(parts, m.Content)
 		}
 	}
@@ -183,7 +187,7 @@ func newEmptyFakeToolset() *Toolset {
 	return &Toolset{
 		handlers:  map[string]internalmcp.ToolHandler{},
 		writeSet:  map[string]bool{},
-		defByName: map[string]llmchat.ToolDef{SearchToolsTool: searchToolsDef},
+		defByName: map[string]llmchat.ToolDef{},
 	}
 }
 
@@ -192,7 +196,6 @@ func addFakeTool(ts *Toolset, name, result string, isError, isWrite bool) {
 	ts.Defs = append(ts.Defs, def)
 	ts.defByName[name] = def
 	ts.order = append(ts.order, name)
-	ts.index = append(ts.index, toolSearchEntry{name: name, lowerName: strings.ToLower(name)})
 	ts.handlers[name] = fakeHandler(result, isError)
 	if isWrite {
 		ts.writeSet[name] = true
@@ -419,12 +422,12 @@ func TestRunTurn_Preflight_EmptyContext_LooksUpProjectsAndApps(t *testing.T) {
 	if len(captured) == 0 {
 		t.Fatal("gateway captured no requests")
 	}
-	sys := systemMessagesJoined(captured[0])
+	sys := groundingJoined(captured[0])
 	if !strings.Contains(sys, inventoryHeader) {
-		t.Fatalf("system messages missing inventory header: %q", sys)
+		t.Fatalf("grounding is missing inventory header: %q", sys)
 	}
 	if !strings.Contains(sys, "web") || !strings.Contains(sys, "worker") {
-		t.Fatalf("system messages missing app names: %q", sys)
+		t.Fatalf("grounding is missing app names: %q", sys)
 	}
 }
 
@@ -466,7 +469,7 @@ func TestRunTurn_Preflight_SkippedWhenAppNameKnown(t *testing.T) {
 	if res.InventoryProjects != 0 {
 		t.Fatalf("InventoryProjects=%d want 0", res.InventoryProjects)
 	}
-	if strings.Contains(systemMessagesJoined(captured[0]), inventoryHeader) {
+	if strings.Contains(groundingJoined(captured[0]), inventoryHeader) {
 		t.Fatal("system messages contain an inventory block, want none")
 	}
 }
@@ -486,12 +489,12 @@ func TestRunTurn_Preflight_NoApps_TellsModelNothingIsDeployed(t *testing.T) {
 	if !res.InventoryAppsLookedUp {
 		t.Fatal("InventoryAppsLookedUp=false, want true - listApps did run")
 	}
-	sys := systemMessagesJoined(captured[0])
+	sys := groundingJoined(captured[0])
 	if !strings.Contains(sys, inventoryNoAppsMarker) {
-		t.Fatalf("system messages missing %q: %q", inventoryNoAppsMarker, sys)
+		t.Fatalf("grounding is missing %q: %q", inventoryNoAppsMarker, sys)
 	}
 	if !strings.Contains(sys, inventoryNoAppsInstruction) {
-		t.Fatalf("system messages missing the do-not-ask instruction: %q", sys)
+		t.Fatalf("grounding is missing the do-not-ask instruction: %q", sys)
 	}
 }
 
@@ -517,7 +520,7 @@ func TestRunTurn_Preflight_ToolError_DoesNotBreakTurn(t *testing.T) {
 	if !res.ToolLog[0].IsError || !res.ToolLog[0].Preflight {
 		t.Fatalf("toolLog[0]=%+v, want IsError and Preflight true", res.ToolLog[0])
 	}
-	if strings.Contains(systemMessagesJoined(captured[0]), inventoryHeader) {
+	if strings.Contains(groundingJoined(captured[0]), inventoryHeader) {
 		t.Fatal("system messages contain an inventory block, want none after a failed preflight")
 	}
 }
@@ -540,7 +543,7 @@ func TestRunTurn_Preflight_MissingTool_DoesNotBreakTurn(t *testing.T) {
 	if !strings.Contains(res.ToolLog[0].Result, "unknown tool") {
 		t.Fatalf("toolLog[0].Result=%q, want an unknown tool error", res.ToolLog[0].Result)
 	}
-	if strings.Contains(systemMessagesJoined(captured[0]), inventoryHeader) {
+	if strings.Contains(groundingJoined(captured[0]), inventoryHeader) {
 		t.Fatal("system messages contain an inventory block, want none")
 	}
 }
@@ -594,35 +597,5 @@ func TestRunTurn_ToolLog_RecordsArgsAndDuration(t *testing.T) {
 	}
 	if entry.Preflight {
 		t.Fatal("Preflight=true, want false for the model's own call")
-	}
-}
-
-// TestRunTurn_SearchToolsDoesNotSpendToolBudget guards the lazy-loading design:
-// discovery is how the model reaches a capability at all, so charging it against
-// MaxToolCallsPerTurn would make a few searches eat the whole turn and reproduce
-// the "go to the console UI" dead end the toolset was built to remove.
-func TestRunTurn_SearchToolsDoesNotSpendToolBudget(t *testing.T) {
-	ts := newFakeToolset([]string{"listDomains"}, nil)
-
-	script := []scriptedTurn{}
-	for i := 0; i < maxSearchCallsPerTurn; i++ {
-		script = append(script, scriptedTurn{ToolCalls: []scriptedToolCall{
-			{ID: fmt.Sprintf("call_s%d", i), Name: SearchToolsTool, Args: `{"query":"domain"}`},
-		}})
-	}
-	script = append(script,
-		scriptedTurn{ToolCalls: []scriptedToolCall{{ID: "call_r", Name: "listDomains", Args: `{}`}}},
-		scriptedTurn{Content: "here are your domains"},
-	)
-
-	res, err := RunTurn(context.Background(), newTestClient(t, script), ts.NewView(), "Bearer test", "test-user", "system", nil, "домен biba.ru", groundedCtx, Emitter{})
-	if err != nil {
-		t.Fatalf("RunTurn: %v", err)
-	}
-	if res.AssistantText != "here are your domains" {
-		t.Fatalf("assistantText=%q want the final answer", res.AssistantText)
-	}
-	if res.ToolCallCount != 1 {
-		t.Fatalf("ToolCallCount=%d, want 1: only listDomains may spend the budget, %d search_tools calls must be free", res.ToolCallCount, maxSearchCallsPerTurn)
 	}
 }
