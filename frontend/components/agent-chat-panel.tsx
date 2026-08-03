@@ -2,14 +2,13 @@
 
 import { useEffect, useRef, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
-import { X, Send, Bot, Loader2, Wrench, AlertTriangle, Check, Ban, Trash2 } from "lucide-react";
+import { X, Send, Bot, Loader2, Wrench, AlertTriangle, Check, Ban, RotateCcw } from "lucide-react";
 import { useT } from "@/lib/i18n/console/context";
 import { useProjectContext } from "@/lib/project-context";
 import { getToken } from "@/lib/api";
 import { renderMarkdown } from "@/lib/markdown";
 import { autolinkConsolePaths, isInternalConsolePath } from "@/lib/agent-chat-links";
 import { confirmArgEntries } from "@/lib/agent-chat-redact";
-import { Tooltip } from "@/components/ui/tooltip";
 
 type ChatMessage =
   | { id: string; kind: "message"; role: "user" | "assistant"; content: string; pending?: boolean }
@@ -26,6 +25,26 @@ type ChatMessage =
       acknowledged?: boolean;
       resolved?: "approved" | "rejected" | "error";
     };
+
+/**
+ * How much the agent may do without stopping to ask. "edit" is the default:
+ * reversible operational actions run on their own, anything that destroys
+ * data, spends money or exposes something publicly still opens a card. The
+ * backend re-derives the same rule from the mode it is sent, so a tampered
+ * value can only ever cost the user extra confirmations, never fewer than the
+ * backend's own classification allows.
+ */
+type AgentMode = "manual" | "edit" | "admin";
+
+const AGENT_MODES: AgentMode[] = ["manual", "edit", "admin"];
+
+const AGENT_MODE_STORAGE_KEY = "dada.agentChat.mode";
+
+function readStoredMode(): AgentMode {
+  if (typeof window === "undefined") return "edit";
+  const stored = window.localStorage.getItem(AGENT_MODE_STORAGE_KEY);
+  return AGENT_MODES.includes(stored as AgentMode) ? (stored as AgentMode) : "edit";
+}
 
 const AGENT_ERROR_CODE_KEYS: Record<string, string> = {
   not_configured: "agentChat.error.notConfigured",
@@ -212,7 +231,7 @@ async function streamSSE(url: string, body: unknown, handlers: StreamChatHandler
 }
 
 function streamChat(
-  body: { message: string; projectId?: string; envId?: string; appName?: string },
+  body: { message: string; projectId?: string; envId?: string; appName?: string; mode: AgentMode },
   handlers: StreamChatHandlers
 ): Promise<void> {
   return streamSSE("/api/v1/agent/chat", body, handlers);
@@ -287,6 +306,7 @@ export function AgentChatPanel({ open, onClose }: AgentChatPanelProps) {
   const appName = appNameFromPath(pathname);
 
   const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [mode, setMode] = useState<AgentMode>("edit");
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
   const listRef = useRef<HTMLDivElement>(null);
@@ -344,6 +364,15 @@ export function AgentChatPanel({ open, onClose }: AgentChatPanelProps) {
     listRef.current?.scrollTo({ top: listRef.current.scrollHeight });
   }, [messages]);
 
+  useEffect(() => {
+    setMode(readStoredMode());
+  }, []);
+
+  function selectMode(next: AgentMode) {
+    setMode(next);
+    window.localStorage.setItem(AGENT_MODE_STORAGE_KEY, next);
+  }
+
   const hasPendingConfirm = messages.some((m) => m.kind === "confirm" && !m.resolved);
 
   async function handleSend(preset?: string) {
@@ -362,7 +391,7 @@ export function AgentChatPanel({ open, onClose }: AgentChatPanelProps) {
 
     try {
       await streamChat(
-        { message: text, projectId: projectId ?? undefined, envId: selectedEnv?.id, appName },
+        { message: text, projectId: projectId ?? undefined, envId: selectedEnv?.id, appName, mode },
         {
           onToken: (chunk) => {
             setMessages((prev) =>
@@ -542,17 +571,16 @@ export function AgentChatPanel({ open, onClose }: AgentChatPanelProps) {
           <span className="text-sm font-semibold text-gray-900 dark:text-gray-100">{t("agentChat.title")}</span>
         </div>
         <div className="flex items-center gap-1">
-          <Tooltip label={t("agentChat.clearContext")}>
-            <button
-              type="button"
-              onClick={handleClearContext}
-              disabled={sending || messages.length === 0}
-              aria-label={t("agentChat.clearContext")}
-              className="rounded-md p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-600 disabled:cursor-not-allowed disabled:opacity-40 dark:text-gray-500 dark:hover:bg-gray-900 dark:hover:text-gray-300"
-            >
-              <Trash2 className="h-4 w-4" />
-            </button>
-          </Tooltip>
+          <button
+            type="button"
+            onClick={handleClearContext}
+            disabled={sending || messages.length === 0}
+            aria-label={t("agentChat.clearContext")}
+            title={t("agentChat.clearContext")}
+            className="rounded-md p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-600 disabled:cursor-not-allowed disabled:opacity-40 dark:text-gray-500 dark:hover:bg-gray-900 dark:hover:text-gray-300"
+          >
+            <RotateCcw className="h-4 w-4" />
+          </button>
           <button
             type="button"
             onClick={onClose}
@@ -710,6 +738,24 @@ export function AgentChatPanel({ open, onClose }: AgentChatPanelProps) {
         {hasPendingConfirm && (
           <p className="mb-2 text-xs text-amber-700 dark:text-amber-300">{t("agentChat.confirm.blockedHint")}</p>
         )}
+        <div className="mb-2 flex items-center gap-2">
+          <label htmlFor="agent-chat-mode" className="text-xs text-gray-500 dark:text-gray-400">
+            {t("agentChat.mode.label")}
+          </label>
+          <select
+            id="agent-chat-mode"
+            value={mode}
+            onChange={(e) => selectMode(e.target.value as AgentMode)}
+            title={t(`agentChat.mode.${mode}Hint`)}
+            className="rounded-md border border-gray-200 bg-white px-2 py-1 text-xs text-gray-700 focus:border-blue-400 focus:outline-none dark:border-gray-800 dark:bg-gray-900 dark:text-gray-200"
+          >
+            {AGENT_MODES.map((m) => (
+              <option key={m} value={m}>
+                {t(`agentChat.mode.${m}`)}
+              </option>
+            ))}
+          </select>
+        </div>
         <div className="flex items-end gap-2">
           <textarea
             value={input}

@@ -30,7 +30,7 @@ func TestPreflightTruncatedAppsResultIsNotReportedAsNothingDeployed(t *testing.T
 	}
 	ts := newInventoryToolset(groundedProjectsJSON, groundedProjectJSON, raw)
 
-	inv, log := runInventoryPreflight(context.Background(), ts.NewView(), "Bearer test", TurnContext{}, Emitter{})
+	inv, log := runInventoryPreflight(context.Background(), ts.NewView(ModeManual), "Bearer test", TurnContext{}, Emitter{})
 	if inv == nil {
 		t.Fatal("inventory is nil, want the preflight result")
 	}
@@ -56,7 +56,7 @@ func TestPreflightParsedAppsAreReportedHonestly(t *testing.T) {
 	ctx := context.Background()
 
 	empty := newInventoryToolset(groundedProjectsJSON, groundedProjectJSON, `{"apps":[]}`)
-	inv, _ := runInventoryPreflight(ctx, empty.NewView(), "Bearer test", TurnContext{}, Emitter{})
+	inv, _ := runInventoryPreflight(ctx, empty.NewView(ModeManual), "Bearer test", TurnContext{}, Emitter{})
 	if inv == nil || !inv.AppsLookedUp {
 		t.Fatalf("inv=%+v, want AppsLookedUp=true for a valid empty list", inv)
 	}
@@ -66,7 +66,7 @@ func TestPreflightParsedAppsAreReportedHonestly(t *testing.T) {
 	}
 
 	full := newInventoryToolset(groundedProjectsJSON, groundedProjectJSON, groundedAppsJSON)
-	inv, _ = runInventoryPreflight(ctx, full.NewView(), "Bearer test", TurnContext{}, Emitter{})
+	inv, _ = runInventoryPreflight(ctx, full.NewView(ModeManual), "Bearer test", TurnContext{}, Emitter{})
 	if inv == nil || !inv.AppsLookedUp || len(inv.Apps) != 2 {
 		t.Fatalf("inv=%+v, want the two parsed apps", inv)
 	}
@@ -82,7 +82,7 @@ func TestPreflightParsedAppsAreReportedHonestly(t *testing.T) {
 func TestPreflightUnparseableProjectsIsNotReportedAsNoProjects(t *testing.T) {
 	ts := newInventoryToolset("<html>502 Bad Gateway</html>", groundedProjectJSON, groundedAppsJSON)
 
-	inv, _ := runInventoryPreflight(context.Background(), ts.NewView(), "Bearer test", TurnContext{}, Emitter{})
+	inv, _ := runInventoryPreflight(context.Background(), ts.NewView(ModeManual), "Bearer test", TurnContext{}, Emitter{})
 	if inv == nil {
 		t.Fatal("inventory is nil, want the preflight result")
 	}
@@ -97,7 +97,7 @@ func TestPreflightEmitsNoToolCallChips(t *testing.T) {
 	var chips []string
 	emit := Emitter{ToolCall: func(name string) { chips = append(chips, name) }}
 
-	inv, log := runInventoryPreflight(context.Background(), ts.NewView(), "Bearer test", TurnContext{}, emit)
+	inv, log := runInventoryPreflight(context.Background(), ts.NewView(ModeManual), "Bearer test", TurnContext{}, emit)
 	if inv == nil || len(log) != 3 {
 		t.Fatalf("inv=%+v log=%+v, want a full three-call preflight", inv, log)
 	}

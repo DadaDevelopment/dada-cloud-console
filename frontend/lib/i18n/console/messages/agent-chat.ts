@@ -8,6 +8,22 @@ export const agentChat: Messages = {
   "agentChat.clearContext": { ru: "Очистить историю", en: "Clear history" },
   "agentChat.placeholder": { ru: "Спросите что-нибудь про проект…", en: "Ask something about your project…" },
   "agentChat.send": { ru: "Отправить", en: "Send" },
+  "agentChat.mode.label": { ru: "Режим агента", en: "Agent mode" },
+  "agentChat.mode.manual": { ru: "Спрашивать всегда", en: "Ask every time" },
+  "agentChat.mode.manualHint": {
+    ru: "Любое изменение сначала показывает карточку подтверждения.",
+    en: "Every change asks for confirmation first.",
+  },
+  "agentChat.mode.edit": { ru: "Обычный", en: "Edit" },
+  "agentChat.mode.editHint": {
+    ru: "Обратимые действия (перезапуск, сборка, откат) агент делает сам, за необратимые спрашивает.",
+    en: "Reversible actions (restart, build, rollback) run on their own; irreversible ones still ask.",
+  },
+  "agentChat.mode.admin": { ru: "Без подтверждений", en: "No confirmations" },
+  "agentChat.mode.adminHint": {
+    ru: "Агент выполняет всё, что умеет, не спрашивая. Права те же, что у вас.",
+    en: "The agent performs everything it can without asking. Same permissions as your own.",
+  },
   "agentChat.emptyState": {
     ru: "Агент видит ваши проекты, приложения, сборки и счета. Спросите — он сам сходит и посмотрит. Всё, что что-то меняет, сначала покажет карточку подтверждения.",
     en: "The agent can see your projects, apps, builds and bills. Ask, and it goes and looks. Anything that changes something asks for confirmation first.",

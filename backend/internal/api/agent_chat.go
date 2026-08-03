@@ -32,7 +32,9 @@ const agentChatConfirmDeclineMessage = "The user chose to decline this action in
 // SSE event carrying this turn's own metrics (tool calls, tokens, latency,
 // outcome); the eval harness sets it, the console panel does not. Model asks
 // for a specific gateway model group and is honoured only for models the
-// deployment allowlisted (see Handler.agentChatModelFor).
+// deployment allowlisted (see Handler.agentChatModelFor). Mode is the autonomy
+// the user picked in the chat input bar ("manual", "edit", "admin"); an empty
+// or unknown value reads as "edit", never as more autonomy than that.
 type agentChatRequest struct {
 	Message   string `json:"message"`
 	ProjectID string `json:"projectId"`
@@ -40,6 +42,7 @@ type agentChatRequest struct {
 	AppName   string `json:"appName"`
 	Trace     bool   `json:"trace"`
 	Model     string `json:"model"`
+	Mode      string `json:"mode"`
 }
 
 // writeSSEEvent frames one Server-Sent Event via the spec-compliant gin sse
@@ -283,12 +286,18 @@ type agentChatPendingRow struct {
 	status           string
 	expiresAt        time.Time
 	priceRub         *float64
+	mode             string
+	queued           []agentchat.PendingWrite
 }
 
-func (h *Handler) agentChatInsertPendingAction(ctx context.Context, userSub, orgID string, projectID, envID *uuid.UUID, pending *agentchat.PendingWrite, priceRub *float64) (uuid.UUID, error) {
+func (h *Handler) agentChatInsertPendingAction(ctx context.Context, userSub, orgID string, projectID, envID *uuid.UUID, pending *agentchat.PendingWrite, priceRub *float64, mode agentchat.Mode) (uuid.UUID, error) {
 	snapshot, err := json.Marshal(pending.Messages)
 	if err != nil {
 		return uuid.Nil, fmt.Errorf("marshal messages snapshot: %w", err)
+	}
+	queued, err := json.Marshal(pending.Queued)
+	if err != nil {
+		return uuid.Nil, fmt.Errorf("marshal queued writes: %w", err)
 	}
 	args := strings.TrimSpace(pending.ArgsJSON)
 	if args == "" {
@@ -304,11 +313,13 @@ func (h *Handler) agentChatInsertPendingAction(ctx context.Context, userSub, org
 	err = h.pool.QueryRow(ctx,
 		`INSERT INTO agent_chat_pending_actions
 			(user_sub, org_id, project_id, env_id, tool_name, args_json, tool_call_id,
-			 messages_snapshot, tool_call_count, write_call_count, status, expires_at, price_rub)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'pending', $11, $12)
+			 messages_snapshot, tool_call_count, write_call_count, status, expires_at, price_rub,
+			 mode, queued_writes)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'pending', $11, $12, $13, $14)
 		 RETURNING id`,
 		userSub, orgArg, projectID, envID, pending.ToolName, args, pending.ToolCallID,
 		snapshot, pending.ToolCallCount, pending.WriteCallCount, time.Now().Add(agentChatPendingActionTTL), priceRub,
+		string(mode), queued,
 	).Scan(&actionID)
 	if err != nil {
 		return uuid.Nil, err
@@ -320,15 +331,23 @@ func (h *Handler) agentChatLoadPendingAction(ctx context.Context, actionID uuid.
 	var row agentChatPendingRow
 	var orgID *string
 	var snapshotRaw []byte
+	var queuedRaw []byte
 	err := h.pool.QueryRow(ctx,
 		`SELECT id, user_sub, org_id, project_id, env_id, tool_name, args_json, tool_call_id,
-		        messages_snapshot, tool_call_count, write_call_count, status, expires_at, price_rub
+		        messages_snapshot, tool_call_count, write_call_count, status, expires_at, price_rub,
+		        mode, queued_writes
 		   FROM agent_chat_pending_actions WHERE id = $1`,
 		actionID,
 	).Scan(&row.id, &row.userSub, &orgID, &row.projectID, &row.envID, &row.toolName, &row.argsJSON,
-		&row.toolCallID, &snapshotRaw, &row.toolCallCount, &row.writeCallCount, &row.status, &row.expiresAt, &row.priceRub)
+		&row.toolCallID, &snapshotRaw, &row.toolCallCount, &row.writeCallCount, &row.status, &row.expiresAt, &row.priceRub,
+		&row.mode, &queuedRaw)
 	if err != nil {
 		return nil, err
+	}
+	if len(queuedRaw) > 0 {
+		if err := json.Unmarshal(queuedRaw, &row.queued); err != nil {
+			return nil, fmt.Errorf("unmarshal queued writes: %w", err)
+		}
 	}
 	if orgID != nil {
 		row.orgID = *orgID
@@ -824,9 +843,9 @@ func agentChatUserMessage(req agentChatRequest, message string) string {
 // the user message, not here -- rebuilding this string would invalidate the
 // gateway's prompt prefix cache on every turn.
 //
-// catalog is the name-only list of tools that exist beyond the fixed tools
-// block. The model reads a schema with load_tool and calls the tool with
-// call_tool; there is no keyword search and no ranking.
+// catalog is the name-only list of tools that exist beyond the base tools
+// block. The model makes one callable with load_tool and then calls it
+// natively; there is no keyword search and no ranking.
 func agentChatSystemPrompt(catalog []string) string {
 	var sb strings.Builder
 	sb.WriteString("You are the Dada Cloud console assistant, embedded in a side panel of the console UI. ")
@@ -834,13 +853,13 @@ func agentChatSystemPrompt(catalog []string) string {
 	sb.WriteString("Use the available tools to look up real project/app/deployment state before making any factual claim about the user's resources; never invent state you have not looked up. ")
 	sb.WriteString("Be concise and concrete. If you cannot resolve the user's problem, offer to file a support ticket with the create_support_ticket tool. ")
 
-	sb.WriteString("TOOLS. The tools block holds the navigation tools you need most, plus load_tool and call_tool. Every other tool of the platform exists and is callable, but its schema is not in the tools block: read the schema with load_tool(names) and then call it with call_tool(name, arguments). ")
-	sb.WriteString("call_tool validates arguments against the tool's real schema before anything runs; a validation error comes back with that schema, so fix the call and retry rather than giving up. ")
-	sb.WriteString("This is the complete list of tools reachable through call_tool: ")
+	sb.WriteString("TOOLS. You start with the navigation tools you need most, plus load_tool. Every other tool of the platform exists and is yours to use, it is simply not loaded yet: call load_tool(names) and from your next message on those tools are in your tool list like any other, with their own schemas. Load what you need, then call it directly. ")
+	sb.WriteString("Arguments are checked against the tool's real schema before anything runs; a validation error comes back with that schema, so fix the call and retry rather than giving up. ")
+	sb.WriteString("This is the complete list of tools you can load: ")
 	sb.WriteString(strings.Join(catalog, ", "))
 	sb.WriteString(". ")
 	sb.WriteString("A capability on that list is a capability you have. A capability that is not on it is one you do not have: say so plainly and give the console path for it, and never call a tool name that is not on the list -- an invented name is a wasted call, not a feature. ")
-	sb.WriteString("Reading a schema is free; guessing is not. Load the schema before the first call to any tool outside the tools block. ")
+	sb.WriteString("Loading is free; guessing is not. Load a tool before the first time you need it, in the same message as the reads you already know you want. ")
 
 	sb.WriteString("GROUNDING. The user message carries the console context of the page the user is on (projectId, envId, appName) and, when the engine looked it up, the projects and apps that actually exist. Trust it and do not re-query what it already states. ")
 	sb.WriteString("If it says the user has nothing deployed, do NOT ask \"which application do you mean\" or \"which project\" -- there is none. Say plainly that nothing is deployed yet and go straight to the first concrete step: create a project if there is none (ensureDefaultProject or createProject), then either connect a GitHub repository (connectGitRepo) or create an app from a container image (createApp). Offer to do it yourself rather than describing buttons -- the user gets a confirmation card before anything is actually created. ")
@@ -873,7 +892,7 @@ func agentChatSystemPrompt(catalog []string) string {
 
 // @ID          agentChat
 // @Summary     Stream a chat turn with the console agent
-// @Description Streams Server-Sent Events for a single chat turn. Runs a server-side ReAct loop against the ADR-015 LLM gateway, grounding answers with a curated subset of the console's own API (read tools plus confirmation-gated write tools and create_support_ticket) executed under the caller's own bearer. The tools block is fixed for the session (navigation tools plus load_tool and call_tool); the rest of the catalog is listed by name in the system prompt, its schema read with load_tool and dispatched with call_tool. Emits token events (assistant text deltas), tool_call events (tool name only), a confirm_request event when a write tool needs the user's approval, an error event on a friendly failure (gateway not configured, daily cap reached, upstream error), an optional trace event with this turn's own metrics when the request sets "trace": true, and a final done event. Sending the literal message "__slowtest__" instead streams a 75s heartbeat run to prove the endpoint survives the ingress proxy-read-timeout.
+// @Description Streams Server-Sent Events for a single chat turn. Runs a server-side ReAct loop against the ADR-015 LLM gateway, grounding answers with a curated subset of the console's own API (read tools plus confirmation-gated write tools and create_support_ticket) executed under the caller's own bearer. The tools block starts as the navigation tools plus load_tool; the rest of the catalog is listed by name in the system prompt and becomes a real, natively callable tool definition once the model loads it with load_tool. Emits token events (assistant text deltas), tool_call events (tool name only), a confirm_request event when a write tool needs the user's approval, an error event on a friendly failure (gateway not configured, daily cap reached, upstream error), an optional trace event with this turn's own metrics when the request sets "trace": true, and a final done event. Sending the literal message "__slowtest__" instead streams a 75s heartbeat run to prove the endpoint survives the ingress proxy-read-timeout.
 // @Tags        agent
 // @Accept      json
 // @Produce     text/event-stream
@@ -982,7 +1001,7 @@ func (h *Handler) AgentChat(c *gin.Context) {
 		},
 	}
 
-	view := h.agentChatTools.NewView()
+	view := h.agentChatTools.NewView(agentchat.ParseMode(req.Mode))
 	turnCtx := agentchat.TurnContext{ProjectID: req.ProjectID, EnvID: req.EnvID, AppName: req.AppName}
 	systemPrompt := agentChatSystemPrompt(view.CatalogNames())
 
@@ -1013,7 +1032,7 @@ func (h *Handler) AgentChat(c *gin.Context) {
 		trace.Finish(agentchat.OutcomePendingConfirm, "")
 		h.agentChatRecordTurn(trace)
 		h.agentChatEmitTrace(c, flusher, req.Trace, trace)
-		h.agentChatEmitConfirmRequest(c, flusher, ctx, userSub, orgID, projectID, envID, pending)
+		h.agentChatEmitConfirmRequest(c, flusher, ctx, userSub, orgID, projectID, envID, pending, view.Mode)
 		return
 	}
 
@@ -1133,7 +1152,11 @@ func (h *Handler) agentChatPriceEstimateRUB(toolName string) *float64 {
 	}
 }
 
-func (h *Handler) agentChatEmitConfirmRequest(c *gin.Context, flusher http.Flusher, ctx context.Context, userSub, orgID string, projectID, envID *uuid.UUID, pending *agentchat.PendingWrite) {
+// agentChatEmitConfirmRequest persists one open confirmation card and streams
+// it to the client. mode is stored with the card so that resolving it resumes
+// under the autonomy the user had selected when the agent proposed the write,
+// even if they flip the switcher while the card is on screen.
+func (h *Handler) agentChatEmitConfirmRequest(c *gin.Context, flusher http.Flusher, ctx context.Context, userSub, orgID string, projectID, envID *uuid.UUID, pending *agentchat.PendingWrite, mode agentchat.Mode) {
 	priceRub := h.agentChatPriceEstimateRUB(pending.ToolName)
 
 	// The tool call's own args are the ground truth for what will actually
@@ -1154,7 +1177,7 @@ func (h *Handler) agentChatEmitConfirmRequest(c *gin.Context, flusher http.Flush
 		}
 	}
 
-	actionID, err := h.agentChatInsertPendingAction(ctx, userSub, orgID, targetProjectID, targetEnvID, pending, priceRub)
+	actionID, err := h.agentChatInsertPendingAction(ctx, userSub, orgID, targetProjectID, targetEnvID, pending, priceRub, mode)
 	if err != nil {
 		log.Printf("agent-chat: failed to persist pending action: %v", err)
 		writeSSEEvent(c, flusher, "error", `{"code":"upstream","message":"agent could not prepare this action for confirmation, please try again"}`)
@@ -1321,7 +1344,8 @@ func (h *Handler) AgentChatConfirm(c *gin.Context) {
 
 	bearer := c.GetHeader("Authorization")
 
-	view := h.agentChatTools.NewView()
+	mode := agentchat.ParseMode(row.mode)
+	view := h.agentChatTools.NewView(mode)
 
 	if decision == "approve" {
 		started := time.Now()
@@ -1353,6 +1377,27 @@ func (h *Handler) AgentChatConfirm(c *gin.Context) {
 		}
 	} else {
 		messages = append(messages, llmchat.Message{Role: "tool", ToolCallID: row.toolCallID, Content: agentChatConfirmDeclineMessage})
+	}
+
+	// The model asked for several writes in one round and the loop paused on
+	// the first. The rest are not re-derived and not skipped: each is shown as
+	// its own card, in the order the model asked for them, before the turn is
+	// resumed. Going back to the model here would let it act on a half-applied
+	// round, so this path deliberately spends no LLM call.
+	if len(row.queued) > 0 {
+		next := row.queued[0]
+		next.Messages = messages
+		next.ToolCallCount = toolCallCount
+		next.WriteCallCount = writeCallCount
+		next.Queued = append([]agentchat.PendingWrite{}, row.queued[1:]...)
+
+		trace.PendingToolName = next.ToolName
+		trace.PendingArgs = agentchat.RedactArgs(next.ArgsJSON)
+		trace.Finish(agentchat.OutcomePendingConfirm, "")
+		h.agentChatRecordTurn(trace)
+		h.agentChatEmitTrace(c, flusher, req.Trace, trace)
+		h.agentChatEmitConfirmRequest(c, flusher, ctx, userSub, row.orgID, row.projectID, row.envID, &next, mode)
+		return
 	}
 
 	emit := agentchat.Emitter{
@@ -1391,7 +1436,7 @@ func (h *Handler) AgentChatConfirm(c *gin.Context) {
 		trace.Finish(agentchat.OutcomePendingConfirm, "")
 		h.agentChatRecordTurn(trace)
 		h.agentChatEmitTrace(c, flusher, req.Trace, trace)
-		h.agentChatEmitConfirmRequest(c, flusher, ctx, userSub, row.orgID, row.projectID, row.envID, nextPending)
+		h.agentChatEmitConfirmRequest(c, flusher, ctx, userSub, row.orgID, row.projectID, row.envID, nextPending, mode)
 		return
 	}
 

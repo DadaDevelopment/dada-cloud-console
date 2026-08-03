@@ -100,33 +100,86 @@ var denyTools = map[string]bool{
 	"revealModelApiKey":      true,
 }
 
+// riskyWriteTools are the writes that always cost the user a confirmation card,
+// whatever the mode. A write lands here when undoing it is impossible, slow or
+// expensive: it destroys or overwrites data, spends money, exposes something
+// publicly, changes where a domain points, or mints a credential. Everything
+// else in writeKeepTools is an operational action the user can simply repeat or
+// reverse from the console, so in edit mode it runs without interrupting them.
+var riskyWriteTools = map[string]bool{
+	"restoreDatabase":        true,
+	"downloadDatabaseBackup": true,
+	"createDeployHook":       true,
+	"createDatabase":         true,
+	"createS3Bucket":         true,
+	"createEndpoint":         true,
+	"createApp":              true,
+	"createProject":          true,
+	"attachHostname":         true,
+	"upsertManagedRecord":    true,
+	"connectGitRepo":         true,
+	"deleteEnvVar":           true,
+	"updateAppStorage":       true,
+	"promoteDeployment":      true,
+}
+
+// Mode is how much autonomy the user granted this session. It comes from the
+// switcher in the chat input bar and is sent with every request.
+//
+// ModeManual confirms every write, ModeEdit (the default) confirms only
+// riskyWriteTools, ModeAdmin confirms nothing.
+type Mode string
+
+const (
+	ModeManual Mode = "manual"
+	ModeEdit   Mode = "edit"
+	ModeAdmin  Mode = "admin"
+)
+
+// ParseMode maps the wire value onto a mode, falling back to ModeEdit for an
+// empty or unknown string: an unrecognised mode must never be read as "more
+// autonomy than the user asked for".
+func ParseMode(s string) Mode {
+	switch Mode(strings.TrimSpace(strings.ToLower(s))) {
+	case ModeManual:
+		return ModeManual
+	case ModeAdmin:
+		return ModeAdmin
+	default:
+		return ModeEdit
+	}
+}
+
 const SupportTicketTool = "create_support_ticket"
 
 const supportTicketRoute = "agent-chat"
 
-// LoadToolTool is the meta-tool the model calls to read the real JSON schema of
-// catalog tools it wants to use. The schema lands in the conversation as a tool
-// result, never in the tools array: tool definitions are serialized into the
-// head of the prompt (tools, then system, then messages), so mutating the array
-// mid-session would invalidate the whole prefix cache on every discovery.
+// LoadToolTool is how a tool from the catalog becomes callable. Loading a name
+// appends that tool's real definition to this view, so from the next round on
+// the model calls it natively -- same function-calling path, same schema, same
+// provider-side argument decoding as a base tool. Nothing is wrapped and no
+// arguments travel as free-form JSON inside another tool's payload.
+//
+// The catalog is not shipped whole because serialized in full its 90 schemas
+// are ~12.6k tokens on every gateway call of every round, and because a
+// 90-entry array measurably degrades which tool a model picks. Loading grows
+// the array by the two or three tools a turn actually needs.
 const LoadToolTool = "load_tool"
-
-// CallToolTool invokes any catalog tool by name. Together with LoadToolTool it
-// replaces the previous keyword search: the model picks a tool by reading the
-// honest catalog and the honest schema, not by matching word fragments.
-const CallToolTool = "call_tool"
 
 const maxLoadToolNames = 8
 
 const maxLoadToolChars = 12000
 
+// maxLoadedTools bounds how far one turn may grow its tools array. It is a
+// backstop against a model that loads by the handful every round, not a budget
+// a real turn is expected to reach.
+const maxLoadedTools = 16
+
 const maxToolResultChars = 24000
 
 // IsMetaTool reports whether a tool name is a client-side meta-tool that does
 // not touch the backend. The loop must not charge those against the per-turn
-// tool-call budget, otherwise reading a schema costs the user an answer.
-// CallToolTool is deliberately absent: it performs a real backend call and is
-// charged as the tool it dispatches to.
+// tool-call budget, otherwise reaching for a tool costs the user an answer.
 func IsMetaTool(name string) bool {
 	return name == LoadToolTool
 }
@@ -135,7 +188,7 @@ var loadToolDef = llmchat.ToolDef{
 	Type: "function",
 	Function: llmchat.ToolFunctionDef{
 		Name:        LoadToolTool,
-		Description: "Read the full JSON schema and documentation of one or more platform tools listed in the catalog. Use it before calling a tool you have not used yet in this conversation, so that you send correct arguments.",
+		Description: "Make one or more tools from the catalog available to you. Pass the catalog names; from your next message on you can call those tools directly, like the ones you already have. Load a tool before you need it, not after.",
 		Parameters: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -146,28 +199,6 @@ var loadToolDef = llmchat.ToolDef{
 				},
 			},
 			"required": []string{"names"},
-		},
-	},
-}
-
-var callToolDef = llmchat.ToolDef{
-	Type: "function",
-	Function: llmchat.ToolFunctionDef{
-		Name:        CallToolTool,
-		Description: "Call any platform tool from the catalog by name. Arguments are validated against the tool's real schema; on a mismatch the schema is returned so the call can be corrected and retried.",
-		Parameters: map[string]any{
-			"type": "object",
-			"properties": map[string]any{
-				"name": map[string]any{
-					"type":        "string",
-					"description": "Catalog tool name.",
-				},
-				"arguments": map[string]any{
-					"type":        "object",
-					"description": "Arguments for that tool, matching its schema.",
-				},
-			},
-			"required": []string{"name"},
 		},
 	},
 }
@@ -317,45 +348,98 @@ func (ts *Toolset) Execute(ctx context.Context, bearer, name, argsJSON string) (
 	return truncateToolResult(sb.String()), res.IsError
 }
 
-// ToolView is the per-turn window onto a Toolset. Unlike its predecessor it
-// never grows: Defs() returns the same fixed list for every round of every
-// turn, which is the whole point -- the tools block sits in front of the system
-// prompt in the serialized request, so a set that changes mid-conversation
-// invalidates the prompt cache for everything behind it.
+// ToolView is the per-turn window onto a Toolset: the base tools, plus
+// load_tool, plus whatever the model has loaded so far in this turn. Loaded
+// tools are real definitions in the tools array, so the model calls them the
+// normal way; the view only decides which ones are in front of it.
 //
 // AllowWrite is the mode gate. With it false the view dispatches read tools
 // only, and the catalog the model is shown lists nothing else.
 type ToolView struct {
-	ts         *Toolset
-	AllowWrite bool
+	ts          *Toolset
+	AllowWrite  bool
+	Mode        Mode
+	loaded      map[string]bool
+	loadedOrder []string
 }
 
-// NewView opens a per-turn view with write dispatch allowed; the loop still
-// pauses every write for a confirmation card, so this is not an approval.
-func (ts *Toolset) NewView() *ToolView {
-	return &ToolView{ts: ts, AllowWrite: true}
+// NewView opens a per-turn view with write dispatch allowed, in the given mode.
+// Mode decides only which writes stop for a confirmation card; it never widens
+// what the caller's own bearer is allowed to do.
+func (ts *Toolset) NewView(mode Mode) *ToolView {
+	return &ToolView{ts: ts, AllowWrite: true, Mode: mode, loaded: map[string]bool{}}
 }
 
 // NewReadOnlyView opens a view for a caller that holds no write scope.
 func (ts *Toolset) NewReadOnlyView() *ToolView {
-	return &ToolView{ts: ts, AllowWrite: false}
+	return &ToolView{ts: ts, AllowWrite: false, Mode: ModeManual, loaded: map[string]bool{}}
 }
 
-// Defs returns the definitions exposed to the model. Fixed for the lifetime of
-// the session: base tools plus load_tool and call_tool.
+// NeedsConfirmation reports whether a call must stop for the user's explicit
+// approval before it runs.
+func (v *ToolView) NeedsConfirmation(name string) bool {
+	if !v.ts.IsWrite(name) {
+		return false
+	}
+	switch v.Mode {
+	case ModeAdmin:
+		return false
+	case ModeEdit:
+		return riskyWriteTools[name]
+	default:
+		return true
+	}
+}
+
+// Defs returns the definitions exposed to the model: the base tools, load_tool,
+// and every tool loaded so far, each with its own real schema.
 func (v *ToolView) Defs() []llmchat.ToolDef {
-	out := make([]llmchat.ToolDef, 0, len(baseTools)+2)
+	out := make([]llmchat.ToolDef, 0, len(baseTools)+len(v.loadedOrder)+1)
 	for _, name := range baseTools {
 		if def, ok := v.ts.defByName[name]; ok {
 			out = append(out, def)
 		}
 	}
-	out = append(out, loadToolDef, callToolDef)
+	for _, name := range v.loadedOrder {
+		if def, ok := v.ts.defByName[name]; ok {
+			out = append(out, def)
+		}
+	}
+	out = append(out, loadToolDef)
 	return out
 }
 
+// Load makes catalog tools callable without going through the model, used to
+// restore what a paused turn had already loaded before it stopped for a
+// confirmation. Names the view may not dispatch are ignored.
+func (v *ToolView) Load(names ...string) {
+	for _, name := range names {
+		v.load(name)
+	}
+}
+
+func (v *ToolView) load(name string) bool {
+	if v.loaded[name] || !v.ts.Has(name) {
+		return false
+	}
+	if v.ts.IsWrite(name) && !v.AllowWrite {
+		return false
+	}
+	if len(v.loadedOrder) >= maxLoadedTools {
+		return false
+	}
+	v.loaded[name] = true
+	v.loadedOrder = append(v.loadedOrder, name)
+	return true
+}
+
+// LoadedNames returns the tools this view has loaded, in load order.
+func (v *ToolView) LoadedNames() []string {
+	return append([]string{}, v.loadedOrder...)
+}
+
 func (v *ToolView) Has(name string) bool {
-	return v.ts.Has(name) || name == LoadToolTool || name == CallToolTool
+	return v.ts.Has(name) || name == LoadToolTool
 }
 
 func (v *ToolView) IsWrite(name string) bool {
@@ -367,46 +451,19 @@ func (v *ToolView) CatalogNames() []string {
 	return v.ts.CatalogNames(v.AllowWrite)
 }
 
-// Resolve maps a model tool call onto the backend tool it actually performs.
-// A direct call resolves to itself; call_tool resolves to its wrapped name and
-// arguments. ok is false when the call carries no dispatchable tool, in which
-// case Execute produces the honest error for the model.
-//
-// The loop resolves before classifying a call as a write, otherwise every
-// mutation wrapped in call_tool would slip past the confirmation gate.
-func (v *ToolView) Resolve(name, argsJSON string) (string, string, bool) {
-	if name != CallToolTool {
-		return name, argsJSON, v.ts.Has(name)
-	}
-	inner, innerArgs, err := parseCallToolArgs(argsJSON)
-	if err != nil || !v.ts.Has(inner) {
-		return name, argsJSON, false
-	}
-	return inner, innerArgs, true
-}
-
 // Execute is the single tool entry point for a turn. It serves load_tool
-// locally, dispatches call_tool onto the catalog after validating arguments
-// against the tool's real schema, and answers an unknown name by naming the
-// catalog rather than leaving the model at a dead end.
+// locally and dispatches everything else onto the catalog, answering an unknown
+// name by naming the catalog rather than leaving the model at a dead end.
 func (v *ToolView) Execute(ctx context.Context, bearer, name, argsJSON string) (text string, isError bool) {
-	switch name {
-	case LoadToolTool:
+	if name == LoadToolTool {
 		return v.loadTools(argsJSON)
-	case CallToolTool:
-		inner, innerArgs, err := parseCallToolArgs(argsJSON)
-		if err != nil {
-			return fmt.Sprintf("call_tool arguments are not valid: %v. Send {\"name\": \"<catalog tool>\", \"arguments\": {...}}.", err), true
-		}
-		return v.dispatch(ctx, bearer, inner, innerArgs)
 	}
-
 	return v.dispatch(ctx, bearer, name, argsJSON)
 }
 
 func (v *ToolView) dispatch(ctx context.Context, bearer, name, argsJSON string) (string, bool) {
 	if !v.ts.Has(name) {
-		return fmt.Sprintf("unknown tool %q. Use only names from the catalog and read the schema with %s first.", name, LoadToolTool), true
+		return fmt.Sprintf("unknown tool %q. Use only names from the catalog, and make one callable with %s first.", name, LoadToolTool), true
 	}
 	if v.ts.IsWrite(name) && !v.AllowWrite {
 		return fmt.Sprintf("%s changes state and this session has read-only access; tell the user what would need to change and let them do it.", name), true
@@ -445,14 +502,18 @@ func (v *ToolView) loadTools(argsJSON string) (string, bool) {
 	for _, n := range names {
 		def, ok := v.ts.defByName[n]
 		if !ok {
-			fmt.Fprintf(&sb, "%s: not in the catalog. Use a name exactly as listed there.\n\n", n)
+			fmt.Fprintf(&sb, "%s: not in the catalog. Use a name exactly as listed there.\n", n)
 			continue
 		}
 		if v.ts.IsWrite(n) && !v.AllowWrite {
-			fmt.Fprintf(&sb, "%s: not available, this session has read-only access.\n\n", n)
+			fmt.Fprintf(&sb, "%s: not available, this session has read-only access.\n", n)
 			continue
 		}
-		fmt.Fprintf(&sb, "%s%s\n%s\nschema:\n%s\n\n", n, writeMarker(v.ts.IsWrite(n)), oneLine(def.Function.Description), schemaJSON(def.Function.Parameters))
+		if !v.loaded[n] && !v.load(n) {
+			fmt.Fprintf(&sb, "%s: not loaded, this turn already holds %d tools. Finish with those or answer with what you have.\n", n, maxLoadedTools)
+			continue
+		}
+		fmt.Fprintf(&sb, "%s%s is now available: %s\n", n, v.writeMarker(n), oneLine(def.Function.Description))
 	}
 	out := strings.TrimRight(sb.String(), "\n")
 	if len(out) > maxLoadToolChars {
@@ -461,11 +522,17 @@ func (v *ToolView) loadTools(argsJSON string) (string, bool) {
 	return out, false
 }
 
-func writeMarker(isWrite bool) string {
-	if isWrite {
+// writeMarker tells the model what calling this tool actually does under the
+// current mode, so it neither promises a confirmation card that will not appear
+// nor treats an autonomous write as harmless.
+func (v *ToolView) writeMarker(name string) string {
+	if !v.ts.IsWrite(name) {
+		return ""
+	}
+	if v.NeedsConfirmation(name) {
 		return " (changes state; the user confirms it before it runs)"
 	}
-	return ""
+	return " (changes state immediately)"
 }
 
 func oneLine(s string) string {
@@ -483,50 +550,10 @@ func schemaJSON(schema map[string]any) string {
 	return string(b)
 }
 
-// parseCallToolArgs unpacks a call_tool payload. The arguments field is
-// accepted both as an object and as a JSON string holding one: models emit the
-// stringified form often enough that rejecting it would burn a round for
-// nothing.
-func parseCallToolArgs(argsJSON string) (string, string, error) {
-	if strings.TrimSpace(argsJSON) == "" {
-		return "", "", fmt.Errorf("no arguments given")
-	}
-	var payload struct {
-		Name      string          `json:"name"`
-		Arguments json.RawMessage `json:"arguments"`
-	}
-	if err := json.Unmarshal([]byte(argsJSON), &payload); err != nil {
-		return "", "", err
-	}
-	name := strings.TrimSpace(payload.Name)
-	if name == "" {
-		return "", "", fmt.Errorf("name is required")
-	}
-
-	inner := strings.TrimSpace(string(payload.Arguments))
-	if inner == "" || inner == "null" {
-		return name, "{}", nil
-	}
-	if strings.HasPrefix(inner, `"`) {
-		var unquoted string
-		if err := json.Unmarshal(payload.Arguments, &unquoted); err == nil {
-			inner = strings.TrimSpace(unquoted)
-			if inner == "" {
-				return name, "{}", nil
-			}
-		}
-	}
-	var probe map[string]any
-	if err := json.Unmarshal([]byte(inner), &probe); err != nil {
-		return name, "", fmt.Errorf("arguments must be an object: %w", err)
-	}
-	return name, inner, nil
-}
-
 // validateAgainstSchema checks a tool call against the tool's own swagger
-// schema before it reaches the backend. It exists because call_tool arguments
-// do not go through the provider's constrained decoding the way a native tool
-// definition does, so the schema has to be enforced on this side. It checks
+// schema before it reaches the backend. Loaded tools are native definitions, so
+// the provider already constrains them, but not every gateway route enforces
+// that, and the backend's own 400 says nothing the model can act on. It checks
 // what a model actually gets wrong -- a missing required field or a value of
 // the wrong JSON type -- and deliberately does not attempt full JSON Schema:
 // a false rejection here would block a legal call outright.

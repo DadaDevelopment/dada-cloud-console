@@ -927,7 +927,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Streams Server-Sent Events for a single chat turn. Runs a server-side ReAct loop against the ADR-015 LLM gateway, grounding answers with a curated subset of the console's own API (read tools plus confirmation-gated write tools and create_support_ticket) executed under the caller's own bearer. The tools block is fixed for the session (navigation tools plus load_tool and call_tool); the rest of the catalog is listed by name in the system prompt, its schema read with load_tool and dispatched with call_tool. Emits token events (assistant text deltas), tool_call events (tool name only), a confirm_request event when a write tool needs the user's approval, an error event on a friendly failure (gateway not configured, daily cap reached, upstream error), an optional trace event with this turn's own metrics when the request sets \"trace\": true, and a final done event. Sending the literal message \"__slowtest__\" instead streams a 75s heartbeat run to prove the endpoint survives the ingress proxy-read-timeout.",
+                "description": "Streams Server-Sent Events for a single chat turn. Runs a server-side ReAct loop against the ADR-015 LLM gateway, grounding answers with a curated subset of the console's own API (read tools plus confirmation-gated write tools and create_support_ticket) executed under the caller's own bearer. The tools block starts as the navigation tools plus load_tool; the rest of the catalog is listed by name in the system prompt and becomes a real, natively callable tool definition once the model loads it with load_tool. Emits token events (assistant text deltas), tool_call events (tool name only), a confirm_request event when a write tool needs the user's approval, an error event on a friendly failure (gateway not configured, daily cap reached, upstream error), an optional trace event with this turn's own metrics when the request sets \"trace\": true, and a final done event. Sending the literal message \"__slowtest__\" instead streams a 75s heartbeat run to prove the endpoint survives the ingress proxy-read-timeout.",
                 "consumes": [
                     "application/json"
                 ],
@@ -17673,6 +17673,9 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "message": {
+                    "type": "string"
+                },
+                "mode": {
                     "type": "string"
                 },
                 "model": {

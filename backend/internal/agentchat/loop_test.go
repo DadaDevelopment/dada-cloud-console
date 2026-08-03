@@ -36,6 +36,15 @@ type scriptedTurn struct {
 // the exact message list the loop assembled for that round.
 type capturedRequest struct {
 	Messages []llmchat.Message `json:"messages"`
+	Tools    []llmchat.ToolDef `json:"tools"`
+}
+
+func (r capturedRequest) toolNames() []string {
+	out := make([]string, 0, len(r.Tools))
+	for _, d := range r.Tools {
+		out = append(out, d.Function.Name)
+	}
+	return out
 }
 
 // newScriptedGatewayServer serves a canned sequence of OpenAI-style SSE
@@ -228,7 +237,7 @@ func TestRunTurn_FirstWriteToolCall_StopsWithoutExecuting(t *testing.T) {
 		{ToolCalls: []scriptedToolCall{{ID: "call_1", Name: "restartApp", Args: `{"appName":"web"}`}}},
 	})
 
-	res, err := RunTurn(context.Background(), llm, ts.NewView(), "Bearer test", "test-user", "system", nil, "restart web please", groundedCtx, Emitter{})
+	res, err := RunTurn(context.Background(), llm, ts.NewView(ModeManual), "Bearer test", "test-user", "system", nil, "restart web please", groundedCtx, Emitter{})
 	if err != nil {
 		t.Fatalf("RunTurn: %v", err)
 	}
@@ -269,7 +278,7 @@ func TestRunTurn_ReadOnlyToolCalls_RunToCompletion(t *testing.T) {
 		{Content: "you have 2 apps"},
 	})
 
-	res, err := RunTurn(context.Background(), llm, ts.NewView(), "Bearer test", "test-user", "system", nil, "list my apps", groundedCtx, Emitter{})
+	res, err := RunTurn(context.Background(), llm, ts.NewView(ModeManual), "Bearer test", "test-user", "system", nil, "list my apps", groundedCtx, Emitter{})
 	if err != nil {
 		t.Fatalf("RunTurn: %v", err)
 	}
@@ -290,7 +299,7 @@ func TestRunTurn_WriteCallBudget_CappedAtThreeAcrossResumes(t *testing.T) {
 	llm1 := newTestClient(t, []scriptedTurn{
 		{ToolCalls: []scriptedToolCall{{ID: "call_1", Name: "restartApp", Args: `{}`}}},
 	})
-	res1, err := RunTurn(context.Background(), llm1, ts.NewView(), "Bearer test", "test-user", "system", nil, "restart", groundedCtx, Emitter{})
+	res1, err := RunTurn(context.Background(), llm1, ts.NewView(ModeManual), "Bearer test", "test-user", "system", nil, "restart", groundedCtx, Emitter{})
 	if err != nil || res1.Pending == nil {
 		t.Fatalf("round 1: pending=%+v err=%v", res1.Pending, err)
 	}
@@ -303,7 +312,7 @@ func TestRunTurn_WriteCallBudget_CappedAtThreeAcrossResumes(t *testing.T) {
 	llm2 := newTestClient(t, []scriptedTurn{
 		{ToolCalls: []scriptedToolCall{{ID: "call_2", Name: "restartApp", Args: `{}`}}},
 	})
-	res2, err := ResumeTurn(context.Background(), llm2, ts.NewView(), "Bearer test", "test-user", messages, toolCallCount, writeCallCount, Emitter{})
+	res2, err := ResumeTurn(context.Background(), llm2, ts.NewView(ModeManual), "Bearer test", "test-user", messages, toolCallCount, writeCallCount, Emitter{})
 	if err != nil || res2.Pending == nil {
 		t.Fatalf("round 2: pending=%+v err=%v", res2.Pending, err)
 	}
@@ -318,7 +327,7 @@ func TestRunTurn_WriteCallBudget_CappedAtThreeAcrossResumes(t *testing.T) {
 	llm3 := newTestClient(t, []scriptedTurn{
 		{ToolCalls: []scriptedToolCall{{ID: "call_3", Name: "restartApp", Args: `{}`}}},
 	})
-	res3, err := ResumeTurn(context.Background(), llm3, ts.NewView(), "Bearer test", "test-user", messages, toolCallCount, writeCallCount, Emitter{})
+	res3, err := ResumeTurn(context.Background(), llm3, ts.NewView(ModeManual), "Bearer test", "test-user", messages, toolCallCount, writeCallCount, Emitter{})
 	if err != nil || res3.Pending == nil {
 		t.Fatalf("round 3: pending=%+v err=%v", res3.Pending, err)
 	}
@@ -337,7 +346,7 @@ func TestRunTurn_WriteCallBudget_CappedAtThreeAcrossResumes(t *testing.T) {
 		{ToolCalls: []scriptedToolCall{{ID: "call_4", Name: "restartApp", Args: `{}`}}},
 		{Content: "I could not restart it a 4th time this turn"},
 	})
-	res4, err := ResumeTurn(context.Background(), llm4, ts.NewView(), "Bearer test", "test-user", messages, toolCallCount, writeCallCount, Emitter{})
+	res4, err := ResumeTurn(context.Background(), llm4, ts.NewView(ModeManual), "Bearer test", "test-user", messages, toolCallCount, writeCallCount, Emitter{})
 	if err != nil {
 		t.Fatalf("round 4: err=%v", err)
 	}
@@ -356,7 +365,7 @@ func TestRunTurn_AccumulatesUsageAcrossLoop(t *testing.T) {
 		{Content: "you have 2 apps", Model: "claude-sonnet-5", PromptTokens: 150, CompletionTokens: 30, TotalTokens: 180},
 	})
 
-	res, err := RunTurn(context.Background(), llm, ts.NewView(), "Bearer test", "test-user", "system", nil, "list my apps", groundedCtx, Emitter{})
+	res, err := RunTurn(context.Background(), llm, ts.NewView(ModeManual), "Bearer test", "test-user", "system", nil, "list my apps", groundedCtx, Emitter{})
 	if err != nil {
 		t.Fatalf("RunTurn: %v", err)
 	}
@@ -388,7 +397,7 @@ func TestRunTurn_Preflight_EmptyContext_LooksUpProjectsAndApps(t *testing.T) {
 	var captured []capturedRequest
 	llm := newTestClientCapturing(t, []scriptedTurn{{Content: "web is Ready, worker is Pending"}}, &captured)
 
-	res, err := RunTurn(context.Background(), llm, ts.NewView(), "Bearer test", "test-user", "system", nil, "how is my stuff", TurnContext{}, Emitter{})
+	res, err := RunTurn(context.Background(), llm, ts.NewView(ModeManual), "Bearer test", "test-user", "system", nil, "how is my stuff", TurnContext{}, Emitter{})
 	if err != nil {
 		t.Fatalf("RunTurn: %v", err)
 	}
@@ -439,7 +448,7 @@ func TestRunTurn_Preflight_PicksProdEnvironmentForListApps(t *testing.T) {
 	ts := newInventoryToolset(groundedProjectsJSON, projectJSON, groundedAppsJSON)
 	llm := newTestClient(t, []scriptedTurn{{Content: "ok"}})
 
-	res, err := RunTurn(context.Background(), llm, ts.NewView(), "Bearer test", "test-user", "system", nil, "status?", TurnContext{}, Emitter{})
+	res, err := RunTurn(context.Background(), llm, ts.NewView(ModeManual), "Bearer test", "test-user", "system", nil, "status?", TurnContext{}, Emitter{})
 	if err != nil {
 		t.Fatalf("RunTurn: %v", err)
 	}
@@ -456,7 +465,7 @@ func TestRunTurn_Preflight_SkippedWhenAppNameKnown(t *testing.T) {
 	var captured []capturedRequest
 	llm := newTestClientCapturing(t, []scriptedTurn{{Content: "ok"}}, &captured)
 
-	res, err := RunTurn(context.Background(), llm, ts.NewView(), "Bearer test", "test-user", "system", nil, "why is it down", groundedCtx, Emitter{})
+	res, err := RunTurn(context.Background(), llm, ts.NewView(ModeManual), "Bearer test", "test-user", "system", nil, "why is it down", groundedCtx, Emitter{})
 	if err != nil {
 		t.Fatalf("RunTurn: %v", err)
 	}
@@ -479,7 +488,7 @@ func TestRunTurn_Preflight_NoApps_TellsModelNothingIsDeployed(t *testing.T) {
 	var captured []capturedRequest
 	llm := newTestClientCapturing(t, []scriptedTurn{{Content: "nothing deployed yet"}}, &captured)
 
-	res, err := RunTurn(context.Background(), llm, ts.NewView(), "Bearer test", "test-user", "system", nil, "how do I host my telegram bot", TurnContext{}, Emitter{})
+	res, err := RunTurn(context.Background(), llm, ts.NewView(ModeManual), "Bearer test", "test-user", "system", nil, "how do I host my telegram bot", TurnContext{}, Emitter{})
 	if err != nil {
 		t.Fatalf("RunTurn: %v", err)
 	}
@@ -504,7 +513,7 @@ func TestRunTurn_Preflight_ToolError_DoesNotBreakTurn(t *testing.T) {
 	var captured []capturedRequest
 	llm := newTestClientCapturing(t, []scriptedTurn{{Content: "here is what I can tell you"}}, &captured)
 
-	res, err := RunTurn(context.Background(), llm, ts.NewView(), "Bearer test", "test-user", "system", nil, "help", TurnContext{}, Emitter{})
+	res, err := RunTurn(context.Background(), llm, ts.NewView(ModeManual), "Bearer test", "test-user", "system", nil, "help", TurnContext{}, Emitter{})
 	if err != nil {
 		t.Fatalf("RunTurn: %v", err)
 	}
@@ -530,7 +539,7 @@ func TestRunTurn_Preflight_MissingTool_DoesNotBreakTurn(t *testing.T) {
 	var captured []capturedRequest
 	llm := newTestClientCapturing(t, []scriptedTurn{{Content: "answered anyway"}}, &captured)
 
-	res, err := RunTurn(context.Background(), llm, ts.NewView(), "Bearer test", "test-user", "system", nil, "help", TurnContext{}, Emitter{})
+	res, err := RunTurn(context.Background(), llm, ts.NewView(ModeManual), "Bearer test", "test-user", "system", nil, "help", TurnContext{}, Emitter{})
 	if err != nil {
 		t.Fatalf("RunTurn: %v", err)
 	}
@@ -555,7 +564,7 @@ func TestRunTurn_Preflight_DoesNotConsumeToolBudget(t *testing.T) {
 		{Content: "still 2 apps"},
 	})
 
-	res, err := RunTurn(context.Background(), llm, ts.NewView(), "Bearer test", "test-user", "system", nil, "recheck", TurnContext{}, Emitter{})
+	res, err := RunTurn(context.Background(), llm, ts.NewView(ModeManual), "Bearer test", "test-user", "system", nil, "recheck", TurnContext{}, Emitter{})
 	if err != nil {
 		t.Fatalf("RunTurn: %v", err)
 	}
@@ -581,7 +590,7 @@ func TestRunTurn_ToolLog_RecordsArgsAndDuration(t *testing.T) {
 		{Content: "done"},
 	})
 
-	res, err := RunTurn(context.Background(), llm, ts.NewView(), "Bearer test", "test-user", "system", nil, "list", groundedCtx, Emitter{})
+	res, err := RunTurn(context.Background(), llm, ts.NewView(ModeManual), "Bearer test", "test-user", "system", nil, "list", groundedCtx, Emitter{})
 	if err != nil {
 		t.Fatalf("RunTurn: %v", err)
 	}
@@ -597,5 +606,191 @@ func TestRunTurn_ToolLog_RecordsArgsAndDuration(t *testing.T) {
 	}
 	if entry.Preflight {
 		t.Fatal("Preflight=true, want false for the model's own call")
+	}
+}
+
+// TestRunTurn_ManyWritesInOneRound_AllQueued proves the round no longer answers
+// the model with skip stubs: every confirm-needing write the model asked for is
+// carried on the pending card, in order, and the reads in the same round still
+// execute.
+func TestRunTurn_ManyWritesInOneRound_AllQueued(t *testing.T) {
+	ts := newFakeToolset([]string{"listApps"}, []string{"restartApp", "setEnvVar"})
+	llm := newTestClient(t, []scriptedTurn{
+		{ToolCalls: []scriptedToolCall{
+			{ID: "call_1", Name: "restartApp", Args: `{"appName":"web"}`},
+			{ID: "call_2", Name: "listApps", Args: `{}`},
+			{ID: "call_3", Name: "setEnvVar", Args: `{"key":"A"}`},
+		}},
+	})
+
+	res, err := RunTurn(context.Background(), llm, ts.NewView(ModeManual), "Bearer test", "test-user", "system", nil, "do it", groundedCtx, Emitter{})
+	if err != nil {
+		t.Fatalf("RunTurn: %v", err)
+	}
+	if res.Pending == nil {
+		t.Fatal("pending is nil, want the first write as an open card")
+	}
+	if res.Pending.ToolName != "restartApp" {
+		t.Fatalf("open card=%q want restartApp (the order the model asked in)", res.Pending.ToolName)
+	}
+	if len(res.Pending.Queued) != 1 || res.Pending.Queued[0].ToolName != "setEnvVar" {
+		t.Fatalf("queued=%+v, want exactly setEnvVar waiting behind the open card", res.Pending.Queued)
+	}
+	if res.Pending.Queued[0].ToolCallID != "call_3" || res.Pending.Queued[0].ArgsJSON != `{"key":"A"}` {
+		t.Fatalf("queued write lost its identity: %+v", res.Pending.Queued[0])
+	}
+	if len(res.ToolLog) != 1 || res.ToolLog[0].Name != "listApps" {
+		t.Fatalf("toolLog=%+v, want only the read executed", res.ToolLog)
+	}
+	for _, m := range res.Pending.Messages {
+		if m.Role == "tool" && m.ToolCallID != "call_2" {
+			t.Fatalf("snapshot answered tool call %q before the user decided: %q", m.ToolCallID, m.Content)
+		}
+	}
+}
+
+// TestRunTurn_EditMode_RunsOrdinaryWriteButStopsOnRiskyOne is the whole point
+// of modes: the default mode must not interrupt the user for an action they can
+// trivially repeat, and must still interrupt for one they cannot undo.
+func TestRunTurn_EditMode_RunsOrdinaryWriteButStopsOnRiskyOne(t *testing.T) {
+	ts := newFakeToolset(nil, []string{"restartApp", "createDatabase"})
+	llm := newTestClient(t, []scriptedTurn{
+		{ToolCalls: []scriptedToolCall{{ID: "call_1", Name: "restartApp", Args: `{"appName":"web"}`}}},
+		{Content: "restarted"},
+	})
+
+	res, err := RunTurn(context.Background(), llm, ts.NewView(ModeEdit), "Bearer test", "test-user", "system", nil, "restart web", groundedCtx, Emitter{})
+	if err != nil {
+		t.Fatalf("RunTurn: %v", err)
+	}
+	if res.Pending != nil {
+		t.Fatalf("pending=%+v, want nil - restartApp is reversible, edit mode runs it", res.Pending)
+	}
+	if len(res.ToolLog) != 1 || res.ToolLog[0].Name != "restartApp" {
+		t.Fatalf("toolLog=%+v, want restartApp executed", res.ToolLog)
+	}
+	if res.WriteCallCount != 1 {
+		t.Fatalf("writeCallCount=%d want 1 - an auto-executed write still spends the write budget", res.WriteCallCount)
+	}
+
+	llm2 := newTestClient(t, []scriptedTurn{
+		{ToolCalls: []scriptedToolCall{{ID: "call_1", Name: "createDatabase", Args: `{"name":"db"}`}}},
+	})
+	res2, err := RunTurn(context.Background(), llm2, ts.NewView(ModeEdit), "Bearer test", "test-user", "system", nil, "make a db", groundedCtx, Emitter{})
+	if err != nil {
+		t.Fatalf("RunTurn: %v", err)
+	}
+	if res2.Pending == nil || res2.Pending.ToolName != "createDatabase" {
+		t.Fatalf("pending=%+v, want a card - createDatabase provisions billed state", res2.Pending)
+	}
+	if len(res2.ToolLog) != 0 {
+		t.Fatalf("toolLog=%+v, want empty - the risky write must not have run", res2.ToolLog)
+	}
+}
+
+// TestRunTurn_AdminMode_ConfirmsNothing covers the mode the user picks when
+// they are driving the agent themselves and do not want to click.
+func TestRunTurn_AdminMode_ConfirmsNothing(t *testing.T) {
+	ts := newFakeToolset(nil, []string{"createDatabase"})
+	llm := newTestClient(t, []scriptedTurn{
+		{ToolCalls: []scriptedToolCall{{ID: "call_1", Name: "createDatabase", Args: `{"name":"db"}`}}},
+		{Content: "created"},
+	})
+
+	res, err := RunTurn(context.Background(), llm, ts.NewView(ModeAdmin), "Bearer test", "test-user", "system", nil, "make a db", groundedCtx, Emitter{})
+	if err != nil {
+		t.Fatalf("RunTurn: %v", err)
+	}
+	if res.Pending != nil {
+		t.Fatalf("pending=%+v, want nil in admin mode", res.Pending)
+	}
+	if len(res.ToolLog) != 1 || res.ToolLog[0].Name != "createDatabase" {
+		t.Fatalf("toolLog=%+v, want createDatabase executed", res.ToolLog)
+	}
+}
+
+func TestParseMode_UnknownFallsBackToEdit(t *testing.T) {
+	for in, want := range map[string]Mode{
+		"":         ModeEdit,
+		"  ":       ModeEdit,
+		"nonsense": ModeEdit,
+		"Manual":   ModeManual,
+		"ADMIN":    ModeAdmin,
+		"edit":     ModeEdit,
+	} {
+		if got := ParseMode(in); got != want {
+			t.Fatalf("ParseMode(%q)=%q want %q", in, got, want)
+		}
+	}
+}
+
+// TestRunTurn_LoadedToolEntersTheToolsArray is the honest-load contract: the
+// model does not describe a call inside another tool's arguments, it asks for
+// the tool and then calls it the normal way, with the provider seeing its real
+// definition.
+func TestRunTurn_LoadedToolEntersTheToolsArray(t *testing.T) {
+	ts := newFakeToolset([]string{"listBoxes"}, nil)
+	var captured []capturedRequest
+	srv := newScriptedGatewayServer(t, []scriptedTurn{
+		{ToolCalls: []scriptedToolCall{{ID: "call_1", Name: LoadToolTool, Args: `{"names":["listBoxes"]}`}}},
+		{ToolCalls: []scriptedToolCall{{ID: "call_2", Name: "listBoxes", Args: `{}`}}},
+		{Content: "You have two boxes."},
+	}, &captured)
+	llm := llmchat.New(srv.URL, "test-key", "test-model")
+
+	res, err := RunTurn(context.Background(), llm, ts.NewView(ModeManual), "Bearer test", "test-user", "system", nil, "what boxes do i have", groundedCtx, Emitter{})
+	if err != nil {
+		t.Fatalf("RunTurn: %v", err)
+	}
+	if len(captured) != 3 {
+		t.Fatalf("gateway rounds=%d want 3", len(captured))
+	}
+	if strings.Contains(strings.Join(captured[0].toolNames(), ","), "listBoxes") {
+		t.Fatalf("round 1 already offered listBoxes: %v", captured[0].toolNames())
+	}
+	if !strings.Contains(strings.Join(captured[1].toolNames(), ","), "listBoxes") {
+		t.Fatalf("round 2 tools=%v, want listBoxes present after load_tool", captured[1].toolNames())
+	}
+	if len(res.ToolLog) != 2 || res.ToolLog[0].Name != LoadToolTool || res.ToolLog[1].Name != "listBoxes" {
+		t.Fatalf("toolLog=%+v, want the load and then the real call", res.ToolLog)
+	}
+	if res.ToolCallCount != 1 {
+		t.Fatalf("toolCallCount=%d want 1: loading is free, only the real call is charged", res.ToolCallCount)
+	}
+	if res.AssistantText != "You have two boxes." {
+		t.Fatalf("assistantText=%q", res.AssistantText)
+	}
+}
+
+// TestResumeTurn_RestoresToolsTheTurnHadLoaded covers the confirmation pause:
+// the view is rebuilt per HTTP request, so without replaying the turn's own
+// load_tool calls the model would come back to find the tool it was using gone.
+func TestResumeTurn_RestoresToolsTheTurnHadLoaded(t *testing.T) {
+	ts := newFakeToolset([]string{"listBoxes"}, []string{"restartApp"})
+	var captured []capturedRequest
+	srv := newScriptedGatewayServer(t, []scriptedTurn{{Content: "done"}}, &captured)
+	llm := llmchat.New(srv.URL, "test-key", "test-model")
+
+	messages := []llmchat.Message{
+		{Role: "system", Content: "system"},
+		{Role: "user", Content: "restart it"},
+		{Role: "assistant", ToolCalls: []llmchat.ToolCall{
+			{ID: "call_1", Type: "function", Function: llmchat.ToolCallFunction{Name: LoadToolTool, Arguments: `{"names":["listBoxes","restartApp"]}`}},
+		}},
+		{Role: "tool", ToolCallID: "call_1", Content: "listBoxes is now available"},
+		{Role: "assistant", ToolCalls: []llmchat.ToolCall{
+			{ID: "call_2", Type: "function", Function: llmchat.ToolCallFunction{Name: "restartApp", Arguments: `{"appName":"web"}`}},
+		}},
+		{Role: "tool", ToolCallID: "call_2", Content: "executed: restartApp"},
+	}
+
+	if _, err := ResumeTurn(context.Background(), llm, ts.NewView(ModeManual), "Bearer test", "test-user", messages, 1, 1, Emitter{}); err != nil {
+		t.Fatalf("ResumeTurn: %v", err)
+	}
+	names := strings.Join(captured[0].toolNames(), ",")
+	for _, want := range []string{"listBoxes", "restartApp"} {
+		if !strings.Contains(names, want) {
+			t.Fatalf("resumed round tools=%v, want %q restored from the snapshot", captured[0].toolNames(), want)
+		}
 	}
 }

@@ -161,7 +161,7 @@ func insertPendingRestartAction(t *testing.T, h *Handler, userSub string) uuid.U
 		ToolCallCount:  0,
 		WriteCallCount: 0,
 	}
-	actionID, err := h.agentChatInsertPendingAction(context.Background(), userSub, "", nil, nil, pending, nil)
+	actionID, err := h.agentChatInsertPendingAction(context.Background(), userSub, "", nil, nil, pending, nil, agentchat.ModeManual)
 	if err != nil {
 		t.Fatalf("agentChatInsertPendingAction: %v", err)
 	}
@@ -397,5 +397,93 @@ func TestAgentChatConfirm_DoubleConfirm_SecondGetsConflict(t *testing.T) {
 
 	if restartCount != 1 {
 		t.Fatalf("restart backend called %d times, want exactly 1 (no double-execution)", restartCount)
+	}
+}
+
+// TestAgentChatConfirm_QueuedWrite_ShowsNextCardWithoutCallingTheModel covers
+// the multi-write round: approving the first card must open the second one the
+// model asked for, and must not resume the turn yet -- the model would
+// otherwise be shown a round where half its calls are still unanswered. The
+// gateway is scripted with zero turns, so any LLM call fails the test.
+func TestAgentChatConfirm_QueuedWrite_ShowsNextCardWithoutCallingTheModel(t *testing.T) {
+	pool := testAgentChatPool(t)
+	userSub := uuid.New().String()
+
+	var seenAuth string
+	backend := newFakeAgentBackend(t, &seenAuth)
+	ts := newFakeAgentToolset(t, backend.URL)
+	llm := newScriptedAgentGateway(t, nil)
+
+	h := &Handler{pool: pool, agentChatLLM: llm, agentChatTools: ts}
+	pending := &agentchat.PendingWrite{
+		ToolName:   "restartApp",
+		ToolCallID: "call_1",
+		ArgsJSON:   `{"appName":"web"}`,
+		Messages: []llmchat.Message{
+			{Role: "system", Content: "system prompt"},
+			{Role: "user", Content: "restart both apps"},
+			{
+				Role: "assistant",
+				ToolCalls: []llmchat.ToolCall{
+					{ID: "call_1", Type: "function", Function: llmchat.ToolCallFunction{Name: "restartApp", Arguments: `{"appName":"web"}`}},
+					{ID: "call_2", Type: "function", Function: llmchat.ToolCallFunction{Name: "restartApp", Arguments: `{"appName":"worker"}`}},
+				},
+			},
+		},
+		Queued: []agentchat.PendingWrite{
+			{ToolName: "restartApp", ToolCallID: "call_2", ArgsJSON: `{"appName":"worker"}`},
+		},
+	}
+	actionID, err := h.agentChatInsertPendingAction(context.Background(), userSub, "", nil, nil, pending, nil, agentchat.ModeManual)
+	if err != nil {
+		t.Fatalf("agentChatInsertPendingAction: %v", err)
+	}
+
+	c, rec := newAgentConfirmCtx(userSub, "confirm-bearer-token", fmt.Sprintf(`{"action_id":%q,"decision":"approve"}`, actionID))
+	h.AgentChatConfirm(c)
+
+	events := parseSSEEvents(t, rec.Body.String())
+	if len(events["error"]) != 0 {
+		t.Fatalf("unexpected error events: %v", events["error"])
+	}
+	if len(events["confirm_request"]) != 1 {
+		t.Fatalf("confirm_request events=%v, want exactly the queued write's card", events["confirm_request"])
+	}
+	if len(events["token"]) != 0 {
+		t.Fatalf("token events=%v, want none - the turn must not resume while a write is still unanswered", events["token"])
+	}
+	if seenAuth != "Bearer confirm-bearer-token" {
+		t.Fatalf("backend saw Authorization=%q, want the approved write to have executed", seenAuth)
+	}
+
+	var card struct {
+		ActionID string          `json:"action_id"`
+		ToolName string          `json:"tool_name"`
+		Args     json.RawMessage `json:"args"`
+	}
+	if err := json.Unmarshal([]byte(events["confirm_request"][0]), &card); err != nil {
+		t.Fatalf("unmarshal confirm_request: %v", err)
+	}
+	if card.ToolName != "restartApp" || !strings.Contains(string(card.Args), "worker") {
+		t.Fatalf("second card=%+v, want the queued restartApp on worker", card)
+	}
+
+	nextID, err := uuid.Parse(card.ActionID)
+	if err != nil {
+		t.Fatalf("parse queued action id: %v", err)
+	}
+	row, err := h.agentChatLoadPendingAction(context.Background(), nextID)
+	if err != nil {
+		t.Fatalf("load queued pending row: %v", err)
+	}
+	if len(row.queued) != 0 {
+		t.Fatalf("queued=%+v on the last card, want empty", row.queued)
+	}
+	if row.mode != string(agentchat.ModeManual) {
+		t.Fatalf("mode=%q on the continuation card, want the mode the first card was created under", row.mode)
+	}
+	last := row.messagesSnapshot[len(row.messagesSnapshot)-1]
+	if last.Role != "tool" || last.ToolCallID != "call_1" {
+		t.Fatalf("continuation snapshot ends with %+v, want the approved call_1 result", last)
 	}
 }

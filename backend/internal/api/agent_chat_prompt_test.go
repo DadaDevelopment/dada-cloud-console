@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/dada-tuda/console/backend/internal/agentchat"
 	"github.com/dada-tuda/console/backend/internal/billing"
 )
 
@@ -146,7 +147,7 @@ func TestAgentChatConsoleRoutes_CoverEveryConsolePage(t *testing.T) {
 // entries.
 func agentChatTestPrompt(t *testing.T) string {
 	t.Helper()
-	return agentChatSystemPrompt(agentChatTestToolset(t).NewView().CatalogNames())
+	return agentChatSystemPrompt(agentChatTestToolset(t).NewView(agentchat.ModeManual).CatalogNames())
 }
 
 func TestAgentChatSystemPrompt_LinksOnlyRealRoutes(t *testing.T) {

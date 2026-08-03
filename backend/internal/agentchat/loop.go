@@ -2,6 +2,7 @@ package agentchat
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"time"
 
@@ -13,8 +14,6 @@ const MaxToolCallsPerTurn = 10
 const maxRounds = MaxToolCallsPerTurn + 4
 
 const MaxWriteCallsPerTurn = 3
-
-const writeInterruptSkipMessage = "skipped: this turn paused for a pending user confirmation on an earlier action in the same round"
 
 const writeBudgetExhaustedMessage = "write action budget exhausted for this turn; answer with what you already know or offer create_support_ticket"
 
@@ -32,6 +31,11 @@ type ToolLogEntry struct {
 	Preflight  bool
 }
 
+// PendingWrite is one write waiting for the user's decision. Queued holds the
+// other writes the model asked for in the same round, in order: they are shown
+// as their own confirmation cards once this one is resolved, so every call the
+// model made gets a real result instead of a skip stub. Messages is the
+// conversation as of the pause and is set only on the card currently open.
 type PendingWrite struct {
 	ToolName       string
 	ToolCallID     string
@@ -39,6 +43,7 @@ type PendingWrite struct {
 	Messages       []llmchat.Message
 	ToolCallCount  int
 	WriteCallCount int
+	Queued         []PendingWrite
 }
 
 type Emitter struct {
@@ -78,13 +83,13 @@ type TurnResult struct {
 
 // RunTurn runs one user turn. Before the first LLM call it grounds itself with
 // runInventoryPreflight and, when anything was found, prefixes the inventory to
-// the user's message. Everything that changes per turn rides on that message on
-// purpose: the system prompt stays byte-stable so the gateway's prompt prefix
-// survives from turn to turn.
+// the user's message. Per-turn context rides on that message rather than on a
+// system message so the system prompt is one stable string the whole session.
 //
-// tools is a ToolView, not the whole catalog: the model is offered the base
-// navigation tools plus load_tool and call_tool, a set that stays identical for
-// every round so the serialized tools block never invalidates the prompt cache.
+// tools is a ToolView, not the whole catalog: the model starts with the base
+// navigation tools plus load_tool and grows the array itself by loading what it
+// needs. The tools block is re-sent on every gateway call, so shipping all 90
+// schemas would cost ~12.6k tokens per call against ~1.1k for the base set.
 func RunTurn(
 	ctx context.Context,
 	llm *llmchat.Client,
@@ -124,7 +129,9 @@ func RunTurn(
 // ResumeTurn continues a turn that paused on a write confirmation. It runs no
 // inventory preflight: the turn context is already baked into the messages
 // snapshot taken when the turn paused, and re-grounding would both duplicate
-// the inventory and contradict the snapshot.
+// the inventory and contradict the snapshot. It does restore the tools the
+// paused turn had loaded, since the view is rebuilt per HTTP request and the
+// model would otherwise find the tool it just used missing from its array.
 func ResumeTurn(
 	ctx context.Context,
 	llm *llmchat.Client,
@@ -136,7 +143,29 @@ func ResumeTurn(
 	writeCallCount int,
 	emit Emitter,
 ) (TurnResult, error) {
+	tools.Load(loadedToolNames(messages)...)
 	return runLoop(ctx, llm, tools, bearer, endUser, messages, toolCallCount, writeCallCount, emit)
+}
+
+// loadedToolNames replays the load_tool calls recorded in a conversation
+// snapshot. Names the view cannot dispatch are dropped by Load itself.
+func loadedToolNames(messages []llmchat.Message) []string {
+	var out []string
+	for _, m := range messages {
+		for _, call := range m.ToolCalls {
+			if call.Function.Name != LoadToolTool {
+				continue
+			}
+			var args struct {
+				Names []string `json:"names"`
+			}
+			if err := json.Unmarshal([]byte(call.Function.Arguments), &args); err != nil {
+				continue
+			}
+			out = append(out, args.Names...)
+		}
+	}
+	return out
 }
 
 func runLoop(
@@ -152,6 +181,7 @@ func runLoop(
 ) (TurnResult, error) {
 	var toolLog []ToolLogEntry
 	var pending *PendingWrite
+	var queued []PendingWrite
 	var usage Usage
 
 	for round := 0; round < maxRounds; round++ {
@@ -193,8 +223,8 @@ func runLoop(
 			ToolCalls: result.ToolCalls,
 		})
 
-		for i, call := range result.ToolCalls {
-			effName, effArgs, _ := tools.Resolve(call.Function.Name, call.Function.Arguments)
+		for _, call := range result.ToolCalls {
+			effName, effArgs := call.Function.Name, call.Function.Arguments
 
 			if toolCallCount >= MaxToolCallsPerTurn {
 				messages = append(messages, llmchat.Message{
@@ -205,39 +235,23 @@ func runLoop(
 				continue
 			}
 
-			if tools.IsWrite(effName) {
-				if writeCallCount >= MaxWriteCallsPerTurn {
-					messages = append(messages, llmchat.Message{
-						Role:       "tool",
-						ToolCallID: call.ID,
-						Content:    writeBudgetExhaustedMessage,
-					})
-					continue
-				}
+			isWrite := tools.IsWrite(effName)
+			if isWrite && writeCallCount+len(queued) >= MaxWriteCallsPerTurn {
+				messages = append(messages, llmchat.Message{
+					Role:       "tool",
+					ToolCallID: call.ID,
+					Content:    writeBudgetExhaustedMessage,
+				})
+				continue
+			}
 
-				pendingToolName := effName
-				pendingToolCallID := call.ID
-				pendingArgsJSON := effArgs
-
-				for j := i + 1; j < len(result.ToolCalls); j++ {
-					messages = append(messages, llmchat.Message{
-						Role:       "tool",
-						ToolCallID: result.ToolCalls[j].ID,
-						Content:    writeInterruptSkipMessage,
-					})
-				}
-
-				snapshot := make([]llmchat.Message, len(messages))
-				copy(snapshot, messages)
-				pending = &PendingWrite{
-					ToolName:       pendingToolName,
-					ToolCallID:     pendingToolCallID,
-					ArgsJSON:       pendingArgsJSON,
-					Messages:       snapshot,
-					ToolCallCount:  toolCallCount,
-					WriteCallCount: writeCallCount,
-				}
-				break
+			if tools.NeedsConfirmation(effName) {
+				queued = append(queued, PendingWrite{
+					ToolName:   effName,
+					ToolCallID: call.ID,
+					ArgsJSON:   effArgs,
+				})
+				continue
 			}
 
 			if !IsMetaTool(effName) {
@@ -247,7 +261,10 @@ func runLoop(
 				emit.ToolCall(effName)
 			}
 			started := time.Now()
-			text, isError := tools.Execute(ctx, bearer, call.Function.Name, call.Function.Arguments)
+			text, isError := tools.Execute(ctx, bearer, effName, effArgs)
+			if isWrite && !isError {
+				writeCallCount++
+			}
 			toolLog = append(toolLog, ToolLogEntry{
 				Name:       effName,
 				ArgsJSON:   effArgs,
@@ -262,7 +279,18 @@ func runLoop(
 			})
 		}
 
-		if pending != nil {
+		if len(queued) > 0 {
+			snapshot := make([]llmchat.Message, len(messages))
+			copy(snapshot, messages)
+			pending = &PendingWrite{
+				ToolName:       queued[0].ToolName,
+				ToolCallID:     queued[0].ToolCallID,
+				ArgsJSON:       queued[0].ArgsJSON,
+				Messages:       snapshot,
+				ToolCallCount:  toolCallCount,
+				WriteCallCount: writeCallCount,
+				Queued:         append([]PendingWrite{}, queued[1:]...),
+			}
 			return TurnResult{
 				ToolLog:        toolLog,
 				Pending:        pending,

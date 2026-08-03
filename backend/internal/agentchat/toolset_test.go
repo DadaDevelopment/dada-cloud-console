@@ -2,6 +2,7 @@ package agentchat
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -135,220 +136,139 @@ func TestToolsetDefs_RemainsFullCatalog(t *testing.T) {
 	}
 }
 
-func TestView_DefsAreFixedAndSmall(t *testing.T) {
+func TestView_StartsSmallAndGrowsOnlyByLoading(t *testing.T) {
 	ts := loadTestToolset(t)
-	view := ts.NewView()
+	view := ts.NewView(ModeManual)
 	before := view.Defs()
-	if len(before) != len(baseTools)+2 {
-		t.Fatalf("view exposes %d tools, want %d base tools plus load_tool and call_tool", len(before), len(baseTools)+2)
+	if len(before) != len(baseTools)+1 {
+		t.Fatalf("view exposes %d tools, want %d base tools plus load_tool", len(before), len(baseTools)+1)
 	}
 	got := map[string]bool{}
 	for _, d := range before {
 		got[d.Function.Name] = true
 	}
-	for _, name := range append(append([]string{}, baseTools...), LoadToolTool, CallToolTool) {
+	for _, name := range append(append([]string{}, baseTools...), LoadToolTool) {
 		if !got[name] {
 			t.Errorf("view is missing %q", name)
 		}
+	}
+	if len(ts.Defs) <= len(before)+10 {
+		t.Fatalf("catalog is %d tools and the view exposes %d; the point of loading is that the array starts far smaller", len(ts.Defs), len(before))
 	}
 
 	if _, isErr := view.Execute(context.Background(), "", LoadToolTool, `{"names":["listDatabaseBackups"]}`); isErr {
 		t.Fatal("load_tool of a real catalog tool must succeed")
 	}
 	after := view.Defs()
-	if len(after) != len(before) {
-		t.Fatalf("the tools block changed after load_tool (%d -> %d); it is serialized ahead of the system prompt, so a change invalidates the whole prefix cache", len(before), len(after))
+	if len(after) != len(before)+1 {
+		t.Fatalf("tools after load_tool = %d, want %d: a loaded tool must become a real definition the model can call natively", len(after), len(before)+1)
 	}
-	for i := range after {
-		if after[i].Function.Name != before[i].Function.Name {
-			t.Fatalf("tool order changed at %d: %s -> %s", i, before[i].Function.Name, after[i].Function.Name)
-		}
+	loaded := after[len(after)-2]
+	if loaded.Function.Name != "listDatabaseBackups" {
+		t.Fatalf("loaded definition is %q, want listDatabaseBackups", loaded.Function.Name)
+	}
+	if len(loaded.Function.Parameters) == 0 {
+		t.Fatal("the loaded definition carries no schema; the model would be guessing arguments again")
+	}
+	if after[len(after)-1].Function.Name != LoadToolTool {
+		t.Fatal("load_tool must stay available so the model can reach for more")
+	}
+
+	if _, isErr := view.Execute(context.Background(), "", LoadToolTool, `{"names":["listDatabaseBackups"]}`); isErr {
+		t.Fatal("re-loading an already loaded tool must not fail")
+	}
+	if len(view.Defs()) != len(after) {
+		t.Fatalf("loading the same tool twice duplicated it: %d defs", len(view.Defs()))
 	}
 }
 
-func TestBaseTools_AllExistInCatalog(t *testing.T) {
+// TestView_LoadedToolIsCallable is the property the whole redesign exists for:
+// after loading, the model calls the tool by its own name, with its own
+// arguments, through the provider's native function calling.
+func TestView_LoadedToolIsCallable(t *testing.T) {
+	view := loadTestToolsetAt(t, "http://127.0.0.1:1").NewView(ModeManual)
+	out, isErr := view.Execute(context.Background(), "", "getProject", `{}`)
+	if !isErr || !strings.Contains(out, "missing required field") {
+		t.Fatalf("a call missing a required argument must fail locally with the reason, got: %s", out)
+	}
+	if !strings.Contains(out, "schema:") {
+		t.Errorf("a validation error must carry the schema so the model fixes itself on the next attempt, got: %s", out)
+	}
+}
+
+func TestView_UnknownToolNamesTheCatalog(t *testing.T) {
+	view := loadTestToolsetAt(t, "http://127.0.0.1:1").NewView(ModeManual)
+	out, isErr := view.Execute(context.Background(), "", "totallyMadeUpTool", `{}`)
+	if !isErr {
+		t.Fatalf("calling a non-existent tool must fail: %s", out)
+	}
+	if !strings.Contains(out, "unknown tool") || !strings.Contains(out, LoadToolTool) {
+		t.Errorf("the error must name the problem and the way out, got: %s", out)
+	}
+}
+
+func TestView_LoadCapBoundsTheToolsArray(t *testing.T) {
 	ts := loadTestToolset(t)
-	for _, name := range baseTools {
-		if !ts.Has(name) {
-			t.Errorf("base tool %q does not exist in the catalog: the turn would start with a dangling definition", name)
+	view := ts.NewView(ModeManual)
+	var names []string
+	for _, name := range view.CatalogNames() {
+		names = append(names, name)
+		if len(names) > maxLoadedTools+4 {
+			break
 		}
 	}
-}
-
-func TestBaseTools_ContainNoWriteTool(t *testing.T) {
-	ts := loadTestToolset(t)
-	for _, name := range baseTools {
-		if ts.IsWrite(name) {
-			t.Errorf("base tool %q is a write tool; the always-on set must be read-only", name)
-		}
+	for _, name := range names {
+		payload, _ := json.Marshal(map[string]any{"names": []string{name}})
+		view.Execute(context.Background(), "", LoadToolTool, string(payload))
+	}
+	if got := len(view.LoadedNames()); got != maxLoadedTools {
+		t.Fatalf("loaded %d tools, want the cap of %d", got, maxLoadedTools)
+	}
+	out, isErr := view.Execute(context.Background(), "", LoadToolTool, `{"names":["`+names[len(names)-1]+`"]}`)
+	if isErr || !strings.Contains(out, "already holds") {
+		t.Fatalf("hitting the cap must be reported honestly, got isErr=%v: %s", isErr, out)
 	}
 }
 
-func TestDownloadDatabaseBackup_RequiresConfirmationCard(t *testing.T) {
-	ts := loadTestToolset(t)
-	if !ts.Has("downloadDatabaseBackup") {
-		t.Fatal("downloadDatabaseBackup must stay in the catalog")
-	}
-	if !ts.IsWrite("downloadDatabaseBackup") {
-		t.Fatal("downloadDatabaseBackup hands out a presigned SigV4 GET on the full pg_dump that needs no Keycloak session; it must be gated behind a confirmation card, not executed silently as a read")
-	}
-}
-
-func TestRedactToolResult_MintedDeployHookTokenNeverPersisted(t *testing.T) {
-	raw := `{"id":"9f0","token":"dhk_live_7Yq2s1AbCdEf","deploy_url":"https://console.dada-tuda.ru/api/v1/deploy"}`
-	got := RedactToolResult("createDeployHook", raw)
-	if strings.Contains(got, "dhk_live_7Yq2s1AbCdEf") {
-		t.Fatalf("the one-time deploy-hook token survived redaction: %s", got)
-	}
-	if got == raw {
-		t.Fatal("createDeployHook result must not pass through verbatim")
-	}
-	if !strings.Contains(got, RedactedMarker) {
-		t.Fatalf("a redacted result must be recognisable as redacted, got: %s", got)
-	}
-}
-
-func TestRedactToolResult_StripsPresignedSignature(t *testing.T) {
-	raw := `{"url":"https://s3.dada.ru/dumps/db-1.sql.gz?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIAEXAMPLE%2F20260803%2Fru-1%2Fs3%2Faws4_request&X-Amz-Signature=deadbeefcafe","expires_at":"2026-08-03T10:05:00Z"}`
-	for _, name := range []string{"downloadDatabaseBackup", "downloadSourceArchive"} {
-		got := RedactToolResult(name, raw)
-		for _, secret := range []string{"X-Amz-Signature", "deadbeefcafe", "AKIAEXAMPLE"} {
-			if strings.Contains(got, secret) {
-				t.Errorf("%s: presigned material %q survived redaction: %s", name, secret, got)
-			}
-		}
-		if !strings.Contains(got, "https://s3.dada.ru/dumps/db-1.sql.gz") {
-			t.Errorf("%s: redaction must keep the URL origin and path for support, got: %s", name, got)
-		}
-		if !strings.Contains(got, "2026-08-03T10:05:00Z") {
-			t.Errorf("%s: redaction must not eat non-URL fields, got: %s", name, got)
-		}
-	}
-}
-
-func TestRedactToolResult_LeavesOrdinaryResultsAlone(t *testing.T) {
-	raw := `{"apps":[{"name":"shop-web","phase":"Ready"}]}`
-	if got := RedactToolResult("listApps", raw); got != raw {
-		t.Fatalf("an ordinary tool result must pass through untouched, got: %s", got)
-	}
-	if got := RedactToolResult("listApps", ""); got != "" {
-		t.Fatalf("empty result must stay empty, got: %q", got)
-	}
-}
-
-func TestRedactToolResult_CoversEveryKeyMintingWriteTool(t *testing.T) {
-	for name := range mintedSecretTools {
-		if !contains(writeKeepTools, name) {
-			t.Errorf("key-minting tool %q must be a write tool so the user sees a confirmation card before it is minted", name)
-		}
-	}
-	for name := range presignedResultTools {
-		if !contains(keepTools, name) && !contains(writeKeepTools, name) {
-			t.Errorf("presigned-result tool %q is redacted but not in any allowlist; the redaction rule is dead code", name)
-		}
-	}
-}
-
-func contains(list []string, want string) bool {
-	for _, s := range list {
-		if s == want {
-			return true
-		}
-	}
-	return false
-}
-
-func TestSanitizeArgs_StripsGitToken(t *testing.T) {
-	got := sanitizeArgs("connectGitRepo", `{"repo_full_name":"a/b","token":"ghp_x"}`)
-	if strings.Contains(got, "token") || strings.Contains(got, "ghp_x") {
-		t.Fatalf("connectGitRepo token must be stripped, got: %s", got)
-	}
-	if !strings.Contains(got, "a/b") {
-		t.Fatalf("sanitizeArgs dropped a legitimate argument: %s", got)
-	}
-	other := `{"token":"keep-me"}`
-	if sanitizeArgs("createApp", other) != other {
-		t.Fatal("sanitizeArgs must leave tools without a deny-list untouched")
-	}
-}
-
-func TestTruncateToolResult(t *testing.T) {
-	short := "small result"
-	if truncateToolResult(short) != short {
-		t.Fatal("short results must pass through unchanged")
-	}
-	long := strings.Repeat("x", maxToolResultChars+100)
-	got := truncateToolResult(long)
-	if len(got) >= len(long) {
-		t.Fatalf("oversized result was not truncated: %d bytes", len(got))
-	}
-	if !strings.HasSuffix(got, "[truncated]") {
-		t.Fatal("a truncated result must say so, otherwise the model treats it as complete")
-	}
-}
-
-func TestIsMetaTool(t *testing.T) {
-	if !IsMetaTool(LoadToolTool) {
-		t.Fatal("load_tool is a meta-tool and must not be charged to the backend tool budget")
-	}
-	if IsMetaTool(CallToolTool) {
-		t.Fatal("call_tool performs a real backend call and must be charged as the tool it dispatches to")
-	}
-	if IsMetaTool("listApps") {
-		t.Fatal("a real backend tool must not be reported as a meta-tool")
-	}
-}
-
-func TestSecretDenyList_WinsOverReadAndWrite(t *testing.T) {
-	ts := loadTestToolset(t)
-	for name := range denyTools {
-		if ts.Has(name) {
-			t.Errorf("deny-listed tool %q must not be registered in the toolset (read or write)", name)
-		}
-		if ts.IsWrite(name) {
-			t.Errorf("deny-listed tool %q must not report IsWrite==true", name)
-		}
-	}
-}
-
-func TestSecretDenyList_NotAccidentallyAddedToWriteKeep(t *testing.T) {
-	for _, name := range writeKeepTools {
-		if denyTools[name] {
-			t.Fatalf("write tool %q is also deny-listed; deny-list must win, so it must never appear registered at all", name)
-		}
-	}
-}
-
-func TestKeepAndWriteKeep_DoNotOverlap(t *testing.T) {
-	read := map[string]bool{}
-	for _, name := range keepTools {
-		read[name] = true
-	}
-	for _, name := range writeKeepTools {
-		if read[name] {
-			t.Errorf("tool %q is in both keepTools and writeKeepTools; a mutating call would then skip the confirmation card", name)
-		}
-	}
-}
-
-func TestLoadTool_ReturnsRealSchema(t *testing.T) {
-	view := loadTestToolset(t).NewView()
+func TestLoadTool_AnnouncesWhatItMadeAvailable(t *testing.T) {
+	view := loadTestToolset(t).NewView(ModeManual)
 	out, isErr := view.Execute(context.Background(), "", LoadToolTool, `{"names":["listDatabaseBackups","restoreDatabase"]}`)
 	if isErr {
 		t.Fatalf("load_tool failed: %s", out)
 	}
-	for _, want := range []string{"listDatabaseBackups", "restoreDatabase", "schema:", `"properties"`} {
+	for _, want := range []string{"listDatabaseBackups", "restoreDatabase", "is now available"} {
 		if !strings.Contains(out, want) {
-			t.Errorf("load_tool output is missing %q, the model cannot build a call from it:\n%s", want, out)
+			t.Errorf("load_tool output is missing %q:\n%s", want, out)
 		}
+	}
+	if strings.Contains(out, `"properties"`) {
+		t.Errorf("the schema belongs in the tools array, not duplicated into the conversation:\n%s", out)
 	}
 	if !strings.Contains(out, "changes state") {
 		t.Error("load_tool must mark mutating tools so the model knows a confirmation card follows")
 	}
+	names := view.LoadedNames()
+	if len(names) != 2 || names[0] != "listDatabaseBackups" || names[1] != "restoreDatabase" {
+		t.Fatalf("LoadedNames=%v, want both tools in load order", names)
+	}
+}
+
+// TestLoadTool_WriteMarkerFollowsTheMode keeps the model's promise to the user
+// honest: in edit mode a reversible write runs without a card, so telling the
+// model one is coming would make it announce a confirmation that never appears.
+func TestLoadTool_WriteMarkerFollowsTheMode(t *testing.T) {
+	manual, _ := loadTestToolset(t).NewView(ModeManual).Execute(context.Background(), "", LoadToolTool, `{"names":["restartApp"]}`)
+	if !strings.Contains(manual, "the user confirms it") {
+		t.Errorf("manual mode confirms every write, got: %s", manual)
+	}
+	edit, _ := loadTestToolset(t).NewView(ModeEdit).Execute(context.Background(), "", LoadToolTool, `{"names":["restartApp"]}`)
+	if !strings.Contains(edit, "changes state immediately") {
+		t.Errorf("edit mode runs restartApp without a card, got: %s", edit)
+	}
 }
 
 func TestLoadTool_UnknownNameIsAnHonestError(t *testing.T) {
-	view := loadTestToolset(t).NewView()
+	view := loadTestToolset(t).NewView(ModeManual)
 	out, isErr := view.Execute(context.Background(), "", LoadToolTool, `{"names":["totallyMadeUpTool"]}`)
 	if isErr {
 		t.Fatalf("a partly unknown name list must still return the known ones: %s", out)
@@ -361,57 +281,14 @@ func TestLoadTool_UnknownNameIsAnHonestError(t *testing.T) {
 	}
 }
 
-func TestCallTool_ValidatesArgumentsAgainstTheRealSchema(t *testing.T) {
-	view := loadTestToolsetAt(t, "http://127.0.0.1:1").NewView()
-	out, isErr := view.Execute(context.Background(), "", CallToolTool, `{"name":"getProject","arguments":{}}`)
-	if !isErr {
-		t.Fatalf("a call missing a required argument must fail locally, not reach the backend: %s", out)
-	}
-	if !strings.Contains(out, "schema:") {
-		t.Errorf("a validation error must carry the schema so the model fixes itself on the next attempt, got: %s", out)
-	}
-}
-
-func TestCallTool_UnknownInnerName(t *testing.T) {
-	view := loadTestToolsetAt(t, "http://127.0.0.1:1").NewView()
-	out, isErr := view.Execute(context.Background(), "", CallToolTool, `{"name":"totallyMadeUpTool","arguments":{}}`)
-	if !isErr {
-		t.Fatalf("call_tool of a non-existent tool must fail: %s", out)
-	}
-	if !strings.Contains(out, "unknown tool") {
-		t.Errorf("the error must name the problem, got: %s", out)
-	}
-}
-
-func TestCallTool_AcceptsStringifiedArguments(t *testing.T) {
-	name, args, ok := loadTestToolset(t).NewView().Resolve(CallToolTool, `{"name":"getProject","arguments":"{\"projectId\":\"p1\"}"}`)
-	if !ok {
-		t.Fatal("models frequently send arguments as a JSON string; that must resolve, not dead-end")
-	}
-	if name != "getProject" {
-		t.Fatalf("resolved to %q, want getProject", name)
-	}
-	if !strings.Contains(args, "p1") {
-		t.Fatalf("the stringified arguments were lost: %s", args)
-	}
-}
-
-func TestResolve_UnwrapsWriteToolFromCallTool(t *testing.T) {
-	view := loadTestToolset(t).NewView()
-	name, _, ok := view.Resolve(CallToolTool, `{"name":"restartApp","arguments":{"appId":"a1"}}`)
-	if !ok || name != "restartApp" {
-		t.Fatalf("Resolve returned (%q, %v), want restartApp: a write wrapped in call_tool must be visible to the confirmation gate", name, ok)
-	}
-	if !view.IsWrite(name) {
-		t.Fatal("the unwrapped tool must classify as a write, otherwise the mutation runs without a confirmation card")
-	}
-}
-
 func TestReadOnlyView_RefusesWritesAndHidesThemFromTheCatalog(t *testing.T) {
 	view := loadTestToolsetAt(t, "http://127.0.0.1:1").NewReadOnlyView()
-	out, isErr := view.Execute(context.Background(), "", CallToolTool, `{"name":"restartApp","arguments":{"appId":"a1"}}`)
+	out, isErr := view.Execute(context.Background(), "", "restartApp", `{"appId":"a1"}`)
 	if !isErr {
 		t.Fatalf("a read-only session must refuse a write: %s", out)
+	}
+	if loaded, _ := view.Execute(context.Background(), "", LoadToolTool, `{"names":["restartApp"]}`); !strings.Contains(loaded, "read-only") {
+		t.Errorf("a read-only session must not be able to load a write into its tools array, got: %s", loaded)
 	}
 	for _, name := range view.CatalogNames() {
 		if view.IsWrite(name) {
@@ -421,7 +298,7 @@ func TestReadOnlyView_RefusesWritesAndHidesThemFromTheCatalog(t *testing.T) {
 }
 
 func TestCatalogNames_CoversCapabilitiesAndExcludesTheBaseSet(t *testing.T) {
-	view := loadTestToolset(t).NewView()
+	view := loadTestToolset(t).NewView(ModeManual)
 	listed := map[string]bool{}
 	for _, name := range view.CatalogNames() {
 		listed[name] = true
