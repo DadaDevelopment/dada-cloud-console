@@ -213,14 +213,17 @@ currently lives. A move re-points that row and re-mints nothing.
       pod: OCR `200 OK` returning `IDENTITY OCR4711`, `web_search` `200 OK`
       returning a sourced answer. Both through
       `ai-gateway-service.argocd-prod.svc.cluster.local`.
-- [ ] Gateway `854f43c` (the human-readable budget message) is still not in
-      prod: `master-1.0.0-16` is deployed. Build `#18` carried a quote-free
-      subject and got past the old failure, then died in dependency install —
-      `uv sync ... Failed to fetch https://nexus.dada-tuda.ru/repository/pypi/simple/respx/
-      operation timed out`, 6 attempts. The same host resets plain `curl` from
-      this machine, so nexus/jenkins ingress (`155.212.223.198`) is degraded.
-      Nothing about the ceiling waits on it: enforcement lives in the console,
-      and the old gateway already refuses. Only the wording is pending.
+- [x] Gateway `854f43c` is live. Build `#18` carried a quote-free subject and
+      got past the argv failure, then died in dependency install
+      (`uv sync ... Failed to fetch .../pypi/simple/respx/ operation timed out`,
+      6 attempts) while nexus/jenkins ingress `155.212.223.198` was degraded.
+      Once that host answered again, `#20` went green and prod rolled to
+      `nexus.dada-tuda.ru/dada/ai-gateway:master-1.0.0-20`. A second throwaway
+      identity at `ai_monthly_limit_usd = 0` now gets the intended wording:
+      `401 Authentication Error, this app identity has spent its monthly AI
+      budget; raise it in the console or wait for the next calendar month`.
+      Identity deleted afterwards. reels e2e re-run against the new gateway:
+      OCR and `web_search` both `200 OK`.
 - [ ] No UI for the ceiling yet — `GET .../identity` returns
       `ai_monthly_limit_usd` and `ai_month_spend_usd`, but the console has no
       identity panel at all, so today the only way to set one is the API.
