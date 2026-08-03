@@ -129,8 +129,25 @@ currently lives. A move re-points that row and re-mints nothing.
 
 ## Phase 4 — attribution follows the grain
 
-- [ ] `agent_token_usage` gains `identity_id` (and so the app), so per-app cost
-      stops being unanswerable.
+- [x] `agent_token_usage` gains `identity_id` (and so the app), so per-app cost
+      stops being unanswerable. Migration 094 + console `4a28e46` + ai-gateway
+      `1b05695`, which have to ship together: the console writes whatever the
+      gateway sends, and the gateway only learned to send it in that commit.
+      The relay is introspection -> auth metadata -> pre-call metadata ->
+      ledger row, and a break anywhere in it is silent — it shows up only as a
+      permanently empty column, which is why the gateway test walks all four
+      hops rather than asserting on one.
+      `identity_id` enters the INSERT through a subselect, not a parameter: the
+      usage callback fires after the response is already out, so an app deleted
+      in between would raise a foreign-key violation and drop the whole row —
+      trading the cost to save an attribution that no longer exists. Unknown or
+      malformed degrades to NULL, which is what the column already means for
+      console chat and project-scoped keys.
+      Read side: `GET /projects/{id}/ai/usage` gains `apps[]`, and the project
+      AI page renders it with the unattributed remainder spelled out. That
+      remainder is the interesting number until every app is on an identity.
+- [ ] Verify in prod: a reels-tracker call lands in `agent_token_usage` with
+      its `identity_id` set, and the project page splits the spend.
 - [ ] Per-app scopes and quota on the identity.
 
 ## Phase 5 — migrate the pasted keys
