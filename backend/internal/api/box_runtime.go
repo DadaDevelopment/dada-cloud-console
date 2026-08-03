@@ -227,7 +227,7 @@ func (h *Handler) initClusterBoxRuntime(cfg *config.Config) {
 		log.Warn().Int("reaped", reaped).
 			Msg("box: startup orphan sweep removed pods/PVCs a previous run abandoned before they became ready")
 	}
-	go boxOrphanReapLoop(rt)
+	go h.boxReapLoop(rt)
 
 	go boxPoolFillLoop(rt, pool, stack.image, stack.region, cfg.BoxWarmPoolSize)
 }
@@ -297,22 +297,65 @@ func boxPoolFillLoop(rt *box.ClusterRuntime, pool box.ParkingPool, image, region
 // be somebody else's job and has to keep going for the whole process life.
 const clusterOrphanReapInterval = 2 * time.Minute
 
-// boxOrphanReapLoop runs ReapOrphans on a ticker for as long as the process
+// boxReapLoop runs both namespace sweeps on a ticker for as long as the process
 // lives. It has no cancellation because it has nothing to hand back and nothing
 // to wait on: the process exiting is what stops it, the same way the warm
 // goroutine above stops.
-func boxOrphanReapLoop(rt *box.ClusterRuntime) {
+//
+// Two sweeps rather than one because they answer different questions and neither
+// can answer the other's. ReapOrphans asks whether a pod ever came up, which needs
+// no database and catches a create that died mid-flight within minutes.
+// ReapUnclaimed asks whether the control plane still owns an object at all, which
+// needs the database and catches everything the first sweep structurally cannot
+// see — crystallization Deployments, published Services and Ingresses, and the
+// workspace volumes of boxes that are already tombstones.
+//
+// NEITHER TAKES THE BOX-REAPER ADVISORY LOCK, unlike the lifecycle sweep in
+// box_reaper.go, and the difference is what each one does rather than how often it
+// runs. The lifecycle sweep sends customer mail and enqueues operations, so three
+// replicas would mean three emails; these two only delete Kubernetes objects, and
+// a delete that loses the race gets NotFound and is tolerated. Running them
+// unguarded on every replica is therefore free, and it means a leak keeps being
+// collected while whichever replica holds the lock is wedged.
+func (h *Handler) boxReapLoop(rt *box.ClusterRuntime) {
 	ticker := time.NewTicker(clusterOrphanReapInterval)
 	defer ticker.Stop()
 	for range ticker.C {
 		reaped, err := rt.ReapOrphans(context.Background())
 		if err != nil {
 			log.Warn().Err(err).Msg("box: orphan sweep failed")
-			continue
-		}
-		if reaped > 0 {
+		} else if reaped > 0 {
 			log.Warn().Int("reaped", reaped).Msg("box: orphan sweep removed pods/PVCs that never went ready")
 		}
+		h.sweepUnclaimedBoxObjects(rt)
+	}
+}
+
+// sweepUnclaimedBoxObjects runs one ownership sweep of the box namespace.
+//
+// The database read is what makes this pass possible and also what can make it
+// dangerous, so a failed read ends the pass rather than degrading it: without a
+// complete live set there is no difference between "nothing is claimed" and "the
+// database did not answer", and box.ReapUnclaimed refuses the second reading on
+// its own as well. A skipped sweep costs one tick of leak; a sweep on a bad
+// reading costs the fleet.
+func (h *Handler) sweepUnclaimedBoxObjects(rt *box.ClusterRuntime) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+
+	live, err := boxLiveObjects(ctx, h.pool)
+	if err != nil {
+		log.Warn().Err(err).Msg("box: cannot read what the control plane still owns; skipping the ownership sweep")
+		return
+	}
+	report, err := rt.ReapUnclaimed(ctx, live)
+	if err != nil {
+		log.Warn().Err(err).Str("removed", report.String()).Msg("box: ownership sweep hit an error")
+	}
+	if report.Total() > 0 {
+		log.Warn().Str("removed", report.String()).Int("total", report.Total()).
+			Int("live_boxes", len(live.InstanceRefs)).Int("live_crystals", len(live.Crystals)).
+			Msg("box: ownership sweep removed objects no database row accounts for")
 	}
 }
 

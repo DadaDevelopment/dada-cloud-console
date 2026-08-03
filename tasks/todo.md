@@ -136,3 +136,62 @@ sees an English page for a Russian query and near-duplicate hosts for the pair.
 - [ ] 2026-08-06 pull: watch whether the RU doc pages enter the Yandex index at all.
       They were the 32 thin pages flagged above; they are no longer thin, but they
       are newly Russian, so treat 08-06 as their first honest measurement
+
+---
+
+## 2026-08-04 — Бокс-пул жёг 15.6% счёта: почему сборщик его не видел
+
+**Повод.** Аналитик: бокс-пул держит 2 345 ₽/мес (15.6% счёта) при нулевом внешнем
+спросе; 3 774 минуты за всё время, 96% — `suspended_disk`, все боксы наши. Владелец:
+«я не просил сжигать кластер ради фичи, за которую никто пока не платит».
+
+**Диагноз — не «фича дорогая», а один UPDATE.** `executeSuspendBox` писал
+`status='Sleeping'`, но не ставил `slept_at`. `reapSleeping` фильтрует
+`AND b.slept_at IS NOT NULL`. Значит КАЖДЫЙ бокс, уснувший через операцию — а это
+ровно то, что делает сам репер по idle-таймауту и по TTL, — становился невидим для
+сборщика навсегда и держал свой 10-20Gi том до конца времён, метря `suspended_disk`.
+Отсюда и 96%: это не «пользователи спят», это боксы, которые некому было убрать.
+
+Ещё три дефекта на том же пути, каждый ломал удаление сам по себе:
+- ветка `asleep >= 72h` слала только ФИНАЛЬНОЕ письмо, если не было первого —
+  `reap_warned_at` оставался NULL, ветка перезаходила вечно, удаления не случалось;
+- `executeResumeBox` не чистил `reap_warned_at`/`reap_final_warned_at` — следующий
+  сон начинался с обоими предупреждениями «уже потраченными», то есть удаление без
+  единого письма;
+- `main.go` заводил репер ВНУТРИ ветки успеха `NewBoxMeter`: нечитаемый
+  `box-fleet-cost.yaml` останавливал не биллинг, а сбор мусора. Ровно наоборот к
+  тому, что нужно флоту, за который никто не платит.
+
+**Чего сборщик не умел вовсе.** `ReapOrphans` смотрел только на поды. Кристаллизация
+оставляет Deployment/Service/Ingress/PVC `crystal-<vm>`, `expose` — Service+Ingress;
+этих форм он структурно не видел. Новый проход `ReapUnclaimed` идёт от ПРАВДЫ БАЗЫ
+к кластеру: всё, на что нет живой строки, — мусор.
+
+**Сделано.**
+- [x] `box_operations_sleep.go`: suspend ставит `slept_at`, resume чистит все три
+      штампа (`slept_at`, оба `reap_*_warned_at`) и двигает `expires_at`
+- [x] `box_reaper.go`: самолечение (`slept_at = updated_at` для уже застрявших строк)
+      + правильный порядок «первое письмо → финальное → 6ч выдержки → удаление»
+      (`boxReapGraceAfterFinalWarning`), чтобы бокс не удалялся через 4 минуты после
+      письма «ваш бокс будет удалён»
+- [x] `internal/box/clusterreap.go`: `ReapUnclaimed` — под, workspace-PVC, crystal
+      Deployment/Service/Ingress/PVC, expose Service/Ingress. Grace 30 минут (спавн
+      создаёт под раньше строки), `phase=parked` не трогается (это пул)
+- [x] `internal/api/box_unclaimed.go`: `LiveObjects.Complete` — блокировка от
+      «база недоступна → ничего не занято → снести весь флот». Postgres на этой
+      платформе падал дважды за неделю, это не гипотетика
+- [x] `main.go`: репер стартует независимо от метра
+- [x] Тесты: 4 новых на `ReapUnclaimed` (fake clientset), 3 новых на штампы сна
+      (real-DB), обновлён `RefusesToDeleteWithoutBothWarnings` под выдержку.
+      Прогнано на живом postgres: `internal/api` и `internal/box` зелёные
+- [x] `BOX_WARM_POOL_SIZE: 1 → 0` (пул ПОРЕПЛИЧНЫЙ, то есть это два тела и два
+      тома круглосуточно ради ~15 секунд холодного старта, которых никто не ждёт)
+- [x] Квота `dada-boxes-fleet` 6 подов/120Gi → 3/40Gi — потолок расхода, а не план
+      мощности
+
+**Не сделано / дальше.**
+- [ ] Три наших спящих бокса (`m2-box-up-1`, `e2e-cryst-0802`, `e2e-zero-0802`,
+      40Gi) — их снесёт починенный репер после выката, но по продуктовому пути это
+      72 часа писем самим себе. Быстрее удалить руками через API после деплоя
+- [ ] Проверить через сутки после выката: `box_usage` за день, доля
+      `suspended_disk`, и что `dada-boxes` пуст, кроме живых боксов
