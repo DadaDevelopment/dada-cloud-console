@@ -115,6 +115,12 @@ export default function ProjectAIPage() {
     [credentials]
   );
 
+  const unattributedCost = useMemo(() => {
+    if (!usage) return 0;
+    const attributed = (usage.apps ?? []).reduce((sum, a) => sum + a.cost_usd, 0);
+    return Math.max(0, usage.total_cost - attributed);
+  }, [usage]);
+
   const defaultModel = useMemo(() => {
     const models = catalog?.models ?? [];
     const usable = models.find((m) => m.kind === "chat" && configuredProviders.has(m.provider));
@@ -704,6 +710,38 @@ export default function ProjectAIPage() {
         ) : (
           <p className="mt-4 text-sm text-gray-400 dark:text-gray-500">{t("ai.usage.empty")}</p>
         )}
+
+        {usage && usage.total_calls > 0 ? (
+          (usage.apps ?? []).length > 0 ? (
+            <div className="mt-4 overflow-x-auto rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 shadow-sm">
+              <table className="min-w-full text-sm">
+                <thead>
+                  <tr className="border-b border-gray-200 dark:border-gray-800 text-left text-xs uppercase tracking-wide text-gray-400 dark:text-gray-500">
+                    <th className="px-5 py-3 font-medium">{t("ai.usage.byApp")}</th>
+                    <th className="px-5 py-3 font-medium">{t("ai.usage.calls")}</th>
+                    <th className="px-5 py-3 font-medium">{t("ai.usage.cost")}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {usage.apps.map((a) => (
+                    <tr key={a.identity_id} className="border-b border-gray-100 dark:border-gray-800 last:border-0">
+                      <td className="px-5 py-3 font-mono text-xs text-gray-900 dark:text-gray-100">{a.app_name}</td>
+                      <td className="px-5 py-3 text-gray-600 dark:text-gray-400">{a.calls}</td>
+                      <td className="px-5 py-3 text-gray-600 dark:text-gray-400">${a.cost_usd.toFixed(2)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {unattributedCost > 0.004 && (
+                <p className="border-t border-gray-100 dark:border-gray-800 px-5 py-3 text-xs text-gray-400 dark:text-gray-500">
+                  {t("ai.usage.unattributed", { amount: unattributedCost.toFixed(2) })}
+                </p>
+              )}
+            </div>
+          ) : (
+            <p className="mt-4 text-sm text-gray-400 dark:text-gray-500">{t("ai.usage.appsEmpty")}</p>
+          )
+        ) : null}
       </section>
       </>
       )}

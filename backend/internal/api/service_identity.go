@@ -242,10 +242,11 @@ func (h *Handler) introspectIdentityAsAIKey(c *gin.Context, token string) {
 	h.touchIdentityToken(c.Request.Context(), ident.TokenID)
 
 	resp := aiKeyIntrospectResponse{
-		Valid:     true,
-		ProjectID: ident.ProjectID.String(),
-		OrgID:     ident.OrgID,
-		Scopes:    ident.Scopes,
+		Valid:      true,
+		ProjectID:  ident.ProjectID.String(),
+		OrgID:      ident.OrgID,
+		Scopes:     ident.Scopes,
+		IdentityID: ident.IdentityID.String(),
 	}
 	if ident.PrincipalID != nil {
 		resp.PrincipalID = ident.PrincipalID.String()

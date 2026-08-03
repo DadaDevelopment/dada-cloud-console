@@ -1322,6 +1322,18 @@ export interface AIUsageDayStat {
   cost_usd: number;
 }
 
+/**
+ * One app's share of a project's gateway spend, resolved through the
+ * ServiceIdentity that paid (ADR-021). Only calls made with an app's own
+ * identity token appear, so the rows sum to at most `total_cost`.
+ */
+export interface AIUsageAppStat {
+  identity_id: string;
+  app_name: string;
+  calls: number;
+  cost_usd: number;
+}
+
 /** A project's own AI Gateway consumption over the trailing window. Costs are the provider's, in USD. */
 export interface ProjectAIUsage {
   days: number;
@@ -1335,6 +1347,7 @@ export interface ProjectAIUsage {
   routing_mode: AIRoutingMode;
   models: AIUsageModelStat[];
   daily: AIUsageDayStat[];
+  apps: AIUsageAppStat[];
 }
 
 /** Whose provider key a project's AI calls go out on. */

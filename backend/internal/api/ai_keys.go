@@ -339,12 +339,18 @@ type aiKeyIntrospectRequest struct {
 // aiKeyIntrospectResponse mirrors user-service's introspection contract field
 // for field, so the gateway plugin can consume either backend without a
 // per-source branch beyond choosing the URL.
+// identity_id is the one field with no user-service counterpart: it is empty
+// for every key that is not an sk-dada-id- token, and the gateway simply
+// forwards whatever it gets onto the usage row (ADR-021 phase 4). An absent
+// field there means "no identity paid for this", which is the truth for a
+// project-scoped key.
 type aiKeyIntrospectResponse struct {
 	Valid       bool   `json:"valid"`
 	ProjectID   string `json:"project_id,omitempty"`
 	OrgID       string `json:"org_id,omitempty"`
 	Scopes      string `json:"scopes,omitempty"`
 	PrincipalID string `json:"principal_id,omitempty"`
+	IdentityID  string `json:"identity_id,omitempty"`
 }
 
 // AIIntrospectKey resolves a console-minted AI Gateway key to its project.

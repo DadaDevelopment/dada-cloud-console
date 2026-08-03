@@ -29,6 +29,7 @@ type aiUsageRecordRequest struct {
 	EndUser           string     `json:"end_user"`
 	Source            string     `json:"source"`
 	KeyOwner          string     `json:"key_owner"`
+	IdentityID        string     `json:"identity_id"`
 }
 
 // aiKeyOwnerFor decides whose provider key paid for a call. The gateway may
@@ -86,6 +87,14 @@ func (h *Handler) aiBilledUSD(ctx context.Context, projectID uuid.UUID, keyOwner
 // Idempotent on platform_request_id: a retried callback collapses via
 // ON CONFLICT DO NOTHING against the partial unique index.
 //
+// identity_id (ADR-021 phase 4) is whatever the gateway got back from
+// introspection, so it is set exactly when an sk-dada-id- token paid. It goes
+// in through a subselect rather than as a plain parameter: an identity deleted
+// between the call and this callback would otherwise raise a foreign-key
+// violation and drop the whole usage row, trading a missing attribution for a
+// missing charge. A malformed or unknown id degrades to NULL, which is the
+// same thing the column already means for console chat.
+//
 // POST /internal/ai/usage/record (guarded by requireInternalToken)
 func (h *Handler) AIRecordUsage(c *gin.Context) {
 	var req aiUsageRecordRequest
@@ -107,6 +116,11 @@ func (h *Handler) AIRecordUsage(c *gin.Context) {
 		userArg = req.EndUser
 	}
 
+	var identityArg any
+	if id, err := uuid.Parse(req.IdentityID); err == nil {
+		identityArg = id
+	}
+
 	ctx := c.Request.Context()
 	keyOwner := h.aiKeyOwnerFor(ctx, req.ProjectID, req.Provider, req.KeyOwner)
 	billed := h.aiBilledUSD(ctx, req.ProjectID, keyOwner, req.CostUSD)
@@ -115,12 +129,13 @@ func (h *Handler) AIRecordUsage(c *gin.Context) {
 		INSERT INTO agent_token_usage
 			(source, org_id, project_id, env_id, user_sub, model, provider,
 			 prompt_tokens, completion_tokens, total_tokens, cost_usd, platform_request_id,
-			 key_owner, billed_usd)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+			 key_owner, billed_usd, identity_id)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14,
+			(SELECT id FROM service_identities WHERE id = $15))
 		ON CONFLICT (platform_request_id) WHERE platform_request_id IS NOT NULL DO NOTHING
 	`, source, orgArg, req.ProjectID, req.EnvID, userArg, req.Model, req.Provider,
 		req.PromptTokens, req.CompletionTokens, req.TotalTokens, req.CostUSD, req.PlatformRequestID,
-		keyOwner, billed,
+		keyOwner, billed, identityArg,
 	); err != nil {
 		respondError(c, http.StatusInternalServerError, "record usage: "+err.Error())
 		return
@@ -347,6 +362,57 @@ type aiProjectDayStat struct {
 	CostUSD float64 `json:"cost_usd"`
 }
 
+// aiAppStat is one app's share of a project's gateway spend, resolved through
+// the ServiceIdentity that paid (ADR-021 phase 4).
+type aiAppStat struct {
+	IdentityID string  `json:"identity_id"`
+	AppName    string  `json:"app_name"`
+	Calls      int64   `json:"calls"`
+	CostUSD    float64 `json:"cost_usd"`
+}
+
+// aiUsageByApp breaks a project's spend down by the app that paid for it.
+//
+// Only rows carrying an identity appear: a project-scoped sk-dada-ai- key and
+// console chat have no app behind them, and inventing one would misattribute
+// spend rather than report it. The caller is expected to compare the sum
+// against total_cost to see how much is still unattributed -- which, until
+// every app is on an identity token, is the interesting number.
+//
+// Joined on the identity rather than filtered by its current project_id: an
+// identity that has since moved to another project still owns the calls it
+// made while it lived here, and those rows are what agent_token_usage.project_id
+// already records.
+func (h *Handler) aiUsageByApp(ctx context.Context, projectID uuid.UUID, from, to time.Time) ([]aiAppStat, error) {
+	rows, err := h.pool.Query(ctx, `
+		SELECT u.identity_id::text,
+		       COALESCE(NULLIF(si.app_name, ''), si.display_name, 'unnamed'),
+		       COUNT(*),
+		       COALESCE(SUM(u.cost_usd), 0)::float8
+		  FROM agent_token_usage u
+		  JOIN service_identities si ON si.id = u.identity_id
+		 WHERE u.project_id = $1 AND u.created_at >= $2 AND u.created_at < $3
+		 GROUP BY 1, 2
+		 ORDER BY 4 DESC
+		 LIMIT 50`,
+		projectID, from, to,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []aiAppStat{}
+	for rows.Next() {
+		var s aiAppStat
+		if err := rows.Scan(&s.IdentityID, &s.AppName, &s.Calls, &s.CostUSD); err != nil {
+			return nil, err
+		}
+		s.CostUSD = round2(s.CostUSD)
+		out = append(out, s)
+	}
+	return out, rows.Err()
+}
+
 // GetProjectAIUsage returns this project's own AI Gateway consumption over the
 // trailing window: totals plus a per-model and per-day breakdown. Scoped by
 // project membership -- it is the customer-facing counterpart of
@@ -354,7 +420,7 @@ type aiProjectDayStat struct {
 //
 // @ID          getProjectAIUsage
 // @Summary     A project's own AI Gateway usage
-// @Description Returns the project's AI Gateway calls, tokens and cost over the trailing window, broken down by model and by day. Any project member may read it.
+// @Description Returns the project's AI Gateway calls, tokens and cost over the trailing window, broken down by model, by day and by app. The app breakdown covers only calls made with a ServiceIdentity token, so its sum is at most total_cost; the difference is spend that no single app can be charged for (console chat, project-scoped keys).
 // @Tags        ai-gateway
 // @Produce     json
 // @Security    BearerAuth
@@ -458,6 +524,12 @@ func (h *Handler) GetProjectAIUsage(c *gin.Context) {
 		daily = append(daily, s)
 	}
 
+	apps, err := h.aiUsageByApp(ctx, projectID, from, to)
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, "load app breakdown: "+err.Error())
+		return
+	}
+
 	c.JSON(http.StatusOK, gin.H{
 		"days":              days,
 		"window":            gin.H{"from": from, "to": to},
@@ -471,5 +543,6 @@ func (h *Handler) GetProjectAIUsage(c *gin.Context) {
 		"completion_tokens": completionTokens,
 		"models":            models,
 		"daily":             daily,
+		"apps":              apps,
 	})
 }

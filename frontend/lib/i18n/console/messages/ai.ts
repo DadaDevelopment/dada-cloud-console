@@ -147,6 +147,15 @@ export const ai: Messages = {
   },
   "ai.usage.empty": { ru: "За это окно вызовов не было.", en: "No calls in this window." },
   "ai.usage.byModel": { ru: "По моделям", en: "By model" },
+  "ai.usage.byApp": { ru: "По приложениям", en: "By app" },
+  "ai.usage.unattributed": {
+    ru: "Не отнесено к приложению: ${amount}. Это чат в консоли и ключи проекта — у них нет приложения-владельца.",
+    en: "Not attributed to an app: ${amount}. Console chat and project keys have no owning app.",
+  },
+  "ai.usage.appsEmpty": {
+    ru: "Ни один вызов не пришёл от приложения: расход нельзя разложить по владельцам.",
+    en: "No call came from an app, so the spend cannot be split by owner.",
+  },
   "ai.usage.error.load": { ru: "Не удалось загрузить расход", en: "Failed to load usage" },
 
   "ai.free.badge": { ru: "Входит в тариф", en: "Included in your plan" },
