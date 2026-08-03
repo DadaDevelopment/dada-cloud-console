@@ -186,12 +186,86 @@ sees an English page for a Russian query and near-duplicate hosts for the pair.
       Прогнано на живом postgres: `internal/api` и `internal/box` зелёные
 - [x] `BOX_WARM_POOL_SIZE: 1 → 0` (пул ПОРЕПЛИЧНЫЙ, то есть это два тела и два
       тома круглосуточно ради ~15 секунд холодного старта, которых никто не ждёт)
+- [x] **Выключателя пула не существовало.** `config.go` читал `BOX_WARM_POOL_SIZE`
+      через `getEnvInt`, где `n <= 0` считается мусором и подменяется дефолтом
+      **2**. То есть выставленный ноль означал «пул на два». Проверено на проде
+      после выката `a81e594f`: ConfigMap `BOX_WARM_POOL_SIZE: "0"`, `env` внутри
+      пода `BOX_WARM_POOL_SIZE=0` — и ровно в минуту старта новых подов в
+      `dada-boxes` родилось второе тело с 10Gi. Values-файл, ConfigMap и env
+      показывали одно, процесс делал другое, и счёт выглядел как авария кластера,
+      а не как парсинг. Чинит `getEnvIntAllowZero` (ноль — значение, минус и
+      опечатка по-прежнему падают в дефолт) + тест
+      `TestBoxWarmPoolSizeZeroTurnsThePoolOff`. Триммить пул `Warm(...,0)` умел и
+      до этого (`poolTrim`), спавн при пустом пуле идёт холодным стартом
+      (`ClusterPool.coldStart`), а не `pool_exhausted`
 - [x] Квота `dada-boxes-fleet` 6 подов/120Gi → 3/40Gi — потолок расхода, а не план
       мощности
 
+- [x] Три наших спящих бокса удалены через продуктовый путь (`DELETE
+      /api/v1/projects/{id}/boxes/{name}` токеном `dada-routine-svc`):
+      `e2e-zero-0802`, `e2e-cryst-0802`, `m2-box-up-1`. В `dada-boxes` осталось
+      ровно одно тело — парковочный под тёплого пула и его 10Gi. Ждать 72 часа
+      писем самим себе смысла не было: 30Gi упирались в потолок квоты
+      (`requests.storage 40Gi used = 40Gi hard`), то есть новый бокс было НЕ создать
+
+**Красный CI по дороге (сборка #890).** Мои коммиты не доезжали до прода не из-за
+кода: `#890` от 08-03 18:21Z собрал и запушил все образы, а на последнем шаге
+(bump тега в argo-infra) потерял агентский под и 3 часа крутил
+`node block ... neither running nor scheduled; cancelling`. `disableConcurrentBuilds()`
+означает, что все следующие пуши висели в очереди за зомби (`why: Build #890 is
+already in progress`). Вылечено `POST /890/stop` + `/term`; очередь сразу отдала
+`#891` на `a81e594`, где мои коммиты уже внутри. Почему под исчез — событий за
+18:34Z уже нет (ретенция), ноды сейчас чистые (`DiskPressure=False` на всех
+четырёх); ГИПОТЕЗА: попал в то же окно, что и P0 с забитым диском под postgres
+08-03 18:03Z. `#889` до этого падал на `npm ci` 503 от Nexus.
+
 **Не сделано / дальше.**
-- [ ] Три наших спящих бокса (`m2-box-up-1`, `e2e-cryst-0802`, `e2e-zero-0802`,
-      40Gi) — их снесёт починенный репер после выката, но по продуктовому пути это
-      72 часа писем самим себе. Быстрее удалить руками через API после деплоя
 - [ ] Проверить через сутки после выката: `box_usage` за день, доля
       `suspended_disk`, и что `dada-boxes` пуст, кроме живых боксов
+
+---
+
+# App knows itself: снапшот-правда вместо эхо профилей (2026-08-04)
+
+**Проблема (владелец):** «зайти в консоль и увидеть, что всё, что мне известно
+про проект, ЗНАЕТ облако». Страница аппа `cloud-console` показывает `Реплики 10`
+без ready, `Порт 8080` и `250m CPU · 256Mi` (выдуманные дефолты), «Репозиторий не
+привязан» при наличии git_sha/автора/коммита в снапшоте, пустые логи и метрики,
+домен `Pending` при живом 200.
+
+**Корни (проверено на проде 08-04):**
+1. `statusreconciler` знает реальные namespace/образы каждого workload'а, но
+   пишет в снапшот только агрегаты (`replicas/ready/restarts/image`). Реальный
+   namespace теряется.
+2. `logs.go:k8sAppNamespaces` и `metrics.go:GetAppMetrics` берут
+   `environments.namespace` (`platform-prod`), а поды живут в `argocd-prod` →
+   0 строк логов и `no data`. В Prometheus серии ЕСТЬ:
+   `container_memory_working_set_bytes{namespace="argocd-prod",image="...backend:a81e594f"}` = 2.
+3. `FillEffectiveResources` подставляет профиль `small` (250m/256Mi) аппу, у
+   которого профиля нет вообще — выдумка выдаётся за факт.
+4. Фронт печатает `summary.replicas ?? 2` и `summary.port ?? 8080`, поля
+   `ready`/`restarts` не читает.
+5. Плитка «Репозиторий» читает только `repo_full_name`; `git_sha`+`git_message`
+   игнорируются, из-за чего next-step зовёт «подключить репозиторий» у
+   gitops-управляемого аппа.
+6. Все `PublicApi` в кластере имеют `Ready=False` (`Unready resources:
+   <n>-beget-dns-request`) → консоль вечно рисует `Pending` даже там, где домен
+   отвечает 200.
+
+## Шаги
+- [ ] 1. gitops-agent/statusreconciler: собирать `namespaces`, `images`,
+      per-pod `observed_resources` (requests/limits первичного контейнера) и
+      писать их в summary_json. Строго read-only по кластеру.
+- [ ] 2. backend/logs.go: namespace для инфра-потока = снапшотные `namespaces`
+      ∪ namespace окружения.
+- [ ] 3. backend/metrics.go: k8s-запрос по снапшотным `namespaces`+`images`
+      (regex-матчер), фоллбек на старую пару ns+image.
+- [ ] 4. backend/apps.go: `FillEffectiveResources` больше не выдумывает профиль
+      там, где есть наблюдаемые ресурсы.
+- [ ] 5. frontend: «Реплики» = `ready/desired` + рестарты; «Порт» без
+      выдуманного 8080; «Размер» из observed_resources; «Репозиторий» показывает
+      коммит-источник для gitops-аппов.
+- [ ] 6. frontend/app-next-step: не звать «подключить репозиторий/домен» у
+      gitops-управляемого аппа.
+- [ ] 7. Домен: не выдавать `Pending` от XR за вердикт (отдельный шаг, после 1-6).
+- [ ] 8. Verify: go build/vet/test, tsc/lint, и прогон правды на проде.

@@ -99,6 +99,44 @@ func TestGetEnvIntRejectsWhatWouldOtherwiseTruncate(t *testing.T) {
 	}
 }
 
+// TestBoxWarmPoolSizeZeroTurnsThePoolOff pins the parse this fixes.
+//
+// BOX_WARM_POOL_SIZE was read with getEnvInt, which folds n <= 0 into the
+// default, so an operator who set 0 to stop paying for an unsold feature got a
+// pool of 2. The values file, the ConfigMap and the pod env all read 0 while the
+// process kept two pods and two 10Gi volumes hot around the clock, which makes a
+// parse bug look like a cluster fault.
+//
+// Zero is the only value whose meaning changed. A negative or a typo must still
+// fall back: a pool cannot be smaller than empty, and a typo must not silently
+// disable a feature.
+func TestBoxWarmPoolSizeZeroTurnsThePoolOff(t *testing.T) {
+	for _, tc := range []struct {
+		env  string
+		want int
+	}{
+		{"0", 0},
+		{"1", 1},
+		{"", 2},
+		{"-1", 2},
+		{"two", 2},
+	} {
+		t.Run(tc.env, func(t *testing.T) {
+			t.Setenv("DB_URL", "postgres://x")
+			t.Setenv("JWT_SECRET", "s")
+			t.Setenv("BOX_WARM_POOL_SIZE", tc.env)
+			cfg, err := Load()
+			if err != nil {
+				t.Fatalf("Load() error = %v", err)
+			}
+			if cfg.BoxWarmPoolSize != tc.want {
+				t.Errorf("BOX_WARM_POOL_SIZE=%q gave %d, want %d",
+					tc.env, cfg.BoxWarmPoolSize, tc.want)
+			}
+		})
+	}
+}
+
 func TestNoCallSiteNarrowsAnInt64Setting(t *testing.T) {
 	// The class, not the seven instances: a new int(getEnvInt64(...)) reintroduces
 	// the same silent truncation, and it reads as deliberate to a reviewer.

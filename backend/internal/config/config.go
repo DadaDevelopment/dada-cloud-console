@@ -543,8 +543,15 @@ type Config struct {
 	// production adapter, which runs a box as a Pod in the existing cluster. A
 	// values file must not be able to switch the local adapter on while reading as
 	// though it switched on "the box runtime".
-	BoxLocalRoot    string // BOX_LOCAL_ROOT (empty = box runtime disabled)
-	BoxWarmPoolSize int    // BOX_WARM_POOL_SIZE (default 2)
+	BoxLocalRoot string // BOX_LOCAL_ROOT (empty = box runtime disabled)
+	// BoxWarmPoolSize is the number of parked bodies the fleet keeps hot. Zero is
+	// an EXPLICIT, honourable setting rather than an unset one: it turns the pool
+	// off and makes every spawn pay the cold start. That distinction is the whole
+	// reason this field is not read with getEnvInt — a warm pool is billed around
+	// the clock in pods and volumes whether or not anyone claims from it, so the
+	// operator needs a way to say "nobody is buying this yet, stop paying for it"
+	// that does not require deleting the deployment.
+	BoxWarmPoolSize int    // BOX_WARM_POOL_SIZE (default 2; 0 disables the pool)
 	BoxWarmImage    string // BOX_WARM_IMAGE (default warm-v1, must exist in boxcatalog)
 	BoxRegion       string // BOX_REGION (pool key; default "")
 	BoxHostnameBase string // BOX_HOSTNAME_BASE (platform wildcard for expose)
@@ -761,7 +768,7 @@ func Load() (*Config, error) {
 		YooKassaPartnerClientSecret: getEnv("YOOKASSA_PARTNER_CLIENT_SECRET", ""),
 
 		BoxLocalRoot:             getEnv("BOX_LOCAL_ROOT", ""),
-		BoxWarmPoolSize:          getEnvInt("BOX_WARM_POOL_SIZE", 2),
+		BoxWarmPoolSize:          getEnvIntAllowZero("BOX_WARM_POOL_SIZE", 2),
 		BoxWarmImage:             getEnv("BOX_WARM_IMAGE", "warm-v1"),
 		BoxBrokerDir:             getEnv("BOX_BROKER_DIR", ""),
 		BoxRegion:                getEnv("BOX_REGION", ""),
@@ -863,6 +870,31 @@ func getEnvInt(key string, defaultVal int) int {
 	}
 	n, err := strconv.Atoi(v)
 	if err != nil || n <= 0 {
+		return defaultVal
+	}
+	return n
+}
+
+// getEnvIntAllowZero reads a non-negative int env var, treating an explicit 0 as
+// a value rather than as garbage.
+//
+// getEnvInt cannot be used for a setting whose zero means "off", because it
+// folds n <= 0 into the default and so silently answers 2 to an operator who
+// wrote 0. That is not a cosmetic difference for anything the platform pays for
+// while idle: BOX_WARM_POOL_SIZE=0 read as 2 keeps two pods and two volumes
+// billed around the clock, and the values file, the ConfigMap and the pod env
+// all read 0 while the process disagrees — which makes the money look like a
+// cluster fault instead of a parse.
+//
+// Negatives and unparseable text still fall back to the default: a pool cannot
+// be smaller than empty, and a typo should not disable a feature silently.
+func getEnvIntAllowZero(key string, defaultVal int) int {
+	v := os.Getenv(key)
+	if v == "" {
+		return defaultVal
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil || n < 0 {
 		return defaultVal
 	}
 	return n
