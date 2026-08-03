@@ -3,7 +3,9 @@ package worker
 import (
 	"context"
 	"encoding/json"
+	"net"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -13,6 +15,7 @@ import (
 	dadak8s "github.com/dada-tuda/console/gitops-agent/internal/k8s"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -61,16 +64,25 @@ type StatusReconciler struct {
 
 	managers map[string]*git.Manager
 	gcBase   string
+
+	dnsVerdicts map[string]dnsVerdict
+}
+
+// dnsVerdict caches one endpoint's resolve result, see dnsRecordLive.
+type dnsVerdict struct {
+	live bool
+	at   time.Time
 }
 
 func NewStatusReconciler(pool *pgxpool.Pool, cfg *config.Config, clients *dadak8s.Clients) *StatusReconciler {
 	return &StatusReconciler{
-		pool:     pool,
-		cfg:      cfg,
-		client:   clients.Typed,
-		clients:  clients,
-		managers: map[string]*git.Manager{},
-		gcBase:   filepath.Join(cfg.RepoLocalPath, "orphan-gc"),
+		pool:        pool,
+		cfg:         cfg,
+		client:      clients.Typed,
+		clients:     clients,
+		managers:    map[string]*git.Manager{},
+		dnsVerdicts: map[string]dnsVerdict{},
+		gcBase:      filepath.Join(cfg.RepoLocalPath, "orphan-gc"),
 	}
 }
 
@@ -244,10 +256,23 @@ func (r *StatusReconciler) reconcilePublicApis(ctx context.Context) {
 			continue
 		}
 		phase := crPhase(cr)
+		verdict := ""
+		if phase == "Pending" && r.dnsRecordLive(ctx, cr) {
+			phase = "Ready"
+			verdict = "dns"
+		}
 		fields := map[string]any{
 			"status":      phase,
 			"live_source": "crossplane",
 			"live_at":     time.Now().UTC().Format(time.RFC3339),
+		}
+		if verdict != "" {
+			fields["live_verdict"] = verdict
+		}
+		if phase == "Pending" {
+			if msg, _, ok := crProvisionError(cr); ok {
+				fields["reason"] = msg
+			}
 		}
 		if inst := cr.GetLabels()["argocd.argoproj.io/instance"]; inst != "" {
 			if app := stripEnvSuffix(inst, envNames); app != "" && app != inst {
@@ -265,6 +290,64 @@ func (r *StatusReconciler) reconcilePublicApis(ctx context.Context) {
 	if updated > 0 {
 		log.Debug().Int("updated", updated).Msg("status-reconciler: synced publicapi statuses")
 	}
+}
+
+// dnsVerdictTTL bounds how long a PublicApi DNS verdict is reused. The
+// reconciler ticks every 30s and most endpoints sit Pending indefinitely while
+// their Crossplane Request is wedged, so without a cache every tick would fire
+// one lookup per endpoint forever.
+const dnsVerdictTTL = 5 * time.Minute
+
+// dnsLookupTimeout bounds a single endpoint resolve.
+const dnsLookupTimeout = 3 * time.Second
+
+// dnsRecordLive reports whether the DNS record a PublicApi exists to create is
+// actually in public DNS: the record resolves, and — when the spec names a
+// target — resolves to that target.
+//
+// It exists because "Pending" from the composite is not evidence the endpoint
+// is unfinished. A provider-http Request that completed its Beget call (HTTP
+// 200, {"status":"success"}) but crashed before recording the result keeps the
+// crossplane.io/external-create-pending annotation, never goes Ready, and pins
+// its whole composite at Ready=False forever — 52 of 53 endpoints platform-wide
+// as of 2026-08-04, every one of them serving traffic. Reporting that as
+// "Pending" tells the user their live domain is still being created. The record
+// itself is the contract this resource owns, so resolving it is the verdict.
+//
+// The check only ever promotes Pending to Ready: an endpoint whose record is
+// missing, or points somewhere else, keeps the composite's own verdict.
+func (r *StatusReconciler) dnsRecordLive(ctx context.Context, cr *unstructured.Unstructured) bool {
+	if enabled, found, _ := unstructured.NestedBool(cr.Object, "spec", "dns", "enabled"); found && !enabled {
+		return false
+	}
+	fqdn, _, _ := unstructured.NestedString(cr.Object, "spec", "dns", "fqdn")
+	if fqdn == "" {
+		return false
+	}
+	if v, ok := r.dnsVerdicts[fqdn]; ok && time.Since(v.at) < dnsVerdictTTL {
+		return v.live
+	}
+	target, _, _ := unstructured.NestedString(cr.Object, "spec", "dns", "target")
+
+	lookupCtx, cancel := context.WithTimeout(ctx, dnsLookupTimeout)
+	defer cancel()
+	addrs, err := net.DefaultResolver.LookupHost(lookupCtx, fqdn)
+
+	live := err == nil && len(addrs) > 0
+	if live && target != "" {
+		live = false
+		for _, a := range addrs {
+			if a == target {
+				live = true
+				break
+			}
+		}
+	}
+	if r.dnsVerdicts == nil {
+		r.dnsVerdicts = map[string]dnsVerdict{}
+	}
+	r.dnsVerdicts[fqdn] = dnsVerdict{live: live, at: time.Now()}
+	return live
 }
 
 // reconcileS3Buckets mirrors S3Bucket readiness — and, when the provider
@@ -362,6 +445,16 @@ func isvcURL(o *unstructured.Unstructured) string {
 // readinessProbe — kubelet marks a just-started container ready right up until
 // it crashes again, so desired==ready reads "Ready" for a container stuck in
 // CrashLoopBackOff.
+//
+// namespaces/images are the observability join keys the console cannot derive
+// on its own: an adopted ArgoCD app (ADR-013) is filed under one environment
+// while its pods run in a different namespace, and it may run several images at
+// once. Log search (kube namespace) and container metrics (namespace+image
+// cAdvisor labels) both go blind without them.
+//
+// cpuRequest/cpuLimit/memRequest/memLimit sum the primary container's envelope
+// over every desired pod, so the console can state the app's real footprint
+// instead of echoing a resource profile it never had.
 type liveApp struct {
 	desired int32
 	ready   int32
@@ -371,6 +464,14 @@ type liveApp struct {
 	reason       string
 	restarts     int32
 	lastExitCode *int32
+
+	namespaces map[string]bool
+	images     map[string]bool
+
+	cpuRequest resource.Quantity
+	cpuLimit   resource.Quantity
+	memRequest resource.Quantity
+	memLimit   resource.Quantity
 }
 
 // snapKey identifies one App snapshot to update: its environment + app name.
@@ -438,13 +539,26 @@ func (r *StatusReconciler) reconcile(ctx context.Context) map[snapKey]bool {
 		k := snapKey{envID, app}
 		la := agg[k]
 		if la == nil {
-			la = &liveApp{}
+			la = &liveApp{namespaces: map[string]bool{}, images: map[string]bool{}}
 			agg[k] = la
 		}
 		la.desired += desired
 		la.ready += ready
+		img := imageFromContainers(containers)
 		if la.image == "" {
-			la.image = imageFromContainers(containers)
+			la.image = img
+		}
+		if ns != "" {
+			la.namespaces[ns] = true
+		}
+		if img != "" {
+			la.images[img] = true
+		}
+		if c := primaryContainer(containers); c != nil && desired > 0 {
+			addScaled(&la.cpuRequest, c.Resources.Requests[corev1.ResourceCPU], desired)
+			addScaled(&la.cpuLimit, c.Resources.Limits[corev1.ResourceCPU], desired)
+			addScaled(&la.memRequest, c.Resources.Requests[corev1.ResourceMemory], desired)
+			addScaled(&la.memLimit, c.Resources.Limits[corev1.ResourceMemory], desired)
 		}
 	}
 
@@ -511,6 +625,11 @@ func (r *StatusReconciler) reconcile(ctx context.Context) map[snapKey]bool {
 			"restarts":    la.restarts,
 			"live_source": "k8s",
 			"live_at":     time.Now().UTC().Format(time.RFC3339),
+			"namespaces":  sortedKeys(la.namespaces),
+			"images":      sortedKeys(la.images),
+		}
+		if env := observedResources(la); len(env) > 0 {
+			patchFields["observed_resources"] = env
 		}
 		if la.reason != "" {
 			patchFields["reason"] = la.reason
@@ -603,6 +722,62 @@ func replicasOrDefault(replicas *int32) int32 {
 
 func primaryImage(d *appsv1.Deployment) string {
 	return imageFromContainers(d.Spec.Template.Spec.Containers)
+}
+
+// primaryContainer returns the app container of a pod template — the same one
+// imageFromContainers names — so the observed resource envelope describes the
+// app and not its logging sidecar.
+func primaryContainer(cs []corev1.Container) *corev1.Container {
+	for i := range cs {
+		if cs[i].Name == "fluent-container" {
+			continue
+		}
+		return &cs[i]
+	}
+	if len(cs) > 0 {
+		return &cs[0]
+	}
+	return nil
+}
+
+// addScaled adds q, repeated n times, into dst. A zero/absent quantity (a
+// container with no limit set) contributes nothing, which keeps "unset" and
+// "zero" distinguishable in observedResources.
+func addScaled(dst *resource.Quantity, q resource.Quantity, n int32) {
+	if q.IsZero() {
+		return
+	}
+	for i := int32(0); i < n; i++ {
+		dst.Add(q)
+	}
+}
+
+// observedResources renders the summed envelope in the same shape the console
+// already reads for App resources, omitting whatever the workloads never set.
+func observedResources(la *liveApp) map[string]string {
+	out := map[string]string{}
+	for key, q := range map[string]*resource.Quantity{
+		"cpu_request":    &la.cpuRequest,
+		"cpu_limit":      &la.cpuLimit,
+		"memory_request": &la.memRequest,
+		"memory_limit":   &la.memLimit,
+	} {
+		if !q.IsZero() {
+			out[key] = q.String()
+		}
+	}
+	return out
+}
+
+// sortedKeys flattens a presence set into a stable slice so an unchanged
+// cluster produces an unchanged patch (jsonb equality, no snapshot churn).
+func sortedKeys(set map[string]bool) []string {
+	out := make([]string, 0, len(set))
+	for k := range set {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // imageFromContainers returns the app image for a pod template, skipping the

@@ -107,6 +107,31 @@ func TestBuildQuery_KubeFilters(t *testing.T) {
 	}
 }
 
+// TestBuildQuery_KubeAppMatchesAdoptedInstanceLabels covers apps adopted from an
+// existing ArgoCD Application: their pods never got a dada.io/app label, only the
+// Helm/ArgoCD instance label, so matching dada.io/app alone left the log panel
+// permanently empty for them (the console's own deploy included).
+func TestBuildQuery_KubeAppMatchesAdoptedInstanceLabels(t *testing.T) {
+	c := New("https://es.example.com", "", "")
+	q := c.buildQuery(SearchOpts{KubeApp: "cloud-console", KubeNamespaces: []string{"argocd-prod"}})
+	raw, err := json.Marshal(q)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	for _, want := range []string{
+		`"kubernetes.labels.app_kubernetes_io/instance":"cloud-console"`,
+		`"kubernetes.labels.app_kubernetes_io/instance.keyword":"cloud-console"`,
+		`"kubernetes.labels.argocd_argoproj_io/instance":"cloud-console"`,
+	} {
+		if !bytes.Contains(raw, []byte(want)) {
+			t.Errorf("query missing %s in %s", want, raw)
+		}
+	}
+	if !bytes.Contains(raw, []byte(`"kubernetes.namespace_name":["argocd-prod"]`)) {
+		t.Errorf("namespace tenancy filter dropped: %s", raw)
+	}
+}
+
 func TestBuildQuery_SortIsTotalOrder(t *testing.T) {
 	c := New("https://es.example.com", "", "")
 	q := c.buildQuery(SearchOpts{App: "x"})

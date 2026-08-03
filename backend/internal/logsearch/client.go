@@ -229,10 +229,22 @@ func (c *Client) buildQuery(opts SearchOpts) map[string]any {
 		// the "<app>-deploy" Deployment-name chart convention too (same fallback
 		// chain the gitops-agent status reconciler uses). Keyword + text variants
 		// are tried defensively, mirroring the VM filters above.
+		//
+		// Apps adopted from an existing ArgoCD Application (ADR-013) were never
+		// rendered by the app-resources chart, so their pods carry no dada.io/app
+		// at all — only the Helm/ArgoCD instance labels, whose value is the same
+		// app name the console shows. Without these the log panel is permanently
+		// empty for every adopted app, the console's own deploy included. The
+		// namespace filter above stays the tenancy boundary.
 		should := []map[string]any{
 			{"term": map[string]any{"kubernetes.labels.dada_io/app": opts.KubeApp}},
 			{"term": map[string]any{"kubernetes.labels.dada_io/app.keyword": opts.KubeApp}},
 			{"term": map[string]any{"kubernetes.labels.dada.io/app": opts.KubeApp}},
+			{"term": map[string]any{"kubernetes.labels.app_kubernetes_io/instance": opts.KubeApp}},
+			{"term": map[string]any{"kubernetes.labels.app_kubernetes_io/instance.keyword": opts.KubeApp}},
+			{"term": map[string]any{"kubernetes.labels.app.kubernetes.io/instance": opts.KubeApp}},
+			{"term": map[string]any{"kubernetes.labels.argocd_argoproj_io/instance": opts.KubeApp}},
+			{"term": map[string]any{"kubernetes.labels.argocd_argoproj_io/instance.keyword": opts.KubeApp}},
 		}
 		filters = append(filters, map[string]any{
 			"bool": map[string]any{"should": should, "minimum_should_match": 1},

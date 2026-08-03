@@ -76,6 +76,11 @@ func FillRepoFullNameAndSource(apps []models.ResourceSnapshot, repoByName, sourc
 // the gitops-agent renderer. This resolves that fallback on the read path only —
 // nothing is written back, so an unsized app stays unsized and keeps following
 // the renderer's defaults if those ever move.
+//
+// An app that carries neither "resources" nor a profile but does carry
+// "observed_resources" is left alone: the status reconciler measured what it
+// really runs with, and defaulting such an app to the "small" profile would
+// present an invented envelope — from a mechanism the app never used — as fact.
 func FillEffectiveResources(apps []models.ResourceSnapshot) {
 	for i := range apps {
 		var m map[string]any
@@ -90,6 +95,9 @@ func FillEffectiveResources(apps []models.ResourceSnapshot) {
 		}
 		profile, _ := m["profile"].(string)
 		if profile == "" {
+			if _, observed := m["observed_resources"]; observed {
+				continue
+			}
 			profile = "small"
 		}
 		envelope, ok := autoscaleProfileRequirements[profile]

@@ -188,14 +188,27 @@ func (h *Handler) SearchLogs(c *gin.Context) {
 	c.JSON(http.StatusOK, result)
 }
 
-// k8sAppNamespaces returns the namespaces of the k8s environments where an App
-// snapshot with this name exists in the project. Empty for VM-only apps.
+// k8sAppNamespaces returns the namespaces to search infra logs in for an App:
+// the namespaces of the k8s environments holding a snapshot of that name, plus
+// the namespaces the status reconciler actually observed the workloads running
+// in. The two differ for adopted ArgoCD apps (ADR-013), which are filed under a
+// project environment while their pods live elsewhere — searching only the
+// environment namespace returns zero hits for an app that logs constantly.
+// Empty for VM-only apps.
 func (h *Handler) k8sAppNamespaces(ctx context.Context, projectID uuid.UUID, app string) ([]string, error) {
 	rows, err := h.pool.Query(ctx,
-		`SELECT DISTINCT e.namespace FROM resource_snapshots rs
-		 JOIN environments e ON e.id = rs.environment_id
-		 WHERE rs.project_id = $1 AND rs.kind = 'App' AND rs.name = $2
-		   AND e.runtime = 'k8s' AND e.namespace <> ''`,
+		`SELECT DISTINCT ns FROM (
+		   SELECT e.namespace AS ns
+		     FROM resource_snapshots rs
+		     JOIN environments e ON e.id = rs.environment_id
+		    WHERE rs.project_id = $1 AND rs.kind = 'App' AND rs.name = $2
+		      AND e.runtime = 'k8s' AND e.namespace <> ''
+		   UNION
+		   SELECT jsonb_array_elements_text(rs.summary_json->'namespaces') AS ns
+		     FROM resource_snapshots rs
+		    WHERE rs.project_id = $1 AND rs.kind = 'App' AND rs.name = $2
+		      AND jsonb_typeof(rs.summary_json->'namespaces') = 'array'
+		 ) u WHERE ns <> ''`,
 		projectID, app,
 	)
 	if err != nil {

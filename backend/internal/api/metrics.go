@@ -4,7 +4,9 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"regexp"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/dada-tuda/console/backend/internal/cache"
@@ -45,21 +47,51 @@ var containerMetricSpecs = []metricSpec{
 	{"mem_bytes", "B", `sum by (container_label_com_docker_compose_service) (container_memory_working_set_bytes{container_label_com_docker_compose_service="%s"})`},
 }
 
-// k8sContainerMetricSpecs key container metrics by namespace + the exact image
-// the status reconciler recorded on the App snapshot. Image is unique per app
-// (profi vs profi-backend differ), so it isolates one app's pods without relying
-// on pod/container naming conventions or pod-label joins (kube_pod_labels does
-// not carry dada.io/app here). Each expr takes (namespace, image).
+// k8sContainerMetricSpecs key container metrics by the namespaces and images
+// the status reconciler observed for the App. Image is unique per app (profi vs
+// profi-backend differ), so it isolates one app's pods without relying on
+// pod/container naming conventions or pod-label joins (kube_pod_labels does not
+// carry dada.io/app here). Both matchers are alternations because one console
+// app can span several namespaces and images at once — an adopted ArgoCD app
+// (ADR-013) is the common case. Each expr takes (namespaces, images).
 var k8sContainerMetricSpecs = []metricSpec{
-	{"cpu_cores", "cores", `sum(rate(container_cpu_usage_seconds_total{namespace="%s",image="%s",container!=""}[5m]))`},
-	{"mem_bytes", "B", `sum(container_memory_working_set_bytes{namespace="%s",image="%s",container!=""})`},
+	{"cpu_cores", "cores", `sum(rate(container_cpu_usage_seconds_total{namespace=~"%s",image=~"%s",container!=""}[5m]))`},
+	{"mem_bytes", "B", `sum(container_memory_working_set_bytes{namespace=~"%s",image=~"%s",container!=""})`},
+}
+
+// regexAlternation renders values as one anchored-by-Prometheus regex branch
+// list, quoting metacharacters so an image tag's dots and slashes match
+// literally instead of acting as wildcards.
+func regexAlternation(values []string) string {
+	parts := make([]string, 0, len(values))
+	for _, v := range values {
+		if v != "" {
+			parts = append(parts, regexp.QuoteMeta(v))
+		}
+	}
+	return strings.Join(parts, "|")
+}
+
+// mergeNonEmpty appends extra to values unless it is empty or already present,
+// keeping the result free of duplicate regex branches.
+func mergeNonEmpty(values []string, extra string) []string {
+	out := make([]string, 0, len(values)+1)
+	seen := map[string]bool{}
+	for _, v := range append(append([]string{}, values...), extra) {
+		if v == "" || seen[v] {
+			continue
+		}
+		seen[v] = true
+		out = append(out, v)
+	}
+	return out
 }
 
 // runK8sContainerMetrics runs the namespace+image-scoped container queries and
 // assembles the same response shape as runMetricSpecs (partial results on error).
-func (h *Handler) runK8sContainerMetrics(ctx context.Context, namespace, image string, start, end time.Time, step time.Duration) gin.H {
-	ns := prometheus.EscapeLabelValue(namespace)
-	img := prometheus.EscapeLabelValue(image)
+func (h *Handler) runK8sContainerMetrics(ctx context.Context, namespaces, images []string, start, end time.Time, step time.Duration) gin.H {
+	ns := prometheus.EscapeLabelValue(regexAlternation(namespaces))
+	img := prometheus.EscapeLabelValue(regexAlternation(images))
 	metrics := gin.H{}
 	var liveErr string
 	for _, s := range k8sContainerMetricSpecs {
@@ -318,17 +350,25 @@ func (h *Handler) GetAppMetrics(c *gin.Context) {
 	}
 	appName := c.Param("appName")
 
-	// Load the app's runtime + namespace + reconciler-recorded image. The JOIN
-	// also proves the App exists in this project/environment (404 otherwise).
+	// Load the app's runtime + namespace + reconciler-recorded image, plus the
+	// namespace/image sets the reconciler actually observed. The JOIN also
+	// proves the App exists in this project/environment (404 otherwise).
 	var runtime, namespace, image string
+	var liveNamespaces, liveImages []string
 	err = h.pool.QueryRow(c.Request.Context(),
-		`SELECT e.runtime, e.namespace, COALESCE(rs.summary_json->>'image', '')
+		`SELECT e.runtime, e.namespace, COALESCE(rs.summary_json->>'image', ''),
+		        ARRAY(SELECT jsonb_array_elements_text(
+		          CASE WHEN jsonb_typeof(rs.summary_json->'namespaces') = 'array'
+		               THEN rs.summary_json->'namespaces' ELSE '[]'::jsonb END)),
+		        ARRAY(SELECT jsonb_array_elements_text(
+		          CASE WHEN jsonb_typeof(rs.summary_json->'images') = 'array'
+		               THEN rs.summary_json->'images' ELSE '[]'::jsonb END))
 		 FROM environments e
 		 JOIN resource_snapshots rs
 		   ON rs.environment_id = e.id AND rs.kind = 'App' AND rs.name = $3
 		 WHERE e.id = $2 AND rs.project_id = $1`,
 		projectID, envID, appName,
-	).Scan(&runtime, &namespace, &image)
+	).Scan(&runtime, &namespace, &image, &liveNamespaces, &liveImages)
 	if err == pgx.ErrNoRows {
 		respondNotFound(c)
 		return
@@ -344,13 +384,17 @@ func (h *Handler) GetAppMetrics(c *gin.Context) {
 	}
 
 	start, end, step := parseRange(c)
-	// k8s apps: scope by namespace + image (cAdvisor labels). Compose/VM apps:
-	// fall back to the docker-compose project label.
+	// k8s apps: scope by observed namespaces + images (cAdvisor labels), falling
+	// back to the environment namespace and the single recorded image for
+	// snapshots written before the reconciler started reporting the sets.
+	// Compose/VM apps: fall back to the docker-compose project label.
+	namespaces := mergeNonEmpty(liveNamespaces, namespace)
+	images := mergeNonEmpty(liveImages, image)
 	key := "metrics:app:" + projectID.String() + ":" + envID.String() + ":" + appName + ":" + c.Request.URL.RawQuery
 	resp, _ := cache.Fetch(c.Request.Context(), h.cache, key, h.cfg.CacheMetricsTTL,
 		func() (gin.H, error) {
-			if runtime == "k8s" && namespace != "" && image != "" {
-				return h.runK8sContainerMetrics(c.Request.Context(), namespace, image, start, end, step), nil
+			if runtime == "k8s" && len(namespaces) > 0 && len(images) > 0 {
+				return h.runK8sContainerMetrics(c.Request.Context(), namespaces, images, start, end, step), nil
 			}
 			return h.runMetricSpecs(c.Request.Context(), containerMetricSpecs, appName, projectID.String(), start, end, step), nil
 		})

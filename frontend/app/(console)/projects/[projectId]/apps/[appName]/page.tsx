@@ -333,7 +333,7 @@ export default function AppDetailPage() {
     );
   }
 
-  const summary = app.summary_json as { image?: string; port?: number; replicas?: number; profile?: string; resources?: { cpu_limit: string; memory_limit: string }; runtime?: string; volume?: AppVolume; repo_full_name?: string; source?: string; url?: string; preview_url?: string };
+  const summary = app.summary_json as { image?: string; port?: number; replicas?: number; ready?: number; restarts?: number; profile?: string; resources?: { cpu_limit: string; memory_limit: string }; observed_resources?: { cpu_request?: string; cpu_limit?: string; memory_request?: string; memory_limit?: string }; runtime?: string; volume?: AppVolume; repo_full_name?: string; source?: string; url?: string; preview_url?: string; git_sha?: string; git_message?: string };
   const isUploadedSource = summary.source === "archive";
   const isCompose = summary.runtime === "compose";
   const resType = classifyVMResource(app);
@@ -341,11 +341,31 @@ export default function AppDetailPage() {
   const alerts = getAppAlerts(app);
   const appPhaseReady = (app.phase ?? "").toLowerCase() === "ready";
   const isReadyNoAlerts = appPhaseReady && alerts.length === 0;
+  const observedCpu = summary.observed_resources?.cpu_limit ?? summary.observed_resources?.cpu_request;
+  const observedMem = summary.observed_resources?.memory_limit ?? summary.observed_resources?.memory_request;
+  const observedSize = observedCpu && observedMem ? `${observedCpu} CPU · ${observedMem}` : null;
+  const sizeValue = summary.resources
+    ? `${summary.resources.cpu_limit} CPU · ${summary.resources.memory_limit}`
+    : observedSize
+      ? (summary.replicas ?? 1) > 1
+        ? t("apps.detail.spec.sizeTotal", { value: observedSize })
+        : observedSize
+      : "—";
+  const replicasValue =
+    summary.replicas == null
+      ? "—"
+      : summary.ready == null
+        ? String(summary.replicas)
+        : t("apps.detail.spec.replicasReady", { ready: summary.ready, desired: summary.replicas });
+  const replicasTip = summary.restarts ? t("apps.detail.spec.restarts", { n: summary.restarts }) : undefined;
+  const gitSha = summary.git_sha?.slice(0, 7);
+  const gitValue = summary.repo_full_name ?? (gitSha ? t("apps.detail.config.gitCommit", { sha: gitSha }) : t("apps.detail.config.gitNone"));
+  const hasGitSource = !!summary.repo_full_name || !!summary.git_sha;
   const nextSteps =
     !isResource && isReadyNoAlerts && !isLoadingHostnames
       ? getAppNextSteps({
           hasCustomDomain: hostnames.some((h) => !h.managed),
-          hasGitRepo: !!summary.repo_full_name,
+          hasGitRepo: hasGitSource,
         })
       : [];
 
@@ -547,9 +567,9 @@ export default function AppDetailPage() {
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
             {[
               ...(canSeeTechnical(role) ? [{ label: t("apps.detail.spec.image"), value: summary.image ?? "—", mono: true, tip: summary.image }] : []),
-              { label: t("apps.detail.spec.size"), value: summary.resources ? `${summary.resources.cpu_limit} CPU · ${summary.resources.memory_limit}` : "—" },
-              { label: t("apps.detail.spec.replicas"), value: String(summary.replicas ?? 2) },
-              { label: t("apps.detail.spec.port"), value: String(summary.port ?? 8080) },
+              { label: t("apps.detail.spec.size"), value: sizeValue },
+              { label: t("apps.detail.spec.replicas"), value: replicasValue, tip: replicasTip },
+              { label: t("apps.detail.spec.port"), value: summary.port != null ? String(summary.port) : "—" },
             ].map(({ label, value, mono, tip }: { label: string; value: string; mono?: boolean; tip?: string }) => (
               <div key={label} className="rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-5 shadow-sm">
                 <p className="text-xs font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500">{label}</p>
@@ -587,8 +607,8 @@ export default function AppDetailPage() {
                   },
                   {
                     label: t("apps.detail.config.git"),
-                    value: summary.repo_full_name ?? t("apps.detail.config.gitNone"),
-                    set: !!summary.repo_full_name,
+                    value: gitValue,
+                    set: hasGitSource,
                     tab: "git",
                   },
                 ].map(({ label, value, set, tab }) => (
@@ -789,6 +809,7 @@ export default function AppDetailPage() {
                 fqdn?: string;
                 auth_scheme?: string;
                 swagger_enabled?: boolean;
+                reason?: string;
                 spec?: { dns?: { fqdn?: string } };
               };
               const fqdn = epSummary.spec?.dns?.fqdn ?? epSummary.fqdn;
@@ -815,6 +836,9 @@ export default function AppDetailPage() {
                         {t("apps.domains.auth", { scheme: epSummary.auth_scheme ?? "none" })}
                         {epSummary.swagger_enabled && t("apps.domains.swagger")}
                       </p>
+                      {ep.phase !== "Ready" && epSummary.reason && (
+                        <p className="mt-0.5 text-xs text-amber-600 dark:text-amber-500">{epSummary.reason}</p>
+                      )}
                     </div>
                   </div>
                   <PhaseBadge phase={ep.phase} />

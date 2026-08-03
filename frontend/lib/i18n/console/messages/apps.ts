@@ -142,6 +142,9 @@ export const apps: Messages = {
   "apps.detail.spec.size": { ru: "Размер", en: "Size" },
   "apps.detail.spec.replicas": { ru: "Реплики", en: "Replicas" },
   "apps.detail.spec.port": { ru: "Порт", en: "Port" },
+  "apps.detail.spec.replicasReady": { ru: "{ready} из {desired}", en: "{ready} of {desired}" },
+  "apps.detail.spec.restarts": { ru: "Рестартов: {n}", en: "Restarts: {n}" },
+  "apps.detail.spec.sizeTotal": { ru: "{value} суммарно", en: "{value} total" },
   "apps.detail.observability.notDeployed": {
     ru: "Приложение ещё не задеплоено — метрики и логи появятся после первого успешного деплоя.",
     en: "App is not deployed yet — metrics and logs will appear after the first successful deploy.",
@@ -475,6 +478,7 @@ export const apps: Messages = {
   "apps.detail.config.storageNone": { ru: "Не подключено", en: "Not configured" },
   "apps.detail.config.git": { ru: "Репозиторий", en: "Repository" },
   "apps.detail.config.gitNone": { ru: "Не привязан", en: "Not connected" },
+  "apps.detail.config.gitCommit": { ru: "Коммит {sha}", en: "Commit {sha}" },
 
   "apps.nextStep.title": { ru: "Что дальше", en: "What's next" },
   "apps.nextStep.domain.title": { ru: "Подключить свой домен", en: "Connect your own domain" },

@@ -253,19 +253,33 @@ already in progress`). Вылечено `POST /890/stop` + `/term`; очеред
    отвечает 200.
 
 ## Шаги
-- [ ] 1. gitops-agent/statusreconciler: собирать `namespaces`, `images`,
+- [x] 1. gitops-agent/statusreconciler: собирать `namespaces`, `images`,
       per-pod `observed_resources` (requests/limits первичного контейнера) и
       писать их в summary_json. Строго read-only по кластеру.
-- [ ] 2. backend/logs.go: namespace для инфра-потока = снапшотные `namespaces`
+- [x] 2. backend/logs.go: namespace для инфра-потока = снапшотные `namespaces`
       ∪ namespace окружения.
-- [ ] 3. backend/metrics.go: k8s-запрос по снапшотным `namespaces`+`images`
+- [x] 3. backend/metrics.go: k8s-запрос по снапшотным `namespaces`+`images`
       (regex-матчер), фоллбек на старую пару ns+image.
-- [ ] 4. backend/apps.go: `FillEffectiveResources` больше не выдумывает профиль
+- [x] 4. backend/apps.go: `FillEffectiveResources` больше не выдумывает профиль
       там, где есть наблюдаемые ресурсы.
-- [ ] 5. frontend: «Реплики» = `ready/desired` + рестарты; «Порт» без
+- [x] 5. frontend: «Реплики» = `ready/desired` + рестарты; «Порт» без
       выдуманного 8080; «Размер» из observed_resources; «Репозиторий» показывает
       коммит-источник для gitops-аппов.
-- [ ] 6. frontend/app-next-step: не звать «подключить репозиторий/домен» у
+- [x] 6. frontend/app-next-step: не звать «подключить репозиторий/домен» у
       gitops-управляемого аппа.
-- [ ] 7. Домен: не выдавать `Pending` от XR за вердикт (отдельный шаг, после 1-6).
-- [ ] 8. Verify: go build/vet/test, tsc/lint, и прогон правды на проде.
+- [x] 7. Домен: не выдавать `Pending` от XR за вердикт (отдельный шаг, после 1-6).
+- [x] 8. Verify: go build/vet/test, tsc/lint, и прогон правды на проде.
+
+- [x] 9. backend/logsearch: инфра-логи матчились только по `dada.io/app`; у
+      adopted-аппов (ADR-013) этого лейбла нет вообще — добавлен матч по
+      `app.kubernetes.io/instance` и `argocd.argoproj.io/instance`.
+
+## Результат (08-04)
+- Проверено на живом OpenSearch: запрос новой формы по `argocd-prod` +
+  `cloud-console` даёт 10000+ записей (было 0).
+- Проверено на живом Prometheus: серии `container_*{namespace="argocd-prod",
+  image=~"...backend:a81e594f"}` теперь попадают в scope метрик аппа.
+- Домен: 52 из 53 `PublicApi` висят `Ready=False` из-за застрявшей аннотации
+  `crossplane.io/external-create-pending` на composed provider-http `Request`
+  (при `status.response.statusCode=200`). Прод НЕ трогал: консоль теперь сама
+  резолвит запись (`dnsRecordLive`) и повышает Pending→Ready только по факту DNS.
