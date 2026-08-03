@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"time"
 
 	"github.com/google/uuid"
@@ -120,14 +121,51 @@ func MarkCommitted(ctx context.Context, pool *pgxpool.Pool, id uuid.UUID, sha, g
 	return err
 }
 
-// MarkFailed sets status=Failed with an error message.
+// MarkFailed sets status=Failed with an error message, and records the failure
+// in audit_events.
 func MarkFailed(ctx context.Context, pool *pgxpool.Pool, id uuid.UUID, code, message string) error {
 	_, err := pool.Exec(ctx, `
 		UPDATE operations
 		SET    status = 'Failed', error_code = $2, error_message = $3, updated_at = NOW()
 		WHERE  id = $1
 	`, id, code, message)
-	return err
+	if err != nil {
+		return err
+	}
+	recordFailureAudit(ctx, pool, id, code, message)
+	return nil
+}
+
+// recordFailureAudit writes an outcome=failure audit row for an operation that
+// died inside the worker. Every audit row an API handler writes is recorded at
+// enqueue time, when nothing is known yet except that the user asked -- so an
+// action that is accepted and then fails asynchronously stays outcome=success in
+// audit_events forever, and path analysis counts a failed deploy, a failed
+// database, a failed move as things that worked. This is the only terminal
+// failure path for operations the gitops agent runs [dbwatcher.go poll].
+//
+// The row is built from the operations row itself so it cannot disagree with it
+// about actor, project, environment or resource, and it carries the same action
+// as the success row: the pair reads as intent then result, distinguished by
+// outcome. The NOT EXISTS guard keeps a retried MarkFailed from stacking rows.
+//
+// Best-effort: the operation is already marked Failed and must not be resurrected
+// by a bookkeeping error.
+func recordFailureAudit(ctx context.Context, pool *pgxpool.Pool, id uuid.UUID, code, message string) {
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO audit_events
+			(actor_id, project_id, environment_id, operation_id, action, resource_kind, resource_name, outcome, metadata)
+		SELECT o.actor_id, o.project_id, o.environment_id, o.id, o.action, o.resource_kind, o.resource_name, 'failure',
+		       jsonb_build_object('reason', $2::text, 'error', left($3::text, 300), 'phase', 'operation')
+		  FROM operations o
+		 WHERE o.id = $1
+		   AND NOT EXISTS (
+			SELECT 1 FROM audit_events a
+			 WHERE a.operation_id = o.id AND a.outcome = 'failure'
+		   )
+	`, id, code, message); err != nil {
+		log.Printf("mark failed: audit row insert failed for op %s: %v", id, err)
+	}
 }
 
 // EnqueueDeployStack creates a follow-up DeployStack operation for a compose

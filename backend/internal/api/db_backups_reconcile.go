@@ -220,9 +220,11 @@ func (h *Handler) reconcileRestores(ctx context.Context) {
 			_, _ = h.pool.Exec(ctx,
 				`UPDATE operations SET status = 'Ready', updated_at = NOW() WHERE id = $1`, id)
 		case cloudtask.KanisterFailed:
+			msg := nonEmpty(st.Error, "restore ActionSet failed")
 			_, _ = h.pool.Exec(ctx,
 				`UPDATE operations SET status = 'Failed', error_message = $2, updated_at = NOW() WHERE id = $1`,
-				id, nonEmpty(st.Error, "restore ActionSet failed"))
+				id, msg)
+			recordOperationFailureAudit(ctx, h.pool, id, "actionset_failed", msg)
 		}
 	}
 }

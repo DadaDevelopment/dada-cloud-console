@@ -209,6 +209,11 @@ func (w *boxOperationsWorker) execute(parent context.Context, op boxOperationRow
 
 	if errors.Is(err, errBoxOperationUnimplemented) || op.Attempts >= boxOperationMaxAttempts {
 		w.markTerminal(parent, op.ID, models.OperationStatusFailed, err.Error())
+		reason := "max_attempts"
+		if errors.Is(err, errBoxOperationUnimplemented) {
+			reason = "unimplemented_action"
+		}
+		recordOperationFailureAudit(parent, w.h.pool, op.ID, reason, err.Error())
 		log.Warn().Err(err).Str("operation", op.ID.String()).Str("action", op.Action).
 			Int("attempts", op.Attempts).Msg("box worker: operation failed terminally")
 		return
