@@ -135,7 +135,7 @@ func seedAutoscaleReadinessFixture(t *testing.T, pool *pgxpool.Pool, appName str
 	).Scan(&projectID); err != nil {
 		t.Fatalf("seed project: %v", err)
 	}
-	t.Cleanup(func() { _, _ = pool.Exec(context.Background(), `DELETE FROM projects WHERE id = $1`, projectID) })
+	t.Cleanup(func() { dropSeededProject(pool, projectID) })
 
 	if err := pool.QueryRow(ctx,
 		`INSERT INTO environments (project_id, name, namespace, type) VALUES ($1, 'prod', $2, 'prod') RETURNING id`,

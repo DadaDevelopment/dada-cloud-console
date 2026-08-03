@@ -47,7 +47,7 @@ func usageTestFixture(t *testing.T, appName string) (*Handler, uuid.UUID, uuid.U
 		bg := context.Background()
 		_, _ = pool.Exec(bg, `DELETE FROM agent_token_usage WHERE project_id = $1`, projectID)
 		_, _ = pool.Exec(bg, `DELETE FROM service_identities WHERE id = $1`, identityID)
-		_, _ = pool.Exec(bg, `DELETE FROM projects WHERE id = $1`, projectID)
+		dropSeededProject(pool, projectID)
 	})
 
 	return h, projectID, identityID

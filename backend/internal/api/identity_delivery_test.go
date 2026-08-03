@@ -87,7 +87,7 @@ func seedDeliveryApp(t *testing.T, pool *pgxpool.Pool, namespace string) (appNam
 		_, _ = pool.Exec(ctx, `DELETE FROM service_identities WHERE environment_id = $1`, envID)
 		_, _ = pool.Exec(ctx, `DELETE FROM resource_snapshots WHERE environment_id = $1`, envID)
 		_, _ = pool.Exec(ctx, `DELETE FROM environments WHERE id = $1`, envID)
-		_, _ = pool.Exec(ctx, `DELETE FROM projects WHERE id = $1`, projectID)
+		dropSeededProject(pool, projectID)
 	})
 	return appName, projectID, envID
 }

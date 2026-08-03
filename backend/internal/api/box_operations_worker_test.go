@@ -65,7 +65,7 @@ func seedBoxOperation(t *testing.T, pool *pgxpool.Pool, status models.BoxStatus,
 	).Scan(&projectID); err != nil {
 		t.Fatalf("seed project: %v", err)
 	}
-	t.Cleanup(func() { _, _ = pool.Exec(context.Background(), `DELETE FROM projects WHERE id = $1`, projectID) })
+	t.Cleanup(func() { dropSeededProject(pool, projectID) })
 	parkClaimableBoxOperations(t, pool)
 
 	boxName = "bw-" + suffix

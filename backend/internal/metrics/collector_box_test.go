@@ -5,6 +5,7 @@ import (
 	"os"
 	"testing"
 
+	"github.com/dada-tuda/console/backend/internal/dbtest"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/prometheus/client_golang/prometheus"
@@ -56,8 +57,7 @@ func seedCollectorBoxes(t *testing.T, pool *pgxpool.Pool, statuses ...string) {
 	).Scan(&projectID); err != nil {
 		t.Fatalf("seed project: %v", err)
 	}
-	// projects cascades to environments, environments cascades to boxes.
-	t.Cleanup(func() { _, _ = pool.Exec(context.Background(), `DELETE FROM projects WHERE id = $1`, projectID) })
+	t.Cleanup(func() { dbtest.DropProject(pool, projectID) })
 
 	for i, status := range statuses {
 		name := "cb-" + suffix + "-" + string(rune('a'+i))

@@ -25,7 +25,7 @@ func TestEnsureDefaultProject_ProvisioningIsAudited(t *testing.T) {
 	claims := &auth.Claims{UserID: userID, Username: username}
 	slug := defaultProjectSlug(username)
 	t.Cleanup(func() {
-		_, _ = pool.Exec(context.Background(), `DELETE FROM projects WHERE name = $1`, slug)
+		dropSeededProjectsByName(pool, slug)
 	})
 
 	rec := routeDatabaseCall(t, http.MethodPost, "/projects/default", "/projects/default",
@@ -73,7 +73,7 @@ func TestEnsureDefaultProject_ReuseIsNotAudited(t *testing.T) {
 	claims := &auth.Claims{UserID: userID, Username: username}
 	slug := defaultProjectSlug(username)
 	t.Cleanup(func() {
-		_, _ = pool.Exec(context.Background(), `DELETE FROM projects WHERE name = $1`, slug)
+		dropSeededProjectsByName(pool, slug)
 	})
 
 	if rec := routeDatabaseCall(t, http.MethodPost, "/projects/default", "/projects/default",

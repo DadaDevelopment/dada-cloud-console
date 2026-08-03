@@ -250,7 +250,7 @@ func seedMeteredBox(t *testing.T, pool *pgxpool.Pool, orgID string, status model
 	).Scan(&projectID); err != nil {
 		t.Fatalf("seed project: %v", err)
 	}
-	t.Cleanup(func() { _, _ = pool.Exec(context.Background(), `DELETE FROM projects WHERE id = $1`, projectID) })
+	t.Cleanup(func() { dropSeededProject(pool, projectID) })
 
 	boxName = "bm-" + suffix
 	var envID uuid.UUID
@@ -837,7 +837,7 @@ func TestCreateBox_BoxMinutesQuotaUsesTheExistingForbiddenShape(t *testing.T) {
 	).Scan(&projectID); err != nil {
 		t.Fatalf("seed project: %v", err)
 	}
-	t.Cleanup(func() { _, _ = pool.Exec(context.Background(), `DELETE FROM projects WHERE id = $1`, projectID) })
+	t.Cleanup(func() { dropSeededProject(pool, projectID) })
 
 	fixedNow := boxQuotaTestClock()
 	h := &Handler{
@@ -881,7 +881,7 @@ func TestBoxMinutesQuotaIgnoresSleepingDiskAccrual(t *testing.T) {
 	).Scan(&projectID); err != nil {
 		t.Fatalf("seed project: %v", err)
 	}
-	t.Cleanup(func() { _, _ = pool.Exec(context.Background(), `DELETE FROM projects WHERE id = $1`, projectID) })
+	t.Cleanup(func() { dropSeededProject(pool, projectID) })
 
 	boxID := uuid.New()
 	t.Cleanup(func() { _, _ = pool.Exec(context.Background(), `DELETE FROM box_usage WHERE box_id = $1`, boxID) })

@@ -65,10 +65,9 @@ func seedOverQuotaOrg(t *testing.T, pool *pgxpool.Pool, graceUntil *time.Time) s
 		}
 	}
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, `DELETE FROM resource_snapshots WHERE project_id = $1`, projectID)
-		_, _ = pool.Exec(ctx, `DELETE FROM environments WHERE project_id = $1`, projectID)
-		_, _ = pool.Exec(ctx, `DELETE FROM projects WHERE id = $1`, projectID)
+		dropSeededProject(pool, projectID)
 		_, _ = pool.Exec(ctx, `DELETE FROM billing_accounts WHERE org_id = $1`, orgID)
+		dropSeededAudit(pool, "BillingAccount", orgID)
 	})
 	return orgID
 }

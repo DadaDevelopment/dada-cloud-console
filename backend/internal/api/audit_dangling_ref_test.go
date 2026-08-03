@@ -24,6 +24,13 @@ func testAuditPool(t *testing.T) *pgxpool.Pool {
 	return pool
 }
 
+// seedAuditActor creates a throwaway user and project for the audit tests and
+// removes both afterwards, together with the audit rows the actor writes.
+//
+// The audit rows go with the actor rather than with the project: these tests
+// deliberately produce rows whose project reference is dangling and therefore
+// stored as NULL, so dropping the project does not take them along. Dropping
+// the user does, because dropSeededUser clears audit_events.actor_id first.
 func seedAuditActor(t *testing.T, pool *pgxpool.Pool) (actorID, projectID uuid.UUID) {
 	t.Helper()
 	ctx := context.Background()
@@ -36,7 +43,7 @@ func seedAuditActor(t *testing.T, pool *pgxpool.Pool) (actorID, projectID uuid.U
 		t.Fatalf("seed user: %v", err)
 	}
 	t.Cleanup(func() {
-		_, _ = pool.Exec(context.Background(), `DELETE FROM users WHERE id = $1`, actorID)
+		dropSeededUser(pool, actorID)
 	})
 
 	if err := pool.QueryRow(ctx,
@@ -46,7 +53,7 @@ func seedAuditActor(t *testing.T, pool *pgxpool.Pool) (actorID, projectID uuid.U
 		t.Fatalf("seed project: %v", err)
 	}
 	t.Cleanup(func() {
-		_, _ = pool.Exec(context.Background(), `DELETE FROM projects WHERE id = $1`, projectID)
+		dropSeededProject(pool, projectID)
 	})
 	return actorID, projectID
 }

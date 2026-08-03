@@ -44,7 +44,7 @@ func seedPaymentsProject(t *testing.T, pool *pgxpool.Pool, orgID string) uuid.UU
 		t.Fatalf("seed project: %v", err)
 	}
 	t.Cleanup(func() {
-		_, _ = pool.Exec(context.Background(), `DELETE FROM projects WHERE id = $1`, projectID)
+		dropSeededProject(pool, projectID)
 	})
 	return projectID
 }
@@ -168,7 +168,7 @@ func seedPaymentsProjectNoOrg(t *testing.T, pool *pgxpool.Pool) uuid.UUID {
 		t.Fatalf("seed org-less project: %v", err)
 	}
 	t.Cleanup(func() {
-		_, _ = pool.Exec(context.Background(), `DELETE FROM projects WHERE id = $1`, projectID)
+		dropSeededProject(pool, projectID)
 	})
 	return projectID
 }

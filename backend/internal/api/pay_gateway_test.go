@@ -65,6 +65,7 @@ func seedServiceCharge(t *testing.T, pool *pgxpool.Pool, keyID uuid.UUID, servic
 	}
 	t.Cleanup(func() {
 		_, _ = pool.Exec(context.Background(), `DELETE FROM service_charges WHERE id = $1`, id)
+		dropSeededAudit(pool, "ServiceCharge", id.String())
 	})
 	return id
 }
@@ -222,6 +223,7 @@ func TestCreateServiceCharge_HappyPath(t *testing.T) {
 	}
 	t.Cleanup(func() {
 		_, _ = pool.Exec(context.Background(), `DELETE FROM service_charges WHERE external_ref = 'tg:1:plan-30d'`)
+		dropSeededAudit(pool, "ServiceCharge", resp.ID)
 	})
 }
 
@@ -243,7 +245,10 @@ func TestCreateServiceCharge_IdempotentReplay_SameChargeOneYKCall(t *testing.T) 
 	if err := json.Unmarshal(rec1.Body.Bytes(), &first); err != nil {
 		t.Fatalf("decode 1st response: %v", err)
 	}
-	t.Cleanup(func() { _, _ = pool.Exec(context.Background(), `DELETE FROM service_charges WHERE id = $1`, first.ID) })
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM service_charges WHERE id = $1`, first.ID)
+		dropSeededAudit(pool, "ServiceCharge", first.ID)
+	})
 
 	c2, rec2 := newPayCtx(http.MethodPost, "/api/v1/pay/charges", body, headers, nil)
 	h.CreateServiceCharge(c2)
@@ -425,6 +430,7 @@ func TestYooKassaWebhook_ServiceCharge_FlipsUnknownToPlansID(t *testing.T) {
 	pool := testPaymentsPool(t)
 	keyID, _ := seedPayServiceKey(t, pool, "svc-wh-"+uuid.NewString()[:8])
 	ykID := "ykid-wh-" + uuid.NewString()[:8]
+	t.Cleanup(func() { dropSeededAuditByMeta(pool, "yk_payment_id", ykID) })
 	chargeID := seedServiceCharge(t, pool, keyID, "svc-wh", "ref-wh", "pending", ykID)
 
 	client, _ := newCountingYooKassaClient(t, "succeeded")
@@ -449,6 +455,7 @@ func TestYooKassaWebhook_ServiceCharge_ReplayIsIdempotent(t *testing.T) {
 	pool := testPaymentsPool(t)
 	keyID, _ := seedPayServiceKey(t, pool, "svc-wh2-"+uuid.NewString()[:8])
 	ykID := "ykid-wh2-" + uuid.NewString()[:8]
+	t.Cleanup(func() { dropSeededAuditByMeta(pool, "yk_payment_id", ykID) })
 	chargeID := seedServiceCharge(t, pool, keyID, "svc-wh2", "ref-wh2", "pending", ykID)
 
 	client, calls := newCountingYooKassaClient(t, "succeeded")
@@ -488,6 +495,7 @@ func TestYooKassaWebhook_UnknownToBothPlansAndServiceCharges_Returns200(t *testi
 	h := testPayHandler(pool, client)
 
 	unknownID := "ykid-nowhere-" + uuid.NewString()[:8]
+	t.Cleanup(func() { dropSeededAuditByMeta(pool, "yk_payment_id", unknownID) })
 	c, rec := newWebhookCtx(t, "", `{"event":"payment.succeeded","object":{"id":"`+unknownID+`"}}`)
 	h.YooKassaWebhook(c)
 
@@ -518,6 +526,10 @@ func seedPayIdentity(t *testing.T, pool *pgxpool.Pool, appName, scopes string) (
 		t.Fatalf("seed identity token: %v", err)
 	}
 	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `
+			DELETE FROM audit_events
+			WHERE resource_kind = 'ServiceCharge'
+			  AND resource_name IN (SELECT id::text FROM service_charges WHERE identity_id = $1)`, identityID)
 		_, _ = pool.Exec(context.Background(), `DELETE FROM service_charges WHERE identity_id = $1`, identityID)
 		_, _ = pool.Exec(context.Background(), `DELETE FROM service_identities WHERE id = $1`, identityID)
 	})

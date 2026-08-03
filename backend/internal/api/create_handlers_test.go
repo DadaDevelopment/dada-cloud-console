@@ -36,7 +36,7 @@ func seedUser(t *testing.T, pool *pgxpool.Pool) uuid.UUID {
 	).Scan(&id); err != nil {
 		t.Fatalf("seed user: %v", err)
 	}
-	t.Cleanup(func() { _, _ = pool.Exec(context.Background(), `DELETE FROM users WHERE id = $1`, id) })
+	t.Cleanup(func() { dropSeededUser(pool, id) })
 	return id
 }
 

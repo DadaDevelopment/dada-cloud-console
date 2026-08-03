@@ -114,8 +114,7 @@ func TestCreateProject_NonAgentStillCreates(t *testing.T) {
 
 	t.Cleanup(func() {
 		_, _ = pool.Exec(context.Background(), `DELETE FROM audit_events WHERE actor_id = $1`, actor)
-		_, _ = pool.Exec(context.Background(), `DELETE FROM environments WHERE project_id IN (SELECT id FROM projects WHERE name = $1)`, slug)
-		_, _ = pool.Exec(context.Background(), `DELETE FROM projects WHERE name = $1`, slug)
+		dropSeededProjectsByName(pool, slug)
 	})
 
 	if rec.Code != http.StatusCreated {

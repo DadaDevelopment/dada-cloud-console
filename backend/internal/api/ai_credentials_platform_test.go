@@ -38,7 +38,7 @@ func seedAICredProject(t *testing.T, pool *pgxpool.Pool) uuid.UUID {
 		t.Fatalf("seed project: %v", err)
 	}
 	t.Cleanup(func() {
-		_, _ = pool.Exec(context.Background(), `DELETE FROM projects WHERE id = $1`, id)
+		dropSeededProject(pool, id)
 	})
 	return id
 }

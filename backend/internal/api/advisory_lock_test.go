@@ -86,7 +86,7 @@ func TestManagedDomainHostnameUniquePerEnvApp(t *testing.T) {
 		t.Fatalf("seed project: %v", err)
 	}
 	t.Cleanup(func() {
-		_, _ = pool.Exec(context.Background(), `DELETE FROM projects WHERE id = $1`, projectID)
+		dropSeededProject(pool, projectID)
 	})
 
 	var envID uuid.UUID

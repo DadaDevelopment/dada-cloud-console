@@ -332,7 +332,7 @@ func seedScheduledBackupServiceDatabase(t *testing.T, pool *pgxpool.Pool, name s
 		t.Fatalf("seed project: %v", err)
 	}
 	t.Cleanup(func() {
-		_, _ = pool.Exec(context.Background(), `DELETE FROM projects WHERE id = $1`, projectID)
+		dropSeededProject(pool, projectID)
 	})
 
 	if err := pool.QueryRow(ctx,

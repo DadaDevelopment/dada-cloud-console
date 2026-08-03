@@ -27,6 +27,12 @@ func testPaymentsConnectConfig() *config.Config {
 	}
 }
 
+// seedPaymentsEnv creates the throwaway project and environment the connect
+// flow needs, and removes both plus whatever the flow stored about them.
+//
+// payment_connections and payment_oauth_states carry a project_id with no
+// foreign key behind it, so dropping the project leaves them untouched; they
+// have to be named here or they stay in the shared database forever.
 func seedPaymentsEnv(t *testing.T, pool *pgxpool.Pool) (projectID, envID uuid.UUID) {
 	t.Helper()
 	ctx := context.Background()
@@ -37,7 +43,7 @@ func seedPaymentsEnv(t *testing.T, pool *pgxpool.Pool) (projectID, envID uuid.UU
 	).Scan(&projectID); err != nil {
 		t.Fatalf("seed project: %v", err)
 	}
-	t.Cleanup(func() { _, _ = pool.Exec(context.Background(), `DELETE FROM projects WHERE id = $1`, projectID) })
+	t.Cleanup(func() { dropSeededProject(pool, projectID) })
 
 	if err := pool.QueryRow(ctx,
 		`INSERT INTO environments (project_id, name, namespace, type) VALUES ($1, 'prod', $2, 'prod') RETURNING id`,
@@ -45,6 +51,10 @@ func seedPaymentsEnv(t *testing.T, pool *pgxpool.Pool) (projectID, envID uuid.UU
 	).Scan(&envID); err != nil {
 		t.Fatalf("seed environment: %v", err)
 	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM payment_connections WHERE project_id = $1`, projectID)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM payment_oauth_states WHERE project_id = $1`, projectID)
+	})
 	return projectID, envID
 }
 

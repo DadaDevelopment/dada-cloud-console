@@ -115,9 +115,7 @@ func seedGraceOrg(t *testing.T, pool *pgxpool.Pool, graceUntil time.Time) string
 		t.Fatalf("seed billing account: %v", err)
 	}
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, `DELETE FROM resource_snapshots WHERE project_id = $1`, projectID)
-		_, _ = pool.Exec(ctx, `DELETE FROM environments WHERE project_id = $1`, projectID)
-		_, _ = pool.Exec(ctx, `DELETE FROM projects WHERE id = $1`, projectID)
+		dropSeededProject(pool, projectID)
 		_, _ = pool.Exec(ctx, `DELETE FROM billing_accounts WHERE org_id = $1`, orgID)
 	})
 	return orgID

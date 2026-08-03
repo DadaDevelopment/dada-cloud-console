@@ -60,6 +60,6 @@ func seedKindUser(t *testing.T, pool *pgxpool.Pool, username, email string) {
 		t.Fatalf("seed user %s: %v", username, err)
 	}
 	t.Cleanup(func() {
-		_, _ = pool.Exec(context.Background(), `DELETE FROM users WHERE id = $1`, id)
+		dropSeededUser(pool, id)
 	})
 }

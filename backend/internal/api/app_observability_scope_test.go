@@ -54,9 +54,7 @@ func seedAdoptedApp(t *testing.T, pool *pgxpool.Pool, summary string) (uuid.UUID
 		t.Fatalf("seed app snapshot: %v", err)
 	}
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, `DELETE FROM resource_snapshots WHERE project_id = $1`, projectID)
-		_, _ = pool.Exec(ctx, `DELETE FROM environments WHERE project_id = $1`, projectID)
-		_, _ = pool.Exec(ctx, `DELETE FROM projects WHERE id = $1`, projectID)
+		dropSeededProject(pool, projectID)
 	})
 	return projectID, envID, appName
 }

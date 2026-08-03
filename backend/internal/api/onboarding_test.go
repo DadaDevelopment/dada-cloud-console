@@ -40,6 +40,19 @@ func newOnboardingCtx(method, target, body string) (*gin.Context, *httptest.Resp
 	return c, rec
 }
 
+// onboardingUser returns the id of a throwaway caller and removes the
+// user_onboarding rows the handler writes for it. That table keys on user_sub
+// with no foreign key back to users, so nothing else takes those rows away and
+// they would pile up in the shared cloud-console database run after run.
+func onboardingUser(t *testing.T, pool *pgxpool.Pool) uuid.UUID {
+	t.Helper()
+	uid := uuid.New()
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM user_onboarding WHERE user_sub = $1`, uid.String())
+	})
+	return uid
+}
+
 func TestOnboarding_GetEmpty(t *testing.T) {
 	pool := testOnboardingPool(t)
 	h := &Handler{pool: pool}
@@ -63,7 +76,7 @@ func TestOnboarding_GetEmpty(t *testing.T) {
 func TestOnboarding_PostThenGet(t *testing.T) {
 	pool := testOnboardingPool(t)
 	h := &Handler{pool: pool}
-	uid := uuid.New()
+	uid := onboardingUser(t, pool)
 
 	cPost, recPost := newOnboardingCtx(http.MethodPost, "/api/v1/onboarding/agent", `{"status":"seen","step":0}`)
 	auth.SetClaims(cPost, &auth.Claims{UserID: uid})
@@ -88,7 +101,7 @@ func TestOnboarding_PostThenGet(t *testing.T) {
 func TestOnboarding_MonotonicNoDowngrade(t *testing.T) {
 	pool := testOnboardingPool(t)
 	h := &Handler{pool: pool}
-	uid := uuid.New()
+	uid := onboardingUser(t, pool)
 
 	cDone, _ := newOnboardingCtx(http.MethodPost, "/api/v1/onboarding/agent", `{"status":"done","step":1}`)
 	auth.SetClaims(cDone, &auth.Claims{UserID: uid})

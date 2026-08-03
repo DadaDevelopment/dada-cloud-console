@@ -61,9 +61,7 @@ func seedBoxFixture(t *testing.T, pool *pgxpool.Pool) uuid.UUID {
 	).Scan(&projectID); err != nil {
 		t.Fatalf("seed project: %v", err)
 	}
-	// projects cascades to environments, and environments cascades to boxes, so
-	// one cleanup removes the whole fixture including anything the handler created.
-	t.Cleanup(func() { _, _ = pool.Exec(context.Background(), `DELETE FROM projects WHERE id = $1`, projectID) })
+	t.Cleanup(func() { dropSeededProject(pool, projectID) })
 	return projectID
 }
 
