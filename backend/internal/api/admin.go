@@ -37,8 +37,9 @@ func (h *Handler) ListAdminApprovals(c *gin.Context) {
 	// Scope is derived purely from native claims (ADR-009): the projects where the
 	// caller holds an explicit Owner/Admin role, plus every project owned by an
 	// org where the caller is org Owner/Admin (cascade). God (/platform-admins)
-	// sees every project. Multi-org: a caller may administer many orgs at once.
-	god := isGod(claims)
+	// and read-only staff (/platform-analysts) see every project; approving still
+	// requires god. Multi-org: a caller may administer many orgs at once.
+	seesEveryProject := isAdminReader(claims)
 	var adminProjectIDs []uuid.UUID
 	for pid, role := range claims.ProjectRoles() {
 		if isOrgAdmin(models.MemberRole(role)) {
@@ -62,7 +63,7 @@ func (h *Handler) ListAdminApprovals(c *gin.Context) {
 		        OR p.id = ANY($3)
 		        OR p.org_id = ANY($4) )
 		ORDER BY o.created_at ASC`,
-		models.OperationStatusWaitingForApproval, god, adminProjectIDs, adminOrgs,
+		models.OperationStatusWaitingForApproval, seesEveryProject, adminProjectIDs, adminOrgs,
 	)
 	if err != nil {
 		respondError(c, http.StatusInternalServerError, "failed to list approvals")
@@ -364,7 +365,7 @@ func (h *Handler) ListAuditEvents(c *gin.Context) {
 		respondUnauthorized(c)
 		return
 	}
-	if !isGod(claims) {
+	if !isAdminReader(claims) {
 		respondForbidden(c)
 		return
 	}

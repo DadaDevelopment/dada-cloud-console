@@ -150,7 +150,7 @@ func (h *Handler) GetAdminCosts(c *gin.Context) {
 		respondUnauthorized(c)
 		return
 	}
-	if !isGod(claims) {
+	if !isAdminReader(claims) {
 		respondForbidden(c)
 		return
 	}

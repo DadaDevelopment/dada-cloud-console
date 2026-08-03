@@ -17,12 +17,13 @@ import (
 //
 //   - Groups carries the full-path group memberships from the Group Membership
 //     mapper: "/orgs/{org}/{Role}", "/orgs/{org}/projects/{proj}/{Role}", and the
-//     hidden "/platform-admins" staff group.
+//     hidden "/platform-admins", "/platform-analysts" and "/agents" staff groups.
 //   - Scope is the native space-delimited OIDC scope string.
 //   - Roles is realm_access.roles (diagnostics only; authz comes from Groups).
 //
-// The decoded view (orgRoles/projectRoles/scopeSet/platformAdmin) is built lazily
-// from Groups+Scope on first access and is never serialized.
+// The decoded view (orgRoles/projectRoles/scopeSet/platformAdmin/platformAnalyst/
+// agent) is built lazily from Groups+Scope on first access and is never
+// serialized.
 type Claims struct {
 	UserID      uuid.UUID `json:"user_id"`
 	Username    string    `json:"username"`
@@ -38,11 +39,13 @@ type Claims struct {
 	SessionID string `json:"sid,omitempty"`
 
 	// decoded view (not serialized).
-	decoded       bool
-	orgRoles      map[string]string
-	projectRoles  map[string]string
-	scopeSet      map[string]struct{}
-	platformAdmin bool
+	decoded         bool
+	orgRoles        map[string]string
+	projectRoles    map[string]string
+	scopeSet        map[string]struct{}
+	platformAdmin   bool
+	platformAnalyst bool
+	agent           bool
 	jwt.RegisteredClaims
 }
 
@@ -84,8 +87,15 @@ func (c *Claims) decode() {
 	c.scopeSet = map[string]struct{}{}
 
 	for _, g := range c.Groups {
-		if g == "/platform-admins" {
+		switch g {
+		case "/platform-admins":
 			c.platformAdmin = true
+			continue
+		case "/platform-analysts":
+			c.platformAnalyst = true
+			continue
+		case "/agents":
+			c.agent = true
 			continue
 		}
 		// "/orgs/{org}/{Role}"                      → org role
@@ -119,7 +129,13 @@ func (c *Claims) decode() {
 	// org_id = <username>; the org-role cascade then makes them visible/ownable to
 	// exactly that user (and /platform-admins). max-merge so an explicit Keycloak
 	// /orgs/<username>/<Role> grant, if one ever exists, is never downgraded.
-	if c.Username != "" && roleRank("Owner") > roleRank(c.orgRoles[c.Username]) {
+	//
+	// Agents (/agents) are deliberately excluded: the whole point of the group is
+	// that a non-human identity holds ONLY the project grants it was handed, with
+	// no org of its own to fall back on. Without this carve-out an agent scoped to
+	// one sandbox project would still be Owner of the org named after its
+	// service-account username and could mint projects there without limit.
+	if c.Username != "" && !c.agent && roleRank("Owner") > roleRank(c.orgRoles[c.Username]) {
 		c.orgRoles[c.Username] = "Owner"
 	}
 }
@@ -155,6 +171,25 @@ func (c *Claims) ProjectRoles() map[string]string {
 func (c *Claims) IsPlatformAdmin() bool {
 	c.decode()
 	return c.platformAdmin
+}
+
+// IsPlatformAnalyst reports read-only staff access (the hidden
+// /platform-analysts group): every project readable, every admin read endpoint
+// readable, nothing writable. Exists so analytics identities (the autonomous
+// routine, dashboards) stop needing /platform-admins just to count things.
+// Outside the customer role enum; never surfaced in UI.
+func (c *Claims) IsPlatformAnalyst() bool {
+	c.decode()
+	return c.platformAnalyst
+}
+
+// IsAgent reports that the caller is a non-human automation identity (the hidden
+// /agents group). Agents are confined to the projects explicitly granted to them:
+// they get no implicit personal org (see decode) and may not create projects at
+// all. Outside the customer role enum; never surfaced in UI.
+func (c *Claims) IsAgent() bool {
+	c.decode()
+	return c.agent
 }
 
 // HasScope reports whether the native scope set contains want.

@@ -128,6 +128,12 @@ type createProjectRequest struct {
 // the caller must be Owner/Admin of it. The gitops-agent db-watcher picks the new
 // row up and bootstraps its git manifest.
 //
+// Automation identities (/agents) are refused outright. They hold no personal org
+// (auth.Claims.decode) and are not org admins, so both paths would already fail;
+// the explicit check exists so the refusal is one auditable reason instead of two
+// incidental ones, and so a future grant cannot reopen project minting by
+// accident. Agents work inside the project explicitly granted to them.
+//
 // @ID          createProject
 // @Summary     Create a project
 // @Description Creates a project plus its default environment. Without org_id the project goes into your personal org (you are Owner). With org_id you must be Owner/Admin of that org. The slug must be DNS-1123-label-safe and is unique platform-wide.
@@ -162,6 +168,13 @@ func (h *Handler) CreateProject(c *gin.Context) {
 	}
 	rejectErr := func(status int, reason, msg string) {
 		reject(status, reason, func() { respondError(c, status, msg) })
+	}
+
+	if isAgent(claims) {
+		reject(http.StatusForbidden, "agent_project_creation_denied", func() {
+			respondError(c, http.StatusForbidden, "automation identities cannot create projects; work inside the project granted to you")
+		})
+		return
 	}
 
 	var req createProjectRequest

@@ -55,7 +55,7 @@ func (h *Handler) ListFeedback(c *gin.Context) {
 		respondUnauthorized(c)
 		return
 	}
-	if !isGod(claims) {
+	if !isAdminReader(claims) {
 		respondForbidden(c)
 		return
 	}

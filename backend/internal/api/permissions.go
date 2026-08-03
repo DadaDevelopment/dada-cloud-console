@@ -17,6 +17,25 @@ func isGod(claims *auth.Claims) bool {
 	return claims != nil && claims.IsPlatformAdmin()
 }
 
+// isPlatformAnalyst reports the read-only staff group (/platform-analysts): the
+// caller reads every project and every admin read endpoint but writes nothing.
+// It is deliberately NOT folded into isGod — isGod is the write gate.
+func isPlatformAnalyst(claims *auth.Claims) bool {
+	return claims != nil && claims.IsPlatformAnalyst()
+}
+
+// isAdminReader gates the read-only /admin/* endpoints (overview, costs, audit,
+// gateway usage). Write endpoints under /admin keep the stricter isGod gate.
+func isAdminReader(claims *auth.Claims) bool {
+	return isGod(claims) || isPlatformAnalyst(claims)
+}
+
+// isAgent reports a non-human automation identity (/agents). Agents may act only
+// inside the projects explicitly granted to them and may never create projects.
+func isAgent(claims *auth.Claims) bool {
+	return claims != nil && claims.IsAgent()
+}
+
 // resolveRole computes the caller's effective role on a project from the decoded
 // native claims, given the project's owning org (looked up locally — dada-cloud
 // owns the resource row keyed by project_id/org_id, ADR-009 §4).
@@ -28,6 +47,8 @@ func isGod(claims *auth.Claims) bool {
 //   - no explicit project membership → only an Owner/Admin org role cascades in;
 //     org Developer/ReadOnly do NOT grant blanket project access ("see own
 //     projects", PRD-IAM role table).
+//   - read-only staff (/platform-analysts) → ReadOnly on every project. Checked
+//     last, so an explicit grant or an org cascade always wins the max-merge.
 //
 // Returns ok=false when the caller has no access. Pure (no DB) so it is unit
 // tested directly; effectiveRole wraps it with the org lookup.
@@ -46,6 +67,9 @@ func resolveRole(claims *auth.Claims, projectOrg, projectID string) (models.Memb
 	}
 	if org == models.MemberRoleOwner || org == models.MemberRoleAdmin {
 		return org, true
+	}
+	if isPlatformAnalyst(claims) {
+		return models.MemberRoleReadOnly, true
 	}
 	return "", false
 }
