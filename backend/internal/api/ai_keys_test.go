@@ -65,9 +65,14 @@ func TestMaskAIKey(t *testing.T) {
 // TestAICatalogProvidersResolve guards the catalog against a model pointing at
 // a provider the console cannot accept a credential for -- such a model would
 // render in the UI and then fail closed at call time with no way to fix it.
+//
+// The platform tier aliases (fast/medium/smart) are the one legitimate
+// exception: the gateway serves them from the platform's own keys, so they
+// carry a provider that is deliberately absent from aiCatalogProviders and a
+// project can never store a credential for them.
 func TestAICatalogProvidersResolve(t *testing.T) {
 	for _, m := range aiCatalogModels {
-		if !isKnownAIProvider(m.Provider) {
+		if m.Provider != aiCatalogPlatformProvider && !isKnownAIProvider(m.Provider) {
 			t.Fatalf("model %q references unknown provider %q", m.Alias, m.Provider)
 		}
 		if m.Kind != "chat" && m.Kind != "embeddings" {
