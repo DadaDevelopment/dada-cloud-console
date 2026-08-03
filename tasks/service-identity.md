@@ -245,34 +245,71 @@ currently lives. A move re-points that row and re-mints nothing.
       ConfigMap contains `sk-dada`. `telemost-bot` reads config with
       `load_dotenv()`, whose default `override=False` leaves an existing
       environment variable alone, so container env beats the file there too.
-- [ ] **The old keys are still live and the console cannot revoke them.** Both
-      pre-cutover literals still authenticate at the gateway (`200`), and
-      neither is in `ai_gateway_keys` — that table holds three rows, all
-      `sk-dada-ai-`, all revoked. Per `ai_keys.go:21`, the gateway sends
+- [x] **The old keys were live and the console could not revoke them.** Neither
+      pre-cutover literal is in `ai_gateway_keys` — that table holds two rows,
+      both `sk-dada-ai-`, both revoked. Per `ai_keys.go:21`, the gateway sends
       `sk-dada-ai-` to the console, `sk-dada-id-` to identity introspection and
-      **anything else in the `sk-dada-` family to user-service**. So these are
+      **anything else in the `sk-dada-` family to user-service**. So these were
       user-service keys: not tied to an app, not visible on
-      `/admin/ai-gateway`, and not revocable from here. Revoking them is what
-      finishes the migration, and it has to happen in user-service.
+      `/admin/ai-gateway`, not revocable from here. Revoked 2026-08-04 in
+      `users.api_key` (db `users`, schema `users`, on the same
+      `postgresql-0`; credentials in secret `internal-prod/user-db-credentials`)
+      after checking every cluster Secret and ConfigMap for each prefix and
+      finding no consumer left:
+      `telemost-bot` (`sk-dada-LSUB`), `reels-tracker` (`sk-dada-ITJP`),
+      `profi-backend` (`sk-dada--hqU`). Proved rather than assumed, both ways:
+      the reels literal now gets
+      `401 Authentication Error, invalid platform api key` at the gateway, and
+      all three pods, probed from inside on the env their own config reads,
+      still answer `200` on their `sk-dada-id-` tokens.
+- [ ] **The console itself is the last legacy holdout.** Secret
+      `argocd-prod/dada-cloud-console-backend` carries `AGENT_CHAT_GATEWAY_KEY`
+      = `sk-dada-hc_3…`, a user-service key scoped to project `platform` — the
+      one live legacy key left, and the only cluster consumer of any of them.
+      Console agent chat is the last caller that is not an app identity, which
+      is exactly the case ADR-021 exists to remove. Cut it over to the
+      `cloud-console` identity (`platform-prod/cloud-console-identity-credentials`
+      already exists and holds a live token), then revoke the key.
 - [x] `reels-tracker` cut over to an identity token (2026-08-03) and, later the
       same day, off the literal entirely — argo-infra now carries a
       `secretKeyRef`, not a value. Its next move re-points the identity row and
       the delivered Secret; git changes nothing.
-- [ ] Duplicate `reels-tracker` App in project `platform`, created 2026-08-02
-      while chasing the 401 and never removed. It has no database, no `env` and
-      no ingress traffic, so both pods CrashLoop on the missing
-      `TELEGRAM_BOT_TOKEN`; delivery counted it as a real app and minted it an
-      identity. Delete through the console (not by hand in git) so the
-      `resource_snapshots` rows go with it.
-- [ ] Revoke reels-tracker's old user-service key, now unused.
+- [x] Duplicate `reels-tracker` App in project `platform`, created 2026-08-02
+      while chasing the 401 and never removed. It had no database, no `env` and
+      no ingress traffic, so both pods CrashLooped on the missing
+      `TELEGRAM_BOT_TOKEN` — and the autoscaler kept issuing `ResizeApp` on it
+      every six hours. Delivery counted it as a real app and minted it an
+      identity. Deleted 2026-08-04 through the console's own path, not by hand
+      in git: a `DeleteApp` row in `operations` (the same row `DeleteApp` in
+      `delete_impact.go` writes), which the gitops-agent claimed and turned into
+      argo-infra commit `c0ecc732` removing the whole app folder — after which
+      `platform-prod` holds no reels object at all. Its orphaned identity
+      (`40cdb2db…`) and the delivered
+      `platform-prod/reels-tracker-identity-credentials` Secret were removed
+      too; `doDeleteApp` cascades child snapshots and AIModel keys, but knows
+      nothing about ServiceIdentity yet.
+- [ ] `doDeleteApp` should cascade the app's ServiceIdentity and its delivered
+      Secret the way it already cascades `aimodel_api_keys`. Until it does,
+      deleting an app leaves a live credential behind in the cluster.
 - [x] Its direct-provider models are back: `OPENROUTER_MODEL=or-gpt-41-mini`,
       `OCR_VISION_MODEL`, `WEB_SEARCH_MODEL` all answer through the identity.
       This needed project `internal` to hold an openrouter credential at all —
       the identity fixes *whose* credential it is, not whether the destination
       project has one. See the Phase 3 MoveImpact warning.
-- [ ] Issue project `internal` its own openrouter key. It currently shares
-      `platform`'s (same ciphertext copied on 2026-08-03 to unblock prod), which
-      makes per-project spend unattributable.
+- [ ] Issue project `internal` its own openrouter **and openai** keys. It now
+      shares both of `platform`'s (same ciphertext, copied 2026-08-03 and
+      2026-08-04 to unblock prod), which makes per-project spend unattributable.
+      The openai copy came from a live break: the agent in `internal` asked for
+      `text-embedding-3-small` and the gateway answered
+      `no credential for project/provider openai`. The identity was fine — the
+      destination project simply held no openai row, and that alias is one
+      deployment on one provider (`Available Model Group Fallbacks=None`), so
+      nothing could take over the way a tier alias would. Row
+      `ad2aabd0-9aff-44ac-92a4-f3b7b07fa0d7`; verified `200`, 1536 dims, with a
+      throwaway identity that was deleted afterwards.
+- [ ] Embeddings have no tier alias, so an embeddings call has no failover at
+      all — one provider, no siblings, and a missing credential is a hard stop.
+      `fast`/`medium`/`smart` solved exactly this for chat.
 - [ ] Mint identities through `POST .../apps/:appName/identity` rather than SQL.
       reels-tracker's row was inserted directly because prod runs
       `AUTH_MODE=keycloak` and the console service account is not a member of
