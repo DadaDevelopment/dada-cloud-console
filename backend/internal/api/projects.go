@@ -350,6 +350,14 @@ func defaultProjectDisplayName(username string) string {
 // have none. Idempotent: the console calls it on first load so the user always lands
 // inside a project instead of an empty overview.
 //
+// The provisioning branch records a CreateProject audit row, same as the explicit
+// handler does. Without it the first server-side thing a new user causes -- their
+// workspace being born -- left an operations row and nothing in audit_events, so
+// every funnel and cohort reading started one step after signup. The row carries
+// trigger=default_project so auto-provisioning stays distinguishable from a
+// project the user typed a slug for. Only the branch that actually inserted
+// audits: the reuse and unique-violation paths created nothing.
+//
 // @ID          ensureDefaultProject
 // @Summary     Get or create the caller's default project
 // @Description Returns the caller's default project, provisioning one (in your personal org, you are Owner) when you have zero projects. Idempotent — repeated calls return the same project.
@@ -443,6 +451,15 @@ func (h *Handler) EnsureDefaultProject(c *gin.Context) {
 		return
 	}
 	h.ensureProjectGroupsAsync(personalOrg, pid.String(), slug, displayName, claims.Subject)
+	h.recordAudit(ctx, claims.UserID, auditEntry{
+		ProjectID:     pid,
+		EnvironmentID: envID,
+		Action:        "CreateProject",
+		ResourceKind:  "Project",
+		ResourceName:  slug,
+		Outcome:       auditOutcomeSuccess,
+		Metadata:      map[string]any{"org": personalOrg, "default_environment": "prod", "trigger": "default_project"},
+	})
 	c.JSON(http.StatusCreated, gin.H{
 		"project_id":             pid,
 		"default_environment_id": envID,
