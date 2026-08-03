@@ -95,7 +95,15 @@ func (h *Handler) refreshAgentChatIdentityKey(ctx context.Context, clientset kub
 // The Secret is found by the identity label rather than by namespace, so the
 // lookup keeps working if the app's project or environment ever changes -- the
 // same property that makes an app survive a move.
+//
+// A nil pool answers "no token" rather than panicking: NewHandler starts this
+// refresher, and callers that only want the route table (TestOpenAPICoverage)
+// build a Handler without a database. That crash took CI down for builds
+// #897-899; runWithAdvisoryLock carries the same guard for the same reason.
 func (h *Handler) resolveDeliveredIdentityToken(ctx context.Context, clientset kubernetes.Interface, appName string) (string, error) {
+	if h.pool == nil {
+		return "", nil
+	}
 	rows, err := h.pool.Query(ctx,
 		`SELECT id FROM service_identities
 		  WHERE app_name = $1 AND revoked_at IS NULL

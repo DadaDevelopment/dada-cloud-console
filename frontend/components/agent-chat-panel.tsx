@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { X, Send, Bot, Loader2, Wrench, AlertTriangle, Check, Ban, RotateCcw } from "lucide-react";
 import { useT } from "@/lib/i18n/console/context";
@@ -40,10 +40,32 @@ const AGENT_MODES: AgentMode[] = ["manual", "edit", "admin"];
 
 const AGENT_MODE_STORAGE_KEY = "dada.agentChat.mode";
 
+const modeListeners = new Set<() => void>();
+
+/**
+ * The mode lives in localStorage, which is an external store: it survives
+ * reloads, it is shared by every panel on the page and another tab can change
+ * it. Reading it through useSyncExternalStore keeps the server render at the
+ * default instead of guessing, so there is no hydration mismatch and no
+ * setState in an effect.
+ */
+function subscribeMode(onChange: () => void): () => void {
+  modeListeners.add(onChange);
+  window.addEventListener("storage", onChange);
+  return () => {
+    modeListeners.delete(onChange);
+    window.removeEventListener("storage", onChange);
+  };
+}
+
 function readStoredMode(): AgentMode {
-  if (typeof window === "undefined") return "edit";
   const stored = window.localStorage.getItem(AGENT_MODE_STORAGE_KEY);
   return AGENT_MODES.includes(stored as AgentMode) ? (stored as AgentMode) : "edit";
+}
+
+function writeStoredMode(next: AgentMode) {
+  window.localStorage.setItem(AGENT_MODE_STORAGE_KEY, next);
+  for (const listener of modeListeners) listener();
 }
 
 const AGENT_ERROR_CODE_KEYS: Record<string, string> = {
@@ -306,7 +328,7 @@ export function AgentChatPanel({ open, onClose }: AgentChatPanelProps) {
   const appName = appNameFromPath(pathname);
 
   const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [mode, setMode] = useState<AgentMode>("edit");
+  const mode = useSyncExternalStore(subscribeMode, readStoredMode, () => "edit" as AgentMode);
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
   const listRef = useRef<HTMLDivElement>(null);
@@ -364,13 +386,8 @@ export function AgentChatPanel({ open, onClose }: AgentChatPanelProps) {
     listRef.current?.scrollTo({ top: listRef.current.scrollHeight });
   }, [messages]);
 
-  useEffect(() => {
-    setMode(readStoredMode());
-  }, []);
-
   function selectMode(next: AgentMode) {
-    setMode(next);
-    window.localStorage.setItem(AGENT_MODE_STORAGE_KEY, next);
+    writeStoredMode(next);
   }
 
   const hasPendingConfirm = messages.some((m) => m.kind === "confirm" && !m.resolved);
