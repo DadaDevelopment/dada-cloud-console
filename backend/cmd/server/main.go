@@ -172,29 +172,42 @@ func main() {
 		// Both live under BILLING_ENABLED with the rest of the metering: a
 		// deployment that is not billing must not be suspending anyone's box for
 		// spending money it is not charging for.
+		// THE REAPER IS NOT CONDITIONAL ON THE METER, and it used to be. Both were
+		// built inside one if/else on NewBoxMeter, so a box-fleet-cost.yaml this
+		// process could not read did not merely stop billing box minutes — it also
+		// stopped the only loop that puts idle boxes to sleep, warns about boxes
+		// asleep too long and destroys them. That is the wrong way round: a fleet
+		// nobody is charging for is exactly the fleet that most needs collecting,
+		// and coupling the two turns a pricing-file typo into a bill that grows on
+		// its own. They are now started independently, and the meter's failure is
+		// reported as the billing gap it is rather than as a silent lifecycle stop.
 		boxNotifier := notify.New(cfg.SMTPHost, cfg.SMTPPort, cfg.SMTPUser, cfg.SMTPPass, cfg.SMTPFrom)
-		if boxMeter, bmErr := api.NewBoxMeter(pool, cfg, billingPlans, boxNotifier); bmErr != nil {
+		boxMeter, bmErr := api.NewBoxMeter(pool, cfg, billingPlans, boxNotifier)
+		if bmErr != nil {
 			// Not fatal, and not silent either. A broken box-fleet-cost.yaml must not
 			// take the whole console down — but it does mean box minutes are not being
 			// billed, which is exactly the kind of thing that is otherwise discovered
 			// a month later.
 			log.Error().Err(bmErr).Msg("box meter NOT started: failed to derive box fleet unit cost; box minutes are not being billed")
-		} else {
-			boxReaper := api.NewBoxReaper(pool, cfg, boxNotifier)
-			boxInterval := time.Duration(cfg.BoxMeterIntervalSecs) * time.Second
-			go func() {
-				ticker := time.NewTicker(boxInterval)
-				defer ticker.Stop()
-				for {
-					select {
-					case <-meterCtx.Done():
-						return
-					case <-ticker.C:
+		}
+		boxReaper := api.NewBoxReaper(pool, cfg, boxNotifier)
+		boxInterval := time.Duration(cfg.BoxMeterIntervalSecs) * time.Second
+		go func() {
+			ticker := time.NewTicker(boxInterval)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-meterCtx.Done():
+					return
+				case <-ticker.C:
+					if boxMeter != nil {
 						boxMeter.MeterBoxMinutes(meterCtx)
-						boxReaper.RunBoxMaintenanceTick(meterCtx)
 					}
+					boxReaper.RunBoxMaintenanceTick(meterCtx)
 				}
-			}()
+			}
+		}()
+		if boxMeter != nil {
 			unit := boxMeter.UnitCost()
 			log.Info().
 				Dur("interval", boxInterval).
@@ -203,6 +216,9 @@ func main() {
 				Float64("per_gb_storage_rub_month", unit.PerGBStorage).
 				Float64("box_standard_rub_minute", boxMeter.PerMinuteRub("box-standard")).
 				Msg("box meter and reaper started")
+		} else {
+			log.Warn().Dur("interval", boxInterval).
+				Msg("box reaper started WITHOUT the meter: boxes are still collected, minutes are not billed")
 		}
 
 		expiryNotifier := notify.New(cfg.SMTPHost, cfg.SMTPPort, cfg.SMTPUser, cfg.SMTPPass, cfg.SMTPFrom)

@@ -240,3 +240,92 @@ func TestBoxOperationsWorker_ResumeThatNeverGoesReadyFailsRatherThanLies(t *test
 		t.Error("operation status = Ready after a failed canary: the wake did not succeed")
 	}
 }
+
+// TestBoxOperationsWorker_SuspendStartsTheSleepClock is the fix for the most
+// expensive defect this feature has had.
+//
+// reapSleeping only considers boxes whose slept_at is set, and for the whole life
+// of the feature this UPDATE wrote the status without the stamp. Every box that
+// went to sleep through an operation — which is every box the reaper itself puts
+// down, at the idle timeout and at the TTL — landed in a state no sweep could ever
+// see again, holding its workspace volume and metering suspended_disk forever. On
+// 2026-08-04 that fleet was 15.6% of the platform bill with no external demand and
+// 96% of all box minutes ever metered were the disks of boxes nobody could reap.
+//
+// The status and the stamp are one fact. Writing one without the other is what
+// made the leak silent.
+func TestBoxOperationsWorker_SuspendStartsTheSleepClock(t *testing.T) {
+	pool := testOptimisticPool(t)
+	rt := &box.FakeRuntime{Clock: box.NewFakeClock(fixedWorkerTestTime)}
+
+	boxID, opID, _, _ := seedBoxOperation(t, pool, models.BoxStatusReady, "fc-sleep-clock",
+		models.ActionSuspendBox, models.SuspendBoxPayload{})
+	if _, err := pool.Exec(context.Background(),
+		`UPDATE operations SET payload = $2 WHERE id = $1`, opID,
+		mustMarshal(t, models.SuspendBoxPayload{BoxID: boxID, Reason: "idle"})); err != nil {
+		t.Fatalf("fix up payload with the real box id: %v", err)
+	}
+
+	w := &boxOperationsWorker{h: newTestBoxWorkerHandler(pool, rt, box.NewMemoryPool())}
+	w.tick(context.Background())
+
+	var sleptAt *time.Time
+	if err := pool.QueryRow(context.Background(),
+		`SELECT slept_at FROM boxes WHERE id = $1`, boxID).Scan(&sleptAt); err != nil {
+		t.Fatalf("read slept_at: %v", err)
+	}
+	if sleptAt == nil {
+		t.Fatal("slept_at is NULL after a suspend landed: the reaper filters on it, " +
+			"so this box would hold its volume and bill suspended_disk until somebody found it by hand")
+	}
+	if since := time.Since(*sleptAt); since > time.Hour || since < -time.Hour {
+		t.Errorf("slept_at is %s away from now; the stamp is the moment the box went down", since)
+	}
+}
+
+// TestBoxOperationsWorker_ResumeClearsTheSleepAndWarningStamps covers the other
+// half of the same fact.
+//
+// The three columns are the sleep episode. A box that has been woken is not asleep,
+// and the warnings it received during that episode were about a deletion that no
+// longer applies. Leaving them set means the NEXT sleep starts with both warnings
+// already spent — the box would be destroyed on the first sweep past 72h with the
+// customer never told, which is precisely the outcome the two-warning rule exists
+// to prevent.
+func TestBoxOperationsWorker_ResumeClearsTheSleepAndWarningStamps(t *testing.T) {
+	pool := testOptimisticPool(t)
+	rt := &box.FakeRuntime{Clock: box.NewFakeClock(fixedWorkerTestTime)}
+
+	boxID, opID, _, _ := seedBoxOperation(t, pool, models.BoxStatusSleeping, "fc-sleep-wake",
+		models.ActionResumeBox, models.ResumeBoxPayload{})
+	if _, err := pool.Exec(context.Background(),
+		`UPDATE operations SET payload = $2 WHERE id = $1`, opID,
+		mustMarshal(t, models.ResumeBoxPayload{BoxID: boxID})); err != nil {
+		t.Fatalf("fix up payload with the real box id: %v", err)
+	}
+	if _, err := pool.Exec(context.Background(),
+		`UPDATE boxes
+		    SET slept_at             = now() - INTERVAL '67 hours',
+		        reap_warned_at       = now() - INTERVAL '19 hours',
+		        reap_final_warned_at = now() - INTERVAL '1 hour'
+		  WHERE id = $1`, boxID); err != nil {
+		t.Fatalf("seed a box that was one hour from deletion: %v", err)
+	}
+
+	w := &boxOperationsWorker{h: newTestBoxWorkerHandler(pool, rt, box.NewMemoryPool())}
+	w.tick(context.Background())
+
+	var sleptAt, warned, finalWarned *time.Time
+	if err := pool.QueryRow(context.Background(),
+		`SELECT slept_at, reap_warned_at, reap_final_warned_at FROM boxes WHERE id = $1`, boxID,
+	).Scan(&sleptAt, &warned, &finalWarned); err != nil {
+		t.Fatalf("read the sleep stamps: %v", err)
+	}
+	if sleptAt != nil {
+		t.Errorf("slept_at = %s on a woken box, want NULL", sleptAt)
+	}
+	if warned != nil || finalWarned != nil {
+		t.Errorf("warning stamps survived the wake (warned=%v final=%v): the box's next sleep "+
+			"would begin with both warnings spent and be deleted with nobody told", warned, finalWarned)
+	}
+}

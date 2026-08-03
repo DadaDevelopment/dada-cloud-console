@@ -303,12 +303,23 @@ func TestBoxReaper_RefusesToDeleteWithoutBothWarnings(t *testing.T) {
 		t.Error("the missing warning was not sent either; the box would sit forever with nobody told")
 	}
 
-	// Now that both warnings exist, the next sweep may act — the catch is a delay, not
-	// a permanent reprieve.
+	// A minute later the warning exists but has not been out long enough to be one.
+	// On the ordinary path the final email precedes deletion by six hours; a box that
+	// arrives here late must get the same six hours, or "warned twice" degrades into
+	// two emails and a deletion inside the same coffee break.
 	clock = clock.Add(time.Minute)
 	r.RunBoxMaintenanceTick(context.Background())
+	if n := countBoxOperations(t, pool, projectID, boxName, models.ActionDeleteBox); n != 0 {
+		t.Errorf("%d deletes one minute after the backfilled final warning, want 0: "+
+			"a warning nobody had time to read is a notification that the box is already gone", n)
+	}
+
+	// Once that grace has run, the catch is spent — it is a delay, not a permanent
+	// reprieve.
+	clock = clock.Add(boxReapGraceAfterFinalWarning)
+	r.RunBoxMaintenanceTick(context.Background())
 	if n := countBoxOperations(t, pool, projectID, boxName, models.ActionDeleteBox); n != 1 {
-		t.Errorf("%d deletes after both warnings exist, want exactly 1", n)
+		t.Errorf("%d deletes after the final warning had its grace, want exactly 1", n)
 	}
 }
 
@@ -492,5 +503,58 @@ func TestBoxReaper_LeavesALiveCrystallizationAlone(t *testing.T) {
 	}
 	if got := boxStatus(t, pool, boxID); got != string(models.BoxStatusCrystallizing) {
 		t.Errorf("box status = %q, want Crystallizing", got)
+	}
+}
+
+// TestBoxReaper_StartsTheClockOnSleepingBoxesThatHaveNone is the self-heal for the
+// boxes the suspend defect already stranded.
+//
+// Fixing the write only helps boxes that go to sleep from now on. The rows already
+// sitting at status='Sleeping' with slept_at NULL are invisible to every sweep and
+// stay that way — three of them on prod, holding 40Gi between them, metering
+// suspended_disk with no path to ever stop. updated_at is the honest estimate of
+// when each went down, because the suspend that stranded it is the last thing that
+// touched the row.
+//
+// The repair deliberately runs BEFORE the sweep's own SELECT, so a stranded box is
+// judged in the same tick that finds it rather than a minute later.
+func TestBoxReaper_StartsTheClockOnSleepingBoxesThatHaveNone(t *testing.T) {
+	pool := testOptimisticPool(t)
+	projectID, boxID, boxName := seedMeteredBox(t, pool, "org-reap-"+uuid.NewString()[:8], models.BoxStatusSleeping)
+
+	strandedSince := time.Now().UTC().Add(-100 * time.Hour)
+	if _, err := pool.Exec(context.Background(),
+		`UPDATE boxes SET slept_at = NULL, reap_warned_at = NULL, reap_final_warned_at = NULL,
+		                  updated_at = $2
+		  WHERE id = $1`, boxID, strandedSince); err != nil {
+		t.Fatalf("strand the box the way the suspend defect did: %v", err)
+	}
+
+	clock := time.Now().UTC()
+	r := newTestBoxReaper(t, pool, &clock)
+	r.RunBoxMaintenanceTick(context.Background())
+
+	var sleptAt, warned *time.Time
+	if err := pool.QueryRow(context.Background(),
+		`SELECT slept_at, reap_warned_at FROM boxes WHERE id = $1`, boxID,
+	).Scan(&sleptAt, &warned); err != nil {
+		t.Fatalf("read the sleep stamps: %v", err)
+	}
+	if sleptAt == nil {
+		t.Fatal("slept_at is still NULL: a box stranded by the old suspend can never be collected")
+	}
+	if diff := sleptAt.Sub(strandedSince); diff > time.Minute || diff < -time.Minute {
+		t.Errorf("slept_at = %s, want the row's updated_at (%s): the last write is when it went down",
+			sleptAt, strandedSince)
+	}
+
+	// Repaired and immediately judged: 100 hours asleep with no warning ever sent is
+	// the first warning, not a deletion.
+	if warned == nil {
+		t.Error("the repaired box was not judged in the same tick; it waits another interval for nothing")
+	}
+	if n := countBoxOperations(t, pool, projectID, boxName, models.ActionDeleteBox); n != 0 {
+		t.Errorf("%d deletes enqueued for a box whose clock was just repaired, want 0: "+
+			"the 100 hours are an artefact of the bug, not 100 hours of the customer being warned", n)
 	}
 }

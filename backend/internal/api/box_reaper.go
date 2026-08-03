@@ -44,6 +44,19 @@ const (
 	boxReapFinalWarnAfter = 66 * time.Hour
 )
 
+// boxReapGraceAfterFinalWarning is how long the final warning must have been out
+// before the box may be destroyed.
+//
+// On the ordinary path it is redundant — 72h minus 66h is exactly this, so a box
+// that slept normally reaches deletion six hours after its last email either way.
+// It exists for the boxes that DID NOT arrive on the ordinary path: a row whose
+// sleep clock was repaired by reapSleeping, or one that slept through an outage
+// that stopped the mail, is already past 72h the first time this pass can see it.
+// Without a floor here it would receive both warnings and its deletion inside two
+// consecutive ticks — four minutes between "your box will be deleted" and the box
+// being gone, which honours the letter of "warned twice" and none of its point.
+const boxReapGraceAfterFinalWarning = boxSleepReapAfter - boxReapFinalWarnAfter
+
 // staleCrystallizationGrace is the slack added on top of crystallizeBudget before a
 // still-'Running' promotion is declared dead. A run that is one second from its own
 // deadline is alive, and stealing its row would make two writers of one outcome.
@@ -248,6 +261,14 @@ func (r *BoxReaper) reapExpired(ctx context.Context) {
 // customer cannot be deleted having received one email or none.
 func (r *BoxReaper) reapSleeping(ctx context.Context) {
 	now := r.now().UTC()
+	if tag, err := r.pool.Exec(ctx, `
+		UPDATE boxes SET slept_at = updated_at
+		 WHERE status = 'Sleeping' AND slept_at IS NULL`); err != nil {
+		log.Warn().Err(err).Msg("box reaper: repairing sleeping boxes with no sleep clock failed")
+	} else if tag.RowsAffected() > 0 {
+		log.Warn().Int64("boxes", tag.RowsAffected()).
+			Msg("box reaper: started the sleep clock on sleeping boxes that had none; until now nothing could ever reap them")
+	}
 	rows, err := r.pool.Query(ctx, `
 		SELECT b.id, b.project_id, b.environment_id, b.name, b.status, b.idle_timeout_seconds,
 		       b.slept_at, b.reap_warned_at, b.reap_final_warned_at
@@ -285,11 +306,27 @@ func (r *BoxReaper) reapSleeping(ctx context.Context) {
 			// for the last three days, the honest outcome is a box that survives and a
 			// warning in the log, not a silent deletion the customer learns about by
 			// finding their prototype gone.
-			if c.WarnedAt == nil || c.FinalWarnedAt == nil {
+			//
+			// The missing warning is sent one per tick, first then final, rather than
+			// jumping to the final one. Sending only the final warning here was a trap
+			// that could never spring: it stamps reap_final_warned_at and leaves
+			// reap_warned_at NULL, so this branch is re-entered forever and the box is
+			// never destroyed — a box past its 72 hours would have gone on holding its
+			// volume for the rest of the platform's life while a log line claimed the
+			// reaper was on the case.
+			if c.WarnedAt == nil {
 				log.Warn().Str("box", c.BoxID.String()).Dur("asleep", asleep).
-					Bool("warned", c.WarnedAt != nil).Bool("final_warned", c.FinalWarnedAt != nil).
-					Msg("box reaper: 72h asleep but the two warnings were not both sent; not deleting")
+					Msg("box reaper: past 72h asleep with no warning sent; sending the first one instead of deleting")
+				r.sendReapWarning(ctx, c, asleep, false)
+				continue
+			}
+			if c.FinalWarnedAt == nil {
 				r.sendReapWarning(ctx, c, asleep, true)
+				continue
+			}
+			if since := now.Sub(*c.FinalWarnedAt); since < boxReapGraceAfterFinalWarning {
+				log.Info().Str("box", c.BoxID.String()).Dur("since_final_warning", since).
+					Msg("box reaper: holding the delete until the final warning has had its grace")
 				continue
 			}
 			r.enqueueDelete(ctx, c, "reaper")

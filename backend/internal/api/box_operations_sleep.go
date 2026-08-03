@@ -41,6 +41,17 @@ func (h *Handler) boxSleeper() (box.Sleeper, error) {
 // volume until someone deleted it by hand — six of them and no one can create a
 // box at all.
 //
+// slept_at IS THE WHOLE SLEEP CLOCK, and writing it here is not bookkeeping.
+// reapSleeping selects on it, so a box put down without a stamp is not merely
+// mislabelled — it is INVISIBLE to the only pass that can ever destroy it. It
+// never gets a warning, it never gets deleted, and it holds its workspace volume
+// forever while the meter bills every minute of it as suspended_disk. That is not
+// a hypothetical: on 2026-08-04 the box fleet was 15.6% of the platform bill with
+// no external demand and 96% of all metered box minutes were suspended_disk,
+// because this UPDATE set the status and left the stamp NULL. The clock has to
+// start at the moment the body is released, in the same statement that releases
+// it, or it does not start at all.
+//
 // revokeBoxSessions runs unconditionally, for the same reason executeDeleteBox
 // does it: the synchronous SuspendBox handler revokes before enqueueing, but the
 // reaper's idle/TTL path and the spend cap never did, so a credential issued
@@ -76,7 +87,8 @@ func (h *Handler) executeSuspendBox(ctx context.Context, payload json.RawMessage
 		}
 	}
 	if _, err := h.pool.Exec(ctx,
-		`UPDATE boxes SET status = 'Sleeping', updated_at = now() WHERE id = $1`, p.BoxID); err != nil {
+		`UPDATE boxes SET status = 'Sleeping', slept_at = now(), updated_at = now() WHERE id = $1`,
+		p.BoxID); err != nil {
 		return fmt.Errorf("mark box sleeping: %w", err)
 	}
 
@@ -115,6 +127,15 @@ func (h *Handler) executeSuspendBox(ctx context.Context, payload json.RawMessage
 // the first deadline a box was given, which is right for a boot and wrong here:
 // a box resumed after its TTL would come back already expired and be put
 // straight back to sleep by the next reaper pass.
+//
+// The sleep clock and BOTH warning stamps are cleared for the same reason, and
+// the warnings are the dangerous half. A box that slept for 67 hours has already
+// been told twice that it is about to be destroyed; waking it must retract those,
+// because a stamp that survives the wake means the next sleep starts with its two
+// warnings already spent and the box is deleted six hours in, with nothing sent
+// and the customer's only notice being a prototype that is gone. Clearing them
+// here is what makes "warned twice before deletion" true per sleep rather than
+// once per lifetime.
 func (h *Handler) executeResumeBox(ctx context.Context, payload json.RawMessage) error {
 	var p models.ResumeBoxPayload
 	if err := json.Unmarshal(payload, &p); err != nil {
@@ -192,15 +213,18 @@ func (h *Handler) executeResumeBox(ctx context.Context, payload json.RawMessage)
 	}
 	if _, err := h.pool.Exec(ctx,
 		`UPDATE boxes
-		    SET status         = 'Ready',
-		        instance_ref   = $2,
-		        node_ref       = $3,
-		        ssh_host       = $4,
-		        mcp_url        = $5,
-		        error_message  = '',
-		        last_active_at = now(),
-		        expires_at     = now() + (ttl_seconds * INTERVAL '1 second'),
-		        updated_at     = now()
+		    SET status               = 'Ready',
+		        instance_ref         = $2,
+		        node_ref             = $3,
+		        ssh_host             = $4,
+		        mcp_url              = $5,
+		        error_message        = '',
+		        last_active_at       = now(),
+		        slept_at             = NULL,
+		        reap_warned_at       = NULL,
+		        reap_final_warned_at = NULL,
+		        expires_at           = now() + (ttl_seconds * INTERVAL '1 second'),
+		        updated_at           = now()
 		  WHERE id = $1`,
 		b.ID, inst.InstanceRef, inst.NodeRef, sshHost, mcpURL); err != nil {
 		return fmt.Errorf("record resumed box: %w", err)
