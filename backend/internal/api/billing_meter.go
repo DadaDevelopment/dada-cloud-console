@@ -10,6 +10,44 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
+// meterAlignOffset delays each aligned run past the boundary it belongs to.
+// MeterUsage stamps the bucket as time.Now().Truncate(time.Hour), so a replica
+// whose clock runs a hair fast would otherwise fire at 12:59:59.98 and write the
+// 12:00 row a second time while 13:00 stays empty.
+const meterAlignOffset = 30 * time.Second
+
+// NextMeterDelay returns how long to wait before the next metering run, aligned
+// to wall-clock interval boundaries rather than to the moment this process
+// started.
+//
+// The loop used to be a plain time.Ticker, which inherits the pod's start phase:
+// a deploy at :36 moved every subsequent run to :36 forever, and the hour
+// buckets straddling the restart got no usage_records row at all. Prod lost
+// 17:00 and 18:00 on 2026-08-03 to exactly that, which is why the console's
+// usage bars went stale for two hours. Alignment makes a restart cost at most
+// the current bucket, and the caller covers that one by metering immediately on
+// startup.
+//
+// Missed buckets are deliberately NOT backfilled. Three of the four metered
+// resources are stocks -- how many apps exist right now -- and the count an hour
+// ago is unrecoverable once the hour has passed. Writing today's number into
+// yesterday's row would turn a visible gap into an invisible lie.
+func NextMeterDelay(now time.Time, interval time.Duration) time.Duration {
+	if interval <= 0 {
+		interval = time.Hour
+	}
+	offset := meterAlignOffset
+	if offset >= interval {
+		offset = 0
+	}
+	utc := now.UTC()
+	next := utc.Truncate(interval).Add(interval + offset)
+	for !next.After(utc) {
+		next = next.Add(interval)
+	}
+	return next.Sub(utc)
+}
+
 // MeterUsage snapshots current resource counts for every org that owns at
 // least one project or has a billing_accounts row, then upserts usage_records
 // idempotent on (org_id, resource, period_start).

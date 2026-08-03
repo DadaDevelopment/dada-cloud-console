@@ -142,13 +142,14 @@ func main() {
 		meterCtx, meterCancel := context.WithCancel(context.Background())
 		defer meterCancel()
 		go func() {
-			ticker := time.NewTicker(meterInterval)
-			defer ticker.Stop()
+			api.MeterUsage(meterCtx, pool, cfg, billingPlans)
 			for {
+				timer := time.NewTimer(api.NextMeterDelay(time.Now(), meterInterval))
 				select {
 				case <-meterCtx.Done():
+					timer.Stop()
 					return
-				case <-ticker.C:
+				case <-timer.C:
 					api.MeterUsage(meterCtx, pool, cfg, billingPlans)
 				}
 			}
