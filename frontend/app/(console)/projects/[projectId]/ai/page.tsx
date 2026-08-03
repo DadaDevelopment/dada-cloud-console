@@ -621,7 +621,7 @@ export default function ProjectAIPage() {
                   </td>
                   <td className="px-5 py-3 text-gray-600 dark:text-gray-400">
                     {m.provider}
-                    {view === "byok" && !configuredProviders.has(m.provider) && (
+                    {view === "byok" && m.provider !== "platform" && !configuredProviders.has(m.provider) && (
                       <span className="ml-2 rounded-full bg-amber-100 dark:bg-amber-950/50 px-2 py-0.5 text-xs text-amber-700 dark:text-amber-300">
                         {t("ai.models.needsKey")}
                       </span>

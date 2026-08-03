@@ -38,6 +38,12 @@ type aiCatalogProvider struct {
 // this list exists to render the console catalog and to reject a credential for
 // a provider the gateway cannot route to. Adding a model there means adding it
 // here.
+// aiCatalogPlatformProvider marks the tier aliases the gateway serves from the
+// platform's own keys (migration 079). They are deliberately absent from
+// aiCatalogProviders: a project can never store a BYOK credential for them, and
+// the console must not tell anyone they need one.
+const aiCatalogPlatformProvider = "platform"
+
 var aiCatalogProviders = []aiCatalogProvider{
 	{Name: "openai", Label: "OpenAI", KeyURL: "https://platform.openai.com/api-keys"},
 	{Name: "anthropic", Label: "Anthropic", KeyURL: "https://console.anthropic.com/settings/keys"},
@@ -59,6 +65,9 @@ var aiCatalogModels = []aiCatalogModel{
 	{Alias: "groq-gpt-oss", Provider: "groq", Kind: "chat", Upstream: "groq/openai/gpt-oss-20b"},
 	{Alias: "groq-llama", Provider: "groq", Kind: "chat", Upstream: "groq/llama-3.3-70b-versatile"},
 	{Alias: "sambanova-llama", Provider: "sambanova", Kind: "chat", Upstream: "sambanova/Meta-Llama-3.3-70B-Instruct"},
+	{Alias: "fast", Provider: aiCatalogPlatformProvider, Kind: "chat", Upstream: "tier alias, fails over across gemini/nvidia_nim/groq/sambanova"},
+	{Alias: "medium", Provider: aiCatalogPlatformProvider, Kind: "chat", Upstream: "tier alias, fails over across gemini/nvidia_nim/groq/sambanova"},
+	{Alias: "smart", Provider: aiCatalogPlatformProvider, Kind: "chat", Upstream: "tier alias, fails over across gemini/nvidia_nim/groq/sambanova"},
 }
 
 // isKnownAIProvider reports whether the gateway can route to this provider at
