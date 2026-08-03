@@ -34,6 +34,9 @@ type App interface {
 	// ListRepos returns the repositories accessible to an installation (used by
 	// the import wizard).
 	ListRepos(ctx context.Context, installationID int64) ([]RemoteRepo, error)
+	// ListBranches returns the branches of one repo accessible to an
+	// installation (used by the repo/branch picker).
+	ListBranches(ctx context.Context, installationID int64, repoFullName string) ([]RemoteBranch, error)
 	// GetInstallation resolves the org/user an installation belongs to (used by
 	// the install-callback to persist git_app_installations).
 	GetInstallation(ctx context.Context, installationID int64) (*InstallationAccount, error)
@@ -62,6 +65,12 @@ type RemoteRepo struct {
 	CloneURL      string `json:"clone_url"`
 	DefaultBranch string `json:"default_branch"`
 	Private       bool   `json:"private"`
+}
+
+// RemoteBranch is one branch of a repository accessible to an installation.
+type RemoteBranch struct {
+	Name      string `json:"name"`
+	Protected bool   `json:"protected"`
 }
 
 // Client is the production App. It signs an App JWT (RS256 over APP_ID + private
@@ -207,6 +216,48 @@ func (c *Client) ListRepos(ctx context.Context, installationID int64) ([]RemoteR
 		}
 	}
 	return repos, nil
+}
+
+// ListBranches returns the branches of one repo accessible to an installation
+// (paginated). repoFullName is "owner/repo".
+func (c *Client) ListBranches(ctx context.Context, installationID int64, repoFullName string) ([]RemoteBranch, error) {
+	token, err := c.InstallToken(ctx, installationID)
+	if err != nil {
+		return nil, err
+	}
+
+	var branches []RemoteBranch
+	for page := 1; ; page++ {
+		url := fmt.Sprintf("%s/repos/%s/branches?per_page=100&page=%d", apiBase, repoFullName, page)
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+		if err != nil {
+			return nil, err
+		}
+		req.Header.Set("Authorization", "token "+token)
+		req.Header.Set("Accept", "application/vnd.github+json")
+		req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
+
+		resp, err := c.http.Do(req)
+		if err != nil {
+			return nil, fmt.Errorf("list branches: %w", err)
+		}
+		if resp.StatusCode != http.StatusOK {
+			msg := readErr(resp)
+			_ = resp.Body.Close()
+			return nil, fmt.Errorf("list branches: %s", msg)
+		}
+		var batch []RemoteBranch
+		err = json.NewDecoder(resp.Body).Decode(&batch)
+		_ = resp.Body.Close()
+		if err != nil {
+			return nil, fmt.Errorf("decode branches: %w", err)
+		}
+		branches = append(branches, batch...)
+		if len(batch) < 100 {
+			break
+		}
+	}
+	return branches, nil
 }
 
 // GetInstallation resolves the account (org/user) behind an installation via the

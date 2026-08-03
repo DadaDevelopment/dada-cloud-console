@@ -190,6 +190,12 @@ func SetupRouter(pool *pgxpool.Pool, cfg *config.Config) *gin.Engine {
 		r.POST("/api/v1/webhooks/dadagent", h.DadaAgentWebhook)
 		r.POST("/api/v1/webhooks/dadagent/usage", h.DadaAgentUsageWebhook)
 		log.Printf("cloud-task: dadagent webhook enabled at /api/v1/webhooks/dadagent")
+
+		// Agent-facing read-only git discovery (repo/branch picker in
+		// agent_sync_hub). Same azp=dada-agent gate as the webhook above.
+		r.GET("/api/v1/agent/git/installations", h.AgentListGitInstallations)
+		r.GET("/api/v1/agent/git/repos", h.AgentListInstallationRepos)
+		r.GET("/api/v1/agent/git/branches", h.AgentListInstallationBranches)
 	} else {
 		log.Printf("cloud-task: dadagent webhook disabled (keycloak verifier: %v)", err)
 	}

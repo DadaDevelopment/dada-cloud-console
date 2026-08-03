@@ -79,6 +79,7 @@ func (s *Server) Start(ctx context.Context) error {
 	// resolves the installation UUID → numeric id and proxies here).
 	if s.gh != nil {
 		mux.HandleFunc("GET /github/installations/{id}/repos", s.handleInstallationRepos)
+		mux.HandleFunc("GET /github/installations/{id}/branches", s.handleInstallationBranches)
 		// account resolve — the backend's install-callback has the DB but no App
 		// key, so it asks the agent who an installation belongs to.
 		mux.HandleFunc("GET /github/installations/{id}/account", s.handleInstallationAccount)
@@ -530,6 +531,32 @@ func (s *Server) handleInstallationRepos(w http.ResponseWriter, r *http.Request)
 		repos = []github.RemoteRepo{}
 	}
 	writeJSON(w, map[string]any{"repos": repos})
+}
+
+// handleInstallationBranches lists the branches of one repo visible to a GitHub
+// App installation. GET /github/installations/{id}/branches?repo=owner/name →
+// {"branches": [...]}.
+func (s *Server) handleInstallationBranches(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil {
+		http.Error(w, "bad installation id", http.StatusBadRequest)
+		return
+	}
+	repo := r.URL.Query().Get("repo")
+	if repo == "" {
+		http.Error(w, "missing repo query param", http.StatusBadRequest)
+		return
+	}
+	branches, err := s.gh.ListBranches(r.Context(), id, repo)
+	if err != nil {
+		log.Error().Err(err).Int64("installation", id).Str("repo", repo).Msg("list installation branches")
+		http.Error(w, "failed to list branches", http.StatusBadGateway)
+		return
+	}
+	if branches == nil {
+		branches = []github.RemoteBranch{}
+	}
+	writeJSON(w, map[string]any{"branches": branches})
 }
 
 // handleInstallationAccount resolves the org/user behind an installation.

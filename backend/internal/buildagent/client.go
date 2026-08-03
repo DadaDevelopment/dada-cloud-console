@@ -79,6 +79,24 @@ func (c *Client) ListInstallationRepos(ctx context.Context, installationID int64
 	return out.Repos, nil
 }
 
+// RemoteBranch mirrors the frontend GitRemoteBranch shape.
+type RemoteBranch struct {
+	Name      string `json:"name"`
+	Protected bool   `json:"protected"`
+}
+
+// ListBranches proxies GET /github/installations/:id/branches?repo=owner/name on the agent.
+func (c *Client) ListBranches(ctx context.Context, installationID int64, repoFullName string) ([]RemoteBranch, error) {
+	var out struct {
+		Branches []RemoteBranch `json:"branches"`
+	}
+	path := fmt.Sprintf("/github/installations/%d/branches?repo=%s", installationID, url.QueryEscape(repoFullName))
+	if err := c.getJSON(ctx, path, &out); err != nil {
+		return nil, err
+	}
+	return out.Branches, nil
+}
+
 // InstallationAccount mirrors the agent's account-resolve shape.
 type InstallationAccount struct {
 	InstallationID int64  `json:"installation_id"`

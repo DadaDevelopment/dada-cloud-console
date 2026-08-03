@@ -21,6 +21,9 @@ func (f *fakeApp) GetInstallation(context.Context, int64) (*github.InstallationA
 func (f *fakeApp) ListInstallations(context.Context) ([]github.InstallationAccount, error) {
 	return f.installs, nil
 }
+func (f *fakeApp) ListBranches(context.Context, int64, string) ([]github.RemoteBranch, error) {
+	return nil, nil
+}
 func (f *fakeApp) PostStatus(context.Context, int64, string, string, string, string, string) error {
 	return nil
 }

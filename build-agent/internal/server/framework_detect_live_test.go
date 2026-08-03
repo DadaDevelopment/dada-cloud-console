@@ -22,6 +22,9 @@ func (a *liveTokenApp) GetInstallation(_ context.Context, _ int64) (*github.Inst
 func (a *liveTokenApp) ListInstallations(_ context.Context) ([]github.InstallationAccount, error) {
 	return nil, nil
 }
+func (a *liveTokenApp) ListBranches(_ context.Context, _ int64, _ string) ([]github.RemoteBranch, error) {
+	return nil, nil
+}
 func (a *liveTokenApp) PostStatus(_ context.Context, _ int64, _, _, _, _, _ string) error { return nil }
 func (a *liveTokenApp) BranchHead(_ context.Context, _, _, _ string) (string, string, error) {
 	return "", "", nil

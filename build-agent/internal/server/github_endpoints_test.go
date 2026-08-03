@@ -15,12 +15,13 @@ import (
 
 // fakeApp is a minimal github.App for endpoint tests.
 type fakeApp struct {
-	repos   []github.RemoteRepo
-	gotID   int64
-	listErr error
-	acct    *github.InstallationAccount
-	acctErr error
-	insts   []github.InstallationAccount
+	repos    []github.RemoteRepo
+	branches []github.RemoteBranch
+	gotID    int64
+	listErr  error
+	acct     *github.InstallationAccount
+	acctErr  error
+	insts    []github.InstallationAccount
 }
 
 func (f *fakeApp) InstallToken(_ context.Context, _ int64) (string, error) { return "t", nil }
@@ -34,6 +35,10 @@ func (f *fakeApp) GetInstallation(_ context.Context, id int64) (*github.Installa
 }
 func (f *fakeApp) ListInstallations(_ context.Context) ([]github.InstallationAccount, error) {
 	return f.insts, nil
+}
+func (f *fakeApp) ListBranches(_ context.Context, id int64, _ string) ([]github.RemoteBranch, error) {
+	f.gotID = id
+	return f.branches, f.listErr
 }
 func (f *fakeApp) PostStatus(_ context.Context, _ int64, _, _, _, _, _ string) error { return nil }
 func (f *fakeApp) BranchHead(_ context.Context, _, _, _ string) (string, string, error) {
