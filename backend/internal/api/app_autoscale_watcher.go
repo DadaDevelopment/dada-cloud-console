@@ -593,12 +593,20 @@ func (h *Handler) StartAppAutoscaleWatcher(ctx context.Context) {
 	}()
 }
 
-// podApp is the app a pod belongs to and how long that pod has been alive. The
-// age is what lets the shrink path tell a week of measured idleness from a pod
-// that was created ten minutes ago and has a week-shaped query window.
+// podApp is the app a pod belongs to, how long that pod has been alive, and
+// its health as of the same list call.
+//
+// Age is what lets the shrink path tell a week of measured idleness from a pod
+// that was created ten minutes ago and has a week-shaped query window. Ready
+// and CrashLooping are what let the grow path tell real starvation from a
+// pod repeatedly failing its own startup: both come off the same list call
+// podAppLabels already makes, so reading them costs no extra API round trip.
 type podApp struct {
-	App string
-	Age time.Duration
+	App          string
+	Age          time.Duration
+	Ready        bool
+	CrashLooping bool
+	RestartCount int32
 }
 
 // podAppLabels maps pod names in namespace to the app they belong to, via the
@@ -613,17 +621,59 @@ func (w *appAutoscaleWatcher) podAppLabels(ctx context.Context, namespace string
 	}
 	out := map[string]podApp{}
 	for i := range pods.Items {
-		name := pods.Items[i].Labels["dada.io/app"]
+		pod := &pods.Items[i]
+		name := pod.Labels["dada.io/app"]
 		if name == "" {
 			continue
 		}
 		var age time.Duration
-		if started := pods.Items[i].CreationTimestamp.Time; !started.IsZero() {
+		if started := pod.CreationTimestamp.Time; !started.IsZero() {
 			age = time.Since(started)
 		}
-		out[pods.Items[i].Name] = podApp{App: name, Age: age}
+		out[pod.Name] = podApp{
+			App:          name,
+			Age:          age,
+			Ready:        podIsReady(pod),
+			CrashLooping: podIsCrashLooping(pod),
+			RestartCount: podRestartCount(pod),
+		}
 	}
 	return out
+}
+
+// podIsReady reads the PodReady condition, the same signal the Service
+// endpoint controller uses to decide whether a pod may receive traffic.
+func podIsReady(pod *corev1.Pod) bool {
+	for _, c := range pod.Status.Conditions {
+		if c.Type == corev1.PodReady {
+			return c.Status == corev1.ConditionTrue
+		}
+	}
+	return false
+}
+
+// podIsCrashLooping reports whether any container is waiting behind
+// CrashLoopBackOff. This is a stronger and slower-to-clear signal than
+// readiness alone: a pod flaps between NotReady and momentarily Running on
+// every restart, so a tick that happens to land during the brief Running
+// window would otherwise read a crashlooping pod as fine.
+func podIsCrashLooping(pod *corev1.Pod) bool {
+	for _, cs := range pod.Status.ContainerStatuses {
+		if cs.State.Waiting != nil && cs.State.Waiting.Reason == "CrashLoopBackOff" {
+			return true
+		}
+	}
+	return false
+}
+
+// podRestartCount sums restarts across containers, carried onto the audit row
+// for a refused resize so the reason is legible without a live kubectl.
+func podRestartCount(pod *corev1.Pod) int32 {
+	var total int32
+	for _, cs := range pod.Status.ContainerStatuses {
+		total += cs.RestartCount
+	}
+	return total
 }
 
 // namespaceQuota returns the first ResourceQuota in a namespace. A nil quota
@@ -762,12 +812,12 @@ func (w *appAutoscaleWatcher) tick(ctx context.Context) {
 		}
 		seen := map[string]bool{}
 		for _, s := range hot {
-			appName := podApp[s.Pod].App
-			if appName == "" || seen[appName] {
+			ref := podApp[s.Pod]
+			if ref.App == "" || seen[ref.App] {
 				continue
 			}
-			seen[appName] = true
-			w.maybeResize(ctx, env.ProjectID, ns, appName, s)
+			seen[ref.App] = true
+			w.maybeResize(ctx, env.ProjectID, ns, ref.App, s, ref)
 		}
 	}
 
@@ -1187,16 +1237,25 @@ func (h *Handler) applyResourceEnvelope(ctx context.Context, projectID, envID uu
 	return opID, nil
 }
 
-// maybeResize grows one starved app's resource envelope, subject to the
-// platform cap, the namespace quota and the cooldown.
+// maybeResize grows one starved app's resource envelope, subject to
+// readiness, the platform cap, the namespace quota and the cooldown.
 //
 // Order matters. The seen-touch runs first and unconditionally, so the
 // console's "still starved" signal never depends on whether a resize actually
-// happened. The ceiling and quota checks run BEFORE the cooldown is claimed:
-// claiming first would burn the app's 6h slot on a decision that changed
-// nothing, muting the real resize that becomes possible the moment the quota
-// is raised.
-func (w *appAutoscaleWatcher) maybeResize(ctx context.Context, projectID uuid.UUID, namespace, appName string, s starvedPod) {
+// happened. The readiness gate runs right after state is loaded, before any
+// of the growth arithmetic: a pod that is not Ready or is visibly
+// crashlooping is not suffering under real traffic, it is failing its own
+// startup, and the throttle/pressure ratio that got it into `hot` is an
+// honest side effect of that failure (see the CPU-threshold comment above),
+// not evidence the app needs more room. Growing it anyway is how a dead app
+// on this cluster got resized upward five times while it had never served a
+// request. Restart count alone is deliberately NOT a gate: an app that
+// recovered from one crash and is Ready now must still grow under real
+// pressure, or the fonbet-value case regresses. The ceiling and quota checks
+// run BEFORE the cooldown is claimed: claiming first would burn the app's 6h
+// slot on a decision that changed nothing, muting the real resize that
+// becomes possible the moment the quota is raised.
+func (w *appAutoscaleWatcher) maybeResize(ctx context.Context, projectID uuid.UUID, namespace, appName string, s starvedPod, pod podApp) {
 	touchAppAutoscaleSeen(ctx, w.h.pool, namespace, appName, s.Reason, s.Ratio)
 
 	st, err := w.h.loadAppProfileState(ctx, projectID, appName)
@@ -1210,6 +1269,14 @@ func (w *appAutoscaleWatcher) maybeResize(ctx context.Context, projectID uuid.UU
 	if st.Image == "" {
 		log.Printf("app-autoscale: %s/%s has no deployed image, skipping", namespace, appName)
 		w.auditRefusal(ctx, projectID, st, namespace, appName, "no_deployed_image", s, nil)
+		return
+	}
+	if !pod.Ready || pod.CrashLooping {
+		log.Printf("app-autoscale: %s/%s is not ready (ready=%v crashlooping=%v restarts=%d), refusing to grow a pod that has never served traffic",
+			namespace, appName, pod.Ready, pod.CrashLooping, pod.RestartCount)
+		w.auditRefusal(ctx, projectID, st, namespace, appName, "app_not_ready", s, map[string]any{
+			"ready": pod.Ready, "crashlooping": pod.CrashLooping, "restart_count": pod.RestartCount,
+		})
 		return
 	}
 
