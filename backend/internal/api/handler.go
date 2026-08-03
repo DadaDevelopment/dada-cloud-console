@@ -5,6 +5,7 @@ import (
 	"log"
 	"os"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/dada-tuda/console/backend/internal/agentchat"
@@ -147,6 +148,8 @@ type Handler struct {
 
 	agentChatLLM   *llmchat.Client
 	agentChatTools *agentchat.Toolset
+
+	agentChatIdentityKey atomic.Pointer[string]
 
 	// boxFunnelLimiter bounds the unauthenticated Dada Box fake-door ingest
 	// (RecordBoxFunnelEvent). Never nil.
@@ -323,6 +326,8 @@ func NewHandler(pool *pgxpool.Pool, cfg *config.Config) *Handler {
 	h.StartIdentityDeliveryWatcher(context.Background())
 
 	h.agentChatLLM = llmchat.New(cfg.AgentChatGatewayURL, cfg.AgentChatGatewayKey, cfg.AgentChatModel)
+	h.agentChatLLM.KeyFunc = h.currentAgentChatKey
+	h.StartAgentChatIdentityRefresher(context.Background())
 	selfURL := cfg.MCPSelfURL
 	if selfURL == "" {
 		selfURL = "http://127.0.0.1:" + cfg.Port
@@ -339,9 +344,13 @@ func NewHandler(pool *pgxpool.Pool, cfg *config.Config) *Handler {
 	h.StartBoxOperationsWorker(context.Background())
 
 	if h.agentChatLLM.Configured() {
-		log.Printf("agent-chat: gateway configured at %s, model %s", cfg.AgentChatGatewayURL, cfg.AgentChatModel)
+		source := "static AGENT_CHAT_GATEWAY_KEY"
+		if h.currentAgentChatKey() != "" {
+			source = "ServiceIdentity " + agentChatIdentityApp
+		}
+		log.Printf("agent-chat: gateway configured at %s, model %s, credential %s", cfg.AgentChatGatewayURL, cfg.AgentChatModel, source)
 	} else {
-		log.Printf("agent-chat: gateway not configured (AGENT_CHAT_GATEWAY_URL/KEY unset); endpoint answers with a friendly error")
+		log.Printf("agent-chat: gateway not configured (no AGENT_CHAT_GATEWAY_URL, and no identity token or AGENT_CHAT_GATEWAY_KEY); endpoint answers with a friendly error")
 	}
 
 	return h

@@ -42,9 +42,21 @@ type Message struct {
 	ToolCalls  []ToolCall `json:"tool_calls,omitempty"`
 }
 
+// Client talks to the OpenAI-compatible gateway.
+//
+// Credentials come from one of two places. APIKey is the static form every
+// test and every pasted-key deployment uses. KeyFunc, when set, is consulted
+// on every request and wins whenever it returns a non-empty string; a nil
+// KeyFunc or an empty answer falls back to APIKey.
+//
+// KeyFunc exists because the console authenticates as its own ServiceIdentity,
+// and that token lives in a Kubernetes Secret the console itself rewrites. A
+// rotation has to reach an already-built client without a process restart, and
+// without the request path racing a plain string field.
 type Client struct {
 	BaseURL    string
 	APIKey     string
+	KeyFunc    func() string
 	Model      string
 	HTTPClient *http.Client
 }
@@ -58,8 +70,22 @@ func New(baseURL, apiKey, model string) *Client {
 	}
 }
 
+// key returns the bearer for this request: KeyFunc's answer when it has one,
+// the static APIKey otherwise.
+func (c *Client) key() string {
+	if c == nil {
+		return ""
+	}
+	if c.KeyFunc != nil {
+		if k := c.KeyFunc(); k != "" {
+			return k
+		}
+	}
+	return c.APIKey
+}
+
 func (c *Client) Configured() bool {
-	return c != nil && c.BaseURL != "" && c.APIKey != ""
+	return c != nil && c.BaseURL != "" && c.key() != ""
 }
 
 // WithModel returns a shallow copy of the client that talks to a different
@@ -157,7 +183,7 @@ func (c *Client) StreamChatCompletion(ctx context.Context, messages []Message, t
 		return nil, fmt.Errorf("build chat request: %w", err)
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("Authorization", "Bearer "+c.APIKey)
+	httpReq.Header.Set("Authorization", "Bearer "+c.key())
 	httpReq.Header.Set("Accept", "text/event-stream")
 
 	resp, err := c.HTTPClient.Do(httpReq)
