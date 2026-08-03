@@ -135,7 +135,30 @@ currently lives. A move re-points that row and re-mints nothing.
 
 ## Phase 5 — migrate the pasted keys
 
-- [ ] Inventory apps whose `env_vars` hold an `sk-dada` literal.
+- [x] Inventory apps whose `env_vars` hold an `sk-dada` literal. Done
+      2026-08-03 against argo-infra: three, all now cut over —
+      `reels-tracker` (`OPENROUTER_API_KEY`), `profi-backend`
+      (`OPENAI_API_KEY`) and `telemost-bot` (`GROQ_API_KEY`). `clusters/`
+      contains no `sk-dada-` literal any more.
+- [x] `profi-backend` and `telemost-bot` on `secretKeyRef` (argo-infra
+      `cbfcc566`). Preconditions checked before the edit, not after: `fin-core`
+      holds an openai credential, `internal` a groq one, both identities live in
+      the same project as their app, and both tokens already answered `200`
+      through the gateway on the app's own alias (`gpt-4o`, `groq-gpt-oss`).
+      Verified after rollout from inside each pod, resolving config exactly the
+      way the app does — `200 IDENTITY_OK` both times, and neither `.env`
+      ConfigMap contains `sk-dada`. `telemost-bot` reads config with
+      `load_dotenv()`, whose default `override=False` leaves an existing
+      environment variable alone, so container env beats the file there too.
+- [ ] **The old keys are still live and the console cannot revoke them.** Both
+      pre-cutover literals still authenticate at the gateway (`200`), and
+      neither is in `ai_gateway_keys` — that table holds three rows, all
+      `sk-dada-ai-`, all revoked. Per `ai_keys.go:21`, the gateway sends
+      `sk-dada-ai-` to the console, `sk-dada-id-` to identity introspection and
+      **anything else in the `sk-dada-` family to user-service**. So these are
+      user-service keys: not tied to an app, not visible on
+      `/admin/ai-gateway`, and not revocable from here. Revoking them is what
+      finishes the migration, and it has to happen in user-service.
 - [x] `reels-tracker` cut over to an identity token (2026-08-03) and, later the
       same day, off the literal entirely — argo-infra now carries a
       `secretKeyRef`, not a value. Its next move re-points the identity row and
