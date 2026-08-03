@@ -192,19 +192,35 @@ currently lives. A move re-points that row and re-mints nothing.
       through the environment — which also closes a shell-injection path, since
       the subject comes from an arbitrary upstream commit and `$(...)` expands
       inside double quotes. Reproduced and re-proved against real git.
-- [ ] Blocked on infrastructure, not on the change: neither build can finish.
-      Nexus refuses artifacts (`npm error 503 ... @dada/react-sso`,
-      `uv ... Failed to fetch .../pypi/simple/pytest/ operation timed out` after
-      6 retries), and prod postgres is down — the console backend has answered
-      `/ready` with 503 for over an hour, `postgresql-0` cannot start because
-      `data-postgresql-0` is mounted by two debugging pods (`pgdiag`,
-      `pg-maint`), and Longhorn refuses to expand the volume for lack of disk
-      (`cannot schedule 6442450944 more bytes`). Someone is working that outage;
-      those pods are deliberately not touched here.
-- [ ] Verify the ceiling in prod once console `d2d125a`+`1e8bdab` and gateway
-      `854f43c` are live: set a tiny `ai_monthly_limit_usd` on a throwaway
-      identity, confirm the gateway refuses with the budget message, then clear
-      it. Then run the reels e2e.
+- [x] Console side is live in prod. `postgresql-0` came back (2/2 Running),
+      the backend rolled to `ghcr.io/dadadevelopment/dada-cloud-console-backend:8bb219d6`,
+      `schema_migrations` heads at `095_service_identity_ai_budget`, and
+      `service_identities.ai_monthly_limit_usd` exists as `numeric`. The PATCH
+      route answers in prod (`401 missing or malformed Authorization header`,
+      not 404, so it is registered).
+- [x] Ceiling verified in prod, both directions, with a throwaway identity
+      (`budget-probe-tmp` in `platform/prod`, since deleted). With
+      `ai_monthly_limit_usd = 0` the gateway refused the call:
+      `HTTP 401 {"error":{"message":"Authentication Error, invalid platform api key"}}`
+      — the generic wording is correct here, because prod still runs gateway
+      `master-1.0.0-16`, which does not read `reason` and fails closed on
+      `valid=false`. With the ceiling cleared and the 60s introspection cache
+      expired, the same token got `HTTP 200` and a real completion, and the call
+      landed in the ledger as `identity_id=56fc9463… model=gpt-4o-mini
+      cost=0.000003`. So the refusal was the ceiling, not a broken credential,
+      and attribution still works on the new image.
+- [x] reels e2e on its ServiceIdentity token (`sk-dada-id-317…`), in the prod
+      pod: OCR `200 OK` returning `IDENTITY OCR4711`, `web_search` `200 OK`
+      returning a sourced answer. Both through
+      `ai-gateway-service.argocd-prod.svc.cluster.local`.
+- [ ] Gateway `854f43c` (the human-readable budget message) is still not in
+      prod: `master-1.0.0-16` is deployed. Build `#18` carried a quote-free
+      subject and got past the old failure, then died in dependency install —
+      `uv sync ... Failed to fetch https://nexus.dada-tuda.ru/repository/pypi/simple/respx/
+      operation timed out`, 6 attempts. The same host resets plain `curl` from
+      this machine, so nexus/jenkins ingress (`155.212.223.198`) is degraded.
+      Nothing about the ceiling waits on it: enforcement lives in the console,
+      and the old gateway already refuses. Only the wording is pending.
 - [ ] No UI for the ceiling yet — `GET .../identity` returns
       `ai_monthly_limit_usd` and `ai_month_spend_usd`, but the console has no
       identity panel at all, so today the only way to set one is the API.
