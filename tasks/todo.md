@@ -219,9 +219,29 @@ already in progress`). Вылечено `POST /890/stop` + `/term`; очеред
 четырёх); ГИПОТЕЗА: попал в то же окно, что и P0 с забитым диском под postgres
 08-03 18:03Z. `#889` до этого падал на `npm ci` 503 от Nexus.
 
+**Выкат и живая проверка (08-04 23:19Z).** Прод на образе `bb6e9335` (сборка `#895`,
+пин argo-infra `1434c87`), внутри `a3b5061`. Лог бекенда:
+`box: cluster warm pool trimmed back to target; surplus warm boxes were holding
+fleet quota  available=0 changed=-2 target=0`. `dada-boxes` — `No resources found`,
+`resourcequota dada-boxes-fleet` used = нули по всем позициям, включая
+`requests.storage`. Флот бокса стоит ровно 0 ₽ до первого реального спавна.
+
+**Красный CI по дороге (сборка #895).** Помечена FAILURE не из-за кода: под агента
+`xvkps-jnvt1` умер на ноде `d5dns` с
+`Failed to pull image "mcr.microsoft.com/playwright:v1.61.1-noble": no space left on
+device` (забился containerd на ноде); за 39 минут до этого другой агент не влезал —
+`0/4 nodes are available: 4 Insufficient memory`. Jenkins поднял второй под и прошёл
+пайплайн заново; `runStage` без гардов по `currentBuild.result`, поэтому write-back
+всё-таки записал пин, и выкат состоялся. Ноду не чистил — это мутация прода без
+подтверждения; на момент проверки на `d5dns` уже было 25.5Gi свободно (fs 46.1/71.6Gi,
+imageFs 15.7Gi). Осталось как риск: диск ноды 71.6Gi мал под агент с dind + playwright
++ node_modules + go-кеш, и следующий параллельный агент ляжет так же.
+
 **Не сделано / дальше.**
 - [ ] Проверить через сутки после выката: `box_usage` за день, доля
       `suspended_disk`, и что `dada-boxes` пуст, кроме живых боксов
+- [ ] Владельцу: диск нод CI (71.6Gi) — либо растить, либо резать образ агента;
+      сборка выживает только за счёт повторного запуска на другом поде
 
 ---
 
