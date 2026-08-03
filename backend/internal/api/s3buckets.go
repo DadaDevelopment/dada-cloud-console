@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"unicode"
 	"unicode/utf8"
 
 	"github.com/dada-tuda/console/backend/internal/auth"
@@ -100,6 +101,49 @@ func (h *Handler) ListS3Buckets(c *gin.Context) {
 // Terraform workspace in ReconcileError, so the connection secret is never
 // created and every credential reveal answers 404 "still provisioning".
 const maxS3BucketDescriptionLen = 45
+
+// s3BucketDescriptionAllowedExtra lists the punctuation Beget accepts in
+// beget_s3_bucket.description beyond Unicode letters, digits and space.
+// There is no published character-set spec from Beget for this field; this
+// set was derived empirically on 2026-08-03 from a live incident where user
+// artemmendeleev's bucket create sat in ReconcileError for 72 minutes
+// because the description "Cold storage: Fonbet raw bodies offloaded"
+// (43 runes, under the length cap) was silently rejected for its colon.
+// Keep this in sync with the strip set in
+// gitops-agent/internal/renderer/renderer.go (RenderS3Bucket).
+const s3BucketDescriptionAllowedExtra = ".,_-"
+
+// validateS3BucketDescriptionCharset rejects description runes outside
+// Unicode letters, digits, space and s3BucketDescriptionAllowedExtra — the
+// character set Beget's S3 provider is empirically known to accept (see
+// s3BucketDescriptionAllowedExtra). An empty description always passes: the
+// field is optional. On failure it returns an error naming each distinct
+// rejected character once, in order of first appearance, so the caller does
+// not have to guess which one tripped the check.
+func validateS3BucketDescriptionCharset(desc string) error {
+	var bad []rune
+	seen := map[rune]bool{}
+	for _, r := range desc {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) || r == ' ' || strings.ContainsRune(s3BucketDescriptionAllowedExtra, r) {
+			continue
+		}
+		if !seen[r] {
+			seen[r] = true
+			bad = append(bad, r)
+		}
+	}
+	if len(bad) == 0 {
+		return nil
+	}
+	quoted := make([]string, len(bad))
+	for i, r := range bad {
+		quoted[i] = fmt.Sprintf("%q", string(r))
+	}
+	return fmt.Errorf(
+		"description contains characters the storage provider rejects: %s; allowed are letters, digits, space and . , _ -",
+		strings.Join(quoted, ", "),
+	)
+}
 
 type createS3BucketRequest struct {
 	Name          string `json:"name"`
@@ -197,6 +241,10 @@ func (h *Handler) CreateS3Bucket(c *gin.Context) {
 	if n := utf8.RuneCountInString(req.Description); n > maxS3BucketDescriptionLen {
 		reject(http.StatusBadRequest, "description_too_long",
 			fmt.Sprintf("description must be at most %d characters, got %d", maxS3BucketDescriptionLen, n))
+		return
+	}
+	if err := validateS3BucketDescriptionCharset(req.Description); err != nil {
+		reject(http.StatusBadRequest, "description_invalid", err.Error())
 		return
 	}
 

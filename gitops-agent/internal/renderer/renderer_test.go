@@ -979,3 +979,30 @@ func TestRenderS3BucketTruncatesOverLongDescription(t *testing.T) {
 		t.Fatalf("description length = %d, want 45", n)
 	}
 }
+
+func TestRenderS3BucketStripsDisallowedCharset(t *testing.T) {
+	out, err := renderer.RenderS3Bucket(renderer.S3BucketSpec{
+		Name:        "raw-archive",
+		BucketName:  "raw-archive",
+		Region:      "ru1",
+		Description: `Cold storage: Fonbet raw bodies offloaded #1 (legacy)`,
+		ProjectSlug: "p",
+		EnvSlug:     "prod",
+	})
+	if err != nil {
+		t.Fatalf("render: %v", err)
+	}
+	var rendered struct {
+		Spec struct {
+			Description string `yaml:"description"`
+		} `yaml:"spec"`
+	}
+	if err := yaml.Unmarshal([]byte(out), &rendered); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	for _, bad := range []string{":", "#", "(", ")"} {
+		if strings.Contains(rendered.Spec.Description, bad) {
+			t.Fatalf("description %q still contains disallowed char %q", rendered.Spec.Description, bad)
+		}
+	}
+}

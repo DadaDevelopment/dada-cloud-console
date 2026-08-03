@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strings"
 	"text/template"
+	"unicode"
 	"unicode/utf8"
 
 	"gopkg.in/yaml.v3"
@@ -1160,7 +1161,34 @@ spec:
 // a bucket; the console rejects over-long input at the API boundary.
 const maxS3BucketDescriptionLen = 45
 
+// s3BucketDescriptionAllowedExtra lists the punctuation Beget accepts in
+// beget_s3_bucket.description beyond Unicode letters, digits and space.
+// There is no published character-set spec from Beget for this field; this
+// set was derived empirically on 2026-08-03 from a live incident where user
+// artemmendeleev's bucket create sat in ReconcileError for 72 minutes
+// because the description "Cold storage: Fonbet raw bodies offloaded"
+// (43 runes, under the length cap) was silently rejected for its colon.
+// Keep this in sync with the validator in
+// backend/internal/api/s3buckets.go (validateS3BucketDescriptionCharset).
+const s3BucketDescriptionAllowedExtra = ".,_-"
+
+// stripS3BucketDescriptionCharset removes runes outside Unicode letters,
+// digits, space and s3BucketDescriptionAllowedExtra. A legacy or hand-edited
+// snapshot can carry a character Beget rejects; the render must not fail on
+// it, since a failing render stalls the whole deploy, so this strips rather
+// than errors. The console rejects the same characters at the API boundary
+// so a fresh create never reaches here with an invalid description.
+func stripS3BucketDescriptionCharset(desc string) string {
+	return strings.Map(func(r rune) rune {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) || r == ' ' || strings.ContainsRune(s3BucketDescriptionAllowedExtra, r) {
+			return r
+		}
+		return -1
+	}, desc)
+}
+
 func RenderS3Bucket(spec S3BucketSpec) (string, error) {
+	spec.Description = stripS3BucketDescriptionCharset(spec.Description)
 	if utf8.RuneCountInString(spec.Description) > maxS3BucketDescriptionLen {
 		spec.Description = string([]rune(spec.Description)[:maxS3BucketDescriptionLen])
 	}

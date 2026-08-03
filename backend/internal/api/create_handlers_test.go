@@ -5,6 +5,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/dada-tuda/console/backend/internal/auth"
@@ -194,6 +195,72 @@ func TestCreateS3Bucket_SeedsOptimisticSnapshot(t *testing.T) {
 	name := "s3-" + uuid.NewString()[:8]
 
 	c, rec := newCreateCtx(t, `{"name":"`+name+`","bucket_name":"bucket-`+name+`"}`, params(projectID, envID), claims)
+	h.CreateS3Bucket(c)
+	assertOptimisticSeeded(t, pool, rec, projectID, envID, "S3Bucket", name)
+}
+
+// TestCreateS3Bucket_RejectsDisallowedDescriptionCharset uses the exact
+// description string from the live artemmendeleev incident (43 runes, well
+// under the 45-rune cap) that Beget silently rejected on its colon, stranding
+// the bucket create for 72 minutes. The API must now reject it up front with
+// a message naming the offending character instead of letting it reach
+// Beget mute.
+func TestCreateS3Bucket_RejectsDisallowedDescriptionCharset(t *testing.T) {
+	pool := testOptimisticPool(t)
+	h := &Handler{pool: pool, cfg: &config.Config{}}
+	projectID, envID := seedOptimisticFixture(t, pool)
+	claims := godClaims(seedUser(t, pool))
+	name := "s3-" + uuid.NewString()[:8]
+
+	body := `{"name":"` + name + `","bucket_name":"bucket-` + name + `","description":"Cold storage: Fonbet raw bodies offloaded"}`
+	c, rec := newCreateCtx(t, body, params(projectID, envID), claims)
+	h.CreateS3Bucket(c)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400; body=%s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), `":"`) {
+		t.Fatalf("error body = %s, want it to name the rejected colon", rec.Body.String())
+	}
+
+	var count int
+	if err := pool.QueryRow(context.Background(),
+		`SELECT count(*) FROM resource_snapshots WHERE project_id = $1 AND environment_id = $2 AND kind = 'S3Bucket' AND name = $3`,
+		projectID, envID, name,
+	).Scan(&count); err != nil {
+		t.Fatalf("query resource_snapshots: %v", err)
+	}
+	if count != 0 {
+		t.Fatalf("resource_snapshots rows for rejected bucket = %d, want 0", count)
+	}
+}
+
+// TestCreateS3Bucket_AllowsValidDescriptionCharset proves Cyrillic letters plus
+// the four allowed punctuation marks (. , _ -) pass the charset check.
+func TestCreateS3Bucket_AllowsValidDescriptionCharset(t *testing.T) {
+	pool := testOptimisticPool(t)
+	h := &Handler{pool: pool, cfg: &config.Config{}}
+	projectID, envID := seedOptimisticFixture(t, pool)
+	claims := godClaims(seedUser(t, pool))
+	name := "s3-" + uuid.NewString()[:8]
+
+	body := `{"name":"` + name + `","bucket_name":"bucket-` + name + `","description":"Холодное хранилище, бэкапы - раз_в.месяц"}`
+	c, rec := newCreateCtx(t, body, params(projectID, envID), claims)
+	h.CreateS3Bucket(c)
+	assertOptimisticSeeded(t, pool, rec, projectID, envID, "S3Bucket", name)
+}
+
+// TestCreateS3Bucket_AllowsEmptyDescription proves the charset check does not
+// treat the optional, empty description as a violation.
+func TestCreateS3Bucket_AllowsEmptyDescription(t *testing.T) {
+	pool := testOptimisticPool(t)
+	h := &Handler{pool: pool, cfg: &config.Config{}}
+	projectID, envID := seedOptimisticFixture(t, pool)
+	claims := godClaims(seedUser(t, pool))
+	name := "s3-" + uuid.NewString()[:8]
+
+	body := `{"name":"` + name + `","bucket_name":"bucket-` + name + `","description":""}`
+	c, rec := newCreateCtx(t, body, params(projectID, envID), claims)
 	h.CreateS3Bucket(c)
 	assertOptimisticSeeded(t, pool, rec, projectID, envID, "S3Bucket", name)
 }

@@ -38,6 +38,18 @@ export const storage: Messages = {
   "storage.modal.region": { ru: "Регион", en: "Region" },
   "storage.modal.description": { ru: "Описание", en: "Description" },
   "storage.modal.descriptionPlaceholder": { ru: "Необязательно", en: "Optional" },
+  "storage.modal.description.hint": {
+    ru: "Буквы, цифры, пробел и . , _ - Максимум {max} символов ({len}/{max})",
+    en: "Letters, digits, spaces, and . , _ - only. Max {max} characters ({len}/{max})",
+  },
+  "storage.modal.description.invalidChar": {
+    ru: "Символ «{char}» недопустим — разрешены буквы, цифры, пробел и . , _ -",
+    en: "Character \"{char}\" isn't allowed — only letters, digits, spaces, and . , _ - are permitted",
+  },
+  "storage.modal.description.tooLong": {
+    ru: "Слишком длинное описание — максимум {max} символов ({len}/{max})",
+    en: "Description is too long — max {max} characters ({len}/{max})",
+  },
   "storage.modal.appRef": { ru: "Привязка к приложению", en: "App Reference" },
   "storage.modal.appRefSub": {
     ru: "(необязательно — оставьте пустым для бакета уровня окружения)",

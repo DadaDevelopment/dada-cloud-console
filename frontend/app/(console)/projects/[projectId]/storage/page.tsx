@@ -19,6 +19,23 @@ import { HardDrive } from "lucide-react";
 import { useT } from "@/lib/i18n/console/context";
 import { trackUxEvent } from "@/lib/ux-telemetry";
 
+/**
+ * Same rule the backend enforces for the S3 bucket description (Beget rejects
+ * the create call, silently, on anything outside it): letters (incl. Cyrillic),
+ * digits, spaces, and the four punctuation marks below. Kept in sync with
+ * backend/internal/api/s3buckets.go's description validator.
+ */
+const DESCRIPTION_ALLOWED_RE = /^[\p{L}\p{N} .,_-]$/u;
+const DESCRIPTION_MAX_LEN = 45;
+
+/** First character in `s` that the backend's description rule would reject, or null. */
+function firstInvalidDescriptionChar(s: string): string | null {
+  for (const ch of s) {
+    if (!DESCRIPTION_ALLOWED_RE.test(ch)) return ch;
+  }
+  return null;
+}
+
 interface CreateBucketForm {
   name: string;
   bucket_name: string;
@@ -56,6 +73,7 @@ export default function StoragePage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const trackedProvisionErrorsRef = useRef<Set<string>>(new Set());
+  const descriptionErrorTrackedRef = useRef(false);
 
   useEffect(() => {
     /* eslint-disable react-hooks/set-state-in-effect */
@@ -100,8 +118,28 @@ export default function StoragePage() {
     setForm((prev) => ({ ...prev, [field]: value }));
   }
 
+  const invalidDescriptionChar = firstInvalidDescriptionChar(form.description);
+  const descriptionTooLong = form.description.length > DESCRIPTION_MAX_LEN;
+  const descriptionError = invalidDescriptionChar
+    ? t("storage.modal.description.invalidChar", { char: invalidDescriptionChar })
+    : descriptionTooLong
+      ? t("storage.modal.description.tooLong", { len: form.description.length, max: DESCRIPTION_MAX_LEN })
+      : null;
+
+  useEffect(() => {
+    if (descriptionError) {
+      if (!descriptionErrorTrackedRef.current) {
+        descriptionErrorTrackedRef.current = true;
+        trackUxEvent("view", "s3_description_invalid");
+      }
+    } else {
+      descriptionErrorTrackedRef.current = false;
+    }
+  }, [descriptionError]);
+
   async function handleSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
+    if (descriptionError) return;
     setSubmitError(null);
     setIsSubmitting(true);
     try {
@@ -302,8 +340,22 @@ export default function StoragePage() {
                 value={form.description}
                 onChange={(e) => handleFormChange("description", e.target.value)}
                 placeholder={t("storage.modal.descriptionPlaceholder")}
-                className="mt-1 block w-full rounded-lg border border-gray-300 dark:border-gray-700 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                aria-invalid={descriptionError ? true : undefined}
+                className={`mt-1 block w-full rounded-lg border px-3 py-2 text-sm text-gray-900 dark:text-gray-100 shadow-sm focus:outline-none focus:ring-1 ${
+                  descriptionError
+                    ? "border-red-400 dark:border-red-700 focus:border-red-500 focus:ring-red-500"
+                    : "border-gray-300 dark:border-gray-700 focus:border-blue-500 focus:ring-blue-500"
+                }`}
               />
+              {descriptionError ? (
+                <p role="alert" data-ux="s3_description_invalid" className="mt-1 text-xs text-red-600 dark:text-red-400">
+                  {descriptionError}
+                </p>
+              ) : (
+                <p className="mt-1 text-xs text-gray-400 dark:text-gray-500">
+                  {t("storage.modal.description.hint", { len: form.description.length, max: DESCRIPTION_MAX_LEN })}
+                </p>
+              )}
             </div>
           </div>
 
@@ -356,7 +408,7 @@ export default function StoragePage() {
             </button>
             <button
               type="submit"
-              disabled={isSubmitting}
+              disabled={isSubmitting || Boolean(descriptionError)}
               className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50 transition-colors"
             >
               {isSubmitting ? <><Spinner size="sm" />{t("common.creating")}</> : t("storage.createBucket")}
