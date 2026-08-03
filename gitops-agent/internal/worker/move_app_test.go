@@ -195,8 +195,8 @@ func seedSnapshot(t *testing.T, ctx context.Context, pool *pgxpool.Pool, project
 	t.Helper()
 	id := uuid.New()
 	exec(t, ctx, pool,
-		`INSERT INTO resource_snapshots (id, project_id, environment_id, kind, name, summary_json)
-		 VALUES ($1, $2, $3, $4, $5, $6::jsonb)`,
+		`INSERT INTO resource_snapshots (id, project_id, environment_id, kind, name, phase, summary_json)
+		 VALUES ($1, $2, $3, $4, $5, 'Ready', $6::jsonb)`,
 		id, projectID, envID, kind, name, summaryJSON)
 	return id
 }

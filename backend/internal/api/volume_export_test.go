@@ -70,9 +70,7 @@ func seedVolumeExportApp(t *testing.T, pool *pgxpool.Pool, volumeJSON string) (p
 	).Scan(&projectID); err != nil {
 		t.Fatalf("seed project: %v", err)
 	}
-	t.Cleanup(func() {
-		_, _ = pool.Exec(context.Background(), `DELETE FROM projects WHERE id = $1`, projectID)
-	})
+	t.Cleanup(func() { dropSeededProject(pool, projectID) })
 
 	if err := pool.QueryRow(ctx,
 		`INSERT INTO environments (project_id, name, namespace, type) VALUES ($1, 'prod', $2, 'prod') RETURNING id`,
@@ -86,7 +84,7 @@ func seedVolumeExportApp(t *testing.T, pool *pgxpool.Pool, volumeJSON string) (p
 		summary = volumeJSON
 	}
 	if _, err := pool.Exec(ctx,
-		`INSERT INTO resource_snapshots (project_id, environment_id, kind, name, summary_json) VALUES ($1, $2, 'App', $3, $4)`,
+		`INSERT INTO resource_snapshots (project_id, environment_id, kind, name, phase, summary_json) VALUES ($1, $2, 'App', $3, 'Ready', $4)`,
 		projectID, envID, appName, summary,
 	); err != nil {
 		t.Fatalf("seed resource_snapshot: %v", err)

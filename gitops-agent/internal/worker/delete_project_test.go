@@ -152,8 +152,8 @@ func seedProjectTrail(t *testing.T, ctx context.Context, pool *pgxpool.Pool, pro
 		uuid.New(), actorID, projectID, opID)
 
 	exec(t, ctx, pool,
-		`INSERT INTO resource_snapshots (id, project_id, environment_id, kind, name)
-		 VALUES ($1, $2, $3, 'App', 'web')`,
+		`INSERT INTO resource_snapshots (id, project_id, environment_id, kind, name, phase)
+		 VALUES ($1, $2, $3, 'App', 'web', 'Ready')`,
 		uuid.New(), projectID, envID)
 
 	exec(t, ctx, pool,
