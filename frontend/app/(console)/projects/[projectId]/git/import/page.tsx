@@ -17,6 +17,7 @@ import { TemplateDeployCards } from "@/components/console/template-deploy-cards"
 import { timeAgo } from "@/lib/format";
 import { CopyButton } from "@/components/ui/copy-button";
 import { githubActionsStep, deployCurl } from "@/lib/deploy-snippet";
+import { trackBuildStart } from "@/lib/build-watch";
 import { Search, Lock, Plus } from "lucide-react";
 
 type FrameworkPreset = { id: string; label: string; port: number };
@@ -538,6 +539,7 @@ export default function GitImportPage() {
     // Repo linked — kick off the first build; the deploy section reveals below.
     try {
       const { build: b } = await buildsApi.trigger(projectId, envId, appName);
+      if (b?.id) trackBuildStart({ projectId, envId, appName, buildId: b.id });
       setBuild(b);
     } catch (err) {
       setDeployError(err instanceof Error ? err.message : t("git.import.deploy.triggerFailed"));
@@ -551,6 +553,7 @@ export default function GitImportPage() {
     setBuild(null);
     try {
       const { build: b } = await buildsApi.trigger(projectId, envId, appName);
+      if (b?.id) trackBuildStart({ projectId, envId, appName, buildId: b.id });
       setBuild(b);
     } catch (err) {
       setDeployError(err instanceof Error ? err.message : t("git.import.deploy.triggerFailed"));

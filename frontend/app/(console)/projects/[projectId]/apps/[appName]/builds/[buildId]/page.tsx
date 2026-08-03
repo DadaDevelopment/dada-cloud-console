@@ -14,6 +14,7 @@ import { BuildLogViewer } from "@/components/deploy/build-log-viewer";
 import { useT } from "@/lib/i18n/console/context";
 import { trackUxEvent } from "@/lib/ux-telemetry";
 import { resolveCommit } from "@/lib/build-commit";
+import { trackBuildStart } from "@/lib/build-watch";
 
 const PYTHON_BOT_DOCKERFILE = `FROM python:3.12-slim
 WORKDIR /app
@@ -147,6 +148,7 @@ export default function BuildDetailPage() {
     try {
       const { build: newBuild } = await buildsApi.trigger(projectId, envId, appName);
       if (newBuild?.id) {
+        trackBuildStart({ projectId, envId, appName, buildId: newBuild.id });
         router.push(`/projects/${projectId}/apps/${appName}/builds/${newBuild.id}${envId ? `?envId=${envId}` : ""}`);
         return;
       }

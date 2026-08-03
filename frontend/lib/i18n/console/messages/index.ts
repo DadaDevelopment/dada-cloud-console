@@ -37,6 +37,7 @@ import { agentChat } from "./agent-chat";
 import { onboarding } from "./onboarding";
 import { passkey } from "./passkey";
 import { payments } from "./payments";
+import { buildWatcher } from "./build-watcher";
 
 /**
  * Flat key→{ru,en} map for the whole console. Each screen owns a namespace
@@ -83,4 +84,5 @@ export const messages: Messages = {
   ...onboarding,
   ...passkey,
   ...payments,
+  ...buildWatcher,
 };

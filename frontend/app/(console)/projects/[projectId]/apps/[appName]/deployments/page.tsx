@@ -12,6 +12,7 @@ import { timeAgo } from "@/lib/format";
 import { BuildStatusBadge, isBuildActive } from "@/components/deploy/build-status-badge";
 import { useT } from "@/lib/i18n/console/context";
 import { formatCommitLabel, resolveCommit } from "@/lib/build-commit";
+import { trackBuildStart } from "@/lib/build-watch";
 
 /**
  * A single row in the unified deploy feed. Either a build attempt (every
@@ -109,6 +110,7 @@ export default function AppDeploymentsPage() {
     try {
       const { build } = await buildsApi.trigger(projectId, envId, appName);
       if (build?.id) {
+        trackBuildStart({ projectId, envId, appName, buildId: build.id });
         router.push(`/projects/${projectId}/apps/${appName}/builds/${build.id}${envId ? `?envId=${envId}` : ""}`);
         return;
       }

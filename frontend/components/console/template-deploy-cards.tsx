@@ -5,6 +5,7 @@ import { gitApi, buildsApi } from "@/lib/api";
 import { ResourceIcon } from "@/components/shell/icons";
 import { Spinner } from "@/components/ui/spinner";
 import { useT } from "@/lib/i18n/console/context";
+import { trackBuildStart } from "@/lib/build-watch";
 
 type Template = { key: string; repo_full_name: string; port: number };
 
@@ -73,7 +74,8 @@ export function TemplateDeployCards({ projectId, envId, compact, hero, className
         const msg = err instanceof Error ? err.message : t("overview.templates.error");
         if (!/409|already/i.test(msg)) throw new Error(msg);
       }
-      await buildsApi.trigger(projectId, envId, appName);
+      const { build } = await buildsApi.trigger(projectId, envId, appName);
+      if (build?.id) trackBuildStart({ projectId, envId, appName, buildId: build.id });
       router.push(`/projects/${projectId}/apps/${appName}/deployments?envId=${envId}`);
     } catch (err) {
       setTemplateError(err instanceof Error ? err.message : t("overview.templates.error"));

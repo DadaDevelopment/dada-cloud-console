@@ -13,6 +13,7 @@ import { canMutate } from "@/lib/rbac";
 import { useT } from "@/lib/i18n/console/context";
 import { trackUxEvent } from "@/lib/ux-telemetry";
 import { resolveCommit, formatCommitLabel } from "@/lib/build-commit";
+import { trackBuildStart } from "@/lib/build-watch";
 
 const POLL_MS = 3000;
 
@@ -114,6 +115,7 @@ export function AppLatestBuildCard({ projectId, envId, appName, appUrl, appReady
     try {
       const { build: newBuild } = await buildsApi.trigger(projectId, envId, appName);
       if (newBuild?.id) {
+        trackBuildStart({ projectId, envId, appName, buildId: newBuild.id });
         router.push(buildHref(newBuild.id));
         return;
       }
