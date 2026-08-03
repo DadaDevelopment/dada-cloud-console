@@ -177,9 +177,34 @@ currently lives. A move re-points that row and re-mints nothing.
       Setting it is `PATCH .../apps/:appName/identity`, deliberately not the
       POST route: POST rotates the token, and setting a budget must not cost an
       app its credential.
-- [ ] Verify the ceiling in prod once console `776c7ea` and gateway `854f43c`
-      are live: set a tiny `ai_monthly_limit_usd` on a throwaway identity,
-      confirm the gateway refuses with the budget message, then clear it.
+- [x] Two CI breakages of my own, both fixed 2026-08-03.
+      Console `#886` and `#888` failed `TestOpenAPICoverage`: the new PATCH route
+      carried its annotations but `internal/api/docs` was never regenerated, so
+      the gate that keeps the spec complete red-lined main for everyone —
+      `1e8bdab` regenerates it (`swag init -g cmd/server/main.go --parseInternal
+      --parseDependency -o internal/api/docs`), and build `#889` shows
+      `ok github.com/dada-tuda/console/backend/internal/api`.
+      ai-gateway `#17` failed after the image was built, in the argo pin step:
+      `maven-lib` interpolated the upstream commit subject straight into a
+      double-quoted shell word, so the double quotes inside
+      `отказ ... как "неверный ключ"` split argv and git read the tail as a
+      pathspec. Fixed in `maven-lib` `develop` (`f8550f6`) by passing the message
+      through the environment — which also closes a shell-injection path, since
+      the subject comes from an arbitrary upstream commit and `$(...)` expands
+      inside double quotes. Reproduced and re-proved against real git.
+- [ ] Blocked on infrastructure, not on the change: neither build can finish.
+      Nexus refuses artifacts (`npm error 503 ... @dada/react-sso`,
+      `uv ... Failed to fetch .../pypi/simple/pytest/ operation timed out` after
+      6 retries), and prod postgres is down — the console backend has answered
+      `/ready` with 503 for over an hour, `postgresql-0` cannot start because
+      `data-postgresql-0` is mounted by two debugging pods (`pgdiag`,
+      `pg-maint`), and Longhorn refuses to expand the volume for lack of disk
+      (`cannot schedule 6442450944 more bytes`). Someone is working that outage;
+      those pods are deliberately not touched here.
+- [ ] Verify the ceiling in prod once console `d2d125a`+`1e8bdab` and gateway
+      `854f43c` are live: set a tiny `ai_monthly_limit_usd` on a throwaway
+      identity, confirm the gateway refuses with the budget message, then clear
+      it. Then run the reels e2e.
 - [ ] No UI for the ceiling yet — `GET .../identity` returns
       `ai_monthly_limit_usd` and `ai_month_spend_usd`, but the console has no
       identity panel at all, so today the only way to set one is the API.
