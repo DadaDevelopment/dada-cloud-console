@@ -3,11 +3,19 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 
 	"github.com/dada-tuda/console/backend/internal/models"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 )
+
+// errRepoWithoutInstallation marks a git_repos row that exists for the app
+// but carries no github app installation (installation_id IS NULL). This is
+// the normal state for a no-OAuth template deploy (anonymous clone of a
+// public template) and must never be confused with pgx.ErrNoRows, which
+// means the app has no connected repo at all.
+var errRepoWithoutInstallation = errors.New("git repo connected without a github app installation")
 
 type cloudTaskInsert struct {
 	ProjectID     uuid.UUID
@@ -129,13 +137,23 @@ func (h *Handler) setCloudTaskWorkflow(ctx context.Context, intentID, workflowID
 
 // resolveGitRepo finds the connected GitHub repo for an app and returns its
 // full name, the numeric GitHub installation id (for token minting), and the
-// git_repos row id. Errors (incl. pgx.ErrNoRows) mean "no connected repo".
+// git_repos row id. pgx.ErrNoRows means the app has no git_repos row at all.
+// errRepoWithoutInstallation means the row exists but has no usable github
+// app installation (installationID is 0 in that case); this is the normal
+// no-OAuth template-deploy state, not a missing repo.
 func (h *Handler) resolveGitRepo(ctx context.Context, projectID, envID uuid.UUID, appName string) (repoFullName string, installationID int64, gitRepoID uuid.UUID, err error) {
+	var instID *int64
 	err = h.pool.QueryRow(ctx,
 		`SELECT r.id, r.repo_full_name, i.installation_id
 		   FROM git_repos r
-		   JOIN git_app_installations i ON i.id = r.installation_id
+		   LEFT JOIN git_app_installations i ON i.id = r.installation_id
 		  WHERE r.project_id=$1 AND r.environment_id=$2 AND r.app_name=$3`,
-		projectID, envID, appName).Scan(&gitRepoID, &repoFullName, &installationID)
-	return repoFullName, installationID, gitRepoID, err
+		projectID, envID, appName).Scan(&gitRepoID, &repoFullName, &instID)
+	if err != nil {
+		return "", 0, uuid.UUID{}, err
+	}
+	if instID == nil {
+		return repoFullName, 0, gitRepoID, errRepoWithoutInstallation
+	}
+	return repoFullName, *instID, gitRepoID, nil
 }

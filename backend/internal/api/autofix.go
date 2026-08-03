@@ -159,15 +159,22 @@ type autofixLaunch struct {
 type autofixError struct {
 	status  int
 	message string
+	code    string
 }
 
 func (e *autofixError) Error() string { return e.message }
 
 // respondAutofixError maps a launch failure onto the response, defaulting to
-// 500 for anything the engine did not classify.
+// 500 for anything the engine did not classify. When the failure carries a
+// code, it rides alongside "error" so the frontend can pick a specific
+// message instead of showing the raw string.
 func respondAutofixError(c *gin.Context, err error) {
 	var af *autofixError
 	if errors.As(err, &af) {
+		if af.code != "" {
+			c.JSON(af.status, gin.H{"error": af.message, "code": af.code})
+			return
+		}
 		respondError(c, af.status, af.message)
 		return
 	}
@@ -186,17 +193,28 @@ func respondAutofixError(c *gin.Context, err error) {
 // their own words is the same input.
 func (h *Handler) launchAutofix(ctx context.Context, in autofixLaunch) (models.CloudTask, error) {
 	if h.dadagent == nil {
-		return models.CloudTask{}, &autofixError{http.StatusServiceUnavailable, "dadagent integration not configured"}
+		return models.CloudTask{}, &autofixError{status: http.StatusServiceUnavailable, message: "dadagent integration not configured"}
 	}
 
 	repo, instID, gitRepoID, err := h.resolveGitRepo(ctx, in.ProjectID, in.EnvID, in.AppName)
+	if errors.Is(err, errRepoWithoutInstallation) {
+		return models.CloudTask{}, &autofixError{
+			status:  http.StatusBadRequest,
+			message: "репозиторий подключён без доступа GitHub App: переподключите его через GitHub App, чтобы автофикс мог открыть PR",
+			code:    "repo_without_installation",
+		}
+	}
 	if err != nil {
-		return models.CloudTask{}, &autofixError{http.StatusBadRequest, "no connected git repo for app"}
+		return models.CloudTask{}, &autofixError{
+			status:  http.StatusBadRequest,
+			message: "no connected git repo for app",
+			code:    "no_repo",
+		}
 	}
 
 	token, _, err := gh.MintInstallToken(ctx, h.cfg.GithubAppID, h.cfg.GithubAppPrivateKey, instID)
 	if err != nil {
-		return models.CloudTask{}, &autofixError{http.StatusBadGateway, "failed to mint install token"}
+		return models.CloudTask{}, &autofixError{status: http.StatusBadGateway, message: "failed to mint install token"}
 	}
 
 	logs := h.fetchAutofixLogs(ctx, in.ProjectID, in.EnvID, in.AppName)
@@ -210,7 +228,7 @@ func (h *Handler) launchAutofix(ctx context.Context, in autofixLaunch) (models.C
 	})
 	if err != nil {
 		log.Printf("autofix: app %s (project %s) launch failed: %v", in.AppName, in.ProjectID, err)
-		return models.CloudTask{}, &autofixError{http.StatusBadGateway, "failed to launch auto-fix run"}
+		return models.CloudTask{}, &autofixError{status: http.StatusBadGateway, message: "failed to launch auto-fix run"}
 	}
 
 	cloudTaskID := ""
@@ -228,7 +246,7 @@ func (h *Handler) launchAutofix(ctx context.Context, in autofixLaunch) (models.C
 		ActorID: in.ActorID,
 	})
 	if err != nil {
-		return models.CloudTask{}, &autofixError{http.StatusInternalServerError, "failed to record cloud task"}
+		return models.CloudTask{}, &autofixError{status: http.StatusInternalServerError, message: "failed to record cloud task"}
 	}
 	return row, nil
 }

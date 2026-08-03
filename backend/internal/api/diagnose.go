@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -42,13 +43,18 @@ const diagnoseSystemPrompt = `Ты инженер поддержки PaaS-пла
 
 // diagnoseResponse is the "razobratsya" contract: one click from a crash
 // alert to a grounded diagnosis of the user's own app, produced from that
-// app's own logs by the AI gateway.
+// app's own logs by the AI gateway. AutofixUnavailableReason explains a
+// false CanAutofix: "no_repo" (no git_repos row for this app) or
+// "repo_without_installation" (the repo is connected but has no usable
+// github app installation, e.g. a no-OAuth template deploy); it is omitted
+// when CanAutofix is true.
 type diagnoseResponse struct {
-	Reason      string   `json:"reason"`
-	Diagnosis   string   `json:"diagnosis"`
-	LogExcerpt  []string `json:"log_excerpt"`
-	CanAutofix  bool     `json:"can_autofix"`
-	GeneratedAt string   `json:"generated_at"`
+	Reason                   string   `json:"reason"`
+	Diagnosis                string   `json:"diagnosis"`
+	LogExcerpt               []string `json:"log_excerpt"`
+	CanAutofix               bool     `json:"can_autofix"`
+	GeneratedAt              string   `json:"generated_at"`
+	AutofixUnavailableReason string   `json:"autofix_unavailable_reason,omitempty"`
 }
 
 // DiagnoseApp turns a crash alert into a grounded, log-backed diagnosis: it
@@ -118,8 +124,15 @@ func (h *Handler) DiagnoseApp(c *gin.Context) {
 	entries := h.fetchDiagnoseLogs(ctx, ns, appName)
 
 	canAutofix := false
-	if _, _, _, gitErr := h.resolveGitRepo(ctx, projectID, envID, appName); gitErr == nil {
+	autofixUnavailableReason := ""
+	_, _, _, gitErr := h.resolveGitRepo(ctx, projectID, envID, appName)
+	switch {
+	case gitErr == nil:
 		canAutofix = true
+	case errors.Is(gitErr, errRepoWithoutInstallation):
+		autofixUnavailableReason = "repo_without_installation"
+	default:
+		autofixUnavailableReason = "no_repo"
 	}
 
 	diagnosis, excerpt, err := h.diagnoseCore(ctx, appName, reason, entries, claims.UserID.String())
@@ -136,18 +149,20 @@ func (h *Handler) DiagnoseApp(c *gin.Context) {
 		ResourceKind:  "app",
 		ResourceName:  appName,
 		Metadata: map[string]any{
-			"reason":      reason,
-			"can_autofix": canAutofix,
-			"had_logs":    len(entries) > 0,
+			"reason":                     reason,
+			"can_autofix":                canAutofix,
+			"had_logs":                   len(entries) > 0,
+			"autofix_unavailable_reason": autofixUnavailableReason,
 		},
 	})
 
 	c.JSON(http.StatusOK, diagnoseResponse{
-		Reason:      reason,
-		Diagnosis:   diagnosis,
-		LogExcerpt:  excerpt,
-		CanAutofix:  canAutofix,
-		GeneratedAt: time.Now().UTC().Format(time.RFC3339),
+		Reason:                   reason,
+		Diagnosis:                diagnosis,
+		LogExcerpt:               excerpt,
+		CanAutofix:               canAutofix,
+		GeneratedAt:              time.Now().UTC().Format(time.RFC3339),
+		AutofixUnavailableReason: autofixUnavailableReason,
 	})
 }
 
