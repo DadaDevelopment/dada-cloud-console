@@ -48,6 +48,64 @@ func TestClassifyCrashLogEmpty(t *testing.T) {
 	}
 }
 
+func TestExtractCauseLine(t *testing.T) {
+	tests := []struct {
+		name    string
+		excerpt string
+		want    string
+	}{
+		{
+			name:    "python picks the exception line, not the traceback header",
+			excerpt: "Traceback (most recent call last):\n  File \"app.py\", line 3, in <module>\nModuleNotFoundError: No module named 'flask'",
+			want:    "ModuleNotFoundError: No module named 'flask'",
+		},
+		{
+			name:    "node picks the error line",
+			excerpt: "internal/modules/cjs/loader.js:1078\nError: Cannot find module 'express'",
+			want:    "Error: Cannot find module 'express'",
+		},
+		{
+			name:    "go panic",
+			excerpt: "starting up\npanic: runtime error: index out of range [3] with length 3\n\ngoroutine 1 [running]:",
+			want:    "panic: runtime error: index out of range [3] with length 3",
+		},
+		{
+			name:    "last matching line wins when several signatures appear",
+			excerpt: "NameError: first\nsome noise\nAttributeError: second and final",
+			want:    "AttributeError: second and final",
+		},
+		{
+			name:    "no known signature never returns a guess",
+			excerpt: "Listening on port 8080\nConnection refused to database",
+			want:    "",
+		},
+		{
+			name:    "empty excerpt",
+			excerpt: "",
+			want:    "",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := ExtractCauseLine(tt.excerpt); got != tt.want {
+				t.Fatalf("ExtractCauseLine(%q) = %q, want %q", tt.excerpt, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestExtractCauseLineTruncatesByRunesNotBytes(t *testing.T) {
+	long := "AttributeError: " + strings.Repeat("о", 400)
+	got := ExtractCauseLine(long)
+	runes := []rune(got)
+	if len(runes) != causeLineMaxRunes {
+		t.Fatalf("expected truncation to %d runes, got %d runes (%q)", causeLineMaxRunes, len(runes), got)
+	}
+	if !strings.HasPrefix(got, "AttributeError: ") {
+		t.Fatalf("expected truncated line to keep its prefix, got %q", got)
+	}
+}
+
 func TestComposeAppAlertIncludesHintWhenPresent(t *testing.T) {
 	_, body := ComposeAppAlert("web", "CrashLoopBackOff", "web-abc12", "panic: boom", "https://console.dada-tuda.ru/projects/p1/apps/web", "Судя по логам, это похоже на ошибку в коде приложения.", "https://console.dada-tuda.ru/projects/p1/apps/web#agent")
 	if !strings.Contains(body, "Судя по логам, это похоже на ошибку в коде приложения.") {

@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -23,7 +24,7 @@ func TestTouchAppHealthAlertSeenDoesNotResetCooldown(t *testing.T) {
 		_, _ = pool.Exec(context.Background(), `DELETE FROM app_health_alerts WHERE namespace = $1`, ns)
 	})
 
-	touchAppHealthAlertSeen(ctx, pool, ns, "web", "CrashLoopBackOff", "pod-1/web")
+	touchAppHealthAlertSeen(ctx, pool, ns, "web", "CrashLoopBackOff", "pod-1/web", "", "")
 
 	var lastSent time.Time
 	var lastSeen *time.Time
@@ -45,7 +46,7 @@ func TestTouchAppHealthAlertSeenDoesNotResetCooldown(t *testing.T) {
 
 	firstSeen := *lastSeen
 	time.Sleep(10 * time.Millisecond)
-	touchAppHealthAlertSeen(ctx, pool, ns, "web", "CrashLoopBackOff", "pod-1/web")
+	touchAppHealthAlertSeen(ctx, pool, ns, "web", "CrashLoopBackOff", "pod-1/web", "", "")
 
 	var sentAfterSecondTouch time.Time
 	var seenAfterSecondTouch time.Time
@@ -100,5 +101,93 @@ func TestLoadAppAlertsFreshnessWindow(t *testing.T) {
 	}
 	if alerts, ok := byApp["live-app"]; !ok || len(alerts) != 1 || alerts[0].Reason != "OOMKilled" {
 		t.Fatalf("live-app was touched just now, must surface as a current alert, got %+v (ok=%v)", byApp["live-app"], ok)
+	}
+}
+
+// TestTouchAppHealthAlertSeenPersistsCauseForNonEmailableReason proves the
+// cause is written independently of emailableReason: maybeNotify calls
+// touchAppHealthAlertSeen before it ever checks emailableReason, so a plain
+// "Error" exit (which never emails) must still land its cause in the row,
+// the console being the only place that class of crash shows up at all.
+func TestTouchAppHealthAlertSeenPersistsCauseForNonEmailableReason(t *testing.T) {
+	pool := testAdvisoryPool(t)
+	ctx := context.Background()
+	ns := "test-ns-cause-" + uuid.NewString()[:8]
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM app_health_alerts WHERE namespace = $1`, ns)
+	})
+
+	touchAppHealthAlertSeen(ctx, pool, ns, "worker", "Error", "pod-1/worker exit=1",
+		"Судя по логам, это ошибка в коде приложения (Python).", "ModuleNotFoundError: No module named 'flask'")
+
+	var cause, causeLine string
+	if err := pool.QueryRow(ctx,
+		`SELECT COALESCE(cause, ''), COALESCE(cause_line, '') FROM app_health_alerts WHERE namespace = $1 AND app_name = 'worker'`,
+		ns).Scan(&cause, &causeLine); err != nil {
+		t.Fatalf("read back row: %v", err)
+	}
+	if !strings.Contains(cause, "Python") {
+		t.Fatalf("expected cause to be persisted for a non-emailable reason, got %q", cause)
+	}
+	if causeLine != "ModuleNotFoundError: No module named 'flask'" {
+		t.Fatalf("expected cause_line to be persisted, got %q", causeLine)
+	}
+}
+
+// TestTouchAppHealthAlertSeenPreservesCauseWhenNotRefreshed proves the "skip
+// this tick" contract from maybeCauseRefresh: passing "" for cause/causeLine
+// on a later touch (the common case once a cause is already known and the
+// reason has not changed) must not erase what an earlier tick already wrote.
+func TestTouchAppHealthAlertSeenPreservesCauseWhenNotRefreshed(t *testing.T) {
+	pool := testAdvisoryPool(t)
+	ctx := context.Background()
+	ns := "test-ns-cause-keep-" + uuid.NewString()[:8]
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM app_health_alerts WHERE namespace = $1`, ns)
+	})
+
+	touchAppHealthAlertSeen(ctx, pool, ns, "worker", "CrashLoopBackOff", "pod-1/worker",
+		"Судя по логам, это похоже на ошибку в коде приложения.", "panic: boom")
+	touchAppHealthAlertSeen(ctx, pool, ns, "worker", "CrashLoopBackOff", "pod-1/worker", "", "")
+
+	var cause, causeLine string
+	if err := pool.QueryRow(ctx,
+		`SELECT COALESCE(cause, ''), COALESCE(cause_line, '') FROM app_health_alerts WHERE namespace = $1 AND app_name = 'worker'`,
+		ns).Scan(&cause, &causeLine); err != nil {
+		t.Fatalf("read back row: %v", err)
+	}
+	if cause == "" || causeLine == "" {
+		t.Fatalf("expected the earlier cause/cause_line to survive an empty touch, got cause=%q cause_line=%q", cause, causeLine)
+	}
+}
+
+// TestCurrentAlertCauseStateDrivesRefreshDecision proves the two branches
+// maybeCauseRefresh relies on: no row yet must report hasCause=false (a
+// first-ever detection always fetches the log), and a row with a cause
+// already recorded for the same reason must report hasCause=true so the
+// caller can skip the kube-API read.
+func TestCurrentAlertCauseStateDrivesRefreshDecision(t *testing.T) {
+	pool := testAdvisoryPool(t)
+	ctx := context.Background()
+	ns := "test-ns-cause-state-" + uuid.NewString()[:8]
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM app_health_alerts WHERE namespace = $1`, ns)
+	})
+
+	if _, _, err := currentAlertCauseState(ctx, pool, ns, "worker"); err == nil {
+		t.Fatalf("expected an error (no row yet) before the first touch")
+	}
+
+	touchAppHealthAlertSeen(ctx, pool, ns, "worker", "OOMKilled", "pod-1/worker", "hint", "evidence line")
+
+	reason, hasCause, err := currentAlertCauseState(ctx, pool, ns, "worker")
+	if err != nil {
+		t.Fatalf("currentAlertCauseState: %v", err)
+	}
+	if reason != "OOMKilled" {
+		t.Fatalf("expected reason=OOMKilled, got %q", reason)
+	}
+	if !hasCause {
+		t.Fatalf("expected hasCause=true after a touch with a non-empty cause")
 	}
 }

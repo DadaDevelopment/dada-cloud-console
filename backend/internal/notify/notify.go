@@ -225,6 +225,66 @@ func ClassifyCrashLog(excerpt string) string {
 	return ""
 }
 
+// causeLineMaxRunes bounds ExtractCauseLine's return value. Counted in runes,
+// not bytes: a Python traceback line can carry Cyrillic text from a
+// translated dependency message, and truncating on a byte boundary there
+// would cut a multi-byte UTF-8 rune in half and corrupt the tail of the
+// string.
+const causeLineMaxRunes = 300
+
+// crashLineSignaturePatterns flattens pythonCrashSignatures and
+// nodeCrashSignatures plus the bare "panic:" match ClassifyCrashLog also
+// checks, so ExtractCauseLine walks the exact same signature set
+// ClassifyCrashLog does instead of maintaining a second copy that could
+// silently drift out of sync with it.
+func crashLineSignaturePatterns() []string {
+	patterns := make([]string, 0, len(pythonCrashSignatures)+len(nodeCrashSignatures)+1)
+	for _, sig := range pythonCrashSignatures {
+		patterns = append(patterns, sig.pattern)
+	}
+	for _, sig := range nodeCrashSignatures {
+		patterns = append(patterns, sig.pattern)
+	}
+	patterns = append(patterns, "panic:")
+	return patterns
+}
+
+// ExtractCauseLine picks the single most telling line out of a crashed
+// container's log excerpt: the LAST line that contains one of the known
+// error signatures (crashLineSignaturePatterns), since a traceback or stack
+// dump lists causes top to bottom and the final matching line is usually the
+// one closest to the actual failure. Returns "" when no line matches — this
+// must never guess or fall back to an arbitrary line, because a wrong
+// "cause" shown next to a crash is worse than no cause at all (same rule
+// ClassifyCrashLog already follows). The result is truncated to
+// causeLineMaxRunes, measured in runes so a UTF-8 line is never cut mid-rune.
+func ExtractCauseLine(excerpt string) string {
+	if excerpt == "" {
+		return ""
+	}
+	patterns := crashLineSignaturePatterns()
+	best := ""
+	for _, line := range strings.Split(excerpt, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			continue
+		}
+		for _, p := range patterns {
+			if strings.Contains(trimmed, p) {
+				best = trimmed
+				break
+			}
+		}
+	}
+	if best == "" {
+		return ""
+	}
+	if runes := []rune(best); len(runes) > causeLineMaxRunes {
+		return string(runes[:causeLineMaxRunes])
+	}
+	return best
+}
+
 // ComposeAppAlert builds the subject and plaintext body for a silent-crash
 // alert: the owner's app is stuck in CrashLoopBackOff/OOMKilled/ImagePullBackOff
 // and would otherwise go unnoticed until the owner happens to open the

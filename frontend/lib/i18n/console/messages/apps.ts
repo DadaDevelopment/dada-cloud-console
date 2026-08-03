@@ -612,6 +612,11 @@ export const apps: Messages = {
     ru: "Образ приложения не скачивается — деплой не может запуститься",
     en: "App image cannot be pulled — the deploy cannot start",
   },
+  "apps.alerts.crash.cause.appCode": {
+    ru: "Похоже на ошибку в коде вашего приложения",
+    en: "Looks like an error in your app's own code",
+  },
+  "apps.alerts.crash.cause.line": { ru: "Из логов:", en: "From the logs:" },
   "apps.alerts.crash.cta": { ru: "Смотреть логи", en: "View logs" },
   "apps.alerts.crash.diagnose": { ru: "Разобраться", en: "Diagnose" },
   "apps.alerts.crash.diagnose.pending": { ru: "Смотрю логи…", en: "Reading logs…" },

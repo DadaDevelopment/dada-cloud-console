@@ -40,10 +40,19 @@ type ResourceSnapshot struct {
 // the watchers already write when they send an owner email. No live cluster
 // or Prometheus read backs this — it is exactly the fact "we emailed about
 // this within the last 24h", so ListApps stays within its latency budget.
+// Cause/CauseLine are only ever populated for Type == "crash": the platform
+// already fetches and classifies the crashed container's log tail
+// (notify.ClassifyCrashLog / notify.ExtractCauseLine) for the alert email,
+// so surfacing the same result here costs nothing extra and lets the console
+// show WHY an app crashed, not just that it did. Both are best-effort and
+// omitted (empty) whenever the log read failed or no known signature
+// matched — the console must never show a guessed cause.
 type AppAlert struct {
 	Type       string    `json:"type"` // "crash" or "volume"
 	Reason     string    `json:"reason,omitempty"`
 	Detail     string    `json:"detail,omitempty"`
+	Cause      string    `json:"cause,omitempty"`
+	CauseLine  string    `json:"cause_line,omitempty"`
 	Ratio      *float64  `json:"ratio,omitempty"`
 	DetectedAt time.Time `json:"detected_at"`
 }

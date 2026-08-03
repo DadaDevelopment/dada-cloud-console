@@ -16,6 +16,8 @@ type appAlertRow struct {
 	Type       string
 	Reason     string
 	Detail     string
+	Cause      string
+	CauseLine  string
 	Ratio      *float64
 	DetectedAt time.Time
 }
@@ -31,6 +33,8 @@ func groupAppAlerts(rows []appAlertRow) map[string][]models.AppAlert {
 			Type:       r.Type,
 			Reason:     r.Reason,
 			Detail:     r.Detail,
+			Cause:      r.Cause,
+			CauseLine:  r.CauseLine,
 			Ratio:      r.Ratio,
 			DetectedAt: r.DetectedAt,
 		})
@@ -81,7 +85,7 @@ func (h *Handler) loadAppAlerts(ctx context.Context, namespace string) (map[stri
 	var rows []appAlertRow
 
 	hrows, err := h.pool.Query(ctx,
-		`SELECT app_name, COALESCE(reason, ''), COALESCE(detail, ''), COALESCE(last_seen_at, last_sent_at)
+		`SELECT app_name, COALESCE(reason, ''), COALESCE(detail, ''), COALESCE(cause, ''), COALESCE(cause_line, ''), COALESCE(last_seen_at, last_sent_at)
 		 FROM app_health_alerts
 		 WHERE namespace = $1 AND COALESCE(last_seen_at, last_sent_at) > now() - make_interval(secs => $2)`,
 		namespace, appHealthAlertFreshWindow.Seconds())
@@ -90,7 +94,7 @@ func (h *Handler) loadAppAlerts(ctx context.Context, namespace string) (map[stri
 	}
 	for hrows.Next() {
 		var r appAlertRow
-		if scanErr := hrows.Scan(&r.AppName, &r.Reason, &r.Detail, &r.DetectedAt); scanErr != nil {
+		if scanErr := hrows.Scan(&r.AppName, &r.Reason, &r.Detail, &r.Cause, &r.CauseLine, &r.DetectedAt); scanErr != nil {
 			hrows.Close()
 			return nil, scanErr
 		}

@@ -2,10 +2,22 @@ import type { ResourceSnapshot } from "@/lib/types";
 
 export type AppAlertType = "crash" | "volume";
 
+/**
+ * `cause` / `cause_line` are the crash explanation the watcher already worked
+ * out at detection time (see backend notify.ClassifyCrashLog /
+ * ExtractCauseLine). `cause` is prose written by the backend in Russian and is
+ * therefore NOT rendered directly — it is only a flag that the platform
+ * recognised an application-code failure, so the console can show its own
+ * localised wording. `cause_line` is the raw matched log line: language
+ * neutral, and the single most useful thing to put in front of the owner.
+ * Both are absent whenever the log read failed or nothing matched.
+ */
 export interface AppAlert {
   type: AppAlertType;
   reason?: string;
   detail?: string;
+  cause?: string;
+  cause_line?: string;
   ratio?: number;
   detected_at: string;
 }

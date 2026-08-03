@@ -508,17 +508,69 @@ func recordAppHealthAlertSend(ctx context.Context, pool *pgxpool.Pool, namespace
 // the first real email entirely. The epoch sentinel guarantees the following
 // claim's WHERE last_sent_at <= now() - cooldown always passes on a brand
 // new row. The ON CONFLICT path never touches last_sent_at at all — only
-// last_seen_at/reason/detail — so an established cooldown is never reset by
-// a touch.
-func touchAppHealthAlertSeen(ctx context.Context, pool *pgxpool.Pool, namespace, appName, reason, detail string) {
+// last_seen_at/reason/detail/cause/cause_line — so an established cooldown
+// is never reset by a touch.
+//
+// cause/cause_line are the console-facing crash explanation
+// (notify.ClassifyCrashLog / notify.ExtractCauseLine); pass "" for either
+// when this tick did not recompute it (see maybeCauseRefresh) rather than
+// dropping the column update — a plain overwrite with "" would erase a cause
+// recorded on an earlier tick just because this tick chose not to re-fetch
+// the log. NULLIF/COALESCE on the UPDATE side keep an existing cause exactly
+// as long as no fresher one is available; the INSERT side just stores
+// whatever came in, since a brand-new row has nothing to preserve.
+func touchAppHealthAlertSeen(ctx context.Context, pool *pgxpool.Pool, namespace, appName, reason, detail, cause, causeLine string) {
 	_, err := pool.Exec(ctx,
-		`INSERT INTO app_health_alerts (namespace, app_name, last_sent_at, last_seen_at, reason, detail)
-		 VALUES ($1, $2, to_timestamp(0), now(), $3, $4)
-		 ON CONFLICT (namespace, app_name) DO UPDATE SET last_seen_at = now(), reason = $3, detail = $4`,
-		namespace, appName, reason, detail)
+		`INSERT INTO app_health_alerts (namespace, app_name, last_sent_at, last_seen_at, reason, detail, cause, cause_line)
+		 VALUES ($1, $2, to_timestamp(0), now(), $3, $4, NULLIF($5, ''), NULLIF($6, ''))
+		 ON CONFLICT (namespace, app_name) DO UPDATE SET
+		     last_seen_at = now(), reason = $3, detail = $4,
+		     cause = COALESCE(NULLIF($5, ''), app_health_alerts.cause),
+		     cause_line = COALESCE(NULLIF($6, ''), app_health_alerts.cause_line)`,
+		namespace, appName, reason, detail, cause, causeLine)
 	if err != nil {
 		log.Printf("app-health: touch-seen for %s/%s failed: %v", namespace, appName, err)
 	}
+}
+
+// currentAlertCauseState reads back the reason and whether a non-empty cause
+// is already stored for (namespace, appName), so maybeCauseRefresh can decide
+// whether this tick needs a fresh kube-API log read at all. Returns an error
+// for both a genuine query failure and "no row yet" (pgx.ErrNoRows) — the
+// caller treats either the same way, as "must refresh", which is correct for
+// a first-ever detection too.
+func currentAlertCauseState(ctx context.Context, pool *pgxpool.Pool, namespace, appName string) (reason string, hasCause bool, err error) {
+	err = pool.QueryRow(ctx,
+		`SELECT COALESCE(reason, ''), cause IS NOT NULL AND cause <> ''
+		 FROM app_health_alerts WHERE namespace = $1 AND app_name = $2`,
+		namespace, appName).Scan(&reason, &hasCause)
+	if err != nil {
+		return "", false, err
+	}
+	return reason, hasCause, nil
+}
+
+// maybeCauseRefresh decides whether this tick is worth a tailLog call. Every
+// bad pod is checked once per appHealthWatchInterval (3m), and tailLog is a
+// live kube API GetLogs call per bad pod per tick — paying that on every tick
+// for an app stuck crashlooping for days would be pure waste once the cause
+// is already known and has not changed. So the log is only actually read
+// when there is no cause on record yet, or the detected reason changed since
+// the last tick (e.g. CrashLoopBackOff flipping to OOMKilled genuinely needs
+// a fresh read). Both ClassifyCrashLog and ExtractCauseLine are cheap pure
+// string scans, so they always run together once the log is fetched — no
+// reason to split that cost further. Returns ("", "", "") when skipping, and
+// the caller (touchAppHealthAlertSeen) already treats "" as "keep whatever is
+// stored".
+func (w *appHealthWatcher) maybeCauseRefresh(ctx context.Context, alert appHealthAlert) (logExcerpt, cause, causeLine string) {
+	prevReason, hasCause, err := currentAlertCauseState(ctx, w.h.pool, alert.Namespace, alert.AppName)
+	if err == nil && hasCause && prevReason == alert.Reason {
+		return "", "", ""
+	}
+	logExcerpt = w.tailLog(ctx, alert)
+	cause = notify.ClassifyCrashLog(logExcerpt)
+	causeLine = notify.ExtractCauseLine(logExcerpt)
+	return logExcerpt, cause, causeLine
 }
 
 // maybeNotify sends the owner alert for one detected bad-state app, gated by
@@ -534,6 +586,15 @@ func touchAppHealthAlertSeen(ctx context.Context, pool *pgxpool.Pool, namespace,
 // still happening" signal never depends on whether an email actually goes
 // out this tick.
 //
+// The cause lookup (maybeCauseRefresh) also runs ahead of emailableReason
+// and the cooldown claim, and unconditionally: reasonError never emails
+// (emailableReason is false for it) and a cooldown-blocked crash never
+// reaches claimAppHealthAlertSlot, but the console must still be able to
+// show why either one is failing, not just that it is. Reusing
+// maybeCauseRefresh's return here — instead of a second tailLog call further
+// down for the email body — means an app that is both newly detected and
+// emailable pays for exactly one kube-API log read per tick, not two.
+//
 // The claim itself only ever meant "slot taken", never "email delivered" —
 // recordAppHealthAlertSend is what turns "did this app owner get notified"
 // into a query instead of a log grep. It runs after every Send call, success
@@ -545,7 +606,9 @@ func (w *appHealthWatcher) maybeNotify(ctx context.Context, projectID uuid.UUID,
 	if alert.Reason == reasonError {
 		detail = fmt.Sprintf("%s exit=%d", detail, alert.ExitCode)
 	}
-	touchAppHealthAlertSeen(ctx, w.h.pool, alert.Namespace, alert.AppName, alert.Reason, detail)
+
+	logExcerpt, cause, causeLine := w.maybeCauseRefresh(ctx, alert)
+	touchAppHealthAlertSeen(ctx, w.h.pool, alert.Namespace, alert.AppName, alert.Reason, detail, cause, causeLine)
 
 	if !emailableReason(alert.Reason) {
 		return
@@ -565,9 +628,14 @@ func (w *appHealthWatcher) maybeNotify(ctx context.Context, projectID uuid.UUID,
 		return
 	}
 
-	logExcerpt := w.tailLog(ctx, alert)
+	if logExcerpt == "" {
+		logExcerpt = w.tailLog(ctx, alert)
+	}
 	consoleLink := fmt.Sprintf("%s/projects/%s/apps/%s", w.h.cfg.PublicBaseURL, projectID, alert.AppName)
-	codeHint := notify.ClassifyCrashLog(logExcerpt)
+	codeHint := cause
+	if codeHint == "" {
+		codeHint = notify.ClassifyCrashLog(logExcerpt)
+	}
 	agentURL := consoleLink + "#agent"
 	subject, body := notify.ComposeAppAlert(alert.AppName, alert.Reason, alert.PodName, logExcerpt, consoleLink, codeHint, agentURL)
 	if source == alertSourceOperator {

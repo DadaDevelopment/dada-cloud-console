@@ -101,6 +101,21 @@ export function AppAlertsBanner({ alerts, logsHref, storageHref, projectId, envI
                 <p className="font-medium">{t(crashTextKey(alert.reason))}</p>
                 <span className="text-xs text-red-500 dark:text-red-400">{timeAgo(alert.detected_at)}</span>
               </div>
+              {(alert.cause || alert.cause_line) && (
+                <div className="mt-2 space-y-1.5">
+                  {alert.cause && <p className="text-xs">{t("apps.alerts.crash.cause.appCode")}</p>}
+                  {alert.cause_line && (
+                    <div className="overflow-x-auto rounded-md bg-red-100/70 dark:bg-red-950/60 px-2.5 py-1.5">
+                      <p className="text-[11px] font-semibold uppercase tracking-wide text-red-500 dark:text-red-400">
+                        {t("apps.alerts.crash.cause.line")}
+                      </p>
+                      <pre className="mt-0.5 whitespace-pre text-xs font-mono text-red-800 dark:text-red-200">
+                        {alert.cause_line}
+                      </pre>
+                    </div>
+                  )}
+                </div>
+              )}
               <div className="mt-2 flex flex-wrap items-center gap-3">
                 <button
                   type="button"
