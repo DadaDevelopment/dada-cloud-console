@@ -51,6 +51,8 @@ func TestReapExpiredPreviewEnvs(t *testing.T) {
 		t.Fatalf("ReapExpiredPreviewEnvs enqueued %d ops, want 1", len(ids))
 	}
 
+	assertReapAudited(t, ctx, pool, expiredID, ids[0])
+
 	assertHasPendingTeardown(t, ctx, pool, expiredID, true)
 	assertHasPendingTeardown(t, ctx, pool, freshID, false)
 	assertHasPendingTeardown(t, ctx, pool, nonEphemeralID, false)
@@ -79,6 +81,28 @@ func TestReapExpiredPreviewEnvs(t *testing.T) {
 	}
 	if len(ids2) != 0 {
 		t.Fatalf("second sweep enqueued %d ops, want 0", len(ids2))
+	}
+}
+
+// assertReapAudited pins the audit row for a TTL teardown. Expiry is the one
+// end-of-life a user never asks for, so without the row the environment just
+// stops existing and path analysis cannot tell that from a preview that was
+// never created at all.
+func assertReapAudited(t *testing.T, ctx context.Context, pool *pgxpool.Pool, envID, opID uuid.UUID) {
+	t.Helper()
+	var gotOp uuid.UUID
+	var trigger *string
+	if err := pool.QueryRow(ctx,
+		`SELECT operation_id, metadata->>'trigger' FROM audit_events
+		  WHERE action = 'DeletePreviewEnv' AND environment_id = $1`, envID,
+	).Scan(&gotOp, &trigger); err != nil {
+		t.Fatalf("the reaper enqueued a teardown but wrote no audit row for env %s: %v", envID, err)
+	}
+	if gotOp != opID {
+		t.Errorf("audit operation_id = %s, want %s", gotOp, opID)
+	}
+	if trigger == nil || *trigger != "ttl_expired" {
+		t.Errorf("metadata.trigger = %v, want ttl_expired — a TTL sweep must stay distinguishable from a user closing the PR", trigger)
 	}
 }
 

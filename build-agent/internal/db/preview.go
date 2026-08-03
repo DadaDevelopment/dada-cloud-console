@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/rs/zerolog/log"
 )
 
 // previewDBNameUnsafe / previewDatabaseName mirror gitops-agent's
@@ -540,6 +541,11 @@ func InsertCreatePreviewEnvOp(ctx context.Context, pool *pgxpool.Pool, actor, pr
 	if err != nil {
 		return uuid.Nil, fmt.Errorf("insert CreatePreviewEnv operation: %w", err)
 	}
+	recordPreviewAudit(ctx, pool, actor, projectID, envID, opID, "CreatePreviewEnv", namespace, map[string]any{
+		"pr_number":   prNumber,
+		"head_branch": headBranch,
+		"app_name":    appName,
+	})
 	return opID, nil
 }
 
@@ -564,7 +570,40 @@ func InsertDeletePreviewEnvOp(ctx context.Context, pool *pgxpool.Pool, actor, pr
 	if err != nil {
 		return uuid.Nil, fmt.Errorf("insert DeletePreviewEnv operation: %w", err)
 	}
+	recordPreviewAudit(ctx, pool, actor, projectID, envID, opID, "DeletePreviewEnv", namespace, map[string]any{
+		"trigger": "pr_event",
+	})
 	return opID, nil
+}
+
+// recordPreviewAudit writes the audit row for a preview environment's birth or
+// death. Both operations are enqueued from a GitHub webhook, so the actor is the
+// system user, but the row is still the only place the event is legible to path
+// analysis: opening a PR and closing it are things a person did, and without
+// these rows the whole preview feature was absent from the funnel (on prod, 17
+// CreatePreviewEnv operations in 30 days against zero audit rows).
+//
+// Best-effort by contract, like the deploy and build-notify audit rows: a
+// bookkeeping failure must never break the webhook path that creates the
+// preview.
+func recordPreviewAudit(ctx context.Context, pool *pgxpool.Pool, actor, projectID, envID, opID uuid.UUID, action, namespace string, meta map[string]any) {
+	if pool == nil {
+		return
+	}
+	payload, err := json.Marshal(meta)
+	if err != nil {
+		payload = []byte("{}")
+	}
+	var env any
+	if envID != uuid.Nil {
+		env = envID
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO audit_events (actor_id, project_id, environment_id, operation_id, action, resource_kind, resource_name, metadata)
+		VALUES ($1, $2, $3, $4, $5, 'Environment', $6, $7)
+	`, actor, projectID, env, opID, action, namespace, payload); err != nil {
+		log.Warn().Err(err).Str("namespace", namespace).Str("action", action).Msg("preview: audit row insert failed")
+	}
 }
 
 // EnvPreviewInfo returns whether an environment is ephemeral and, if so, the PR
