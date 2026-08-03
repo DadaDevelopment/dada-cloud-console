@@ -114,7 +114,7 @@ export default function ProjectOverviewPage() {
   ];
   const checklistDone = checklist.filter((i) => i.done).length;
   const checklistComplete = checklistDone === checklist.length;
-  const showTemplates = !c || c.apps === 0;
+  const isEmpty = !c || (c.apps === 0 && c.dbs === 0);
 
   return (
     <div>
@@ -135,7 +135,7 @@ export default function ProjectOverviewPage() {
         </Link>
       </div>
 
-      {c && (
+      {c && !isEmpty && (
         <div className="mb-8 flex flex-wrap items-center gap-2">
           {c.apps > 0 ? (
             <StateChip tone={c.appsReady === c.apps ? "ready" : "needs-action"} dot>
@@ -158,16 +158,16 @@ export default function ProjectOverviewPage() {
 
       {projectApps.length > 0 && <ProjectAppHealthList apps={projectApps} projectId={projectId} />}
 
-      <CostCard projectId={projectId} />
+      {!isEmpty && <CostCard projectId={projectId} />}
 
-      {showTemplates && (
+      {isEmpty && (
         <div data-onboarding="first-deploy" className="mb-8 grid gap-4 lg:grid-cols-2">
           <TemplateDeployCards projectId={projectId} envId={envId} hero />
           <UploadDeployCard projectId={projectId} envId={envId} hero />
         </div>
       )}
 
-      {!checklistComplete && (
+      {!isEmpty && !checklistComplete && (
         <div className="mb-8 rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-5 shadow-sm">
           <div className="mb-3 flex items-center justify-between">
             <h2 className="text-sm font-semibold text-gray-900 dark:text-gray-100">{t("overview.checklist.title")}</h2>
@@ -210,113 +210,42 @@ export default function ProjectOverviewPage() {
         </div>
       )}
 
-      <div className="mb-8 grid gap-4 sm:grid-cols-3">
-        <ActionCard
-          icon="apps"
-          tone="blue"
-          title={t("overview.card.app.title")}
-          hint={t("overview.card.app.hint")}
-          cta={t("overview.card.app.cta")}
-          href={`/projects/${projectId}/git/import`}
-        />
-        <ActionCard
-          icon="databases"
-          tone="green"
-          title={t("overview.card.db.title")}
-          hint={t("overview.card.db.hint")}
-          cta={t("overview.card.db.cta")}
-          href={`/projects/${projectId}/databases`}
-        />
-        <ActionCard
-          icon="domains"
-          tone="indigo"
-          title={t("overview.card.domain.title")}
-          hint={t("overview.card.domain.hint")}
-          cta={t("overview.card.domain.cta")}
-          href={`/projects/${projectId}/domains`}
-        />
-      </div>
-
       <ProjectBoxesPanel projectId={projectId} />
 
-      <div className="mb-8">
-        <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">{t("overview.section.more")}</h2>
-        <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-          <SecondaryLink icon="ai" label={t("nav.ai")} hint={t("overview.secondary.ai.hint")} href={`/projects/${projectId}/ai`} />
-          <SecondaryLink icon="monitoring" label={t("nav.monitoring")} hint={t("overview.secondary.monitoring.hint")} href={`/projects/${projectId}/monitoring`} />
-          <SecondaryLink icon="storage" label={t("nav.storage")} hint={t("overview.secondary.storage.hint")} href={`/projects/${projectId}/storage`} />
-          <SecondaryLink icon="models" label={t("nav.models")} hint={t("overview.secondary.models.hint")} href={`/projects/${projectId}/models`} />
-          <SecondaryLink icon="app-servers" label={t("nav.app-servers")} hint={t("overview.secondary.appServers.hint")} href={`/projects/${projectId}/app-servers`} />
-          <SecondaryLink icon="git" label={t("nav.git")} hint={t("overview.secondary.git.hint")} href={`/projects/${projectId}/git`} />
-          <SecondaryLink icon="billing" label={t("nav.billing")} hint={t("overview.secondary.billing.hint")} href={`/projects/${projectId}/billing`} />
+      {!isEmpty && (
+        <div className="mb-8 flex flex-wrap items-center gap-x-5 gap-y-2 border-t border-gray-200 pt-4 dark:border-gray-800">
+          <SecondaryLink icon="monitoring" label={t("nav.monitoring")} href={`/projects/${projectId}/monitoring`} />
+          <SecondaryLink icon="git" label={t("nav.git")} href={`/projects/${projectId}/git`} />
+          <SecondaryLink icon="billing" label={t("nav.billing")} href={`/projects/${projectId}/billing`} />
         </div>
-      </div>
+      )}
 
     </div>
   );
 }
 
-const toneClasses: Record<string, string> = {
-  blue: "bg-blue-100 dark:bg-blue-950/40 text-blue-600 dark:text-blue-400",
-  green: "bg-green-100 dark:bg-green-950/40 text-green-600 dark:text-green-400",
-  indigo: "bg-indigo-100 dark:bg-indigo-950/40 text-indigo-600 dark:text-indigo-400",
-};
-
-function ActionCard({
-  icon,
-  tone,
-  title,
-  hint,
-  cta,
-  href,
-}: {
-  icon: IconName;
-  tone: keyof typeof toneClasses;
-  title: string;
-  hint: string;
-  cta: string;
-  href: string;
-}) {
-  return (
-    <div className="flex flex-col rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-5 shadow-sm">
-      <div className={`mb-4 flex h-10 w-10 items-center justify-center rounded-lg ${toneClasses[tone]}`}>
-        <ResourceIcon name={icon} className="h-5 w-5" />
-      </div>
-      <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">{title}</p>
-      <p className="mt-1 flex-1 text-sm text-gray-500 dark:text-gray-400">{hint}</p>
-      <Link
-        href={href}
-        className="mt-4 inline-flex items-center justify-center gap-1.5 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700"
-      >
-        {cta}
-      </Link>
-    </div>
-  );
-}
-
+/**
+ * Compact link to a surface that holds no sidebar slot (monitoring, builds,
+ * billing). Deliberately a text link and not a card: the overview used to
+ * repeat every destination as a bordered CTA card, which restated the sidebar
+ * and buried the one action that matters on an empty project.
+ */
 function SecondaryLink({
   icon,
   label,
-  hint,
   href,
 }: {
   icon: IconName;
   label: string;
-  hint: string;
   href: string;
 }) {
   return (
     <Link
       href={href}
-      className="group flex items-center gap-3 rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 px-4 py-3 shadow-sm transition-all hover:border-blue-200 hover:shadow-md"
+      className="inline-flex items-center gap-2 text-sm text-gray-500 transition-colors hover:text-blue-600 dark:text-gray-400 dark:hover:text-blue-400"
     >
-      <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400 transition-colors group-hover:bg-blue-600 group-hover:text-white">
-        <ResourceIcon name={icon} className="h-4 w-4" />
-      </div>
-      <div className="min-w-0">
-        <p className="text-sm font-medium text-gray-900 dark:text-gray-100">{label}</p>
-        <p className="truncate text-xs text-gray-400 dark:text-gray-500">{hint}</p>
-      </div>
+      <ResourceIcon name={icon} className="h-4 w-4" />
+      {label}
     </Link>
   );
 }

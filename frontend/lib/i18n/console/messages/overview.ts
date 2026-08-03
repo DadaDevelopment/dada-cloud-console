@@ -22,27 +22,6 @@ export const overview: Messages = {
   "overview.checklist.domain": { ru: "Подключите домен и HTTPS", en: "Connect a domain and HTTPS" },
   "overview.checklist.go": { ru: "Перейти →", en: "Go →" },
 
-  "overview.card.app.title": { ru: "Развернуть приложение", en: "Deploy an app" },
-  "overview.card.app.hint": {
-    ru: "Подключите репозиторий GitHub — сборка и деплой без YAML.",
-    en: "Connect a GitHub repository — build and deploy without YAML.",
-  },
-  "overview.card.app.cta": { ru: "Подключить GitHub", en: "Connect GitHub" },
-
-  "overview.card.db.title": { ru: "Добавить базу данных", en: "Add a database" },
-  "overview.card.db.hint": {
-    ru: "Создайте Postgres и подключите строку соединения к приложению.",
-    en: "Create Postgres and wire the connection string to your app.",
-  },
-  "overview.card.db.cta": { ru: "Создать Postgres", en: "Create Postgres" },
-
-  "overview.card.domain.title": { ru: "Добавить домен", en: "Add a domain" },
-  "overview.card.domain.hint": {
-    ru: "Свой домен с автоматическим выпуском HTTPS-сертификата.",
-    en: "Your own domain with automatic HTTPS certificate issuance.",
-  },
-  "overview.card.domain.cta": { ru: "Добавить домен", en: "Add domain" },
-
   "overview.templates.title": { ru: "Разверните шаблон — GitHub не нужен", en: "Deploy a template — no GitHub needed" },
   "overview.templates.hint": {
     ru: "Готовое приложение из нашего репозитория. Один клик — сборка и запуск, без подключения аккаунта.",
@@ -74,18 +53,6 @@ export const overview: Messages = {
     en: "A static HTML and CSS site.",
   },
   "overview.templates.cta": { ru: "Развернуть", en: "Deploy" },
-
-  "overview.section.more": { ru: "Ещё в проекте", en: "More in project" },
-
-  "overview.secondary.ai.hint": { ru: "OpenAI-эндпоинт без VPN", en: "OpenAI endpoint, no VPN" },
-  "overview.secondary.boxes.hint": { ru: "Root-машина за секунды", en: "A root machine in seconds" },
-  "overview.secondary.monitoring.hint": { ru: "Логи и метрики", en: "Logs and metrics" },
-  "overview.secondary.operations.hint": { ru: "История деплоев", en: "Deploy history" },
-  "overview.secondary.storage.hint": { ru: "S3-совместимые бакеты", en: "S3-compatible buckets" },
-  "overview.secondary.models.hint": { ru: "Инференс KServe", en: "KServe inference" },
-  "overview.secondary.appServers.hint": { ru: "VM-хосты", en: "VM hosts" },
-  "overview.secondary.git.hint": { ru: "Репозитории и билды", en: "Repositories and builds" },
-  "overview.secondary.billing.hint": { ru: "Тарифный план и квоты", en: "Plan and quotas" },
 
   "overview.boxes.col.name": { ru: "Имя", en: "Name" },
   "overview.boxes.col.status": { ru: "Статус", en: "Status" },
