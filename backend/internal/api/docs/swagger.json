@@ -3078,7 +3078,7 @@
                         "BearerAuth": []
                     }
                 ],
-                "description": "Returns the project's AI Gateway calls, tokens and cost over the trailing window, broken down by model and by day. Any project member may read it.",
+                "description": "Returns the project's AI Gateway calls, tokens and cost over the trailing window, broken down by model, by day and by app. The app breakdown covers only calls made with a ServiceIdentity token, so its sum is at most total_cost; the difference is spend that no single app can be charged for (console chat, project-scoped keys).",
                 "produces": [
                     "application/json"
                 ],
@@ -9527,6 +9527,92 @@
                         }
                     }
                 }
+            },
+            "patch": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Changes the identity's scopes and/or its monthly AI spend ceiling in USD, leaving the live token untouched. Omit a field to leave it as it is; send ai_monthly_limit_usd as null to remove the ceiling. Over the ceiling, the AI Gateway refuses the app's calls until the next calendar month.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "service-identity"
+                ],
+                "summary": "Update an app's service identity scopes and AI budget",
+                "operationId": "updateAppServiceIdentity",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Project UUID",
+                        "name": "projectId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Environment UUID",
+                        "name": "envId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "App name",
+                        "name": "appName",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Fields to change",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.updateIdentityRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.identityView"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
             }
         },
         "/projects/{projectId}/environments/{envId}/apps/{appName}/image": {
@@ -15906,7 +15992,7 @@
                         "BearerAuth": []
                     }
                 ],
-                "description": "Reveals the S3 endpoint, access key and secret key for a bucket by reading its Crossplane connection secret. Requires reveal=true and write access; every reveal is audited. Returns 404 while the bucket is still provisioning (no secret yet) and 503 when in-cluster credential access is not configured.",
+                "description": "Reveals the S3 endpoint, access key and secret key for a bucket by reading its Crossplane connection secret. Requires reveal=true and write access; every reveal is audited. Returns 404 while the bucket is still provisioning (no secret yet), 409 with the provider's own error text when provisioning has failed outright, and 503 when in-cluster credential access is not configured.",
                 "produces": [
                     "application/json"
                 ],
@@ -17513,6 +17599,9 @@
                 "decision": {
                     "type": "string"
                 },
+                "model": {
+                    "type": "string"
+                },
                 "trace": {
                     "type": "boolean"
                 }
@@ -17577,6 +17666,9 @@
                     "type": "string"
                 },
                 "message": {
+                    "type": "string"
+                },
+                "model": {
                     "type": "string"
                 },
                 "projectId": {
@@ -17734,6 +17826,9 @@
                     "type": "string"
                 },
                 "git_repo_id": {
+                    "type": "string"
+                },
+                "head_sha": {
                     "type": "string"
                 },
                 "id": {
@@ -18474,6 +18569,12 @@
         "internal_api.identityView": {
             "type": "object",
             "properties": {
+                "ai_month_spend_usd": {
+                    "type": "number"
+                },
+                "ai_monthly_limit_usd": {
+                    "type": "number"
+                },
                 "app_name": {
                     "type": "string"
                 },
@@ -18867,6 +18968,23 @@
             "type": "object",
             "properties": {
                 "volumes": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                }
+            }
+        },
+        "internal_api.updateIdentityRequest": {
+            "type": "object",
+            "properties": {
+                "ai_monthly_limit_usd": {
+                    "type": "array",
+                    "items": {
+                        "type": "integer"
+                    }
+                },
+                "scopes": {
                     "type": "array",
                     "items": {
                         "type": "string"
