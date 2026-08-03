@@ -344,6 +344,11 @@ type aiKeyIntrospectRequest struct {
 // forwards whatever it gets onto the usage row (ADR-021 phase 4). An absent
 // field there means "no identity paid for this", which is the truth for a
 // project-scoped key.
+// reason is set only alongside valid=false, and only when the rejection is
+// something other than "this token does not resolve". A gateway that does not
+// know the field still refuses the call, so the enforcement never depends on
+// both sides shipping together -- the field only decides whether the operator
+// is told why.
 type aiKeyIntrospectResponse struct {
 	Valid       bool   `json:"valid"`
 	ProjectID   string `json:"project_id,omitempty"`
@@ -351,7 +356,14 @@ type aiKeyIntrospectResponse struct {
 	Scopes      string `json:"scopes,omitempty"`
 	PrincipalID string `json:"principal_id,omitempty"`
 	IdentityID  string `json:"identity_id,omitempty"`
+	Reason      string `json:"reason,omitempty"`
 }
+
+// aiIntrospectReasonBudget is the rejection reason for an identity that has
+// spent its monthly ceiling. The value is part of the gateway contract: the
+// plugin matches on it to turn the refusal into a message an app developer can
+// act on instead of "invalid platform api key".
+const aiIntrospectReasonBudget = "ai_budget_exceeded"
 
 // AIIntrospectKey resolves a console-minted AI Gateway key to its project.
 // Server-to-server only: the gateway plugin posts the raw key in the body over

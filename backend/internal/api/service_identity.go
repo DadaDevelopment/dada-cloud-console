@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -93,6 +94,7 @@ type resolvedIdentity struct {
 	OrgID       string
 	Scopes      string
 	PrincipalID *uuid.UUID
+	AIBudgetUSD *float64
 }
 
 // resolveIdentityToken looks a plaintext token up by hash and returns the live
@@ -104,7 +106,8 @@ func resolveIdentityToken(ctx context.Context, q pgxQuerier, plaintext string) (
 	var appName *string
 	var orgID *string
 	err := q.QueryRow(ctx,
-		`SELECT t.id, i.id, i.app_name, i.project_id, i.environment_id, i.scopes, i.created_by, p.org_id
+		`SELECT t.id, i.id, i.app_name, i.project_id, i.environment_id, i.scopes, i.created_by, p.org_id,
+		        i.ai_monthly_limit_usd::float8
 		   FROM service_identity_tokens t
 		   JOIN service_identities i ON i.id = t.identity_id
 		   LEFT JOIN projects p ON p.id = i.project_id
@@ -112,7 +115,7 @@ func resolveIdentityToken(ctx context.Context, q pgxQuerier, plaintext string) (
 		    AND t.revoked_at IS NULL
 		    AND i.revoked_at IS NULL`,
 		hashIdentityToken(plaintext),
-	).Scan(&out.TokenID, &out.IdentityID, &appName, &out.ProjectID, &out.EnvID, &out.Scopes, &out.PrincipalID, &orgID)
+	).Scan(&out.TokenID, &out.IdentityID, &appName, &out.ProjectID, &out.EnvID, &out.Scopes, &out.PrincipalID, &orgID, &out.AIBudgetUSD)
 	if err != nil {
 		return resolvedIdentity{}, err
 	}
@@ -214,6 +217,27 @@ func identityToIntrospectResponse(ident resolvedIdentity) identityIntrospectResp
 	return resp
 }
 
+// identityMonthSpendUSD is what the identity has cost so far this calendar
+// month, from the same ledger the project page reads. It is only called for an
+// identity that actually carries a ceiling, so an app without a budget pays no
+// query for the feature at all.
+//
+// The window is calendar-month in the database's timezone rather than a rolling
+// 30 days: a ceiling a human sets is a ceiling a human has to reason about, and
+// "resets on the 1st" is checkable against an invoice in a way that a sliding
+// window is not.
+func (h *Handler) identityMonthSpendUSD(ctx context.Context, identityID uuid.UUID) (float64, error) {
+	var spent float64
+	err := h.pool.QueryRow(ctx,
+		`SELECT COALESCE(SUM(cost_usd), 0)::float8
+		   FROM agent_token_usage
+		  WHERE identity_id = $1
+		    AND created_at >= date_trunc('month', now())`,
+		identityID,
+	).Scan(&spent)
+	return spent, err
+}
+
 // introspectIdentityAsAIKey answers an AI Gateway introspection with a
 // ServiceIdentity token, in the shape the gateway plugin already parses. This
 // is what lets an app move off its pasted project-scoped key without the
@@ -224,6 +248,16 @@ func identityToIntrospectResponse(ident resolvedIdentity) identityIntrospectResp
 // identity (a service outside the cluster) has no AI answer to give -- and
 // answering with a default project is exactly the isolation break this design
 // exists to prevent.
+//
+// An identity over its monthly ceiling resolves to invalid too, but carries a
+// reason so the rejection is readable at the gateway instead of arriving as
+// "bad key" -- an over-budget app and a wrong token are the same HTTP answer
+// and must not be the same message to whoever is debugging it. The check is a
+// soft ceiling by construction and overshoots by design: usage rows are written
+// after the response is already out, and the gateway caches introspection for
+// up to a minute, so the guard stops the next minute of traffic rather than the
+// next cent. Making it exact would mean reserving spend before the call, which
+// is a different (and much more expensive) feature than a runaway-cost guard.
 func (h *Handler) introspectIdentityAsAIKey(c *gin.Context, token string) {
 	ident, err := resolveIdentityToken(c.Request.Context(), h.pool, token)
 	if err == pgx.ErrNoRows {
@@ -240,6 +274,18 @@ func (h *Handler) introspectIdentityAsAIKey(c *gin.Context, token string) {
 	}
 
 	h.touchIdentityToken(c.Request.Context(), ident.TokenID)
+
+	if ident.AIBudgetUSD != nil {
+		spent, err := h.identityMonthSpendUSD(c.Request.Context(), ident.IdentityID)
+		if err != nil {
+			respondError(c, http.StatusInternalServerError, "identity budget: "+err.Error())
+			return
+		}
+		if spent >= *ident.AIBudgetUSD {
+			c.JSON(http.StatusOK, aiKeyIntrospectResponse{Valid: false, Reason: aiIntrospectReasonBudget})
+			return
+		}
+	}
 
 	resp := aiKeyIntrospectResponse{
 		Valid:      true,
@@ -311,6 +357,8 @@ type identityView struct {
 	TokenPrefix string     `json:"token_prefix"`
 	CreatedAt   time.Time  `json:"created_at"`
 	LastUsedAt  *time.Time `json:"last_used_at,omitempty"`
+	AIBudgetUSD *float64   `json:"ai_monthly_limit_usd,omitempty"`
+	AISpentUSD  float64    `json:"ai_month_spend_usd"`
 }
 
 // CreateAppServiceIdentity declares (or rotates) an app's platform identity and
@@ -535,7 +583,11 @@ func (h *Handler) GetAppServiceIdentity(c *gin.Context) {
 	var tokenPrefix *string
 	var lastUsed *time.Time
 	err = h.pool.QueryRow(c.Request.Context(),
-		`SELECT i.id, i.app_name, i.scopes, i.created_at, t.token_prefix, t.last_used_at
+		`SELECT i.id, i.app_name, i.scopes, i.created_at, t.token_prefix, t.last_used_at,
+		        i.ai_monthly_limit_usd::float8,
+		        COALESCE((SELECT SUM(u.cost_usd) FROM agent_token_usage u
+		                   WHERE u.identity_id = i.id
+		                     AND u.created_at >= date_trunc('month', now())), 0)::float8
 		   FROM service_identities i
 		   LEFT JOIN service_identity_tokens t
 		     ON t.identity_id = i.id AND t.revoked_at IS NULL
@@ -543,7 +595,7 @@ func (h *Handler) GetAppServiceIdentity(c *gin.Context) {
 		  ORDER BY t.created_at DESC NULLS LAST
 		  LIMIT 1`,
 		appName, envID,
-	).Scan(&out.IdentityID, &out.AppName, &out.Scopes, &out.CreatedAt, &tokenPrefix, &lastUsed)
+	).Scan(&out.IdentityID, &out.AppName, &out.Scopes, &out.CreatedAt, &tokenPrefix, &lastUsed, &out.AIBudgetUSD, &out.AISpentUSD)
 	if err == pgx.ErrNoRows {
 		respondNotFound(c)
 		return
@@ -557,4 +609,139 @@ func (h *Handler) GetAppServiceIdentity(c *gin.Context) {
 	}
 	out.LastUsedAt = lastUsed
 	c.JSON(http.StatusOK, out)
+}
+
+// updateIdentityRequest is the body of the settings route. ai_monthly_limit_usd
+// is raw on purpose: absent, explicit null and a number are three different
+// intents (leave alone, remove the ceiling, set it), and a *float64 collapses
+// the first two into "clear it" -- which would drop an app's budget every time
+// somebody edited only its scopes.
+type updateIdentityRequest struct {
+	Scopes      []string        `json:"scopes"`
+	AIBudgetUSD json.RawMessage `json:"ai_monthly_limit_usd"`
+}
+
+// UpdateAppServiceIdentity changes what an identity may do and what it may
+// spend, without minting anything. Kept apart from the POST route because
+// rotation is destructive to every consumer holding the current token, and
+// setting a budget must not cost an app its credential.
+//
+// @ID          updateAppServiceIdentity
+// @Summary     Update an app's service identity scopes and AI budget
+// @Description Changes the identity's scopes and/or its monthly AI spend ceiling in USD, leaving the live token untouched. Omit a field to leave it as it is; send ai_monthly_limit_usd as null to remove the ceiling. Over the ceiling, the AI Gateway refuses the app's calls until the next calendar month.
+// @Tags        service-identity
+// @Accept      json
+// @Produce     json
+// @Security    BearerAuth
+// @Param       projectId path     string true "Project UUID"
+// @Param       envId     path     string true "Environment UUID"
+// @Param       appName   path     string true "App name"
+// @Param       body      body     updateIdentityRequest true "Fields to change"
+// @Success     200       {object} identityView
+// @Failure     400       {object} map[string]string
+// @Failure     403       {object} map[string]string
+// @Failure     404       {object} map[string]string
+// @Router      /projects/{projectId}/environments/{envId}/apps/{appName}/identity [patch]
+func (h *Handler) UpdateAppServiceIdentity(c *gin.Context) {
+	claims, ok := auth.GetClaims(c)
+	if !ok {
+		respondUnauthorized(c)
+		return
+	}
+	projectID, err := uuid.Parse(c.Param("projectId"))
+	if err != nil {
+		respondNotFound(c)
+		return
+	}
+	envID, err := uuid.Parse(c.Param("envId"))
+	if err != nil {
+		respondNotFound(c)
+		return
+	}
+	appName := c.Param("appName")
+
+	var req updateIdentityRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		respondError(c, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	scopes := ""
+	if len(req.Scopes) > 0 {
+		scopes, err = normalizeIdentityScopes(req.Scopes)
+		if err != nil {
+			respondError(c, http.StatusBadRequest, err.Error())
+			return
+		}
+	}
+
+	budgetGiven := len(req.AIBudgetUSD) > 0
+	var budget *float64
+	if budgetGiven && string(req.AIBudgetUSD) != "null" {
+		var v float64
+		if err := json.Unmarshal(req.AIBudgetUSD, &v); err != nil {
+			respondError(c, http.StatusBadRequest, "ai_monthly_limit_usd must be a number or null")
+			return
+		}
+		if v < 0 {
+			respondError(c, http.StatusBadRequest, "ai_monthly_limit_usd must not be negative")
+			return
+		}
+		budget = &v
+	}
+	if scopes == "" && !budgetGiven {
+		respondError(c, http.StatusBadRequest, "nothing to update")
+		return
+	}
+
+	role, err := h.effectiveRole(c.Request.Context(), claims, projectID)
+	if err == pgx.ErrNoRows {
+		respondNotFound(c)
+		return
+	}
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, "failed to check project membership")
+		return
+	}
+	if !canWrite(role) {
+		respondForbidden(c)
+		return
+	}
+
+	ctx := c.Request.Context()
+	var identityID uuid.UUID
+	var newScopes string
+	var newBudget *float64
+	err = h.pool.QueryRow(ctx,
+		`UPDATE service_identities
+		    SET scopes = COALESCE(NULLIF($1, ''), scopes),
+		        ai_monthly_limit_usd = CASE WHEN $2 THEN $3::numeric ELSE ai_monthly_limit_usd END
+		  WHERE app_name = $4 AND environment_id = $5 AND revoked_at IS NULL
+		  RETURNING id, scopes, ai_monthly_limit_usd::float8`,
+		scopes, budgetGiven, budget, appName, envID,
+	).Scan(&identityID, &newScopes, &newBudget)
+	if err == pgx.ErrNoRows {
+		respondNotFound(c)
+		return
+	}
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, "update identity: "+err.Error())
+		return
+	}
+
+	meta := map[string]any{"identity_id": identityID, "scopes": newScopes}
+	if budgetGiven {
+		meta["ai_monthly_limit_usd"] = newBudget
+	}
+	h.recordAudit(ctx, claims.UserID, auditEntry{
+		ProjectID:     projectID,
+		EnvironmentID: envID,
+		Action:        "UpdateAppServiceIdentity",
+		ResourceKind:  "ServiceIdentity",
+		ResourceName:  appName,
+		Outcome:       auditOutcomeSuccess,
+		Metadata:      meta,
+	})
+
+	h.GetAppServiceIdentity(c)
 }
