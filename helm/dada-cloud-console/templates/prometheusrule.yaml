@@ -51,6 +51,10 @@ spec:
         - alert: DadaMetricsCollectorFailing
           expr: increase(dada_metrics_collect_errors_total[15m]) > 3
           for: 5m
+          # increase() over a 15m window falls back under the threshold as soon as the
+          # errors stop arriving, then crosses again on the next batch: 4 episodes in
+          # 3.4h. The collector is equally broken across the gaps.
+          keep_firing_for: 30m
           labels:
             severity: warning
           annotations:
@@ -93,6 +97,10 @@ spec:
         - alert: BoxPoolExhausted
           expr: dada_box_pool_available == 0
           for: 5m
+          # dada_box_pool_available oscillates 0 -> 1 -> 0 while the warmer refills:
+          # measured 4 firing episodes in 1.8h of total firing time, i.e. a fresh
+          # alert lifecycle per refill attempt rather than one "pool is starving".
+          keep_firing_for: 30m
           labels:
             severity: warning
           annotations:
