@@ -33,6 +33,7 @@ const (
 	lockKeyCostWarmSlow      int64 = 0x64616461_0006
 	lockKeyAppAutoscaleWatch int64 = 0x64616461_0007
 	lockKeyIdentityDelivery  int64 = 0x64616461_0008
+	lockKeyDemoAppReap       int64 = 0x64616461_0009
 )
 
 // runWithAdvisoryLock executes fn while holding the session-scoped Postgres

@@ -419,6 +419,7 @@ func SetupRouter(pool *pgxpool.Pool, cfg *config.Config) *gin.Engine {
 		api.GET("/projects/:projectId/environments/:envId/apps/:appName/identity", h.GetAppServiceIdentity)
 		api.PATCH("/projects/:projectId/environments/:envId/apps/:appName/identity", h.UpdateAppServiceIdentity)
 		api.POST("/projects/:projectId/environments/:envId/apps/:appName/adopt", h.AdoptApp)
+		api.POST("/projects/:projectId/environments/:envId/apps/:appName/keep", h.KeepDemoApp)
 		api.POST("/projects/:projectId/environments/:envId/apps/:appName/values-token", h.GetValuesToken)
 		api.GET("/projects/:projectId/environments/:envId/apps/:appName/delete-impact", h.DeleteAppImpact)
 		api.DELETE("/projects/:projectId/environments/:envId/apps/:appName", h.DeleteApp)

@@ -552,6 +552,13 @@ type Config struct {
 	// production adapter, which runs a box as a Pod in the existing cluster. A
 	// values file must not be able to switch the local adapter on while reading as
 	// though it switched on "the box runtime".
+	// DemoAppTTLHours is how long an app deployed from a platform starter template
+	// survives before the reaper deletes it. Read with getEnvIntAllowZero because
+	// 0 is a real setting that turns the reaper off, and the whole point of the
+	// field is that an operator can stop automatic deletion of user-visible apps
+	// without a redeploy.
+	DemoAppTTLHours int // DEMO_APP_TTL_HOURS (default 24; 0 disables the reaper)
+
 	BoxLocalRoot string // BOX_LOCAL_ROOT (empty = box runtime disabled)
 	// BoxWarmPoolSize is the number of parked bodies the fleet keeps hot. Zero is
 	// an EXPLICIT, honourable setting rather than an unset one: it turns the pool
@@ -777,6 +784,8 @@ func Load() (*Config, error) {
 		YooKassaTaxSystemCode:       getEnvInt("YOOKASSA_TAX_SYSTEM_CODE", 0),
 		YooKassaPartnerClientID:     getEnv("YOOKASSA_PARTNER_CLIENT_ID", ""),
 		YooKassaPartnerClientSecret: getEnv("YOOKASSA_PARTNER_CLIENT_SECRET", ""),
+
+		DemoAppTTLHours: getEnvIntAllowZero("DEMO_APP_TTL_HOURS", 24),
 
 		BoxLocalRoot:             getEnv("BOX_LOCAL_ROOT", ""),
 		BoxWarmPoolSize:          getEnvIntAllowZero("BOX_WARM_POOL_SIZE", 2),

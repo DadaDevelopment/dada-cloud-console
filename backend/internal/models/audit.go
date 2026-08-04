@@ -22,6 +22,11 @@ type AuditEvent struct {
 }
 
 // ResourceSnapshot caches Kubernetes / Argo CD resource status for fast UI reads.
+//
+// DemoExpiresAt is not a snapshot column: it is joined in from git_repos and is
+// non-nil only for an app deployed from a platform starter template, carrying
+// the moment the reaper deletes it unless the user claims it first. Ordinary
+// apps omit the field entirely.
 type ResourceSnapshot struct {
 	ID            uuid.UUID       `json:"id"             db:"id"`
 	ProjectID     uuid.UUID       `json:"project_id"     db:"project_id"`
@@ -32,6 +37,7 @@ type ResourceSnapshot struct {
 	SummaryJSON   json.RawMessage `json:"summary_json"   db:"summary_json"`
 	LastSyncedAt  time.Time       `json:"last_synced_at" db:"last_synced_at"`
 	Alerts        []AppAlert      `json:"alerts,omitempty" db:"-"`
+	DemoExpiresAt *time.Time      `json:"demo_expires_at,omitempty" db:"-"`
 }
 
 // AppAlert is one unresolved-within-cooldown alert surfaced to the console for

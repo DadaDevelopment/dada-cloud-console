@@ -10,8 +10,8 @@ export const onboarding: Messages = {
     en: "Your first deploy is one click away",
   },
   "onboarding.firstDeploy.body": {
-    ru: "Выбери шаблон — мы соберём и запустим его примерно за две минуты, GitHub подключать не нужно. Свой код можно просто загрузить папкой. Домен и HTTPS выдаются сразу.",
-    en: "Pick a starter — we build and run it in about two minutes, no GitHub connection needed. Your own code can simply be uploaded as a folder. Domain and HTTPS come out of the box.",
+    ru: "Подключи репозиторий — соберём и выкатим его примерно за две минуты, дальше каждый push деплоится сам. Нет гита — загрузи архив. Домен и HTTPS выдаются сразу.",
+    en: "Connect a repository — we build and ship it in about two minutes, and every later push deploys itself. No git? Upload an archive. Domain and HTTPS come out of the box.",
   },
 
   "onboarding.aiRouting.title": {

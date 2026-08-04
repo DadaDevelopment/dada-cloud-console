@@ -1,58 +1,6 @@
 basePath: /api/v1
 definitions:
-  github_com_dada-tuda_console_backend_internal_billing_pricing.Need:
-    properties:
-      apps:
-        type: integer
-      databases:
-        type: integer
-      domains:
-        type: integer
-      members:
-        type: integer
-      storageGB:
-        type: integer
-    type: object
-  github_com_dada-tuda_console_backend_internal_models.AIModelAuthMode:
-    enum:
-    - apikey
-    - jwt
-    - public
-    type: string
-    x-enum-varnames:
-    - AIModelAuthAPIKey
-    - AIModelAuthJWT
-    - AIModelAuthPublic
-  github_com_dada-tuda_console_backend_internal_models.AIModelSource:
-    enum:
-    - mlflow
-    - s3
-    - custom
-    type: string
-    x-enum-varnames:
-    - AIModelSourceMLflow
-    - AIModelSourceS3
-    - AIModelSourceCustom
-  github_com_dada-tuda_console_backend_internal_models.ImportServiceSpec:
-    properties:
-      container_name:
-        type: string
-      image:
-        type: string
-      include:
-        type: boolean
-      ports:
-        items:
-          type: string
-        type: array
-      service_name:
-        type: string
-      volumes:
-        items:
-          type: string
-        type: array
-    type: object
-  internal_api.DeleteImpact:
+  api.DeleteImpact:
     properties:
       app:
         type: string
@@ -62,12 +10,12 @@ definitions:
         type: boolean
       items:
         items:
-          $ref: '#/definitions/internal_api.ImpactItem'
+          $ref: '#/definitions/api.ImpactItem'
         type: array
       namespace:
         type: string
     type: object
-  internal_api.ImpactItem:
+  api.ImpactItem:
     properties:
       group:
         type: string
@@ -78,7 +26,7 @@ definitions:
       source:
         type: string
     type: object
-  internal_api.MoveBlockerItem:
+  api.MoveBlockerItem:
     properties:
       kind:
         type: string
@@ -87,19 +35,19 @@ definitions:
       reason:
         type: string
     type: object
-  internal_api.MoveImpact:
+  api.MoveImpact:
     properties:
       app:
         type: string
       blockers:
         items:
-          $ref: '#/definitions/internal_api.MoveBlockerItem'
+          $ref: '#/definitions/api.MoveBlockerItem'
         type: array
       can_move:
         type: boolean
       movable:
         items:
-          $ref: '#/definitions/internal_api.MoveMovableItem'
+          $ref: '#/definitions/api.MoveMovableItem'
         type: array
       name_collision:
         type: boolean
@@ -112,7 +60,7 @@ definitions:
       target_project:
         type: string
     type: object
-  internal_api.MoveMovableItem:
+  api.MoveMovableItem:
     properties:
       group:
         type: string
@@ -121,19 +69,19 @@ definitions:
       name:
         type: string
     type: object
-  internal_api.addDomainAuthorizationRequest:
+  api.addDomainAuthorizationRequest:
     properties:
       apex_domain:
         type: string
     type: object
-  internal_api.agentChatClearContextRequest:
+  api.agentChatClearContextRequest:
     properties:
       envId:
         type: string
       projectId:
         type: string
     type: object
-  internal_api.agentChatConfirmRequest:
+  api.agentChatConfirmRequest:
     properties:
       action_id:
         type: string
@@ -144,7 +92,7 @@ definitions:
       trace:
         type: boolean
     type: object
-  internal_api.agentChatHistoryMessage:
+  api.agentChatHistoryMessage:
     properties:
       content:
         type: string
@@ -153,16 +101,16 @@ definitions:
       toolName:
         type: string
     type: object
-  internal_api.agentChatHistoryResponse:
+  api.agentChatHistoryResponse:
     properties:
       messages:
         items:
-          $ref: '#/definitions/internal_api.agentChatHistoryMessage'
+          $ref: '#/definitions/api.agentChatHistoryMessage'
         type: array
       pendingAction:
-        $ref: '#/definitions/internal_api.agentChatPendingActionDTO'
+        $ref: '#/definitions/api.agentChatPendingActionDTO'
     type: object
-  internal_api.agentChatPendingActionDTO:
+  api.agentChatPendingActionDTO:
     properties:
       actionId:
         type: string
@@ -176,7 +124,7 @@ definitions:
       toolName:
         type: string
     type: object
-  internal_api.agentChatRequest:
+  api.agentChatRequest:
     properties:
       appName:
         type: string
@@ -193,7 +141,7 @@ definitions:
       trace:
         type: boolean
     type: object
-  internal_api.aiRoutingResponse:
+  api.aiRoutingResponse:
     properties:
       markup:
         type: number
@@ -202,7 +150,7 @@ definitions:
       updated_by:
         type: string
     type: object
-  internal_api.appFilePathRequest:
+  api.appFilePathRequest:
     properties:
       path:
         type: string
@@ -211,7 +159,7 @@ definitions:
     required:
     - path
     type: object
-  internal_api.appVolumeReq:
+  api.appVolumeReq:
     properties:
       path:
         type: string
@@ -220,7 +168,7 @@ definitions:
       storage_class:
         type: string
     type: object
-  internal_api.attachBoxDatabaseRequest:
+  api.attachBoxDatabaseRequest:
     properties:
       env_prefix:
         description: EnvPrefix lets a box hold two databases without their env keys
@@ -230,23 +178,23 @@ definitions:
         description: Name labels the attachment inside the box's namespace of attachments.
         type: string
     type: object
-  internal_api.attachHostnameRequest:
+  api.attachHostnameRequest:
     properties:
       hostname:
         type: string
     type: object
-  internal_api.autofixRequest:
+  api.autofixRequest:
     properties:
       error:
         type: string
     type: object
-  internal_api.bindInstallationRequest:
+  api.bindInstallationRequest:
     properties:
       installation_id:
         description: numeric GitHub installation id
         type: string
     type: object
-  internal_api.boxUpRequest:
+  api.boxUpRequest:
     properties:
       image:
         type: string
@@ -276,7 +224,7 @@ definitions:
           a body that arrives after the caller gave up.
         type: integer
     type: object
-  internal_api.build:
+  api.build:
     properties:
       app_name:
         type: string
@@ -317,7 +265,7 @@ definitions:
       updated_at:
         type: string
     type: object
-  internal_api.bulkEnvVarItem:
+  api.bulkEnvVarItem:
     properties:
       is_secret:
         type: boolean
@@ -328,14 +276,14 @@ definitions:
       value:
         type: string
     type: object
-  internal_api.bulkSetEnvVarsRequest:
+  api.bulkSetEnvVarsRequest:
     properties:
       vars:
         items:
-          $ref: '#/definitions/internal_api.bulkEnvVarItem'
+          $ref: '#/definitions/api.bulkEnvVarItem'
         type: array
     type: object
-  internal_api.clientErrorReport:
+  api.clientErrorReport:
     properties:
       component_stack:
         type: string
@@ -348,7 +296,7 @@ definitions:
       url:
         type: string
     type: object
-  internal_api.connectGitRepoRequest:
+  api.connectGitRepoRequest:
     properties:
       app_name:
         type: string
@@ -383,12 +331,12 @@ definitions:
           Ignored for GitHub.'
         type: string
     type: object
-  internal_api.createAIKeyRequest:
+  api.createAIKeyRequest:
     properties:
       name:
         type: string
     type: object
-  internal_api.createAIKeyResponse:
+  api.createAIKeyResponse:
     properties:
       base_url:
         type: string
@@ -405,14 +353,14 @@ definitions:
       token_prefix:
         type: string
     type: object
-  internal_api.createAIModelRequest:
+  api.createAIModelRequest:
     properties:
       artifact_uri:
         type: string
       attached_app_name:
         type: string
       auth_mode:
-        $ref: '#/definitions/github_com_dada-tuda_console_backend_internal_models.AIModelAuthMode'
+        $ref: '#/definitions/models.AIModelAuthMode'
       container_image:
         type: string
       mlflow_name:
@@ -426,11 +374,11 @@ definitions:
       profile:
         type: string
       source:
-        $ref: '#/definitions/github_com_dada-tuda_console_backend_internal_models.AIModelSource'
+        $ref: '#/definitions/models.AIModelSource'
       version:
         type: string
     type: object
-  internal_api.createAppRequest:
+  api.createAppRequest:
     properties:
       framework:
         type: string
@@ -445,13 +393,13 @@ definitions:
       replicas:
         type: integer
       volume:
-        $ref: '#/definitions/internal_api.appVolumeReq'
+        $ref: '#/definitions/api.appVolumeReq'
       worker:
         type: boolean
       workload_type:
         type: string
     type: object
-  internal_api.createAppServerRequest:
+  api.createAppServerRequest:
     properties:
       flavor:
         type: string
@@ -476,7 +424,7 @@ definitions:
         description: Manual-mode fields (connecting a pre-existing VM over SSH).
         type: string
     type: object
-  internal_api.createBoxRequest:
+  api.createBoxRequest:
     properties:
       image:
         description: |-
@@ -502,7 +450,7 @@ definitions:
         description: TTLSeconds is when the box goes to sleep, not when it is destroyed.
         type: integer
     type: object
-  internal_api.createChargeRequest:
+  api.createChargeRequest:
     properties:
       amount:
         type: number
@@ -518,17 +466,17 @@ definitions:
       return_url:
         type: string
     type: object
-  internal_api.createCloudTaskRequest:
+  api.createCloudTaskRequest:
     properties:
       task_type:
         type: string
     type: object
-  internal_api.createDeployHookRequest:
+  api.createDeployHookRequest:
     properties:
       name:
         type: string
     type: object
-  internal_api.createDeployHookResponse:
+  api.createDeployHookResponse:
     properties:
       base_url:
         type: string
@@ -545,7 +493,7 @@ definitions:
       token_prefix:
         type: string
     type: object
-  internal_api.createEndpointRequest:
+  api.createEndpointRequest:
     properties:
       auth_enabled:
         type: boolean
@@ -564,14 +512,14 @@ definitions:
       swagger_title:
         type: string
     type: object
-  internal_api.createIdentityRequest:
+  api.createIdentityRequest:
     properties:
       scopes:
         items:
           type: string
         type: array
     type: object
-  internal_api.createIdentityResponse:
+  api.createIdentityResponse:
     properties:
       app_name:
         type: string
@@ -586,7 +534,7 @@ definitions:
       token_prefix:
         type: string
     type: object
-  internal_api.createIngressRequest:
+  api.createIngressRequest:
     properties:
       aliases:
         items:
@@ -600,7 +548,7 @@ definitions:
         type: string
       rules:
         items:
-          $ref: '#/definitions/internal_api.ingressRuleReq'
+          $ref: '#/definitions/api.ingressRuleReq'
         type: array
       ssl_redirect:
         type: boolean
@@ -616,19 +564,19 @@ definitions:
             type: string
         type: object
     type: object
-  internal_api.createMonitoringRequest:
+  api.createMonitoringRequest:
     properties:
       name:
         type: string
     type: object
-  internal_api.createPayServiceKeyRequest:
+  api.createPayServiceKeyRequest:
     properties:
       service:
         type: string
     required:
     - service
     type: object
-  internal_api.createPayServiceKeyResponse:
+  api.createPayServiceKeyResponse:
     properties:
       created_at:
         type: string
@@ -641,7 +589,7 @@ definitions:
       token_prefix:
         type: string
     type: object
-  internal_api.createProjectRequest:
+  api.createProjectRequest:
     properties:
       default_environment:
         description: DefaultEnvironment names the first environment; defaults to "prod".
@@ -660,7 +608,7 @@ definitions:
     required:
     - slug
     type: object
-  internal_api.createS3BucketRequest:
+  api.createS3BucketRequest:
     properties:
       app_ref:
         description: AppRef optionally binds the bucket to an app's chart. Empty =
@@ -679,7 +627,7 @@ definitions:
       region:
         type: string
     type: object
-  internal_api.createServiceDatabaseRequest:
+  api.createServiceDatabaseRequest:
     properties:
       app_ref:
         type: string
@@ -694,7 +642,7 @@ definitions:
       name:
         type: string
     type: object
-  internal_api.crystallizeBoxRequest:
+  api.crystallizeBoxRequest:
     properties:
       ack_monthly_charge:
         description: AckMonthlyCharge is consent, not a flag. Without it the answer
@@ -723,7 +671,7 @@ definitions:
       working_dir:
         type: string
     type: object
-  internal_api.deployOperationStatusResponse:
+  api.deployOperationStatusResponse:
     properties:
       error_code:
         type: string
@@ -736,20 +684,22 @@ definitions:
       terminal:
         type: boolean
     type: object
-  internal_api.deployTriggerRequest:
+  api.deployTriggerRequest:
     properties:
       image:
         type: string
     type: object
-  internal_api.deployTriggerResponse:
+  api.deployTriggerResponse:
     properties:
       message:
         type: string
       operation_id:
         type: string
     type: object
-  internal_api.diagnoseResponse:
+  api.diagnoseResponse:
     properties:
+      autofix_unavailable_reason:
+        type: string
       can_autofix:
         type: boolean
       diagnosis:
@@ -763,7 +713,7 @@ definitions:
       reason:
         type: string
     type: object
-  internal_api.exposeBoxRequest:
+  api.exposeBoxRequest:
     properties:
       port:
         description: |-
@@ -771,13 +721,13 @@ definitions:
           purpose — see the file comment.
         type: integer
     type: object
-  internal_api.extendBoxRequest:
+  api.extendBoxRequest:
     properties:
       ttl_seconds:
         description: TTLSeconds is the new lifetime measured from now, capped at maxBoxTTLSeconds.
         type: integer
     type: object
-  internal_api.gitInstallation:
+  api.gitInstallation:
     properties:
       account_login:
         type: string
@@ -795,7 +745,7 @@ definitions:
       provider:
         type: string
     type: object
-  internal_api.grantBoxRequest:
+  api.grantBoxRequest:
     properties:
       box_id:
         type: string
@@ -804,7 +754,7 @@ definitions:
       org_id:
         type: string
     type: object
-  internal_api.identityView:
+  api.identityView:
     properties:
       ai_month_spend_usd:
         type: number
@@ -823,7 +773,7 @@ definitions:
       token_prefix:
         type: string
     type: object
-  internal_api.importComposeStackRequest:
+  api.importComposeStackRequest:
     properties:
       ack_secrets_in_git:
         type: boolean
@@ -835,10 +785,10 @@ definitions:
         type: object
       services:
         items:
-          $ref: '#/definitions/github_com_dada-tuda_console_backend_internal_models.ImportServiceSpec'
+          $ref: '#/definitions/models.ImportServiceSpec'
         type: array
     type: object
-  internal_api.importRecord:
+  api.importRecord:
     properties:
       contents:
         items:
@@ -851,14 +801,14 @@ definitions:
       type:
         type: string
     type: object
-  internal_api.importZoneRequest:
+  api.importZoneRequest:
     properties:
       records:
         items:
-          $ref: '#/definitions/internal_api.importRecord'
+          $ref: '#/definitions/api.importRecord'
         type: array
     type: object
-  internal_api.ingestLogsRequest:
+  api.ingestLogsRequest:
     properties:
       level:
         type: string
@@ -867,7 +817,7 @@ definitions:
       source:
         type: string
     type: object
-  internal_api.ingestMetricsRequest:
+  api.ingestMetricsRequest:
     properties:
       metrics:
         additionalProperties:
@@ -879,7 +829,7 @@ definitions:
       timestamp:
         type: string
     type: object
-  internal_api.ingressRuleReq:
+  api.ingressRuleReq:
     properties:
       app:
         type: string
@@ -888,7 +838,7 @@ definitions:
       port:
         type: integer
     type: object
-  internal_api.loginRequest:
+  api.loginRequest:
     properties:
       email:
         type: string
@@ -899,7 +849,7 @@ definitions:
     required:
     - password
     type: object
-  internal_api.moveAppFileRequest:
+  api.moveAppFileRequest:
     properties:
       from:
         type: string
@@ -909,12 +859,12 @@ definitions:
     - from
     - to
     type: object
-  internal_api.moveAppRequest:
+  api.moveAppRequest:
     properties:
       target_project_id:
         type: string
     type: object
-  internal_api.putAICredentialRequest:
+  api.putAICredentialRequest:
     properties:
       api_base:
         type: string
@@ -923,7 +873,7 @@ definitions:
     required:
     - api_key
     type: object
-  internal_api.recordBoxFunnelEventRequest:
+  api.recordBoxFunnelEventRequest:
     properties:
       agent:
         type: string
@@ -954,35 +904,35 @@ definitions:
           type: string
         type: array
     type: object
-  internal_api.recordUXEventsRequest:
+  api.recordUXEventsRequest:
     properties:
       anon_id:
         type: string
       events:
         items:
-          $ref: '#/definitions/internal_api.uxEventPayload'
+          $ref: '#/definitions/api.uxEventPayload'
         type: array
       session_id:
         type: string
     type: object
-  internal_api.reportOnboardingRequest:
+  api.reportOnboardingRequest:
     properties:
       status:
         type: string
       step:
         type: integer
     type: object
-  internal_api.resolveFeedbackRequest:
+  api.resolveFeedbackRequest:
     properties:
       resolution:
         type: string
     type: object
-  internal_api.restoreDatabaseRequest:
+  api.restoreDatabaseRequest:
     properties:
       backup_id:
         type: string
     type: object
-  internal_api.resumeBoxRequest:
+  api.resumeBoxRequest:
     properties:
       ssh_public_key:
         description: |-
@@ -990,16 +940,9 @@ definitions:
           keep one alive across a sleep. Public half only.
         type: string
     type: object
-  internal_api.saveDashboardRequest:
-    properties:
-      config:
-        items:
-          type: integer
-        type: array
-      version:
-        type: integer
+  api.saveDashboardRequest:
     type: object
-  internal_api.serviceChargeResponse:
+  api.serviceChargeResponse:
     properties:
       amount:
         type: string
@@ -1020,42 +963,40 @@ definitions:
       status:
         type: string
     type: object
-  internal_api.setAIRoutingRequest:
+  api.setAIRoutingRequest:
     properties:
       mode:
         type: string
     required:
     - mode
     type: object
-  internal_api.setEnvVarRequest:
+  api.setEnvVarRequest:
     properties:
       is_secret:
-        type: boolean
-      preview_override:
         type: boolean
       scope:
         type: string
       value:
         type: string
     type: object
-  internal_api.submitFeedbackRequest:
+  api.submitFeedbackRequest:
     properties:
       message:
         type: string
       route:
         type: string
     type: object
-  internal_api.updateAppImageRequest:
+  api.updateAppImageRequest:
     properties:
       image:
         type: string
     type: object
-  internal_api.updateAppProfileRequest:
+  api.updateAppProfileRequest:
     properties:
       profile:
         type: string
     type: object
-  internal_api.updateComposeConfigRequest:
+  api.updateComposeConfigRequest:
     properties:
       image:
         type: string
@@ -1064,41 +1005,32 @@ definitions:
           type: string
         type: array
     type: object
-  internal_api.updateComposeVolumeRequest:
+  api.updateComposeVolumeRequest:
     properties:
       volumes:
         items:
           type: string
         type: array
     type: object
-  internal_api.updateIdentityRequest:
-    properties:
-      ai_monthly_limit_usd:
-        items:
-          type: integer
-        type: array
-      scopes:
-        items:
-          type: string
-        type: array
+  api.updateIdentityRequest:
     type: object
-  internal_api.uploadSourceDetect:
+  api.uploadSourceDetect:
     properties:
       framework:
         type: string
       port:
         type: integer
     type: object
-  internal_api.uploadSourceResponse:
+  api.uploadSourceResponse:
     properties:
       artifact_uri:
         type: string
       build:
-        $ref: '#/definitions/internal_api.build'
+        $ref: '#/definitions/api.build'
       detected:
-        $ref: '#/definitions/internal_api.uploadSourceDetect'
+        $ref: '#/definitions/api.uploadSourceDetect'
     type: object
-  internal_api.upsertRecordRequest:
+  api.upsertRecordRequest:
     properties:
       contents:
         items:
@@ -1111,7 +1043,7 @@ definitions:
       type:
         type: string
     type: object
-  internal_api.uxEventPayload:
+  api.uxEventPayload:
     properties:
       at:
         type: string
@@ -1125,7 +1057,7 @@ definitions:
       type:
         type: string
     type: object
-  internal_api.writeAppFileRequest:
+  api.writeAppFileRequest:
     properties:
       content:
         type: string
@@ -1135,6 +1067,58 @@ definitions:
         type: string
     required:
     - path
+    type: object
+  models.AIModelAuthMode:
+    enum:
+    - apikey
+    - jwt
+    - public
+    type: string
+    x-enum-varnames:
+    - AIModelAuthAPIKey
+    - AIModelAuthJWT
+    - AIModelAuthPublic
+  models.AIModelSource:
+    enum:
+    - mlflow
+    - s3
+    - custom
+    type: string
+    x-enum-varnames:
+    - AIModelSourceMLflow
+    - AIModelSourceS3
+    - AIModelSourceCustom
+  models.ImportServiceSpec:
+    properties:
+      container_name:
+        type: string
+      image:
+        type: string
+      include:
+        type: boolean
+      ports:
+        items:
+          type: string
+        type: array
+      service_name:
+        type: string
+      volumes:
+        items:
+          type: string
+        type: array
+    type: object
+  pricing.Need:
+    properties:
+      apps:
+        type: integer
+      databases:
+        type: integer
+      domains:
+        type: integer
+      members:
+        type: integer
+      storageGB:
+        type: integer
     type: object
 info:
   contact: {}
@@ -1251,7 +1235,7 @@ paths:
         name: body
         required: true
         schema:
-          $ref: '#/definitions/internal_api.grantBoxRequest'
+          $ref: '#/definitions/api.grantBoxRequest'
       produces:
       - application/json
       responses:
@@ -1448,7 +1432,7 @@ paths:
         in: body
         name: body
         schema:
-          $ref: '#/definitions/internal_api.resolveFeedbackRequest'
+          $ref: '#/definitions/api.resolveFeedbackRequest'
       produces:
       - application/json
       responses:
@@ -1701,14 +1685,14 @@ paths:
         name: body
         required: true
         schema:
-          $ref: '#/definitions/internal_api.createPayServiceKeyRequest'
+          $ref: '#/definitions/api.createPayServiceKeyRequest'
       produces:
       - application/json
       responses:
         "201":
           description: Created
           schema:
-            $ref: '#/definitions/internal_api.createPayServiceKeyResponse'
+            $ref: '#/definitions/api.createPayServiceKeyResponse'
         "400":
           description: Bad Request
           schema:
@@ -1772,16 +1756,15 @@ paths:
         ReAct loop against the ADR-015 LLM gateway, grounding answers with a curated
         subset of the console''s own API (read tools plus confirmation-gated write
         tools and create_support_ticket) executed under the caller''s own bearer.
-        The tools block starts as the navigation tools plus
-        load_tool; the rest of the catalog is listed by name in the system prompt
-        and becomes a real, natively callable tool definition once the model loads
-        it with load_tool. Emits token events (assistant text deltas), tool_call
-        events (tool name only), a confirm_request event when a write tool needs the
-        user''s approval, an error event on a friendly failure (gateway not configured,
-        daily cap reached, upstream error), an optional trace event with this turn''s
-        own metrics when the request sets "trace": true, and a final done event. Sending
-        the literal message "__slowtest__" instead streams a 75s heartbeat run to
-        prove the endpoint survives the ingress proxy-read-timeout.'
+        The tools block starts as the navigation tools plus load_tool; the rest of
+        the catalog is listed by name in the system prompt and becomes a real, natively
+        callable tool definition once the model loads it with load_tool. Emits token
+        events (assistant text deltas), tool_call events (tool name only), a confirm_request
+        event when a write tool needs the user''s approval, an error event on a friendly
+        failure (gateway not configured, daily cap reached, upstream error), an optional
+        trace event with this turn''s own metrics when the request sets "trace": true,
+        and a final done event. Sending the literal message "__slowtest__" instead
+        streams a 75s heartbeat run to prove the endpoint survives the ingress proxy-read-timeout.'
       operationId: agentChat
       parameters:
       - description: Chat turn
@@ -1789,7 +1772,7 @@ paths:
         name: body
         required: true
         schema:
-          $ref: '#/definitions/internal_api.agentChatRequest'
+          $ref: '#/definitions/api.agentChatRequest'
       produces:
       - text/event-stream
       responses:
@@ -1833,7 +1816,7 @@ paths:
         name: body
         required: true
         schema:
-          $ref: '#/definitions/internal_api.agentChatConfirmRequest'
+          $ref: '#/definitions/api.agentChatConfirmRequest'
       produces:
       - text/event-stream
       responses:
@@ -1878,7 +1861,7 @@ paths:
         name: body
         required: true
         schema:
-          $ref: '#/definitions/internal_api.agentChatClearContextRequest'
+          $ref: '#/definitions/api.agentChatClearContextRequest'
       produces:
       - application/json
       responses:
@@ -1922,7 +1905,7 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/internal_api.agentChatHistoryResponse'
+            $ref: '#/definitions/api.agentChatHistoryResponse'
         "401":
           description: Unauthorized
           schema:
@@ -1935,6 +1918,149 @@ paths:
         confirmation
       tags:
       - agent
+  /agent/git/branches:
+    get:
+      operationId: agentListInstallationBranches
+      parameters:
+      - description: Project UUID
+        in: query
+        name: project_id
+        required: true
+        type: string
+      - description: Installation UUID
+        in: query
+        name: installation_id
+        required: true
+        type: string
+      - description: Repository full name (org/repo)
+        in: query
+        name: repo
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: object with a branches array
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "503":
+          description: Service Unavailable
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: '[service] List branches of a repo visible to a git installation'
+      tags:
+      - agent-git
+  /agent/git/installations:
+    get:
+      description: Trusted-service equivalent of ListGitInstallations, gated by azp=dada-agent
+        instead of project membership.
+      operationId: agentListGitInstallations
+      parameters:
+      - description: Project UUID
+        in: query
+        name: project_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: object with an installations array
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: '[service] List git installations for a project'
+      tags:
+      - agent-git
+  /agent/git/repos:
+    get:
+      operationId: agentListInstallationRepos
+      parameters:
+      - description: Project UUID
+        in: query
+        name: project_id
+        required: true
+        type: string
+      - description: Installation UUID
+        in: query
+        name: installation_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: object with a repos array
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "503":
+          description: Service Unavailable
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: '[service] List repos visible to a git installation'
+      tags:
+      - agent-git
   /ai/catalog:
     get:
       description: Lists the model aliases callable through the AI Gateway and the
@@ -1974,7 +2100,7 @@ paths:
         name: body
         required: true
         schema:
-          $ref: '#/definitions/internal_api.loginRequest'
+          $ref: '#/definitions/api.loginRequest'
       produces:
       - application/json
       responses:
@@ -2086,7 +2212,7 @@ paths:
         name: body
         required: true
         schema:
-          $ref: '#/definitions/github_com_dada-tuda_console_backend_internal_billing_pricing.Need'
+          $ref: '#/definitions/pricing.Need'
       produces:
       - application/json
       responses:
@@ -2153,7 +2279,7 @@ paths:
         name: body
         required: true
         schema:
-          $ref: '#/definitions/internal_api.recordBoxFunnelEventRequest'
+          $ref: '#/definitions/api.recordBoxFunnelEventRequest'
       produces:
       - application/json
       responses:
@@ -2197,7 +2323,7 @@ paths:
         name: body
         required: true
         schema:
-          $ref: '#/definitions/internal_api.clientErrorReport'
+          $ref: '#/definitions/api.clientErrorReport'
       responses:
         "204":
           description: no content
@@ -2221,14 +2347,14 @@ paths:
         name: body
         required: true
         schema:
-          $ref: '#/definitions/internal_api.deployTriggerRequest'
+          $ref: '#/definitions/api.deployTriggerRequest'
       produces:
       - application/json
       responses:
         "202":
           description: Accepted
           schema:
-            $ref: '#/definitions/internal_api.deployTriggerResponse'
+            $ref: '#/definitions/api.deployTriggerResponse'
         "400":
           description: Bad Request
           schema:
@@ -2268,7 +2394,7 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/internal_api.deployOperationStatusResponse'
+            $ref: '#/definitions/api.deployOperationStatusResponse'
         "401":
           description: Unauthorized
           schema:
@@ -2299,7 +2425,7 @@ paths:
         name: body
         required: true
         schema:
-          $ref: '#/definitions/internal_api.submitFeedbackRequest'
+          $ref: '#/definitions/api.submitFeedbackRequest'
       produces:
       - application/json
       responses:
@@ -2582,7 +2708,7 @@ paths:
         name: body
         required: true
         schema:
-          $ref: '#/definitions/internal_api.reportOnboardingRequest'
+          $ref: '#/definitions/api.reportOnboardingRequest'
       produces:
       - application/json
       responses:
@@ -2652,14 +2778,14 @@ paths:
         name: body
         required: true
         schema:
-          $ref: '#/definitions/internal_api.createChargeRequest'
+          $ref: '#/definitions/api.createChargeRequest'
       produces:
       - application/json
       responses:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/internal_api.serviceChargeResponse'
+            $ref: '#/definitions/api.serviceChargeResponse'
         "400":
           description: Bad Request
           schema:
@@ -2711,7 +2837,7 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/internal_api.serviceChargeResponse'
+            $ref: '#/definitions/api.serviceChargeResponse'
         "401":
           description: Unauthorized
           schema:
@@ -2795,7 +2921,7 @@ paths:
         name: body
         required: true
         schema:
-          $ref: '#/definitions/internal_api.createProjectRequest'
+          $ref: '#/definitions/api.createProjectRequest'
       produces:
       - application/json
       responses:
@@ -3014,7 +3140,7 @@ paths:
         name: body
         required: true
         schema:
-          $ref: '#/definitions/internal_api.putAICredentialRequest'
+          $ref: '#/definitions/api.putAICredentialRequest'
       produces:
       - application/json
       responses:
@@ -3102,14 +3228,14 @@ paths:
         in: body
         name: body
         schema:
-          $ref: '#/definitions/internal_api.createAIKeyRequest'
+          $ref: '#/definitions/api.createAIKeyRequest'
       produces:
       - application/json
       responses:
         "201":
           description: Created
           schema:
-            $ref: '#/definitions/internal_api.createAIKeyResponse'
+            $ref: '#/definitions/api.createAIKeyResponse'
         "400":
           description: Bad Request
           schema:
@@ -3188,7 +3314,7 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/internal_api.aiRoutingResponse'
+            $ref: '#/definitions/api.aiRoutingResponse'
         "401":
           description: Unauthorized
           schema:
@@ -3223,14 +3349,14 @@ paths:
         name: body
         required: true
         schema:
-          $ref: '#/definitions/internal_api.setAIRoutingRequest'
+          $ref: '#/definitions/api.setAIRoutingRequest'
       produces:
       - application/json
       responses:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/internal_api.aiRoutingResponse'
+            $ref: '#/definitions/api.aiRoutingResponse'
         "400":
           description: Bad Request
           schema:
@@ -3352,7 +3478,7 @@ paths:
         name: body
         required: true
         schema:
-          $ref: '#/definitions/internal_api.createAppServerRequest'
+          $ref: '#/definitions/api.createAppServerRequest'
       produces:
       - application/json
       responses:
@@ -3555,7 +3681,7 @@ paths:
         name: body
         required: true
         schema:
-          $ref: '#/definitions/internal_api.importComposeStackRequest'
+          $ref: '#/definitions/api.importComposeStackRequest'
       produces:
       - application/json
       responses:
@@ -4097,7 +4223,7 @@ paths:
         in: body
         name: body
         schema:
-          $ref: '#/definitions/internal_api.boxUpRequest'
+          $ref: '#/definitions/api.boxUpRequest'
       produces:
       - application/json
       responses:
@@ -4206,7 +4332,7 @@ paths:
         name: body
         required: true
         schema:
-          $ref: '#/definitions/internal_api.createBoxRequest'
+          $ref: '#/definitions/api.createBoxRequest'
       produces:
       - application/json
       responses:
@@ -4368,7 +4494,7 @@ paths:
         in: body
         name: body
         schema:
-          $ref: '#/definitions/internal_api.attachBoxDatabaseRequest'
+          $ref: '#/definitions/api.attachBoxDatabaseRequest'
       produces:
       - application/json
       responses:
@@ -4592,7 +4718,7 @@ paths:
         name: body
         required: true
         schema:
-          $ref: '#/definitions/internal_api.crystallizeBoxRequest'
+          $ref: '#/definitions/api.crystallizeBoxRequest'
       produces:
       - application/json
       responses:
@@ -4678,7 +4804,7 @@ paths:
         name: body
         required: true
         schema:
-          $ref: '#/definitions/internal_api.exposeBoxRequest'
+          $ref: '#/definitions/api.exposeBoxRequest'
       produces:
       - application/json
       responses:
@@ -4755,7 +4881,7 @@ paths:
         name: body
         required: true
         schema:
-          $ref: '#/definitions/internal_api.extendBoxRequest'
+          $ref: '#/definitions/api.extendBoxRequest'
       produces:
       - application/json
       responses:
@@ -4832,7 +4958,7 @@ paths:
         in: body
         name: body
         schema:
-          $ref: '#/definitions/internal_api.resumeBoxRequest'
+          $ref: '#/definitions/api.resumeBoxRequest'
       produces:
       - application/json
       responses:
@@ -5600,7 +5726,7 @@ paths:
         name: body
         required: true
         schema:
-          $ref: '#/definitions/internal_api.addDomainAuthorizationRequest'
+          $ref: '#/definitions/api.addDomainAuthorizationRequest'
       produces:
       - application/json
       responses:
@@ -5837,7 +5963,7 @@ paths:
         name: body
         required: true
         schema:
-          $ref: '#/definitions/internal_api.importZoneRequest'
+          $ref: '#/definitions/api.importZoneRequest'
       produces:
       - application/json
       responses:
@@ -6051,7 +6177,7 @@ paths:
         name: body
         required: true
         schema:
-          $ref: '#/definitions/internal_api.upsertRecordRequest'
+          $ref: '#/definitions/api.upsertRecordRequest'
       produces:
       - application/json
       responses:
@@ -6155,7 +6281,7 @@ paths:
         name: body
         required: true
         schema:
-          $ref: '#/definitions/internal_api.createAppRequest'
+          $ref: '#/definitions/api.createAppRequest'
       produces:
       - application/json
       responses:
@@ -6331,7 +6457,7 @@ paths:
         in: body
         name: body
         schema:
-          $ref: '#/definitions/internal_api.autofixRequest'
+          $ref: '#/definitions/api.autofixRequest'
       produces:
       - application/json
       responses:
@@ -6557,7 +6683,7 @@ paths:
         name: body
         required: true
         schema:
-          $ref: '#/definitions/internal_api.createCloudTaskRequest'
+          $ref: '#/definitions/api.createCloudTaskRequest'
       produces:
       - application/json
       responses:
@@ -6630,7 +6756,7 @@ paths:
         name: body
         required: true
         schema:
-          $ref: '#/definitions/internal_api.updateComposeConfigRequest'
+          $ref: '#/definitions/api.updateComposeConfigRequest'
       produces:
       - application/json
       responses:
@@ -6697,7 +6823,7 @@ paths:
         name: body
         required: true
         schema:
-          $ref: '#/definitions/internal_api.updateComposeVolumeRequest'
+          $ref: '#/definitions/api.updateComposeVolumeRequest'
       produces:
       - application/json
       responses:
@@ -6764,7 +6890,7 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/internal_api.DeleteImpact'
+            $ref: '#/definitions/api.DeleteImpact'
         "401":
           description: Unauthorized
           schema:
@@ -6858,14 +6984,14 @@ paths:
         in: body
         name: body
         schema:
-          $ref: '#/definitions/internal_api.createDeployHookRequest'
+          $ref: '#/definitions/api.createDeployHookRequest'
       produces:
       - application/json
       responses:
         "201":
           description: Created
           schema:
-            $ref: '#/definitions/internal_api.createDeployHookResponse'
+            $ref: '#/definitions/api.createDeployHookResponse'
         "400":
           description: Bad Request
           schema:
@@ -7016,7 +7142,7 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/internal_api.diagnoseResponse'
+            $ref: '#/definitions/api.diagnoseResponse'
         "400":
           description: Bad Request
           schema:
@@ -7127,7 +7253,7 @@ paths:
         name: body
         required: true
         schema:
-          $ref: '#/definitions/internal_api.createEndpointRequest'
+          $ref: '#/definitions/api.createEndpointRequest'
       produces:
       - application/json
       responses:
@@ -7214,7 +7340,7 @@ paths:
   /projects/{projectId}/environments/{envId}/apps/{appName}/env/{key}:
     delete:
       description: Removes a single environment variable from an app. Requires write
-        access. Pass preview_override=true to delete a preview-only override instead.
+        access.
       operationId: deleteEnvVar
       parameters:
       - description: Project UUID
@@ -7237,10 +7363,6 @@ paths:
         name: key
         required: true
         type: string
-      - description: Delete the preview-only override instead of the base env var
-        in: query
-        name: preview_override
-        type: boolean
       produces:
       - application/json
       responses:
@@ -7293,10 +7415,6 @@ paths:
         name: reveal
         required: true
         type: boolean
-      - description: Reveal the preview-only override instead of the base env var
-        in: query
-        name: preview_override
-        type: boolean
       produces:
       - application/json
       responses:
@@ -7333,8 +7451,7 @@ paths:
       consumes:
       - application/json
       description: Creates or updates a single environment variable for an app. The
-        value is always stored AES-GCM encrypted. Requires write access. When preview_override
-        is true, writes a preview-only override instead (see preview_env_overrides).
+        value is always stored AES-GCM encrypted. Requires write access.
       operationId: setEnvVar
       parameters:
       - description: Project UUID
@@ -7362,7 +7479,7 @@ paths:
         name: body
         required: true
         schema:
-          $ref: '#/definitions/internal_api.setEnvVarRequest'
+          $ref: '#/definitions/api.setEnvVarRequest'
       produces:
       - application/json
       responses:
@@ -7424,7 +7541,7 @@ paths:
         name: body
         required: true
         schema:
-          $ref: '#/definitions/internal_api.bulkSetEnvVarsRequest'
+          $ref: '#/definitions/api.bulkSetEnvVarsRequest'
       produces:
       - application/json
       responses:
@@ -7529,7 +7646,7 @@ paths:
         name: body
         required: true
         schema:
-          $ref: '#/definitions/internal_api.attachHostnameRequest'
+          $ref: '#/definitions/api.attachHostnameRequest'
       produces:
       - application/json
       responses:
@@ -7649,7 +7766,7 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/internal_api.identityView'
+            $ref: '#/definitions/api.identityView'
         "404":
           description: Not Found
           schema:
@@ -7690,14 +7807,14 @@ paths:
         name: body
         required: true
         schema:
-          $ref: '#/definitions/internal_api.updateIdentityRequest'
+          $ref: '#/definitions/api.updateIdentityRequest'
       produces:
       - application/json
       responses:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/internal_api.identityView'
+            $ref: '#/definitions/api.identityView'
         "400":
           description: Bad Request
           schema:
@@ -7750,14 +7867,14 @@ paths:
         in: body
         name: body
         schema:
-          $ref: '#/definitions/internal_api.createIdentityRequest'
+          $ref: '#/definitions/api.createIdentityRequest'
       produces:
       - application/json
       responses:
         "201":
           description: Created
           schema:
-            $ref: '#/definitions/internal_api.createIdentityResponse'
+            $ref: '#/definitions/api.createIdentityResponse'
         "400":
           description: Bad Request
           schema:
@@ -7809,7 +7926,7 @@ paths:
         name: body
         required: true
         schema:
-          $ref: '#/definitions/internal_api.updateAppImageRequest'
+          $ref: '#/definitions/api.updateAppImageRequest'
       produces:
       - application/json
       responses:
@@ -7841,6 +7958,60 @@ paths:
       summary: Deploy a new image version for an app
       tags:
       - app
+  /projects/{projectId}/environments/{envId}/apps/{appName}/keep:
+    post:
+      description: Cancels the automatic deletion of an app deployed from a platform
+        starter template, so it survives like any other app. A no-op on apps that
+        were never demos. Requires write access.
+      operationId: keepDemoApp
+      parameters:
+      - description: Project ID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      - description: Environment ID
+        in: path
+        name: envId
+        required: true
+        type: string
+      - description: App name
+        in: path
+        name: appName
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Keep a demo app
+      tags:
+      - apps
   /projects/{projectId}/environments/{envId}/apps/{appName}/logs:
     get:
       description: Returns the last N lines of a single container's logs for a VM
@@ -8005,7 +8176,7 @@ paths:
         name: body
         required: true
         schema:
-          $ref: '#/definitions/internal_api.moveAppRequest'
+          $ref: '#/definitions/api.moveAppRequest'
       produces:
       - application/json
       responses:
@@ -8083,7 +8254,7 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/internal_api.MoveImpact'
+            $ref: '#/definitions/api.MoveImpact'
         "400":
           description: Bad Request
           schema:
@@ -8289,7 +8460,7 @@ paths:
         name: body
         required: true
         schema:
-          $ref: '#/definitions/internal_api.updateAppProfileRequest'
+          $ref: '#/definitions/api.updateAppProfileRequest'
       produces:
       - application/json
       responses:
@@ -8463,7 +8634,7 @@ paths:
         "202":
           description: Accepted
           schema:
-            $ref: '#/definitions/internal_api.uploadSourceResponse'
+            $ref: '#/definitions/api.uploadSourceResponse'
         "400":
           description: Bad Request
           schema:
@@ -8648,7 +8819,7 @@ paths:
         name: body
         required: true
         schema:
-          $ref: '#/definitions/internal_api.appVolumeReq'
+          $ref: '#/definitions/api.appVolumeReq'
       produces:
       - application/json
       responses:
@@ -9113,7 +9284,7 @@ paths:
         name: body
         required: true
         schema:
-          $ref: '#/definitions/internal_api.writeAppFileRequest'
+          $ref: '#/definitions/api.writeAppFileRequest'
       produces:
       - application/json
       responses:
@@ -9204,7 +9375,7 @@ paths:
         name: body
         required: true
         schema:
-          $ref: '#/definitions/internal_api.appFilePathRequest'
+          $ref: '#/definitions/api.appFilePathRequest'
       produces:
       - application/json
       responses:
@@ -9288,7 +9459,7 @@ paths:
         name: body
         required: true
         schema:
-          $ref: '#/definitions/internal_api.appFilePathRequest'
+          $ref: '#/definitions/api.appFilePathRequest'
       produces:
       - application/json
       responses:
@@ -9372,7 +9543,7 @@ paths:
         name: body
         required: true
         schema:
-          $ref: '#/definitions/internal_api.moveAppFileRequest'
+          $ref: '#/definitions/api.moveAppFileRequest'
       produces:
       - application/json
       responses:
@@ -9729,7 +9900,7 @@ paths:
         name: body
         required: true
         schema:
-          $ref: '#/definitions/internal_api.createServiceDatabaseRequest'
+          $ref: '#/definitions/api.createServiceDatabaseRequest'
       produces:
       - application/json
       responses:
@@ -10105,7 +10276,7 @@ paths:
         name: body
         required: true
         schema:
-          $ref: '#/definitions/internal_api.restoreDatabaseRequest'
+          $ref: '#/definitions/api.restoreDatabaseRequest'
       produces:
       - application/json
       responses:
@@ -10216,7 +10387,7 @@ paths:
         name: body
         required: true
         schema:
-          $ref: '#/definitions/internal_api.createIngressRequest'
+          $ref: '#/definitions/api.createIngressRequest'
       produces:
       - application/json
       responses:
@@ -10314,7 +10485,7 @@ paths:
         name: body
         required: true
         schema:
-          $ref: '#/definitions/internal_api.createAIModelRequest'
+          $ref: '#/definitions/api.createAIModelRequest'
       produces:
       - application/json
       responses:
@@ -10842,7 +11013,7 @@ paths:
         name: body
         required: true
         schema:
-          $ref: '#/definitions/internal_api.createMonitoringRequest'
+          $ref: '#/definitions/api.createMonitoringRequest'
       produces:
       - application/json
       responses:
@@ -11234,7 +11405,7 @@ paths:
         name: body
         required: true
         schema:
-          $ref: '#/definitions/internal_api.saveDashboardRequest'
+          $ref: '#/definitions/api.saveDashboardRequest'
       produces:
       - application/json
       responses:
@@ -11988,7 +12159,7 @@ paths:
         name: body
         required: true
         schema:
-          $ref: '#/definitions/internal_api.connectGitRepoRequest'
+          $ref: '#/definitions/api.connectGitRepoRequest'
       produces:
       - application/json
       responses:
@@ -12132,7 +12303,7 @@ paths:
         name: body
         required: true
         schema:
-          $ref: '#/definitions/internal_api.createS3BucketRequest'
+          $ref: '#/definitions/api.createS3BucketRequest'
       produces:
       - application/json
       responses:
@@ -12435,14 +12606,14 @@ paths:
         name: body
         required: true
         schema:
-          $ref: '#/definitions/internal_api.bindInstallationRequest'
+          $ref: '#/definitions/api.bindInstallationRequest'
       produces:
       - application/json
       responses:
         "201":
           description: Created
           schema:
-            $ref: '#/definitions/internal_api.gitInstallation'
+            $ref: '#/definitions/api.gitInstallation'
         "400":
           description: Bad Request
           schema:
@@ -12752,7 +12923,7 @@ paths:
         name: body
         required: true
         schema:
-          $ref: '#/definitions/internal_api.ingestLogsRequest'
+          $ref: '#/definitions/api.ingestLogsRequest'
       produces:
       - application/json
       responses:
@@ -12832,7 +13003,7 @@ paths:
         name: body
         required: true
         schema:
-          $ref: '#/definitions/internal_api.ingestMetricsRequest'
+          $ref: '#/definitions/api.ingestMetricsRequest'
       produces:
       - application/json
       responses:
@@ -13109,7 +13280,7 @@ paths:
         name: body
         required: true
         schema:
-          $ref: '#/definitions/internal_api.recordUXEventsRequest'
+          $ref: '#/definitions/api.recordUXEventsRequest'
       produces:
       - application/json
       responses:

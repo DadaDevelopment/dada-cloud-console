@@ -642,6 +642,8 @@ export const apps: Messages = {
     en: "Failed to start auto-fix",
   },
   "apps.alerts.chip.crash": { ru: "Падает", en: "Crashing" },
+  "apps.demo.chip": { ru: "демо · удалится через {hours} ч", en: "demo · deleted in {hours}h" },
+  "apps.demo.keep": { ru: "оставить", en: "keep" },
   "apps.alerts.volume.text": {
     ru: "Диск заполнен на {percent}% — приложение упадёт при нехватке места",
     en: "Disk is {percent}% full — the app will crash once space runs out",

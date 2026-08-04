@@ -11,8 +11,7 @@ import { ResourceIcon } from "@/components/shell/icons";
 import type { IconName } from "@/lib/resources";
 import { useT } from "@/lib/i18n/console/context";
 import { CostCard } from "@/components/cost/cost-card";
-import { TemplateDeployCards } from "@/components/console/template-deploy-cards";
-import { UploadDeployCard } from "@/components/deploy/upload-deploy";
+import { EmptyProjectOnramp } from "@/components/console/empty-project-onramp";
 import { ProjectAppHealthList } from "@/components/console/project-app-health-list";
 import { ProjectBoxesPanel } from "@/components/console/project-boxes-panel";
 
@@ -160,12 +159,7 @@ export default function ProjectOverviewPage() {
 
       {!isEmpty && <CostCard projectId={projectId} />}
 
-      {isEmpty && (
-        <div data-onboarding="first-deploy" className="mb-8 grid gap-4 lg:grid-cols-2">
-          <TemplateDeployCards projectId={projectId} envId={envId} hero />
-          <UploadDeployCard projectId={projectId} envId={envId} hero />
-        </div>
-      )}
+      {isEmpty && <EmptyProjectOnramp projectId={projectId} envId={envId} />}
 
       {!isEmpty && !checklistComplete && (
         <div className="mb-8 rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-5 shadow-sm">

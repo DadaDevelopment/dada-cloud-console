@@ -171,7 +171,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/internal_api.grantBoxRequest"
+                            "$ref": "#/definitions/api.grantBoxRequest"
                         }
                     }
                 ],
@@ -458,7 +458,7 @@ const docTemplate = `{
                         "name": "body",
                         "in": "body",
                         "schema": {
-                            "$ref": "#/definitions/internal_api.resolveFeedbackRequest"
+                            "$ref": "#/definitions/api.resolveFeedbackRequest"
                         }
                     }
                 ],
@@ -829,7 +829,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/internal_api.createPayServiceKeyRequest"
+                            "$ref": "#/definitions/api.createPayServiceKeyRequest"
                         }
                     }
                 ],
@@ -837,7 +837,7 @@ const docTemplate = `{
                     "201": {
                         "description": "Created",
                         "schema": {
-                            "$ref": "#/definitions/internal_api.createPayServiceKeyResponse"
+                            "$ref": "#/definitions/api.createPayServiceKeyResponse"
                         }
                     },
                     "400": {
@@ -946,7 +946,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/internal_api.agentChatRequest"
+                            "$ref": "#/definitions/api.agentChatRequest"
                         }
                     }
                 ],
@@ -1004,7 +1004,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/internal_api.agentChatConfirmRequest"
+                            "$ref": "#/definitions/api.agentChatConfirmRequest"
                         }
                     }
                 ],
@@ -1062,7 +1062,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/internal_api.agentChatClearContextRequest"
+                            "$ref": "#/definitions/api.agentChatClearContextRequest"
                         }
                     }
                 ],
@@ -1122,11 +1122,228 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/internal_api.agentChatHistoryResponse"
+                            "$ref": "#/definitions/api.agentChatHistoryResponse"
                         }
                     },
                     "401": {
                         "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/agent/git/branches": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "agent-git"
+                ],
+                "summary": "[service] List branches of a repo visible to a git installation",
+                "operationId": "agentListInstallationBranches",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Project UUID",
+                        "name": "project_id",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Installation UUID",
+                        "name": "installation_id",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Repository full name (org/repo)",
+                        "name": "repo",
+                        "in": "query",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "object with a branches array",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/agent/git/installations": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Trusted-service equivalent of ListGitInstallations, gated by azp=dada-agent instead of project membership.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "agent-git"
+                ],
+                "summary": "[service] List git installations for a project",
+                "operationId": "agentListGitInstallations",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Project UUID",
+                        "name": "project_id",
+                        "in": "query",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "object with an installations array",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/agent/git/repos": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "agent-git"
+                ],
+                "summary": "[service] List repos visible to a git installation",
+                "operationId": "agentListInstallationRepos",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Project UUID",
+                        "name": "project_id",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Installation UUID",
+                        "name": "installation_id",
+                        "in": "query",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "object with a repos array",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
                         "schema": {
                             "type": "object",
                             "additionalProperties": {
@@ -1194,7 +1411,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/internal_api.loginRequest"
+                            "$ref": "#/definitions/api.loginRequest"
                         }
                     }
                 ],
@@ -1361,7 +1578,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/github_com_dada-tuda_console_backend_internal_billing_pricing.Need"
+                            "$ref": "#/definitions/pricing.Need"
                         }
                     }
                 ],
@@ -1442,7 +1659,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/internal_api.recordBoxFunnelEventRequest"
+                            "$ref": "#/definitions/api.recordBoxFunnelEventRequest"
                         }
                     }
                 ],
@@ -1502,7 +1719,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/internal_api.clientErrorReport"
+                            "$ref": "#/definitions/api.clientErrorReport"
                         }
                     }
                 ],
@@ -1534,7 +1751,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/internal_api.deployTriggerRequest"
+                            "$ref": "#/definitions/api.deployTriggerRequest"
                         }
                     }
                 ],
@@ -1542,7 +1759,7 @@ const docTemplate = `{
                     "202": {
                         "description": "Accepted",
                         "schema": {
-                            "$ref": "#/definitions/internal_api.deployTriggerResponse"
+                            "$ref": "#/definitions/api.deployTriggerResponse"
                         }
                     },
                     "400": {
@@ -1599,7 +1816,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/internal_api.deployOperationStatusResponse"
+                            "$ref": "#/definitions/api.deployOperationStatusResponse"
                         }
                     },
                     "401": {
@@ -1649,7 +1866,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/internal_api.submitFeedbackRequest"
+                            "$ref": "#/definitions/api.submitFeedbackRequest"
                         }
                     }
                 ],
@@ -2063,7 +2280,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/internal_api.reportOnboardingRequest"
+                            "$ref": "#/definitions/api.reportOnboardingRequest"
                         }
                     }
                 ],
@@ -2162,7 +2379,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/internal_api.createChargeRequest"
+                            "$ref": "#/definitions/api.createChargeRequest"
                         }
                     }
                 ],
@@ -2170,7 +2387,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/internal_api.serviceChargeResponse"
+                            "$ref": "#/definitions/api.serviceChargeResponse"
                         }
                     },
                     "400": {
@@ -2245,7 +2462,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/internal_api.serviceChargeResponse"
+                            "$ref": "#/definitions/api.serviceChargeResponse"
                         }
                     },
                     "401": {
@@ -2369,7 +2586,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/internal_api.createProjectRequest"
+                            "$ref": "#/definitions/api.createProjectRequest"
                         }
                     }
                 ],
@@ -2672,7 +2889,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/internal_api.putAICredentialRequest"
+                            "$ref": "#/definitions/api.putAICredentialRequest"
                         }
                     }
                 ],
@@ -2855,7 +3072,7 @@ const docTemplate = `{
                         "name": "body",
                         "in": "body",
                         "schema": {
-                            "$ref": "#/definitions/internal_api.createAIKeyRequest"
+                            "$ref": "#/definitions/api.createAIKeyRequest"
                         }
                     }
                 ],
@@ -2863,7 +3080,7 @@ const docTemplate = `{
                     "201": {
                         "description": "Created",
                         "schema": {
-                            "$ref": "#/definitions/internal_api.createAIKeyResponse"
+                            "$ref": "#/definitions/api.createAIKeyResponse"
                         }
                     },
                     "400": {
@@ -2982,7 +3199,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/internal_api.aiRoutingResponse"
+                            "$ref": "#/definitions/api.aiRoutingResponse"
                         }
                     },
                     "401": {
@@ -3037,7 +3254,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/internal_api.setAIRoutingRequest"
+                            "$ref": "#/definitions/api.setAIRoutingRequest"
                         }
                     }
                 ],
@@ -3045,7 +3262,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/internal_api.aiRoutingResponse"
+                            "$ref": "#/definitions/api.aiRoutingResponse"
                         }
                     },
                     "400": {
@@ -3223,7 +3440,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/internal_api.createAppServerRequest"
+                            "$ref": "#/definitions/api.createAppServerRequest"
                         }
                     }
                 ],
@@ -3513,7 +3730,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/internal_api.importComposeStackRequest"
+                            "$ref": "#/definitions/api.importComposeStackRequest"
                         }
                     }
                 ],
@@ -4300,7 +4517,7 @@ const docTemplate = `{
                         "name": "body",
                         "in": "body",
                         "schema": {
-                            "$ref": "#/definitions/internal_api.boxUpRequest"
+                            "$ref": "#/definitions/api.boxUpRequest"
                         }
                     }
                 ],
@@ -4454,7 +4671,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/internal_api.createBoxRequest"
+                            "$ref": "#/definitions/api.createBoxRequest"
                         }
                     }
                 ],
@@ -4682,7 +4899,7 @@ const docTemplate = `{
                         "name": "body",
                         "in": "body",
                         "schema": {
-                            "$ref": "#/definitions/internal_api.attachBoxDatabaseRequest"
+                            "$ref": "#/definitions/api.attachBoxDatabaseRequest"
                         }
                     }
                 ],
@@ -4989,7 +5206,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/internal_api.crystallizeBoxRequest"
+                            "$ref": "#/definitions/api.crystallizeBoxRequest"
                         }
                     }
                 ],
@@ -5107,7 +5324,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/internal_api.exposeBoxRequest"
+                            "$ref": "#/definitions/api.exposeBoxRequest"
                         }
                     }
                 ],
@@ -5216,7 +5433,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/internal_api.extendBoxRequest"
+                            "$ref": "#/definitions/api.extendBoxRequest"
                         }
                     }
                 ],
@@ -5315,7 +5532,7 @@ const docTemplate = `{
                         "name": "body",
                         "in": "body",
                         "schema": {
-                            "$ref": "#/definitions/internal_api.resumeBoxRequest"
+                            "$ref": "#/definitions/api.resumeBoxRequest"
                         }
                     }
                 ],
@@ -6437,7 +6654,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/internal_api.addDomainAuthorizationRequest"
+                            "$ref": "#/definitions/api.addDomainAuthorizationRequest"
                         }
                     }
                 ],
@@ -6792,7 +7009,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/internal_api.importZoneRequest"
+                            "$ref": "#/definitions/api.importZoneRequest"
                         }
                     }
                 ],
@@ -7020,7 +7237,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/internal_api.upsertRecordRequest"
+                            "$ref": "#/definitions/api.upsertRecordRequest"
                         }
                     }
                 ],
@@ -7258,7 +7475,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/internal_api.createAppRequest"
+                            "$ref": "#/definitions/api.createAppRequest"
                         }
                     }
                 ],
@@ -7509,7 +7726,7 @@ const docTemplate = `{
                         "name": "body",
                         "in": "body",
                         "schema": {
-                            "$ref": "#/definitions/internal_api.autofixRequest"
+                            "$ref": "#/definitions/api.autofixRequest"
                         }
                     }
                 ],
@@ -7843,7 +8060,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/internal_api.createCloudTaskRequest"
+                            "$ref": "#/definitions/api.createCloudTaskRequest"
                         }
                     }
                 ],
@@ -7950,7 +8167,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/internal_api.updateComposeConfigRequest"
+                            "$ref": "#/definitions/api.updateComposeConfigRequest"
                         }
                     }
                 ],
@@ -8048,7 +8265,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/internal_api.updateComposeVolumeRequest"
+                            "$ref": "#/definitions/api.updateComposeVolumeRequest"
                         }
                     }
                 ],
@@ -8142,7 +8359,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/internal_api.DeleteImpact"
+                            "$ref": "#/definitions/api.DeleteImpact"
                         }
                     },
                     "401": {
@@ -8278,7 +8495,7 @@ const docTemplate = `{
                         "name": "body",
                         "in": "body",
                         "schema": {
-                            "$ref": "#/definitions/internal_api.createDeployHookRequest"
+                            "$ref": "#/definitions/api.createDeployHookRequest"
                         }
                     }
                 ],
@@ -8286,7 +8503,7 @@ const docTemplate = `{
                     "201": {
                         "description": "Created",
                         "schema": {
-                            "$ref": "#/definitions/internal_api.createDeployHookResponse"
+                            "$ref": "#/definitions/api.createDeployHookResponse"
                         }
                     },
                     "400": {
@@ -8507,7 +8724,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/internal_api.diagnoseResponse"
+                            "$ref": "#/definitions/api.diagnoseResponse"
                         }
                     },
                     "400": {
@@ -8671,7 +8888,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/internal_api.createEndpointRequest"
+                            "$ref": "#/definitions/api.createEndpointRequest"
                         }
                     }
                 ],
@@ -8837,7 +9054,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/internal_api.bulkSetEnvVarsRequest"
+                            "$ref": "#/definitions/api.bulkSetEnvVarsRequest"
                         }
                     }
                 ],
@@ -8930,12 +9147,6 @@ const docTemplate = `{
                         "name": "reveal",
                         "in": "query",
                         "required": true
-                    },
-                    {
-                        "type": "boolean",
-                        "description": "Reveal the preview-only override instead of the base env var",
-                        "name": "preview_override",
-                        "in": "query"
                     }
                 ],
                 "responses": {
@@ -8983,7 +9194,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Creates or updates a single environment variable for an app. The value is always stored AES-GCM encrypted. Requires write access. When preview_override is true, writes a preview-only override instead (see preview_env_overrides).",
+                "description": "Creates or updates a single environment variable for an app. The value is always stored AES-GCM encrypted. Requires write access.",
                 "consumes": [
                     "application/json"
                 ],
@@ -9030,7 +9241,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/internal_api.setEnvVarRequest"
+                            "$ref": "#/definitions/api.setEnvVarRequest"
                         }
                     }
                 ],
@@ -9077,7 +9288,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Removes a single environment variable from an app. Requires write access. Pass preview_override=true to delete a preview-only override instead.",
+                "description": "Removes a single environment variable from an app. Requires write access.",
                 "produces": [
                     "application/json"
                 ],
@@ -9114,12 +9325,6 @@ const docTemplate = `{
                         "name": "key",
                         "in": "path",
                         "required": true
-                    },
-                    {
-                        "type": "boolean",
-                        "description": "Delete the preview-only override instead of the base env var",
-                        "name": "preview_override",
-                        "in": "query"
                     }
                 ],
                 "responses": {
@@ -9259,7 +9464,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/internal_api.attachHostnameRequest"
+                            "$ref": "#/definitions/api.attachHostnameRequest"
                         }
                     }
                 ],
@@ -9436,7 +9641,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/internal_api.identityView"
+                            "$ref": "#/definitions/api.identityView"
                         }
                     },
                     "404": {
@@ -9495,7 +9700,7 @@ const docTemplate = `{
                         "name": "body",
                         "in": "body",
                         "schema": {
-                            "$ref": "#/definitions/internal_api.createIdentityRequest"
+                            "$ref": "#/definitions/api.createIdentityRequest"
                         }
                     }
                 ],
@@ -9503,7 +9708,7 @@ const docTemplate = `{
                     "201": {
                         "description": "Created",
                         "schema": {
-                            "$ref": "#/definitions/internal_api.createIdentityResponse"
+                            "$ref": "#/definitions/api.createIdentityResponse"
                         }
                     },
                     "400": {
@@ -9581,7 +9786,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/internal_api.updateIdentityRequest"
+                            "$ref": "#/definitions/api.updateIdentityRequest"
                         }
                     }
                 ],
@@ -9589,7 +9794,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/internal_api.identityView"
+                            "$ref": "#/definitions/api.identityView"
                         }
                     },
                     "400": {
@@ -9669,7 +9874,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/internal_api.updateAppImageRequest"
+                            "$ref": "#/definitions/api.updateAppImageRequest"
                         }
                     }
                 ],
@@ -9683,6 +9888,85 @@ const docTemplate = `{
                     },
                     "400": {
                         "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/projects/{projectId}/environments/{envId}/apps/{appName}/keep": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Cancels the automatic deletion of an app deployed from a platform starter template, so it survives like any other app. A no-op on apps that were never demos. Requires write access.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "apps"
+                ],
+                "summary": "Keep a demo app",
+                "operationId": "keepDemoApp",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Project ID",
+                        "name": "projectId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Environment ID",
+                        "name": "envId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "App name",
+                        "name": "appName",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
                         "schema": {
                             "type": "object",
                             "additionalProperties": {
@@ -9949,7 +10233,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/internal_api.moveAppRequest"
+                            "$ref": "#/definitions/api.moveAppRequest"
                         }
                     }
                 ],
@@ -10057,7 +10341,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/internal_api.MoveImpact"
+                            "$ref": "#/definitions/api.MoveImpact"
                         }
                     },
                     "400": {
@@ -10364,7 +10648,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/internal_api.updateAppProfileRequest"
+                            "$ref": "#/definitions/api.updateAppProfileRequest"
                         }
                     }
                 ],
@@ -10613,7 +10897,7 @@ const docTemplate = `{
                     "202": {
                         "description": "Accepted",
                         "schema": {
-                            "$ref": "#/definitions/internal_api.uploadSourceResponse"
+                            "$ref": "#/definitions/api.uploadSourceResponse"
                         }
                     },
                     "400": {
@@ -10883,7 +11167,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/internal_api.appVolumeReq"
+                            "$ref": "#/definitions/api.appVolumeReq"
                         }
                     }
                 ],
@@ -11550,7 +11834,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/internal_api.writeAppFileRequest"
+                            "$ref": "#/definitions/api.writeAppFileRequest"
                         }
                     }
                 ],
@@ -11684,7 +11968,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/internal_api.appFilePathRequest"
+                            "$ref": "#/definitions/api.appFilePathRequest"
                         }
                     }
                 ],
@@ -11809,7 +12093,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/internal_api.appFilePathRequest"
+                            "$ref": "#/definitions/api.appFilePathRequest"
                         }
                     }
                 ],
@@ -11934,7 +12218,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/internal_api.moveAppFileRequest"
+                            "$ref": "#/definitions/api.moveAppFileRequest"
                         }
                     }
                 ],
@@ -12454,7 +12738,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/internal_api.createServiceDatabaseRequest"
+                            "$ref": "#/definitions/api.createServiceDatabaseRequest"
                         }
                     }
                 ],
@@ -12994,7 +13278,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/internal_api.restoreDatabaseRequest"
+                            "$ref": "#/definitions/api.restoreDatabaseRequest"
                         }
                     }
                 ],
@@ -13155,7 +13439,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/internal_api.createIngressRequest"
+                            "$ref": "#/definitions/api.createIngressRequest"
                         }
                     }
                 ],
@@ -13296,7 +13580,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/internal_api.createAIModelRequest"
+                            "$ref": "#/definitions/api.createAIModelRequest"
                         }
                     }
                 ],
@@ -14057,7 +14341,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/internal_api.createMonitoringRequest"
+                            "$ref": "#/definitions/api.createMonitoringRequest"
                         }
                     }
                 ],
@@ -14883,7 +15167,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/internal_api.saveDashboardRequest"
+                            "$ref": "#/definitions/api.saveDashboardRequest"
                         }
                     }
                 ],
@@ -15736,7 +16020,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/internal_api.connectGitRepoRequest"
+                            "$ref": "#/definitions/api.connectGitRepoRequest"
                         }
                     }
                 ],
@@ -15950,7 +16234,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/internal_api.createS3BucketRequest"
+                            "$ref": "#/definitions/api.createS3BucketRequest"
                         }
                     }
                 ],
@@ -16392,7 +16676,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/internal_api.bindInstallationRequest"
+                            "$ref": "#/definitions/api.bindInstallationRequest"
                         }
                     }
                 ],
@@ -16400,7 +16684,7 @@ const docTemplate = `{
                     "201": {
                         "description": "Created",
                         "schema": {
-                            "$ref": "#/definitions/internal_api.gitInstallation"
+                            "$ref": "#/definitions/api.gitInstallation"
                         }
                     },
                     "400": {
@@ -16854,7 +17138,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/internal_api.ingestLogsRequest"
+                            "$ref": "#/definitions/api.ingestLogsRequest"
                         }
                     }
                 ],
@@ -16972,7 +17256,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/internal_api.ingestMetricsRequest"
+                            "$ref": "#/definitions/api.ingestMetricsRequest"
                         }
                     }
                 ],
@@ -17319,7 +17603,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/internal_api.recordUXEventsRequest"
+                            "$ref": "#/definitions/api.recordUXEventsRequest"
                         }
                     }
                 ],
@@ -17397,82 +17681,7 @@ const docTemplate = `{
         }
     },
     "definitions": {
-        "github_com_dada-tuda_console_backend_internal_billing_pricing.Need": {
-            "type": "object",
-            "properties": {
-                "apps": {
-                    "type": "integer"
-                },
-                "databases": {
-                    "type": "integer"
-                },
-                "domains": {
-                    "type": "integer"
-                },
-                "members": {
-                    "type": "integer"
-                },
-                "storageGB": {
-                    "type": "integer"
-                }
-            }
-        },
-        "github_com_dada-tuda_console_backend_internal_models.AIModelAuthMode": {
-            "type": "string",
-            "enum": [
-                "apikey",
-                "jwt",
-                "public"
-            ],
-            "x-enum-varnames": [
-                "AIModelAuthAPIKey",
-                "AIModelAuthJWT",
-                "AIModelAuthPublic"
-            ]
-        },
-        "github_com_dada-tuda_console_backend_internal_models.AIModelSource": {
-            "type": "string",
-            "enum": [
-                "mlflow",
-                "s3",
-                "custom"
-            ],
-            "x-enum-varnames": [
-                "AIModelSourceMLflow",
-                "AIModelSourceS3",
-                "AIModelSourceCustom"
-            ]
-        },
-        "github_com_dada-tuda_console_backend_internal_models.ImportServiceSpec": {
-            "type": "object",
-            "properties": {
-                "container_name": {
-                    "type": "string"
-                },
-                "image": {
-                    "type": "string"
-                },
-                "include": {
-                    "type": "boolean"
-                },
-                "ports": {
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    }
-                },
-                "service_name": {
-                    "type": "string"
-                },
-                "volumes": {
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    }
-                }
-            }
-        },
-        "internal_api.DeleteImpact": {
+        "api.DeleteImpact": {
             "type": "object",
             "properties": {
                 "app": {
@@ -17487,7 +17696,7 @@ const docTemplate = `{
                 "items": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/internal_api.ImpactItem"
+                        "$ref": "#/definitions/api.ImpactItem"
                     }
                 },
                 "namespace": {
@@ -17495,7 +17704,7 @@ const docTemplate = `{
                 }
             }
         },
-        "internal_api.ImpactItem": {
+        "api.ImpactItem": {
             "type": "object",
             "properties": {
                 "group": {
@@ -17512,7 +17721,7 @@ const docTemplate = `{
                 }
             }
         },
-        "internal_api.MoveBlockerItem": {
+        "api.MoveBlockerItem": {
             "type": "object",
             "properties": {
                 "kind": {
@@ -17526,7 +17735,7 @@ const docTemplate = `{
                 }
             }
         },
-        "internal_api.MoveImpact": {
+        "api.MoveImpact": {
             "type": "object",
             "properties": {
                 "app": {
@@ -17535,7 +17744,7 @@ const docTemplate = `{
                 "blockers": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/internal_api.MoveBlockerItem"
+                        "$ref": "#/definitions/api.MoveBlockerItem"
                     }
                 },
                 "can_move": {
@@ -17544,7 +17753,7 @@ const docTemplate = `{
                 "movable": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/internal_api.MoveMovableItem"
+                        "$ref": "#/definitions/api.MoveMovableItem"
                     }
                 },
                 "name_collision": {
@@ -17564,7 +17773,7 @@ const docTemplate = `{
                 }
             }
         },
-        "internal_api.MoveMovableItem": {
+        "api.MoveMovableItem": {
             "type": "object",
             "properties": {
                 "group": {
@@ -17578,7 +17787,7 @@ const docTemplate = `{
                 }
             }
         },
-        "internal_api.addDomainAuthorizationRequest": {
+        "api.addDomainAuthorizationRequest": {
             "type": "object",
             "properties": {
                 "apex_domain": {
@@ -17586,7 +17795,7 @@ const docTemplate = `{
                 }
             }
         },
-        "internal_api.agentChatClearContextRequest": {
+        "api.agentChatClearContextRequest": {
             "type": "object",
             "properties": {
                 "envId": {
@@ -17597,7 +17806,7 @@ const docTemplate = `{
                 }
             }
         },
-        "internal_api.agentChatConfirmRequest": {
+        "api.agentChatConfirmRequest": {
             "type": "object",
             "properties": {
                 "action_id": {
@@ -17614,7 +17823,7 @@ const docTemplate = `{
                 }
             }
         },
-        "internal_api.agentChatHistoryMessage": {
+        "api.agentChatHistoryMessage": {
             "type": "object",
             "properties": {
                 "content": {
@@ -17628,21 +17837,21 @@ const docTemplate = `{
                 }
             }
         },
-        "internal_api.agentChatHistoryResponse": {
+        "api.agentChatHistoryResponse": {
             "type": "object",
             "properties": {
                 "messages": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/internal_api.agentChatHistoryMessage"
+                        "$ref": "#/definitions/api.agentChatHistoryMessage"
                     }
                 },
                 "pendingAction": {
-                    "$ref": "#/definitions/internal_api.agentChatPendingActionDTO"
+                    "$ref": "#/definitions/api.agentChatPendingActionDTO"
                 }
             }
         },
-        "internal_api.agentChatPendingActionDTO": {
+        "api.agentChatPendingActionDTO": {
             "type": "object",
             "properties": {
                 "actionId": {
@@ -17663,7 +17872,7 @@ const docTemplate = `{
                 }
             }
         },
-        "internal_api.agentChatRequest": {
+        "api.agentChatRequest": {
             "type": "object",
             "properties": {
                 "appName": {
@@ -17689,7 +17898,7 @@ const docTemplate = `{
                 }
             }
         },
-        "internal_api.aiRoutingResponse": {
+        "api.aiRoutingResponse": {
             "type": "object",
             "properties": {
                 "markup": {
@@ -17703,7 +17912,7 @@ const docTemplate = `{
                 }
             }
         },
-        "internal_api.appFilePathRequest": {
+        "api.appFilePathRequest": {
             "type": "object",
             "required": [
                 "path"
@@ -17717,7 +17926,7 @@ const docTemplate = `{
                 }
             }
         },
-        "internal_api.appVolumeReq": {
+        "api.appVolumeReq": {
             "type": "object",
             "properties": {
                 "path": {
@@ -17731,7 +17940,7 @@ const docTemplate = `{
                 }
             }
         },
-        "internal_api.attachBoxDatabaseRequest": {
+        "api.attachBoxDatabaseRequest": {
             "type": "object",
             "properties": {
                 "env_prefix": {
@@ -17744,7 +17953,7 @@ const docTemplate = `{
                 }
             }
         },
-        "internal_api.attachHostnameRequest": {
+        "api.attachHostnameRequest": {
             "type": "object",
             "properties": {
                 "hostname": {
@@ -17752,7 +17961,7 @@ const docTemplate = `{
                 }
             }
         },
-        "internal_api.autofixRequest": {
+        "api.autofixRequest": {
             "type": "object",
             "properties": {
                 "error": {
@@ -17760,7 +17969,7 @@ const docTemplate = `{
                 }
             }
         },
-        "internal_api.bindInstallationRequest": {
+        "api.bindInstallationRequest": {
             "type": "object",
             "properties": {
                 "installation_id": {
@@ -17769,7 +17978,7 @@ const docTemplate = `{
                 }
             }
         },
-        "internal_api.boxUpRequest": {
+        "api.boxUpRequest": {
             "type": "object",
             "properties": {
                 "image": {
@@ -17805,7 +18014,7 @@ const docTemplate = `{
                 }
             }
         },
-        "internal_api.build": {
+        "api.build": {
             "type": "object",
             "properties": {
                 "app_name": {
@@ -17867,7 +18076,7 @@ const docTemplate = `{
                 }
             }
         },
-        "internal_api.bulkEnvVarItem": {
+        "api.bulkEnvVarItem": {
             "type": "object",
             "properties": {
                 "is_secret": {
@@ -17884,18 +18093,18 @@ const docTemplate = `{
                 }
             }
         },
-        "internal_api.bulkSetEnvVarsRequest": {
+        "api.bulkSetEnvVarsRequest": {
             "type": "object",
             "properties": {
                 "vars": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/internal_api.bulkEnvVarItem"
+                        "$ref": "#/definitions/api.bulkEnvVarItem"
                     }
                 }
             }
         },
-        "internal_api.clientErrorReport": {
+        "api.clientErrorReport": {
             "type": "object",
             "properties": {
                 "component_stack": {
@@ -17915,7 +18124,7 @@ const docTemplate = `{
                 }
             }
         },
-        "internal_api.connectGitRepoRequest": {
+        "api.connectGitRepoRequest": {
             "type": "object",
             "properties": {
                 "app_name": {
@@ -17962,7 +18171,7 @@ const docTemplate = `{
                 }
             }
         },
-        "internal_api.createAIKeyRequest": {
+        "api.createAIKeyRequest": {
             "type": "object",
             "properties": {
                 "name": {
@@ -17970,7 +18179,7 @@ const docTemplate = `{
                 }
             }
         },
-        "internal_api.createAIKeyResponse": {
+        "api.createAIKeyResponse": {
             "type": "object",
             "properties": {
                 "base_url": {
@@ -17996,7 +18205,7 @@ const docTemplate = `{
                 }
             }
         },
-        "internal_api.createAIModelRequest": {
+        "api.createAIModelRequest": {
             "type": "object",
             "properties": {
                 "artifact_uri": {
@@ -18006,7 +18215,7 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "auth_mode": {
-                    "$ref": "#/definitions/github_com_dada-tuda_console_backend_internal_models.AIModelAuthMode"
+                    "$ref": "#/definitions/models.AIModelAuthMode"
                 },
                 "container_image": {
                     "type": "string"
@@ -18027,14 +18236,14 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "source": {
-                    "$ref": "#/definitions/github_com_dada-tuda_console_backend_internal_models.AIModelSource"
+                    "$ref": "#/definitions/models.AIModelSource"
                 },
                 "version": {
                     "type": "string"
                 }
             }
         },
-        "internal_api.createAppRequest": {
+        "api.createAppRequest": {
             "type": "object",
             "properties": {
                 "framework": {
@@ -18056,7 +18265,7 @@ const docTemplate = `{
                     "type": "integer"
                 },
                 "volume": {
-                    "$ref": "#/definitions/internal_api.appVolumeReq"
+                    "$ref": "#/definitions/api.appVolumeReq"
                 },
                 "worker": {
                     "type": "boolean"
@@ -18066,7 +18275,7 @@ const docTemplate = `{
                 }
             }
         },
-        "internal_api.createAppServerRequest": {
+        "api.createAppServerRequest": {
             "type": "object",
             "properties": {
                 "flavor": {
@@ -18103,7 +18312,7 @@ const docTemplate = `{
                 }
             }
         },
-        "internal_api.createBoxRequest": {
+        "api.createBoxRequest": {
             "type": "object",
             "properties": {
                 "image": {
@@ -18133,7 +18342,7 @@ const docTemplate = `{
                 }
             }
         },
-        "internal_api.createChargeRequest": {
+        "api.createChargeRequest": {
             "type": "object",
             "properties": {
                 "amount": {
@@ -18157,7 +18366,7 @@ const docTemplate = `{
                 }
             }
         },
-        "internal_api.createCloudTaskRequest": {
+        "api.createCloudTaskRequest": {
             "type": "object",
             "properties": {
                 "task_type": {
@@ -18165,7 +18374,7 @@ const docTemplate = `{
                 }
             }
         },
-        "internal_api.createDeployHookRequest": {
+        "api.createDeployHookRequest": {
             "type": "object",
             "properties": {
                 "name": {
@@ -18173,7 +18382,7 @@ const docTemplate = `{
                 }
             }
         },
-        "internal_api.createDeployHookResponse": {
+        "api.createDeployHookResponse": {
             "type": "object",
             "properties": {
                 "base_url": {
@@ -18199,7 +18408,7 @@ const docTemplate = `{
                 }
             }
         },
-        "internal_api.createEndpointRequest": {
+        "api.createEndpointRequest": {
             "type": "object",
             "properties": {
                 "auth_enabled": {
@@ -18228,7 +18437,7 @@ const docTemplate = `{
                 }
             }
         },
-        "internal_api.createIdentityRequest": {
+        "api.createIdentityRequest": {
             "type": "object",
             "properties": {
                 "scopes": {
@@ -18239,7 +18448,7 @@ const docTemplate = `{
                 }
             }
         },
-        "internal_api.createIdentityResponse": {
+        "api.createIdentityResponse": {
             "type": "object",
             "properties": {
                 "app_name": {
@@ -18262,7 +18471,7 @@ const docTemplate = `{
                 }
             }
         },
-        "internal_api.createIngressRequest": {
+        "api.createIngressRequest": {
             "type": "object",
             "properties": {
                 "aliases": {
@@ -18283,7 +18492,7 @@ const docTemplate = `{
                 "rules": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/internal_api.ingressRuleReq"
+                        "$ref": "#/definitions/api.ingressRuleReq"
                     }
                 },
                 "ssl_redirect": {
@@ -18308,7 +18517,7 @@ const docTemplate = `{
                 }
             }
         },
-        "internal_api.createMonitoringRequest": {
+        "api.createMonitoringRequest": {
             "type": "object",
             "properties": {
                 "name": {
@@ -18316,7 +18525,7 @@ const docTemplate = `{
                 }
             }
         },
-        "internal_api.createPayServiceKeyRequest": {
+        "api.createPayServiceKeyRequest": {
             "type": "object",
             "required": [
                 "service"
@@ -18327,7 +18536,7 @@ const docTemplate = `{
                 }
             }
         },
-        "internal_api.createPayServiceKeyResponse": {
+        "api.createPayServiceKeyResponse": {
             "type": "object",
             "properties": {
                 "created_at": {
@@ -18347,7 +18556,7 @@ const docTemplate = `{
                 }
             }
         },
-        "internal_api.createProjectRequest": {
+        "api.createProjectRequest": {
             "type": "object",
             "required": [
                 "slug"
@@ -18371,7 +18580,7 @@ const docTemplate = `{
                 }
             }
         },
-        "internal_api.createS3BucketRequest": {
+        "api.createS3BucketRequest": {
             "type": "object",
             "properties": {
                 "app_ref": {
@@ -18398,7 +18607,7 @@ const docTemplate = `{
                 }
             }
         },
-        "internal_api.createServiceDatabaseRequest": {
+        "api.createServiceDatabaseRequest": {
             "type": "object",
             "properties": {
                 "app_ref": {
@@ -18421,7 +18630,7 @@ const docTemplate = `{
                 }
             }
         },
-        "internal_api.crystallizeBoxRequest": {
+        "api.crystallizeBoxRequest": {
             "type": "object",
             "properties": {
                 "ack_monthly_charge": {
@@ -18455,7 +18664,7 @@ const docTemplate = `{
                 }
             }
         },
-        "internal_api.deployOperationStatusResponse": {
+        "api.deployOperationStatusResponse": {
             "type": "object",
             "properties": {
                 "error_code": {
@@ -18475,7 +18684,7 @@ const docTemplate = `{
                 }
             }
         },
-        "internal_api.deployTriggerRequest": {
+        "api.deployTriggerRequest": {
             "type": "object",
             "properties": {
                 "image": {
@@ -18483,7 +18692,7 @@ const docTemplate = `{
                 }
             }
         },
-        "internal_api.deployTriggerResponse": {
+        "api.deployTriggerResponse": {
             "type": "object",
             "properties": {
                 "message": {
@@ -18494,9 +18703,12 @@ const docTemplate = `{
                 }
             }
         },
-        "internal_api.diagnoseResponse": {
+        "api.diagnoseResponse": {
             "type": "object",
             "properties": {
+                "autofix_unavailable_reason": {
+                    "type": "string"
+                },
                 "can_autofix": {
                     "type": "boolean"
                 },
@@ -18517,7 +18729,7 @@ const docTemplate = `{
                 }
             }
         },
-        "internal_api.exposeBoxRequest": {
+        "api.exposeBoxRequest": {
             "type": "object",
             "properties": {
                 "port": {
@@ -18526,7 +18738,7 @@ const docTemplate = `{
                 }
             }
         },
-        "internal_api.extendBoxRequest": {
+        "api.extendBoxRequest": {
             "type": "object",
             "properties": {
                 "ttl_seconds": {
@@ -18535,7 +18747,7 @@ const docTemplate = `{
                 }
             }
         },
-        "internal_api.gitInstallation": {
+        "api.gitInstallation": {
             "type": "object",
             "properties": {
                 "account_login": {
@@ -18562,7 +18774,7 @@ const docTemplate = `{
                 }
             }
         },
-        "internal_api.grantBoxRequest": {
+        "api.grantBoxRequest": {
             "type": "object",
             "properties": {
                 "box_id": {
@@ -18576,7 +18788,7 @@ const docTemplate = `{
                 }
             }
         },
-        "internal_api.identityView": {
+        "api.identityView": {
             "type": "object",
             "properties": {
                 "ai_month_spend_usd": {
@@ -18605,7 +18817,7 @@ const docTemplate = `{
                 }
             }
         },
-        "internal_api.importComposeStackRequest": {
+        "api.importComposeStackRequest": {
             "type": "object",
             "properties": {
                 "ack_secrets_in_git": {
@@ -18623,12 +18835,12 @@ const docTemplate = `{
                 "services": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/github_com_dada-tuda_console_backend_internal_models.ImportServiceSpec"
+                        "$ref": "#/definitions/models.ImportServiceSpec"
                     }
                 }
             }
         },
-        "internal_api.importRecord": {
+        "api.importRecord": {
             "type": "object",
             "properties": {
                 "contents": {
@@ -18648,18 +18860,18 @@ const docTemplate = `{
                 }
             }
         },
-        "internal_api.importZoneRequest": {
+        "api.importZoneRequest": {
             "type": "object",
             "properties": {
                 "records": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/internal_api.importRecord"
+                        "$ref": "#/definitions/api.importRecord"
                     }
                 }
             }
         },
-        "internal_api.ingestLogsRequest": {
+        "api.ingestLogsRequest": {
             "type": "object",
             "properties": {
                 "level": {
@@ -18673,7 +18885,7 @@ const docTemplate = `{
                 }
             }
         },
-        "internal_api.ingestMetricsRequest": {
+        "api.ingestMetricsRequest": {
             "type": "object",
             "properties": {
                 "metrics": {
@@ -18691,7 +18903,7 @@ const docTemplate = `{
                 }
             }
         },
-        "internal_api.ingressRuleReq": {
+        "api.ingressRuleReq": {
             "type": "object",
             "properties": {
                 "app": {
@@ -18705,7 +18917,7 @@ const docTemplate = `{
                 }
             }
         },
-        "internal_api.loginRequest": {
+        "api.loginRequest": {
             "type": "object",
             "required": [
                 "password"
@@ -18722,7 +18934,7 @@ const docTemplate = `{
                 }
             }
         },
-        "internal_api.moveAppFileRequest": {
+        "api.moveAppFileRequest": {
             "type": "object",
             "required": [
                 "from",
@@ -18737,7 +18949,7 @@ const docTemplate = `{
                 }
             }
         },
-        "internal_api.moveAppRequest": {
+        "api.moveAppRequest": {
             "type": "object",
             "properties": {
                 "target_project_id": {
@@ -18745,7 +18957,7 @@ const docTemplate = `{
                 }
             }
         },
-        "internal_api.putAICredentialRequest": {
+        "api.putAICredentialRequest": {
             "type": "object",
             "required": [
                 "api_key"
@@ -18759,7 +18971,7 @@ const docTemplate = `{
                 }
             }
         },
-        "internal_api.recordBoxFunnelEventRequest": {
+        "api.recordBoxFunnelEventRequest": {
             "type": "object",
             "properties": {
                 "agent": {
@@ -18806,7 +19018,7 @@ const docTemplate = `{
                 }
             }
         },
-        "internal_api.recordUXEventsRequest": {
+        "api.recordUXEventsRequest": {
             "type": "object",
             "properties": {
                 "anon_id": {
@@ -18815,7 +19027,7 @@ const docTemplate = `{
                 "events": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/internal_api.uxEventPayload"
+                        "$ref": "#/definitions/api.uxEventPayload"
                     }
                 },
                 "session_id": {
@@ -18823,7 +19035,7 @@ const docTemplate = `{
                 }
             }
         },
-        "internal_api.reportOnboardingRequest": {
+        "api.reportOnboardingRequest": {
             "type": "object",
             "properties": {
                 "status": {
@@ -18834,7 +19046,7 @@ const docTemplate = `{
                 }
             }
         },
-        "internal_api.resolveFeedbackRequest": {
+        "api.resolveFeedbackRequest": {
             "type": "object",
             "properties": {
                 "resolution": {
@@ -18842,7 +19054,7 @@ const docTemplate = `{
                 }
             }
         },
-        "internal_api.restoreDatabaseRequest": {
+        "api.restoreDatabaseRequest": {
             "type": "object",
             "properties": {
                 "backup_id": {
@@ -18850,7 +19062,7 @@ const docTemplate = `{
                 }
             }
         },
-        "internal_api.resumeBoxRequest": {
+        "api.resumeBoxRequest": {
             "type": "object",
             "properties": {
                 "ssh_public_key": {
@@ -18859,21 +19071,10 @@ const docTemplate = `{
                 }
             }
         },
-        "internal_api.saveDashboardRequest": {
-            "type": "object",
-            "properties": {
-                "config": {
-                    "type": "array",
-                    "items": {
-                        "type": "integer"
-                    }
-                },
-                "version": {
-                    "type": "integer"
-                }
-            }
+        "api.saveDashboardRequest": {
+            "type": "object"
         },
-        "internal_api.serviceChargeResponse": {
+        "api.serviceChargeResponse": {
             "type": "object",
             "properties": {
                 "amount": {
@@ -18905,7 +19106,7 @@ const docTemplate = `{
                 }
             }
         },
-        "internal_api.setAIRoutingRequest": {
+        "api.setAIRoutingRequest": {
             "type": "object",
             "required": [
                 "mode"
@@ -18916,13 +19117,10 @@ const docTemplate = `{
                 }
             }
         },
-        "internal_api.setEnvVarRequest": {
+        "api.setEnvVarRequest": {
             "type": "object",
             "properties": {
                 "is_secret": {
-                    "type": "boolean"
-                },
-                "preview_override": {
                     "type": "boolean"
                 },
                 "scope": {
@@ -18933,7 +19131,7 @@ const docTemplate = `{
                 }
             }
         },
-        "internal_api.submitFeedbackRequest": {
+        "api.submitFeedbackRequest": {
             "type": "object",
             "properties": {
                 "message": {
@@ -18944,7 +19142,7 @@ const docTemplate = `{
                 }
             }
         },
-        "internal_api.updateAppImageRequest": {
+        "api.updateAppImageRequest": {
             "type": "object",
             "properties": {
                 "image": {
@@ -18952,7 +19150,7 @@ const docTemplate = `{
                 }
             }
         },
-        "internal_api.updateAppProfileRequest": {
+        "api.updateAppProfileRequest": {
             "type": "object",
             "properties": {
                 "profile": {
@@ -18960,7 +19158,7 @@ const docTemplate = `{
                 }
             }
         },
-        "internal_api.updateComposeConfigRequest": {
+        "api.updateComposeConfigRequest": {
             "type": "object",
             "properties": {
                 "image": {
@@ -18974,7 +19172,7 @@ const docTemplate = `{
                 }
             }
         },
-        "internal_api.updateComposeVolumeRequest": {
+        "api.updateComposeVolumeRequest": {
             "type": "object",
             "properties": {
                 "volumes": {
@@ -18985,24 +19183,10 @@ const docTemplate = `{
                 }
             }
         },
-        "internal_api.updateIdentityRequest": {
-            "type": "object",
-            "properties": {
-                "ai_monthly_limit_usd": {
-                    "type": "array",
-                    "items": {
-                        "type": "integer"
-                    }
-                },
-                "scopes": {
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    }
-                }
-            }
+        "api.updateIdentityRequest": {
+            "type": "object"
         },
-        "internal_api.uploadSourceDetect": {
+        "api.uploadSourceDetect": {
             "type": "object",
             "properties": {
                 "framework": {
@@ -19013,21 +19197,21 @@ const docTemplate = `{
                 }
             }
         },
-        "internal_api.uploadSourceResponse": {
+        "api.uploadSourceResponse": {
             "type": "object",
             "properties": {
                 "artifact_uri": {
                     "type": "string"
                 },
                 "build": {
-                    "$ref": "#/definitions/internal_api.build"
+                    "$ref": "#/definitions/api.build"
                 },
                 "detected": {
-                    "$ref": "#/definitions/internal_api.uploadSourceDetect"
+                    "$ref": "#/definitions/api.uploadSourceDetect"
                 }
             }
         },
-        "internal_api.upsertRecordRequest": {
+        "api.upsertRecordRequest": {
             "type": "object",
             "properties": {
                 "contents": {
@@ -19047,7 +19231,7 @@ const docTemplate = `{
                 }
             }
         },
-        "internal_api.uxEventPayload": {
+        "api.uxEventPayload": {
             "type": "object",
             "properties": {
                 "at": {
@@ -19068,7 +19252,7 @@ const docTemplate = `{
                 }
             }
         },
-        "internal_api.writeAppFileRequest": {
+        "api.writeAppFileRequest": {
             "type": "object",
             "required": [
                 "path"
@@ -19082,6 +19266,81 @@ const docTemplate = `{
                 },
                 "path": {
                     "type": "string"
+                }
+            }
+        },
+        "models.AIModelAuthMode": {
+            "type": "string",
+            "enum": [
+                "apikey",
+                "jwt",
+                "public"
+            ],
+            "x-enum-varnames": [
+                "AIModelAuthAPIKey",
+                "AIModelAuthJWT",
+                "AIModelAuthPublic"
+            ]
+        },
+        "models.AIModelSource": {
+            "type": "string",
+            "enum": [
+                "mlflow",
+                "s3",
+                "custom"
+            ],
+            "x-enum-varnames": [
+                "AIModelSourceMLflow",
+                "AIModelSourceS3",
+                "AIModelSourceCustom"
+            ]
+        },
+        "models.ImportServiceSpec": {
+            "type": "object",
+            "properties": {
+                "container_name": {
+                    "type": "string"
+                },
+                "image": {
+                    "type": "string"
+                },
+                "include": {
+                    "type": "boolean"
+                },
+                "ports": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "service_name": {
+                    "type": "string"
+                },
+                "volumes": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                }
+            }
+        },
+        "pricing.Need": {
+            "type": "object",
+            "properties": {
+                "apps": {
+                    "type": "integer"
+                },
+                "databases": {
+                    "type": "integer"
+                },
+                "domains": {
+                    "type": "integer"
+                },
+                "members": {
+                    "type": "integer"
+                },
+                "storageGB": {
+                    "type": "integer"
                 }
             }
         }

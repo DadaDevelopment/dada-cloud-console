@@ -498,6 +498,13 @@ export const appsApi = {
       { method: "POST" }
     ),
 
+  /** Claim a starter-template demo app so the reaper stops counting down on it. */
+  keepDemo: (projectId: string, envId: string, appName: string) =>
+    apiFetch<{ message: string }>(
+      `/api/v1/projects/${projectId}/environments/${envId}/apps/${appName}/keep`,
+      { method: "POST" }
+    ),
+
   // Adopt an existing single compose app into N first-class per-service Applications
   // (preserves the live stack + external volumes; brief cutover outage).
   adopt: (projectId: string, envId: string, appName: string) =>

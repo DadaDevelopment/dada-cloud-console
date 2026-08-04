@@ -280,6 +280,8 @@ export interface ResourceSnapshot {
   phase?: string;
   summary_json: Record<string, unknown>;
   last_synced_at: string;
+  /** Set only on apps deployed from a platform starter template: when the demo reaper deletes them. */
+  demo_expires_at?: string;
 }
 
 export interface LoginResponse {

@@ -201,15 +201,16 @@ func RestatePlaceholderPhase(apps []models.ResourceSnapshot, buildStatus map[str
 // SynthesizeGitRepoApps needs to decide whether to surface a NotDeployed
 // placeholder app for a repo that has no live snapshot yet.
 type GitRepoRow struct {
-	ID           uuid.UUID
-	Name         string
-	Repo         string
-	Provider     string
-	Profile      string
-	Replicas     int
-	Port         int
-	Updated      time.Time
-	LatestStatus string
+	ID            uuid.UUID
+	Name          string
+	Repo          string
+	Provider      string
+	Profile       string
+	Replicas      int
+	Port          int
+	Updated       time.Time
+	LatestStatus  string
+	DemoExpiresAt *time.Time
 }
 
 // SynthesizeGitRepoApps appends a NotDeployed placeholder app for each git_repos
@@ -364,7 +365,7 @@ func (h *Handler) ListApps(c *gin.Context) {
 	grows, gerr := h.pool.Query(c.Request.Context(),
 		`SELECT gr.id, gr.app_name, gr.repo_full_name, gr.provider,
 		        COALESCE(gr.profile, 'small'), COALESCE(gr.replicas, 1), COALESCE(gr.port, 8080),
-		        gr.updated_at, COALESCE(lb.status, '')
+		        gr.updated_at, COALESCE(lb.status, ''), gr.demo_expires_at
 		 FROM git_repos gr
 		 LEFT JOIN LATERAL (
 		     SELECT status FROM builds b
@@ -380,7 +381,7 @@ func (h *Handler) ListApps(c *gin.Context) {
 		defer grows.Close()
 		for grows.Next() {
 			var r GitRepoRow
-			if scanErr := grows.Scan(&r.ID, &r.Name, &r.Repo, &r.Provider, &r.Profile, &r.Replicas, &r.Port, &r.Updated, &r.LatestStatus); scanErr != nil {
+			if scanErr := grows.Scan(&r.ID, &r.Name, &r.Repo, &r.Provider, &r.Profile, &r.Replicas, &r.Port, &r.Updated, &r.LatestStatus, &r.DemoExpiresAt); scanErr != nil {
 				continue
 			}
 			gitRows = append(gitRows, r)
@@ -393,6 +394,7 @@ func (h *Handler) ListApps(c *gin.Context) {
 	apps, repoByName, sourceByName := SynthesizeGitRepoApps(apps, gitRows, seen, projectID, envID)
 
 	FillRepoFullNameAndSource(apps, repoByName, sourceByName)
+	FillDemoExpiry(apps, gitRows)
 	FillEffectiveResources(apps)
 	RestatePlaceholderPhase(apps, buildStatus)
 	SuppressNonHTTPURL(apps)

@@ -22,6 +22,24 @@ export const overview: Messages = {
   "overview.checklist.domain": { ru: "Подключите домен и HTTPS", en: "Connect a domain and HTTPS" },
   "overview.checklist.go": { ru: "Перейти →", en: "Go →" },
 
+  "overview.onramp.git.title": {
+    ru: "Разверните приложение из GitHub",
+    en: "Deploy an app from GitHub",
+  },
+  "overview.onramp.git.hint": {
+    ru: "Подключите репозиторий — платформа соберёт его и выкатит, а каждый следующий push будет деплоиться сам.",
+    en: "Connect a repository — the platform builds and ships it, and every later push deploys itself.",
+  },
+  "overview.onramp.git.cta": { ru: "Подключить репозиторий", en: "Connect a repository" },
+  "overview.onramp.demo.title": {
+    ru: "Просто посмотреть, как это работает",
+    en: "Just to see how it works",
+  },
+  "overview.onramp.demo.hint": {
+    ru: "Демо-приложение из нашего репозитория, без GitHub. Удалится автоматически через 24 часа — если захотите оставить, нажмите «Оставить» в карточке приложения.",
+    en: "A demo app from our repository, no GitHub needed. It is deleted automatically after 24 hours — press «Keep» on the app card to hold on to it.",
+  },
+
   "overview.templates.title": { ru: "Разверните шаблон — GitHub не нужен", en: "Deploy a template — no GitHub needed" },
   "overview.templates.hint": {
     ru: "Готовое приложение из нашего репозитория. Один клик — сборка и запуск, без подключения аккаунта.",

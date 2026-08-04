@@ -13,6 +13,7 @@ import { canMutate } from "@/lib/rbac";
 import { isSettling } from "@/lib/phase";
 import { timeAgo } from "@/lib/format";
 import { PhaseBadge } from "@/components/ui/phase-badge";
+import { DemoAppChip } from "@/components/console/demo-app-chip";
 import { MetricSparkline } from "@/components/metrics/fixed-metrics-dashboard";
 import { EmptyState } from "@/components/ui/empty-state";
 import { DeployChooser } from "@/components/deploy/deploy-chooser";
@@ -644,6 +645,9 @@ function AppRow({ app, env, projectId, previews, expanded, onToggle, t }: AppRow
             <div className="flex items-center gap-2">
               <p className="font-mono text-sm font-semibold text-gray-900 dark:text-gray-100 truncate">{app.name}</p>
               <PhaseBadge phase={app.phase} />
+              {app.demo_expires_at && (
+                <DemoAppChip projectId={projectId} envId={env.id} appName={app.name} expiresAt={app.demo_expires_at} />
+              )}
               {hasCrashAlert && (
                 <span className="inline-flex items-center rounded-full bg-red-100 dark:bg-red-950/60 px-2 py-0.5 text-xs font-medium text-red-700 dark:text-red-300">
                   {t("apps.alerts.chip.crash")}

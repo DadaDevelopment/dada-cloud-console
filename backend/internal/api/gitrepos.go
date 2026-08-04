@@ -1173,21 +1173,23 @@ func (h *Handler) ConnectGitRepo(c *gin.Context) {
 
 	webhookSecret := randomHex(32)
 
+	demoExpiresAt := h.demoExpiryFor(req.RepoFullName)
+
 	var r gitRepo
 	row := h.pool.QueryRow(c.Request.Context(),
 		`INSERT INTO git_repos
 		   (project_id, environment_id, app_name, installation_id, provider,
 		    repo_full_name, clone_url, token_encrypted, webhook_secret,
 		    production_branch, root_dir, framework_override, auto_deploy,
-		    port, replicas, profile, created_by)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+		    port, replicas, profile, created_by, demo_expires_at)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
 		 RETURNING id, project_id, environment_id, app_name, installation_id, provider,
 		           repo_full_name, production_branch, root_dir, framework_override,
 		           auto_deploy, port, replicas, profile, created_at, updated_at`,
 		projectID, envID, req.AppName, installationID, provider,
 		req.RepoFullName, cloneURL, tokenEncrypted, webhookSecret,
 		req.ProductionBranch, req.RootDir, frameworkOverride, req.AutoDeploy,
-		req.Port, req.Replicas, req.Profile, claims.UserID,
+		req.Port, req.Replicas, req.Profile, claims.UserID, demoExpiresAt,
 	)
 	if err := row.Scan(&r.ID, &r.ProjectID, &r.EnvironmentID, &r.AppName,
 		&r.InstallationID, &r.Provider, &r.RepoFullName, &r.ProductionBranch,
