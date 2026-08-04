@@ -112,7 +112,7 @@ export function TemplateDeployCards({ projectId, envId, compact, hero, className
           {templateError}
         </div>
       )}
-      <div className={`grid gap-4 sm:grid-cols-3 ${compact ? "" : "mt-4"}`}>
+      <div className={`grid gap-4 sm:grid-cols-2 lg:grid-cols-3 ${compact ? "" : "mt-4"}`}>
         {TEMPLATES.map((tpl) => (
           <TemplateCard
             key={tpl.key}
