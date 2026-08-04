@@ -8,47 +8,34 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// TestInsertPreviewEnvOps_AreAudited pins the audit rows on a preview
-// environment's birth and death. Both are enqueued from a GitHub webhook, so the
-// actor is the system user, but the events themselves are things a person did --
-// opened a pull request, closed it. On prod they wrote 17 CreatePreviewEnv
-// operations in 30 days against zero audit rows, so the whole preview feature was
-// absent from path analysis.
-func TestInsertPreviewEnvOps_AreAudited(t *testing.T) {
+// TestInsertDeletePreviewEnvOp_IsAudited pins the audit row on a legacy preview
+// environment's death. Creation is gone with the feature; teardown still runs
+// for environments opened before the removal, and it is enqueued from a GitHub
+// webhook, so the actor is the system user while the event itself is something
+// a person did -- closed a pull request. On prod the preview operations wrote 17
+// rows in 30 days against zero audit rows, so the lifecycle was absent from path
+// analysis entirely.
+func TestInsertDeletePreviewEnvOp_IsAudited(t *testing.T) {
 	pool := testPool(t)
 	ctx := context.Background()
 	projectID, envID := seedProjectEnv(t, pool, "small")
-	appName := "prev-audit-" + uuid.NewString()[:8]
-	gitRepoID := seedGitRepo(t, pool, projectID, envID, appName, "small")
 	namespace := "ns-" + uuid.NewString()[:8]
-
-	createOp, err := InsertCreatePreviewEnvOp(ctx, pool, SystemUserID, projectID, envID,
-		"pr-7-"+appName, namespace, gitRepoID, 7, "feature/x", envID, appName)
-	if err != nil {
-		t.Fatalf("InsertCreatePreviewEnvOp: %v", err)
-	}
-	assertPreviewAudited(t, pool, "CreatePreviewEnv", createOp, envID, namespace)
-
-	var pr *int
-	var branch *string
-	if err := pool.QueryRow(ctx,
-		`SELECT (metadata->>'pr_number')::int, metadata->>'head_branch'
-		   FROM audit_events WHERE operation_id = $1`, createOp,
-	).Scan(&pr, &branch); err != nil {
-		t.Fatalf("read CreatePreviewEnv audit metadata: %v", err)
-	}
-	if pr == nil || *pr != 7 {
-		t.Errorf("metadata.pr_number = %v, want 7 — without it the row cannot be tied back to the pull request", pr)
-	}
-	if branch == nil || *branch != "feature/x" {
-		t.Errorf("metadata.head_branch = %v, want feature/x", branch)
-	}
 
 	deleteOp, err := InsertDeletePreviewEnvOp(ctx, pool, SystemUserID, projectID, envID, namespace)
 	if err != nil {
 		t.Fatalf("InsertDeletePreviewEnvOp: %v", err)
 	}
 	assertPreviewAudited(t, pool, "DeletePreviewEnv", deleteOp, envID, namespace)
+
+	var trigger *string
+	if err := pool.QueryRow(ctx,
+		`SELECT metadata->>'trigger' FROM audit_events WHERE operation_id = $1`, deleteOp,
+	).Scan(&trigger); err != nil {
+		t.Fatalf("read DeletePreviewEnv audit metadata: %v", err)
+	}
+	if trigger == nil || *trigger != "pr_event" {
+		t.Errorf("metadata.trigger = %v, want pr_event — otherwise the teardown cannot be told apart from a reaper's", trigger)
+	}
 }
 
 func assertPreviewAudited(t *testing.T, pool *pgxpool.Pool, action string, opID, envID uuid.UUID, namespace string) {

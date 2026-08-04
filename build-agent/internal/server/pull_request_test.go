@@ -1,134 +1,30 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 
-	"github.com/dada-tuda/console/build-agent/internal/config"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-func TestPullRequestEventUnmarshalOpened(t *testing.T) {
-	body := []byte(`{
-		"action": "opened",
-		"number": 42,
-		"repository": {"full_name": "acme/webapp"},
-		"pull_request": {
-			"title": "Add pricing page",
-			"head": {
-				"sha": "abc123",
-				"ref": "feature/pricing-page",
-				"repo": {"full_name": "acme/webapp"}
-			},
-			"base": {
-				"repo": {"full_name": "acme/webapp"}
-			}
-		}
-	}`)
-
-	var ev pullRequestEvent
-	if err := json.Unmarshal(body, &ev); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
-	if ev.Action != "opened" {
-		t.Errorf("Action = %q, want opened", ev.Action)
-	}
-	if ev.Number != 42 {
-		t.Errorf("Number = %d, want 42", ev.Number)
-	}
-	if ev.Repository.FullName != "acme/webapp" {
-		t.Errorf("Repository.FullName = %q, want acme/webapp", ev.Repository.FullName)
-	}
-	if ev.PullRequest.Head.SHA != "abc123" {
-		t.Errorf("Head.SHA = %q, want abc123", ev.PullRequest.Head.SHA)
-	}
-	if ev.PullRequest.Head.Ref != "feature/pricing-page" {
-		t.Errorf("Head.Ref = %q, want feature/pricing-page", ev.PullRequest.Head.Ref)
-	}
-	if ev.PullRequest.Head.Repo.FullName != ev.PullRequest.Base.Repo.FullName {
-		t.Errorf("same-repo PR should have equal head/base full_name")
-	}
-}
-
-func TestPullRequestEventUnmarshalForkPR(t *testing.T) {
-	body := []byte(`{
-		"action": "synchronize",
-		"number": 7,
-		"repository": {"full_name": "acme/webapp"},
-		"pull_request": {
-			"title": "Fix typo",
-			"head": {
-				"sha": "def456",
-				"ref": "fix-typo",
-				"repo": {"full_name": "contributor/webapp"}
-			},
-			"base": {
-				"repo": {"full_name": "acme/webapp"}
-			}
-		}
-	}`)
-
-	var ev pullRequestEvent
-	if err := json.Unmarshal(body, &ev); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
-	headRepo := ev.PullRequest.Head.Repo.FullName
-	baseRepo := ev.PullRequest.Base.Repo.FullName
-	if headRepo == baseRepo {
-		t.Fatalf("fixture should be a fork PR: head=%q base=%q", headRepo, baseRepo)
-	}
-	if headRepo != "contributor/webapp" {
-		t.Errorf("Head.Repo.FullName = %q, want contributor/webapp", headRepo)
-	}
-}
-
-func TestPullRequestEventUnmarshalClosed(t *testing.T) {
+// TestPullRequestEventDecodesTeardownFieldsOnly locks the shrunken payload. The
+// event carries the PR number and its repository and nothing else: no head sha,
+// no head/base repo, no labels. Those fields fed the creation path, and a struct
+// that cannot decode them is a struct nobody can rebuild a preview deploy from
+// by accident.
+func TestPullRequestEventDecodesTeardownFieldsOnly(t *testing.T) {
 	body := []byte(`{
 		"action": "closed",
 		"number": 42,
 		"repository": {"full_name": "acme/webapp"},
-		"pull_request": {
-			"title": "Add pricing page",
-			"head": {"sha": "abc123", "ref": "feature/pricing-page", "repo": {"full_name": "acme/webapp"}},
-			"base": {"repo": {"full_name": "acme/webapp"}}
-		}
-	}`)
-
-	var ev pullRequestEvent
-	if err := json.Unmarshal(body, &ev); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
-	if ev.Action != "closed" {
-		t.Errorf("Action = %q, want closed", ev.Action)
-	}
-	if ev.Number != 42 {
-		t.Errorf("Number = %d, want 42", ev.Number)
-	}
-}
-
-func TestPullRequestEventUnknownActionIgnored(t *testing.T) {
-	body := []byte(`{"action": "assigned", "number": 1, "repository": {"full_name": "acme/webapp"}}`)
-	var ev pullRequestEvent
-	if err := json.Unmarshal(body, &ev); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
-	switch ev.Action {
-	case "opened", "reopened", "synchronize", "closed", "labeled", "unlabeled":
-		t.Errorf("action %q should not match the handled set", ev.Action)
-	}
-}
-
-// TestPullRequestEventUnmarshalLabels proves both label shapes decode: the PR's
-// full current set (which the opt-in check reads) and the single changed label
-// GitHub attaches to a labeled/unlabeled delivery.
-func TestPullRequestEventUnmarshalLabels(t *testing.T) {
-	body := []byte(`{
-		"action": "labeled",
-		"number": 9,
-		"repository": {"full_name": "acme/webapp"},
 		"label": {"name": "preview"},
 		"pull_request": {
 			"title": "Add pricing page",
-			"labels": [{"name": "enhancement"}, {"name": "preview"}],
+			"labels": [{"name": "preview"}],
 			"head": {"sha": "abc123", "ref": "feat", "repo": {"full_name": "acme/webapp"}},
 			"base": {"repo": {"full_name": "acme/webapp"}}
 		}
@@ -138,96 +34,59 @@ func TestPullRequestEventUnmarshalLabels(t *testing.T) {
 	if err := json.Unmarshal(body, &ev); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
-	if ev.Label.Name != "preview" {
-		t.Errorf("Label.Name = %q, want preview", ev.Label.Name)
+	if ev.Action != "closed" || ev.Number != 42 || ev.Repository.FullName != "acme/webapp" {
+		t.Fatalf("teardown fields lost: %+v", ev)
 	}
-	if len(ev.PullRequest.Labels) != 2 {
-		t.Fatalf("Labels len = %d, want 2", len(ev.PullRequest.Labels))
+
+	raw, err := json.Marshal(ev)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
 	}
-	if !prHasLabel(&ev, "preview") {
-		t.Error("prHasLabel should find the preview label in the PR's set")
-	}
-	if prHasLabel(&ev, "bug") {
-		t.Error("prHasLabel should not find a label the PR does not carry")
+	for _, gone := range []string{"sha", "labels", "head", "base"} {
+		if strings.Contains(string(raw), gone) {
+			t.Errorf("pullRequestEvent still carries %q: %s", gone, raw)
+		}
 	}
 }
 
-// TestPreviewOptInRequiresLabel locks the opt-in default: with
-// PreviewEnvsRequireLabel on, only a PR carrying the label may create a preview,
-// so an ignored PR never spawns an environment nobody asked for. With the flag
-// off, every PR opts in (the pre-opt-in behavior, kept as an env kill switch).
-func TestPreviewOptInRequiresLabel(t *testing.T) {
-	labelled := func(names ...string) *pullRequestEvent {
-		ev := &pullRequestEvent{}
-		for _, n := range names {
-			ev.PullRequest.Labels = append(ev.PullRequest.Labels, struct {
-				Name string `json:"name"`
-			}{Name: n})
-		}
-		return ev
+// TestPullRequestWebhookIsTeardownOnly is the regression proper for removing
+// previews as a feature: every action that used to CREATE or refresh a preview
+// environment must now be dropped before the handler even looks at the
+// database, while "closed" still goes looking for a legacy environment to tear
+// down.
+//
+// The database is deliberately unreachable, which is what makes the two cases
+// tell each other apart: a delivery that reaches the DB fails loudly (500), a
+// delivery that is dropped first cannot (200). An "opened" that starts
+// resolving repos again would flip to 500 and fail this test.
+func TestPullRequestWebhookIsTeardownOnly(t *testing.T) {
+	pool, err := pgxpool.New(context.Background(), "postgres://nobody@127.0.0.1:1/none")
+	if err != nil {
+		t.Fatalf("build unreachable pool: %v", err)
 	}
-	gated := &config.Config{PreviewEnvsRequireLabel: true, PreviewEnvLabel: "preview"}
-	open := &config.Config{PreviewEnvsRequireLabel: false, PreviewEnvLabel: "preview"}
+	defer pool.Close()
+	s := &Server{pool: pool}
 
 	cases := []struct {
-		name string
-		cfg  *config.Config
-		ev   *pullRequestEvent
-		want bool
+		action string
+		want   int
 	}{
-		{"gated, no labels at all", gated, labelled(), false},
-		{"gated, only unrelated labels", gated, labelled("bug", "enhancement"), false},
-		{"gated, exact label", gated, labelled("preview"), true},
-		{"gated, label among others", gated, labelled("bug", "preview"), true},
-		{"gated, case-insensitive", gated, labelled("Preview"), true},
-		{"gated, padded label", gated, labelled("  preview "), true},
-		{"gated, near-miss label does not count", gated, labelled("previews"), false},
-		{"flag off, no labels still opts in", open, labelled(), true},
-		{"nil config opts in", nil, labelled(), true},
+		{"opened", http.StatusOK},
+		{"reopened", http.StatusOK},
+		{"synchronize", http.StatusOK},
+		{"labeled", http.StatusOK},
+		{"unlabeled", http.StatusOK},
+		{"assigned", http.StatusOK},
+		{"closed", http.StatusInternalServerError},
 	}
 	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			if got := previewOptIn(tc.cfg, tc.ev); got != tc.want {
-				t.Fatalf("previewOptIn = %v, want %v", got, tc.want)
-			}
-		})
-	}
-}
-
-// TestPreviewOptedOutOnLabelRemoval proves removing the opt-in label tears the
-// preview down immediately, while removing any OTHER label leaves a running
-// preview alone -- an unrelated label edit must not destroy someone's env.
-func TestPreviewOptedOutOnLabelRemoval(t *testing.T) {
-	event := func(action, removed string, remaining ...string) *pullRequestEvent {
-		ev := &pullRequestEvent{Action: action}
-		ev.Label.Name = removed
-		for _, n := range remaining {
-			ev.PullRequest.Labels = append(ev.PullRequest.Labels, struct {
-				Name string `json:"name"`
-			}{Name: n})
-		}
-		return ev
-	}
-	gated := &Server{cfg: &config.Config{PreviewEnvsRequireLabel: true, PreviewEnvLabel: "preview"}}
-	open := &Server{cfg: &config.Config{PreviewEnvsRequireLabel: false, PreviewEnvLabel: "preview"}}
-
-	cases := []struct {
-		name string
-		srv  *Server
-		ev   *pullRequestEvent
-		want bool
-	}{
-		{"opt-in label removed", gated, event("unlabeled", "preview"), true},
-		{"opt-in label removed, case-insensitive", gated, event("unlabeled", "Preview"), true},
-		{"unrelated label removed, preview kept", gated, event("unlabeled", "bug", "preview"), false},
-		{"unrelated label removed, never had preview", gated, event("unlabeled", "bug"), false},
-		{"labeled action is not an opt-out", gated, event("labeled", "preview", "preview"), false},
-		{"flag off never opts out", open, event("unlabeled", "preview"), false},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			if got := tc.srv.previewOptedOut(tc.ev); got != tc.want {
-				t.Fatalf("previewOptedOut = %v, want %v", got, tc.want)
+		t.Run(tc.action, func(t *testing.T) {
+			body := []byte(`{"action":"` + tc.action + `","number":7,"repository":{"full_name":"acme/webapp"}}`)
+			rec := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodPost, "/webhooks/github", strings.NewReader(string(body)))
+			s.handlePullRequestWebhook(rec, req, body)
+			if rec.Code != tc.want {
+				t.Fatalf("action %s: status %d, want %d", tc.action, rec.Code, tc.want)
 			}
 		})
 	}

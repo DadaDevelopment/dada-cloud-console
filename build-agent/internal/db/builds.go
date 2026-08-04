@@ -420,36 +420,6 @@ func InsertBuildFromWebhook(ctx context.Context, pool *pgxpool.Pool, gitRepoID, 
 	return id, nil
 }
 
-// ErrBuildShaTaken is returned by InsertPreviewBuild when the commit has
-// already been built on this repo under a different (non-PR) trigger. builds
-// has a UNIQUE(git_repo_id, commit_sha) constraint shared by every trigger, so
-// a SHA that already landed a push/manual build row can never get a second,
-// PR-scoped build row for the same commit. This is expected when a branch was
-// pushed to the production branch and later opened as a PR from the same SHA;
-// the caller should log this at info level and skip the PR build gracefully
-// rather than treat it as a failure.
-var ErrBuildShaTaken = fmt.Errorf("commit sha already has a build row on this repo")
-
-// InsertPreviewBuild idempotently enqueues a preview (trigger='pr') build
-// against a preview environment. It never updates an existing row for the same
-// (git_repo_id, commit_sha) - see ErrBuildShaTaken.
-func InsertPreviewBuild(ctx context.Context, pool *pgxpool.Pool, gitRepoID, previewEnvID uuid.UUID, appName, commitSHA, commitMessage, branch string, prNumber int, forkUnsafe bool) (uuid.UUID, error) {
-	var id uuid.UUID
-	err := pool.QueryRow(ctx, `
-		INSERT INTO builds (git_repo_id, environment_id, app_name, commit_sha, commit_message, branch, trigger, pr_number, fork_unsafe, status)
-		VALUES ($1, $2, $3, $4, $5, $6, 'pr', $7, $8, 'queued')
-		ON CONFLICT (git_repo_id, commit_sha) DO NOTHING
-		RETURNING id
-	`, gitRepoID, previewEnvID, appName, commitSHA, commitMessage, branch, prNumber, forkUnsafe).Scan(&id)
-	if err == pgx.ErrNoRows {
-		return uuid.Nil, ErrBuildShaTaken
-	}
-	if err != nil {
-		return uuid.Nil, fmt.Errorf("insert preview build: %w", err)
-	}
-	return id, nil
-}
-
 // RecentLogs returns the most recent log lines for a build in seq order, for WS
 // backlog replay on (re)connect. limit caps the number of returned lines.
 func RecentLogs(ctx context.Context, pool *pgxpool.Pool, buildID uuid.UUID, limit int) ([]string, error) {

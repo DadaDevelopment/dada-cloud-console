@@ -78,11 +78,6 @@ type Config struct {
 	SourceUploadS3AccessKey string
 	SourceUploadS3SecretKey string
 	SourceUploadS3Insecure  bool
-
-	PreviewEnvsEnabled      bool
-	PreviewEnvTTL           time.Duration
-	PreviewEnvsRequireLabel bool
-	PreviewEnvLabel         string
 }
 
 func Load() (*Config, error) {
@@ -97,10 +92,6 @@ func Load() (*Config, error) {
 	logRetention, err := time.ParseDuration(getEnv("BUILD_LOG_DB_RETENTION", "168h"))
 	if err != nil {
 		return nil, fmt.Errorf("BUILD_LOG_DB_RETENTION: %w", err)
-	}
-	previewEnvTTL, err := time.ParseDuration(getEnv("BUILD_PREVIEW_ENV_TTL", "168h"))
-	if err != nil {
-		return nil, fmt.Errorf("BUILD_PREVIEW_ENV_TTL: %w", err)
 	}
 
 	cfg := &Config{
@@ -150,11 +141,6 @@ func Load() (*Config, error) {
 		SourceUploadS3AccessKey: getEnv("SOURCE_UPLOAD_S3_ACCESS_KEY", ""),
 		SourceUploadS3SecretKey: getEnv("SOURCE_UPLOAD_S3_SECRET_KEY", ""),
 		SourceUploadS3Insecure:  getEnv("SOURCE_UPLOAD_S3_INSECURE", "false") == "true",
-
-		PreviewEnvsEnabled:      getEnv("BUILD_PREVIEW_ENVS_ENABLED", "false") == "true",
-		PreviewEnvTTL:           previewEnvTTL,
-		PreviewEnvsRequireLabel: getEnv("BUILD_PREVIEW_ENVS_REQUIRE_LABEL", "true") == "true",
-		PreviewEnvLabel:         getEnv("BUILD_PREVIEW_ENV_LABEL", "preview"),
 	}
 
 	if cfg.DatabaseURL == "" {
