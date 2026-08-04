@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strings"
 	"testing"
+	"unsafe"
 
 	"github.com/dada-tuda/console/backend/internal/agentchat"
 	"github.com/dada-tuda/console/backend/internal/billing"
@@ -289,5 +290,52 @@ func TestAgentChatSystemPrompt_ProjectSlugRuleMatchesTheValidator(t *testing.T) 
 		if !projectSlugRe.MatchString(ok) {
 			t.Fatalf("validator rejects %q, so the prompt rule stated is wrong", ok)
 		}
+	}
+}
+
+// TestAgentChatSystemPrompt_IsBuiltOnceAndStaysStable pins the split the
+// redesign is built on: the system prompt is the stable part of the request and
+// per-turn context lives on the user message. A prompt that differs between two
+// turns of the same session moves everything serialized after it and defeats any
+// prefix the gateway or the provider could reuse.
+func TestAgentChatSystemPrompt_IsBuiltOnceAndStaysStable(t *testing.T) {
+	catalog := agentChatTestToolset(t).NewView(agentchat.ModeManual).CatalogNames()
+
+	first := agentChatSystemPrompt(catalog)
+	second := agentChatSystemPrompt(append([]string{}, catalog...))
+	if first != second {
+		t.Fatal("two calls with the same catalog produced different prompts")
+	}
+	if unsafe.StringData(first) != unsafe.StringData(second) {
+		t.Fatal("the prompt was rebuilt instead of served from the cache")
+	}
+	if strings.Contains(first, "console context:") {
+		t.Error("per-turn console context leaked into the system prompt")
+	}
+	if strings.Contains(first, "autonomy:") {
+		t.Error("the per-turn autonomy mode leaked into the system prompt")
+	}
+}
+
+// TestAgentChatUserMessage_CarriesTheVolatileContext is the other half: what the
+// prompt no longer states must actually reach the model, or the assistant loses
+// the page it is on and how much of what it proposes will stop for a card.
+func TestAgentChatUserMessage_CarriesTheVolatileContext(t *testing.T) {
+	msg := agentChatUserMessage(agentChatRequest{ProjectID: "p1", EnvID: "e1", AppName: "shop", Mode: "admin"}, "deploy it")
+	for _, want := range []string{"projectId=p1", "envId=e1", "appName=shop", "autonomy: admin", "deploy it"} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("user message lost %q:\n%s", want, msg)
+		}
+	}
+	if !strings.HasSuffix(msg, "\n\ndeploy it") {
+		t.Errorf("the user's own text must come last:\n%s", msg)
+	}
+
+	empty := agentChatUserMessage(agentChatRequest{}, "hi")
+	if !strings.Contains(empty, "the user has not opened a project") {
+		t.Errorf("empty context must say so plainly:\n%s", empty)
+	}
+	if !strings.Contains(empty, "autonomy: edit") {
+		t.Errorf("an unset mode must read as edit:\n%s", empty)
 	}
 }

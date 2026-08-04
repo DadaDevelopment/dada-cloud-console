@@ -412,8 +412,17 @@ type Config struct {
 	// count of user turns (agent_chat_messages rows with role='user').
 	AgentChatGatewayURL  string // AGENT_CHAT_GATEWAY_URL
 	AgentChatGatewayKey  string // AGENT_CHAT_GATEWAY_KEY
-	AgentChatModel       string // AGENT_CHAT_MODEL (default "claude")
+	AgentChatModel       string // AGENT_CHAT_MODEL (default "or-gpt-41-mini")
 	AgentChatDailyMsgCap int64  // AGENT_CHAT_DAILY_MSG_CAP (default 50)
+
+	// AgentChatModelB and AgentChatModelBPercent are the live A/B. A user whose
+	// stable hash falls in the first AgentChatModelBPercent percent runs every
+	// turn on AgentChatModelB instead of AgentChatModel; the split is by user,
+	// not by turn, so one person never sees two models mid-conversation and the
+	// turn rows can be compared per cohort. Zero percent (the default) means the
+	// experiment is off.
+	AgentChatModelB        string // AGENT_CHAT_MODEL_B
+	AgentChatModelBPercent int    // AGENT_CHAT_MODEL_B_PERCENT (default 0)
 
 	// AgentChatModelAllowlist names the models a chat request may ask for by
 	// hand ("model" in the request body), comma-separated. It exists so a
@@ -731,7 +740,9 @@ func Load() (*Config, error) {
 		MCPResourceURL:              getEnv("MCP_RESOURCE_URL", "https://console.dada-tuda.ru/mcp"),
 		AgentChatGatewayURL:         getEnv("AGENT_CHAT_GATEWAY_URL", "http://ai-gateway-service.argocd-prod.svc.cluster.local"),
 		AgentChatGatewayKey:         getEnv("AGENT_CHAT_GATEWAY_KEY", ""),
-		AgentChatModel:              getEnv("AGENT_CHAT_MODEL", "claude"),
+		AgentChatModel:              getEnv("AGENT_CHAT_MODEL", "or-gpt-41-mini"),
+		AgentChatModelB:             getEnv("AGENT_CHAT_MODEL_B", ""),
+		AgentChatModelBPercent:      getEnvIntAllowZero("AGENT_CHAT_MODEL_B_PERCENT", 0),
 		AgentChatDailyMsgCap:        getEnvInt64("AGENT_CHAT_DAILY_MSG_CAP", 50),
 		AgentChatModelAllowlist:     splitList(getEnv("AGENT_CHAT_MODEL_ALLOWLIST", "")),
 		LangfuseHost:                getEnv("LANGFUSE_HOST", "https://cloud.langfuse.com"),

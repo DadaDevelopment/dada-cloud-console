@@ -22,20 +22,101 @@ func TestAgentChatModelFor_HonoursOnlyTheAllowlist(t *testing.T) {
 		want      string
 	}{
 		{"no allowlist ignores the request", nil, "gpt-4o", ""},
-		{"allowlisted model is honoured", []string{"gpt-4o", "claude"}, "gpt-4o", "gpt-4o"},
-		{"model outside the allowlist is dropped", []string{"gpt-4o"}, "claude", ""},
+		{"allowlisted model is honoured", []string{"gpt-4o", "or-gpt-4o-mini"}, "gpt-4o", "gpt-4o"},
+		{"model outside the allowlist is dropped", []string{"gpt-4o"}, "groq-llama", ""},
 		{"empty request keeps the default", []string{"gpt-4o"}, "", ""},
 		{"whitespace request keeps the default", []string{"gpt-4o"}, "   ", ""},
 		{"case and padding do not matter", []string{" GPT-4o "}, "gpt-4o", "gpt-4o"},
+		{"an allowlisted anthropic alias is still refused", []string{"claude", "claude-haiku"}, "claude", ""},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			h := &Handler{cfg: &config.Config{AgentChatModelAllowlist: tc.allowlist}}
-			if got := h.agentChatModelFor(tc.requested); got != tc.want {
+			if got := h.agentChatModelFor(tc.requested, "user-1"); got != tc.want {
 				t.Fatalf("agentChatModelFor(%q) = %q, want %q", tc.requested, got, tc.want)
 			}
 		})
+	}
+}
+
+// TestAgentChatDefaultModel_NeverStartsOnAnthropic pins the removal itself.
+// Production ran AGENT_CHAT_MODEL=claude-haiku, which routes through the
+// platform project's own BYOK anthropic credential -- the console assistant is
+// not a customer of that key and must not spend it.
+func TestAgentChatDefaultModel_NeverStartsOnAnthropic(t *testing.T) {
+	for _, configured := range []string{"claude", "claude-haiku", " CLAUDE ", ""} {
+		if got := agentChatDefaultModel(configured); got != agentChatDefaultModelFallback {
+			t.Fatalf("agentChatDefaultModel(%q) = %q, want the fallback %q", configured, got, agentChatDefaultModelFallback)
+		}
+	}
+	for _, configured := range []string{"or-gpt-41-mini", "gpt-4o", "some-future-alias"} {
+		if got := agentChatDefaultModel(configured); got != configured {
+			t.Fatalf("agentChatDefaultModel(%q) = %q, want it kept", configured, got)
+		}
+	}
+	if !agentChatModelIsAnthropic("claude-haiku") {
+		t.Fatal("claude-haiku must be recognised as anthropic from the routing catalog")
+	}
+	if agentChatModelIsAnthropic("or-gpt-41-mini") {
+		t.Fatal("or-gpt-41-mini is not anthropic")
+	}
+}
+
+// TestAgentChatABModel_IsStickyPerUser is the property that makes the A/B
+// readable: a per-turn coin flip would swap the model in the middle of a
+// conversation -- including between a write proposal and the user's
+// confirmation -- and the turn rows could not be grouped into cohorts.
+func TestAgentChatABModel_IsStickyPerUser(t *testing.T) {
+	h := &Handler{cfg: &config.Config{AgentChatModelB: "gpt-4o", AgentChatModelBPercent: 50}}
+
+	for _, sub := range []string{"user-a", "user-b", "user-c", "user-d"} {
+		first := h.agentChatABModel(sub)
+		for i := 0; i < 5; i++ {
+			if got := h.agentChatABModel(sub); got != first {
+				t.Fatalf("cohort of %q flipped: %q then %q", sub, first, got)
+			}
+		}
+		if first != "" && first != "gpt-4o" {
+			t.Fatalf("cohort of %q = %q, want either the default or gpt-4o", sub, first)
+		}
+	}
+
+	off := &Handler{cfg: &config.Config{AgentChatModelB: "gpt-4o", AgentChatModelBPercent: 0}}
+	if got := off.agentChatABModel("user-a"); got != "" {
+		t.Fatalf("experiment at 0%% still routed to %q", got)
+	}
+	unset := &Handler{cfg: &config.Config{AgentChatModelBPercent: 100}}
+	if got := unset.agentChatABModel("user-a"); got != "" {
+		t.Fatalf("experiment without a B model routed to %q", got)
+	}
+	anthropicB := &Handler{cfg: &config.Config{AgentChatModelB: "claude", AgentChatModelBPercent: 100}}
+	if got := anthropicB.agentChatABModel("user-a"); got != "" {
+		t.Fatalf("experiment routed to anthropic: %q", got)
+	}
+	all := &Handler{cfg: &config.Config{AgentChatModelB: "gpt-4o", AgentChatModelBPercent: 100}}
+	if got := all.agentChatABModel("user-a"); got != "gpt-4o" {
+		t.Fatalf("experiment at 100%% = %q, want gpt-4o", got)
+	}
+	if got := all.agentChatABModel(""); got != "" {
+		t.Fatalf("anonymous caller must stay on the default, got %q", got)
+	}
+}
+
+// TestAgentChatModelFor_RequestBeatsTheExperiment keeps the eval harness able to
+// drive one specific model: without this an A/B cohort would silently rewrite
+// what the harness asked for and every scored run would be untrustworthy.
+func TestAgentChatModelFor_RequestBeatsTheExperiment(t *testing.T) {
+	h := &Handler{cfg: &config.Config{
+		AgentChatModelAllowlist: []string{"or-gpt-4o-mini"},
+		AgentChatModelB:         "gpt-4o",
+		AgentChatModelBPercent:  100,
+	}}
+	if got := h.agentChatModelFor("or-gpt-4o-mini", "user-a"); got != "or-gpt-4o-mini" {
+		t.Fatalf("requested model = %q, want or-gpt-4o-mini", got)
+	}
+	if got := h.agentChatModelFor("", "user-a"); got != "gpt-4o" {
+		t.Fatalf("without a request the cohort applies, got %q", got)
 	}
 }
 

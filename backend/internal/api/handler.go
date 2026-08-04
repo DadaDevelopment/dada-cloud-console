@@ -325,7 +325,7 @@ func NewHandler(pool *pgxpool.Pool, cfg *config.Config) *Handler {
 	h.StartAppAutoscaleWatcher(context.Background())
 	h.StartIdentityDeliveryWatcher(context.Background())
 
-	h.agentChatLLM = llmchat.New(cfg.AgentChatGatewayURL, cfg.AgentChatGatewayKey, cfg.AgentChatModel)
+	h.agentChatLLM = llmchat.New(cfg.AgentChatGatewayURL, cfg.AgentChatGatewayKey, agentChatDefaultModel(cfg.AgentChatModel))
 	h.agentChatLLM.KeyFunc = h.currentAgentChatKey
 	h.StartAgentChatIdentityRefresher(context.Background())
 	selfURL := cfg.MCPSelfURL
@@ -348,7 +348,7 @@ func NewHandler(pool *pgxpool.Pool, cfg *config.Config) *Handler {
 		if h.currentAgentChatKey() != "" {
 			source = "ServiceIdentity " + agentChatIdentityApp
 		}
-		log.Printf("agent-chat: gateway configured at %s, model %s, credential %s", cfg.AgentChatGatewayURL, cfg.AgentChatModel, source)
+		log.Printf("agent-chat: gateway configured at %s, model %s, credential %s", cfg.AgentChatGatewayURL, h.agentChatLLM.Model, source)
 	} else {
 		log.Printf("agent-chat: gateway not configured (no AGENT_CHAT_GATEWAY_URL, and no identity token or AGENT_CHAT_GATEWAY_KEY); endpoint answers with a friendly error")
 	}
