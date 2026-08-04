@@ -64,6 +64,29 @@ func TestIsWrite_AllWriteKeepToolsRegisteredAndClassified(t *testing.T) {
 	}
 }
 
+// TestProbeAppNetwork_WriteButNotRiskyOrConfirmationGatedInEditMode pins the
+// design intent: the probe execs inside a pod so it belongs on the write path
+// like restartApp, but it destroys nothing, spends nothing and mints no
+// credential, so ModeEdit (the default) must run it without a confirmation
+// card the same way it runs restartApp.
+func TestProbeAppNetwork_WriteButNotRiskyOrConfirmationGatedInEditMode(t *testing.T) {
+	ts := loadTestToolset(t)
+	if !ts.Has("probeAppNetwork") {
+		t.Fatal("expected probeAppNetwork to be a registered tool")
+	}
+	if !ts.IsWrite("probeAppNetwork") {
+		t.Fatal("expected probeAppNetwork to be classified as a write tool")
+	}
+	view := ts.NewView(ModeEdit)
+	if view.NeedsConfirmation("probeAppNetwork") {
+		t.Error("expected probeAppNetwork to run without a confirmation card in ModeEdit")
+	}
+	manual := ts.NewView(ModeManual)
+	if !manual.NeedsConfirmation("probeAppNetwork") {
+		t.Error("expected probeAppNetwork to still confirm once in ModeManual, like every other write")
+	}
+}
+
 func TestKeepTools_AllRegisteredAndClassifiedAsRead(t *testing.T) {
 	ts := loadTestToolset(t)
 	for _, name := range keepTools {

@@ -112,6 +112,12 @@ type Handler struct {
 
 	podFS cloudtask.PodFS
 
+	// podProber execs a fixed DNS/TCP/TLS/HTTP diagnostic sequence inside an
+	// ephemeral debug container attached to a running app pod (ProbeAppNetwork).
+	// Never nil: off-cluster it is disabled (Enabled() == false) and the probe
+	// handler returns 503.
+	podProber cloudtask.PodProber
+
 	// billingPlans is the full plan catalog loaded once at startup from the
 	// embedded plans.yaml. Always populated (the embedded file is compiled in);
 	// handlers degrade gracefully if somehow empty.
@@ -294,6 +300,7 @@ func NewHandler(pool *pgxpool.Pool, cfg *config.Config) *Handler {
 	)
 	h.podTarExporter = cloudtask.NewPodTarExporter()
 	h.podFS = cloudtask.NewPodFS()
+	h.podProber = cloudtask.NewPodProber()
 
 	plans, err := billing.LoadPlans("")
 	if err != nil {

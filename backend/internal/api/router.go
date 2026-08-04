@@ -429,6 +429,7 @@ func SetupRouter(pool *pgxpool.Pool, cfg *config.Config) *gin.Engine {
 		api.GET("/projects/:projectId/environments/:envId/apps/:appName/logs", h.GetAppLogs)
 		api.GET("/projects/:projectId/environments/:envId/apps/:appName/metrics", h.GetAppMetrics)
 		api.POST("/projects/:projectId/environments/:envId/apps/:appName/volume/export", h.ExportAppVolume)
+		api.POST("/projects/:projectId/environments/:envId/apps/:appName/net-probe", h.ProbeAppNetwork)
 		api.GET("/projects/:projectId/environments/:envId/apps/:appName/volume/usage", h.GetAppVolumeUsage)
 		api.GET("/projects/:projectId/environments/:envId/apps/:appName/volume/files", h.ListAppFiles)
 		api.GET("/projects/:projectId/environments/:envId/apps/:appName/volume/files/content", h.ReadAppFile)

@@ -81,6 +81,14 @@ var writeKeepTools = []string{
 	"updateAppProfile", "updateAppStorage",
 	"createDatabase",
 	"createEndpoint", "createS3Bucket",
+	// probeAppNetwork execs a fixed, non-shell-templated diagnostic sequence in
+	// an ephemeral debug container, not the app's own container: it changes
+	// nothing about the app and reads no state a write tool normally exposes,
+	// but exec-in-pod belongs on the write path like the rest of this list, not
+	// in keepTools alongside pure API reads. It stays out of riskyWriteTools:
+	// nothing is destroyed, spent, exposed, or minted, so ModeEdit runs it
+	// without a confirmation card, the same as restartApp.
+	"probeAppNetwork",
 
 	"createApp", "createProject", "ensureDefaultProject",
 	"connectGitRepo",

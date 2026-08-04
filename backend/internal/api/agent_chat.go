@@ -782,6 +782,12 @@ func agentChatConfirmSummary(toolName, argsJSON, projectName, envName string) st
 			return fmt.Sprintf("Change the resource profile of app %s to %s", appName, profile)
 		}
 		return fmt.Sprintf("Update the resource profile for app %s", appName)
+	case "probeAppNetwork":
+		target := agentChatArg(args, "target")
+		if port := agentChatArgInt(args, "port"); port > 0 {
+			return fmt.Sprintf("Run a network diagnostic (DNS/TCP/TLS) from app %s to %s:%d", appName, target, port)
+		}
+		return fmt.Sprintf("Run a network diagnostic (DNS/TCP/TLS) from app %s to %s", appName, target)
 	case "updateAppStorage":
 		size := agentChatArg(args, "size")
 		path := agentChatArg(args, "path")
@@ -1010,6 +1016,10 @@ func buildAgentChatSystemPrompt(catalog []string) string {
 	sb.WriteString("- There are NO per-PR preview environments. The platform does not stand up an environment for a pull request, with or without a label, and there is no setting that turns this on. A project has one environment. If the user asks for previews, say plainly that the feature does not exist; the only manual stand-in is a separate app deployed from that branch, which nobody tears down automatically.\n")
 	sb.WriteString("- Persistent storage can be grown but never shrunk, and its storage class is fixed once created.\n")
 	sb.WriteString("- A new app consumes the plan's app quota (the Free plan allows 1 app) and is then billed by actual consumption -- say so when you propose createApp, and call getProjectQuotas if the user asks whether they still have room.\n\n")
+
+	sb.WriteString("# NETWORK DIAGNOSTICS\n")
+	sb.WriteString("When the user describes a connection error, timeout, or TLS failure reaching an external host from their app -- including when they paste in a diagnosis someone or something else already produced -- call probeAppNetwork with that host and port BEFORE forming a hypothesis of your own. It execs a DNS resolve, a TCP connect, and (depending on port/protocol) a TLS handshake or HTTP request from inside the app's own running pod, so it sees exactly the network path the app itself has. ")
+	sb.WriteString("Read the result step by step: only conclude the connection is blocked at the network level once DNS resolves but TCP or TLS still fails; a DNS failure means the host does not resolve from here at all, a different problem from a blocked connection. Do not repeat a pasted diagnosis back to the user as if it were your own finding -- probeAppNetwork gives you an independent, current answer, and if the pasted diagnosis already ran the same kind of test from outside the platform, state the comparison explicitly: the same failure from both sides points at the destination or the path between them, one side only failing narrows it to that side's environment.\n\n")
 
 	sb.WriteString("# ORDERING RESOURCES\n")
 	sb.WriteString("You can order a managed PostgreSQL database (createDatabase), a public endpoint for an app (createEndpoint), an S3 storage bucket (createS3Bucket), a new app (createApp) or a connected git repository (connectGitRepo). All of them require a specific projectId and envId (environment), and createEndpoint also requires a real appName -- these are NOT things you may invent. ")

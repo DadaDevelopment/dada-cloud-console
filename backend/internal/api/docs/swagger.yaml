@@ -821,7 +821,6 @@ definitions:
     properties:
       metrics:
         additionalProperties:
-          format: float64
           type: number
         type: object
       source:
@@ -862,6 +861,15 @@ definitions:
   api.moveAppRequest:
     properties:
       target_project_id:
+        type: string
+    type: object
+  api.netProbeRequest:
+    properties:
+      port:
+        type: integer
+      protocol:
+        type: string
+      target:
         type: string
     type: object
   api.putAICredentialRequest:
@@ -1067,6 +1075,30 @@ definitions:
         type: string
     required:
     - path
+    type: object
+  cloudtask.ProbeResult:
+    properties:
+      dns:
+        $ref: '#/definitions/cloudtask.StepResult'
+      http:
+        $ref: '#/definitions/cloudtask.StepResult'
+      tcp:
+        $ref: '#/definitions/cloudtask.StepResult'
+      tls:
+        $ref: '#/definitions/cloudtask.StepResult'
+    type: object
+  cloudtask.StepResult:
+    properties:
+      durationMs:
+        type: integer
+      error:
+        type: string
+      ok:
+        type: boolean
+      output:
+        type: string
+      ran:
+        type: boolean
     type: object
   models.AIModelAuthMode:
     enum:
@@ -8284,6 +8316,90 @@ paths:
       summary: Preview the impact of moving an app to another project
       tags:
       - apps
+  /projects/{projectId}/environments/{envId}/apps/{appName}/net-probe:
+    post:
+      consumes:
+      - application/json
+      description: Execs a fixed DNS resolve, TCP connect and (protocol tls/http)
+        TLS handshake or HTTP request against a caller-supplied host and port, from
+        inside an ephemeral debug container attached to the app's own running pod.
+        Runs regardless of what the app's own image contains (no shell or network
+        tools required in the app image). Target must be a bare external hostname
+        or IP; private/loopback/link-local addresses and the platform's own internal
+        DNS suffixes are rejected. 400 on an invalid target/port/protocol. 404 when
+        the environment or app does not exist. 502 when no running pod is found or
+        the exec fails. 503 when network probing is not configured for this environment.
+      operationId: probeAppNetwork
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      - description: Environment UUID
+        in: path
+        name: envId
+        required: true
+        type: string
+      - description: App name
+        in: path
+        name: appName
+        required: true
+        type: string
+      - description: Probe target
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/api.netProbeRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/cloudtask.ProbeResult'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "502":
+          description: Bad Gateway
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "503":
+          description: Service Unavailable
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Probe network connectivity from an app's own running pod
+      tags:
+      - app
   /projects/{projectId}/environments/{envId}/apps/{appName}/payments:
     delete:
       description: Best-effort deletes the registered webhooks, removes the injected

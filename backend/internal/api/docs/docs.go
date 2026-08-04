@@ -10374,6 +10374,121 @@ const docTemplate = `{
                 }
             }
         },
+        "/projects/{projectId}/environments/{envId}/apps/{appName}/net-probe": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Execs a fixed DNS resolve, TCP connect and (protocol tls/http) TLS handshake or HTTP request against a caller-supplied host and port, from inside an ephemeral debug container attached to the app's own running pod. Runs regardless of what the app's own image contains (no shell or network tools required in the app image). Target must be a bare external hostname or IP; private/loopback/link-local addresses and the platform's own internal DNS suffixes are rejected. 400 on an invalid target/port/protocol. 404 when the environment or app does not exist. 502 when no running pod is found or the exec fails. 503 when network probing is not configured for this environment.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "app"
+                ],
+                "summary": "Probe network connectivity from an app's own running pod",
+                "operationId": "probeAppNetwork",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Project UUID",
+                        "name": "projectId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Environment UUID",
+                        "name": "envId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "App name",
+                        "name": "appName",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Probe target",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/api.netProbeRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/cloudtask.ProbeResult"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "502": {
+                        "description": "Bad Gateway",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/projects/{projectId}/environments/{envId}/apps/{appName}/payments": {
             "get": {
                 "security": [
@@ -18891,8 +19006,7 @@ const docTemplate = `{
                 "metrics": {
                     "type": "object",
                     "additionalProperties": {
-                        "type": "number",
-                        "format": "float64"
+                        "type": "number"
                     }
                 },
                 "source": {
@@ -18953,6 +19067,20 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "target_project_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "api.netProbeRequest": {
+            "type": "object",
+            "properties": {
+                "port": {
+                    "type": "integer"
+                },
+                "protocol": {
+                    "type": "string"
+                },
+                "target": {
                     "type": "string"
                 }
             }
@@ -19266,6 +19394,43 @@ const docTemplate = `{
                 },
                 "path": {
                     "type": "string"
+                }
+            }
+        },
+        "cloudtask.ProbeResult": {
+            "type": "object",
+            "properties": {
+                "dns": {
+                    "$ref": "#/definitions/cloudtask.StepResult"
+                },
+                "http": {
+                    "$ref": "#/definitions/cloudtask.StepResult"
+                },
+                "tcp": {
+                    "$ref": "#/definitions/cloudtask.StepResult"
+                },
+                "tls": {
+                    "$ref": "#/definitions/cloudtask.StepResult"
+                }
+            }
+        },
+        "cloudtask.StepResult": {
+            "type": "object",
+            "properties": {
+                "durationMs": {
+                    "type": "integer"
+                },
+                "error": {
+                    "type": "string"
+                },
+                "ok": {
+                    "type": "boolean"
+                },
+                "output": {
+                    "type": "string"
+                },
+                "ran": {
+                    "type": "boolean"
                 }
             }
         },

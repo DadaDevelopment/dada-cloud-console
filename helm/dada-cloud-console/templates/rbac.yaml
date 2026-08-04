@@ -51,6 +51,18 @@ rules:
     resources:
       - pods/exec
     verbs: ["create"]
+  # The network probe (ProbeAppNetwork) attaches a small, platform-maintained
+  # debug image to a running app pod as an ephemeral container, then execs
+  # fixed DNS/TCP/TLS/HTTP checks inside it. It needs its own subresource
+  # because an app's own image (distroless, scratch, or anything else without
+  # a shell or network tools) cannot be relied on to run diagnostics itself --
+  # the ephemeral container shares the pod's network namespace but carries its
+  # own toolset. Ephemeral containers cannot be removed once added, so get is
+  # needed to check for an already-attached one before patching in a new one.
+  - apiGroups: [""]
+    resources:
+      - pods/ephemeralcontainers
+    verbs: ["get", "patch", "update"]
   # The autoscaler applies a grow decision to the running pod through the resize
   # subresource, which changes the container's cgroup limits in place. Without
   # it the only way to enlarge a starving app is to rewrite its Deployment
