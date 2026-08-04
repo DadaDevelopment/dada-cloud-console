@@ -167,3 +167,49 @@ func TestNoCallSiteNarrowsAnInt64Setting(t *testing.T) {
 		return true
 	})
 }
+
+// TestAppUsageBackfillDefaultsStayInsideBothHorizons guards the reconstruction
+// window against the two limits that make a longer one pointless. The
+// long-retention metrics store runs out (measured at roughly 22 days on this
+// cluster), and the ledger prunes its own rows at 30 days, so hours
+// reconstructed past that are deleted by the first prune they live through --
+// the pass would spend hundreds of range queries writing rows nobody ever reads.
+func TestAppUsageBackfillDefaultsStayInsideBothHorizons(t *testing.T) {
+	const metricsStoreDays = 22
+	const ledgerRetentionDays = 30
+	t.Setenv("DB_URL", "postgres://x")
+	t.Setenv("JWT_SECRET", "s")
+	t.Setenv("APP_USAGE_BACKFILL_DAYS", "")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if cfg.AppUsageBackfillDays <= 0 {
+		t.Fatalf("backfill is off by default: %d", cfg.AppUsageBackfillDays)
+	}
+	if cfg.AppUsageBackfillDays > metricsStoreDays {
+		t.Errorf("backfill reaches past the metrics store: %d days", cfg.AppUsageBackfillDays)
+	}
+	if cfg.AppUsageBackfillDays >= ledgerRetentionDays {
+		t.Errorf("backfill reaches into rows the retention prune deletes: %d days", cfg.AppUsageBackfillDays)
+	}
+	if cfg.AppUsageBackfillTenant == "" {
+		t.Error("backfill tenant must default to the tenant cluster-state metrics are written under")
+	}
+}
+
+// TestAppUsageBackfillCanBeTurnedOff pins the off switch as a real zero rather
+// than a value that silently collapses back to the default, which is exactly
+// how the box pool lost its own kill switch (a3b5061).
+func TestAppUsageBackfillCanBeTurnedOff(t *testing.T) {
+	t.Setenv("DB_URL", "postgres://x")
+	t.Setenv("JWT_SECRET", "s")
+	t.Setenv("APP_USAGE_BACKFILL_DAYS", "0")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if cfg.AppUsageBackfillDays != 0 {
+		t.Fatalf("explicit 0 did not disable the backfill: %d", cfg.AppUsageBackfillDays)
+	}
+}

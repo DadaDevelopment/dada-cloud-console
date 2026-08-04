@@ -101,6 +101,10 @@ export const adminCosts: Messages = {
     ru: "Журнал покрывает {hours} ч, с {since}. Строки старше 30 дней удаляются.",
     en: "Ledger covers {hours}h, since {since}. Rows older than 30 days are pruned.",
   },
+  "adminCosts.collected.reconstructed": {
+    ru: "Из них {amount} восстановлено задним числом по метрикам (с {since}) — футпринт настоящий, цена посчитана сегодняшним прайсом. Спор по такому часу решается в пользу клиента.",
+    en: "Of that, {amount} was reconstructed after the fact from metrics (since {since}) - the footprint is real, the price is today's. A dispute over such an hour is settled in the client's favour.",
+  },
   "adminCosts.collected.noLedger": {
     ru: "Журнал потребления ещё не наполнен — метр пишет по строке в час, цифры появятся в течение часа после деплоя.",
     en: "The usage ledger has not filled yet — the meter writes one row per hour, so numbers appear within an hour of deploy.",

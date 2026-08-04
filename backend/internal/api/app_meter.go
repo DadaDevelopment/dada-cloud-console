@@ -19,6 +19,14 @@ const (
 	appUsageKindVolume = "volume"
 )
 
+// Provenance of a ledger row: measured by the meter shortly after the hour
+// closed, or reconstructed by the backfill weeks later. Migration 102 explains
+// why the difference is recorded rather than smoothed over.
+const (
+	appUsageSourceMeter    = "meter"
+	appUsageSourceBackfill = "backfill"
+)
+
 // appMeterStep is the resolution the meter integrates an hour at, and
 // appMeterStepsPerHour is how many such samples a whole hour contains.
 //
@@ -80,6 +88,47 @@ type appMeterTarget struct {
 	envID     uuid.UUID
 	projectID uuid.UUID
 	orgID     string
+}
+
+// appMetricsSource is the metrics store one metering pass reads from, together
+// with the dialect it has to speak to that store. runningFilter builds a PromQL
+// vector, joinable on (namespace, pod), that is 1 for pods that were actually
+// running and absent otherwise.
+//
+// It exists because the ledger has two readers of the same arithmetic. The live
+// meter reads the cluster's own Prometheus, which holds three days and carries
+// every kube-state series. The backfill reads Mimir, which holds about three
+// weeks but only the series Prometheus remote_writes into it -- and that set is
+// missing kube_pod_status_phase, the metric the live meter uses to refuse to
+// bill a Pending pod. Sharing everything except the running filter is
+// deliberate: two independent copies of the same six expressions would drift,
+// and the drift would show up as a customer's history disagreeing with their
+// present for reasons nobody could reconstruct.
+type appMetricsSource struct {
+	client        *prometheus.Client
+	tenant        string
+	runningFilter func(nsMatcher string) string
+}
+
+// liveMetricsSource is the meter's own store: the cluster Prometheus, single
+// tenant, phase-based running filter.
+func (h *Handler) liveMetricsSource() appMetricsSource {
+	return appMetricsSource{client: h.prometheus, runningFilter: podPhaseRunning}
+}
+
+// podPhaseRunning is the live filter. A Pending pod already has resource
+// requests, so without this a customer whose image fails to pull would be
+// billed for a pod that never started.
+func podPhaseRunning(nsMatcher string) string {
+	return fmt.Sprintf(`(kube_pod_status_phase{%s,phase="Running"} == 1)`, nsMatcher)
+}
+
+// podContainerRunning is the backfill filter, in terms of the one running
+// signal that survives the remote_write allowlist. It collapses the container
+// dimension first: kube_pod_container_status_running is per container, and
+// without the max-by a two-container pod would multiply its own footprint.
+func podContainerRunning(nsMatcher string) string {
+	return fmt.Sprintf(`(max by (namespace, pod) (kube_pod_container_status_running{%s}) == 1)`, nsMatcher)
 }
 
 // StartAppUsageMeter runs the hourly app usage meter until ctx is cancelled.
@@ -165,15 +214,27 @@ func (h *Handler) appHourAlreadyMetered(ctx context.Context, hourStart time.Time
 // MeterAppHour measures one closed hour and writes its rows. Missing metrics
 // degrade to fewer rows, never to invented ones.
 func (h *Handler) MeterAppHour(ctx context.Context, hourStart time.Time) error {
-	targets, err := h.appMeterTargets(ctx)
+	written, apps, err := h.meterAppHourFrom(ctx, hourStart, h.liveMetricsSource(), appUsageSourceMeter)
 	if err != nil {
 		return err
 	}
+	log.Info().Time("hour", hourStart).Int("rows", written).Int("apps", apps).Msg("app usage meter: hour recorded")
+	return nil
+}
+
+// meterAppHourFrom is the shared body of both metering passes: resolve tenancy,
+// measure the hour against src, price it, write it under the given provenance.
+// It reports rows written and apps seen so each caller can log in its own words.
+func (h *Handler) meterAppHourFrom(ctx context.Context, hourStart time.Time, src appMetricsSource, source string) (int, int, error) {
+	targets, err := h.appMeterTargets(ctx)
+	if err != nil {
+		return 0, 0, err
+	}
 	if len(targets) == 0 {
-		return nil
+		return 0, 0, nil
 	}
 
-	samples := h.measureAppHour(ctx, hourStart, appMeterNamespaces(targets))
+	samples := h.measureAppHour(ctx, hourStart, appMeterNamespaces(targets), src)
 	pricing := h.billingSnapshot().pricing
 	hours := hoursInMonth(hourStart)
 
@@ -185,19 +246,18 @@ func (h *Handler) MeterAppHour(ctx context.Context, hourStart time.Time) error {
 		}
 		if s.heldVCPU > 0 || s.heldRAMGB > 0 || s.replicas > 0 {
 			cost := h.appUsageCostRub(s.heldVCPU, s.heldRAMGB, 0, pricing, hours)
-			if h.upsertAppUsage(ctx, key, target, hourStart, appUsageKindPod, s.heldVCPU, s.heldRAMGB, 0, s.replicas, s.usedVCPU, s.usedRAMGB, cost) {
+			if h.upsertAppUsage(ctx, key, target, hourStart, appUsageKindPod, s.heldVCPU, s.heldRAMGB, 0, s.replicas, s.usedVCPU, s.usedRAMGB, cost, source) {
 				written++
 			}
 		}
 		if s.storageGB > 0 {
 			cost := h.appUsageCostRub(0, 0, s.storageGB, pricing, hours)
-			if h.upsertAppUsage(ctx, key, target, hourStart, appUsageKindVolume, 0, 0, s.storageGB, 0, nil, nil, cost) {
+			if h.upsertAppUsage(ctx, key, target, hourStart, appUsageKindVolume, 0, 0, s.storageGB, 0, nil, nil, cost, source) {
 				written++
 			}
 		}
 	}
-	log.Info().Time("hour", hourStart).Int("rows", written).Int("apps", len(samples)).Msg("app usage meter: hour recorded")
-	return nil
+	return written, len(samples), nil
 }
 
 // appMeterTargets maps every k8s environment namespace to its tenancy. This map
@@ -264,14 +324,16 @@ func appNamespaceMatcher(namespaces []string) string {
 // in the order (heldCPU, heldRAM, replicas, usedCPU, usedRAM). Storage is a
 // sixth with a different join shape and is built separately.
 //
-// The running-phase factor on the first three is not decoration: a Pending pod
+// The running factor on the first three is not decoration: a Pending pod
 // already has resource requests and would otherwise be billed as if it were
 // serving traffic, and a customer whose image fails to pull would receive a bill
-// for the pod that never started.
-func appMeterExprs(namespaces []string) [5]string {
+// for the pod that never started. Which signal expresses "running" is the
+// caller's, because the two stores the ledger reads do not carry the same one --
+// see appMetricsSource.
+func appMeterExprs(namespaces []string, runningFilter func(string) string) [5]string {
 	join := appPodLabelJoin(namespaces)
 	ns := appNamespaceMatcher(namespaces)
-	running := fmt.Sprintf(`(kube_pod_status_phase{%s,phase="Running"} == 1)`, ns)
+	running := runningFilter(ns)
 	return [5]string{
 		fmt.Sprintf(`sum by (namespace, app) (kube_pod_container_resource_requests{%s,resource="cpu"} * on (namespace, pod) group_left(app) %s * on (namespace, pod) group_left() %s)`, ns, join, running),
 		fmt.Sprintf(`sum by (namespace, app) (kube_pod_container_resource_requests{%s,resource="memory"} * on (namespace, pod) group_left(app) %s * on (namespace, pod) group_left() %s) / 1073741824`, ns, join, running),
@@ -298,19 +360,19 @@ func appMeterStorageExpr(namespaces []string) string {
 
 // measureAppHour runs the six range queries and folds them into one sample per
 // app. Any single query failing costs its own dimension and nothing else.
-func (h *Handler) measureAppHour(ctx context.Context, hourStart time.Time, namespaces []string) map[appUsageKey]*appUsageSample {
+func (h *Handler) measureAppHour(ctx context.Context, hourStart time.Time, namespaces []string, src appMetricsSource) map[appUsageKey]*appUsageSample {
 	out := map[appUsageKey]*appUsageSample{}
-	if len(namespaces) == 0 {
+	if len(namespaces) == 0 || src.client == nil {
 		return out
 	}
-	exprs := appMeterExprs(namespaces)
+	exprs := appMeterExprs(namespaces, src.runningFilter)
 
-	held := h.appHourAverages(ctx, exprs[0], hourStart, "held_cpu")
-	heldRAM := h.appHourAverages(ctx, exprs[1], hourStart, "held_ram")
-	replicas := h.appHourAverages(ctx, exprs[2], hourStart, "replicas")
-	usedCPU := h.appHourAverages(ctx, exprs[3], hourStart, "used_cpu")
-	usedRAM := h.appHourAverages(ctx, exprs[4], hourStart, "used_ram")
-	storage := h.appHourAverages(ctx, appMeterStorageExpr(namespaces), hourStart, "storage")
+	held := h.appHourAverages(ctx, src, exprs[0], hourStart, "held_cpu")
+	heldRAM := h.appHourAverages(ctx, src, exprs[1], hourStart, "held_ram")
+	replicas := h.appHourAverages(ctx, src, exprs[2], hourStart, "replicas")
+	usedCPU := h.appHourAverages(ctx, src, exprs[3], hourStart, "used_cpu")
+	usedRAM := h.appHourAverages(ctx, src, exprs[4], hourStart, "used_ram")
+	storage := h.appHourAverages(ctx, src, appMeterStorageExpr(namespaces), hourStart, "storage")
 
 	at := func(key appUsageKey) *appUsageSample {
 		if s, ok := out[key]; ok {
@@ -346,9 +408,9 @@ func (h *Handler) measureAppHour(ctx context.Context, hourStart time.Time, names
 // appHourAverages runs one range query across the hour and returns the
 // time-weighted average per app. Failure is logged and returns nothing, so the
 // dimension is absent rather than zero.
-func (h *Handler) appHourAverages(ctx context.Context, expr string, hourStart time.Time, dim string) map[appUsageKey]float64 {
+func (h *Handler) appHourAverages(ctx context.Context, src appMetricsSource, expr string, hourStart time.Time, dim string) map[appUsageKey]float64 {
 	end := hourStart.Add(time.Hour - appMeterStep)
-	series, err := h.prometheus.QueryRange(ctx, expr, hourStart, end, appMeterStep, "")
+	series, err := src.client.QueryRange(ctx, expr, hourStart, end, appMeterStep, src.tenant)
 	if err != nil {
 		log.Warn().Err(err).Str("dim", dim).Time("hour", hourStart).Msg("app usage meter: range query failed")
 		return nil
@@ -407,6 +469,12 @@ func (h *Handler) appUsageCostRub(vcpu, ramGB, storageGB float64, p consumptionP
 
 // upsertAppUsage writes one ledger row, idempotent on the primary key. Reports
 // whether the write succeeded so the caller can log an honest row count.
+//
+// The conflict clause depends on provenance, and the asymmetry is the whole
+// point: a measurement overwrites whatever was there, a reconstruction never
+// touches a row that already exists. The backfill runs weeks after the fact and
+// prices with today's numbers, so letting it win over a live measurement would
+// quietly rewrite a settled hour into an estimate.
 func (h *Handler) upsertAppUsage(
 	ctx context.Context,
 	key appUsageKey,
@@ -416,15 +484,9 @@ func (h *Handler) upsertAppUsage(
 	vcpu, ramGB, storageGB, replicas float64,
 	usedVCPU, usedRAMGB *float64,
 	costRub float64,
+	source string,
 ) bool {
-	_, err := h.pool.Exec(ctx, `
-		INSERT INTO app_usage (
-			environment_id, app_name, hour_start, kind,
-			org_id, project_id, namespace,
-			vcpu, ram_gb, storage_gb, replicas,
-			used_vcpu, used_ram_gb, cost_rub
-		) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
-		ON CONFLICT (environment_id, app_name, hour_start, kind) DO UPDATE
+	onConflict := `ON CONFLICT (environment_id, app_name, hour_start, kind) DO UPDATE
 		   SET org_id      = EXCLUDED.org_id,
 		       project_id  = EXCLUDED.project_id,
 		       namespace   = EXCLUDED.namespace,
@@ -435,12 +497,23 @@ func (h *Handler) upsertAppUsage(
 		       used_vcpu   = EXCLUDED.used_vcpu,
 		       used_ram_gb = EXCLUDED.used_ram_gb,
 		       cost_rub    = EXCLUDED.cost_rub,
-		       recorded_at = now()
-	`,
+		       source      = EXCLUDED.source,
+		       recorded_at = now()`
+	if source == appUsageSourceBackfill {
+		onConflict = `ON CONFLICT (environment_id, app_name, hour_start, kind) DO NOTHING`
+	}
+	_, err := h.pool.Exec(ctx, `
+		INSERT INTO app_usage (
+			environment_id, app_name, hour_start, kind,
+			org_id, project_id, namespace,
+			vcpu, ram_gb, storage_gb, replicas,
+			used_vcpu, used_ram_gb, cost_rub, source
+		) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
+		`+onConflict,
 		target.envID, key.app, hourStart, kind,
 		target.orgID, target.projectID, key.namespace,
 		vcpu, ramGB, storageGB, replicas,
-		usedVCPU, usedRAMGB, costRub,
+		usedVCPU, usedRAMGB, costRub, source,
 	)
 	if err != nil {
 		log.Warn().Err(err).Str("app", key.app).Str("kind", kind).Time("hour", hourStart).Msg("app usage meter: upsert failed")

@@ -19,11 +19,13 @@ import (
 // Paid is the only figure here backed by a settled payment; Metered is the only
 // one backed by a per-hour ledger row rather than a run-rate projection.
 type adminMoneyTotals struct {
-	PaidRUB        float64 `json:"paid_rub"`
-	MeteredRUB     float64 `json:"metered_rub"`
-	UncollectedRUB float64 `json:"uncollected_rub"`
-	MeteredSince   string  `json:"metered_since,omitempty"`
-	LedgerHours    int     `json:"ledger_hours"`
+	PaidRUB           float64 `json:"paid_rub"`
+	MeteredRUB        float64 `json:"metered_rub"`
+	UncollectedRUB    float64 `json:"uncollected_rub"`
+	MeteredSince      string  `json:"metered_since,omitempty"`
+	LedgerHours       int     `json:"ledger_hours"`
+	ReconstructedRUB  float64 `json:"reconstructed_rub"`
+	ReconstructedFrom string  `json:"reconstructed_from,omitempty"`
 }
 
 // adminPlanFree is the plan key assumed for an org with no billing_accounts
@@ -121,7 +123,40 @@ func (h *Handler) attachClientMoney(ctx context.Context, clients []*adminCostCli
 	if !since.IsZero() {
 		totals.MeteredSince = since.Format(time.RFC3339)
 	}
+	if sum, oldest, err := h.adminReconstructedShare(ctx, from); err != nil {
+		log.Warn().Err(err).Msg("admin costs: reconstructed share skipped, app_usage read failed")
+	} else {
+		totals.ReconstructedRUB = round2(sum)
+		if !oldest.IsZero() {
+			totals.ReconstructedFrom = oldest.Format(time.RFC3339)
+		}
+	}
 	return totals
+}
+
+// adminReconstructedShare reports how much of the metered total was rebuilt
+// after the fact rather than measured live, and how far back that rebuild
+// reaches.
+//
+// The number exists so the page cannot quietly present an estimate as a
+// measurement. Reconstructed hours are priced with today's inputs and use a
+// slightly weaker running signal (migration 102), so a dispute that lands on
+// them is decided in the client's favour -- which is only possible if the page
+// says which part of the total they are.
+func (h *Handler) adminReconstructedShare(ctx context.Context, from time.Time) (float64, time.Time, error) {
+	var sum float64
+	var oldest *time.Time
+	err := h.pool.QueryRow(ctx, `
+		SELECT COALESCE(SUM(cost_rub), 0)::float8, MIN(hour_start)
+		FROM app_usage
+		WHERE hour_start >= $1 AND source = $2`, from, appUsageSourceBackfill).Scan(&sum, &oldest)
+	if err != nil {
+		return 0, time.Time{}, err
+	}
+	if oldest == nil {
+		return sum, time.Time{}, nil
+	}
+	return sum, oldest.UTC(), nil
 }
 
 // dedupeSorted collapses runs of equal strings in an already-sorted slice. Used

@@ -143,11 +143,11 @@ func TestAttachClientMoneyCountsOnlySettledPayments(t *testing.T) {
 	hour := time.Now().UTC().Truncate(time.Hour).Add(-2 * time.Hour)
 	target := appMeterTarget{envID: envID, projectID: projectID, orgID: orgID}
 	if !h.upsertAppUsage(ctx, appUsageKey{namespace: k8sNS, app: "web"}, target, hour,
-		appUsageKindPod, 1, 2, 0, 1, nil, nil, 8) {
+		appUsageKindPod, 1, 2, 0, 1, nil, nil, 8, appUsageSourceMeter) {
 		t.Fatal("seed pod ledger row failed")
 	}
 	if !h.upsertAppUsage(ctx, appUsageKey{namespace: k8sNS, app: "web"}, target, hour,
-		appUsageKindVolume, 0, 0, 24, 0, nil, nil, 2) {
+		appUsageKindVolume, 0, 0, 24, 0, nil, nil, 2, appUsageSourceMeter) {
 		t.Fatal("seed volume ledger row failed")
 	}
 

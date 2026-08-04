@@ -1018,6 +1018,8 @@ export interface AdminCostsResponse {
   total_uncollected?: number;
   metered_since?: string;
   ledger_hours?: number;
+  reconstructed_rub?: number;
+  reconstructed_from?: string;
   unallocated?: AdminCostResource;
   top_loss_makers?: AdminCostLossMaker[];
   clients?: AdminCostClient[];

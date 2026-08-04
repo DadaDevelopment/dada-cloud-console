@@ -98,7 +98,7 @@ func TestHoursInMonthTracksCalendar(t *testing.T) {
 // failed image pull would arrive as a bill).
 func TestAppMeterExprsScopeToRunningUserNamespaces(t *testing.T) {
 	namespaces := []string{"tenant-a", "tenant-b"}
-	exprs := appMeterExprs(namespaces)
+	exprs := appMeterExprs(namespaces, podPhaseRunning)
 	all := append(exprs[:], appMeterStorageExpr(namespaces))
 
 	for i, expr := range all {
@@ -194,12 +194,14 @@ func appUsagePool(t *testing.T) *pgxpool.Pool {
 // the deploy does minutes later, not a divergent test-only schema.
 func ensureAppUsageTable(t *testing.T, pool *pgxpool.Pool) {
 	t.Helper()
-	sql, err := os.ReadFile("../../migrations/101_app_usage.sql")
-	if err != nil {
-		t.Fatalf("read migration 101: %v", err)
-	}
-	if _, err := pool.Exec(context.Background(), string(sql)); err != nil {
-		t.Fatalf("apply migration 101: %v", err)
+	for _, m := range []string{"101_app_usage.sql", "102_app_usage_source.sql"} {
+		sql, err := os.ReadFile("../../migrations/" + m)
+		if err != nil {
+			t.Fatalf("read migration %s: %v", m, err)
+		}
+		if _, err := pool.Exec(context.Background(), string(sql)); err != nil {
+			t.Fatalf("apply migration %s: %v", m, err)
+		}
 	}
 }
 
@@ -283,13 +285,13 @@ func TestUpsertAppUsageIdempotent(t *testing.T) {
 	hour := time.Now().UTC().Truncate(time.Hour).Add(-2 * time.Hour)
 	used := 0.5
 
-	if !h.upsertAppUsage(ctx, key, target, hour, appUsageKindPod, 0.25, 0.5, 0, 1, &used, &used, 1.5) {
+	if !h.upsertAppUsage(ctx, key, target, hour, appUsageKindPod, 0.25, 0.5, 0, 1, &used, &used, 1.5, appUsageSourceMeter) {
 		t.Fatal("first upsert failed")
 	}
-	if !h.upsertAppUsage(ctx, key, target, hour, appUsageKindPod, 0.5, 1, 0, 2, &used, &used, 3) {
+	if !h.upsertAppUsage(ctx, key, target, hour, appUsageKindPod, 0.5, 1, 0, 2, &used, &used, 3, appUsageSourceMeter) {
 		t.Fatal("second upsert failed")
 	}
-	if !h.upsertAppUsage(ctx, key, target, hour, appUsageKindVolume, 0, 0, 20, 0, nil, nil, 0.4) {
+	if !h.upsertAppUsage(ctx, key, target, hour, appUsageKindVolume, 0, 0, 20, 0, nil, nil, 0.4, appUsageSourceMeter) {
 		t.Fatal("volume upsert failed")
 	}
 
@@ -329,8 +331,8 @@ func TestPruneAppUsageKeepsRetentionWindow(t *testing.T) {
 	fresh := now.Add(-24 * time.Hour)
 	stale := now.Add(-time.Duration(appMeterRetentionDays+1) * 24 * time.Hour)
 
-	h.upsertAppUsage(ctx, key, target, fresh, appUsageKindPod, 0.25, 0.5, 0, 1, nil, nil, 1)
-	h.upsertAppUsage(ctx, key, target, stale, appUsageKindPod, 0.25, 0.5, 0, 1, nil, nil, 1)
+	h.upsertAppUsage(ctx, key, target, fresh, appUsageKindPod, 0.25, 0.5, 0, 1, nil, nil, 1, appUsageSourceMeter)
+	h.upsertAppUsage(ctx, key, target, stale, appUsageKindPod, 0.25, 0.5, 0, 1, nil, nil, 1, appUsageSourceMeter)
 
 	h.pruneAppUsage(ctx, now)
 
@@ -377,7 +379,7 @@ func TestAppHourAlreadyMeteredSeesWrittenHour(t *testing.T) {
 
 	h.upsertAppUsage(ctx, appUsageKey{namespace: k8sNS, app: "web"},
 		appMeterTarget{envID: envID, projectID: projectID, orgID: orgID},
-		hour, appUsageKindPod, 0.25, 0.5, 0, 1, nil, nil, 1)
+		hour, appUsageKindPod, 0.25, 0.5, 0, 1, nil, nil, 1, appUsageSourceMeter)
 
 	after, err := h.appHourAlreadyMetered(ctx, hour)
 	if err != nil {

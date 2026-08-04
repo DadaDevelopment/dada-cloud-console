@@ -409,6 +409,8 @@ function CollectedCard({
 
   const hours = data.ledger_hours ?? 0;
   const since = data.metered_since ? new Date(data.metered_since).toLocaleString("ru-RU") : "";
+  const reconstructed = data.reconstructed_rub ?? 0;
+  const reconstructedFrom = data.reconstructed_from ? new Date(data.reconstructed_from).toLocaleString("ru-RU") : "";
 
   return (
     <Card className="mb-6">
@@ -472,6 +474,14 @@ function CollectedCard({
             ? t("adminCosts.collected.coverage", { hours, since })
             : t("adminCosts.collected.noLedger")}
         </p>
+        {reconstructed > 0 && (
+          <p className="mt-1 text-xs text-gray-400 dark:text-gray-500">
+            {t("adminCosts.collected.reconstructed", {
+              amount: formatMoney(reconstructed, currency),
+              since: reconstructedFrom,
+            })}
+          </p>
+        )}
       </CardContent>
     </Card>
   );
