@@ -13,8 +13,9 @@ spec:
     - name: dada-cloud-console.resources
       rules:
         - alert: DadaOperationFailed
-          expr: sum by (action) (dada_operations_failed_recent) > 0
+          expr: max by (action) (dada_operations_failed_recent) > 0
           for: 5m
+          keep_firing_for: 30m
           labels:
             severity: warning
           annotations:
@@ -24,8 +25,9 @@ spec:
               last hour. A user create/attach (build, database, bucket, app server, domain)
               did not complete. Inspect operations.error_message for the reason.
         - alert: DadaBuildFailed
-          expr: dada_builds_failed_recent > 0
+          expr: max by (namespace, service) (dada_builds_failed_recent) > 0
           for: 5m
+          keep_firing_for: 30m
           labels:
             severity: warning
           annotations:
@@ -37,8 +39,9 @@ spec:
               signups unnoticed. Inspect builds.error_message and the Jenkins dada-build
               console for the cause, then reach out to unblock the user.
         - alert: DadaCustomDomainStuck
-          expr: dada_domain_hostname_pending_age_seconds > {{ .Values.metrics.alerts.customDomainStuckSeconds }}
+          expr: max by (namespace, service) (dada_domain_hostname_pending_age_seconds) > {{ .Values.metrics.alerts.customDomainStuckSeconds }}
           for: 10m
+          keep_firing_for: 30m
           labels:
             severity: warning
           annotations:
@@ -49,7 +52,7 @@ spec:
               ACME HTTP-01 challenge 404s and the Let's Encrypt cert never issues. Verify the
               A/CNAME record and the challenge state in the app's namespace.
         - alert: DadaMetricsCollectorFailing
-          expr: increase(dada_metrics_collect_errors_total[15m]) > 3
+          expr: max by (namespace, service) (increase(dada_metrics_collect_errors_total[15m])) > 3
           for: 5m
           # increase() over a 15m window falls back under the threshold as soon as the
           # errors stop arriving, then crosses again on the next batch: 4 episodes in
@@ -71,6 +74,7 @@ spec:
         - alert: BoxReadyBudgetBreached
           expr: sum by (phase) (rate(dada_box_ready_budget_breaches_total[10m])) > 0
           for: 10m
+          keep_firing_for: 30m
           labels:
             severity: warning
           annotations:
@@ -85,6 +89,7 @@ spec:
         - alert: BoxReadySLORegressed
           expr: histogram_quantile(0.95, sum by (le) (rate(dada_box_ready_duration_seconds_bucket[30m]))) > {{ .Values.metrics.alerts.boxReadyP95Seconds }}
           for: 15m
+          keep_firing_for: 30m
           labels:
             severity: warning
           annotations:
@@ -95,7 +100,7 @@ spec:
               inside the hard budget, so the breach counter can be quiet while this fires — that is
               the point: it catches a gradual slide before customers do.
         - alert: BoxPoolExhausted
-          expr: dada_box_pool_available == 0
+          expr: max by (namespace, service, image, region) (dada_box_pool_available) == 0
           for: 5m
           # dada_box_pool_available oscillates 0 -> 1 -> 0 while the warmer refills:
           # measured 4 firing episodes in 1.8h of total firing time, i.e. a fresh
@@ -110,8 +115,9 @@ spec:
               {{`{{ $labels.region }}`}}, so every spawn now pays a cold start. Check the pool
               controller and dada_box_pool_refill_duration_seconds.
         - alert: BoxCrystallizeStateLoss
-          expr: increase(dada_box_crystallize_state_loss_total[1h]) > 0
+          expr: max by (namespace, service, kind) (increase(dada_box_crystallize_state_loss_total[1h])) > 0
           for: 0m
+          keep_firing_for: 30m
           labels:
             severity: critical
           annotations:
@@ -123,8 +129,9 @@ spec:
               customer-visible data loss: find the operation, read its validation_result
               equivalence report, and contact the customer before they find out themselves.
         - alert: BoxMeterStale
-          expr: dada_box_metered_minutes_lag_seconds > {{ .Values.metrics.alerts.boxMeterStaleSeconds }}
+          expr: max by (namespace, service) (dada_box_metered_minutes_lag_seconds) > {{ .Values.metrics.alerts.boxMeterStaleSeconds }}
           for: 10m
+          keep_firing_for: 30m
           labels:
             severity: warning
           annotations:
@@ -135,8 +142,9 @@ spec:
               reconciliation will surface in time. Check dada_box_meter_errors_total and the meter
               ticker in the backend.
         - alert: BoxFailedRecent
-          expr: dada_box_failed_recent > 0
+          expr: max by (namespace, service) (dada_box_failed_recent) > 0
           for: 5m
+          keep_firing_for: 30m
           labels:
             severity: warning
           annotations:
