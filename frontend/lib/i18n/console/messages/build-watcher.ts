@@ -19,4 +19,14 @@ export const buildWatcher: Messages = {
   },
   "buildWatcher.openBuild": { ru: "Открыть сборку", en: "Open build" },
   "buildWatcher.dismiss": { ru: "Закрыть", en: "Dismiss" },
+  "buildWatcher.notify.success.title": { ru: "Приложение развёрнуто", en: "App deployed" },
+  "buildWatcher.notify.success.body": {
+    ru: "Сборка {app} завершилась успешно. Нажмите, чтобы открыть.",
+    en: "The build for {app} finished successfully. Click to open.",
+  },
+  "buildWatcher.notify.failure.title": { ru: "Сборка не удалась", en: "Build failed" },
+  "buildWatcher.notify.failure.body": {
+    ru: "Сборка {app} завершилась с ошибкой. Нажмите, чтобы посмотреть.",
+    en: "The build for {app} failed. Click to see why.",
+  },
 };

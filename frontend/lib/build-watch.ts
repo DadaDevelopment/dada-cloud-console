@@ -15,6 +15,8 @@
  * resurface as "new".
  */
 
+import { maybeRequestNotifyPermission } from "@/lib/build-notify";
+
 export interface TrackedBuild {
   projectId: string;
   envId: string;
@@ -77,6 +79,7 @@ export function trackBuildStart(entry: Omit<TrackedBuild, "startedAt">): void {
   const existing = readTrackedBuilds().filter((e) => e.buildId !== entry.buildId);
   const next = [...existing, { ...entry, startedAt: Date.now() }].slice(-MAX_TRACKED);
   writeTrackedBuilds(next);
+  maybeRequestNotifyPermission();
 }
 
 /** Removes one build from the tracked list, e.g. once its terminal status has been observed. */

@@ -6,6 +6,7 @@ import { buildsApi, appsApi } from "@/lib/api";
 import type { BuildStatus } from "@/lib/types";
 import { isBuildActive } from "@/components/deploy/build-status-badge";
 import { readTrackedBuilds, untrackBuild, type TrackedBuild } from "@/lib/build-watch";
+import { showBuildNotification } from "@/lib/build-notify";
 import { useT } from "@/lib/i18n/console/context";
 import { trackUxEvent } from "@/lib/ux-telemetry";
 
@@ -15,6 +16,13 @@ const APP_READY_MAX_POLLS = 60;
 const TITLE_FLASH_MS = 1200;
 
 type NoticeStatus = Extract<BuildStatus, "success" | "failed">;
+
+/** Route to a tracked build's detail page, shared by the panel and the native notification. */
+function buildHref(notice: Pick<Notice, "projectId" | "appName" | "buildId" | "envId">): string {
+  return `/projects/${notice.projectId}/apps/${notice.appName}/builds/${notice.buildId}${
+    notice.envId ? `?envId=${notice.envId}` : ""
+  }`;
+}
 
 interface Notice {
   buildId: string;
@@ -47,6 +55,7 @@ export function BuildWatcher() {
   const [notices, setNotices] = useState<Notice[]>([]);
   const [unread, setUnread] = useState(false);
   const viewedRef = useRef<Set<string>>(new Set());
+  const notifiedRef = useRef<Set<string>>(new Set());
 
   const dropTracked = useCallback((buildId: string) => {
     untrackBuild(buildId);
@@ -136,6 +145,35 @@ export function BuildWatcher() {
     });
   }, [notices]);
 
+  /**
+   * Fires the native notification for a background tab. Guarded by
+   * `notifiedRef` the same way `viewedRef` guards the view event above, so a
+   * re-render never raises the same build twice. `showBuildNotification`
+   * itself decides whether anything actually happened (permission, tab
+   * visibility); telemetry only fires for a real "shown".
+   */
+  useEffect(() => {
+    notices.forEach((n) => {
+      const key = `${n.buildId}:${n.status}`;
+      if (notifiedRef.current.has(key)) return;
+      notifiedRef.current.add(key);
+      const success = n.status === "success";
+      const href = buildHref(n);
+      const shown = showBuildNotification({
+        title: t(success ? "buildWatcher.notify.success.title" : "buildWatcher.notify.failure.title"),
+        body: t(success ? "buildWatcher.notify.success.body" : "buildWatcher.notify.failure.body", {
+          app: n.appName,
+        }),
+        tag: n.buildId,
+        onClick: () => {
+          trackUxEvent("click", "build_notify:click");
+          window.location.href = href;
+        },
+      });
+      if (shown) trackUxEvent("view", `build_notify:shown:${success ? "success" : "failure"}`);
+    });
+  }, [notices, t]);
+
   useEffect(() => {
     function onFocus() {
       setUnread(false);
@@ -182,9 +220,7 @@ export function BuildWatcher() {
     <div className="fixed inset-x-4 bottom-24 z-40 flex flex-col gap-2 sm:inset-x-auto sm:right-5 sm:w-96">
       {notices.map((notice) => {
         const success = notice.status === "success";
-        const buildHref = `/projects/${notice.projectId}/apps/${notice.appName}/builds/${notice.buildId}${
-          notice.envId ? `?envId=${notice.envId}` : ""
-        }`;
+        const href = buildHref(notice);
         return (
           <div
             key={notice.buildId}
@@ -227,7 +263,7 @@ export function BuildWatcher() {
                 </a>
               )}
               <Link
-                href={buildHref}
+                href={href}
                 data-ux="build_notice:open_build"
                 className="text-xs font-medium underline underline-offset-2 opacity-90 hover:opacity-100"
               >
