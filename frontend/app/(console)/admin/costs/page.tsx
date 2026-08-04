@@ -201,6 +201,8 @@ export default function AdminCostsPage() {
         </Card>
       </div>
 
+      <CollectedCard data={data} isLoading={isLoading} t={t} />
+
       {data?.hardware_source === "opencost_only" && (
         <p className="mb-6 text-xs text-gray-400 dark:text-gray-500">{t("adminCosts.hardwareSource.note")}</p>
       )}
@@ -365,6 +367,113 @@ export default function AdminCostsPage() {
         </Card>
       )}
     </div>
+  );
+}
+
+/**
+ * CollectedCard puts the platform's two money numbers side by side: what the
+ * hourly app-usage ledger says clients consumed, and what actually settled as
+ * payments in the same window.
+ *
+ * Every other money column on this page is modelled — the pricing formula
+ * applied to observed usage, computed for a free-plan account exactly as for a
+ * paying one — so the page could show a healthy "revenue" while the platform
+ * collected nothing. This card is the correction: consumption, money, and the
+ * gap between them, per client.
+ */
+function CollectedCard({
+  data,
+  isLoading,
+  t,
+}: {
+  data: AdminCostsResponse | null;
+  isLoading: boolean;
+  t: (key: string, vars?: Record<string, string | number>) => string;
+}) {
+  const currency = data?.currency;
+  const rows = useMemo(() => {
+    return (data?.clients ?? [])
+      .map((c) => ({
+        id: c.client_id,
+        name: c.client_name,
+        plan: c.plan || "free",
+        metered: c.metered_rub ?? 0,
+        paid: c.paid_rub ?? 0,
+        uncollected: c.uncollected_rub ?? 0,
+      }))
+      .filter((r) => r.metered > 0 || r.paid > 0)
+      .sort((a, b) => b.uncollected - a.uncollected);
+  }, [data]);
+
+  if (isLoading || !data?.available) return null;
+
+  const hours = data.ledger_hours ?? 0;
+  const since = data.metered_since ? new Date(data.metered_since).toLocaleString("ru-RU") : "";
+
+  return (
+    <Card className="mb-6">
+      <CardHeader className="p-4 pb-2">
+        <CardTitle className="text-sm">{t("adminCosts.collected.title")}</CardTitle>
+        <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">{t("adminCosts.collected.subtitle")}</p>
+      </CardHeader>
+      <CardContent className="p-4 pt-0">
+        <div className="mb-4 grid grid-cols-1 gap-4 sm:grid-cols-3">
+          <div>
+            <p className="text-xs font-medium text-gray-500 dark:text-gray-400">{t("adminCosts.collected.metered")}</p>
+            <p className="mt-1 text-2xl font-bold text-gray-900 dark:text-gray-100">{formatMoney(data.total_metered, currency)}</p>
+          </div>
+          <div>
+            <p className="text-xs font-medium text-gray-500 dark:text-gray-400">{t("adminCosts.collected.paid")}</p>
+            <p className="mt-1 text-2xl font-bold text-gray-900 dark:text-gray-100">{formatMoney(data.total_paid, currency)}</p>
+          </div>
+          <div>
+            <p className="text-xs font-medium text-gray-500 dark:text-gray-400">{t("adminCosts.collected.uncollected")}</p>
+            <p className={`mt-1 text-2xl font-bold ${marginClass(-(data.total_uncollected ?? 0))}`}>
+              {formatMoney(data.total_uncollected, currency)}
+            </p>
+          </div>
+        </div>
+
+        {rows.length === 0 ? (
+          <p className="py-4 text-center text-sm text-gray-400 dark:text-gray-500">{t("adminCosts.collected.empty")}</p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-gray-200 dark:border-gray-800 text-xs font-medium text-gray-500 dark:text-gray-400">
+                  <th className="py-2 text-left">{t("adminCosts.collected.client")}</th>
+                  <th className="py-2 text-left">{t("adminCosts.collected.plan")}</th>
+                  <th className="py-2 text-right">{t("adminCosts.collected.metered")}</th>
+                  <th className="py-2 text-right">{t("adminCosts.collected.paid")}</th>
+                  <th className="py-2 text-right">{t("adminCosts.collected.uncollected")}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((r) => (
+                  <tr key={r.id} className="border-b border-gray-100 dark:border-gray-800/60">
+                    <td className="py-2 text-left text-gray-900 dark:text-gray-100">{r.name}</td>
+                    <td className="py-2 text-left">
+                      <span className="rounded-md bg-gray-100 dark:bg-gray-800 px-1.5 py-0.5 font-mono text-[11px] text-gray-600 dark:text-gray-300">
+                        {r.plan}
+                      </span>
+                    </td>
+                    <td className="py-2 text-right font-mono text-xs text-gray-700 dark:text-gray-200">{formatMoney(r.metered, currency)}</td>
+                    <td className="py-2 text-right font-mono text-xs text-gray-700 dark:text-gray-200">{formatMoney(r.paid, currency)}</td>
+                    <td className={`py-2 text-right font-mono text-xs ${marginClass(-r.uncollected)}`}>{formatMoney(r.uncollected, currency)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        <p className="mt-3 text-xs text-gray-400 dark:text-gray-500">
+          {hours > 0
+            ? t("adminCosts.collected.coverage", { hours, since })
+            : t("adminCosts.collected.noLedger")}
+        </p>
+      </CardContent>
+    </Card>
   );
 }
 

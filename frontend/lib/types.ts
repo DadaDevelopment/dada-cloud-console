@@ -917,6 +917,9 @@ export interface AdminOverviewMoney {
   hardware_total?: number;
   revenue_total?: number;
   margin_total?: number;
+  paid_total?: number;
+  metered_total?: number;
+  uncollected_total?: number;
   top_loss_makers?: AdminCostLossMaker[];
 }
 
@@ -965,6 +968,7 @@ export interface AdminCostProject {
   revenue: number;
   margin: number;
   margin_pct: number;
+  metered_rub?: number;
   resources: AdminCostResource[];
 }
 
@@ -975,6 +979,11 @@ export interface AdminCostClient {
   revenue: number;
   margin: number;
   margin_pct: number;
+  plan?: string;
+  plan_price_rub?: number;
+  paid_rub?: number;
+  metered_rub?: number;
+  uncollected_rub?: number;
   projects: AdminCostProject[];
 }
 
@@ -1004,6 +1013,11 @@ export interface AdminCostsResponse {
   total_cost?: number;
   total_revenue?: number;
   total_margin?: number;
+  total_paid?: number;
+  total_metered?: number;
+  total_uncollected?: number;
+  metered_since?: string;
+  ledger_hours?: number;
   unallocated?: AdminCostResource;
   top_loss_makers?: AdminCostLossMaker[];
   clients?: AdminCostClient[];

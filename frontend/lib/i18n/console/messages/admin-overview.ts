@@ -37,8 +37,11 @@ export const adminOverview: Messages = {
 
   "adminOverview.money.title": { ru: "Деньги", en: "Money" },
   "adminOverview.money.hardware": { ru: "Железо (30д)", en: "Hardware (30d)" },
-  "adminOverview.money.revenue": { ru: "Выручка (30д)", en: "Revenue (30d)" },
+  "adminOverview.money.revenue": { ru: "Прайс (30д)", en: "List price (30d)" },
   "adminOverview.money.margin": { ru: "Маржа (30д)", en: "Margin (30d)" },
+  "adminOverview.money.metered": { ru: "Наюзано (30д)", en: "Consumed (30d)" },
+  "adminOverview.money.paid": { ru: "Собрано (30д)", en: "Collected (30d)" },
+  "adminOverview.money.uncollected": { ru: "Не оплачено (30д)", en: "Uncollected (30d)" },
   "adminOverview.money.top": { ru: "Клиенты с наименьшей маржой", en: "Clients with the lowest margin" },
   "adminOverview.money.unavailable": {
     ru: "Данные по затратам временно недоступны (OpenCost).",

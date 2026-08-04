@@ -241,6 +241,22 @@ export default function AdminOverviewPage() {
                     </p>
                   </div>
                 </div>
+                <div className="mb-3 grid grid-cols-3 gap-3 border-t border-gray-100 dark:border-gray-800/60 pt-3">
+                  <div>
+                    <p className="text-xs text-gray-500 dark:text-gray-400">{t("adminOverview.money.metered")}</p>
+                    <p className="text-lg font-semibold text-gray-900 dark:text-gray-100">{data ? formatMoney(data.money.metered_total ?? 0, data.money.currency) : "—"}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-gray-500 dark:text-gray-400">{t("adminOverview.money.paid")}</p>
+                    <p className="text-lg font-semibold text-gray-900 dark:text-gray-100">{data ? formatMoney(data.money.paid_total ?? 0, data.money.currency) : "—"}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-gray-500 dark:text-gray-400">{t("adminOverview.money.uncollected")}</p>
+                    <p className={`text-lg font-semibold ${(data?.money.uncollected_total ?? 0) > 0 ? "text-red-600 dark:text-red-400" : "text-gray-900 dark:text-gray-100"}`}>
+                      {data ? formatMoney(data.money.uncollected_total ?? 0, data.money.currency) : "—"}
+                    </p>
+                  </div>
+                </div>
                 <p className="mb-2 text-xs font-medium text-gray-500 dark:text-gray-400">{t("adminOverview.money.top")}</p>
                 {(data?.money.top_loss_makers ?? []).length === 0 ? (
                   <p className="text-xs text-gray-400 dark:text-gray-500">{t("adminOverview.money.empty")}</p>

@@ -24,7 +24,7 @@ export const adminCosts: Messages = {
   "adminCosts.window.30d": { ru: "30 дней", en: "30d" },
 
   "adminCosts.kpi.hardware": { ru: "Стоимость железа", en: "Hardware cost" },
-  "adminCosts.kpi.revenue": { ru: "Выручка", en: "Revenue" },
+  "adminCosts.kpi.revenue": { ru: "Начислено по прайсу", en: "Charged at list price" },
   "adminCosts.kpi.margin": { ru: "Маржа", en: "Margin" },
   "adminCosts.kpi.unallocated": { ru: "Не распределено / простой", en: "Unallocated / idle" },
 
@@ -80,11 +80,31 @@ export const adminCosts: Messages = {
   "adminCosts.table.client": { ru: "Клиент / проект / ресурс", en: "Client / project / resource" },
   "adminCosts.table.node": { ru: "Инфраструктура / проект / ресурс", en: "Infrastructure / project / resource" },
   "adminCosts.table.cost": { ru: "Стоимость железа", en: "Hardware cost" },
-  "adminCosts.table.revenue": { ru: "Платит клиент", en: "Client pays" },
+  "adminCosts.table.revenue": { ru: "Начислено по прайсу", en: "Charged at list price" },
   "adminCosts.table.marginPct": { ru: "Маржа %", en: "Margin %" },
   "adminCosts.table.margin": { ru: "Прибыль ₽", en: "Profit ₽" },
 
   "adminCosts.agentRow.label": { ru: "Агентские задачи (ИИ)", en: "Agent tasks (AI)" },
+
+  "adminCosts.collected.title": { ru: "Наюзано против собранного", en: "Consumed vs collected" },
+  "adminCosts.collected.subtitle": {
+    ru: "«Наюзано» — часовой журнал потребления приложений по прайсу. «Собрано» — деньги, которые реально пришли за период. Разница — то, что клиент потребил и не оплатил.",
+    en: "\"Consumed\" is the hourly app-usage ledger priced at list. \"Collected\" is money that actually settled in the window. The difference is consumption nobody paid for.",
+  },
+  "adminCosts.collected.metered": { ru: "Наюзано (журнал)", en: "Consumed (ledger)" },
+  "adminCosts.collected.paid": { ru: "Собрано деньгами", en: "Collected" },
+  "adminCosts.collected.uncollected": { ru: "Не оплачено", en: "Uncollected" },
+  "adminCosts.collected.plan": { ru: "Тариф", en: "Plan" },
+  "adminCosts.collected.client": { ru: "Клиент", en: "Client" },
+  "adminCosts.collected.empty": { ru: "Журнал потребления пока пуст", en: "The usage ledger is still empty" },
+  "adminCosts.collected.coverage": {
+    ru: "Журнал покрывает {hours} ч, с {since}. Строки старше 30 дней удаляются.",
+    en: "Ledger covers {hours}h, since {since}. Rows older than 30 days are pruned.",
+  },
+  "adminCosts.collected.noLedger": {
+    ru: "Журнал потребления ещё не наполнен — метр пишет по строке в час, цифры появятся в течение часа после деплоя.",
+    en: "The usage ledger has not filled yet — the meter writes one row per hour, so numbers appear within an hour of deploy.",
+  },
 
   "adminCosts.empty": { ru: "Нет данных за выбранный период", en: "No data for the selected window" },
   "adminCosts.expand": { ru: "Развернуть", en: "Expand" },

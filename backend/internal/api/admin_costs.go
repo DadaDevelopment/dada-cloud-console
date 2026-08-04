@@ -90,17 +90,31 @@ type adminCostProject struct {
 	Revenue     float64             `json:"revenue"`
 	Margin      float64             `json:"margin"`
 	MarginPct   float64             `json:"margin_pct"`
+	MeteredRUB  float64             `json:"metered_rub"`
 	Resources   []adminCostResource `json:"resources"`
 }
 
+// adminCostClient is one paying (or, more often, non-paying) customer.
+//
+// Cost/Revenue/Margin are the MODELLED economics: what the hardware cost us and
+// what our consumption formula would charge for the same usage. Plan, PaidRUB,
+// MeteredRUB and UncollectedRUB are the settled side of the same client --
+// which subscription they are actually on, what money actually arrived, what
+// the hourly ledger says they actually consumed, and the gap between the last
+// two. See attachClientMoney (admin_collected.go).
 type adminCostClient struct {
-	ClientID   string             `json:"client_id"`
-	ClientName string             `json:"client_name"`
-	Cost       float64            `json:"cost"`
-	Revenue    float64            `json:"revenue"`
-	Margin     float64            `json:"margin"`
-	MarginPct  float64            `json:"margin_pct"`
-	Projects   []adminCostProject `json:"projects"`
+	ClientID       string             `json:"client_id"`
+	ClientName     string             `json:"client_name"`
+	Cost           float64            `json:"cost"`
+	Revenue        float64            `json:"revenue"`
+	Margin         float64            `json:"margin"`
+	MarginPct      float64            `json:"margin_pct"`
+	Plan           string             `json:"plan,omitempty"`
+	PlanPriceRUB   float64            `json:"plan_price_rub"`
+	PaidRUB        float64            `json:"paid_rub"`
+	MeteredRUB     float64            `json:"metered_rub"`
+	UncollectedRUB float64            `json:"uncollected_rub"`
+	Projects       []adminCostProject `json:"projects"`
 }
 
 type adminCostLossMaker struct {
@@ -185,6 +199,11 @@ func (h *Handler) GetAdminCosts(c *gin.Context) {
 		"total_cost":          round2(summary.TotalCost),
 		"total_revenue":       round2(summary.TotalRevenue),
 		"total_margin":        round2(summary.TotalRevenue - summary.TotalCost),
+		"total_paid":          summary.Money.PaidRUB,
+		"total_metered":       summary.Money.MeteredRUB,
+		"total_uncollected":   summary.Money.UncollectedRUB,
+		"metered_since":       summary.Money.MeteredSince,
+		"ledger_hours":        summary.Money.LedgerHours,
 		"unallocated":         summary.Unallocated,
 		"top_loss_makers":     summary.TopLossMakers,
 		"clients":             summary.Clients,
@@ -216,6 +235,7 @@ type adminCostSummary struct {
 	TopLossMakers     []adminCostLossMaker
 	Clients           []*adminCostClient
 	Platform          *adminCostClient
+	Money             adminMoneyTotals
 }
 
 // buildAdminCostSummary computes the platform cost/revenue/margin economics
@@ -310,6 +330,8 @@ func (h *Handler) buildAdminCostSummary(ctx context.Context, days int) adminCost
 	}
 	sort.Slice(customers, func(i, j int) bool { return customers[i].Cost > customers[j].Cost })
 
+	money := h.attachClientMoney(ctx, customers, days)
+
 	if platform != nil {
 		platformCostOnly(platform)
 	}
@@ -348,6 +370,7 @@ func (h *Handler) buildAdminCostSummary(ctx context.Context, days int) adminCost
 	out.TopLossMakers = lossMakers
 	out.Clients = customers
 	out.Platform = platform
+	out.Money = money
 	return out
 }
 

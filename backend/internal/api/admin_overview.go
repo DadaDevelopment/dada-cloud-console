@@ -69,15 +69,27 @@ type overviewDomains struct {
 	Failed  int `json:"failed"`
 }
 
+// overviewMoney is the money card of the god-admin overview.
+//
+// RevenueTotal and MarginTotal are MODELLED: what the consumption formula would
+// charge for observed usage, computed identically for a free account and a
+// paying one. PaidTotal is the only settled figure (succeeded payments in the
+// window), MeteredTotal the only ledger-backed one (app_usage hours), and
+// UncollectedTotal their difference. The card used to show the modelled pair
+// alone, which reads as income the platform has never received; the settled
+// three carry no omitempty precisely because zero is the number worth showing.
 type overviewMoney struct {
-	Available     bool                 `json:"available"`
-	Note          string               `json:"note,omitempty"`
-	Currency      string               `json:"currency,omitempty"`
-	Days          int                  `json:"days,omitempty"`
-	HardwareTotal float64              `json:"hardware_total,omitempty"`
-	RevenueTotal  float64              `json:"revenue_total,omitempty"`
-	MarginTotal   float64              `json:"margin_total,omitempty"`
-	TopLossMakers []adminCostLossMaker `json:"top_loss_makers,omitempty"`
+	Available        bool                 `json:"available"`
+	Note             string               `json:"note,omitempty"`
+	Currency         string               `json:"currency,omitempty"`
+	Days             int                  `json:"days,omitempty"`
+	HardwareTotal    float64              `json:"hardware_total,omitempty"`
+	RevenueTotal     float64              `json:"revenue_total,omitempty"`
+	MarginTotal      float64              `json:"margin_total,omitempty"`
+	TopLossMakers    []adminCostLossMaker `json:"top_loss_makers,omitempty"`
+	PaidTotal        float64              `json:"paid_total"`
+	MeteredTotal     float64              `json:"metered_total"`
+	UncollectedTotal float64              `json:"uncollected_total"`
 }
 
 type overviewDayPoint struct {
@@ -364,6 +376,10 @@ func (h *Handler) overviewMoney(ctx context.Context) overviewMoney {
 		RevenueTotal:  round2(summary.TotalRevenue),
 		MarginTotal:   round2(summary.TotalRevenue - summary.HardwareTotal),
 		TopLossMakers: summary.TopLossMakers,
+
+		PaidTotal:        summary.Money.PaidRUB,
+		MeteredTotal:     summary.Money.MeteredRUB,
+		UncollectedTotal: summary.Money.UncollectedRUB,
 	}
 }
 
