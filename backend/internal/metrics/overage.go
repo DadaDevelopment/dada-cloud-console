@@ -41,8 +41,18 @@ const overageSeriesLimit = 100
 // reading plans.yaml here keeps this package what it already is -- gauges
 // derived from the console's own state tables -- and leaves pricing in the one
 // package that owns it.
-func StartOverageCollector(ctx context.Context, pool *pgxpool.Pool, interval time.Duration, allowance map[string]float64) {
-	collectOverage(ctx, pool, allowance)
+//
+// exempt lists orgs that BILLING_EXEMPT_ORGS already excuses from quotas and
+// bills -- the platform's own org, demo and e2e. They are the heaviest
+// consumers on the cluster by design, so without this they would be the loudest
+// and most permanent thing in the alert, which is how an alert stops being
+// read.
+func StartOverageCollector(ctx context.Context, pool *pgxpool.Pool, interval time.Duration, allowance map[string]float64, exempt []string) {
+	skip := map[string]struct{}{}
+	for _, org := range exempt {
+		skip[org] = struct{}{}
+	}
+	collectOverage(ctx, pool, allowance, skip)
 	go func() {
 		t := time.NewTicker(interval)
 		defer t.Stop()
@@ -51,11 +61,14 @@ func StartOverageCollector(ctx context.Context, pool *pgxpool.Pool, interval tim
 			case <-ctx.Done():
 				return
 			case <-t.C:
-				collectOverage(ctx, pool, allowance)
+				collectOverage(ctx, pool, allowance, skip)
 			}
 		}
 	}()
-	log.Info().Int("plans_with_allowance", len(allowance)).Msg("org overage collector started")
+	log.Info().
+		Int("plans_with_allowance", len(allowance)).
+		Int("exempt_orgs", len(skip)).
+		Msg("org overage collector started")
 }
 
 // collectOverage rewrites both gauges from the ledger.
@@ -69,12 +82,25 @@ func StartOverageCollector(ctx context.Context, pool *pgxpool.Pool, interval tim
 // series rather than freeze at its last value forever -- and on the first of the
 // month EVERY org's consumption drops to zero, which is the one moment where a
 // frozen gauge would keep an alert firing for a month that has not started yet.
-func collectOverage(ctx context.Context, pool *pgxpool.Pool, allowance map[string]float64) {
+//
+// An org in skip gets no series at all rather than a zeroed one. A zero would be
+// a lie about consumption the platform genuinely pays for, and a series that
+// exists is a series someone can build a second rule on top of that fires about
+// an account nobody will ever invoice. The exclusion is in the query rather than
+// in the scan loop so that exempt orgs do not eat slots under the series limit --
+// they are the heaviest consumers on the cluster, so they would take the top of
+// the ORDER BY and push out the paying accounts the alert exists for.
+func collectOverage(ctx context.Context, pool *pgxpool.Pool, allowance map[string]float64, skip map[string]struct{}) {
 	if len(allowance) == 0 {
 		return
 	}
 	c, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
+
+	exempt := make([]string, 0, len(skip))
+	for org := range skip {
+		exempt = append(exempt, org)
+	}
 
 	rows, err := pool.Query(c,
 		`SELECT u.org_id, COALESCE(ba.plan, 'free'), SUM(u.cost_rub)::float8
@@ -82,9 +108,10 @@ func collectOverage(ctx context.Context, pool *pgxpool.Pool, allowance map[strin
 		   LEFT JOIN billing_accounts ba ON ba.org_id = u.org_id
 		  WHERE u.hour_start >= date_trunc('month', now() AT TIME ZONE 'utc')
 		    AND u.org_id <> ''
+		    AND NOT (u.org_id = ANY($1))
 		  GROUP BY 1, 2
 		  ORDER BY 3 DESC
-		  LIMIT `+strconv.Itoa(overageSeriesLimit))
+		  LIMIT `+strconv.Itoa(overageSeriesLimit), exempt)
 	if err != nil {
 		collectErrors.Inc()
 		log.Warn().Err(err).Msg("metrics: month-to-date org consumption query failed")

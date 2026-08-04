@@ -141,7 +141,7 @@ func main() {
 		if planErr != nil {
 			log.Fatal().Err(planErr).Msg("billing: failed to load plans (BILLING_ENABLED=true)")
 		}
-		startOverageCollector(metricsCtx, pool, billingPlans)
+		startOverageCollector(metricsCtx, pool, billingPlans, cfg.BillingExemptOrgs)
 
 		meterInterval := time.Duration(cfg.BillingMeterIntervalSec) * time.Second
 		meterCtx, meterCancel := context.WithCancel(context.Background())
@@ -269,7 +269,11 @@ func main() {
 // console keeps running and the collector simply does not start, which is
 // reported as the blind spot it is. Alerting on a fabricated allowance would be
 // worse than not alerting.
-func startOverageCollector(ctx context.Context, pool *pgxpool.Pool, plans []pricing.Plan) {
+//
+// exempt is the same BILLING_EXEMPT_ORGS list the quota gate honours. An org the
+// platform has already decided never to bill must not be the loudest thing in an
+// alert about unbilled consumption.
+func startOverageCollector(ctx context.Context, pool *pgxpool.Pool, plans []pricing.Plan, exempt []string) {
 	clusterCost, err := billing.LoadClusterCost("")
 	if err != nil {
 		log.Error().Err(err).Msg("org overage collector NOT started: cluster cost config unreadable; over-consuming accounts will not alert")
@@ -286,7 +290,7 @@ func startOverageCollector(ctx context.Context, pool *pgxpool.Pool, plans []pric
 			allowance[p.Key] = included
 		}
 	}
-	metrics.StartOverageCollector(ctx, pool, 5*time.Minute, allowance)
+	metrics.StartOverageCollector(ctx, pool, 5*time.Minute, allowance, exempt)
 }
 
 // resolveMigrationsDir returns the path to the migrations directory.

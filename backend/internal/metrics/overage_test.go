@@ -91,7 +91,7 @@ func TestCollectOverageReportsConsumptionAgainstAllowance(t *testing.T) {
 	pool := testCollectorPool(t)
 	org := seedOrgLedger(t, pool, "free", 400)
 
-	collectOverage(context.Background(), pool, map[string]float64{"free": 164.72})
+	collectOverage(context.Background(), pool, map[string]float64{"free": 164.72}, nil)
 
 	spent, ok := gaugeFor(t, orgUsageMonthRub, org)
 	if !ok {
@@ -118,13 +118,37 @@ func TestCollectOverageSkipsPlansWithoutAllowance(t *testing.T) {
 	pool := testCollectorPool(t)
 	org := seedOrgLedger(t, pool, "enterprise", 9000)
 
-	collectOverage(context.Background(), pool, map[string]float64{"free": 164.72, "enterprise": 0})
+	collectOverage(context.Background(), pool, map[string]float64{"free": 164.72, "enterprise": 0}, nil)
 
 	if v, ok := gaugeFor(t, orgUsageMonthRub, org); ok {
 		t.Errorf("enterprise org %q produced a consumption series (%v); with no allowance it can only alert forever", org, v)
 	}
 	if v, ok := gaugeFor(t, orgUsageAllowanceRub, org); ok {
 		t.Errorf("enterprise org %q produced an allowance series (%v); zero is 'undefined', not a limit", org, v)
+	}
+}
+
+// TestCollectOverageSkipsExemptOrgs keeps the alert about accounts someone could
+// actually invoice. BILLING_EXEMPT_ORGS lists the orgs the platform runs itself
+// -- in prod that is org "dada", which is also the single heaviest consumer on
+// the cluster. Without this it would be permanently over any allowance and would
+// be the only thing anyone ever saw in this alert.
+func TestCollectOverageSkipsExemptOrgs(t *testing.T) {
+	pool := testCollectorPool(t)
+	exempt := seedOrgLedger(t, pool, "free", 9000)
+	billed := seedOrgLedger(t, pool, "free", 400)
+
+	collectOverage(context.Background(), pool, map[string]float64{"free": 164.72},
+		map[string]struct{}{exempt: {}})
+
+	if v, ok := gaugeFor(t, orgUsageMonthRub, exempt); ok {
+		t.Errorf("exempt org %q produced a consumption series (%v); it is excused from bills by config, so this can only alert forever", exempt, v)
+	}
+	if v, ok := gaugeFor(t, orgUsageAllowanceRub, exempt); ok {
+		t.Errorf("exempt org %q produced an allowance series (%v)", exempt, v)
+	}
+	if _, ok := gaugeFor(t, orgUsageMonthRub, billed); !ok {
+		t.Errorf("non-exempt org %q lost its series; the exemption must remove one org, not disable the metric", billed)
 	}
 }
 
@@ -137,7 +161,7 @@ func TestCollectOverageDropsOrgsThatStoppedConsuming(t *testing.T) {
 	org := seedOrgLedger(t, pool, "free", 400)
 	allowance := map[string]float64{"free": 164.72}
 
-	collectOverage(context.Background(), pool, allowance)
+	collectOverage(context.Background(), pool, allowance, nil)
 	if _, ok := gaugeFor(t, orgUsageMonthRub, org); !ok {
 		t.Fatalf("seeded org %q produced no series", org)
 	}
@@ -146,7 +170,7 @@ func TestCollectOverageDropsOrgsThatStoppedConsuming(t *testing.T) {
 		`DELETE FROM app_usage WHERE org_id = $1`, org); err != nil {
 		t.Fatalf("clear ledger: %v", err)
 	}
-	collectOverage(context.Background(), pool, allowance)
+	collectOverage(context.Background(), pool, allowance, nil)
 
 	if v, ok := gaugeFor(t, orgUsageMonthRub, org); ok {
 		t.Errorf("org %q has no ledger rows left but still reports %v consumed; the alert would keep firing", org, v)
