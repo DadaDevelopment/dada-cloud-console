@@ -201,6 +201,7 @@ export default function AppsPage() {
   });
   const crashCount = alertedApps.filter((r) => hasAlertType(r.alerts, "crash")).length;
   const volumeCount = alertedApps.filter((r) => hasAlertType(r.alerts, "volume")).length;
+  const urlCount = alertedApps.filter((r) => hasAlertType(r.alerts, "url")).length;
 
   const canCreate = canMutate(role);
   const modalEnv = environments.find((e) => e.id === modalEnvId);
@@ -257,7 +258,12 @@ export default function AppsPage() {
           }`}
         >
           <p className="font-medium">
-            {t("apps.alerts.summary.title", { count: alertedApps.length, crash: crashCount, volume: volumeCount })}
+            {t("apps.alerts.summary.title", {
+              count: alertedApps.length,
+              crash: crashCount,
+              volume: volumeCount,
+              url: urlCount,
+            })}
           </p>
           <div className="mt-1.5 flex flex-wrap gap-x-4 gap-y-1">
             {alertedApps.map(({ app, env }) => (
@@ -592,6 +598,7 @@ function AppRow({ app, env, projectId, expanded, onToggle, t }: AppRowProps) {
   const alerts = getAppAlerts(app);
   const hasCrashAlert = hasAlertType(alerts, "crash");
   const hasVolumeAlert = hasAlertType(alerts, "volume");
+  const hasURLAlert = hasAlertType(alerts, "url");
   const subtitle =
     resType === "ingress"
       ? ing?.host ?? summary.image ?? "—"
@@ -642,6 +649,11 @@ function AppRow({ app, env, projectId, expanded, onToggle, t }: AppRowProps) {
               {hasVolumeAlert && (
                 <span className="inline-flex items-center rounded-full bg-amber-100 dark:bg-amber-950/60 px-2 py-0.5 text-xs font-medium text-amber-700 dark:text-amber-300">
                   {t("apps.alerts.chip.volume")}
+                </span>
+              )}
+              {hasURLAlert && (
+                <span className="inline-flex items-center rounded-full bg-amber-100 dark:bg-amber-950/60 px-2 py-0.5 text-xs font-medium text-amber-700 dark:text-amber-300">
+                  {t("apps.alerts.chip.url")}
                 </span>
               )}
             </div>

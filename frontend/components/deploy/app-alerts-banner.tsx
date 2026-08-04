@@ -27,6 +27,25 @@ function crashTextKey(reason?: string): string {
   }
 }
 
+/**
+ * Maps the URL watcher's reason to the message key: `no_listener` means the
+ * app never accepted the connection (bot/worker not listening on the port at
+ * all), `not_http` means the port answered but the response was not an HTTP
+ * response (a non-HTTP protocol such as MTProto behind the public domain).
+ * An unknown or empty reason falls back to the generic "not a web service"
+ * wording.
+ */
+function urlTextKey(reason?: string): string {
+  switch (reason) {
+    case "no_listener":
+      return "apps.alerts.url.text.noListener";
+    case "not_http":
+      return "apps.alerts.url.text.notHttp";
+    default:
+      return "apps.alerts.url.text";
+  }
+}
+
 type DiagnoseState =
   | { status: "idle" }
   | { status: "pending" }
@@ -202,7 +221,7 @@ export function AppAlertsBanner({ alerts, logsHref, storageHref, projectId, envI
               </div>
             )}
           </div>
-        ) : (
+        ) : alert.type === "volume" ? (
           <div
             key={`volume-${idx}`}
             className="rounded-lg border border-amber-200 dark:border-amber-900 bg-amber-50 dark:bg-amber-950/40 px-4 py-3 text-sm text-amber-700 dark:text-amber-300"
@@ -220,6 +239,32 @@ export function AppAlertsBanner({ alerts, logsHref, storageHref, projectId, envI
               className="mt-1.5 inline-flex items-center gap-1 text-xs font-semibold text-amber-700 dark:text-amber-300 underline underline-offset-2 hover:text-amber-800 dark:hover:text-amber-200"
             >
               {t("apps.alerts.volume.cta")}
+            </Link>
+          </div>
+        ) : (
+          <div
+            key={`url-${idx}`}
+            className="rounded-lg border border-amber-200 dark:border-amber-900 bg-amber-50 dark:bg-amber-950/40 px-4 py-3 text-sm text-amber-700 dark:text-amber-300"
+          >
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <p className="font-medium">{t(urlTextKey(alert.reason))}</p>
+              <span className="text-xs text-amber-600 dark:text-amber-400">{timeAgo(alert.detected_at)}</span>
+            </div>
+            {alert.detail && (
+              <div className="mt-2 overflow-x-auto rounded-md bg-amber-100/70 dark:bg-amber-950/60 px-2.5 py-1.5">
+                <p className="text-[11px] font-semibold uppercase tracking-wide text-amber-500 dark:text-amber-400">
+                  {t("apps.alerts.url.detail")}
+                </p>
+                <pre className="mt-0.5 whitespace-pre text-xs font-mono text-amber-800 dark:text-amber-200">
+                  {alert.detail}
+                </pre>
+              </div>
+            )}
+            <Link
+              href={logsHref}
+              className="mt-1.5 inline-flex items-center gap-1 text-xs font-semibold text-amber-700 dark:text-amber-300 underline underline-offset-2 hover:text-amber-800 dark:hover:text-amber-200"
+            >
+              {t("apps.alerts.url.cta")}
             </Link>
           </div>
         ),

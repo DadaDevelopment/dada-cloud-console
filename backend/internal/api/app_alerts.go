@@ -64,12 +64,12 @@ func applyAppAlerts(apps []models.ResourceSnapshot, byApp map[string][]models.Ap
 }
 
 // loadAppAlerts reads the freshly-seen cooldown rows for namespace out of
-// app_health_alerts and app_volume_alerts and groups them by app name, ready
-// to stamp onto ListApps' result. This is the one extra query ListApps pays
-// for the P1-ALERTS-IN-UI feature: a single indexed lookup per table, no k8s
-// or Prometheus access, keeping the endpoint inside its latency budget. Any
-// query failure is logged by the caller's err return and treated as "no
-// alerts" rather than failing the whole app list.
+// app_health_alerts, app_volume_alerts and app_url_alerts and groups them by
+// app name, ready to stamp onto ListApps' result. This is the one extra
+// query ListApps pays for the P1-ALERTS-IN-UI feature: a single indexed
+// lookup per table, no k8s or Prometheus access, keeping the endpoint inside
+// its latency budget. Any query failure is logged by the caller's err return
+// and treated as "no alerts" rather than failing the whole app list.
 //
 // Freshness is judged on COALESCE(last_seen_at, last_sent_at), never on
 // last_sent_at alone (P1-ALERTS-IN-UI-FRESHNESS): last_sent_at only moves
@@ -77,10 +77,19 @@ func applyAppAlerts(apps []models.ResourceSnapshot, byApp map[string][]models.Ap
 // a day after the app was actually fixed — exactly the false-positive the
 // owner ruled out ("wrong alert is worse than no alert"). last_seen_at is
 // touched on every tick the watcher still detects the bad state (see
-// touchAppHealthAlertSeen/touchAppVolumeAlertSeen), so it reflects "still
-// happening right now" instead. The COALESCE falls back to last_sent_at for
-// rows written before this migration/deploy landed, where last_seen_at is
-// still NULL.
+// touchAppHealthAlertSeen/touchAppVolumeAlertSeen/recordURLProbeFailure), so
+// it reflects "still happening right now" instead. The COALESCE falls back
+// to last_sent_at for rows written before this migration/deploy landed,
+// where last_seen_at is still NULL. app_url_alerts never sets last_sent_at
+// at all (this watcher sends no email), so its COALESCE always resolves to
+// last_seen_at; the column is kept only so all three queries share this one
+// shape.
+//
+// app_url_alerts additionally gates on consecutive_failures reaching
+// appURLAlertFailureThreshold: the row exists (and its counter climbs) from
+// the very first failing probe, but the console must only show a banner once
+// the anti-flap threshold is actually crossed, same as the in-memory check
+// app_url_watcher.go's recordProbeResult performs before logging.
 func (h *Handler) loadAppAlerts(ctx context.Context, namespace string) (map[string][]models.AppAlert, error) {
 	var rows []appAlertRow
 
@@ -127,6 +136,29 @@ func (h *Handler) loadAppAlerts(ctx context.Context, namespace string) (map[stri
 	}
 	vrows.Close()
 	if err := vrows.Err(); err != nil {
+		return nil, err
+	}
+
+	urows, err := h.pool.Query(ctx,
+		`SELECT app_name, COALESCE(reason, ''), COALESCE(detail, ''), COALESCE(last_seen_at, last_sent_at)
+		 FROM app_url_alerts
+		 WHERE namespace = $1 AND consecutive_failures >= $2
+		   AND COALESCE(last_seen_at, last_sent_at) > now() - make_interval(secs => $3)`,
+		namespace, appURLAlertFailureThreshold, appURLAlertFreshWindow.Seconds())
+	if err != nil {
+		return nil, err
+	}
+	for urows.Next() {
+		var r appAlertRow
+		if scanErr := urows.Scan(&r.AppName, &r.Reason, &r.Detail, &r.DetectedAt); scanErr != nil {
+			urows.Close()
+			return nil, scanErr
+		}
+		r.Type = "url"
+		rows = append(rows, r)
+	}
+	urows.Close()
+	if err := urows.Err(); err != nil {
 		return nil, err
 	}
 

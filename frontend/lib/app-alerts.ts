@@ -1,6 +1,6 @@
 import type { ResourceSnapshot } from "@/lib/types";
 
-export type AppAlertType = "crash" | "volume";
+export type AppAlertType = "crash" | "volume" | "url";
 
 /**
  * `cause` / `cause_line` are the crash explanation the watcher already worked
@@ -36,7 +36,9 @@ export function getAppAlerts(snapshot: ResourceSnapshot | null | undefined): App
     (a): a is AppAlert =>
       !!a &&
       typeof a === "object" &&
-      ((a as AppAlert).type === "crash" || (a as AppAlert).type === "volume") &&
+      ((a as AppAlert).type === "crash" ||
+        (a as AppAlert).type === "volume" ||
+        (a as AppAlert).type === "url") &&
       typeof (a as AppAlert).detected_at === "string",
   );
 }
