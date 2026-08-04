@@ -11,7 +11,8 @@ export const previews: Messages = {
 
   "previewPane.title": { ru: "Живой просмотр", en: "Live preview" },
   "previewPane.reload": { ru: "Обновить", en: "Reload" },
-  "previewPane.openNewTab": { ru: "Открыть в новой вкладке", en: "Open in new tab" },
+  "previewPane.projectDetails": { ru: "Подробнее о проекте", en: "Project details" },
+  "previewPane.openUi": { ru: "Открыть UI проекта", en: "Open project UI" },
   "previewPane.viewport.mobile": { ru: "Моб.", en: "Mobile" },
   "previewPane.viewport.tablet": { ru: "Планшет", en: "Tablet" },
   "previewPane.viewport.full": { ru: "Во всю ширину", en: "Full" },

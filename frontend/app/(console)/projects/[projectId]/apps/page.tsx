@@ -696,7 +696,13 @@ function AppRow({ app, env, projectId, expanded, onToggle, t }: AppRowProps) {
           <div className="grid gap-4 xl:grid-cols-[1fr_320px]">
             <div className="min-w-0">
               {summary.url ? (
-                <AppPreviewPane key={summary.preview_url ?? summary.url} url={summary.preview_url ?? summary.url} openUrl={summary.url} title={app.name} />
+                <AppPreviewPane
+                  key={summary.preview_url ?? summary.url}
+                  url={summary.preview_url ?? summary.url}
+                  openUrl={summary.url}
+                  detailsUrl={`/projects/${projectId}/apps/${app.name}/settings?envId=${env.id}`}
+                  title={app.name}
+                />
               ) : (
                 <div className="flex h-40 items-center justify-center rounded-lg border border-dashed border-gray-200 dark:border-gray-800 text-sm text-gray-400 dark:text-gray-500">
                   {t("apps.row.noUrl")}

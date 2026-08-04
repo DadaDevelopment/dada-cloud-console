@@ -485,7 +485,11 @@ export default function AppDetailPage() {
 
       {!isResource && summary.url && (
         <div className="mb-6">
-          <AppPreviewPane url={summary.preview_url ?? summary.url} openUrl={summary.url} />
+          <AppPreviewPane
+            url={summary.preview_url ?? summary.url}
+            openUrl={summary.url}
+            detailsUrl={`/projects/${projectId}/apps/${appName}/settings${envId ? `?envId=${envId}` : ""}`}
+          />
         </div>
       )}
 

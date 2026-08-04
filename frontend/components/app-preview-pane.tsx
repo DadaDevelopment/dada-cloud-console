@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { useT } from "@/lib/i18n/console/context";
 import { Spinner } from "@/components/ui/spinner";
 import type { SiteCard } from "@/lib/site-card";
@@ -28,6 +29,7 @@ function hostOf(raw: string): string {
 interface AppPreviewPaneProps {
   url: string;
   openUrl?: string;
+  detailsUrl: string;
   title?: string;
   defaultOpen?: boolean;
 }
@@ -39,8 +41,9 @@ interface AppPreviewPaneProps {
  *
  * `url` is the iframe source — the backend hands out a preview-gate URL
  * (*.pv.dada-tuda.ru) with frame-blocking headers scrubbed, so the check
- * passes for any app. `openUrl` is the app's real address used for the
- * "open in new tab" links; it defaults to `url`.
+ * passes for any app. `openUrl` is the app's real address used for the UI
+ * links; it defaults to `url`. `detailsUrl` is the console route for the
+ * project's settings.
  *
  * The pane leads with a static card — the app's own Open Graph summary, the
  * same thing a chat client shows for a pasted link. It arrives in one cheap
@@ -48,7 +51,7 @@ interface AppPreviewPaneProps {
  * most visits have ("is my app up, and is it mine?") without booting the app.
  * The live frame stays one click away.
  */
-export function AppPreviewPane({ url, openUrl, title, defaultOpen = false }: AppPreviewPaneProps) {
+export function AppPreviewPane({ url, openUrl, detailsUrl, title, defaultOpen = false }: AppPreviewPaneProps) {
   const externalUrl = openUrl ?? url;
   const isGateUrl = openUrl !== undefined && openUrl !== url;
   const { t } = useT();
@@ -162,6 +165,12 @@ export function AppPreviewPane({ url, openUrl, title, defaultOpen = false }: App
                 <Play className="h-3.5 w-3.5" />
                 {open ? t("previewPane.card.hide") : t("previewPane.card.open")}
               </button>
+              <Link
+                href={detailsUrl}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 dark:border-gray-800 px-2.5 py-1.5 text-xs font-medium text-gray-600 dark:text-gray-300 hover:border-blue-300 hover:text-blue-600 transition-colors"
+              >
+                {t("previewPane.projectDetails")}
+              </Link>
               <a
                 href={externalUrl}
                 target="_blank"
@@ -169,7 +178,7 @@ export function AppPreviewPane({ url, openUrl, title, defaultOpen = false }: App
                 className="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 dark:border-gray-800 px-2.5 py-1.5 text-xs font-medium text-gray-600 dark:text-gray-300 hover:border-blue-300 hover:text-blue-600 transition-colors"
               >
                 <ExternalLink className="h-3.5 w-3.5" />
-                {t("previewPane.openNewTab")}
+                {t("previewPane.openUi")}
               </a>
             </div>
           </div>
@@ -234,7 +243,7 @@ export function AppPreviewPane({ url, openUrl, title, defaultOpen = false }: App
                 className="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 dark:border-gray-800 px-2.5 py-1.5 text-xs font-medium text-gray-600 dark:text-gray-300 hover:border-blue-300 hover:text-blue-600 transition-colors"
               >
                 <ExternalLink className="h-3.5 w-3.5" />
-                {t("previewPane.openNewTab")}
+                {t("previewPane.openUi")}
               </a>
             </div>
           </div>
@@ -256,7 +265,7 @@ export function AppPreviewPane({ url, openUrl, title, defaultOpen = false }: App
                 className="inline-flex items-center gap-1.5 text-sm font-medium text-amber-700 dark:text-amber-300 hover:underline"
               >
                 <ExternalLink className="h-4 w-4" />
-                {t("previewPane.openNewTab")}
+                {t("previewPane.openUi")}
               </a>
             </div>
           ) : embeddable === false ? (
@@ -270,7 +279,7 @@ export function AppPreviewPane({ url, openUrl, title, defaultOpen = false }: App
                 className="inline-flex items-center gap-1.5 text-sm font-medium text-blue-600 dark:text-blue-400 hover:underline"
               >
                 <ExternalLink className="h-4 w-4" />
-                {t("previewPane.openNewTab")}
+                {t("previewPane.openUi")}
               </a>
             </div>
           ) : (
