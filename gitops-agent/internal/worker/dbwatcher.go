@@ -445,17 +445,25 @@ func (w *DBWatcher) commitFilesAndRecord(ctx context.Context, op db.Operation, m
 }
 
 // ensureAppExists returns the FileChanges needed to create the owning app's
-// app.yaml + values.yaml when they are not yet present in git. When the
-// app already exists — whether a bare chart-owner or a real workload — it returns
-// nil so the existing definition is left untouched. Child resources
-// (ServiceDatabase, AIModel, PublicApi) call this so that creating a resource
-// first auto-provisions the app that owns its chart.
+// app.yaml + values.yaml when they are not yet present in git, or to patch an
+// existing workload app.yaml that predates the "resources: true" field. Every
+// caller (ServiceDatabase, AIModel, PublicApi, custom-domain Ingress) is about
+// to write into that app's resources.values.yaml, so an app.yaml that does not
+// yet wire the shared helm/app-resources source would silently swallow the CR
+// it is about to be given: ArgoCD applies the workload chart it already knows
+// about and never looks at resources.values.yaml at all. ArgoName, namespace
+// and labels are left untouched on patch — only the missing resources flag is
+// added — because renaming the ArgoCD Application here would delete and
+// recreate it instead of just adding a source.
 func (w *DBWatcher) ensureAppExists(mgr *git.Manager, projectName, envName, appName, namespace, operationID string) ([]git.FileChange, error) {
 	if err := mgr.EnsureCloned(); err != nil {
 		return nil, err
 	}
 	appPath := renderer.AppGitPath(projectName, envName, appName)
-	if _, err := mgr.ReadFile(appPath); err == nil {
+	if existing, err := mgr.ReadFile(appPath); err == nil {
+		if patched, changed := patchAppResourcesFlag(existing); changed {
+			return []git.FileChange{{Path: appPath, Content: patched}}, nil
+		}
 		return nil, nil
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return nil, err
@@ -484,6 +492,29 @@ func (w *DBWatcher) ensureAppExists(mgr *git.Manager, projectName, envName, appN
 	return []git.FileChange{
 		{Path: appPath, Content: appYAML},
 	}, nil
+}
+
+// patchAppResourcesFlag adds "resources: true" to an existing workload app.yaml
+// that predates that field, so ArgoCD's tenant-apps ApplicationSet adds the
+// shared helm/app-resources source and starts reading the app's
+// resources.values.yaml. A bare ResourcesOnly owner app (spec.helm.path already
+// pointed straight at helm/app-resources) is left alone: that shape never
+// carries the flag by design. Reports changed=false when the file already has
+// the flag or is not a workload app.yaml, so the caller can skip the commit.
+func patchAppResourcesFlag(content string) (patched string, changed bool) {
+	if strings.Contains(content, "path: helm/app-resources") {
+		return content, false
+	}
+	if strings.Contains(content, "\n  resources: true\n") {
+		return content, false
+	}
+	const specLine = "\nspec:\n"
+	idx := strings.Index(content, specLine)
+	if idx == -1 {
+		return content, false
+	}
+	insertAt := idx + len(specLine)
+	return content[:insertAt] + "  resources: true\n" + content[insertAt:], true
 }
 
 // doCreateComposeManagedDB materialises a managed database on a VM as a
