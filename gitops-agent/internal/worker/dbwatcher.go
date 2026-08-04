@@ -303,7 +303,7 @@ func (w *DBWatcher) dispatch(ctx context.Context, op db.Operation) error {
 	case "CreateS3Bucket":
 		return w.doCreateS3Bucket(ctx, op)
 	case "CreatePreviewEnv":
-		return w.doCreatePreviewEnv(ctx, op)
+		return fmt.Errorf("CreatePreviewEnv: превью-окружения убраны как фича, операция не выполняется")
 	case "DeletePreviewEnv":
 		return w.doDeletePreviewEnv(ctx, op)
 	case "ImportComposeStack":
@@ -1877,12 +1877,10 @@ func (w *DBWatcher) guardUnattendedClobber(op db.Operation, mgr *git.Manager, va
 }
 
 // appProfileFallback resolves the resource profile for an environment whose App
-// snapshot carries no "profile" (the stale-stub case a spec-less App snapshot
-// used to leave behind, see previewOwnerAppSnapshot). It looks up the git_repos
-// row the environment was connected from -- for a preview env this is the
-// PARENT app's repo, via environments.git_repo_id -- and falls back to "small"
-// only when no such repo is linked or the lookup fails, matching the prior
-// hardcoded default.
+// snapshot carries no "profile" -- the stale-stub case a spec-less App snapshot
+// leaves behind. It looks up the git_repos row the environment was connected
+// from and falls back to "small" only when no such repo is linked or the lookup
+// fails, matching the prior hardcoded default.
 func (w *DBWatcher) appProfileFallback(ctx context.Context, environmentID *uuid.UUID) string {
 	if environmentID == nil {
 		return "small"

@@ -13,9 +13,9 @@ import (
 )
 
 // TestSyncAppFile_DoesNotClobberRichSeedWithBareStub is the regression test for
-// the live e2e failure: doCreatePreviewEnv (preview.go) seeds the preview's App
-// resource_snapshot verbatim from the parent app (image + volume carried
-// through, see previewOwnerAppSnapshot), then ensureAppExists (dbwatcher.go)
+// a live e2e failure first seen on the (since removed) preview-env path: an
+// operation seeds an App resource_snapshot verbatim from another app (image +
+// volume carried through), then ensureAppExists (dbwatcher.go)
 // writes a brand-new app.yaml stub to git in the SAME operation. When the git
 // watcher later syncs that commit, syncAppFile used to unconditionally
 // UpsertSnapshot a bare {status:"Unknown", git_sha, git_message, app_name}

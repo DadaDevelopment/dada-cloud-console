@@ -77,12 +77,10 @@ type Config struct {
 	// GITOPS_AGENT_TOKEN_SECRET in the console backend. Empty disables /ws/values.
 	ValuesTokenSecret string
 
-	// PreviewEnvTTL is how long a preview (ephemeral) environment lives before the
-	// reaper enqueues its teardown. Written to environments.expires_at on creation.
-	PreviewEnvTTL time.Duration
-
-	// PreviewReapInterval is how often the TTL reaper scans for expired preview
-	// environments and enqueues their teardown (DeletePreviewEnv).
+	// PreviewReapInterval is how often the TTL reaper scans for expired legacy
+	// preview environments and enqueues their teardown (DeletePreviewEnv).
+	// Previews are no longer a product feature, so nothing sets expires_at any
+	// more; the reaper survives only to finish off rows created before removal.
 	PreviewReapInterval time.Duration
 
 	// OrphanGC garbage-collects App snapshots that no DeleteApp op ever cleaned
@@ -108,10 +106,6 @@ func Load() (*Config, error) {
 	gitInterval, err := time.ParseDuration(getEnv("GITOPS_POLL_INTERVAL_GIT", "30s"))
 	if err != nil {
 		return nil, fmt.Errorf("GITOPS_POLL_INTERVAL_GIT: %w", err)
-	}
-	previewTTL, err := time.ParseDuration(getEnv("GITOPS_PREVIEW_ENV_TTL", "168h"))
-	if err != nil {
-		return nil, fmt.Errorf("GITOPS_PREVIEW_ENV_TTL: %w", err)
 	}
 	previewReapInterval, err := time.ParseDuration(getEnv("GITOPS_PREVIEW_REAP_INTERVAL", "10m"))
 	if err != nil {
@@ -151,7 +145,6 @@ func Load() (*Config, error) {
 		MLflowBaseURL:           getEnv("MLFLOW_BASE_URL", ""),
 		MLflowAuthHeader:        getEnv("MLFLOW_AUTH_HEADER", ""),
 		ValuesTokenSecret:       getEnv("GITOPS_VALUES_TOKEN_SECRET", ""),
-		PreviewEnvTTL:           previewTTL,
 		PreviewReapInterval:     previewReapInterval,
 		DefaultDomainTLSSecret:  getEnv("GITOPS_DEFAULT_DOMAIN_TLS_SECRET", ""),
 		DefaultDomainDNSTarget:  getEnv("GITOPS_DEFAULT_DOMAIN_DNS_TARGET", "155.212.223.198"),

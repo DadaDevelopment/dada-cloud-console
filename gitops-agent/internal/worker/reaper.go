@@ -23,7 +23,7 @@ type Reaper struct {
 }
 
 // NewReaper constructs a Reaper sharing DBWatcher's pool and config, so
-// PreviewReapInterval / PreviewEnvTTL stay a single source of truth.
+// PreviewReapInterval stays a single source of truth.
 func NewReaper(pool *pgxpool.Pool, cfg *config.Config) *Reaper {
 	return &Reaper{pool: pool, cfg: cfg}
 }
