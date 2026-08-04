@@ -446,6 +446,15 @@ type Config struct {
 	// Empty (the default) means no request may override AgentChatModel.
 	AgentChatModelAllowlist []string // AGENT_CHAT_MODEL_ALLOWLIST
 
+	// AgentChatStore picks where the chat transcript is kept: "postgres" (the
+	// default) or "langfuse". Postgres is the default because it is the only one
+	// of the two that can be read back immediately after a write -- Langfuse
+	// ingestion is asynchronous and its read API eventually consistent, so on
+	// Langfuse a conversation can briefly not include what was just said. The
+	// sessions, the memory summary and the confirmation queue stay in Postgres
+	// under either value; they are locks, not a transcript.
+	AgentChatStore string // AGENT_CHAT_STORE (default "postgres")
+
 	// Langfuse turn tracing for the console agent. An empty public or secret
 	// key means disabled: the client is a no-op and the SSE path never waits on
 	// it. Turn rows in agent_chat_turns are written either way, so the database
@@ -770,6 +779,7 @@ func Load() (*Config, error) {
 		AgentChatMemoryMaxChars:     getEnvIntAllowZero("AGENT_CHAT_MEMORY_MAX_CHARS", 1200),
 		AgentChatMemoryModel:        getEnv("AGENT_CHAT_MEMORY_MODEL", ""),
 		AgentChatModelAllowlist:     splitList(getEnv("AGENT_CHAT_MODEL_ALLOWLIST", "")),
+		AgentChatStore:              getEnv("AGENT_CHAT_STORE", "postgres"),
 		LangfuseHost:                getEnv("LANGFUSE_HOST", "https://cloud.langfuse.com"),
 		LangfusePublicKey:           getEnv("LANGFUSE_PUBLIC_KEY", ""),
 		LangfuseSecretKey:           getEnv("LANGFUSE_SECRET_KEY", ""),

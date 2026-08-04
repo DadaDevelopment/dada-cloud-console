@@ -148,6 +148,7 @@ type Handler struct {
 
 	agentChatLLM   *llmchat.Client
 	agentChatTools *agentchat.Toolset
+	chat           chatStore
 
 	agentChatIdentityKey atomic.Pointer[string]
 
@@ -179,6 +180,17 @@ func (h *Handler) clock() time.Time {
 	return time.Now().UTC()
 }
 
+// transcript is the chat store this Handler archives conversations in. A nil
+// h.chat means Postgres, so a Handler assembled by hand -- which is every
+// Handler in a test -- keeps the storage it has always had, and only an explicit
+// AGENT_CHAT_STORE moves the transcript somewhere else.
+func (h *Handler) transcript() chatStore {
+	if h.chat != nil {
+		return h.chat
+	}
+	return pgChatStore{h}
+}
+
 func (h *Handler) optionalClaims(c *gin.Context) (*auth.Claims, bool) {
 	if h.optionalAuth != nil {
 		return h.optionalAuth(c)
@@ -189,6 +201,7 @@ func (h *Handler) optionalClaims(c *gin.Context) (*auth.Claims, bool) {
 // NewHandler constructs a Handler with the given dependencies.
 func NewHandler(pool *pgxpool.Pool, cfg *config.Config) *Handler {
 	h := &Handler{pool: pool, cfg: cfg}
+	h.chat = newChatStore(h)
 	h.boxFunnelLimiter = newBoxFunnelLimiter(boxFunnelPerMin, boxFunnelGlobalPerMin)
 	h.uxIngestLimiter = newBoxFunnelLimiter(uxIngestPerMin, uxIngestGlobalPerMin)
 	if cfg.AIStudioEnabled && cfg.MLflowBaseURL != "" {

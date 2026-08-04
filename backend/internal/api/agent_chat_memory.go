@@ -162,27 +162,21 @@ func (h *Handler) agentChatEndSessions(ctx context.Context, userSub string, proj
 // model rather than hidden -- an assistant that quietly lost the middle of the
 // conversation answers confidently from a transcript it does not have.
 func (h *Handler) agentChatSessionHistory(ctx context.Context, sessionID uuid.UUID) []llmchat.Message {
-	if h.pool == nil || sessionID == uuid.Nil {
+	if sessionID == uuid.Nil {
 		return nil
 	}
-	rows, err := h.pool.Query(ctx,
-		`SELECT role, content FROM agent_chat_messages
-		 WHERE session_id = $1 AND role IN ('user', 'assistant') AND content <> ''
-		 ORDER BY created_at ASC`,
-		sessionID,
-	)
+	stored, err := h.transcript().SessionMessages(ctx, sessionID, 0)
 	if err != nil {
+		log.Printf("agent-chat: failed to read session %s, answering without its history: %v", sessionID, err)
 		return nil
 	}
-	defer rows.Close()
 
 	var out []llmchat.Message
-	for rows.Next() {
-		var role, content string
-		if err := rows.Scan(&role, &content); err != nil {
+	for _, m := range stored {
+		if m.Content == "" || (m.Role != "user" && m.Role != "assistant") {
 			continue
 		}
-		out = append(out, llmchat.Message{Role: role, Content: content})
+		out = append(out, llmchat.Message{Role: m.Role, Content: m.Content})
 	}
 	return agentChatTrimHistory(out, h.cfg.AgentChatHistoryMaxChars)
 }
@@ -308,9 +302,15 @@ func (h *Handler) agentChatFoldFinishedSessions(ctx context.Context) {
 //
 // The session is marked folded even when the transcript turns out to be empty
 // or the model refuses: an unfoldable session that stays unfolded is retried
-// every five minutes forever, and the retry costs a gateway call each time.
+// every five minutes forever, and the retry costs a gateway call each time. A
+// transcript that could not be READ is the one case that is left unfolded --
+// "the store did not answer" and "nothing was said" look identical here, and
+// treating the first as the second throws the conversation away for good.
 func (h *Handler) agentChatFoldSession(ctx context.Context, f agentChatFoldable) error {
-	transcript := h.agentChatFoldTranscript(ctx, f.sessionID)
+	transcript, err := h.agentChatFoldTranscript(ctx, f.sessionID)
+	if err != nil {
+		return err
+	}
 	if strings.TrimSpace(transcript) == "" {
 		return h.agentChatMarkFolded(ctx, f.sessionID)
 	}
@@ -414,30 +414,23 @@ func (h *Handler) agentChatMarkFolded(ctx context.Context, sessionID uuid.UUID) 
 // rows are left out: what a tool returned is a fact about the platform at that
 // moment, not a fact about the user, and platform state is exactly the thing
 // the assistant must look up live instead of remembering.
-func (h *Handler) agentChatFoldTranscript(ctx context.Context, sessionID uuid.UUID) string {
-	rows, err := h.pool.Query(ctx,
-		`SELECT role, content FROM agent_chat_messages
-		 WHERE session_id = $1 AND role IN ('user', 'assistant') AND content <> ''
-		 ORDER BY created_at ASC`,
-		sessionID,
-	)
+func (h *Handler) agentChatFoldTranscript(ctx context.Context, sessionID uuid.UUID) (string, error) {
+	stored, err := h.transcript().SessionMessages(ctx, sessionID, 0)
 	if err != nil {
-		return ""
+		return "", err
 	}
-	defer rows.Close()
 
 	var sb strings.Builder
-	for rows.Next() {
-		var role, content string
-		if err := rows.Scan(&role, &content); err != nil {
+	for _, m := range stored {
+		if m.Content == "" || (m.Role != "user" && m.Role != "assistant") {
 			continue
 		}
-		sb.WriteString(role)
+		sb.WriteString(m.Role)
 		sb.WriteString(": ")
-		sb.WriteString(content)
+		sb.WriteString(m.Content)
 		sb.WriteString("\n")
 	}
-	return agentchat.RuneSafeCut(sb.String(), agentChatFoldSourceMax)
+	return agentchat.RuneSafeCut(sb.String(), agentChatFoldSourceMax), nil
 }
 
 // agentChatFoldSystemPrompt describes what a memory is for. The negative rules

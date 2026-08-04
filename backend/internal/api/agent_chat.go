@@ -74,6 +74,9 @@ func writeSSEEvent(c *gin.Context, flusher http.Flusher, event string, data stri
 // per-turn coin flip would swap models mid-conversation and make the turn rows
 // uncomparable.
 func (h *Handler) agentChatModelFor(requested, endUser string) string {
+	if h.cfg == nil {
+		return ""
+	}
 	if m := h.agentChatAllowlistedModel(requested); m != "" {
 		return m
 	}
@@ -249,40 +252,15 @@ func truncateForTranscript(s string, max int) string {
 }
 
 func (h *Handler) agentChatDailyMessageCount(ctx context.Context, userSub string) (int64, error) {
-	var count int64
-	err := h.pool.QueryRow(ctx,
-		`SELECT COUNT(*) FROM agent_chat_messages
-		 WHERE user_sub = $1 AND role = 'user' AND created_at >= date_trunc('day', now())`,
-		userSub,
-	).Scan(&count)
-	return count, err
+	return h.transcript().DailyUserMessageCount(ctx, userSub)
 }
 
-// agentChatInsertMessage appends one transcript row. The trace id is taken from
-// the context rather than a parameter, so every message written anywhere in a
-// turn joins to that turn's agent_chat_turns row without threading an extra
-// argument through the whole call graph.
+// agentChatInsertMessage appends one transcript message. The trace and session
+// ids are taken from the context rather than from parameters, so every message
+// written anywhere in a turn joins to that turn and that conversation without
+// threading two extra arguments through the whole call graph.
 func (h *Handler) agentChatInsertMessage(ctx context.Context, userSub, orgID string, projectID, envID *uuid.UUID, role, content string, toolName *string) {
-	var orgArg, toolArg, traceArg, sessionArg any
-	if orgID != "" {
-		orgArg = orgID
-	}
-	if toolName != nil {
-		toolArg = *toolName
-	}
-	if traceID := agentchat.TraceIDFrom(ctx); traceID != "" {
-		traceArg = traceID
-	}
-	if sessionID := agentchat.SessionIDFrom(ctx); sessionID != uuid.Nil {
-		sessionArg = sessionID
-	}
-	if _, err := h.pool.Exec(ctx,
-		`INSERT INTO agent_chat_messages (user_sub, org_id, project_id, env_id, role, content, tool_name, trace_id, session_id)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
-		userSub, orgArg, projectID, envID, role, content, toolArg, traceArg, sessionArg,
-	); err != nil {
-		log.Printf("agent-chat: failed to persist %s message: %v", role, err)
-	}
+	h.transcript().AppendMessage(ctx, userSub, orgID, projectID, envID, role, content, toolName)
 }
 
 // agentChatContextClearedAt returns the most recent "clear context" timestamp
@@ -1653,32 +1631,18 @@ func (h *Handler) AgentChatGetHistory(c *gin.Context) {
 	envID := parseOptionalUUID(c.Query("envId"))
 	messages := []agentChatHistoryMessage{}
 	if sessionID := h.agentChatOpenSessionID(ctx, userSub, projectID, envID); sessionID != uuid.Nil {
-		rows, err := h.pool.Query(ctx,
-			`SELECT role, content, tool_name FROM (
-				SELECT role, content, tool_name, created_at FROM agent_chat_messages
-				WHERE session_id = $1
-				  AND role IN ('user', 'assistant', 'tool')
-				ORDER BY created_at DESC
-				LIMIT $2
-			 ) recent ORDER BY created_at ASC`,
-			sessionID, agentChatHistoryLimit,
-		)
+		stored, err := h.transcript().SessionMessages(ctx, sessionID, agentChatHistoryLimit)
 		if err != nil {
+			log.Printf("agent-chat: failed to load history for session %s: %v", sessionID, err)
 			respondError(c, http.StatusInternalServerError, "failed to load chat history")
 			return
 		}
-		defer rows.Close()
-
-		for rows.Next() {
-			var m agentChatHistoryMessage
-			var toolName *string
-			if err := rows.Scan(&m.Role, &m.Content, &toolName); err != nil {
-				continue
-			}
-			if toolName != nil {
-				m.ToolName = *toolName
-			}
-			messages = append(messages, m)
+		for _, m := range stored {
+			messages = append(messages, agentChatHistoryMessage{
+				Role:     m.Role,
+				Content:  m.Content,
+				ToolName: m.ToolName,
+			})
 		}
 	}
 
