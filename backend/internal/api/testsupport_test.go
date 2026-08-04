@@ -2,6 +2,8 @@ package api
 
 import (
 	"context"
+	"fmt"
+	"testing"
 
 	"github.com/dada-tuda/console/backend/internal/dbtest"
 	"github.com/google/uuid"
@@ -40,6 +42,31 @@ func dropSeededAudit(pool *pgxpool.Pool, kind, name string) {
 func dropSeededAuditByMeta(pool *pgxpool.Pool, key, value string) {
 	_, _ = pool.Exec(context.Background(),
 		`DELETE FROM audit_events WHERE metadata->>$1 = $2`, key, value)
+}
+
+// agentChatUser mints the throwaway user_sub an agent-chat test writes under
+// and removes every row that test left behind.
+//
+// The agent-chat tables key on user_sub, which is a bare TEXT column with no
+// foreign key behind it, so the FK walk in dbtest cannot reach them: without
+// this the transcript, the turn trace and the confirmation cards of every run
+// stay in the shared cloud-console database and surface as somebody's chat
+// history.
+func agentChatUser(t *testing.T, pool *pgxpool.Pool) string {
+	t.Helper()
+	sub := uuid.NewString()
+	t.Cleanup(func() {
+		for _, table := range []string{
+			"agent_chat_pending_actions",
+			"agent_chat_messages",
+			"agent_chat_turns",
+			"agent_chat_context_resets",
+		} {
+			_, _ = pool.Exec(context.Background(),
+				fmt.Sprintf(`DELETE FROM %s WHERE user_sub = $1`, table), sub)
+		}
+	})
+	return sub
 }
 
 // dropSeededProjectsByName is dropSeededProject for tests that never learn the

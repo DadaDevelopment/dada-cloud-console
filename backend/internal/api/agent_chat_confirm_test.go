@@ -200,7 +200,7 @@ func parseSSEEvents(t *testing.T, body string) map[string][]string {
 
 func TestAgentChatConfirm_Approve_ExecutesToolAndResumes(t *testing.T) {
 	pool := testAgentChatPool(t)
-	userSub := uuid.New().String()
+	userSub := agentChatUser(t, pool)
 
 	var seenAuth string
 	backend := newFakeAgentBackend(t, &seenAuth)
@@ -254,7 +254,7 @@ func TestAgentChatConfirm_Approve_ExecutesToolAndResumes(t *testing.T) {
 
 func TestAgentChatConfirm_Reject_LeavesStateUntouched(t *testing.T) {
 	pool := testAgentChatPool(t)
-	userSub := uuid.New().String()
+	userSub := agentChatUser(t, pool)
 
 	var seenAuth string
 	backend := newFakeAgentBackend(t, &seenAuth)
@@ -293,7 +293,7 @@ func TestAgentChatConfirm_Reject_LeavesStateUntouched(t *testing.T) {
 
 func TestAgentChatConfirm_Expired_NoExecution(t *testing.T) {
 	pool := testAgentChatPool(t)
-	userSub := uuid.New().String()
+	userSub := agentChatUser(t, pool)
 
 	var seenAuth string
 	backend := newFakeAgentBackend(t, &seenAuth)
@@ -329,8 +329,8 @@ func TestAgentChatConfirm_Expired_NoExecution(t *testing.T) {
 
 func TestAgentChatConfirm_WrongUser_Forbidden(t *testing.T) {
 	pool := testAgentChatPool(t)
-	ownerSub := uuid.New().String()
-	attackerSub := uuid.New().String()
+	ownerSub := agentChatUser(t, pool)
+	attackerSub := agentChatUser(t, pool)
 
 	var seenAuth string
 	backend := newFakeAgentBackend(t, &seenAuth)
@@ -362,7 +362,7 @@ func TestAgentChatConfirm_WrongUser_Forbidden(t *testing.T) {
 
 func TestAgentChatConfirm_DoubleConfirm_SecondGetsConflict(t *testing.T) {
 	pool := testAgentChatPool(t)
-	userSub := uuid.New().String()
+	userSub := agentChatUser(t, pool)
 
 	var restartCount int
 	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -407,7 +407,7 @@ func TestAgentChatConfirm_DoubleConfirm_SecondGetsConflict(t *testing.T) {
 // gateway is scripted with zero turns, so any LLM call fails the test.
 func TestAgentChatConfirm_QueuedWrite_ShowsNextCardWithoutCallingTheModel(t *testing.T) {
 	pool := testAgentChatPool(t)
-	userSub := uuid.New().String()
+	userSub := agentChatUser(t, pool)
 
 	var seenAuth string
 	backend := newFakeAgentBackend(t, &seenAuth)
