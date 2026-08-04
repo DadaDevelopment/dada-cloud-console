@@ -7,6 +7,7 @@ import (
 
 	"github.com/dada-tuda/console/backend/internal/billing/pricing"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // TestDedupeSortedCollapsesRuns pins the plan label of a client whose projects
@@ -15,6 +16,88 @@ func TestDedupeSortedCollapsesRuns(t *testing.T) {
 	got := dedupeSorted([]string{"free", "free", "free", "startup"})
 	if len(got) != 2 || got[0] != "free" || got[1] != "startup" {
 		t.Fatalf("dedupeSorted: want [free startup], got %v", got)
+	}
+}
+
+// setProjectOwner gives a seeded project an owner and returns that owner id in
+// the form the cost tree uses as ClientID, so a test client can be matched to
+// the org money by the same rule production uses.
+func setProjectOwner(t *testing.T, pool *pgxpool.Pool, projectID uuid.UUID) string {
+	t.Helper()
+	owner := uuid.New()
+	if _, err := pool.Exec(context.Background(),
+		`UPDATE projects SET owner_id = $1 WHERE id = $2`, owner, projectID,
+	); err != nil {
+		t.Fatalf("set project owner: %v", err)
+	}
+	return owner.String()
+}
+
+// TestAttachClientMoneyCreditsOneClientPerOrg guards the number that made the
+// column worth shipping. An org is not a client: the only real payment the
+// platform ever settled belongs to an org with nine projects and two owners, so
+// crediting every owner turned 990 RUB into 1980 RUB of "collected". The org's
+// money must land on exactly one client, and the totals must equal the money
+// that actually settled.
+func TestAttachClientMoneyCreditsOneClientPerOrg(t *testing.T) {
+	pool := appUsagePool(t)
+	founderProject, _, orgID, _, _ := seedAppUsageEnv(t, pool)
+	ctx := context.Background()
+
+	var joinerProject uuid.UUID
+	if err := pool.QueryRow(ctx,
+		`INSERT INTO projects (name, display_name, org_id, owner_id)
+		 VALUES ($1, $1, $2, $3) RETURNING id`,
+		"appusage-joiner-"+uuid.NewString()[:8], orgID, uuid.New(),
+	).Scan(&joinerProject); err != nil {
+		t.Fatalf("seed second project in the same org: %v", err)
+	}
+	t.Cleanup(func() { dropSeededProject(pool, joinerProject) })
+
+	h := &Handler{pool: pool, billingPlans: []pricing.Plan{{Key: "startup", PriceRUB: 990}}}
+	if _, err := pool.Exec(ctx,
+		`INSERT INTO billing_accounts (org_id, plan) VALUES ($1, 'startup')
+		 ON CONFLICT (org_id) DO UPDATE SET plan = EXCLUDED.plan`, orgID,
+	); err != nil {
+		t.Fatalf("seed billing account: %v", err)
+	}
+	if _, err := pool.Exec(ctx,
+		`INSERT INTO payments (id, org_id, plan, amount_value, status, created_by_sub, paid_at)
+		 VALUES ($1, $2, 'startup', 990, 'succeeded', 'test', now())`,
+		uuid.New(), orgID,
+	); err != nil {
+		t.Fatalf("seed payment: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM billing_accounts WHERE org_id = $1`, orgID)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM payments WHERE org_id = $1`, orgID)
+	})
+
+	founder := setProjectOwner(t, pool, founderProject)
+	var joiner string
+	if err := pool.QueryRow(ctx,
+		`SELECT owner_id::text FROM projects WHERE id = $1`, joinerProject,
+	).Scan(&joiner); err != nil {
+		t.Fatalf("read joiner owner: %v", err)
+	}
+
+	clients := []*adminCostClient{
+		{ClientID: founder, Projects: []adminCostProject{{ProjectID: founderProject.String()}}},
+		{ClientID: joiner, Projects: []adminCostProject{{ProjectID: joinerProject.String()}}},
+	}
+	totals := h.attachClientMoney(ctx, clients, 30)
+
+	if clients[0].PaidRUB != 990 {
+		t.Fatalf("org founder must carry the org payment: want 990, got %v", clients[0].PaidRUB)
+	}
+	if clients[1].PaidRUB != 0 {
+		t.Fatalf("co-owner must not be credited the same payment: want 0, got %v", clients[1].PaidRUB)
+	}
+	if clients[1].PlanPriceRUB != 0 {
+		t.Fatalf("co-owner must not be charged the same subscription: want 0, got %v", clients[1].PlanPriceRUB)
+	}
+	if totals.PaidRUB != 990 {
+		t.Fatalf("totals must count the org payment once: want 990, got %v", totals.PaidRUB)
 	}
 }
 
@@ -68,8 +151,9 @@ func TestAttachClientMoneyCountsOnlySettledPayments(t *testing.T) {
 		t.Fatal("seed volume ledger row failed")
 	}
 
+	owner := setProjectOwner(t, pool, projectID)
 	client := &adminCostClient{
-		ClientID:   "owner-" + uuid.NewString()[:8],
+		ClientID:   owner,
 		ClientName: "owner",
 		Projects:   []adminCostProject{{ProjectID: projectID.String(), ProjectName: "p"}},
 	}
@@ -122,7 +206,7 @@ func TestAttachClientMoneyScalesPlanPriceToWindow(t *testing.T) {
 	})
 
 	client := &adminCostClient{
-		ClientID: "owner-" + uuid.NewString()[:8],
+		ClientID: setProjectOwner(t, pool, projectID),
 		Projects: []adminCostProject{{ProjectID: projectID.String()}},
 	}
 	h.attachClientMoney(ctx, []*adminCostClient{client}, 7)

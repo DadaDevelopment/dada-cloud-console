@@ -50,7 +50,7 @@ func (h *Handler) attachClientMoney(ctx context.Context, clients []*adminCostCli
 	var totals adminMoneyTotals
 	from := h.nowUTC().AddDate(0, 0, -days)
 
-	orgOf, err := h.adminProjectOrgs(ctx)
+	orgOf, orgPayer, err := h.adminProjectOrgs(ctx)
 	if err != nil {
 		log.Warn().Err(err).Msg("admin costs: collected-money columns skipped, project->org lookup failed")
 		return totals
@@ -96,6 +96,9 @@ func (h *Handler) attachClientMoney(ctx context.Context, clients []*adminCostCli
 				key = adminPlanFree
 			}
 			planKeys = append(planKeys, key)
+			if orgPayer[org] != cl.ClientID {
+				continue
+			}
 			subscription += planPrice[key] * windowScale
 			collected += paid[org]
 		}
@@ -135,28 +138,52 @@ func dedupeSorted(in []string) []string {
 	return out
 }
 
-// adminProjectOrgs maps every project to the org that owns it. Projects with no
-// org (pre-migration-021 leftovers) are skipped: they cannot be joined to a
-// billing account, and inventing one would attribute someone else's payment.
-func (h *Handler) adminProjectOrgs(ctx context.Context) (map[string]string, error) {
-	rows, err := h.pool.Query(ctx,
-		`SELECT id::text, COALESCE(org_id, '') FROM projects`)
+// adminProjectOrgs maps every project to the org that owns it, and every org to
+// the ONE client its subscription and payments are credited to.
+//
+// The second map is not a convenience, it is a correctness gate. An org is not
+// a client: org `dada` holds nine projects across two owners, so crediting
+// every project owner with their org's payments made one 990 RUB payment show
+// up as 1980 RUB collected. Money is a scalar owned by the org, and it has to
+// land on exactly one row.
+//
+// The org's payer is the owner of its OLDEST project -- whoever stood the org
+// up. It is deterministic and explicable, and deliberately not an economic
+// split: apportioning one payment across co-owners by consumption would invent
+// a number the payment system never produced. Co-owners still show their own
+// consumption, so an org whose bill is carried by one member reads as one payer
+// plus freeloaders, which is what it is.
+//
+// Projects with no org (pre-migration-021 leftovers) and projects with no owner
+// (platform, internal, seed) are skipped: neither can be joined to a billing
+// account, and inventing one would attribute someone else's payment.
+func (h *Handler) adminProjectOrgs(ctx context.Context) (projectOrg, orgPayer map[string]string, err error) {
+	rows, err := h.pool.Query(ctx, `
+		SELECT id::text, COALESCE(org_id, ''), COALESCE(owner_id::text, '')
+		FROM projects
+		ORDER BY created_at, id`)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	defer rows.Close()
-	out := map[string]string{}
+	projectOrg, orgPayer = map[string]string{}, map[string]string{}
 	for rows.Next() {
-		var id, org string
-		if err := rows.Scan(&id, &org); err != nil {
-			return nil, err
+		var id, org, owner string
+		if err := rows.Scan(&id, &org, &owner); err != nil {
+			return nil, nil, err
 		}
 		if org == "" {
 			continue
 		}
-		out[id] = org
+		projectOrg[id] = org
+		if owner == "" {
+			continue
+		}
+		if _, taken := orgPayer[org]; !taken {
+			orgPayer[org] = owner
+		}
 	}
-	return out, rows.Err()
+	return projectOrg, orgPayer, rows.Err()
 }
 
 // adminOrgPlans returns each org's assigned plan key. An org missing from the
