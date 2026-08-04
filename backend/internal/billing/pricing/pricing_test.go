@@ -245,3 +245,39 @@ func TestQuota(t *testing.T) {
 		})
 	}
 }
+
+// TestIncludedConsumptionRubGivesFreeARealAllowance pins the one number the
+// overage alert stands on. The free plan's price is zero, so measuring against
+// the price alone would put every free account over its limit the moment it
+// deployed anything, and the alert would be pure noise. Paid plans must stay
+// measured against the money the customer actually paid.
+func TestIncludedConsumptionRubGivesFreeARealAllowance(t *testing.T) {
+	plans, err := billing.LoadPlans("")
+	if err != nil {
+		t.Fatalf("LoadPlans: %v", err)
+	}
+	u := realUnitCost(t)
+	byKey := map[string]pricing.Plan{}
+	for _, p := range plans {
+		byKey[p.Key] = p
+	}
+
+	free := pricing.IncludedConsumptionRub(byKey["free"], u)
+	if free <= 0 {
+		t.Fatalf("free allowance = %v; a zero allowance alerts on every free account forever", free)
+	}
+	if want := pricing.PriceFloor(byKey["free"], u); free != want {
+		t.Errorf("free allowance = %v, want its price floor %v", free, want)
+	}
+
+	for _, key := range []string{"startup", "business"} {
+		got := pricing.IncludedConsumptionRub(byKey[key], u)
+		if got != byKey[key].PriceRUB {
+			t.Errorf("%s allowance = %v, want the published price %v", key, got, byKey[key].PriceRUB)
+		}
+	}
+
+	if got := pricing.IncludedConsumptionRub(byKey["enterprise"], u); got != 0 {
+		t.Errorf("enterprise allowance = %v, want 0 so callers skip a plan whose limit is contractual", got)
+	}
+}

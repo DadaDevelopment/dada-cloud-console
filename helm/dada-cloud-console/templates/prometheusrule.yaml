@@ -67,6 +67,32 @@ spec:
             description: >-
               The console /metrics collector is failing its state queries; the resource-health
               alerts above may be blind. Check the backend logs.
+    - name: dada-cloud-console.money
+      rules:
+        - alert: DadaOrgOverConsumingPlan
+          expr: |-
+            max by (org, plan) (dada_org_usage_month_rub)
+            > on (org, plan)
+            max by (org, plan) (dada_org_usage_allowance_rub) * {{ .Values.metrics.alerts.orgOverageFactor }}
+          for: 30m
+          # Consumption only ever climbs within a month, so this cannot flap
+          # inside one -- but it drops to zero for everyone on the 1st. The hold
+          # is short on purpose: an alert about last month's money must not
+          # survive into a month the customer has already been billed for.
+          keep_firing_for: 1h
+          labels:
+            severity: warning
+          annotations:
+            summary: "Org {{`{{ $labels.org }}`}} consuming past its {{`{{ $labels.plan }}`}} plan"
+            description: >-
+              Org {{`{{ $labels.org }}`}} has burned {{`{{ $value | printf "%.0f" }}`}} RUB of
+              list-price consumption this calendar month, over
+              {{ .Values.metrics.alerts.orgOverageFactor }}x what the
+              {{`{{ $labels.plan }}`}} plan includes. On the free plan the included figure is the
+              footprint the tier was budgeted to cost, so this is an account being carried by the
+              platform rather than a customer to invoice — decide deliberately whether to keep
+              carrying it. The per-hour evidence is in app_usage; the same numbers per client are
+              on /admin/costs.
     - name: dada-cloud-console.box
       rules:
         # Dada Box. Time to ready is the product claim marketing cannot

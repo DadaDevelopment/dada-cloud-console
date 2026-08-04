@@ -13,10 +13,13 @@ import (
 
 	"github.com/dada-tuda/console/backend/internal/api"
 	"github.com/dada-tuda/console/backend/internal/billing"
+	"github.com/dada-tuda/console/backend/internal/billing/costengine"
+	"github.com/dada-tuda/console/backend/internal/billing/pricing"
 	"github.com/dada-tuda/console/backend/internal/config"
 	"github.com/dada-tuda/console/backend/internal/db"
 	"github.com/dada-tuda/console/backend/internal/metrics"
 	"github.com/dada-tuda/console/backend/internal/notify"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/joho/godotenv"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
@@ -138,6 +141,8 @@ func main() {
 		if planErr != nil {
 			log.Fatal().Err(planErr).Msg("billing: failed to load plans (BILLING_ENABLED=true)")
 		}
+		startOverageCollector(metricsCtx, pool, billingPlans)
+
 		meterInterval := time.Duration(cfg.BillingMeterIntervalSec) * time.Second
 		meterCtx, meterCancel := context.WithCancel(context.Background())
 		defer meterCancel()
@@ -252,6 +257,36 @@ func main() {
 	if err := srv.Shutdown(ctx); err != nil {
 		log.Error().Err(err).Msg("server forced to shutdown")
 	}
+}
+
+// startOverageCollector publishes the per-org "consumed vs included" gauges the
+// overage alert compares.
+//
+// The allowance is derived here rather than in the metrics package because it
+// needs both halves of the pricing input: plans.yaml for the published price
+// and cluster-cost.yaml for the unit cost behind the free tier's floor. A
+// cluster-cost file this process cannot read is not fatal and not silent: the
+// console keeps running and the collector simply does not start, which is
+// reported as the blind spot it is. Alerting on a fabricated allowance would be
+// worse than not alerting.
+func startOverageCollector(ctx context.Context, pool *pgxpool.Pool, plans []pricing.Plan) {
+	clusterCost, err := billing.LoadClusterCost("")
+	if err != nil {
+		log.Error().Err(err).Msg("org overage collector NOT started: cluster cost config unreadable; over-consuming accounts will not alert")
+		return
+	}
+	unit, err := costengine.ComputeUnitCost(clusterCost)
+	if err != nil {
+		log.Error().Err(err).Msg("org overage collector NOT started: unit cost not derivable; over-consuming accounts will not alert")
+		return
+	}
+	allowance := map[string]float64{}
+	for _, p := range plans {
+		if included := pricing.IncludedConsumptionRub(p, unit); included > 0 {
+			allowance[p.Key] = included
+		}
+	}
+	metrics.StartOverageCollector(ctx, pool, 5*time.Minute, allowance)
 }
 
 // resolveMigrationsDir returns the path to the migrations directory.

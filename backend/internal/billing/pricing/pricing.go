@@ -63,6 +63,31 @@ func PriceFloor(p Plan, u costengine.UnitCost) float64 {
 	return costengine.PlanCost(p.InternalFootprint, u) * markupDefault
 }
 
+// IncludedConsumptionRub is how much list-price consumption one calendar month
+// of a plan buys before the account is over-consuming what it pays for.
+//
+// It is max(published price, price floor) rather than the published price
+// alone, because the free plan's price is zero and a zero allowance would
+// declare every free account in overage the moment it deploys anything. The
+// floor is the plan's own internal footprint priced at the real cluster unit
+// cost with the standard markup -- that IS what a free account was budgeted to
+// consume, so the free tier gets a real allowance without anyone inventing a
+// number for it. For paid plans the published price is always the higher of the
+// two (the margin guard enforces exactly that), so they are measured against
+// the money the customer actually handed over.
+//
+// Zero means "no allowance is defined": enterprise carries a negotiated
+// contract with zero quotas and zero footprint here, and a per-contract
+// allowance cannot be derived from plans.yaml. Callers must skip those rather
+// than treat zero as a limit, or every enterprise account alerts forever.
+func IncludedConsumptionRub(p Plan, u costengine.UnitCost) float64 {
+	floor := PriceFloor(p, u)
+	if p.PriceRUB > floor {
+		return p.PriceRUB
+	}
+	return floor
+}
+
 // RecommendPlan returns the cheapest plan whose quotas all satisfy the need.
 // Enterprise is the catch-all when no other plan fits. The reason string
 // lists the driving constraint(s).

@@ -486,3 +486,9 @@ metrics:
     boxReadyP95Seconds: 8
     # Fire BoxMeterStale once the newest metered box-minute is this old.
     boxMeterStaleSeconds: 3600
+    # How far over its included consumption an org must go before
+    # DadaOrgOverConsumingPlan fires. 1.5 = burning half again as much as the
+    # plan buys. Not 1.0: the allowance for the free tier is a budgeted
+    # footprint, not a contract, and a free account a few roubles over it is
+    # normal rather than actionable.
+    orgOverageFactor: 1.5
