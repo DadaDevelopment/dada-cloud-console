@@ -177,11 +177,22 @@ const maxLoadedTools = 16
 
 const maxToolResultChars = 24000
 
+// OpenPageTool moves the console the user is looking at to another page. The
+// product runs the whole application, so an answer that ends in "go to
+// /projects/{id}/git" is a step the user has to perform by hand for no reason:
+// the assistant can put them on that page and then talk about what they see.
+//
+// It is deliberately not a write tool. Nothing on the platform changes, the
+// destination is checked against the real route table before anything is sent,
+// and the client refuses a path it cannot render -- so the worst outcome is a
+// page the user did not want, one browser Back away.
+const OpenPageTool = "open_console_page"
+
 // IsMetaTool reports whether a tool name is a client-side meta-tool that does
 // not touch the backend. The loop must not charge those against the per-turn
 // tool-call budget, otherwise reaching for a tool costs the user an answer.
 func IsMetaTool(name string) bool {
-	return name == LoadToolTool
+	return name == LoadToolTool || name == OpenPageTool
 }
 
 var loadToolDef = llmchat.ToolDef{
@@ -199,6 +210,24 @@ var loadToolDef = llmchat.ToolDef{
 				},
 			},
 			"required": []string{"names"},
+		},
+	},
+}
+
+var openPageDef = llmchat.ToolDef{
+	Type: "function",
+	Function: llmchat.ToolFunctionDef{
+		Name:        OpenPageTool,
+		Description: "Open a console page for the user right now: their current tab moves to that page as you answer. Call this instead of asking the user to navigate somewhere themselves, whenever the page is where the rest of your answer happens. Pass a path from the console page list with the placeholders filled in with real ids, for example /projects/<projectId>/git/import. Only ever move a user somewhere they asked to go or somewhere your answer sends them, once per turn, and say in one short sentence what they are now looking at.",
+		Parameters: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"path": map[string]any{
+					"type":        "string",
+					"description": "Console path to open, starting with /, no scheme and no host. Every placeholder must already be replaced with a real id.",
+				},
+			},
+			"required": []string{"path"},
 		},
 	},
 }
@@ -361,6 +390,18 @@ type ToolView struct {
 	Mode        Mode
 	loaded      map[string]bool
 	loadedOrder []string
+	navigate    func(path string) bool
+	navigated   bool
+}
+
+// SetNavigator hands the view the client's own navigation, used by
+// OpenPageTool. The callback owns both halves of the decision: it reports
+// whether the path is a page the console really serves, and it is what actually
+// moves the user. A view without one still advertises the tool and answers the
+// model that this client cannot move it, which is the honest result for a
+// caller that has no live stream to the browser.
+func (v *ToolView) SetNavigator(fn func(path string) bool) {
+	v.navigate = fn
 }
 
 // NewView opens a per-turn view with write dispatch allowed, in the given mode.
@@ -405,7 +446,7 @@ func (v *ToolView) Defs() []llmchat.ToolDef {
 			out = append(out, def)
 		}
 	}
-	out = append(out, loadToolDef)
+	out = append(out, loadToolDef, openPageDef)
 	return out
 }
 
@@ -439,7 +480,7 @@ func (v *ToolView) LoadedNames() []string {
 }
 
 func (v *ToolView) Has(name string) bool {
-	return v.ts.Has(name) || name == LoadToolTool
+	return v.ts.Has(name) || name == LoadToolTool || name == OpenPageTool
 }
 
 func (v *ToolView) IsWrite(name string) bool {
@@ -458,7 +499,42 @@ func (v *ToolView) Execute(ctx context.Context, bearer, name, argsJSON string) (
 	if name == LoadToolTool {
 		return v.loadTools(argsJSON)
 	}
+	if name == OpenPageTool {
+		return v.openPage(argsJSON)
+	}
 	return v.dispatch(ctx, bearer, name, argsJSON)
+}
+
+// openPage moves the user's console to path.
+//
+// One move per turn: a model that keeps calling this would drag the page around
+// under the user's hands while they are still reading the previous answer, and
+// the second destination is never the one they asked for. The refusal names the
+// page they are already on so the model can fall back to writing the path out.
+func (v *ToolView) openPage(argsJSON string) (string, bool) {
+	var args struct {
+		Path string `json:"path"`
+	}
+	if strings.TrimSpace(argsJSON) != "" {
+		if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
+			return fmt.Sprintf("%s arguments are not valid JSON: %v", OpenPageTool, err), true
+		}
+	}
+	path := strings.TrimSpace(args.Path)
+	if path == "" {
+		return fmt.Sprintf("%s requires a path, for example /projects/<projectId>/apps", OpenPageTool), true
+	}
+	if v.navigate == nil {
+		return "this client cannot open pages for the user; write the path out in your answer instead", true
+	}
+	if v.navigated {
+		return "the user was already moved to another page this turn; leave them there and write any further path out in your answer instead", true
+	}
+	if !v.navigate(path) {
+		return fmt.Sprintf("%q is not a page this console serves, so the user was not moved. Use a path from the console page list with every placeholder replaced by a real id.", path), true
+	}
+	v.navigated = true
+	return fmt.Sprintf("The user's console is now showing %s. Say in one short sentence what they are looking at; do not ask them to navigate there.", path), false
 }
 
 func (v *ToolView) dispatch(ctx context.Context, bearer, name, argsJSON string) (string, bool) {

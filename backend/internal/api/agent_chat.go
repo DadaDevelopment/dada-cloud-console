@@ -848,6 +848,59 @@ var agentChatConsoleRoutes = []string{
 	"/projects/{projectId}/storage/{name}",
 }
 
+// agentChatNavigator emits the navigate SSE event that moves the caller's own
+// browser tab, and reports back whether the move happened. A path that is not a
+// real console route is refused here rather than sent, so the model learns it
+// guessed and can correct itself inside the same turn.
+func (h *Handler) agentChatNavigator(c *gin.Context, flusher http.Flusher) func(string) bool {
+	return func(path string) bool {
+		if !agentChatConsolePathIsRoute(path) {
+			return false
+		}
+		writeSSEEvent(c, flusher, "navigate", fmt.Sprintf(`{"path":%q}`, path))
+		return true
+	}
+}
+
+// agentChatConsolePathIsRoute reports whether path is a page the console really
+// serves, matching it against agentChatConsoleRoutes with `{name}` standing for
+// any one segment. Query and hash are ignored: they address something on a page
+// that already exists.
+//
+// It is the gate in front of open_console_page. The model fills the placeholders
+// in itself, so without this check an invented path would move the user to a 404
+// -- worse than the dead link this replaces, because nobody chose to click it.
+func agentChatConsolePathIsRoute(path string) bool {
+	if path == "" || !strings.HasPrefix(path, "/") || strings.HasPrefix(path, "//") {
+		return false
+	}
+	if i := strings.IndexAny(path, "?#"); i >= 0 {
+		path = path[:i]
+	}
+	got := strings.Split(strings.Trim(path, "/"), "/")
+	for _, route := range agentChatConsoleRoutes {
+		want := strings.Split(strings.Trim(route, "/"), "/")
+		if len(want) != len(got) {
+			continue
+		}
+		ok := true
+		for i, seg := range want {
+			if strings.HasPrefix(seg, "{") && strings.HasSuffix(seg, "}") {
+				ok = got[i] != ""
+			} else {
+				ok = seg == got[i]
+			}
+			if !ok {
+				break
+			}
+		}
+		if ok {
+			return true
+		}
+	}
+	return false
+}
+
 // agentChatModeLine tells the model how much of what it proposes will actually
 // stop for a confirmation card. The mode is a per-turn choice of the user's, so
 // like the page context it rides on the user message and never touches the
@@ -969,7 +1022,8 @@ func buildAgentChatSystemPrompt(catalog []string) string {
 	sb.WriteString(strings.Join(agentChatConsoleRoutes, ", "))
 	sb.WriteString(".\n")
 	sb.WriteString("Application logs are NOT a page of their own: link the app page anchor /projects/{projectId}/apps/{appName}#logs, or /projects/{projectId}/monitoring/{appId} for the full view. There is no top-level billing page -- project billing lives at /projects/{projectId}/billing. The panel turns such paths into clickable links automatically.\n")
-	sb.WriteString("A console link is a path and nothing else: it starts with / and carries no scheme and no host. You do not know which domain the user is on, so any absolute URL you write for the console is a hostname you made up -- it renders as a link that leaves the console and lands nowhere. Write the path exactly as it appears in the list above, with nothing in front of the leading slash.\n\n")
+	sb.WriteString("A console link is a path and nothing else: it starts with / and carries no scheme and no host. You do not know which domain the user is on, so any absolute URL you write for the console is a hostname you made up -- it renders as a link that leaves the console and lands nowhere. Write the path exactly as it appears in the list above, with nothing in front of the leading slash.\n")
+	sb.WriteString("You are inside the console and can move it yourself: when the next thing the user has to do happens on a page, call " + agentchat.OpenPageTool + " with that path and their tab goes there while you answer, instead of \"go to <path>\" that they have to click. Use it once per turn, for the one page your answer is about, and then describe what they are now looking at. Keep writing the path in the text as well when you are only mentioning a page, not sending them to it.\n\n")
 
 	sb.WriteString("# SECRETS\n")
 	sb.WriteString("Never ask the user for a GitHub token, private key, SSH key or password in chat, and never fill the token argument of connectGitRepo -- repository access comes from the installed GitHub App; if there is no installation, call getGitInstallUrl or send the user to /projects/{projectId}/git/import. Never print, echo or repeat a secret value returned by any tool. ")
@@ -989,7 +1043,7 @@ func buildAgentChatSystemPrompt(catalog []string) string {
 
 // @ID          agentChat
 // @Summary     Stream a chat turn with the console agent
-// @Description Streams Server-Sent Events for a single chat turn. Runs a server-side ReAct loop against the ADR-015 LLM gateway, grounding answers with a curated subset of the console's own API (read tools plus confirmation-gated write tools and create_support_ticket) executed under the caller's own bearer. The tools block starts as the navigation tools plus load_tool; the rest of the catalog is listed by name in the system prompt and becomes a real, natively callable tool definition once the model loads it with load_tool. Emits token events (assistant text deltas), tool_call events (tool name only), a confirm_request event when a write tool needs the user's approval, an error event on a friendly failure (gateway not configured, daily cap reached, upstream error), an optional trace event with this turn's own metrics when the request sets "trace": true, and a final done event. Sending the literal message "__slowtest__" instead streams a 75s heartbeat run to prove the endpoint survives the ingress proxy-read-timeout.
+// @Description Streams Server-Sent Events for a single chat turn. Runs a server-side ReAct loop against the ADR-015 LLM gateway, grounding answers with a curated subset of the console's own API (read tools plus confirmation-gated write tools and create_support_ticket) executed under the caller's own bearer. The tools block starts as the navigation tools plus load_tool; the rest of the catalog is listed by name in the system prompt and becomes a real, natively callable tool definition once the model loads it with load_tool. Emits token events (assistant text deltas), tool_call events (tool name only), a confirm_request event when a write tool needs the user's approval, a navigate event when the assistant opens a console page for the user (the panel routes the current tab there; the path is checked against the console's real route table before it is sent), an error event on a friendly failure (gateway not configured, daily cap reached, upstream error), an optional trace event with this turn's own metrics when the request sets "trace": true, and a final done event. Sending the literal message "__slowtest__" instead streams a 75s heartbeat run to prove the endpoint survives the ingress proxy-read-timeout.
 // @Tags        agent
 // @Accept      json
 // @Produce     text/event-stream
@@ -1104,6 +1158,7 @@ func (h *Handler) AgentChat(c *gin.Context) {
 	}
 
 	view := h.agentChatTools.NewView(agentchat.ParseMode(req.Mode))
+	view.SetNavigator(h.agentChatNavigator(c, flusher))
 	turnCtx := agentchat.TurnContext{ProjectID: req.ProjectID, EnvID: req.EnvID, AppName: req.AppName}
 	systemPrompt := agentChatSystemPrompt(view.CatalogNames())
 
@@ -1449,6 +1504,7 @@ func (h *Handler) AgentChatConfirm(c *gin.Context) {
 
 	mode := agentchat.ParseMode(row.mode)
 	view := h.agentChatTools.NewView(mode)
+	view.SetNavigator(h.agentChatNavigator(c, flusher))
 
 	if decision == "approve" {
 		started := time.Now()

@@ -140,14 +140,14 @@ func TestView_StartsSmallAndGrowsOnlyByLoading(t *testing.T) {
 	ts := loadTestToolset(t)
 	view := ts.NewView(ModeManual)
 	before := view.Defs()
-	if len(before) != len(baseTools)+1 {
-		t.Fatalf("view exposes %d tools, want %d base tools plus load_tool", len(before), len(baseTools)+1)
+	if len(before) != len(baseTools)+2 {
+		t.Fatalf("view exposes %d tools, want %d base tools plus load_tool and %s", len(before), len(baseTools)+2, OpenPageTool)
 	}
 	got := map[string]bool{}
 	for _, d := range before {
 		got[d.Function.Name] = true
 	}
-	for _, name := range append(append([]string{}, baseTools...), LoadToolTool) {
+	for _, name := range append(append([]string{}, baseTools...), LoadToolTool, OpenPageTool) {
 		if !got[name] {
 			t.Errorf("view is missing %q", name)
 		}
@@ -163,14 +163,14 @@ func TestView_StartsSmallAndGrowsOnlyByLoading(t *testing.T) {
 	if len(after) != len(before)+1 {
 		t.Fatalf("tools after load_tool = %d, want %d: a loaded tool must become a real definition the model can call natively", len(after), len(before)+1)
 	}
-	loaded := after[len(after)-2]
+	loaded := after[len(after)-3]
 	if loaded.Function.Name != "listDatabaseBackups" {
 		t.Fatalf("loaded definition is %q, want listDatabaseBackups", loaded.Function.Name)
 	}
 	if len(loaded.Function.Parameters) == 0 {
 		t.Fatal("the loaded definition carries no schema; the model would be guessing arguments again")
 	}
-	if after[len(after)-1].Function.Name != LoadToolTool {
+	if after[len(after)-2].Function.Name != LoadToolTool {
 		t.Fatal("load_tool must stay available so the model can reach for more")
 	}
 
@@ -328,5 +328,93 @@ func TestCatalogNames_CoversCapabilitiesAndExcludesTheBaseSet(t *testing.T) {
 		if listed[name] {
 			t.Errorf("deny-listed tool %q is listed in the catalog", name)
 		}
+	}
+}
+
+// TestOpenPage_MovesTheUserOncePerTurn covers the reason the tool exists: an
+// answer that ends in "go to /projects/{id}/git" leaves the last step to the
+// user for no reason, since the console is the product's own UI. The tool must
+// move them, refuse a page that does not exist rather than parking them on a
+// 404, and refuse a second move so the page does not shift under them while
+// they read.
+func TestOpenPage_MovesTheUserOncePerTurn(t *testing.T) {
+	view := loadTestToolsetAt(t, "http://127.0.0.1:1").NewView(ModeManual)
+	var moved []string
+	view.SetNavigator(func(path string) bool {
+		if path != "/projects/p1/git/import" {
+			return false
+		}
+		moved = append(moved, path)
+		return true
+	})
+
+	out, isErr := view.Execute(context.Background(), "", OpenPageTool, `{"path":"/projects/p1/git/import"}`)
+	if isErr {
+		t.Fatalf("opening a real console page must succeed, got: %s", out)
+	}
+	if len(moved) != 1 {
+		t.Fatalf("navigator was called %d times, want exactly once", len(moved))
+	}
+	if !strings.Contains(out, "/projects/p1/git/import") {
+		t.Errorf("the result must tell the model where the user now is, got: %s", out)
+	}
+
+	out, isErr = view.Execute(context.Background(), "", OpenPageTool, `{"path":"/projects/p1/apps"}`)
+	if !isErr {
+		t.Fatalf("a second move in one turn must be refused, got: %s", out)
+	}
+	if len(moved) != 1 {
+		t.Fatalf("navigator was called %d times; the second call must not reach the browser", len(moved))
+	}
+}
+
+func TestOpenPage_RefusesPathsThatGoNowhere(t *testing.T) {
+	cases := []struct {
+		name string
+		args string
+	}{
+		{"empty path", `{"path":""}`},
+		{"no path at all", `{}`},
+		{"unknown route", `{"path":"/projects/p1/logs"}`},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			view := loadTestToolsetAt(t, "http://127.0.0.1:1").NewView(ModeManual)
+			called := false
+			view.SetNavigator(func(path string) bool {
+				called = true
+				return path == "/projects/p1"
+			})
+			out, isErr := view.Execute(context.Background(), "", OpenPageTool, c.args)
+			if !isErr {
+				t.Fatalf("%s must be an error the model can recover from, got: %s", c.name, out)
+			}
+			if c.name != "unknown route" && called {
+				t.Error("the navigator must not be reached before the arguments are valid")
+			}
+		})
+	}
+}
+
+// TestOpenPage_WithoutANavigatorSaysSo guards the history endpoint and any
+// other caller that has no live stream to the browser: silently doing nothing
+// would have the assistant claim it moved the user when it did not.
+func TestOpenPage_WithoutANavigatorSaysSo(t *testing.T) {
+	view := loadTestToolsetAt(t, "http://127.0.0.1:1").NewView(ModeManual)
+	out, isErr := view.Execute(context.Background(), "", OpenPageTool, `{"path":"/projects/p1"}`)
+	if !isErr {
+		t.Fatalf("a view with no navigator must not report a move, got: %s", out)
+	}
+	if !strings.Contains(out, "write the path") {
+		t.Errorf("the refusal must point at the fallback the user can still use, got: %s", out)
+	}
+}
+
+// TestOpenPage_IsFreeOfTheToolBudget keeps navigation from costing the user an
+// answer: it touches no backend, so charging it against MaxToolCallsPerTurn
+// would mean moving the page instead of, say, reading the app state.
+func TestOpenPage_IsFreeOfTheToolBudget(t *testing.T) {
+	if !IsMetaTool(OpenPageTool) {
+		t.Errorf("%s must be a meta-tool; it calls nothing on the backend", OpenPageTool)
 	}
 }

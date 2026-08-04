@@ -7,7 +7,7 @@ import { useT } from "@/lib/i18n/console/context";
 import { useProjectContext } from "@/lib/project-context";
 import { getToken } from "@/lib/api";
 import { renderMarkdown } from "@/lib/markdown";
-import { autolinkConsolePaths, isInternalConsolePath } from "@/lib/agent-chat-links";
+import { autolinkConsolePaths, isInternalConsolePath, isKnownConsoleRoute } from "@/lib/agent-chat-links";
 import { confirmArgEntries } from "@/lib/agent-chat-redact";
 
 type ChatMessage =
@@ -115,8 +115,29 @@ interface StreamChatHandlers {
   onToken: (chunk: string) => void;
   onToolCall: (name: string) => void;
   onConfirmRequest: (req: ConfirmRequestPayload) => void;
+  onNavigate: (path: string) => void;
   onError: (code: string, message: string) => void;
   onDone?: (awaitingConfirm: boolean) => void;
+}
+
+/**
+ * Reads the path out of a navigate event, or null when the assistant asked for
+ * somewhere this console does not render.
+ *
+ * The backend checks the path against its own copy of the route table before
+ * sending, so this is the second half of the same gate: the panel moves the
+ * user's page without them clicking anything, and the one thing worse than a
+ * dead link is a page that navigates itself to a 404.
+ */
+function parseNavigateData(data: string): string | null {
+  try {
+    const parsed = JSON.parse(data) as { path?: string };
+    const path = parsed.path ?? "";
+    if (!isInternalConsolePath(path) || !isKnownConsoleRoute(path)) return null;
+    return path;
+  } catch {
+    return null;
+  }
 }
 
 function parseToolCallData(data: string): string | null {
@@ -212,6 +233,11 @@ async function streamSSE(url: string, body: unknown, handlers: StreamChatHandler
       case "confirm_request": {
         const req = parseConfirmRequestData(data);
         if (req) handlers.onConfirmRequest(req);
+        return false;
+      }
+      case "navigate": {
+        const path = parseNavigateData(data);
+        if (path) handlers.onNavigate(path);
         return false;
       }
       case "error": {
@@ -440,6 +466,7 @@ export function AgentChatPanel({ open, onClose }: AgentChatPanelProps) {
               },
             ]);
           },
+          onNavigate: handleAgentNavigate,
           onError: (code, message) => {
             sawError = true;
             const key = AGENT_ERROR_CODE_KEYS[code];
@@ -524,6 +551,7 @@ export function AgentChatPanel({ open, onClose }: AgentChatPanelProps) {
             },
           ]);
         },
+        onNavigate: handleAgentNavigate,
         onError: (code, message) => {
           sawError = true;
           const key = AGENT_ERROR_CODE_KEYS[code];
@@ -556,6 +584,19 @@ export function AgentChatPanel({ open, onClose }: AgentChatPanelProps) {
       e.preventDefault();
       handleSend();
     }
+  }
+
+  /**
+   * Takes the user to the page the assistant opened for them.
+   *
+   * The answer is still streaming while this runs, so it goes through the Next
+   * router rather than a location assignment: a full page load would tear down
+   * the fetch mid-turn and the user would land on the right page with half an
+   * answer and no panel. Client-side routing keeps both, and Back still undoes
+   * the move.
+   */
+  function handleAgentNavigate(path: string) {
+    router.push(path);
   }
 
   /**

@@ -1760,11 +1760,14 @@ paths:
         the catalog is listed by name in the system prompt and becomes a real, natively
         callable tool definition once the model loads it with load_tool. Emits token
         events (assistant text deltas), tool_call events (tool name only), a confirm_request
-        event when a write tool needs the user''s approval, an error event on a friendly
-        failure (gateway not configured, daily cap reached, upstream error), an optional
-        trace event with this turn''s own metrics when the request sets "trace": true,
-        and a final done event. Sending the literal message "__slowtest__" instead
-        streams a 75s heartbeat run to prove the endpoint survives the ingress proxy-read-timeout.'
+        event when a write tool needs the user''s approval, a navigate event when
+        the assistant opens a console page for the user (the panel routes the current
+        tab there; the path is checked against the console''s real route table before
+        it is sent), an error event on a friendly failure (gateway not configured,
+        daily cap reached, upstream error), an optional trace event with this turn''s
+        own metrics when the request sets "trace": true, and a final done event. Sending
+        the literal message "__slowtest__" instead streams a 75s heartbeat run to
+        prove the endpoint survives the ingress proxy-read-timeout.'
       operationId: agentChat
       parameters:
       - description: Chat turn
@@ -1884,11 +1887,14 @@ paths:
       - agent
   /agent/chat/history:
     get:
-      description: Reads back what's already in agent_chat_messages (and, if one is
-        still open, the pending write-action awaiting confirm/reject) so the panel
-        can restore a conversation after a page reload -- the browser-side message
-        list is otherwise pure in-memory React state and disappears on refresh. Read-only;
-        does not touch the LLM gateway or the daily message cap.
+      description: 'Reads back the currently open conversation (and, if one is still
+        open, the pending write-action awaiting confirm/reject) so the panel can restore
+        it after a page reload -- the browser-side message list is otherwise pure
+        in-memory React state and disappears on refresh. Scoped to the live session,
+        so the panel shows exactly what the assistant still has in front of it rather
+        than a transcript it has already forgotten. Read-only: it neither opens a
+        session nor extends an idle one, and it does not touch the LLM gateway or
+        the daily message cap.'
       operationId: agentChatGetHistory
       parameters:
       - description: Project UUID
