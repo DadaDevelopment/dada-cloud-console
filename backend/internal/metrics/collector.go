@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgconn"
@@ -56,10 +57,10 @@ var (
 		Help: "User-app builds that reached status='failed' within the last hour. Alert on >0: a user's build broke, so their first deploy is blocked and they see nothing deployed until someone unblocks them. Clears itself as failures age out. This is the exact silent-failure that stranded early signups for two weeks unnoticed.",
 	})
 
-	domainHostnamePendingAge = promauto.NewGauge(prometheus.GaugeOpts{
+	domainHostnamePendingAge = promauto.NewGaugeVec(prometheus.GaugeOpts{
 		Name: "dada_domain_hostname_pending_age_seconds",
-		Help: "Age of the oldest custom hostname that is not yet active. 0 when every hostname is active. A high value means a domain has been silently stuck attaching.",
-	})
+		Help: "Age of each custom hostname that is not yet active, labelled with the hostname, its project and its app. No series at all when every hostname is active. A high value means that specific domain has been silently stuck attaching; the labels are what lets the alert name it instead of paging about \"a domain\".",
+	}, []string{"hostname", "project", "app"})
 
 	collectErrors = promauto.NewCounter(prometheus.CounterOpts{
 		Name: "dada_metrics_collect_errors_total",
@@ -71,6 +72,13 @@ var (
 		Help: "Wall-clock duration of the last state-gauge refresh.",
 	})
 )
+
+// pendingHostnameSeriesLimit caps how many pending hostnames get their own
+// time series. One series per stuck hostname is what lets the alert name the
+// domain, but the label is user-controlled, so a mass import of broken domains
+// would otherwise be a cardinality bomb in Prometheus. The oldest rows win the
+// slots: they are the ones the stuck-domain alert is about.
+const pendingHostnameSeriesLimit = 50
 
 // Handler returns the /metrics HTTP handler over the default registry.
 func Handler() http.Handler { return promhttp.Handler() }
@@ -183,20 +191,51 @@ func collect(ctx context.Context, pool *pgxpool.Pool) {
 		rows.Close()
 	}
 
-	var age float64
-	if err := pool.QueryRow(c,
-		`SELECT COALESCE(EXTRACT(EPOCH FROM (now() - min(created_at))), 0)
-		   FROM domain_hostnames WHERE status = 'pending'`).Scan(&age); err != nil {
-		collectErrors.Inc()
-		log.Warn().Err(err).Msg("metrics: pending-hostname age query failed")
-	} else {
-		domainHostnamePendingAge.Set(age)
-	}
+	collectPendingHostnames(c, pool)
 
 	collectBoxes(c, pool)
 	collectBoxRepeatUse(c, pool)
 
 	collectDuration.Set(time.Since(start).Seconds())
+}
+
+// collectPendingHostnames refreshes dada_domain_hostname_pending_age_seconds,
+// one series per hostname that has not finished attaching.
+//
+// It deliberately does not aggregate: an aggregate (the old min(created_at))
+// told the on-call that "a domain" was stuck without saying which one, so every
+// page started with a manual DB lookup. The hostname, its project and its app
+// are labels precisely so the alert body can name the domain to go fix.
+//
+// Reset() first, so a hostname that reached active stops producing a series
+// instead of freezing at its last age forever.
+func collectPendingHostnames(c context.Context, pool *pgxpool.Pool) {
+	rows, err := pool.Query(c,
+		`SELECT dh.hostname, COALESCE(p.name, ''), dh.app_name,
+		        EXTRACT(EPOCH FROM (now() - dh.created_at))
+		   FROM domain_hostnames dh
+		   JOIN environments e ON e.id = dh.environment_id
+		   LEFT JOIN projects p ON p.id = e.project_id
+		  WHERE dh.status = 'pending'
+		  ORDER BY dh.created_at
+		  LIMIT `+strconv.Itoa(pendingHostnameSeriesLimit))
+	if err != nil {
+		collectErrors.Inc()
+		log.Warn().Err(err).Msg("metrics: pending-hostname age query failed")
+		return
+	}
+	defer rows.Close()
+
+	domainHostnamePendingAge.Reset()
+	for rows.Next() {
+		var hostname, project, app string
+		var age float64
+		if err := rows.Scan(&hostname, &project, &app, &age); err != nil {
+			collectErrors.Inc()
+			continue
+		}
+		domainHostnamePendingAge.WithLabelValues(hostname, project, app).Set(age)
+	}
 }
 
 // boxRepeatUseWindowDays is the length of the repeat-use window. A claim is only

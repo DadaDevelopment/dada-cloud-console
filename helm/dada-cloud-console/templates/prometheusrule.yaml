@@ -39,18 +39,20 @@ spec:
               signups unnoticed. Inspect builds.error_message and the Jenkins dada-build
               console for the cause, then reach out to unblock the user.
         - alert: DadaCustomDomainStuck
-          expr: max by (namespace, service) (dada_domain_hostname_pending_age_seconds) > {{ .Values.metrics.alerts.customDomainStuckSeconds }}
+          expr: max by (namespace, service, hostname, project, app) (dada_domain_hostname_pending_age_seconds) > {{ .Values.metrics.alerts.customDomainStuckSeconds }}
           for: 10m
           keep_firing_for: 30m
           labels:
             severity: warning
           annotations:
-            summary: "Custom domain stuck attaching"
+            summary: "Custom domain {{`{{ $labels.hostname }}`}} stuck attaching"
             description: >-
-              A custom hostname has been non-active for {{`{{ $value | humanizeDuration }}`}}.
+              {{`{{ $labels.hostname }}`}} (project {{`{{ $labels.project }}`}}, app
+              {{`{{ $labels.app }}`}}) has been non-active for
+              {{`{{ $value | humanizeDuration }}`}}.
               Usual cause: the user's DNS does not point at the public ingress LB, so the
               ACME HTTP-01 challenge 404s and the Let's Encrypt cert never issues. Verify the
-              A/CNAME record and the challenge state in the app's namespace.
+              A/CNAME record for that hostname and the challenge state in the app's namespace.
         - alert: DadaMetricsCollectorFailing
           expr: max by (namespace, service) (increase(dada_metrics_collect_errors_total[15m])) > 3
           for: 5m
