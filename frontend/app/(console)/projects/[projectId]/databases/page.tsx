@@ -139,6 +139,10 @@ export default function DatabasesPage() {
         setQuotaBlock({ resource: quota.resource ?? "databases", limit: quota.limit });
         return;
       }
+      if (quota?.code === "consumption_exceeded") {
+        setSubmitError(t("billing.consumptionExceeded"));
+        return;
+      }
       setSubmitError(err instanceof Error ? err.message : t("databases.error.create"));
     } finally {
       setIsSubmitting(false);

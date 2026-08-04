@@ -496,8 +496,7 @@ func (h *Handler) provisionBoxRecord(c *gin.Context, actorID uuid.UUID, projectI
 	// rather than on an internal call.
 	if orgID, orgErr := h.projectOrg(c.Request.Context(), projectID); orgErr == nil {
 		if qErr := h.checkQuota(c.Request.Context(), orgID, "box_minutes"); qErr != nil {
-			if qe, ok := qErr.(*quotaExceededError); ok {
-				respondQuotaExceeded(c, qe.Resource, qe.Limit)
+			if h.respondBillingBlocked(c, orgID, qErr) {
 				return models.Box{}, false
 			}
 		}

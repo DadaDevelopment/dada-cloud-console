@@ -282,12 +282,10 @@ func (h *Handler) CreateServiceDatabase(c *gin.Context) {
 
 	if orgID, orgErr := h.projectOrg(c.Request.Context(), projectID); orgErr == nil {
 		if qErr := h.checkQuota(c.Request.Context(), orgID, "databases"); qErr != nil {
-			if qe, ok := qErr.(*quotaExceededError); ok {
-				audit(uuid.Nil, auditOutcomeFailure, map[string]any{
-					"reason": "quota_exceeded", "status": http.StatusPaymentRequired,
-					"resource": qe.Resource, "limit": qe.Limit,
-				})
-				respondQuotaExceeded(c, qe.Resource, qe.Limit)
+			if meta, blocked := billingBlockAudit(qErr); blocked {
+				meta["status"] = http.StatusPaymentRequired
+				audit(uuid.Nil, auditOutcomeFailure, meta)
+				h.respondBillingBlocked(c, orgID, qErr)
 				return
 			}
 		}

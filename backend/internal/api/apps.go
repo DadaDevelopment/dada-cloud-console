@@ -606,16 +606,16 @@ func (h *Handler) CreateApp(c *gin.Context) {
 
 	if orgID, orgErr := h.projectOrg(c.Request.Context(), projectID); orgErr == nil {
 		if qErr := h.checkQuota(c.Request.Context(), orgID, "apps"); qErr != nil {
-			if qe, ok := qErr.(*quotaExceededError); ok {
+			if meta, blocked := billingBlockAudit(qErr); blocked {
 				h.recordAudit(c.Request.Context(), claims.UserID, auditEntry{
 					ProjectID:     projectID,
 					EnvironmentID: envID,
 					Action:        "CreateApp",
 					ResourceKind:  "App",
 					Outcome:       auditOutcomeFailure,
-					Metadata:      map[string]any{"reason": "quota_exceeded", "resource": qe.Resource, "limit": qe.Limit},
+					Metadata:      meta,
 				})
-				respondQuotaExceeded(c, qe.Resource, qe.Limit)
+				h.respondBillingBlocked(c, orgID, qErr)
 				return
 			}
 		}

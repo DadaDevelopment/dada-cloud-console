@@ -109,6 +109,10 @@ export const billing: Messages = {
   },
   "billing.autopayError": { ru: "Не удалось изменить настройку", en: "Could not change the setting" },
   "billing.autopayConsent": { ru: "Продлевать автоматически каждый месяц", en: "Renew automatically every month" },
+  "billing.consumptionExceeded": {
+    ru: "Бесплатный тариф исчерпан по потреблению. Работающие приложения продолжают работать, но добавить или увеличить ресурсы можно после перехода на платный тариф или уменьшения текущих.",
+    en: "Free plan consumption exceeded. Existing apps keep running; to add or grow resources, upgrade the plan or scale down what is running.",
+  },
   "billing.autopayConsentHint": {
     ru: "Карта сохранится у ЮKassa, списание — за сутки до конца оплаченного периода. Отключить можно в любой момент на этой странице.",
     en: "The card is stored by YooKassa and charged a day before the paid period ends. You can turn this off any time on this page.",

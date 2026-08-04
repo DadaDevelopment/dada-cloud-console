@@ -28,6 +28,154 @@ func (e *quotaExceededError) Error() string {
 	return fmt.Sprintf("quota exceeded: %s limit=%d", e.Resource, e.Limit)
 }
 
+// consumptionExceededError is returned by checkConsumption when a free org has
+// burned more list-price consumption this calendar month than its plan includes,
+// multiplied by BILLING_OVERAGE_BLOCK_FACTOR.
+type consumptionExceededError struct {
+	SpentRUB    float64
+	IncludedRUB float64
+	Factor      float64
+}
+
+func (e *consumptionExceededError) Error() string {
+	return fmt.Sprintf("consumption exceeded: spent=%.2f included=%.2f factor=%.1f", e.SpentRUB, e.IncludedRUB, e.Factor)
+}
+
+// orgMonthConsumptionRub sums the org's list-price consumption since the start
+// of the current calendar month from the hourly app_usage ledger.
+//
+// The window is the calendar month because that is the period the allowance is
+// stated in and the period a bill would settle over. A rolling 30 days would
+// carry a spike the customer has already been billed for into a month they have
+// not.
+func (h *Handler) orgMonthConsumptionRub(ctx context.Context, orgID string) (float64, error) {
+	var spent float64
+	err := h.pool.QueryRow(ctx, `
+		SELECT COALESCE(SUM(cost_rub), 0)::float8 FROM app_usage
+		WHERE org_id = $1 AND hour_start >= date_trunc('month', now() AT TIME ZONE 'utc')
+	`, orgID).Scan(&spent)
+	return spent, err
+}
+
+// checkConsumption is the degradation the overage alert escalates to: a free
+// org that has burned more than BILLING_OVERAGE_BLOCK_FACTOR times its included
+// consumption stops being allowed to GROW.
+//
+// It only ever blocks growth. Running apps keep running, and shrinking is
+// always allowed, because the point is to stop an unpaid footprint from getting
+// bigger while nobody has decided to carry it -- not to take a service away
+// from someone who was never told a rule. Counted quotas cannot do this job:
+// they cap how MANY things an account has, and the accounts that cost real
+// money are within every count while running fat replicas around the clock.
+//
+// Paid plans are excluded. Consumption past a plan the customer actually pays
+// for is an invoice to raise, not a wall to hit; blocking there would punish
+// exactly the accounts worth keeping.
+//
+// Every failure fails OPEN. A DB hiccup or an unreadable cluster-cost file must
+// not turn into "nobody can deploy anything": the gate exists to slow down a
+// handful of free accounts, and its own unavailability is not evidence about
+// any of them.
+func (h *Handler) checkConsumption(ctx context.Context, orgID string) error {
+	if !h.cfg.BillingEnabled || h.cfg.BillingOverageBlockFactor <= 0 {
+		return nil
+	}
+	if h.quotaExempt(orgID) {
+		return nil
+	}
+	plan, err := h.planFor(ctx, orgID)
+	if err != nil {
+		log.Printf("billing: consumption gate open for org %s: plan lookup failed: %v", orgID, err)
+		return nil
+	}
+	if plan.Key != "free" {
+		return nil
+	}
+	included := pricing.IncludedConsumptionRub(plan, h.billingUnit)
+	if included <= 0 {
+		return nil
+	}
+	if h.quotaGraceActive(ctx, orgID) {
+		return nil
+	}
+	spent, err := h.orgMonthConsumptionRub(ctx, orgID)
+	if err != nil {
+		log.Printf("billing: consumption gate open for org %s: ledger read failed: %v", orgID, err)
+		return nil
+	}
+	if spent <= included*h.cfg.BillingOverageBlockFactor {
+		return nil
+	}
+	return &consumptionExceededError{SpentRUB: spent, IncludedRUB: included, Factor: h.cfg.BillingOverageBlockFactor}
+}
+
+// recordConsumptionBlock leaves a trail every time the gate refuses growth. An
+// account that suddenly cannot deploy will ask why, and the answer has to be
+// findable without re-deriving the ledger by hand.
+func (h *Handler) recordConsumptionBlock(ctx context.Context, orgID string, e *consumptionExceededError) {
+	log.Printf("billing: GROWTH BLOCKED org=%s spent=%.2f included=%.2f factor=%.1f -- free account over its included consumption",
+		orgID, e.SpentRUB, e.IncludedRUB, e.Factor)
+	h.recordSystemAudit(ctx, auditEntry{
+		Action:       "ConsumptionBlocked",
+		ResourceKind: "BillingAccount",
+		ResourceName: orgID,
+		Outcome:      auditOutcomeSuccess,
+		Metadata: map[string]string{
+			"spent_rub":    strconv.FormatFloat(e.SpentRUB, 'f', 2, 64),
+			"included_rub": strconv.FormatFloat(e.IncludedRUB, 'f', 2, 64),
+			"factor":       strconv.FormatFloat(e.Factor, 'f', -1, 64),
+		},
+	})
+}
+
+// respondConsumptionExceeded writes the 403 a blocked growth request gets. It
+// names both numbers: a wall whose reason a customer cannot check is a support
+// ticket, and the numbers are the same ones on their own usage page.
+func respondConsumptionExceeded(c *gin.Context, e *consumptionExceededError) {
+	c.JSON(http.StatusForbidden, gin.H{
+		"error":        "consumption_exceeded",
+		"spent_rub":    e.SpentRUB,
+		"included_rub": e.IncludedRUB,
+		"upgrade":      true,
+		"message":      "Free plan consumption exceeded. Existing apps keep running; upgrade or scale down to add or grow resources.",
+	})
+}
+
+// billingBlockAudit renders a gate refusal into audit metadata and reports
+// whether the error came from a gate at all. Call sites merge their own fields
+// on top; the shared keys are here so "why was this refused" reads the same in
+// the audit log whichever resource was asked for.
+func billingBlockAudit(err error) (map[string]any, bool) {
+	var qe *quotaExceededError
+	if errors.As(err, &qe) {
+		return map[string]any{"reason": "quota_exceeded", "resource": qe.Resource, "limit": qe.Limit}, true
+	}
+	var ce *consumptionExceededError
+	if errors.As(err, &ce) {
+		return map[string]any{"reason": "consumption_exceeded", "spent_rub": ce.SpentRUB, "included_rub": ce.IncludedRUB}, true
+	}
+	return nil, false
+}
+
+// respondBillingBlocked writes the response for whichever billing gate refused
+// the request and reports whether it handled the error. Growth paths route both
+// gates through one helper so a new gate cannot be added and then silently
+// ignored at a call site that only type-asserted the older one.
+func (h *Handler) respondBillingBlocked(c *gin.Context, orgID string, err error) bool {
+	var qe *quotaExceededError
+	if errors.As(err, &qe) {
+		respondQuotaExceeded(c, qe.Resource, qe.Limit)
+		return true
+	}
+	var ce *consumptionExceededError
+	if errors.As(err, &ce) {
+		h.recordConsumptionBlock(c.Request.Context(), orgID, ce)
+		respondConsumptionExceeded(c, ce)
+		return true
+	}
+	return false
+}
+
 // planFor resolves the org's current plan from billing_accounts and finds
 // the matching pricing.Plan from the handler's loaded plan set. If the org
 // has no billing_accounts row the free plan is used.
@@ -135,9 +283,14 @@ func (h *Handler) quotaGraceActive(ctx context.Context, orgID string) bool {
 	return graceUntil != nil && graceUntil.After(time.Now().UTC())
 }
 
-// checkQuota is the hard gate for countable resources. It returns a
-// *quotaExceededError when the org is at or over its plan limit. A limit of 0
-// means unlimited (Enterprise).
+// checkQuota is the hard gate every growth path already calls, so the
+// consumption gate lives inside it rather than beside it: a path that forgets to
+// call the newer gate is a path where an over-consuming account keeps growing,
+// and there is no way to notice that from reading the newer gate. It returns a
+// *quotaExceededError when the org is at or over its plan limit (a limit of 0
+// means unlimited, i.e. Enterprise), or a *consumptionExceededError when the org
+// is over what its free plan includes. Callers route both through
+// respondBillingBlocked.
 //
 // Grace does not skip the count. An org inside its grandfathering window is
 // still allowed through -- that promise is not being taken back -- but the
@@ -152,6 +305,9 @@ func (h *Handler) checkQuota(ctx context.Context, orgID, resource string) error 
 	}
 	if h.quotaExempt(orgID) {
 		return nil
+	}
+	if err := h.checkConsumption(ctx, orgID); err != nil {
+		return err
 	}
 	inGrace := h.quotaGraceActive(ctx, orgID)
 	plan, err := h.planFor(ctx, orgID)

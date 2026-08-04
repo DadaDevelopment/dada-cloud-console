@@ -123,15 +123,15 @@ func (h *Handler) AddDomainAuthorization(c *gin.Context) {
 
 	if orgID, orgErr := h.projectOrg(c.Request.Context(), projectID); orgErr == nil {
 		if qErr := h.checkQuota(c.Request.Context(), orgID, "domains"); qErr != nil {
-			if qe, ok := qErr.(*quotaExceededError); ok {
+			if meta, blocked := billingBlockAudit(qErr); blocked {
 				h.recordAudit(c.Request.Context(), claims.UserID, auditEntry{
 					ProjectID:    projectID,
 					Action:       "AddDomainAuthorization",
 					ResourceKind: "CustomDomain",
 					Outcome:      auditOutcomeFailure,
-					Metadata:     map[string]any{"reason": "domain_quota_exceeded", "limit": qe.Limit},
+					Metadata:     meta,
 				})
-				respondQuotaExceeded(c, qe.Resource, qe.Limit)
+				h.respondBillingBlocked(c, orgID, qErr)
 				return
 			}
 		}

@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"math"
@@ -1303,6 +1304,12 @@ func (w *appAutoscaleWatcher) maybeResize(ctx context.Context, projectID uuid.UU
 		return
 	}
 
+	if blocked, why := w.consumptionBlocked(ctx, projectID); blocked {
+		log.Printf("app-autoscale: %s/%s needs %s -> %s but its org is over what the free plan includes (%s), refusing to grow it", namespace, appName, from, to, why)
+		w.auditRefusal(ctx, projectID, st, namespace, appName, "consumption_blocked", s, map[string]any{"to_envelope": to.String(), "detail": why})
+		return
+	}
+
 	quota, err := w.namespaceQuota(ctx, namespace)
 	if err != nil {
 		log.Printf("app-autoscale: %s/%s needs %s -> %s but its quota could not be read, skipping: %v", namespace, appName, from, to, err)
@@ -1350,6 +1357,35 @@ func (w *appAutoscaleWatcher) maybeResize(ctx context.Context, projectID uuid.UU
 			"restarted":     live.Total() == 0 || live.Failed > 0,
 		},
 	})
+}
+
+// consumptionBlocked reports whether the app's org has burned past what its
+// free plan includes, with the numbers for the refusal record.
+//
+// The autoscaler is where an unpaid footprint actually grows. The console no
+// longer offers sizes to users, so nobody clicks "make it bigger" -- the
+// platform decides, silently, on its own money. Gating creation while leaving
+// this open would block the one path that costs nothing to leave open and leave
+// the one that spends open.
+//
+// It gates the GROWTH pass only. shrinkPass never asks: an account over its
+// allowance must always be allowed to get smaller, and a gate that also blocked
+// shrinking would pin the exact accounts it exists to slow down at their largest
+// size.
+//
+// An unresolvable org opens the gate. The watcher runs unattended on every app
+// on the cluster, and a lookup failure must not become "nothing on the platform
+// may grow tonight".
+func (w *appAutoscaleWatcher) consumptionBlocked(ctx context.Context, projectID uuid.UUID) (bool, string) {
+	orgID, err := w.h.projectOrg(ctx, projectID)
+	if err != nil || orgID == "" {
+		return false, ""
+	}
+	var ce *consumptionExceededError
+	if errors.As(w.h.checkConsumption(ctx, orgID), &ce) {
+		return true, ce.Error()
+	}
+	return false, ""
 }
 
 // auditRefusal records a starvation the watcher saw and deliberately did not

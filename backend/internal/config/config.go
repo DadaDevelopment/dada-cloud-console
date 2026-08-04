@@ -495,6 +495,8 @@ type Config struct {
 	// (dozens of apps) and must not be gated by the customer plan ladder.
 	BillingExemptOrgs []string
 
+	BillingOverageBlockFactor float64
+
 	// Dada Box metering knobs (internal/api/box_meter.go, box_reaper.go). Named
 	// BOX_* rather than BILLING_BOX_* because the same window also drives the
 	// reaper's sleep decision, which is a lifecycle concern and not a billing one.
@@ -797,6 +799,7 @@ func Load() (*Config, error) {
 		BillingEnabled:              getEnv("BILLING_ENABLED", "false") == "true",
 		BillingMeterIntervalSec:     getEnvInt64("BILLING_METER_INTERVAL_SECS", 3600),
 		BillingExemptOrgs:           splitList(getEnv("BILLING_EXEMPT_ORGS", "")),
+		BillingOverageBlockFactor:   getEnvFloat("BILLING_OVERAGE_BLOCK_FACTOR", 3),
 		BoxMeterIntervalSecs:        getEnvInt64("BOX_METER_INTERVAL_SECS", 60),
 		BoxActiveWindowSecs:         getEnvInt64("BOX_ACTIVE_WINDOW_SECS", 120),
 		BoxActiveCPUPercent:         getEnvFloat("BOX_ACTIVE_CPU_PERCENT", 5),

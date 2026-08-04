@@ -177,6 +177,10 @@ export default function AppsPage() {
         setQuotaBlocked({ resource: quota.resource ?? "apps", limit: quota.limit });
         return;
       }
+      if (quota?.code === "consumption_exceeded") {
+        setSubmitError(t("billing.consumptionExceeded"));
+        return;
+      }
       let msg = raw || t("apps.error.create");
       if (/already exists|unique per environment/i.test(raw)) {
         msg = t("apps.error.create.duplicateGlobal");

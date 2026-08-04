@@ -699,6 +699,8 @@ function AddDomainFunnel({
       const quota = e2 as { code?: string; resource?: string; limit?: number } | undefined;
       if (quota?.code === "quota_exceeded") {
         setQuotaBlocked({ resource: quota.resource ?? "domains", limit: quota.limit });
+      } else if (quota?.code === "consumption_exceeded") {
+        setErr(t("billing.consumptionExceeded"));
       } else {
         setErr(e2 instanceof Error ? e2.message : t("domains.error.add"));
       }
