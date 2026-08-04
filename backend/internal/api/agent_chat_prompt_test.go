@@ -230,7 +230,7 @@ func TestAgentChatSystemPrompt_AdvertisesNoCapabilityItLacks(t *testing.T) {
 	if strings.Contains(prompt, "is the only thing you cannot do") {
 		t.Error("prompt still claims a single capability gap; the catalog has many")
 	}
-	for _, must := range []string{"Managed databases are PostgreSQL ONLY", "VERTICAL only", "no cron job", "PR preview environments are free"} {
+	for _, must := range []string{"Managed databases are PostgreSQL ONLY", "VERTICAL only", "no cron job", "NO per-PR preview environments"} {
 		if !strings.Contains(prompt, must) {
 			t.Errorf("prompt lost the %q statement", must)
 		}
