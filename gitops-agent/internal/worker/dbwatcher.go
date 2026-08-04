@@ -33,6 +33,7 @@ type DBWatcher struct {
 	managers map[string]*git.Manager // keyed by repoURL
 	mlflow   *mlflow.Client          // nil when MLFLOW_BASE_URL is unset
 	clients  *dadak8s.Clients        // nil when there is no in-cluster config (local dev)
+	onDeploy func(context.Context, db.Operation)
 }
 
 func NewDBWatcher(pool *pgxpool.Pool, cfg *config.Config, clients *dadak8s.Clients) *DBWatcher {
@@ -52,6 +53,14 @@ func NewDBWatcher(pool *pgxpool.Pool, cfg *config.Config, clients *dadak8s.Clien
 		mlflow:  mlflow.New(cfg.MLflowBaseURL, cfg.MLflowAuthHeader),
 		clients: clients,
 	}
+}
+
+// WithDeployObserver connects the app redeploy commit edge to a live-status
+// observer. Keeping it optional preserves the DB worker's local/off-cluster
+// behavior while production can track the actual rollout immediately.
+func (w *DBWatcher) WithDeployObserver(observer func(context.Context, db.Operation)) *DBWatcher {
+	w.onDeploy = observer
+	return w
 }
 
 func (w *DBWatcher) Start(ctx context.Context) {
@@ -1863,10 +1872,16 @@ func (w *DBWatcher) doDeployImageVersion(ctx context.Context, op db.Operation) e
 	cur["port"] = portVal
 	cur["status"] = "Pending"
 	updatedJSON, _ := json.Marshal(cur)
-	return db.UpsertSnapshot(ctx, w.pool,
+	if err := db.UpsertSnapshot(ctx, w.pool,
 		op.ProjectID, op.EnvironmentID,
 		"App", p.AppName, "Pending", updatedJSON, time.Now(),
-	)
+	); err != nil {
+		return err
+	}
+	if w.onDeploy != nil {
+		w.onDeploy(ctx, op)
+	}
+	return nil
 }
 
 // guardUnattendedClobber refuses an unattended deploy that would delete parts

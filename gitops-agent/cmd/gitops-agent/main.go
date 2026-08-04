@@ -57,6 +57,11 @@ func main() {
 	dbw := worker.NewDBWatcher(pool, cfg, clients)
 	gitw := worker.NewGitWatcher(pool, cfg, defaultMgr)
 	reaper := worker.NewReaper(pool, cfg)
+	var statusReconciler *worker.StatusReconciler
+	if cfg.StatusReconcileEnabled && clients != nil {
+		statusReconciler = worker.NewStatusReconciler(pool, cfg, clients)
+		dbw.WithDeployObserver(statusReconciler.ObserveDeployment)
+	}
 
 	if err := dbw.BootstrapProjects(ctx); err != nil {
 		log.Fatal().Err(err).Msg("bootstrapping project manifests")
@@ -73,7 +78,7 @@ func main() {
 		if clients == nil {
 			log.Warn().Msg("status-reconciler disabled: no in-cluster k8s config")
 		} else {
-			go worker.NewStatusReconciler(pool, cfg, clients).Start(ctx)
+			go statusReconciler.Start(ctx)
 		}
 	}
 

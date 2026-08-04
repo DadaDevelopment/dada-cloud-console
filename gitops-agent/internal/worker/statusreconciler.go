@@ -24,6 +24,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rs/zerolog/log"
+	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/apimachinery/pkg/watch"
 )
 
 // inferenceServiceGVR is the KServe InferenceService resource — how AIModels run
@@ -66,7 +68,19 @@ type StatusReconciler struct {
 	gcBase   string
 
 	dnsVerdicts map[string]dnsVerdict
+	deployments chan deploymentObservation
 }
+
+// deploymentObservation is a just-committed application rollout that needs
+// event-driven status tracking. A git commit says only that Argo may begin the
+// rollout; a Ready pod without a crash state is the recovery proof.
+type deploymentObservation struct {
+	environmentID uuid.UUID
+	appName       string
+	operationID   uuid.UUID
+}
+
+const deploymentObservationTimeout = 15 * time.Minute
 
 // dnsVerdict caches one endpoint's resolve result, see dnsRecordLive.
 type dnsVerdict struct {
@@ -82,7 +96,28 @@ func NewStatusReconciler(pool *pgxpool.Pool, cfg *config.Config, clients *dadak8
 		clients:     clients,
 		managers:    map[string]*git.Manager{},
 		dnsVerdicts: map[string]dnsVerdict{},
+		deployments: make(chan deploymentObservation, 64),
 		gcBase:      filepath.Join(cfg.RepoLocalPath, "orphan-gc"),
+	}
+}
+
+// ObserveDeployment begins watching a specific k8s app after its redeploy
+// manifest is committed. The buffered, coalesced handoff keeps the DB worker
+// independent from watch latency and never blocks operation processing.
+func (r *StatusReconciler) ObserveDeployment(ctx context.Context, op db.Operation) {
+	if op.EnvironmentID == nil || op.ResourceName == "" {
+		return
+	}
+	target := deploymentObservation{
+		environmentID: *op.EnvironmentID,
+		appName:       op.ResourceName,
+		operationID:   op.ID,
+	}
+	select {
+	case r.deployments <- target:
+	case <-ctx.Done():
+	default:
+		log.Warn().Str("app", target.appName).Str("operation", target.operationID.String()).Msg("status-reconciler: deploy observation queue full")
 	}
 }
 
@@ -97,8 +132,81 @@ func (r *StatusReconciler) Start(ctx context.Context) {
 			return
 		case <-ticker.C:
 			r.tick(ctx)
+		case target := <-r.deployments:
+			go r.observeDeployment(ctx, target)
 		}
 	}
+}
+
+// observeDeployment turns a DeployImageVersion commit into a Kubernetes watch
+// scoped to the app's pods. Unlike the normal status ticker it wakes precisely
+// when the rollout changes a pod, so a recovered app does not keep a stale
+// CrashLoop alert until the next broad reconciliation pass.
+func (r *StatusReconciler) observeDeployment(parent context.Context, target deploymentObservation) {
+	ctx, cancel := context.WithTimeout(parent, deploymentObservationTimeout)
+	defer cancel()
+
+	var namespace string
+	if err := r.pool.QueryRow(ctx, `SELECT namespace FROM environments WHERE id = $1 AND runtime = 'k8s'`, target.environmentID).Scan(&namespace); err != nil {
+		log.Warn().Err(err).Str("app", target.appName).Str("operation", target.operationID.String()).Msg("status-reconciler: load deploy observation namespace")
+		return
+	}
+	if namespace == "" {
+		return
+	}
+
+	selector := labels.Set{appLabel: target.appName}.AsSelector().String()
+	for {
+		if r.reconcileObservedDeployment(ctx, target, namespace) {
+			return
+		}
+
+		pods, err := r.client.CoreV1().Pods(namespace).Watch(ctx, metav1.ListOptions{LabelSelector: selector})
+		if err != nil {
+			log.Warn().Err(err).Str("app", target.appName).Str("operation", target.operationID.String()).Msg("status-reconciler: watch redeploy pods")
+			return
+		}
+
+		closed := false
+		for !closed {
+			select {
+			case <-ctx.Done():
+				pods.Stop()
+				return
+			case event, ok := <-pods.ResultChan():
+				if !ok || event.Type == watch.Error {
+					closed = true
+					break
+				}
+				if r.reconcileObservedDeployment(ctx, target, namespace) {
+					pods.Stop()
+					return
+				}
+			}
+		}
+		pods.Stop()
+	}
+}
+
+// reconcileObservedDeployment reuses the authoritative app reconciliation and
+// stops the scoped watch only after that reconciliation has recorded Ready.
+// A commit, a new pod, or a merely running container never qualifies.
+func (r *StatusReconciler) reconcileObservedDeployment(ctx context.Context, target deploymentObservation, namespace string) bool {
+	r.reconcile(ctx)
+	var phase string
+	err := r.pool.QueryRow(ctx, `
+		SELECT phase FROM resource_snapshots
+		WHERE environment_id = $1 AND kind = 'App' AND name = $2
+	`, target.environmentID, target.appName).Scan(&phase)
+	if err != nil || phase != "Ready" {
+		return false
+	}
+	if err := db.ResolveAppHealthAlert(ctx, r.pool, namespace, target.appName); err != nil {
+		log.Warn().Err(err).Str("app", target.appName).Msg("status-reconciler: resolve recovered crash alert")
+		return false
+	}
+	log.Info().Str("app", target.appName).Str("namespace", namespace).Str("operation", target.operationID.String()).Msg("status-reconciler: redeploy recovered app")
+	return true
 }
 
 func (r *StatusReconciler) tick(ctx context.Context) {
@@ -649,6 +757,13 @@ func (r *StatusReconciler) reconcile(ctx context.Context) map[snapKey]bool {
 			continue
 		}
 		updated += int(n)
+		if phase == "Ready" {
+			for namespace := range la.namespaces {
+				if err := db.ResolveAppHealthAlert(ctx, r.pool, namespace, k.app); err != nil {
+					log.Warn().Err(err).Str("app", k.app).Str("namespace", namespace).Msg("status-reconciler: resolve ready app health alert")
+				}
+			}
+		}
 	}
 	if updated > 0 {
 		log.Debug().Int("updated", updated).Msg("status-reconciler: synced app statuses")

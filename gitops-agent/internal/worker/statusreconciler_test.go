@@ -1,12 +1,45 @@
 package worker
 
 import (
+	"context"
 	"testing"
 
+	"github.com/dada-tuda/console/gitops-agent/internal/db"
+	"github.com/google/uuid"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
+
+func TestObserveDeploymentQueuesCommittedK8sDeploy(t *testing.T) {
+	envID := uuid.New()
+	opID := uuid.New()
+	r := &StatusReconciler{deployments: make(chan deploymentObservation, 1)}
+	r.ObserveDeployment(context.Background(), db.Operation{
+		ID:            opID,
+		EnvironmentID: &envID,
+		ResourceName:  "profi-backend",
+	})
+
+	select {
+	case got := <-r.deployments:
+		if got.environmentID != envID || got.appName != "profi-backend" || got.operationID != opID {
+			t.Fatalf("queued deploy observation = %+v", got)
+		}
+	default:
+		t.Fatal("committed deploy was not queued for event-driven observation")
+	}
+}
+
+func TestObserveDeploymentSkipsOperationWithoutEnvironment(t *testing.T) {
+	r := &StatusReconciler{deployments: make(chan deploymentObservation, 1)}
+	r.ObserveDeployment(context.Background(), db.Operation{ID: uuid.New(), ResourceName: "profi-backend"})
+	select {
+	case got := <-r.deployments:
+		t.Fatalf("unexpected observation for environment-less operation: %+v", got)
+	default:
+	}
+}
 
 func ptr32(v int32) *int32 { return &v }
 

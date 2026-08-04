@@ -319,6 +319,24 @@ func UpdateLiveStatus(ctx context.Context, pool *pgxpool.Pool,
 	return tag.RowsAffected(), nil
 }
 
+// ResolveAppHealthAlert closes the console-visible side of a prior crash alert
+// without deleting its delivery and diagnostic history. last_seen_at is the
+// liveness marker used by the console; moving it to the epoch makes the row
+// fall outside the freshness window immediately while last_sent_at remains
+// intact for the email cooldown and incident history.
+func ResolveAppHealthAlert(ctx context.Context, pool *pgxpool.Pool, namespace, appName string) error {
+	_, err := pool.Exec(ctx, `
+		UPDATE app_health_alerts
+		SET last_seen_at = to_timestamp(0)
+		WHERE namespace = $1 AND app_name = $2
+		  AND COALESCE(last_seen_at, last_sent_at) > to_timestamp(0)
+	`, namespace, appName)
+	if err != nil {
+		return fmt.Errorf("resolve app health alert: %w", err)
+	}
+	return nil
+}
+
 // PrimaryHostname returns the hostname to surface on an app's card, or ""
 // if the app has none. Preference order within domain_hostnames: an active
 // custom domain over an active surrogate (rows whose hostname ends in
