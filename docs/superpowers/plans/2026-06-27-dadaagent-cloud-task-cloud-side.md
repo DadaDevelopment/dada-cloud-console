@@ -1505,7 +1505,7 @@ In `apps/[appName]/page.tsx`, below the spec cards, render:
 
 - [ ] **Step 3: Verify in the running app**
 
-Run the dev server (via the project's run mechanism / `intelij.execute_run_configuration` per CLAUDE.md), open a web app detail page, confirm the chip renders and disables while busy. Screenshot for proof.
+Run the dev server via Codex Preview, open a web app detail page, confirm the chip renders and disables while busy. Screenshot for proof.
 
 - [ ] **Step 4: Typecheck + commit**
 
