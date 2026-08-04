@@ -43,10 +43,14 @@ const (
 	EventTypeObservationCreate = "observation-create"
 )
 
+// Observation types the ingestion API accepts. The list is closed: anything
+// else is rejected per-event with "Invalid request data" while the rest of the
+// batch is stored, which shows up as a trace whose children are silently
+// missing. A tool call is a SPAN named after the tool.
 const (
 	ObservationTypeSpan       = "SPAN"
 	ObservationTypeGeneration = "GENERATION"
-	ObservationTypeTool       = "TOOL"
+	ObservationTypeEvent      = "EVENT"
 )
 
 const (
@@ -97,10 +101,14 @@ type ingestRequest struct {
 	Batch []Event `json:"batch"`
 }
 
+// ingestError is one per-event rejection. Message is a constant
+// ("Invalid request data") and Error carries the field that was wrong, so
+// reporting Message alone leaves nothing to act on.
 type ingestError struct {
-	ID      string `json:"id"`
-	Status  int    `json:"status"`
-	Message string `json:"message"`
+	ID      string          `json:"id"`
+	Status  int             `json:"status"`
+	Message string          `json:"message"`
+	Error   json.RawMessage `json:"error"`
 }
 
 type ingestResponse struct {
@@ -186,7 +194,12 @@ func (c *Client) Ingest(ctx context.Context, batch []Event) error {
 		return nil
 	}
 	if len(parsed.Errors) > 0 {
-		return fmt.Errorf("langfuse ingestion: %d event(s) rejected: %s", len(parsed.Errors), parsed.Errors[0].Message)
+		first := parsed.Errors[0]
+		detail := strings.TrimSpace(string(first.Error))
+		if detail == "" || detail == "null" {
+			detail = first.Message
+		}
+		return fmt.Errorf("langfuse ingestion: %d event(s) rejected, first %s: %s: %s", len(parsed.Errors), first.ID, first.Message, detail)
 	}
 	return nil
 }

@@ -98,8 +98,8 @@ func (h *Handler) agentChatPersistTurn(tr *agentchat.TurnTrace) {
 }
 
 // agentChatLangfuseBatch renders a finished turn as a Langfuse ingestion batch:
-// one trace, one generation rolling up the whole ReAct loop, and one TOOL
-// observation per tool call, in call order.
+// one trace, one generation rolling up the whole ReAct loop, and one span per
+// tool call, named after the tool, in call order.
 func agentChatLangfuseBatch(tr *agentchat.TurnTrace) []langfuse.Event {
 	if tr == nil {
 		return nil
@@ -199,7 +199,7 @@ func agentChatLangfuseBatch(tr *agentchat.TurnTrace) []langfuse.Event {
 				ID:                  uuid.NewString(),
 				TraceID:             traceID,
 				ParentObservationID: genID,
-				Type:                langfuse.ObservationTypeTool,
+				Type:                langfuse.ObservationTypeSpan,
 				Name:                span.Name,
 				StartTime:           langfuse.FormatTime(start),
 				EndTime:             langfuse.FormatTime(cursor),

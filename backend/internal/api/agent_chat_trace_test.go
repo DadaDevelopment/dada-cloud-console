@@ -25,6 +25,28 @@ func newAnsweredTrace(t *testing.T) *agentchat.TurnTrace {
 	return tr
 }
 
+// TestAgentChatLangfuseBatch_UsesOnlyTypesTheAPIAccepts pins the failure that
+// let tracing look wired while every tool call was dropped: Langfuse rejects an
+// unknown observation type per event and stores the rest of the batch, so the
+// trace arrived with no children and only a log line said why.
+func TestAgentChatLangfuseBatch_UsesOnlyTypesTheAPIAccepts(t *testing.T) {
+	accepted := map[string]bool{
+		langfuse.ObservationTypeGeneration: true,
+		langfuse.ObservationTypeSpan:       true,
+		langfuse.ObservationTypeEvent:      true,
+	}
+
+	for _, event := range agentChatLangfuseBatch(newAnsweredTrace(t)) {
+		body, ok := event.Body.(langfuse.ObservationBody)
+		if !ok {
+			continue
+		}
+		if !accepted[body.Type] {
+			t.Fatalf("observation %q has type %q, which the ingestion API rejects; allowed: GENERATION, SPAN, EVENT", body.Name, body.Type)
+		}
+	}
+}
+
 func TestAgentChatLangfuseBatchShape(t *testing.T) {
 	tr := newAnsweredTrace(t)
 	batch := agentChatLangfuseBatch(tr)
@@ -82,8 +104,8 @@ func TestAgentChatLangfuseBatchShape(t *testing.T) {
 		if !ok {
 			t.Fatalf("batch[%d].Body is %T, want langfuse.ObservationBody", 2+i, batch[2+i].Body)
 		}
-		if tool.Type != langfuse.ObservationTypeTool {
-			t.Fatalf("batch[%d] type = %q, want TOOL", 2+i, tool.Type)
+		if tool.Type != langfuse.ObservationTypeSpan {
+			t.Fatalf("batch[%d] type = %q, want SPAN", 2+i, tool.Type)
 		}
 		if tool.Name != want {
 			t.Fatalf("batch[%d] name = %q, want %q (call order must survive)", 2+i, tool.Name, want)
