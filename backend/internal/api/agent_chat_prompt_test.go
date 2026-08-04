@@ -163,6 +163,30 @@ func TestAgentChatSystemPrompt_LinksOnlyRealRoutes(t *testing.T) {
 	}
 }
 
+// TestAgentChatSystemPrompt_ForbidsAbsoluteConsoleURLs guards a failure seen on
+// prod on 2026-08-04: asked where to deploy from, the assistant answered with
+// https://your-console-url/projects/<id>/git and, one turn later,
+// https://cloud.example.com/projects/<id>/apps. The model does not know the
+// user's domain, so every absolute console URL it writes is invented, and the
+// panel's allowlist only links bare paths -- the user gets a link out of the
+// product to a host that does not exist. The prompt has to say so in the LINKS
+// section, and the prompt itself must not contain such a URL to copy.
+func TestAgentChatSystemPrompt_ForbidsAbsoluteConsoleURLs(t *testing.T) {
+	prompt := agentChatTestPrompt(t)
+
+	links := prompt[strings.Index(prompt, "# LINKS"):]
+	if cut := strings.Index(links[len("# LINKS"):], "\n# "); cut >= 0 {
+		links = links[:len("# LINKS")+cut]
+	}
+	if !strings.Contains(links, "no scheme and no host") {
+		t.Error("the LINKS section does not tell the assistant that a console link carries no scheme and no host")
+	}
+
+	for _, m := range regexp.MustCompile(`https?://[^\s"]*/projects/`).FindAllString(prompt, -1) {
+		t.Errorf("prompt shows an absolute console URL %q, which is the exact shape it must never produce", m)
+	}
+}
+
 // TestAgentChatConsoleRoutes_MatchTheFrontendAllowlist closes the last gap: the
 // panel only turns a path into a link when it matches CONSOLE_ROUTES in
 // frontend/lib/agent-chat-links.ts, so a route the prompt advertises but that
