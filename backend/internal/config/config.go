@@ -424,6 +424,20 @@ type Config struct {
 	AgentChatModelB        string // AGENT_CHAT_MODEL_B
 	AgentChatModelBPercent int    // AGENT_CHAT_MODEL_B_PERCENT (default 0)
 
+	// Memory. AgentChatSessionIdleMinutes is the gap that ends a conversation:
+	// inside one session the assistant reads the whole transcript, across
+	// sessions it reads only the recursive per-user summary. AgentChatHistoryMax
+	// Chars bounds that transcript in characters rather than in messages, since
+	// what blows a context window is length, not turn count.
+	// AgentChatMemoryMaxChars is the size of the summary and doubles as the
+	// switch: zero turns the folder off and the assistant remembers nothing
+	// across sessions. AgentChatMemoryModel is optional -- empty means the
+	// folder runs on whatever the chat itself runs on.
+	AgentChatSessionIdleMinutes int    // AGENT_CHAT_SESSION_IDLE_MINUTES (default 60)
+	AgentChatHistoryMaxChars    int    // AGENT_CHAT_HISTORY_MAX_CHARS (default 120000)
+	AgentChatMemoryMaxChars     int    // AGENT_CHAT_MEMORY_MAX_CHARS (default 1200; 0 disables memory)
+	AgentChatMemoryModel        string // AGENT_CHAT_MEMORY_MODEL (default: the chat model)
+
 	// AgentChatModelAllowlist names the models a chat request may ask for by
 	// hand ("model" in the request body), comma-separated. It exists so a
 	// model swap can be MEASURED against the live tool catalog before it is
@@ -751,6 +765,10 @@ func Load() (*Config, error) {
 		AgentChatModelB:             getEnv("AGENT_CHAT_MODEL_B", ""),
 		AgentChatModelBPercent:      getEnvIntAllowZero("AGENT_CHAT_MODEL_B_PERCENT", 0),
 		AgentChatDailyMsgCap:        getEnvInt64("AGENT_CHAT_DAILY_MSG_CAP", 50),
+		AgentChatSessionIdleMinutes: getEnvInt("AGENT_CHAT_SESSION_IDLE_MINUTES", 60),
+		AgentChatHistoryMaxChars:    getEnvInt("AGENT_CHAT_HISTORY_MAX_CHARS", 120000),
+		AgentChatMemoryMaxChars:     getEnvIntAllowZero("AGENT_CHAT_MEMORY_MAX_CHARS", 1200),
+		AgentChatMemoryModel:        getEnv("AGENT_CHAT_MEMORY_MODEL", ""),
 		AgentChatModelAllowlist:     splitList(getEnv("AGENT_CHAT_MODEL_ALLOWLIST", "")),
 		LangfuseHost:                getEnv("LANGFUSE_HOST", "https://cloud.langfuse.com"),
 		LangfusePublicKey:           getEnv("LANGFUSE_PUBLIC_KEY", ""),

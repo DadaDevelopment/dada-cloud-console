@@ -329,6 +329,7 @@ func NewHandler(pool *pgxpool.Pool, cfg *config.Config) *Handler {
 	h.agentChatLLM = llmchat.New(cfg.AgentChatGatewayURL, cfg.AgentChatGatewayKey, agentChatDefaultModel(cfg.AgentChatModel))
 	h.agentChatLLM.KeyFunc = h.currentAgentChatKey
 	h.StartAgentChatIdentityRefresher(context.Background())
+	h.StartAgentChatMemoryFolder(context.Background())
 	selfURL := cfg.MCPSelfURL
 	if selfURL == "" {
 		selfURL = "http://127.0.0.1:" + cfg.Port

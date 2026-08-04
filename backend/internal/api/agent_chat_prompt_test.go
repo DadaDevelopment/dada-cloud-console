@@ -321,7 +321,7 @@ func TestAgentChatSystemPrompt_IsBuiltOnceAndStaysStable(t *testing.T) {
 // prompt no longer states must actually reach the model, or the assistant loses
 // the page it is on and how much of what it proposes will stop for a card.
 func TestAgentChatUserMessage_CarriesTheVolatileContext(t *testing.T) {
-	msg := agentChatUserMessage(agentChatRequest{ProjectID: "p1", EnvID: "e1", AppName: "shop", Mode: "admin"}, "deploy it")
+	msg := agentChatUserMessage(agentChatRequest{ProjectID: "p1", EnvID: "e1", AppName: "shop", Mode: "admin"}, "deploy it", "")
 	for _, want := range []string{"projectId=p1", "envId=e1", "appName=shop", "autonomy: admin", "deploy it"} {
 		if !strings.Contains(msg, want) {
 			t.Errorf("user message lost %q:\n%s", want, msg)
@@ -331,11 +331,32 @@ func TestAgentChatUserMessage_CarriesTheVolatileContext(t *testing.T) {
 		t.Errorf("the user's own text must come last:\n%s", msg)
 	}
 
-	empty := agentChatUserMessage(agentChatRequest{}, "hi")
+	empty := agentChatUserMessage(agentChatRequest{}, "hi", "")
 	if !strings.Contains(empty, "the user has not opened a project") {
 		t.Errorf("empty context must say so plainly:\n%s", empty)
 	}
 	if !strings.Contains(empty, "autonomy: edit") {
 		t.Errorf("an unset mode must read as edit:\n%s", empty)
+	}
+	if strings.Contains(empty, "remembered from earlier") {
+		t.Errorf("a user with no memory must not get an empty memory block:\n%s", empty)
+	}
+}
+
+// TestAgentChatUserMessage_MemoryIsLabelledAsRecall guards the one thing that
+// makes cross-session memory safe to carry: the model has to be able to tell a
+// summary written by an older conversation apart from the platform state it is
+// looking at right now, or it starts answering "your app is on 2 replicas" from
+// a note instead of from the API.
+func TestAgentChatUserMessage_MemoryIsLabelledAsRecall(t *testing.T) {
+	msg := agentChatUserMessage(agentChatRequest{}, "hi", "  prefers Russian; runs a Django shop  ")
+	if !strings.Contains(msg, "not current platform state") {
+		t.Errorf("memory must be marked as recall, not observation:\n%s", msg)
+	}
+	if !strings.Contains(msg, "prefers Russian; runs a Django shop]") {
+		t.Errorf("memory must be trimmed and carried verbatim:\n%s", msg)
+	}
+	if !strings.HasSuffix(msg, "\n\nhi") {
+		t.Errorf("the user's own text must still come last:\n%s", msg)
 	}
 }

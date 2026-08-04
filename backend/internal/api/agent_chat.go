@@ -263,7 +263,7 @@ func (h *Handler) agentChatDailyMessageCount(ctx context.Context, userSub string
 // turn joins to that turn's agent_chat_turns row without threading an extra
 // argument through the whole call graph.
 func (h *Handler) agentChatInsertMessage(ctx context.Context, userSub, orgID string, projectID, envID *uuid.UUID, role, content string, toolName *string) {
-	var orgArg, toolArg, traceArg any
+	var orgArg, toolArg, traceArg, sessionArg any
 	if orgID != "" {
 		orgArg = orgID
 	}
@@ -273,10 +273,13 @@ func (h *Handler) agentChatInsertMessage(ctx context.Context, userSub, orgID str
 	if traceID := agentchat.TraceIDFrom(ctx); traceID != "" {
 		traceArg = traceID
 	}
+	if sessionID := agentchat.SessionIDFrom(ctx); sessionID != uuid.Nil {
+		sessionArg = sessionID
+	}
 	if _, err := h.pool.Exec(ctx,
-		`INSERT INTO agent_chat_messages (user_sub, org_id, project_id, env_id, role, content, tool_name, trace_id)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-		userSub, orgArg, projectID, envID, role, content, toolArg, traceArg,
+		`INSERT INTO agent_chat_messages (user_sub, org_id, project_id, env_id, role, content, tool_name, trace_id, session_id)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+		userSub, orgArg, projectID, envID, role, content, toolArg, traceArg, sessionArg,
 	); err != nil {
 		log.Printf("agent-chat: failed to persist %s message: %v", role, err)
 	}
@@ -301,38 +304,6 @@ func (h *Handler) agentChatContextClearedAt(ctx context.Context, userSub string,
 		return time.Time{}
 	}
 	return clearedAt
-}
-
-func (h *Handler) agentChatHistory(ctx context.Context, userSub string, projectID, envID *uuid.UUID) []llmchat.Message {
-	clearedAt := h.agentChatContextClearedAt(ctx, userSub, projectID, envID)
-	rows, err := h.pool.Query(ctx,
-		`SELECT role, content FROM (
-			SELECT role, content, created_at FROM agent_chat_messages
-			WHERE user_sub = $1
-			  AND project_id IS NOT DISTINCT FROM $2
-			  AND env_id IS NOT DISTINCT FROM $3
-			  AND role IN ('user', 'assistant')
-			  AND content <> ''
-			  AND created_at > $5
-			ORDER BY created_at DESC
-			LIMIT $4
-		 ) recent ORDER BY created_at ASC`,
-		userSub, projectID, envID, agentChatHistoryLimit, clearedAt,
-	)
-	if err != nil {
-		return nil
-	}
-	defer rows.Close()
-
-	var out []llmchat.Message
-	for rows.Next() {
-		var role, content string
-		if err := rows.Scan(&role, &content); err != nil {
-			continue
-		}
-		out = append(out, llmchat.Message{Role: role, Content: content})
-	}
-	return out
 }
 
 // agentChatConfirmRequest resolves a pending write. Model mirrors
@@ -363,6 +334,7 @@ type agentChatPendingRow struct {
 	priceRub         *float64
 	mode             string
 	queued           []agentchat.PendingWrite
+	sessionID        uuid.UUID
 }
 
 func (h *Handler) agentChatInsertPendingAction(ctx context.Context, userSub, orgID string, projectID, envID *uuid.UUID, pending *agentchat.PendingWrite, priceRub *float64, mode agentchat.Mode) (uuid.UUID, error) {
@@ -383,18 +355,22 @@ func (h *Handler) agentChatInsertPendingAction(ctx context.Context, userSub, org
 	if orgID != "" {
 		orgArg = orgID
 	}
+	var sessionArg any
+	if sessionID := agentchat.SessionIDFrom(ctx); sessionID != uuid.Nil {
+		sessionArg = sessionID
+	}
 
 	var actionID uuid.UUID
 	err = h.pool.QueryRow(ctx,
 		`INSERT INTO agent_chat_pending_actions
 			(user_sub, org_id, project_id, env_id, tool_name, args_json, tool_call_id,
 			 messages_snapshot, tool_call_count, write_call_count, status, expires_at, price_rub,
-			 mode, queued_writes)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'pending', $11, $12, $13, $14)
+			 mode, queued_writes, session_id)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'pending', $11, $12, $13, $14, $15)
 		 RETURNING id`,
 		userSub, orgArg, projectID, envID, pending.ToolName, args, pending.ToolCallID,
 		snapshot, pending.ToolCallCount, pending.WriteCallCount, time.Now().Add(agentChatPendingActionTTL), priceRub,
-		string(mode), queued,
+		string(mode), queued, sessionArg,
 	).Scan(&actionID)
 	if err != nil {
 		return uuid.Nil, err
@@ -407,17 +383,21 @@ func (h *Handler) agentChatLoadPendingAction(ctx context.Context, actionID uuid.
 	var orgID *string
 	var snapshotRaw []byte
 	var queuedRaw []byte
+	var sessionID *uuid.UUID
 	err := h.pool.QueryRow(ctx,
 		`SELECT id, user_sub, org_id, project_id, env_id, tool_name, args_json, tool_call_id,
 		        messages_snapshot, tool_call_count, write_call_count, status, expires_at, price_rub,
-		        mode, queued_writes
+		        mode, queued_writes, session_id
 		   FROM agent_chat_pending_actions WHERE id = $1`,
 		actionID,
 	).Scan(&row.id, &row.userSub, &orgID, &row.projectID, &row.envID, &row.toolName, &row.argsJSON,
 		&row.toolCallID, &snapshotRaw, &row.toolCallCount, &row.writeCallCount, &row.status, &row.expiresAt, &row.priceRub,
-		&row.mode, &queuedRaw)
+		&row.mode, &queuedRaw, &sessionID)
 	if err != nil {
 		return nil, err
+	}
+	if sessionID != nil {
+		row.sessionID = *sessionID
 	}
 	if len(queuedRaw) > 0 {
 		if err := json.Unmarshal(queuedRaw, &row.queued); err != nil {
@@ -906,11 +886,17 @@ func agentChatModeLine(mode agentchat.Mode) string {
 }
 
 // agentChatUserMessage prefixes the user's own text with the console context of
-// the page they are on and the autonomy mode of this turn. Both change every
+// the page they are on, the autonomy mode of this turn, and what the assistant
+// remembers about this person from earlier conversations. All three change every
 // turn, which is exactly why they live here and not in the system prompt: the
 // prompt prefix stays byte-stable, and the volatile part rides on the message
 // that was going to be appended anyway.
-func agentChatUserMessage(req agentChatRequest, message string) string {
+//
+// The memory block is labelled as remembered rather than observed on purpose:
+// it was written by a model from an old conversation, so it is a lead, not a
+// fact, and the grounding rules still make the assistant look the current state
+// up before acting on it.
+func agentChatUserMessage(req agentChatRequest, message, memory string) string {
 	var ctxLine strings.Builder
 	if req.ProjectID != "" {
 		ctxLine.WriteString(" projectId=" + req.ProjectID)
@@ -925,7 +911,11 @@ func agentChatUserMessage(req agentChatRequest, message string) string {
 	if ctxLine.Len() > 0 {
 		head = "[console context:" + ctxLine.String() + "]"
 	}
-	return head + "\n" + agentChatModeLine(agentchat.ParseMode(req.Mode)) + "\n\n" + message
+	out := head + "\n" + agentChatModeLine(agentchat.ParseMode(req.Mode))
+	if memory = strings.TrimSpace(memory); memory != "" {
+		out += "\n[remembered from earlier conversations with this user, not current platform state: " + memory + "]"
+	}
+	return out + "\n\n" + message
 }
 
 // agentChatPromptCache holds the built prompt per distinct tool catalog. The
@@ -1115,9 +1105,14 @@ func (h *Handler) AgentChat(c *gin.Context) {
 		}
 	}
 
+	sessionID := h.agentChatSessionID(ctx, userSub, projectID, envID)
+	ctx = agentchat.WithSessionID(ctx, sessionID)
+
+	history := h.agentChatSessionHistory(ctx, sessionID)
+	memory := h.agentChatUserMemory(ctx, userSub)
+
 	h.agentChatInsertMessage(ctx, userSub, orgID, projectID, envID, "user", message, nil)
 
-	history := h.agentChatHistory(ctx, userSub, projectID, envID)
 	bearer := c.GetHeader("Authorization")
 
 	emit := agentchat.Emitter{
@@ -1134,7 +1129,7 @@ func (h *Handler) AgentChat(c *gin.Context) {
 	systemPrompt := agentChatSystemPrompt(view.CatalogNames())
 
 	llm := h.agentChatLLM.WithModel(h.agentChatModelFor(req.Model, userSub))
-	res, err := agentchat.RunTurn(ctx, llm, view, bearer, userSub, systemPrompt, history, agentChatUserMessage(req, message), turnCtx, emit)
+	res, err := agentchat.RunTurn(ctx, llm, view, bearer, userSub, systemPrompt, history, agentChatUserMessage(req, message, memory), turnCtx, emit)
 	trace.AbsorbResult(res)
 	trace.EnsureModel(llm.Model)
 	if err != nil {
@@ -1438,6 +1433,7 @@ func (h *Handler) AgentChatConfirm(c *gin.Context) {
 	trace.ProjectID = row.projectID
 	trace.EnvID = row.envID
 	trace.ContextProjectPresent = row.projectID != nil
+	ctx = agentchat.WithSessionID(ctx, h.agentChatConfirmSessionID(ctx, userSub, row))
 	trace.PendingToolName = row.toolName
 	trace.PendingArgs = agentchat.RedactArgs(row.argsJSON)
 
@@ -1635,7 +1631,7 @@ func (h *Handler) agentChatFindOpenPendingAction(ctx context.Context, userSub st
 
 // @ID          agentChatGetHistory
 // @Summary     Get persisted chat history for this project/env, plus any still-open confirmation
-// @Description Reads back what's already in agent_chat_messages (and, if one is still open, the pending write-action awaiting confirm/reject) so the panel can restore a conversation after a page reload -- the browser-side message list is otherwise pure in-memory React state and disappears on refresh. Read-only; does not touch the LLM gateway or the daily message cap.
+// @Description Reads back the currently open conversation (and, if one is still open, the pending write-action awaiting confirm/reject) so the panel can restore it after a page reload -- the browser-side message list is otherwise pure in-memory React state and disappears on refresh. Scoped to the live session, so the panel shows exactly what the assistant still has in front of it rather than a transcript it has already forgotten. Read-only: it neither opens a session nor extends an idle one, and it does not touch the LLM gateway or the daily message cap.
 // @Tags        agent
 // @Produce     json
 // @Security    BearerAuth
@@ -1655,38 +1651,35 @@ func (h *Handler) AgentChatGetHistory(c *gin.Context) {
 	userSub := claims.UserID.String()
 	projectID := parseOptionalUUID(c.Query("projectId"))
 	envID := parseOptionalUUID(c.Query("envId"))
-	clearedAt := h.agentChatContextClearedAt(ctx, userSub, projectID, envID)
-
-	rows, err := h.pool.Query(ctx,
-		`SELECT role, content, tool_name FROM (
-			SELECT role, content, tool_name, created_at FROM agent_chat_messages
-			WHERE user_sub = $1
-			  AND project_id IS NOT DISTINCT FROM $2
-			  AND env_id IS NOT DISTINCT FROM $3
-			  AND role IN ('user', 'assistant', 'tool')
-			  AND created_at > $5
-			ORDER BY created_at DESC
-			LIMIT $4
-		 ) recent ORDER BY created_at ASC`,
-		userSub, projectID, envID, agentChatHistoryLimit, clearedAt,
-	)
-	if err != nil {
-		respondError(c, http.StatusInternalServerError, "failed to load chat history")
-		return
-	}
-	defer rows.Close()
-
 	messages := []agentChatHistoryMessage{}
-	for rows.Next() {
-		var m agentChatHistoryMessage
-		var toolName *string
-		if err := rows.Scan(&m.Role, &m.Content, &toolName); err != nil {
-			continue
+	if sessionID := h.agentChatOpenSessionID(ctx, userSub, projectID, envID); sessionID != uuid.Nil {
+		rows, err := h.pool.Query(ctx,
+			`SELECT role, content, tool_name FROM (
+				SELECT role, content, tool_name, created_at FROM agent_chat_messages
+				WHERE session_id = $1
+				  AND role IN ('user', 'assistant', 'tool')
+				ORDER BY created_at DESC
+				LIMIT $2
+			 ) recent ORDER BY created_at ASC`,
+			sessionID, agentChatHistoryLimit,
+		)
+		if err != nil {
+			respondError(c, http.StatusInternalServerError, "failed to load chat history")
+			return
 		}
-		if toolName != nil {
-			m.ToolName = *toolName
+		defer rows.Close()
+
+		for rows.Next() {
+			var m agentChatHistoryMessage
+			var toolName *string
+			if err := rows.Scan(&m.Role, &m.Content, &toolName); err != nil {
+				continue
+			}
+			if toolName != nil {
+				m.ToolName = *toolName
+			}
+			messages = append(messages, m)
 		}
-		messages = append(messages, m)
 	}
 
 	var pending *agentChatPendingActionDTO
@@ -1744,6 +1737,8 @@ func (h *Handler) AgentChatClearContext(c *gin.Context) {
 		respondError(c, http.StatusInternalServerError, "failed to clear context")
 		return
 	}
+
+	h.agentChatEndSessions(ctx, userSub, projectID, envID)
 
 	if pendingRow, err := h.agentChatFindOpenPendingAction(ctx, userSub, projectID, envID); err == nil && pendingRow != nil {
 		_, _ = h.agentChatConsumePendingAction(ctx, pendingRow.id, "declined")
