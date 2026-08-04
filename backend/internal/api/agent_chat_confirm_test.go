@@ -17,6 +17,7 @@ import (
 
 	"github.com/dada-tuda/console/backend/internal/agentchat"
 	"github.com/dada-tuda/console/backend/internal/auth"
+	"github.com/dada-tuda/console/backend/internal/config"
 	"github.com/dada-tuda/console/backend/internal/llmchat"
 )
 
@@ -207,7 +208,7 @@ func TestAgentChatConfirm_Approve_ExecutesToolAndResumes(t *testing.T) {
 	ts := newFakeAgentToolset(t, backend.URL)
 	llm := newScriptedAgentGateway(t, []string{"Restarted web."})
 
-	h := &Handler{pool: pool, agentChatLLM: llm, agentChatTools: ts}
+	h := &Handler{pool: pool, cfg: &config.Config{}, agentChatLLM: llm, agentChatTools: ts}
 	actionID := insertPendingRestartAction(t, h, userSub)
 
 	c, rec := newAgentConfirmCtx(userSub, "confirm-bearer-token", fmt.Sprintf(`{"action_id":%q,"decision":"approve"}`, actionID))
@@ -261,7 +262,7 @@ func TestAgentChatConfirm_Reject_LeavesStateUntouched(t *testing.T) {
 	ts := newFakeAgentToolset(t, backend.URL)
 	llm := newScriptedAgentGateway(t, []string{"OK, I will not restart it."})
 
-	h := &Handler{pool: pool, agentChatLLM: llm, agentChatTools: ts}
+	h := &Handler{pool: pool, cfg: &config.Config{}, agentChatLLM: llm, agentChatTools: ts}
 	actionID := insertPendingRestartAction(t, h, userSub)
 
 	c, rec := newAgentConfirmCtx(userSub, "confirm-bearer-token", fmt.Sprintf(`{"action_id":%q,"decision":"reject"}`, actionID))
@@ -300,7 +301,7 @@ func TestAgentChatConfirm_Expired_NoExecution(t *testing.T) {
 	ts := newFakeAgentToolset(t, backend.URL)
 	llm := newScriptedAgentGateway(t, nil)
 
-	h := &Handler{pool: pool, agentChatLLM: llm, agentChatTools: ts}
+	h := &Handler{pool: pool, cfg: &config.Config{}, agentChatLLM: llm, agentChatTools: ts}
 	actionID := insertPendingRestartAction(t, h, userSub)
 
 	if _, err := pool.Exec(context.Background(), `UPDATE agent_chat_pending_actions SET expires_at = now() - interval '1 minute' WHERE id=$1`, actionID); err != nil {
@@ -337,7 +338,7 @@ func TestAgentChatConfirm_WrongUser_Forbidden(t *testing.T) {
 	ts := newFakeAgentToolset(t, backend.URL)
 	llm := newScriptedAgentGateway(t, nil)
 
-	h := &Handler{pool: pool, agentChatLLM: llm, agentChatTools: ts}
+	h := &Handler{pool: pool, cfg: &config.Config{}, agentChatLLM: llm, agentChatTools: ts}
 	actionID := insertPendingRestartAction(t, h, ownerSub)
 
 	c, rec := newAgentConfirmCtx(attackerSub, "attacker-bearer-token", fmt.Sprintf(`{"action_id":%q,"decision":"approve"}`, actionID))
@@ -378,7 +379,7 @@ func TestAgentChatConfirm_DoubleConfirm_SecondGetsConflict(t *testing.T) {
 	ts := newFakeAgentToolset(t, backend.URL)
 	llm := newScriptedAgentGateway(t, []string{"Restarted web."})
 
-	h := &Handler{pool: pool, agentChatLLM: llm, agentChatTools: ts}
+	h := &Handler{pool: pool, cfg: &config.Config{}, agentChatLLM: llm, agentChatTools: ts}
 	actionID := insertPendingRestartAction(t, h, userSub)
 
 	c1, rec1 := newAgentConfirmCtx(userSub, "confirm-bearer-token", fmt.Sprintf(`{"action_id":%q,"decision":"approve"}`, actionID))
@@ -414,7 +415,7 @@ func TestAgentChatConfirm_QueuedWrite_ShowsNextCardWithoutCallingTheModel(t *tes
 	ts := newFakeAgentToolset(t, backend.URL)
 	llm := newScriptedAgentGateway(t, nil)
 
-	h := &Handler{pool: pool, agentChatLLM: llm, agentChatTools: ts}
+	h := &Handler{pool: pool, cfg: &config.Config{}, agentChatLLM: llm, agentChatTools: ts}
 	pending := &agentchat.PendingWrite{
 		ToolName:   "restartApp",
 		ToolCallID: "call_1",
