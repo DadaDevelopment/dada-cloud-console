@@ -21,7 +21,7 @@ import { TemplateDeployCards } from "@/components/console/template-deploy-cards"
 import { UploadDeployCard } from "@/components/deploy/upload-deploy";
 import { useT } from "@/lib/i18n/console/context";
 import { QuotaUpsell } from "@/components/billing/quota-upsell";
-import { Globe, Database, GitPullRequest, ChevronDown } from "lucide-react";
+import { Globe, Database, ChevronDown } from "lucide-react";
 import { AppPreviewPane } from "@/components/app-preview-pane";
 import { LogsViewer } from "@/components/logs-viewer";
 import { classifyVMResource, extractIngressSpec, extractDatabaseSpec } from "@/lib/vm-resources";
@@ -277,14 +277,6 @@ export default function AppsPage() {
         <div className="space-y-10">
           {(() => {
             const realEnvs = environments.filter((env) => !env.is_ephemeral);
-            const previews = environments
-              .filter((pe) => pe.is_ephemeral && pe.pr_number != null)
-              .map((pe) => ({
-                env: pe,
-                url: (appsByEnv[pe.id] ?? [])
-                  .map((a) => (a.summary_json as unknown as AppSummary).url)
-                  .find(Boolean),
-              }));
             const groups = (["cloud", "vm"] as const)
               .map((runtime) => {
                 const envs = realEnvs.filter((e) => (e.runtime === "vm") === (runtime === "vm"));
@@ -305,7 +297,6 @@ export default function AppsPage() {
                 projectId={projectId}
                 entries={g.entries}
                 infra={g.infra}
-                previews={previews}
                 canCreate={canCreate}
                 onCreate={(envId) => openChooser(envId)}
                 t={t}
@@ -477,24 +468,18 @@ export default function AppsPage() {
   );
 }
 
-interface EnvPreviewChip {
-  env: Environment;
-  url?: string;
-}
-
 interface GroupBlockProps {
   title?: string;
   primaryEnv: Environment;
   projectId: string;
   entries: { app: ResourceSnapshot; env: Environment }[];
   infra: ResourceSnapshot[];
-  previews: EnvPreviewChip[];
   canCreate: boolean;
   onCreate: (envId: string) => void;
   t: (key: string, vars?: Record<string, string>) => string;
 }
 
-function GroupBlock({ title, primaryEnv, projectId, entries, infra, previews, canCreate, onCreate, t }: GroupBlockProps) {
+function GroupBlock({ title, primaryEnv, projectId, entries, infra, canCreate, onCreate, t }: GroupBlockProps) {
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const isVM = primaryEnv.runtime === "vm";
   return (
@@ -544,7 +529,6 @@ function GroupBlock({ title, primaryEnv, projectId, entries, infra, previews, ca
               app={app}
               env={env}
               projectId={projectId}
-              previews={previews}
               expanded={expandedId === app.id}
               onToggle={() => setExpandedId((cur) => (cur === app.id ? null : app.id))}
               t={t}
@@ -590,13 +574,12 @@ interface AppRowProps {
   app: ResourceSnapshot;
   env: Environment;
   projectId: string;
-  previews: EnvPreviewChip[];
   expanded: boolean;
   onToggle: () => void;
   t: (key: string, vars?: Record<string, string>) => string;
 }
 
-function AppRow({ app, env, projectId, previews, expanded, onToggle, t }: AppRowProps) {
+function AppRow({ app, env, projectId, expanded, onToggle, t }: AppRowProps) {
   const summary = app.summary_json as unknown as AppSummary;
   const resType = classifyVMResource(app);
   const ing = resType === "ingress" ? extractIngressSpec(app) : null;
@@ -605,7 +588,6 @@ function AppRow({ app, env, projectId, previews, expanded, onToggle, t }: AppRow
   const alerts = getAppAlerts(app);
   const hasCrashAlert = hasAlertType(alerts, "crash");
   const hasVolumeAlert = hasAlertType(alerts, "volume");
-  const rowPreviews = previews.filter((p) => p.env.name === `pr-${p.env.pr_number}-${app.name}`);
   const subtitle =
     resType === "ingress"
       ? ing?.host ?? summary.image ?? "—"
@@ -657,29 +639,6 @@ function AppRow({ app, env, projectId, previews, expanded, onToggle, t }: AppRow
                 <span className="inline-flex items-center rounded-full bg-amber-100 dark:bg-amber-950/60 px-2 py-0.5 text-xs font-medium text-amber-700 dark:text-amber-300">
                   {t("apps.alerts.chip.volume")}
                 </span>
-              )}
-              {rowPreviews.map((p) =>
-                p.url ? (
-                  <a
-                    key={p.env.id}
-                    href={p.url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    onClick={(e) => e.stopPropagation()}
-                    className="inline-flex items-center gap-1 rounded-full bg-purple-50 dark:bg-purple-950/40 px-2 py-0.5 text-xs font-medium text-purple-700 dark:text-purple-300 hover:bg-purple-100 dark:hover:bg-purple-950/60 transition-colors"
-                  >
-                    <GitPullRequest className="h-3 w-3" />
-                    {t("apps.card.prPreview", { pr: String(p.env.pr_number) })}
-                  </a>
-                ) : (
-                  <span
-                    key={p.env.id}
-                    className="inline-flex items-center gap-1 rounded-full bg-purple-50 dark:bg-purple-950/40 px-2 py-0.5 text-xs font-medium text-purple-700 dark:text-purple-300"
-                  >
-                    <GitPullRequest className="h-3 w-3" />
-                    {t("apps.card.prPreview", { pr: String(p.env.pr_number) })}
-                  </span>
-                ),
               )}
             </div>
             <p className="mt-0.5 truncate font-mono text-xs text-gray-400 dark:text-gray-500">{subtitle}</p>

@@ -1194,7 +1194,6 @@ export interface EnvVar {
   value?: string; // only present after reveal
   is_secret: boolean;
   scope: "build" | "runtime" | "both";
-  preview_override?: boolean;
   created_at: string;
   updated_at: string;
 }

@@ -94,8 +94,8 @@ own.
 | Tool | Required | Optional | Notes |
 | --- | --- | --- | --- |
 | `listEnvVars` | `projectId`, `envId`, `appName` | — | read-only. Non-secret values come back in plaintext; **secret values are masked**, so an agent can see that a key exists without seeing what it holds. |
-| `setEnvVar` | `projectId`, `envId`, `appName`, `key` | `value`, `is_secret`, `scope`, `preview_override` | Creates or updates one key. The value is stored AES-GCM encrypted either way; `is_secret` controls whether it is ever readable back. |
-| `deleteEnvVar` | `projectId`, `envId`, `appName`, `key` | `preview_override` | **destructive.** Removes one key. With `preview_override=true` it removes only the preview-environment override and leaves the base variable alone. |
+| `setEnvVar` | `projectId`, `envId`, `appName`, `key` | `value`, `is_secret`, `scope` | Creates or updates one key. The value is stored AES-GCM encrypted either way; `is_secret` controls whether it is ever readable back. |
+| `deleteEnvVar` | `projectId`, `envId`, `appName`, `key` | — | **destructive.** Removes one key. |
 
 Changes reconcile without a restart. There is no bulk-set tool on the agent
 surface — one key per call, which keeps a partial failure legible.
