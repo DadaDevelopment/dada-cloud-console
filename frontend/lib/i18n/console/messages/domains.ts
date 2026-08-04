@@ -112,6 +112,10 @@ export const domains: Messages = {
     ru: "DNS на месте, выпускаем сертификат — обычно занимает минуту.",
     en: "DNS is in place, the certificate is being issued — usually takes a minute.",
   },
+  "domains.hm.reason.route_missing": {
+    ru: "Сертификат выпущен, но маршрута к приложению нет — платформа не отдаёт этот адрес. Передеплойте приложение или привяжите хост заново.",
+    en: "The certificate is issued, but no route to the app exists — the platform does not serve this address yet. Redeploy the app or attach the hostname again.",
+  },
   "domains.hm.reason.attach_timeout": {
     ru: "Домен так и не заработал за 48 часов. Проверьте DNS-запись и привяжите хост заново.",
     en: "The domain never came up within 48 hours. Check the DNS record and attach the hostname again.",

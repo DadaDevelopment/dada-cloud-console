@@ -21,6 +21,9 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rs/zerolog/log"
+	networkingv1 "k8s.io/api/networking/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/kubernetes"
 )
 
 // Custom domains (Vercel-style two-level model). Level 1: a project proves
@@ -1067,21 +1070,46 @@ const hostnameReasonCertPending = "cert_pending"
 // for never serving its certificate within hostnamePendingFailAfter.
 const hostnameReasonAttachTimeout = "attach_timeout"
 
+// hostnameReasonRouteMissing is the status_reason for a hostname whose TLS
+// handshake succeeds (the wildcard cert covering our managed *.dada-tuda.ru
+// surrogates always answers, regardless of whether anything routes the name)
+// but has no Ingress rule for it in the cluster. Without this check a
+// surrogate hostname with no live Ingress -- app deleted, Ingress dropped from
+// git out-of-band -- passed hostnameCertLive on the wildcard alone and showed
+// green in the console over a dead URL. Route existence is the second half of
+// "active": a live cert and a live route to serve it.
+const hostnameReasonRouteMissing = "route_missing"
+
+// domainRouteClientsetFactory builds the kube client the route checks dial,
+// indirected through a var (rather than calling newAppHealthClientset
+// directly) so tests can swap in a fake clientset and exercise the
+// cert+route decision logic without an in-cluster service account.
+var domainRouteClientsetFactory = newAppHealthClientset
+
 // reissueActorID is the fixed system-user id (see migration 010_system_user.sql)
 // used as actor_id for operations the reconciler enqueues on its own, with no
 // human actor behind them.
 var reissueActorID = uuid.MustParse("00000000-0000-0000-0000-000000000000")
 
 // ReconcilePendingHostnames flips a hostname from pending to active once its
-// Let's Encrypt certificate is serving end-to-end, fails hostnames that have
-// been pending past hostnamePendingFailAfter, and -- for managed (surrogate)
-// hostnames only -- re-issues the DNS write when the A record itself never
-// resolved within hostnameDNSStuckAfter. Nothing else updates the row after
-// AttachHostname/CreateApp commits the Ingress (and, for managed rows, the
-// PublicApi DNS composite) to git, so without this a fully working domain
-// shows "pending" forever in the console, and a managed hostname whose DNS
-// write was dropped (e.g. a Beget-API egress block at write time) stays
-// NXDOMAIN forever with no auto-recovery.
+// Let's Encrypt certificate is serving end-to-end AND (for non-VM runtimes) an
+// Ingress rule for it actually exists in the cluster, fails hostnames that
+// have been pending past hostnamePendingFailAfter, and -- for managed
+// (surrogate) hostnames only -- re-issues the DNS write when the A record
+// itself never resolved within hostnameDNSStuckAfter. Nothing else updates
+// the row after AttachHostname/CreateApp commits the Ingress (and, for
+// managed rows, the PublicApi DNS composite) to git, so without this a fully
+// working domain shows "pending" forever in the console, and a managed
+// hostname whose DNS write was dropped (e.g. a Beget-API egress block at
+// write time) stays NXDOMAIN forever with no auto-recovery.
+//
+// The route check exists because our managed surrogate hostnames
+// (*.dada-tuda.ru) share one wildcard certificate: hostnameCertLive alone
+// passes for ANY name under that wildcard whether or not anything in the
+// cluster actually routes it, which is exactly how 14 dead surrogate rows
+// went active with no Ingress behind them. A cert-only check cannot tell
+// "served by us" from "matches our wildcard", so the route must be verified
+// independently via the kube API.
 //
 // The cert probe is a TLS handshake with SNI set to the hostname, aimed at our
 // OWN ingress (cfg.IngressTLSProbeAddr), not at the hostname's public address.
@@ -1097,6 +1125,7 @@ var reissueActorID = uuid.MustParse("00000000-0000-0000-0000-000000000000")
 // status='pending' so a concurrent detach or a row that just went active is
 // never clobbered.
 func ReconcilePendingHostnames(ctx context.Context, pool *pgxpool.Pool, cfg *config.Config) error {
+	clientset := domainRouteClientsetFactory()
 	rows, err := pool.Query(ctx,
 		`SELECT dh.id, dh.hostname, dh.created_at, dh.managed, dh.environment_id, dh.app_name,
 		        dh.last_reissue_at, dh.status_reason, e.project_id, e.runtime, a.vm_ip
@@ -1139,9 +1168,23 @@ func ReconcilePendingHostnames(ctx context.Context, pool *pgxpool.Pool, cfg *con
 			continue
 		}
 		if hostnameCertLive(ctx, p.hostname, probeAddr) {
-			_, _ = pool.Exec(ctx,
-				`UPDATE domain_hostnames SET status='active', cert_status='active', status_reason=NULL, updated_at=now()
-				  WHERE id=$1 AND status='pending'`, p.id)
+			routeLive, routeKnown := true, true
+			if p.runtime != models.EnvironmentRuntimeVM {
+				routeLive, routeKnown = hostnameRouteLive(ctx, clientset, p.hostname)
+			}
+			switch hostnameCertRouteDecision(p.runtime, routeKnown, routeLive) {
+			case hostnameOutcomeUnknown:
+			case hostnameOutcomeRouteMissing:
+				if p.statusReason == nil || *p.statusReason != hostnameReasonRouteMissing {
+					_, _ = pool.Exec(ctx,
+						`UPDATE domain_hostnames SET status_reason=$2, updated_at=now()
+						  WHERE id=$1 AND status='pending'`, p.id, hostnameReasonRouteMissing)
+				}
+			case hostnameOutcomeActive:
+				_, _ = pool.Exec(ctx,
+					`UPDATE domain_hostnames SET status='active', cert_status='active', status_reason=NULL, updated_at=now()
+					  WHERE id=$1 AND status='pending'`, p.id)
+			}
 			continue
 		}
 		reason := hostnameReasonCertPending
@@ -1188,6 +1231,159 @@ func ReconcilePendingHostnames(ctx context.Context, pool *pgxpool.Pool, cfg *con
 			Msg("managed hostname A record unresolved past window -- re-issued DNS write")
 	}
 	return nil
+}
+
+// RevalidateActiveHostnameRoutes catches the other side of the route_missing
+// bug: ReconcilePendingHostnames only ever looks at status='pending' rows, so
+// a hostname that already flipped to 'active' before this check existed (or
+// whose Ingress was deleted from git after going active -- app retired,
+// hand-written "clean up" commit) stays green forever with nothing that ever
+// re-examines it. This walks the active rows instead and, for k8s runtimes
+// only, sends them back to pending with status_reason=route_missing the
+// moment their Ingress rule disappears. It deliberately does NOT touch the
+// certificate: hostnameCertLive already passed once to get here, and a
+// transient probe failure is not this function's job to chase.
+//
+// A kube-API error or timeout on hostnameRouteLive means "unknown", not
+// "absent" -- the row is left untouched rather than demoted, so a control-plane
+// blip never flaps an otherwise-healthy domain back to pending.
+func RevalidateActiveHostnameRoutes(ctx context.Context, pool *pgxpool.Pool) error {
+	clientset := domainRouteClientsetFactory()
+	if clientset == nil {
+		return nil
+	}
+	rows, err := pool.Query(ctx,
+		`SELECT dh.id, dh.hostname, e.runtime
+		   FROM domain_hostnames dh
+		   JOIN environments e ON e.id = dh.environment_id
+		  WHERE dh.status = 'active'`)
+	if err != nil {
+		return err
+	}
+	type activeHost struct {
+		id       uuid.UUID
+		hostname string
+		runtime  models.EnvironmentRuntime
+	}
+	var active []activeHost
+	for rows.Next() {
+		var a activeHost
+		if err := rows.Scan(&a.id, &a.hostname, &a.runtime); err != nil {
+			rows.Close()
+			return err
+		}
+		active = append(active, a)
+	}
+	rows.Close()
+
+	for _, a := range active {
+		if a.runtime == models.EnvironmentRuntimeVM {
+			continue
+		}
+		routeLive, known := hostnameRouteLive(ctx, clientset, a.hostname)
+		if !known || routeLive {
+			continue
+		}
+		if _, err := pool.Exec(ctx,
+			`UPDATE domain_hostnames SET status='pending', status_reason=$2, updated_at=now()
+			  WHERE id=$1 AND status='active'`, a.id, hostnameReasonRouteMissing,
+		); err == nil {
+			log.Warn().
+				Str("hostname", a.hostname).
+				Msg("active hostname has no matching Ingress route -- reverted to pending")
+		}
+	}
+	return nil
+}
+
+// hostnameCertRouteOutcome is what ReconcilePendingHostnames does with a
+// pending hostname whose cert probe already passed, once the route check
+// weighs in.
+type hostnameCertRouteOutcome int
+
+const (
+	// hostnameOutcomeActive: VM runtime (no route check applies), or a route
+	// check that confirmed the Ingress rule exists.
+	hostnameOutcomeActive hostnameCertRouteOutcome = iota
+	// hostnameOutcomeRouteMissing: the route check ran and confirmed there is
+	// no Ingress rule for the hostname -- the row stays pending with the
+	// route_missing reason.
+	hostnameOutcomeRouteMissing
+	// hostnameOutcomeUnknown: the route check could not run (no in-cluster
+	// client) or errored (kube-API timeout/failure) -- the row is left
+	// exactly as it was, to be retried next tick.
+	hostnameOutcomeUnknown
+)
+
+// hostnameCertRouteDecision turns a route lookup into the action
+// ReconcilePendingHostnames takes for a hostname whose cert probe already
+// succeeded. Kept separate from the lookup itself (hostnameRouteLive, which
+// needs a live or fake kube client) so the actual branching -- the part a
+// wrong kube-API response must not silently corrupt into a flap -- is
+// testable with plain booleans.
+func hostnameCertRouteDecision(runtime models.EnvironmentRuntime, routeKnown, routeLive bool) hostnameCertRouteOutcome {
+	if runtime == models.EnvironmentRuntimeVM {
+		return hostnameOutcomeActive
+	}
+	if !routeKnown {
+		return hostnameOutcomeUnknown
+	}
+	if !routeLive {
+		return hostnameOutcomeRouteMissing
+	}
+	return hostnameOutcomeActive
+}
+
+// hostnameRouteLive reports whether the cluster has an Ingress with a rule for
+// hostname. known is false when the answer cannot be determined -- no
+// in-cluster kube client (local dev, off-cluster tests) or the list call
+// itself failed/timed out -- so callers can treat "unknown" as "leave the row
+// alone" rather than as "the route is gone", which is the difference between a
+// genuine dead domain and a momentary API-server hiccup.
+//
+// The list is cluster-wide on purpose. A hostname is not always routed from
+// the environment's own namespace: PR previews under *.pv.dada-tuda.ru are
+// served by one shared wildcard Ingress living in argocd-prod, so a
+// namespace-scoped lookup would report every live preview domain as
+// route-missing and flap it back to pending.
+func hostnameRouteLive(parent context.Context, clientset kubernetes.Interface, hostname string) (live bool, known bool) {
+	if clientset == nil {
+		return false, false
+	}
+	ctx, cancel := context.WithTimeout(parent, 6*time.Second)
+	defer cancel()
+	list, err := clientset.NetworkingV1().Ingresses(metav1.NamespaceAll).List(ctx, metav1.ListOptions{})
+	if err != nil {
+		return false, false
+	}
+	for _, ing := range list.Items {
+		if ingressRouteMatchesHost(ing.Spec.Rules, hostname) {
+			return true, true
+		}
+	}
+	return false, true
+}
+
+// ingressRouteMatchesHost reports whether any rule in rules routes hostname,
+// counting the single-label wildcard form Kubernetes itself defines
+// (*.example.com matches foo.example.com but never bar.foo.example.com or the
+// bare apex). Pulled out of hostnameRouteLive so the matching logic itself --
+// the part worth getting right -- is testable without a fake clientset.
+func ingressRouteMatchesHost(rules []networkingv1.IngressRule, hostname string) bool {
+	for _, rule := range rules {
+		if rule.Host == hostname {
+			return true
+		}
+		suffix, ok := strings.CutPrefix(rule.Host, "*.")
+		if !ok {
+			continue
+		}
+		label, rest, found := strings.Cut(hostname, ".")
+		if found && label != "" && rest == suffix {
+			return true
+		}
+	}
+	return false
 }
 
 // hostnameDNSResolved reports whether hostname's A record currently resolves
