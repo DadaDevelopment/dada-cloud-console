@@ -32,6 +32,17 @@ var ErrNoPreviousVersion = errors.New("no previous version to roll back to")
 // adopt the new HEAD as the cursor instead.
 var ErrHistoryRewritten = errors.New("remote history rewritten since last sync cursor")
 
+// LocalCloneError marks a failure that came from the local clone — its object
+// store, index, or worktree — rather than from the network or the remote. The
+// distinction is what lets SyncHard decide it is safe to throw the clone away:
+// a fetch that fails because GitHub is unreachable must be retried, but a reset
+// that fails because a pack is truncated will fail the same way forever.
+type LocalCloneError struct{ Err error }
+
+func (e *LocalCloneError) Error() string { return e.Err.Error() }
+
+func (e *LocalCloneError) Unwrap() error { return e.Err }
+
 // RepoConfig holds credentials for a specific remote repository.
 type RepoConfig struct {
 	RepoURL   string
@@ -90,7 +101,11 @@ func (m *Manager) EnsureCloned() error {
 	if _, err := os.Stat(filepath.Join(m.path, ".git")); err == nil {
 		return nil // already cloned
 	}
+	return m.clone()
+}
 
+// clone performs the initial clone. Callers must hold m.mu.
+func (m *Manager) clone() error {
 	log.Info().Str("repo", m.cfg.RepoURL).Str("branch", m.cfg.Branch).Msg("cloning repo")
 	_, err := gogit.PlainClone(m.path, false, &gogit.CloneOptions{
 		URL:           m.cfg.RepoURL,
@@ -151,23 +166,51 @@ func (m *Manager) pull() (string, error) {
 // existence probe keeps answering yes. That is how the orphan GC came to see
 // app.yaml for apps deleted months earlier and never pruned their snapshots,
 // leaving the console listing apps that do not exist (2026-07-31).
+// A local clone that cannot be reset is not recoverable in place, and the damage
+// is permanent: go-git writes one pack per fetch and never repacks, so a
+// long-lived clone accumulates hundreds of packs and a single truncated one
+// makes every later reset fail identically with "unexpected EOF". Every consumer
+// of SyncHard is a read-only probe with no local commits, so the clone is a
+// disposable cache — discard it and clone again rather than leaving the caller
+// permanently unable to verify anything. Observed 2026-08-04: the orphan GC had
+// been failing on every tick for every project, so no stale snapshot anywhere in
+// the estate could be purged.
 func (m *Manager) SyncHard() error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
+	err := m.syncHard()
+	var local *LocalCloneError
+	if !errors.As(err, &local) {
+		return err
+	}
+
+	log.Warn().Err(err).Str("path", m.path).
+		Msg("local clone unusable; discarding it and cloning again")
+	if rmErr := os.RemoveAll(m.path); rmErr != nil {
+		return fmt.Errorf("%w (discarding clone failed: %w)", err, rmErr)
+	}
+	if clErr := m.clone(); clErr != nil {
+		return fmt.Errorf("%w (re-clone failed: %w)", err, clErr)
+	}
+	return m.syncHard()
+}
+
+// syncHard is SyncHard without the re-clone recovery. Callers must hold m.mu.
+func (m *Manager) syncHard() error {
 	repo, err := gogit.PlainOpen(m.path)
 	if err != nil {
-		return fmt.Errorf("opening repo: %w", err)
+		return &LocalCloneError{fmt.Errorf("opening repo: %w", err)}
 	}
 	wt, err := repo.Worktree()
 	if err != nil {
-		return err
+		return &LocalCloneError{err}
 	}
 	if err := m.resetToRemoteHead(repo, wt); err != nil {
 		return err
 	}
 	if err := wt.Clean(&gogit.CleanOptions{Dir: true}); err != nil {
-		return fmt.Errorf("cleaning untracked files: %w", err)
+		return &LocalCloneError{fmt.Errorf("cleaning untracked files: %w", err)}
 	}
 	return nil
 }
@@ -285,7 +328,7 @@ func (m *Manager) resetToRemoteHead(repo *gogit.Repository, wt *gogit.Worktree) 
 	}
 
 	if err := wt.Reset(&gogit.ResetOptions{Mode: gogit.HardReset, Commit: ref.Hash()}); err != nil {
-		return fmt.Errorf("hard reset to remote HEAD %s: %w", ref.Hash(), err)
+		return &LocalCloneError{fmt.Errorf("hard reset to remote HEAD %s: %w", ref.Hash(), err)}
 	}
 	return nil
 }

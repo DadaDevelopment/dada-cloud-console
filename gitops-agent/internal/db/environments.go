@@ -98,11 +98,22 @@ func AppSnapshotEnvs(ctx context.Context, pool *pgxpool.Pool) (map[string][]uuid
 // resolve a workload living in a namespace that isn't its env namespace (e.g.
 // AIModel InferenceServices in ml-prod, or App spec.namespace overrides) back to
 // its owning environment — but only when the name is unambiguous (one env).
+//
+// Orphaned rows are excluded. phase='Orphaned' is a soft delete: the app is gone
+// from git and has no live pod, and the row survives only so the purge has
+// something to grace-period. Counting it as a claimant makes every re-homed app
+// permanently ambiguous — its live workload is then attributed to no
+// environment at all, so the surviving snapshot freezes at phase "Unknown" with
+// no image and no namespaces, which also blanks the log search that resolves
+// namespaces from it. Observed 2026-08-04: moving ten apps from project
+// "platform" to "observability" left an Orphaned twin per app and blacked out
+// live status for the whole monitoring estate, with the orphan GC unable to
+// purge the twins because its own clone could not sync.
 func SnapshotEnvsByKind(ctx context.Context, pool *pgxpool.Pool, kind string) (map[string][]uuid.UUID, error) {
 	rows, err := pool.Query(ctx, `
 		SELECT name, environment_id
 		FROM resource_snapshots
-		WHERE kind = $1 AND environment_id IS NOT NULL
+		WHERE kind = $1 AND environment_id IS NOT NULL AND phase <> 'Orphaned'
 	`, kind)
 	if err != nil {
 		return nil, fmt.Errorf("list snapshot envs: %w", err)
