@@ -15,7 +15,6 @@ interface EditState {
   value: string;
   is_secret: boolean;
   scope: Scope;
-  preview_override: boolean;
   editingExisting: boolean;
 }
 
@@ -33,12 +32,11 @@ const EMPTY: EditState = {
   value: "",
   is_secret: true,
   scope: "runtime",
-  preview_override: false,
   editingExisting: false,
 };
 
 function rowKey(v: EnvVar): string {
-  return `${v.key}:${v.preview_override ? "p" : "b"}`;
+  return v.key;
 }
 
 export function EnvVarsEditor({
@@ -93,7 +91,7 @@ export function EnvVarsEditor({
     const rk = rowKey(v);
     setRevealing(rk);
     try {
-      const { value } = await envVarsApi.reveal(projectId, envId, appName, v.key, v.preview_override);
+      const { value } = await envVarsApi.reveal(projectId, envId, appName, v.key);
       setRevealed((prev) => ({ ...prev, [rk]: value }));
     } catch (err) {
       const msg = err instanceof Error ? err.message : t("apps.env.error.reveal");
@@ -115,7 +113,6 @@ export function EnvVarsEditor({
       value: "",
       is_secret: v.is_secret,
       scope: v.scope,
-      preview_override: v.preview_override ?? false,
       editingExisting: true,
     });
     setSubmitError(null);
@@ -131,12 +128,11 @@ export function EnvVarsEditor({
         value: form.value,
         is_secret: form.is_secret,
         scope: form.scope,
-        preview_override: form.preview_override,
       });
       setModalOpen(false);
       setRevealed((prev) => {
         const next = { ...prev };
-        delete next[`${form.key}:${form.preview_override ? "p" : "b"}`];
+        delete next[form.key];
         return next;
       });
       await load();
@@ -174,7 +170,7 @@ export function EnvVarsEditor({
     const rk = rowKey(v);
     setDeleting(rk);
     try {
-      await envVarsApi.remove(projectId, envId, appName, v.key, v.preview_override);
+      await envVarsApi.remove(projectId, envId, appName, v.key);
       await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : t("apps.env.error.delete"));
@@ -272,15 +268,9 @@ export function EnvVarsEditor({
                     )}
                   </td>
                   <td className="px-4 py-3">
-                    {v.preview_override ? (
-                      <span className="inline-flex items-center rounded-full bg-violet-50 px-2 py-0.5 text-xs font-medium text-violet-700 ring-1 ring-violet-600/20">
-                        {t("apps.env.previewOverride.badge")}
-                      </span>
-                    ) : (
-                      <span className="inline-flex items-center rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600">
-                        {v.scope}
-                      </span>
-                    )}
+                    <span className="inline-flex items-center rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600">
+                      {v.scope}
+                    </span>
                     {v.is_secret && (
                       <span className="ml-1.5 inline-flex items-center rounded-full bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-700 ring-1 ring-amber-600/20">
                         {t("apps.env.secret")}
@@ -385,24 +375,6 @@ export function EnvVarsEditor({
                 </select>
                 <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">{t("apps.env.scope.hint")}</p>
               </div>
-
-          <div className="flex items-center justify-between rounded-lg border border-gray-200 dark:border-gray-800 px-4 py-3">
-            <div>
-              <p className="text-sm font-medium text-gray-700 dark:text-gray-200">{t("apps.env.previewOverride.label")}</p>
-              <p className="text-xs text-gray-500 dark:text-gray-400">{t("apps.env.previewOverride.hint")}</p>
-            </div>
-            <button
-              type="button"
-              onClick={() => setForm((f) => ({ ...f, preview_override: !f.preview_override }))}
-              className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 ${
-                form.preview_override ? "bg-blue-600" : "bg-gray-200"
-              }`}
-              role="switch"
-              aria-checked={form.preview_override}
-            >
-              <span className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${form.preview_override ? "translate-x-6" : "translate-x-1"}`} />
-            </button>
-          </div>
             </div>
           </details>
 

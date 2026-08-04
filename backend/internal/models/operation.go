@@ -268,21 +268,10 @@ type CreatePublicApiPayload struct {
 	SwaggerTitle   string   `json:"swagger_title"`
 }
 
-// CreatePreviewEnvPayload is the typed payload for CreatePreviewEnv operations.
-// JSON tags are a hard contract with gitops-agent's doCreatePreviewEnv worker —
-// do NOT rename them.
-type CreatePreviewEnvPayload struct {
-	EnvName     string `json:"env_name"`
-	Namespace   string `json:"namespace"`
-	GitRepoID   string `json:"git_repo_id"`
-	PRNumber    int    `json:"pr_number"`
-	HeadBranch  string `json:"head_branch"`
-	ParentEnvID string `json:"parent_env_id"`
-}
-
 // DeletePreviewEnvPayload is the typed payload for DeletePreviewEnv operations.
 // JSON tags are a hard contract with gitops-agent's doDeletePreviewEnv worker —
-// do NOT rename them.
+// do NOT rename them. Previews are no longer a product feature; teardown stays
+// because environments opened before the removal still have to be taken down.
 type DeletePreviewEnvPayload struct {
 	EnvironmentID string `json:"environment_id"`
 	Namespace     string `json:"namespace"`

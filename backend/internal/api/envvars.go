@@ -16,23 +16,16 @@ import (
 )
 
 // envVar mirrors the frontend EnvVar shape. value is only populated on reveal.
-//
-// PreviewOverride marks a row that lives in preview_env_overrides rather than
-// env_vars: it is set on a PARENT environment and, when true, its value wins
-// over the parent's own env_vars row for the same key when a preview (PR)
-// environment is created from this one. Scope is meaningless for such a row
-// (preview_env_overrides has no scope column) and is left empty.
 type envVar struct {
-	ID              uuid.UUID `json:"id"`
-	EnvironmentID   uuid.UUID `json:"environment_id"`
-	AppName         string    `json:"app_name"`
-	Key             string    `json:"key"`
-	Value           *string   `json:"value,omitempty"` // masked/omitted in list; set only on reveal
-	IsSecret        bool      `json:"is_secret"`
-	Scope           string    `json:"scope,omitempty"`
-	PreviewOverride bool      `json:"preview_override"`
-	CreatedAt       time.Time `json:"created_at"`
-	UpdatedAt       time.Time `json:"updated_at"`
+	ID            uuid.UUID `json:"id"`
+	EnvironmentID uuid.UUID `json:"environment_id"`
+	AppName       string    `json:"app_name"`
+	Key           string    `json:"key"`
+	Value         *string   `json:"value,omitempty"`
+	IsSecret      bool      `json:"is_secret"`
+	Scope         string    `json:"scope,omitempty"`
+	CreatedAt     time.Time `json:"created_at"`
+	UpdatedAt     time.Time `json:"updated_at"`
 }
 
 // queueEnvApply re-deploys an app so an env var change actually reaches its
@@ -172,62 +165,20 @@ func (h *Handler) ListEnvVars(c *gin.Context) {
 		return
 	}
 
-	overrideRows, err := h.pool.Query(c.Request.Context(),
-		`SELECT id, environment_id, app_name, key, value_encrypted, is_secret, created_at, updated_at
-		 FROM preview_env_overrides
-		 WHERE environment_id = $1 AND app_name = $2
-		 ORDER BY key`,
-		envID, appName,
-	)
-	if err != nil {
-		respondError(c, http.StatusInternalServerError, "failed to query preview env overrides")
-		return
-	}
-	defer overrideRows.Close()
-
-	for overrideRows.Next() {
-		var ev envVar
-		var encrypted []byte
-		if err := overrideRows.Scan(&ev.ID, &ev.EnvironmentID, &ev.AppName, &ev.Key,
-			&encrypted, &ev.IsSecret, &ev.CreatedAt, &ev.UpdatedAt); err != nil {
-			respondError(c, http.StatusInternalServerError, "failed to scan preview env override")
-			return
-		}
-		ev.PreviewOverride = true
-		if !ev.IsSecret {
-			if plain, derr := crypto.DecryptToken(h.cfg.GitopsEncryptionKey, encrypted); derr == nil {
-				v := string(plain)
-				ev.Value = &v
-			}
-		}
-		envVars = append(envVars, ev)
-	}
-	if err := overrideRows.Err(); err != nil {
-		respondError(c, http.StatusInternalServerError, "error reading preview env overrides")
-		return
-	}
-
 	c.JSON(http.StatusOK, gin.H{"env_vars": envVars})
 }
 
 type setEnvVarRequest struct {
-	Value           string `json:"value"`
-	IsSecret        bool   `json:"is_secret"`
-	Scope           string `json:"scope"`
-	PreviewOverride bool   `json:"preview_override"`
+	Value    string `json:"value"`
+	IsSecret bool   `json:"is_secret"`
+	Scope    string `json:"scope"`
 }
 
 // SetEnvVar upserts a single environment variable (value stored encrypted).
 //
-// When preview_override is true, the variable is written to
-// preview_env_overrides instead of env_vars: it stays inert on THIS
-// environment (never rendered, never copied verbatim) and only takes effect
-// as an override on preview (PR) environments created from this one. scope is
-// ignored in that case (preview_env_overrides has no scope column).
-//
 // @ID          setEnvVar
 // @Summary     Set an environment variable
-// @Description Creates or updates a single environment variable for an app. The value is always stored AES-GCM encrypted. Requires write access. When preview_override is true, writes a preview-only override instead (see preview_env_overrides).
+// @Description Creates or updates a single environment variable for an app. The value is always stored AES-GCM encrypted. Requires write access.
 // @Tags        env-var
 // @Accept      json
 // @Produce     json
@@ -313,45 +264,19 @@ func (h *Handler) SetEnvVar(c *gin.Context) {
 		return
 	}
 
-	var ev envVar
-	if req.PreviewOverride {
-		encrypted, err := crypto.EncryptToken(h.cfg.GitopsEncryptionKey, []byte(req.Value))
-		if err != nil {
-			rejectEnv(http.StatusInternalServerError, "encrypt_failed", "failed to encrypt value")
-			return
-		}
-		row := h.pool.QueryRow(c.Request.Context(),
-			`INSERT INTO preview_env_overrides (environment_id, app_name, key, value_encrypted, is_secret, created_by)
-			 VALUES ($1, $2, $3, $4, $5, $6)
-			 ON CONFLICT (environment_id, app_name, key)
-			 DO UPDATE SET value_encrypted = EXCLUDED.value_encrypted,
-			               is_secret = EXCLUDED.is_secret,
-			               updated_at = NOW()
-			 RETURNING id, environment_id, app_name, key, is_secret, created_at, updated_at`,
-			envID, appName, key, encrypted, req.IsSecret, claims.UserID,
-		)
-		if err := row.Scan(&ev.ID, &ev.EnvironmentID, &ev.AppName, &ev.Key,
-			&ev.IsSecret, &ev.CreatedAt, &ev.UpdatedAt); err != nil {
-			rejectEnv(http.StatusInternalServerError, "save_preview_override_failed", "failed to save preview env override")
-			return
-		}
-		ev.PreviewOverride = true
-	} else {
-		scope := req.Scope
-		if scope == "" {
-			scope = "runtime"
-		}
-		if scope != "build" && scope != "runtime" && scope != "both" {
-			rejectEnv(http.StatusBadRequest, "invalid_scope", "scope must be one of: build, runtime, both")
-			return
-		}
+	scope := req.Scope
+	if scope == "" {
+		scope = "runtime"
+	}
+	if scope != "build" && scope != "runtime" && scope != "both" {
+		rejectEnv(http.StatusBadRequest, "invalid_scope", "scope must be one of: build, runtime, both")
+		return
+	}
 
-		saved, err := h.upsertEnvVar(c.Request.Context(), envID, appName, key, req.Value, req.IsSecret, scope, claims.UserID.String())
-		if err != nil {
-			rejectEnv(http.StatusInternalServerError, "save_failed", "failed to save env var")
-			return
-		}
-		ev = saved
+	ev, err := h.upsertEnvVar(c.Request.Context(), envID, appName, key, req.Value, req.IsSecret, scope, claims.UserID.String())
+	if err != nil {
+		rejectEnv(http.StatusInternalServerError, "save_failed", "failed to save env var")
+		return
 	}
 
 	h.recordAudit(c.Request.Context(), claims.UserID, auditEntry{
@@ -363,10 +288,8 @@ func (h *Handler) SetEnvVar(c *gin.Context) {
 	})
 
 	resp := gin.H{"env_var": ev}
-	if !req.PreviewOverride {
-		if op, queued := h.queueEnvApply(c, claims, projectID, envID, appName); queued {
-			resp["operation"] = op
-		}
+	if op, queued := h.queueEnvApply(c, claims, projectID, envID, appName); queued {
+		resp["operation"] = op
 	}
 	c.JSON(http.StatusOK, resp)
 }
@@ -392,10 +315,6 @@ type bulkSetEnvVarsRequest struct {
 // Partial success is not offered: a half-applied .env is worse than a rejected
 // one, because the app comes up with an environment the user never described.
 // Validation therefore runs over the whole batch before anything is written.
-//
-// Preview overrides are deliberately out of scope — bulk entry exists for the
-// "here is my .env, run my app" path, and preview_env_overrides is an expert
-// feature that belongs on the single-variable form.
 //
 // @ID          bulkSetEnvVars
 // @Summary     Set many environment variables at once
@@ -568,7 +487,6 @@ func validEnvKey(key string) bool {
 // @Param       appName   path     string true "App name"
 // @Param       key       path     string true "Variable key"
 // @Param       reveal    query    bool   true "Must be true to reveal"
-// @Param       preview_override query bool  false "Reveal the preview-only override instead of the base env var"
 // @Success     200       {object} map[string]string "object with the decrypted value"
 // @Failure     400       {object} map[string]string
 // @Failure     403       {object} map[string]string
@@ -642,14 +560,9 @@ func (h *Handler) RevealEnvVar(c *gin.Context) {
 		return
 	}
 
-	table := "env_vars"
-	if c.Query("preview_override") == "true" {
-		table = "preview_env_overrides"
-	}
-
 	var encrypted []byte
 	err = h.pool.QueryRow(c.Request.Context(),
-		`SELECT value_encrypted FROM `+table+`
+		`SELECT value_encrypted FROM env_vars
 		 WHERE environment_id = $1 AND app_name = $2 AND key = $3`,
 		envID, appName, key,
 	).Scan(&encrypted)
@@ -669,17 +582,16 @@ func (h *Handler) RevealEnvVar(c *gin.Context) {
 		return
 	}
 
-	audit(auditOutcomeSuccess, map[string]any{"preview_override": table == "preview_env_overrides"})
+	audit(auditOutcomeSuccess, map[string]any{})
 
-	c.JSON(http.StatusOK, gin.H{"value": string(plain), "preview_override": table == "preview_env_overrides"})
+	c.JSON(http.StatusOK, gin.H{"value": string(plain)})
 }
 
-// DeleteEnvVar removes a single environment variable. When preview_override=true
-// it removes the preview-only override instead (see preview_env_overrides).
+// DeleteEnvVar removes a single environment variable.
 //
 // @ID          deleteEnvVar
 // @Summary     Delete an environment variable
-// @Description Removes a single environment variable from an app. Requires write access. Pass preview_override=true to delete a preview-only override instead.
+// @Description Removes a single environment variable from an app. Requires write access.
 // @Tags        env-var
 // @Produce     json
 // @Security    BearerAuth
@@ -687,7 +599,6 @@ func (h *Handler) RevealEnvVar(c *gin.Context) {
 // @Param       envId           path     string true  "Environment UUID"
 // @Param       appName         path     string true  "App name"
 // @Param       key             path     string true  "Variable key"
-// @Param       preview_override query    bool   false "Delete the preview-only override instead of the base env var"
 // @Success     204       {object} nil
 // @Failure     403       {object} map[string]string
 // @Failure     404       {object} map[string]string
@@ -747,13 +658,8 @@ func (h *Handler) DeleteEnvVar(c *gin.Context) {
 		return
 	}
 
-	table := "env_vars"
-	if c.Query("preview_override") == "true" {
-		table = "preview_env_overrides"
-	}
-
 	tag, err := h.pool.Exec(c.Request.Context(),
-		`DELETE FROM `+table+` WHERE environment_id = $1 AND app_name = $2 AND key = $3`,
+		`DELETE FROM env_vars WHERE environment_id = $1 AND app_name = $2 AND key = $3`,
 		envID, appName, key,
 	)
 	if err != nil {
@@ -774,9 +680,7 @@ func (h *Handler) DeleteEnvVar(c *gin.Context) {
 		return
 	}
 
-	if table == "env_vars" {
-		_, _ = h.queueEnvApply(c, claims, projectID, envID, appName)
-	}
+	_, _ = h.queueEnvApply(c, claims, projectID, envID, appName)
 
 	h.recordAudit(c.Request.Context(), claims.UserID, auditEntry{
 		ProjectID:     projectID,
@@ -784,7 +688,7 @@ func (h *Handler) DeleteEnvVar(c *gin.Context) {
 		Action:        "DeleteEnvVar",
 		ResourceKind:  "EnvVar",
 		ResourceName:  appName,
-		Metadata:      map[string]any{"key": key, "preview_override": table == "preview_env_overrides"},
+		Metadata:      map[string]any{"key": key},
 	})
 
 	c.Status(http.StatusNoContent)
