@@ -1,5 +1,6 @@
 # Lessons
 
+- Use Codex Preview for project runs and visual checks; do not hardcode or request IntelliJ run configuration MCP.
 - When renaming a UI action, verify both its label and destination: project details/settings and the deployed project's UI are separate actions and must have separate links and copy.
 - When the user points at git watcher / gitops-agent sync, verify the repo-local agent in the current workspace first; do not cross over to similarly named infra repos.
 - If the request is about project sync in the UI, treat `projects` table bootstrap and `project.yaml` state-repo bootstrap as first-class sync surfaces, not optional extras.
@@ -671,3 +672,30 @@ DadaCustomDomainStuck дал 24 серии за сутки на ОДИН зас�
 пул выключен намеренно, он жёг 15.6% счёта. «Пул пуст» при target=0 — это не
 инцидент, а штатное состояние, и оно горело 11 часов подряд, повторяясь по
 расписанию в телегу. Гейт `and on(...) target > 0`.
+
+**Правило 27.** Удалить фичу — это не только убрать код, который её делает.
+Превью-окружения перестали создаваться в build-agent ещё в `9d3b5f5`, но
+системный промпт ассистента (`buildAgentChatSystemPrompt`) продолжал обещать
+бесплатные превью на каждый PR и советовал «повесьте лейбл preview» — лейбл,
+который уже никто не читает. Хуже: eval-док
+`docs/product/agent-eval-personas-and-cases.md` фиксировал это враньё как
+ПРАВИЛЬНЫЙ ответ для TC-18, то есть честный ответ «такой фичи нет» провалил бы
+проверку. Правило: снос продуктовой фичи закрывается только тогда, когда
+пройдены все места, где продукт О СЕБЕ РАССКАЗЫВАЕТ — системный промпт агента,
+eval-кейсы и рубрики, маркетинговые тексты/dict.ts, docs, i18n-строки, и env-
+флаги в argo-infra, которые больше некому читать. Грепать надо по названию
+фичи в прозе, а не только по идентификаторам в коде.
+
+**Правило 27.** Индекс git в общем дереве — общий. Правило 24 учит собирать
+свой набор файлов через `git add <пути>`; чего оно не покрывает, так это
+паузу между `git add` и `git commit`. Соседняя сессия за эту паузу сделала
+`git commit -m "docs(lessons): ..."` — и весь мой staged шаг «память»
+(10 файлов, миграция, 1084 строки) уехал в чужой коммит под чужим
+заголовком, а мой `git commit` ответил «no changes added to commit».
+Коммит уже был запушен, переписывать общий trunk нельзя. Правило: в общем
+дереве коммитить пathspec-формой — `git commit <пути> -F -`, она берёт
+файлы напрямую и вообще не трогает индекс, так что чужой `commit` в ту же
+секунду уносит только своё. Если файл всё-таки надо провести через индекс
+(частичная постановка из Правила 24) — `add` и `commit` идут одной командой
+через `&&`, без единого tool-вызова между ними. Разъехавшееся описание
+чинится пустым коммитом со ссылкой на SHA, а не rebase'ом (2207c21).
