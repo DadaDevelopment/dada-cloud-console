@@ -3,13 +3,14 @@
 Runs the 38 cases from `docs/product/agent-eval-personas-and-cases.md` against the live
 console assistant and scores them. Python 3 stdlib only, no packages to install.
 
-Four steps, four scripts:
+Five steps, five scripts:
 
 ```
 extract_dataset.py   spec markdown -> dataset.jsonl
 run_eval.py          dataset.jsonl -> runs/<ts>/results.jsonl + meta.json
 judge.py             results.jsonl -> runs/<ts>/judged.jsonl
 report.py            judged.jsonl  -> runs/<ts>/report.md  (exit 1 = release blocked)
+push_scores.py       judged.jsonl  -> scores on the Langfuse trace of each turn
 ```
 
 ## Safety first
@@ -34,6 +35,9 @@ calls one, that is recorded as a safety violation and the report exits 1.
 | `DADA_AI_KEY` | judge | required unless `--dry-run` |
 | `DADA_AI_BASE` | judge | `https://console.dada-tuda.ru/ai/v1` |
 | `DADA_AI_MODEL` | judge | `gpt-4o`, override with `--model` |
+| `LANGFUSE_PUBLIC_KEY` | push_scores | required, same project keys as the backend |
+| `LANGFUSE_SECRET_KEY` | push_scores | required |
+| `LANGFUSE_HOST` | push_scores | `https://cloud.langfuse.com` |
 
 Concurrency needs one scope per worker. The agent keeps one conversation per
 `(user, project, env)`, so two cases sharing a scope in parallel would read each other's
@@ -51,6 +55,9 @@ python3 scripts/agent-eval/run_eval.py --repeats 3
 export DADA_AI_KEY=...
 python3 scripts/agent-eval/judge.py runs/20260803-101500
 python3 scripts/agent-eval/report.py runs/20260803-101500 --baseline runs/20260801-090000
+
+export LANGFUSE_PUBLIC_KEY=... LANGFUSE_SECRET_KEY=...
+python3 scripts/agent-eval/push_scores.py runs/20260803-101500
 ```
 
 Useful flags: `--only TC-01,TC-09` to iterate on a single case, `--dry-run` on the judge to
@@ -92,27 +99,26 @@ now exist. Several cases in the spec ("the feature exists but the agent has no t
 are therefore describing a world that has moved. The harness does not silently rewrite that
 intent; it surfaces the drift so the spec gets updated deliberately.
 
-## What is missing until the backend catches up
+## Rounds, tokens and where the verdict ends up
 
-Spec metric 4 wants LLM rounds per turn, and metric 10 wants token cost. Both are now
-recorded server side -- migration `085_agent_chat_turns.sql` gives every turn a row with
-`gateway_calls`, `prompt_tokens`, `completion_tokens`, `total_tokens`, `model`, `latency_ms`,
-`preflight_calls`, `inventory_apps` and the outcome. What does not exist yet is a way for
-this harness to read them: nothing is returned on the SSE stream and there is no HTTP read
-path for `agent_chat_turns`.
+Spec metric 4 wants LLM rounds per turn and metric 10 wants token cost. Both arrive on the
+stream: `run_eval.py --trace` sends `"trace": true` and the backend answers with a `trace`
+event carrying `gateway_calls`, `prompt_tokens`, `completion_tokens`, `total_tokens`,
+`model`, `latency_ms` and the turn's `trace_id`. Without the flag the harness still records
+"steps to result" as the tool calls it saw, which is a floor rather than the real round
+count, and the report says out loud that it asked for nothing.
 
-So the harness measures "steps to result" as the number of tool calls it observed, which is
-a floor rather than the real round count, and reports no token cost at all.
-`run_eval.py --trace` sends `"trace": true` and parses a `trace` event if one ever appears;
-the backend ignores the field today, and the report says out loud when it asked and got
-nothing. Closing this needs one of: a `trace` SSE event carrying the turn row, or a read
-endpoint keyed by `trace_id` / time range. Either one turns metrics 4 and 10 on with no
-change to the scoring code.
+That `trace_id` is also the Langfuse trace id, so `push_scores.py` attaches every criterion
+score to the turn it grades. A 0 in `grounding` in a local JSONL file says a case failed;
+the same 0 on the trace is one click from the prompt, the tool calls and the arguments that
+produced it. Score ids are derived from (trace id, score name), so re-judging and pushing
+again replaces the verdict instead of stacking a second one beside it.
 
 ## Files
 
 - `common.py` -- tool inventory, SSE reader, HTTP helpers, JSONL io
 - `extract_dataset.py` -- spec parser
+- `push_scores.py` -- judged scores onto the Langfuse traces (needs a run made with `--trace`)
 - `overrides.json` -- manual per-case annotations layered on the parse
 - `dataset.jsonl` -- generated, committed so runs are reproducible
 - `runs/` -- git-ignored output
