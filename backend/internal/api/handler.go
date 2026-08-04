@@ -325,6 +325,7 @@ func NewHandler(pool *pgxpool.Pool, cfg *config.Config) *Handler {
 	h.StartAppAutoscaleWatcher(context.Background())
 	h.StartIdentityDeliveryWatcher(context.Background())
 	h.StartDemoAppReaper(context.Background())
+	h.StartAppUsageMeter(context.Background())
 
 	h.agentChatLLM = llmchat.New(cfg.AgentChatGatewayURL, cfg.AgentChatGatewayKey, agentChatDefaultModel(cfg.AgentChatModel))
 	h.agentChatLLM.KeyFunc = h.currentAgentChatKey
