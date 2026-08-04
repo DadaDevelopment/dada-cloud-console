@@ -100,7 +100,10 @@ spec:
               inside the hard budget, so the breach counter can be quiet while this fires — that is
               the point: it catches a gradual slide before customers do.
         - alert: BoxPoolExhausted
-          expr: max by (namespace, service, image, region) (dada_box_pool_available) == 0
+          expr: |-
+            max by (namespace, service, image, region) (dada_box_pool_available) == 0
+            and on (namespace, service, image, region)
+            max by (namespace, service, image, region) (dada_box_pool_target) > 0
           for: 5m
           # dada_box_pool_available oscillates 0 -> 1 -> 0 while the warmer refills:
           # measured 4 firing episodes in 1.8h of total firing time, i.e. a fresh
