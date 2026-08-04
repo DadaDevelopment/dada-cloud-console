@@ -1,5 +1,25 @@
 # Economics: previews-are-free + per-project agent-tasks row
 
+> **ЗАКРЫТО 2026-08-04 — превью-окружений больше нет как фичи.** Владелец:
+> «я чётко просил убрать превью-аппы как фичу в принципе». P1/P2/P4 описывают
+> тарификацию и opt-in для того, чего в продукте не существует; читать их можно
+> только как историю. Удаление: `9d3b5f5` (build-agent перестал создавать),
+> `2b06eba` (gitops-agent), `d1d84ae` (backend env-overrides), `1c999e0` (UI
+> консоли), `b8fde4c` (системный промпт ассистента больше не обещает превью на
+> PR), argo-infra `b1c6782d` (снят флаг `BUILD_PREVIEW_ENVS_ENABLED`).
+> Директива на всех этих коммитах: не возвращать создание превью через флаг —
+> если фича понадобится снова, это отдельный продуктовый разговор с моделью
+> оплаты, а не env var.
+>
+> Что из этого осталось живым кодом: фильтр `AND NOT e.is_ephemeral` в
+> `consumptionApps` (P2) и маршрутизация `is_ephemeral` в платформенный бакет
+> (P1) — они безвредны и продолжают правильно обрабатывать исторические строки.
+> Per-project agent-tokens row (P3) к превью отношения не имеет и живёт.
+>
+> Хвост, который эта уборка НЕ закрыла: четыре старые prod-строки окружений
+> `pr-*` с `is_ephemeral=f` (артефакт ранней схемы) и их пустые namespace —
+> reaper их не трогает именно из-за флага.
+
 **Owner ask (2026-07-26):**
 1. Move away from stable app-per-PR — an ignored PR must not pile x2/x3 cost on the user. Previews are a feature WE give.
 2. Each project needs an "агентские задачи" (AI-token) row — we write agent spend there.

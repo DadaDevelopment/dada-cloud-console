@@ -1,6 +1,6 @@
 # Lessons
 
-- Use Codex Preview for project runs and visual checks; do not hardcode or request IntelliJ run configuration MCP.
+- Use Codex Preview for project runs and visual checks; do not hardcode IDE-specific run tooling.
 - When renaming a UI action, verify both its label and destination: project details/settings and the deployed project's UI are separate actions and must have separate links and copy.
 - When the user points at git watcher / gitops-agent sync, verify the repo-local agent in the current workspace first; do not cross over to similarly named infra repos.
 - If the request is about project sync in the UI, treat `projects` table bootstrap and `project.yaml` state-repo bootstrap as first-class sync surfaces, not optional extras.
