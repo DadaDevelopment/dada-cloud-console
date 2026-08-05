@@ -15,7 +15,7 @@
  * resurface as "new".
  */
 
-import { maybeRequestNotifyPermission } from "@/lib/build-notify";
+import { maybeRequestNotifyPermission } from "./build-notify.ts";
 
 export interface TrackedBuild {
   projectId: string;
@@ -28,6 +28,19 @@ export interface TrackedBuild {
 const STORAGE_KEY = "dada_tracked_builds";
 const MAX_TRACKED = 5;
 const MAX_AGE_MS = 2 * 60 * 60 * 1000;
+
+/**
+ * Same-tab change signal for the tracked-build list.
+ *
+ * The browser's own `storage` event is deliberately not enough here: it fires
+ * only in the *other* tabs of the origin, never in the tab that performed the
+ * write. Every caller of `trackBuildStart` is a client component rendered
+ * inside the console layout, and that layout is where `BuildWatcher` is
+ * mounted, so the write and the watcher always live in the same tab and the
+ * same mount. Without this event the watcher would keep the snapshot it read
+ * when it first mounted and would never observe a build triggered afterwards.
+ */
+export const BUILD_TRACK_EVENT = "dada-tracked-builds-change";
 
 function isTrackedBuild(value: unknown): value is TrackedBuild {
   if (!value || typeof value !== "object") return false;
@@ -60,7 +73,12 @@ export function readTrackedBuilds(): TrackedBuild[] {
   }
 }
 
-/** Best-effort write: a private-mode or full storage failure is swallowed, tracking just stops. */
+/**
+ * Best-effort write: a private-mode or full storage failure is swallowed,
+ * tracking just stops. A successful write announces itself on
+ * {@link BUILD_TRACK_EVENT} so the watcher mounted in this same tab picks the
+ * change up; a failed write stays silent, because there is nothing new to read.
+ */
 function writeTrackedBuilds(entries: TrackedBuild[]): void {
   if (typeof window === "undefined") return;
   try {
@@ -68,6 +86,7 @@ function writeTrackedBuilds(entries: TrackedBuild[]): void {
   } catch {
     return;
   }
+  window.dispatchEvent(new Event(BUILD_TRACK_EVENT));
 }
 
 /**

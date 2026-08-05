@@ -5,7 +5,7 @@ import Link from "next/link";
 import { buildsApi, appsApi } from "@/lib/api";
 import type { BuildStatus } from "@/lib/types";
 import { isBuildActive } from "@/components/deploy/build-status-badge";
-import { readTrackedBuilds, untrackBuild, type TrackedBuild } from "@/lib/build-watch";
+import { BUILD_TRACK_EVENT, readTrackedBuilds, untrackBuild, type TrackedBuild } from "@/lib/build-watch";
 import { showBuildNotification } from "@/lib/build-notify";
 import { useT } from "@/lib/i18n/console/context";
 import { trackUxEvent } from "@/lib/ux-telemetry";
@@ -60,6 +60,39 @@ export function BuildWatcher() {
   const dropTracked = useCallback((buildId: string) => {
     untrackBuild(buildId);
     setTracked((prev) => prev.filter((b) => b.buildId !== buildId));
+  }, []);
+
+  /**
+   * Keeps the in-memory list in step with storage after the initial mount.
+   *
+   * This component lives in the console layout, which survives every
+   * client-side navigation, so it mounts once per full page load. Each caller
+   * of `trackBuildStart` runs inside that same layout without a reload, which
+   * means the build the user just triggered was written to storage after this
+   * mount read it. Listening to `BUILD_TRACK_EVENT` covers that (same-tab)
+   * case; `storage` covers a build triggered in another tab, where the browser
+   * refuses to fire the same-tab event.
+   *
+   * The re-read replaces state only when the set of tracked build ids actually
+   * changed, so an announcement caused by this component's own `untrackBuild`
+   * does not hand the polling effect a fresh array identity and restart it.
+   */
+  useEffect(() => {
+    function sync() {
+      const next = readTrackedBuilds();
+      setTracked((prev) => {
+        const same =
+          prev.length === next.length &&
+          prev.every((entry, i) => entry.buildId === next[i]?.buildId);
+        return same ? prev : next;
+      });
+    }
+    window.addEventListener(BUILD_TRACK_EVENT, sync);
+    window.addEventListener("storage", sync);
+    return () => {
+      window.removeEventListener(BUILD_TRACK_EVENT, sync);
+      window.removeEventListener("storage", sync);
+    };
   }, []);
 
   useEffect(() => {

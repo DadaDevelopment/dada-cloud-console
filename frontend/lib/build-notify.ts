@@ -1,4 +1,4 @@
-import { trackUxEvent } from "@/lib/ux-telemetry";
+import { trackUxEvent } from "./ux-telemetry.ts";
 
 /**
  * Native browser notifications for build completion.
