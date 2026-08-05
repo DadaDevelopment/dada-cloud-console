@@ -13,6 +13,7 @@ import {
 import { useLang } from "@/lib/i18n/context";
 import { consoleHref, localeHref } from "@/lib/site";
 import { CtaBand, FaqList } from "@/components/marketing/sections";
+import { GOAL_LANDING_CTA, reachGoal } from "@/lib/metrika";
 import { HomeJsonLd } from "@/components/marketing/home-jsonld";
 import { McpAgentSection } from "@/components/marketing/mcp-agent";
 import { BoxSpotlight } from "@/components/marketing/box-spotlight";
@@ -42,6 +43,7 @@ export default function HomePage() {
             <div className="mt-9 flex flex-wrap gap-3">
               <Link
                 href={consoleHref("/register")}
+                onClick={() => reachGoal(GOAL_LANDING_CTA, { source: "direct", placement: "hero" })}
                 className="inline-flex items-center gap-2 rounded-md bg-blue-600 px-7 py-3 text-sm font-semibold text-white transition-colors hover:bg-blue-700"
               >
                 <GitBranch className="h-4 w-4" />
@@ -188,11 +190,20 @@ export default function HomePage() {
           </div>
           <div className="mt-8 flex flex-wrap items-center gap-4">
             <Link
-              href={localeHref("/pricing", locale)}
+              href={consoleHref("/register")}
+              onClick={() =>
+                reachGoal(GOAL_LANDING_CTA, { source: "direct", placement: "pricing_teaser" })
+              }
               className="inline-flex items-center gap-2 rounded-md bg-blue-600 px-6 py-3 text-sm font-semibold text-white transition-colors hover:bg-blue-700"
             >
-              {t.common.learnMore}
+              {t.common.createAccount}
               <ArrowRight className="h-4 w-4" />
+            </Link>
+            <Link
+              href={localeHref("/pricing", locale)}
+              className="inline-flex items-center gap-2 rounded-md border border-slate-300 px-6 py-3 text-sm font-semibold text-slate-700 transition-colors hover:bg-slate-50"
+            >
+              {t.common.learnMore}
             </Link>
             <p className="text-xs text-slate-400">{t.home.pricingNote}</p>
           </div>

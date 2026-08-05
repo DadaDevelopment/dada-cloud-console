@@ -6,6 +6,7 @@ import { Cloud, Menu, X } from "lucide-react";
 import { useLang } from "@/lib/i18n/context";
 import { useAuth } from "@/lib/auth";
 import { consoleHref, localeHref } from "@/lib/site";
+import { GOAL_LANDING_CTA, reachGoal } from "@/lib/metrika";
 import { LangToggle } from "./lang-toggle";
 import { clsx } from "clsx";
 
@@ -69,6 +70,7 @@ export function MarketingHeader() {
               </Link>
               <Link
                 href={consoleHref("/register")}
+                onClick={() => reachGoal(GOAL_LANDING_CTA, { source: "direct", placement: "header" })}
                 className="rounded-md bg-blue-600 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-blue-700"
               >
                 {t.nav.register}
@@ -108,7 +110,12 @@ export function MarketingHeader() {
             <LangToggle />
             <Link
               href={consoleHref(token ? "/projects" : "/register")}
-              onClick={() => setOpen(false)}
+              onClick={() => {
+                setOpen(false);
+                if (!token) {
+                  reachGoal(GOAL_LANDING_CTA, { source: "direct", placement: "header_mobile" });
+                }
+              }}
               className="flex-1 rounded-md bg-blue-600 px-4 py-2 text-center text-sm font-semibold text-white"
             >
               {token ? t.nav.console : t.nav.register}
