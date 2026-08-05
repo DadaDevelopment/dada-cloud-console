@@ -38,6 +38,7 @@ import { onboarding } from "./onboarding";
 import { passkey } from "./passkey";
 import { payments } from "./payments";
 import { buildWatcher } from "./build-watcher";
+import { authError } from "./auth-error";
 
 /**
  * Flat key→{ru,en} map for the whole console. Each screen owns a namespace
@@ -85,4 +86,5 @@ export const messages: Messages = {
   ...passkey,
   ...payments,
   ...buildWatcher,
+  ...authError,
 };

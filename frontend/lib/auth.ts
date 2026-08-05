@@ -2,6 +2,7 @@
 // and provides standalone token utilities.
 
 export { AuthProvider, useAuth, AuthContext } from "./auth-provider";
+export type { AuthErrorCode } from "./auth-provider";
 
 export function getStoredToken(): string | null {
   if (typeof window === "undefined") return null;

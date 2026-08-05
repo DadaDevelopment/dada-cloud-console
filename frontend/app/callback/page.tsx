@@ -13,6 +13,7 @@ import { useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth";
 import { Spinner } from "@/components/ui/spinner";
+import { AuthErrorScreen } from "@/components/shell/auth-error-screen";
 import { PENDING_REGISTRATION_KEY } from "@/lib/register-redirect";
 import { capturePasskeyActionStatus, markFreshAuthentication } from "@/lib/passkey";
 import { GOAL_REGISTRATION_COMPLETE, reachGoal } from "@/lib/metrika";
@@ -42,7 +43,7 @@ const REGISTRATION_WINDOW_MS = 30 * 60 * 1000;
 
 export default function CallbackPage() {
   const router = useRouter();
-  const { token, isLoading } = useAuth();
+  const { token, isLoading, authError, logout } = useAuth();
   const registrationGoalCheckedRef = useRef(false);
 
   useEffect(() => {
@@ -74,6 +75,10 @@ export default function CallbackPage() {
       reachGoal(GOAL_REGISTRATION_COMPLETE);
     } catch {}
   }, [isLoading, token]);
+
+  if (authError) {
+    return <AuthErrorScreen onRetry={() => window.location.reload()} onLogout={logout} />;
+  }
 
   return (
     <div className="flex h-screen items-center justify-center bg-gray-50">

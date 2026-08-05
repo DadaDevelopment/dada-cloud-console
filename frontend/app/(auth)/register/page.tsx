@@ -2,6 +2,7 @@
 import { Suspense, useEffect, useRef } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useAuth } from "@/lib/auth";
+import { AuthErrorScreen } from "@/components/shell/auth-error-screen";
 import { startRegister } from "@/lib/register-redirect";
 import { GOAL_SIGNUP_STARTED, reachGoal, rememberSource } from "@/lib/metrika";
 
@@ -34,13 +35,13 @@ function sanitizeReturnTo(value: string | null): string {
 function OidcRegisterPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { isLoading, token } = useAuth();
+  const { isLoading, token, authError, logout } = useAuth();
   const startedRef = useRef(false);
   const returnTo = sanitizeReturnTo(searchParams.get("returnTo") ?? searchParams.get("next"));
   const source = searchParams.get("utm_source") ?? "direct";
 
   useEffect(() => {
-    if (isLoading) return;
+    if (isLoading || authError) return;
     if (token) {
       router.replace(returnTo);
       return;
@@ -50,7 +51,16 @@ function OidcRegisterPage() {
     rememberSource(source);
     reachGoal(GOAL_SIGNUP_STARTED, { source });
     void startRegister(returnTo);
-  }, [isLoading, token, router, returnTo, source]);
+  }, [isLoading, token, authError, router, returnTo, source]);
+
+  /**
+   * Auth is in a dead end, so there is nobody to register: starting the
+   * Keycloak round-trip from here would return into the same failure. Show
+   * the dead-end screen instead of a spinner that never resolves.
+   */
+  if (authError) {
+    return <AuthErrorScreen onRetry={() => window.location.reload()} onLogout={logout} />;
+  }
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-gray-50">

@@ -18,6 +18,7 @@
 import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useAuth } from "@/lib/auth";
+import { AuthErrorScreen } from "@/components/shell/auth-error-screen";
 import { startRegister } from "@/lib/register-redirect";
 import { projectsApi, gitApi, buildsApi } from "@/lib/api";
 import type { FrameworkDetection } from "@/lib/types";
@@ -43,7 +44,7 @@ type Target = { projectId: string; envId: string };
 function DeployResolver() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { isLoading, token } = useAuth();
+  const { isLoading, token, authError, logout } = useAuth();
   const startedRef = useRef(false);
 
   const repo = parseRepoParam(searchParams.get("repo"));
@@ -63,7 +64,7 @@ function DeployResolver() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (isLoading) return;
+    if (isLoading || authError) return;
     if (startedRef.current) return;
     startedRef.current = true;
 
@@ -118,7 +119,7 @@ function DeployResolver() {
         setError(err instanceof Error ? err.message : "Не удалось подготовить деплой");
       }
     })();
-  }, [isLoading, token, router, searchParams, repo, rootDir]);
+  }, [isLoading, token, authError, router, searchParams, repo, rootDir]);
 
   const deploy = useCallback(async () => {
     if (!target || !repo || deploying) return;
@@ -161,6 +162,15 @@ function DeployResolver() {
       setDeploying(false);
     }
   }, [target, repo, deploying, appName, branch, rootDir, port, router]);
+
+  /**
+   * Checked before the spinner below: without a settled auth state this page
+   * has no token to deploy with and no way to get one, so the generic
+   * "Готовим деплой…" would spin forever on a deploy-badge link.
+   */
+  if (authError) {
+    return <AuthErrorScreen onRetry={() => window.location.reload()} onLogout={logout} />;
+  }
 
   if (!token || resolving || !repo) {
     return (

@@ -3,6 +3,7 @@ import { useEffect, useRef, useState, FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { authApi } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
+import { AuthErrorScreen } from "@/components/shell/auth-error-screen";
 
 const AUTH_MODE = process.env.NEXT_PUBLIC_AUTH_MODE;
 
@@ -16,11 +17,11 @@ const AUTH_MODE = process.env.NEXT_PUBLIC_AUTH_MODE;
  */
 function OidcLoginPage() {
   const router = useRouter();
-  const { login, isLoading, token } = useAuth();
+  const { login, isLoading, token, authError, logout } = useAuth();
   const startedRef = useRef(false);
 
   useEffect(() => {
-    if (isLoading) return;
+    if (isLoading || authError) return;
     if (token) {
       router.replace("/projects");
       return;
@@ -28,7 +29,18 @@ function OidcLoginPage() {
     if (startedRef.current) return;
     startedRef.current = true;
     login();
-  }, [isLoading, token, login, router]);
+  }, [isLoading, token, authError, login, router]);
+
+  /**
+   * Auth gave up before it could tell us who this is. Starting the Keycloak
+   * redirect here would be the worst possible answer: with a live SSO session
+   * it returns instantly, fails the same way, and lands back on this page -
+   * and when the failure is a provider chunk that never loaded, `login` is a
+   * plain page reload, which loops outright.
+   */
+  if (authError) {
+    return <AuthErrorScreen onRetry={() => window.location.reload()} onLogout={logout} />;
+  }
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-gray-50">

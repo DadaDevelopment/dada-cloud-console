@@ -3,6 +3,9 @@ import { createContext, useContext, useEffect, useState } from "react";
 import type { User } from "./types";
 import { setTokenGetter } from "./api";
 import { publishUid } from "./uid-cookie";
+import { fetchWithRetry, loadWithFallback, scheduleTimeout, type AuthErrorCode } from "./auth-retry";
+
+export type { AuthErrorCode } from "./auth-retry";
 
 interface AuthContextValue {
   user: User | null;
@@ -10,7 +13,30 @@ interface AuthContextValue {
   login: (token?: string, user?: User) => void;
   logout: () => void;
   isLoading: boolean;
+  /**
+   * Set once auth state cannot settle on its own: the access-token fetch
+   * failed after retries, the OIDC provider chunk failed to load, or the
+   * loading watchdog fired. Callers must show a dead-end screen with a
+   * manual retry/logout, never redirect to /login while this is set -
+   * /login auto-starts a Keycloak redirect for a logged-out user, which
+   * would recreate the same hang under a live SSO session.
+   */
+  authError: AuthErrorCode | null;
 }
+
+/**
+ * How long the SSO provider is allowed to stay in `loading` before the
+ * watchdog forces an error state. Set well above the ~75s cold-start the
+ * console backend itself can take (this watchdog is not on that path) and
+ * comfortably above the ~3.5s worst case of the token-fetch retry loop
+ * below; 30s is long enough that no real network round-trip should hit it,
+ * short enough that a genuinely stuck promise does not leave the user
+ * staring at a spinner indefinitely.
+ */
+const AUTH_WATCHDOG_TIMEOUT_MS = 30_000;
+
+/** Backoff schedule for retrying a failed `sso.getAccessToken()` call. */
+const TOKEN_FETCH_RETRY_DELAYS_MS = [500, 1500];
 
 export const AuthContext = createContext<AuthContextValue | null>(null);
 
@@ -76,7 +102,7 @@ function LocalAuthProvider({ children }: { children: React.ReactNode }) {
   }
 
   return (
-    <AuthContext.Provider value={{ ...auth, login, logout }}>
+    <AuthContext.Provider value={{ ...auth, login, logout, authError: null }}>
       {children}
     </AuthContext.Provider>
   );
@@ -98,13 +124,23 @@ async function loadOidcProvider(): Promise<React.ComponentType<{ children: React
   function OidcBridge({ children }: { children: React.ReactNode }) {
     const sso = useSso();
     const [token, setToken] = useState<string | null>(null);
-    // Tracks whether the access-token fetch has settled for the current status.
-    // The token is fetched asynchronously AFTER sso.status flips to
-    // "authenticated", so without this there is a render where
-    // status==="authenticated", isLoading===false, but token===null — and the
-    // console route guard reads that as logged-out and bounces to /login on
-    // every page refresh.
+    /**
+     * Tracks whether the access-token fetch has settled for the current
+     * status. The token is fetched asynchronously AFTER sso.status flips to
+     * "authenticated", so without this there is a render where
+     * status==="authenticated", isLoading===false, but token===null - and
+     * the console route guard reads that as logged-out and bounces to
+     * /login on every page refresh.
+     */
     const [tokenReady, setTokenReady] = useState(false);
+    /**
+     * Set when the token fetch exhausts its retries, the loading watchdog
+     * below fires, or (via {@link OidcAuthProviderLazy}) the provider chunk
+     * itself failed to load. A non-null value takes over rendering: it is
+     * the difference between "still loading" and "gave up", so callers must
+     * check it before treating `isLoading === false` as logged-out.
+     */
+    const [authError, setAuthError] = useState<AuthErrorCode | null>(null);
 
     useEffect(() => {
       setTokenGetter(() => sso.getAccessToken());
@@ -114,15 +150,21 @@ async function loadOidcProvider(): Promise<React.ComponentType<{ children: React
     useEffect(() => {
       let active = true;
       if (sso.status === "authenticated") {
-        sso.getAccessToken().then((t) => {
-          if (!active) return;
-          setToken(t);
-          setTokenReady(true);
-        });
+        fetchWithRetry(() => sso.getAccessToken(), TOKEN_FETCH_RETRY_DELAYS_MS)
+          .then((t) => {
+            if (!active) return;
+            setToken(t);
+            setTokenReady(true);
+            setAuthError(null);
+          })
+          .catch(() => {
+            if (!active) return;
+            setTokenReady(true);
+            setAuthError("token_fetch_failed");
+          });
       } else {
         // eslint-disable-next-line react-hooks/set-state-in-effect
         setToken(null);
-        // "loading" is still pending; only unauthenticated/error are settled.
         setTokenReady(sso.status !== "loading");
       }
       return () => {
@@ -130,12 +172,26 @@ async function loadOidcProvider(): Promise<React.ComponentType<{ children: React
       };
     }, [sso, sso.status]);
 
-    // Publish the internal, non-PII id (OIDC sub) into the fleet-wide dada_uid
-    // cookie so same-domain static frontends can bind it to Yandex.Metrika.
-    // Cleared when the principal goes away (logout / unauthenticated).
+    /**
+     * Publishes the internal, non-PII id (OIDC sub) into the fleet-wide
+     * dada_uid cookie so same-domain static frontends can bind it to
+     * Yandex.Metrika. Cleared when the principal goes away (logout /
+     * unauthenticated).
+     */
     useEffect(() => {
       publishUid(sso.principal?.sub ?? null);
     }, [sso.principal?.sub]);
+
+    const isLoading =
+      authError === null && (sso.status === "loading" || (sso.status === "authenticated" && !tokenReady));
+
+    useEffect(() => {
+      if (!isLoading) return undefined;
+      return scheduleTimeout(AUTH_WATCHDOG_TIMEOUT_MS, () => {
+        setAuthError((prev) => prev ?? "timeout");
+        setTokenReady(true);
+      });
+    }, [isLoading]);
 
     const user: User | null = sso.principal
       ? {
@@ -147,9 +203,10 @@ async function loadOidcProvider(): Promise<React.ComponentType<{ children: React
       : null;
 
     const value: AuthContextValue = {
-      user,
-      token,
-      isLoading: sso.status === "loading" || (sso.status === "authenticated" && !tokenReady),
+      user: authError ? null : user,
+      token: authError ? null : token,
+      isLoading,
+      authError,
       login: () => void sso.login(),
       logout: () => void sso.logout(),
     };
@@ -179,16 +236,62 @@ async function loadOidcProvider(): Promise<React.ComponentType<{ children: React
   return OidcAuthProvider;
 }
 
+/**
+ * Standard Keycloak end-session redirect. Used only when the OIDC provider
+ * chunk itself never loaded, so `sso.logout()` does not exist yet - this is
+ * the one path where breaking a stuck SSO session has to be done without the
+ * library.
+ */
+function buildKeycloakLogoutUrl(): string {
+  const redirectTo = typeof window !== "undefined" ? `${window.location.origin}/` : "/";
+  return `${OIDC_AUTHORITY}/protocol/openid-connect/logout?client_id=${encodeURIComponent(OIDC_CLIENT_ID)}&post_logout_redirect_uri=${encodeURIComponent(redirectTo)}`;
+}
+
 function OidcAuthProviderLazy({ children }: { children: React.ReactNode }) {
   const [Provider, setProvider] = useState<React.ComponentType<{ children: React.ReactNode }> | null>(null);
+  const [loadError, setLoadError] = useState<AuthErrorCode | null>(null);
 
   useEffect(() => {
-    loadOidcProvider().then((P) => setProvider(() => P));
+    let active = true;
+    loadWithFallback(loadOidcProvider).then((result) => {
+      if (!active) return;
+      if (result.error) setLoadError(result.error);
+      else setProvider(() => result.value);
+    });
+    return () => {
+      active = false;
+    };
   }, []);
+
+  useEffect(() => {
+    if (Provider || loadError) return undefined;
+    return scheduleTimeout(AUTH_WATCHDOG_TIMEOUT_MS, () => setLoadError("timeout"));
+  }, [Provider, loadError]);
+
+  if (loadError) {
+    return (
+      <AuthContext.Provider
+        value={{
+          user: null,
+          token: null,
+          isLoading: false,
+          authError: loadError,
+          login: () => window.location.reload(),
+          logout: () => {
+            window.location.href = buildKeycloakLogoutUrl();
+          },
+        }}
+      >
+        {children}
+      </AuthContext.Provider>
+    );
+  }
 
   if (!Provider) {
     return (
-      <AuthContext.Provider value={{ user: null, token: null, isLoading: true, login: () => {}, logout: () => {} }}>
+      <AuthContext.Provider
+        value={{ user: null, token: null, isLoading: true, authError: null, login: () => {}, logout: () => {} }}
+      >
         {children}
       </AuthContext.Provider>
     );

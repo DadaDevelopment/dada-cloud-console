@@ -3,6 +3,7 @@ import { Suspense, useEffect, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth";
 import { Spinner } from "@/components/ui/spinner";
+import { AuthErrorScreen } from "@/components/shell/auth-error-screen";
 import { ProjectProvider, useProjectContext } from "@/lib/project-context";
 import { ConsoleLangProvider } from "@/lib/i18n/console/context";
 import { ThemeProvider } from "@/lib/theme/context";
@@ -118,11 +119,15 @@ function ConsoleShell({ children }: { children: React.ReactNode }) {
 
 export default function ConsoleLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
-  const { token, isLoading } = useAuth();
+  const { token, isLoading, authError, logout } = useAuth();
 
   useEffect(() => {
-    if (!isLoading && !token) router.push("/login");
-  }, [isLoading, token, router]);
+    if (!isLoading && !token && !authError) router.push("/login");
+  }, [isLoading, token, authError, router]);
+
+  if (authError) {
+    return <AuthErrorScreen onRetry={() => window.location.reload()} onLogout={logout} />;
+  }
 
   if (isLoading) {
     return (
