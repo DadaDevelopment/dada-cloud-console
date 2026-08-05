@@ -135,6 +135,76 @@ func TestBoxOperationsWorker_SuspendSucceedsWhenTheBodyIsAlreadyGone(t *testing.
 	}
 }
 
+// recordingExposer is a box.Exposer that only ever records which hostnames
+// were unexposed, so a test can assert the withdrawal happened without
+// standing up a real listener or a cluster.
+type recordingExposer struct {
+	unexposed []string
+}
+
+func (e *recordingExposer) Expose(boxName string, port int) (box.Exposure, error) {
+	return box.Exposure{Hostname: fmt.Sprintf("%s-%d.box.test", boxName, port)}, nil
+}
+
+func (e *recordingExposer) Unexpose(hostname string) error {
+	e.unexposed = append(e.unexposed, hostname)
+	return nil
+}
+
+// TestBoxOperationsWorker_SuspendWithdrawsExposuresWithoutForgettingThem: a
+// box that suspends while a port is published must not leave the Service and
+// Ingress behind. Waking a box only ever happens through executeResumeBox —
+// never by a request landing on the box's own hostname — so a Service and
+// Ingress pointing at a pod that no longer exists is pure dead weight: the
+// hostname answers a bare 503, and ingress-nginx logs a missing-endpoint line
+// for it every few seconds, all so the box can be told to wake up over a path
+// wake never actually uses. The box_exposures row must survive with
+// withdrawn_at still NULL, because the customer's intent to publish the port
+// is not revoked by the box falling asleep — republishBoxExposures recreates
+// the same objects the moment the box wakes.
+func TestBoxOperationsWorker_SuspendWithdrawsExposuresWithoutForgettingThem(t *testing.T) {
+	pool := testOptimisticPool(t)
+	rt := &box.FakeRuntime{Clock: box.NewFakeClock(fixedWorkerTestTime)}
+	exposer := &recordingExposer{}
+
+	boxID, opID, _, boxName := seedBoxOperation(t, pool, models.BoxStatusReady, "fc-sleep-exposed",
+		models.ActionSuspendBox, models.SuspendBoxPayload{})
+	if _, err := pool.Exec(context.Background(),
+		`UPDATE operations SET payload = $2 WHERE id = $1`, opID,
+		mustMarshal(t, models.SuspendBoxPayload{BoxID: boxID, Reason: "idle"})); err != nil {
+		t.Fatalf("fix up payload with the real box id: %v", err)
+	}
+	hostname := fmt.Sprintf("%s-8080.box.test", boxName)
+	if _, err := pool.Exec(context.Background(),
+		`INSERT INTO box_exposures (box_id, port, hostname, url, cert) VALUES ($1, 8080, $2, $3, 'none')`,
+		boxID, hostname, "https://"+hostname); err != nil {
+		t.Fatalf("seed an exposure: %v", err)
+	}
+
+	h := newTestBoxWorkerHandler(pool, rt, box.NewMemoryPool())
+	h.boxStack.exposer = exposer
+	w := &boxOperationsWorker{h: h}
+	w.tick(context.Background())
+
+	status, errMsg, _ := operationStatus(t, pool, opID)
+	if status != string(models.OperationStatusReady) {
+		t.Fatalf("operation status = %q, want Ready; error_message=%q", status, errMsg)
+	}
+	if len(exposer.unexposed) != 1 || exposer.unexposed[0] != hostname {
+		t.Errorf("Unexpose calls = %v, want exactly [%q]", exposer.unexposed, hostname)
+	}
+	var withdrawnAt *time.Time
+	if err := pool.QueryRow(context.Background(),
+		`SELECT withdrawn_at FROM box_exposures WHERE box_id = $1 AND hostname = $2`,
+		boxID, hostname).Scan(&withdrawnAt); err != nil {
+		t.Fatalf("read exposure row: %v", err)
+	}
+	if withdrawnAt != nil {
+		t.Errorf("withdrawn_at = %v after a sleep, want NULL: the exposure is still the customer's intent, "+
+			"only the cluster objects came down", *withdrawnAt)
+	}
+}
+
 // TestBoxOperationsWorker_ResumeWakesTheBoxAndMovesItsDeadline pins the two
 // things a wake must do beyond calling the runtime.
 //

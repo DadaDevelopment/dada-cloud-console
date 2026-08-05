@@ -91,6 +91,9 @@ func (h *Handler) executeSuspendBox(ctx context.Context, payload json.RawMessage
 		p.BoxID); err != nil {
 		return fmt.Errorf("mark box sleeping: %w", err)
 	}
+	if stack := h.boxStack; stack != nil {
+		h.withdrawBoxExposures(ctx, stack, b)
+	}
 
 	h.recordSystemAudit(ctx, auditEntry{
 		ProjectID:     b.ProjectID,
@@ -243,6 +246,57 @@ func (h *Handler) executeResumeBox(ctx context.Context, payload json.RawMessage)
 		},
 	})
 	return nil
+}
+
+// withdrawBoxExposures tears down the Service and Ingress of every live
+// exposure of a box that just went to sleep.
+//
+// Waking a box only ever happens through executeResumeBox, called from the
+// console or the API — never by a request landing on the box's own hostname.
+// So a sleeping box's Service and Ingress are dead weight with a public DNS
+// name attached to it: the pod behind them is gone, the hostname answers a
+// bare 503 from nginx, and every ~3s ingress-nginx logs "does not have any
+// active Endpoint" for it, burying real incidents under noise from boxes that
+// are sleeping on purpose. The box_exposures ROW is left alone (withdrawn_at
+// stays NULL): the customer's intent to publish that port survives the sleep,
+// and republishBoxExposures recreates the same Service/Ingress from it the
+// moment the box wakes.
+//
+// Failures are logged rather than returned, for the same reason
+// republishBoxExposures's are: the box is already asleep, and failing the
+// whole suspend over a stuck ingress delete would leave the box stranded
+// between Ready and Sleeping while the fleet quota it was meant to free stays
+// held.
+func (h *Handler) withdrawBoxExposures(ctx context.Context, stack *boxRuntimeStack, b models.Box) {
+	if stack.exposer == nil {
+		return
+	}
+	rows, err := h.pool.Query(ctx,
+		`SELECT hostname FROM box_exposures WHERE box_id = $1 AND withdrawn_at IS NULL`, b.ID)
+	if err != nil {
+		log.Warn().Err(err).Str("box", b.Name).Msg("box: cannot read exposures of a box going to sleep")
+		return
+	}
+	defer rows.Close()
+	var hostnames []string
+	for rows.Next() {
+		var hostname string
+		if err := rows.Scan(&hostname); err != nil {
+			log.Warn().Err(err).Str("box", b.Name).Msg("box: cannot read an exposure of a box going to sleep")
+			return
+		}
+		hostnames = append(hostnames, hostname)
+	}
+	if err := rows.Err(); err != nil {
+		log.Warn().Err(err).Str("box", b.Name).Msg("box: cannot read exposures of a box going to sleep")
+		return
+	}
+	for _, hostname := range hostnames {
+		if err := stack.exposer.Unexpose(hostname); err != nil {
+			log.Warn().Err(err).Str("box", b.Name).Str("hostname", hostname).
+				Msg("box: withdrawing an exposure of a sleeping box failed; the hostname will keep answering behind a dead pod")
+		}
+	}
 }
 
 // republishBoxExposures re-applies every live exposure of a box to the pod that
