@@ -1,9 +1,9 @@
 import type { Metadata } from "next";
 
 const SITE_URL = "https://cloud.dada-tuda.ru";
-const TITLE = "Аналог Railway в России — деплой из GitHub, оплата рублями";
+const TITLE = "Railway не принимает карту РФ? Аналог с оплатой в рублях";
 const DESCRIPTION =
-  "Аналог Railway, который работает в России: деплой из GitHub-репозитория с HTTPS-адресом и managed PostgreSQL рядом, оплата рублёвой картой, без VPN, серверы в РФ (152-ФЗ). Тот же опыт «из репозитория в прод» — Dada Cloud.";
+  "Российские карты Railway не принимает. Dada Cloud — тот же push-to-deploy из GitHub с managed PostgreSQL рядом, оплата рублями, серверы в РФ. Перенос — внутри.";
 
 export const metadata: Metadata = {
   title: TITLE,

@@ -1,9 +1,9 @@
 import type { Metadata } from "next";
 
 const SITE_URL = "https://cloud.dada-tuda.ru";
-const TITLE = "Аналог Heroku для России — деплой из GitHub, оплата рублями";
+const TITLE = "Heroku не принимает карту РФ? Аналог с оплатой в рублях";
 const DESCRIPTION =
-  "Аналог Heroku, который работает в России: git push из GitHub-репозитория в прод с HTTPS-адресом и managed PostgreSQL рядом, оплата рублёвой картой, без VPN, серверы в РФ (152-ФЗ). Тот же флоу, что у Heroku — Dada Cloud.";
+  "Российские карты Heroku не принимает. Dada Cloud — тот же git push в прод с managed PostgreSQL рядом, оплата рублями, серверы в РФ. Как перенести — внутри.";
 
 export const metadata: Metadata = {
   title: TITLE,

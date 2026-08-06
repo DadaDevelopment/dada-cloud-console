@@ -1,9 +1,9 @@
 import type { Metadata } from "next";
 
 const SITE_URL = "https://cloud.dada-tuda.ru";
-const TITLE = "Аналог Vercel в России — деплой из GitHub, оплата рублями";
+const TITLE = "Vercel не принимает карту РФ? Аналог с оплатой в рублях";
 const DESCRIPTION =
-  "Аналог Vercel и Railway, который работает в России: деплой приложения из GitHub с HTTPS-адресом, оплата рублёвой картой, без VPN, данные и серверы в РФ (152-ФЗ). Тот же флоу «из репозитория в прод» — Dada Cloud.";
+  "Российские карты и «Мир» Vercel не принимает. Dada Cloud — тот же деплой из GitHub, но оплата рублями и серверы в РФ. Способы оплаты и перенос — внутри.";
 
 export const metadata: Metadata = {
   title: TITLE,
