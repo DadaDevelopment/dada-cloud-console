@@ -269,6 +269,8 @@ func (w *DBWatcher) dispatch(ctx context.Context, op db.Operation) error {
 		return w.doCreateServiceDatabase(ctx, op)
 	case "DeleteServiceDatabase":
 		return w.doDeleteServiceDatabase(ctx, op)
+	case "SetDatabaseEnforcement":
+		return w.doSetDatabaseEnforcement(ctx, op)
 	case "CreateIngress":
 		return w.doCreateIngress(ctx, op)
 	case "CreateApp":
