@@ -44,3 +44,23 @@
 
 Развёрнутый дизайн: [database-insights-design.md](database-insights-design.md).
 Рынок и чего нет у конкурентов: [db-insights-market-research.md](db-insights-market-research.md).
+
+## Ход
+
+- **1. Сборщик** — в `main` (`aa405208`). `db_stat_*` пишутся раз в 5 минут,
+  таблицы/индексы каждый третий тик, сырые кумулятивные счётчики. В проде молчит:
+  `DB_SHARD_ADMIN_DSNS` не выдан, без кредов сборщик выходит сразу.
+- **2. Advisories** — в `main` (`aa405208`). Критерий приёмки закрыт тестом
+  `TestEvaluateDBAdvisories_ReproducesOddsResearchForensics`: движок на
+  замеренных числах odds-research сам выдаёт три unused_index, append-only с
+  ростом > 1 GB/нед, low_cache_hit 6% и slow_query по доле времени БД.
+- **3. API** — в `main` (`eaefd730`). Четыре GET на реальной форме маршрута
+  `/environments/:envId/databases/:name/{insights,tables,queries,advisories}`
+  (дизайн-док обещал app-scoped — код победил). Читают только контрол-плейн.
+- **4. Консоль** — в `main` (`3df6c79e`). Секция на странице базы: шапка,
+  выводы, карточки таблиц, запросы. SQL показываем с явной подписью «выполняет
+  владелец»; кнопки «исправить» нет и не будет.
+- **5. Платформенный `/admin`** — следующий шаг.
+
+Открытый блокер обеих проверок «на живых данных»: `DB_SHARD_ADMIN_DSNS` в проде
+не задан. До этого страница честно показывает «показатели ещё не собраны».
