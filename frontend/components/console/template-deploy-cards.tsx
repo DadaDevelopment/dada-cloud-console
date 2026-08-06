@@ -6,14 +6,11 @@ import { ResourceIcon } from "@/components/shell/icons";
 import { Spinner } from "@/components/ui/spinner";
 import { useT } from "@/lib/i18n/console/context";
 import { trackBuildStart } from "@/lib/build-watch";
+import { STARTER_TEMPLATES, type StarterTemplate } from "@/lib/starter-templates";
 
-type Template = { key: string; repo_full_name: string; port: number };
+type Template = StarterTemplate;
 
-const TEMPLATES: Template[] = [
-  { key: "nextjs", repo_full_name: "DadaDevelopment/dada-nextjs-starter", port: 3000 },
-  { key: "fastapi", repo_full_name: "DadaDevelopment/dada-fastapi-starter", port: 8000 },
-  { key: "static", repo_full_name: "DadaDevelopment/dada-static-starter", port: 8080 },
-];
+const TEMPLATES: Template[] = STARTER_TEMPLATES;
 
 function toKubeName(s: string): string {
   return s

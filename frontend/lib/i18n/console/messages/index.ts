@@ -33,6 +33,7 @@ import { moveApp } from "./move-app";
 import { feedback } from "./feedback";
 import { deployHooks } from "./deploy-hooks";
 import { previews } from "./previews";
+import { starterNext } from "./starter-next";
 import { agentChat } from "./agent-chat";
 import { onboarding } from "./onboarding";
 import { passkey } from "./passkey";
@@ -81,6 +82,7 @@ export const messages: Messages = {
   ...feedback,
   ...deployHooks,
   ...previews,
+  ...starterNext,
   ...agentChat,
   ...onboarding,
   ...passkey,

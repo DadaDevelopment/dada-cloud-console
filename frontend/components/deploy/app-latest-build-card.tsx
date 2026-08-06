@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ExternalLink, Rocket } from "lucide-react";
-import { buildsApi, cloudTasksApi } from "@/lib/api";
+import { buildsApi, cloudTasksApi, gitApi } from "@/lib/api";
 import type { Build } from "@/lib/types";
 import { Spinner } from "@/components/ui/spinner";
 import { BuildStatusBadge, isBuildActive } from "@/components/deploy/build-status-badge";
@@ -14,6 +14,7 @@ import { useT } from "@/lib/i18n/console/context";
 import { trackUxEvent } from "@/lib/ux-telemetry";
 import { resolveCommit, formatCommitLabel } from "@/lib/build-commit";
 import { trackBuildStart } from "@/lib/build-watch";
+import { StarterNextStep } from "@/components/deploy/starter-next-step";
 
 const POLL_MS = 3000;
 
@@ -54,6 +55,31 @@ export function AppLatestBuildCard({ projectId, envId, appName, appUrl, appReady
   const [autofixing, setAutofixing] = useState(false);
   const viewedRef = useRef<BuildViewKey | null>(null);
   const readyCtaViewedRef = useRef<string | null>(null);
+  const [repoFullName, setRepoFullName] = useState<string | null>(null);
+
+  /**
+   * Fetched once (not on every build poll tick) purely to detect a
+   * starter-template app for the StarterNextStep nudge below. Only fired
+   * when the app actually has a git repo -- an upload-deployed app never
+   * will, so skipping the call there avoids a guaranteed-empty round trip.
+   */
+  useEffect(() => {
+    if (!envId || !hasGitRepo) return;
+    let cancelled = false;
+    gitApi
+      .listRepos(projectId, envId)
+      .then((data) => {
+        if (cancelled) return;
+        const repo = (data.repos ?? []).find((r) => r.app_name === appName);
+        setRepoFullName(repo?.repo_full_name ?? null);
+      })
+      .catch(() => {
+        if (cancelled) return;
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId, envId, appName, hasGitRepo]);
 
   useEffect(() => {
     if (!envId) return;
@@ -179,7 +205,8 @@ export function AppLatestBuildCard({ projectId, envId, appName, appUrl, appReady
 
   if (build.status === "success") {
     return (
-      <div className="mb-6 rounded-xl border border-green-100 dark:border-green-950 bg-green-50/50 dark:bg-green-950/20 px-5 py-4">
+      <div className="mb-6 space-y-4">
+      <div className="rounded-xl border border-green-100 dark:border-green-950 bg-green-50/50 dark:bg-green-950/20 px-5 py-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="min-w-0">
             <p className="text-sm font-semibold text-green-700 dark:text-green-400">{t("apps.latestBuild.success.heading")}</p>
@@ -236,6 +263,8 @@ export function AppLatestBuildCard({ projectId, envId, appName, appUrl, appReady
             )}
           </div>
         </div>
+      </div>
+      <StarterNextStep projectId={projectId} envId={envId} repoFullName={repoFullName} />
       </div>
     );
   }
