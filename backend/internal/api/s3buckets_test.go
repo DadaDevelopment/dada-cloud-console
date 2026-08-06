@@ -1,6 +1,9 @@
 package api
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
 
 func TestDeclaredS3ConnectionSecret(t *testing.T) {
 	cases := []struct {
@@ -114,4 +117,44 @@ func TestS3ProvisionError(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestResolveProvisioningSince(t *testing.T) {
+	now := time.Date(2026, 8, 3, 10, 0, 0, 0, time.UTC)
+	auditTime := time.Date(2026, 8, 2, 20, 10, 31, 0, time.UTC)
+	firstSeen := time.Date(2026, 8, 3, 9, 0, 0, 0, time.UTC)
+
+	t.Run("audit row present wins over first_seen_at", func(t *testing.T) {
+		got, ok := resolveProvisioningSince(&auditTime, firstSeen, now)
+		if !ok {
+			t.Fatal("resolveProvisioningSince() ok = false, want true")
+		}
+		if !got.Equal(auditTime) {
+			t.Errorf("resolveProvisioningSince() = %v, want the audit timestamp %v", got, auditTime)
+		}
+	})
+
+	t.Run("no audit row falls back to first_seen_at for adopted buckets", func(t *testing.T) {
+		got, ok := resolveProvisioningSince(nil, firstSeen, now)
+		if !ok {
+			t.Fatal("resolveProvisioningSince() ok = false, want true")
+		}
+		if !got.Equal(firstSeen) {
+			t.Errorf("resolveProvisioningSince() = %v, want first_seen_at %v", got, firstSeen)
+		}
+	})
+
+	t.Run("stale first_seen_at is refused so adopted buckets keep the browser clock", func(t *testing.T) {
+		stale := now.Add(-maxSnapshotProvisioningAge - time.Minute)
+		if _, ok := resolveProvisioningSince(nil, stale, now); ok {
+			t.Error("resolveProvisioningSince() ok = true, want false for a first_seen_at older than the freshness bound")
+		}
+	})
+
+	t.Run("neither audit row nor first_seen_at yields nothing", func(t *testing.T) {
+		_, ok := resolveProvisioningSince(nil, time.Time{}, now)
+		if ok {
+			t.Error("resolveProvisioningSince() ok = true, want false when both sources are empty")
+		}
+	})
 }

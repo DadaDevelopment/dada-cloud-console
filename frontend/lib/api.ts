@@ -147,7 +147,10 @@ function raceAbort<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
  * backend's machine-readable `error` field, e.g. "quota_exceeded") and, when
  * the failure is a plan limit, `upgrade` plus the `resource` and `limit` that
  * were hit -- enough for the caller to render an upsell for the exact thing
- * the user was refused. The Error's message prefers the
+ * the user was refused. Also carries `provisioningSince` (from the backend's
+ * `provisioning_since`), the ISO timestamp of when a still-provisioning
+ * resource's creation actually started, for callers whose only other proof
+ * is a tab-local timer that resets on reload. The Error's message prefers the
  * backend's human `message` over the code, so callers that just render
  * `err.message` show a sentence rather than a raw error code.
  */
@@ -193,19 +196,28 @@ export async function apiFetch<T>(
 
   if (!res.ok) {
     const err = await res.json().catch(() => ({ error: res.statusText }));
-    const body = err as { error?: string; message?: string; upgrade?: boolean; resource?: string; limit?: number };
+    const body = err as {
+      error?: string;
+      message?: string;
+      upgrade?: boolean;
+      resource?: string;
+      limit?: number;
+      provisioning_since?: string;
+    };
     const apiError = new Error(body.message ?? body.error ?? "API error") as Error & {
       status?: number;
       code?: string;
       upgrade?: boolean;
       resource?: string;
       limit?: number;
+      provisioningSince?: string;
     };
     apiError.status = res.status;
     apiError.code = body.error;
     apiError.upgrade = body.upgrade;
     apiError.resource = body.resource;
     apiError.limit = body.limit;
+    apiError.provisioningSince = body.provisioning_since;
     throw apiError;
   }
 
@@ -1185,7 +1197,6 @@ export const gitApi = {
       framework_override?: string;
       auto_deploy: boolean;
       port?: number;
-      worker?: boolean;
       replicas?: number;
       profile?: string;
     }

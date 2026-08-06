@@ -1,11 +1,14 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"strings"
+	"time"
 	"unicode"
 	"unicode/utf8"
 
@@ -390,11 +393,12 @@ func (h *Handler) GetS3BucketCredentials(c *gin.Context) {
 	}
 
 	var summaryRaw []byte
+	var firstSeenAt time.Time
 	if err := h.pool.QueryRow(c.Request.Context(),
-		`SELECT summary_json FROM resource_snapshots
+		`SELECT summary_json, first_seen_at FROM resource_snapshots
 		 WHERE project_id = $1 AND environment_id = $2 AND kind = 'S3Bucket' AND name = $3`,
 		projectID, envID, name,
-	).Scan(&summaryRaw); err != nil {
+	).Scan(&summaryRaw, &firstSeenAt); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			h.recordAudit(c.Request.Context(), claims.UserID, auditEntry{
 				ProjectID:     projectID,
@@ -440,7 +444,23 @@ func (h *Handler) GetS3BucketCredentials(c *gin.Context) {
 				c.JSON(http.StatusConflict, gin.H{"error": "provisioning_failed", "message": provisionErr})
 				return
 			}
-			rejectReveal(http.StatusNotFound, "credentials_not_ready", "credentials not available yet — the bucket is still provisioning")
+			since, haveSince := h.s3BucketProvisioningSince(c.Request.Context(), projectID, envID, name, firstSeenAt)
+			metadata := map[string]any{"reason": "credentials_not_ready", "status": http.StatusNotFound}
+			body := gin.H{"error": "credentials_not_ready", "message": "credentials not available yet — the bucket is still provisioning"}
+			if haveSince {
+				metadata["waited_seconds"] = int(time.Since(since).Seconds())
+				body["provisioning_since"] = since.UTC().Format(time.RFC3339)
+			}
+			h.recordAudit(c.Request.Context(), claims.UserID, auditEntry{
+				ProjectID:     projectID,
+				EnvironmentID: envID,
+				Action:        "RevealS3Credentials",
+				ResourceKind:  "S3Bucket",
+				ResourceName:  name,
+				Outcome:       auditOutcomeFailure,
+				Metadata:      metadata,
+			})
+			c.JSON(http.StatusNotFound, body)
 			return
 		}
 		rejectReveal(http.StatusServiceUnavailable, "credential_access_unconfigured", "S3 credential access is not configured for this environment")
@@ -465,6 +485,58 @@ func (h *Handler) GetS3BucketCredentials(c *gin.Context) {
 		"ftp_host":    creds.FtpHost,
 		"sftp_host":   creds.SftpHost,
 	})
+}
+
+// s3BucketProvisioningSince resolves when a bucket's provisioning began, for
+// a stuck reveal to report honestly instead of the browser's own "since"
+// clock, which resets on every reload or new tab. Two-tier lookup, in order
+// of how honestly each answers "when did this start":
+//  1. The earliest successful CreateS3Bucket audit row — the moment the user
+//     actually pressed create.
+//  2. resourceFirstSeenAt, the snapshot's own first_seen_at (migration 049),
+//     for buckets adopted from git that never went through the console's
+//     create flow and so have no audit row — but only while it is still
+//     recent, see resolveProvisioningSince.
+//
+// Returns false when neither is available, or when the audit lookup itself
+// fails; a query failure here must not turn a working reveal-denial into a
+// 500, so it is logged and swallowed.
+func (h *Handler) s3BucketProvisioningSince(ctx context.Context, projectID, envID uuid.UUID, name string, resourceFirstSeenAt time.Time) (time.Time, bool) {
+	var auditSince *time.Time
+	err := h.pool.QueryRow(ctx,
+		`SELECT MIN(created_at) FROM audit_events
+		 WHERE project_id = $1 AND environment_id = $2 AND action = 'CreateS3Bucket'
+		   AND resource_kind = 'S3Bucket' AND resource_name = $3 AND outcome = $4`,
+		projectID, envID, name, auditOutcomeSuccess,
+	).Scan(&auditSince)
+	if err != nil {
+		log.Printf("s3buckets: provisioning-since lookup failed for project=%s env=%s bucket=%s: %v", projectID, envID, name, err)
+		auditSince = nil
+	}
+	return resolveProvisioningSince(auditSince, resourceFirstSeenAt, time.Now())
+}
+
+// maxSnapshotProvisioningAge bounds how old a snapshot's first_seen_at may be
+// before it stops counting as "provisioning started here". Adopted or imported
+// buckets whose connection secret will never land in the console's namespace
+// (ADR-013) answer not-ready forever, and their snapshot row can be months
+// old; anchoring the wait counter to it would report a five-digit minute count
+// and trip the slow-provisioning hint with a diagnosis that does not apply.
+const maxSnapshotProvisioningAge = 24 * time.Hour
+
+// resolveProvisioningSince applies the two-tier fallback documented on
+// s3BucketProvisioningSince, isolated as a pure function so the fallback order
+// and the freshness bound are unit-testable without a live database. Callers
+// that get false fall back to their own clock, which is the behaviour that
+// shipped before this anchor existed.
+func resolveProvisioningSince(auditSince *time.Time, resourceFirstSeenAt time.Time, now time.Time) (time.Time, bool) {
+	if auditSince != nil {
+		return *auditSince, true
+	}
+	if !resourceFirstSeenAt.IsZero() && now.Sub(resourceFirstSeenAt) < maxSnapshotProvisioningAge {
+		return resourceFirstSeenAt, true
+	}
+	return time.Time{}, false
 }
 
 // s3ProvisionError extracts the upstream provider's own failure text from a

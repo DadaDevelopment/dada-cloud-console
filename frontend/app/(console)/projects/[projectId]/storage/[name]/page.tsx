@@ -57,12 +57,17 @@ export default function BucketDetailPage() {
       const r = await s3bucketsApi.credentials(projectId, envId, name);
       setCreds(r);
     } catch (e) {
-      const err = e as { status?: number; code?: string } | undefined;
+      const err = e as { status?: number; code?: string; provisioningSince?: string } | undefined;
       if (err?.status === 409 || err?.code === "provisioning_failed") {
         setCredsError({ kind: "failed", message: e instanceof Error ? e.message : t("storage.detail.access.error") });
       } else if (err?.status === 404) {
         setCredsError({ kind: "notReady" });
-        setWaitingSince((prev) => prev ?? Date.now());
+        const serverSince = err.provisioningSince ? Date.parse(err.provisioningSince) : NaN;
+        if (!Number.isNaN(serverSince)) {
+          setWaitingSince((prev) => (prev === null ? serverSince : Math.min(prev, serverSince)));
+        } else {
+          setWaitingSince((prev) => prev ?? Date.now());
+        }
       } else if (err?.status === 503) {
         setCredsError({ kind: "notConfigured" });
       } else {
@@ -245,6 +250,19 @@ aws --endpoint-url ${endpointPlaceholder} s3 cp s3://${bucketName}/file.txt ./`;
                       ? t("storage.detail.access.notConfigured")
                       : credsError.message}
                 </p>
+              )}
+              {credsError?.kind === "notReady" && waitedMin > 90 && (
+                <div
+                  data-ux="s3_provision_slow"
+                  className="mt-3 rounded-lg border border-amber-200 dark:border-amber-900 bg-amber-50 dark:bg-amber-950/40 px-3 py-2"
+                >
+                  <p className="text-sm font-semibold text-amber-700 dark:text-amber-300">
+                    {t("storage.detail.access.slowTitle")}
+                  </p>
+                  <p className="mt-1 text-xs text-amber-700/90 dark:text-amber-400/90">
+                    {t("storage.detail.access.slowHint")}
+                  </p>
+                </div>
               )}
             </div>
           ) : (
