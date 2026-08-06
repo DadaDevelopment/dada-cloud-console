@@ -236,9 +236,12 @@ metadata:
   labels:
     {{- include "dada-cloud-console.labels" . | nindent 4 }}
 rules:
+  # patch is what points a managed database's "<app>-db-credentials" secret at
+  # the connection router (DB_ROUTER_HOST): only endpoint and port are replaced,
+  # so provider-sql's username and password are never read or rewritten.
   - apiGroups: [""]
     resources: ["secrets"]
-    verbs: ["get", "list", "create", "update", "delete"]
+    verbs: ["get", "list", "create", "update", "patch", "delete"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding

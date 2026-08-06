@@ -325,6 +325,7 @@ func (r *StatusReconciler) reconcileDatabases(ctx context.Context) {
 	updated := 0
 	for i := range list.Items {
 		cr := &list.Items[i]
+		r.syncRouterEndpoint(ctx, cr)
 		name := cr.GetName()
 		ids := dbEnvs[name]
 		if len(ids) != 1 {
