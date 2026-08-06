@@ -12,6 +12,7 @@ import {
   isInternalConsolePath,
   isKnownConsoleRoute,
   matchConsoleRouteTemplate,
+  repairConsoleLinks,
 } from "@/lib/agent-chat-links";
 import { confirmArgEntries } from "@/lib/agent-chat-redact";
 import { trackUxEvent } from "@/lib/ux-telemetry";
@@ -790,7 +791,7 @@ export function AgentChatPanel({ open, onClose }: AgentChatPanelProps) {
                   <div
                     className="agent-chat-md"
                     onClick={handleMarkdownClick}
-                    dangerouslySetInnerHTML={{ __html: renderMarkdown(autolinkConsolePaths(m.content)) }}
+                    dangerouslySetInnerHTML={{ __html: renderMarkdown(autolinkConsolePaths(repairConsoleLinks(m.content))) }}
                   />
                 ) : (
                   m.content

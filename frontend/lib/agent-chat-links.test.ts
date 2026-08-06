@@ -8,6 +8,8 @@ import {
   autolinkConsolePaths,
   isInternalConsolePath,
   isKnownConsoleRoute,
+  repairConsoleHref,
+  repairConsoleLinks,
 } from "./agent-chat-links.ts";
 
 test("isInternalConsolePath accepts console routes", () => {
@@ -138,4 +140,62 @@ test("CONSOLE_ROUTES matches the pages on disk", () => {
   const tops = new Set(CONSOLE_ROUTES.map((r) => r.split("/")[1]));
   const onDisk = found.filter((p) => tops.has(p.split("/")[1])).sort();
   assert.deepEqual(onDisk, [...CONSOLE_ROUTES].sort());
+});
+
+test("repairs the malformed console links the assistant writes on production", () => {
+  assert.equal(
+    repairConsoleHref("projects/7a387969-e082-415c-8b61-1f53f7e18295/git/import"),
+    "/projects/7a387969-e082-415c-8b61-1f53f7e18295/git/import",
+  );
+  assert.equal(
+    repairConsoleHref("project/7a387969-e082-415c-8b61-1f53f7e18295/git/import"),
+    "/projects/7a387969-e082-415c-8b61-1f53f7e18295/git/import",
+  );
+  assert.equal(repairConsoleHref("projects/p-1/apps"), "/projects/p-1/apps");
+});
+
+test("leaves hrefs that already work, and ones it cannot verify, alone", () => {
+  assert.equal(repairConsoleHref("/projects/p-1/apps"), null);
+  assert.equal(repairConsoleHref("https://example.com/projects/p-1/apps"), null);
+  assert.equal(repairConsoleHref("mailto:hi@example.com"), null);
+  assert.equal(repairConsoleHref("#anchor"), null);
+  assert.equal(repairConsoleHref("//evil.example.com/projects/p-1/apps"), null);
+  assert.equal(repairConsoleHref("projects/p-1/apps/a-1/logs"), null);
+  assert.equal(repairConsoleHref(""), null);
+});
+
+test("rewrites link targets in an answer without touching the text", () => {
+  const answer =
+    "Если ваш код на GitHub: [Подключите репозиторий](projects/p-1/git/import). " +
+    "Иначе загрузите папку: [страница приложений](project/p-1/apps).";
+  assert.equal(
+    repairConsoleLinks(answer),
+    "Если ваш код на GitHub: [Подключите репозиторий](/projects/p-1/git/import). " +
+      "Иначе загрузите папку: [страница приложений](/projects/p-1/apps).",
+  );
+});
+
+test("a repaired link is one the panel will route internally", () => {
+  const repaired = repairConsoleHref("projects/p-1/apps");
+  assert.ok(repaired);
+  assert.equal(isInternalConsolePath(repaired), true);
+  assert.equal(isKnownConsoleRoute(repaired), true);
+});
+
+test("repair runs before autolinking and the two do not fight", () => {
+  const answer = "Загрузите проект здесь: [страница](projects/p-1/apps), либо откройте /projects/p-1/git.";
+  const out = autolinkConsolePaths(repairConsoleLinks(answer));
+  assert.ok(out.includes("[страница](/projects/p-1/apps)"));
+  assert.ok(out.includes("[`/projects/p-1/git`](/projects/p-1/git)"));
+});
+
+test("a sentence-ending period is not swallowed into a deep path", () => {
+  assert.equal(
+    autolinkConsolePaths("Открой /projects/p-1/git."),
+    "Открой [`/projects/p-1/git`](/projects/p-1/git).",
+  );
+  assert.equal(
+    autolinkConsolePaths("Логи тут: /projects/p-1/apps/web/settings. Дальше жми Save"),
+    "Логи тут: [`/projects/p-1/apps/web/settings`](/projects/p-1/apps/web/settings). Дальше жми Save",
+  );
 });
