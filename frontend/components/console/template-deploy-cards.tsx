@@ -50,6 +50,24 @@ export function TemplateDeployCards({ projectId, envId, compact, hero, className
   const [deployingKey, setDeployingKey] = useState<string | null>(null);
   const [templateError, setTemplateError] = useState<string | null>(null);
 
+  /**
+   * Links the template repo, triggers the first build, then lands the user on
+   * the app overview page.
+   *
+   * DESTINATION. Overview, not `/deployments`. `TriggerBuild` is the single
+   * largest terminal action in the measured path graph, and every user in that
+   * cluster had `builds.status='success'` -- people leave right after their
+   * app works. The deployments feed has no live-URL surface at all, so the
+   * dominant new-user path never saw one: 64 successful builds in 14d against
+   * 38 lifetime views of a "your app is live" panel, by 2 distinct users.
+   * Overview carries `AppLatestBuildCard` (live URL + open CTAs), polls the
+   * app phase itself, and fires the Metrika deploy-success goal, which
+   * template deploys never reached before.
+   *
+   * The app row is created asynchronously and lags the build trigger, so the
+   * destination must tolerate a missing app: overview retries `appsApi.list`
+   * 40 times at 3s intervals (~120s) before rendering not-found.
+   */
   async function deployTemplate(tpl: Template) {
     if (!envId || deployingKey) return;
     setTemplateError(null);
@@ -73,7 +91,7 @@ export function TemplateDeployCards({ projectId, envId, compact, hero, className
       }
       const { build } = await buildsApi.trigger(projectId, envId, appName);
       if (build?.id) trackBuildStart({ projectId, envId, appName, buildId: build.id });
-      router.push(`/projects/${projectId}/apps/${appName}/deployments?envId=${envId}`);
+      router.push(`/projects/${projectId}/apps/${appName}?envId=${envId}`);
     } catch (err) {
       setTemplateError(err instanceof Error ? err.message : t("overview.templates.error"));
       setDeployingKey(null);
