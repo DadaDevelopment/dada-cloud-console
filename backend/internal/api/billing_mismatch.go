@@ -41,6 +41,13 @@ type mismatchRow struct {
 // A payment older than its 30-day term plus the expiry sweeper's grace
 // window is excluded: a plan lapsed to free on schedule is the system
 // working as designed, not a discrepancy.
+//
+// Unlike its three neighbours it also runs once at boot rather than waiting
+// for the first tick: an org that paid and did not get its plan should not
+// wait an hour, and the backend redeploys often enough that a pod is not
+// guaranteed to live that long. Running it early is safe because the repair
+// is idempotent and only grants what a succeeded payment already bought --
+// the sweepers that move money or revoke plans stay on the tick.
 func SweepPaymentPlanMismatch(ctx context.Context, pool *pgxpool.Pool, auditTo string, now time.Time) {
 	rows, err := pool.Query(ctx, `
 		SELECT DISTINCT ON (p.org_id)

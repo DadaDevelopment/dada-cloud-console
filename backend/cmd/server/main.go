@@ -232,6 +232,7 @@ func main() {
 		go func() {
 			ticker := time.NewTicker(1 * time.Hour)
 			defer ticker.Stop()
+			api.SweepPaymentPlanMismatch(meterCtx, pool, cfg.AuditNotifyEmail, time.Now().UTC())
 			for {
 				select {
 				case <-meterCtx.Done():
