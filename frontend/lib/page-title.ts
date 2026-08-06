@@ -70,6 +70,7 @@ const TOP_LEVEL: Record<string, Label> = {
 
 const ADMIN_PAGES: Record<string, Label> = {
   costs: label("Экономика", "Economics"),
+  "db-shards": label("Базы", "Databases"),
   audit: label("Аудит", "Audit"),
   approvals: label("Согласования", "Approvals"),
   "ai-gateway": label("AI Gateway", "AI Gateway"),

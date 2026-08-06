@@ -1064,6 +1064,41 @@ export interface AdminCostHardwareGroup {
   price_month_rub: number;
 }
 
+/** One logical database as the platform sees it, sitting on a shard. */
+export interface AdminDBShardDatabase {
+  datname: string;
+  size_bytes: number;
+  share: number;
+  growth_bytes_7d: number;
+  connections: number;
+  project_id?: string;
+  project_name?: string;
+  resource?: string;
+  app_ref?: string;
+  tier?: string;
+  critical_advisories: number;
+  warning_advisories: number;
+  orphan: boolean;
+}
+
+/** One managed PostgreSQL instance with what is actually inside it. */
+export interface AdminDBShard {
+  name: string;
+  state: string;
+  is_platform: boolean;
+  capacity_bytes: number;
+  sampled_bytes: number;
+  databases: number;
+  collected_at?: string;
+  instance_start_at?: string;
+  top: AdminDBShardDatabase[];
+}
+
+export interface AdminDBShardsResponse {
+  shards: AdminDBShard[];
+  window_days: number;
+}
+
 export interface AdminCostsResponse {
   available: boolean;
   note?: string;

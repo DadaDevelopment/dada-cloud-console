@@ -58,6 +58,7 @@ import type {
   FeedbackListResponse,
   AdminOverviewResponse,
   AdminCostsResponse,
+  AdminDBShardsResponse,
   AIGatewayUsageResponse,
   AppState,
   AppServerState,
@@ -1162,6 +1163,7 @@ export const adminApi = {
     apiFetch<AdminCostsResponse>(`/api/v1/admin/costs?days=${days}`),
   getAIGatewayUsage: (days: 7 | 30 = 7) =>
     apiFetch<AIGatewayUsageResponse>(`/api/v1/admin/ai-gateway/usage?days=${days}`),
+  getDBShards: () => apiFetch<AdminDBShardsResponse>(`/api/v1/admin/db-shards`),
 };
 
 // Vercel-flow API clients -------------------------------------------------------
