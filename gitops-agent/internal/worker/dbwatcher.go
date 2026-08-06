@@ -1744,6 +1744,24 @@ func (w *DBWatcher) saveComposeSnapshotAndRender(ctx context.Context, op db.Oper
 	return w.renderEnvAggregate(ctx, op, op.ProjectID, op.EnvironmentID)
 }
 
+// deployPortAndWorker reads the effective port and worker flag a redeploy
+// should render with. A worker app (summary["worker"] == true) never gets a
+// Service, no matter what port an earlier snapshot happened to carry: without
+// this, a background app retrofitted with worker=true after living for a
+// while as a broken public-domain app would keep re-rendering with its old
+// non-zero port on every redeploy, re-enabling the Service
+// (renderer.RenderAppValues sets Common.Service.Enabled = spec.Port > 0) and
+// keeping the phantom route alive underneath the domain BackfillMissingDefaultDomains
+// and DetachHostname already stop from being reattached/reissued.
+func deployPortAndWorker(cur map[string]any) (port float64, worker bool) {
+	worker, _ = cur["worker"].(bool)
+	if worker {
+		return 0, true
+	}
+	port, _ = cur["port"].(float64)
+	return port, false
+}
+
 func (w *DBWatcher) doDeployImageVersion(ctx context.Context, op db.Operation) error {
 	var p struct {
 		AppName   string `json:"app_name"`
@@ -1778,7 +1796,7 @@ func (w *DBWatcher) doDeployImageVersion(ctx context.Context, op db.Operation) e
 	var cur map[string]any
 	_ = json.Unmarshal(summaryRaw, &cur)
 
-	portVal, _ := cur["port"].(float64)
+	portVal, workerVal := deployPortAndWorker(cur)
 	replicasVal, _ := cur["replicas"].(float64)
 	profileVal, _ := cur["profile"].(string)
 	frameworkVal, _ := cur["framework"].(string)
@@ -1873,6 +1891,7 @@ func (w *DBWatcher) doDeployImageVersion(ctx context.Context, op db.Operation) e
 	cur["framework"] = frameworkVal
 	cur["port"] = portVal
 	cur["status"] = "Pending"
+	cur["worker"] = workerVal
 	updatedJSON, _ := json.Marshal(cur)
 	if err := db.UpsertSnapshot(ctx, w.pool,
 		op.ProjectID, op.EnvironmentID,
@@ -2422,7 +2441,11 @@ func (w *DBWatcher) doAttachDefaultDomain(ctx context.Context, op db.Operation) 
 
 // doDetachCustomHostname removes the {Ingress, <host-as-name>} entry from the
 // owning app's resources.values.yaml manifests list. cert-manager then GCs the
-// Certificate/secret once the Ingress is pruned.
+// Certificate/secret once the Ingress is pruned. It also removes any
+// {PublicApi, <host-as-name>} entry: doAttachDefaultDomain renders both an
+// Ingress and a PublicApi (the crossplane DNS route) under the same name for
+// a managed default domain, and rv.Remove is a no-op for a kind that was
+// never rendered, so this is safe for an ordinary custom-domain detach too.
 func (w *DBWatcher) doDetachCustomHostname(ctx context.Context, op db.Operation) error {
 	var p struct {
 		AppName  string `json:"app_name"`
@@ -2456,6 +2479,7 @@ func (w *DBWatcher) doDetachCustomHostname(ctx context.Context, op db.Operation)
 	valuesPath := renderer.AppResourcesValuesGitPath(projectName, envName, p.AppName)
 	manifestFile, changed, err := removeManifestsFile(mgr, valuesPath, [][2]string{
 		{"Ingress", renderer.FQDNToName(p.Hostname)},
+		{"PublicApi", renderer.FQDNToName(p.Hostname)},
 	})
 	if err != nil {
 		return fmt.Errorf("remove manifests: %w", err)
