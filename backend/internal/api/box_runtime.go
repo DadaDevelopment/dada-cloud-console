@@ -379,10 +379,18 @@ func boxSessionBaseURL(cfg *config.Config) string {
 // would hand the tenant a DSN pointing at a database inside a body that is about
 // to be destroyed. An unconfigured subsystem is not a failed request, which is
 // why this is 503 with a reason and not a 500.
+//
+// The message deliberately does not say "yet" or "not ready": on the cluster
+// adapter this is not a warm-up state a retry will clear, it is the shape of
+// this installation today (see boxRuntimeStack doc). A caller — human or agent —
+// that reads "yet" retries forever. The message instead names the working path:
+// createDatabase against the project's environment provisions the same managed
+// Postgres outside the box; the caller injects its credential into the box itself
+// (getBoxConnection plus its own env-setting step).
 func (s *boxRuntimeStack) requireAttachProvider(c *gin.Context) (box.AttachProvider, bool) {
 	if s.attach == nil {
 		respondError(c, http.StatusServiceUnavailable,
-			"the wired box runtime cannot attach managed resources yet: attach is available on the local adapter only (ADR-019)")
+			"attaching a managed database directly to a box is not available in this installation: the wired box runtime has no attach path (ADR-019). This is not temporary and will not succeed on retry. Use a project database instead: POST /projects/{projectId}/environments/{envId}/databases (MCP tool createDatabase), then set its connection details as env inside the box yourself")
 		return nil, false
 	}
 	return s.attach, true
