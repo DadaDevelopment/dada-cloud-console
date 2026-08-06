@@ -343,6 +343,7 @@ func NewHandler(pool *pgxpool.Pool, cfg *config.Config) *Handler {
 	h.StartAppHealthWatcher(context.Background())
 	h.StartAppVolumeWatcher(context.Background())
 	h.StartAppURLWatcher(context.Background())
+	h.StartDBQuotaWatcher(context.Background())
 	h.StartAppAutoscaleWatcher(context.Background())
 	h.StartIdentityDeliveryWatcher(context.Background())
 	h.StartDemoAppReaper(context.Background())

@@ -36,6 +36,7 @@ const (
 	lockKeyDemoAppReap       int64 = 0x64616461_0009
 	lockKeyAgentChatFold     int64 = 0x64616461_000A
 	lockKeyAppURLWatch       int64 = 0x64616461_000B
+	lockKeyDBQuotaWatch      int64 = 0x64616461_000C
 )
 
 // runWithAdvisoryLock executes fn while holding the session-scoped Postgres

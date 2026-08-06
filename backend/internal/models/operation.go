@@ -47,6 +47,18 @@ type CreateServiceDatabasePayload struct {
 	BackupRetention string `json:"backup_retention"`
 }
 
+// SetDatabaseEnforcementPayload is the typed payload for
+// SetDatabaseEnforcement operations, emitted by the storage-quota watcher and
+// never by a human. Enforcement is one of none/read-only/frozen and maps onto
+// ServiceDatabaseV2.spec.enforcement; the agent patches that one field into the
+// manifest already in git, so no other field of the database is carried here on
+// purpose — a payload that re-declared identity would silently rewrite it.
+type SetDatabaseEnforcementPayload struct {
+	Name        string `json:"name"`
+	AppRef      string `json:"app_ref,omitempty"`
+	Enforcement string `json:"enforcement"`
+}
+
 // DeleteServiceDatabasePayload is the typed payload for DeleteServiceDatabase
 // operations. AppRef is the owning app whose resources.values.yaml holds the
 // CR entry (empty = the standalone "service-databases-<project>" chart); the
