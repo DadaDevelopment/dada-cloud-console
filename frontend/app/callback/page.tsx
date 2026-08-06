@@ -16,7 +16,8 @@ import { Spinner } from "@/components/ui/spinner";
 import { AuthErrorScreen } from "@/components/shell/auth-error-screen";
 import { PENDING_REGISTRATION_KEY } from "@/lib/register-redirect";
 import { capturePasskeyActionStatus, markFreshAuthentication } from "@/lib/passkey";
-import { GOAL_REGISTRATION_COMPLETE, reachGoal } from "@/lib/metrika";
+import { GOAL_AUTH_CALLBACK_FAILED, GOAL_REGISTRATION_COMPLETE, reachGoal } from "@/lib/metrika";
+import { callbackVerdict } from "@/lib/callback-outcome";
 
 /**
  * Keycloak reports the outcome of an Application-Initiated Action (passkey
@@ -41,10 +42,20 @@ if (typeof window !== "undefined") {
  */
 const REGISTRATION_WINDOW_MS = 30 * 60 * 1000;
 
+/**
+ * The query string Keycloak redirected to, snapshotted at module scope for
+ * the same reason as the passkey status above: react-sso rewrites the URL on
+ * the success path. Empty on the server, which is harmless - auth always
+ * starts out loading, so the first render is the spinner on both sides and
+ * the failure verdict is only ever reached in the browser.
+ */
+const CALLBACK_SEARCH = typeof window !== "undefined" ? window.location.search : "";
+
 export default function CallbackPage() {
   const router = useRouter();
-  const { token, isLoading, authError, logout } = useAuth();
+  const { token, isLoading, authError, login, logout } = useAuth();
   const registrationGoalCheckedRef = useRef(false);
+  const failureGoalSentRef = useRef(false);
 
   useEffect(() => {
     if (!isLoading && token) {
@@ -76,8 +87,45 @@ export default function CallbackPage() {
     } catch {}
   }, [isLoading, token]);
 
-  if (authError) {
-    return <AuthErrorScreen onRetry={() => window.location.reload()} onLogout={logout} />;
+  /**
+   * A round-trip that comes back without a session is the console's quietest
+   * way to lose a new user: no token, no error, nothing to retry, and no
+   * authenticated request afterwards - so not even the audit log records that
+   * they were ever here. Count it, so the drop-off stops being invisible.
+   */
+  useEffect(() => {
+    if (isLoading || token || failureGoalSentRef.current) return;
+    failureGoalSentRef.current = true;
+    const outcome = callbackVerdict({
+      isLoading,
+      hasToken: false,
+      hasAuthError: authError !== null,
+      search: CALLBACK_SEARCH,
+    });
+    if (outcome.state !== "failed") return;
+    reachGoal(GOAL_AUTH_CALLBACK_FAILED, { reason: outcome.error ?? outcome.reason });
+  }, [isLoading, token, authError]);
+
+  const verdict = callbackVerdict({
+    isLoading,
+    hasToken: token !== null,
+    hasAuthError: authError !== null,
+    search: CALLBACK_SEARCH,
+  });
+
+  if (verdict.state === "failed") {
+    /**
+     * Retry restarts the authorize request instead of reloading: the code in
+     * this URL is either absent or already spent, so a reload would land on
+     * the very same failure.
+     */
+    return (
+      <AuthErrorScreen
+        variant={authError !== null ? "session" : verdict.reason}
+        onRetry={authError !== null ? () => window.location.reload() : () => login()}
+        onLogout={logout}
+      />
+    );
   }
 
   return (

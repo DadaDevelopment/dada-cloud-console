@@ -56,6 +56,14 @@ export const GOAL_SIGNUP_STARTED = "signup_started";
 /** Goal fired once a returning OIDC callback completes a fresh registration. */
 export const GOAL_REGISTRATION_COMPLETE = "registration_complete";
 
+/**
+ * Goal fired when an OIDC round-trip lands back on /callback without a
+ * session. Makes the sign-in dead end countable: until this existed the
+ * drop-off was invisible, since a visitor who never gets a token never
+ * reaches an authenticated API call and so leaves no audit trail either.
+ */
+export const GOAL_AUTH_CALLBACK_FAILED = "auth_callback_failed";
+
 /** Goal fired the first time an app of this user reaches a running phase. */
 export const GOAL_DEPLOY_SUCCESS = "deploy_success";
 
