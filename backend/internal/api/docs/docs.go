@@ -4867,7 +4867,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Provisions a managed PostgreSQL database and role OUTSIDE the box and injects the connection credential into the box's env file (mode 0600, root). The box can then open it immediately — the very next command inside the box sees DATABASE_URL. The database is deliberately not inside the box: a disposable body must not own the customer's data, so deleting or crystallizing the box never destroys it. The response lists WHICH env keys were injected and never their values.",
+                "description": "Provisions a managed PostgreSQL database and role OUTSIDE the box and injects the connection credential into the box's env file (mode 0600, root). The box can then open it immediately - the very next command inside the box sees DATABASE_URL. The database is deliberately not inside the box: a disposable body must not own the customer's data, so deleting or crystallizing the box never destroys it. The response lists WHICH env keys were injected and never their values. Current installation status: this returns 503 always, for every box, because the wired box runtime (the cluster adapter, ADR-019) has no attach path. This is not a transient failure and retrying will not help. Use createDatabase instead (POST /projects/{projectId}/environments/{envId}/databases) to provision the same managed Postgres outside the box, then inject its credential into the box yourself.",
                 "consumes": [
                     "application/json"
                 ],
