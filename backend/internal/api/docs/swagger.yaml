@@ -821,6 +821,7 @@ definitions:
     properties:
       metrics:
         additionalProperties:
+          format: float64
           type: number
         type: object
       source:
@@ -872,6 +873,13 @@ definitions:
       target:
         type: string
     type: object
+  api.promoTokenRequest:
+    properties:
+      token:
+        type: string
+    required:
+    - token
+    type: object
   api.putAICredentialRequest:
     properties:
       api_base:
@@ -922,6 +930,13 @@ definitions:
         type: array
       session_id:
         type: string
+    type: object
+  api.redeemPromoRequest:
+    properties:
+      token:
+        type: string
+    required:
+    - token
     type: object
   api.reportOnboardingRequest:
     properties:
@@ -1090,6 +1105,7 @@ definitions:
   cloudtask.StepResult:
     properties:
       durationMs:
+        format: int64
         type: integer
       error:
         type: string
@@ -1497,6 +1513,42 @@ paths:
       summary: Resolve a feedback ticket (platform-admin only)
       tags:
       - admin
+  /admin/growth/campaigns:
+    get:
+      description: Sent/clicked/redeemed/converted per campaign, variant and signup
+        week.
+      operationId: getGrowthCampaigns
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Campaign funnel report (platform staff)
+      tags:
+      - growth
   /admin/operations:
     get:
       description: Returns operations in the WaitingForApproval state across all projects
@@ -13388,6 +13440,89 @@ paths:
       summary: Get or create the caller's default project
       tags:
       - project
+  /promo/click:
+    post:
+      consumes:
+      - application/json
+      description: Marks a promo token as clicked. Public, idempotent, and answers
+        identically for unknown tokens.
+      operationId: recordPromoClick
+      parameters:
+      - description: Promo token
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/api.promoTokenRequest'
+      responses:
+        "204":
+          description: No Content
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Record a campaign promo-link click
+      tags:
+      - growth
+  /promo/redeem:
+    post:
+      consumes:
+      - application/json
+      description: Grants the campaign plan for a fixed term to the caller's org.
+        The token must belong to the calling user.
+      operationId: redeemPromo
+      parameters:
+      - description: Promo token
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/api.redeemPromoRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Redeem a campaign promo token
+      tags:
+      - growth
   /telemetry/events:
     post:
       consumes:

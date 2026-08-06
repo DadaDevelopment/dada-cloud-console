@@ -239,6 +239,8 @@ func SetupRouter(pool *pgxpool.Pool, cfg *config.Config) *gin.Engine {
 
 	r.POST("/api/v1/telemetry/events", h.RecordUXEvents)
 
+	r.POST("/api/v1/promo/click", h.RecordPromoClick)
+
 	// Dada Box fake-door funnel ingest. Public on purpose: the /box landing is a
 	// marketing page with no session, and its route handler forwards events
 	// server-to-server. Guarded by a per-IP + global token bucket inside the
@@ -319,6 +321,7 @@ func SetupRouter(pool *pgxpool.Pool, cfg *config.Config) *gin.Engine {
 		internal.POST("/ai/credential/set", h.AISetProviderCredential)
 		internal.POST("/ai/credential/get", h.AIGetProviderCredential)
 		internal.POST("/ai/usage/record", h.AIRecordUsage)
+		internal.POST("/ai/failure/record", h.AIRecordFailure)
 		internal.POST("/ai/key/introspect", h.AIIntrospectKey)
 		internal.POST("/identity/introspect", h.IntrospectServiceIdentity)
 		log.Printf("internal: provisioning API enabled at /internal")
@@ -607,6 +610,7 @@ func SetupRouter(pool *pgxpool.Pool, cfg *config.Config) *gin.Engine {
 			api.GET("/admin/overview", h.GetAdminOverview)
 			api.GET("/admin/costs", h.GetAdminCosts)
 			api.GET("/admin/ai-gateway/usage", h.GetAIGatewayUsage)
+			api.GET("/admin/growth/campaigns", h.GetGrowthCampaigns)
 
 			// Concierge write-back for the Box private preview: which claim got
 			// which box. Mandatory — it is the only source for the repeat-use
@@ -638,6 +642,7 @@ func SetupRouter(pool *pgxpool.Pool, cfg *config.Config) *gin.Engine {
 		api.GET("/agent/chat/history", h.AgentChatGetHistory)
 		api.POST("/agent/chat/context/clear", h.AgentChatClearContext)
 
+		api.POST("/promo/redeem", h.RedeemPromo)
 		api.GET("/onboarding", h.GetOnboarding)
 		api.POST("/onboarding/:key", h.PostOnboarding)
 	}

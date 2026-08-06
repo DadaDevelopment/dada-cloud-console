@@ -502,6 +502,60 @@ const docTemplate = `{
                 }
             }
         },
+        "/admin/growth/campaigns": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Sent/clicked/redeemed/converted per campaign, variant and signup week.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "growth"
+                ],
+                "summary": "Campaign funnel report (platform staff)",
+                "operationId": "getGrowthCampaigns",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/admin/operations": {
             "get": {
                 "security": [
@@ -17697,6 +17751,130 @@ const docTemplate = `{
                 }
             }
         },
+        "/promo/click": {
+            "post": {
+                "description": "Marks a promo token as clicked. Public, idempotent, and answers identically for unknown tokens.",
+                "consumes": [
+                    "application/json"
+                ],
+                "tags": [
+                    "growth"
+                ],
+                "summary": "Record a campaign promo-link click",
+                "operationId": "recordPromoClick",
+                "parameters": [
+                    {
+                        "description": "Promo token",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/api.promoTokenRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "No Content"
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/promo/redeem": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Grants the campaign plan for a fixed term to the caller's org. The token must belong to the calling user.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "growth"
+                ],
+                "summary": "Redeem a campaign promo token",
+                "operationId": "redeemPromo",
+                "parameters": [
+                    {
+                        "description": "Promo token",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/api.redeemPromoRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/telemetry/events": {
             "post": {
                 "description": "Ingests a batch of browser UX events (session_start, pageview, click, input_commit, nav_leave, visibility, error_shown, view) into ux_events, the client-side half of the end-to-end path that audit_events cannot see. Unauthenticated so the pre-login part of the journey is captured; the user is resolved server-side from the dada_uid cookie, never from the payload. Rate-limited per client IP and globally, body and batch size capped, event names checked against a closed set. Carries control names and paths only -- never field values.",
@@ -19006,7 +19184,8 @@ const docTemplate = `{
                 "metrics": {
                     "type": "object",
                     "additionalProperties": {
-                        "type": "number"
+                        "type": "number",
+                        "format": "float64"
                     }
                 },
                 "source": {
@@ -19085,6 +19264,17 @@ const docTemplate = `{
                 }
             }
         },
+        "api.promoTokenRequest": {
+            "type": "object",
+            "required": [
+                "token"
+            ],
+            "properties": {
+                "token": {
+                    "type": "string"
+                }
+            }
+        },
         "api.putAICredentialRequest": {
             "type": "object",
             "required": [
@@ -19159,6 +19349,17 @@ const docTemplate = `{
                     }
                 },
                 "session_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "api.redeemPromoRequest": {
+            "type": "object",
+            "required": [
+                "token"
+            ],
+            "properties": {
+                "token": {
                     "type": "string"
                 }
             }
@@ -19418,7 +19619,8 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "durationMs": {
-                    "type": "integer"
+                    "type": "integer",
+                    "format": "int64"
                 },
                 "error": {
                     "type": "string"

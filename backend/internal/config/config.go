@@ -488,6 +488,13 @@ type Config struct {
 	GithubOAuthRedirectURI string // GITHUB_OAUTH_REDIRECT_URI (absolute callback; disambiguates the App's multiple callback URLs, must be in the App allowlist)
 	MetrikaOAuthToken      string // METRIKA_OAUTH_TOKEN
 
+	// ReactivationCampaignEnabled (REACTIVATION_CAMPAIGN_ENABLED, default
+	// false) arms the dormant-account campaign sweeper. Off by default because
+	// the sweeper's first tick mails real customers: deploying the code and
+	// deciding to send are separate decisions, and only the second one is
+	// irreversible.
+	ReactivationCampaignEnabled bool
+
 	BillingEnabled          bool  // BILLING_ENABLED (default false) — guards metering ticker; billing endpoints always load plans read-only
 	BillingMeterIntervalSec int64 // BILLING_METER_INTERVAL_SECS (default 3600)
 	// BillingExemptOrgs (BILLING_EXEMPT_ORGS, comma-separated) never hit a quota
@@ -800,6 +807,7 @@ func Load() (*Config, error) {
 		GithubOAuthRedirectURI:      getEnv("GITHUB_OAUTH_REDIRECT_URI", ""),
 		MetrikaOAuthToken:           getEnv("METRIKA_OAUTH_TOKEN", ""),
 		BillingEnabled:              getEnv("BILLING_ENABLED", "false") == "true",
+		ReactivationCampaignEnabled: getEnv("REACTIVATION_CAMPAIGN_ENABLED", "false") == "true",
 		BillingMeterIntervalSec:     getEnvInt64("BILLING_METER_INTERVAL_SECS", 3600),
 		BillingExemptOrgs:           splitList(getEnv("BILLING_EXEMPT_ORGS", "")),
 		BillingOverageBlockFactor:   getEnvFloat("BILLING_OVERAGE_BLOCK_FACTOR", 3),

@@ -178,6 +178,26 @@ func ComposeQuotaGraceReminder(graceUntilUTC string, daysLeft int, over []QuotaL
 	return subject, b.String()
 }
 
+// ComposeReactivation builds the letter sent to an account that signed up and
+// never shipped anything. Every one of those accounts already has a project,
+// so the blocker is not "how do I start" — it is "what do I put in it", and
+// the letter is written against that: one link, one offer, no tour.
+//
+// promoLink is the per-recipient tracked URL; it is the ONLY link in the body,
+// because a second link splits the click and makes the campaign unmeasurable.
+// planName and days describe the grant waiting behind it.
+func ComposeReactivation(planName string, days int, promoLink string) (subject, body string) {
+	subject = fmt.Sprintf("Dada Cloud: %s на %d дней — и готовые шаблоны, чтобы не начинать с пустого экрана", planName, days)
+	var b strings.Builder
+	b.WriteString("Вы завели проект в Dada Cloud, но так и не выкатили приложение.\n\n")
+	b.WriteString("Чаще всего дело не в платформе, а в том, что непонятно, с чего начать. Поэтому мы приготовили две вещи.\n\n")
+	fmt.Fprintf(&b, "Первое — тариф %s на %d дней бесплатно. Карта не нужна, по окончании срока аккаунт сам вернётся на Free, ничего не спишется.\n", planName, days)
+	b.WriteString("Второе — каталог готовых шаблонов: выбираете репозиторий, жмёте «Задеплоить», через пару минут приложение живёт на своём домене с HTTPS.\n\n")
+	fmt.Fprintf(&b, "Забрать тариф и посмотреть шаблоны: %s\n\n", promoLink)
+	b.WriteString("Если что-то не поедет — ответьте на это письмо, разберёмся вместе.\n")
+	return subject, b.String()
+}
+
 // crashLogSignature is one entry in the ordered pattern table ClassifyCrashLog
 // walks: pattern is matched with strings.Contains against the log excerpt,
 // label is the human hint appended to the pattern name in the parenthetical.

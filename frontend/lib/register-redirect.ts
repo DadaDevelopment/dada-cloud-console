@@ -73,3 +73,41 @@ export function startRegister(returnTo = "/projects", method: RegisterMethod = "
     extraQueryParams: registerQueryParams(method),
   });
 }
+
+/**
+ * Kicks off the ordinary Keycloak sign-IN flow, returning to `returnTo`.
+ *
+ * The auth context's `login()` bridges to `@dada/react-sso` with no argument,
+ * so it always lands back on the default page. Campaign links need the return
+ * path preserved: a promo recipient who is bounced to Keycloak must come back
+ * to the promo URL, or the token they were mailed is silently lost. This
+ * mirrors {@link startRegister}'s config exactly — same client, same scopes,
+ * same localStorage state store — so react-sso's own UserManager completes the
+ * `/callback` round-trip, and only omits `prompt=create`: these recipients
+ * already have accounts and must see the sign-in form, not the sign-up one.
+ *
+ * @param returnTo in-app path to return to after auth (defaults to /projects)
+ * @param forcePrompt re-ask for credentials even when a Keycloak session is
+ *   already live. Used when the current session is the wrong identity: a plain
+ *   redirect would be waved straight through by the session cookie and land
+ *   back on the same refusal.
+ */
+export function startLogin(returnTo = "/projects", forcePrompt = false): Promise<void> {
+  const authority = process.env.NEXT_PUBLIC_KEYCLOAK_ISSUER ?? "";
+  const clientId = process.env.NEXT_PUBLIC_OIDC_CLIENT_ID ?? "dada-console";
+
+  const userManager = new UserManager({
+    authority,
+    client_id: clientId,
+    redirect_uri: `${window.location.origin}/callback`,
+    post_logout_redirect_uri: window.location.origin,
+    response_type: "code",
+    scope: "openid profile email builds:write deploy:write",
+    userStore: new WebStorageStateStore({ store: window.localStorage }),
+  });
+
+  return userManager.signinRedirect({
+    state: returnTo,
+    extraQueryParams: forcePrompt ? { prompt: "login" } : {},
+  });
+}

@@ -1,3 +1,25 @@
+# Public-route health (2026-08-04, reopened)
+
+**Decision:** do not infer or surface a separate app type. A configured port is
+the whole contract: a port creates a public HTTP expectation; no port means no
+public route and no probe. The first port is auto-detected and every later
+configuration change, including removal, is authoritative.
+
+- [x] Trace and remove fallback paths that silently recreate a port/domain after it was removed.
+- [x] Probe the real public URL (DNS, TLS, ingress/LB, HTTP), record a bounded result and expose a calm actionable state.
+- [ ] Add metrics and alerting for both endpoint failures and watcher/LB failure; apply the LB fix from live evidence in its source repository.
+- [x] Cover detect, remove-port, public failure, recovery, and no-port cases with unit/integration tests.
+- [x] Verify the deployment path and document the result below.
+
+## Review — Public-route health
+
+- `port=0` is now preserved through archive detection, deploy handoff, GitOps rendering and Helm. The shared chart emits no Service, Ingress, default HTTP container port or HTTP probes in that mode.
+- Public probing now targets the public HTTPS URL, not the in-cluster service. It writes `dada_public_route_probes_total{outcome=ok|edge_unavailable|bad_gateway}` and a compact per-app status with an actionable log link.
+- Live evidence: 5 of 12 fresh TLS connections to `155.212.223.198` failed during handshake; successful connections reached the expected upstream 502. The public Service has `externalTrafficPolicy: Cluster`, two ready ingress pods on two of four nodes, and no health-check NodePort. The exact GitOps source for this Service is not present in the available repositories, so the required `externalTrafficPolicy: Local` change was not applied manually.
+- Verification: backend API/metrics tests, gitops renderer/worker tests, build-agent DB tests, frontend typecheck/unit tests (80 passing), and Helm rendering for both service-enabled and service-disabled modes passed.
+
+---
+
 # VM App-Settings parity + full custom-domain wiring
 
 **Goal:** the console App Settings page is k8s-only. For a VM (compose) environment it shows the wrong surface (empty helm config, ungated k8s mutations). Make every tab VM-aware and wire custom domains end-to-end for VM.
@@ -303,3 +325,81 @@ imageFs 15.7Gi). Осталось как риск: диск ноды 71.6Gi ма
   `crossplane.io/external-create-pending` на composed provider-http `Request`
   (при `status.response.statusCode=200`). Прод НЕ трогал: консоль теперь сама
   резолвит запись (`dnsRecordLive`) и повышает Pending→Ready только по факту DNS.
+
+---
+
+# Logs viewer: layout and timestamp clarity (2026-08-04)
+
+## Review
+
+- [x] Long log messages/URLs wrap inside the message column without moving the
+      timestamp and stream columns out of alignment.
+- [x] API timestamps are rendered in the browser timezone (`HH:mm:ss`), which is
+      the user's actual local time; no silent UTC override is applied.
+- [x] Verified with frontend unit tests (80/80), targeted ESLint, and production
+      Next.js build.
+
+---
+
+# Reactivation campaign: registered, never deployed (2026-08-06)
+
+Cohort ground truth from prod (`cloud-console`, `user_accounts` view): 18
+customer accounts, 10 of them with zero builds ever. All 10 already have a
+project, so the drop-off is "what do I deploy", not "how do I sign up".
+
+Offer decided by the owner: Startup plan free for 30 days, redeemed from a
+tracked promo link. A/B variants are stored but a single variant ships first —
+at n=10 a split measures nothing; cohorts are cut by registration date instead.
+
+## Plan
+
+- [x] 1. Migration `103_growth_campaign_sends.sql`: one row per (campaign,
+      user), carrying the opaque promo token and the four funnel timestamps
+      (sent / clicked / redeemed / converted).
+- [x] 2. `notify.ComposeReactivation`: the customer-facing letter.
+- [x] 3. `SweepReactivation`: picks the cohort, sends once, never twice, and
+      backfills `converted_at` from the user's first successful build.
+- [x] 4. Click tracking: `POST /api/v1/promo/click`, public and idempotent.
+      Replaces the planned `GET /r/:token` redirect — on `console.dada-tuda.ru`
+      the ingress routes only /api, /auth, /health, /mcp and a few fixed paths
+      to the backend, so a vanity path would never have reached it.
+- [x] 5. `POST /api/v1/promo/redeem` (authenticated): grants Startup for 30 days
+      to the caller's own org and marks the send redeemed.
+- [x] 6. `GET /api/v1/admin/growth/campaigns`: sent/clicked/redeemed/converted
+      per campaign, variant and signup week.
+- [x] 7. Frontend `/promo/[token]`: records the click, signs the recipient in
+      with the return path preserved, redeems, then lands on the templates.
+- [x] 8. Wire the sweeper in `cmd/server/main.go`, behind the billing sweeper
+      tick and behind `REACTIVATION_CAMPAIGN_ENABLED` (default off).
+- [x] 9. Verify: real-DB tests for the sweeper and the redeem gate, go vet,
+      frontend build.
+
+## Review
+
+Shipped dark on purpose. `REACTIVATION_CAMPAIGN_ENABLED` defaults to false, so
+deploying this code mails nobody: the first tick after the flag flips writes to
+ten real mailboxes, and that is a decision to take deliberately, not a side
+effect of a push.
+
+What the tests actually prove (real Postgres, all six green):
+
+- a dormant customer is enrolled and mailed once; an account that already
+  shipped a build is not enrolled at all;
+- a second sweep sends nothing more — the unique index, not the mail call, is
+  the dedup guard;
+- `converted_at` is stamped by a successful build after the letter, and a
+  failed build does not count;
+- the grant carries a 30-day term, never a perpetual paid plan;
+- a forwarded link is refused with 403 and consumes nothing;
+- a paying customer keeps their plan and their longer term (`granted: false`);
+- the click endpoint answers 204 identically for live and unknown tokens, so it
+  cannot be used to probe whether an address was mailed.
+
+Test isolation note: these run against the shared cloud-console database, so
+they sweep under a per-test campaign name. Running them under the live campaign
+name would stamp `sent_at` on real dormant accounts that never got a letter and
+the unique index would then refuse to ever mail them — the suite would burn the
+campaign it exists to protect.
+
+To go live: set `REACTIVATION_CAMPAIGN_ENABLED=true` on the console backend.
+Funnel reads from `GET /api/v1/admin/growth/campaigns`.
