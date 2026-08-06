@@ -80,6 +80,7 @@ export const overview: Messages = {
   },
   "overview.templates.ask.fromCatalog": { ru: "проверенный", en: "verified" },
   "overview.templates.ask.fromSearch": { ru: "с GitHub", en: "from GitHub" },
+  "overview.templates.ask.fromLink": { ru: "по ссылке", en: "from your link" },
   "overview.templates.ask.managed": { ru: "управляемая", en: "managed" },
   "overview.templates.ask.archived": { ru: "архив", en: "archived" },
   "overview.templates.ask.openDatabases": { ru: "Создать", en: "Create" },

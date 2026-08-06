@@ -297,9 +297,11 @@ export function TemplateDeployCards({ projectId, envId, compact, hero, className
                 badge={
                   c.kind === "managed"
                     ? t("overview.templates.ask.managed")
-                    : c.from === "search"
-                      ? t("overview.templates.ask.fromSearch")
-                      : t("overview.templates.ask.fromCatalog")
+                    : c.kind === "solution"
+                      ? t("overview.templates.ask.fromCatalog")
+                      : c.from === "search"
+                        ? t("overview.templates.ask.fromSearch")
+                        : t("overview.templates.ask.fromLink")
                 }
                 archivedLabel={t("overview.templates.ask.archived")}
                 onClick={() => void deployCandidate(c)}

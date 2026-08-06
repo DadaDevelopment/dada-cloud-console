@@ -192,7 +192,10 @@ func candidatePayload(c solutions.Candidate) gin.H {
 // outages, and an App installation can be removed; in every one of those cases
 // the customer still gets the catalog rows and a `search_failed` flag, because
 // a suggestion list that goes blank reads as "this platform has nothing for
-// you" rather than as a temporary upstream problem.
+// you" rather than as a temporary upstream problem. A build-agent that is not
+// configured at all counts as the same kind of failure: the search was owed and
+// did not happen, and reporting searched=true with no rows and no flag would
+// blame the customer's query for our missing dependency.
 //
 // @ID          resolveSolution
 // @Summary     Resolve what to deploy from one input string
@@ -249,7 +252,7 @@ func (h *Handler) ResolveSolution(c *gin.Context) {
 		out = append(out, candidatePayload(cand))
 	}
 
-	searchFailed := false
+	searchFailed := res.SearchQuery != "" && h.buildagent == nil
 	if res.SearchQuery != "" && h.buildagent != nil {
 		hits, err := cache.Fetch(c.Request.Context(), h.cache,
 			fmt.Sprintf("git:search:public:%s", strings.ToLower(res.SearchQuery)), searchCacheTTL,
