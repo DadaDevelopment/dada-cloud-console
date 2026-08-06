@@ -10166,6 +10166,62 @@ paths:
       summary: Delete a managed PostgreSQL database
       tags:
       - database
+  /projects/{projectId}/environments/{envId}/databases/{name}/advisories:
+    get:
+      description: 'Lists the advisories the platform derived for a managed PostgreSQL
+        database: unused indexes, stale planner statistics, append-only tables with
+        no retention, tables read off disk instead of cache, slow or dominant queries,
+        and a storage-quota forecast. Each carries the evidence it fired on and, where
+        the action is safe to spell out, the SQL to fix it. The SQL is the owner''s
+        to run: the platform never executes DDL against tenant data.'
+      operationId: listDatabaseAdvisories
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      - description: Environment UUID
+        in: path
+        name: envId
+        required: true
+        type: string
+      - description: Database resource name
+        in: path
+        name: name
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: What the platform found wrong in this database
+      tags:
+      - database
   /projects/{projectId}/environments/{envId}/databases/{name}/backups:
     get:
       description: Returns the per-database logical backup catalog (newest first)
@@ -10425,6 +10481,118 @@ paths:
       summary: Reveal a database's connection credentials
       tags:
       - database
+  /projects/{projectId}/environments/{envId}/databases/{name}/insights:
+    get:
+      description: 'Returns the headline insight numbers for a managed PostgreSQL
+        database: current size against the tier quota, growth over the last seven
+        days, buffer cache hit ratio, connection count and how fresh the underlying
+        sample is. Reads collected samples from the control plane, never the tenant
+        instance. Returns collectedAt = null when no sample has been collected yet,
+        which is what an installation without collector credentials looks like.'
+      operationId: getDatabaseInsights
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      - description: Environment UUID
+        in: path
+        name: envId
+        required: true
+        type: string
+      - description: Database resource name
+        in: path
+        name: name
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Database size, growth and cache efficiency
+      tags:
+      - database
+  /projects/{projectId}/environments/{envId}/databases/{name}/queries:
+    get:
+      description: Lists the heaviest normalized queries of a managed PostgreSQL database
+        over the last seven days, by total execution time, with call count, mean duration,
+        rows per call, physical reads and share of the database's execution time.
+        Query text is the normalized form pg_stat_statements stores, with literal
+        constants already replaced by placeholders. Reads collected samples, never
+        the tenant instance.
+      operationId: listDatabaseQueries
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      - description: Environment UUID
+        in: path
+        name: envId
+        required: true
+        type: string
+      - description: Database resource name
+        in: path
+        name: name
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Slowest and heaviest queries
+      tags:
+      - database
   /projects/{projectId}/environments/{envId}/databases/{name}/restore:
     post:
       consumes:
@@ -10497,6 +10665,60 @@ paths:
       security:
       - BearerAuth: []
       summary: Restore a managed database from a backup
+      tags:
+      - database
+  /projects/{projectId}/environments/{envId}/databases/{name}/tables:
+    get:
+      description: Lists the tables of a managed PostgreSQL database with heap and
+        index size, estimated row count, cache hit ratio, growth over the last seven
+        days and the last autovacuum/autoanalyze timestamps. Only tables above 1 MB
+        are collected. Reads collected samples, never the tenant instance.
+      operationId: listDatabaseTables
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      - description: Environment UUID
+        in: path
+        name: envId
+        required: true
+        type: string
+      - description: Database resource name
+        in: path
+        name: name
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Per-table size, rows and growth
       tags:
       - database
   /projects/{projectId}/environments/{envId}/infra:
