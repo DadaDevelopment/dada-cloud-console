@@ -1007,7 +1007,6 @@ func TestRenderS3BucketStripsDisallowedCharset(t *testing.T) {
 	}
 }
 
-
 // A stateful app on a clean VM only works if the volume its aggregate pins
 // `external: true` is created before the deploy. The deploy worker gets that
 // list from AuthoredNamedVolumes, so the two must agree: every volume the
