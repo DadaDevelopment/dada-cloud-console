@@ -17,6 +17,10 @@ import type {
   CreateS3BucketResponse,
   S3BucketCredentialsResponse,
   DatabaseCredentialsResponse,
+  DatabaseInsights,
+  DatabaseTablesResponse,
+  DatabaseQueriesResponse,
+  DatabaseAdvisoriesResponse,
   AppsResponse,
   AppFileListResponse,
   AppFileContent,
@@ -399,6 +403,26 @@ export const databasesApi = {
   credentials: (projectId: string, envId: string, name: string) =>
     apiFetch<DatabaseCredentialsResponse>(
       `/api/v1/projects/${projectId}/environments/${envId}/databases/${name}/credentials?reveal=true`
+    ),
+
+  insights: (projectId: string, envId: string, name: string) =>
+    apiFetch<DatabaseInsights>(
+      `/api/v1/projects/${projectId}/environments/${envId}/databases/${name}/insights`
+    ),
+
+  tables: (projectId: string, envId: string, name: string) =>
+    apiFetch<DatabaseTablesResponse>(
+      `/api/v1/projects/${projectId}/environments/${envId}/databases/${name}/tables`
+    ),
+
+  queries: (projectId: string, envId: string, name: string) =>
+    apiFetch<DatabaseQueriesResponse>(
+      `/api/v1/projects/${projectId}/environments/${envId}/databases/${name}/queries`
+    ),
+
+  advisories: (projectId: string, envId: string, name: string) =>
+    apiFetch<DatabaseAdvisoriesResponse>(
+      `/api/v1/projects/${projectId}/environments/${envId}/databases/${name}/advisories`
     ),
 };
 

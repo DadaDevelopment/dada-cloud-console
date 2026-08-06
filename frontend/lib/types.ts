@@ -347,6 +347,71 @@ export interface DatabaseCredentialsResponse {
   external_port?: string;
 }
 
+export interface DatabaseInsights {
+  collectedAt: string | null;
+  stale?: boolean;
+  shard?: string;
+  database?: string;
+  tier?: string;
+  sizeBytes?: number;
+  sizeLimitBytes?: number;
+  growthBytes7d?: number;
+  cacheHitRatio?: number | null;
+  connections?: number;
+  instanceStartAt?: string | null;
+}
+
+export interface DatabaseTableCard {
+  schema: string;
+  name: string;
+  totalBytes: number;
+  heapBytes: number;
+  indexBytes: number;
+  rowsEstimate: number;
+  lastAutoanalyze?: string | null;
+  windowHours: number;
+  growthBytes?: number;
+  insertedRows?: number;
+  deletedRows?: number;
+  appendOnly?: boolean;
+  cacheHitRatio?: number;
+  bytesReadFromDisk?: number;
+}
+
+export interface DatabaseQueryStat {
+  queryId: number;
+  query: string;
+  meanMs: number;
+  calls: number;
+  totalMs: number;
+  share: number;
+  rowsPerCall: number;
+}
+
+export interface DatabaseAdvisory {
+  code: string;
+  subject: string;
+  severity: "info" | "warning" | "critical";
+  detail: string;
+  suggestedSql: string;
+  evidence: Record<string, unknown>;
+  firstSeenAt: string;
+  lastSeenAt: string;
+}
+
+export interface DatabaseTablesResponse {
+  tables: DatabaseTableCard[];
+}
+
+export interface DatabaseQueriesResponse {
+  queries: DatabaseQueryStat[] | null;
+  totalMs: number;
+}
+
+export interface DatabaseAdvisoriesResponse {
+  advisories: DatabaseAdvisory[];
+}
+
 export interface S3BucketsResponse {
   buckets: ResourceSnapshot[];
 }
