@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math"
 	"sort"
+	"strconv"
 	"time"
 )
 
@@ -222,13 +223,13 @@ func staleStatsAdvisories(in dbAdvisoryInput) []dbAdvisory {
 			Code:     dbAdvisoryStaleStats,
 			Subject:  t.Schema + "." + t.Name,
 			Severity: dbAdvisoryInfo,
-			Detail: fmt.Sprintf("last_autoanalyze older than %s, rows=%d, uptime=%s",
-				humanDuration(age), t.RowsEstimate, humanDuration(in.Uptime)),
+			Detail: fmt.Sprintf("last_autoanalyze older than %s, rows=%s, uptime=%s",
+				humanDuration(age), rowsEstimateText(t.RowsEstimate), humanDuration(in.Uptime)),
 			SuggestedSQL: fmt.Sprintf("ANALYZE %s.%s;", t.Schema, t.Name),
 			Evidence: map[string]any{
 				"ageHours":    int(age.Hours()),
 				"neverRan":    t.LastAutoanalyze == nil,
-				"rows":        t.RowsEstimate,
+				"rows":        rowsEstimateValue(t.RowsEstimate),
 				"uptimeHours": int(in.Uptime.Hours()),
 			},
 		})
@@ -409,6 +410,26 @@ func maxDuration(a, b time.Duration) time.Duration {
 		return a
 	}
 	return b
+}
+
+// rowsEstimateText renders reltuples for a human. PostgreSQL 14 and later write
+// -1 for a relation that has never been analyzed, which is not a row count and
+// must not be shown as one — on odds-research it would have claimed a table
+// holds minus one row.
+func rowsEstimateText(rows int64) string {
+	if rows < 0 {
+		return "unknown"
+	}
+	return strconv.FormatInt(rows, 10)
+}
+
+// rowsEstimateValue is the same distinction for the evidence map: an unanalyzed
+// relation carries no estimate at all rather than a negative one.
+func rowsEstimateValue(rows int64) any {
+	if rows < 0 {
+		return nil
+	}
+	return rows
 }
 
 func humanBytes(b int64) string {
