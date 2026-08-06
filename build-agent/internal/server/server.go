@@ -89,6 +89,7 @@ func (s *Server) Start(ctx context.Context) error {
 		// exchange a user OAuth code → the installations that user can access.
 		// The backend proxies here so the OAuth client secret stays in the agent.
 		mux.HandleFunc("POST /github/oauth/exchange", s.handleOAuthExchange)
+		mux.HandleFunc("GET /github/search/repos", s.handleSearchRepos)
 	}
 	// Framework detection is best-effort here (no clone in the agent process — a
 	// clone-based Nixpacks detect belongs in the build Job). Always 200 so the
@@ -393,6 +394,41 @@ func (s *Server) handleAppInstallations(w http.ResponseWriter, r *http.Request) 
 		insts = []github.InstallationAccount{}
 	}
 	writeJSON(w, map[string]any{"installations": insts})
+}
+
+// handleSearchRepos searches public GitHub repositories by free text.
+// GET /github/search/repos?q=n8n&limit=8 → {"repositories":[...]}.
+//
+// It lives in the agent because the agent is where the App key lives, and the
+// search endpoint's rate limit triples with a token. The backend caches the
+// answer before it ever gets here — this handler is deliberately not the place
+// that thinks about budgets, it is the place that has the credential.
+func (s *Server) handleSearchRepos(w http.ResponseWriter, r *http.Request) {
+	q := strings.TrimSpace(r.URL.Query().Get("q"))
+	if q == "" {
+		http.Error(w, "q is required", http.StatusBadRequest)
+		return
+	}
+	limit := 0
+	if v := r.URL.Query().Get("limit"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n <= 0 {
+			http.Error(w, "limit must be a positive integer", http.StatusBadRequest)
+			return
+		}
+		limit = n
+	}
+
+	hits, err := s.gh.SearchRepos(r.Context(), q, limit)
+	if err != nil {
+		log.Warn().Err(err).Str("q", q).Msg("github repo search failed")
+		http.Error(w, "failed to search repositories", http.StatusBadGateway)
+		return
+	}
+	if hits == nil {
+		hits = []github.SearchHit{}
+	}
+	writeJSON(w, map[string]any{"repositories": hits})
 }
 
 // handleOAuthExchange swaps a user OAuth code for the installations that user can

@@ -376,6 +376,7 @@ func SetupRouter(pool *pgxpool.Pool, cfg *config.Config) *gin.Engine {
 		api.GET("/solutions", h.ListSolutions)
 		api.GET("/solutions/:slug", h.GetSolution)
 		api.GET("/git/parse-repo-url", h.ParseRepoURL)
+		api.GET("/projects/:projectId/solutions/resolve", h.ResolveSolution)
 
 		// Boxes (ephemeral root sandboxes). A box owns exactly one environment
 		// with runtime='box'; crystallization later promotes that same row to

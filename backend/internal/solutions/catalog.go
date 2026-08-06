@@ -79,6 +79,11 @@ type Param struct {
 }
 
 // Solution is one installable open-source project.
+//
+// Aliases are the other words a person types for this project: the English name
+// when the product is known by a Russian one, the abbreviation, the thing it
+// replaces. Without them the resolver only answers people who already know what
+// an entry is called, which is the opposite of who the catalog exists for.
 type Solution struct {
 	Slug     string
 	Name     string
@@ -88,6 +93,7 @@ type Solution struct {
 	Category Category
 	Homepage string
 	License  string
+	Aliases  []string
 
 	// Repo is the public GitHub repository, "owner/name". It is cloned without
 	// an installation token: these are public projects, and requiring a customer
@@ -137,6 +143,7 @@ var V1 = []Solution{
 		Category: CategoryDevTools,
 		Homepage: "https://excalidraw.com",
 		License:  "MIT",
+		Aliases:  []string{"экскалидроу", "доска", "whiteboard", "схемы", "диаграммы", "draw", "рисование", "miro"},
 		About: "Виртуальная доска для схем, диаграмм и набросков: рисует так, будто чертили от " +
 			"руки на бумаге. Рисунки хранятся в браузере, экспорт в PNG и SVG, ссылка на " +
 			"доску открывается у коллеги без регистрации.",
@@ -161,6 +168,7 @@ var V1 = []Solution{
 		Category: CategoryDevTools,
 		Homepage: "https://it-tools.tech",
 		License:  "GPL-3.0",
+		Aliases:  []string{"ittools", "tools", "инструменты", "утилиты", "jwt", "hash", "хеш", "uuid", "json", "конвертер"},
 		About: "Инструменты, за которыми обычно идут на случайные сайты: разбор JWT, хеши и UUID, " +
 			"форматирование JSON, SQL и XML, конвертеры дат, кодировок и цветов, генератор " +
 			"паролей. Всё считается в браузере и никуда не отправляется.",
@@ -184,6 +192,7 @@ var V1 = []Solution{
 		Category: CategoryAI,
 		Homepage: "https://gitingest.com",
 		License:  "MIT",
+		Aliases:  []string{"ingest", "repo2text", "llm", "нейросеть", "контекст", "промпт", "ai"},
 		About: "Принимает ссылку на репозиторий и собирает его в один структурированный текст, " +
 			"который можно целиком отдать модели: дерево файлов, содержимое, оценка размера " +
 			"в токенах. Полезно ровно тогда, когда нужно объяснить модели незнакомый проект.",
@@ -209,6 +218,7 @@ var V1 = []Solution{
 		Category: CategoryDocuments,
 		Homepage: "https://devdocs.io",
 		License:  "MPL-2.0",
+		Aliases:  []string{"docs", "документация", "справочник", "api docs", "manual", "мануал"},
 		About: "Собирает документацию сотен языков и библиотек в один быстрый интерфейс с общим " +
 			"поиском и горячими клавишами. Свой экземпляр удобен тем, что набор документаций " +
 			"и их версии выбираете вы.",
