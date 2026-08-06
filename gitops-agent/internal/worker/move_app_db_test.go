@@ -48,6 +48,24 @@ func TestRerenderServiceDatabaseForMoveSetsDstNamespace(t *testing.T) {
 	}
 }
 
+// Losing spec.tier during a move would silently widen a tenant's quota back to
+// "unlimited", so the tier is carried verbatim like the rest of the DB identity.
+func TestRerenderServiceDatabaseForMoveKeepsTier(t *testing.T) {
+	var src serviceDatabaseManifest
+	src.Metadata.Name = "n8n"
+	src.Spec.AppRef = "n8n"
+	src.Spec.Database = "n8n"
+	src.Spec.Tier = "free"
+
+	got, err := rerenderServiceDatabaseForMove(src, "platform", "prod", "platform-prod", "op-123")
+	if err != nil {
+		t.Fatalf("rerender: %v", err)
+	}
+	if !strings.Contains(got, "tier: free") {
+		t.Errorf("moved DB lost its quota tier\n---\n%s", got)
+	}
+}
+
 func TestRerenderServiceDatabaseForMoveRejectsUnnamed(t *testing.T) {
 	var src serviceDatabaseManifest
 	if _, err := rerenderServiceDatabaseForMove(src, "platform", "prod", "platform-prod", "op-1"); err == nil {

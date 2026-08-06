@@ -31,11 +31,17 @@ const (
 // rendered as a platform-owned Application in the environment's aggregate stack
 // (postgres) rather than a Crossplane ServiceDatabaseV2 CRD; empty means the k8s
 // (Crossplane Postgres) path.
+//
+// Tier is the database quota class derived from the org's billing plan. It maps
+// onto ServiceDatabaseV2.spec.tier, which the Crossplane composition turns into
+// the role's CONNECTION LIMIT and per-role postgres parameters. Empty means the
+// XRD default ("unlimited") — used for the k8s path only.
 type CreateServiceDatabasePayload struct {
 	Name            string `json:"name"`
 	Database        string `json:"database"`
 	AppRef          string `json:"app_ref"`
 	Engine          string `json:"engine,omitempty"`
+	Tier            string `json:"tier,omitempty"`
 	BackupEnabled   bool   `json:"backup_enabled"`
 	BackupSchedule  string `json:"backup_schedule"`
 	BackupRetention string `json:"backup_retention"`

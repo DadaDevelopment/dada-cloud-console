@@ -9,6 +9,7 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 )
 
 func TestObserveDeploymentQueuesCommittedK8sDeploy(t *testing.T) {
@@ -425,5 +426,28 @@ func TestPrimaryImage(t *testing.T) {
 	empty := &appsv1.Deployment{}
 	if got := primaryImage(empty); got != "" {
 		t.Fatalf("primaryImage(empty) = %q, want empty", got)
+	}
+}
+
+// A database created before quota tiers existed carries no spec.tier, and the
+// console must show what it actually runs under — the XRD default — rather than
+// an empty badge.
+func TestCrDatabaseTier(t *testing.T) {
+	cases := []struct {
+		name string
+		spec map[string]any
+		want string
+	}{
+		{"explicit", map[string]any{"tier": "starter"}, "starter"},
+		{"absent", map[string]any{"database": "x"}, "unlimited"},
+		{"empty", map[string]any{"tier": ""}, "unlimited"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cr := &unstructured.Unstructured{Object: map[string]any{"spec": tc.spec}}
+			if got := crDatabaseTier(cr); got != tc.want {
+				t.Errorf("crDatabaseTier = %q, want %q", got, tc.want)
+			}
+		})
 	}
 }

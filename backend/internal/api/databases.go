@@ -19,6 +19,34 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
+// databaseTierByPlan maps a billing plan key onto the ServiceDatabaseV2 quota
+// tier declared by the crossplane-platform-api chart. The tier decides the
+// role's CONNECTION LIMIT and its per-role postgres parameters (statement and
+// idle-in-transaction timeouts, temp_file_limit, work_mem) — the isolation that
+// keeps one tenant from starving the shared instance.
+//
+// enterprise deliberately lands on the same ceiling as business rather than on
+// "unlimited": an unbounded role is exactly the failure mode the tiers exist to
+// prevent. A genuinely larger enterprise gets its own pool, not no limits.
+var databaseTierByPlan = map[string]string{
+	"free":       "free",
+	"startup":    "starter",
+	"business":   "business",
+	"enterprise": "business",
+}
+
+// databaseTierFor resolves the quota tier for an org's databases. An unknown or
+// unresolvable plan yields "" — the XRD default ("unlimited"), i.e. today's
+// behaviour — so a transient billing-lookup failure never cripples a paying
+// tenant's new database. Drift is corrected by the tier reconciler, not here.
+func (h *Handler) databaseTierFor(ctx context.Context, orgID string) string {
+	plan, err := h.planFor(ctx, orgID)
+	if err != nil {
+		return ""
+	}
+	return databaseTierByPlan[plan.Key]
+}
+
 // randomPassword returns a 32-hex-char (16-byte) secret suitable for a managed
 // database credential.
 func randomPassword() (string, error) {
@@ -369,12 +397,22 @@ func (h *Handler) CreateServiceDatabase(c *gin.Context) {
 		}
 	}
 
+	// Quota tier applies to the Crossplane (shared PostgreSQL) path only; a VM
+	// compose database is a container of its own and is bounded by its own limits.
+	tier := ""
+	if engine == "" {
+		if orgID, orgErr := h.projectOrg(c.Request.Context(), projectID); orgErr == nil {
+			tier = h.databaseTierFor(c.Request.Context(), orgID)
+		}
+	}
+
 	// Marshal payload
 	payload := models.CreateServiceDatabasePayload{
 		Name:            req.Name,
 		Database:        req.Database,
 		AppRef:          req.AppRef,
 		Engine:          engine,
+		Tier:            tier,
 		BackupEnabled:   req.BackupEnabled,
 		BackupSchedule:  req.BackupSchedule,
 		BackupRetention: req.BackupRetention,

@@ -681,6 +681,7 @@ func (w *DBWatcher) doCreateServiceDatabase(ctx context.Context, op db.Operation
 		Database        string `json:"database"`
 		AppRef          string `json:"app_ref"`
 		Engine          string `json:"engine"`
+		Tier            string `json:"tier"`
 		BackupEnabled   bool   `json:"backup_enabled"`
 		BackupSchedule  string `json:"backup_schedule"`
 		BackupRetention string `json:"backup_retention"`
@@ -705,6 +706,7 @@ func (w *DBWatcher) doCreateServiceDatabase(ctx context.Context, op db.Operation
 		EnvSlug:         envName,
 		AppRef:          p.AppRef,
 		Database:        p.Database,
+		Tier:            p.Tier,
 		BackupEnabled:   p.BackupEnabled,
 		BackupSchedule:  defaultIfEmpty(p.BackupSchedule, "daily"),
 		BackupRetention: defaultIfEmpty(p.BackupRetention, "14d"),
@@ -855,15 +857,10 @@ func (w *DBWatcher) doCreateApp(ctx context.Context, op db.Operation) error {
 		return w.doCreateComposeApp(ctx, op, p.Name)
 	}
 
-	if p.Port == 0 {
-		p.Port = renderer.DefaultPortForFramework(p.Framework)
-	}
-
 	projectName, envName, envNamespace, err := w.projectEnv(ctx, op.ProjectID, op.EnvironmentID)
 	if err != nil {
 		return fmt.Errorf("project/env lookup: %w", err)
 	}
-
 	mgr, err := w.managerFor(ctx, op.ProjectID)
 	if err != nil {
 		return err
@@ -930,6 +927,9 @@ func (w *DBWatcher) doCreateApp(ctx context.Context, op db.Operation) error {
 			files = append(files, *secretFile)
 		}
 	} else {
+		if p.Port <= 0 {
+			return fmt.Errorf("default hostname requires a configured port")
+		}
 		ingressYAML, iErr := renderer.RenderCustomIngress(renderer.CustomIngressSpec{
 			Name:              renderer.FQDNToName(p.DefaultHostname),
 			Namespace:         envNamespace,
@@ -1780,12 +1780,9 @@ func (w *DBWatcher) doDeployImageVersion(ctx context.Context, op db.Operation) e
 	if p.Framework != "" {
 		frameworkVal = p.Framework
 	}
-	if p.Port > 0 {
-		portVal = float64(p.Port)
-	}
-	if portVal == 0 {
-		portVal = float64(renderer.DefaultPortForFramework(frameworkVal))
-	}
+	// A later build may detect a different port, but it must not silently
+	// override the application's configured public-route contract. The current
+	// snapshot is authoritative, including an explicit zero (no HTTP service).
 	if replicasVal == 0 {
 		replicasVal = 1
 	}
@@ -2027,9 +2024,6 @@ func (w *DBWatcher) doUpdateAppStorage(ctx context.Context, op db.Operation) err
 	replicasVal, _ := cur["replicas"].(float64)
 	profileVal, _ := cur["profile"].(string)
 	frameworkVal, _ := cur["framework"].(string)
-	if portVal == 0 {
-		portVal = float64(renderer.DefaultPortForFramework(frameworkVal))
-	}
 	if replicasVal == 0 {
 		replicasVal = 1
 	}
@@ -2148,8 +2142,8 @@ func (w *DBWatcher) doCreatePublicApi(ctx context.Context, op db.Operation) erro
 	var appSpec map[string]any
 	_ = json.Unmarshal(summaryRaw, &appSpec)
 	portVal, _ := appSpec["port"].(float64)
-	if portVal == 0 {
-		portVal = 8080
+	if portVal <= 0 {
+		return fmt.Errorf("public API requires a configured app port")
 	}
 
 	yaml, err := renderer.RenderPublicApi(renderer.PublicApiSpec{
@@ -2220,6 +2214,19 @@ func (w *DBWatcher) doAttachCustomHostname(ctx context.Context, op db.Operation)
 	projectName, envName, envNamespace, err := w.projectEnv(ctx, op.ProjectID, op.EnvironmentID)
 	if err != nil {
 		return fmt.Errorf("project/env lookup: %w", err)
+	}
+	var appRaw []byte
+	if err := w.pool.QueryRow(ctx, `
+		SELECT summary_json FROM resource_snapshots
+		WHERE project_id=$1 AND environment_id=$2 AND kind='App' AND name=$3
+	`, op.ProjectID, op.EnvironmentID, p.AppName).Scan(&appRaw); err != nil {
+		return fmt.Errorf("loading app snapshot: %w", err)
+	}
+	var appSummary map[string]any
+	_ = json.Unmarshal(appRaw, &appSummary)
+	port, _ := appSummary["port"].(float64)
+	if port <= 0 {
+		return fmt.Errorf("custom hostname requires a configured app port")
 	}
 
 	mgr, err := w.managerFor(ctx, op.ProjectID)
@@ -2298,11 +2305,14 @@ func (w *DBWatcher) doAttachCustomHostnameCompose(ctx context.Context, op db.Ope
 		} `json:"desired"`
 	}
 	_ = json.Unmarshal(appRaw, &appSummary)
-	port := 80
+	port := 0
 	if len(appSummary.Desired.Ports) > 0 {
 		if p := containerPortFromPortString(appSummary.Desired.Ports[0]); p > 0 {
 			port = p
 		}
+	}
+	if port <= 0 {
+		return fmt.Errorf("custom hostname requires a configured app port")
 	}
 
 	customHosts := envelope.Ingress.CustomHosts
@@ -2349,9 +2359,8 @@ func (w *DBWatcher) doAttachDefaultDomain(ctx context.Context, op db.Operation) 
 	var cur map[string]any
 	_ = json.Unmarshal(summaryRaw, &cur)
 	portVal, _ := cur["port"].(float64)
-	frameworkVal, _ := cur["framework"].(string)
-	if portVal == 0 {
-		portVal = float64(renderer.DefaultPortForFramework(frameworkVal))
+	if portVal <= 0 {
+		return fmt.Errorf("default domain requires a configured app port")
 	}
 
 	mgr, err := w.managerFor(ctx, op.ProjectID)
