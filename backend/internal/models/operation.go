@@ -90,6 +90,32 @@ type CreateAppPayload struct {
 	Worker          bool              `json:"worker,omitempty"`
 }
 
+// SolutionAppSpec is one compose service of an installed ready-made solution,
+// carried in the InstallSolution payload. It is the whole desired shape of the
+// resulting first-class VM Application: the gitops worker copies it into the
+// app snapshot's desired spec and never consults the catalog itself, so an
+// operation stays reproducible even after the catalog entry is edited.
+type SolutionAppSpec struct {
+	Name    string   `json:"name"`
+	Image   string   `json:"image"`
+	Command []string `json:"command,omitempty"`
+	Ports   []string `json:"ports,omitempty"`
+	Volumes []string `json:"volumes,omitempty"`
+}
+
+// InstallSolutionPayload is the typed payload for InstallSolution operations:
+// install one catalog solution onto a VM environment as N Applications.
+//
+// It deliberately carries NO environment variables. The install writes them to
+// env_vars (encrypted) before enqueueing, and the worker resolves them from
+// there like it does for every other compose app — so an API key never sits in
+// cleartext in an operations row that audit surfaces read.
+type InstallSolutionPayload struct {
+	Slug     string            `json:"slug"`
+	Instance string            `json:"instance"`
+	Apps     []SolutionAppSpec `json:"apps"`
+}
+
 // DeployImageVersionPayload is the typed payload for DeployImageVersion operations.
 // Framework/Port are carried from build-time detection so a redeploy re-renders
 // the app on the correct helm chart + servicePort; both are optional and fall

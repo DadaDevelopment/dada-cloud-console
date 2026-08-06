@@ -370,6 +370,12 @@ func SetupRouter(pool *pgxpool.Pool, cfg *config.Config) *gin.Engine {
 		api.POST("/projects/:projectId/app-servers/:serverName/discover", h.DiscoverWorkload)
 		api.POST("/projects/:projectId/app-servers/:serverName/import", h.ImportComposeStack)
 
+		// Ready-made solutions (VM track). The catalog is global and read-only;
+		// the install is scoped to one VM environment and creates ordinary apps.
+		api.GET("/solutions", h.ListSolutions)
+		api.GET("/solutions/:slug", h.GetSolution)
+		api.POST("/projects/:projectId/environments/:envId/solutions/:slug", h.InstallSolution)
+
 		// Boxes (ephemeral root sandboxes). A box owns exactly one environment
 		// with runtime='box'; crystallization later promotes that same row to
 		// runtime='vm', which is how its attachments and hostnames survive.
