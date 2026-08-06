@@ -171,15 +171,18 @@ func recordFailureAudit(ctx context.Context, pool *pgxpool.Pool, id uuid.UUID, c
 // EnqueueDeployStack creates a follow-up DeployStack operation for a compose
 // app, copying actor/project/environment from the parent (render) operation.
 // The portainer-agent claims and executes it (CreateStackFromGit / RedeployStack).
-func EnqueueDeployStack(ctx context.Context, pool *pgxpool.Pool, parentOpID uuid.UUID, appName string) (uuid.UUID, error) {
+func EnqueueDeployStack(ctx context.Context, pool *pgxpool.Pool, parentOpID uuid.UUID, appName string, volumes []string) (uuid.UUID, error) {
+	if volumes == nil {
+		volumes = []string{}
+	}
 	var id uuid.UUID
 	err := pool.QueryRow(ctx, `
 		INSERT INTO operations (actor_id, project_id, environment_id, action, resource_kind, resource_name, status, payload)
 		SELECT actor_id, project_id, environment_id, 'DeployStack', 'App', $2::text, 'Created',
-		       jsonb_build_object('app_name', $2::text)
+		       jsonb_build_object('app_name', $2::text, 'volumes', $3::jsonb)
 		FROM operations WHERE id = $1
 		RETURNING id`,
-		parentOpID, appName,
+		parentOpID, appName, volumes,
 	).Scan(&id)
 	return id, err
 }

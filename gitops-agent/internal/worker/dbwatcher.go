@@ -374,7 +374,9 @@ func (w *DBWatcher) doRollbackStack(ctx context.Context, op db.Operation) error 
 		return err
 	}
 
-	deployID, err := db.EnqueueDeployStack(ctx, w.pool, op.ID, p.AppName)
+	// No volumes to ensure: a rollback redeploys a compose file that already ran
+	// on this machine, so anything it mounts is already there.
+	deployID, err := db.EnqueueDeployStack(ctx, w.pool, op.ID, p.AppName, nil)
 	if err != nil {
 		return fmt.Errorf("enqueue deploy stack: %w", err)
 	}
@@ -1420,12 +1422,15 @@ func (w *DBWatcher) renderEnvAggregate(ctx context.Context, op db.Operation, pro
 	}
 
 	envStack := projectName + "-" + envName
-	deployID, err := db.EnqueueDeployStack(ctx, w.pool, op.ID, envStack)
+	// The aggregate pins authored named volumes external, so the deploy worker
+	// has to create the missing ones before Portainer pulls the stack.
+	namedVolumes := renderer.AuthoredNamedVolumes(specs)
+	deployID, err := db.EnqueueDeployStack(ctx, w.pool, op.ID, envStack, namedVolumes)
 	if err != nil {
 		return fmt.Errorf("enqueue deploy stack: %w", err)
 	}
-	log.Info().Str("env_stack", envStack).Int("apps", len(specs)).Str("deploy_op", deployID.String()).
-		Msg("assembled compose stack; deploy enqueued")
+	log.Info().Str("env_stack", envStack).Int("apps", len(specs)).Int("volumes", len(namedVolumes)).
+		Str("deploy_op", deployID.String()).Msg("assembled compose stack; deploy enqueued")
 	return nil
 }
 
@@ -1538,7 +1543,9 @@ func (w *DBWatcher) doAdoptComposeStack(ctx context.Context, op db.Operation) er
 	)
 
 	envStack := projectName + "-" + envName
-	deployID, err := db.EnqueueDeployStack(ctx, w.pool, op.ID, envStack)
+	// No volumes to ensure: adoption means the workload — and its volumes —
+	// already exist on the machine, which is the whole data-safety premise.
+	deployID, err := db.EnqueueDeployStack(ctx, w.pool, op.ID, envStack, nil)
 	if err != nil {
 		return fmt.Errorf("enqueue deploy stack: %w", err)
 	}
