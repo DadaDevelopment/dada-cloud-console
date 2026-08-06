@@ -370,13 +370,14 @@ func SetupRouter(pool *pgxpool.Pool, cfg *config.Config) *gin.Engine {
 		api.POST("/projects/:projectId/app-servers/:serverName/discover", h.DiscoverWorkload)
 		api.POST("/projects/:projectId/app-servers/:serverName/import", h.ImportComposeStack)
 
-		// Ready-made projects. The catalog is global and read-only: deploying an
-		// entry runs the ordinary connect-repo + build path, so there is no
-		// install endpoint of its own.
+		// Ready-made projects. The catalog is global and read-only; installing
+		// one runs the ordinary connect-repo + build path server-side, plus the
+		// managed database the entry declares it needs.
 		api.GET("/solutions", h.ListSolutions)
 		api.GET("/solutions/:slug", h.GetSolution)
 		api.GET("/git/parse-repo-url", h.ParseRepoURL)
 		api.GET("/projects/:projectId/solutions/resolve", h.ResolveSolution)
+		api.POST("/projects/:projectId/environments/:envId/solutions/install", h.InstallSolution)
 
 		// Boxes (ephemeral root sandboxes). A box owns exactly one environment
 		// with runtime='box'; crystallization later promotes that same row to

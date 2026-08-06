@@ -208,6 +208,154 @@ func seedOptimisticSnapshot(ctx context.Context, tx pgx.Tx, projectID, envID uui
 	return err
 }
 
+// opFault is a rejection a shared handler core hands back to whichever endpoint
+// called it: the HTTP status to answer with, the machine-readable reason the
+// audit trail records, and the sentence the customer reads. It exists so a core
+// can be reused by a second endpoint without either endpoint inventing its own
+// status codes or audit vocabulary for the same failure.
+type opFault struct {
+	Status  int
+	Reason  string
+	Message string
+}
+
+// Error makes opFault usable where an error is expected.
+func (f *opFault) Error() string { return f.Message }
+
+// managedDatabaseResult is what provisioning a managed database produced: the
+// queued operation, plus the runtime and engine the caller needs for its audit
+// record — both are decided inside the core from the environment, so a caller
+// that guessed them would be recording a guess.
+type managedDatabaseResult struct {
+	Operation models.Operation
+	Runtime   string
+	Engine    string
+}
+
+// createManagedDatabase validates a database request and queues its operation.
+//
+// This is the whole body of CreateServiceDatabase below except for
+// authentication, membership, quota and audit, which stay in the endpoint. It
+// is separated so ordering a database as part of installing a ready-made
+// project goes through exactly this code: the VM track's credential generation
+// and DSN injection are the kind of rules that quietly diverge when a second
+// caller reimplements them, and a diverged copy hands the customer an app that
+// cannot reach its own database.
+//
+// VM (compose) environments render the managed database as a platform-owned
+// Application in the environment's aggregate stack (postgres image plus an
+// external volume). The backend generates the credential and seeds the env vars
+// here because it holds the encryption key; the gitops worker only materialises
+// the App and re-assembles the stack. k8s keeps the Crossplane path, where the
+// chart binds the database to the app through app_ref, so engine stays empty
+// and no DSN is seeded.
+func (h *Handler) createManagedDatabase(ctx context.Context, actorID, projectID, envID uuid.UUID, req createServiceDatabaseRequest) (*managedDatabaseResult, *opFault) {
+	if req.Name == "" {
+		return nil, &opFault{http.StatusBadRequest, "name_required", "name is required"}
+	}
+	if req.Database == "" {
+		return nil, &opFault{http.StatusBadRequest, "database_required", "database is required"}
+	}
+	if err := validateKubeName(req.Name); err != nil {
+		return nil, &opFault{http.StatusBadRequest, "invalid_name", err.Error()}
+	}
+	if err := validatePgName(req.Database); err != nil {
+		return nil, &opFault{http.StatusBadRequest, "invalid_database_name", err.Error()}
+	}
+
+	var existing int
+	if err := h.pool.QueryRow(ctx,
+		`SELECT COUNT(*) FROM resource_snapshots
+		 WHERE project_id = $1 AND environment_id = $2 AND kind = 'ServiceDatabaseV2' AND name = $3`,
+		projectID, envID, req.Name,
+	).Scan(&existing); err != nil {
+		return nil, &opFault{http.StatusInternalServerError, "uniqueness_check_failed", "failed to check name uniqueness"}
+	}
+	if existing > 0 {
+		return nil, &opFault{http.StatusConflict, "name_taken", "a database with that name already exists in this environment"}
+	}
+
+	var runtime string
+	_ = h.pool.QueryRow(ctx, `SELECT runtime FROM environments WHERE id = $1`, envID).Scan(&runtime)
+
+	engine := ""
+	if runtime == "vm" {
+		engine = "postgres"
+		password, perr := randomPassword()
+		if perr != nil {
+			return nil, &opFault{http.StatusInternalServerError, "credential_generation_failed", "failed to generate database credential"}
+		}
+		const dbUser = "dada"
+		for _, kv := range [][2]string{
+			{"POSTGRES_PASSWORD", password},
+			{"POSTGRES_DB", req.Database},
+			{"POSTGRES_USER", dbUser},
+		} {
+			if err := h.seedEnvVar(ctx, envID, req.Name, kv[0], kv[1], actorID); err != nil {
+				return nil, &opFault{http.StatusInternalServerError, "seed_credentials_failed", "failed to seed database credentials"}
+			}
+		}
+		if req.AppRef != "" {
+			dsn := fmt.Sprintf("postgres://%s:%s@%s:5432/%s", dbUser, password, req.Name, req.Database)
+			if err := h.seedEnvVar(ctx, envID, req.AppRef, "DATABASE_URL", dsn, actorID); err != nil {
+				return nil, &opFault{http.StatusInternalServerError, "seed_dsn_failed", "failed to inject database connection string"}
+			}
+		}
+	}
+
+	payload := models.CreateServiceDatabasePayload{
+		Name:            req.Name,
+		Database:        req.Database,
+		AppRef:          req.AppRef,
+		Engine:          engine,
+		BackupEnabled:   req.BackupEnabled,
+		BackupSchedule:  req.BackupSchedule,
+		BackupRetention: req.BackupRetention,
+	}
+	payloadBytes, err := json.Marshal(payload)
+	if err != nil {
+		return nil, &opFault{http.StatusInternalServerError, "payload_marshal_failed", "failed to marshal payload"}
+	}
+
+	tx, err := h.pool.Begin(ctx)
+	if err != nil {
+		return nil, &opFault{http.StatusInternalServerError, "tx_begin_failed", "failed to create operation"}
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	var op models.Operation
+	row := tx.QueryRow(ctx,
+		`INSERT INTO operations (actor_id, project_id, environment_id, action, resource_kind, resource_name, status, payload)
+		 VALUES ($1, $2, $3, 'CreateServiceDatabase', 'ServiceDatabaseV2', $4, 'Created', $5)
+		 RETURNING id, actor_id, project_id, environment_id, action, resource_kind, resource_name,
+		           status, payload, validation_result, git_commit, git_path, argo_application,
+		           error_code, error_message, created_at, updated_at`,
+		actorID, projectID, envID, req.Name, payloadBytes,
+	)
+	if err = scanOperation(row, &op); err != nil {
+		return nil, &opFault{http.StatusInternalServerError, "operation_insert_failed", "failed to create operation"}
+	}
+
+	if err = seedOptimisticSnapshot(ctx, tx, projectID, envID, "ServiceDatabaseV2", req.Name, map[string]any{
+		"name":     req.Name,
+		"kind":     "ServiceDatabaseV2",
+		"app_ref":  req.AppRef,
+		"database": req.Database,
+		"spec": map[string]any{
+			"appRef":   req.AppRef,
+			"database": req.Database,
+		},
+	}); err != nil {
+		return nil, &opFault{http.StatusInternalServerError, "snapshot_seed_failed", "failed to create operation"}
+	}
+
+	if err = tx.Commit(ctx); err != nil {
+		return nil, &opFault{http.StatusInternalServerError, "tx_commit_failed", "failed to create operation"}
+	}
+
+	return &managedDatabaseResult{Operation: op, Runtime: runtime, Engine: engine}, nil
+}
+
 // CreateServiceDatabase enqueues an operation to provision a new ServiceDatabase CRD.
 //
 // @ID          createDatabase
@@ -296,140 +444,19 @@ func (h *Handler) CreateServiceDatabase(c *gin.Context) {
 		return
 	}
 
-	// Validate fields
-	if req.Name == "" {
-		rejectErr(http.StatusBadRequest, "name_required", "name is required")
-		return
-	}
-	if req.Database == "" {
-		rejectErr(http.StatusBadRequest, "database_required", "database is required")
-		return
-	}
 	// app_ref is optional: empty = standalone, environment-level database that
 	// owns its own chart. When set, the database is bound to that app's chart.
-	if err := validateKubeName(req.Name); err != nil {
-		rejectErr(http.StatusBadRequest, "invalid_name", err.Error())
-		return
-	}
-	if err := validatePgName(req.Database); err != nil {
-		rejectErr(http.StatusBadRequest, "invalid_database_name", err.Error())
+	res, fault := h.createManagedDatabase(c.Request.Context(), claims.UserID, projectID, envID, req)
+	if fault != nil {
+		rejectErr(fault.Status, fault.Reason, fault.Message)
 		return
 	}
 
-	// Check name uniqueness in resource_snapshots for this project/env
-	var existing int
-	err = h.pool.QueryRow(c.Request.Context(),
-		`SELECT COUNT(*) FROM resource_snapshots
-		 WHERE project_id = $1 AND environment_id = $2 AND kind = 'ServiceDatabaseV2' AND name = $3`,
-		projectID, envID, req.Name,
-	).Scan(&existing)
-	if err != nil {
-		rejectErr(http.StatusInternalServerError, "uniqueness_check_failed", "failed to check name uniqueness")
-		return
-	}
-	if existing > 0 {
-		rejectErr(http.StatusConflict, "name_taken", "a database with that name already exists in this environment")
-		return
-	}
-
-	// VM (compose) environments render the managed database as a platform-owned
-	// Application in the environment's aggregate stack (postgres image + external
-	// volume). The backend generates the credential and seeds env vars now (it
-	// holds the encryption key); the gitops worker just materialises the App and
-	// re-assembles the stack. k8s keeps the Crossplane path (engine stays empty).
-	var runtime string
-	_ = h.pool.QueryRow(c.Request.Context(),
-		`SELECT runtime FROM environments WHERE id = $1`, envID).Scan(&runtime)
-
-	engine := ""
-	if runtime == "vm" {
-		engine = "postgres"
-		password, perr := randomPassword()
-		if perr != nil {
-			rejectErr(http.StatusInternalServerError, "credential_generation_failed", "failed to generate database credential")
-			return
-		}
-		const dbUser = "dada"
-		for _, kv := range [][2]string{
-			{"POSTGRES_PASSWORD", password},
-			{"POSTGRES_DB", req.Database},
-			{"POSTGRES_USER", dbUser},
-		} {
-			if err := h.seedEnvVar(c.Request.Context(), envID, req.Name, kv[0], kv[1], claims.UserID); err != nil {
-				rejectErr(http.StatusInternalServerError, "seed_credentials_failed", "failed to seed database credentials")
-				return
-			}
-		}
-		if req.AppRef != "" {
-			dsn := fmt.Sprintf("postgres://%s:%s@%s:5432/%s", dbUser, password, req.Name, req.Database)
-			if err := h.seedEnvVar(c.Request.Context(), envID, req.AppRef, "DATABASE_URL", dsn, claims.UserID); err != nil {
-				rejectErr(http.StatusInternalServerError, "seed_dsn_failed", "failed to inject database connection string")
-				return
-			}
-		}
-	}
-
-	// Marshal payload
-	payload := models.CreateServiceDatabasePayload{
-		Name:            req.Name,
-		Database:        req.Database,
-		AppRef:          req.AppRef,
-		Engine:          engine,
-		BackupEnabled:   req.BackupEnabled,
-		BackupSchedule:  req.BackupSchedule,
-		BackupRetention: req.BackupRetention,
-	}
-	payloadBytes, err := json.Marshal(payload)
-	if err != nil {
-		rejectErr(http.StatusInternalServerError, "payload_marshal_failed", "failed to marshal payload")
-		return
-	}
-
-	tx, err := h.pool.Begin(c.Request.Context())
-	if err != nil {
-		rejectErr(http.StatusInternalServerError, "tx_begin_failed", "failed to create operation")
-		return
-	}
-	defer func() { _ = tx.Rollback(c.Request.Context()) }()
-
-	var op models.Operation
-	row := tx.QueryRow(c.Request.Context(),
-		`INSERT INTO operations (actor_id, project_id, environment_id, action, resource_kind, resource_name, status, payload)
-		 VALUES ($1, $2, $3, 'CreateServiceDatabase', 'ServiceDatabaseV2', $4, 'Created', $5)
-		 RETURNING id, actor_id, project_id, environment_id, action, resource_kind, resource_name,
-		           status, payload, validation_result, git_commit, git_path, argo_application,
-		           error_code, error_message, created_at, updated_at`,
-		claims.UserID, projectID, envID, req.Name, payloadBytes,
-	)
-	if err = scanOperation(row, &op); err != nil {
-		rejectErr(http.StatusInternalServerError, "operation_insert_failed", "failed to create operation")
-		return
-	}
-
-	if err = seedOptimisticSnapshot(c.Request.Context(), tx, projectID, envID, "ServiceDatabaseV2", req.Name, map[string]any{
-		"name":     req.Name,
-		"kind":     "ServiceDatabaseV2",
-		"app_ref":  req.AppRef,
-		"database": req.Database,
-		"spec": map[string]any{
-			"appRef":   req.AppRef,
-			"database": req.Database,
-		},
-	}); err != nil {
-		rejectErr(http.StatusInternalServerError, "snapshot_seed_failed", "failed to create operation")
-		return
-	}
-
-	if err = tx.Commit(c.Request.Context()); err != nil {
-		rejectErr(http.StatusInternalServerError, "tx_commit_failed", "failed to create operation")
-		return
-	}
-
-	audit(op.ID, auditOutcomeSuccess, map[string]any{
+	audit(res.Operation.ID, auditOutcomeSuccess, map[string]any{
 		"database":         req.Database,
 		"app_ref":          req.AppRef,
-		"engine":           engine,
-		"runtime":          runtime,
+		"engine":           res.Engine,
+		"runtime":          res.Runtime,
 		"backup_enabled":   req.BackupEnabled,
 		"backup_schedule":  req.BackupSchedule,
 		"backup_retention": req.BackupRetention,
@@ -437,7 +464,7 @@ func (h *Handler) CreateServiceDatabase(c *gin.Context) {
 	h.notifyAuditEvent(claims, projectID, "CreateServiceDatabase", req.Name)
 
 	c.JSON(http.StatusAccepted, gin.H{
-		"operation": op,
+		"operation": res.Operation,
 		"message":   "ServiceDatabase creation queued",
 	})
 }

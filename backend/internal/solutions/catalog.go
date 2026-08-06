@@ -119,6 +119,13 @@ type Solution struct {
 
 	Params []Param
 
+	// Needs are the managed resources this project cannot run without, by engine
+	// name ("postgres"). Declaring them here rather than telling the customer to
+	// go and create a database afterwards is what turns a two-step install into
+	// one button: the installer orders the database in the same call and binds it
+	// to the app, so the project comes up already connected.
+	Needs []string
+
 	// Warning is the one thing a customer must read before deploying, rendered
 	// prominently rather than as fine print.
 	Warning string

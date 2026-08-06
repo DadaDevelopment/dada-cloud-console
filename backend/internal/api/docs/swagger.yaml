@@ -838,6 +838,27 @@ definitions:
       port:
         type: integer
     type: object
+  api.installSolutionRequest:
+    properties:
+      app_name:
+        type: string
+      branch:
+        type: string
+      framework:
+        type: string
+      port:
+        type: integer
+      profile:
+        type: string
+      repo:
+        type: string
+      root_dir:
+        type: string
+      slug:
+        type: string
+      with_database:
+        type: boolean
+    type: object
   api.loginRequest:
     properties:
       email:
@@ -12575,6 +12596,76 @@ paths:
       summary: Reveal an S3 bucket's access credentials
       tags:
       - storage
+  /projects/{projectId}/environments/{envId}/solutions/install:
+    post:
+      consumes:
+      - application/json
+      description: Links the repository, orders any managed database the project declares
+        it needs (bound to the app, with the connection string injected), and queues
+        the first build — the sequence the console used to run as three calls. Accepts
+        a catalog slug or any public repository. Requires write access.
+      operationId: installSolution
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      - description: Environment UUID
+        in: path
+        name: envId
+        required: true
+        type: string
+      - description: What to install
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/api.installSolutionRequest'
+      produces:
+      - application/json
+      responses:
+        "202":
+          description: object with the app name, the queued build and any database
+            operation
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "409":
+          description: Conflict
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Install a ready-made project
+      tags:
+      - solutions
   /projects/{projectId}/git/detect:
     get:
       description: Best-effort framework detection for a public GitHub repository

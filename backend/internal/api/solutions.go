@@ -298,6 +298,288 @@ func (h *Handler) ResolveSolution(c *gin.Context) {
 	})
 }
 
+// installSolutionRequest is one "install this" click.
+//
+// Everything except what the customer picked is optional: a catalog slug
+// carries the verified build spec, and a bare repository falls back to the same
+// server-side defaults the connect-repo endpoint applies. WithDatabase is a
+// pointer so "the customer explicitly said no" is distinguishable from "the
+// customer said nothing", which is the only way a catalog entry that declares
+// Needs can default to yes and still be refusable.
+type installSolutionRequest struct {
+	Slug         string `json:"slug"`
+	Repo         string `json:"repo"`
+	AppName      string `json:"app_name"`
+	Branch       string `json:"branch"`
+	RootDir      string `json:"root_dir"`
+	Framework    string `json:"framework"`
+	Port         int    `json:"port"`
+	Profile      string `json:"profile"`
+	WithDatabase *bool  `json:"with_database"`
+}
+
+// managedDatabaseNameFor derives the database resource name and PostgreSQL
+// database name for an app that asked for one.
+//
+// Both are derived rather than asked for because the customer installing a
+// ready-made project has no opinion about either, and a name they never chose
+// is a name they cannot get wrong. The resource keeps the "-db" suffix so it
+// reads as the app's database in every list; the database itself reuses the app
+// name, prefixed when the app name starts with a digit because validatePgName
+// requires a leading letter.
+func managedDatabaseNameFor(appName string) (resource, database string) {
+	resource = appName + "-db"
+	if len(resource) > 63 {
+		resource = resource[:63]
+	}
+	database = appName
+	if database == "" || database[0] < 'a' || database[0] > 'z' {
+		database = "db-" + database
+	}
+	if len(database) > 63 {
+		database = database[:63]
+	}
+	return resource, database
+}
+
+// appNameForInstall picks the app name an install lands on.
+func appNameForInstall(req installSolutionRequest, repoFullName string) string {
+	if req.AppName != "" {
+		return req.AppName
+	}
+	if req.Slug != "" {
+		return req.Slug
+	}
+	name := strings.ToLower(repoShortName(repoFullName))
+	var b strings.Builder
+	for _, r := range name {
+		switch {
+		case r >= 'a' && r <= 'z', r >= '0' && r <= '9':
+			b.WriteRune(r)
+		default:
+			b.WriteRune('-')
+		}
+	}
+	return strings.Trim(b.String(), "-")
+}
+
+// InstallSolution turns one click into a running project.
+//
+// The console used to assemble this itself: link the repository, then order a
+// database, then trigger a build, three calls it had to keep in the right order
+// and unwind by hand when the middle one failed. That is a sequence, not a
+// decision, so it belongs on the server — and putting it here is what lets a
+// catalog entry declare `needs: [postgres]` and have the database appear
+// already bound to the app, instead of the customer reading a "now create a
+// database" instruction under a project that does not work yet.
+//
+// It composes the existing cores rather than reimplementing them: linkGitRepo
+// applies the same defaults and installation resolution the connect-repo
+// endpoint applies, and createManagedDatabase generates the credential and
+// seeds DATABASE_URL exactly as ordering a database by hand does.
+//
+// Failure is reported, not unwound. If the database order fails after the
+// repository is linked, the link stays and the response says so: the link is
+// the part the customer can see and reuse, and silently deleting it would turn
+// a recoverable half-install into a mystery.
+//
+// @ID          installSolution
+// @Summary     Install a ready-made project
+// @Description Links the repository, orders any managed database the project declares it needs (bound to the app, with the connection string injected), and queues the first build — the sequence the console used to run as three calls. Accepts a catalog slug or any public repository. Requires write access.
+// @Tags        solutions
+// @Accept      json
+// @Produce     json
+// @Security    BearerAuth
+// @Param       projectId path     string                  true "Project UUID"
+// @Param       envId     path     string                  true "Environment UUID"
+// @Param       body      body     installSolutionRequest  true "What to install"
+// @Success     202       {object} map[string]interface{} "object with the app name, the queued build and any database operation"
+// @Failure     400       {object} map[string]string
+// @Failure     401       {object} map[string]string
+// @Failure     403       {object} map[string]string
+// @Failure     404       {object} map[string]string
+// @Failure     409       {object} map[string]string
+// @Router      /projects/{projectId}/environments/{envId}/solutions/install [post]
+func (h *Handler) InstallSolution(c *gin.Context) {
+	claims, ok := auth.GetClaims(c)
+	if !ok {
+		respondUnauthorized(c)
+		return
+	}
+	projectID, err := uuid.Parse(c.Param("projectId"))
+	if err != nil {
+		respondNotFound(c)
+		return
+	}
+	envID, err := uuid.Parse(c.Param("envId"))
+	if err != nil {
+		respondNotFound(c)
+		return
+	}
+
+	role, err := h.effectiveRole(c.Request.Context(), claims, projectID)
+	if err == pgx.ErrNoRows {
+		respondNotFound(c)
+		return
+	}
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, "failed to check project membership")
+		return
+	}
+	if !canWrite(role) {
+		respondForbidden(c)
+		return
+	}
+
+	appAudit := ""
+	audit := func(outcome string, meta map[string]any) {
+		h.recordAudit(c.Request.Context(), claims.UserID, auditEntry{
+			ProjectID:     projectID,
+			EnvironmentID: envID,
+			Action:        "InstallSolution",
+			ResourceKind:  "Solution",
+			ResourceName:  appAudit,
+			Outcome:       outcome,
+			Metadata:      meta,
+		})
+	}
+	rejectErr := func(status int, reason, msg string) {
+		audit(auditOutcomeFailure, map[string]any{"reason": reason, "status": status})
+		respondError(c, status, msg)
+	}
+
+	var req installSolutionRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		rejectErr(http.StatusBadRequest, "malformed_body", err.Error())
+		return
+	}
+
+	link := connectGitRepoRequest{
+		Provider:         "github",
+		ProductionBranch: req.Branch,
+		RootDir:          req.RootDir,
+		Port:             req.Port,
+		Profile:          req.Profile,
+		AutoDeploy:       true,
+	}
+	needsDatabase := false
+
+	if req.Slug != "" {
+		s, found := solutions.Lookup(req.Slug)
+		if !found {
+			rejectErr(http.StatusNotFound, "unknown_solution", "no such ready-made project")
+			return
+		}
+		link.RepoFullName = s.Repo
+		if link.ProductionBranch == "" {
+			link.ProductionBranch = s.Branch
+		}
+		if link.RootDir == "" {
+			link.RootDir = s.RootDir
+		}
+		if link.Port == 0 {
+			link.Port = s.Port
+		}
+		if link.Profile == "" {
+			link.Profile = s.Profile
+		}
+		link.FrameworkOverride = s.Framework
+		for _, need := range s.Needs {
+			if need == "postgres" {
+				needsDatabase = true
+			}
+		}
+	} else {
+		if req.Repo == "" {
+			rejectErr(http.StatusBadRequest, "missing_repo", "slug or repo is required")
+			return
+		}
+		full, perr := solutions.ParseRepoURL(req.Repo)
+		if perr != nil {
+			rejectErr(http.StatusBadRequest, "invalid_repo", perr.Error())
+			return
+		}
+		link.RepoFullName = full
+		link.FrameworkOverride = req.Framework
+	}
+
+	if req.WithDatabase != nil {
+		needsDatabase = *req.WithDatabase
+	}
+
+	link.AppName = appNameForInstall(req, link.RepoFullName)
+	appAudit = link.AppName
+	if err := validateKubeName(link.AppName); err != nil {
+		rejectErr(http.StatusBadRequest, "invalid_app_name", err.Error())
+		return
+	}
+
+	repo, fault := h.linkGitRepo(c.Request.Context(), claims.UserID, projectID, envID, &link)
+	if fault != nil {
+		rejectErr(fault.Status, fault.Reason, fault.Message)
+		return
+	}
+
+	var dbOperation any
+	if needsDatabase {
+		resource, database := managedDatabaseNameFor(link.AppName)
+		res, dbFault := h.createManagedDatabase(c.Request.Context(), claims.UserID, projectID, envID, createServiceDatabaseRequest{
+			Name:     resource,
+			Database: database,
+			AppRef:   link.AppName,
+		})
+		if dbFault != nil {
+			audit(auditOutcomeFailure, map[string]any{
+				"reason":      dbFault.Reason,
+				"status":      dbFault.Status,
+				"stage":       "database",
+				"repo_linked": true,
+				"app":         link.AppName,
+			})
+			respondError(c, dbFault.Status, dbFault.Message)
+			return
+		}
+		dbOperation = res.Operation
+	}
+
+	var b build
+	row := h.pool.QueryRow(c.Request.Context(),
+		`INSERT INTO builds
+		   (git_repo_id, environment_id, app_name, commit_sha, branch, triggered_by, trigger, status)
+		 VALUES ($1, $2, $3, $4, $5, $6, 'manual', 'queued')
+		 RETURNING `+buildSelectCols,
+		repo.ID, envID, link.AppName, placeholderCommitSHA(), link.ProductionBranch, claims.UserID,
+	)
+	if err := scanBuild(row, &b); err != nil {
+		audit(auditOutcomeFailure, map[string]any{
+			"reason":      "queue_failed",
+			"stage":       "build",
+			"repo_linked": true,
+			"app":         link.AppName,
+		})
+		respondError(c, http.StatusInternalServerError, "failed to queue build")
+		return
+	}
+
+	audit(auditOutcomeSuccess, map[string]any{
+		"slug":     req.Slug,
+		"repo":     link.RepoFullName,
+		"branch":   link.ProductionBranch,
+		"app":      link.AppName,
+		"database": needsDatabase,
+		"build_id": b.ID.String(),
+	})
+	h.notifyAuditEvent(claims, projectID, "InstallSolution", link.AppName)
+
+	c.JSON(http.StatusAccepted, gin.H{
+		"app_name":  link.AppName,
+		"repo":      *repo,
+		"build":     b,
+		"database":  dbOperation,
+		"installed": true,
+	})
+}
+
 // repoShortName is the repository half of "owner/name".
 func repoShortName(full string) string {
 	if _, name, ok := strings.Cut(full, "/"); ok && name != "" {
