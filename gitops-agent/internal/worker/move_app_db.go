@@ -24,6 +24,7 @@ type serviceDatabaseManifest struct {
 	Spec struct {
 		AppRef   string `yaml:"appRef"`
 		Database string `yaml:"database"`
+		Shard    string `yaml:"shard"`
 		Tier     string `yaml:"tier"`
 		Backup   struct {
 			Enabled   bool   `yaml:"enabled"`
@@ -36,7 +37,9 @@ type serviceDatabaseManifest struct {
 // rerenderServiceDatabaseForMove re-renders one ServiceDatabaseV2 CR for its new
 // home. spec.namespace and the dada.io/project|environment|operation labels move
 // to the target; metadata.name, spec.appRef, the logical spec.database, the
-// quota spec.tier and the entire backup policy are carried verbatim from src.
+// quota spec.tier, the spec.shard placement and the entire backup policy are
+// carried verbatim from src. Dropping spec.shard would re-point the provider at
+// the default instance, where the moved database does not exist.
 //
 // That verbatim carry is what makes a move a data-safe RE-POINT rather than a
 // destroy-and-recreate: re-rendering the same-named CR with
@@ -56,6 +59,7 @@ func rerenderServiceDatabaseForMove(src serviceDatabaseManifest, dstProjectSlug,
 		EnvSlug:         dstEnvSlug,
 		AppRef:          src.Spec.AppRef,
 		Database:        src.Spec.Database,
+		Shard:           src.Spec.Shard,
 		Tier:            src.Spec.Tier,
 		BackupEnabled:   src.Spec.Backup.Enabled,
 		BackupSchedule:  src.Spec.Backup.Frequency,

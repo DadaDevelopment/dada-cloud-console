@@ -400,10 +400,12 @@ func (h *Handler) CreateServiceDatabase(c *gin.Context) {
 	// Quota tier applies to the Crossplane (shared PostgreSQL) path only; a VM
 	// compose database is a container of its own and is bounded by its own limits.
 	tier := ""
+	shard := ""
 	if engine == "" {
 		if orgID, orgErr := h.projectOrg(c.Request.Context(), projectID); orgErr == nil {
 			tier = h.databaseTierFor(c.Request.Context(), orgID)
 		}
+		shard = h.placeTenantDatabaseShard(c.Request.Context())
 	}
 
 	// Marshal payload
@@ -413,6 +415,7 @@ func (h *Handler) CreateServiceDatabase(c *gin.Context) {
 		AppRef:          req.AppRef,
 		Engine:          engine,
 		Tier:            tier,
+		Shard:           shard,
 		BackupEnabled:   req.BackupEnabled,
 		BackupSchedule:  req.BackupSchedule,
 		BackupRetention: req.BackupRetention,
@@ -468,6 +471,7 @@ func (h *Handler) CreateServiceDatabase(c *gin.Context) {
 		"app_ref":          req.AppRef,
 		"engine":           engine,
 		"runtime":          runtime,
+		"shard":            shard,
 		"backup_enabled":   req.BackupEnabled,
 		"backup_schedule":  req.BackupSchedule,
 		"backup_retention": req.BackupRetention,

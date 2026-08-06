@@ -684,6 +684,7 @@ func (w *DBWatcher) doCreateServiceDatabase(ctx context.Context, op db.Operation
 		AppRef          string `json:"app_ref"`
 		Engine          string `json:"engine"`
 		Tier            string `json:"tier"`
+		Shard           string `json:"shard"`
 		BackupEnabled   bool   `json:"backup_enabled"`
 		BackupSchedule  string `json:"backup_schedule"`
 		BackupRetention string `json:"backup_retention"`
@@ -708,6 +709,7 @@ func (w *DBWatcher) doCreateServiceDatabase(ctx context.Context, op db.Operation
 		EnvSlug:         envName,
 		AppRef:          p.AppRef,
 		Database:        p.Database,
+		Shard:           p.Shard,
 		Tier:            p.Tier,
 		BackupEnabled:   p.BackupEnabled,
 		BackupSchedule:  defaultIfEmpty(p.BackupSchedule, "daily"),
@@ -760,6 +762,7 @@ func (w *DBWatcher) doCreateServiceDatabase(ctx context.Context, op db.Operation
 			"appRef":    p.AppRef,
 			"namespace": envNamespace,
 			"database":  p.Database,
+			"shard":     p.Shard,
 			"backup": map[string]any{
 				"enabled":   p.BackupEnabled,
 				"frequency": p.BackupSchedule,

@@ -36,12 +36,18 @@ const (
 // onto ServiceDatabaseV2.spec.tier, which the Crossplane composition turns into
 // the role's CONNECTION LIMIT and per-role postgres parameters. Empty means the
 // XRD default ("unlimited") — used for the k8s path only.
+//
+// Shard is the Postgres instance the database is placed on, resolved from the
+// db_shards registry at create time and mapped onto ServiceDatabaseV2.spec.shard,
+// which selects the provider-sql ProviderConfig of that instance. Placement is
+// automatic; empty means the XRD default (the shared instance).
 type CreateServiceDatabasePayload struct {
 	Name            string `json:"name"`
 	Database        string `json:"database"`
 	AppRef          string `json:"app_ref"`
 	Engine          string `json:"engine,omitempty"`
 	Tier            string `json:"tier,omitempty"`
+	Shard           string `json:"shard,omitempty"`
 	BackupEnabled   bool   `json:"backup_enabled"`
 	BackupSchedule  string `json:"backup_schedule"`
 	BackupRetention string `json:"backup_retention"`

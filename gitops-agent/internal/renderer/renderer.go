@@ -19,6 +19,13 @@ import (
 // parameters) applied by the composition. An empty Tier omits the field so the
 // XRD default ("unlimited") applies and already-rendered manifests stay
 // byte-for-byte unchanged.
+//
+// Shard is the Postgres instance the database lives on; it selects the
+// provider-sql ProviderConfig used for every object of this database. An empty
+// Shard omits the field, so the XRD default (the shared instance) applies and
+// databases rendered before shards existed keep their exact placement. Editing
+// it on a live database does NOT move the data — that is the documented move
+// procedure — so it is written once at creation and carried verbatim after.
 type ServiceDatabaseSpec struct {
 	Name            string
 	Namespace       string
@@ -26,6 +33,7 @@ type ServiceDatabaseSpec struct {
 	EnvSlug         string
 	AppRef          string
 	Database        string
+	Shard           string
 	Tier            string
 	BackupEnabled   bool
 	BackupSchedule  string
@@ -46,6 +54,9 @@ spec:
   namespace: {{ .Namespace }}
   engine: postgresql
   database: {{ .Database }}
+{{- if .Shard }}
+  shard: {{ .Shard }}
+{{- end }}
 {{- if .Tier }}
   tier: {{ .Tier }}
 {{- end }}

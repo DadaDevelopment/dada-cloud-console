@@ -66,6 +66,25 @@ func TestRerenderServiceDatabaseForMoveKeepsTier(t *testing.T) {
 	}
 }
 
+// Losing spec.shard during a move would point provider-sql at the default
+// instance, where the moved database does not exist — a move is a re-point of
+// the SAME data, so placement travels with it verbatim.
+func TestRerenderServiceDatabaseForMoveKeepsShard(t *testing.T) {
+	var src serviceDatabaseManifest
+	src.Metadata.Name = "n8n"
+	src.Spec.AppRef = "n8n"
+	src.Spec.Database = "n8n"
+	src.Spec.Shard = "shard-2"
+
+	got, err := rerenderServiceDatabaseForMove(src, "platform", "prod", "platform-prod", "op-123")
+	if err != nil {
+		t.Fatalf("rerender: %v", err)
+	}
+	if !strings.Contains(got, "shard: shard-2") {
+		t.Errorf("moved DB lost its shard placement\n---\n%s", got)
+	}
+}
+
 func TestRerenderServiceDatabaseForMoveRejectsUnnamed(t *testing.T) {
 	var src serviceDatabaseManifest
 	if _, err := rerenderServiceDatabaseForMove(src, "platform", "prod", "platform-prod", "op-1"); err == nil {

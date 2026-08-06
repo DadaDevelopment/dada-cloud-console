@@ -283,6 +283,21 @@ func (r *StatusReconciler) reconcileModels(ctx context.Context) {
 // existed. defaultDatabaseTier mirrors the XRD default.
 const defaultDatabaseTier = "unlimited"
 
+// crDatabaseShard reads the Postgres instance a ServiceDatabaseV2 actually
+// lives on. Like the tier it comes from the LIVE CR, so the console reports
+// where the data really is rather than where the registry meant to put it —
+// the two diverge for every database created before shards existed and during
+// a move. defaultDatabaseShard mirrors the XRD default (the shared instance).
+const defaultDatabaseShard = "shard-1"
+
+func crDatabaseShard(cr *unstructured.Unstructured) string {
+	shard, found, err := unstructured.NestedString(cr.Object, "spec", "shard")
+	if err != nil || !found || shard == "" {
+		return defaultDatabaseShard
+	}
+	return shard
+}
+
 func crDatabaseTier(cr *unstructured.Unstructured) string {
 	tier, found, err := unstructured.NestedString(cr.Object, "spec", "tier")
 	if err != nil || !found || tier == "" {
@@ -322,6 +337,7 @@ func (r *StatusReconciler) reconcileDatabases(ctx context.Context) {
 			"live_at":     time.Now().UTC().Format(time.RFC3339),
 		}
 		fields["tier"] = crDatabaseTier(cr)
+		fields["shard"] = crDatabaseShard(cr)
 		patch, _ := json.Marshal(fields)
 		n, err := db.UpdateLiveStatus(ctx, r.pool, ids[0], "ServiceDatabaseV2", name, phase, patch)
 		if err != nil {
