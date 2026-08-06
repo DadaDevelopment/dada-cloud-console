@@ -11,15 +11,35 @@ import { UserManager, WebStorageStateStore } from "oidc-client-ts";
 export const PENDING_REGISTRATION_KEY = "dada_pending_registration";
 
 /**
- * Kicks off the Keycloak sign-UP flow (registration form) instead of the
- * default sign-in form.
+ * Sign-up entry method: `"email"` sends the visitor to Keycloak's own
+ * registration form (`prompt=create`); `"yandex"` skips that form entirely
+ * and drops straight into the Yandex broker login (`kc_idp_hint=yandex`),
+ * since the registration form renders no IdP buttons of its own.
+ */
+export type RegisterMethod = "email" | "yandex";
+
+/**
+ * Builds the `extraQueryParams` for a {@link startRegister} authorize
+ * request, kept as a pure function so the branching is unit-testable
+ * without spinning up a {@link UserManager} or touching the DOM.
+ *
+ * `prompt=create` and `kc_idp_hint` are mutually exclusive: the former asks
+ * Keycloak to render its registration form, the latter skips straight to a
+ * broker and never reaches that form, so mixing them is meaningless.
+ */
+export function registerQueryParams(method: RegisterMethod): Record<string, string> {
+  if (method === "yandex") return { kc_idp_hint: "yandex" };
+  return { prompt: "create" };
+}
+
+/**
+ * Kicks off the Keycloak sign-UP flow instead of the default sign-in form.
  *
  * `@dada/react-sso` only exposes `login(returnTo)`, which forwards `{ state }`
- * to oidc-client-ts and offers no hook for extra authorize params. Keycloak
- * 20+ renders its registration page when the authorize request carries
- * `prompt=create`, so this helper builds a throwaway {@link UserManager} whose
- * settings mirror the react-sso OIDC provider exactly and issues the redirect
- * with that param.
+ * to oidc-client-ts and offers no hook for extra authorize params. This
+ * helper builds a throwaway {@link UserManager} whose settings mirror the
+ * react-sso OIDC provider exactly and issues the redirect with the params
+ * from {@link registerQueryParams}.
  *
  * Config parity is what makes this safe: neither react-sso nor this helper
  * overrides oidc-client-ts's default `stateStore` (localStorage), so the PKCE
@@ -28,8 +48,9 @@ export const PENDING_REGISTRATION_KEY = "dada_pending_registration";
  * authenticated through the normal callback path — no second login step.
  *
  * @param returnTo in-app path to return to after auth (defaults to /projects)
+ * @param method which sign-up path to take (defaults to the e-mail form)
  */
-export function startRegister(returnTo = "/projects"): Promise<void> {
+export function startRegister(returnTo = "/projects", method: RegisterMethod = "email"): Promise<void> {
   const authority = process.env.NEXT_PUBLIC_KEYCLOAK_ISSUER ?? "";
   const clientId = process.env.NEXT_PUBLIC_OIDC_CLIENT_ID ?? "dada-console";
 
@@ -49,6 +70,6 @@ export function startRegister(returnTo = "/projects"): Promise<void> {
 
   return userManager.signinRedirect({
     state: returnTo,
-    extraQueryParams: { prompt: "create" },
+    extraQueryParams: registerQueryParams(method),
   });
 }
