@@ -181,7 +181,7 @@ def bench_one(entry, args, workdir):
         row["reason"] = "wrong_port"
 
     if named and row["detected_framework"] != "docker":
-        row["reason"] = "template_only"
+        row.setdefault("reason", "template_only")
         return row
     if not args.build:
         return row

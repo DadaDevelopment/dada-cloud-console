@@ -2,6 +2,14 @@
 # shape — что реально лежит в корне на пине (проверено HTTP 200 на raw.githubusercontent).
 # port — порт, который наше определение обязано выдать на ступени 1.
 # probe — путь, ответ 2xx/3xx на котором считается «живой» (ступень 4).
+# port: 0 вместе с port_source: env означает «приложение слушает $PORT, который
+# назначает платформа»: правильное поведение детектора здесь — НЕ называть порт,
+# а любое названное число является выдумкой и считается провалом.
+# Так исправлены firefly-iii и miniflux (было 8080): у обоих в корне лежит только
+# Procfile. У firefly-iii это `web: vendor/bin/heroku-php-nginx`, который биндит
+# $PORT; у miniflux — `web: miniflux.app`, а сам miniflux переопределяет
+# LISTEN_ADDR из PORT (internal/config/parser.go). 8080 был портом их docker-образа,
+# то есть ожиданием от другого пути развёртывания.
 version: 1
 repos:
   - repo: CorentinTh/it-tools
@@ -114,7 +122,7 @@ repos:
     branch: master
     stack: node
     shape: dockerfile-root
-    port: 3000
+    port: 8000
     probe: /
     root_files: [Dockerfile, docker-compose.yml, requirements.txt]
   - repo: excalidraw/excalidraw
@@ -138,7 +146,8 @@ repos:
     branch: main
     stack: php
     shape: procfile-only
-    port: 8080
+    port: 0
+    port_source: env
     probe: /
     root_files: [Procfile, package.json]
   - repo: freeCodeCamp/devdocs
@@ -195,7 +204,8 @@ repos:
     branch: main
     stack: node
     shape: procfile-only
-    port: 5000
+    port: 0
+    port_source: env
     probe: /
     root_files: [Procfile, package.json]
   - repo: heroku/python-getting-started
@@ -203,7 +213,8 @@ repos:
     branch: main
     stack: python
     shape: procfile-only
-    port: 8000
+    port: 0
+    port_source: env
     probe: /
     root_files: [Procfile, requirements.txt]
   - repo: heroku/ruby-getting-started
@@ -211,7 +222,8 @@ repos:
     branch: main
     stack: ruby
     shape: procfile-only
-    port: 3000
+    port: 0
+    port_source: env
     probe: /
     root_files: [Procfile]
   - repo: hoppscotch/hoppscotch
@@ -261,7 +273,8 @@ repos:
     branch: main
     stack: go
     shape: procfile-only
-    port: 8080
+    port: 0
+    port_source: env
     probe: /healthcheck
     root_files: [Procfile, go.mod]
   - repo: n8n-io/n8n
@@ -318,7 +331,8 @@ repos:
     branch: main
     stack: python
     shape: no-manifest
-    port: 8000
+    port: 0
+    port_source: env
     probe: /
     root_files: [requirements.txt]
   - repo: searxng/searxng
