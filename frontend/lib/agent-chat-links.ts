@@ -86,14 +86,27 @@ function routeMatches(pattern: string, path: string): boolean {
 }
 
 /**
+ * Finds the `CONSOLE_ROUTES` pattern a href resolves to, or null when none
+ * matches. Query and hash are ignored: a hash targets an anchor on an
+ * existing page, which is a valid deep link.
+ *
+ * The returned pattern is the `[projectId]`-style template, never the real
+ * path -- callers that need to log a navigation without naming the resource
+ * it landed on (telemetry) use this instead of the href itself.
+ */
+export function matchConsoleRouteTemplate(href: string): string | null {
+  if (!href || !href.startsWith("/") || href.startsWith("//")) return null;
+  const path = href.split(/[?#]/)[0];
+  if (path === "/") return null;
+  return CONSOLE_ROUTES.find((pattern) => routeMatches(pattern, path)) ?? null;
+}
+
+/**
  * True when href resolves to a page that exists. Query and hash are ignored:
  * a hash targets an anchor on an existing page, which is a valid deep link.
  */
 export function isKnownConsoleRoute(href: string): boolean {
-  if (!href || !href.startsWith("/") || href.startsWith("//")) return false;
-  const path = href.split(/[?#]/)[0];
-  if (path === "/") return false;
-  return CONSOLE_ROUTES.some((pattern) => routeMatches(pattern, path));
+  return matchConsoleRouteTemplate(href) !== null;
 }
 
 type Span = { start: number; end: number };
