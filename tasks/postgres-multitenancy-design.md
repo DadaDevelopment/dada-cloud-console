@@ -143,9 +143,26 @@ read-only 1.0 / frozen 1.25 / снятие 0.9, принуждение чере�
       (`969e90d1`), рычаг `spec.enforcement` (`6cd84dc9`, `627f4c69`).
 - [x] b. Воркер квоты размера: `db_quota_state`, лестница с гистерезисом,
       аудит, письма — `885d2464`. Живьём не прогонялось (kubectl недоступен).
-- [ ] 1. Шард-чарт: `shard-0` (платформа, 4Gi+, реплика) рядом с существующим
-      инстансом (= будущий `shard-1`); `pg_stat_statements` +
-      `log_min_duration_statement=1s`; выбор оператора HA (CNPG vs bitnami).
+- [x] 1. Шард-чарт: `shard-0` рядом с существующим инстансом (= будущий
+      `shard-1`) — argo-infra `94016d17`, app
+      `platform/prod/apps/postgres-shard-0`, bitnami/postgresql 16.7.27,
+      сервис `pg-shard-0-postgresql.databases.svc:5432`, лимит 4Gi,
+      `shared_buffers=1GB`, `pg_stat_statements` +
+      `log_min_duration_statement=1s` с рождения, ServiceMonitor включён.
+      Оператор HA: **bitnami**, не CNPG (оператор + новые CRD + новый режим
+      отказа на пути SSO ради failover, которого сегодня нет; контракт роутера
+      `dbname → host` от оператора не зависит, отдельный шард переведём позже).
+      **Реплика отложена**: `architecture: standalone`, второй под и второй том
+      Longhorn вслепую не добавляем после потери ноды по диску 2026-08-06.
+      Включение = `architecture: replication` + `readReplicas.replicaCount: 1`,
+      данные и имя сервиса не меняются.
+      Живьём не проверено: с этой сети k8s API недоступен вообще (и через
+      bypass-прокси, и напрямую с en0 — 502/timeout), проверено `helm template`
+      на values 16.7.27 и наличием bitnamilegacy-тегов в реестре.
+- [ ] 1b. Проверить живьём: под `pg-shard-0-postgresql-0` Ready, `SHOW
+      shared_buffers` = 1GB, `pg_stat_statements` в `shared_preload_libraries`,
+      серии `pg_database_size_bytes{...pg-shard-0...}` в Prometheus; после
+      проверки ёмкости нод — включить реплику.
 - [ ] 2. pg-router: стенд PgBouncer vs Odyssey (латентность, reload без
       разрыва, SCRAM), деплой фарма ≥2 реплик, конфиг из gitops.
 - [ ] 3. Реестр: таблица `db_shards`, `spec.shard` в XRD/композиции →
