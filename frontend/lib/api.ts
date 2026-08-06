@@ -74,6 +74,7 @@ import type {
   FrameworkDetection,
   Solution,
   ResolveSolutionsResponse,
+  InstallSolutionResponse,
   // Monitoring
   MonitoringApp,
   HealthStatus,
@@ -1243,6 +1244,32 @@ export const solutionsApi = {
   resolve: (projectId: string, query: string) =>
     apiFetch<ResolveSolutionsResponse>(
       `/api/v1/projects/${projectId}/solutions/resolve?q=${encodeURIComponent(query)}`
+    ),
+
+  /**
+   * Installs a ready-made project or any public repository: one call that links
+   * the repo, orders the managed database the entry declares it needs, and
+   * queues the first build. The console used to run those as three calls and
+   * had to unwind the first two by hand when the third failed.
+   */
+  install: (
+    projectId: string,
+    envId: string,
+    data: {
+      slug?: string;
+      repo?: string;
+      app_name?: string;
+      branch?: string;
+      root_dir?: string;
+      framework?: string;
+      port?: number;
+      profile?: string;
+      with_database?: boolean;
+    }
+  ) =>
+    apiFetch<InstallSolutionResponse>(
+      `/api/v1/projects/${projectId}/environments/${envId}/solutions/install`,
+      { method: "POST", body: JSON.stringify(data) }
     ),
 };
 

@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { gitApi, buildsApi, solutionsApi } from "@/lib/api";
+import { gitApi, solutionsApi } from "@/lib/api";
 import type { Solution, SolutionCandidate } from "@/lib/types";
 import { ResourceIcon } from "@/components/shell/icons";
 import { Spinner } from "@/components/ui/spinner";
@@ -110,16 +110,21 @@ export function TemplateDeployCards({ projectId, envId, compact, hero, className
   }, [query, projectId]);
 
   /**
-   * Links a public repo and starts its first build. `installation_id: ""` is
-   * what makes this work without a connected GitHub account — the clone URL is
-   * derived from the repository name and the repo is public.
+   * Installs one project: a single call that links the public repository,
+   * orders any managed database the catalog entry declares it needs, and
+   * queues the first build. No connected GitHub account is required — the
+   * repository is public and the backend derives the clone URL from its name.
+   *
+   * The app name is minted here rather than server-side so deploying the same
+   * project twice never collides on a name.
    */
   async function deploy(opts: {
     key: string;
     appBase: string;
-    repoFullName: string;
-    branch: string;
-    rootDir: string;
+    slug?: string;
+    repoFullName?: string;
+    branch?: string;
+    rootDir?: string;
     framework?: string;
     port?: number;
     profile?: string;
@@ -129,18 +134,16 @@ export function TemplateDeployCards({ projectId, envId, compact, hero, className
     setDeployingKey(opts.key);
     const appName = uniqueAppName(opts.appBase);
     try {
-      await gitApi.linkRepo(projectId, envId, {
-        installation_id: "",
-        repo_full_name: opts.repoFullName,
+      const { build } = await solutionsApi.install(projectId, envId, {
+        slug: opts.slug,
+        repo: opts.repoFullName,
         app_name: appName,
-        production_branch: opts.branch,
+        branch: opts.branch,
         root_dir: opts.rootDir,
-        framework_override: opts.framework,
-        auto_deploy: false,
+        framework: opts.framework,
         port: opts.port,
-        profile: opts.profile ?? "small",
+        profile: opts.profile,
       });
-      const { build } = await buildsApi.trigger(projectId, envId, appName);
       if (build?.id) trackBuildStart({ projectId, envId, appName, buildId: build.id });
       router.push(`/projects/${projectId}/apps/${appName}/deployments?envId=${envId}`);
     } catch (err) {
@@ -150,16 +153,7 @@ export function TemplateDeployCards({ projectId, envId, compact, hero, className
   }
 
   function deploySolution(s: Solution) {
-    return deploy({
-      key: s.slug,
-      appBase: s.slug,
-      repoFullName: s.repo,
-      branch: s.branch,
-      rootDir: s.root_dir,
-      framework: s.framework,
-      port: s.port,
-      profile: s.profile,
-    });
+    return deploy({ key: s.slug, appBase: s.slug, slug: s.slug });
   }
 
   /**
@@ -180,17 +174,7 @@ export function TemplateDeployCards({ projectId, envId, compact, hero, className
       return;
     }
     if (c.kind === "solution") {
-      const key = `cand:${c.slug}`;
-      await deploy({
-        key,
-        appBase: c.slug,
-        repoFullName: c.repo,
-        branch: c.branch,
-        rootDir: c.root_dir,
-        framework: c.framework,
-        port: c.port,
-        profile: c.profile,
-      });
+      await deploy({ key: `cand:${c.slug}`, appBase: c.slug, slug: c.slug });
       return;
     }
     const key = `cand:${c.repo}`;

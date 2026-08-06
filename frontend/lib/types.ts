@@ -1527,3 +1527,11 @@ export interface ResolveSolutionsResponse {
   /** Search was attempted and failed; the local rows are still trustworthy. */
   search_failed: boolean;
 }
+
+export interface InstallSolutionResponse {
+  app_name: string;
+  build: Build;
+  /** Present only when the install also ordered a managed database. */
+  database?: Operation | null;
+  installed: boolean;
+}
