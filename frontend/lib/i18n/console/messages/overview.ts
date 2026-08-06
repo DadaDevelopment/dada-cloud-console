@@ -55,22 +55,34 @@ export const overview: Messages = {
   },
   "overview.templates.deploying": { ru: "Разворачиваем…", en: "Deploying…" },
   "overview.templates.error": { ru: "Не удалось развернуть проект", en: "Failed to deploy the project" },
-  "overview.templates.byUrl.title": {
-    ru: "Или любой публичный репозиторий",
-    en: "Or any public repository",
-  },
-  "overview.templates.byUrl.hint": {
-    ru: "Вставьте ссылку на GitHub — мы сами определим, как это собрать, соберём и запустим.",
-    en: "Paste a GitHub link — we work out how to build it, build it and run it.",
-  },
-  "overview.templates.byUrl.placeholder": {
-    ru: "https://github.com/owner/repository",
-    en: "https://github.com/owner/repository",
-  },
-  "overview.templates.byUrl.branchPlaceholder": { ru: "ветка: main", en: "branch: main" },
-  "overview.templates.byUrl.branchLabel": { ru: "Ветка", en: "Branch" },
-  "overview.templates.byUrl.cta": { ru: "Собрать", en: "Build" },
   "overview.templates.cta": { ru: "Развернуть", en: "Deploy" },
+
+  "overview.templates.ask.title": {
+    ru: "Или напишите, что нужно запустить",
+    en: "Or say what you want to run",
+  },
+  "overview.templates.ask.hint": {
+    ru: "Название проекта, ссылка на GitHub или просто «база данных» — найдём и соберём.",
+    en: "A project name, a GitHub link, or just «database» — we find it and build it.",
+  },
+  "overview.templates.ask.placeholder": {
+    ru: "n8n, база данных, https://github.com/owner/repo",
+    en: "n8n, database, https://github.com/owner/repo",
+  },
+  "overview.templates.ask.searching": { ru: "Ищем на GitHub…", en: "Searching GitHub…" },
+  "overview.templates.ask.empty": {
+    ru: "Ничего не нашли. Попробуйте другое слово или вставьте ссылку на репозиторий.",
+    en: "Nothing found. Try another word or paste a repository link.",
+  },
+  "overview.templates.ask.searchFailed": {
+    ru: "Поиск по GitHub сейчас недоступен — показываем только наши проекты.",
+    en: "GitHub search is unavailable right now — showing our own projects only.",
+  },
+  "overview.templates.ask.fromCatalog": { ru: "проверенный", en: "verified" },
+  "overview.templates.ask.fromSearch": { ru: "с GitHub", en: "from GitHub" },
+  "overview.templates.ask.managed": { ru: "управляемая", en: "managed" },
+  "overview.templates.ask.archived": { ru: "архив", en: "archived" },
+  "overview.templates.ask.openDatabases": { ru: "Создать", en: "Create" },
 
   "overview.boxes.col.name": { ru: "Имя", en: "Name" },
   "overview.boxes.col.status": { ru: "Статус", en: "Status" },

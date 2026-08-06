@@ -2,7 +2,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { gitApi, buildsApi, solutionsApi } from "@/lib/api";
-import type { Solution } from "@/lib/types";
+import type { Solution, SolutionCandidate } from "@/lib/types";
 import { ResourceIcon } from "@/components/shell/icons";
 import { Spinner } from "@/components/ui/spinner";
 import { useT } from "@/lib/i18n/console/context";
@@ -54,8 +54,10 @@ export function TemplateDeployCards({ projectId, envId, compact, hero, className
   const [solutions, setSolutions] = useState<Solution[] | null>(null);
   const [deployingKey, setDeployingKey] = useState<string | null>(null);
   const [templateError, setTemplateError] = useState<string | null>(null);
-  const [repoUrl, setRepoUrl] = useState("");
-  const [repoBranch, setRepoBranch] = useState("");
+  const [query, setQuery] = useState("");
+  const [candidates, setCandidates] = useState<SolutionCandidate[] | null>(null);
+  const [resolving, setResolving] = useState(false);
+  const [searchFailed, setSearchFailed] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -71,6 +73,41 @@ export function TemplateDeployCards({ projectId, envId, compact, hero, className
       cancelled = true;
     };
   }, []);
+
+  /**
+   * Resolves what the customer typed, one debounced request per pause in the
+   * typing. The delay is not cosmetic: every keystroke that reaches the backend
+   * can become a GitHub search, and that budget is 30 requests a minute for the
+   * whole platform, not per customer.
+   */
+  useEffect(() => {
+    const typed = query.trim();
+    if (typed.length < 2) return;
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      setResolving(true);
+      solutionsApi
+        .resolve(projectId, typed)
+        .then((res) => {
+          if (cancelled) return;
+          setCandidates(res.candidates ?? []);
+          setSearchFailed(res.search_failed);
+        })
+        .catch(() => {
+          if (!cancelled) {
+            setCandidates([]);
+            setSearchFailed(true);
+          }
+        })
+        .finally(() => {
+          if (!cancelled) setResolving(false);
+        });
+    }, 350);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [query, projectId]);
 
   /**
    * Links a public repo and starts its first build. `installation_id: ""` is
@@ -126,47 +163,61 @@ export function TemplateDeployCards({ projectId, envId, compact, hero, className
   }
 
   /**
-   * The paste-a-link path. Detection runs before the link so the app is created
-   * with the port the repository actually listens on: a wrong port deploys
-   * green and answers 502, which reads as the platform being broken.
+   * Deploys one resolver row.
+   *
+   * A catalog row already carries the build spec we verified, so it goes
+   * straight through. A repository row — pasted or found by search — carries a
+   * name and nothing else, so detection runs first: the port a repository
+   * actually listens on is what separates an app that answers from one that
+   * deploys green and returns 502, which reads as the platform being broken.
+   * A managed row is not a build at all and hands over to the databases page,
+   * where the customer picks size and backups.
    */
-  async function deployPastedRepo() {
-    if (!envId || deployingKey || !repoUrl.trim()) return;
-    setTemplateError(null);
-    setDeployingKey("__url__");
-    try {
-      const { repo_full_name } = await solutionsApi.parseRepoUrl(repoUrl);
-      let framework: string | undefined;
-      let port: number | undefined;
-      try {
-        const detected = await gitApi.detectPublic(projectId, repo_full_name);
-        framework = detected.framework ?? undefined;
-        port = detected.port ?? undefined;
-      } catch {
-        // Detection is best effort: the build pipeline detects again on the
-        // real checkout, which sees more than the GitHub API does.
-      }
-      setDeployingKey(null);
-      await deploy({
-        key: "__url__",
-        appBase: repo_full_name.split("/")[1] ?? "app",
-        repoFullName: repo_full_name,
-        // Empty means "main" server-side. The field is here because plenty of
-        // real repositories still default to master, and guessing the branch
-        // wrong fails the build with an error about a missing ref rather than
-        // about the guess.
-        branch: repoBranch.trim(),
-        rootDir: ".",
-        framework,
-        port,
-      });
-    } catch (err) {
-      setTemplateError(err instanceof Error ? err.message : t("overview.templates.error"));
-      setDeployingKey(null);
+  async function deployCandidate(c: SolutionCandidate) {
+    if (!envId || deployingKey) return;
+    if (c.kind === "managed") {
+      router.push(`/projects/${projectId}/databases?envId=${envId}`);
+      return;
     }
+    if (c.kind === "solution") {
+      const key = `cand:${c.slug}`;
+      await deploy({
+        key,
+        appBase: c.slug,
+        repoFullName: c.repo,
+        branch: c.branch,
+        rootDir: c.root_dir,
+        framework: c.framework,
+        port: c.port,
+        profile: c.profile,
+      });
+      return;
+    }
+    const key = `cand:${c.repo}`;
+    setTemplateError(null);
+    setDeployingKey(key);
+    let framework = c.framework || undefined;
+    let port = c.port || undefined;
+    try {
+      const detected = await gitApi.detectPublic(projectId, c.repo);
+      framework = detected.framework ?? framework;
+      port = detected.port ?? port;
+    } catch {
+      /* Best effort: the build pipeline detects again on the real checkout, which sees more than the GitHub API does. */
+    }
+    setDeployingKey(null);
+    await deploy({
+      key,
+      appBase: c.repo.split("/")[1] ?? "app",
+      repoFullName: c.repo,
+      branch: c.branch,
+      rootDir: c.root_dir || ".",
+      framework,
+      port,
+    });
   }
 
-  const busyUrl = deployingKey === "__url__";
+  const asking = query.trim().length >= 2;
 
   const body = (
     <>
@@ -215,46 +266,63 @@ export function TemplateDeployCards({ projectId, envId, compact, hero, className
 
       <div className="mt-5 rounded-xl border border-dashed border-gray-300 dark:border-gray-700 p-4">
         <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">
-          {t("overview.templates.byUrl.title")}
+          {t("overview.templates.ask.title")}
         </p>
         <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
-          {t("overview.templates.byUrl.hint")}
+          {t("overview.templates.ask.hint")}
         </p>
-        <div className="mt-3 flex flex-col gap-2 sm:flex-row">
-          <input
-            type="url"
-            inputMode="url"
-            value={repoUrl}
-            onChange={(e) => setRepoUrl(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") void deployPastedRepo();
-            }}
-            placeholder={t("overview.templates.byUrl.placeholder")}
-            disabled={!!deployingKey || !envId}
-            className="flex-1 rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 placeholder:text-gray-400 disabled:opacity-60"
-          />
+        <div className="mt-3 flex items-center gap-2 rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 focus-within:border-blue-500">
+          <ResourceIcon name="apps" className="h-4 w-4 shrink-0 text-gray-400" />
           <input
             type="text"
-            value={repoBranch}
-            onChange={(e) => setRepoBranch(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") void deployPastedRepo();
-            }}
-            placeholder={t("overview.templates.byUrl.branchPlaceholder")}
-            aria-label={t("overview.templates.byUrl.branchLabel")}
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder={t("overview.templates.ask.placeholder")}
             disabled={!!deployingKey || !envId}
-            className="rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 placeholder:text-gray-400 disabled:opacity-60 sm:w-40"
+            aria-label={t("overview.templates.ask.title")}
+            className="flex-1 bg-transparent text-sm text-gray-900 dark:text-gray-100 placeholder:text-gray-400 focus:outline-none disabled:opacity-60"
           />
-          <button
-            type="button"
-            onClick={() => void deployPastedRepo()}
-            disabled={!!deployingKey || !envId || !repoUrl.trim()}
-            className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            {busyUrl && <Spinner size="sm" />}
-            {busyUrl ? t("overview.templates.deploying") : t("overview.templates.byUrl.cta")}
-          </button>
+          {asking && resolving && <Spinner size="sm" />}
         </div>
+
+        {asking && searchFailed && (
+          <p className="mt-2 text-xs text-amber-600 dark:text-amber-400">
+            {t("overview.templates.ask.searchFailed")}
+          </p>
+        )}
+
+        {asking && candidates !== null && candidates.length === 0 && !resolving && (
+          <p className="mt-3 text-sm text-gray-500 dark:text-gray-400">
+            {t("overview.templates.ask.empty")}
+          </p>
+        )}
+
+        {asking && candidates !== null && candidates.length > 0 && (
+          <ul className="mt-3 divide-y divide-gray-100 dark:divide-gray-800 overflow-hidden rounded-lg border border-gray-200 dark:border-gray-800">
+            {candidates.map((c) => (
+              <CandidateRow
+                key={`${c.kind}:${c.slug}`}
+                candidate={c}
+                busy={deployingKey === `cand:${c.kind === "solution" ? c.slug : c.repo}`}
+                disabled={!!deployingKey || !envId}
+                cta={
+                  c.kind === "managed"
+                    ? t("overview.templates.ask.openDatabases")
+                    : t("overview.templates.cta")
+                }
+                badge={
+                  c.kind === "managed"
+                    ? t("overview.templates.ask.managed")
+                    : c.from === "search"
+                      ? t("overview.templates.ask.fromSearch")
+                      : t("overview.templates.ask.fromCatalog")
+                }
+                archivedLabel={t("overview.templates.ask.archived")}
+                onClick={() => void deployCandidate(c)}
+              />
+            ))}
+          </ul>
+        )}
       </div>
     </>
   );
@@ -268,6 +336,73 @@ export function TemplateDeployCards({ projectId, envId, compact, hero, className
     : "rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-5 shadow-sm";
 
   return <div className={`${containerClass} ${className ?? ""}`}>{body}</div>;
+}
+
+/**
+ * One resolver suggestion. The badge is the honest part: a catalog row carries
+ * a build spec someone verified, a search row carries a name and a star count,
+ * and the customer choosing between them deserves to know which is which.
+ */
+function CandidateRow({
+  candidate,
+  busy,
+  disabled,
+  cta,
+  badge,
+  archivedLabel,
+  onClick,
+}: {
+  candidate: SolutionCandidate;
+  busy: boolean;
+  disabled: boolean;
+  cta: string;
+  badge: string;
+  archivedLabel: string;
+  onClick: () => void;
+}) {
+  return (
+    <li className="flex items-center gap-3 bg-white dark:bg-gray-900 px-3 py-2.5">
+      {candidate.icon ? (
+        <img
+          src={candidate.icon}
+          alt=""
+          className="h-8 w-8 shrink-0 rounded-md bg-gray-100 dark:bg-gray-800 object-cover"
+        />
+      ) : (
+        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-blue-100 dark:bg-blue-950/40 text-blue-600 dark:text-blue-400">
+          <ResourceIcon name={candidate.kind === "managed" ? "databases" : "apps"} className="h-4 w-4" />
+        </div>
+      )}
+      <div className="min-w-0 flex-1">
+        <p className="flex items-center gap-2 text-sm font-medium text-gray-900 dark:text-gray-100">
+          <span className="truncate">{candidate.name}</span>
+          <span className="shrink-0 rounded bg-gray-100 dark:bg-gray-800 px-1.5 py-0.5 text-[11px] font-normal text-gray-500 dark:text-gray-400">
+            {badge}
+          </span>
+          {candidate.archived && (
+            <span className="shrink-0 rounded bg-amber-100 dark:bg-amber-950/40 px-1.5 py-0.5 text-[11px] font-normal text-amber-700 dark:text-amber-400">
+              {archivedLabel}
+            </span>
+          )}
+        </p>
+        <p className="truncate text-xs text-gray-500 dark:text-gray-400">
+          {candidate.tagline || candidate.repo}
+        </p>
+      </div>
+      {typeof candidate.stars === "number" && candidate.stars > 0 && (
+        <span className="shrink-0 text-xs text-gray-400 dark:text-gray-500">★ {candidate.stars}</span>
+      )}
+      <button
+        type="button"
+        onClick={onClick}
+        disabled={disabled}
+        className="inline-flex shrink-0 items-center justify-center gap-1.5 rounded-lg border border-gray-300 dark:border-gray-700 px-3 py-1.5 text-sm font-medium text-gray-900 dark:text-gray-100 transition-colors hover:bg-gray-50 dark:hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-60"
+      >
+        {busy && <Spinner size="sm" />}
+        {cta}
+      </button>
+    </li>
+  );
 }
 
 function SolutionCardSkeleton() {

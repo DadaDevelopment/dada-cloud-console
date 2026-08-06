@@ -73,6 +73,7 @@ import type {
   Build,
   FrameworkDetection,
   Solution,
+  ResolveSolutionsResponse,
   // Monitoring
   MonitoringApp,
   HealthStatus,
@@ -1231,6 +1232,17 @@ export const solutionsApi = {
   parseRepoUrl: (url: string) =>
     apiFetch<{ repo_full_name: string }>(
       `/api/v1/git/parse-repo-url?url=${encodeURIComponent(url)}`
+    ),
+
+  /**
+   * Turns one typed string into a ranked list of things to deploy: catalog
+   * entries, managed resources, a pasted repository, and GitHub search results
+   * below them. Project-scoped because searching spends a rate-limit budget
+   * shared by the whole platform, so it is gated on write access.
+   */
+  resolve: (projectId: string, query: string) =>
+    apiFetch<ResolveSolutionsResponse>(
+      `/api/v1/projects/${projectId}/solutions/resolve?q=${encodeURIComponent(query)}`
     ),
 };
 
