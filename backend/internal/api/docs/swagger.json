@@ -270,6 +270,51 @@
                 }
             }
         },
+        "/admin/db-shards": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Returns every managed PostgreSQL shard from the registry with what is actually inside it: total sampled size, database count, instance uptime, and the largest databases with their owning project, quota tier, seven-day growth and open advisory counts. Databases present in the samples but absent from the control plane's resource snapshots are returned with orphan=true. Reads collected samples only; no shard is queried live. Platform-admin and platform-analyst readers; every other caller gets 403.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin"
+                ],
+                "summary": "Per-shard database consumption (admin readers)",
+                "operationId": "getAdminDBShards",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/admin/feedback": {
             "get": {
                 "security": [
