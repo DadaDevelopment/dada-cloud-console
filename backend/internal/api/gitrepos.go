@@ -62,6 +62,7 @@ type gitRepo struct {
 	Port              int        `json:"port"`
 	Replicas          int        `json:"replicas"`
 	Profile           string     `json:"profile"`
+	Worker            bool       `json:"worker"`
 	CreatedAt         time.Time  `json:"created_at"`
 	UpdatedAt         time.Time  `json:"updated_at"`
 }
@@ -890,7 +891,7 @@ func (h *Handler) ListGitRepos(c *gin.Context) {
 	rows, err := h.pool.Query(c.Request.Context(),
 		`SELECT id, project_id, environment_id, app_name, installation_id, provider,
 		        repo_full_name, production_branch, root_dir, framework_override,
-		        auto_deploy, port, replicas, profile, created_at, updated_at
+		        auto_deploy, port, replicas, profile, worker, created_at, updated_at
 		 FROM git_repos
 		 WHERE project_id = $1 AND environment_id = $2
 		 ORDER BY app_name`,
@@ -908,7 +909,7 @@ func (h *Handler) ListGitRepos(c *gin.Context) {
 		if err := rows.Scan(&r.ID, &r.ProjectID, &r.EnvironmentID, &r.AppName,
 			&r.InstallationID, &r.Provider, &r.RepoFullName, &r.ProductionBranch,
 			&r.RootDir, &r.FrameworkOverride, &r.AutoDeploy,
-			&r.Port, &r.Replicas, &r.Profile, &r.CreatedAt, &r.UpdatedAt); err != nil {
+			&r.Port, &r.Replicas, &r.Profile, &r.Worker, &r.CreatedAt, &r.UpdatedAt); err != nil {
 			respondError(c, http.StatusInternalServerError, "failed to scan repo")
 			return
 		}
@@ -936,6 +937,9 @@ type connectGitRepoRequest struct {
 	Port     int    `json:"port"`
 	Replicas int    `json:"replicas"`
 	Profile  string `json:"profile"`
+	// Worker marks an app with no HTTP entrypoint: port stays 0, so nothing
+	// downstream renders a Service or a default hostname for it.
+	Worker bool `json:"worker"`
 	// GitLab only: a personal/project access token to store encrypted. Ignored for GitHub.
 	Token string `json:"token"`
 	// Provider defaults to github when an installation_id is supplied.
@@ -1086,7 +1090,7 @@ func (h *Handler) ConnectGitRepo(c *gin.Context) {
 		req.RootDir = "."
 	}
 	// Intended app spec (applied when the first build creates the app).
-	if req.Port == 0 {
+	if req.Port == 0 && !req.Worker {
 		req.Port = 8080
 	}
 	if req.Replicas == 0 {
@@ -1095,7 +1099,7 @@ func (h *Handler) ConnectGitRepo(c *gin.Context) {
 	if req.Profile == "" {
 		req.Profile = "small"
 	}
-	if req.Port < 1 || req.Port > 65535 {
+	if !req.Worker && (req.Port < 1 || req.Port > 65535) {
 		rejectErr(http.StatusBadRequest, "invalid_port", "port must be between 1 and 65535")
 		return
 	}
@@ -1181,20 +1185,20 @@ func (h *Handler) ConnectGitRepo(c *gin.Context) {
 		   (project_id, environment_id, app_name, installation_id, provider,
 		    repo_full_name, clone_url, token_encrypted, webhook_secret,
 		    production_branch, root_dir, framework_override, auto_deploy,
-		    port, replicas, profile, created_by, demo_expires_at)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
+		    port, replicas, profile, worker, created_by, demo_expires_at)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
 		 RETURNING id, project_id, environment_id, app_name, installation_id, provider,
 		           repo_full_name, production_branch, root_dir, framework_override,
-		           auto_deploy, port, replicas, profile, created_at, updated_at`,
+		           auto_deploy, port, replicas, profile, worker, created_at, updated_at`,
 		projectID, envID, req.AppName, installationID, provider,
 		req.RepoFullName, cloneURL, tokenEncrypted, webhookSecret,
 		req.ProductionBranch, req.RootDir, frameworkOverride, req.AutoDeploy,
-		req.Port, req.Replicas, req.Profile, claims.UserID, demoExpiresAt,
+		req.Port, req.Replicas, req.Profile, req.Worker, claims.UserID, demoExpiresAt,
 	)
 	if err := row.Scan(&r.ID, &r.ProjectID, &r.EnvironmentID, &r.AppName,
 		&r.InstallationID, &r.Provider, &r.RepoFullName, &r.ProductionBranch,
 		&r.RootDir, &r.FrameworkOverride, &r.AutoDeploy,
-		&r.Port, &r.Replicas, &r.Profile, &r.CreatedAt, &r.UpdatedAt); err != nil {
+		&r.Port, &r.Replicas, &r.Profile, &r.Worker, &r.CreatedAt, &r.UpdatedAt); err != nil {
 		if isUniqueViolation(err) {
 			rejectErr(http.StatusConflict, "repo_already_linked", "this app already has a linked repository in this environment")
 			return
