@@ -50,6 +50,12 @@ type VMIngressSpec struct {
 	ACMEWebroot string
 	// ACMEWebrootSrc is the host/stack source bind-mounted at ACMEWebroot.
 	ACMEWebrootSrc string
+	// TLSIncludeDir, when set, is glob-included from the generated conf. The VM
+	// provider drops a per-host 443 block there only once that host's cert really
+	// exists on disk, so a not-yet-issued domain cannot keep nginx from starting.
+	// A glob that matches nothing is not an error in nginx, which is what makes
+	// the deferral safe.
+	TLSIncludeDir string
 }
 
 // VMExtraHost is an additional serving vhost on the same Ingress, alongside its
@@ -99,6 +105,9 @@ const nginxProxyHeaders = `        proxy_http_version 1.1;
 func RenderNginxConf(spec VMIngressSpec) string {
 	var b strings.Builder
 	proto := sslProtocols(spec.TLS.MinVersion)
+	if spec.TLSIncludeDir != "" {
+		fmt.Fprintf(&b, "include %s/*.conf;\n\n", strings.TrimSuffix(spec.TLSIncludeDir, "/"))
+	}
 	acme := acmeLocation(spec.ACMEWebroot)
 	redirect80 := func(serverName, target string) {
 		fmt.Fprintf(&b, "server {\n    listen 80;\n    server_name %s;\n%s", serverName, acme)
@@ -143,10 +152,20 @@ func RenderNginxConf(spec VMIngressSpec) string {
 		}
 		b.WriteString("\n")
 		redirect80(h.Host, h.Host)
-		fmt.Fprintf(&b, "server {\n    listen 443 ssl http2;\n    server_name %s;\n\n", h.Host)
-		fmt.Fprintf(&b, "    ssl_certificate %s;\n    ssl_certificate_key %s;\n    ssl_protocols %s;\n    ssl_ciphers HIGH:!aNULL:!MD5;\n\n", h.CertPath, h.KeyPath, proto)
-		fmt.Fprintf(&b, "    location / {\n        proxy_pass http://%s:%d;\n%s\n    }\n}\n", h.App, h.Port, nginxProxyHeaders)
+		b.WriteString(RenderExtraHostTLS(h, spec.TLS.MinVersion))
 	}
+	return b.String()
+}
+
+// RenderExtraHostTLS renders one custom domain's 443 serving block on its own, so
+// the VM provider can deliver it as a separate file into TLSIncludeDir once the
+// cert exists. Same output the inline TLSReady path produces — the block has one
+// author, whichever way it is delivered.
+func RenderExtraHostTLS(h VMExtraHost, minVersion string) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "server {\n    listen 443 ssl http2;\n    server_name %s;\n\n", h.Host)
+	fmt.Fprintf(&b, "    ssl_certificate %s;\n    ssl_certificate_key %s;\n    ssl_protocols %s;\n    ssl_ciphers HIGH:!aNULL:!MD5;\n\n", h.CertPath, h.KeyPath, sslProtocols(minVersion))
+	fmt.Fprintf(&b, "    location / {\n        proxy_pass http://%s:%d;\n%s\n    }\n}\n", h.App, h.Port, nginxProxyHeaders)
 	return b.String()
 }
 

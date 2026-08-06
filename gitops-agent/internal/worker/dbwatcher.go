@@ -641,6 +641,130 @@ func (w *DBWatcher) doCreateIngress(ctx context.Context, op db.Operation) error 
 	return w.renderEnvAggregate(ctx, op, op.ProjectID, op.EnvironmentID)
 }
 
+// Deferred-TLS wiring for custom domains on the VM track. A custom domain is
+// attached long before its cert exists: DNS still has to be delegated, and the
+// http-01 challenge cannot be answered until the vhost is already serving on :80.
+// nginx refuses to start when ssl_certificate points at a missing file, so a 443
+// block rendered ahead of issuance does not merely leave the new domain broken —
+// it takes the whole ingress down, every other site on the VM with it.
+//
+// So the 443 blocks ship as separate files that the entrypoint writes ONLY for
+// hosts whose cert is really on disk, into a glob-included dir (a glob matching
+// nothing is not an error in nginx). The same sync runs on a timer and reloads,
+// which is what lets a cert issued (or renewed) after the deploy come into effect
+// without re-rendering the stack — the worker has no way to observe the VM's
+// filesystem, so the decision has to live in the container.
+const (
+	ingressTLSIncludeDir  = "/etc/nginx/tls.d"
+	ingressACMEWebroot    = "/var/www/acme"
+	ingressACMEWebrootSrc = "/var/lib/dada/acme"
+)
+
+// ingressEntrypointScript decodes the generated conf, installs the 443 blocks
+// whose certs exist, then keeps nginx running with an hourly re-sync + reload.
+// $$ passes a literal $ through compose interpolation (see ingressComposeBlock).
+// A broken generated block fails `nginx -t` and is simply not reloaded: the
+// running config stays stale rather than the site going dark.
+const ingressEntrypointScript = `set -e
+mkdir -p /etc/nginx/tls.d
+echo "$$NGINX_CONF_B64" | base64 -d > /etc/nginx/conf.d/default.conf
+sync_tls() {
+  rm -f /etc/nginx/tls.d/*.conf
+  n=0
+  echo "$$NGINX_TLS_BLOCKS" | while read -r cert key b64; do
+    n=$$((n+1))
+    [ -n "$$b64" ] || continue
+    [ -f "$$cert" ] && [ -f "$$key" ] || continue
+    echo "$$b64" | base64 -d > /etc/nginx/tls.d/$$n.conf
+  done
+}
+sync_tls
+( while :; do sleep 3600; sync_tls; nginx -t >/dev/null 2>&1 && nginx -s reload; done ) &
+exec nginx -g 'daemon off;'`
+
+// certbotServiceName is the companion app that issues and renews the custom
+// domains' certs. It lives in the env stack as its own snapshot App (that is the
+// only shape renderEnvAggregate assembles) and exists exactly while the ingress
+// has custom domains.
+func certbotServiceName(ingressName string) string { return ingressName + "-certbot" }
+
+// certbotComposeBlock renders the issuer/renewer. One certificate per host
+// (--cert-name = the host) so attaching or detaching a domain never invalidates
+// the others' certs, which a single multi-SAN cert would.
+//
+// Failure is expected and must not be fatal: a domain is usually attached before
+// its DNS is delegated, so early attempts fail and the loop simply retries. The
+// half-hour period keeps retries under Let's Encrypt's 5-failures-per-hostname-
+// per-hour limit while still getting a working cert soon after DNS lands.
+// --keep-until-expiring makes the same loop the renewal path.
+func certbotComposeBlock(ingressName, email string, hosts []string, deps []string) map[string]any {
+	script := `set -e
+for h in $$CERTBOT_HOSTS; do
+  certbot certonly --webroot -w ` + ingressACMEWebroot + ` --non-interactive --agree-tos -m "$$CERTBOT_EMAIL" --keep-until-expiring --cert-name "$$h" -d "$$h" || true
+done
+while :; do
+  sleep 1800
+  for h in $$CERTBOT_HOSTS; do
+    certbot certonly --webroot -w ` + ingressACMEWebroot + ` --non-interactive --agree-tos -m "$$CERTBOT_EMAIL" --keep-until-expiring --cert-name "$$h" -d "$$h" || true
+  done
+done`
+	block := map[string]any{
+		"image":   "certbot/certbot:latest",
+		"restart": "unless-stopped",
+		"environment": map[string]any{
+			"CERTBOT_HOSTS": strings.Join(hosts, " "),
+			"CERTBOT_EMAIL": email,
+		},
+		"volumes": []string{
+			"/etc/letsencrypt:/etc/letsencrypt",
+			ingressACMEWebrootSrc + ":" + ingressACMEWebroot,
+		},
+		"entrypoint": []string{"/bin/sh", "-c", script},
+	}
+	if len(deps) > 0 {
+		block["depends_on"] = deps
+	}
+	return block
+}
+
+// syncCertbotSnapshot keeps the issuer app in step with the ingress's custom
+// domains: created with the first one, updated on every change, removed with the
+// last one so a domain-less env carries no idle container.
+func (w *DBWatcher) syncCertbotSnapshot(ctx context.Context, op db.Operation, ingressName string, customHosts []ingressCustomHost) error {
+	name := certbotServiceName(ingressName)
+	if len(customHosts) == 0 {
+		_, err := db.DeleteSnapshot(ctx, w.pool, op.ProjectID, op.EnvironmentID, "App", name)
+		return err
+	}
+	hosts := make([]string, 0, len(customHosts))
+	for _, ch := range customHosts {
+		hosts = append(hosts, ch.Host)
+	}
+	sort.Strings(hosts)
+	block := certbotComposeBlock(ingressName, w.cfg.BotEmail, hosts, []string{ingressName})
+	summaryJSON := composeAppSummary(
+		composeDesired{Compose: block},
+		map[string]any{"managed": "certbot", "hosts": hosts},
+	)
+	return db.UpsertSnapshot(ctx, w.pool,
+		op.ProjectID, op.EnvironmentID, "App", name, "Pending", summaryJSON, time.Now())
+}
+
+// ingressDeferredTLSBlocks encodes one "<cert> <key> <base64 block>" line per
+// custom domain for the entrypoint to install conditionally. Hosts are rendered
+// by the renderer, never by the shell, so the 443 block has a single author.
+func ingressDeferredTLSBlocks(spec renderer.VMIngressSpec) string {
+	var b strings.Builder
+	for _, h := range spec.ExtraHosts {
+		if h.CertPath == "" || h.KeyPath == "" {
+			continue
+		}
+		fmt.Fprintf(&b, "%s %s %s\n", h.CertPath, h.KeyPath,
+			base64.StdEncoding.EncodeToString([]byte(renderer.RenderExtraHostTLS(h, spec.TLS.MinVersion))))
+	}
+	return b.String()
+}
+
 // ingressComposeBlock builds the nginx service block for a managed Ingress with
 // EDGE-safe config delivery: the rendered conf is base64-encoded into an env var
 // and decoded to disk by the entrypoint before nginx boots (git-relative bind
@@ -652,6 +776,10 @@ func (w *DBWatcher) doCreateIngress(ctx context.Context, op db.Operation) error 
 // by the caller (deterministic output). Kept pure so the delivery contract is
 // locked by a unit test.
 func ingressComposeBlock(spec renderer.VMIngressSpec, deps []string) map[string]any {
+	if len(spec.ExtraHosts) > 0 {
+		spec.TLSIncludeDir = ingressTLSIncludeDir
+		spec.ACMEWebroot = ingressACMEWebroot
+	}
 	confB64 := base64.StdEncoding.EncodeToString([]byte(renderer.RenderNginxConf(spec)))
 	vols := []string{}
 	if spec.TLS.Enabled {
@@ -660,13 +788,17 @@ func ingressComposeBlock(spec renderer.VMIngressSpec, deps []string) map[string]
 	if spec.BasicAuth != "" {
 		vols = append(vols, spec.BasicAuth+":"+spec.BasicAuth+":ro")
 	}
+	env := map[string]any{"NGINX_CONF_B64": confB64}
+	if len(spec.ExtraHosts) > 0 {
+		vols = append(vols, ingressACMEWebrootSrc+":"+ingressACMEWebroot+":ro")
+		env["NGINX_TLS_BLOCKS"] = ingressDeferredTLSBlocks(spec)
+	}
 	block := map[string]any{
 		"image":       "nginx:1.27-alpine",
 		"restart":     "unless-stopped",
 		"ports":       []string{"80:80", "443:443"},
-		"environment": map[string]any{"NGINX_CONF_B64": confB64},
-		"entrypoint": []string{"/bin/sh", "-c",
-			"echo \"$$NGINX_CONF_B64\" | base64 -d > /etc/nginx/conf.d/default.conf && exec nginx -g 'daemon off;'"},
+		"environment": env,
+		"entrypoint":  []string{"/bin/sh", "-c", ingressEntrypointScript},
 	}
 	if len(vols) > 0 {
 		block["volumes"] = vols
@@ -2545,11 +2677,12 @@ type ingressCustomHost struct {
 	Port int    `json:"port"`
 }
 
-// certPathForHost / keyPathForHost apply the BYO-cert convention documented to
-// VM operators: place the cert at the certbot layout under the ingress's
-// already-mounted /etc/nginx/certs (host /etc/letsencrypt), keyed by hostname.
-// Attaching a domain only wires the vhost; it is inert until the operator puts
-// the cert there.
+// certPathForHost / keyPathForHost apply the certbot layout under the ingress's
+// already-mounted /etc/nginx/certs (host /etc/letsencrypt), keyed by hostname —
+// the path the companion certbot service (certbotComposeBlock) writes to, and
+// the one an operator uses when bringing their own cert instead. The path is
+// referenced by nginx only once the file actually exists; see
+// ingressEntrypointScript for why that deferral is not optional.
 func certPathForHost(hostname string) string {
 	return "/etc/nginx/certs/live/" + hostname + "/fullchain.pem"
 }
@@ -2665,6 +2798,9 @@ func (w *DBWatcher) rebuildIngressCompose(ctx context.Context, op db.Operation, 
 	if err := db.UpsertSnapshot(ctx, w.pool,
 		op.ProjectID, op.EnvironmentID, "App", ingressName, "Pending", summaryJSON, time.Now(),
 	); err != nil {
+		return err
+	}
+	if err := w.syncCertbotSnapshot(ctx, op, ingressName, customHosts); err != nil {
 		return err
 	}
 	return w.renderEnvAggregate(ctx, op, op.ProjectID, op.EnvironmentID)
