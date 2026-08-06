@@ -1197,6 +1197,7 @@ export const gitApi = {
       framework_override?: string;
       auto_deploy: boolean;
       port?: number;
+      worker?: boolean;
       replicas?: number;
       profile?: string;
     }
