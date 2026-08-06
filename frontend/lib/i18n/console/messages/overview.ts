@@ -40,36 +40,36 @@ export const overview: Messages = {
     en: "A demo app from our repository, no GitHub needed. It is deleted automatically after 24 hours — press «Keep» on the app card to hold on to it.",
   },
 
-  "overview.templates.title": { ru: "Разверните шаблон — GitHub не нужен", en: "Deploy a template — no GitHub needed" },
+  "overview.templates.title": { ru: "Готовый проект — GitHub не нужен", en: "A ready-made project — no GitHub needed" },
   "overview.templates.hint": {
-    ru: "Готовое приложение из нашего репозитория. Один клик — сборка и запуск, без подключения аккаунта.",
-    en: "A ready app from our repository. One click builds and runs it, no account connection.",
+    ru: "Открытый проект собирается из исходников и запускается в один клик, без подключения аккаунта.",
+    en: "An open-source project builds from source and runs in one click, with no account connected.",
   },
   "overview.templates.heroTitle": {
     ru: "Начни здесь — задеплой первое приложение за 1 клик",
     en: "Start here — deploy your first app in one click",
   },
   "overview.templates.heroHint": {
-    ru: "Готовое приложение соберётся и запустится за пару минут — без GitHub и без настройки. Просто чтобы увидеть платформу в деле.",
-    en: "A ready-made app builds and runs in a couple of minutes — no GitHub, no setup. Just to see the platform in action.",
+    ru: "Настоящий открытый проект соберётся из исходников и запустится — без GitHub и без настройки. Тем же путём, которым потом поедет ваш код.",
+    en: "A real open-source project builds from source and runs — no GitHub, no setup. The same path your own code will take.",
   },
   "overview.templates.deploying": { ru: "Разворачиваем…", en: "Deploying…" },
-  "overview.templates.error": { ru: "Не удалось развернуть шаблон", en: "Failed to deploy template" },
-  "overview.templates.nextjs.title": { ru: "Next.js стартер", en: "Next.js starter" },
-  "overview.templates.nextjs.hint": {
-    ru: "Веб-приложение на Next.js с готовой страницей.",
-    en: "A Next.js web app with a ready page.",
+  "overview.templates.error": { ru: "Не удалось развернуть проект", en: "Failed to deploy the project" },
+  "overview.templates.byUrl.title": {
+    ru: "Или любой публичный репозиторий",
+    en: "Or any public repository",
   },
-  "overview.templates.fastapi.title": { ru: "FastAPI стартер", en: "FastAPI starter" },
-  "overview.templates.fastapi.hint": {
-    ru: "Python-бэкенд на FastAPI с примером эндпоинта.",
-    en: "A Python FastAPI backend with a sample endpoint.",
+  "overview.templates.byUrl.hint": {
+    ru: "Вставьте ссылку на GitHub — мы сами определим, как это собрать, соберём и запустим.",
+    en: "Paste a GitHub link — we work out how to build it, build it and run it.",
   },
-  "overview.templates.static.title": { ru: "Статический сайт", en: "Static site" },
-  "overview.templates.static.hint": {
-    ru: "Статический сайт на HTML и CSS.",
-    en: "A static HTML and CSS site.",
+  "overview.templates.byUrl.placeholder": {
+    ru: "https://github.com/owner/repository",
+    en: "https://github.com/owner/repository",
   },
+  "overview.templates.byUrl.branchPlaceholder": { ru: "ветка: main", en: "branch: main" },
+  "overview.templates.byUrl.branchLabel": { ru: "Ветка", en: "Branch" },
+  "overview.templates.byUrl.cta": { ru: "Собрать", en: "Build" },
   "overview.templates.cta": { ru: "Развернуть", en: "Deploy" },
 
   "overview.boxes.col.name": { ru: "Имя", en: "Name" },

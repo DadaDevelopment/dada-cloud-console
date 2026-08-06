@@ -1460,3 +1460,30 @@ export interface AppDiagnosis {
   can_autofix: boolean;
   generated_at: string;
 }
+
+/**
+ * One entry of the ready-made project catalog: a public open-source repository
+ * the console can build and deploy in one click, plus the build spec verified
+ * for it. Mirrors the backend's `internal/solutions` catalog.
+ */
+export interface Solution {
+  slug: string;
+  name: string;
+  tagline: string;
+  about: string;
+  bullets: string[] | null;
+  category: string;
+  homepage: string;
+  license: string;
+  repo: string;
+  branch: string;
+  root_dir: string;
+  /** Build framework override; "dockerfile" means build the repo's own Dockerfile. */
+  framework: string;
+  port: number;
+  profile: string;
+  warning: string;
+  first_run: string;
+  /** What to expect from the build itself (a real repo takes longer than a starter). */
+  build_note: string;
+}

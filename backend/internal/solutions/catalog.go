@@ -1,28 +1,41 @@
-// Package solutions holds the ready-made solution catalog: whole third-party
-// products a customer installs onto a VM app server in one click, instead of
-// bringing a repository of their own.
+// Package solutions holds the ready-made project catalog: real open-source
+// projects a customer deploys into a cloud (Kubernetes) environment in one
+// click, when they have nothing of their own to deploy yet.
+//
+// It replaces the starter templates (dada-nextjs-starter and friends, see
+// api/demo_apps.go). A starter proves that a deploy happened and is then reaped;
+// nobody opens it twice, because there is nothing inside it. A whiteboard, a
+// toolbox, an offline documentation browser — those a customer might keep, and
+// they arrive on the platform the same way the customer's own code will.
 //
 // The catalog is a frozen Go variable — same idiom, and same reason, as
-// internal/boxcatalog and internal/profiles: edit this file and redeploy. A row
-// an operator could INSERT at 3am would promise a product the platform cannot
-// actually install, because a solution is only real once its image exists in a
-// registry we can pull from AND the compose shape it renders has been run on a
-// VM at least once. A deploy is exactly the event that also publishes and pins
-// that image, so the catalog and the registry move together by construction.
+// internal/boxcatalog and internal/profiles: edit this file and redeploy.
 //
-// What a solution is NOT: it is not a starter repository (see
-// api/demo_apps.go). A starter demo proves a deploy happened and is reaped
-// after a few hours; a solution is a product the customer keeps and uses, with
-// its own data volume, credentials and upgrade path. The two answer the same
-// onboarding question — "I have no code, show me something" — with opposite
-// levels of ambition.
+// # Built from source, on purpose
 //
-// Every solution renders to ordinary first-class VM Applications: one App per
-// compose service, deployed into the environment's single aggregate stack
-// (renderer.EnvComposeGitPath). Nothing about a solution is a special runtime,
-// so per-app logs, metrics, env editing, restart and delete all work the day it
-// is installed, and an operator who never opens this catalog cannot tell a
-// solution app from a hand-made one.
+// Every entry is a REPOSITORY, not a published image. The install runs the
+// ordinary customer path — link the public repo, detect the framework, build it
+// in our pipeline, deploy the result — so a catalog card exercises exactly the
+// machinery a customer's first repository will hit. Pulling `n8nio/n8n:2.34.2`
+// would make prettier cards and prove nothing: it would be our platform running
+// somebody else's build.
+//
+// That choice has a price, and it is the point. Real repositories are monorepos,
+// build in two stages, read their port from an environment variable, and put
+// their Dockerfile three directories down. Where the auto-detector misses, the
+// card fails visibly and we fix the detector — which is worth more than a
+// catalog that never touches it. tasks/autodeploy-benchmark-50-oss.md is that
+// feedback loop written down.
+//
+// # Why every v1 entry is stateless
+//
+// An app created by the build pipeline takes its spec from git_repos
+// (port/replicas/profile) and there is no volume in that spec, so a project
+// that keeps state on disk would silently lose it on every redeploy. Until the
+// build path can carry a volume, the catalog only lists projects whose state
+// lives in the browser or nowhere at all. This is a real constraint, not an
+// aesthetic: shipping a note-taking app that eats notes is worse than not
+// shipping it.
 package solutions
 
 import (
@@ -32,14 +45,13 @@ import (
 	"strings"
 )
 
-// Category groups solutions in the console's catalog UI.
+// Category groups projects in the catalog UI.
 type Category string
 
 const (
-	CategoryAIAgent    Category = "ai-agent"
-	CategoryAutomation Category = "automation"
-	CategoryDatabase   Category = "database"
-	CategoryTools      Category = "tools"
+	CategoryDevTools  Category = "dev-tools"
+	CategoryDocuments Category = "documents"
+	CategoryAI        Category = "ai"
 )
 
 // ParamKind is how the console renders one install parameter, and how the API
@@ -47,342 +59,174 @@ const (
 type ParamKind string
 
 const (
-	// ParamText is a plain single-line value (a URL, a model name).
-	ParamText ParamKind = "text"
-	// ParamSecret is a value the customer supplies that must never be echoed
-	// back: an upstream API key. Stored encrypted like any other secret env var.
+	ParamText   ParamKind = "text"
 	ParamSecret ParamKind = "secret"
-	// ParamSelect is a closed set of allowed values (Options).
 	ParamSelect ParamKind = "select"
 )
 
-// Param is one value the customer supplies at install time.
-//
-// EnvKey is the container environment variable the value lands in. That is the
-// whole contract with the upstream product: the catalog never patches config
-// files inside a solution's data volume, because that volume belongs to the
-// customer the moment the first container writes to it. Anything the platform
-// cannot express as an env var either gets a documented first-boot bootstrap
-// command (see Service.Command) or does not get automated at all.
+// Param is one value the customer supplies at install time. EnvKey is the
+// container environment variable it lands in.
 type Param struct {
-	Key         string    // stable identifier in the install request
-	EnvKey      string    // container env var the value is written to
-	Label       string    // console label (Russian: the console's product language)
-	Help        string    // one-line hint under the field
-	Kind        ParamKind //
-	Required    bool      //
-	Default     string    // pre-filled for text/select; never for secrets
-	Options     []string  // ParamSelect only
-	Placeholder string    //
+	Key         string
+	EnvKey      string
+	Label       string
+	Help        string
+	Kind        ParamKind
+	Required    bool
+	Default     string
+	Options     []string
+	Placeholder string
 }
 
-// Generated is a credential the PLATFORM mints at install time rather than
-// asking the customer for: a dashboard password, a session-signing secret.
-//
-// This is what makes a one-click install of an agent that runs shell commands
-// defensible. The upstream product ships with its dashboard bound to loopback
-// precisely because it holds API keys and has no password by default; publishing
-// that port on a VM with a public IP would be handing out a root shell. So the
-// platform generates real credentials, stores them encrypted, and injects them —
-// the customer gets a dashboard that is reachable AND authenticated, and never
-// has to know that the alternative was an open one.
-type Generated struct {
-	Key    string // stable identifier, referenced by RevealKeys
-	EnvKey string // container env var the generated value is written to
-	Kind   GeneratedKind
-	Label  string // shown next to the value on the "installed" screen
-}
-
-// GeneratedKind selects the generator. Deliberately a tiny closed set: every
-// kind here is a credential with a known consumer, not a general-purpose random
-// string service.
-type GeneratedKind string
-
-const (
-	// GeneratedPassword is a human-typeable password (hex, 16 bytes). The
-	// customer reads it off the console and types it into a login form.
-	GeneratedPassword GeneratedKind = "password"
-	// GeneratedSecret is a machine-only signing key (hex, 32 bytes). Nobody ever
-	// types it, so it is twice as long.
-	GeneratedSecret GeneratedKind = "secret"
-)
-
-// Service is one compose service of a solution — and therefore one first-class
-// Application after install.
-//
-// NameSuffix is appended to the instance name the customer chose, so an install
-// named "hermes" produces apps "hermes" (suffix "") and "hermes-dashboard"
-// (suffix "dashboard"). Exactly one service must carry the empty suffix: it is
-// the one the instance is named after, and the one the console links to.
-type Service struct {
-	NameSuffix string
-	// Image is the registry reference WITHOUT a digest; Digest pins it. Split
-	// because the console shows the human-readable ref and the renderer emits
-	// ref@digest — an unpinned solution is not installable at all (see Pinned).
-	Image  string
-	Digest string
-	// Command overrides the image entrypoint's arguments. Solutions built from
-	// one image that supervises several roles (an agent gateway and its web
-	// dashboard, say) need this to tell the roles apart.
-	Command []string
-	// Ports are compose "host:container" publish rules. Empty means the service
-	// is reachable only from inside the stack — the correct default: a service
-	// gets a published port only when a human has to open it in a browser.
-	Ports []string
-	// Volumes are compose "name:/path" mounts. A bare name (no leading /) is a
-	// named docker volume; the installer prefixes it with the instance name so
-	// two installs of the same solution on one VM never share state.
-	Volumes []string
-	// Primary marks the service whose published port the console links to.
-	Primary bool
-	// Description is shown in the console so the customer understands why one
-	// install produced more than one app.
-	Description string
-}
-
-// Solution is one installable product.
+// Solution is one installable open-source project.
 type Solution struct {
 	Slug     string
 	Name     string
-	Tagline  string   // one line, catalog card
-	About    string   // paragraph, detail page
-	Bullets  []string // what it does, catalog card
+	Tagline  string
+	About    string
+	Bullets  []string
 	Category Category
-	Vendor   string
 	Homepage string
 	License  string
-	// DocsSlug is the console documentation page (frontend/content/docs) that
-	// explains the install in prose. Empty means no page yet.
-	DocsSlug string
-	// MinVCPU / MinMemoryMB / MinDiskGB are the VM floor. The installer checks
-	// nothing against them today — VM sizing lives with the customer's provider
-	// order, not with us — but the console shows them BEFORE the install so
-	// nobody installs an agent runtime onto a 1GB box and then files a bug about
-	// the OOM killer.
-	MinVCPU     int
-	MinMemoryMB int
-	MinDiskGB   int
-	// Warning is the one thing a customer must read before installing. Rendered
-	// prominently, not as fine print. Empty for solutions that carry no unusual
-	// risk.
+
+	// Repo is the public GitHub repository, "owner/name". It is cloned without
+	// an installation token: these are public projects, and requiring a customer
+	// to connect a GitHub account before they can see anything deploy is the
+	// exact wall the starter cards existed to get around.
+	Repo string
+	// Branch is the branch to build. Pinned by name rather than by commit
+	// because a card should ship what upstream currently calls released; a
+	// broken upstream build is a signal we want to see, not hide behind a pin.
+	Branch string
+	// RootDir is the directory to build from, "." for the repository root.
+	RootDir string
+	// Framework overrides auto-detection. Set to "dockerfile" for every entry
+	// that ships its own Dockerfile: the repository's own build is what upstream
+	// tests, and second-guessing it with a framework template is how a card
+	// starts failing on an upstream refactor nobody told us about.
+	Framework string
+	// Port is what the built image actually listens on, read from the
+	// repository's Dockerfile rather than assumed from the framework.
+	Port int
+	// Profile is the compute envelope (small | medium | large).
+	Profile string
+
+	Params []Param
+
+	// Warning is the one thing a customer must read before deploying, rendered
+	// prominently rather than as fine print.
 	Warning string
-	Params  []Param
-	Secrets []Generated
-	// RevealKeys lists Generated.Key values the install response returns in
-	// cleartext exactly once. Everything else the customer supplied is theirs
-	// already; these are values the platform invented and the customer has no
-	// other way to learn (they can still be re-read later through the ordinary
-	// env-var reveal path, which is audited).
-	RevealKeys []string
-	Services   []Service
+	// FirstRun is what to do once it is up.
+	FirstRun string
+	// BuildNote is what to expect from the BUILD, not the product: an honest
+	// heads-up that a real repository takes longer to build than a starter.
+	BuildNote string
 }
 
-// Pinned reports whether every service image carries a digest.
+// V1 is the v1 catalog. Frozen at deploy time.
 //
-// An unpinned solution is listed in the catalog but cannot be installed. That
-// combination is deliberate: the catalog entry is code and ships with the
-// release, while publishing the image is a separate operation that may land
-// later. Listing it early tells the customer what is coming; refusing to install
-// it keeps a one-click button from resolving to a tag that does not exist yet,
-// which would fail deep inside a Portainer pull with an error nobody can read.
-func (s Solution) Pinned() bool {
-	for _, svc := range s.Services {
-		if strings.TrimSpace(svc.Digest) == "" {
-			return false
-		}
-	}
-	return len(s.Services) > 0
-}
-
-// ImageRef returns the fully pinned image reference for a service.
-func (svc Service) ImageRef() string {
-	if strings.TrimSpace(svc.Digest) == "" {
-		return svc.Image
-	}
-	return svc.Image + "@" + svc.Digest
-}
-
-// AppName returns the Application name a service gets for an install named
-// instance.
-func (svc Service) AppName(instance string) string {
-	if svc.NameSuffix == "" {
-		return instance
-	}
-	return instance + "-" + svc.NameSuffix
-}
-
-// hermesDataVolume is the single named volume both Hermes services mount. It
-// holds ~/.hermes — config, sessions, memory, learned skills. It is the whole
-// product: an agent that "gets better the longer it runs" is exactly this
-// directory, so it is a named volume rather than a bind mount, and nothing in
-// the install path ever deletes it.
-const hermesDataVolume = "data"
-
-// V1 is the v1 solution catalog. Frozen at deploy time.
-//
-// One entry on purpose. A catalog page with a single honest, fully-tested
-// solution beats twelve entries assembled from upstream READMEs, because the
-// promise a one-click install makes is not "we transcribed a compose file" but
-// "this works, and we will answer the ticket when it does not". The next entries
-// (n8n, ClickHouse, and the rest of the usual marketplace roster) each earn
-// their place by being installed and run, not by being typed here.
+// Four entries, each verified to carry a Dockerfile at its repository root and
+// to listen on the port recorded here. Small on purpose: a catalog of four
+// projects that build is worth more than twenty assembled from READMEs, and the
+// next entries earn their place by being deployed, not by being typed.
 var V1 = []Solution{
 	{
-		Slug:     "hermes-agent",
-		Name:     "Hermes Agent",
-		Tagline:  "Автономный AI-агент, который живёт на вашем сервере и учится на своей работе",
-		Category: CategoryAIAgent,
-		Vendor:   "Nous Research",
-		Homepage: "https://github.com/NousResearch/hermes-agent",
+		Slug:     "excalidraw",
+		Name:     "Excalidraw",
+		Tagline:  "Доска для схем от руки — та самая, с «карандашным» стилем",
+		Category: CategoryDevTools,
+		Homepage: "https://excalidraw.com",
 		License:  "MIT",
-		DocsSlug: "solutions-hermes-agent",
-		About: "Hermes Agent — открытый автономный агент с собственным терминалом, файловой " +
-			"системой и памятью. В отличие от плагина к IDE он не заканчивается вместе с сессией: " +
-			"состояние, история и накопленные навыки лежат на диске сервера и переживают " +
-			"перезапуск. Работает с любым OpenAI-совместимым провайдером — модель выбираете вы.",
+		About: "Виртуальная доска для схем, диаграмм и набросков: рисует так, будто чертили от " +
+			"руки на бумаге. Рисунки хранятся в браузере, экспорт в PNG и SVG, ссылка на " +
+			"доску открывается у коллеги без регистрации.",
 		Bullets: []string{
-			"Выполняет команды и код в собственном терминале",
-			"Веб-дашборд с чатом, историей и поиском по сессиям",
-			"Планировщик задач и делегирование субагентам",
-			"Память и навыки, которые переживают перезапуск",
-			"Любой OpenAI-совместимый провайдер модели",
+			"Схемы и наброски в «карандашном» стиле",
+			"Экспорт в PNG, SVG и файл проекта",
+			"Ничего не хранится на сервере — всё в браузере",
 		},
-		// The numbers are the upstream image's own shape: a Debian image with a
-		// Python venv, a node toolchain and a Playwright browser cache, plus
-		// whatever the agent installs into its data volume while it works.
-		MinVCPU:     2,
-		MinMemoryMB: 4096,
-		MinDiskGB:   20,
-		Warning: "Агент выполняет команды в терминале сервера, читает и пишет файлы и ходит в " +
-			"интернет. Ставьте его на отдельную VM, а ключи и токены выдавайте по мере " +
-			"необходимости — каждый выданный ключ агент сможет использовать. Дашборд " +
-			"публикуется на IP машины по HTTP: вход защищён логином и паролем, но сам трафик " +
-			"не шифруется, поэтому открывайте его из доверенной сети или закрывайте своим " +
-			"прокси с TLS.",
-		Params: []Param{
-			{
-				Key:         "llm_base_url",
-				EnvKey:      "OPENAI_BASE_URL",
-				Label:       "Endpoint провайдера",
-				Help:        "OpenAI-совместимый URL. Любой провайдер или ваш собственный сервер.",
-				Kind:        ParamText,
-				Required:    true,
-				Default:     "https://api.openai.com/v1",
-				Placeholder: "https://api.openai.com/v1",
-			},
-			{
-				Key:      "llm_api_key",
-				EnvKey:   "OPENAI_API_KEY",
-				Label:    "API-ключ провайдера",
-				Help:     "Хранится зашифрованным и виден агенту как переменная окружения.",
-				Kind:     ParamSecret,
-				Required: true,
-			},
-			{
-				Key:    "model",
-				EnvKey: "HERMES_MODEL",
-				Label:  "Модель",
-				Help: "Записывается в конфиг агента при первом запуске. Дальше модель " +
-					"переключается в самом дашборде.",
-				Kind:        ParamText,
-				Required:    true,
-				Placeholder: "gpt-5.2",
-			},
-			{
-				Key:      "dashboard_user",
-				EnvKey:   "HERMES_DASHBOARD_BASIC_AUTH_USERNAME",
-				Label:    "Логин для дашборда",
-				Kind:     ParamText,
-				Required: true,
-				Default:  "admin",
-			},
+		Repo:      "excalidraw/excalidraw",
+		Branch:    "master",
+		RootDir:   ".",
+		Framework: "dockerfile",
+		Port:      80,
+		Profile:   "small",
+		FirstRun:  "Открывайте и рисуйте — регистрация не нужна, доски сохраняются в браузере.",
+		BuildNote: "Сборка фронтенда занимает несколько минут: это настоящий репозиторий, а не заготовка.",
+	},
+	{
+		Slug:     "it-tools",
+		Name:     "IT-Tools",
+		Tagline:  "Больше сотни инструментов разработчика в одном месте",
+		Category: CategoryDevTools,
+		Homepage: "https://it-tools.tech",
+		License:  "GPL-3.0",
+		About: "Инструменты, за которыми обычно идут на случайные сайты: разбор JWT, хеши и UUID, " +
+			"форматирование JSON, SQL и XML, конвертеры дат, кодировок и цветов, генератор " +
+			"паролей. Всё считается в браузере и никуда не отправляется.",
+		Bullets: []string{
+			"Больше 100 инструментов: хеши, JWT, форматтеры, конвертеры",
+			"Всё вычисляется в браузере",
+			"Никаких данных на сервере",
 		},
-		Secrets: []Generated{
-			{
-				Key:    "dashboard_password",
-				EnvKey: "HERMES_DASHBOARD_BASIC_AUTH_PASSWORD",
-				Kind:   GeneratedPassword,
-				Label:  "Пароль дашборда",
-			},
-			{
-				// Without a stable signing key the dashboard mints a random one
-				// per process, so every restart logs everyone out. Upstream logs
-				// that at INFO and moves on; a managed install should not make
-				// the customer discover it.
-				Key:    "dashboard_session_secret",
-				EnvKey: "HERMES_DASHBOARD_BASIC_AUTH_SECRET",
-				Kind:   GeneratedSecret,
-				Label:  "Ключ подписи сессий",
-			},
+		Repo:      "CorentinTh/it-tools",
+		Branch:    "main",
+		RootDir:   ".",
+		Framework: "dockerfile",
+		Port:      80,
+		Profile:   "small",
+		FirstRun:  "Открывайте и пользуйтесь — учётная запись не нужна.",
+	},
+	{
+		Slug:     "gitingest",
+		Name:     "Gitingest",
+		Tagline:  "Превращает любой репозиторий в один текст для языковой модели",
+		Category: CategoryAI,
+		Homepage: "https://gitingest.com",
+		License:  "MIT",
+		About: "Принимает ссылку на репозиторий и собирает его в один структурированный текст, " +
+			"который можно целиком отдать модели: дерево файлов, содержимое, оценка размера " +
+			"в токенах. Полезно ровно тогда, когда нужно объяснить модели незнакомый проект.",
+		Bullets: []string{
+			"Репозиторий → один текст с деревом файлов",
+			"Оценка размера в токенах",
+			"Фильтры по путям и расширениям",
 		},
-		RevealKeys: []string{"dashboard_password"},
-		Services: []Service{
-			{
-				NameSuffix: "",
-				Image:      hermesImage,
-				Digest:     hermesDigest,
-				Primary:    false,
-				// The gateway is the agent itself. The bootstrap in front of it
-				// runs ONCE per data volume: the upstream product keeps the
-				// chosen model in its own config file (env is not read for it),
-				// so a fresh volume needs one write to become usable — and a
-				// volume that already has one must never be overwritten, or the
-				// console would silently undo a model the customer changed in
-				// the dashboard.
-				Command: []string{"sh", "-lc", hermesBootstrap + "exec hermes gateway run"},
-				Volumes: []string{hermesDataVolume + ":/opt/data"},
-				Description: "Агент: терминал, инструменты, память, планировщик. Наружу не " +
-					"публикуется.",
-			},
-			{
-				NameSuffix: "dashboard",
-				Image:      hermesImage,
-				Digest:     hermesDigest,
-				Primary:    true,
-				// Bound to 0.0.0.0 — which upstream allows ONLY when an auth
-				// provider is registered, and refuses otherwise (--insecure is
-				// a no-op there since the June 2026 hardening). The install
-				// always generates a password and a signing secret, so the
-				// provider is always registered and the bind is always
-				// authenticated. Do not "simplify" this by dropping the
-				// generated credentials: the container would then fail closed
-				// at boot, which is the correct upstream behaviour.
-				Command: []string{"dashboard", "--host", "0.0.0.0", "--port", "9119", "--no-open"},
-				Ports:   []string{"9119:9119"},
-				Volumes: []string{hermesDataVolume + ":/opt/data"},
-				Description: "Веб-дашборд: чат с агентом, история и поиск по сессиям. Порт 9119, " +
-					"вход по логину и паролю.",
-			},
+		Repo:      "cyclotruc/gitingest",
+		Branch:    "main",
+		RootDir:   ".",
+		Framework: "dockerfile",
+		Port:      8000,
+		Profile:   "small",
+		FirstRun:  "Вставьте ссылку на публичный репозиторий и получите текст для модели.",
+		Warning: "Приложение ходит в интернет за содержимым репозиториев, которые вы ему называете. " +
+			"Приватные репозитории оно без ваших ключей не увидит — и не должно.",
+	},
+	{
+		Slug:     "devdocs",
+		Name:     "DevDocs",
+		Tagline:  "Документация 500+ библиотек в одном интерфейсе, с поиском",
+		Category: CategoryDocuments,
+		Homepage: "https://devdocs.io",
+		License:  "MPL-2.0",
+		About: "Собирает документацию сотен языков и библиотек в один быстрый интерфейс с общим " +
+			"поиском и горячими клавишами. Свой экземпляр удобен тем, что набор документаций " +
+			"и их версии выбираете вы.",
+		Bullets: []string{
+			"Документация 500+ языков и библиотек",
+			"Мгновенный поиск по всему набору",
+			"Свой экземпляр — свой выбор версий",
 		},
+		Repo:      "freeCodeCamp/devdocs",
+		Branch:    "main",
+		RootDir:   ".",
+		Framework: "dockerfile",
+		Port:      9292,
+		Profile:   "medium",
+		FirstRun:  "Откройте приложение и включите нужные документации в настройках.",
+		BuildNote: "Образ большой: сборка идёт дольше остальных карточек каталога.",
 	},
 }
-
-// hermesImage / hermesDigest are the image the platform publishes for this
-// solution.
-//
-// Upstream ships a Dockerfile and a compose file that BUILDS it (`build: .`);
-// its CI builds an image named `hermes-agent:test` and never pushes it, so there
-// is no official published image to point at. The platform therefore builds and
-// publishes its own — see solutions/hermes-agent/README.md for the exact
-// clone-build-push-pin recipe. Until the digest below is filled in, the entry is
-// listed and NOT installable (Solution.Pinned), which is the honest state: the
-// code is ready, the artifact is not.
-const (
-	hermesImage  = "ghcr.io/dadadevelopment/hermes-agent:v1"
-	hermesDigest = ""
-)
-
-// hermesBootstrap seeds the model into the agent's config exactly once per data
-// volume, then gets out of the way.
-//
-// Written as a shell prefix rather than an init service because a compose
-// service in this platform always carries `restart: unless-stopped`: a one-shot
-// init container would exit 0 and be restarted forever. The marker file lives in
-// the data volume, so "once" means once per install, surviving container
-// replacement and image upgrades.
-const hermesBootstrap = `if [ ! -f /opt/data/.dada-bootstrapped ]; then ` +
-	`hermes config set model "$HERMES_MODEL" >/dev/null 2>&1 || true; ` +
-	`touch /opt/data/.dada-bootstrapped; fi; `
 
 // Lookup returns the Solution by slug. Second return is false if slug is unknown.
 func Lookup(slug string) (Solution, bool) {
@@ -403,14 +247,29 @@ func Slugs() []string {
 	return out
 }
 
-// instanceNameRe is the accepted install name: a compose service key and a
-// Kubernetes-ish resource name at the same time, because the name becomes both.
+// IsCatalogRepo reports whether repoFullName is one of the catalog's own
+// repositories. Case-insensitive, because GitHub owner/repo names are.
+//
+// This is what makes a catalog deploy a DEMO for the reaper (api/demo_apps.go):
+// a project the platform offered, that nobody claimed, is exactly the app that
+// used to idle for eighteen days. A repository the customer pasted themselves is
+// never a demo — they chose it, and deleting their work on a timer would be a
+// different product than the one we are building. Matching on the full name
+// means a fork ("acme/it-tools") is the customer's, not ours.
+func IsCatalogRepo(repoFullName string) bool {
+	for _, s := range V1 {
+		if strings.EqualFold(s.Repo, repoFullName) {
+			return true
+		}
+	}
+	return false
+}
+
+// instanceNameRe is the accepted app name: lowercase, alphanumeric and dashes,
+// starting with a letter — a legal Kubernetes resource name.
 var instanceNameRe = regexp.MustCompile(`^[a-z]([-a-z0-9]*[a-z0-9])?$`)
 
-// ValidateInstanceName checks the name an install will be recorded under.
-//
-// The limit is 40 rather than 63 because the longest service suffix is appended
-// to it, and the result still has to be a legal app name.
+// ValidateInstanceName checks the name the deployed app will carry.
 func ValidateInstanceName(name string) error {
 	if name == "" {
 		return fmt.Errorf("name is required")
@@ -424,13 +283,61 @@ func ValidateInstanceName(name string) error {
 	return nil
 }
 
-// ResolveParams validates the supplied values against the solution's parameters
-// and returns the environment variables they produce.
+// repoFullNameRe is a GitHub "owner/name" pair. GitHub allows alphanumerics,
+// dash, underscore and dot in both halves.
+var repoFullNameRe = regexp.MustCompile(`^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9_])?/[A-Za-z0-9._-]+$`)
+
+// ParseRepoURL turns what a person actually pastes into an "owner/name" pair.
 //
-// Values are trimmed, missing optional values fall back to Default, and unknown
-// keys are rejected rather than ignored — a typo in a parameter name is a
-// misconfigured install that would otherwise surface as an agent that silently
-// talks to the wrong endpoint.
+// Accepts the browser URL, the clone URL, the SSH remote, and a bare
+// "owner/name" — because all four are what ends up on a clipboard, and a form
+// that takes only one of them is a form that rejects the customer's first
+// attempt. Anything else is refused rather than guessed at: a wrong guess here
+// deploys somebody else's repository under the customer's name.
+func ParseRepoURL(raw string) (string, error) {
+	s := strings.TrimSpace(raw)
+	if s == "" {
+		return "", fmt.Errorf("paste a link to a public GitHub repository")
+	}
+	s = strings.TrimSuffix(s, "/")
+	s = strings.TrimPrefix(s, "git+")
+
+	switch {
+	case strings.HasPrefix(s, "git@github.com:"):
+		s = strings.TrimPrefix(s, "git@github.com:")
+	case strings.HasPrefix(s, "ssh://git@github.com/"):
+		s = strings.TrimPrefix(s, "ssh://git@github.com/")
+	case strings.HasPrefix(s, "https://"), strings.HasPrefix(s, "http://"):
+		rest := s[strings.Index(s, "//")+2:]
+		host, path, found := strings.Cut(rest, "/")
+		if !found {
+			return "", fmt.Errorf("that link has no repository in it")
+		}
+		if !strings.EqualFold(host, "github.com") && !strings.EqualFold(host, "www.github.com") {
+			return "", fmt.Errorf("only public GitHub repositories are supported here")
+		}
+		s = path
+	}
+	s = strings.TrimSuffix(s, ".git")
+
+	// A deep link (…/tree/main/apps/web) carries a branch and a subdirectory the
+	// caller has to choose deliberately, so keep only the repository and let
+	// them set branch and root directory in the form.
+	parts := strings.Split(s, "/")
+	if len(parts) > 2 {
+		parts = parts[:2]
+	}
+	full := strings.Join(parts, "/")
+	if !repoFullNameRe.MatchString(full) {
+		return "", fmt.Errorf("expected a link like https://github.com/owner/repository")
+	}
+	return full, nil
+}
+
+// ResolveParams validates supplied values against the entry's parameters and
+// returns the environment variables they produce. Unknown keys are rejected
+// rather than ignored: a typo in a parameter name is a misconfigured deploy
+// that would otherwise surface much later as a product behaving oddly.
 func (s Solution) ResolveParams(in map[string]string) (map[string]string, error) {
 	known := make(map[string]Param, len(s.Params))
 	for _, p := range s.Params {
@@ -463,8 +370,6 @@ func (s Solution) ResolveParams(in map[string]string) (map[string]string, error)
 			return nil, fmt.Errorf("%s must be one of: %s", p.Key, strings.Join(p.Options, ", "))
 		}
 		if strings.ContainsAny(v, "\n\r") {
-			// A newline would split one .env line into two, turning the tail of a
-			// value into an attacker-chosen variable.
 			return nil, fmt.Errorf("%s must not contain line breaks", p.Key)
 		}
 		env[p.EnvKey] = v

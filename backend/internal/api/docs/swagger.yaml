@@ -838,19 +838,6 @@ definitions:
       port:
         type: integer
     type: object
-  api.installSolutionRequest:
-    properties:
-      name:
-        description: |-
-          Name is the install's instance name. It becomes the primary app's name and
-          the prefix of every other app and volume the install creates. Empty falls
-          back to the solution slug.
-        type: string
-      params:
-        additionalProperties:
-          type: string
-        type: object
-    type: object
   api.loginRequest:
     properties:
       email:
@@ -2544,6 +2531,45 @@ paths:
       summary: GitHub App install callback (Setup URL)
       tags:
       - git
+  /git/parse-repo-url:
+    get:
+      description: 'Accepts a GitHub browser URL, clone URL, SSH remote or a bare
+        owner/name and returns the canonical owner/name. Rejects anything that is
+        not a public GitHub repository rather than guessing. Pure string handling:
+        it does not check that the repository exists.'
+      operationId: parseRepoURL
+      parameters:
+      - description: Pasted repository link
+        in: query
+        name: url
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: object with repo_full_name
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Parse a pasted repository link
+      tags:
+      - solutions
   /mlflow/registered-models:
     get:
       description: Returns the MLflow registered models visible to a project, filtered
@@ -12544,82 +12570,6 @@ paths:
       summary: Reveal an S3 bucket's access credentials
       tags:
       - storage
-  /projects/{projectId}/environments/{envId}/solutions/{slug}:
-    post:
-      consumes:
-      - application/json
-      description: 'Installs a catalog solution onto the VM environment''s app server
-        as one or more Applications. Requires a VM (compose) environment whose app
-        server is Ready. Parameters are validated against the catalog entry; credentials
-        the platform generates are returned once in the response and stored encrypted.
-        Asynchronous: returns 202 with an operation; poll the operation until terminal.'
-      operationId: installSolution
-      parameters:
-      - description: Project UUID
-        in: path
-        name: projectId
-        required: true
-        type: string
-      - description: Environment UUID
-        in: path
-        name: envId
-        required: true
-        type: string
-      - description: Solution slug
-        in: path
-        name: slug
-        required: true
-        type: string
-      - description: Install parameters
-        in: body
-        name: body
-        required: true
-        schema:
-          $ref: '#/definitions/api.installSolutionRequest'
-      produces:
-      - application/json
-      responses:
-        "202":
-          description: object with the accepted operation, the created app names and
-            any generated credentials
-          schema:
-            additionalProperties: true
-            type: object
-        "400":
-          description: Bad Request
-          schema:
-            additionalProperties:
-              type: string
-            type: object
-        "401":
-          description: Unauthorized
-          schema:
-            additionalProperties:
-              type: string
-            type: object
-        "403":
-          description: Forbidden
-          schema:
-            additionalProperties:
-              type: string
-            type: object
-        "404":
-          description: Not Found
-          schema:
-            additionalProperties:
-              type: string
-            type: object
-        "409":
-          description: Conflict
-          schema:
-            additionalProperties:
-              type: string
-            type: object
-      security:
-      - BearerAuth: []
-      summary: Install a ready-made solution
-      tags:
-      - solutions
   /projects/{projectId}/git/detect:
     get:
       description: Best-effort framework detection for a public GitHub repository
@@ -13476,9 +13426,11 @@ paths:
       - project
   /solutions:
     get:
-      description: Returns the catalog of ready-made solutions installable onto a
-        VM app server in one click. Entries whose image is not published yet are listed
-        with installable=false. Read-only; the catalog is the same for every project.
+      description: Returns the catalog of open-source projects the console can deploy
+        in one click. Each entry is a public repository plus the build spec verified
+        for it (branch, root directory, framework, port, profile); deploying one uses
+        the ordinary connect-repo and build path. Read-only; the catalog is the same
+        for every project.
       operationId: listSolutions
       produces:
       - application/json
@@ -13496,13 +13448,13 @@ paths:
             type: object
       security:
       - BearerAuth: []
-      summary: List ready-made solutions
+      summary: List ready-made projects
       tags:
       - solutions
   /solutions/{slug}:
     get:
-      description: Returns a single catalog entry, including the parameters its install
-        asks for and the credentials the platform generates. Read-only.
+      description: Returns a single catalog entry with its build spec and any parameters
+        it asks for. Read-only.
       operationId: getSolution
       parameters:
       - description: Solution slug
@@ -13532,7 +13484,7 @@ paths:
             type: object
       security:
       - BearerAuth: []
-      summary: Get one ready-made solution
+      summary: Get one ready-made project
       tags:
       - solutions
   /telemetry/events:

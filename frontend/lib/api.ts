@@ -72,6 +72,7 @@ import type {
   DomainsResponse,
   Build,
   FrameworkDetection,
+  Solution,
   // Monitoring
   MonitoringApp,
   HealthStatus,
@@ -1211,6 +1212,25 @@ export const gitApi = {
     apiFetch<{ repo: GitReposResponse["repos"][0] }>(
       `/api/v1/projects/${projectId}/environments/${envId}/repos/${repoId}`,
       { method: "PATCH", body: data }
+    ),
+};
+
+/**
+ * Ready-made project catalog: the open-source projects the console offers on an
+ * empty project, and the parser that turns whatever the customer pasted into a
+ * repository name. Deploying an entry uses gitApi.linkRepo + buildsApi.trigger —
+ * the same path a customer's own repository takes — so there is no install call
+ * here on purpose.
+ */
+export const solutionsApi = {
+  list: () => apiFetch<{ solutions: Solution[] }>(`/api/v1/solutions`),
+
+  get: (slug: string) => apiFetch<Solution>(`/api/v1/solutions/${encodeURIComponent(slug)}`),
+
+  /** Canonicalises a browser URL, clone URL, SSH remote or bare owner/name. */
+  parseRepoUrl: (url: string) =>
+    apiFetch<{ repo_full_name: string }>(
+      `/api/v1/git/parse-repo-url?url=${encodeURIComponent(url)}`
     ),
 };
 

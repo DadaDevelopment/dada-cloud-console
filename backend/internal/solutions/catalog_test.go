@@ -5,65 +5,58 @@ import (
 	"testing"
 )
 
-// The catalog is data an operator reads as a promise ("one click and this
-// works"), so the invariants that make that promise true are asserted here
+// The catalog is data a customer reads as a promise ("one click and this
+// works"), so the invariants that keep the promise true are asserted here
 // rather than left to review.
 func TestV1CatalogInvariants(t *testing.T) {
+	validProfile := map[string]bool{"small": true, "medium": true, "large": true}
 	seenSlug := map[string]bool{}
+	seenRepo := map[string]bool{}
+
 	for _, s := range V1 {
-		if s.Slug == "" || s.Name == "" || s.Tagline == "" {
-			t.Fatalf("solution %q: slug, name and tagline are all required", s.Slug)
+		if s.Slug == "" || s.Name == "" || s.Tagline == "" || s.About == "" {
+			t.Fatalf("solution %q: slug, name, tagline and about are all required", s.Slug)
 		}
 		if seenSlug[s.Slug] {
 			t.Fatalf("duplicate slug %q", s.Slug)
 		}
 		seenSlug[s.Slug] = true
-
-		if len(s.Services) == 0 {
-			t.Fatalf("solution %q has no services", s.Slug)
+		// The slug is the default app name, so it has to be a legal one.
+		if err := ValidateInstanceName(s.Slug); err != nil {
+			t.Fatalf("solution %q: slug is not a usable app name: %v", s.Slug, err)
+		}
+		if s.Homepage == "" || s.License == "" {
+			t.Fatalf("solution %q: a third-party project must name its homepage and license", s.Slug)
+		}
+		if s.FirstRun == "" {
+			t.Fatalf("solution %q: say what to do once it is up", s.Slug)
 		}
 
-		var primaries, roots int
-		seenSuffix := map[string]bool{}
-		for _, svc := range s.Services {
-			if svc.Image == "" {
-				t.Fatalf("solution %q service %q has no image", s.Slug, svc.NameSuffix)
-			}
-			if seenSuffix[svc.NameSuffix] {
-				t.Fatalf("solution %q has two services with suffix %q", s.Slug, svc.NameSuffix)
-			}
-			seenSuffix[svc.NameSuffix] = true
-			if svc.NameSuffix == "" {
-				roots++
-			}
-			if svc.Primary {
-				primaries++
-			}
-			// A published port on a service nobody links to is a hole in the VM's
-			// firewall with no user-visible purpose.
-			if len(svc.Ports) > 0 && !svc.Primary {
-				t.Fatalf("solution %q service %q publishes ports but is not primary", s.Slug, svc.NameSuffix)
-			}
+		// The repository is the whole point of an entry: it is what gets built.
+		if _, err := ParseRepoURL(s.Repo); err != nil {
+			t.Fatalf("solution %q: repo %q is not a usable owner/name: %v", s.Slug, s.Repo, err)
 		}
-		if roots != 1 {
-			t.Fatalf("solution %q must have exactly one service with an empty suffix, got %d", s.Slug, roots)
+		if seenRepo[strings.ToLower(s.Repo)] {
+			t.Fatalf("two entries build %q", s.Repo)
 		}
-		if primaries > 1 {
-			t.Fatalf("solution %q has %d primary services, want at most 1", s.Slug, primaries)
+		seenRepo[strings.ToLower(s.Repo)] = true
+		if s.Branch == "" {
+			t.Fatalf("solution %q: branch is required; the default is not the same on every repo", s.Slug)
+		}
+		if s.RootDir == "" {
+			t.Fatalf("solution %q: root dir is required (\".\" for the repository root)", s.Slug)
+		}
+		if s.Port < 1 || s.Port > 65535 {
+			t.Fatalf("solution %q: port %d is not a port; a wrong one deploys green and answers 502", s.Slug, s.Port)
+		}
+		if !validProfile[s.Profile] {
+			t.Fatalf("solution %q: profile %q is not one of small/medium/large", s.Slug, s.Profile)
 		}
 
-		// Every env key the install writes must be unique across params and
-		// generated secrets: a collision means one silently wins and the other
-		// never reaches the container.
-		seenEnv := map[string]string{}
 		for _, p := range s.Params {
 			if p.Key == "" || p.EnvKey == "" || p.Label == "" {
 				t.Fatalf("solution %q param %q: key, env key and label are required", s.Slug, p.Key)
 			}
-			if owner, dup := seenEnv[p.EnvKey]; dup {
-				t.Fatalf("solution %q: env key %q claimed by both %q and %q", s.Slug, p.EnvKey, owner, p.Key)
-			}
-			seenEnv[p.EnvKey] = p.Key
 			if p.Kind == ParamSecret && p.Default != "" {
 				t.Fatalf("solution %q param %q: a secret must never ship a default", s.Slug, p.Key)
 			}
@@ -71,139 +64,79 @@ func TestV1CatalogInvariants(t *testing.T) {
 				t.Fatalf("solution %q param %q: select needs options", s.Slug, p.Key)
 			}
 		}
-		known := map[string]bool{}
-		for _, g := range s.Secrets {
-			if g.Key == "" || g.EnvKey == "" {
-				t.Fatalf("solution %q generated secret: key and env key are required", s.Slug)
-			}
-			if owner, dup := seenEnv[g.EnvKey]; dup {
-				t.Fatalf("solution %q: env key %q claimed by both %q and %q", s.Slug, g.EnvKey, owner, g.Key)
-			}
-			seenEnv[g.EnvKey] = g.Key
-			if g.Kind != GeneratedPassword && g.Kind != GeneratedSecret {
-				t.Fatalf("solution %q secret %q: unknown kind %q", s.Slug, g.Key, g.Kind)
-			}
-			known[g.Key] = true
-		}
-		for _, k := range s.RevealKeys {
-			if !known[k] {
-				t.Fatalf("solution %q reveals %q, which it does not generate", s.Slug, k)
-			}
+	}
+}
+
+// v1 builds from source, and an app created by the build pipeline has no
+// volume: a project that keeps state on disk would lose it on every redeploy.
+// Until the build path can carry one, every entry must be stateless — this test
+// is the reminder, so adding a stateful project is a deliberate act with a
+// matching change to the build spec rather than an oversight.
+func TestEveryEntryShipsItsOwnDockerfileBuild(t *testing.T) {
+	for _, s := range V1 {
+		if s.Framework != "dockerfile" {
+			t.Fatalf("solution %q builds via %q; every v1 entry was verified against its own root Dockerfile", s.Slug, s.Framework)
 		}
 	}
 }
 
-// Hermes is the reason this package exists, and two properties of its entry are
-// load-bearing rather than cosmetic: the dashboard may only bind non-loopback
-// because the install always mints credentials for it, and the agent's data
-// volume is shared by both services (the memory IS the product).
-func TestHermesDashboardIsNeverExposedWithoutCredentials(t *testing.T) {
-	s, ok := Lookup("hermes-agent")
-	if !ok {
-		t.Fatal("hermes-agent missing from the catalog")
+func TestIsCatalogRepo(t *testing.T) {
+	if !IsCatalogRepo("CorentinTh/it-tools") {
+		t.Fatal("catalog repo not recognised; its deploys would never be reaped")
 	}
-
-	var dashboard Service
-	for _, svc := range s.Services {
-		if svc.NameSuffix == "dashboard" {
-			dashboard = svc
-		}
+	if !IsCatalogRepo("corentinth/IT-TOOLS") {
+		t.Fatal("match must be case-insensitive, like GitHub names")
 	}
-	if len(dashboard.Ports) == 0 {
-		t.Fatal("dashboard publishes no port, so nobody can reach it")
+	// A fork is the customer's own work, not a demo we offered.
+	if IsCatalogRepo("acme/it-tools") {
+		t.Fatal("a fork must not be treated as a catalog demo")
 	}
-	if !containsArg(dashboard.Command, "0.0.0.0") {
-		t.Fatalf("dashboard command %v no longer binds non-loopback; the published port would be dead", dashboard.Command)
-	}
-
-	// Upstream fails closed on a non-loopback bind with no auth provider, so the
-	// install MUST supply both a username and a password.
-	var hasUser bool
-	for _, p := range s.Params {
-		if p.EnvKey == "HERMES_DASHBOARD_BASIC_AUTH_USERNAME" && p.Required {
-			hasUser = true
-		}
-	}
-	if !hasUser {
-		t.Fatal("dashboard username is not a required param; the container would fail closed at boot")
-	}
-	var hasPassword, hasSigningSecret bool
-	for _, g := range s.Secrets {
-		switch g.EnvKey {
-		case "HERMES_DASHBOARD_BASIC_AUTH_PASSWORD":
-			hasPassword = true
-		case "HERMES_DASHBOARD_BASIC_AUTH_SECRET":
-			hasSigningSecret = true
-		}
-	}
-	if !hasPassword {
-		t.Fatal("no generated dashboard password; a non-loopback bind would fail closed")
-	}
-	if !hasSigningSecret {
-		t.Fatal("no generated session signing secret; every restart would log the customer out")
-	}
-
-	var mounts int
-	for _, svc := range s.Services {
-		for _, v := range svc.Volumes {
-			if strings.HasSuffix(v, ":/opt/data") {
-				mounts++
-			}
-		}
-	}
-	if mounts != len(s.Services) {
-		t.Fatalf("%d of %d hermes services mount the data volume; the agent's memory must be shared and persistent", mounts, len(s.Services))
+	if IsCatalogRepo("") {
+		t.Fatal("empty repo name matched")
 	}
 }
 
-func containsArg(args []string, want string) bool {
-	for _, a := range args {
-		if strings.Contains(a, want) {
-			return true
+func TestParseRepoURL(t *testing.T) {
+	want := "excalidraw/excalidraw"
+	for _, in := range []string{
+		"excalidraw/excalidraw",
+		"https://github.com/excalidraw/excalidraw",
+		"https://github.com/excalidraw/excalidraw/",
+		"https://github.com/excalidraw/excalidraw.git",
+		"http://www.github.com/excalidraw/excalidraw",
+		"git@github.com:excalidraw/excalidraw.git",
+		"ssh://git@github.com/excalidraw/excalidraw",
+		"  https://github.com/excalidraw/excalidraw  ",
+		// A deep link keeps only the repository: branch and subdirectory are
+		// choices the form asks for explicitly.
+		"https://github.com/excalidraw/excalidraw/tree/master/packages/excalidraw",
+	} {
+		got, err := ParseRepoURL(in)
+		if err != nil {
+			t.Fatalf("%q rejected: %v", in, err)
+		}
+		if got != want {
+			t.Fatalf("%q -> %q, want %q", in, got, want)
 		}
 	}
-	return false
-}
 
-func TestPinnedRequiresEveryDigest(t *testing.T) {
-	s := Solution{Services: []Service{{Image: "a", Digest: "sha256:1"}, {Image: "b"}}}
-	if s.Pinned() {
-		t.Fatal("a solution with one unpinned service must not be installable")
-	}
-	s.Services[1].Digest = "sha256:2"
-	if !s.Pinned() {
-		t.Fatal("a fully pinned solution must be installable")
-	}
-	if (Solution{}).Pinned() {
-		t.Fatal("a solution with no services is not installable")
-	}
-}
-
-func TestImageRefAndAppName(t *testing.T) {
-	svc := Service{Image: "ghcr.io/x/y:v1"}
-	if got := svc.ImageRef(); got != "ghcr.io/x/y:v1" {
-		t.Fatalf("unpinned ref = %q", got)
-	}
-	svc.Digest = "sha256:abc"
-	if got := svc.ImageRef(); got != "ghcr.io/x/y:v1@sha256:abc" {
-		t.Fatalf("pinned ref = %q", got)
-	}
-	if got := svc.AppName("hermes"); got != "hermes" {
-		t.Fatalf("root app name = %q", got)
-	}
-	svc.NameSuffix = "dashboard"
-	if got := svc.AppName("hermes"); got != "hermes-dashboard" {
-		t.Fatalf("suffixed app name = %q", got)
+	for _, bad := range []string{
+		"", "   ", "https://gitlab.com/owner/repo", "https://github.com",
+		"https://github.com/owner", "not a url", "/leading-slash",
+	} {
+		if got, err := ParseRepoURL(bad); err == nil {
+			t.Fatalf("%q accepted as %q", bad, got)
+		}
 	}
 }
 
 func TestValidateInstanceName(t *testing.T) {
-	for _, ok := range []string{"hermes", "hermes-2", "a"} {
+	for _, ok := range []string{"excalidraw", "it-tools", "a"} {
 		if err := ValidateInstanceName(ok); err != nil {
 			t.Fatalf("%q rejected: %v", ok, err)
 		}
 	}
-	for _, bad := range []string{"", "Hermes", "2hermes", "hermes_1", "hermes-", strings.Repeat("a", 41)} {
+	for _, bad := range []string{"", "Excalidraw", "2fast", "my_app", "app-", strings.Repeat("a", 41)} {
 		if err := ValidateInstanceName(bad); err == nil {
 			t.Fatalf("%q accepted", bad)
 		}

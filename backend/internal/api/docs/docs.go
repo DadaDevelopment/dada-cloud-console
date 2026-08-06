@@ -1954,6 +1954,62 @@ const docTemplate = `{
                 }
             }
         },
+        "/git/parse-repo-url": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Accepts a GitHub browser URL, clone URL, SSH remote or a bare owner/name and returns the canonical owner/name. Rejects anything that is not a public GitHub repository rather than guessing. Pure string handling: it does not check that the repository exists.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "solutions"
+                ],
+                "summary": "Parse a pasted repository link",
+                "operationId": "parseRepoURL",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Pasted repository link",
+                        "name": "url",
+                        "in": "query",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "object with repo_full_name",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/mlflow/registered-models": {
             "get": {
                 "security": [
@@ -16493,113 +16549,6 @@ const docTemplate = `{
                 }
             }
         },
-        "/projects/{projectId}/environments/{envId}/solutions/{slug}": {
-            "post": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ],
-                "description": "Installs a catalog solution onto the VM environment's app server as one or more Applications. Requires a VM (compose) environment whose app server is Ready. Parameters are validated against the catalog entry; credentials the platform generates are returned once in the response and stored encrypted. Asynchronous: returns 202 with an operation; poll the operation until terminal.",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "solutions"
-                ],
-                "summary": "Install a ready-made solution",
-                "operationId": "installSolution",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Project UUID",
-                        "name": "projectId",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "type": "string",
-                        "description": "Environment UUID",
-                        "name": "envId",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "type": "string",
-                        "description": "Solution slug",
-                        "name": "slug",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "description": "Install parameters",
-                        "name": "body",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/api.installSolutionRequest"
-                        }
-                    }
-                ],
-                "responses": {
-                    "202": {
-                        "description": "object with the accepted operation, the created app names and any generated credentials",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": true
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
-                        }
-                    },
-                    "401": {
-                        "description": "Unauthorized",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
-                        }
-                    },
-                    "403": {
-                        "description": "Forbidden",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
-                        }
-                    },
-                    "409": {
-                        "description": "Conflict",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
-                        }
-                    }
-                }
-            }
-        },
         "/projects/{projectId}/git/detect": {
             "get": {
                 "security": [
@@ -17811,14 +17760,14 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Returns the catalog of ready-made solutions installable onto a VM app server in one click. Entries whose image is not published yet are listed with installable=false. Read-only; the catalog is the same for every project.",
+                "description": "Returns the catalog of open-source projects the console can deploy in one click. Each entry is a public repository plus the build spec verified for it (branch, root directory, framework, port, profile); deploying one uses the ordinary connect-repo and build path. Read-only; the catalog is the same for every project.",
                 "produces": [
                     "application/json"
                 ],
                 "tags": [
                     "solutions"
                 ],
-                "summary": "List ready-made solutions",
+                "summary": "List ready-made projects",
                 "operationId": "listSolutions",
                 "responses": {
                     "200": {
@@ -17847,14 +17796,14 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Returns a single catalog entry, including the parameters its install asks for and the credentials the platform generates. Read-only.",
+                "description": "Returns a single catalog entry with its build spec and any parameters it asks for. Read-only.",
                 "produces": [
                     "application/json"
                 ],
                 "tags": [
                     "solutions"
                 ],
-                "summary": "Get one ready-made solution",
+                "summary": "Get one ready-made project",
                 "operationId": "getSolution",
                 "parameters": [
                     {
@@ -19226,21 +19175,6 @@ const docTemplate = `{
                 },
                 "port": {
                     "type": "integer"
-                }
-            }
-        },
-        "api.installSolutionRequest": {
-            "type": "object",
-            "properties": {
-                "name": {
-                    "description": "Name is the install's instance name. It becomes the primary app's name and\nthe prefix of every other app and volume the install creates. Empty falls\nback to the solution slug.",
-                    "type": "string"
-                },
-                "params": {
-                    "type": "object",
-                    "additionalProperties": {
-                        "type": "string"
-                    }
                 }
             }
         },
