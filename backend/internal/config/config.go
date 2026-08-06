@@ -146,6 +146,14 @@ type Config struct {
 	// DB_BACKUP_PROFILE's prefix.
 	DBBackupS3Prefix string // DB_BACKUP_S3_PREFIX
 
+	// DBShardAdminDSNs maps a db_shards.name to a superuser DSN on that
+	// instance, in the form "shard-1=postgres://...,shard-0=postgres://...".
+	// The Database Insights collector is the only consumer: it connects per
+	// shard, reads system views, and never writes. A shard missing from this
+	// map is simply not collected, so adding a shard to the registry without
+	// its credentials degrades to no insights rather than to a crash loop.
+	DBShardAdminDSNs string // DB_SHARD_ADMIN_DSNS
+
 	// S3 access for upload-deploy (docs/plans/2026-07-23-upload-deploy.md):
 	// where UploadSourceArchive stores the uploaded archive bytes, keyed
 	// "source-uploads/<projectID>/<appName>/<uploadID>.<ext>". build-agent
@@ -712,6 +720,7 @@ func Load() (*Config, error) {
 		DBBackupS3SecretKey:         getEnv("DB_BACKUP_S3_SECRET_KEY", ""),
 		DBBackupS3Insecure:          getEnv("DB_BACKUP_S3_INSECURE", "false") == "true",
 		DBBackupS3Prefix:            getEnv("DB_BACKUP_S3_PREFIX", "k10/postgresql-logical"),
+		DBShardAdminDSNs:            getEnv("DB_SHARD_ADMIN_DSNS", ""),
 		SourceUploadS3Endpoint:      getEnv("SOURCE_UPLOAD_S3_ENDPOINT", ""),
 		SourceUploadS3Bucket:        getEnv("SOURCE_UPLOAD_S3_BUCKET", ""),
 		SourceUploadS3Region:        getEnv("SOURCE_UPLOAD_S3_REGION", "us-east-1"),
