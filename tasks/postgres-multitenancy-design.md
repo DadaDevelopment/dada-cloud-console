@@ -163,8 +163,32 @@ read-only 1.0 / frozen 1.25 / снятие 0.9, принуждение чере�
       shared_buffers` = 1GB, `pg_stat_statements` в `shared_preload_libraries`,
       серии `pg_database_size_bytes{...pg-shard-0...}` в Prometheus; после
       проверки ёмкости нод — включить реплику.
-- [ ] 2. pg-router: стенд PgBouncer vs Odyssey (латентность, reload без
-      разрыва, SCRAM), деплой фарма ≥2 реплик, конфиг из gitops.
+- [x] 2. pg-router — argo-infra `4563077c`, app
+      `platform/prod/apps/pg-router`, сервис `pg-router.databases.svc:5432`,
+      PgBouncer 1.25.2, 2 реплики + anti-affinity + PDB minAvailable=1,
+      pool_mode=transaction. Маршруты: wildcard `*` → дефолтный шард (то есть
+      туда, где все базы лежат сегодня — включение роутера не двигает ничего),
+      отдельная строка только у базы, размещённой на другом инстансе.
+      Аутентификация — SCRAM pass-through: роутер спрашивает у шарда
+      сохранённый секрет (`auth_query`) и переигрывает SCRAM-доказательство
+      клиента, паролей арендаторов у него нет. Условия документированы: клиент
+      по SCRAM, одинаковые секреты, в записи базы НЕТ `user=` — поэтому
+      добавлять `user=` в маршрут нельзя никогда. PreSync-джоба на каждый шард
+      создаёт роль поиска и SECURITY DEFINER `pgbouncer.get_auth` (pg_authid
+      читает только суперпользователь); `auth_dbname=postgres`, поэтому функция
+      нужна одна на шард, а не одна на каждую из 33 баз. Reload маршрутов без
+      разрыва коннектов — sidecar в общем process namespace шлёт SIGHUP.
+      **Odyssey отвергнут**: маршрутизация по имени базы есть у обоих, но у
+      PgBouncer per-database host, онлайн RELOAD `[databases]` и SCRAM
+      pass-through документированы, а стенда для замера нет; компонент, через
+      который идёт весь трафик арендаторов, должен быть скучным. Вернуть, если
+      один поток упрётся в ядро.
+      Стенд НЕ проводился и живьём НЕ проверено: k8s API с этой сети
+      недоступен, docker локально висит на pull. Проверено `helm template`
+      (включая ветку per-db override) и наличие тегов образов в registry.
+      Открытые риски до первого живого прогона: поведение entrypoint
+      `edoburu/pgbouncer` с примонтированным read-only `pgbouncer.ini` и
+      результат bootstrap-SQL на общем инстансе.
 - [x] 3. Реестр и плейсмент. Инфра-половина — argo-infra `056e754a`:
       `spec.shard` в XRD (enum по `serviceDatabase.shards`, дефолт `shard-1`),
       композиция подставляет `providerConfigRef` шарда во все четыре объекта,
