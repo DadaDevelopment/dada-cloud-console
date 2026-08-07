@@ -3,6 +3,8 @@ package api
 import (
 	"strings"
 	"testing"
+
+	"github.com/dada-tuda/console/backend/internal/metrics"
 )
 
 func routeShards() []shardAddr {
@@ -14,7 +16,7 @@ func routeShards() []shardAddr {
 }
 
 func TestRenderRoutesWildcardOnlyWhenNothingMoved(t *testing.T) {
-	out, err := renderPgBouncerRoutes(routeShards(), []dbPlacement{
+	out, stats, err := renderPgBouncerRoutes(routeShards(), []dbPlacement{
 		{Datname: "app-one", Shard: "shard-1"},
 		{Datname: "app-two", Shard: ""},
 	}, "shard-1")
@@ -27,10 +29,16 @@ func TestRenderRoutesWildcardOnlyWhenNothingMoved(t *testing.T) {
 	if strings.Contains(out, "app-one =") || strings.Contains(out, "app-two =") {
 		t.Fatalf("databases on the default shard must not get a line:\n%s", out)
 	}
+	if stats.Routed != 0 || len(stats.Dropped) != 0 {
+		t.Fatalf("nothing moved, so nothing is routed or dropped: %+v", stats)
+	}
+	if stats.PerShard["shard-1"] != 2 {
+		t.Fatalf("a placement without a shard counts against the default: %+v", stats.PerShard)
+	}
 }
 
 func TestRenderRoutesLinesMovedDatabase(t *testing.T) {
-	out, err := renderPgBouncerRoutes(routeShards(), []dbPlacement{
+	out, stats, err := renderPgBouncerRoutes(routeShards(), []dbPlacement{
 		{Datname: "odds-research", Shard: "shard-2"},
 		{Datname: "app-one", Shard: "shard-1"},
 	}, "shard-1")
@@ -44,10 +52,13 @@ func TestRenderRoutesLinesMovedDatabase(t *testing.T) {
 	if strings.Contains(out, "user=") {
 		t.Fatalf("a user= field breaks SCRAM pass-through:\n%s", out)
 	}
+	if stats.Routed != 1 {
+		t.Fatalf("the moved database is the one routed by name: %+v", stats)
+	}
 }
 
 func TestRenderRoutesDropsAmbiguousName(t *testing.T) {
-	out, err := renderPgBouncerRoutes(routeShards(), []dbPlacement{
+	out, stats, err := renderPgBouncerRoutes(routeShards(), []dbPlacement{
 		{Datname: "billing", Shard: "shard-2"},
 		{Datname: "billing", Shard: "shard-0"},
 	}, "shard-1")
@@ -60,11 +71,14 @@ func TestRenderRoutesDropsAmbiguousName(t *testing.T) {
 	if !strings.Contains(out, "; billing: same name on 2 shards") {
 		t.Fatalf("the dropped name must be visible in the file:\n%s", out)
 	}
+	if stats.Dropped[metrics.RouteDropAmbiguousName] != 1 {
+		t.Fatalf("an ambiguous name must be countable, it reaches the wrong shard: %+v", stats.Dropped)
+	}
 }
 
 func TestRenderRoutesSkipsShardWithoutAddress(t *testing.T) {
 	shards := append(routeShards(), shardAddr{Name: "shard-3", Host: "", Port: 5432})
-	out, err := renderPgBouncerRoutes(shards, []dbPlacement{
+	out, stats, err := renderPgBouncerRoutes(shards, []dbPlacement{
 		{Datname: "fresh", Shard: "shard-3"},
 	}, "shard-1")
 	if err != nil {
@@ -76,10 +90,13 @@ func TestRenderRoutesSkipsShardWithoutAddress(t *testing.T) {
 	if !strings.Contains(out, "; fresh: shard shard-3 has no address") {
 		t.Fatalf("missing note about the unaddressable shard:\n%s", out)
 	}
+	if stats.Dropped[metrics.RouteDropShardUnaddresed] != 1 {
+		t.Fatalf("an unaddressable shard must be countable: %+v", stats.Dropped)
+	}
 }
 
 func TestRenderRoutesFailsWithoutDefaultAddress(t *testing.T) {
-	if _, err := renderPgBouncerRoutes([]shardAddr{
+	if _, _, err := renderPgBouncerRoutes([]shardAddr{
 		{Name: "shard-2", Host: "pg-shard-2-postgresql.databases.svc.cluster.local", Port: 5432},
 	}, []dbPlacement{{Datname: "odds-research", Shard: "shard-2"}}, "shard-1"); err == nil {
 		t.Fatal("a table without the wildcard would reject every unlisted database")
@@ -87,7 +104,7 @@ func TestRenderRoutesFailsWithoutDefaultAddress(t *testing.T) {
 }
 
 func TestRenderRoutesDefaultsPort(t *testing.T) {
-	out, err := renderPgBouncerRoutes([]shardAddr{
+	out, stats, err := renderPgBouncerRoutes([]shardAddr{
 		{Name: "shard-1", Host: "postgresql.databases.svc.cluster.local"},
 	}, nil, "shard-1")
 	if err != nil {
@@ -96,10 +113,13 @@ func TestRenderRoutesDefaultsPort(t *testing.T) {
 	if !strings.Contains(out, "port=5432") {
 		t.Fatalf("missing default port:\n%s", out)
 	}
+	if stats.Routed != 0 {
+		t.Fatalf("no placements, no routes: %+v", stats)
+	}
 }
 
 func TestRenderRoutesRejectsUnsafeName(t *testing.T) {
-	out, err := renderPgBouncerRoutes(routeShards(), []dbPlacement{
+	out, stats, err := renderPgBouncerRoutes(routeShards(), []dbPlacement{
 		{Datname: "evil = host=attacker.example\n*", Shard: "shard-2"},
 	}, "shard-1")
 	if err != nil {
@@ -107,6 +127,9 @@ func TestRenderRoutesRejectsUnsafeName(t *testing.T) {
 	}
 	if strings.Contains(out, "attacker.example") {
 		t.Fatalf("a name must never be able to rewrite the table:\n%s", out)
+	}
+	if stats.Dropped[metrics.RouteDropUnsafeName] != 1 {
+		t.Fatalf("a rejected name must be countable: %+v", stats.Dropped)
 	}
 }
 

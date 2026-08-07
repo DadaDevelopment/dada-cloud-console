@@ -184,4 +184,38 @@ spec:
               {{`{{ $value }}`}} box(es) reached a failed state in the last hour. An agent asked for
               a body and did not get one. Check operations.error_message for the box actions and
               the box-agent logs on the host.
+        - alert: DadaDBRouteUnaddressable
+          expr: max by (namespace, service, reason) (dada_db_routes_dropped) > 0
+          for: 10m
+          # A collision or a shard without an address does not flap back and forth on
+          # its own, but a moving database can make the count dip for one scrape while
+          # the snapshot catches up; keep_firing_for stops that from re-notifying.
+          keep_firing_for: 1h
+          labels:
+            severity: warning
+          annotations:
+            summary: "{{`{{ $value }}`}} database(s) the DB router cannot address ({{`{{ $labels.reason }}`}})"
+            description: >-
+              These databases have no line of their own in the router's table, so every
+              connection to them follows the wildcard to the default shard. While a database
+              sits on the default shard that is harmless; the moment it is moved, its clients
+              keep landing on the instance that no longer holds the data. reason=ambiguous_name
+              means two databases share a name across shards (routing by name has no correct
+              answer), reason=shard_unaddressed means db_shards has no host for that shard, and
+              reason=unsafe_name means the datname cannot be written into a pgbouncer config
+              line. Fix before moving anything: GET /internal/db/routes.ini lists each one as a
+              comment.
+        - alert: DadaDBShardClosed
+          expr: max by (namespace, service, shard) (dada_db_shard_state{state!="open",is_platform="false"}) > 0
+          for: 30m
+          keep_firing_for: 1h
+          labels:
+            severity: info
+          annotations:
+            summary: "Tenant shard {{`{{ $labels.shard }}`}} is not open"
+            description: >-
+              The shard takes no new databases, so every new tenant database lands on the
+              remaining open shards. That is the intended state while draining or migrating,
+              but if it is the last tenant shard, placement has nowhere left to go. Check the
+              db_shards registry and /admin/db-shards.
 {{- end }}

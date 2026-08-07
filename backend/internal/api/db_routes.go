@@ -8,6 +8,8 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
+
+	"github.com/dada-tuda/console/backend/internal/metrics"
 )
 
 // dbRouterDefaultShard mirrors the ServiceDatabaseV2 XRD default: every
@@ -56,6 +58,16 @@ func safeRouteToken(s string) bool {
 	return true
 }
 
+// routeStats is what the rendered table says about routing health: how many
+// databases the router can address by name, how many it cannot and why, and
+// where every database sits. Returned alongside the file so the published
+// metrics describe the exact table that was served.
+type routeStats struct {
+	Routed   int
+	Dropped  map[string]int
+	PerShard map[string]int
+}
+
 // renderPgBouncerRoutes builds the [databases] section the connection router
 // includes. Pure, so the routing rule is testable without a cluster.
 //
@@ -74,7 +86,8 @@ func safeRouteToken(s string) bool {
 // Returns an error when the default shard has no usable address: rendering a
 // file without the wildcard would make the router reject every database that
 // has no explicit line, which is worse than keeping the previous table.
-func renderPgBouncerRoutes(shards []shardAddr, placements []dbPlacement, defaultShard string) (string, error) {
+func renderPgBouncerRoutes(shards []shardAddr, placements []dbPlacement, defaultShard string) (string, routeStats, error) {
+	stats := routeStats{Dropped: map[string]int{}, PerShard: map[string]int{}}
 	byName := make(map[string]shardAddr, len(shards))
 	for _, s := range shards {
 		if s.Host == "" {
@@ -88,7 +101,7 @@ func renderPgBouncerRoutes(shards []shardAddr, placements []dbPlacement, default
 
 	def, ok := byName[defaultShard]
 	if !ok {
-		return "", fmt.Errorf("default shard %q has no address in db_shards", defaultShard)
+		return "", stats, fmt.Errorf("default shard %q has no address in db_shards", defaultShard)
 	}
 
 	shardsFor := make(map[string]map[string]bool)
@@ -105,6 +118,7 @@ func renderPgBouncerRoutes(shards []shardAddr, placements []dbPlacement, default
 			shardsFor[name] = map[string]bool{}
 		}
 		shardsFor[name][shard] = true
+		stats.PerShard[shard]++
 	}
 
 	var b strings.Builder
@@ -123,6 +137,7 @@ func renderPgBouncerRoutes(shards []shardAddr, placements []dbPlacement, default
 		on := shardsFor[name]
 		if len(on) > 1 {
 			fmt.Fprintf(&b, "; %s: same name on %d shards, routed by the wildcard\n", name, len(on))
+			stats.Dropped[metrics.RouteDropAmbiguousName]++
 			continue
 		}
 		shard := ""
@@ -135,15 +150,18 @@ func renderPgBouncerRoutes(shards []shardAddr, placements []dbPlacement, default
 		addr, ok := byName[shard]
 		if !ok {
 			fmt.Fprintf(&b, "; %s: shard %s has no address, routed by the wildcard\n", name, shard)
+			stats.Dropped[metrics.RouteDropShardUnaddresed]++
 			continue
 		}
 		if !safeRouteToken(name) {
+			stats.Dropped[metrics.RouteDropUnsafeName]++
 			continue
 		}
+		stats.Routed++
 		fmt.Fprintf(&b, "%s = host=%s port=%d dbname=%s auth_dbname=%s\n",
 			name, addr.Host, addr.Port, name, dbRouterAuthDBName)
 	}
-	return b.String(), nil
+	return b.String(), stats, nil
 }
 
 // routerShards reads every shard that has an address.
@@ -208,11 +226,12 @@ func (h *Handler) DBRoutes(c *gin.Context) {
 		c.String(http.StatusInternalServerError, "read placements: %v", err)
 		return
 	}
-	body, err := renderPgBouncerRoutes(shards, placements, dbRouterDefaultShard)
+	body, stats, err := renderPgBouncerRoutes(shards, placements, dbRouterDefaultShard)
 	if err != nil {
 		c.String(http.StatusInternalServerError, "render routes: %v", err)
 		return
 	}
+	metrics.SetDBRouting(stats.Routed, stats.Dropped, stats.PerShard)
 	c.Header("Content-Type", "text/plain; charset=utf-8")
 	c.String(http.StatusOK, body)
 }
