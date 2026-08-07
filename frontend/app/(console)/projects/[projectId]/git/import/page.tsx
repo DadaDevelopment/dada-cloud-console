@@ -744,7 +744,7 @@ export default function GitImportPage() {
                   <div data-ux="git_import:upload_archive">
                     <UploadDeployCard projectId={projectId} envId={envId || null} />
                   </div>
-                  <TemplateDeployCards projectId={projectId} envId={envId || null} />
+                  <TemplateDeployCards projectId={projectId} envId={envId || null} placement="git-import" />
                 </div>
               </div>
             </>

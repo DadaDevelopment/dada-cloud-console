@@ -7,6 +7,7 @@ import { ResourceIcon } from "@/components/shell/icons";
 import { Spinner } from "@/components/ui/spinner";
 import { useT } from "@/lib/i18n/console/context";
 import { trackBuildStart } from "@/lib/build-watch";
+import { templateUxName, type TemplateDeployPlacement } from "@/lib/ux-target-names";
 
 function toKubeName(s: string): string {
   return s
@@ -23,9 +24,13 @@ function uniqueAppName(base: string): string {
   return toKubeName(`${toKubeName(base).slice(0, 30)}-${suffix}`);
 }
 
+export type { TemplateDeployPlacement };
+export { templateUxName };
+
 export interface TemplateDeployCardsProps {
   projectId: string;
   envId: string | null;
+  placement: TemplateDeployPlacement;
   /** Denser layout for secondary placements (apps empty state, git import wall). */
   compact?: boolean;
   /**
@@ -48,7 +53,7 @@ export interface TemplateDeployCardsProps {
  * project is a backend change and the console never disagrees with it about
  * which branch or port an entry builds with.
  */
-export function TemplateDeployCards({ projectId, envId, compact, hero, className }: TemplateDeployCardsProps) {
+export function TemplateDeployCards({ projectId, envId, placement, compact, hero, className }: TemplateDeployCardsProps) {
   const { t } = useT();
   const router = useRouter();
   const [solutions, setSolutions] = useState<Solution[] | null>(null);
@@ -250,6 +255,7 @@ export function TemplateDeployCards({ projectId, envId, compact, hero, className
                   cta={deployingKey === s.slug ? t("overview.templates.deploying") : t("overview.templates.cta")}
                   busy={deployingKey === s.slug}
                   disabled={!!deployingKey || !envId}
+                  uxName={templateUxName(placement, "deploy", s.slug)}
                   onClick={() => deploySolution(s)}
                 />
               ))}
@@ -265,6 +271,7 @@ export function TemplateDeployCards({ projectId, envId, compact, hero, className
                   cta={deployingKey === s.slug ? t("overview.templates.deploying") : t("overview.templates.cta")}
                   busy={deployingKey === s.slug}
                   disabled={!!deployingKey || !envId}
+                  uxName={templateUxName(placement, "deploy", s.slug)}
                   onClick={() => deploySolution(s)}
                 />
               ))}
@@ -287,6 +294,7 @@ export function TemplateDeployCards({ projectId, envId, compact, hero, className
             placeholder={t("overview.templates.ask.placeholder")}
             disabled={!!deployingKey || !envId}
             aria-label={t("overview.templates.ask.title")}
+            data-ux={templateUxName(placement, "ask")}
             className="flex-1 bg-transparent text-sm text-gray-900 dark:text-gray-100 placeholder:text-gray-400 focus:outline-none disabled:opacity-60"
           />
           {asking && resolving && <Spinner size="sm" />}
@@ -327,6 +335,7 @@ export function TemplateDeployCards({ projectId, envId, compact, hero, className
                         : t("overview.templates.ask.fromLink")
                 }
                 archivedLabel={t("overview.templates.ask.archived")}
+                uxName={templateUxName(placement, "candidate", c.kind, c.kind === "repo" ? c.from || "link" : "")}
                 onClick={() => void deployCandidate(c)}
               />
             ))}
@@ -359,6 +368,7 @@ function CandidateRow({
   cta,
   badge,
   archivedLabel,
+  uxName,
   onClick,
 }: {
   candidate: SolutionCandidate;
@@ -367,6 +377,7 @@ function CandidateRow({
   cta: string;
   badge: string;
   archivedLabel: string;
+  uxName: string;
   onClick: () => void;
 }) {
   return (
@@ -405,6 +416,7 @@ function CandidateRow({
         type="button"
         onClick={onClick}
         disabled={disabled}
+        data-ux={uxName}
         className="inline-flex shrink-0 items-center justify-center gap-1.5 rounded-lg border border-gray-300 dark:border-gray-700 px-3 py-1.5 text-sm font-medium text-gray-900 dark:text-gray-100 transition-colors hover:bg-gray-50 dark:hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-60"
       >
         {busy && <Spinner size="sm" />}
@@ -426,12 +438,14 @@ function SolutionRow({
   cta,
   busy,
   disabled,
+  uxName,
   onClick,
 }: {
   solution: Solution;
   cta: string;
   busy: boolean;
   disabled: boolean;
+  uxName: string;
   onClick: () => void;
 }) {
   return (
@@ -450,6 +464,7 @@ function SolutionRow({
         type="button"
         onClick={onClick}
         disabled={disabled}
+        data-ux={uxName}
         className="inline-flex shrink-0 items-center justify-center gap-1.5 rounded-lg border border-gray-300 dark:border-gray-700 px-3 py-1.5 text-sm font-medium text-gray-900 dark:text-gray-100 transition-colors hover:bg-gray-50 dark:hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-60"
       >
         {busy && <Spinner size="sm" />}
@@ -488,12 +503,14 @@ function SolutionCard({
   cta,
   busy,
   disabled,
+  uxName,
   onClick,
 }: {
   solution: Solution;
   cta: string;
   busy: boolean;
   disabled: boolean;
+  uxName: string;
   onClick: () => void;
 }) {
   return (
@@ -510,6 +527,7 @@ function SolutionCard({
         type="button"
         onClick={onClick}
         disabled={disabled}
+        data-ux={uxName}
         className="mt-4 inline-flex items-center justify-center gap-1.5 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
       >
         {busy && <Spinner size="sm" />}

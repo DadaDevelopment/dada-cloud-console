@@ -57,7 +57,7 @@ export function EmptyProjectOnramp({ projectId, envId }: EmptyProjectOnrampProps
             {t("overview.onramp.demo.hint")}
           </p>
         </div>
-        <TemplateDeployCards projectId={projectId} envId={envId} compact />
+        <TemplateDeployCards projectId={projectId} envId={envId} placement="onramp" compact />
       </div>
     </div>
   );
