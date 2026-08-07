@@ -1,0 +1,12 @@
+-- Open tracking for campaign mail.
+--
+-- The first send answered "10 mailed, 1 clicked" and could say nothing about
+-- the nine: an unopened letter and an opened letter with a rejected offer are
+-- the same row, and they are opposite problems -- one is deliverability and
+-- subject line, the other is the offer itself.
+--
+-- opened_at is stamped by a 1x1 image the letter loads. It is a floor, not a
+-- count: a client with remote images off never reports, and a mailbox that
+-- prefetches images (Gmail proxies every one) reports without a human having
+-- read anything. Treat the gap between opened and clicked as directional.
+ALTER TABLE growth_campaign_sends ADD COLUMN IF NOT EXISTS opened_at TIMESTAMPTZ;

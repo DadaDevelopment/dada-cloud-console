@@ -6,8 +6,11 @@
 package notify
 
 import (
+	"crypto/rand"
 	"encoding/base64"
+	"encoding/hex"
 	"fmt"
+	"html"
 	"net/smtp"
 	"strings"
 	"time"
@@ -196,6 +199,38 @@ func ComposeReactivation(planName string, days int, promoLink string) (subject, 
 	fmt.Fprintf(&b, "Забрать тариф и посмотреть шаблоны: %s\n\n", promoLink)
 	b.WriteString("Если что-то не поедет — ответьте на это письмо, разберёмся вместе.\n")
 	return subject, b.String()
+}
+
+// ComposeReactivationHTML builds the HTML half of the reactivation letter.
+//
+// It says exactly what the text half says — the two parts of a
+// multipart/alternative message are the same letter, and a client picking one
+// over the other must not change the offer.
+//
+// pixelURL is a 1x1 image whose fetch is the only open signal there is. It
+// sits at the end of the body: an image ahead of the content delays the
+// visible part of the letter on a slow connection for no measurement gain.
+// Nothing in the letter depends on it loading, and a client with remote images
+// off still gets the whole message plus the link.
+func ComposeReactivationHTML(planName string, days int, promoLink, pixelURL string) string {
+	var b strings.Builder
+	b.WriteString(`<div style="font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;font-size:15px;line-height:1.55;color:#111827">`)
+	b.WriteString(`<p>Вы завели проект в Dada Cloud, но так и не выкатили приложение.</p>`)
+	b.WriteString(`<p>Чаще всего дело не в платформе, а в том, что непонятно, с чего начать. Поэтому мы приготовили две вещи.</p>`)
+	fmt.Fprintf(&b, `<p><b>Первое</b> — тариф %s на %d дней бесплатно. Карта не нужна, по окончании срока аккаунт сам вернётся на Free, ничего не спишется.</p>`,
+		html.EscapeString(planName), days)
+	b.WriteString(`<p><b>Второе</b> — каталог готовых шаблонов: выбираете репозиторий, жмёте «Задеплоить», через пару минут приложение живёт на своём домене с HTTPS.</p>`)
+	fmt.Fprintf(&b, `<p><a href="%s" style="display:inline-block;background:#2563eb;color:#ffffff;text-decoration:none;padding:12px 22px;border-radius:8px;font-weight:600">Забрать тариф и посмотреть шаблоны</a></p>`,
+		html.EscapeString(promoLink))
+	fmt.Fprintf(&b, `<p style="font-size:13px;color:#6b7280">Если кнопка не нажимается, откройте ссылку: <a href="%s">%s</a></p>`,
+		html.EscapeString(promoLink), html.EscapeString(promoLink))
+	b.WriteString(`<p>Если что-то не поедет — ответьте на это письмо, разберёмся вместе.</p>`)
+	if pixelURL != "" {
+		fmt.Fprintf(&b, `<img src="%s" width="1" height="1" alt="" style="display:block;width:1px;height:1px;border:0">`,
+			html.EscapeString(pixelURL))
+	}
+	b.WriteString(`</div>`)
+	return b.String()
 }
 
 // crashLogSignature is one entry in the ordered pattern table ClassifyCrashLog
@@ -596,6 +631,60 @@ func (n *Notifier) Send(to, subject, body string) error {
 		auth = smtp.PlainAuth("", n.user, n.pass, n.host)
 	}
 	return smtp.SendMail(addr, auth, n.from, []string{to}, []byte(msg))
+}
+
+// SendHTML delivers one message that carries both a plain-text and an HTML
+// body as multipart/alternative.
+//
+// Campaign mail needs the HTML part to carry the open pixel, and it needs the
+// text part for the same reason it always did: a text-only client must still
+// get a readable letter, and an HTML-only message scores worse with spam
+// filters. The text body is not a fallback afterthought — it is the message,
+// and the HTML part says the same words.
+func (n *Notifier) SendHTML(to, subject, textBody, htmlBody string) error {
+	if n == nil || to == "" {
+		return nil
+	}
+	addr := fmt.Sprintf("%s:%d", n.host, n.port)
+	msg := n.renderAlternative(to, subject, textBody, htmlBody)
+	var auth smtp.Auth
+	if n.user != "" {
+		auth = smtp.PlainAuth("", n.user, n.pass, n.host)
+	}
+	return smtp.SendMail(addr, auth, n.from, []string{to}, []byte(msg))
+}
+
+// renderAlternative assembles a two-part multipart/alternative message. The
+// HTML part comes last because clients render the final part they can display.
+func (n *Notifier) renderAlternative(to, subject, textBody, htmlBody string) string {
+	boundary := multipartBoundary()
+	var b strings.Builder
+	fmt.Fprintf(&b, "From: %s\r\n", n.from)
+	fmt.Fprintf(&b, "To: %s\r\n", to)
+	fmt.Fprintf(&b, "Subject: %s\r\n", encodeHeader(subject))
+	fmt.Fprintf(&b, "Date: %s\r\n", time.Now().UTC().Format(time.RFC1123Z))
+	b.WriteString("MIME-Version: 1.0\r\n")
+	fmt.Fprintf(&b, "Content-Type: multipart/alternative; boundary=\"%s\"\r\n", boundary)
+	b.WriteString("\r\n")
+	fmt.Fprintf(&b, "--%s\r\n", boundary)
+	b.WriteString("Content-Type: text/plain; charset=\"UTF-8\"\r\n\r\n")
+	b.WriteString(strings.ReplaceAll(textBody, "\n", "\r\n"))
+	fmt.Fprintf(&b, "\r\n--%s\r\n", boundary)
+	b.WriteString("Content-Type: text/html; charset=\"UTF-8\"\r\n\r\n")
+	b.WriteString(strings.ReplaceAll(htmlBody, "\n", "\r\n"))
+	fmt.Fprintf(&b, "\r\n--%s--\r\n", boundary)
+	return b.String()
+}
+
+// multipartBoundary returns a delimiter that cannot occur inside the bodies.
+// Random rather than fixed: a constant boundary that happens to appear in a
+// user-supplied line would split the message at the wrong place.
+func multipartBoundary() string {
+	buf := make([]byte, 16)
+	if _, err := rand.Read(buf); err != nil {
+		return "dada-boundary-fallback"
+	}
+	return "dada-" + hex.EncodeToString(buf)
 }
 
 // render assembles RFC-5322 headers + UTF-8 body.

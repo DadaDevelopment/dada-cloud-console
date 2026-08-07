@@ -18655,6 +18655,36 @@ const docTemplate = `{
                 }
             }
         },
+        "/promo/pixel/{token}": {
+            "get": {
+                "description": "Returns a 1x1 GIF and records the first open of a promo token. Public; answers identically for unknown tokens.",
+                "produces": [
+                    "image/gif"
+                ],
+                "tags": [
+                    "growth"
+                ],
+                "summary": "Campaign open-tracking pixel",
+                "operationId": "recordPromoOpen",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Promo token, optionally suffixed .gif",
+                        "name": "token",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "GIF89a",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
         "/promo/redeem": {
             "post": {
                 "security": [

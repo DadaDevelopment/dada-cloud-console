@@ -23,6 +23,7 @@ const (
 	auditActionViewAppLogs   = "ViewAppLogs"
 	auditActionViewProject   = "ViewProject"
 	auditActionViewApp       = "ViewApp"
+	auditActionViewApps      = "ViewApps"
 	auditActionAutoscaleApp  = "AutoscaleApp"
 )
 

@@ -7,6 +7,8 @@ import type { Messages } from "./common";
 export const apps: Messages = {
   "apps.title": { ru: "Приложения", en: "Applications" },
   "apps.subtitle": { ru: "Управляемые рабочие нагрузки", en: "Managed application workloads" },
+  "apps.promo.banner.title": { ru: "Тариф {plan} на {days} дней активирован", en: "{plan} plan activated for {days} days" },
+  "apps.promo.banner.body": { ru: "Карта не нужна: по окончании срока аккаунт сам вернётся на Free. Выберите шаблон ниже — приложение поднимется на своём домене с HTTPS.", en: "No card needed: the account returns to Free when the term ends. Pick a template below and the app comes up on its own domain with HTTPS." },
   "apps.restart.button": { ru: "Перезапустить", en: "Restart" },
   "apps.restart.confirm": { ru: "Перезапустить приложение (пересоздать контейнеры без обновления образов)?", en: "Restart the app (recreate containers without pulling new images)?" },
   "apps.restart.error": { ru: "Не удалось перезапустить", en: "Restart failed" },

@@ -26,11 +26,17 @@ func expiryTestPool(t *testing.T) *pgxpool.Pool {
 
 type recordingMailer struct {
 	sends []struct{ to, subject string }
+	html  []string
 }
 
 func (m *recordingMailer) Send(to, subject, body string) error {
 	m.sends = append(m.sends, struct{ to, subject string }{to, subject})
 	return nil
+}
+
+func (m *recordingMailer) SendHTML(to, subject, textBody, htmlBody string) error {
+	m.html = append(m.html, htmlBody)
+	return m.Send(to, subject, textBody)
 }
 
 func seedExpiryAccount(t *testing.T, pool *pgxpool.Pool, plan string, expiresAt time.Time, email string) string {

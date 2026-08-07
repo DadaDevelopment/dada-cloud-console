@@ -55,6 +55,9 @@ export default function AppsPage() {
   const searchParams = useSearchParams();
   const { t } = useT();
 
+  const promoPlan = searchParams.get("promo") ?? "";
+  const promoDays = searchParams.get("promoDays") ?? "30";
+
   const { project, environments, role, loading: isLoadingEnvs } = useProjectContext();
   const [appsByEnv, setAppsByEnv] = useState<Record<string, ResourceSnapshot[]>>({});
   const [infraByEnv, setInfraByEnv] = useState<Record<string, ResourceSnapshot[]>>({});
@@ -242,6 +245,15 @@ export default function AppsPage() {
         <h1 className="mt-2 text-2xl font-bold text-gray-900 dark:text-gray-100">{t("apps.title")}</h1>
         <p className="mt-0.5 text-sm text-gray-500 dark:text-gray-400">{t("apps.subtitle")}</p>
       </div>
+
+      {promoPlan && (
+        <div className="mb-6 rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-900 dark:border-blue-900 dark:bg-blue-950/40 dark:text-blue-200">
+          <p className="font-medium">
+            {t("apps.promo.banner.title", { plan: promoPlan, days: promoDays })}
+          </p>
+          <p className="mt-1 text-blue-800/80 dark:text-blue-200/80">{t("apps.promo.banner.body")}</p>
+        </div>
+      )}
 
       {error && (
         <div className="mb-6 rounded-lg border border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-950/40 px-4 py-3 text-sm text-red-700 dark:text-red-300">

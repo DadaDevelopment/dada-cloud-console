@@ -1576,8 +1576,8 @@ paths:
       - admin
   /admin/growth/campaigns:
     get:
-      description: Sent/clicked/redeemed/converted per campaign, variant and signup
-        week.
+      description: Sent/opened/clicked/redeemed/converted per campaign, variant and
+        signup week.
       operationId: getGrowthCampaigns
       produces:
       - application/json
@@ -14108,6 +14108,27 @@ paths:
               type: string
             type: object
       summary: Record a campaign promo-link click
+      tags:
+      - growth
+  /promo/pixel/{token}:
+    get:
+      description: Returns a 1x1 GIF and records the first open of a promo token.
+        Public; answers identically for unknown tokens.
+      operationId: recordPromoOpen
+      parameters:
+      - description: Promo token, optionally suffixed .gif
+        in: path
+        name: token
+        required: true
+        type: string
+      produces:
+      - image/gif
+      responses:
+        "200":
+          description: GIF89a
+          schema:
+            type: string
+      summary: Campaign open-tracking pixel
       tags:
       - growth
   /promo/redeem:

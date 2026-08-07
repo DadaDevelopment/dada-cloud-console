@@ -18,7 +18,7 @@
  * would be lost across the Keycloak round-trip.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { useAuth } from "@/lib/auth";
 import { startLogin } from "@/lib/register-redirect";
@@ -62,6 +62,7 @@ export default function PromoPage() {
   const params = useParams<{ token: string }>();
   const promoToken = typeof params?.token === "string" ? params.token : "";
   const { isLoading, token } = useAuth();
+  const router = useRouter();
 
   const clickedRef = useRef(false);
   const redeemStartedRef = useRef(false);
@@ -87,11 +88,15 @@ export default function PromoPage() {
         body: { token: promoToken },
       });
       setResult(res);
+      const banner =
+        res.granted === false
+          ? ""
+          : `?promo=${encodeURIComponent(planLabel(res.plan))}&promoDays=${res.days}`;
       try {
         const projects = await projectsApi.list();
         const projectId =
           projects.projects?.[0]?.id ?? (await projectsApi.ensureDefault()).project_id;
-        setTarget(`/projects/${projectId}/apps`);
+        setTarget(`/projects/${projectId}/apps${banner}`);
       } catch {
         setTarget("/projects");
       }
@@ -110,6 +115,11 @@ export default function PromoPage() {
   }, [promoToken]);
 
   useEffect(() => {
+    if (!result || !target) return;
+    router.replace(target);
+  }, [result, target, router]);
+
+  useEffect(() => {
     if (isLoading || !promoToken) return;
     if (!token) {
       void startLogin(`/promo/${promoToken}`);
@@ -120,7 +130,7 @@ export default function PromoPage() {
     void redeem();
   }, [isLoading, token, promoToken, redeem]);
 
-  if (!promoToken || isLoading || !token || (!result && !error && !wrongAccount)) {
+  if (!promoToken || isLoading || !token || (!result && !error && !wrongAccount) || (result && target)) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-gray-50 dark:bg-gray-950">
         <div className="flex flex-col items-center gap-4 text-center">

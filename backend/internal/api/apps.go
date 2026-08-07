@@ -408,6 +408,14 @@ func (h *Handler) ListApps(c *gin.Context) {
 
 	sort.Slice(apps, func(i, j int) bool { return apps[i].Name < apps[j].Name })
 
+	h.recordViewAudit(claims, auditActionViewApps, auditEntry{
+		ProjectID:     projectID,
+		EnvironmentID: envID,
+		ResourceKind:  "AppList",
+		ResourceName:  envID.String(),
+		Metadata:      map[string]any{"apps": len(apps)},
+	})
+
 	c.JSON(http.StatusOK, gin.H{"apps": apps})
 }
 

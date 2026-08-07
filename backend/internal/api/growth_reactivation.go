@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/dada-tuda/console/backend/internal/auth"
@@ -48,7 +49,7 @@ const promoTokenBytes = 24
 // substitute a recorder. Mirrors expiryMailer rather than sharing it, so a
 // change to one campaign's mail surface cannot silently retype the other's.
 type reactivationMailer interface {
-	Send(to, subject, body string) error
+	SendHTML(to, subject, textBody, htmlBody string) error
 }
 
 // campaignSpec names the campaign a sweep runs under and how much of it runs.
@@ -110,6 +111,17 @@ func newPromoToken() (string, error) {
 // that gap is what says whether the offer or the login wall is losing people.
 func promoLink(publicBaseURL, token string) string {
 	return fmt.Sprintf("%s/promo/%s", publicBaseURL, token)
+}
+
+// promoPixelURL builds the open-tracking image URL for a recipient.
+//
+// It points at the backend directly, unlike the promo link: /api is one of the
+// few prefixes the console ingress routes to the backend, so this is the one
+// shape of tracked URL a mail client can actually fetch. The .gif suffix is
+// cosmetic — some clients and proxies are happier fetching something that
+// looks like an image — and the handler matches on the token before it.
+func promoPixelURL(publicBaseURL, token string) string {
+	return fmt.Sprintf("%s/api/v1/promo/pixel/%s.gif", publicBaseURL, token)
 }
 
 // SweepReactivation runs one pass of the dormant-account campaign in three
@@ -235,8 +247,10 @@ func deliverReactivation(ctx context.Context, pool *pgxpool.Pool, mailer reactiv
 	}
 
 	for _, p := range pending {
-		subject, body := notify.ComposeReactivation("Startup", reactivationGrantDays, promoLink(publicBaseURL, p.Token))
-		if err := mailer.Send(p.Email, subject, body); err != nil {
+		link := promoLink(publicBaseURL, p.Token)
+		subject, body := notify.ComposeReactivation("Startup", reactivationGrantDays, link)
+		htmlBody := notify.ComposeReactivationHTML("Startup", reactivationGrantDays, link, promoPixelURL(publicBaseURL, p.Token))
+		if err := mailer.SendHTML(p.Email, subject, body, htmlBody); err != nil {
 			log.Error().Err(err).Str("email", p.Email).Msg("reactivation: send failed, will retry")
 			continue
 		}
@@ -323,6 +337,54 @@ func (h *Handler) RecordPromoClick(c *gin.Context) {
 		log.Error().Err(err).Msg("promo click: record")
 	}
 	c.Status(http.StatusNoContent)
+}
+
+// promoPixelGIF is a 1x1 transparent GIF, the smallest thing a mail client
+// will fetch and render without leaving a visible mark in the letter.
+var promoPixelGIF = []byte{
+	0x47, 0x49, 0x46, 0x38, 0x39, 0x61, 0x01, 0x00, 0x01, 0x00, 0x80, 0x00, 0x00,
+	0x00, 0x00, 0x00, 0xff, 0xff, 0xff, 0x21, 0xf9, 0x04, 0x01, 0x00, 0x00, 0x00,
+	0x00, 0x2c, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x01, 0x00, 0x00, 0x02, 0x02,
+	0x44, 0x01, 0x00, 0x3b,
+}
+
+// RecordPromoOpen stamps the open on a promo token and returns the pixel.
+//
+// Public and unauthenticated: a mail client fetches this with no session, from
+// an address the platform has never seen. It answers with the same image for a
+// live token, an unknown token and a malformed one, so the endpoint cannot be
+// used to test whether an address was mailed, and it never fails the fetch —
+// a broken image in the letter is a visible defect for the recipient and buys
+// nothing.
+//
+// What it measures is a floor. Gmail and friends proxy remote images, which
+// can register an open the recipient never performed, and any client with
+// images off registers nothing at all. opened_at uses COALESCE so it records
+// the first fetch only: later proxy re-fetches must not drag the timestamp
+// forward past the click.
+//
+// @ID          recordPromoOpen
+// @Summary     Campaign open-tracking pixel
+// @Description Returns a 1x1 GIF and records the first open of a promo token. Public; answers identically for unknown tokens.
+// @Tags        growth
+// @Produce     image/gif
+// @Param       token path string true "Promo token, optionally suffixed .gif"
+// @Success     200 {string} string "GIF89a"
+// @Router      /promo/pixel/{token} [get]
+func (h *Handler) RecordPromoOpen(c *gin.Context) {
+	token := strings.TrimSuffix(c.Param("token"), ".gif")
+	if len(token) == promoTokenHexLen {
+		if _, err := h.pool.Exec(c.Request.Context(), `
+			UPDATE growth_campaign_sends
+			SET opened_at = COALESCE(opened_at, $2), updated_at = $2
+			WHERE token = $1
+		`, token, time.Now().UTC()); err != nil {
+			log.Error().Err(err).Msg("promo open: record")
+		}
+	}
+	c.Header("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
+	c.Header("Pragma", "no-cache")
+	c.Data(http.StatusOK, "image/gif", promoPixelGIF)
 }
 
 type redeemPromoRequest struct {
@@ -470,6 +532,7 @@ type campaignStatsRow struct {
 	Variant   string `json:"variant"`
 	SignupWk  string `json:"signup_week"`
 	Sent      int    `json:"sent"`
+	Opened    int    `json:"opened"`
 	Clicked   int    `json:"clicked"`
 	Redeemed  int    `json:"redeemed"`
 	Converted int    `json:"converted"`
@@ -483,7 +546,7 @@ type campaignStatsRow struct {
 //
 // @ID          getGrowthCampaigns
 // @Summary     Campaign funnel report (platform staff)
-// @Description Sent/clicked/redeemed/converted per campaign, variant and signup week.
+// @Description Sent/opened/clicked/redeemed/converted per campaign, variant and signup week.
 // @Tags        growth
 // @Produce     json
 // @Security    BearerAuth
@@ -507,6 +570,7 @@ func (h *Handler) GetGrowthCampaigns(c *gin.Context) {
 		       s.variant,
 		       to_char(date_trunc('week', u.created_at), 'YYYY-MM-DD') AS signup_week,
 		       count(*) FILTER (WHERE s.sent_at IS NOT NULL)      AS sent,
+		       count(*) FILTER (WHERE s.opened_at IS NOT NULL)    AS opened,
 		       count(*) FILTER (WHERE s.clicked_at IS NOT NULL)   AS clicked,
 		       count(*) FILTER (WHERE s.redeemed_at IS NOT NULL)  AS redeemed,
 		       count(*) FILTER (WHERE s.converted_at IS NOT NULL) AS converted
@@ -523,7 +587,7 @@ func (h *Handler) GetGrowthCampaigns(c *gin.Context) {
 	out := make([]campaignStatsRow, 0)
 	for rows.Next() {
 		var r campaignStatsRow
-		if err := rows.Scan(&r.Campaign, &r.Variant, &r.SignupWk, &r.Sent, &r.Clicked, &r.Redeemed, &r.Converted); err != nil {
+		if err := rows.Scan(&r.Campaign, &r.Variant, &r.SignupWk, &r.Sent, &r.Opened, &r.Clicked, &r.Redeemed, &r.Converted); err != nil {
 			respondError(c, http.StatusInternalServerError, "failed to scan campaigns")
 			return
 		}

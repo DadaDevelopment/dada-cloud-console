@@ -241,6 +241,8 @@ func SetupRouter(pool *pgxpool.Pool, cfg *config.Config) *gin.Engine {
 
 	r.POST("/api/v1/promo/click", h.RecordPromoClick)
 
+	r.GET("/api/v1/promo/pixel/:token", h.RecordPromoOpen)
+
 	// Dada Box fake-door funnel ingest. Public on purpose: the /box landing is a
 	// marketing page with no session, and its route handler forwards events
 	// server-to-server. Guarded by a per-IP + global token bucket inside the

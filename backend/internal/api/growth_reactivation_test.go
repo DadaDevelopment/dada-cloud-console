@@ -426,3 +426,57 @@ func TestRecordPromoClick_StampsTheClickAndHidesUnknownTokens(t *testing.T) {
 		t.Fatalf("an unknown token must answer exactly like a live one, got %d %q", rec2.Code, rec2.Body.String())
 	}
 }
+
+func promoOpenedAt(t *testing.T, pool *pgxpool.Pool, spec campaignSpec, userID uuid.UUID) *time.Time {
+	t.Helper()
+	var opened *time.Time
+	if err := pool.QueryRow(context.Background(),
+		`SELECT opened_at FROM growth_campaign_sends WHERE campaign = $1 AND user_id = $2`,
+		spec.Campaign, userID,
+	).Scan(&opened); err != nil {
+		t.Fatalf("read opened_at: %v", err)
+	}
+	return opened
+}
+
+func TestRecordPromoOpen_StampsFirstOpenAndAlwaysServesThePixel(t *testing.T) {
+	pool := growthTestPool(t)
+	spec := growthSpec(t, pool)
+	now := time.Now().UTC()
+	userID, _, _, _, email := growthAccount(t, pool, now.Add(-30*24*time.Hour))
+	token := seedPromo(t, pool, spec, userID, email, now.Add(-time.Hour))
+
+	h := &Handler{pool: pool}
+	gin.SetMode(gin.TestMode)
+	engine := gin.New()
+	engine.GET("/api/v1/promo/pixel/:token", h.RecordPromoOpen)
+	open := func(tok string) *httptest.ResponseRecorder {
+		rec := httptest.NewRecorder()
+		engine.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/promo/pixel/"+tok+".gif", nil))
+		return rec
+	}
+
+	rec := open(token)
+	if rec.Code != http.StatusOK || rec.Header().Get("Content-Type") != "image/gif" {
+		t.Fatalf("want a 200 image/gif, got %d %q", rec.Code, rec.Header().Get("Content-Type"))
+	}
+	if rec.Body.Len() != len(promoPixelGIF) {
+		t.Fatalf("pixel body=%d bytes want %d", rec.Body.Len(), len(promoPixelGIF))
+	}
+	first := promoOpenedAt(t, pool, spec, userID)
+	if first == nil {
+		t.Fatal("first open not recorded")
+	}
+
+	if rec2 := open(token); rec2.Code != http.StatusOK {
+		t.Fatalf("second open answered %d", rec2.Code)
+	}
+	second := promoOpenedAt(t, pool, spec, userID)
+	if second == nil || !second.Equal(*first) {
+		t.Fatalf("opened_at moved on a re-open: %v -> %v; a proxy refetch must not look like a new read", first, second)
+	}
+
+	if rec3 := open(strings.Repeat("f", promoTokenHexLen)); rec3.Code != http.StatusOK || rec3.Body.Len() != len(promoPixelGIF) {
+		t.Fatalf("an unknown token must answer exactly like a live one, got %d %d bytes", rec3.Code, rec3.Body.Len())
+	}
+}
