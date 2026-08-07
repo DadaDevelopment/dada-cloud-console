@@ -167,3 +167,31 @@ func TestApplyMoveOverridesKeepsInputIntact(t *testing.T) {
 		t.Fatal("the snapshot slice is shared with the caller and must not be rewritten in place")
 	}
 }
+
+func TestApplyMoveOverridesAddsDatabaseWithoutSnapshot(t *testing.T) {
+	got := applyMoveOverrides([]dbPlacement{
+		{Datname: "app-one", Shard: "shard-1"},
+	}, map[string]string{"no-cr-yet": "shard-0"})
+
+	if len(got) != 2 {
+		t.Fatalf("a move without a snapshot row must still be routed: %+v", got)
+	}
+	if got[1].Datname != "no-cr-yet" || got[1].Shard != "shard-0" {
+		t.Fatalf("wrong placement added: %+v", got[1])
+	}
+}
+
+func TestRenderRoutesLinesMoveWithoutSnapshot(t *testing.T) {
+	out, stats, err := renderPgBouncerRoutes(routeShards(),
+		applyMoveOverrides(nil, map[string]string{"no-cr-yet": "shard-0"}), "shard-1")
+	if err != nil {
+		t.Fatalf("render: %v", err)
+	}
+	want := "no-cr-yet = host=pg-shard-0-postgresql.databases.svc.cluster.local port=5432 dbname=no-cr-yet auth_dbname=postgres"
+	if !strings.Contains(out, want) {
+		t.Fatalf("a cut-over database with no CR must get a line:\n%s", out)
+	}
+	if stats.Routed != 1 {
+		t.Fatalf("the moved database is the one routed by name: %+v", stats)
+	}
+}

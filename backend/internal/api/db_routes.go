@@ -218,16 +218,35 @@ func (h *Handler) routerPlacements(ctx context.Context) ([]dbPlacement, error) {
 // CR says so" are exactly the seconds in which the router would keep sending
 // clients to the instance the data just left. A move that has reached its
 // cutover therefore decides where its database is until the CR agrees.
+//
+// A move whose database has no snapshot row at all adds one rather than being
+// dropped. The snapshot is written from a live CR, so a database that has none
+// - one created before ServiceDatabaseV2, or one whose CR has not been observed
+// yet - would otherwise cut over into silence: the router would keep sending it
+// to the wildcard, which is the shard the data just left. The move is the
+// stronger statement about where the data is, with or without a CR.
 func applyMoveOverrides(placements []dbPlacement, overrides map[string]string) []dbPlacement {
 	if len(overrides) == 0 {
 		return placements
 	}
 	out := make([]dbPlacement, len(placements))
 	copy(out, placements)
+	seen := make(map[string]bool, len(out))
 	for i, p := range out {
 		if shard, ok := overrides[p.Datname]; ok {
 			out[i].Shard = shard
 		}
+		seen[p.Datname] = true
+	}
+	extra := make([]string, 0, len(overrides))
+	for datname := range overrides {
+		if !seen[datname] {
+			extra = append(extra, datname)
+		}
+	}
+	sort.Strings(extra)
+	for _, datname := range extra {
+		out = append(out, dbPlacement{Datname: datname, Shard: overrides[datname]})
 	}
 	return out
 }
