@@ -93,6 +93,57 @@ spec:
               platform rather than a customer to invoice — decide deliberately whether to keep
               carrying it. The per-hour evidence is in app_usage; the same numbers per client are
               on /admin/costs.
+    - name: dada-cloud-console.ai
+      rules:
+        # On 2026-08-04 the shared OpenRouter account ran out of credit. The
+        # gateway answered 402 Insufficient credits to 66 of 66 calls over three
+        # hours, every or-* alias went down at once, half of console chat and
+        # every user's background memory fold got nothing — and no rule fired,
+        # because nothing counted an upstream refusal anywhere. It was found by
+        # reading pod logs by hand. These two rules are that gap closed: the
+        # first says a group's callers are getting errors, the second says they
+        # are getting answers only because a fallback is carrying them.
+        - alert: AIModelGroupRefused
+          expr: |-
+            sum by (model_group, provider, status) (
+              rate(dada_ai_upstream_failures_total{status=~"402|429"}[10m])
+            ) > {{ .Values.metrics.alerts.aiUpstreamFailureRate }} / 60
+          for: 10m
+          # A dead balance does not fail evenly: a client retry storm makes the
+          # rate spike and sag around the threshold, and every sag would end the
+          # alert and start a new one on the next crossing. The provider is
+          # equally broke across the gaps.
+          keep_firing_for: 30m
+          labels:
+            severity: warning
+          annotations:
+            summary: "AI model group {{`{{ $labels.model_group }}`}} refused by {{`{{ $labels.provider }}`}} ({{`{{ $labels.status }}`}})"
+            description: >-
+              {{`{{ $labels.provider }}`}} is answering HTTP {{`{{ $labels.status }}`}} to
+              {{`{{ $labels.model_group }}`}}. 402 means the account has stopped paying out —
+              an exhausted balance, which no retry and no fallback inside the group can fix and
+              which only a human with the provider's billing page can. 429 means quota, which
+              may clear on its own. Check the balance on the provider's dashboard first, then
+              dada_ai_fallbacks_total to see whether callers are still being served.
+        - alert: AIServedByFallback
+          expr: |-
+            sum by (requested, served) (rate(dada_ai_fallbacks_total[15m])) > 0
+          for: 15m
+          # A chain that is carrying traffic flaps with the primary it is
+          # covering: the primary recovers for a minute, the fallback rate drops
+          # to zero, and the next refusal starts a fresh alert. One degradation,
+          # not ten.
+          keep_firing_for: 1h
+          labels:
+            severity: info
+          annotations:
+            summary: "{{`{{ $labels.requested }}`}} is being served by {{`{{ $labels.served }}`}}"
+            description: >-
+              Callers asking for {{`{{ $labels.requested }}`}} are getting answers from
+              {{`{{ $labels.served }}`}} instead, so its own provider is refusing. Nobody is
+              getting an error — which is the point of the chain and also the reason this needs
+              saying out loud: a fully absorbed outage is invisible until the bill or the quality
+              complaint arrives. Informational; act on the AIModelGroupRefused alert beside it.
     - name: dada-cloud-console.box
       rules:
         # Dada Box. Time to ready is the product claim marketing cannot

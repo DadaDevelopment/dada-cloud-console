@@ -506,3 +506,9 @@ metrics:
     # footprint, not a contract, and a free account a few roubles over it is
     # normal rather than actionable.
     orgOverageFactor: 1.5
+    # Upstream refusals per minute, per model group, before AIModelGroupRefused
+    # fires. 0.2/min ≈ one every five minutes: high enough that a single
+    # unlucky call is not an alert, low enough that a provider which has
+    # genuinely stopped paying out crosses it within the `for` window. On
+    # 2026-08-04 OpenRouter ran at roughly 0.4/min for three hours.
+    aiUpstreamFailureRate: 0.2
