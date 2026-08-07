@@ -76,18 +76,23 @@ func SetAppServerWorkspace(ctx context.Context, pool *pgxpool.Pool, id uuid.UUID
 }
 
 // SetAppServerProvisioned updates vm_ip and vm_provider_id after terraform apply.
+// It clears error_message: the failure that text described belongs to an attempt
+// this apply just superseded.
 func SetAppServerProvisioned(ctx context.Context, pool *pgxpool.Pool, id uuid.UUID, vmIP, vmProviderID string) error {
 	_, err := pool.Exec(ctx,
-		`UPDATE app_servers SET vm_ip=$2, vm_provider_id=$3, status='WaitingForAgent', updated_at=NOW() WHERE id=$1`,
+		`UPDATE app_servers SET vm_ip=$2, vm_provider_id=$3, status='WaitingForAgent', error_message=NULL, updated_at=NOW() WHERE id=$1`,
 		id, vmIP, vmProviderID,
 	)
 	return err
 }
 
-// SetAppServerReady sets status=Ready and records the portainer endpoint ID.
+// SetAppServerReady sets status=Ready and records the portainer endpoint ID. The
+// error_message of any earlier failed attempt is cleared with it — a Ready server
+// carrying "context deadline exceeded" reads as broken in the console while it is
+// serving fine (le-probe, 08-07).
 func SetAppServerReady(ctx context.Context, pool *pgxpool.Pool, id uuid.UUID, portainerEndpointID int) error {
 	_, err := pool.Exec(ctx,
-		`UPDATE app_servers SET portainer_endpoint_id=$2, status='Ready', updated_at=NOW() WHERE id=$1`,
+		`UPDATE app_servers SET portainer_endpoint_id=$2, status='Ready', error_message=NULL, updated_at=NOW() WHERE id=$1`,
 		id, portainerEndpointID,
 	)
 	return err
