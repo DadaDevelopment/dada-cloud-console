@@ -324,6 +324,7 @@ func SetupRouter(pool *pgxpool.Pool, cfg *config.Config) *gin.Engine {
 		internal.POST("/ai/failure/record", h.AIRecordFailure)
 		internal.POST("/ai/key/introspect", h.AIIntrospectKey)
 		internal.POST("/identity/introspect", h.IntrospectServiceIdentity)
+		internal.GET("/db/routes.ini", h.DBRoutes)
 		log.Printf("internal: provisioning API enabled at /internal")
 	}
 
