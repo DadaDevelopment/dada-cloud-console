@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -24,6 +25,16 @@ const (
 	dbMoveFailed    = "failed"
 )
 
+// dbMoveStreamGrace is how long a move may see no walsender before it gives
+// up. CREATE SUBSCRIPTION returns as soon as the slot exists on the source; the
+// subscriber worker connects a moment later, and the first tick after the
+// schema copy lands inside that gap often enough that two of the first six real
+// moves died there - both were streaming healthily by the time the failure was
+// read. Minutes rather than seconds because the alternative failure, a stream
+// that really is dead, costs nothing extra to notice a little later: nothing
+// cuts over while the lag is unknown.
+const dbMoveStreamGrace = 5 * time.Minute
+
 // dbMoveCutoverLagBytes is how close the copy must be before the move is
 // allowed to hold traffic. It is not zero on purpose: a busy database never
 // reaches exactly zero while it keeps writing, and waiting for that would mean
@@ -40,6 +51,7 @@ type dbMove struct {
 	TargetShard string
 	Phase       string
 	LagBytes    int64
+	UpdatedAt   time.Time
 }
 
 // shardExecutor is the slice of a pgx connection the move steps need. Narrow on
@@ -255,6 +267,15 @@ func startReplication(ctx context.Context, srcDB, dstDB shardExecutor, datname, 
 	return nil
 }
 
+// errNoReplicationStream says nobody is streaming to the target right now.
+//
+// It is its own error because the same fact means two opposite things
+// depending on when it is seen: in the seconds after CREATE SUBSCRIPTION the
+// subscriber worker has not connected yet and the move only has to wait, while
+// minutes later it means the stream died and the copy is silently frozen. The
+// caller decides which, by how long the move has been waiting.
+var errNoReplicationStream = errors.New("db-move: nothing is streaming to the target, the copy is not current")
+
 // replicationLag reports how far the copy trails the original, in bytes of WAL.
 //
 // A missing walsender is an error rather than zero lag. Zero is what a caller
@@ -273,7 +294,7 @@ func replicationLag(ctx context.Context, srcDB shardExecutor, datname string) (i
 		return 0, fmt.Errorf("db-move: read replication lag: %w", err)
 	}
 	if senders == 0 {
-		return 0, errors.New("db-move: nothing is streaming to the target, the copy is not current")
+		return 0, errNoReplicationStream
 	}
 	if lag < 0 {
 		lag = 0

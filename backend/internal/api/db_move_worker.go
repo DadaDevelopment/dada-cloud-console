@@ -84,7 +84,7 @@ func (h *Handler) StartDBMoveWorker(ctx context.Context) {
 // others, so a step's error is recorded on its own row and the loop continues.
 func (w *dbMoveWorker) tick(ctx context.Context) {
 	rows, err := w.h.pool.Query(ctx, `
-		SELECT id::text, datname, owner_role, source_shard, target_shard, phase, lag_bytes
+		SELECT id::text, datname, owner_role, source_shard, target_shard, phase, lag_bytes, updated_at
 		FROM db_moves
 		WHERE phase NOT IN ('done', 'failed')
 		ORDER BY created_at
@@ -97,7 +97,7 @@ func (w *dbMoveWorker) tick(ctx context.Context) {
 	for rows.Next() {
 		var m dbMove
 		if err := rows.Scan(&m.ID, &m.Datname, &m.OwnerRole, &m.SourceShard,
-			&m.TargetShard, &m.Phase, &m.LagBytes); err != nil {
+			&m.TargetShard, &m.Phase, &m.LagBytes, &m.UpdatedAt); err != nil {
 			log.Printf("db-move: scan move: %v", err)
 			rows.Close()
 			return
@@ -251,6 +251,11 @@ func (w *dbMoveWorker) schema(ctx context.Context, m dbMove) error {
 // sync watches the copy catch up and moves to cutover once it is close enough.
 // The lag is stored on every tick because it is the only honest answer to "how
 // long until my database moves".
+//
+// A stream that has not appeared yet is waited out rather than treated as a
+// dead one, for dbMoveStreamGrace measured from the last tick that could read
+// the lag at all - which is exactly the moment the subscription was created,
+// because a tick that cannot read the lag writes nothing.
 func (w *dbMoveWorker) sync(ctx context.Context, m dbMove) error {
 	srcDB, err := w.connect(ctx, m.SourceShard, m.Datname)
 	if err != nil {
@@ -259,6 +264,9 @@ func (w *dbMoveWorker) sync(ctx context.Context, m dbMove) error {
 	defer srcDB.Close(ctx)
 
 	lag, err := replicationLag(ctx, srcDB, m.Datname)
+	if errors.Is(err, errNoReplicationStream) && time.Since(m.UpdatedAt) < dbMoveStreamGrace {
+		return nil
+	}
 	if err != nil {
 		return err
 	}

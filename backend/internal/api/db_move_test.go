@@ -252,3 +252,19 @@ func TestHandOverObjectsEscapesOwner(t *testing.T) {
 		t.Fatalf("a role name is tenant-influenced and has to be escaped:\n%s", dst.cmds[0])
 	}
 }
+
+func TestReplicationLagReportsMissingStreamAsItsOwnError(t *testing.T) {
+	src := &fakeShard{answers: []fakeRow{{vals: []any{0, int64(0)}}}}
+	_, err := replicationLag(context.Background(), src, "n8n")
+	if !errors.Is(err, errNoReplicationStream) {
+		t.Fatalf("a move has to tell a stream that has not started from one that died, got %v", err)
+	}
+}
+
+func TestReplicationLagStillReportsOtherErrors(t *testing.T) {
+	src := &fakeShard{answers: []fakeRow{{err: errors.New("boom")}}}
+	_, err := replicationLag(context.Background(), src, "n8n")
+	if err == nil || errors.Is(err, errNoReplicationStream) {
+		t.Fatalf("a broken query is not a missing stream, got %v", err)
+	}
+}
