@@ -88,7 +88,7 @@ func TestRouterCutoverPausesEveryReplica(t *testing.T) {
 	a, cmds := newFakeAdmin([]string{"10.0.0.1", "10.0.0.2"}, func(addr string) *fakeRouterConn {
 		return &fakeRouterConn{addr: addr, host: "old.svc", newHost: "new.svc", reloadsLeft: 2}
 	})
-	if err := a.Cutover(context.Background(), "odds-research", "new.svc"); err != nil {
+	if err := a.Cutover(context.Background(), "odds-research", "new.svc", nil); err != nil {
 		t.Fatalf("cutover: %v", err)
 	}
 	if got := countCmd(*cmds, "PAUSE \"odds-research\""); got != 2 {
@@ -109,7 +109,7 @@ func TestRouterCutoverResumesWhenRouteNeverLands(t *testing.T) {
 	a, cmds := newFakeAdmin([]string{"10.0.0.1"}, func(addr string) *fakeRouterConn {
 		return &fakeRouterConn{addr: addr, host: "old.svc"}
 	})
-	if err := a.Cutover(context.Background(), "odds-research", "new.svc"); err == nil {
+	if err := a.Cutover(context.Background(), "odds-research", "new.svc", nil); err == nil {
 		t.Fatal("a router that never picks up the new table must fail the cutover")
 	}
 	if countCmd(*cmds, "RESUME") != 1 {
@@ -125,7 +125,7 @@ func TestRouterCutoverResumesAfterPartialPause(t *testing.T) {
 	a, cmds := newFakeAdmin([]string{"10.0.0.1", "10.0.0.2"}, func(addr string) *fakeRouterConn {
 		return &fakeRouterConn{addr: addr, host: "old.svc", failPause: addr == "10.0.0.2"}
 	})
-	if err := a.Cutover(context.Background(), "odds-research", "new.svc"); err == nil {
+	if err := a.Cutover(context.Background(), "odds-research", "new.svc", nil); err == nil {
 		t.Fatal("cutover must fail when a replica refuses PAUSE")
 	}
 	if countCmd(*cmds, "RESUME") != 1 {
@@ -137,7 +137,7 @@ func TestRouterCutoverResumesAfterPartialPause(t *testing.T) {
 // would switch the registry while live traffic keeps writing to the old shard.
 func TestRouterCutoverRefusesWithoutPods(t *testing.T) {
 	a, cmds := newFakeAdmin(nil, func(addr string) *fakeRouterConn { return &fakeRouterConn{addr: addr} })
-	if err := a.Cutover(context.Background(), "odds-research", "new.svc"); err == nil {
+	if err := a.Cutover(context.Background(), "odds-research", "new.svc", nil); err == nil {
 		t.Fatal("cutover with zero routers must fail")
 	}
 	if len(*cmds) != 0 {
@@ -148,5 +148,46 @@ func TestRouterCutoverRefusesWithoutPods(t *testing.T) {
 func TestQuoteRouterIdent(t *testing.T) {
 	if got := quoteRouterIdent("odd\"s"); got != "\"odd\"\"s\"" {
 		t.Fatalf("quoteRouterIdent = %s", got)
+	}
+}
+
+// Work done inside the held window is the move itself: draining the last of
+// the replication lag, copying sequence positions, marking the database as
+// living on its new shard. If any of it fails the routing table must not be
+// switched at all, and the clients waiting behind PAUSE must be let go on the
+// shard that still has their data.
+func TestRouterCutoverResumesWhenTheWorkFails(t *testing.T) {
+	a, cmds := newFakeAdmin([]string{"10.0.0.1", "10.0.0.2"}, func(addr string) *fakeRouterConn {
+		return &fakeRouterConn{addr: addr, host: "old.svc", newHost: "new.svc", reloadsLeft: 1}
+	})
+	err := a.Cutover(context.Background(), "odds-research", "new.svc", func(context.Context) error {
+		return fmt.Errorf("lag never drained")
+	})
+	if err == nil {
+		t.Fatal("work that fails inside the held window must fail the cutover")
+	}
+	if got := countCmd(*cmds, "RESUME \"odds-research\""); got != 2 {
+		t.Fatalf("every paused replica must be released, got %d: %v", got, *cmds)
+	}
+	if got := countCmd(*cmds, "RELOAD"); got != 0 {
+		t.Fatalf("routes must not be switched when the work failed: %v", *cmds)
+	}
+}
+
+// The work runs while traffic is held, not before it: sequence positions copied
+// before PAUSE would be stale by the time clients stop writing.
+func TestRouterCutoverRunsWorkAfterEveryPause(t *testing.T) {
+	a, cmds := newFakeAdmin([]string{"10.0.0.1", "10.0.0.2"}, func(addr string) *fakeRouterConn {
+		return &fakeRouterConn{addr: addr, host: "old.svc", newHost: "new.svc", reloadsLeft: 1}
+	})
+	var pausesWhenWorkRan int
+	if err := a.Cutover(context.Background(), "odds-research", "new.svc", func(context.Context) error {
+		pausesWhenWorkRan = countCmd(*cmds, "PAUSE")
+		return nil
+	}); err != nil {
+		t.Fatalf("cutover: %v", err)
+	}
+	if pausesWhenWorkRan != 2 {
+		t.Fatalf("work ran with %d replicas paused, want 2", pausesWhenWorkRan)
 	}
 }

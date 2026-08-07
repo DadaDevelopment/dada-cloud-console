@@ -153,7 +153,7 @@ func quoteRouterIdent(s string) string {
 //
 // Every exit path resumes. A router left paused serves nobody, so a failure to
 // finish the cutover must still end with traffic flowing to the old shard.
-func (a *routerAdmin) Cutover(ctx context.Context, datname, wantHost string) error {
+func (a *routerAdmin) Cutover(ctx context.Context, datname, wantHost string, during func(context.Context) error) error {
 	if a == nil || a.host == "" {
 		return fmt.Errorf("router admin is not configured")
 	}
@@ -195,6 +195,13 @@ func (a *routerAdmin) Cutover(ctx context.Context, datname, wantHost string) err
 			return fmt.Errorf("pause router %s: %w", addrs[i], err)
 		}
 		paused = append(paused, c)
+	}
+
+	if during != nil {
+		if err := during(ctx); err != nil {
+			resumeAll()
+			return fmt.Errorf("cutover work for %s: %w", datname, err)
+		}
 	}
 
 	deadline := a.now().Add(a.timeout)
