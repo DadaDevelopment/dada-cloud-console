@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/dada-tuda/console/gitops-agent/internal/db"
 	"github.com/dada-tuda/console/gitops-agent/internal/renderer"
 )
 
@@ -280,5 +281,70 @@ func TestCertbotComposeBlock_IssuesPerHostAndSurvivesFailures(t *testing.T) {
 	}
 	if got := block["depends_on"].([]string); len(got) != 1 || got[0] != "web-ingress" {
 		t.Errorf("certbot must start behind the vhost that answers the challenge, got %v", got)
+	}
+}
+
+// Attaching a custom domain re-renders the whole nginx conf, so a password-gated
+// ingress can lose its gate in the process — a private site silently going
+// public is worse than the domain never attaching. Locks that the persisted
+// auth_basic_user_file path survives the rebuild: same directive, same mount.
+func TestIngressRebuildSpec_KeepsBasicAuth(t *testing.T) {
+	meta := ingressMetaSnapshot{
+		Host:          "fin-data.pro",
+		SSLRedirect:   true,
+		BasicAuth:     true,
+		BasicAuthFile: "/etc/nginx/.htpasswd",
+	}
+	meta.TLS.Enabled = true
+	meta.TLS.CertPath = "/etc/nginx/certs/live/fin-data.pro/fullchain.pem"
+	meta.Rules = append(meta.Rules, struct {
+		Path string `json:"path"`
+		App  string `json:"app"`
+		Port int    `json:"port"`
+	}{Path: "/", App: "frontend", Port: 5173})
+
+	spec, deps, keyPath := ingressRebuildSpec(meta, []ingressCustomHost{{Host: "www.fin-data.pro", App: "frontend", Port: 5173}})
+
+	if spec.BasicAuth != "/etc/nginx/.htpasswd" {
+		t.Fatalf("rebuild dropped the auth_basic_user_file path: %q", spec.BasicAuth)
+	}
+	if keyPath != "/etc/nginx/certs/live/fin-data.pro/privkey.pem" {
+		t.Errorf("key path not derived from cert path: %q", keyPath)
+	}
+
+	block := ingressComposeBlock(spec, deps)
+	conf, err := base64.StdEncoding.DecodeString(block["environment"].(map[string]any)["NGINX_CONF_B64"].(string))
+	if err != nil {
+		t.Fatalf("decode rendered conf: %v", err)
+	}
+	if !strings.Contains(string(conf), "auth_basic_user_file /etc/nginx/.htpasswd;") {
+		t.Errorf("re-rendered conf serves the site without a password gate:\n%s", conf)
+	}
+
+	var mounted bool
+	for _, v := range block["volumes"].([]string) {
+		if strings.HasPrefix(v, "/etc/nginx/.htpasswd:") {
+			mounted = true
+		}
+	}
+	if !mounted {
+		t.Errorf("htpasswd file not mounted, nginx would fail on the directive: %+v", block["volumes"])
+	}
+}
+
+// An ingress created before basic_auth_file was persisted carries the flag with
+// no path. There is nothing to re-render, so the attach must fail loudly rather
+// than publish the site or mount a guessed path (which takes nginx, and every
+// other domain on that VM, down).
+func TestRebuildIngressCompose_RefusesLegacyBasicAuthSnapshot(t *testing.T) {
+	w := &DBWatcher{}
+	meta := ingressMetaSnapshot{Host: "fin-data.pro", BasicAuth: true}
+
+	err := w.rebuildIngressCompose(context.Background(), db.Operation{}, "ingress", meta, nil)
+	if err == nil {
+		t.Fatal("legacy basic-auth snapshot must not be rebuilt silently")
+	}
+	if !strings.Contains(err.Error(), "basic_auth_file") {
+		t.Errorf("error must name the missing field so the fix is obvious: %v", err)
 	}
 }

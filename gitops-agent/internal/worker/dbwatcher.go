@@ -618,10 +618,11 @@ func (w *DBWatcher) doCreateIngress(ctx context.Context, op db.Operation) error 
 	// console renders routing/TLS as a first-class Resource (the generated conf is
 	// base64-opaque; the console reads this, not the nginx.conf).
 	ingressMeta := map[string]any{
-		"host":         p.Host,
-		"aliases":      p.Aliases,
-		"ssl_redirect": p.SSLRedirect,
-		"basic_auth":   p.BasicAuth != "",
+		"host":            p.Host,
+		"aliases":         p.Aliases,
+		"ssl_redirect":    p.SSLRedirect,
+		"basic_auth":      p.BasicAuth != "",
+		"basic_auth_file": p.BasicAuth,
 		"tls": map[string]any{
 			"enabled":     p.TLS.Enabled,
 			"min_version": p.TLS.MinVersion,
@@ -2709,12 +2710,18 @@ func (w *DBWatcher) findManagedIngress(ctx context.Context, op db.Operation) (na
 // on a managed-ingress App snapshot — the source of truth
 // doAttachCustomHostnameCompose/doDetachCustomHostnameCompose reconstruct a
 // renderer.VMIngressSpec from whenever a custom domain is attached or detached.
+//
+// BasicAuth is the console-facing "this ingress is password-gated" flag;
+// BasicAuthFile is the auth_basic_user_file path a rebuild re-renders to keep
+// the gate alive. Snapshots written before the path was persisted carry the
+// flag without the path — the only case rebuildIngressCompose still refuses.
 type ingressMetaSnapshot struct {
-	Host        string   `json:"host"`
-	Aliases     []string `json:"aliases"`
-	SSLRedirect bool     `json:"ssl_redirect"`
-	BasicAuth   bool     `json:"basic_auth"`
-	TLS         struct {
+	Host          string   `json:"host"`
+	Aliases       []string `json:"aliases"`
+	SSLRedirect   bool     `json:"ssl_redirect"`
+	BasicAuth     bool     `json:"basic_auth"`
+	BasicAuthFile string   `json:"basic_auth_file"`
+	TLS           struct {
 		Enabled    bool   `json:"enabled"`
 		MinVersion string `json:"min_version"`
 		CertPath   string `json:"cert_path"`
@@ -2783,17 +2790,20 @@ func containerPortFromPortString(s string) int {
 // TLS is forced enabled: once any custom host exists the ingress needs the
 // /etc/nginx/certs mount regardless of the canonical host's original setting.
 //
-// KNOWN GAP (fail-safe): doCreateIngress persists basic_auth only as a bool, not
-// the auth_basic_user_file path, so a rebuild cannot carry the protection into
-// the re-rendered spec. Rather than silently drop it (turning a password-gated
-// site public) or mount a guessed path (crashing nginx for every domain), this
-// refuses the operation when meta.BasicAuth is set, leaving the ingress
-// untouched. Closing the gap needs a real basic_auth path field in the meta.
-func (w *DBWatcher) rebuildIngressCompose(ctx context.Context, op db.Operation, ingressName string, meta ingressMetaSnapshot, customHosts []ingressCustomHost) error {
-	if meta.BasicAuth {
-		return fmt.Errorf("ingress %q has basic auth configured; attaching or detaching a custom domain would re-render the nginx conf and drop that protection (the auth_basic_user_file path is not persisted) — not supported until the path is stored in the ingress meta", ingressName)
-	}
-
+// Basic auth survives the rebuild: the auth_basic_user_file path is persisted
+// as basic_auth_file, so the re-rendered spec carries the same htpasswd mount
+// and directive the ingress had. A snapshot from before that field existed
+// still carries the flag without a path — there the operation is refused rather
+// than silently dropping the protection (turning a password-gated site public)
+// or mounting a guessed path (nginx then fails to start, taking every other
+// domain on the VM down with it). Re-creating such an ingress persists the path
+// and unblocks it.
+// ingressRebuildSpec reconstructs the ingress's VMIngressSpec from its persisted
+// meta plus the custom hosts it should now serve, and reports the deps the
+// compose block must wait on. Split out of rebuildIngressCompose so the parts
+// that decide what the re-rendered nginx keeps — the basic-auth gate above all
+// — are provable without a database.
+func ingressRebuildSpec(meta ingressMetaSnapshot, customHosts []ingressCustomHost) (renderer.VMIngressSpec, []string, string) {
 	keyPath := meta.TLS.KeyPath
 	if keyPath == "" {
 		keyPath = deriveIngressKeyPath(meta.TLS.CertPath)
@@ -2803,6 +2813,7 @@ func (w *DBWatcher) rebuildIngressCompose(ctx context.Context, op db.Operation, 
 		Host:        meta.Host,
 		Aliases:     meta.Aliases,
 		SSLRedirect: meta.SSLRedirect,
+		BasicAuth:   meta.BasicAuthFile,
 		TLS: renderer.VMIngressTLS{
 			Enabled:    true,
 			MinVersion: meta.TLS.MinVersion,
@@ -2834,13 +2845,23 @@ func (w *DBWatcher) rebuildIngressCompose(ctx context.Context, op db.Operation, 
 		deps = append(deps, a)
 	}
 	sort.Strings(deps)
+	return spec, deps, keyPath
+}
+
+func (w *DBWatcher) rebuildIngressCompose(ctx context.Context, op db.Operation, ingressName string, meta ingressMetaSnapshot, customHosts []ingressCustomHost) error {
+	if meta.BasicAuth && meta.BasicAuthFile == "" {
+		return fmt.Errorf("ingress %q has basic auth configured but its snapshot predates basic_auth_file, so a re-render would drop that protection; re-create the ingress to persist the auth_basic_user_file path, then retry", ingressName)
+	}
+
+	spec, deps, keyPath := ingressRebuildSpec(meta, customHosts)
 	block := ingressComposeBlock(spec, deps)
 
 	newIngressMeta := map[string]any{
-		"host":         meta.Host,
-		"aliases":      meta.Aliases,
-		"ssl_redirect": meta.SSLRedirect,
-		"basic_auth":   meta.BasicAuth,
+		"host":            meta.Host,
+		"aliases":         meta.Aliases,
+		"ssl_redirect":    meta.SSLRedirect,
+		"basic_auth":      meta.BasicAuth,
+		"basic_auth_file": meta.BasicAuthFile,
 		"tls": map[string]any{
 			"enabled":     true,
 			"min_version": meta.TLS.MinVersion,
