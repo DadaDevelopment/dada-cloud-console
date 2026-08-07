@@ -380,8 +380,10 @@ func (c *jobSchemaCopier) CopySchema(ctx context.Context, m dbMove, srcDSN, dstD
 	if job.Status.Succeeded > 0 {
 		return true, nil
 	}
-	if job.Status.Failed > 0 {
-		return false, fmt.Errorf("schema copy job %s failed, see its pod logs", name)
+	for _, c := range job.Status.Conditions {
+		if c.Type == batchv1.JobFailed && c.Status == corev1.ConditionTrue {
+			return false, fmt.Errorf("schema copy job %s failed: %s, see its pod logs", name, c.Reason)
+		}
 	}
 	return false, nil
 }
@@ -391,6 +393,10 @@ func (c *jobSchemaCopier) CopySchema(ctx context.Context, m dbMove, srcDSN, dstD
 // ON_ERROR_STOP is on: a schema that loaded halfway would let replication start
 // against a target missing tables, and those tables would be silently absent
 // after the move rather than loudly missing before it.
+//
+// bash, not sh: /bin/sh in this image is dash, which has no pipefail, so a
+// failing pg_dump would be reported by the exit status of psql - which happily
+// succeeds on an empty stream.
 func schemaCopyJob(name string, m dbMove, srcDSN, dstDSN string) *batchv1.Job {
 	backoff := int32(2)
 	ttl := int32(24 * 60 * 60)
@@ -417,7 +423,7 @@ func schemaCopyJob(name string, m dbMove, srcDSN, dstDSN string) *batchv1.Job {
 					Containers: []corev1.Container{{
 						Name:    "copy-schema",
 						Image:   dbMoveSchemaImage,
-						Command: []string{"/bin/sh", "-c", script},
+						Command: []string{"/bin/bash", "-c", script},
 						Env: []corev1.EnvVar{
 							{Name: "SRC", Value: srcDSN},
 							{Name: "DST", Value: dstDSN},
