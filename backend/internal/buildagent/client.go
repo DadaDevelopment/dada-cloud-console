@@ -188,32 +188,3 @@ func (c *Client) DetectFramework(ctx context.Context, installationID int64, repo
 	}
 	return &out, nil
 }
-
-// SearchHit mirrors the agent's github.SearchHit.
-type SearchHit struct {
-	FullName      string `json:"full_name"`
-	Description   string `json:"description"`
-	Stars         int    `json:"stars"`
-	DefaultBranch string `json:"default_branch"`
-	AvatarURL     string `json:"avatar_url"`
-	Archived      bool   `json:"archived"`
-	Fork          bool   `json:"fork"`
-	License       string `json:"license"`
-	HTMLURL       string `json:"html_url"`
-}
-
-// SearchRepos proxies GET /github/search/repos on the agent.
-func (c *Client) SearchRepos(ctx context.Context, query string, limit int) ([]SearchHit, error) {
-	q := url.Values{}
-	q.Set("q", query)
-	if limit > 0 {
-		q.Set("limit", fmt.Sprintf("%d", limit))
-	}
-	var out struct {
-		Repositories []SearchHit `json:"repositories"`
-	}
-	if err := c.getJSON(ctx, "/github/search/repos?"+q.Encode(), &out); err != nil {
-		return nil, err
-	}
-	return out.Repositories, nil
-}

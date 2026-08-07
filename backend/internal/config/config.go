@@ -154,16 +154,6 @@ type Config struct {
 	// its credentials degrades to no insights rather than to a crash loop.
 	DBShardAdminDSNs string // DB_SHARD_ADMIN_DSNS
 
-	// pg-router admin console, used to hold traffic still for the instant a
-	// database changes shard. The host must resolve to EVERY router pod (a
-	// headless Service), not to the load-balanced one: a PAUSE sent through the
-	// balanced Service lands on one replica while the other keeps forwarding
-	// writes to the instance the data is leaving. Empty host = no cutovers.
-	DBRouterAdminHost     string // DB_ROUTER_ADMIN_HOST
-	DBRouterAdminPort     int    // DB_ROUTER_ADMIN_PORT
-	DBRouterAdminUser     string // DB_ROUTER_ADMIN_USER
-	DBRouterAdminPassword string // DB_ROUTER_ADMIN_PASSWORD
-
 	// S3 access for upload-deploy (docs/plans/2026-07-23-upload-deploy.md):
 	// where UploadSourceArchive stores the uploaded archive bytes, keyed
 	// "source-uploads/<projectID>/<appName>/<uploadID>.<ext>". build-agent
@@ -737,10 +727,6 @@ func Load() (*Config, error) {
 		DBBackupS3Insecure:          getEnv("DB_BACKUP_S3_INSECURE", "false") == "true",
 		DBBackupS3Prefix:            getEnv("DB_BACKUP_S3_PREFIX", "k10/postgresql-logical"),
 		DBShardAdminDSNs:            getEnv("DB_SHARD_ADMIN_DSNS", ""),
-		DBRouterAdminHost:           getEnv("DB_ROUTER_ADMIN_HOST", ""),
-		DBRouterAdminPort:           getEnvInt("DB_ROUTER_ADMIN_PORT", 5432),
-		DBRouterAdminUser:           getEnv("DB_ROUTER_ADMIN_USER", "pgbouncer_auth"),
-		DBRouterAdminPassword:       getEnv("DB_ROUTER_ADMIN_PASSWORD", ""),
 		SourceUploadS3Endpoint:      getEnv("SOURCE_UPLOAD_S3_ENDPOINT", ""),
 		SourceUploadS3Bucket:        getEnv("SOURCE_UPLOAD_S3_BUCKET", ""),
 		SourceUploadS3Region:        getEnv("SOURCE_UPLOAD_S3_REGION", "us-east-1"),

@@ -62,7 +62,6 @@ type gitRepo struct {
 	Port              int        `json:"port"`
 	Replicas          int        `json:"replicas"`
 	Profile           string     `json:"profile"`
-	Worker            bool       `json:"worker"`
 	CreatedAt         time.Time  `json:"created_at"`
 	UpdatedAt         time.Time  `json:"updated_at"`
 }
@@ -891,7 +890,7 @@ func (h *Handler) ListGitRepos(c *gin.Context) {
 	rows, err := h.pool.Query(c.Request.Context(),
 		`SELECT id, project_id, environment_id, app_name, installation_id, provider,
 		        repo_full_name, production_branch, root_dir, framework_override,
-		        auto_deploy, port, replicas, profile, worker, created_at, updated_at
+		        auto_deploy, port, replicas, profile, created_at, updated_at
 		 FROM git_repos
 		 WHERE project_id = $1 AND environment_id = $2
 		 ORDER BY app_name`,
@@ -909,7 +908,7 @@ func (h *Handler) ListGitRepos(c *gin.Context) {
 		if err := rows.Scan(&r.ID, &r.ProjectID, &r.EnvironmentID, &r.AppName,
 			&r.InstallationID, &r.Provider, &r.RepoFullName, &r.ProductionBranch,
 			&r.RootDir, &r.FrameworkOverride, &r.AutoDeploy,
-			&r.Port, &r.Replicas, &r.Profile, &r.Worker, &r.CreatedAt, &r.UpdatedAt); err != nil {
+			&r.Port, &r.Replicas, &r.Profile, &r.CreatedAt, &r.UpdatedAt); err != nil {
 			respondError(c, http.StatusInternalServerError, "failed to scan repo")
 			return
 		}
@@ -937,9 +936,6 @@ type connectGitRepoRequest struct {
 	Port     int    `json:"port"`
 	Replicas int    `json:"replicas"`
 	Profile  string `json:"profile"`
-	// Worker marks an app with no HTTP entrypoint: port stays 0, so nothing
-	// downstream renders a Service or a default hostname for it.
-	Worker bool `json:"worker"`
 	// GitLab only: a personal/project access token to store encrypted. Ignored for GitHub.
 	Token string `json:"token"`
 	// Provider defaults to github when an installation_id is supplied.
@@ -1063,16 +1059,150 @@ func (h *Handler) ConnectGitRepo(c *gin.Context) {
 	}
 	appAudit = req.AppName
 
-	r, fault := h.linkGitRepo(c.Request.Context(), claims.UserID, projectID, envID, &req)
-	if fault != nil {
-		if fault.Status == http.StatusNotFound {
-			reject(fault.Status, fault.Reason, func() { respondNotFound(c) })
-			return
-		}
-		rejectErr(fault.Status, fault.Reason, fault.Message)
+	if req.RepoFullName == "" {
+		rejectErr(http.StatusBadRequest, "missing_repo_full_name", "repo_full_name is required")
 		return
 	}
-	provider := r.Provider
+	if req.AppName == "" {
+		rejectErr(http.StatusBadRequest, "missing_app_name", "app_name is required")
+		return
+	}
+	if err := validateKubeName(req.AppName); err != nil {
+		rejectErr(http.StatusBadRequest, "invalid_app_name", err.Error())
+		return
+	}
+	provider := req.Provider
+	if provider == "" {
+		provider = "github"
+	}
+	if provider != "github" && provider != "gitlab" {
+		rejectErr(http.StatusBadRequest, "invalid_provider", "provider must be github or gitlab")
+		return
+	}
+	if req.ProductionBranch == "" {
+		req.ProductionBranch = "main"
+	}
+	if req.RootDir == "" {
+		req.RootDir = "."
+	}
+	// Intended app spec (applied when the first build creates the app).
+	if req.Port == 0 {
+		req.Port = 8080
+	}
+	if req.Replicas == 0 {
+		req.Replicas = 1
+	}
+	if req.Profile == "" {
+		req.Profile = "small"
+	}
+	if req.Port < 1 || req.Port > 65535 {
+		rejectErr(http.StatusBadRequest, "invalid_port", "port must be between 1 and 65535")
+		return
+	}
+	if req.Replicas < 1 || req.Replicas > 10 {
+		rejectErr(http.StatusBadRequest, "invalid_replicas", "replicas must be between 1 and 10")
+		return
+	}
+	if req.Profile != "small" && req.Profile != "medium" && req.Profile != "large" {
+		rejectErr(http.StatusBadRequest, "invalid_profile", "profile must be one of: small, medium, large")
+		return
+	}
+	cloneURL := req.CloneURL
+	if cloneURL == "" {
+		cloneURL = "https://github.com/" + req.RepoFullName + ".git"
+	}
+
+	// Resolve the installation to a row visible to this project's org. Accept
+	// EITHER the installation's id (UUID) OR its numeric GitHub installation id —
+	// listGitInstallations surfaces both fields, and callers reasonably pass
+	// whichever they see. Scoped by org (how installations are shared/listed), not
+	// by the row's project_id, so an org-shared installation resolves correctly.
+	var installationID *uuid.UUID
+	if req.InstallationID != "" {
+		var resolved uuid.UUID
+		var qerr error
+		if instUUID, perr := uuid.Parse(req.InstallationID); perr == nil {
+			qerr = h.pool.QueryRow(c.Request.Context(),
+				`SELECT gai.id FROM git_app_installations gai
+				 JOIN projects p ON p.org_id = gai.org_id
+				 WHERE gai.id = $1 AND p.id = $2`,
+				instUUID, projectID,
+			).Scan(&resolved)
+		} else if numeric, nerr := strconv.ParseInt(req.InstallationID, 10, 64); nerr == nil {
+			qerr = h.pool.QueryRow(c.Request.Context(),
+				`SELECT gai.id FROM git_app_installations gai
+				 JOIN projects p ON p.org_id = gai.org_id
+				 WHERE gai.installation_id = $1 AND p.id = $2`,
+				numeric, projectID,
+			).Scan(&resolved)
+		} else {
+			rejectErr(http.StatusBadRequest, "invalid_installation_id", "installation_id must be the installation id (UUID) or its numeric GitHub installation id")
+			return
+		}
+		if qerr == pgx.ErrNoRows {
+			reject(http.StatusNotFound, "installation_not_found", func() { respondNotFound(c) })
+			return
+		}
+		if qerr != nil {
+			rejectErr(http.StatusInternalServerError, "installation_check_failed", "failed to verify installation")
+			return
+		}
+		installationID = &resolved
+	}
+
+	if installationID == nil && provider == "github" {
+		if resolved, ok := h.resolveInstallationByOwner(c.Request.Context(), projectID, req.RepoFullName); ok {
+			installationID = &resolved
+		}
+	}
+
+	// GitLab token (optional) — store encrypted.
+	var tokenEncrypted []byte
+	if req.Token != "" {
+		tokenEncrypted, err = crypto.EncryptToken(h.cfg.GitopsEncryptionKey, []byte(req.Token))
+		if err != nil {
+			rejectErr(http.StatusInternalServerError, "token_encrypt_failed", "failed to encrypt token")
+			return
+		}
+	}
+
+	var frameworkOverride *string
+	if req.FrameworkOverride != "" {
+		frameworkOverride = &req.FrameworkOverride
+	}
+
+	webhookSecret := randomHex(32)
+
+	demoExpiresAt := h.demoExpiryFor(req.RepoFullName)
+
+	var r gitRepo
+	row := h.pool.QueryRow(c.Request.Context(),
+		`INSERT INTO git_repos
+		   (project_id, environment_id, app_name, installation_id, provider,
+		    repo_full_name, clone_url, token_encrypted, webhook_secret,
+		    production_branch, root_dir, framework_override, auto_deploy,
+		    port, replicas, profile, created_by, demo_expires_at)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
+		 RETURNING id, project_id, environment_id, app_name, installation_id, provider,
+		           repo_full_name, production_branch, root_dir, framework_override,
+		           auto_deploy, port, replicas, profile, created_at, updated_at`,
+		projectID, envID, req.AppName, installationID, provider,
+		req.RepoFullName, cloneURL, tokenEncrypted, webhookSecret,
+		req.ProductionBranch, req.RootDir, frameworkOverride, req.AutoDeploy,
+		req.Port, req.Replicas, req.Profile, claims.UserID, demoExpiresAt,
+	)
+	if err := row.Scan(&r.ID, &r.ProjectID, &r.EnvironmentID, &r.AppName,
+		&r.InstallationID, &r.Provider, &r.RepoFullName, &r.ProductionBranch,
+		&r.RootDir, &r.FrameworkOverride, &r.AutoDeploy,
+		&r.Port, &r.Replicas, &r.Profile, &r.CreatedAt, &r.UpdatedAt); err != nil {
+		if isUniqueViolation(err) {
+			rejectErr(http.StatusConflict, "repo_already_linked", "this app already has a linked repository in this environment")
+			return
+		}
+		rejectErr(http.StatusInternalServerError, "link_insert_failed", "failed to link repository")
+		return
+	}
+	r.PlatformAccess = classifyPlatformAccess(r.Provider, r.InstallationID)
 
 	h.recordAudit(c.Request.Context(), claims.UserID, auditEntry{
 		ProjectID:     projectID,
@@ -1090,149 +1220,7 @@ func (h *Handler) ConnectGitRepo(c *gin.Context) {
 	})
 	h.notifyAuditEvent(claims, projectID, "ConnectGitRepo", req.AppName)
 
-	c.JSON(http.StatusCreated, gin.H{"repos": []gitRepo{*r}})
-}
-
-// linkGitRepo validates a link request, applies the server-side defaults and
-// writes the git_repos row.
-//
-// Split out of ConnectGitRepo so installing a ready-made project links its
-// repository through the same code rather than through a second copy of these
-// rules. The request is taken by pointer because the defaults it fills in
-// (branch, root dir, port, replicas, profile) are what the caller must record
-// afterwards — an audit line saying "branch: " when the row says "main" is a
-// log that lies.
-func (h *Handler) linkGitRepo(ctx context.Context, actorID, projectID, envID uuid.UUID, req *connectGitRepoRequest) (*gitRepo, *opFault) {
-	if req.RepoFullName == "" {
-		return nil, &opFault{http.StatusBadRequest, "missing_repo_full_name", "repo_full_name is required"}
-	}
-	if req.AppName == "" {
-		return nil, &opFault{http.StatusBadRequest, "missing_app_name", "app_name is required"}
-	}
-	if err := validateKubeName(req.AppName); err != nil {
-		return nil, &opFault{http.StatusBadRequest, "invalid_app_name", err.Error()}
-	}
-	if req.Provider == "" {
-		req.Provider = "github"
-	}
-	if req.Provider != "github" && req.Provider != "gitlab" {
-		return nil, &opFault{http.StatusBadRequest, "invalid_provider", "provider must be github or gitlab"}
-	}
-	if req.ProductionBranch == "" {
-		req.ProductionBranch = "main"
-	}
-	if req.RootDir == "" {
-		req.RootDir = "."
-	}
-	if req.Port == 0 && !req.Worker {
-		req.Port = 8080
-	}
-	if req.Replicas == 0 {
-		req.Replicas = 1
-	}
-	if req.Profile == "" {
-		req.Profile = "small"
-	}
-	if !req.Worker && (req.Port < 1 || req.Port > 65535) {
-		return nil, &opFault{http.StatusBadRequest, "invalid_port", "port must be between 1 and 65535"}
-	}
-	if req.Replicas < 1 || req.Replicas > 10 {
-		return nil, &opFault{http.StatusBadRequest, "invalid_replicas", "replicas must be between 1 and 10"}
-	}
-	if req.Profile != "small" && req.Profile != "medium" && req.Profile != "large" {
-		return nil, &opFault{http.StatusBadRequest, "invalid_profile", "profile must be one of: small, medium, large"}
-	}
-	cloneURL := req.CloneURL
-	if cloneURL == "" {
-		cloneURL = "https://github.com/" + req.RepoFullName + ".git"
-	}
-
-	// Resolve the installation to a row visible to this project's org. Accept
-	// EITHER the installation's id (UUID) OR its numeric GitHub installation id —
-	// listGitInstallations surfaces both fields, and callers reasonably pass
-	// whichever they see. Scoped by org (how installations are shared/listed), not
-	// by the row's project_id, so an org-shared installation resolves correctly.
-	var installationID *uuid.UUID
-	if req.InstallationID != "" {
-		var resolved uuid.UUID
-		var qerr error
-		if instUUID, perr := uuid.Parse(req.InstallationID); perr == nil {
-			qerr = h.pool.QueryRow(ctx,
-				`SELECT gai.id FROM git_app_installations gai
-				 JOIN projects p ON p.org_id = gai.org_id
-				 WHERE gai.id = $1 AND p.id = $2`,
-				instUUID, projectID,
-			).Scan(&resolved)
-		} else if numeric, nerr := strconv.ParseInt(req.InstallationID, 10, 64); nerr == nil {
-			qerr = h.pool.QueryRow(ctx,
-				`SELECT gai.id FROM git_app_installations gai
-				 JOIN projects p ON p.org_id = gai.org_id
-				 WHERE gai.installation_id = $1 AND p.id = $2`,
-				numeric, projectID,
-			).Scan(&resolved)
-		} else {
-			return nil, &opFault{http.StatusBadRequest, "invalid_installation_id", "installation_id must be the installation id (UUID) or its numeric GitHub installation id"}
-		}
-		if qerr == pgx.ErrNoRows {
-			return nil, &opFault{http.StatusNotFound, "installation_not_found", "installation not found"}
-		}
-		if qerr != nil {
-			return nil, &opFault{http.StatusInternalServerError, "installation_check_failed", "failed to verify installation"}
-		}
-		installationID = &resolved
-	}
-
-	if installationID == nil && req.Provider == "github" {
-		if resolved, ok := h.resolveInstallationByOwner(ctx, projectID, req.RepoFullName); ok {
-			installationID = &resolved
-		}
-	}
-
-	// GitLab token (optional) — store encrypted.
-	var tokenEncrypted []byte
-	if req.Token != "" {
-		enc, err := crypto.EncryptToken(h.cfg.GitopsEncryptionKey, []byte(req.Token))
-		if err != nil {
-			return nil, &opFault{http.StatusInternalServerError, "token_encrypt_failed", "failed to encrypt token"}
-		}
-		tokenEncrypted = enc
-	}
-
-	var frameworkOverride *string
-	if req.FrameworkOverride != "" {
-		frameworkOverride = &req.FrameworkOverride
-	}
-
-	webhookSecret := randomHex(32)
-	demoExpiresAt := h.demoExpiryFor(req.RepoFullName)
-
-	var r gitRepo
-	row := h.pool.QueryRow(ctx,
-		`INSERT INTO git_repos
-		   (project_id, environment_id, app_name, installation_id, provider,
-		    repo_full_name, clone_url, token_encrypted, webhook_secret,
-		    production_branch, root_dir, framework_override, auto_deploy,
-		    port, replicas, profile, worker, created_by, demo_expires_at)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
-		 RETURNING id, project_id, environment_id, app_name, installation_id, provider,
-		           repo_full_name, production_branch, root_dir, framework_override,
-		           auto_deploy, port, replicas, profile, worker, created_at, updated_at`,
-		projectID, envID, req.AppName, installationID, req.Provider,
-		req.RepoFullName, cloneURL, tokenEncrypted, webhookSecret,
-		req.ProductionBranch, req.RootDir, frameworkOverride, req.AutoDeploy,
-		req.Port, req.Replicas, req.Profile, req.Worker, actorID, demoExpiresAt,
-	)
-	if err := row.Scan(&r.ID, &r.ProjectID, &r.EnvironmentID, &r.AppName,
-		&r.InstallationID, &r.Provider, &r.RepoFullName, &r.ProductionBranch,
-		&r.RootDir, &r.FrameworkOverride, &r.AutoDeploy,
-		&r.Port, &r.Replicas, &r.Profile, &r.Worker, &r.CreatedAt, &r.UpdatedAt); err != nil {
-		if isUniqueViolation(err) {
-			return nil, &opFault{http.StatusConflict, "repo_already_linked", "this app already has a linked repository in this environment"}
-		}
-		return nil, &opFault{http.StatusInternalServerError, "link_insert_failed", "failed to link repository"}
-	}
-	r.PlatformAccess = classifyPlatformAccess(r.Provider, r.InstallationID)
-	return &r, nil
+	c.JSON(http.StatusCreated, gin.H{"repos": []gitRepo{r}})
 }
 
 // DisconnectGitRepo unlinks a repository from an app.

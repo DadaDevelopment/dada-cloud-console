@@ -108,8 +108,10 @@ export function CommonConfigEditor({ projectId, envId, appName, canEdit, isUploa
   }
 
   function validate(): string | null {
-    const port = Number(cfg.servicePort);
-    if (!Number.isInteger(port) || port < 1 || port > 65535) return t("apps.config.invalid.port");
+    if (cfg.servicePort.trim()) {
+      const port = Number(cfg.servicePort);
+      if (!Number.isInteger(port) || port < 1 || port > 65535) return t("apps.config.invalid.port");
+    }
     const rep = Number(cfg.replicas);
     if (!Number.isInteger(rep) || rep < minReplicas || rep > 10) return t("apps.config.invalid.replicas", { min: String(minReplicas) });
     if (!cfg.imageName.trim() || !cfg.imageTag.trim()) return t("apps.config.invalid.image");
@@ -200,7 +202,8 @@ export function CommonConfigEditor({ projectId, envId, appName, canEdit, isUploa
             </div>
             <div>
               <label className={label}>{t("apps.config.servicePort")}</label>
-              <input className={field} type="number" min={1} max={65535} value={cfg.servicePort} onChange={(e) => set("servicePort", e.target.value)} disabled={disabled} />
+              <input className={field} type="number" min={1} max={65535} value={cfg.servicePort} onChange={(e) => set("servicePort", e.target.value)} disabled={disabled} placeholder="8080" />
+              <p className="mt-1 text-xs text-gray-400">{t("apps.config.servicePortHint")}</p>
             </div>
             <div>
               <label className={label}>{t("apps.config.replicas")}</label>

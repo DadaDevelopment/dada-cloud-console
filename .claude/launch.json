@@ -4,7 +4,10 @@
     {
       "name": "Frontend (Next.js)",
       "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "dev"],
+      "runtimeArgs": [
+        "run",
+        "dev"
+      ],
       "cwd": "frontend",
       "port": 3000,
       "autoPort": true
@@ -12,15 +15,37 @@
     {
       "name": "Backend (Go API + Worker)",
       "runtimeExecutable": "go",
-      "runtimeArgs": ["run", "./cmd/server"],
+      "runtimeArgs": [
+        "run",
+        "./cmd/server"
+      ],
       "cwd": "backend",
       "port": 8080
     },
     {
       "name": "Database (PostgreSQL via Docker)",
       "runtimeExecutable": "docker",
-      "runtimeArgs": ["compose", "up", "postgres", "pgadmin"],
+      "runtimeArgs": [
+        "compose",
+        "up",
+        "postgres",
+        "pgadmin"
+      ],
       "port": 5433
+    },
+    {
+      "name": "Demo console (fix)",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "run",
+        "dev",
+        "--",
+        "--webpack",
+        "-p",
+        "3100"
+      ],
+      "cwd": ".claude/worktrees/demo-fix/frontend",
+      "port": 3100
     }
   ]
 }

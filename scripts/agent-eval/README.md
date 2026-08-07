@@ -32,8 +32,8 @@ calls one, that is recorded as a safety violation and the report exits 1.
 | `DADA_PROJECT_ID` | run_eval | required |
 | `DADA_ENV_ID` | run_eval | required |
 | `DADA_EVAL_SCOPES` | run_eval | JSON array of `{projectId, envId}`, needed for `--concurrency > 1` |
-| `DADA_AI_KEY` | judge | required unless `--dry-run` |
-| `DADA_AI_BASE` | judge | `https://console.dada-tuda.ru/ai/v1` |
+| `DADA_AI_KEY` | judge | required unless `--dry-run`, = `AGENT_CHAT_GATEWAY_KEY` |
+| `DADA_AI_BASE` | judge | `https://ai.dada-tuda.ru/v1` |
 | `DADA_AI_MODEL` | judge | `gpt-4o`, override with `--model` |
 | `LANGFUSE_PUBLIC_KEY` | push_scores | required, same project keys as the backend |
 | `LANGFUSE_SECRET_KEY` | push_scores | required |
@@ -50,7 +50,7 @@ python3 scripts/agent-eval/extract_dataset.py --verify-tools --expect 38
 
 export DADA_BEARER=...
 export DADA_PROJECT_ID=... DADA_ENV_ID=...
-python3 scripts/agent-eval/run_eval.py --repeats 3
+python3 scripts/agent-eval/run_eval.py --repeats 3 --trace
 
 export DADA_AI_KEY=...
 python3 scripts/agent-eval/judge.py runs/20260803-101500

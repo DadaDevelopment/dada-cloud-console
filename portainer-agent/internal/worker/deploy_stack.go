@@ -14,11 +14,6 @@ import (
 // not an individual app. gitops-agent's renderEnvAggregate enqueues it.
 type deployStackPayload struct {
 	AppName string `json:"app_name"`
-	// Volumes are the named Docker volumes the rendered compose file pins
-	// `external: true`. gitops-agent knows them because it rendered them; this
-	// worker creates the missing ones before deploying, because an external
-	// volume that does not exist yet fails the deploy outright.
-	Volumes []string `json:"volumes,omitempty"`
 }
 
 // envComposeGitPath builds the in-repo path to an environment's AGGREGATE
@@ -44,21 +39,6 @@ func (w *VMWatcher) doDeployStack(ctx context.Context, op db.Operation) error {
 	target, err := db.GetComposeDeployTarget(ctx, w.pool, op.ProjectID, op.EnvironmentID)
 	if err != nil {
 		return fmt.Errorf("resolve deploy target: %w", err)
-	}
-
-	// Create the stack's named volumes before deploying. Idempotent: Docker
-	// returns an existing volume untouched, so this never disturbs live data —
-	// which is why it can run on every deploy rather than only on the first.
-	// Failing here is fatal on purpose: deploying a stack whose external volume
-	// is missing produces a compose error about an unknown volume, which reads
-	// as a broken platform rather than as the missing volume it is.
-	for _, vol := range p.Volumes {
-		if vol == "" {
-			continue
-		}
-		if err := w.portainer.EnsureVolume(ctx, target.EndpointID, vol); err != nil {
-			return fmt.Errorf("ensure volume %q: %w", vol, err)
-		}
 	}
 
 	composePath := envComposeGitPath(target.ProjectSlug, target.EnvSlug)

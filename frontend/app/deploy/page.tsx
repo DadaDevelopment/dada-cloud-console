@@ -25,7 +25,6 @@ import type { FrameworkDetection } from "@/lib/types";
 import { Spinner } from "@/components/ui/spinner";
 import { Button } from "@/components/ui/button";
 import { githubUrl, parseRepoParam } from "@/lib/deploy-badge";
-import { trackBuildStart } from "@/lib/build-watch";
 
 function toKubeName(s: string): string {
   return s
@@ -156,26 +155,7 @@ function DeployResolver() {
 
     try {
       const name = await link(wanted);
-      const started = await buildsApi.trigger(target.projectId, target.envId, name);
-      /**
-       * Hands the build to `BuildWatcher` before navigating. Without this the
-       * badge visitor — the one path into the product that never required a
-       * GitHub connection — was the only trigger point the watcher never saw,
-       * so a visitor who switched tabs during the ~2.5 minute build learned
-       * nothing about the outcome. The notification prompt is suppressed here:
-       * see `TrackBuildOptions`.
-       */
-      if (started?.build?.id) {
-        trackBuildStart(
-          {
-            projectId: target.projectId,
-            envId: target.envId,
-            appName: name,
-            buildId: started.build.id,
-          },
-          { requestNotifyPermission: false }
-        );
-      }
+      await buildsApi.trigger(target.projectId, target.envId, name);
       router.replace(`/projects/${target.projectId}/apps/${name}?envId=${target.envId}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Деплой не запустился");

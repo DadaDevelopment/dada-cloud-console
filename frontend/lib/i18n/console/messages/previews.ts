@@ -24,8 +24,8 @@ export const previews: Messages = {
   },
   "previewPane.gatewayError.title": { ru: "Приложение не отвечает по HTTP", en: "The app is not responding over HTTP" },
   "previewPane.gatewayError.body": {
-    ru: "Это бот без веб-сервера? Пересоздайте приложение в worker-режиме — ему не нужен домен.",
-    en: "Is this a bot with no web server? Recreate the app as a background worker — it does not need a domain.",
+    ru: "Для веб-приложения проверьте, что оно слушает PORT на 0.0.0.0. Фоновый процесс пересоздайте в worker-режиме — ему не нужен домен.",
+    en: "For a web app, make sure it listens on PORT at 0.0.0.0. Recreate a background process as a worker — it does not need a domain.",
   },
 
   "previewPane.card.open": { ru: "Открыть живой просмотр", en: "Open live preview" },

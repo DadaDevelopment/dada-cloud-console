@@ -42,25 +42,11 @@ type VMIngressSpec struct {
 	BasicAuth   string       // auth_basic_user_file path; empty = no basic auth
 	Rules       []VMIngressRule
 	ExtraHosts  []VMExtraHost // additional serving vhosts (custom domains), each with its own cert
-
-	// ACMEWebroot is the in-container webroot serving /.well-known/acme-challenge/
-	// on port 80 for every vhost; empty disables the challenge locations. The
-	// http→https redirect moves into `location /` so the challenge is never
-	// redirected away (a server-level `return` runs before location selection).
-	ACMEWebroot string
-	// ACMEWebrootSrc is the host/stack source bind-mounted at ACMEWebroot.
-	ACMEWebrootSrc string
-	// TLSIncludeDir, when set, is glob-included from the generated conf. The VM
-	// provider drops a per-host 443 block there only once that host's cert really
-	// exists on disk, so a not-yet-issued domain cannot keep nginx from starting.
-	// A glob that matches nothing is not an error in nginx, which is what makes
-	// the deferral safe.
-	TLSIncludeDir string
 }
 
 // VMExtraHost is an additional serving vhost on the same Ingress, alongside its
 // canonical Host — a custom domain routed straight to App:Port with its own
-// cert. Unlike Aliases, an ExtraHost SERVES traffic; it never redirects to
+// BYO cert. Unlike Aliases, an ExtraHost SERVES traffic; it never redirects to
 // Host.
 type VMExtraHost struct {
 	Host     string // server_name, e.g. "custom.example.com"
@@ -68,21 +54,6 @@ type VMExtraHost struct {
 	KeyPath  string // in-container key path for this host
 	App      string // target compose service name
 	Port     int    // target container port
-	// TLSReady reports that CertPath/KeyPath exist on the VM. When false the host
-	// is served over plain http only: nginx refuses to start against a missing
-	// ssl_certificate, so rendering a 443 block ahead of issuance would take the
-	// whole ingress — every site on the VM — down.
-	TLSReady bool
-}
-
-// acmeLocation renders the http-01 challenge location served from webroot, or ""
-// when ACME is disabled. Callers put it inside a `listen 80` server block ahead of
-// the redirect location.
-func acmeLocation(webroot string) string {
-	if webroot == "" {
-		return ""
-	}
-	return fmt.Sprintf("    location /.well-known/acme-challenge/ {\n        root %s;\n        default_type \"text/plain\";\n    }\n", webroot)
 }
 
 func sslProtocols(minVersion string) string {
@@ -105,22 +76,10 @@ const nginxProxyHeaders = `        proxy_http_version 1.1;
 func RenderNginxConf(spec VMIngressSpec) string {
 	var b strings.Builder
 	proto := sslProtocols(spec.TLS.MinVersion)
-	if spec.TLSIncludeDir != "" {
-		fmt.Fprintf(&b, "include %s/*.conf;\n\n", strings.TrimSuffix(spec.TLSIncludeDir, "/"))
-	}
-	acme := acmeLocation(spec.ACMEWebroot)
-	redirect80 := func(serverName, target string) {
-		fmt.Fprintf(&b, "server {\n    listen 80;\n    server_name %s;\n%s", serverName, acme)
-		if acme == "" {
-			fmt.Fprintf(&b, "    return 301 https://%s$request_uri;\n}\n\n", target)
-			return
-		}
-		fmt.Fprintf(&b, "    location / {\n        return 301 https://%s$request_uri;\n    }\n}\n\n", target)
-	}
 
 	// Aliases (e.g. www) → 301 to the canonical host, on both 80 and 443.
 	for _, alias := range spec.Aliases {
-		redirect80(alias, spec.Host)
+		fmt.Fprintf(&b, "server {\n    listen 80;\n    server_name %s;\n    return 301 https://%s$request_uri;\n}\n\n", alias, spec.Host)
 		if spec.TLS.Enabled {
 			fmt.Fprintf(&b, "server {\n    listen 443 ssl http2;\n    server_name %s;\n    ssl_certificate %s;\n    ssl_certificate_key %s;\n    ssl_protocols %s;\n    ssl_ciphers HIGH:!aNULL:!MD5;\n    return 301 https://%s$request_uri;\n}\n\n",
 				alias, spec.TLS.CertPath, spec.TLS.KeyPath, proto, spec.Host)
@@ -129,7 +88,7 @@ func RenderNginxConf(spec VMIngressSpec) string {
 
 	// Canonical host: http → https redirect.
 	if spec.SSLRedirect {
-		redirect80(spec.Host, spec.Host)
+		fmt.Fprintf(&b, "server {\n    listen 80;\n    server_name %s;\n    return 301 https://%s$request_uri;\n}\n\n", spec.Host, spec.Host)
 	}
 
 	// Canonical host: the TLS vhost with routing.
@@ -145,27 +104,11 @@ func RenderNginxConf(spec VMIngressSpec) string {
 	b.WriteString("}\n")
 
 	for _, h := range spec.ExtraHosts {
-		if !h.TLSReady {
-			fmt.Fprintf(&b, "\nserver {\n    listen 80;\n    server_name %s;\n%s", h.Host, acme)
-			fmt.Fprintf(&b, "    location / {\n        proxy_pass http://%s:%d;\n%s\n    }\n}\n", h.App, h.Port, nginxProxyHeaders)
-			continue
-		}
-		b.WriteString("\n")
-		redirect80(h.Host, h.Host)
-		b.WriteString(RenderExtraHostTLS(h, spec.TLS.MinVersion))
+		fmt.Fprintf(&b, "\nserver {\n    listen 80;\n    server_name %s;\n    return 301 https://%s$request_uri;\n}\n\n", h.Host, h.Host)
+		fmt.Fprintf(&b, "server {\n    listen 443 ssl http2;\n    server_name %s;\n\n", h.Host)
+		fmt.Fprintf(&b, "    ssl_certificate %s;\n    ssl_certificate_key %s;\n    ssl_protocols %s;\n    ssl_ciphers HIGH:!aNULL:!MD5;\n\n", h.CertPath, h.KeyPath, proto)
+		fmt.Fprintf(&b, "    location / {\n        proxy_pass http://%s:%d;\n%s\n    }\n}\n", h.App, h.Port, nginxProxyHeaders)
 	}
-	return b.String()
-}
-
-// RenderExtraHostTLS renders one custom domain's 443 serving block on its own, so
-// the VM provider can deliver it as a separate file into TLSIncludeDir once the
-// cert exists. Same output the inline TLSReady path produces — the block has one
-// author, whichever way it is delivered.
-func RenderExtraHostTLS(h VMExtraHost, minVersion string) string {
-	var b strings.Builder
-	fmt.Fprintf(&b, "server {\n    listen 443 ssl http2;\n    server_name %s;\n\n", h.Host)
-	fmt.Fprintf(&b, "    ssl_certificate %s;\n    ssl_certificate_key %s;\n    ssl_protocols %s;\n    ssl_ciphers HIGH:!aNULL:!MD5;\n\n", h.CertPath, h.KeyPath, sslProtocols(minVersion))
-	fmt.Fprintf(&b, "    location / {\n        proxy_pass http://%s:%d;\n%s\n    }\n}\n", h.App, h.Port, nginxProxyHeaders)
 	return b.String()
 }
 
@@ -187,9 +130,6 @@ func (spec VMIngressSpec) ServiceBlock(image, confSrc, certsSrc, htpasswdSrc str
 	}
 	if certsSrc != "" {
 		vols = append(vols, certsSrc+":/etc/nginx/certs:ro")
-	}
-	if spec.ACMEWebroot != "" && spec.ACMEWebrootSrc != "" {
-		vols = append(vols, spec.ACMEWebrootSrc+":"+spec.ACMEWebroot+":ro")
 	}
 	b := map[string]any{
 		"image":   image,

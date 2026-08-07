@@ -1180,7 +1180,7 @@ func (r *Runner) gitCreds(ctx context.Context, repo *db.Repo, b *db.Build) (toke
 		return tok, injectToken(repo.CloneURL, "x-access-token", tok), nil
 	case "gitlab":
 		if len(repo.TokenEncrypted) == 0 {
-			return "", repo.CloneURL, nil
+			return "", "", fmt.Errorf("gitlab repo missing token")
 		}
 		tok, derr := db.DecryptToken(r.cfg.EncryptionKey, repo.TokenEncrypted)
 		if derr != nil {

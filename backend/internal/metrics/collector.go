@@ -195,7 +195,6 @@ func collect(ctx context.Context, pool *pgxpool.Pool) {
 
 	collectBoxes(c, pool)
 	collectBoxRepeatUse(c, pool)
-	collectDBShards(c, pool)
 
 	collectDuration.Set(time.Since(start).Seconds())
 }

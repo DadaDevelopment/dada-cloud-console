@@ -15,7 +15,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { callbackDiagnostics, callbackVerdict, parseCallbackError } from "./callback-outcome.ts";
+import { callbackVerdict, parseCallbackError } from "./callback-outcome.ts";
 
 test("parseCallbackError: reads the OAuth error code off the redirect_uri", () => {
   assert.equal(parseCallbackError("?error=access_denied&state=abc"), "access_denied");
@@ -68,74 +68,4 @@ test("callbackVerdict: a provider-level authError wins over the loading flag", (
     reason: "callback",
     error: null,
   });
-});
-
-/**
- * Diagnostics for the failure the six live events could not explain: the
- * browser never reached Keycloak's token endpoint, so whatever broke is local.
- * These pin what the event is allowed to say about that - and, just as
- * important, what it must never carry.
- */
-class FakeStore {
-  private entries: Array<[string, string]>;
-  private blocked: boolean;
-
-  constructor(entries: Record<string, string>, blocked = false) {
-    this.entries = Object.entries(entries);
-    this.blocked = blocked;
-  }
-
-  get length(): number {
-    if (this.blocked) throw new Error("storage blocked");
-    return this.entries.length;
-  }
-
-  key(i: number): string | null {
-    if (this.blocked) throw new Error("storage blocked");
-    return this.entries[i]?.[0] ?? null;
-  }
-
-  getItem(): string | null {
-    return null;
-  }
-}
-
-const store = (entries: Record<string, string>, blocked = false) =>
-  new FakeStore(entries, blocked) as unknown as Storage;
-
-test("callbackDiagnostics: a live request whose stash survived reads as found", () => {
-  assert.deepEqual(
-    callbackDiagnostics("?code=abc&state=s1", [store({ "oidc.s1": "{}", unrelated: "x" })]),
-    { has_code: true, has_state: true, state_entry: "found", oidc_keys: 1 },
-  );
-});
-
-test("callbackDiagnostics: a lost stash is distinguishable from unreadable storage", () => {
-  assert.deepEqual(
-    callbackDiagnostics("?code=abc&state=s1", [store({ "oidc.other": "{}" })]),
-    { has_code: true, has_state: true, state_entry: "missing", oidc_keys: 1 },
-  );
-  assert.deepEqual(callbackDiagnostics("?code=abc&state=s1", [store({}, true), null]), {
-    has_code: true,
-    has_state: true,
-    state_entry: "unreadable",
-    oidc_keys: 0,
-  });
-});
-
-test("callbackDiagnostics: a bare landing with no authorize params says so", () => {
-  assert.deepEqual(callbackDiagnostics("", [store({})]), {
-    has_code: false,
-    has_state: false,
-    state_entry: "missing",
-    oidc_keys: 0,
-  });
-});
-
-test("callbackDiagnostics: never carries the single-use code or state values", () => {
-  const serialized = JSON.stringify(
-    callbackDiagnostics("?code=SECRET_CODE&state=SECRET_STATE", [store({ "oidc.SECRET_STATE": "{}" })]),
-  );
-  assert.equal(serialized.includes("SECRET_CODE"), false);
-  assert.equal(serialized.includes("SECRET_STATE"), false);
 });

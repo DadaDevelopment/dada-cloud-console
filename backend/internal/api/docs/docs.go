@@ -554,7 +554,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Sent/clicked/redeemed/converted per campaign, variant and signup week.",
+                "description": "Sent/opened/clicked/redeemed/converted per campaign, variant and signup week.",
                 "produces": [
                     "application/json"
                 ],
@@ -2049,62 +2049,6 @@ const docTemplate = `{
                 "responses": {
                     "302": {
                         "description": "Found"
-                    }
-                }
-            }
-        },
-        "/git/parse-repo-url": {
-            "get": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ],
-                "description": "Accepts a GitHub browser URL, clone URL, SSH remote or a bare owner/name and returns the canonical owner/name. Rejects anything that is not a public GitHub repository rather than guessing. Pure string handling: it does not check that the repository exists.",
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "solutions"
-                ],
-                "summary": "Parse a pasted repository link",
-                "operationId": "parseRepoURL",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Pasted repository link",
-                        "name": "url",
-                        "in": "query",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "object with repo_full_name",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
-                        }
-                    },
-                    "401": {
-                        "description": "Unauthorized",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
-                        }
                     }
                 }
             }
@@ -17234,106 +17178,6 @@ const docTemplate = `{
                 }
             }
         },
-        "/projects/{projectId}/environments/{envId}/solutions/install": {
-            "post": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ],
-                "description": "Links the repository, orders any managed database the project declares it needs (bound to the app, with the connection string injected), and queues the first build — the sequence the console used to run as three calls. Accepts a catalog slug or any public repository. Requires write access.",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "solutions"
-                ],
-                "summary": "Install a ready-made project",
-                "operationId": "installSolution",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Project UUID",
-                        "name": "projectId",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "type": "string",
-                        "description": "Environment UUID",
-                        "name": "envId",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "description": "What to install",
-                        "name": "body",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/api.installSolutionRequest"
-                        }
-                    }
-                ],
-                "responses": {
-                    "202": {
-                        "description": "object with the app name, the queued build and any database operation",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": true
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
-                        }
-                    },
-                    "401": {
-                        "description": "Unauthorized",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
-                        }
-                    },
-                    "403": {
-                        "description": "Forbidden",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
-                        }
-                    },
-                    "409": {
-                        "description": "Conflict",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
-                        }
-                    }
-                }
-            }
-        },
         "/projects/{projectId}/git/detect": {
             "get": {
                 "security": [
@@ -18538,85 +18382,6 @@ const docTemplate = `{
                 }
             }
         },
-        "/projects/{projectId}/solutions/resolve": {
-            "get": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ],
-                "description": "Turns a single typed string into a ranked list of things the console can deploy: catalog entries, managed resources, a pasted repository, and GitHub search results below them. Requires write access to the project, because searching spends a rate-limit budget shared by the whole platform.",
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "solutions"
-                ],
-                "summary": "Resolve what to deploy from one input string",
-                "operationId": "resolveSolution",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Project UUID",
-                        "name": "projectId",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "type": "string",
-                        "description": "What the customer typed",
-                        "name": "q",
-                        "in": "query",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "object with a candidates array",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": true
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
-                        }
-                    },
-                    "401": {
-                        "description": "Unauthorized",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
-                        }
-                    },
-                    "403": {
-                        "description": "Forbidden",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
-                        }
-                    }
-                }
-            }
-        },
         "/promo/click": {
             "post": {
                 "description": "Marks a promo token as clicked. Public, idempotent, and answers identically for unknown tokens.",
@@ -18761,96 +18526,6 @@ const docTemplate = `{
                     },
                     "500": {
                         "description": "Internal Server Error",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
-                        }
-                    }
-                }
-            }
-        },
-        "/solutions": {
-            "get": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ],
-                "description": "Returns the catalog of open-source projects the console can deploy in one click. Each entry is a public repository plus the build spec verified for it (branch, root directory, framework, port, profile); deploying one uses the ordinary connect-repo and build path. Read-only; the catalog is the same for every project.",
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "solutions"
-                ],
-                "summary": "List ready-made projects",
-                "operationId": "listSolutions",
-                "responses": {
-                    "200": {
-                        "description": "object with a solutions array",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": true
-                        }
-                    },
-                    "401": {
-                        "description": "Unauthorized",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
-                        }
-                    }
-                }
-            }
-        },
-        "/solutions/{slug}": {
-            "get": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ],
-                "description": "Returns a single catalog entry with its build spec and any parameters it asks for. Read-only.",
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "solutions"
-                ],
-                "summary": "Get one ready-made project",
-                "operationId": "getSolution",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Solution slug",
-                        "name": "slug",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": true
-                        }
-                    },
-                    "401": {
-                        "description": "Unauthorized",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
                         "schema": {
                             "type": "object",
                             "additionalProperties": {
@@ -19447,10 +19122,6 @@ const docTemplate = `{
                 "token": {
                     "description": "GitLab only: a personal/project access token to store encrypted. Ignored for GitHub.",
                     "type": "string"
-                },
-                "worker": {
-                    "description": "Worker marks an app with no HTTP entrypoint: port stays 0, so nothing\ndownstream renders a Service or a default hostname for it.",
-                    "type": "boolean"
                 }
             }
         },
@@ -20197,38 +19868,6 @@ const docTemplate = `{
                 },
                 "port": {
                     "type": "integer"
-                }
-            }
-        },
-        "api.installSolutionRequest": {
-            "type": "object",
-            "properties": {
-                "app_name": {
-                    "type": "string"
-                },
-                "branch": {
-                    "type": "string"
-                },
-                "framework": {
-                    "type": "string"
-                },
-                "port": {
-                    "type": "integer"
-                },
-                "profile": {
-                    "type": "string"
-                },
-                "repo": {
-                    "type": "string"
-                },
-                "root_dir": {
-                    "type": "string"
-                },
-                "slug": {
-                    "type": "string"
-                },
-                "with_database": {
-                    "type": "boolean"
                 }
             }
         },

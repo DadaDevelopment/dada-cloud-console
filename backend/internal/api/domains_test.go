@@ -78,12 +78,12 @@ func TestAppNeedsDefaultDomain(t *testing.T) {
 	}{
 		{"ordinary http app on 8080", map[string]any{"port": float64(8080)}, true},
 		{"js app on default vite port", map[string]any{"port": float64(5173), "framework": "vite"}, true},
-		{"redis datastore port excluded", map[string]any{"port": float64(6379)}, false},
-		{"postgres datastore port excluded", map[string]any{"port": float64(5432)}, false},
+		{"configured nonstandard port is included", map[string]any{"port": float64(6379)}, true},
+		{"configured database-number port is included", map[string]any{"port": float64(5432)}, true},
 		{"missing port excluded (hand-maintained infra snapshot)", map[string]any{"framework": "node"}, false},
 		{"missing port and framework excluded", map[string]any{}, false},
 		{"zero port excluded even with framework", map[string]any{"port": float64(0), "framework": "react"}, false},
-		{"worker app excluded even with http port", map[string]any{"port": float64(8080), "worker": true}, false},
+		{"worker flag does not override a configured port", map[string]any{"port": float64(8080), "worker": true}, true},
 		{"worker false leaves ordinary app included", map[string]any{"port": float64(8080), "worker": false}, true},
 	}
 	for _, c := range cases {

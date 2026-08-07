@@ -45,5 +45,3 @@ Thumbs.db
 # Python
 __pycache__/
 *.pyc
-backend/autodeploy-detect
-tasks/autodeploy-results.jsonl

@@ -582,18 +582,24 @@ func (h *Handler) AttachHostname(c *gin.Context) {
 		return
 	}
 
-	// App must exist in this environment.
-	var appCount int
+	// A domain is an HTTP promise. Do not create a hostname that has no
+	// configured public port; port zero is the explicit no-route state.
+	var appPort int
 	if err := h.pool.QueryRow(c.Request.Context(),
-		`SELECT COUNT(*) FROM resource_snapshots
-		 WHERE project_id = $1 AND environment_id = $2 AND kind = 'App' AND name = $3`,
+		`SELECT COALESCE((summary_json->>'port')::int, 0)
+		 FROM resource_snapshots
+		 WHERE project_id = $1 AND environment_id = $2 AND kind = 'App' AND name = $3
+		 LIMIT 1`,
 		projectID, envID, appName,
-	).Scan(&appCount); err != nil {
+	).Scan(&appPort); err == pgx.ErrNoRows {
+		rejectAttach(http.StatusNotFound, "app_not_found", "app not found")
+		return
+	} else if err != nil {
 		rejectAttach(http.StatusInternalServerError, "app_lookup_failed", "failed to verify app")
 		return
 	}
-	if appCount == 0 {
-		rejectAttach(http.StatusNotFound, "app_not_found", "app not found")
+	if appPort <= 0 {
+		rejectAttach(http.StatusConflict, "app_has_no_public_port", "configure a public port before attaching a hostname")
 		return
 	}
 
@@ -874,7 +880,7 @@ func (h *Handler) DetachHostname(c *gin.Context) {
 		return
 	}
 	detachHostname = hn.Hostname
-	if hn.Managed && appStillNeedsDefaultDomain(c.Request.Context(), h.pool, envID, appName) {
+	if hn.Managed {
 		rejectDetach(http.StatusConflict, "managed_domain", "the default domain cannot be detached")
 		return
 	}
@@ -1472,43 +1478,9 @@ const defaultDomainBackfillGrace = 5 * time.Minute
 // dbwatcher.go), and every later live-status update merges into that
 // summary_json rather than replacing it, so the flag survives for the
 // lifetime of the app.
-// appStillNeedsDefaultDomain gates DetachHostname's managed-domain refusal: an
-// ordinary HTTP app must keep its only public route, but an app retrofitted
-// as a worker (or left with no configured port) after already receiving a
-// default domain -- the exact class of already-affected app this whole flow
-// exists to unstick -- has a route that only ever 502s, and its owner needs a
-// way to remove it. Reuses appNeedsDefaultDomain's same worker/port judgment
-// so the attach-time and detach-time answers can never disagree.
-//
-// Fails closed (still needs the domain, so detach stays refused) on any
-// lookup problem -- missing snapshot, DB error -- since the alternative is
-// silently letting a live HTTP app lose its only public route.
-func appStillNeedsDefaultDomain(ctx context.Context, pool *pgxpool.Pool, environmentID uuid.UUID, appName string) bool {
-	var summaryRaw []byte
-	err := pool.QueryRow(ctx,
-		`SELECT summary_json FROM resource_snapshots
-		  WHERE environment_id = $1 AND kind = 'App' AND name = $2`,
-		environmentID, appName,
-	).Scan(&summaryRaw)
-	if err != nil {
-		return true
-	}
-	var summary map[string]any
-	if err := json.Unmarshal(summaryRaw, &summary); err != nil {
-		return true
-	}
-	return appNeedsDefaultDomain(summary)
-}
-
 func appNeedsDefaultDomain(summary map[string]any) bool {
-	if worker, _ := summary["worker"].(bool); worker {
-		return false
-	}
 	port, _ := summary["port"].(float64)
-	if port <= 0 {
-		return false
-	}
-	return servesHTTP(int(port))
+	return port > 0
 }
 
 // BackfillMissingDefaultDomains finds HTTP-serving Kubernetes apps that have no

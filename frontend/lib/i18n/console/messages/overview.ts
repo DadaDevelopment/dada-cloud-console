@@ -40,50 +40,37 @@ export const overview: Messages = {
     en: "A demo app from our repository, no GitHub needed. It is deleted automatically after 24 hours — press «Keep» on the app card to hold on to it.",
   },
 
-  "overview.templates.title": { ru: "Готовый проект — GitHub не нужен", en: "A ready-made project — no GitHub needed" },
+  "overview.templates.title": { ru: "Разверните шаблон — GitHub не нужен", en: "Deploy a template — no GitHub needed" },
   "overview.templates.hint": {
-    ru: "Открытый проект собирается из исходников и запускается в один клик, без подключения аккаунта.",
-    en: "An open-source project builds from source and runs in one click, with no account connected.",
+    ru: "Готовое приложение из нашего репозитория. Один клик — сборка и запуск, без подключения аккаунта.",
+    en: "A ready app from our repository. One click builds and runs it, no account connection.",
   },
   "overview.templates.heroTitle": {
     ru: "Начни здесь — задеплой первое приложение за 1 клик",
     en: "Start here — deploy your first app in one click",
   },
   "overview.templates.heroHint": {
-    ru: "Настоящий открытый проект соберётся из исходников и запустится — без GitHub и без настройки. Тем же путём, которым потом поедет ваш код.",
-    en: "A real open-source project builds from source and runs — no GitHub, no setup. The same path your own code will take.",
+    ru: "Готовое приложение соберётся и запустится за пару минут — без GitHub и без настройки. Просто чтобы увидеть платформу в деле.",
+    en: "A ready-made app builds and runs in a couple of minutes — no GitHub, no setup. Just to see the platform in action.",
   },
   "overview.templates.deploying": { ru: "Разворачиваем…", en: "Deploying…" },
-  "overview.templates.error": { ru: "Не удалось развернуть проект", en: "Failed to deploy the project" },
+  "overview.templates.error": { ru: "Не удалось развернуть шаблон", en: "Failed to deploy template" },
+  "overview.templates.nextjs.title": { ru: "Next.js стартер", en: "Next.js starter" },
+  "overview.templates.nextjs.hint": {
+    ru: "Веб-приложение на Next.js с готовой страницей.",
+    en: "A Next.js web app with a ready page.",
+  },
+  "overview.templates.fastapi.title": { ru: "FastAPI стартер", en: "FastAPI starter" },
+  "overview.templates.fastapi.hint": {
+    ru: "Python-бэкенд на FastAPI с примером эндпоинта.",
+    en: "A Python FastAPI backend with a sample endpoint.",
+  },
+  "overview.templates.static.title": { ru: "Статический сайт", en: "Static site" },
+  "overview.templates.static.hint": {
+    ru: "Статический сайт на HTML и CSS.",
+    en: "A static HTML and CSS site.",
+  },
   "overview.templates.cta": { ru: "Развернуть", en: "Deploy" },
-
-  "overview.templates.ask.title": {
-    ru: "Или напишите, что нужно запустить",
-    en: "Or say what you want to run",
-  },
-  "overview.templates.ask.hint": {
-    ru: "Название проекта, ссылка на GitHub или просто «база данных» — найдём и соберём.",
-    en: "A project name, a GitHub link, or just «database» — we find it and build it.",
-  },
-  "overview.templates.ask.placeholder": {
-    ru: "n8n, база данных, https://github.com/owner/repo",
-    en: "n8n, database, https://github.com/owner/repo",
-  },
-  "overview.templates.ask.searching": { ru: "Ищем на GitHub…", en: "Searching GitHub…" },
-  "overview.templates.ask.empty": {
-    ru: "Ничего не нашли. Попробуйте другое слово или вставьте ссылку на репозиторий.",
-    en: "Nothing found. Try another word or paste a repository link.",
-  },
-  "overview.templates.ask.searchFailed": {
-    ru: "Поиск по GitHub сейчас недоступен — показываем только наши проекты.",
-    en: "GitHub search is unavailable right now — showing our own projects only.",
-  },
-  "overview.templates.ask.fromCatalog": { ru: "проверенный", en: "verified" },
-  "overview.templates.ask.fromSearch": { ru: "с GitHub", en: "from GitHub" },
-  "overview.templates.ask.fromLink": { ru: "по ссылке", en: "from your link" },
-  "overview.templates.ask.managed": { ru: "управляемая", en: "managed" },
-  "overview.templates.ask.archived": { ru: "архив", en: "archived" },
-  "overview.templates.ask.openDatabases": { ru: "Создать", en: "Create" },
 
   "overview.boxes.col.name": { ru: "Имя", en: "Name" },
   "overview.boxes.col.status": { ru: "Статус", en: "Status" },

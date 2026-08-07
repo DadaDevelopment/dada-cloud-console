@@ -990,6 +990,22 @@ export interface AuditEventsResponse {
   offset: number;
 }
 
+export interface AuditActorFacet {
+  email: string;
+  account_kind: string;
+  count: number;
+}
+
+export interface AuditActionFacet {
+  action: string;
+  count: number;
+}
+
+export interface AuditFacetsResponse {
+  actors: AuditActorFacet[];
+  actions: AuditActionFacet[];
+}
+
 export interface FeedbackItem {
   id: string;
   created_at: string;
@@ -1631,79 +1647,4 @@ export interface AppDiagnosis {
   log_excerpt: string[];
   can_autofix: boolean;
   generated_at: string;
-}
-
-/**
- * One entry of the ready-made project catalog: a public open-source repository
- * the console can build and deploy in one click, plus the build spec verified
- * for it. Mirrors the backend's `internal/solutions` catalog.
- */
-export interface Solution {
-  slug: string;
-  name: string;
-  tagline: string;
-  about: string;
-  bullets: string[] | null;
-  category: string;
-  homepage: string;
-  license: string;
-  repo: string;
-  branch: string;
-  root_dir: string;
-  /** Build framework override; "dockerfile" means build the repo's own Dockerfile. */
-  framework: string;
-  port: number;
-  profile: string;
-  warning: string;
-  first_run: string;
-  /** What to expect from the build itself (a real repo takes longer than a starter). */
-  build_note: string;
-}
-
-/**
- * One row of the resolver's answer to whatever the customer typed in the single
- * "what do you want to run?" field.
- *
- * `kind` is what the row installs, and the console needs it because the three
- * kinds go down different paths: `solution` and `repo` link a repository and
- * build it, while `managed` is a database the platform runs. Rows with
- * `from: "search"` came from GitHub rather than from our catalog, so they carry
- * stars and a licence instead of a verified build spec — `framework`, `port`
- * and `profile` are empty for them on purpose, and the pipeline detects.
- */
-export interface SolutionCandidate {
-  kind: "solution" | "repo" | "managed";
-  slug: string;
-  name: string;
-  tagline: string;
-  icon: string;
-  repo: string;
-  branch: string;
-  root_dir: string;
-  framework: string;
-  port: number;
-  profile: string;
-  engine: string;
-  stars?: number;
-  license?: string;
-  archived?: boolean;
-  homepage?: string;
-  from?: string;
-}
-
-export interface ResolveSolutionsResponse {
-  query: string;
-  candidates: SolutionCandidate[];
-  /** Whether the query fell through to GitHub search at all. */
-  searched: boolean;
-  /** Search was attempted and failed; the local rows are still trustworthy. */
-  search_failed: boolean;
-}
-
-export interface InstallSolutionResponse {
-  app_name: string;
-  build: Build;
-  /** Present only when the install also ordered a managed database. */
-  database?: Operation | null;
-  installed: boolean;
 }

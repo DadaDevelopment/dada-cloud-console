@@ -47,9 +47,6 @@ const (
 	dbAdvisorySlowQueryMeanMs = 1000
 	dbAdvisorySlowQueryShare  = 0.20
 
-	dbAdvisorySlowQueryMinQueryMs = 5_000
-	dbAdvisorySlowQueryMinDBMs    = 60_000
-
 	dbAdvisoryQuotaForecastDays = 30
 
 	dbAdvisoryIdleInTxnSeconds = 300
@@ -332,14 +329,6 @@ func lowCacheHitAdvisories(in dbAdvisoryInput) []dbAdvisory {
 // small per call but dominant in aggregate. Both matter and neither subsumes
 // the other — on odds-research one query took 44.7 seconds in a single call
 // while the database as a whole held 96% of the instance's execution time.
-//
-// Both branches sit behind absolute floors, because a share is meaningless on
-// an idle database. The first live run flagged a query with mean=0ms holding
-// 27% of a database that had done 20 seconds of work all window, and six
-// 80-millisecond calls holding 97% of four databases doing nothing else. A
-// finding has to be worth someone's morning: the query must have burned at
-// least five seconds, and a share only counts once the database itself has
-// burned a minute.
 func slowQueryAdvisories(in dbAdvisoryInput) []dbAdvisory {
 	var out []dbAdvisory
 	for _, s := range in.Statements {
@@ -347,11 +336,8 @@ func slowQueryAdvisories(in dbAdvisoryInput) []dbAdvisory {
 		if in.StatementsTotalMs > 0 {
 			share = s.DeltaTotalMs / in.StatementsTotalMs
 		}
-		if s.DeltaTotalMs < dbAdvisorySlowQueryMinQueryMs {
-			continue
-		}
 		slow := s.MeanMs >= dbAdvisorySlowQueryMeanMs
-		dominant := share >= dbAdvisorySlowQueryShare && in.StatementsTotalMs >= dbAdvisorySlowQueryMinDBMs
+		dominant := share >= dbAdvisorySlowQueryShare
 		if !slow && !dominant {
 			continue
 		}

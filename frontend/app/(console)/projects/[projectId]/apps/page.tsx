@@ -25,7 +25,7 @@ import { Globe, Database, ChevronDown } from "lucide-react";
 import { AppPreviewPane } from "@/components/app-preview-pane";
 import { LogsViewer } from "@/components/logs-viewer";
 import { classifyVMResource, extractIngressSpec, extractDatabaseSpec } from "@/lib/vm-resources";
-import { getAppAlerts, hasAlertType, type AppAlert } from "@/lib/app-alerts";
+import { getAppAlerts, getOperationalAppAlerts, hasAlertType, type AppAlert } from "@/lib/app-alerts";
 
 interface CreateAppForm {
   name: string;
@@ -199,12 +199,11 @@ export default function AppsPage() {
   const alertedApps = Object.entries(appsByEnv).flatMap(([envId, apps]) => {
     const env = environments.find((e) => e.id === envId);
     return apps
-      .map((app) => ({ app, env, alerts: getAppAlerts(app) }))
+      .map((app) => ({ app, env, alerts: getOperationalAppAlerts(getAppAlerts(app)) }))
       .filter((row): row is { app: ResourceSnapshot; env: Environment; alerts: AppAlert[] } => row.env != null && row.alerts.length > 0);
   });
   const crashCount = alertedApps.filter((r) => hasAlertType(r.alerts, "crash")).length;
   const volumeCount = alertedApps.filter((r) => hasAlertType(r.alerts, "volume")).length;
-  const urlCount = alertedApps.filter((r) => hasAlertType(r.alerts, "url")).length;
 
   const canCreate = canMutate(role);
   const modalEnv = environments.find((e) => e.id === modalEnvId);
@@ -274,7 +273,6 @@ export default function AppsPage() {
               count: alertedApps.length,
               crash: crashCount,
               volume: volumeCount,
-              url: urlCount,
             })}
           </p>
           <div className="mt-1.5 flex flex-wrap gap-x-4 gap-y-1">
@@ -610,7 +608,6 @@ function AppRow({ app, env, projectId, expanded, onToggle, t }: AppRowProps) {
   const alerts = getAppAlerts(app);
   const hasCrashAlert = hasAlertType(alerts, "crash");
   const hasVolumeAlert = hasAlertType(alerts, "volume");
-  const hasURLAlert = hasAlertType(alerts, "url");
   const subtitle =
     resType === "ingress"
       ? ing?.host ?? summary.image ?? "—"
@@ -661,11 +658,6 @@ function AppRow({ app, env, projectId, expanded, onToggle, t }: AppRowProps) {
               {hasVolumeAlert && (
                 <span className="inline-flex items-center rounded-full bg-amber-100 dark:bg-amber-950/60 px-2 py-0.5 text-xs font-medium text-amber-700 dark:text-amber-300">
                   {t("apps.alerts.chip.volume")}
-                </span>
-              )}
-              {hasURLAlert && (
-                <span className="inline-flex items-center rounded-full bg-amber-100 dark:bg-amber-950/60 px-2 py-0.5 text-xs font-medium text-amber-700 dark:text-amber-300">
-                  {t("apps.alerts.chip.url")}
                 </span>
               )}
             </div>

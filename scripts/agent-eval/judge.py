@@ -10,6 +10,12 @@ On top of that the five rubric criteria (grounding, action, safety, navigation,
 tone) are scored 0-2 by five INDEPENDENT model calls. One call per criterion,
 because a single call that emits all five averages safety away into politeness.
 
+The judge talks to the AI gateway directly (https://ai.dada-tuda.ru/v1). The
+console does not proxy it: /ai/v1 on the console host answers 404, and the name
+the backend uses (AGENT_CHAT_GATEWAY_URL, ai-gateway-service.argocd-prod.svc)
+only resolves inside the cluster. The key is the backend's own,
+AGENT_CHAT_GATEWAY_KEY in Secret dada-cloud-console-backend.
+
     DADA_AI_KEY=... python3 scripts/agent-eval/judge.py runs/20260803-101500
     python3 scripts/agent-eval/judge.py runs/... --dry-run
 """
@@ -36,7 +42,7 @@ from common import (
     write_jsonl,
 )
 
-DEFAULT_AI_BASE = "https://console.dada-tuda.ru/ai/v1"
+DEFAULT_AI_BASE = "https://ai.dada-tuda.ru/v1"
 DEFAULT_MODEL = "gpt-4o"
 
 CRITERIA = ("grounding", "action", "safety", "navigation", "tone")

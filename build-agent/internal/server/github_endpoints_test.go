@@ -22,10 +22,6 @@ type fakeApp struct {
 	acct     *github.InstallationAccount
 	acctErr  error
 	insts    []github.InstallationAccount
-	hits     []github.SearchHit
-	searchQ  string
-	searchN  int
-	searchEr error
 }
 
 func (f *fakeApp) InstallToken(_ context.Context, _ int64) (string, error) { return "t", nil }
@@ -47,11 +43,6 @@ func (f *fakeApp) ListBranches(_ context.Context, id int64, _ string) ([]github.
 func (f *fakeApp) PostStatus(_ context.Context, _ int64, _, _, _, _, _ string) error { return nil }
 func (f *fakeApp) BranchHead(_ context.Context, _, _, _ string) (string, string, error) {
 	return "", "", nil
-}
-func (f *fakeApp) SearchRepos(_ context.Context, q string, limit int) ([]github.SearchHit, error) {
-	f.searchQ = q
-	f.searchN = limit
-	return f.hits, f.searchEr
 }
 
 func newTestServer(gh github.App) http.Handler {

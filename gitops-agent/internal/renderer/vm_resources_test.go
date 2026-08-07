@@ -72,7 +72,6 @@ func TestRenderNginxConf_ExtraHost(t *testing.T) {
 				KeyPath:  "/etc/nginx/certs/live/custom.example.com/privkey.pem",
 				App:      "custom-app",
 				Port:     9000,
-				TLSReady: true,
 			},
 		},
 	})
@@ -102,86 +101,6 @@ func TestRenderNginxConf_ExtraHost(t *testing.T) {
 	}
 	if !strings.Contains(block, "proxy_pass http://custom-app:9000;") {
 		t.Errorf("extra host 443 block must proxy to its own app:port:\n%s", block)
-	}
-}
-
-// A custom domain whose cert has not been issued yet must NOT get a 443 block:
-// nginx refuses to start when ssl_certificate points at a missing file, so an
-// eager TLS vhost takes down the whole ingress -- every site on the VM, not just
-// the new domain. Until issuance the host is served over plain http.
-func TestRenderNginxConf_ExtraHostWithoutCertStaysHTTP(t *testing.T) {
-	conf := RenderNginxConf(VMIngressSpec{
-		Host:        "fin-data.pro",
-		SSLRedirect: true,
-		TLS: VMIngressTLS{
-			Enabled:  true,
-			CertPath: "/etc/nginx/certs/live/fin-data.pro/fullchain.pem",
-			KeyPath:  "/etc/nginx/certs/live/fin-data.pro/privkey.pem",
-		},
-		ACMEWebroot: "/var/www/acme",
-		Rules:       []VMIngressRule{{Path: "/", App: "frontend", Port: 5173}},
-		ExtraHosts: []VMExtraHost{{
-			Host:     "pending.example.com",
-			CertPath: "/etc/nginx/certs/live/pending.example.com/fullchain.pem",
-			KeyPath:  "/etc/nginx/certs/live/pending.example.com/privkey.pem",
-			App:      "custom-app",
-			Port:     9000,
-		}},
-	})
-	if strings.Contains(conf, "/etc/nginx/certs/live/pending.example.com/") {
-		t.Fatalf("cert-less host must not be referenced by any ssl_certificate:\n%s", conf)
-	}
-	if !strings.Contains(conf, "proxy_pass http://custom-app:9000;") {
-		t.Errorf("cert-less host must still serve over http:\n%s", conf)
-	}
-	if !strings.Contains(conf, "ssl_certificate /etc/nginx/certs/live/fin-data.pro/fullchain.pem;") {
-		t.Errorf("canonical host must keep its TLS vhost:\n%s", conf)
-	}
-}
-
-// The http-01 challenge must survive the http->https redirect. A server-level
-// `return 301` runs in the rewrite phase, before location selection, so the
-// redirect has to live in `location /` instead.
-func TestRenderNginxConf_ACMEChallengeIsNotRedirected(t *testing.T) {
-	conf := RenderNginxConf(VMIngressSpec{
-		Host:        "fin-data.pro",
-		Aliases:     []string{"www.fin-data.pro"},
-		SSLRedirect: true,
-		TLS:         VMIngressTLS{Enabled: true, CertPath: "/c.pem", KeyPath: "/k.pem"},
-		ACMEWebroot: "/var/www/acme",
-		Rules:       []VMIngressRule{{Path: "/", App: "frontend", Port: 5173}},
-	})
-	challenges := strings.Count(conf, "location /.well-known/acme-challenge/ {")
-	if challenges != 2 {
-		t.Fatalf("every listen-80 vhost needs the challenge location, got %d:\n%s", challenges, conf)
-	}
-	for _, block := range strings.Split(conf, "server {") {
-		if !strings.Contains(block, "listen 80;") || !strings.Contains(block, "return 301") {
-			continue
-		}
-		redirect := strings.Index(block, "return 301")
-		challenge := strings.Index(block, "location /.well-known/acme-challenge/")
-		if challenge < 0 || challenge > redirect {
-			t.Errorf("redirect must not precede/shadow the challenge location:\n%s", block)
-		}
-		if !strings.Contains(block, "location / {\n        return 301") {
-			t.Errorf("redirect must be scoped to `location /`, not the server block:\n%s", block)
-		}
-	}
-}
-
-func TestIngressServiceBlock_MountsACMEWebroot(t *testing.T) {
-	spec := VMIngressSpec{Host: "x", ACMEWebroot: "/var/www/acme", ACMEWebrootSrc: "/var/lib/dada/acme"}
-	block := spec.ServiceBlock("", "./nginx.conf", "/etc/letsencrypt", "")
-	vols, _ := block["volumes"].([]string)
-	var found bool
-	for _, v := range vols {
-		if v == "/var/lib/dada/acme:/var/www/acme:ro" {
-			found = true
-		}
-	}
-	if !found {
-		t.Fatalf("acme webroot must be mounted into nginx, got %v", vols)
 	}
 }
 

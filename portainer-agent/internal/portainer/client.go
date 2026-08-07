@@ -368,23 +368,3 @@ func (c *Client) StreamLogs(ctx context.Context, endpointID int, containerID str
 	}
 	return resp.Body, nil
 }
-
-// EnsureVolume creates a named Docker volume on the endpoint if it is missing.
-//
-// Idempotent by Docker's own contract: `POST /volumes/create` with the name of
-// an existing volume returns that volume untouched, it does not recreate or
-// empty it. That is what makes this safe to call before every stack deploy —
-// and the property the whole VM data model leans on, because the aggregate
-// compose pins named volumes `external: true` so a fresh stack can never mint an
-// empty volume over live data.
-//
-// Without this call an `external: true` volume that nobody has created yet fails
-// the very first deploy of a stateful app on a clean VM: compose refuses to
-// start a service whose external volume is absent. The old compose apps got away
-// with it because their volumes were adopted from a workload that already
-// existed on the machine.
-func (c *Client) EnsureVolume(ctx context.Context, endpointID int, name string) error {
-	path := fmt.Sprintf("/api/endpoints/%d/docker/volumes/create", endpointID)
-	body := map[string]any{"Name": name, "Driver": "local"}
-	return c.doJSON(ctx, http.MethodPost, path, body, nil)
-}

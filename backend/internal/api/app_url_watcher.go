@@ -6,23 +6,16 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
-	"net"
+	"net/http"
 	"time"
 
+	"github.com/dada-tuda/console/backend/internal/metrics"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// appURLWatchInterval is the poll period for the URL-reality watcher: a live,
-// Ready app that got handed a public HTTPS domain but never speaks HTTP on
-// its declared port otherwise sits behind a silent, permanent 502 with no
-// signal anywhere in the console. Two confirmed live cases: fanvk (a
-// vkbottle long-poll bot on containerPort 8080 -- READY 1/1, domain
-// provisioned, curl = 502) and oxygen (an MTProto proxy on containerPort
-// 8443 -- READY 1/1, domain provisioned, curl times out). Neither is broken:
-// both are workers that never should have been offered a public hostname in
-// the first place, because servesHTTP (apps.go) only excludes a static
-// denylist of known binary-protocol ports and treats everything else as "web
-// app".
+// appURLWatchInterval is the poll period for the customer-visible public
+// route. The route contract is explicit: a positive configured port must
+// answer over its public HTTPS address.
 const appURLWatchInterval = 5 * time.Minute
 
 // appURLProbeTimeout bounds both the TCP dial and the response read of one
@@ -48,54 +41,23 @@ const appURLAlertFailureThreshold = 3
 // instead of lingering.
 const appURLAlertFreshWindow = 3 * appURLWatchInterval
 
-// urlProbeReasonNoListener and urlProbeReasonNotHTTP are the two ways a
-// probe can fail. Any successful HTTP response -- including a 4xx or 5xx
-// from the app's own code -- is healthy: the point of this watcher is
-// reachability of an HTTP server, not correctness of what it serves.
+// A transport failure is an edge failure (DNS, TLS, load balancer); a 5xx is
+// a route failure. A 4xx is still reachable and therefore healthy.
 const (
-	urlProbeReasonNoListener = "no_listener"
-	urlProbeReasonNotHTTP    = "not_http"
+	urlProbeReasonEdgeUnavailable = "edge_unavailable"
+	urlProbeReasonBadGateway      = "bad_gateway"
 )
 
-// appURLWatcher polls every live, publicly-addressed app over its
-// in-cluster Service DNS name and records consecutive HTTP-reachability
-// failures in app_url_alerts.
-//
-// The probe deliberately targets <app>-service.<namespace>.svc.cluster.local
-// (the same in-cluster Service name preview_gate.go's servicePort resolves
-// against), never the public hostname. The public path runs through the
-// Beget load balancer, which drops roughly a third of connections
-// (project_beget_lb_drops_third_of_connections) -- probing through it would
-// manufacture false alerts out of LB flakiness that has nothing to do with
-// whether the app itself speaks HTTP. Probing the in-cluster Service also
-// means this watcher works for an app with no public domain at all, though
-// in practice loadCandidates only feeds it apps that already have a "url" in
-// their summary.
-//
-// No readiness probe is added to the helm charts to catch this instead: a
-// TCP probe would flag fanvk (a working long-poll bot that binds no port at
-// all) as broken, and an HTTP probe would still pass for oxygen (which binds
-// its port but never speaks HTTP) while the public domain still 502s. Both
-// also touch 120+ live apps in the separate dada-argo repo. This watcher
-// stays entirely inside this repo and changes no chart.
-//
-// Sends no email. The owner has ruled that alert mail stays scoped to
-// crash/volume; this watcher only writes app_url_alerts for the console
-// banner (app_alerts.go's loadAppAlerts) to read.
+// appURLWatcher probes every Ready app with both a configured port and public
+// URL, then records bounded public-route failures for the console and metrics.
 type appURLWatcher struct {
 	h *Handler
 }
 
-// StartAppURLWatcher launches the URL-reality watcher goroutine. No-op
-// off-cluster (local dev has no svc.cluster.local DNS and no reason to run
-// this), matching the gate newAppHealthClientset already established for
-// the other watchers -- reused here purely as an in-cluster signal, this
-// watcher does not otherwise touch the Kubernetes API.
+// StartAppURLWatcher launches the public-route watcher. It deliberately does
+// not require in-cluster DNS: the customer uses the public route, so that is
+// the route we must verify.
 func (h *Handler) StartAppURLWatcher(ctx context.Context) {
-	if newAppHealthClientset() == nil {
-		log.Printf("app-url: no in-cluster client, watcher disabled")
-		return
-	}
 	w := &appURLWatcher{h: h}
 	log.Printf("app-url: watcher started interval=%s timeout=%s threshold=%d", appURLWatchInterval, appURLProbeTimeout, appURLAlertFailureThreshold)
 	go func() {
@@ -113,34 +75,27 @@ func (h *Handler) StartAppURLWatcher(ctx context.Context) {
 	}()
 }
 
-// urlProbeCandidate is one app worth probing this tick: it has a public URL
-// on record, a known service port, and is not a declared worker.
+// urlProbeCandidate is one app worth probing: it has a public URL and a
+// configured positive port.
 type urlProbeCandidate struct {
 	Namespace string
 	AppName   string
 	Port      int
+	URL       string
 }
 
 // parseURLProbeCandidate decides whether one resource_snapshots row is worth
 // probing, purely from its summary JSON. Pure and unit-tested without a
 // database.
 //
-// A worker (summary "worker": true) is excluded outright: apps.go already
-// never hands a worker a default hostname, so a worker carrying a "url" can
-// only be a custom domain the user attached on purpose, and this watcher has
-// no business second-guessing that choice. An app with no "url" has nothing
-// public to validate. An app with no numeric "port" is left alone rather
-// than guessing a default: probing the wrong port would misclassify a
-// perfectly healthy app.
+// An app with no URL or no positive port has no public-route contract and is
+// ignored. No workload-type inference participates in this decision.
 func parseURLProbeCandidate(namespace, appName string, summaryRaw []byte) (urlProbeCandidate, bool) {
 	if len(summaryRaw) == 0 {
 		return urlProbeCandidate{}, false
 	}
 	var m map[string]any
 	if err := json.Unmarshal(summaryRaw, &m); err != nil {
-		return urlProbeCandidate{}, false
-	}
-	if worker, _ := m["worker"].(bool); worker {
 		return urlProbeCandidate{}, false
 	}
 	urlVal, _ := m["url"].(string)
@@ -151,7 +106,7 @@ func parseURLProbeCandidate(namespace, appName string, summaryRaw []byte) (urlPr
 	if !ok || portVal <= 0 {
 		return urlProbeCandidate{}, false
 	}
-	return urlProbeCandidate{Namespace: namespace, AppName: appName, Port: int(portVal)}, true
+	return urlProbeCandidate{Namespace: namespace, AppName: appName, Port: int(portVal), URL: urlVal}, true
 }
 
 // loadCandidates reads every Ready, publicly-addressed app across every user
@@ -212,54 +167,31 @@ func (w *appURLWatcher) tick(ctx context.Context) {
 	}
 	log.Printf("app-url: tick candidates=%d", len(candidates))
 	for _, c := range candidates {
-		addr := fmt.Sprintf("%s-service.%s.svc.cluster.local:%d", c.AppName, c.Namespace, c.Port)
 		probeCtx, cancel := context.WithTimeout(ctx, appURLProbeTimeout)
-		healthy, reason, detail := probeAppReality(probeCtx, addr, appURLProbeTimeout)
+		healthy, reason, detail := probePublicRoute(probeCtx, c.URL, appURLProbeTimeout)
 		cancel()
 		w.recordProbeResult(ctx, c.Namespace, c.AppName, healthy, reason, detail)
 	}
 }
 
-// probeAppReality is the single active check this watcher performs: dial
-// the in-cluster Service address over TCP, and if that succeeds, send a
-// minimal HTTP/1.1 GET and read whatever comes back.
-//
-//   - Dial fails (refused, timeout, no such host) -> urlProbeReasonNoListener.
-//     Matches oxygen: an MTProto proxy binds 8443 for its own binary
-//     protocol reachable from outside the mesh in ways this dial is not, so
-//     in practice this also covers "binds nothing at all" (fanvk).
-//   - Dial succeeds but the response does not start with "HTTP/" (garbage,
-//     a raw binary reply, or nothing at all before the read deadline) ->
-//     urlProbeReasonNotHTTP. Matches an app that owns the port but speaks
-//     its own protocol on it, not HTTP.
-//   - Any response starting with "HTTP/" is healthy, regardless of status
-//     code: a 404 or 500 still proves the app answers HTTP requests, which
-//     is the only thing a public hostname promises visitors.
-func probeAppReality(ctx context.Context, addr string, timeout time.Duration) (healthy bool, reason, detail string) {
-	d := net.Dialer{Timeout: timeout}
-	conn, err := d.DialContext(ctx, "tcp", addr)
+// probePublicRoute makes an HTTPS request through the same public path a
+// visitor uses. It does not skip certificate verification and creates a fresh
+// connection for each probe, so a stale keep-alive cannot hide LB instability.
+func probePublicRoute(ctx context.Context, rawURL string, timeout time.Duration) (healthy bool, reason, detail string) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
 	if err != nil {
-		return false, urlProbeReasonNoListener, err.Error()
+		return false, urlProbeReasonEdgeUnavailable, err.Error()
 	}
-	defer conn.Close()
-
-	_ = conn.SetDeadline(time.Now().Add(timeout))
-	host := addr
-	if h, _, splitErr := net.SplitHostPort(addr); splitErr == nil {
-		host = h
+	client := &http.Client{Timeout: timeout, Transport: &http.Transport{DisableKeepAlives: true}}
+	resp, err := client.Do(req)
+	if err != nil {
+		return false, urlProbeReasonEdgeUnavailable, err.Error()
 	}
-	request := fmt.Sprintf("GET / HTTP/1.1\r\nHost: %s\r\nConnection: close\r\n\r\n", host)
-	if _, werr := conn.Write([]byte(request)); werr != nil {
-		return false, urlProbeReasonNotHTTP, fmt.Sprintf("connected but request failed: %v", werr)
+	defer resp.Body.Close()
+	if resp.StatusCode >= http.StatusInternalServerError {
+		return false, urlProbeReasonBadGateway, fmt.Sprintf("public route returned HTTP %d", resp.StatusCode)
 	}
-
-	buf := make([]byte, 512)
-	n, _ := conn.Read(buf)
-	data := buf[:n]
-	if looksLikeHTTPResponse(data) {
-		return true, "", ""
-	}
-	return false, urlProbeReasonNotHTTP, notHTTPDetail(data)
+	return true, "", ""
 }
 
 // looksLikeHTTPResponse is the entire classification of a raw TCP read:
@@ -357,6 +289,7 @@ func clearURLProbeAlert(ctx context.Context, pool *pgxpool.Pool, namespace, appN
 // one line per genuinely new outage rather than one line per tick for the
 // lifetime of a broken app.
 func (w *appURLWatcher) recordProbeResult(ctx context.Context, namespace, appName string, healthy bool, reason, detail string) {
+	metrics.RecordPublicRouteProbe(healthy, reason)
 	if healthy {
 		clearURLProbeAlert(ctx, w.h.pool, namespace, appName)
 		return

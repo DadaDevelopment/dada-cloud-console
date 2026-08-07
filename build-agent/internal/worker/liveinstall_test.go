@@ -30,9 +30,6 @@ func (f *fakeApp) PostStatus(context.Context, int64, string, string, string, str
 func (f *fakeApp) BranchHead(context.Context, string, string, string) (string, string, error) {
 	return "", "", nil
 }
-func (f *fakeApp) SearchRepos(context.Context, string, int) ([]github.SearchHit, error) {
-	return nil, nil
-}
 
 func TestLiveInstallationForOwner(t *testing.T) {
 	app := &fakeApp{installs: []github.InstallationAccount{

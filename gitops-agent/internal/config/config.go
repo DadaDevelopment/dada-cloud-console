@@ -3,7 +3,6 @@ package config
 import (
 	"fmt"
 	"os"
-	"strings"
 	"time"
 )
 
@@ -97,25 +96,6 @@ type Config struct {
 	OrphanPurgeAfter time.Duration
 
 	MoveVolumeEnabled bool
-
-	// DBRouterHost is the connection router (pg-router) every application should
-	// reach its managed Postgres through. provider-sql publishes the shard's own
-	// address into "<appRef>-db-credentials" once, when the role is created, and
-	// never rewrites it afterwards - so a database that later moves to another
-	// shard would keep a DSN pointing at the instance it no longer lives on. When
-	// this is set, the status reconciler rewrites that secret's endpoint to the
-	// router, which is what makes a shard address a private detail.
-	//
-	// Empty (the default) disables the rewrite entirely: every secret keeps the
-	// exact endpoint provider-sql wrote, which is today's behaviour.
-	DBRouterHost string
-	DBRouterPort string
-
-	// DBRouterDirectShards are shards whose databases keep their direct address
-	// even when the router is enabled. The platform shard belongs here: routing
-	// the console's and Keycloak's own connections through the router would make
-	// signing in depend on the router being up.
-	DBRouterDirectShards []string
 }
 
 func Load() (*Config, error) {
@@ -175,10 +155,6 @@ func Load() (*Config, error) {
 		OrphanPurgeAfter: orphanPurge,
 
 		MoveVolumeEnabled: getEnv("MOVE_VOLUME_ENABLED", "false") == "true",
-
-		DBRouterHost:         getEnv("DB_ROUTER_HOST", ""),
-		DBRouterPort:         getEnv("DB_ROUTER_PORT", "5432"),
-		DBRouterDirectShards: splitList(getEnv("DB_ROUTER_DIRECT_SHARDS", "shard-0")),
 	}
 
 	if cfg.DatabaseURL == "" {
@@ -189,18 +165,6 @@ func Load() (*Config, error) {
 	}
 
 	return cfg, nil
-}
-
-// splitList parses a comma-separated env value into a trimmed, non-empty list.
-func splitList(v string) []string {
-	out := []string{}
-	for _, part := range strings.Split(v, ",") {
-		part = strings.TrimSpace(part)
-		if part != "" {
-			out = append(out, part)
-		}
-	}
-	return out
 }
 
 func getEnv(key, def string) string {
