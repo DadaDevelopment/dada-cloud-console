@@ -274,7 +274,20 @@ func (w *DBWatcher) doDeleteAIModel(ctx context.Context, op db.Operation) error 
 	)
 	var sha string
 	if changed {
-		sha, err = mgr.CommitFilesAndPush([]git.FileChange{manifestFile}, commitMsg, w.cfg.BotName, w.cfg.BotEmail)
+		lastOne := false
+		if attachedApp == "" {
+			lastOne, err = manifestsFileIsEmpty(manifestFile)
+			if err != nil {
+				return err
+			}
+		}
+		if lastOne {
+			sha, err = mgr.RemoveAndPush(
+				standaloneOwnerAppPaths(projectName, envName, renderer.AIModelOwnerApp(attachedApp, projectName)),
+				commitMsg, w.cfg.BotName, w.cfg.BotEmail)
+		} else {
+			sha, err = mgr.CommitFilesAndPush([]git.FileChange{manifestFile}, commitMsg, w.cfg.BotName, w.cfg.BotEmail)
+		}
 		if err != nil {
 			return fmt.Errorf("git push (remove manifests): %w", err)
 		}

@@ -52,6 +52,36 @@ func upsertManifestsFile(mgr *git.Manager, valuesPath string, crYAMLs ...string)
 	return git.FileChange{Path: valuesPath, Content: out}, nil
 }
 
+// manifestsFileIsEmpty reports whether a rendered resources.values.yaml carries
+// no manifests at all. A carrier app whose file reaches that state renders zero
+// resources, which ArgoCD refuses to auto-sync: the generated Application stops
+// with "auto-sync will wipe out all resources" (allowEmpty is off on the
+// tenant-apps ApplicationSet), so the CRs it owns are never pruned and the
+// physical database or bucket survives the delete. Callers use this to remove
+// the carrier app itself instead of committing an empty file.
+func manifestsFileIsEmpty(f git.FileChange) (bool, error) {
+	rv, err := renderer.ParseResourcesValues(f.Content)
+	if err != nil {
+		return false, err
+	}
+	return len(rv.Manifests) == 0, nil
+}
+
+// standaloneOwnerAppPaths lists every git file of a resources-carrier owner app
+// ("service-databases-<project>", "models-<project>", "s3-buckets-<project>").
+// Removing them in one commit drops the app from the tenant-apps generator, so
+// ArgoCD tears the Application down and its resources-finalizer prunes the CRs
+// it owned. The prune render stays valid because the source is the shared
+// helm/app-resources chart with ignoreMissingValueFiles: true — unlike a
+// workload app, no per-app chart path disappears with the file.
+func standaloneOwnerAppPaths(projectSlug, envSlug, ownerApp string) []string {
+	return []string{
+		renderer.AppGitPath(projectSlug, envSlug, ownerApp),
+		renderer.AppResourcesValuesGitPath(projectSlug, envSlug, ownerApp),
+		renderer.AppHelmValuesGitPath(projectSlug, envSlug, ownerApp),
+	}
+}
+
 // removeManifestsFile loads the app's resources.values.yaml, removes each
 // (kind,name) entry, and returns the resulting file as a single FileChange plus
 // whether anything was removed. When nothing matched (and the file was absent),

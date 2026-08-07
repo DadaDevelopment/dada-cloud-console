@@ -914,6 +914,13 @@ func (w *DBWatcher) doCreateServiceDatabase(ctx context.Context, op db.Operation
 // owner app's resources.values.yaml and drops the snapshot; Argo prunes the CR
 // once it leaves git. Mirrors doDeleteAIModel. AppRef comes from the operation
 // payload (empty = the standalone "service-databases-<project>" owner app).
+//
+// When the removed CR was the LAST one in a standalone owner app, the whole
+// carrier app is removed instead of leaving an empty manifests list behind:
+// ArgoCD will not auto-sync a source that renders zero resources ("auto-sync
+// will wipe out all resources"), so the Application would sit in SyncError and
+// the ServiceDatabaseV2 — and the physical database with it — would survive the
+// delete forever. Observed 08-07 on agent-sandbox/prod.
 func (w *DBWatcher) doDeleteServiceDatabase(ctx context.Context, op db.Operation) error {
 	var p struct {
 		Name   string `json:"name"`
@@ -949,7 +956,21 @@ func (w *DBWatcher) doDeleteServiceDatabase(ctx context.Context, op db.Operation
 	)
 	var sha string
 	if changed {
-		sha, err = mgr.CommitFilesAndPush([]git.FileChange{manifestFile}, commitMsg, w.cfg.BotName, w.cfg.BotEmail)
+		lastOne := false
+		if p.AppRef == "" {
+			lastOne, err = manifestsFileIsEmpty(manifestFile)
+			if err != nil {
+				return err
+			}
+		}
+		if lastOne {
+			ownerApp := renderer.ServiceDatabaseOwnerApp(p.AppRef, projectName)
+			sha, err = mgr.RemoveAndPush(
+				standaloneOwnerAppPaths(projectName, envName, ownerApp),
+				commitMsg, w.cfg.BotName, w.cfg.BotEmail)
+		} else {
+			sha, err = mgr.CommitFilesAndPush([]git.FileChange{manifestFile}, commitMsg, w.cfg.BotName, w.cfg.BotEmail)
+		}
 		if err != nil {
 			return fmt.Errorf("git push (remove manifests): %w", err)
 		}
