@@ -157,9 +157,13 @@ func TestCommitFilesAndPush_RetriesRaceLostToConcurrentWriter(t *testing.T) {
 
 // TestCommitFilesAndPush_TerminalErrorIsNotRetried keeps the retry narrow: a
 // push that fails while the remote branch stays put is a real failure and must
-// surface immediately, not spin through attempts. The remote is made readable
-// but unwritable so the failure lands on the push itself — deleting it instead
-// would fail earlier, in the fetch, and never exercise the retry decision.
+// surface immediately, not spin through attempts. The remote rejects the push
+// from a pre-receive hook, so the failure lands on the push itself while the
+// branch stays readable and unmoved — which is exactly the state the retry
+// decision reads. Deleting or breaking the remote instead would fail the
+// re-read too and never exercise that decision, and revoking write permission
+// would not fail at all under a root CI agent, which ignores permission bits
+// (Jenkins #971, 2026-08-07).
 func TestCommitFilesAndPush_TerminalErrorIsNotRetried(t *testing.T) {
 	remoteDir := seedRaceRemote(t)
 	mgr := newRaceManager(t, remoteDir)
@@ -167,35 +171,34 @@ func TestCommitFilesAndPush_TerminalErrorIsNotRetried(t *testing.T) {
 	attempts := 0
 	mgr.prePush = func(plumbing.Hash) {
 		attempts++
-		chmodTree(t, remoteDir, 0o500)
+		rejectPushes(t, remoteDir)
 	}
-	t.Cleanup(func() { chmodTree(t, remoteDir, 0o700) })
 
 	if _, err := mgr.CommitFilesAndPush(
 		[]FileChange{{Path: "apps/ours.yaml", Content: "image: ours\n"}},
 		"deploy ours", "gitops", "gitops@test"); err == nil {
-		t.Fatal("push to a read-only remote returned no error")
+		t.Fatal("push to a remote that rejects every update returned no error")
 	}
 	if attempts != 1 {
 		t.Fatalf("push attempted %d times against an unmoved remote; want 1", attempts)
 	}
+	if _, ok := remoteFile(t, remoteDir, "apps/ours.yaml"); ok {
+		t.Fatal("rejected push landed on the remote anyway")
+	}
 }
 
-// chmodTree sets mode on every directory under root.
-func chmodTree(t *testing.T, root string, mode os.FileMode) {
+// rejectPushes installs a pre-receive hook that declines every update, the one
+// way to fail a push that holds for any uid.
+func rejectPushes(t *testing.T, remoteDir string) {
 	t.Helper()
 
-	err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return err
-		}
-		if !info.IsDir() {
-			return nil
-		}
-		return os.Chmod(path, mode)
-	})
-	if err != nil {
-		t.Fatalf("chmod %s to %o: %v", root, mode, err)
+	hooks := filepath.Join(remoteDir, "hooks")
+	if err := os.MkdirAll(hooks, 0o755); err != nil {
+		t.Fatalf("mkdir hooks: %v", err)
+	}
+	hook := "#!/bin/sh\necho 'remote rejected: test policy' >&2\nexit 1\n"
+	if err := os.WriteFile(filepath.Join(hooks, "pre-receive"), []byte(hook), 0o755); err != nil {
+		t.Fatalf("write pre-receive hook: %v", err)
 	}
 }
 
