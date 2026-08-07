@@ -188,6 +188,7 @@ export const databases: Messages = {
   "databases.insights.code.append_only_no_retention": { ru: "Таблица только растёт", en: "Table only grows" },
   "databases.insights.code.low_cache_hit": { ru: "Таблица читается с диска", en: "Table is read from disk" },
   "databases.insights.code.slow_query": { ru: "Тяжёлый запрос", en: "Heavy query" },
+  "databases.insights.code.idle_in_transaction": { ru: "Транзакция висит открытой", en: "Transaction left open" },
   "databases.insights.code.quota_forecast": { ru: "Место закончится", en: "Storage will run out" },
 
   "databases.insights.tables.title": { ru: "Таблицы", en: "Tables" },
@@ -236,6 +237,21 @@ export const databases: Messages = {
   "databases.table.queries.hint": {
     ru: "Запросы отобраны по упоминанию имени таблицы в тексте: запрос через вьюху или CTE сюда может не попасть.",
     en: "Queries are matched by the table name appearing in their text, so a query going through a view or CTE may be missing.",
+  },
+  "databases.activity.title": { ru: "Что идёт прямо сейчас", en: "Running right now" },
+  "databases.activity.summary": {
+    ru: "{total} соединений, {active} работают, {idleInTxn} висят в транзакции",
+    en: "{total} connections, {active} working, {idleInTxn} idle in transaction",
+  },
+  "databases.activity.empty": { ru: "Сейчас к базе никто не подключён.", en: "Nothing is connected right now." },
+  "databases.activity.inState": { ru: "в этом состоянии {time}", en: "{time} in this state" },
+  "databases.activity.xactOpen": { ru: "транзакция открыта {time}", en: "transaction open {time}" },
+  "databases.activity.waitingOnLock": { ru: "ждёт блокировку", en: "waiting on a lock" },
+  "databases.activity.cancel": { ru: "Отменить запрос", en: "Cancel query" },
+  "databases.activity.cancelling": { ru: "Отменяем…", en: "Cancelling…" },
+  "databases.activity.hint": {
+    ru: "Читается с самого инстанса в момент открытия страницы и нигде не сохраняется. Отмена завершает текущий запрос и откатывает транзакцию, соединение остаётся живым.",
+    en: "Read from the instance itself when you open the page and stored nowhere. Cancelling ends the current statement and rolls its transaction back; the connection survives.",
   },
   "databases.table.noColumns": {
     ru: "Схему колонок платформа не собирает: сбор идёт только по счётчикам статистики, без чтения структуры и данных.",

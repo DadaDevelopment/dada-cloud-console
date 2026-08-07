@@ -188,6 +188,9 @@ func (c *dbStatsCollector) collectShard(ctx context.Context, shard, dsn string, 
 	if err := c.collectStatements(ctx, conn, shard, now); err != nil {
 		log.Printf("db-stats: shard %s statements: %v", shard, err)
 	}
+	if err := c.collectActivity(ctx, conn, shard, now); err != nil {
+		log.Printf("db-stats: shard %s activity: %v", shard, err)
+	}
 	if !deep {
 		return nil
 	}
@@ -316,6 +319,55 @@ func (c *dbStatsCollector) collectStatements(ctx context.Context, conn *pgx.Conn
 	return c.sendBatch(ctx, batch)
 }
 
+// collectActivity snapshots how many connections each database is holding and
+// how old its oldest open transaction is.
+//
+// No query text is read. pg_stat_activity carries the statement with the
+// client's own constants in it, and these rows feed platform-wide views; the
+// owner sees the live text through GetDatabaseActivity, which reads the view
+// at the moment they ask and stores nothing.
+func (c *dbStatsCollector) collectActivity(ctx context.Context, conn *pgx.Conn, shard string, now time.Time) error {
+	rows, err := conn.Query(ctx, `
+		SELECT datname,
+		       COUNT(*),
+		       COUNT(*) FILTER (WHERE state = 'active'),
+		       COUNT(*) FILTER (WHERE state = 'idle'),
+		       COUNT(*) FILTER (WHERE state LIKE 'idle in transaction%'),
+		       COUNT(*) FILTER (WHERE wait_event_type = 'Lock'),
+		       COALESCE(MAX(EXTRACT(EPOCH FROM (NOW() - xact_start))), 0),
+		       COALESCE(MAX(EXTRACT(EPOCH FROM (NOW() - xact_start)))
+		                FILTER (WHERE state LIKE 'idle in transaction%'), 0)
+		  FROM pg_stat_activity
+		 WHERE datname IS NOT NULL AND backend_type = 'client backend'
+		 GROUP BY datname`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	batch := &pgx.Batch{}
+	for rows.Next() {
+		var (
+			datname                             string
+			backends, active, idle, inTxn, wait int32
+			maxXact, maxIdleTxn                 float64
+		)
+		if err := rows.Scan(&datname, &backends, &active, &idle, &inTxn, &wait, &maxXact, &maxIdleTxn); err != nil {
+			return err
+		}
+		batch.Queue(`
+			INSERT INTO db_stat_activity (shard, datname, collected_at, backends,
+				active, idle, idle_in_txn, waiting, max_xact_seconds, max_idle_txn_seconds)
+			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+			ON CONFLICT DO NOTHING`,
+			shard, datname, now, backends, active, idle, inTxn, wait, maxXact, maxIdleTxn)
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	return c.sendBatch(ctx, batch)
+}
+
 // collectRelations opens one connection to a single logical database and reads
 // its table and index statistics. Read-only by construction: every statement
 // here is a SELECT against a system view.
@@ -440,6 +492,7 @@ func (c *dbStatsCollector) prune(ctx context.Context) {
 		{`DELETE FROM db_stat_databases WHERE collected_at < $1`, cutoff},
 		{`DELETE FROM db_stat_tables WHERE collected_at < $1`, cutoff},
 		{`DELETE FROM db_stat_indexes WHERE collected_at < $1`, cutoff},
+		{`DELETE FROM db_stat_activity WHERE collected_at < $1`, cutoff},
 		{`DELETE FROM db_stat_statements WHERE collected_at < $1`, stmtCutoff},
 	} {
 		if _, err := c.h.pool.Exec(ctx, q.sql, q.at); err != nil {

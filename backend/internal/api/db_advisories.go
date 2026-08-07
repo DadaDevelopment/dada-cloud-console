@@ -19,6 +19,7 @@ const (
 	dbAdvisoryLowCacheHit   = "low_cache_hit"
 	dbAdvisorySlowQuery     = "slow_query"
 	dbAdvisoryQuotaForecast = "quota_forecast"
+	dbAdvisoryIdleInTxn     = "idle_in_transaction"
 )
 
 const (
@@ -47,6 +48,9 @@ const (
 	dbAdvisorySlowQueryShare  = 0.20
 
 	dbAdvisoryQuotaForecastDays = 30
+
+	dbAdvisoryIdleInTxnSeconds = 300
+	dbAdvisoryIdleInTxnSamples = 2
 )
 
 // dbAdvisory is one finding about one subject inside one logical database.
@@ -114,6 +118,13 @@ type dbAdvisoryStatement struct {
 // odds-research every large table reported last_autovacuum = NULL nine hours
 // after a pod restart, which looked exactly like "autovacuum never ran" and
 // was not.
+type dbAdvisoryActivity struct {
+	At               time.Time
+	Backends         int
+	IdleInTxn        int
+	MaxIdleTxnSecond float64
+}
+
 type dbAdvisoryInput struct {
 	Shard             string
 	Datname           string
@@ -127,6 +138,7 @@ type dbAdvisoryInput struct {
 	Indexes           []dbAdvisoryIndex
 	Statements        []dbAdvisoryStatement
 	StatementsTotalMs float64
+	Activity          []dbAdvisoryActivity
 }
 
 // evaluateDBAdvisories runs every rule over one database's window and returns
@@ -141,6 +153,7 @@ func evaluateDBAdvisories(in dbAdvisoryInput) []dbAdvisory {
 	out = append(out, lowCacheHitAdvisories(in)...)
 	out = append(out, slowQueryAdvisories(in)...)
 	out = append(out, quotaForecastAdvisories(in)...)
+	out = append(out, idleInTransactionAdvisories(in)...)
 
 	rank := map[string]int{dbAdvisoryCritical: 0, dbAdvisoryWarning: 1, dbAdvisoryInfo: 2}
 	sort.SliceStable(out, func(i, j int) bool {
@@ -391,6 +404,54 @@ func quotaForecastAdvisories(in dbAdvisoryInput) []dbAdvisory {
 			"growthBytesPerDay": int64(perDay),
 			"daysToLimit":       days,
 			"exhaustedAt":       in.Now.Add(time.Duration(days * float64(24*time.Hour))).Format(time.RFC3339),
+		},
+	}}
+}
+
+// idleInTransactionAdvisories reports a transaction left open and doing
+// nothing.
+//
+// It fires only when consecutive samples both see one, because a single sample
+// cannot tell a stuck transaction apart from an ordinary one that happened to
+// be open when the tick landed. The cost is not the connection: an open
+// transaction pins the oldest snapshot the instance must preserve, so vacuum
+// stops reclaiming dead rows everywhere, and the tables that grow are not
+// necessarily the ones the transaction touched.
+//
+// No SQL is suggested. Terminating someone's backend is not a fix a page
+// should hand out as a one-liner -- the console offers cancellation as an
+// explicit action on the live view, where the owner can see what they are
+// cancelling.
+func idleInTransactionAdvisories(in dbAdvisoryInput) []dbAdvisory {
+	if len(in.Activity) < dbAdvisoryIdleInTxnSamples {
+		return nil
+	}
+	recent := in.Activity[:dbAdvisoryIdleInTxnSamples]
+	worst := recent[0]
+	for _, a := range recent {
+		if a.IdleInTxn == 0 || a.MaxIdleTxnSecond < dbAdvisoryIdleInTxnSeconds {
+			return nil
+		}
+		if a.MaxIdleTxnSecond > worst.MaxIdleTxnSecond {
+			worst = a
+		}
+	}
+	severity := dbAdvisoryWarning
+	if worst.MaxIdleTxnSecond >= 4*dbAdvisoryIdleInTxnSeconds {
+		severity = dbAdvisoryCritical
+	}
+	return []dbAdvisory{{
+		Code:     dbAdvisoryIdleInTxn,
+		Subject:  in.Datname,
+		Severity: severity,
+		Detail: fmt.Sprintf("%d connection(s) idle in transaction, oldest open for %s",
+			worst.IdleInTxn, humanDuration(time.Duration(worst.MaxIdleTxnSecond)*time.Second)),
+		Evidence: map[string]any{
+			"connections":  worst.IdleInTxn,
+			"backends":     worst.Backends,
+			"openSeconds":  worst.MaxIdleTxnSecond,
+			"observedAt":   worst.At.Format(time.RFC3339),
+			"samplesInRow": dbAdvisoryIdleInTxnSamples,
 		},
 	}}
 }

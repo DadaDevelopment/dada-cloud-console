@@ -305,3 +305,70 @@ func TestConfigForDatabase_ActuallyRetargets(t *testing.T) {
 		t.Skip("pgx now rebuilds ConnString; the string path would be safe again")
 	}
 }
+
+// TestIdleInTransactionAdvisories_NeedsTwoSamples pins the rule that separates
+// a stuck transaction from an ordinary one. A single sample always catches
+// somebody mid-transaction; only a transaction still open on the next tick is
+// worth telling the owner about.
+func TestIdleInTransactionAdvisories_NeedsTwoSamples(t *testing.T) {
+	now := time.Now().UTC()
+	one := dbAdvisoryInput{
+		Datname: "app",
+		Now:     now,
+		Activity: []dbAdvisoryActivity{
+			{At: now, Backends: 9, IdleInTxn: 1, MaxIdleTxnSecond: 900},
+		},
+	}
+	if got := idleInTransactionAdvisories(one); len(got) != 0 {
+		t.Fatalf("one sample fired: %+v", got)
+	}
+
+	gone := dbAdvisoryInput{
+		Datname: "app",
+		Now:     now,
+		Activity: []dbAdvisoryActivity{
+			{At: now, Backends: 9, IdleInTxn: 1, MaxIdleTxnSecond: 900},
+			{At: now.Add(-5 * time.Minute), Backends: 9, IdleInTxn: 0},
+		},
+	}
+	if got := idleInTransactionAdvisories(gone); len(got) != 0 {
+		t.Fatalf("transaction seen once fired: %+v", got)
+	}
+
+	stuck := dbAdvisoryInput{
+		Datname: "app",
+		Now:     now,
+		Activity: []dbAdvisoryActivity{
+			{At: now, Backends: 9, IdleInTxn: 2, MaxIdleTxnSecond: 3000},
+			{At: now.Add(-5 * time.Minute), Backends: 9, IdleInTxn: 1, MaxIdleTxnSecond: 2700},
+		},
+	}
+	got := idleInTransactionAdvisories(stuck)
+	if len(got) != 1 {
+		t.Fatalf("two samples in a row produced %d advisories", len(got))
+	}
+	if got[0].Severity != dbAdvisoryCritical {
+		t.Errorf("severity = %q, want critical for a 50 minute idle transaction", got[0].Severity)
+	}
+	if got[0].SuggestedSQL != "" {
+		t.Errorf("rule handed out SQL: %q", got[0].SuggestedSQL)
+	}
+}
+
+// TestIdleInTransactionAdvisories_ShortTransactionIsNotAFinding keeps the rule
+// off healthy write traffic: a transaction that is briefly idle between
+// statements is how every ORM works.
+func TestIdleInTransactionAdvisories_ShortTransactionIsNotAFinding(t *testing.T) {
+	now := time.Now().UTC()
+	in := dbAdvisoryInput{
+		Datname: "app",
+		Now:     now,
+		Activity: []dbAdvisoryActivity{
+			{At: now, Backends: 4, IdleInTxn: 3, MaxIdleTxnSecond: 12},
+			{At: now.Add(-5 * time.Minute), Backends: 4, IdleInTxn: 2, MaxIdleTxnSecond: 30},
+		},
+	}
+	if got := idleInTransactionAdvisories(in); len(got) != 0 {
+		t.Fatalf("short transactions fired: %+v", got)
+	}
+}

@@ -25,6 +25,7 @@ const eslintConfig = defineConfig([
       "app/(console)/admin/feedback/page.tsx",
       "app/(console)/admin/db-shards/page.tsx",
       "app/(console)/projects/\\[projectId\\]/databases/\\[name\\]/tables/\\[table\\]/page.tsx",
+      "components/databases/db-activity.tsx",
     ],
     rules: { "react-hooks/set-state-in-effect": "off" },
   },

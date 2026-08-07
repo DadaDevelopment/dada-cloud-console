@@ -455,6 +455,35 @@ export interface DatabaseTableDetailResponse {
   advisories: DatabaseAdvisory[];
 }
 
+export interface DatabaseActivityConnection {
+  pid: number;
+  user: string;
+  applicationName: string;
+  clientAddr: string;
+  state: string;
+  waitEventType: string;
+  waitEvent: string;
+  stateSeconds: number | null;
+  xactSeconds: number | null;
+  query: string;
+}
+
+export interface DatabaseActivitySummary {
+  total: number;
+  active: number;
+  idle: number;
+  idleInTransaction: number;
+  waitingOnLock: number;
+  oldestXactSeconds: number;
+  truncated: boolean;
+  collectedAt: string;
+}
+
+export interface DatabaseActivityResponse {
+  connections: DatabaseActivityConnection[];
+  summary: DatabaseActivitySummary;
+}
+
 export interface S3BucketsResponse {
   buckets: ResourceSnapshot[];
 }

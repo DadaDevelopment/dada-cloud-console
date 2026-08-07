@@ -10266,6 +10266,138 @@ paths:
       summary: Delete a managed PostgreSQL database
       tags:
       - database
+  /projects/{projectId}/environments/{envId}/databases/{name}/activity:
+    get:
+      description: Reads pg_stat_activity on the tenant instance filtered to this
+        database and returns each client connection with its state, how long it has
+        been in that state, what it is waiting on, and the statement it is running.
+        Also returns counts by state and the age of the oldest open transaction. Live
+        read, nothing here is stored.
+      operationId: getDatabaseActivity
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      - description: Environment UUID
+        in: path
+        name: envId
+        required: true
+        type: string
+      - description: Database resource name
+        in: path
+        name: name
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "503":
+          description: Service Unavailable
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Connections open on a database right now
+      tags:
+      - database
+  /projects/{projectId}/environments/{envId}/databases/{name}/activity/{pid}/cancel:
+    post:
+      description: Runs pg_cancel_backend against one connection of this database,
+        ending its current statement and rolling its transaction back. The connection
+        itself survives. The pid must belong to this database. Requires write access
+        to the project.
+      operationId: cancelDatabaseBackend
+      parameters:
+      - description: Project UUID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      - description: Environment UUID
+        in: path
+        name: envId
+        required: true
+        type: string
+      - description: Database resource name
+        in: path
+        name: name
+        required: true
+        type: string
+      - description: Backend pid to cancel
+        in: path
+        name: pid
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "503":
+          description: Service Unavailable
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Cancel what one database connection is doing
+      tags:
+      - database
   /projects/{projectId}/environments/{envId}/databases/{name}/advisories:
     get:
       description: 'Lists the advisories the platform derived for a managed PostgreSQL

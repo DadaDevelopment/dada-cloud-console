@@ -183,7 +183,35 @@ func (e *dbAdvisoryEngine) loadInput(ctx context.Context, shard, datname string,
 	if err := e.loadStatements(ctx, in, shard, datname); err != nil {
 		return nil, err
 	}
+	if err := e.loadActivity(ctx, in, shard, datname); err != nil {
+		return nil, err
+	}
 	return in, nil
+}
+
+// loadActivity reads the most recent connection-state samples, newest first.
+// Only the last hour counts: an idle transaction the collector saw yesterday
+// says nothing about the instance right now, and an advisory that outlives the
+// condition it describes teaches the owner to ignore the page.
+func (e *dbAdvisoryEngine) loadActivity(ctx context.Context, in *dbAdvisoryInput, shard, datname string) error {
+	rows, err := e.h.pool.Query(ctx, `
+		SELECT collected_at, backends, idle_in_txn, max_idle_txn_seconds
+		  FROM db_stat_activity
+		 WHERE shard = $1 AND datname = $2 AND collected_at > NOW() - INTERVAL '1 hour'
+		 ORDER BY collected_at DESC
+		 LIMIT 12`, shard, datname)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var a dbAdvisoryActivity
+		if err := rows.Scan(&a.At, &a.Backends, &a.IdleInTxn, &a.MaxIdleTxnSecond); err != nil {
+			return err
+		}
+		in.Activity = append(in.Activity, a)
+	}
+	return rows.Err()
 }
 
 // dbAdvisoryTableSQL pairs each table's newest sample in the window with its

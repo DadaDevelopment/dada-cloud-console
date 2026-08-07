@@ -15,6 +15,7 @@ import { canMutate } from "@/lib/rbac";
 import { timeAgo } from "@/lib/format";
 import { useT } from "@/lib/i18n/console/context";
 import { DbInsights } from "@/components/databases/db-insights";
+import { DbActivity } from "@/components/databases/db-activity";
 
 interface DbSpec {
   database?: string;
@@ -351,6 +352,7 @@ export default function DatabaseDetailPage() {
       </section>
 
       <DbInsights projectId={projectId} envId={envId} name={name} />
+      <DbActivity projectId={projectId} envId={envId} name={name} canManage={canManage} />
 
       <section className="mb-8">
         <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">{t("databases.detail.connection")}</h2>

@@ -20,6 +20,7 @@ import type {
   DatabaseInsights,
   DatabaseTablesResponse,
   DatabaseTableDetailResponse,
+  DatabaseActivityResponse,
   DatabaseQueriesResponse,
   DatabaseAdvisoriesResponse,
   AppsResponse,
@@ -418,6 +419,17 @@ export const databasesApi = {
   tables: (projectId: string, envId: string, name: string) =>
     apiFetch<DatabaseTablesResponse>(
       `/api/v1/projects/${projectId}/environments/${envId}/databases/${name}/tables`
+    ),
+
+  activity: (projectId: string, envId: string, name: string) =>
+    apiFetch<DatabaseActivityResponse>(
+      `/api/v1/projects/${projectId}/environments/${envId}/databases/${name}/activity`
+    ),
+
+  cancelBackend: (projectId: string, envId: string, name: string, pid: number) =>
+    apiFetch<{ cancelled: boolean; pid: number }>(
+      `/api/v1/projects/${projectId}/environments/${envId}/databases/${name}/activity/${pid}/cancel`,
+      { method: "POST" }
     ),
 
   table: (projectId: string, envId: string, name: string, table: string, schema?: string) =>
