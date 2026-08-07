@@ -539,13 +539,26 @@ func touchAppHealthAlertSeen(ctx context.Context, pool *pgxpool.Pool, namespace,
 // for both a genuine query failure and "no row yet" (pgx.ErrNoRows) — the
 // caller treats either the same way, as "must refresh", which is correct for
 // a first-ever detection too.
+//
+// A stored cause_line that notify.IsUnusableCauseLine rejects also reports
+// hasCause=false, so a row poisoned by the older extractor (bare traceback
+// header, P1-CAUSELINE-HEADER) is re-derived on the next tick instead of
+// sticking for as long as the app keeps crashlooping with the same reason.
+// Residual cost: an app whose fresh log yields no cause at all keeps its
+// poisoned line and pays one extra GetLogs per tick until its reason changes
+// or it stops failing — bounded to legacy rows, since the fixed extractor can
+// no longer produce that value.
 func currentAlertCauseState(ctx context.Context, pool *pgxpool.Pool, namespace, appName string) (reason string, hasCause bool, err error) {
+	var causeLine string
 	err = pool.QueryRow(ctx,
-		`SELECT COALESCE(reason, ''), cause IS NOT NULL AND cause <> ''
+		`SELECT COALESCE(reason, ''), cause IS NOT NULL AND cause <> '', COALESCE(cause_line, '')
 		 FROM app_health_alerts WHERE namespace = $1 AND app_name = $2`,
-		namespace, appName).Scan(&reason, &hasCause)
+		namespace, appName).Scan(&reason, &hasCause, &causeLine)
 	if err != nil {
 		return "", false, err
+	}
+	if notify.IsUnusableCauseLine(causeLine) {
+		return reason, false, nil
 	}
 	return reason, hasCause, nil
 }

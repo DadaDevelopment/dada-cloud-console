@@ -191,3 +191,43 @@ func TestCurrentAlertCauseStateDrivesRefreshDecision(t *testing.T) {
 		t.Fatalf("expected hasCause=true after a touch with a non-empty cause")
 	}
 }
+
+// TestCurrentAlertCauseStateForcesRefreshOnPoisonedCauseLine is RED-proof for
+// P1-CAUSELINE-HEADER. The older extractor could store the bare Python
+// traceback header as the crash cause, and maybeCauseRefresh skips the log
+// read entirely while a cause is on record — so without this, a row poisoned
+// before the fix would keep showing "Traceback (most recent call last):" in
+// the console banner for as long as the app kept crashlooping with the same
+// reason, and the fixed extractor would never get to run on it.
+func TestCurrentAlertCauseStateForcesRefreshOnPoisonedCauseLine(t *testing.T) {
+	pool := testAdvisoryPool(t)
+	ctx := context.Background()
+	ns := "test-ns-cause-poison-" + uuid.NewString()[:8]
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM app_health_alerts WHERE namespace = $1`, ns)
+	})
+
+	touchAppHealthAlertSeen(ctx, pool, ns, "worker", "CrashLoopBackOff", "pod-1/worker",
+		"ошибка в коде приложения (Python)", "Traceback (most recent call last):")
+
+	reason, hasCause, err := currentAlertCauseState(ctx, pool, ns, "worker")
+	if err != nil {
+		t.Fatalf("currentAlertCauseState: %v", err)
+	}
+	if reason != "CrashLoopBackOff" {
+		t.Fatalf("expected reason=CrashLoopBackOff, got %q", reason)
+	}
+	if hasCause {
+		t.Fatalf("a stored bare traceback header must not count as a known cause")
+	}
+
+	touchAppHealthAlertSeen(ctx, pool, ns, "worker", "CrashLoopBackOff", "pod-1/worker",
+		"ошибка в коде приложения (Python)", "RuntimeError: no objects found under 's3://models/buffalo_l'")
+
+	if _, hasCause, err = currentAlertCauseState(ctx, pool, ns, "worker"); err != nil {
+		t.Fatalf("currentAlertCauseState after repair: %v", err)
+	}
+	if !hasCause {
+		t.Fatalf("expected hasCause=true once a real exception line replaced the header")
+	}
+}

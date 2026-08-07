@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"html"
 	"net/smtp"
+	"regexp"
 	"strings"
 	"time"
 )
@@ -381,30 +382,102 @@ func crashLineSignaturePatterns() []string {
 	return patterns
 }
 
+// pythonTracebackHeader is the first line CPython prints for an uncaught
+// exception. It is deliberately NOT usable as a cause line on its own: it
+// names no exception type and no message, so storing it as the cause tells
+// the owner only "python died", which ClassifyCrashLog already says.
+const pythonTracebackHeader = "Traceback (most recent call last)"
+
+// IsUnusableCauseLine reports whether an already-stored cause line carries no
+// information about the failure and should therefore be re-derived from a
+// fresh log read. Today that is exactly the bare Python traceback header,
+// which older builds of ExtractCauseLine could store as the cause; callers
+// keep such a row from being treated as "cause already known" so the fixed
+// extractor gets a chance to replace it instead of the stale value sticking
+// for as long as the app keeps crashlooping.
+func IsUnusableCauseLine(causeLine string) bool {
+	return strings.Contains(causeLine, pythonTracebackHeader)
+}
+
+// pythonExceptionLinePattern matches the shape of CPython's final traceback
+// line: a dotted identifier (the exception type, possibly module-qualified)
+// optionally followed by ": message". Frames are indented and therefore never
+// reach this check; the pattern exists to reject unindented application
+// output that happens to trail a traceback, so an arbitrary log line can
+// never be presented to the owner as the crash cause.
+var pythonExceptionLinePattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_.]*(:.*)?$`)
+
+// pythonTracebackException returns the exception line of the LAST traceback
+// in the excerpt, or "" when the excerpt has no traceback or the traceback is
+// cut off before its exception line (a tail window can start mid-frames).
+//
+// This exists because the signature-table scan alone cannot find the cause of
+// an exception type nobody thought to list: P1 live case was a RuntimeError
+// from a missing S3 model path, where the only line matching any known
+// signature was the traceback header itself, so the stored cause_line — shown
+// in the console banner, mailed to the owner, and fed to auto-fix as evidence
+// — was the literal string "Traceback (most recent call last):". CPython's
+// format is authoritative here: after the header come indented frames, and
+// the last unindented line is the exception. Reading the format instead of
+// enumerating exception types covers every type, including ones defined by
+// the application itself.
+func pythonTracebackException(excerpt string) string {
+	lines := strings.Split(excerpt, "\n")
+	header := -1
+	for i, line := range lines {
+		if strings.Contains(line, pythonTracebackHeader) {
+			header = i
+		}
+	}
+	if header < 0 {
+		return ""
+	}
+	for i := len(lines) - 1; i > header; i-- {
+		line := strings.TrimRight(lines[i], " \t\r")
+		if line == "" || line[0] == ' ' || line[0] == '\t' {
+			continue
+		}
+		if strings.Contains(line, pythonTracebackHeader) {
+			continue
+		}
+		if pythonExceptionLinePattern.MatchString(line) {
+			return line
+		}
+	}
+	return ""
+}
+
 // ExtractCauseLine picks the single most telling line out of a crashed
-// container's log excerpt: the LAST line that contains one of the known
-// error signatures (crashLineSignaturePatterns), since a traceback or stack
-// dump lists causes top to bottom and the final matching line is usually the
-// one closest to the actual failure. Returns "" when no line matches — this
-// must never guess or fall back to an arbitrary line, because a wrong
-// "cause" shown next to a crash is worse than no cause at all (same rule
-// ClassifyCrashLog already follows). The result is truncated to
-// causeLineMaxRunes, measured in runes so a UTF-8 line is never cut mid-rune.
+// container's log excerpt. A Python traceback is read by its own format
+// first (pythonTracebackException), because that finds the real exception
+// even when its type is absent from the signature tables; everything else
+// falls back to the LAST line containing one of the known error signatures
+// (crashLineSignaturePatterns), since a stack dump lists causes top to bottom
+// and the final matching line is usually the one closest to the failure. The
+// bare traceback header is never a valid answer in either path.
+//
+// Returns "" when nothing matches — this must never guess or fall back to an
+// arbitrary line, because a wrong "cause" shown next to a crash is worse than
+// no cause at all (same rule ClassifyCrashLog already follows). The result is
+// truncated to causeLineMaxRunes, measured in runes so a UTF-8 line is never
+// cut mid-rune.
 func ExtractCauseLine(excerpt string) string {
 	if excerpt == "" {
 		return ""
 	}
-	patterns := crashLineSignaturePatterns()
-	best := ""
-	for _, line := range strings.Split(excerpt, "\n") {
-		trimmed := strings.TrimSpace(line)
-		if trimmed == "" {
-			continue
-		}
-		for _, p := range patterns {
-			if strings.Contains(trimmed, p) {
-				best = trimmed
-				break
+	best := pythonTracebackException(excerpt)
+	if best == "" {
+		patterns := crashLineSignaturePatterns()
+		for _, line := range strings.Split(excerpt, "\n") {
+			trimmed := strings.TrimSpace(line)
+			if trimmed == "" || strings.Contains(trimmed, pythonTracebackHeader) {
+				continue
+			}
+			for _, p := range patterns {
+				if strings.Contains(trimmed, p) {
+					best = trimmed
+					break
+				}
 			}
 		}
 	}

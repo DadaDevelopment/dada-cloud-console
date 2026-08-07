@@ -75,6 +75,31 @@ func TestExtractCauseLine(t *testing.T) {
 			want:    "AttributeError: second and final",
 		},
 		{
+			name:    "unlisted exception type is still found by traceback shape",
+			excerpt: "loading model\nTraceback (most recent call last):\n  File \"/app/infer.py\", line 41, in <module>\n    load_model()\n  File \"/app/infer.py\", line 22, in load_model\n    raise RuntimeError(msg)\nRuntimeError: no objects found under 's3://models/buffalo_l' - check MODEL_S3_URI",
+			want:    "RuntimeError: no objects found under 's3://models/buffalo_l' - check MODEL_S3_URI",
+		},
+		{
+			name:    "bare traceback header is never the cause",
+			excerpt: "starting\nTraceback (most recent call last):\n  File \"/app/bot.py\", line 9, in <module>",
+			want:    "",
+		},
+		{
+			name:    "chained traceback reports the final exception",
+			excerpt: "Traceback (most recent call last):\n  File \"a.py\", line 1, in <module>\nKeyError: 'token'\n\nDuring handling of the above exception, another exception occurred:\n\nTraceback (most recent call last):\n  File \"b.py\", line 2, in <module>\nSystemExit: 1",
+			want:    "SystemExit: 1",
+		},
+		{
+			name:    "unindented app output after a traceback is not mistaken for the cause",
+			excerpt: "Traceback (most recent call last):\n  File \"a.py\", line 1, in <module>\nImportError: cannot import name 'x'\nshutting down worker pool now",
+			want:    "ImportError: cannot import name 'x'",
+		},
+		{
+			name:    "live case: telebot attribute error",
+			excerpt: "Traceback (most recent call last):\n  File \"/app/main.py\", line 12, in <module>\n    @bot.message_handler(commands=['start'])\nAttributeError: module 'telebot.util' has no attribute 'message_handler'",
+			want:    "AttributeError: module 'telebot.util' has no attribute 'message_handler'",
+		},
+		{
 			name:    "no known signature never returns a guess",
 			excerpt: "Listening on port 8080\nConnection refused to database",
 			want:    "",
