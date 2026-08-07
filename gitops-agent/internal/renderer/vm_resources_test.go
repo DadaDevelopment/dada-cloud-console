@@ -51,6 +51,56 @@ func TestRenderNginxConf_ReproducesFindata(t *testing.T) {
 	}
 }
 
+// An ingress created without TLS must not emit an ssl_certificate directive at
+// all. Rendering the canonical host as a 443 vhost with empty cert paths makes
+// nginx exit at boot ("invalid number of arguments in \"ssl_certificate\""),
+// which crash-loops the ingress container and takes down every site on the VM,
+// not just this one. Live proof: le-probe, 08-07.
+func TestRenderNginxConf_WithoutTLSServesPlainHTTP(t *testing.T) {
+	conf := RenderNginxConf(VMIngressSpec{
+		Host:        "le-probe.example.com",
+		Aliases:     []string{"www.le-probe.example.com"},
+		SSLRedirect: true,
+		ACMEWebroot: "/var/www/acme",
+		Rules:       []VMIngressRule{{Path: "/", App: "le-web", Port: 80}},
+	})
+	if strings.Contains(conf, "ssl_certificate") {
+		t.Fatalf("a TLS-less ingress must not reference any certificate:\n%s", conf)
+	}
+	if strings.Contains(conf, "listen 443") {
+		t.Fatalf("a TLS-less ingress must not open 443:\n%s", conf)
+	}
+	if strings.Contains(conf, "return 301 https://") {
+		t.Errorf("nothing serves https yet, so an https redirect is a dead end:\n%s", conf)
+	}
+	for _, w := range []string{
+		"listen 80;",
+		"server_name le-probe.example.com;",
+		"proxy_pass http://le-web:80;",
+		"location /.well-known/acme-challenge/ {",
+	} {
+		if !strings.Contains(conf, w) {
+			t.Errorf("generated nginx conf missing %q\n---\n%s", w, conf)
+		}
+	}
+}
+
+// TLS.Enabled with no cert paths is the same crash as TLS disabled: the flag is
+// forced on whenever a custom host is attached, before any cert exists.
+func TestRenderNginxConf_TLSEnabledWithoutCertPathsStaysHTTP(t *testing.T) {
+	conf := RenderNginxConf(VMIngressSpec{
+		Host:  "le-probe.example.com",
+		TLS:   VMIngressTLS{Enabled: true},
+		Rules: []VMIngressRule{{Path: "/", App: "le-web", Port: 80}},
+	})
+	if strings.Contains(conf, "ssl_certificate") {
+		t.Fatalf("empty cert paths must never reach nginx:\n%s", conf)
+	}
+	if !strings.Contains(conf, "proxy_pass http://le-web:80;") {
+		t.Errorf("the canonical host must still serve over http:\n%s", conf)
+	}
+}
+
 // A custom domain (ExtraHost) attached to an ingress must SERVE traffic to its
 // own app:port with its own cert, alongside (not instead of) the canonical
 // Host -- unlike Aliases, which only 301-redirect to Host.
@@ -186,7 +236,12 @@ func TestIngressServiceBlock_MountsACMEWebroot(t *testing.T) {
 }
 
 func TestRenderNginxConf_MinVersion13(t *testing.T) {
-	conf := RenderNginxConf(VMIngressSpec{Host: "x", TLS: VMIngressTLS{Enabled: true, MinVersion: "1.3"}})
+	conf := RenderNginxConf(VMIngressSpec{Host: "x", TLS: VMIngressTLS{
+		Enabled:    true,
+		MinVersion: "1.3",
+		CertPath:   "/etc/nginx/certs/live/x/fullchain.pem",
+		KeyPath:    "/etc/nginx/certs/live/x/privkey.pem",
+	}})
 	if !strings.Contains(conf, "ssl_protocols TLSv1.3;") || strings.Contains(conf, "TLSv1.2") {
 		t.Errorf("minVersion 1.3 should emit only TLSv1.3:\n%s", conf)
 	}

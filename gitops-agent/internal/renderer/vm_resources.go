@@ -108,6 +108,11 @@ func RenderNginxConf(spec VMIngressSpec) string {
 	if spec.TLSIncludeDir != "" {
 		fmt.Fprintf(&b, "include %s/*.conf;\n\n", strings.TrimSuffix(spec.TLSIncludeDir, "/"))
 	}
+	// The canonical host gets a 443 block only when it actually has cert paths.
+	// An `ssl_certificate` with an empty argument is a config error, so a TLS-less
+	// ingress rendered as a 443 vhost puts nginx in a crash loop and takes the
+	// whole VM's routing with it — including sites that were serving fine.
+	canonicalTLS := spec.TLS.Enabled && spec.TLS.CertPath != "" && spec.TLS.KeyPath != ""
 	acme := acmeLocation(spec.ACMEWebroot)
 	redirect80 := func(serverName, target string) {
 		fmt.Fprintf(&b, "server {\n    listen 80;\n    server_name %s;\n%s", serverName, acme)
@@ -117,24 +122,42 @@ func RenderNginxConf(spec VMIngressSpec) string {
 		}
 		fmt.Fprintf(&b, "    location / {\n        return 301 https://%s$request_uri;\n    }\n}\n\n", target)
 	}
+	redirect80Plain := func(serverName, target string) {
+		fmt.Fprintf(&b, "server {\n    listen 80;\n    server_name %s;\n%s", serverName, acme)
+		if acme == "" {
+			fmt.Fprintf(&b, "    return 301 http://%s$request_uri;\n}\n\n", target)
+			return
+		}
+		fmt.Fprintf(&b, "    location / {\n        return 301 http://%s$request_uri;\n    }\n}\n\n", target)
+	}
 
 	// Aliases (e.g. www) → 301 to the canonical host, on both 80 and 443.
 	for _, alias := range spec.Aliases {
-		redirect80(alias, spec.Host)
-		if spec.TLS.Enabled {
+		if canonicalTLS {
+			redirect80(alias, spec.Host)
 			fmt.Fprintf(&b, "server {\n    listen 443 ssl http2;\n    server_name %s;\n    ssl_certificate %s;\n    ssl_certificate_key %s;\n    ssl_protocols %s;\n    ssl_ciphers HIGH:!aNULL:!MD5;\n    return 301 https://%s$request_uri;\n}\n\n",
 				alias, spec.TLS.CertPath, spec.TLS.KeyPath, proto, spec.Host)
+			continue
 		}
+		redirect80Plain(alias, spec.Host)
 	}
 
-	// Canonical host: http → https redirect.
-	if spec.SSLRedirect {
+	// Canonical host: http → https redirect. Only meaningful once TLS can serve.
+	if spec.SSLRedirect && canonicalTLS {
 		redirect80(spec.Host, spec.Host)
 	}
 
-	// Canonical host: the TLS vhost with routing.
-	fmt.Fprintf(&b, "server {\n    listen 443 ssl http2;\n    server_name %s;\n\n", spec.Host)
-	fmt.Fprintf(&b, "    ssl_certificate %s;\n    ssl_certificate_key %s;\n    ssl_protocols %s;\n    ssl_ciphers HIGH:!aNULL:!MD5;\n\n", spec.TLS.CertPath, spec.TLS.KeyPath, proto)
+	// Canonical host: the serving vhost with routing — 443 when it has a cert,
+	// plain 80 (plus the ACME challenge location) until then.
+	if canonicalTLS {
+		fmt.Fprintf(&b, "server {\n    listen 443 ssl http2;\n    server_name %s;\n\n", spec.Host)
+		fmt.Fprintf(&b, "    ssl_certificate %s;\n    ssl_certificate_key %s;\n    ssl_protocols %s;\n    ssl_ciphers HIGH:!aNULL:!MD5;\n\n", spec.TLS.CertPath, spec.TLS.KeyPath, proto)
+	} else {
+		fmt.Fprintf(&b, "server {\n    listen 80;\n    server_name %s;\n\n", spec.Host)
+		if acme != "" {
+			b.WriteString(acme + "\n")
+		}
+	}
 	b.WriteString("    access_log /var/log/nginx/access.log;\n    error_log /var/log/nginx/error.log warn;\n\n")
 	if spec.BasicAuth != "" {
 		fmt.Fprintf(&b, "    auth_basic \"Private area\";\n    auth_basic_user_file %s;\n\n", spec.BasicAuth)
