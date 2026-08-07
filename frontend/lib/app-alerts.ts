@@ -43,6 +43,10 @@ export function getAppAlerts(snapshot: ResourceSnapshot | null | undefined): App
   );
 }
 
+export function getOperationalAppAlerts(alerts: AppAlert[]): AppAlert[] {
+	return alerts;
+}
+
 /** True if any alert in the list is the given type. */
 export function hasAlertType(alerts: AppAlert[], type: AppAlertType): boolean {
   return alerts.some((a) => a.type === type);

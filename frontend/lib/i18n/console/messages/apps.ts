@@ -105,6 +105,10 @@ export const apps: Messages = {
     ru: "Не нужен для фонового воркера — публичный адрес не выдаётся",
     en: "Not needed for a background worker — no public address is issued",
   },
+  "apps.config.servicePortHint": {
+    ru: "Оставьте пустым, чтобы убрать публичный HTTP-маршрут. При следующем деплое порт не будет подставлен автоматически.",
+    en: "Leave empty to remove the public HTTP route. Later deploys will not restore a port automatically.",
+  },
   "apps.modal.create.worker.label": { ru: "Фоновый воркер (бот без HTTP)", en: "Background worker (no HTTP)" },
   "apps.modal.create.worker.hint": {
     ru: "Для long-poll ботов и очередей без входящего HTTP-трафика: приложение не получит публичный домен.",

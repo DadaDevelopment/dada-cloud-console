@@ -64,7 +64,10 @@ function unquote(v: string): string {
 /** readCommon extracts the current common.* values; missing keys come back "". */
 export function readCommon(yaml: string): CommonConfig {
   const map = scan(yaml);
-  const get = (path: string) => unquote(map.get(path)?.value ?? "");
+  const get = (path: string) => {
+    const value = unquote(map.get(path)?.value ?? "");
+    return value === "~" || value === "null" ? "" : value;
+  };
   return {
     imageName: get(PATHS.imageName),
     imageTag: get(PATHS.imageTag),
@@ -80,6 +83,7 @@ export function readCommon(yaml: string): CommonConfig {
 
 function formatValue(field: keyof CommonConfig, value: string): string {
   if (field === "useDotEnv") return `"${value}"`;
+  if (field === "servicePort" && !value.trim()) return "~";
   return value;
 }
 
@@ -96,5 +100,16 @@ export function patchCommon(yaml: string, cfg: CommonConfig): string {
     if (!info) return;
     lines[info.idx] = `${" ".repeat(info.indent)}${info.key}: ${formatValue(field, cfg[field])}`;
   });
+
+  // Keep the no-route choice explicit for Helm. Older values files do not
+  // carry common.service.enabled, so add it next to servicePort when needed.
+  const enabled = cfg.servicePort.trim() !== "";
+  const enabledInfo = map.get("common.service.enabled");
+  const portInfo = map.get(PATHS.servicePort);
+  if (enabledInfo) {
+    lines[enabledInfo.idx] = `${" ".repeat(enabledInfo.indent)}${enabledInfo.key}: ${enabled}`;
+  } else if (portInfo) {
+    lines.splice(portInfo.idx + 1, 0, `${" ".repeat(portInfo.indent)}service:`, `${" ".repeat(portInfo.indent + 2)}enabled: ${enabled}`);
+  }
   return lines.join("\n");
 }
