@@ -869,6 +869,109 @@ func (h *Handler) agentChatNavigator(c *gin.Context, flusher http.Flusher) func(
 	}
 }
 
+// agentChatOpenPagePromises are the phrasings an answer uses to commit to
+// moving the user's tab itself, in both languages the console speaks. They are
+// the trigger for finishing the move on the server: a turn that says one of
+// these and never calls OpenPageTool has told the user to wait for a tab that
+// would otherwise never move.
+var agentChatOpenPagePromises = []string{
+	"открою", "открываю", "открыл вам", "открыла вам", "открыл для вас",
+	"перевожу вас", "переведу вас", "переношу вас", "перенесу вас",
+	"отправлю вас", "отправляю вас",
+	"i'll open", "i will open", "i'm opening", "i am opening",
+	"i've opened", "i have opened", "let me open",
+	"i'll take you", "i will take you", "taking you to",
+}
+
+// agentChatNavigationPromised reports the console page an answer promised to
+// open but never opened, so the caller can keep that promise.
+//
+// The prompt rule alone does not hold this: six production replays in a row
+// never called OpenPageTool and two of them still announced the move, the
+// second of those on the very build that added the ban. So the honesty of the
+// sentence is enforced by the server, not asked for in words.
+//
+// It stays deliberately narrow. A promise is required, because the prompt also
+// tells the assistant to write a path when it is only mentioning a page, and
+// yanking the tab on a mention would be the opposite defect. Exactly one
+// console route must appear, because two candidates mean the answer never named
+// a single destination and guessing between them moves the user somewhere they
+// were not sent.
+func agentChatNavigationPromised(text string) (string, bool) {
+	lower := strings.ToLower(text)
+	promised := false
+	for _, phrase := range agentChatOpenPagePromises {
+		if strings.Contains(lower, phrase) {
+			promised = true
+			break
+		}
+	}
+	if !promised {
+		return "", false
+	}
+	paths := agentChatConsolePathsIn(text)
+	if len(paths) != 1 {
+		return "", false
+	}
+	return paths[0], true
+}
+
+// agentChatConsolePathsIn returns the distinct real console routes written in
+// text, in the order they appear. Candidates are rooted paths standing on a
+// word boundary -- which is what both a bare path and a markdown link target
+// look like -- trimmed of the punctuation that ends the sentence around them
+// and then held against the console's own route table.
+func agentChatConsolePathsIn(text string) []string {
+	var paths []string
+	seen := map[string]bool{}
+	for i := 0; i < len(text); i++ {
+		if text[i] != '/' {
+			continue
+		}
+		if i > 0 && !agentChatPathOpener(text[i-1]) {
+			continue
+		}
+		j := i
+		for j < len(text) && agentChatPathByte(text[j]) {
+			j++
+		}
+		candidate := strings.TrimRight(text[i:j], ".,;:!?")
+		if candidate == "" || seen[candidate] || !agentChatConsolePathIsRoute(candidate) {
+			continue
+		}
+		seen[candidate] = true
+		paths = append(paths, candidate)
+	}
+	return paths
+}
+
+// agentChatPathOpener reports whether a byte can stand immediately before a
+// path without being part of one. It keeps the second half of a URL out: the
+// slashes inside https://host/projects follow a letter or a slash, never one of
+// these.
+func agentChatPathOpener(b byte) bool {
+	switch b {
+	case ' ', '\t', '\n', '\r', '(', '[', '<', '"', '\'', '`', '*', '|':
+		return true
+	}
+	return false
+}
+
+// agentChatPathByte reports whether a byte continues a console path. Query and
+// hash are excluded on purpose: they address something on a page, and the route
+// check drops them anyway.
+func agentChatPathByte(b byte) bool {
+	switch {
+	case b >= 'a' && b <= 'z', b >= 'A' && b <= 'Z', b >= '0' && b <= '9':
+		return true
+	}
+	switch b {
+	case '/', '-', '_', '.', '~':
+		return true
+	}
+	return false
+}
+
 // agentChatConsolePathIsRoute reports whether path is a page the console really
 // serves, matching it against agentChatConsoleRoutes with `{name}` standing for
 // any one segment. Query and hash are ignored: they address something on a page
@@ -1213,6 +1316,12 @@ func (h *Handler) AgentChat(c *gin.Context) {
 		h.agentChatEmitTrace(c, flusher, req.Trace, trace)
 		h.agentChatEmitConfirmRequest(c, flusher, ctx, userSub, orgID, projectID, envID, pending, view.Mode)
 		return
+	}
+
+	if !view.Navigated() {
+		if path, ok := agentChatNavigationPromised(assistantText); ok {
+			h.agentChatNavigator(c, flusher)(path)
+		}
 	}
 
 	if assistantText != "" {
@@ -1619,6 +1728,12 @@ func (h *Handler) AgentChatConfirm(c *gin.Context) {
 		h.agentChatEmitTrace(c, flusher, req.Trace, trace)
 		h.agentChatEmitConfirmRequest(c, flusher, ctx, userSub, row.orgID, row.projectID, row.envID, nextPending, mode)
 		return
+	}
+
+	if !view.Navigated() {
+		if path, ok := agentChatNavigationPromised(assistantText); ok {
+			h.agentChatNavigator(c, flusher)(path)
+		}
 	}
 
 	if assistantText != "" {
