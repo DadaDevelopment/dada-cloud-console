@@ -89,16 +89,33 @@ function writeTrackedBuilds(entries: TrackedBuild[]): void {
   window.dispatchEvent(new Event(BUILD_TRACK_EVENT));
 }
 
+export interface TrackBuildOptions {
+  /**
+   * Whether this entry point may raise the native notification prompt.
+   *
+   * Defaults to true for console surfaces, where the visitor is already a
+   * signed-in customer watching their own build. The deploy-badge page passes
+   * false: its visitor arrived from a README badge and has not yet seen the
+   * product, so a permission dialog is the wrong first thing to ask them —
+   * tracking still happens, and the in-console panel still reports the result
+   * once the redirect lands them inside the console layout.
+   */
+  requestNotifyPermission?: boolean;
+}
+
 /**
  * Records a build the user just triggered so `BuildWatcher` can pick it up
  * even if this tab reloads or the user leaves the build page. Call this
  * right after a successful `buildsApi.trigger(...)`.
  */
-export function trackBuildStart(entry: Omit<TrackedBuild, "startedAt">): void {
+export function trackBuildStart(
+  entry: Omit<TrackedBuild, "startedAt">,
+  options: TrackBuildOptions = {}
+): void {
   const existing = readTrackedBuilds().filter((e) => e.buildId !== entry.buildId);
   const next = [...existing, { ...entry, startedAt: Date.now() }].slice(-MAX_TRACKED);
   writeTrackedBuilds(next);
-  maybeRequestNotifyPermission();
+  if (options.requestNotifyPermission ?? true) maybeRequestNotifyPermission();
 }
 
 /** Removes one build from the tracked list, e.g. once its terminal status has been observed. */

@@ -121,3 +121,43 @@ test("entries older than the freshness window never resurface as new", () => {
 
   assert.deepEqual(readTrackedBuilds(), []);
 });
+
+/**
+ * The deploy badge is the one entry point whose visitor has not signed up for
+ * anything yet, so it tracks the build without raising a permission dialog.
+ * Both halves matter: suppressing the prompt must not also suppress tracking,
+ * or the badge visitor is back to learning nothing about their build.
+ */
+function installNotificationSpy(): { asked: () => number } {
+  let asked = 0;
+  (window as unknown as Record<string, unknown>).Notification = {
+    permission: "default",
+    requestPermission: () => {
+      asked += 1;
+      return Promise.resolve("default");
+    },
+  };
+  return { asked: () => asked };
+}
+
+test("an entry point that opts out of the prompt still gets tracked", () => {
+  installWindow();
+  const spy = installNotificationSpy();
+
+  trackBuildStart(ENTRY, { requestNotifyPermission: false });
+
+  assert.equal(spy.asked(), 0);
+  assert.deepEqual(
+    readTrackedBuilds().map((b) => b.buildId),
+    [ENTRY.buildId]
+  );
+});
+
+test("console entry points still raise the prompt by default", () => {
+  installWindow();
+  const spy = installNotificationSpy();
+
+  trackBuildStart(ENTRY);
+
+  assert.equal(spy.asked(), 1);
+});
