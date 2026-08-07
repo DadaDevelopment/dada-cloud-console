@@ -491,7 +491,7 @@ func growthFixSpec(t *testing.T, pool *pgxpool.Pool) campaignSpec {
 		_, _ = pool.Exec(context.Background(),
 			`DELETE FROM growth_campaign_sends WHERE campaign = $1`, name)
 	})
-	return campaignSpec{Campaign: name, Variant: "a", MinAge: reactivationFixMinAge, PerRun: 3}
+	return campaignSpec{Campaign: name, Variant: "a", MinAge: reactivationFixMinAge, PerRun: 3, QuietPeriod: reactivationWaveQuiet}
 }
 
 // markRedeemed puts a first-wave row in the state the fix wave targets.
@@ -579,5 +579,39 @@ func TestSweepReactivationFix_SecondPassDoesNotMailAgain(t *testing.T) {
 
 	if got := sendsTo(mailer, email); got != 1 {
 		t.Fatalf("letters after two passes=%d want 1", got)
+	}
+}
+
+func TestSweepReactivationFix_HoldsTheQuietPeriodAfterTheFirstLetter(t *testing.T) {
+	pool := growthTestPool(t)
+	first := growthSpec(t, pool)
+	fix := growthFixSpec(t, pool)
+	now := time.Now().UTC()
+	ancient := time.Date(2001, 1, 1, 0, 0, 0, 0, time.UTC)
+
+	recent, _, _, _, recentEmail := growthAccount(t, pool, ancient)
+	seedPromo(t, pool, first, recent, recentEmail, now.Add(-24*time.Hour))
+	markRedeemed(t, pool, first, recent, now.Add(-23*time.Hour))
+
+	old, _, _, _, oldEmail := growthAccount(t, pool, ancient)
+	seedPromo(t, pool, first, old, oldEmail, now.Add(-reactivationWaveQuiet-time.Hour))
+	markRedeemed(t, pool, first, old, now.Add(-reactivationWaveQuiet))
+
+	mailer := &recordingMailer{}
+	sweepFixCampaign(context.Background(), pool, mailer, "https://console.example", now, fix, first.Campaign)
+
+	for _, sent := range mailer.sends {
+		if sent.to == recentEmail {
+			t.Fatalf("second letter landed %v after the first, inside the %v quiet period", 24*time.Hour, reactivationWaveQuiet)
+		}
+	}
+	found := false
+	for _, sent := range mailer.sends {
+		if sent.to == oldEmail {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("recipient past the quiet period was never mailed, got %v", mailer.sends)
 	}
 }

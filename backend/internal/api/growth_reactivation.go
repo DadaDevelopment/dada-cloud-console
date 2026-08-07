@@ -64,6 +64,16 @@ type campaignSpec struct {
 	Variant  string
 	MinAge   time.Duration
 	PerRun   int
+
+	// QuietPeriod is how long a person is left alone after ANY campaign letter
+	// we have already sent them, whatever campaign it belonged to. It is the
+	// anti-spam guarantee: without it a second wave whose own age gate happens
+	// to be satisfied can land a day after the first, and two mails in two days
+	// from a platform someone has not used yet is what a spam report is for.
+	//
+	// Zero means no quiet period, which is right for a first-contact wave --
+	// there is no earlier letter to be too close to.
+	QuietPeriod time.Duration
 }
 
 // liveReactivationSpec is the campaign the server actually mails.
@@ -312,15 +322,20 @@ func backfillCampaignConversions(ctx context.Context, pool *pgxpool.Pool, now ti
 const (
 	reactivationFixCampaign = "reactivation-git-url-fix"
 	reactivationFixMinAge   = 24 * time.Hour
+
+	// reactivationWaveQuiet keeps any two campaign letters to the same person
+	// at least this far apart.
+	reactivationWaveQuiet = 96 * time.Hour
 )
 
 // liveReactivationFixSpec is the fix wave the server actually mails.
 func liveReactivationFixSpec() campaignSpec {
 	return campaignSpec{
-		Campaign: reactivationFixCampaign,
-		Variant:  reactivationVariant,
-		MinAge:   reactivationFixMinAge,
-		PerRun:   reactivationSendPerRun,
+		Campaign:    reactivationFixCampaign,
+		Variant:     reactivationVariant,
+		MinAge:      reactivationFixMinAge,
+		PerRun:      reactivationSendPerRun,
+		QuietPeriod: reactivationWaveQuiet,
 	}
 }
 
@@ -344,7 +359,8 @@ func sweepFixCampaign(ctx context.Context, pool *pgxpool.Pool, mailer reactivati
 }
 
 // enrollReactivationFix targets first-wave rows that were redeemed at least
-// MinAge ago and never converted. The build checks are repeated verbatim from
+// MinAge ago, never converted, and belong to someone we have not mailed inside
+// the spec's quiet period. The build checks are repeated verbatim from
 // the first wave's enrollment even though converted_at should already cover
 // success: a recipient mid-first-build has moved past the connect screen, and
 // a letter about the connect screen would land as noise.
@@ -367,9 +383,15 @@ func enrollReactivationFix(ctx context.Context, pool *pgxpool.Pool, now time.Tim
 		      SELECT 1 FROM growth_campaign_sends f
 		      WHERE f.campaign = $3 AND f.user_id = s.user_id
 		  )
+		  AND NOT EXISTS (
+		      SELECT 1 FROM growth_campaign_sends q
+		      WHERE q.user_id = s.user_id
+		        AND q.sent_at IS NOT NULL
+		        AND q.sent_at > $5
+		  )
 		ORDER BY s.redeemed_at
 		LIMIT $4
-	`, sourceCampaign, now.Add(-spec.MinAge), spec.Campaign, spec.PerRun)
+	`, sourceCampaign, now.Add(-spec.MinAge), spec.Campaign, spec.PerRun, now.Add(-spec.QuietPeriod))
 	if err != nil {
 		log.Error().Err(err).Msg("reactivation fix: list candidates")
 		return
