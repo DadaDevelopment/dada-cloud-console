@@ -171,6 +171,53 @@ export const databases: Messages = {
   "databases.insights.stat.cacheHit": { ru: "Чтения из памяти", en: "Reads served from memory" },
   "databases.insights.stat.connections": { ru: "Соединений", en: "Connections" },
 
+  "databases.insights.hero.quota": { ru: "Размер / квота", en: "Size / quota" },
+  "databases.insights.hero.growth7d": { ru: "+{size} за 7 дней", en: "+{size} in 7 days" },
+  "databases.insights.hero.shrunk7d": { ru: "-{size} за 7 дней", en: "-{size} in 7 days" },
+  "databases.insights.hero.runsOut": { ru: "Место кончится", en: "Runs out of space" },
+  "databases.insights.hero.atCurrentGrowth": { ru: "при текущем росте", en: "at the current growth rate" },
+  "databases.insights.hero.ok": { ru: "норма", en: "healthy" },
+  "databases.insights.hero.cacheLow": { ru: "многое читается с диска", en: "a lot is read from disk" },
+
+  "databases.insights.diagnosis.title": { ru: "Диагноз", en: "Diagnosis" },
+  "databases.insights.diagnosis.healthy": {
+    ru: "Ничего требующего внимания: запросы быстрые, чтения из памяти, место не кончается.",
+    en: "Nothing needs your attention: queries are fast, reads come from memory, storage is fine.",
+  },
+  "databases.insights.diagnosis.showRest": { ru: "Ещё находки: {n}", en: "More findings: {n}" },
+  "databases.insights.diagnosis.hideRest": { ru: "Свернуть", en: "Collapse" },
+
+  "databases.insights.human.slow_query": {
+    ru: "Один запрос съедает {share} времени базы: в среднем {mean} на вызов, {calls} вызовов за окно наблюдения.",
+    en: "One query eats {share} of database time: {mean} per call on average, {calls} calls in the window.",
+  },
+  "databases.insights.human.low_cache_hit": {
+    ru: "Таблица {table} не помещается в память: из кеша приходит только {pct} чтений, {read} прочитано с диска.",
+    en: "Table {table} does not fit in memory: only {pct} of reads come from cache, {read} read from disk.",
+  },
+  "databases.insights.human.append_only": {
+    ru: "Таблица {table} только растёт: +{growth} в неделю, удалений нет. Без ретеншена место закончится.",
+    en: "Table {table} only grows: +{growth} per week, nothing is ever deleted. Without retention it will fill the quota.",
+  },
+  "databases.insights.human.unused_index": {
+    ru: "Индекс {index} занимает {size} и ни разу не использовался за {days} дн. — его можно удалить.",
+    en: "Index {index} takes {size} and was never used in {days} days — it can be dropped.",
+  },
+  "databases.insights.human.stale_stats": {
+    ru: "По таблице {table} нет свежей статистики планировщика — запросы могут выбирать плохие планы.",
+    en: "Table {table} has stale planner statistics — queries may pick bad plans.",
+  },
+  "databases.insights.human.quota_forecast": {
+    ru: "При текущем росте (+{perDay} в день) место закончится {date}.",
+    en: "At the current growth rate (+{perDay} per day) storage runs out on {date}.",
+  },
+  "databases.insights.human.idle_in_transaction": {
+    ru: "{n} соединений держат транзакцию открытой (старейшая {dur}) и блокируют очистку. Чинится в коде приложения.",
+    en: "{n} connections hold a transaction open (oldest {dur}), blocking cleanup. Fix this in the application code.",
+  },
+
+  "databases.insights.showLess": { ru: "Свернуть", en: "Show less" },
+
   "databases.insights.advisories.title": { ru: "Выводы", en: "Findings" },
   "databases.insights.advisories.empty": {
     ru: "Ничего требующего внимания не нашлось.",
@@ -192,6 +239,8 @@ export const databases: Messages = {
   "databases.insights.code.quota_forecast": { ru: "Место закончится", en: "Storage will run out" },
 
   "databases.insights.tables.title": { ru: "Таблицы", en: "Tables" },
+  "databases.insights.tables.topOf": { ru: "Таблицы · {top} крупнейших из {total}", en: "Tables · top {top} of {total}" },
+  "databases.insights.tables.showAll": { ru: "Показать все {n}", en: "Show all {n}" },
   "databases.insights.tables.empty": { ru: "Таблиц больше 1 МБ пока нет.", en: "No tables above 1 MB yet." },
   "databases.insights.tables.rows": { ru: "{rows} строк", en: "{rows} rows" },
   "databases.insights.tables.heap": { ru: "данные {size}", en: "data {size}" },
@@ -208,6 +257,8 @@ export const databases: Messages = {
     ru: "Нормализованные запросы: константы уже заменены на плейсхолдеры, ваших данных здесь нет.",
     en: "Normalized queries: constants are already replaced by placeholders, none of your data is here.",
   },
+  "databases.insights.queries.perCall": { ru: "на вызов", en: "per call" },
+  "databases.insights.queries.showAll": { ru: "Показать все {n}", en: "Show all {n}" },
   "databases.insights.queries.mean": { ru: "в среднем {ms}", en: "{ms} avg" },
   "databases.insights.queries.calls": { ru: "{calls} вызовов", en: "{calls} calls" },
   "databases.insights.queries.share": { ru: "{pct} времени базы", en: "{pct} of database time" },
