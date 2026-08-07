@@ -437,6 +437,65 @@ func (h *Handler) storageCapBytes(ctx context.Context, orgID string) (int64, int
 	return int64(gb) << 30, gb, nil
 }
 
+// orgStorageBytes sums the storage the org actually holds: the persistent
+// volumes attached to its apps plus the on-disk size of its managed databases.
+// The database half reads db_quota_state, the same rows the quota worker writes
+// from pg_database_size, so the gigabytes on the billing page and the gigabytes
+// that put a database into read-only are one measurement rather than two that
+// drift apart.
+//
+// Reported, not enforced. The plan's storage_gb still gates a single app volume
+// at create time (storageCapBytes) and managed databases are gated by their own
+// per-database tier; this figure exists because a customer whose database has
+// grown to 15 GB currently sees that number nowhere in the console.
+func (h *Handler) orgStorageBytes(ctx context.Context, orgID string) (int64, error) {
+	var total int64
+	rows, err := h.pool.Query(ctx, `
+		SELECT rs.summary_json->'volume'->>'size'
+		FROM resource_snapshots rs
+		JOIN projects p ON p.id = rs.project_id
+		WHERE p.org_id = $1 AND rs.kind = 'App'
+		  AND rs.summary_json->'volume'->>'size' IS NOT NULL
+	`, orgID)
+	if err != nil {
+		return 0, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var size string
+		if err := rows.Scan(&size); err != nil {
+			return 0, err
+		}
+		total += quantityBytes(size)
+	}
+	if err := rows.Err(); err != nil {
+		return 0, err
+	}
+
+	var dbBytes int64
+	if err := h.pool.QueryRow(ctx, `
+		SELECT COALESCE(SUM(q.size_bytes), 0)
+		FROM db_quota_state q
+		JOIN projects p ON p.id = q.project_id
+		WHERE p.org_id = $1
+	`, orgID).Scan(&dbBytes); err != nil {
+		return 0, err
+	}
+	return total + dbBytes, nil
+}
+
+// storageUsedGB rounds bytes up to whole gigabytes. Rounding up rather than
+// truncating keeps a customer holding 1.4 GB from reading "1 GB of 10" and
+// concluding the page ignores what they just wrote; the plan ladder is in whole
+// gigabytes, so a fraction has nowhere else to go.
+func storageUsedGB(b int64) int {
+	if b <= 0 {
+		return 0
+	}
+	const gib = int64(1) << 30
+	return int((b + gib - 1) / gib)
+}
+
 // GetBillingPlans returns all loaded plans.
 //
 // @ID          getBillingPlans
@@ -734,5 +793,12 @@ func (h *Handler) buildUsage(ctx context.Context, orgID string, plan pricing.Pla
 		limit, _ := pricing.Quota(plan, res)
 		out[res] = gin.H{"used": used, "limit": limit}
 	}
+
+	bytes, err := h.orgStorageBytes(ctx, orgID)
+	if err != nil {
+		return nil, fmt.Errorf("billing: storage usage: %w", err)
+	}
+	storageLimit, _ := pricing.Quota(plan, "storage_gb")
+	out["storage_gb"] = gin.H{"used": storageUsedGB(bytes), "limit": storageLimit}
 	return out, nil
 }
