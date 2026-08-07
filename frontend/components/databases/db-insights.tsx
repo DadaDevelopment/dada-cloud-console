@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
-import { databasesApi } from "@/lib/api";
+import { cloudTasksApi, databasesApi } from "@/lib/api";
 import type {
   DatabaseAdvisory,
   DatabaseInsights,
@@ -275,10 +275,37 @@ function HeroTile({
  * DiagnosisPanel is the first screen: one finding, chosen as the most severe
  * and most impactful, told as a paragraph a person can act on. Everything
  * else is a count ("ещё 12 находок") that expands into the grouped list.
+ *
+ * The primary action depends on what the database is attached to. With a
+ * bound app (delegate present) the button fires a DadaAgent cloud task: the
+ * agent clones the app's repo and delivers the fix as a pull request —
+ * schema changes go through PRs by owner decision, the platform never runs
+ * DDL itself. Without a bound app the finding is handed to the assistant
+ * chat instead.
  */
-function DiagnosisPanel({ advisories, dbName }: { advisories: DatabaseAdvisory[]; dbName: string }) {
+function DiagnosisPanel({
+  advisories,
+  dbName,
+  delegate,
+}: {
+  advisories: DatabaseAdvisory[];
+  dbName: string;
+  delegate?: (a: DatabaseAdvisory) => Promise<void>;
+}) {
   const { t, locale } = useT();
   const [expanded, setExpanded] = useState(false);
+  const [taskState, setTaskState] = useState<"idle" | "creating" | "created" | "failed">("idle");
+
+  async function handleDelegate(a: DatabaseAdvisory) {
+    if (!delegate || taskState === "creating") return;
+    setTaskState("creating");
+    try {
+      await delegate(a);
+      setTaskState("created");
+    } catch {
+      setTaskState("failed");
+    }
+  }
   const sorted = useMemo(() => [...advisories].sort((x, y) => advisoryScore(y) - advisoryScore(x)), [advisories]);
   const top = sorted[0];
   if (!top) {
@@ -322,15 +349,47 @@ function DiagnosisPanel({ advisories, dbName }: { advisories: DatabaseAdvisory[]
       {top.suggestedSql && (
         <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">{t("databases.insights.advisories.sqlHint")}</p>
       )}
-      <div className="mt-4 flex flex-wrap items-center gap-2">
+      <div className="mt-4 flex flex-wrap items-center gap-3">
+        {delegate ? (
+          taskState === "created" ? (
+            <p className="text-sm font-medium text-emerald-700 dark:text-emerald-400">
+              {t("databases.insights.diagnosis.taskCreated")}
+            </p>
+          ) : (
+            <>
+              <button
+                type="button"
+                disabled={taskState === "creating"}
+                onClick={() => handleDelegate(top)}
+                className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-indigo-700 disabled:opacity-60"
+              >
+                {taskState === "creating"
+                  ? t("databases.insights.diagnosis.delegating")
+                  : t("databases.insights.diagnosis.delegate")}
+              </button>
+              <span className="text-xs text-gray-500 dark:text-gray-400">
+                {taskState === "failed"
+                  ? t("databases.insights.diagnosis.taskFailed")
+                  : t("databases.insights.diagnosis.delegateHint")}
+              </span>
+            </>
+          )
+        ) : (
+          <button
+            type="button"
+            onClick={() => openAgentChatWith(agentPrompt(top, dbName, t, locale))}
+            className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-indigo-700"
+          >
+            {t("databases.insights.diagnosis.discuss")}
+          </button>
+        )}
         <button
           type="button"
           onClick={() => openAgentChatWith(agentPrompt(top, dbName, t, locale))}
-          className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-indigo-700"
+          className={delegate ? "text-sm font-medium text-indigo-700 hover:text-indigo-900 dark:text-indigo-400 dark:hover:text-indigo-300" : "hidden"}
         >
-          {t("databases.insights.diagnosis.delegate")}
+          {t("databases.insights.diagnosis.askAgent")}
         </button>
-        <span className="text-xs text-gray-500 dark:text-gray-400">{t("databases.insights.diagnosis.delegateHint")}</span>
       </div>
       {rest.length > 0 && (
         <div className="mt-4 border-t border-indigo-100 dark:border-indigo-900/40 pt-3">
@@ -434,7 +493,7 @@ function QueryRow({ q }: { q: DatabaseQueryStat }) {
  * samples at all is the normal state for the first hour of its life and is
  * explained rather than reported as an error.
  */
-export function DbInsights({ projectId, envId, name }: { projectId: string; envId: string; name: string }) {
+export function DbInsights({ projectId, envId, name, appRef }: { projectId: string; envId: string; name: string; appRef?: string }) {
   const { t } = useT();
   const [insights, setInsights] = useState<DatabaseInsights | null>(null);
   const [advisories, setAdvisories] = useState<DatabaseAdvisory[]>([]);
@@ -504,7 +563,9 @@ export function DbInsights({ projectId, envId, name }: { projectId: string; envI
   return (
     <DbInsightsView
       projectId={projectId}
+      envId={envId}
       name={name}
+      appRef={appRef}
       insights={insights}
       advisories={advisories}
       tables={tables}
@@ -521,7 +582,9 @@ export function DbInsights({ projectId, envId, name }: { projectId: string; envI
  */
 export function DbInsightsView({
   projectId,
+  envId,
   name,
+  appRef,
   insights,
   advisories,
   tables,
@@ -529,7 +592,9 @@ export function DbInsightsView({
   now,
 }: {
   projectId: string;
+  envId?: string;
   name: string;
+  appRef?: string;
   insights: DatabaseInsights;
   advisories: DatabaseAdvisory[];
   tables: DatabaseTableCard[];
@@ -539,6 +604,19 @@ export function DbInsightsView({
   const { t, locale } = useT();
   const [allTables, setAllTables] = useState(false);
   const [allQueries, setAllQueries] = useState(false);
+
+  const delegate =
+    appRef && envId
+      ? async (a: DatabaseAdvisory) => {
+          await cloudTasksApi.create(projectId, envId, appRef, "db-advisory-fix", {
+            finding: humanBody(a, t, locale),
+            sql: a.suggestedSql || "",
+            database: name,
+            code: a.code,
+            subject: a.subject,
+          });
+        }
+      : undefined;
 
   const limit = insights.sizeLimitBytes ?? 0;
   const size = insights.sizeBytes ?? 0;
@@ -611,7 +689,7 @@ export function DbInsightsView({
       </div>
 
       <div className="mt-4">
-        <DiagnosisPanel advisories={advisories} dbName={name} />
+        <DiagnosisPanel advisories={advisories} dbName={name} delegate={delegate} />
       </div>
 
       {tables.length > 0 && (

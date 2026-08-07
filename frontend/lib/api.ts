@@ -1636,10 +1636,10 @@ export const cloudTasksApi = {
       `/api/v1/projects/${projectId}/environments/${envId}/apps/${appName}/cloud-tasks`,
     ),
 
-  create: (projectId: string, envId: string, appName: string, taskType: string) =>
+  create: (projectId: string, envId: string, appName: string, taskType: string, params?: Record<string, string>) =>
     apiFetch<CreateCloudTaskResponse>(
       `/api/v1/projects/${projectId}/environments/${envId}/apps/${appName}/cloud-tasks`,
-      { method: "POST", body: { task_type: taskType } },
+      { method: "POST", body: params ? { task_type: taskType, params } : { task_type: taskType } },
     ),
 
   triggerAutofix: (projectId: string, envId: string, appName: string, error: string) =>

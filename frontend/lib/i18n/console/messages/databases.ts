@@ -216,10 +216,20 @@ export const databases: Messages = {
     en: "{n} connections hold a transaction open (oldest {dur}), blocking cleanup. Fix this in the application code.",
   },
 
-  "databases.insights.diagnosis.delegate": { ru: "Поручить агенту", en: "Hand to the agent" },
+  "databases.insights.diagnosis.delegate": { ru: "Поручить агенту — PR", en: "Hand to the agent — PR" },
+  "databases.insights.diagnosis.delegating": { ru: "Создаю задачу…", en: "Creating the task…" },
+  "databases.insights.diagnosis.taskCreated": {
+    ru: "Задача создана: агент клонирует репозиторий приложения и откроет PR с исправлением. Статус — на странице приложения.",
+    en: "Task created: the agent clones the app's repo and opens a PR with the fix. Status lives on the app page.",
+  },
+  "databases.insights.diagnosis.taskFailed": {
+    ru: "Не удалось создать задачу — попробуйте ещё раз или обсудите с агентом.",
+    en: "Could not create the task — retry or discuss with the agent.",
+  },
+  "databases.insights.diagnosis.discuss": { ru: "Обсудить с агентом", en: "Discuss with the agent" },
   "databases.insights.diagnosis.delegateHint": {
-    ru: "Агент подготовит исправление; изменения схемы едут через PR, ничего не выполняется молча.",
-    en: "The agent prepares the fix; schema changes go through a PR, nothing runs silently.",
+    ru: "Агент подготовит исправление и откроет PR; в базе напрямую ничего не выполняется.",
+    en: "The agent prepares the fix and opens a PR; nothing runs against the database directly.",
   },
   "databases.insights.diagnosis.askAgent": { ru: "Обсудить с агентом →", en: "Discuss with the agent →" },
   "databases.insights.agentPrompt.intro": {

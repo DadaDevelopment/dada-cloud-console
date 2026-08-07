@@ -29,13 +29,43 @@ type ResolverCfg struct {
 // those pay the counter-resolution dependency in the handler, so counter-free
 // tasks (e.g. github-actions-deploy-setup) are not gated behind a Metrika CR.
 type Entry struct {
-	TaskType      string
-	SkillID       string
-	Label         string
-	Summary       string
-	NeedsCounter  bool
-	AppliesTo     func(kind string) bool
-	ResolveParams func(cfg ResolverCfg) (map[string]any, error)
+	TaskType        string
+	SkillID         string
+	Label           string
+	Summary         string
+	NeedsCounter    bool
+	AppliesTo       func(kind string) bool
+	ResolveParams   func(cfg ResolverCfg) (map[string]any, error)
+	ClientParamKeys []string
+}
+
+// MergeClientParams folds request-supplied params into the server-resolved
+// set. ClientParamKeys is the whitelist: keys outside it are dropped
+// silently, and a server-resolved value always wins a key collision, so a
+// client can never override what the cloud derived itself. An empty
+// whitelist means the task takes no client input at all — the MVP default.
+// Values are length-capped rather than rejected: the params travel into an
+// agent prompt, not into SQL or a shell, and a truncated finding is still a
+// useful finding.
+func MergeClientParams(e Entry, resolved map[string]any, client map[string]string) map[string]any {
+	const maxValueLen = 4000
+	if resolved == nil {
+		resolved = map[string]any{}
+	}
+	for _, key := range e.ClientParamKeys {
+		v, ok := client[key]
+		if !ok || v == "" {
+			continue
+		}
+		if _, taken := resolved[key]; taken {
+			continue
+		}
+		if len(v) > maxValueLen {
+			v = v[:maxValueLen]
+		}
+		resolved[key] = v
+	}
+	return resolved
 }
 
 func isWeb(kind string) bool { return kind == "web" || kind == "App" || kind == "app" }
@@ -67,6 +97,17 @@ func Catalog() []Entry {
 					params["archetype"] = cfg.Archetype
 				}
 				return params, nil
+			},
+		},
+		{
+			TaskType:        "db-advisory-fix",
+			SkillID:         "db-advisory-fix",
+			Label:           "Fix a database finding via PR",
+			Summary:         "Turn a database-insights finding into a migration PR: the agent prepares the DDL and paired code changes; nothing runs against the live database.",
+			AppliesTo:       isWeb,
+			ClientParamKeys: []string{"finding", "sql", "database", "code", "subject"},
+			ResolveParams: func(cfg ResolverCfg) (map[string]any, error) {
+				return map[string]any{}, nil
 			},
 		},
 		{

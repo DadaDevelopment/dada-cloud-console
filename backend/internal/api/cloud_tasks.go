@@ -18,7 +18,8 @@ import (
 )
 
 type createCloudTaskRequest struct {
-	TaskType string `json:"task_type"`
+	TaskType string            `json:"task_type"`
+	Params   map[string]string `json:"params"`
 }
 
 // CreateCloudTask mints repo + agent params, submits + executes a DadaAgent intent.
@@ -145,6 +146,7 @@ func (h *Handler) CreateCloudTask(c *gin.Context) {
 		respondError(c, http.StatusFailedDependency, err.Error())
 		return
 	}
+	params = cloudtask.MergeClientParams(entry, params, req.Params)
 
 	intentID := uuid.NewString()
 	gitRepoUUID := gitRepoID

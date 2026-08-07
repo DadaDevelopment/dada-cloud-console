@@ -87,3 +87,47 @@ func TestCatalog_CounterResolverErrorSurfaces(t *testing.T) {
 		t.Fatal("expected resolver error to surface")
 	}
 }
+
+func TestCatalog_DBAdvisoryEntry(t *testing.T) {
+	e, ok := Lookup("db-advisory-fix")
+	if !ok {
+		t.Fatal("db-advisory-fix entry missing")
+	}
+	if e.NeedsCounter {
+		t.Fatal("db-advisory-fix must not require a Metrika counter")
+	}
+	resolved, err := e.ResolveParams(ResolverCfg{})
+	if err != nil {
+		t.Fatalf("ResolveParams: %v", err)
+	}
+	merged := MergeClientParams(e, resolved, map[string]string{
+		"finding":  "Index public.big_pkey takes 563 MB and was never used.",
+		"sql":      "DROP INDEX CONCURRENTLY public.big_pkey;",
+		"database": "odds-research",
+		"evil":     "ignored",
+	})
+	if merged["finding"] == "" || merged["sql"] == "" || merged["database"] != "odds-research" {
+		t.Fatalf("client params not merged: %v", merged)
+	}
+	if _, ok := merged["evil"]; ok {
+		t.Fatal("non-whitelisted client param must be dropped")
+	}
+}
+
+func TestMergeClientParams_ServerValueWinsAndLongValuesAreCapped(t *testing.T) {
+	e := Entry{ClientParamKeys: []string{"finding", "counterId"}}
+	long := make([]byte, 5000)
+	for i := range long {
+		long[i] = 'x'
+	}
+	merged := MergeClientParams(e, map[string]any{"counterId": "server"}, map[string]string{
+		"counterId": "client-spoof",
+		"finding":   string(long),
+	})
+	if merged["counterId"] != "server" {
+		t.Fatal("server-resolved value must win over a client key collision")
+	}
+	if len(merged["finding"].(string)) != 4000 {
+		t.Fatalf("client value must be capped at 4000, got %d", len(merged["finding"].(string)))
+	}
+}

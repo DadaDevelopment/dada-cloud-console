@@ -351,7 +351,7 @@ export default function DatabaseDetailPage() {
         </div>
       </section>
 
-      <DbInsights projectId={projectId} envId={envId} name={name} />
+      <DbInsights projectId={projectId} envId={envId} name={name} appRef={appRef} />
       <DbActivity projectId={projectId} envId={envId} name={name} canManage={canManage} />
 
       <section className="mb-8">
