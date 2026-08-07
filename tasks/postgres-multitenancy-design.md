@@ -159,10 +159,17 @@ read-only 1.0 / frozen 1.25 / снятие 0.9, принуждение чере�
       Живьём не проверено: с этой сети k8s API недоступен вообще (и через
       bypass-прокси, и напрямую с en0 — 502/timeout), проверено `helm template`
       на values 16.7.27 и наличием bitnamilegacy-тегов в реестре.
-- [ ] 1b. Проверить живьём: под `pg-shard-0-postgresql-0` Ready, `SHOW
-      shared_buffers` = 1GB, `pg_stat_statements` в `shared_preload_libraries`,
-      серии `pg_database_size_bytes{...pg-shard-0...}` в Prometheus; после
-      проверки ёмкости нод — включить реплику.
+- [x] 1b. Проверено живьём 07-08: под `pg-shard-0-postgresql-0` 2/2 Ready
+      13 часов, `shared_buffers` = 1GB, `shared_preload_libraries` =
+      `pgaudit,pg_stat_statements`, `max_connections` = 200, 3 базы; в
+      Prometheus отвечают ОБА селектора `pg_database_size_bytes` — shard-1
+      19.4 GB, shard-0 22.9 MB.
+      Реплика НЕ включена, и это не забывчивость: `longhorn-prod` держит
+      `numberOfReplicas: 3`, свободно по нодам 16.8/17.8/15.9/11.7 GiB против
+      уже расписанных 58/32/85/64 GiB, файловые системы нод 76.5/75.1/83.3/
+      88.9%. Второй том на 10Gi не размещается ни на одной ноде — реплику
+      возвращать только после расширения ёмкости, иначе получим degraded том
+      вместо запаса прочности.
 - [x] 2. pg-router — argo-infra `4563077c`, app
       `platform/prod/apps/pg-router`, сервис `pg-router.databases.svc:5432`,
       PgBouncer 1.25.2, 2 реплики + anti-affinity + PDB minAvailable=1,
@@ -254,6 +261,23 @@ read-only 1.0 / frozen 1.25 / снятие 0.9, принуждение чере�
       рестарт.
       Ещё: приложение читает секрет на старте, адрес меняется на следующем
       рестарте пода, не мгновенно.
+      Роутер проверен живьём 07-08 (закрывает «стенд НЕ проводился» из
+      шагов 2 и 4): консоль отдаёт таблицу, сайдкар логирует `routing table
+      updated`, `/routes/routes.ini` в поде совпадает с ответом консоли,
+      релоадер шлёт SIGHUP (`reloading pgbouncer pid=16`), pgbouncer пишет
+      `got SIGHUP, re-reading config`, а реальный клиент через
+      `pg-router.databases.svc:5432` логинится по SCRAM и приезжает на
+      `10.244.2.162` = `postgresql-0` (shard-1), как и задумано wildcard'ом.
+      Отказной путь тоже наблюдался: 404 от консоли → fallback-таблица,
+      pgbouncer жив.
+      Две ловушки, стоившие времени: (1) в ns `databases` висит default-deny
+      NetworkPolicy от K10 (`podSelector: {}`, `policyTypes: [Ingress]`), у
+      шардов свои bitnami-политики, а у pg-router политики не было — под
+      отвечал на 127.0.0.1 и молча ронял пакеты через Service (таймаут, НЕ
+      refused); лечится собственной NetworkPolicy на порт 5432, добавлена в
+      чарт. (2) `SHOW DATABASES` не показывает строку `*` до первого
+      клиентского коннекта — PgBouncer создаёт запись из wildcard лениво, это
+      не признак непрочитанного `%include`.
 - [ ] 5. Переезд платформенных БД на `shard-0` (окно, фазы как выше);
       решение прямой-vs-через-роутер для control plane.
 - [ ] 6. `odds-research` (15 GB) → выделенный шард с окном и уведомлением
