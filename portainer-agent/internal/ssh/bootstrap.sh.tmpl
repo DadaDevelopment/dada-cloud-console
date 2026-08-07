@@ -17,8 +17,17 @@ echo "[bootstrap] Starting VM setup for {{.ServerName}}"
 if command -v docker >/dev/null 2>&1; then
   echo "[bootstrap] Docker already present ($(docker --version 2>/dev/null)) — skipping install"
 else
+  for i in $(seq 1 60); do
+    if fuser /var/lib/dpkg/lock-frontend /var/lib/apt/lists/lock /var/cache/apt/archives/lock >/dev/null 2>&1; then
+      echo "[bootstrap] waiting for apt lock (cloud-init/unattended-upgrades), attempt $i"
+      sleep 10
+    else
+      break
+    fi
+  done
+  export DEBIAN_FRONTEND=noninteractive
   apt-get update -qq
-  apt-get install -y -qq docker.io docker-compose-plugin curl wget
+  apt-get install -y -qq docker.io docker-compose-v2 curl wget
 fi
 systemctl enable docker --now 2>/dev/null || true
 echo "[bootstrap] Docker ready"

@@ -143,3 +143,35 @@ func TestRenderBootstrap_WritesFleetIdentityNoSidecars(t *testing.T) {
 		}
 	}
 }
+
+// TestRenderBootstrap_DockerInstallIsInstallable proves the Docker install line
+// only names packages that actually exist in the Ubuntu archive the Beget VMs
+// boot from. `docker-compose-plugin` lives in Docker's own repo, not Ubuntu's;
+// asking apt for it on a fresh noble VM fails the whole `apt-get install`, so
+// Docker never lands and the edge agent never starts (le-probe, 08-07). The
+// compose CLI on Ubuntu is `docker-compose-v2`. The lock wait guards the other
+// half of that incident: bootstrap runs seconds after boot, while cloud-init /
+// unattended-upgrades still hold the dpkg lock, and apt would block past the
+// 15-minute bootstrap deadline.
+func TestRenderBootstrap_DockerInstallIsInstallable(t *testing.T) {
+	script, err := dadash.RenderBootstrap(dadash.BootstrapParams{
+		ServerName: "vm-docker",
+		EdgeKey:    "edgekey",
+		EdgeID:     "edge-id-4",
+	})
+	if err != nil {
+		t.Fatalf("RenderBootstrap error: %v", err)
+	}
+	if strings.Contains(script, "docker-compose-plugin") {
+		t.Error("bootstrap must not install docker-compose-plugin: it does not exist in the Ubuntu archive, and apt fails the whole install")
+	}
+	for _, want := range []string{
+		"docker.io docker-compose-v2",
+		"/var/lib/dpkg/lock-frontend",
+		"DEBIAN_FRONTEND=noninteractive",
+	} {
+		if !strings.Contains(script, want) {
+			t.Errorf("expected bootstrap to contain %q", want)
+		}
+	}
+}
