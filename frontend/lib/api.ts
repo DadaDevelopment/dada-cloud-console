@@ -57,6 +57,7 @@ import type {
   RevealAPIKeyResponse,
   PendingApprovalsResponse,
   AuditEventsResponse,
+  AuditFacetsResponse,
   FeedbackListResponse,
   AdminOverviewResponse,
   AdminCostsResponse,

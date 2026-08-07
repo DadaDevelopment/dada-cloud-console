@@ -990,6 +990,22 @@ export interface AuditEventsResponse {
   offset: number;
 }
 
+export interface AuditActorFacet {
+  email: string;
+  account_kind: string;
+  count: number;
+}
+
+export interface AuditActionFacet {
+  action: string;
+  count: number;
+}
+
+export interface AuditFacetsResponse {
+  actors: AuditActorFacet[];
+  actions: AuditActionFacet[];
+}
+
 export interface FeedbackItem {
   id: string;
   created_at: string;
