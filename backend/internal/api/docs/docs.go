@@ -104,6 +104,18 @@ const docTemplate = `{
                         "in": "query"
                     },
                     {
+                        "type": "string",
+                        "description": "Comma-separated actions to hide (checkbox filter)",
+                        "name": "exclude_action",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Comma-separated actor emails to hide (checkbox filter, exact match)",
+                        "name": "exclude_user",
+                        "in": "query"
+                    },
+                    {
                         "type": "integer",
                         "description": "Max rows to return (default 50, max 200)",
                         "name": "limit",
@@ -119,6 +131,59 @@ const docTemplate = `{
                 "responses": {
                     "200": {
                         "description": "object with an events array and a total count",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/admin/audit/facets": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Returns the distinct actors (with cohort and count) and actions (with count) present in audit_events, newest-heavy first, for building the audit viewer's checkbox filters. Honours the same ?kind= cohort filter as the trail. Platform-admin only; every other caller gets 403.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin"
+                ],
+                "summary": "List audit filter facets (platform-admin only)",
+                "operationId": "listAuditFacets",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Actor cohort: customer, internal, synthetic or platform (default: all)",
+                        "name": "kind",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "object with actors and actions arrays",
                         "schema": {
                             "type": "object",
                             "additionalProperties": true
@@ -554,7 +619,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Sent/clicked/redeemed/converted per campaign, variant and signup week.",
+                "description": "Sent/opened/clicked/redeemed/converted per campaign, variant and signup week.",
                 "produces": [
                     "application/json"
                 ],
@@ -19652,6 +19717,12 @@ const docTemplate = `{
         "api.createCloudTaskRequest": {
             "type": "object",
             "properties": {
+                "params": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string"
+                    }
+                },
                 "task_type": {
                     "type": "string"
                 }

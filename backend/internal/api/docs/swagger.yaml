@@ -473,6 +473,10 @@ definitions:
     type: object
   api.createCloudTaskRequest:
     properties:
+      params:
+        additionalProperties:
+          type: string
+        type: object
       task_type:
         type: string
     type: object
@@ -1259,6 +1263,15 @@ paths:
         in: query
         name: kind
         type: string
+      - description: Comma-separated actions to hide (checkbox filter)
+        in: query
+        name: exclude_action
+        type: string
+      - description: Comma-separated actor emails to hide (checkbox filter, exact
+          match)
+        in: query
+        name: exclude_user
+        type: string
       - description: Max rows to return (default 50, max 200)
         in: query
         name: limit
@@ -1290,6 +1303,44 @@ paths:
       security:
       - BearerAuth: []
       summary: List audit events (platform-admin only)
+      tags:
+      - admin
+  /admin/audit/facets:
+    get:
+      description: Returns the distinct actors (with cohort and count) and actions
+        (with count) present in audit_events, newest-heavy first, for building the
+        audit viewer's checkbox filters. Honours the same ?kind= cohort filter as
+        the trail. Platform-admin only; every other caller gets 403.
+      operationId: listAuditFacets
+      parameters:
+      - description: 'Actor cohort: customer, internal, synthetic or platform (default:
+          all)'
+        in: query
+        name: kind
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: object with actors and actions arrays
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: List audit filter facets (platform-admin only)
       tags:
       - admin
   /admin/box/grants:

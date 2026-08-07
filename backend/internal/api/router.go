@@ -623,6 +623,7 @@ func SetupRouter(pool *pgxpool.Pool, cfg *config.Config) *gin.Engine {
 			api.POST("/admin/operations/:opId/approve", h.ApproveOperation)
 			api.POST("/admin/operations/:opId/reject", h.RejectOperation)
 			api.GET("/admin/audit", h.ListAuditEvents)
+			api.GET("/admin/audit/facets", h.ListAuditFacets)
 			api.GET("/admin/feedback", h.ListFeedback)
 			api.POST("/admin/feedback/:id/resolve", h.ResolveFeedback)
 			api.POST("/admin/feedback/:id/autofix", h.AutofixFeedback)
