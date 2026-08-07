@@ -324,41 +324,7 @@ type auditEventRow struct {
 const (
 	auditEventsDefaultLimit = 50
 	auditEventsMaxLimit     = 200
-	auditExcludeMaxItems    = 200
-	auditFacetsMaxRows      = 300
 )
-
-// parseAuditExclusions turns a comma-separated ?exclude_* value into a
-// deduplicated slice, or nil when nothing is excluded.
-//
-// The audit viewer's checkbox filters send what to HIDE rather than what to
-// show: with 46% of a week's trail being two chatty actions (ViewProject and
-// SessionStart) the useful gesture is unticking those two, and an exclusion
-// list keeps every newly instrumented action visible by default instead of
-// silently dropping it out of a stale inclusion list.
-//
-// nil (not an empty slice) is what the queries below test with IS NULL, so an
-// absent or all-blank parameter means no filtering at all. The cap bounds the
-// array a caller can push into the query.
-func parseAuditExclusions(raw string) []string {
-	if strings.TrimSpace(raw) == "" {
-		return nil
-	}
-	seen := make(map[string]bool)
-	var out []string
-	for _, part := range strings.Split(raw, ",") {
-		v := strings.TrimSpace(part)
-		if v == "" || seen[v] {
-			continue
-		}
-		seen[v] = true
-		out = append(out, v)
-		if len(out) >= auditExcludeMaxItems {
-			break
-		}
-	}
-	return out
-}
 
 // auditCohortKinds is the allowlist behind the audit viewer's ?kind= filter.
 //
@@ -387,8 +353,6 @@ var auditCohortKinds = map[string]bool{
 // @Param       action query    string false "Exact audit_events.action value"
 // @Param       user   query    string false "Case-insensitive substring match on the actor's email"
 // @Param       kind   query    string false "Actor cohort: customer, internal, synthetic or platform (default: all)"
-// @Param       exclude_action query string false "Comma-separated actions to hide (checkbox filter)"
-// @Param       exclude_user   query string false "Comma-separated actor emails to hide (checkbox filter, exact match)"
 // @Param       limit  query    int    false "Max rows to return (default 50, max 200)"
 // @Param       offset query    int    false "Rows to skip"
 // @Success     200 {object} map[string]interface{} "object with an events array and a total count"
@@ -436,8 +400,6 @@ func (h *Handler) ListAuditEvents(c *gin.Context) {
 	if kind != "" {
 		kindFilter = &kind
 	}
-	excludedActions := parseAuditExclusions(c.Query("exclude_action"))
-	excludedUsers := parseAuditExclusions(c.Query("exclude_user"))
 
 	var total int
 	if err := h.pool.QueryRow(c.Request.Context(), `
@@ -446,10 +408,8 @@ func (h *Handler) ListAuditEvents(c *gin.Context) {
 		JOIN user_accounts u ON u.id = a.actor_id
 		WHERE ($1::text IS NULL OR a.action = $1)
 		  AND ($2::text IS NULL OR u.email ILIKE '%' || $2 || '%')
-		  AND ($3::text IS NULL OR u.account_kind = $3)
-		  AND ($4::text[] IS NULL OR a.action <> ALL($4))
-		  AND ($5::text[] IS NULL OR u.email <> ALL($5))`,
-		actionFilter, userFilter, kindFilter, excludedActions, excludedUsers,
+		  AND ($3::text IS NULL OR u.account_kind = $3)`,
+		actionFilter, userFilter, kindFilter,
 	).Scan(&total); err != nil {
 		respondError(c, http.StatusInternalServerError, "failed to count audit events")
 		return
@@ -464,11 +424,9 @@ func (h *Handler) ListAuditEvents(c *gin.Context) {
 		WHERE ($1::text IS NULL OR a.action = $1)
 		  AND ($2::text IS NULL OR u.email ILIKE '%' || $2 || '%')
 		  AND ($3::text IS NULL OR u.account_kind = $3)
-		  AND ($4::text[] IS NULL OR a.action <> ALL($4))
-		  AND ($5::text[] IS NULL OR u.email <> ALL($5))
 		ORDER BY a.created_at DESC
-		LIMIT $6 OFFSET $7`,
-		actionFilter, userFilter, kindFilter, excludedActions, excludedUsers, limit, offset,
+		LIMIT $4 OFFSET $5`,
+		actionFilter, userFilter, kindFilter, limit, offset,
 	)
 	if err != nil {
 		respondError(c, http.StatusInternalServerError, "failed to list audit events")
@@ -494,116 +452,4 @@ func (h *Handler) ListAuditEvents(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"events": out, "total": total, "limit": limit, "offset": offset})
-}
-
-// auditActorFacet is one checkbox in the audit viewer's user filter: an actor
-// that appears in the trail, with the cohort badge and the row count that tell
-// the reader whether unticking it is worth it.
-type auditActorFacet struct {
-	Email       string `json:"email"`
-	AccountKind string `json:"account_kind"`
-	Count       int    `json:"count"`
-}
-
-// auditActionFacet is one checkbox in the audit viewer's action filter.
-type auditActionFacet struct {
-	Action string `json:"action"`
-	Count  int    `json:"count"`
-}
-
-// ListAuditFacets returns the distinct actors and actions present in
-// audit_events with their row counts, so the dashboard can render checkbox
-// filters over the whole trail rather than over the 50 rows of the current
-// page. Platform-admin only, same gate as the trail itself.
-//
-// @ID          listAuditFacets
-// @Summary     List audit filter facets (platform-admin only)
-// @Description Returns the distinct actors (with cohort and count) and actions (with count) present in audit_events, newest-heavy first, for building the audit viewer's checkbox filters. Honours the same ?kind= cohort filter as the trail. Platform-admin only; every other caller gets 403.
-// @Tags        admin
-// @Produce     json
-// @Security    BearerAuth
-// @Param       kind query string false "Actor cohort: customer, internal, synthetic or platform (default: all)"
-// @Success     200 {object} map[string]interface{} "object with actors and actions arrays"
-// @Failure     401 {object} map[string]string
-// @Failure     403 {object} map[string]string
-// @Router      /admin/audit/facets [get]
-func (h *Handler) ListAuditFacets(c *gin.Context) {
-	claims, ok := auth.GetClaims(c)
-	if !ok {
-		respondUnauthorized(c)
-		return
-	}
-	if !isAdminReader(claims) {
-		respondForbidden(c)
-		return
-	}
-
-	kind := strings.TrimSpace(c.Query("kind"))
-	if !auditCohortKinds[kind] {
-		kind = ""
-	}
-	var kindFilter *string
-	if kind != "" {
-		kindFilter = &kind
-	}
-
-	ctx := c.Request.Context()
-
-	actorRows, err := h.pool.Query(ctx, `
-		SELECT u.email, u.account_kind, count(*)
-		FROM audit_events a
-		JOIN user_accounts u ON u.id = a.actor_id
-		WHERE ($1::text IS NULL OR u.account_kind = $1)
-		GROUP BY u.email, u.account_kind
-		ORDER BY count(*) DESC, u.email
-		LIMIT $2`, kindFilter, auditFacetsMaxRows)
-	if err != nil {
-		respondError(c, http.StatusInternalServerError, "failed to list audit actors")
-		return
-	}
-	defer actorRows.Close()
-
-	actors := []auditActorFacet{}
-	for actorRows.Next() {
-		var f auditActorFacet
-		if err := actorRows.Scan(&f.Email, &f.AccountKind, &f.Count); err != nil {
-			respondError(c, http.StatusInternalServerError, "failed to scan audit actor")
-			return
-		}
-		actors = append(actors, f)
-	}
-	if err := actorRows.Err(); err != nil {
-		respondError(c, http.StatusInternalServerError, "failed to list audit actors")
-		return
-	}
-
-	actionRows, err := h.pool.Query(ctx, `
-		SELECT a.action, count(*)
-		FROM audit_events a
-		JOIN user_accounts u ON u.id = a.actor_id
-		WHERE ($1::text IS NULL OR u.account_kind = $1)
-		GROUP BY a.action
-		ORDER BY count(*) DESC, a.action
-		LIMIT $2`, kindFilter, auditFacetsMaxRows)
-	if err != nil {
-		respondError(c, http.StatusInternalServerError, "failed to list audit actions")
-		return
-	}
-	defer actionRows.Close()
-
-	actions := []auditActionFacet{}
-	for actionRows.Next() {
-		var f auditActionFacet
-		if err := actionRows.Scan(&f.Action, &f.Count); err != nil {
-			respondError(c, http.StatusInternalServerError, "failed to scan audit action")
-			return
-		}
-		actions = append(actions, f)
-	}
-	if err := actionRows.Err(); err != nil {
-		respondError(c, http.StatusInternalServerError, "failed to list audit actions")
-		return
-	}
-
-	c.JSON(http.StatusOK, gin.H{"actors": actors, "actions": actions})
 }

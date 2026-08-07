@@ -6,7 +6,7 @@ import { timeAgo } from "@/lib/format";
 import { useT } from "@/lib/i18n/console/context";
 import { Spinner } from "@/components/ui/spinner";
 import { diagnoseApi, cloudTasksApi } from "@/lib/api";
-import { getOperationalAppAlerts, type AppAlert } from "@/lib/app-alerts";
+import type { AppAlert } from "@/lib/app-alerts";
 import type { AppDiagnosis } from "@/lib/types";
 
 /**
@@ -24,6 +24,25 @@ function crashTextKey(reason?: string): string {
       return "apps.alerts.crash.text.image";
     default:
       return "apps.alerts.crash.text";
+  }
+}
+
+/**
+ * Maps the URL watcher's reason to the message key: `no_listener` means the
+ * app never accepted the connection (bot/worker not listening on the port at
+ * all), `not_http` means the port answered but the response was not an HTTP
+ * response (a non-HTTP protocol such as MTProto behind the public domain).
+ * An unknown or empty reason falls back to the generic "not a web service"
+ * wording.
+ */
+function urlTextKey(reason?: string): string {
+  switch (reason) {
+    case "no_listener":
+      return "apps.alerts.url.text.noListener";
+    case "not_http":
+      return "apps.alerts.url.text.notHttp";
+    default:
+      return "apps.alerts.url.text";
   }
 }
 
@@ -60,9 +79,8 @@ export function AppAlertsBanner({ alerts, logsHref, storageHref, projectId, envI
   const { t } = useT();
   const [diagnose, setDiagnose] = useState<DiagnoseState>({ status: "idle" });
   const [autofix, setAutofix] = useState<AutofixState>({ status: "idle" });
-  const operationalAlerts = getOperationalAppAlerts(alerts);
 
-  if (operationalAlerts.length === 0) return null;
+  if (alerts.length === 0) return null;
 
   async function handleDiagnose() {
     setDiagnose({ status: "pending" });
@@ -94,7 +112,7 @@ export function AppAlertsBanner({ alerts, logsHref, storageHref, projectId, envI
 
   return (
     <div className="mb-6 space-y-3">
-      {operationalAlerts.map((alert, idx) =>
+      {alerts.map((alert, idx) =>
         alert.type === "crash" ? (
           <div key={`crash-${idx}`} className="space-y-2">
             <div className="rounded-lg border border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-950/40 px-4 py-3 text-sm text-red-700 dark:text-red-300">
@@ -224,13 +242,28 @@ export function AppAlertsBanner({ alerts, logsHref, storageHref, projectId, envI
             </Link>
           </div>
         ) : (
-          <div key={`url-${idx}`} className="rounded-lg border border-amber-200 dark:border-amber-900 bg-amber-50 dark:bg-amber-950/40 px-4 py-3 text-sm text-amber-700 dark:text-amber-300">
+          <div
+            key={`url-${idx}`}
+            className="rounded-lg border border-amber-200 dark:border-amber-900 bg-amber-50 dark:bg-amber-950/40 px-4 py-3 text-sm text-amber-700 dark:text-amber-300"
+          >
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <p className="font-medium">{t(alert.reason === "edge_unavailable" ? "apps.alerts.url.edge" : "apps.alerts.url.gateway")}</p>
+              <p className="font-medium">{t(urlTextKey(alert.reason))}</p>
               <span className="text-xs text-amber-600 dark:text-amber-400">{timeAgo(alert.detected_at)}</span>
             </div>
-            {alert.detail && <p className="mt-1 text-xs text-amber-700 dark:text-amber-300">{alert.detail}</p>}
-            <Link href={logsHref} className="mt-1.5 inline-flex items-center gap-1 text-xs font-semibold underline underline-offset-2 hover:text-amber-800 dark:hover:text-amber-200">
+            {alert.detail && (
+              <div className="mt-2 overflow-x-auto rounded-md bg-amber-100/70 dark:bg-amber-950/60 px-2.5 py-1.5">
+                <p className="text-[11px] font-semibold uppercase tracking-wide text-amber-500 dark:text-amber-400">
+                  {t("apps.alerts.url.detail")}
+                </p>
+                <pre className="mt-0.5 whitespace-pre text-xs font-mono text-amber-800 dark:text-amber-200">
+                  {alert.detail}
+                </pre>
+              </div>
+            )}
+            <Link
+              href={logsHref}
+              className="mt-1.5 inline-flex items-center gap-1 text-xs font-semibold text-amber-700 dark:text-amber-300 underline underline-offset-2 hover:text-amber-800 dark:hover:text-amber-200"
+            >
               {t("apps.alerts.url.cta")}
             </Link>
           </div>

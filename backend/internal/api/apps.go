@@ -111,10 +111,15 @@ func FillEffectiveResources(apps []models.ResourceSnapshot) {
 	}
 }
 
-// SuppressPortlessURL removes a stale URL only after the public-route contract
-// itself was removed. A positive configured port is the sole public-HTTP
-// contract; do not infer protocol from a worker flag, framework, or port list.
-func SuppressPortlessURL(apps []models.ResourceSnapshot) {
+// SuppressNonHTTPURL blanks the summary "url" field for apps whose stored
+// port fails servesHTTP (the same gate CreateApp uses to skip the auto
+// surrogate domain). A resource_snapshots row can carry a stale "url" set by
+// the status reconciler before the port was known to be a datastore port, or
+// from before servesHTTP existed; showing that URL as the app's live
+// endpoint is always wrong for a raw-TCP service (nginx cannot speak HTTP to
+// redis/postgres/etc, guaranteed 502). Ambiguous cases (no numeric "port" in
+// the summary) are left untouched so ordinary web apps never regress.
+func SuppressNonHTTPURL(apps []models.ResourceSnapshot) {
 	for i := range apps {
 		if len(apps[i].SummaryJSON) == 0 {
 			continue
@@ -130,7 +135,7 @@ func SuppressPortlessURL(apps []models.ResourceSnapshot) {
 		if !ok {
 			continue
 		}
-		if portVal > 0 {
+		if servesHTTP(int(portVal)) {
 			continue
 		}
 		delete(m, "url")
@@ -392,7 +397,7 @@ func (h *Handler) ListApps(c *gin.Context) {
 	FillDemoExpiry(apps, gitRows)
 	FillEffectiveResources(apps)
 	RestatePlaceholderPhase(apps, buildStatus)
-	SuppressPortlessURL(apps)
+	SuppressNonHTTPURL(apps)
 	EnrichPreviewURL(apps, envID, h.cfg)
 
 	if ns := h.environmentNamespace(c.Request.Context(), envID); ns != "" {
@@ -424,14 +429,42 @@ var jsFrameworks = map[string]bool{
 	"fastify": true, "remix": true, "vite": true, "node": true,
 }
 
-// defaultPortForFramework is retained for legacy callers that explicitly ask
-// for a framework default. A missing port in a CreateApp request is no longer
-// turned into one: port zero is the explicit no-public-route configuration.
+// defaultPortForFramework returns the servicePort to assume when a create request
+// omits one: 5173 for javascript apps, 8080 otherwise.
 func defaultPortForFramework(framework string) int {
 	if jsFrameworks[framework] {
 		return 5173
 	}
 	return 8080
+}
+
+// datastorePorts are well-known TCP ports that speak a binary protocol, not
+// HTTP: redis 6379, postgres 5432/5433, mysql/mariadb 3306, mssql 1433,
+// mongodb 27017, rabbitmq amqp 5672, kafka 9092, memcached 11211, zookeeper
+// 2181, cockroachdb 26257. An app listening only on one of these cannot answer
+// an HTTP request, so auto-attaching a default surrogate hostname produces a
+// guaranteed 502 and an attack-log-noise magnet (see top-decker redis:latest).
+// Deploys on these ports skip the auto domain; the user gets an internal
+// service instead.
+var datastorePorts = map[int]bool{
+	6379:  true,
+	5432:  true,
+	5433:  true,
+	3306:  true,
+	1433:  true,
+	27017: true,
+	5672:  true,
+	9092:  true,
+	11211: true,
+	2181:  true,
+	26257: true,
+}
+
+// servesHTTP reports whether an app on servicePort should get an auto public
+// hostname. Conservative: only ports known to be non-HTTP datastores are
+// excluded, so ordinary web apps on any other port keep their default domain.
+func servesHTTP(servicePort int) bool {
+	return !datastorePorts[servicePort]
 }
 
 type createAppRequest struct {
@@ -651,6 +684,9 @@ func (h *Handler) CreateApp(c *gin.Context) {
 
 	if !isCompose {
 		// Helm app validation + defaults.
+		if req.Port == 0 && !req.Worker {
+			req.Port = defaultPortForFramework(req.Framework)
+		}
 		if req.Replicas == 0 && !claims.IsPlatformAdmin() {
 			req.Replicas = 1
 		}
@@ -665,8 +701,8 @@ func (h *Handler) CreateApp(c *gin.Context) {
 			rejectCreate(http.StatusBadRequest, "invalid_image", err.Error())
 			return
 		}
-		if req.Port < 0 || req.Port > 65535 {
-			rejectCreate(http.StatusBadRequest, "invalid_port", "port must be between 0 and 65535")
+		if !req.Worker && (req.Port < 1 || req.Port > 65535) {
+			rejectCreate(http.StatusBadRequest, "invalid_port", "port must be between 1 and 65535")
 			return
 		}
 		minReplicas := 1
@@ -769,7 +805,7 @@ func (h *Handler) CreateApp(c *gin.Context) {
 	}
 
 	var defaultHostname string
-	if !isCompose && req.Port > 0 && h.cfg.DefaultDomainEnabled && h.cfg.DefaultDomainBase != "" {
+	if !isCompose && !req.Worker && servesHTTP(req.Port) && h.cfg.DefaultDomainEnabled && h.cfg.DefaultDomainBase != "" {
 		if suffix, sErr := randomHostSuffix(); sErr == nil {
 			defaultHostname = buildDefaultHostname(h.cfg.DefaultDomainBase, req.Name, suffix)
 		}

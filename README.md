@@ -1,7 +1,5 @@
 # DADA Cloud Console
 
-**Live:** https://console.dada-tuda.ru
-
 GitOps-backed self-service cloud console for managing Kubernetes platform resources.
 
 ## One-click deploy button

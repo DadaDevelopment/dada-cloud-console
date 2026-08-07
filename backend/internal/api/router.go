@@ -326,6 +326,7 @@ func SetupRouter(pool *pgxpool.Pool, cfg *config.Config) *gin.Engine {
 		internal.POST("/ai/failure/record", h.AIRecordFailure)
 		internal.POST("/ai/key/introspect", h.AIIntrospectKey)
 		internal.POST("/identity/introspect", h.IntrospectServiceIdentity)
+		internal.GET("/db/routes.ini", h.DBRoutes)
 		log.Printf("internal: provisioning API enabled at /internal")
 	}
 
@@ -381,6 +382,15 @@ func SetupRouter(pool *pgxpool.Pool, cfg *config.Config) *gin.Engine {
 		api.DELETE("/projects/:projectId/app-servers/:serverName", h.DeleteAppServer)
 		api.POST("/projects/:projectId/app-servers/:serverName/discover", h.DiscoverWorkload)
 		api.POST("/projects/:projectId/app-servers/:serverName/import", h.ImportComposeStack)
+
+		// Ready-made projects. The catalog is global and read-only; installing
+		// one runs the ordinary connect-repo + build path server-side, plus the
+		// managed database the entry declares it needs.
+		api.GET("/solutions", h.ListSolutions)
+		api.GET("/solutions/:slug", h.GetSolution)
+		api.GET("/git/parse-repo-url", h.ParseRepoURL)
+		api.GET("/projects/:projectId/solutions/resolve", h.ResolveSolution)
+		api.POST("/projects/:projectId/environments/:envId/solutions/install", h.InstallSolution)
 
 		// Boxes (ephemeral root sandboxes). A box owns exactly one environment
 		// with runtime='box'; crystallization later promotes that same row to
@@ -613,7 +623,6 @@ func SetupRouter(pool *pgxpool.Pool, cfg *config.Config) *gin.Engine {
 			api.POST("/admin/operations/:opId/approve", h.ApproveOperation)
 			api.POST("/admin/operations/:opId/reject", h.RejectOperation)
 			api.GET("/admin/audit", h.ListAuditEvents)
-			api.GET("/admin/audit/facets", h.ListAuditFacets)
 			api.GET("/admin/feedback", h.ListFeedback)
 			api.POST("/admin/feedback/:id/resolve", h.ResolveFeedback)
 			api.POST("/admin/feedback/:id/autofix", h.AutofixFeedback)

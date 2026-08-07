@@ -24,6 +24,15 @@ type UsageKey = keyof BillingUsage;
 
 const USAGE_KEYS: UsageKey[] = ["apps", "databases", "storage_gb", "domains", "environments", "members"];
 
+/**
+ * Resources the backend actually refuses growth on (overQuotaLines in
+ * billing.go). Storage is deliberately absent: the plan's storage_gb gates one
+ * app volume at a time, not the org total the usage card now shows, so warning
+ * that an org is "at its storage limit" would announce a wall that does not
+ * exist. It is shown as a number, not as a threat.
+ */
+const ENFORCED_USAGE_KEYS: UsageKey[] = ["apps", "databases", "domains", "members"];
+
 function UsageBar({ used, limit, label }: { used: number; limit: number | null; label: string }) {
   const unlimited = limit === null || limit === 0;
   const pct = unlimited ? 0 : Math.min(100, Math.round((used / limit) * 100));
@@ -224,7 +233,7 @@ export default function BillingPage() {
     : null;
 
   const nearLimitResources = quotaEnforced
-    ? USAGE_KEYS.filter((k) => {
+    ? ENFORCED_USAGE_KEYS.filter((k) => {
         const item = usage[k];
         if (!item || item.limit === null || item.limit === 0) return false;
         const ratio = item.used / item.limit;
@@ -233,7 +242,7 @@ export default function BillingPage() {
     : [];
 
   const atLimitResources = quotaEnforced
-    ? USAGE_KEYS.filter((k) => {
+    ? ENFORCED_USAGE_KEYS.filter((k) => {
         const item = usage[k];
         if (!item || item.limit === null || item.limit === 0) return false;
         return item.used / item.limit >= 1;

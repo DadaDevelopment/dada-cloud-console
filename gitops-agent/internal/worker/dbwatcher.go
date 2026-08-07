@@ -376,7 +376,9 @@ func (w *DBWatcher) doRollbackStack(ctx context.Context, op db.Operation) error 
 		return err
 	}
 
-	deployID, err := db.EnqueueDeployStack(ctx, w.pool, op.ID, p.AppName)
+	// No volumes to ensure: a rollback redeploys a compose file that already ran
+	// on this machine, so anything it mounts is already there.
+	deployID, err := db.EnqueueDeployStack(ctx, w.pool, op.ID, p.AppName, nil)
 	if err != nil {
 		return fmt.Errorf("enqueue deploy stack: %w", err)
 	}
@@ -616,10 +618,11 @@ func (w *DBWatcher) doCreateIngress(ctx context.Context, op db.Operation) error 
 	// console renders routing/TLS as a first-class Resource (the generated conf is
 	// base64-opaque; the console reads this, not the nginx.conf).
 	ingressMeta := map[string]any{
-		"host":         p.Host,
-		"aliases":      p.Aliases,
-		"ssl_redirect": p.SSLRedirect,
-		"basic_auth":   p.BasicAuth != "",
+		"host":            p.Host,
+		"aliases":         p.Aliases,
+		"ssl_redirect":    p.SSLRedirect,
+		"basic_auth":      p.BasicAuth != "",
+		"basic_auth_file": p.BasicAuth,
 		"tls": map[string]any{
 			"enabled":     p.TLS.Enabled,
 			"min_version": p.TLS.MinVersion,
@@ -641,6 +644,130 @@ func (w *DBWatcher) doCreateIngress(ctx context.Context, op db.Operation) error 
 	return w.renderEnvAggregate(ctx, op, op.ProjectID, op.EnvironmentID)
 }
 
+// Deferred-TLS wiring for custom domains on the VM track. A custom domain is
+// attached long before its cert exists: DNS still has to be delegated, and the
+// http-01 challenge cannot be answered until the vhost is already serving on :80.
+// nginx refuses to start when ssl_certificate points at a missing file, so a 443
+// block rendered ahead of issuance does not merely leave the new domain broken —
+// it takes the whole ingress down, every other site on the VM with it.
+//
+// So the 443 blocks ship as separate files that the entrypoint writes ONLY for
+// hosts whose cert is really on disk, into a glob-included dir (a glob matching
+// nothing is not an error in nginx). The same sync runs on a timer and reloads,
+// which is what lets a cert issued (or renewed) after the deploy come into effect
+// without re-rendering the stack — the worker has no way to observe the VM's
+// filesystem, so the decision has to live in the container.
+const (
+	ingressTLSIncludeDir  = "/etc/nginx/tls.d"
+	ingressACMEWebroot    = "/var/www/acme"
+	ingressACMEWebrootSrc = "/var/lib/dada/acme"
+)
+
+// ingressEntrypointScript decodes the generated conf, installs the 443 blocks
+// whose certs exist, then keeps nginx running with an hourly re-sync + reload.
+// $$ passes a literal $ through compose interpolation (see ingressComposeBlock).
+// A broken generated block fails `nginx -t` and is simply not reloaded: the
+// running config stays stale rather than the site going dark.
+const ingressEntrypointScript = `set -e
+mkdir -p /etc/nginx/tls.d
+echo "$$NGINX_CONF_B64" | base64 -d > /etc/nginx/conf.d/default.conf
+sync_tls() {
+  rm -f /etc/nginx/tls.d/*.conf
+  n=0
+  echo "$$NGINX_TLS_BLOCKS" | while read -r cert key b64; do
+    n=$$((n+1))
+    [ -n "$$b64" ] || continue
+    [ -f "$$cert" ] && [ -f "$$key" ] || continue
+    echo "$$b64" | base64 -d > /etc/nginx/tls.d/$$n.conf
+  done
+}
+sync_tls
+( while :; do sleep 3600; sync_tls; nginx -t >/dev/null 2>&1 && nginx -s reload; done ) &
+exec nginx -g 'daemon off;'`
+
+// certbotServiceName is the companion app that issues and renews the custom
+// domains' certs. It lives in the env stack as its own snapshot App (that is the
+// only shape renderEnvAggregate assembles) and exists exactly while the ingress
+// has custom domains.
+func certbotServiceName(ingressName string) string { return ingressName + "-certbot" }
+
+// certbotComposeBlock renders the issuer/renewer. One certificate per host
+// (--cert-name = the host) so attaching or detaching a domain never invalidates
+// the others' certs, which a single multi-SAN cert would.
+//
+// Failure is expected and must not be fatal: a domain is usually attached before
+// its DNS is delegated, so early attempts fail and the loop simply retries. The
+// half-hour period keeps retries under Let's Encrypt's 5-failures-per-hostname-
+// per-hour limit while still getting a working cert soon after DNS lands.
+// --keep-until-expiring makes the same loop the renewal path.
+func certbotComposeBlock(ingressName, email string, hosts []string, deps []string) map[string]any {
+	script := `set -e
+for h in $$CERTBOT_HOSTS; do
+  certbot certonly --webroot -w ` + ingressACMEWebroot + ` --non-interactive --agree-tos -m "$$CERTBOT_EMAIL" --keep-until-expiring --cert-name "$$h" -d "$$h" || true
+done
+while :; do
+  sleep 1800
+  for h in $$CERTBOT_HOSTS; do
+    certbot certonly --webroot -w ` + ingressACMEWebroot + ` --non-interactive --agree-tos -m "$$CERTBOT_EMAIL" --keep-until-expiring --cert-name "$$h" -d "$$h" || true
+  done
+done`
+	block := map[string]any{
+		"image":   "certbot/certbot:latest",
+		"restart": "unless-stopped",
+		"environment": map[string]any{
+			"CERTBOT_HOSTS": strings.Join(hosts, " "),
+			"CERTBOT_EMAIL": email,
+		},
+		"volumes": []string{
+			"/etc/letsencrypt:/etc/letsencrypt",
+			ingressACMEWebrootSrc + ":" + ingressACMEWebroot,
+		},
+		"entrypoint": []string{"/bin/sh", "-c", script},
+	}
+	if len(deps) > 0 {
+		block["depends_on"] = deps
+	}
+	return block
+}
+
+// syncCertbotSnapshot keeps the issuer app in step with the ingress's custom
+// domains: created with the first one, updated on every change, removed with the
+// last one so a domain-less env carries no idle container.
+func (w *DBWatcher) syncCertbotSnapshot(ctx context.Context, op db.Operation, ingressName string, customHosts []ingressCustomHost) error {
+	name := certbotServiceName(ingressName)
+	if len(customHosts) == 0 {
+		_, err := db.DeleteSnapshot(ctx, w.pool, op.ProjectID, op.EnvironmentID, "App", name)
+		return err
+	}
+	hosts := make([]string, 0, len(customHosts))
+	for _, ch := range customHosts {
+		hosts = append(hosts, ch.Host)
+	}
+	sort.Strings(hosts)
+	block := certbotComposeBlock(ingressName, w.cfg.BotEmail, hosts, []string{ingressName})
+	summaryJSON := composeAppSummary(
+		composeDesired{Compose: block},
+		map[string]any{"managed": "certbot", "hosts": hosts},
+	)
+	return db.UpsertSnapshot(ctx, w.pool,
+		op.ProjectID, op.EnvironmentID, "App", name, "Pending", summaryJSON, time.Now())
+}
+
+// ingressDeferredTLSBlocks encodes one "<cert> <key> <base64 block>" line per
+// custom domain for the entrypoint to install conditionally. Hosts are rendered
+// by the renderer, never by the shell, so the 443 block has a single author.
+func ingressDeferredTLSBlocks(spec renderer.VMIngressSpec) string {
+	var b strings.Builder
+	for _, h := range spec.ExtraHosts {
+		if h.CertPath == "" || h.KeyPath == "" {
+			continue
+		}
+		fmt.Fprintf(&b, "%s %s %s\n", h.CertPath, h.KeyPath,
+			base64.StdEncoding.EncodeToString([]byte(renderer.RenderExtraHostTLS(h, spec.TLS.MinVersion))))
+	}
+	return b.String()
+}
+
 // ingressComposeBlock builds the nginx service block for a managed Ingress with
 // EDGE-safe config delivery: the rendered conf is base64-encoded into an env var
 // and decoded to disk by the entrypoint before nginx boots (git-relative bind
@@ -652,6 +779,10 @@ func (w *DBWatcher) doCreateIngress(ctx context.Context, op db.Operation) error 
 // by the caller (deterministic output). Kept pure so the delivery contract is
 // locked by a unit test.
 func ingressComposeBlock(spec renderer.VMIngressSpec, deps []string) map[string]any {
+	if len(spec.ExtraHosts) > 0 {
+		spec.TLSIncludeDir = ingressTLSIncludeDir
+		spec.ACMEWebroot = ingressACMEWebroot
+	}
 	confB64 := base64.StdEncoding.EncodeToString([]byte(renderer.RenderNginxConf(spec)))
 	vols := []string{}
 	if spec.TLS.Enabled {
@@ -660,13 +791,17 @@ func ingressComposeBlock(spec renderer.VMIngressSpec, deps []string) map[string]
 	if spec.BasicAuth != "" {
 		vols = append(vols, spec.BasicAuth+":"+spec.BasicAuth+":ro")
 	}
+	env := map[string]any{"NGINX_CONF_B64": confB64}
+	if len(spec.ExtraHosts) > 0 {
+		vols = append(vols, ingressACMEWebrootSrc+":"+ingressACMEWebroot+":ro")
+		env["NGINX_TLS_BLOCKS"] = ingressDeferredTLSBlocks(spec)
+	}
 	block := map[string]any{
 		"image":       "nginx:1.27-alpine",
 		"restart":     "unless-stopped",
 		"ports":       []string{"80:80", "443:443"},
-		"environment": map[string]any{"NGINX_CONF_B64": confB64},
-		"entrypoint": []string{"/bin/sh", "-c",
-			"echo \"$$NGINX_CONF_B64\" | base64 -d > /etc/nginx/conf.d/default.conf && exec nginx -g 'daemon off;'"},
+		"environment": env,
+		"entrypoint":  []string{"/bin/sh", "-c", ingressEntrypointScript},
 	}
 	if len(vols) > 0 {
 		block["volumes"] = vols
@@ -1446,12 +1581,15 @@ func (w *DBWatcher) renderEnvAggregate(ctx context.Context, op db.Operation, pro
 	}
 
 	envStack := projectName + "-" + envName
-	deployID, err := db.EnqueueDeployStack(ctx, w.pool, op.ID, envStack)
+	// The aggregate pins authored named volumes external, so the deploy worker
+	// has to create the missing ones before Portainer pulls the stack.
+	namedVolumes := renderer.AuthoredNamedVolumes(specs)
+	deployID, err := db.EnqueueDeployStack(ctx, w.pool, op.ID, envStack, namedVolumes)
 	if err != nil {
 		return fmt.Errorf("enqueue deploy stack: %w", err)
 	}
-	log.Info().Str("env_stack", envStack).Int("apps", len(specs)).Str("deploy_op", deployID.String()).
-		Msg("assembled compose stack; deploy enqueued")
+	log.Info().Str("env_stack", envStack).Int("apps", len(specs)).Int("volumes", len(namedVolumes)).
+		Str("deploy_op", deployID.String()).Msg("assembled compose stack; deploy enqueued")
 	return nil
 }
 
@@ -1564,7 +1702,9 @@ func (w *DBWatcher) doAdoptComposeStack(ctx context.Context, op db.Operation) er
 	)
 
 	envStack := projectName + "-" + envName
-	deployID, err := db.EnqueueDeployStack(ctx, w.pool, op.ID, envStack)
+	// No volumes to ensure: adoption means the workload — and its volumes —
+	// already exist on the machine, which is the whole data-safety premise.
+	deployID, err := db.EnqueueDeployStack(ctx, w.pool, op.ID, envStack, nil)
 	if err != nil {
 		return fmt.Errorf("enqueue deploy stack: %w", err)
 	}
@@ -1765,6 +1905,24 @@ func (w *DBWatcher) saveComposeSnapshotAndRender(ctx context.Context, op db.Oper
 	return w.renderEnvAggregate(ctx, op, op.ProjectID, op.EnvironmentID)
 }
 
+// deployPortAndWorker reads the effective port and worker flag a redeploy
+// should render with. A worker app (summary["worker"] == true) never gets a
+// Service, no matter what port an earlier snapshot happened to carry: without
+// this, a background app retrofitted with worker=true after living for a
+// while as a broken public-domain app would keep re-rendering with its old
+// non-zero port on every redeploy, re-enabling the Service
+// (renderer.RenderAppValues sets Common.Service.Enabled = spec.Port > 0) and
+// keeping the phantom route alive underneath the domain BackfillMissingDefaultDomains
+// and DetachHostname already stop from being reattached/reissued.
+func deployPortAndWorker(cur map[string]any) (port float64, worker bool) {
+	worker, _ = cur["worker"].(bool)
+	if worker {
+		return 0, true
+	}
+	port, _ = cur["port"].(float64)
+	return port, false
+}
+
 func (w *DBWatcher) doDeployImageVersion(ctx context.Context, op db.Operation) error {
 	var p struct {
 		AppName   string `json:"app_name"`
@@ -1799,7 +1957,7 @@ func (w *DBWatcher) doDeployImageVersion(ctx context.Context, op db.Operation) e
 	var cur map[string]any
 	_ = json.Unmarshal(summaryRaw, &cur)
 
-	portVal, _ := cur["port"].(float64)
+	portVal, workerVal := deployPortAndWorker(cur)
 	replicasVal, _ := cur["replicas"].(float64)
 	profileVal, _ := cur["profile"].(string)
 	frameworkVal, _ := cur["framework"].(string)
@@ -1894,6 +2052,7 @@ func (w *DBWatcher) doDeployImageVersion(ctx context.Context, op db.Operation) e
 	cur["framework"] = frameworkVal
 	cur["port"] = portVal
 	cur["status"] = "Pending"
+	cur["worker"] = workerVal
 	updatedJSON, _ := json.Marshal(cur)
 	if err := db.UpsertSnapshot(ctx, w.pool,
 		op.ProjectID, op.EnvironmentID,
@@ -2443,7 +2602,11 @@ func (w *DBWatcher) doAttachDefaultDomain(ctx context.Context, op db.Operation) 
 
 // doDetachCustomHostname removes the {Ingress, <host-as-name>} entry from the
 // owning app's resources.values.yaml manifests list. cert-manager then GCs the
-// Certificate/secret once the Ingress is pruned.
+// Certificate/secret once the Ingress is pruned. It also removes any
+// {PublicApi, <host-as-name>} entry: doAttachDefaultDomain renders both an
+// Ingress and a PublicApi (the crossplane DNS route) under the same name for
+// a managed default domain, and rv.Remove is a no-op for a kind that was
+// never rendered, so this is safe for an ordinary custom-domain detach too.
 func (w *DBWatcher) doDetachCustomHostname(ctx context.Context, op db.Operation) error {
 	var p struct {
 		AppName  string `json:"app_name"`
@@ -2477,6 +2640,7 @@ func (w *DBWatcher) doDetachCustomHostname(ctx context.Context, op db.Operation)
 	valuesPath := renderer.AppResourcesValuesGitPath(projectName, envName, p.AppName)
 	manifestFile, changed, err := removeManifestsFile(mgr, valuesPath, [][2]string{
 		{"Ingress", renderer.FQDNToName(p.Hostname)},
+		{"PublicApi", renderer.FQDNToName(p.Hostname)},
 	})
 	if err != nil {
 		return fmt.Errorf("remove manifests: %w", err)
@@ -2546,12 +2710,18 @@ func (w *DBWatcher) findManagedIngress(ctx context.Context, op db.Operation) (na
 // on a managed-ingress App snapshot — the source of truth
 // doAttachCustomHostnameCompose/doDetachCustomHostnameCompose reconstruct a
 // renderer.VMIngressSpec from whenever a custom domain is attached or detached.
+//
+// BasicAuth is the console-facing "this ingress is password-gated" flag;
+// BasicAuthFile is the auth_basic_user_file path a rebuild re-renders to keep
+// the gate alive. Snapshots written before the path was persisted carry the
+// flag without the path — the only case rebuildIngressCompose still refuses.
 type ingressMetaSnapshot struct {
-	Host        string   `json:"host"`
-	Aliases     []string `json:"aliases"`
-	SSLRedirect bool     `json:"ssl_redirect"`
-	BasicAuth   bool     `json:"basic_auth"`
-	TLS         struct {
+	Host          string   `json:"host"`
+	Aliases       []string `json:"aliases"`
+	SSLRedirect   bool     `json:"ssl_redirect"`
+	BasicAuth     bool     `json:"basic_auth"`
+	BasicAuthFile string   `json:"basic_auth_file"`
+	TLS           struct {
 		Enabled    bool   `json:"enabled"`
 		MinVersion string `json:"min_version"`
 		CertPath   string `json:"cert_path"`
@@ -2573,11 +2743,12 @@ type ingressCustomHost struct {
 	Port int    `json:"port"`
 }
 
-// certPathForHost / keyPathForHost apply the BYO-cert convention documented to
-// VM operators: place the cert at the certbot layout under the ingress's
-// already-mounted /etc/nginx/certs (host /etc/letsencrypt), keyed by hostname.
-// Attaching a domain only wires the vhost; it is inert until the operator puts
-// the cert there.
+// certPathForHost / keyPathForHost apply the certbot layout under the ingress's
+// already-mounted /etc/nginx/certs (host /etc/letsencrypt), keyed by hostname —
+// the path the companion certbot service (certbotComposeBlock) writes to, and
+// the one an operator uses when bringing their own cert instead. The path is
+// referenced by nginx only once the file actually exists; see
+// ingressEntrypointScript for why that deferral is not optional.
 func certPathForHost(hostname string) string {
 	return "/etc/nginx/certs/live/" + hostname + "/fullchain.pem"
 }
@@ -2619,17 +2790,20 @@ func containerPortFromPortString(s string) int {
 // TLS is forced enabled: once any custom host exists the ingress needs the
 // /etc/nginx/certs mount regardless of the canonical host's original setting.
 //
-// KNOWN GAP (fail-safe): doCreateIngress persists basic_auth only as a bool, not
-// the auth_basic_user_file path, so a rebuild cannot carry the protection into
-// the re-rendered spec. Rather than silently drop it (turning a password-gated
-// site public) or mount a guessed path (crashing nginx for every domain), this
-// refuses the operation when meta.BasicAuth is set, leaving the ingress
-// untouched. Closing the gap needs a real basic_auth path field in the meta.
-func (w *DBWatcher) rebuildIngressCompose(ctx context.Context, op db.Operation, ingressName string, meta ingressMetaSnapshot, customHosts []ingressCustomHost) error {
-	if meta.BasicAuth {
-		return fmt.Errorf("ingress %q has basic auth configured; attaching or detaching a custom domain would re-render the nginx conf and drop that protection (the auth_basic_user_file path is not persisted) — not supported until the path is stored in the ingress meta", ingressName)
-	}
-
+// Basic auth survives the rebuild: the auth_basic_user_file path is persisted
+// as basic_auth_file, so the re-rendered spec carries the same htpasswd mount
+// and directive the ingress had. A snapshot from before that field existed
+// still carries the flag without a path — there the operation is refused rather
+// than silently dropping the protection (turning a password-gated site public)
+// or mounting a guessed path (nginx then fails to start, taking every other
+// domain on the VM down with it). Re-creating such an ingress persists the path
+// and unblocks it.
+// ingressRebuildSpec reconstructs the ingress's VMIngressSpec from its persisted
+// meta plus the custom hosts it should now serve, and reports the deps the
+// compose block must wait on. Split out of rebuildIngressCompose so the parts
+// that decide what the re-rendered nginx keeps — the basic-auth gate above all
+// — are provable without a database.
+func ingressRebuildSpec(meta ingressMetaSnapshot, customHosts []ingressCustomHost) (renderer.VMIngressSpec, []string, string) {
 	keyPath := meta.TLS.KeyPath
 	if keyPath == "" {
 		keyPath = deriveIngressKeyPath(meta.TLS.CertPath)
@@ -2639,6 +2813,7 @@ func (w *DBWatcher) rebuildIngressCompose(ctx context.Context, op db.Operation, 
 		Host:        meta.Host,
 		Aliases:     meta.Aliases,
 		SSLRedirect: meta.SSLRedirect,
+		BasicAuth:   meta.BasicAuthFile,
 		TLS: renderer.VMIngressTLS{
 			Enabled:    true,
 			MinVersion: meta.TLS.MinVersion,
@@ -2670,13 +2845,23 @@ func (w *DBWatcher) rebuildIngressCompose(ctx context.Context, op db.Operation, 
 		deps = append(deps, a)
 	}
 	sort.Strings(deps)
+	return spec, deps, keyPath
+}
+
+func (w *DBWatcher) rebuildIngressCompose(ctx context.Context, op db.Operation, ingressName string, meta ingressMetaSnapshot, customHosts []ingressCustomHost) error {
+	if meta.BasicAuth && meta.BasicAuthFile == "" {
+		return fmt.Errorf("ingress %q has basic auth configured but its snapshot predates basic_auth_file, so a re-render would drop that protection; re-create the ingress to persist the auth_basic_user_file path, then retry", ingressName)
+	}
+
+	spec, deps, keyPath := ingressRebuildSpec(meta, customHosts)
 	block := ingressComposeBlock(spec, deps)
 
 	newIngressMeta := map[string]any{
-		"host":         meta.Host,
-		"aliases":      meta.Aliases,
-		"ssl_redirect": meta.SSLRedirect,
-		"basic_auth":   meta.BasicAuth,
+		"host":            meta.Host,
+		"aliases":         meta.Aliases,
+		"ssl_redirect":    meta.SSLRedirect,
+		"basic_auth":      meta.BasicAuth,
+		"basic_auth_file": meta.BasicAuthFile,
 		"tls": map[string]any{
 			"enabled":     true,
 			"min_version": meta.TLS.MinVersion,
@@ -2693,6 +2878,9 @@ func (w *DBWatcher) rebuildIngressCompose(ctx context.Context, op db.Operation, 
 	if err := db.UpsertSnapshot(ctx, w.pool,
 		op.ProjectID, op.EnvironmentID, "App", ingressName, "Pending", summaryJSON, time.Now(),
 	); err != nil {
+		return err
+	}
+	if err := w.syncCertbotSnapshot(ctx, op, ingressName, customHosts); err != nil {
 		return err
 	}
 	return w.renderEnvAggregate(ctx, op, op.ProjectID, op.EnvironmentID)

@@ -57,7 +57,6 @@ import type {
   RevealAPIKeyResponse,
   PendingApprovalsResponse,
   AuditEventsResponse,
-  AuditFacetsResponse,
   FeedbackListResponse,
   AdminOverviewResponse,
   AdminCostsResponse,
@@ -80,6 +79,9 @@ import type {
   DomainsResponse,
   Build,
   FrameworkDetection,
+  Solution,
+  ResolveSolutionsResponse,
+  InstallSolutionResponse,
   // Monitoring
   MonitoringApp,
   HealthStatus,
@@ -127,9 +129,16 @@ export async function getToken(): Promise<string | null> {
   return localStorage.getItem("dada_token");
 }
 
+/**
+ * `body` is the payload as an object, never a pre-serialized string: apiFetch
+ * owns the JSON.stringify. Typing it `object` is the gate — a caller that
+ * stringifies first now fails tsc instead of shipping a JSON string as the
+ * whole request body, which the Go handlers reject with
+ * "cannot unmarshal string into Go value of type ...".
+ */
 type RequestOptions = {
   method?: string;
-  body?: unknown;
+  body?: object;
   token?: string;
   // Override the base URL. user-service endpoints (orgs/members/invitations)
   // sit at the gateway root, not under dada-cloud's /api/v1 — see lib/userService.ts.
@@ -294,10 +303,10 @@ export const api = {
   get: <T>(path: string, token?: string) =>
     apiFetch<T>(path, { method: "GET", token }),
 
-  post: <T>(path: string, body: unknown, token?: string) =>
+  post: <T>(path: string, body: object, token?: string) =>
     apiFetch<T>(path, { method: "POST", body, token }),
 
-  put: <T>(path: string, body: unknown, token?: string) =>
+  put: <T>(path: string, body: object, token?: string) =>
     apiFetch<T>(path, { method: "PUT", body, token }),
 
   delete: <T>(path: string, token?: string) =>
@@ -1234,7 +1243,7 @@ export const gitApi = {
     projectId: string,
     envId: string,
     data: {
-      installation_id: string;
+      installation_id?: string;
       repo_full_name: string;
       app_name: string;
       production_branch: string;
@@ -1245,6 +1254,9 @@ export const gitApi = {
       worker?: boolean;
       replicas?: number;
       profile?: string;
+      provider?: string;
+      clone_url?: string;
+      token?: string;
     }
   ) =>
     apiFetch<GitReposResponse>(
@@ -1269,6 +1281,62 @@ export const gitApi = {
     apiFetch<{ repo: GitReposResponse["repos"][0] }>(
       `/api/v1/projects/${projectId}/environments/${envId}/repos/${repoId}`,
       { method: "PATCH", body: data }
+    ),
+};
+
+/**
+ * Ready-made project catalog: the open-source projects the console offers on an
+ * empty project, and the parser that turns whatever the customer pasted into a
+ * repository name. Deploying an entry uses gitApi.linkRepo + buildsApi.trigger —
+ * the same path a customer's own repository takes — so there is no install call
+ * here on purpose.
+ */
+export const solutionsApi = {
+  list: () => apiFetch<{ solutions: Solution[] }>(`/api/v1/solutions`),
+
+  get: (slug: string) => apiFetch<Solution>(`/api/v1/solutions/${encodeURIComponent(slug)}`),
+
+  /** Canonicalises a browser URL, clone URL, SSH remote or bare owner/name. */
+  parseRepoUrl: (url: string) =>
+    apiFetch<{ repo_full_name: string }>(
+      `/api/v1/git/parse-repo-url?url=${encodeURIComponent(url)}`
+    ),
+
+  /**
+   * Turns one typed string into a ranked list of things to deploy: catalog
+   * entries, managed resources, a pasted repository, and GitHub search results
+   * below them. Project-scoped because searching spends a rate-limit budget
+   * shared by the whole platform, so it is gated on write access.
+   */
+  resolve: (projectId: string, query: string) =>
+    apiFetch<ResolveSolutionsResponse>(
+      `/api/v1/projects/${projectId}/solutions/resolve?q=${encodeURIComponent(query)}`
+    ),
+
+  /**
+   * Installs a ready-made project or any public repository: one call that links
+   * the repo, orders the managed database the entry declares it needs, and
+   * queues the first build. The console used to run those as three calls and
+   * had to unwind the first two by hand when the third failed.
+   */
+  install: (
+    projectId: string,
+    envId: string,
+    data: {
+      slug?: string;
+      repo?: string;
+      app_name?: string;
+      branch?: string;
+      root_dir?: string;
+      framework?: string;
+      port?: number;
+      profile?: string;
+      with_database?: boolean;
+    }
+  ) =>
+    apiFetch<InstallSolutionResponse>(
+      `/api/v1/projects/${projectId}/environments/${envId}/solutions/install`,
+      { method: "POST", body: data }
     ),
 };
 

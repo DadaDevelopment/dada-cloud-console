@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useEffect, useRef } from "react";
 import type { ResourceSnapshot } from "@/lib/types";
-import { getAppAlerts, getOperationalAppAlerts, type AppAlert } from "@/lib/app-alerts";
+import { getAppAlerts, type AppAlert } from "@/lib/app-alerts";
 import { useT } from "@/lib/i18n/console/context";
 import { trackUxEvent } from "@/lib/ux-telemetry";
 
@@ -60,7 +60,7 @@ export function ProjectAppHealthList({ apps, projectId }: ProjectAppHealthListPr
   const viewedRef = useRef(false);
 
   const rows: Row[] = apps.map((app) => {
-    const alerts = getOperationalAppAlerts(getAppAlerts(app));
+    const alerts = getAppAlerts(app);
     return { app, alerts, unhealthy: isUnhealthy(app, alerts) };
   });
   const unhealthyCount = rows.filter((r) => r.unhealthy).length;

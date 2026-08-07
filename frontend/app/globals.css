@@ -268,6 +268,129 @@ body {
   border-radius: 0 0.35rem 0.35rem 0;
 }
 
+/* Agent chat launcher: a cloud with a robot peeking out from behind it.
+   Hiding is purely draw-order (robot drawn first, cloud on top) — no
+   clip-path, since a clip nested inside the animated transform ends up
+   moving with it and permanently crops the robot instead of revealing it. */
+.agent-pet-btn {
+  display: flex;
+  height: 4rem;
+  width: 4rem;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: transparent;
+  padding: 0;
+  cursor: pointer;
+  --pet-cloud: #ffffff;
+  --pet-cloud-stroke: #5b7fc7;
+  --pet-robot-body: #6366f1;
+  --pet-robot-body-dark: #4338ca;
+  --pet-robot-glow: #ffffff;
+  --pet-outline: #312e81;
+}
+.dark .agent-pet-btn {
+  --pet-cloud: #2a2f45;
+  --pet-cloud-stroke: #8ba6e0;
+  --pet-robot-body: #818cf8;
+  --pet-robot-body-dark: #6366f1;
+  --pet-robot-glow: #eef2ff;
+  --pet-outline: #1e1b4b;
+}
+.agent-pet-svg {
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  transition: transform 0.15s ease;
+}
+.agent-pet-btn:hover .agent-pet-svg {
+  transform: scale(1.06);
+}
+.agent-pet-float {
+  animation: agent-pet-bob 4s ease-in-out infinite;
+  transform-origin: center;
+  filter: drop-shadow(0 4px 8px rgba(30, 27, 75, 0.18));
+}
+@keyframes agent-pet-bob {
+  0%,
+  100% {
+    transform: translateY(0px);
+  }
+  50% {
+    transform: translateY(-6px);
+  }
+}
+.agent-pet-robot {
+  animation: agent-pet-peek 5s ease-in-out infinite;
+  transform-origin: 155px 222px;
+}
+@keyframes agent-pet-peek {
+  0% {
+    transform: translateY(0px) rotate(0deg);
+  }
+  8% {
+    transform: translateY(-90px) rotate(-3deg);
+  }
+  20% {
+    transform: translateY(-96px) rotate(2deg);
+  }
+  30% {
+    transform: translateY(-90px) rotate(-2deg);
+  }
+  42%,
+  70% {
+    transform: translateY(0px) rotate(0deg);
+  }
+  78% {
+    transform: translateY(-45px) rotate(5deg) translateX(36px);
+  }
+  88% {
+    transform: translateY(-45px) rotate(5deg) translateX(36px);
+  }
+  96% {
+    transform: translateY(0px) rotate(0deg) translateX(0px);
+  }
+  100% {
+    transform: translateY(0px) rotate(0deg);
+  }
+}
+.agent-pet-eye {
+  transform-origin: center;
+  animation: agent-pet-blink 4.5s ease-in-out infinite;
+}
+@keyframes agent-pet-blink {
+  0%,
+  92%,
+  100% {
+    transform: scaleY(1);
+  }
+  95% {
+    transform: scaleY(0.15);
+  }
+}
+.agent-pet-antenna-light {
+  animation: agent-pet-pulse 1.6s ease-in-out infinite;
+}
+@keyframes agent-pet-pulse {
+  0%,
+  100% {
+    opacity: 0.5;
+    r: 3.5;
+  }
+  50% {
+    opacity: 1;
+    r: 5;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .agent-pet-float,
+  .agent-pet-robot,
+  .agent-pet-eye,
+  .agent-pet-antenna-light {
+    animation: none;
+  }
+}
+
 
 
 

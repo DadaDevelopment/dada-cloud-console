@@ -19,7 +19,7 @@ import { DeployHooksCard } from "@/components/deploy/deploy-hooks-card";
 import { DeployBadgeCard } from "@/components/deploy/deploy-badge-card";
 import { AppPreviewPane } from "@/components/app-preview-pane";
 import { AppAlertsBanner } from "@/components/deploy/app-alerts-banner";
-import { getAppAlerts, getOperationalAppAlerts } from "@/lib/app-alerts";
+import { getAppAlerts } from "@/lib/app-alerts";
 import { AppNextStepCard } from "@/components/deploy/app-next-step-card";
 import { AppLatestBuildCard } from "@/components/deploy/app-latest-build-card";
 import { getAppNextSteps } from "@/lib/app-next-step";
@@ -272,9 +272,8 @@ export default function AppDetailPage() {
   const resType = classifyVMResource(app);
   const isResource = resType !== "app";
   const alerts = getAppAlerts(app);
-  const operationalAlerts = getOperationalAppAlerts(alerts);
   const appPhaseReady = (app.phase ?? "").toLowerCase() === "ready";
-  const isReadyNoAlerts = appPhaseReady && operationalAlerts.length === 0;
+  const isReadyNoAlerts = appPhaseReady && alerts.length === 0;
   const observedCpu = summary.observed_resources?.cpu_limit ?? summary.observed_resources?.cpu_request;
   const observedMem = summary.observed_resources?.memory_limit ?? summary.observed_resources?.memory_request;
   const observedSize = observedCpu && observedMem ? `${observedCpu} CPU · ${observedMem}` : null;
@@ -434,7 +433,7 @@ export default function AppDetailPage() {
       </div>
 
       <AppAlertsBanner
-        alerts={operationalAlerts}
+        alerts={alerts}
         logsHref={`/projects/${projectId}/apps/${appName}${envId ? `?envId=${envId}` : ""}#logs`}
         storageHref={`/projects/${projectId}/apps/${appName}/settings?tab=storage${envId ? `&envId=${envId}` : ""}`}
         projectId={projectId}

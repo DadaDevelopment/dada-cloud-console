@@ -5,7 +5,6 @@ import type { LogEntry } from "@/lib/types";
 import { AnsiText } from "@/components/ansi-text";
 import { Spinner } from "@/components/ui/spinner";
 import { useT } from "@/lib/i18n/console/context";
-import { formatLogTime } from "@/lib/log-time";
 
 const SINCE = ["15m", "1h", "6h", "24h", "7d"] as const;
 type Since = (typeof SINCE)[number];
@@ -170,14 +169,14 @@ export function LogsViewer({
       ) : entries.length === 0 ? (
         <div className="px-5 py-6 text-sm text-gray-400">{t("apps.logs.empty")}</div>
       ) : (
-        <div className="max-h-[28rem] min-w-0 overflow-auto px-5 pb-4">
-          <div className="min-w-0 rounded-lg bg-gray-900 p-3 font-mono text-xs leading-relaxed text-gray-100">
+        <div className="max-h-[28rem] overflow-auto px-5 pb-4">
+          <div className="rounded-lg bg-gray-900 p-3 font-mono text-xs leading-relaxed text-gray-100">
             {entries.map((e, i) => (
               <div
                 key={i}
-                className="flex min-w-0 max-w-full items-start gap-2 rounded px-1 py-0.5 whitespace-pre-wrap [overflow-wrap:anywhere] hover:bg-white/[0.04]"
+                className="flex items-start gap-2 whitespace-pre-wrap break-words rounded px-1 py-0.5 hover:bg-white/[0.04]"
               >
-                <span className="w-[13ch] shrink-0 select-none text-gray-500">{formatLogTime(e.timestamp)}</span>
+                <span className="shrink-0 select-none text-gray-500">{fmtTime(e.timestamp)}</span>
                 {e.stream && (
                   <span
                     className={`shrink-0 select-none ${e.stream === "stderr" ? "text-red-400" : "text-green-400"}`}
@@ -185,7 +184,7 @@ export function LogsViewer({
                     {e.stream}
                   </span>
                 )}
-                <span className="min-w-0 max-w-full flex-1 [overflow-wrap:anywhere]">
+                <span className="min-w-0 flex-1">
                   <AnsiText value={e.message} />
                 </span>
               </div>
@@ -196,4 +195,11 @@ export function LogsViewer({
       )}
     </div>
   );
+}
+
+function fmtTime(ts: string): string {
+  if (!ts) return "";
+  const d = new Date(ts);
+  if (isNaN(d.getTime())) return ts;
+  return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
 }

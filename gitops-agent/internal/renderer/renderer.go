@@ -792,6 +792,32 @@ func externalVolumesFor(specs []AppServiceSpec) map[string]any {
 	return out
 }
 
+// AuthoredNamedVolumes returns the named volumes the aggregate will pin
+// `external: true` for AUTHORED apps, sorted for a deterministic payload.
+//
+// Adopted stacks are skipped for the same reason externalVolumesFor skips them:
+// their volumes already exist on the machine (that is what adoption means), and
+// their original top-level volumes block carries an external-NAME mapping, so a
+// creation attempt here would invent a volume under the wrong name.
+//
+// The deploy worker uses this to create missing volumes before the stack is
+// deployed. It has to come from the renderer rather than be re-derived from the
+// compose file, because the renderer is what decided which volumes are external
+// in the first place — two independent derivations would eventually disagree,
+// and the disagreement would surface as a failed deploy on a stateful app.
+func AuthoredNamedVolumes(specs []AppServiceSpec) []string {
+	vols := externalVolumesFor(specs)
+	if len(vols) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(vols))
+	for name := range vols {
+		out = append(out, name)
+	}
+	sort.Strings(out)
+	return out
+}
+
 // RenderAppServiceFragment renders one Application's durable service.yaml: a
 // single-service compose document keyed by the app name. env_file is a bare
 // ".env" (sibling of the fragment); the aggregate rewrites it to the app's

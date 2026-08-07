@@ -126,7 +126,7 @@ func TestParseURLProbeCandidate(t *testing.T) {
 	}{
 		{"web app", `{"url":"https://app.dada-tuda.ru","port":8080}`, true, 8080},
 		{"non standard port", `{"url":"https://app.dada-tuda.ru","port":3000}`, true, 3000},
-		{"declared worker", `{"url":"https://app.dada-tuda.ru","port":8080,"worker":true}`, true, 8080},
+		{"declared worker", `{"url":"https://app.dada-tuda.ru","port":8080,"worker":true}`, false, 0},
 		{"no url", `{"port":8080}`, false, 0},
 		{"empty url", `{"url":"","port":8080}`, false, 0},
 		{"no port", `{"url":"https://app.dada-tuda.ru"}`, false, 0},
@@ -161,17 +161,17 @@ func TestParseURLProbeCandidate(t *testing.T) {
 // or rewritten type is an invisible feature.
 func TestGroupAppAlertsCarriesURLType(t *testing.T) {
 	rows := []appAlertRow{
-		{AppName: "app", Type: "url", Reason: urlProbeReasonEdgeUnavailable},
-		{AppName: "proxy", Type: "url", Reason: urlProbeReasonBadGateway, Detail: "public route returned HTTP 502"},
+		{AppName: "bot", Type: "url", Reason: urlProbeReasonNoListener},
+		{AppName: "proxy", Type: "url", Reason: urlProbeReasonNotHTTP, Detail: "connected but response did not start with HTTP/"},
 	}
 
 	out := groupAppAlerts(rows)
 
-	if len(out["app"]) != 1 || out["app"][0].Type != "url" {
-		t.Fatalf("app alerts = %+v, want one url alert", out["app"])
+	if len(out["bot"]) != 1 || out["bot"][0].Type != "url" {
+		t.Fatalf("bot alerts = %+v, want one url alert", out["bot"])
 	}
-	if out["app"][0].Reason != urlProbeReasonEdgeUnavailable {
-		t.Fatalf("app reason = %q, want %q", out["app"][0].Reason, urlProbeReasonEdgeUnavailable)
+	if out["bot"][0].Reason != urlProbeReasonNoListener {
+		t.Fatalf("bot reason = %q, want %q", out["bot"][0].Reason, urlProbeReasonNoListener)
 	}
 	if len(out["proxy"]) != 1 || out["proxy"][0].Detail == "" {
 		t.Fatalf("proxy alerts = %+v, want one url alert carrying a detail", out["proxy"])

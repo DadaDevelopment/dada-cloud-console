@@ -20,7 +20,7 @@ import { AgentChatPanel } from "@/components/agent-chat-panel";
 import { OnboardingProvider } from "@/components/onboarding/onboarding-provider";
 import { PasskeyPrompt } from "@/components/passkey/passkey-prompt";
 import { useT } from "@/lib/i18n/console/context";
-import { Bot } from "lucide-react";
+import { AgentPetButton } from "@/components/shell/agent-pet-button";
 
 function ConsoleShell({ children }: { children: React.ReactNode }) {
   const { projectId } = useProjectContext();
@@ -99,16 +99,12 @@ function ConsoleShell({ children }: { children: React.ReactNode }) {
           />
         )}
         {!chatOpen && (
-          <button
-            type="button"
-            data-onboarding="agent-fab"
+          <AgentPetButton
+            dataOnboarding="agent-fab"
             onClick={() => setChatOpen(true)}
             title={t("agentChat.open")}
-            aria-label={t("agentChat.open")}
-            className="fixed bottom-5 right-5 z-40 flex h-11 w-11 items-center justify-center rounded-full bg-blue-600 text-white shadow-lg transition-colors hover:bg-blue-700"
-          >
-            <Bot className="h-5 w-5" />
-          </button>
+            ariaLabel={t("agentChat.open")}
+          />
         )}
         <AgentChatPanel open={chatOpen} onClose={() => setChatOpen(false)} />
         <OnboardingProvider suppressed={chatOpen || navOpen || passkeyOpen} />

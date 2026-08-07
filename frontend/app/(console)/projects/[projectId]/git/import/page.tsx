@@ -14,6 +14,8 @@ import { useProjectContext } from "@/lib/project-context";
 import { canMutate } from "@/lib/rbac";
 import { useT } from "@/lib/i18n/console/context";
 import { TemplateDeployCards } from "@/components/console/template-deploy-cards";
+import { UploadDeployCard } from "@/components/deploy/upload-deploy";
+import { ConnectByUrlDialog } from "@/components/deploy/connect-by-url-dialog";
 import { timeAgo } from "@/lib/format";
 import { CopyButton } from "@/components/ui/copy-button";
 import { githubActionsStep, deployCurl } from "@/lib/deploy-snippet";
@@ -32,6 +34,7 @@ type WizardDraft = {
   selectedRepo: GitRemoteRepoCandidate | null;
   appName: string;
   port: number;
+  worker: boolean;
   profile: string;
   branch: string;
   rootDir: string;
@@ -214,7 +217,7 @@ export default function GitImportPage() {
   const [installations, setInstallations] = useState<GitInstallation[]>([]);
   const [loadingInstalls, setLoadingInstalls] = useState(true);
   const [installError, setInstallError] = useState<string | null>(null);
-  const [connectingProvider, setConnectingProvider] = useState<"github" | "gitlab" | null>(null);
+  const [connectingProvider, setConnectingProvider] = useState<"github" | null>(null);
   const [installUrl, setInstallUrl] = useState<string | null>(null);
 
   const [remoteRepos, setRemoteRepos] = useState<GitRemoteRepoCandidate[]>([]);
@@ -228,6 +231,7 @@ export default function GitImportPage() {
 
   const [appName, setAppName] = useState("");
   const [port, setPort] = useState(8080);
+  const [worker, setWorker] = useState(false);
   const [profile, setProfile] = useState("small");
   const [branch, setBranch] = useState("");
   const [rootDir, setRootDir] = useState(".");
@@ -241,6 +245,7 @@ export default function GitImportPage() {
   const [ghaGuideOpen, setGhaGuideOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  const [urlDialogOpen, setUrlDialogOpen] = useState(false);
 
   // Deploy phase. Linking the repo kicks off the first build; we stay on the same
   // continuous page and stream its logs until a terminal status.
@@ -394,32 +399,26 @@ export default function GitImportPage() {
   const repoParam = searchParams.get("repo");
   const repoPrefillDone = useRef(false);
 
-  async function handleConnectProvider(provider: "github" | "gitlab", forceInstall = false) {
+  async function handleConnectProvider(provider: "github", forceInstall = false) {
     setInstallError(null);
 
-    if (provider === "github" && forceInstall && installUrl) {
+    if (forceInstall && installUrl) {
       window.location.href = installUrl;
       return;
     }
 
     setConnectingProvider(provider);
     try {
-      if (provider === "github" && !forceInstall) {
-        const { installations: avail } = await gitApi.availableInstallations(projectId);
-        const list = avail ?? [];
-        const toBind = list.filter((a) => !a.bound);
-        if (list.length) {
-          await Promise.all(toBind.map((a) => gitApi.bindInstallation(projectId, a.installation_id)));
-          await refreshInstallations(false);
-          return;
-        }
-        const url = installUrl ?? (await gitApi.installUrl(projectId, provider)).url;
-        setInstallUrl(url);
-        window.location.href = url;
+      const { installations: avail } = await gitApi.availableInstallations(projectId);
+      const list = avail ?? [];
+      const toBind = list.filter((a) => !a.bound);
+      if (list.length) {
+        await Promise.all(toBind.map((a) => gitApi.bindInstallation(projectId, a.installation_id)));
+        await refreshInstallations(false);
         return;
       }
-      const { url } = await gitApi.installUrl(projectId, provider);
-      if (provider === "github") setInstallUrl(url);
+      const url = installUrl ?? (await gitApi.installUrl(projectId, provider)).url;
+      setInstallUrl(url);
       window.location.href = url;
     } catch (err) {
       const msg = err instanceof Error ? err.message : t("git.import.error.startInstall");
@@ -524,7 +523,8 @@ export default function GitImportPage() {
         root_dir: rootDir || ".",
         framework_override: frameworkOverride || undefined,
         auto_deploy: autoDeploy,
-        port,
+        port: worker ? 0 : port,
+        worker,
         profile,
       });
     } catch (err) {
@@ -569,6 +569,7 @@ export default function GitImportPage() {
     }
     if (d?.appName) setAppName(d.appName);
     if (typeof d?.port === "number") setPort(d.port);
+    if (typeof d?.worker === "boolean") setWorker(d.worker);
     if (d?.profile) setProfile(d.profile);
     if (d?.branch) setBranch(d.branch);
     if (d?.rootDir) setRootDir(d.rootDir);
@@ -597,6 +598,7 @@ export default function GitImportPage() {
       selectedRepo,
       appName,
       port,
+      worker,
       profile,
       branch,
       rootDir,
@@ -613,6 +615,7 @@ export default function GitImportPage() {
     selectedRepo,
     appName,
     port,
+    worker,
     profile,
     branch,
     rootDir,
@@ -708,16 +711,17 @@ export default function GitImportPage() {
                   <button
                     onClick={() => handleConnectProvider("github")}
                     disabled={connectingProvider !== null}
+                    data-ux="git_import:connect_github"
                     className="rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
                   >
                     {t("git.import.connectGitHub")}
                   </button>
                   <button
-                    onClick={() => handleConnectProvider("gitlab")}
-                    disabled={connectingProvider !== null}
-                    className="rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
+                    onClick={() => setUrlDialogOpen(true)}
+                    data-ux="git_import:connect_url_open"
+                    className="rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-50"
                   >
-                    {t("git.import.connectGitLab")}
+                    {t("git.import.byUrl.open")}
                   </button>
                 </div>
                 {installUrl && (
@@ -736,7 +740,12 @@ export default function GitImportPage() {
                   <span className="text-xs font-medium uppercase tracking-wide text-gray-400 dark:text-gray-500">{t("git.import.orTemplate")}</span>
                   <div className="h-px flex-1 bg-gray-200 dark:bg-gray-800" />
                 </div>
-                <TemplateDeployCards projectId={projectId} envId={envId || null} />
+                <div className="space-y-4">
+                  <div data-ux="git_import:upload_archive">
+                    <UploadDeployCard projectId={projectId} envId={envId || null} />
+                  </div>
+                  <TemplateDeployCards projectId={projectId} envId={envId || null} />
+                </div>
               </div>
             </>
           ) : selectedRepo && !repoPickerOpen ? (
@@ -773,14 +782,23 @@ export default function GitImportPage() {
                     </span>
                   </div>
                   {!deploying && (
-                    <button
-                      onClick={() => handleConnectProvider("github", true)}
-                      disabled={connectingProvider !== null}
-                      className="inline-flex shrink-0 items-center justify-center gap-2 rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 text-sm font-medium text-gray-700 dark:text-gray-200 shadow-sm transition-colors hover:border-blue-400 hover:text-blue-600 disabled:cursor-not-allowed disabled:opacity-60"
-                    >
-                      <Plus className="h-4 w-4" />
-                      <span>{t("git.import.connectAnotherGitHub")}</span>
-                    </button>
+                    <div className="flex shrink-0 items-center gap-2">
+                      <button
+                        onClick={() => handleConnectProvider("github", true)}
+                        disabled={connectingProvider !== null}
+                        className="inline-flex items-center justify-center gap-2 rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 text-sm font-medium text-gray-700 dark:text-gray-200 shadow-sm transition-colors hover:border-blue-400 hover:text-blue-600 disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        <Plus className="h-4 w-4" />
+                        <span>{t("git.import.connectAnotherGitHub")}</span>
+                      </button>
+                      <button
+                        onClick={() => setUrlDialogOpen(true)}
+                        data-ux="git_import:connect_url_open"
+                        className="inline-flex items-center justify-center rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 text-sm font-medium text-gray-700 dark:text-gray-200 shadow-sm transition-colors hover:border-blue-400 hover:text-blue-600"
+                      >
+                        {t("git.import.byUrl.open")}
+                      </button>
+                    </div>
                   )}
                 </div>
                 {!deploying && installUrl && (
@@ -1036,15 +1054,16 @@ export default function GitImportPage() {
                     <label className="block text-sm font-medium text-gray-700 dark:text-gray-200">{t("git.import.port.label")}</label>
                     <input
                       type="number"
-                      required
+                      required={!worker}
+                      disabled={worker}
                       min={1}
                       max={65535}
-                      value={port}
+                      value={worker ? "" : port}
                       onChange={(e) => {
                         setPortTouched(true);
                         setPort(parseInt(e.target.value, 10) || 8080);
                       }}
-                      className="mt-1 block w-full rounded-lg border border-gray-300 dark:border-gray-700 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                      className="mt-1 block w-full rounded-lg border border-gray-300 dark:border-gray-700 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:cursor-not-allowed disabled:bg-gray-50 dark:disabled:bg-gray-900"
                     />
                   </div>
                   <div>
@@ -1060,6 +1079,19 @@ export default function GitImportPage() {
                     </select>
                   </div>
                 </div>
+
+                <label className="flex items-start gap-3 rounded-lg border border-gray-200 dark:border-gray-800 px-4 py-3">
+                  <input
+                    type="checkbox"
+                    checked={worker}
+                    onChange={(e) => setWorker(e.target.checked)}
+                    className="mt-0.5 h-4 w-4 rounded border-gray-300 dark:border-gray-700"
+                  />
+                  <span>
+                    <span className="block text-sm font-medium text-gray-700 dark:text-gray-200">{t("git.import.worker.label")}</span>
+                    <span className="mt-0.5 block text-xs text-gray-400 dark:text-gray-500">{t("git.import.worker.hint")}</span>
+                  </span>
+                </label>
 
                 <div className="grid grid-cols-2 gap-3">
                   <div>
@@ -1206,6 +1238,13 @@ export default function GitImportPage() {
           </section>
         )}
       </div>
+
+      <ConnectByUrlDialog
+        projectId={projectId}
+        envId={envId || null}
+        open={urlDialogOpen}
+        onClose={() => setUrlDialogOpen(false)}
+      />
     </div>
   );
 }

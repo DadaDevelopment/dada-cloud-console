@@ -49,6 +49,9 @@ type App interface {
 	// BranchHead resolves the current HEAD commit sha and message for a branch.
 	// token may be empty for anonymous access to a public repo.
 	BranchHead(ctx context.Context, token, repoFullName, branch string) (sha, message string, err error)
+	// SearchRepos searches public repositories by free text, so the console's
+	// one input field can answer "n8n" with repositories instead of nothing.
+	SearchRepos(ctx context.Context, query string, limit int) ([]SearchHit, error)
 }
 
 // InstallationAccount identifies the org/user a GitHub App installation belongs

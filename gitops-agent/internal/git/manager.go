@@ -75,6 +75,11 @@ type Manager struct {
 	cfg  RepoConfig
 	path string // absolute path to the local clone
 	mu   sync.Mutex
+	// prePush runs immediately before every push with the hash just
+	// committed. It is nil in production and exists so tests can advance the
+	// remote branch inside the window between fetch and push — the only way
+	// to reproduce a lost push race deterministically.
+	prePush func(plumbing.Hash)
 }
 
 // New returns a Manager. The repo is cloned on first use via EnsureCloned.
@@ -144,7 +149,7 @@ func (m *Manager) pull() (string, error) {
 		ReferenceName: plumbing.NewBranchReferenceName(m.cfg.Branch),
 		Force:         false,
 	})
-	if err != nil && err != gogit.NoErrAlreadyUpToDate {
+	if err != nil && !errors.Is(err, gogit.NoErrAlreadyUpToDate) {
 		return "", fmt.Errorf("pulling: %w", err)
 	}
 
@@ -221,61 +226,142 @@ type FileChange struct {
 	Content string
 }
 
+// pushAttempts bounds how many times a commit is rebuilt on top of a moving
+// remote branch before the push is reported as failed. Only a proven race
+// (the remote branch advanced under us) consumes an attempt.
+const pushAttempts = 3
+
 // CommitAndPush writes content to relativePath, commits, and pushes.
-// On push rejection (non-fast-forward) it pulls with rebase and retries once.
-// Returns the commit SHA.
+// A push lost to a concurrent writer is rebuilt on the new remote head and
+// retried; see pushWithRaceRetry. Returns the commit SHA.
 func (m *Manager) CommitAndPush(relativePath, content, commitMessage, authorName, authorEmail string) (string, error) {
 	return m.CommitFilesAndPush([]FileChange{{Path: relativePath, Content: content}}, commitMessage, authorName, authorEmail)
 }
 
 // CommitFilesAndPush writes one or more files, commits, and pushes.
-// On push rejection (non-fast-forward) it pulls with rebase and retries once.
 // Returns the commit SHA.
 func (m *Manager) CommitFilesAndPush(files []FileChange, commitMessage, authorName, authorEmail string) (string, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	sha, err := m.writeFilesCommitPush(files, commitMessage, authorName, authorEmail)
-	if err == nil {
-		return sha, nil
-	}
-
-	// Non-fast-forward: rebase on top of remote and retry once.
-	if isNonFastForward(err) {
-		log.Warn().Int("files", len(files)).Msg("push rejected, rebasing and retrying")
-		if _, pullErr := m.pull(); pullErr != nil {
-			return "", fmt.Errorf("rebase pull failed: %w (original push error: %w)", pullErr, err)
-		}
+	return m.pushWithRaceRetry(func() (string, string, error) {
 		return m.writeFilesCommitPush(files, commitMessage, authorName, authorEmail)
-	}
-
-	return "", err
+	})
 }
 
-func (m *Manager) writeFilesCommitPush(files []FileChange, commitMessage, authorName, authorEmail string) (string, error) {
+// pushWithRaceRetry runs attempt until it succeeds, is proven already
+// delivered, or fails for a reason that is not a lost race.
+//
+// Whether a failed push is retryable is decided by state, not by the wording
+// of the error: after a failure the remote branch is re-read, and the push is
+// retried only when that branch has moved away from the base the attempt
+// committed on — the signature of a concurrent writer. Matching the error
+// text cannot do this, because every git server phrases the same race
+// differently ("non-fast-forward", "fetch first", "cannot lock ref '...': is
+// at X but expected Y"), and an unmatched phrasing turned a race that only
+// needed a retry into a terminal deploy failure for a user (2026-08-06).
+//
+// attempt returns the commit SHA and the remote head it built on; it must
+// return both on failure too, and must start from the current remote head so
+// a retry rebuilds on top of the winner instead of clobbering it. Callers
+// must hold m.mu.
+func (m *Manager) pushWithRaceRetry(attempt func() (string, string, error)) (string, error) {
+	var lastErr error
+	for try := 1; try <= pushAttempts; try++ {
+		sha, base, err := attempt()
+		if err == nil {
+			return sha, nil
+		}
+		lastErr = err
+
+		var localErr *LocalCloneError
+		if base == "" || errors.As(err, &localErr) {
+			break
+		}
+
+		head, headErr := m.remoteBranchHead()
+		if headErr != nil {
+			lastErr = fmt.Errorf("%w (re-reading remote branch failed: %w)", err, headErr)
+			break
+		}
+		if delivered, derr := commitReachable(m.path, sha, head); derr == nil && delivered {
+			log.Warn().Err(err).Str("sha", sha).
+				Msg("push reported an error but the commit is on the remote branch; treating it as delivered")
+			return sha, nil
+		}
+		if head.String() == base {
+			break
+		}
+		if try < pushAttempts {
+			log.Warn().Err(err).Int("attempt", try).
+				Str("base", base).Str("remote_head", head.String()).
+				Msg("push lost a race with a concurrent writer; rebuilding on the new remote head and retrying")
+		}
+	}
+
+	return "", lastErr
+}
+
+// commitReachable reports whether sha is head or one of its ancestors, i.e.
+// whether the commit is already on the remote branch despite the push having
+// reported an error.
+func commitReachable(path, sha string, head plumbing.Hash) (bool, error) {
+	if sha == "" {
+		return false, nil
+	}
+	hash := plumbing.NewHash(sha)
+	if hash == head {
+		return true, nil
+	}
+
+	repo, err := gogit.PlainOpen(path)
+	if err != nil {
+		return false, err
+	}
+	commit, err := repo.CommitObject(hash)
+	if err != nil {
+		return false, err
+	}
+	headCommit, err := repo.CommitObject(head)
+	if err != nil {
+		return false, err
+	}
+	return commit.IsAncestor(headCommit)
+}
+
+// writeFilesCommitPush returns the pushed commit SHA and the remote head the
+// commit was built on. Both are returned on failure too, so the caller can
+// tell a lost race from a terminal error.
+func (m *Manager) writeFilesCommitPush(files []FileChange, commitMessage, authorName, authorEmail string) (string, string, error) {
 	repo, err := gogit.PlainOpen(m.path)
 	if err != nil {
-		return "", fmt.Errorf("opening repo: %w", err)
+		return "", "", fmt.Errorf("opening repo: %w", err)
 	}
 	wt, err := repo.Worktree()
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 
 	if err := m.resetToRemoteHead(repo, wt); err != nil {
-		return "", err
+		return "", "", err
 	}
+
+	base, err := repo.Head()
+	if err != nil {
+		return "", "", fmt.Errorf("resolving commit base: %w", err)
+	}
+	baseSHA := base.Hash().String()
 
 	for _, file := range files {
 		absPath := filepath.Join(m.path, file.Path)
 		if err := os.MkdirAll(filepath.Dir(absPath), 0o755); err != nil {
-			return "", fmt.Errorf("mkdir %s: %w", file.Path, err)
+			return "", baseSHA, fmt.Errorf("mkdir %s: %w", file.Path, err)
 		}
 		if err := os.WriteFile(absPath, []byte(file.Content), 0o644); err != nil {
-			return "", fmt.Errorf("writing file %s: %w", file.Path, err)
+			return "", baseSHA, fmt.Errorf("writing file %s: %w", file.Path, err)
 		}
 		if _, err := wt.Add(file.Path); err != nil {
-			return "", fmt.Errorf("git add %s: %w", file.Path, err)
+			return "", baseSHA, fmt.Errorf("git add %s: %w", file.Path, err)
 		}
 	}
 
@@ -287,7 +373,11 @@ func (m *Manager) writeFilesCommitPush(files []FileChange, commitMessage, author
 		},
 	})
 	if err != nil {
-		return "", fmt.Errorf("git commit: %w", err)
+		return "", baseSHA, fmt.Errorf("git commit: %w", err)
+	}
+
+	if m.prePush != nil {
+		m.prePush(hash)
 	}
 
 	if err := repo.Push(&gogit.PushOptions{
@@ -296,11 +386,11 @@ func (m *Manager) writeFilesCommitPush(files []FileChange, commitMessage, author
 		RefSpecs: []config.RefSpec{
 			config.RefSpec(fmt.Sprintf("refs/heads/%s:refs/heads/%s", m.cfg.Branch, m.cfg.Branch)),
 		},
-	}); err != nil {
-		return "", fmt.Errorf("git push: %w", err)
+	}); err != nil && !errors.Is(err, gogit.NoErrAlreadyUpToDate) {
+		return hash.String(), baseSHA, fmt.Errorf("git push: %w", err)
 	}
 
-	return hash.String(), nil
+	return hash.String(), baseSHA, nil
 }
 
 // resetToRemoteHead fetches the tracked branch and hard-resets the worktree,
@@ -318,7 +408,7 @@ func (m *Manager) resetToRemoteHead(repo *gogit.Repository, wt *gogit.Worktree) 
 			config.RefSpec(fmt.Sprintf("+refs/heads/%s:refs/remotes/origin/%s", m.cfg.Branch, m.cfg.Branch)),
 		},
 		Force: true,
-	}); err != nil && err != gogit.NoErrAlreadyUpToDate {
+	}); err != nil && !errors.Is(err, gogit.NoErrAlreadyUpToDate) {
 		return fmt.Errorf("fetch before commit: %w", err)
 	}
 
@@ -333,14 +423,12 @@ func (m *Manager) resetToRemoteHead(repo *gogit.Repository, wt *gogit.Worktree) 
 	return nil
 }
 
-// RemoteHEAD returns the current remote HEAD SHA without modifying the local clone.
-func (m *Manager) RemoteHEAD() (string, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
+// remoteBranchHead fetches the tracked branch and returns its hash without
+// touching the worktree. Callers must hold m.mu.
+func (m *Manager) remoteBranchHead() (plumbing.Hash, error) {
 	repo, err := gogit.PlainOpen(m.path)
 	if err != nil {
-		return "", err
+		return plumbing.ZeroHash, err
 	}
 
 	if err := repo.Fetch(&gogit.FetchOptions{
@@ -350,16 +438,27 @@ func (m *Manager) RemoteHEAD() (string, error) {
 			config.RefSpec(fmt.Sprintf("+refs/heads/%s:refs/remotes/origin/%s", m.cfg.Branch, m.cfg.Branch)),
 		},
 		Force: true,
-	}); err != nil && err != gogit.NoErrAlreadyUpToDate {
-		return "", fmt.Errorf("fetch: %w", err)
+	}); err != nil && !errors.Is(err, gogit.NoErrAlreadyUpToDate) {
+		return plumbing.ZeroHash, fmt.Errorf("fetch: %w", err)
 	}
 
-	ref, err := repo.Reference(
-		plumbing.NewRemoteReferenceName("origin", m.cfg.Branch), true)
+	ref, err := repo.Reference(plumbing.NewRemoteReferenceName("origin", m.cfg.Branch), true)
 	if err != nil {
-		return "", fmt.Errorf("resolving remote HEAD: %w", err)
+		return plumbing.ZeroHash, fmt.Errorf("resolving remote HEAD: %w", err)
 	}
-	return ref.Hash().String(), nil
+	return ref.Hash(), nil
+}
+
+// RemoteHEAD returns the current remote HEAD SHA without modifying the local clone.
+func (m *Manager) RemoteHEAD() (string, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	hash, err := m.remoteBranchHead()
+	if err != nil {
+		return "", err
+	}
+	return hash.String(), nil
 }
 
 // CommitsSince returns commits reachable from HEAD that are not reachable from
@@ -469,17 +568,33 @@ func (m *Manager) RemoveAndPush(relativePaths []string, commitMessage, authorNam
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	if _, err := m.pull(); err != nil {
-		return "", err
-	}
+	return m.pushWithRaceRetry(func() (string, string, error) {
+		return m.removeFilesCommitPush(relativePaths, commitMessage, authorName, authorEmail)
+	})
+}
+
+// removeFilesCommitPush returns the pushed commit SHA and the remote head the
+// commit was built on, both on failure too, so pushWithRaceRetry can tell a
+// lost race from a terminal error. A deletion that finds nothing to delete
+// returns an empty SHA and no error.
+func (m *Manager) removeFilesCommitPush(relativePaths []string, commitMessage, authorName, authorEmail string) (string, string, error) {
 	repo, err := gogit.PlainOpen(m.path)
 	if err != nil {
-		return "", fmt.Errorf("opening repo: %w", err)
+		return "", "", fmt.Errorf("opening repo: %w", err)
 	}
 	wt, err := repo.Worktree()
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
+	if err := m.resetToRemoteHead(repo, wt); err != nil {
+		return "", "", err
+	}
+	base, err := repo.Head()
+	if err != nil {
+		return "", "", fmt.Errorf("resolving commit base: %w", err)
+	}
+	baseSHA := base.Hash().String()
+
 	removed := 0
 	for _, rel := range relativePaths {
 		abs := filepath.Join(m.path, rel)
@@ -487,18 +602,21 @@ func (m *Manager) RemoveAndPush(relativePaths []string, commitMessage, authorNam
 			continue
 		}
 		if _, err := wt.Remove(rel); err != nil {
-			return "", fmt.Errorf("git rm %s: %w", rel, err)
+			return "", baseSHA, fmt.Errorf("git rm %s: %w", rel, err)
 		}
 		removed++
 	}
 	if removed == 0 {
-		return "", nil
+		return "", baseSHA, nil
 	}
 	hash, err := wt.Commit(commitMessage, &gogit.CommitOptions{
 		Author: &object.Signature{Name: authorName, Email: authorEmail, When: time.Now()},
 	})
 	if err != nil {
-		return "", fmt.Errorf("git commit (remove): %w", err)
+		return "", baseSHA, fmt.Errorf("git commit (remove): %w", err)
+	}
+	if m.prePush != nil {
+		m.prePush(hash)
 	}
 	if err := repo.Push(&gogit.PushOptions{
 		Auth:       m.auth(),
@@ -506,10 +624,10 @@ func (m *Manager) RemoveAndPush(relativePaths []string, commitMessage, authorNam
 		RefSpecs: []config.RefSpec{
 			config.RefSpec(fmt.Sprintf("refs/heads/%s:refs/heads/%s", m.cfg.Branch, m.cfg.Branch)),
 		},
-	}); err != nil {
-		return "", fmt.Errorf("git push (remove): %w", err)
+	}); err != nil && !errors.Is(err, gogit.NoErrAlreadyUpToDate) {
+		return hash.String(), baseSHA, fmt.Errorf("git push (remove): %w", err)
 	}
-	return hash.String(), nil
+	return hash.String(), baseSHA, nil
 }
 
 // ReadFileAtCommit returns the content of a file at a specific commit SHA.
@@ -624,14 +742,6 @@ func historyRewritten(repo *gogit.Repository, fromSHA string, headHash plumbing.
 		return false, fmt.Errorf("checking ancestry of cursor %s: %w", fromSHA, err)
 	}
 	return !isAncestor, nil
-}
-
-func isNonFastForward(err error) bool {
-	if err == nil {
-		return false
-	}
-	s := err.Error()
-	return strings.Contains(s, "non-fast-forward") || strings.Contains(s, "rejected")
 }
 
 func changedFiles(c *object.Commit) ([]string, map[string]bool, error) {

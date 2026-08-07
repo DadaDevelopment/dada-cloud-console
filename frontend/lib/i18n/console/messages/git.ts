@@ -83,14 +83,15 @@ export const git: Messages = {
     en: "Authorize a provider to grant access to your repositories.",
   },
   "git.import.connectGitHub": { ru: "Подключить GitHub", en: "Connect GitHub" },
-  "git.import.connectGitLab": { ru: "Подключить GitLab", en: "Connect GitLab" },
   "git.import.connectAnotherGitHub": { ru: "Подключить ещё один аккаунт GitHub", en: "Connect another GitHub account" },
-  "git.import.connectAnotherGitLab": { ru: "Подключить ещё один GitLab", en: "Connect another GitLab" },
   "git.import.openGithub": {
     ru: "Ничего не произошло? Открыть GitHub →",
     en: "Nothing happened? Open GitHub →",
   },
-  "git.import.orTemplate": { ru: "или без GitHub", en: "or without GitHub" },
+  "git.import.orTemplate": {
+    ru: "или без GitHub: загрузите архив или разверните шаблон",
+    en: "or without GitHub: upload an archive or deploy a template",
+  },
 
   "git.import.select": { ru: "Выбрать →", en: "Select →" },
   "git.import.backToAccounts": { ru: "← Назад к аккаунтам", en: "← Back to accounts" },
@@ -127,6 +128,14 @@ export const git: Messages = {
   },
 
   "git.import.port.label": { ru: "Порт", en: "Port" },
+  "git.import.worker.label": {
+    ru: "Фоновый процесс без HTTP-порта (бот, воркер)",
+    en: "Background process with no HTTP port (bot, worker)",
+  },
+  "git.import.worker.hint": {
+    ru: "Публичный адрес не выдаётся, порт не слушается, и консоль не будет требовать от приложения ответа по HTTP.",
+    en: "No public address is issued, no port is exposed, and the console will not expect the app to answer over HTTP.",
+  },
   "git.import.profile.label": { ru: "Профиль", en: "Profile" },
   "git.import.branch.label": { ru: "Ветка для продакшна", en: "Production branch" },
   "git.import.rootDir.label": { ru: "Корневая директория", en: "Root directory" },
@@ -162,4 +171,51 @@ export const git: Messages = {
   "git.import.error.startInstall": { ru: "Не удалось начать установку", en: "Failed to start install" },
   "git.import.error.loadRepos": { ru: "Не удалось загрузить репозитории", en: "Failed to load repositories" },
   "git.import.error.connect": { ru: "Не удалось подключить репозиторий", en: "Failed to connect repository" },
+
+  "git.import.byUrl.open": { ru: "Подключить по URL", en: "Connect by URL" },
+  "git.import.byUrl.title": { ru: "Подключить репозиторий по URL", en: "Connect a repository by URL" },
+  "git.import.byUrl.subtitle": {
+    ru: "Для GitLab (включая self-hosted), Gitea, Bitbucket и любого другого https-репозитория.",
+    en: "For GitLab (including self-hosted), Gitea, Bitbucket, and any other https repository.",
+  },
+  "git.import.byUrl.cloneUrl.label": { ru: "Clone URL", en: "Clone URL" },
+  "git.import.byUrl.cloneUrl.placeholder": { ru: "https://gitlab.com/owner/repo.git", en: "https://gitlab.com/owner/repo.git" },
+  "git.import.byUrl.cloneUrl.hint": {
+    ru: "Только https. github.com определится как GitHub, любой другой хост - как GitLab, в том числе self-hosted.",
+    en: "https only. github.com is detected as GitHub, any other host as GitLab, including self-hosted.",
+  },
+  "git.import.byUrl.token.label": { ru: "Токен доступа", en: "Access token" },
+  "git.import.byUrl.token.hint": {
+    ru: "Нужен только для приватного репозитория. Хранится в зашифрованном виде.",
+    en: "Only needed for a private repository. Stored encrypted.",
+  },
+  "git.import.byUrl.appName.label": { ru: "Имя приложения", en: "Application name" },
+  "git.import.byUrl.branch.label": { ru: "Ветка для продакшна", en: "Production branch" },
+  "git.import.byUrl.rootDir.label": { ru: "Корневая директория", en: "Root directory" },
+  "git.import.byUrl.port.label": { ru: "Порт", en: "Port" },
+  "git.import.byUrl.worker.label": {
+    ru: "Фоновый процесс без HTTP-порта (бот, воркер)",
+    en: "Background process with no HTTP port (bot, worker)",
+  },
+  "git.import.byUrl.submit": { ru: "Подключить", en: "Connect" },
+  "git.import.byUrl.submitting": { ru: "Подключение…", en: "Connecting…" },
+  "git.import.byUrl.cancel": { ru: "Отмена", en: "Cancel" },
+  "git.import.byUrl.error.appNameTaken": {
+    ru: "Приложение с таким именем уже есть в этом окружении.",
+    en: "An app with this name already exists in this environment.",
+  },
+  "git.import.byUrl.error.empty": { ru: "Введите clone URL репозитория", en: "Enter the repository's clone URL" },
+  "git.import.byUrl.error.sshNotSupported": {
+    ru: "ssh-адреса не поддерживаются - используйте https-адрес с токеном.",
+    en: "ssh URLs are not supported - use an https URL with a token.",
+  },
+  "git.import.byUrl.error.httpNotSupported": {
+    ru: "Только https - токен передаётся лишь по https.",
+    en: "https only - the token is only sent over https.",
+  },
+  "git.import.byUrl.error.invalidUrl": { ru: "Не похоже на URL репозитория", en: "Doesn't look like a repository URL" },
+  "git.import.byUrl.error.incompletePath": {
+    ru: "В URL не хватает пути до репозитория, например owner/repo",
+    en: "The URL is missing the repository path, e.g. owner/repo",
+  },
 };

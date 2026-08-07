@@ -105,10 +105,6 @@ export const apps: Messages = {
     ru: "Не нужен для фонового воркера — публичный адрес не выдаётся",
     en: "Not needed for a background worker — no public address is issued",
   },
-  "apps.config.servicePortHint": {
-    ru: "Оставьте пустым, чтобы убрать публичный HTTP-маршрут. При следующем деплое порт не будет подставлен автоматически.",
-    en: "Leave empty to remove the public HTTP route. Later deploys will not restore a port automatically.",
-  },
   "apps.modal.create.worker.label": { ru: "Фоновый воркер (бот без HTTP)", en: "Background worker (no HTTP)" },
   "apps.modal.create.worker.hint": {
     ru: "Для long-poll ботов и очередей без входящего HTTP-трафика: приложение не получит публичный домен.",
@@ -406,9 +402,6 @@ export const apps: Messages = {
     en: "Normally managed by builds. Edit manually only if you know what you are doing.",
   },
   "apps.config.servicePort": { ru: "Порт сервиса", en: "Service port" },
-  "apps.alerts.url.edge": { ru: "Публичный адрес сейчас недоступен. Платформа повторит проверку автоматически.", en: "The public address is unavailable. The platform will retry automatically." },
-  "apps.alerts.url.gateway": { ru: "Публичный адрес отвечает ошибкой шлюза.", en: "The public address is returning a gateway error." },
-  "apps.alerts.url.cta": { ru: "Открыть логи", en: "Open logs" },
   "apps.config.replicas": { ru: "Реплики", en: "Replicas" },
   "apps.config.useDotEnv": { ru: "Файл .env", en: ".env file" },
   "apps.config.useDotEnvHint": {
@@ -659,9 +652,24 @@ export const apps: Messages = {
   },
   "apps.alerts.volume.cta": { ru: "Открыть Storage", en: "Open Storage" },
   "apps.alerts.chip.volume": { ru: "Диск", en: "Disk" },
+  "apps.alerts.chip.url": { ru: "Не веб", en: "Not web" },
+  "apps.alerts.url.text": {
+    ru: "Приложение запущено, но не отвечает по HTTP — публичный адрес будет отдавать 502. Если это бот, воркер или не-веб сервис, это нормально.",
+    en: "The app is running but is not answering HTTP requests — its public address will return 502. This is expected if the app is a bot, worker, or other non-web service.",
+  },
+  "apps.alerts.url.text.noListener": {
+    ru: "Приложению выдан публичный адрес, но оно не слушает порт — публичный адрес будет отдавать 502. Если это бот, воркер или не-веб сервис, это нормально.",
+    en: "The app was given a public address but is not listening on its port — the public address will return 502. This is expected if the app is a bot, worker, or other non-web service.",
+  },
+  "apps.alerts.url.text.notHttp": {
+    ru: "Порт отвечает, но не по протоколу HTTP — публичный адрес будет отдавать 502. Если это не-веб сервис (например, прокси на другом протоколе), это нормально.",
+    en: "The port answers, but not with the HTTP protocol — the public address will return 502. This is expected if the app is a non-web service (for example a proxy on another protocol).",
+  },
+  "apps.alerts.url.detail": { ru: "Ответ порта", en: "Port response" },
+  "apps.alerts.url.cta": { ru: "Смотреть логи", en: "View logs" },
   "apps.alerts.summary.title": {
-    ru: "Требуют внимания: {count} — падают: {crash}, диск заполнен: {volume}",
-    en: "Need attention: {count} — crashing: {crash}, disk filling up: {volume}",
+    ru: "Требуют внимания: {count} — падают: {crash}, диск заполнен: {volume}, не отвечают по HTTP: {url}",
+    en: "Need attention: {count} — crashing: {crash}, disk filling up: {volume}, not answering HTTP: {url}",
   },
 
   "apps.dangerZone.title": { ru: "Опасная зона", en: "Danger zone" },

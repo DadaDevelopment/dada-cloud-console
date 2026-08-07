@@ -35,6 +35,22 @@ type uploadSourceDetect struct {
 // the console's upload card enforces client-side.
 var uploadAppNameRe = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$`)
 
+// isWorkerUpload reports whether an archive whose detection produced this port
+// is a workload with no HTTP entrypoint — a Telegram bot, a queue consumer, a
+// cron job. Detection returns 0 exactly when it found no web framework and no
+// EXPOSE, which is the shape of every long-polling bot, the headline case of
+// the /hosting-telegram-bot landing.
+//
+// Such an app still needs a nominal servicePort for the chart, but it must
+// never be handed a surrogate domain: nothing is listening, so the link the
+// console would show can only ever 502. The verdict is stored on the git_repos
+// row (migration 067) because the app itself is materialized later, by
+// HandoffDeploy after the first successful build, long after this request is
+// gone.
+func isWorkerUpload(detectedPort int) bool {
+	return detectedPort <= 0
+}
+
 // UploadSourceArchive accepts a multipart archive (zip or tar.gz, max 100MB)
 // of an app's source, detects its framework and port from manifest files
 // (Dockerfile, package.json, requirements.txt, pyproject.toml), stores the
@@ -185,10 +201,11 @@ func (h *Handler) UploadSourceArchive(c *gin.Context) {
 	if detected.Framework != "" {
 		frameworkOverride = &detected.Framework
 	}
-	// Detection is the first-deploy source of truth. In particular, zero is a
-	// valid result: it means no public HTTP port was found and must not be
-	// silently replaced by 8080.
+	isWorker := isWorkerUpload(detected.Port)
 	port := detected.Port
+	if port <= 0 {
+		port = 8080
+	}
 
 	var gitRepoID uuid.UUID
 	if err := h.pool.QueryRow(c.Request.Context(),
@@ -208,7 +225,7 @@ func (h *Handler) UploadSourceArchive(c *gin.Context) {
 		   updated_at         = NOW()
 		 RETURNING id`,
 		projectID, envID, appName, "upload/"+appName, artifactURI,
-		frameworkOverride, port, false, claims.UserID,
+		frameworkOverride, port, isWorker, claims.UserID,
 	).Scan(&gitRepoID); err != nil {
 		respondError(c, http.StatusInternalServerError, "failed to record uploaded source")
 		return
@@ -238,7 +255,7 @@ func (h *Handler) UploadSourceArchive(c *gin.Context) {
 			"framework": detected.Framework,
 			"format":    string(detected.Format),
 			"bytes":     len(data),
-			"port":      port,
+			"worker":    isWorker,
 		},
 	})
 	h.notifyAuditEvent(claims, projectID, "UploadSourceArchive", appName)

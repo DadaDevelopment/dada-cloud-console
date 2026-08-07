@@ -9,32 +9,45 @@ import (
 
 	"github.com/dada-tuda/console/backend/internal/auth"
 	"github.com/dada-tuda/console/backend/internal/models"
+	"github.com/dada-tuda/console/backend/internal/solutions"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/rs/zerolog/log"
 )
 
-// demoTemplateRepos is the set of platform-owned starter repositories the
-// console offers as a one-click showroom deploy. An app linked to one of these
-// is not the user's work: nobody pushes to them, and the only thing they prove
-// is that a deploy happens. Membership is an exact match on the full name so a
+// legacyDemoTemplateRepos is the set of platform-owned starter repositories the
+// console used to offer as its one-click showroom. They are retired in favour of
+// the ready-made project catalog (internal/solutions), but they stay listed here
+// because apps deployed from them are still out there with a deadline stamped on
+// them, and dropping the entry would strand those apps in the projects of people
+// who never claimed them. Membership is an exact match on the full name so a
 // user repository that merely ends in "-starter" is never treated as disposable.
-var demoTemplateRepos = map[string]struct{}{
+var legacyDemoTemplateRepos = map[string]struct{}{
 	"DadaDevelopment/dada-nextjs-starter":  {},
 	"DadaDevelopment/dada-fastapi-starter": {},
 	"DadaDevelopment/dada-static-starter":  {},
 }
 
-// isDemoTemplateRepo reports whether repoFullName is one of the platform's own
-// starter templates. Case-insensitive because GitHub owner/repo names are.
+// isDemoTemplateRepo reports whether an app linked to repoFullName is a showroom
+// deploy rather than the customer's own work: a retired starter, or one of the
+// catalog's open-source projects.
+//
+// The catalog half is what keeps the reaper honest after the starters are gone.
+// A catalog project is something the platform offered on an empty screen, and
+// the one that nobody claims is exactly the app that used to sit Ready for
+// eighteen days in a project whose owner never deployed anything of their own. A
+// repository the customer pasted themselves is never a demo — they chose it, and
+// putting their choice on a timer would be a different product.
+//
+// Case-insensitive because GitHub owner/repo names are.
 func isDemoTemplateRepo(repoFullName string) bool {
-	for known := range demoTemplateRepos {
+	for known := range legacyDemoTemplateRepos {
 		if strings.EqualFold(known, repoFullName) {
 			return true
 		}
 	}
-	return false
+	return solutions.IsCatalogRepo(repoFullName)
 }
 
 // demoAppTTL is the deadline stamped on a starter-template app at link time.
