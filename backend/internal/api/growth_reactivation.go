@@ -124,6 +124,14 @@ func promoPixelURL(publicBaseURL, token string) string {
 	return fmt.Sprintf("%s/api/v1/promo/pixel/%s.gif", publicBaseURL, token)
 }
 
+// promoHeroURL builds the URL of a campaign banner served from the console's
+// static assets. The console frontend answers every path the ingress does not
+// hand to the backend, and /email/* is unauthenticated, so a mail client can
+// fetch it without a session.
+func promoHeroURL(publicBaseURL, name string) string {
+	return fmt.Sprintf("%s/email/%s.png", publicBaseURL, name)
+}
+
 // SweepReactivation runs one pass of the dormant-account campaign in three
 // phases: enroll everyone newly eligible, deliver whatever is still unsent,
 // and backfill conversions.
@@ -249,7 +257,7 @@ func deliverReactivation(ctx context.Context, pool *pgxpool.Pool, mailer reactiv
 	for _, p := range pending {
 		link := promoLink(publicBaseURL, p.Token)
 		subject, body := notify.ComposeReactivation("Startup", reactivationGrantDays, link)
-		htmlBody := notify.ComposeReactivationHTML("Startup", reactivationGrantDays, link, promoPixelURL(publicBaseURL, p.Token))
+		htmlBody := notify.ComposeReactivationHTML("Startup", reactivationGrantDays, link, promoPixelURL(publicBaseURL, p.Token), promoHeroURL(publicBaseURL, "hero-reactivation"))
 		if err := mailer.SendHTML(p.Email, subject, body, htmlBody); err != nil {
 			log.Error().Err(err).Str("email", p.Email).Msg("reactivation: send failed, will retry")
 			continue
@@ -289,6 +297,176 @@ func backfillCampaignConversions(ctx context.Context, pool *pgxpool.Pool, now ti
 		WHERE s.id = sub.id
 	`, now); err != nil {
 		log.Error().Err(err).Msg("reactivation: backfill conversions")
+	}
+}
+
+// The fix wave: second letter to a first-wave recipient who redeemed the plan
+// and then stalled without a single build. The first wave's own data located
+// the stall inside the product -- the git-import page could only connect
+// GitHub, every other path was a drawn button with a 503 behind it -- so this
+// wave announces the repair instead of repeating the offer.
+//
+// reactivationFixMinAge is measured from the REDEEM, not from signup: the
+// letter says "you activated and then nothing", and mailing it an hour after
+// the redeem would say "we watch you in real time" instead.
+const (
+	reactivationFixCampaign = "reactivation-git-url-fix"
+	reactivationFixMinAge   = 24 * time.Hour
+)
+
+// liveReactivationFixSpec is the fix wave the server actually mails.
+func liveReactivationFixSpec() campaignSpec {
+	return campaignSpec{
+		Campaign: reactivationFixCampaign,
+		Variant:  reactivationVariant,
+		MinAge:   reactivationFixMinAge,
+		PerRun:   reactivationSendPerRun,
+	}
+}
+
+// SweepReactivationFix runs one pass of the fix wave. Conversions are
+// backfilled FIRST: a recipient who shipped since the last tick must fall out
+// of the target set before enrollment reads it, or the letter tells someone
+// with a live app that they never deployed.
+func SweepReactivationFix(ctx context.Context, pool *pgxpool.Pool, mailer reactivationMailer, publicBaseURL string, now time.Time) {
+	if mailer == nil || publicBaseURL == "" {
+		return
+	}
+	sweepFixCampaign(ctx, pool, mailer, publicBaseURL, now, liveReactivationFixSpec(), reactivationCampaign)
+}
+
+// sweepFixCampaign is SweepReactivationFix's body for one named campaign pair;
+// tests run it under their own names so the live funnel stays untouched.
+func sweepFixCampaign(ctx context.Context, pool *pgxpool.Pool, mailer reactivationMailer, publicBaseURL string, now time.Time, spec campaignSpec, sourceCampaign string) {
+	backfillCampaignConversions(ctx, pool, now)
+	enrollReactivationFix(ctx, pool, now, spec, sourceCampaign)
+	deliverReactivationFix(ctx, pool, mailer, publicBaseURL, now, spec)
+}
+
+// enrollReactivationFix targets first-wave rows that were redeemed at least
+// MinAge ago and never converted. The build checks are repeated verbatim from
+// the first wave's enrollment even though converted_at should already cover
+// success: a recipient mid-first-build has moved past the connect screen, and
+// a letter about the connect screen would land as noise.
+func enrollReactivationFix(ctx context.Context, pool *pgxpool.Pool, now time.Time, spec campaignSpec, sourceCampaign string) {
+	rows, err := pool.Query(ctx, `
+		SELECT s.user_id, s.email
+		FROM growth_campaign_sends s
+		WHERE s.campaign = $1
+		  AND s.redeemed_at IS NOT NULL
+		  AND s.converted_at IS NULL
+		  AND s.redeemed_at <= $2
+		  AND NOT EXISTS (
+		      SELECT 1 FROM builds b
+		      JOIN environments e ON e.id = b.environment_id
+		      JOIN projects p ON p.id = e.project_id
+		      WHERE p.owner_id = s.user_id
+		  )
+		  AND NOT EXISTS (SELECT 1 FROM builds b2 WHERE b2.triggered_by = s.user_id)
+		  AND NOT EXISTS (
+		      SELECT 1 FROM growth_campaign_sends f
+		      WHERE f.campaign = $3 AND f.user_id = s.user_id
+		  )
+		ORDER BY s.redeemed_at
+		LIMIT $4
+	`, sourceCampaign, now.Add(-spec.MinAge), spec.Campaign, spec.PerRun)
+	if err != nil {
+		log.Error().Err(err).Msg("reactivation fix: list candidates")
+		return
+	}
+	candidates := make([]campaignCandidate, 0)
+	for rows.Next() {
+		var c campaignCandidate
+		if err := rows.Scan(&c.UserID, &c.Email); err != nil {
+			rows.Close()
+			log.Error().Err(err).Msg("reactivation fix: scan candidate")
+			return
+		}
+		candidates = append(candidates, c)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		log.Error().Err(err).Msg("reactivation fix: read candidates")
+		return
+	}
+
+	for _, c := range candidates {
+		token, err := newPromoToken()
+		if err != nil {
+			log.Error().Err(err).Msg("reactivation fix: mint token")
+			return
+		}
+		if _, err := pool.Exec(ctx, `
+			INSERT INTO growth_campaign_sends (campaign, variant, user_id, email, token, created_at, updated_at)
+			VALUES ($1, $2, $3, $4, $5, $6, $6)
+			ON CONFLICT (campaign, user_id) DO NOTHING
+		`, spec.Campaign, spec.Variant, c.UserID, c.Email, token, now); err != nil {
+			log.Error().Err(err).Str("user_id", c.UserID.String()).Msg("reactivation fix: enroll")
+			continue
+		}
+	}
+}
+
+// deliverReactivationFix mails every enrolled fix-wave row that has no sent_at
+// yet, with the recipient's real plan expiry in the letter when the billing
+// row still has one. The date is decoration, not logic: a missing expiry
+// drops the date from the sentence rather than blocking the send.
+func deliverReactivationFix(ctx context.Context, pool *pgxpool.Pool, mailer reactivationMailer, publicBaseURL string, now time.Time, spec campaignSpec) {
+	rows, err := pool.Query(ctx, `
+		SELECT s.id, s.email, s.token,
+		       COALESCE(to_char(exp.plan_expires_at, 'DD.MM.YYYY'), '')
+		FROM growth_campaign_sends s
+		LEFT JOIN LATERAL (
+		    SELECT ba.plan_expires_at
+		    FROM projects p
+		    JOIN billing_accounts ba ON ba.org_id = p.org_id
+		    WHERE p.owner_id = s.user_id AND ba.plan = $3
+		    ORDER BY p.created_at
+		    LIMIT 1
+		) exp ON true
+		WHERE s.campaign = $1 AND s.sent_at IS NULL
+		ORDER BY s.created_at
+		LIMIT $2
+	`, spec.Campaign, spec.PerRun, reactivationPlan)
+	if err != nil {
+		log.Error().Err(err).Msg("reactivation fix: list pending sends")
+		return
+	}
+	type fixSend struct {
+		pendingSend
+		Expires string
+	}
+	pending := make([]fixSend, 0)
+	for rows.Next() {
+		var p fixSend
+		if err := rows.Scan(&p.ID, &p.Email, &p.Token, &p.Expires); err != nil {
+			rows.Close()
+			log.Error().Err(err).Msg("reactivation fix: scan pending send")
+			return
+		}
+		pending = append(pending, p)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		log.Error().Err(err).Msg("reactivation fix: read pending sends")
+		return
+	}
+
+	for _, p := range pending {
+		link := promoLink(publicBaseURL, p.Token)
+		subject, body := notify.ComposeReactivationFix("Startup", p.Expires, link)
+		htmlBody := notify.ComposeReactivationFixHTML("Startup", p.Expires, link, promoPixelURL(publicBaseURL, p.Token), promoHeroURL(publicBaseURL, "hero-git-url"))
+		if err := mailer.SendHTML(p.Email, subject, body, htmlBody); err != nil {
+			log.Error().Err(err).Str("email", p.Email).Msg("reactivation fix: send failed, will retry")
+			continue
+		}
+		if _, err := pool.Exec(ctx, `
+			UPDATE growth_campaign_sends SET sent_at = $2, updated_at = $2 WHERE id = $1
+		`, p.ID, now); err != nil {
+			log.Error().Err(err).Str("send_id", p.ID.String()).Msg("reactivation fix: mark sent")
+			continue
+		}
+		log.Info().Str("campaign", spec.Campaign).Str("email", p.Email).Msg("reactivation fix: sent")
 	}
 }
 

@@ -207,14 +207,21 @@ func ComposeReactivation(planName string, days int, promoLink string) (subject, 
 // multipart/alternative message are the same letter, and a client picking one
 // over the other must not change the offer.
 //
+// heroURL is a wide banner carrying the offer as a picture. The first wave
+// went out as a wall of text and nobody read past the first line; the banner
+// exists so the offer survives a two-second glance. It is decorative on
+// purpose: its alt text repeats the offer, and every word of it is also in the
+// body, so a client with remote images off loses nothing but the picture.
+//
 // pixelURL is a 1x1 image whose fetch is the only open signal there is. It
 // sits at the end of the body: an image ahead of the content delays the
 // visible part of the letter on a slow connection for no measurement gain.
 // Nothing in the letter depends on it loading, and a client with remote images
 // off still gets the whole message plus the link.
-func ComposeReactivationHTML(planName string, days int, promoLink, pixelURL string) string {
+func ComposeReactivationHTML(planName string, days int, promoLink, pixelURL, heroURL string) string {
 	var b strings.Builder
-	b.WriteString(`<div style="font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;font-size:15px;line-height:1.55;color:#111827">`)
+	b.WriteString(`<div style="font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;font-size:15px;line-height:1.55;color:#111827;max-width:600px">`)
+	writeMailHero(&b, heroURL, promoLink, fmt.Sprintf("%s на %d дней бесплатно", planName, days))
 	b.WriteString(`<p>Вы завели проект в Dada Cloud, но так и не выкатили приложение.</p>`)
 	b.WriteString(`<p>Чаще всего дело не в платформе, а в том, что непонятно, с чего начать. Поэтому мы приготовили две вещи.</p>`)
 	fmt.Fprintf(&b, `<p><b>Первое</b> — тариф %s на %d дней бесплатно. Карта не нужна, по окончании срока аккаунт сам вернётся на Free, ничего не спишется.</p>`,
@@ -225,6 +232,76 @@ func ComposeReactivationHTML(planName string, days int, promoLink, pixelURL stri
 	fmt.Fprintf(&b, `<p style="font-size:13px;color:#6b7280">Если кнопка не нажимается, откройте ссылку: <a href="%s">%s</a></p>`,
 		html.EscapeString(promoLink), html.EscapeString(promoLink))
 	b.WriteString(`<p>Если что-то не поедет — ответьте на это письмо, разберёмся вместе.</p>`)
+	if pixelURL != "" {
+		fmt.Fprintf(&b, `<img src="%s" width="1" height="1" alt="" style="display:block;width:1px;height:1px;border:0">`,
+			html.EscapeString(pixelURL))
+	}
+	b.WriteString(`</div>`)
+	return b.String()
+}
+
+// writeMailHero writes the banner that opens a campaign letter: the picture,
+// linked to the same tracked URL as the button, with alt text that carries the
+// headline when the picture does not load.
+//
+// The width is fixed at 600 because that is what mail clients give a message
+// body; the image itself is rendered at 1200 so it is not mush on a retina
+// screen. An empty heroURL writes nothing at all, which is what tests and any
+// deployment without a public asset host want.
+func writeMailHero(b *strings.Builder, heroURL, linkURL, alt string) {
+	if heroURL == "" {
+		return
+	}
+	fmt.Fprintf(b, `<p style="margin:0 0 20px"><a href="%s"><img src="%s" alt="%s" width="600" style="display:block;width:100%%;max-width:600px;height:auto;border:0;border-radius:12px"></a></p>`,
+		html.EscapeString(linkURL), html.EscapeString(heroURL), html.EscapeString(alt))
+}
+
+// ComposeReactivationFix builds the second-wave letter: the recipient took the
+// promo, reached the deploy screen and stalled there. The first wave's data
+// showed the stall was ours -- the git-import page could not connect anything
+// but GitHub -- so this letter does not repeat the offer, it announces the
+// fix. The tone is an apology that carries news, not a nudge.
+//
+// promoLink stays the ONLY link for the same reason as in the first wave: a
+// second link splits the click and makes the wave unmeasurable.
+func ComposeReactivationFix(planName, expires string, promoLink string) (subject, body string) {
+	subject = "Dada Cloud: деплой по ссылке на репозиторий теперь работает"
+	var b strings.Builder
+	b.WriteString("Вы активировали тариф в Dada Cloud, но приложение так и не выехало.\n\n")
+	b.WriteString("Скорее всего, споткнулись об нас: подключить репозиторий не с GitHub было нельзя, кнопка была, а за ней ничего. Это уже починено.\n\n")
+	b.WriteString("Теперь достаточно вставить ссылку на репозиторий — GitHub, GitLab, любой публичный Git. Токен не нужен, приватный тоже можно, с токеном.\n\n")
+	if expires != "" {
+		fmt.Fprintf(&b, "Тариф %s ещё действует до %s, ничего заново активировать не надо.\n\n", planName, expires)
+	} else {
+		fmt.Fprintf(&b, "Тариф %s ещё действует, ничего заново активировать не надо.\n\n", planName)
+	}
+	fmt.Fprintf(&b, "Задеплоить по ссылке: %s\n\n", promoLink)
+	b.WriteString("Если снова что-то упрётся — просто ответьте на это письмо.\n")
+	return subject, b.String()
+}
+
+// ComposeReactivationFixHTML is the HTML half of the second-wave letter. Same
+// words as the text half; the pixel sits last for the same reasons as in
+// ComposeReactivationHTML.
+func ComposeReactivationFixHTML(planName, expires string, promoLink, pixelURL, heroURL string) string {
+	var b strings.Builder
+	b.WriteString(`<div style="font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;font-size:15px;line-height:1.55;color:#111827;max-width:600px">`)
+	writeMailHero(&b, heroURL, promoLink, "Теперь деплой по ссылке на любой Git")
+	b.WriteString(`<p>Вы активировали тариф в Dada Cloud, но приложение так и не выехало.</p>`)
+	b.WriteString(`<p>Скорее всего, споткнулись об нас: подключить репозиторий не с GitHub было нельзя, кнопка была, а за ней ничего. Это уже починено.</p>`)
+	b.WriteString(`<p>Теперь достаточно вставить <b>ссылку на репозиторий</b> — GitHub, GitLab, любой публичный Git. Токен не нужен, приватный тоже можно, с токеном.</p>`)
+	if expires != "" {
+		fmt.Fprintf(&b, `<p>Тариф %s ещё действует до %s, ничего заново активировать не надо.</p>`,
+			html.EscapeString(planName), html.EscapeString(expires))
+	} else {
+		fmt.Fprintf(&b, `<p>Тариф %s ещё действует, ничего заново активировать не надо.</p>`,
+			html.EscapeString(planName))
+	}
+	fmt.Fprintf(&b, `<p><a href="%s" style="display:inline-block;background:#2563eb;color:#ffffff;text-decoration:none;padding:12px 22px;border-radius:8px;font-weight:600">Задеплоить по ссылке</a></p>`,
+		html.EscapeString(promoLink))
+	fmt.Fprintf(&b, `<p style="font-size:13px;color:#6b7280">Если кнопка не нажимается, откройте ссылку: <a href="%s">%s</a></p>`,
+		html.EscapeString(promoLink), html.EscapeString(promoLink))
+	b.WriteString(`<p>Если снова что-то упрётся — просто ответьте на это письмо.</p>`)
 	if pixelURL != "" {
 		fmt.Fprintf(&b, `<img src="%s" width="1" height="1" alt="" style="display:block;width:1px;height:1px;border:0">`,
 			html.EscapeString(pixelURL))

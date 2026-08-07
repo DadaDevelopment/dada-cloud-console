@@ -513,6 +513,12 @@ type Config struct {
 	// irreversible.
 	ReactivationCampaignEnabled bool
 
+	// ReactivationFixWaveEnabled (REACTIVATION_FIX_WAVE_ENABLED, default
+	// false) arms the second letter: first-wave recipients who redeemed the
+	// plan and then never built anything get told the git-connect blocker they
+	// hit is fixed. Same deploy-vs-send separation as the first wave.
+	ReactivationFixWaveEnabled bool
+
 	BillingEnabled          bool  // BILLING_ENABLED (default false) — guards metering ticker; billing endpoints always load plans read-only
 	BillingMeterIntervalSec int64 // BILLING_METER_INTERVAL_SECS (default 3600)
 	// BillingExemptOrgs (BILLING_EXEMPT_ORGS, comma-separated) never hit a quota
@@ -831,6 +837,7 @@ func Load() (*Config, error) {
 		MetrikaOAuthToken:           getEnv("METRIKA_OAUTH_TOKEN", ""),
 		BillingEnabled:              getEnv("BILLING_ENABLED", "false") == "true",
 		ReactivationCampaignEnabled: getEnv("REACTIVATION_CAMPAIGN_ENABLED", "false") == "true",
+		ReactivationFixWaveEnabled:  getEnv("REACTIVATION_FIX_WAVE_ENABLED", "false") == "true",
 		BillingMeterIntervalSec:     getEnvInt64("BILLING_METER_INTERVAL_SECS", 3600),
 		BillingExemptOrgs:           splitList(getEnv("BILLING_EXEMPT_ORGS", "")),
 		BillingOverageBlockFactor:   getEnvFloat("BILLING_OVERAGE_BLOCK_FACTOR", 3),

@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="600" height="280" viewBox="0 0 600 280" font-family="Helvetica, Arial, sans-serif">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#0b1220"/>
+      <stop offset="100%" stop-color="#16233c"/>
+    </linearGradient>
+  </defs>
+  <rect width="600" height="280" rx="14" fill="url(#bg)"/>
+  <text x="36" y="58" fill="#93c5fd" font-size="13" letter-spacing="2">DADA CLOUD</text>
+  <text x="36" y="102" fill="#ffffff" font-size="30" font-weight="bold">Startup на 30 дней</text>
+  <text x="36" y="136" fill="#ffffff" font-size="30" font-weight="bold">бесплатно</text>
+  <text x="36" y="170" fill="#9aa8bd" font-size="15">Карта не нужна. Потом аккаунт сам вернётся на Free.</text>
+  <rect x="36" y="196" width="528" height="56" rx="10" fill="#0f1a2c" stroke="#25324a"/>
+  <circle cx="58" cy="224" r="5" fill="#22c55e"/>
+  <text x="76" y="219" fill="#e5e7eb" font-size="14">my-app</text>
+  <text x="76" y="240" fill="#7c8aa0" font-size="12">https://my-app.dada-tuda.ru · HTTPS выдан</text>
+  <rect x="438" y="210" width="108" height="28" rx="7" fill="#2563eb"/>
+  <text x="492" y="229" fill="#ffffff" font-size="13" font-weight="bold" text-anchor="middle">Задеплоить</text>
+</svg>

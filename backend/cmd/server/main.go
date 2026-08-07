@@ -246,10 +246,14 @@ func main() {
 					if cfg.ReactivationCampaignEnabled {
 						api.SweepReactivation(meterCtx, pool, expiryNotifier, cfg.PublicBaseURL, now)
 					}
+					if cfg.ReactivationFixWaveEnabled {
+						api.SweepReactivationFix(meterCtx, pool, expiryNotifier, cfg.PublicBaseURL, now)
+					}
 				}
 			}
 		}()
 		log.Info().Bool("reactivation", cfg.ReactivationCampaignEnabled).
+			Bool("reactivation_fix_wave", cfg.ReactivationFixWaveEnabled).
 			Msg("billing autopay, plan-expiry and quota-grace sweepers started")
 	}
 

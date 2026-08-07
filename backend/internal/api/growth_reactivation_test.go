@@ -480,3 +480,104 @@ func TestRecordPromoOpen_StampsFirstOpenAndAlwaysServesThePixel(t *testing.T) {
 		t.Fatalf("an unknown token must answer exactly like a live one, got %d %d bytes", rec3.Code, rec3.Body.Len())
 	}
 }
+
+// growthFixSpec names a throwaway fix-wave campaign, for the same reason
+// growthSpec does: these tests share the production database with the live
+// campaign, and a fix wave run under its real name would burn real recipients.
+func growthFixSpec(t *testing.T, pool *pgxpool.Pool) campaignSpec {
+	t.Helper()
+	name := "test-reactivation-fix-" + uuid.NewString()[:8]
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(),
+			`DELETE FROM growth_campaign_sends WHERE campaign = $1`, name)
+	})
+	return campaignSpec{Campaign: name, Variant: "a", MinAge: reactivationFixMinAge, PerRun: 3}
+}
+
+// markRedeemed puts a first-wave row in the state the fix wave targets.
+func markRedeemed(t *testing.T, pool *pgxpool.Pool, spec campaignSpec, userID uuid.UUID, at time.Time) {
+	t.Helper()
+	if _, err := pool.Exec(context.Background(), `
+		UPDATE growth_campaign_sends SET redeemed_at = $3, updated_at = $3
+		WHERE campaign = $1 AND user_id = $2
+	`, spec.Campaign, userID, at); err != nil {
+		t.Fatalf("mark redeemed: %v", err)
+	}
+}
+
+func TestSweepReactivationFix_MailsTheStalledRedeemerOnly(t *testing.T) {
+	pool := growthTestPool(t)
+	first := growthSpec(t, pool)
+	fix := growthFixSpec(t, pool)
+	now := time.Now().UTC()
+	ancient := time.Date(2001, 1, 1, 0, 0, 0, 0, time.UTC)
+
+	stalled, _, _, _, stalledEmail := growthAccount(t, pool, ancient)
+	seedPromo(t, pool, first, stalled, stalledEmail, ancient.Add(time.Hour))
+	markRedeemed(t, pool, first, stalled, now.Add(-48*time.Hour))
+
+	shipped, shippedProject, shippedEnv, _, shippedEmail := growthAccount(t, pool, ancient)
+	seedPromo(t, pool, first, shipped, shippedEmail, ancient.Add(time.Hour))
+	markRedeemed(t, pool, first, shipped, now.Add(-48*time.Hour))
+	growthBuild(t, pool, shippedProject, shippedEnv, shipped, "success", now.Add(-24*time.Hour))
+
+	fresh, _, _, _, freshEmail := growthAccount(t, pool, ancient)
+	seedPromo(t, pool, first, fresh, freshEmail, ancient.Add(time.Hour))
+	markRedeemed(t, pool, first, fresh, now.Add(-time.Hour))
+
+	silent, _, _, _, silentEmail := growthAccount(t, pool, ancient)
+	seedPromo(t, pool, first, silent, silentEmail, ancient.Add(time.Hour))
+
+	mailer := &recordingMailer{}
+	sweepFixCampaign(context.Background(), pool, mailer, "https://console.dada-tuda.ru", now, fix, first.Campaign)
+
+	if got := sendsTo(mailer, stalledEmail); got != 1 {
+		t.Fatalf("letters to the stalled redeemer=%d want 1", got)
+	}
+	if got := sendsTo(mailer, shippedEmail); got != 0 {
+		t.Fatalf("letters to a redeemer who already shipped=%d want 0", got)
+	}
+	if got := sendsTo(mailer, freshEmail); got != 0 {
+		t.Fatalf("letters to someone who redeemed an hour ago=%d want 0 -- the wave must not read as surveillance", got)
+	}
+	if got := sendsTo(mailer, silentEmail); got != 0 {
+		t.Fatalf("letters to someone who never redeemed=%d want 0", got)
+	}
+
+	token, sentAt, _, _, _ := growthSendRow(t, pool, fix, stalled)
+	if sentAt == nil {
+		t.Fatal("stalled redeemer enrolled but never marked sent")
+	}
+	if len(token) != promoTokenHexLen {
+		t.Fatalf("fix-wave token length=%d want %d", len(token), promoTokenHexLen)
+	}
+	if firstToken, _, _, _, _ := growthSendRow(t, pool, first, stalled); firstToken == token {
+		t.Fatal("fix wave reused the first wave's token; the two waves would be indistinguishable in the funnel")
+	}
+	if len(mailer.html) == 0 || !strings.Contains(mailer.html[0], token) {
+		t.Fatal("the letter does not carry the fix wave's own promo link")
+	}
+	if !strings.Contains(mailer.html[0], "/api/v1/promo/pixel/"+token+".gif") {
+		t.Fatal("the fix letter has no open pixel")
+	}
+}
+
+func TestSweepReactivationFix_SecondPassDoesNotMailAgain(t *testing.T) {
+	pool := growthTestPool(t)
+	first := growthSpec(t, pool)
+	fix := growthFixSpec(t, pool)
+	now := time.Now().UTC()
+	ancient := time.Date(2001, 1, 1, 0, 0, 0, 0, time.UTC)
+
+	stalled, _, _, _, email := growthAccount(t, pool, ancient)
+	seedPromo(t, pool, first, stalled, email, ancient.Add(time.Hour))
+	markRedeemed(t, pool, first, stalled, now.Add(-48*time.Hour))
+
+	mailer := &recordingMailer{}
+	sweepFixCampaign(context.Background(), pool, mailer, "https://console.dada-tuda.ru", now, fix, first.Campaign)
+	sweepFixCampaign(context.Background(), pool, mailer, "https://console.dada-tuda.ru", now.Add(time.Hour), fix, first.Campaign)
+
+	if got := sendsTo(mailer, email); got != 1 {
+		t.Fatalf("letters after two passes=%d want 1", got)
+	}
+}

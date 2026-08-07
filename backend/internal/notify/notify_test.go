@@ -184,3 +184,34 @@ func TestComposeAutofixFailedOmitsEmptyReason(t *testing.T) {
 		t.Fatalf("expected no reason line when none is known, got: %s", body)
 	}
 }
+
+func TestReactivationHTMLCarriesTheBannerAndSurvivesWithoutIt(t *testing.T) {
+	withHero := ComposeReactivationHTML("Startup", 30, "https://console.example/promo/tok", "", "https://console.example/email/hero-reactivation.png")
+	if !strings.Contains(withHero, `src="https://console.example/email/hero-reactivation.png"`) {
+		t.Fatalf("banner missing from html body: %s", withHero)
+	}
+	if !strings.Contains(withHero, `alt="Startup на 30 дней бесплатно"`) {
+		t.Fatalf("banner alt text must repeat the offer: %s", withHero)
+	}
+	if !strings.Contains(withHero, "тариф Startup на 30 дней бесплатно") {
+		t.Fatalf("offer must also be in the text of the body, not only in the picture")
+	}
+
+	noHero := ComposeReactivationHTML("Startup", 30, "https://console.example/promo/tok", "", "")
+	if strings.Contains(noHero, "<img") {
+		t.Fatalf("empty hero URL must write no image at all: %s", noHero)
+	}
+	if !strings.Contains(noHero, "тариф Startup на 30 дней бесплатно") {
+		t.Fatalf("letter without a banner must still carry the offer")
+	}
+}
+
+func TestReactivationFixHTMLCarriesTheBanner(t *testing.T) {
+	got := ComposeReactivationFixHTML("Startup", "05.09.2026", "https://console.example/promo/tok", "", "https://console.example/email/hero-git-url.png")
+	if !strings.Contains(got, `src="https://console.example/email/hero-git-url.png"`) {
+		t.Fatalf("banner missing from fix-wave body: %s", got)
+	}
+	if !strings.Contains(got, "ссылку на репозиторий") {
+		t.Fatalf("fix-wave body must state what changed: %s", got)
+	}
+}
