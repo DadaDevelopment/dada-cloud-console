@@ -268,3 +268,33 @@ func TestReplicationLagStillReportsOtherErrors(t *testing.T) {
 		t.Fatalf("a broken query is not a missing stream, got %v", err)
 	}
 }
+
+func TestAwaitInitialCopyRefusesWhileTablesStillCopying(t *testing.T) {
+	dst := &fakeShard{answers: []fakeRow{{vals: []any{3, 21}}, {vals: []any{21}}}}
+	err := awaitInitialCopy(context.Background(), dst, "fanbot")
+	if !errors.Is(err, errInitialCopyPending) {
+		t.Fatalf("a copy in flight must hold the move back, got %v", err)
+	}
+}
+
+func TestAwaitInitialCopyRefusesWhenTablesAreNotSubscribed(t *testing.T) {
+	dst := &fakeShard{answers: []fakeRow{{vals: []any{0, 0}}, {vals: []any{21}}}}
+	err := awaitInitialCopy(context.Background(), dst, "fanbot")
+	if !errors.Is(err, errInitialCopyPending) {
+		t.Fatalf("a subscription that carries no table is not a finished copy, got %v", err)
+	}
+}
+
+func TestAwaitInitialCopyPassesWhenEveryTableIsReady(t *testing.T) {
+	dst := &fakeShard{answers: []fakeRow{{vals: []any{0, 21}}, {vals: []any{21}}}}
+	if err := awaitInitialCopy(context.Background(), dst, "fanbot"); err != nil {
+		t.Fatalf("awaitInitialCopy: %v", err)
+	}
+}
+
+func TestAwaitInitialCopyAllowsADatabaseWithNoTables(t *testing.T) {
+	dst := &fakeShard{answers: []fakeRow{{vals: []any{0, 0}}, {vals: []any{0}}}}
+	if err := awaitInitialCopy(context.Background(), dst, "zerkalo"); err != nil {
+		t.Fatalf("an empty database has nothing to copy: %v", err)
+	}
+}

@@ -263,11 +263,23 @@ func (w *dbMoveWorker) sync(ctx context.Context, m dbMove) error {
 	}
 	defer srcDB.Close(ctx)
 
+	dstDB, err := w.connect(ctx, m.TargetShard, m.Datname)
+	if err != nil {
+		return fmt.Errorf("connect target database: %w", err)
+	}
+	defer dstDB.Close(ctx)
+
 	lag, err := replicationLag(ctx, srcDB, m.Datname)
 	if errors.Is(err, errNoReplicationStream) && time.Since(m.UpdatedAt) < dbMoveStreamGrace {
 		return nil
 	}
 	if err != nil {
+		return err
+	}
+	if err := awaitInitialCopy(ctx, dstDB, m.Datname); err != nil {
+		if errors.Is(err, errInitialCopyPending) {
+			return nil
+		}
 		return err
 	}
 	if _, err := w.h.pool.Exec(ctx,
@@ -309,6 +321,9 @@ func (w *dbMoveWorker) cutover(ctx context.Context, m dbMove) error {
 	defer dstDB.Close(ctx)
 
 	return w.router.Cutover(ctx, m.Datname, targetHost, func(ctx context.Context) error {
+		if err := awaitInitialCopy(ctx, dstDB, m.Datname); err != nil {
+			return err
+		}
 		lag, err := replicationLag(ctx, srcDB, m.Datname)
 		if err != nil {
 			return err

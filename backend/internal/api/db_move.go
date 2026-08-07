@@ -302,6 +302,54 @@ func replicationLag(ctx context.Context, srcDB shardExecutor, datname string) (i
 	return lag, nil
 }
 
+// errInitialCopyPending says logical replication is still doing its first pass
+// over the tables, so the target does not hold the data yet.
+//
+// It exists because the lag reading cannot see this. pg_stat_replication shows
+// the apply worker, whose replay position advances from the moment the
+// subscription starts, while the initial COPY of each table runs in separate
+// tablesync workers with slots of their own. A move that trusted lag alone read
+// "0 bytes behind" over an empty target, cut over, dropped the subscription
+// mid-copy and left the tenant pointed at a database with no rows in it. That
+// is exactly what happened to six databases on 2026-08-07.
+var errInitialCopyPending = errors.New("db-move: the initial table copy has not finished")
+
+// awaitInitialCopy fails with errInitialCopyPending until every table of the
+// subscription reports state 'r' (ready) on the target.
+//
+// The count check is the second half of the guard: a subscription that knows
+// about fewer tables than the target has schema for is one whose publication
+// was read before those tables existed, and they would never be filled - "no
+// pending rows" would otherwise read as success.
+func awaitInitialCopy(ctx context.Context, dstDB shardExecutor, datname string) error {
+	name := moveObjectName(datname)
+	var pending, tracked int
+	if err := dstDB.QueryRow(ctx, `
+		SELECT COUNT(*) FILTER (WHERE r.srsubstate <> 'r'), COUNT(r.srrelid)
+		FROM pg_subscription s
+		LEFT JOIN pg_subscription_rel r ON r.srsubid = s.oid
+		WHERE s.subname = $1
+	`, name).Scan(&pending, &tracked); err != nil {
+		return fmt.Errorf("db-move: read initial copy state: %w", err)
+	}
+	var tables int
+	if err := dstDB.QueryRow(ctx, `
+		SELECT COUNT(*)
+		FROM pg_class c
+		JOIN pg_namespace n ON n.oid = c.relnamespace
+		WHERE c.relkind IN ('r', 'p')
+		  AND n.nspname NOT LIKE 'pg\_%'
+		  AND n.nspname <> 'information_schema'
+	`).Scan(&tables); err != nil {
+		return fmt.Errorf("db-move: count target tables: %w", err)
+	}
+	if pending > 0 || tracked != tables {
+		return fmt.Errorf("%w: %d tables still copying, %d of %d subscribed",
+			errInitialCopyPending, pending, tracked, tables)
+	}
+	return nil
+}
+
 // moveSequence is one sequence's position, which logical replication does not
 // carry.
 type moveSequence struct {
