@@ -1,5 +1,5 @@
 def GO_VERSION   = '1.25'
-def NODE_VERSION = '20'
+def NODE_VERSION = '22'
 
 def GO_BUILDER_IMAGE   = "golang:${GO_VERSION}-alpine"
 def NODE_BUILDER_IMAGE = "node:${NODE_VERSION}-bookworm"
@@ -553,7 +553,7 @@ spec:
                             }
                         }
 
-                        stage('Frontend typecheck + build') {
+                        stage('Frontend typecheck + tests + build') {
                             dir('frontend') {
                                 withEnv([
                                     "NEXT_PUBLIC_AUTH_MODE=${NEXT_PUBLIC_AUTH_MODE}",
@@ -576,6 +576,7 @@ spec:
                                         }
                                         if has_script typecheck; then npm run typecheck; else echo "No typecheck script — skip"; fi
                                         if has_script lint;      then npm run lint;      else echo "No lint script — skip";      fi
+                                        if has_script test:unit; then npm run test:unit; else echo "No test:unit script — skip"; fi
                                         npm run build
                                     '''
                                 }
