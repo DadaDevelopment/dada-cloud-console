@@ -129,9 +129,16 @@ export async function getToken(): Promise<string | null> {
   return localStorage.getItem("dada_token");
 }
 
+/**
+ * `body` is the payload as an object, never a pre-serialized string: apiFetch
+ * owns the JSON.stringify. Typing it `object` is the gate — a caller that
+ * stringifies first now fails tsc instead of shipping a JSON string as the
+ * whole request body, which the Go handlers reject with
+ * "cannot unmarshal string into Go value of type ...".
+ */
 type RequestOptions = {
   method?: string;
-  body?: unknown;
+  body?: object;
   token?: string;
   // Override the base URL. user-service endpoints (orgs/members/invitations)
   // sit at the gateway root, not under dada-cloud's /api/v1 — see lib/userService.ts.
@@ -296,10 +303,10 @@ export const api = {
   get: <T>(path: string, token?: string) =>
     apiFetch<T>(path, { method: "GET", token }),
 
-  post: <T>(path: string, body: unknown, token?: string) =>
+  post: <T>(path: string, body: object, token?: string) =>
     apiFetch<T>(path, { method: "POST", body, token }),
 
-  put: <T>(path: string, body: unknown, token?: string) =>
+  put: <T>(path: string, body: object, token?: string) =>
     apiFetch<T>(path, { method: "PUT", body, token }),
 
   delete: <T>(path: string, token?: string) =>
@@ -1326,7 +1333,7 @@ export const solutionsApi = {
   ) =>
     apiFetch<InstallSolutionResponse>(
       `/api/v1/projects/${projectId}/environments/${envId}/solutions/install`,
-      { method: "POST", body: JSON.stringify(data) }
+      { method: "POST", body: data }
     ),
 };
 

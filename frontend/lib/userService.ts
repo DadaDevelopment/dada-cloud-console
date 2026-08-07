@@ -21,7 +21,7 @@ import type { Invitation, Member, MemberRole, Org } from "./types";
 const USER_SERVICE_BASE =
   process.env.NEXT_PUBLIC_USER_SERVICE_URL ?? "https://api-prod.dada-tuda.ru/user";
 
-function us<T>(path: string, init?: { method?: string; body?: unknown }): Promise<T> {
+function us<T>(path: string, init?: { method?: string; body?: object }): Promise<T> {
   return apiFetch<T>(path, { ...init, baseUrl: USER_SERVICE_BASE });
 }
 
