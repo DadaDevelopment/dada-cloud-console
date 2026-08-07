@@ -217,3 +217,38 @@ func TestQuoteSQLLiteralEscapesQuotes(t *testing.T) {
 		t.Fatalf("got %s", got)
 	}
 }
+
+func TestHandOverObjectsInlinesOwnerAndSkipsExtensions(t *testing.T) {
+	dst := &fakeShard{}
+	if err := handOverObjects(context.Background(), dst, "svc-n8n"); err != nil {
+		t.Fatalf("handOverObjects: %v", err)
+	}
+	if len(dst.cmds) != 1 {
+		t.Fatalf("the handover must be one statement, got %d", len(dst.cmds))
+	}
+	stmt := dst.cmds[0]
+	if !strings.Contains(stmt, "target text := 'svc-n8n'") {
+		t.Fatalf("the owner has to be inlined, DO takes no parameters:\n%s", stmt)
+	}
+	for _, want := range []string{"ALTER SCHEMA %I OWNER TO %I", "ALTER %s %I.%I OWNER TO %I", "ALTER %s %s OWNER TO %I"} {
+		if !strings.Contains(stmt, want) {
+			t.Fatalf("missing %q, objects of that kind stay owned by the admin:\n%s", want, stmt)
+		}
+	}
+	if strings.Count(stmt, "d.deptype = 'e'") != 2 || !strings.Contains(stmt, "d.deptype IN ('a', 'i', 'e')") {
+		t.Fatalf("extension members must be left alone, they are admin-owned on both shards:\n%s", stmt)
+	}
+	if !strings.Contains(stmt, "NOT IN (target, 'pg_database_owner')") {
+		t.Fatalf("schema public ships owned by pg_database_owner, which already means the tenant:\n%s", stmt)
+	}
+}
+
+func TestHandOverObjectsEscapesOwner(t *testing.T) {
+	dst := &fakeShard{}
+	if err := handOverObjects(context.Background(), dst, "o'brien"); err != nil {
+		t.Fatalf("handOverObjects: %v", err)
+	}
+	if !strings.Contains(dst.cmds[0], "'o''brien'") {
+		t.Fatalf("a role name is tenant-influenced and has to be escaped:\n%s", dst.cmds[0])
+	}
+}

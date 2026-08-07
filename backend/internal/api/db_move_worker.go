@@ -239,6 +239,9 @@ func (w *dbMoveWorker) schema(ctx context.Context, m dbMove) error {
 	}
 	defer dstDB.Close(ctx)
 
+	if err := handOverObjects(ctx, dstDB, m.OwnerRole); err != nil {
+		return err
+	}
 	if err := startReplication(ctx, srcDB, dstDB, m.Datname, srcDSN); err != nil {
 		return err
 	}
@@ -362,8 +365,9 @@ func dbMoveJobName(id string) string {
 // CopySchema creates the Job on first call and reports its outcome afterwards.
 //
 // The dump is schema-only and ownerless: every object is created by the admin
-// the Job connects as and handed to the tenant's role by the move, because a
-// dump that carries owners fails on a shard where those roles do not exist yet.
+// the Job connects as, because a dump that carries owners fails on a shard
+// where those roles do not exist yet. handOverObjects, run by the move once
+// this Job succeeds, is what gives them back to the tenant.
 func (c *jobSchemaCopier) CopySchema(ctx context.Context, m dbMove, srcDSN, dstDSN string) (bool, error) {
 	name := dbMoveJobName(m.ID)
 	job, err := c.cs.BatchV1().Jobs(dbMoveNamespace).Get(ctx, name, metav1.GetOptions{})

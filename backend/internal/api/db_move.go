@@ -145,6 +145,95 @@ func ensureTargetDatabase(ctx context.Context, dst shardExecutor, datname, owner
 	return nil
 }
 
+// handOverObjects gives every copied object to the tenant's role.
+//
+// The schema copy runs as the shard admin, so the tables, sequences, views and
+// functions it creates are owned by the admin no matter who owns the database.
+// n8n found this the hard way: after its first real move every query answered
+// "permission denied for schema n8n", because the schema on the new shard
+// belonged to postgres. Ownership is not cosmetic - a tenant that cannot ALTER
+// its own tables cannot run a migration, and the failure appears long after the
+// move looked successful.
+//
+// A dollar-quoted DO block rather than a query and a loop in Go: the set of
+// objects is only knowable on the target, and one statement means one round
+// trip and no half-finished handover if the connection drops.
+//
+// Objects that belong to an extension are left alone (uuid-ossp installs
+// functions owned by the admin on both shards, so touching them would make the
+// copy differ from the original), and so are sequences owned by a column, which
+// PostgreSQL refuses to reassign separately from their table.
+//
+// Schema public is left alone too when it belongs to pg_database_owner, which
+// is how PostgreSQL 15 and later ship it: that role already resolves to
+// whoever owns the database, so naming the tenant explicitly changes nothing a
+// client can observe and makes the copy differ from the original for no
+// reason. The first run of this handover did exactly that.
+func handOverObjects(ctx context.Context, dstDB shardExecutor, owner string) error {
+	stmt := `DO $handover$
+DECLARE
+	target text := ` + quoteSQLLiteral(owner) + `;
+	r record;
+BEGIN
+	FOR r IN
+		SELECT n.nspname
+		FROM pg_namespace n
+		WHERE n.nspname NOT LIKE 'pg\_%'
+		  AND n.nspname <> 'information_schema'
+		  AND pg_get_userbyid(n.nspowner) NOT IN (target, 'pg_database_owner')
+		  AND NOT EXISTS (
+			SELECT 1 FROM pg_depend d
+			WHERE d.classid = 'pg_namespace'::regclass AND d.objid = n.oid AND d.deptype = 'e')
+	LOOP
+		EXECUTE format('ALTER SCHEMA %I OWNER TO %I', r.nspname, target);
+	END LOOP;
+
+	FOR r IN
+		SELECT n.nspname, c.relname,
+		       CASE c.relkind
+		            WHEN 'S' THEN 'SEQUENCE'
+		            WHEN 'v' THEN 'VIEW'
+		            WHEN 'm' THEN 'MATERIALIZED VIEW'
+		            WHEN 'f' THEN 'FOREIGN TABLE'
+		            ELSE 'TABLE'
+		       END AS kind
+		FROM pg_class c
+		JOIN pg_namespace n ON n.oid = c.relnamespace
+		WHERE n.nspname NOT LIKE 'pg\_%'
+		  AND n.nspname <> 'information_schema'
+		  AND c.relkind IN ('r', 'p', 'S', 'v', 'm', 'f')
+		  AND pg_get_userbyid(c.relowner) <> target
+		  AND NOT EXISTS (
+			SELECT 1 FROM pg_depend d
+			WHERE d.classid = 'pg_class'::regclass AND d.objid = c.oid
+			  AND d.deptype IN ('a', 'i', 'e'))
+	LOOP
+		EXECUTE format('ALTER %s %I.%I OWNER TO %I', r.kind, r.nspname, r.relname, target);
+	END LOOP;
+
+	FOR r IN
+		SELECT p.oid::regprocedure::text AS sig,
+		       CASE p.prokind WHEN 'p' THEN 'PROCEDURE' ELSE 'FUNCTION' END AS kind
+		FROM pg_proc p
+		JOIN pg_namespace n ON n.oid = p.pronamespace
+		WHERE n.nspname NOT LIKE 'pg\_%'
+		  AND n.nspname <> 'information_schema'
+		  AND p.prokind IN ('f', 'p')
+		  AND pg_get_userbyid(p.proowner) <> target
+		  AND NOT EXISTS (
+			SELECT 1 FROM pg_depend d
+			WHERE d.classid = 'pg_proc'::regclass AND d.objid = p.oid AND d.deptype = 'e')
+	LOOP
+		EXECUTE format('ALTER %s %s OWNER TO %I', r.kind, r.sig, target);
+	END LOOP;
+END
+$handover$`
+	if _, err := dstDB.Exec(ctx, stmt); err != nil {
+		return fmt.Errorf("db-move: hand the copied objects to %q: %w", owner, err)
+	}
+	return nil
+}
+
 // startReplication opens the stream that keeps the copy current while the
 // tenant keeps writing. This is what makes a move a flap instead of an outage:
 // the data is already there when traffic switches.
