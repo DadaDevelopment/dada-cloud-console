@@ -50,6 +50,81 @@ export function registerQueryParams(method: RegisterMethod): Record<string, stri
  * @param returnTo in-app path to return to after auth (defaults to /projects)
  * @param method which sign-up path to take (defaults to the e-mail form)
  */
+/**
+ * How long a fresh {@link PENDING_REGISTRATION_KEY} marker is left alone
+ * before {@link readAbandonedRegistration} will call it abandoned. The
+ * visitor may still legitimately be filling in Keycloak's own form.
+ */
+export const ABANDONED_REGISTRATION_GRACE_MS = 90_000;
+
+/**
+ * How old a {@link PENDING_REGISTRATION_KEY} marker can get before
+ * {@link readAbandonedRegistration} stops nagging about it. Past this the
+ * visit is ancient history, not a bounce worth recovering.
+ */
+export const ABANDONED_REGISTRATION_CEILING_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Parsed shape of a {@link PENDING_REGISTRATION_KEY} value once
+ * {@link startRegister} started tagging it with the chosen method.
+ */
+interface PendingRegistrationMarker {
+  method: RegisterMethod;
+  startedAt: number;
+}
+
+/**
+ * Serializes the marker written to {@link PENDING_REGISTRATION_KEY}.
+ *
+ * Kept on its own line as `<timestamp>:<method>` rather than JSON so an old
+ * bare-timestamp value already sitting in a visitor's localStorage (written
+ * by a build before this marker carried a method) still parses as a valid
+ * timestamp by {@link parsePendingRegistration} -- just without a method.
+ */
+function serializePendingRegistration(method: RegisterMethod, now: number): string {
+  return `${now}:${method}`;
+}
+
+/**
+ * Parses a {@link PENDING_REGISTRATION_KEY} value written by either the
+ * current format (`"<timestamp>:<method>"`) or the legacy bare-timestamp
+ * format that shipped before this marker carried a method. Returns null for
+ * anything that isn't a finite timestamp.
+ */
+function parsePendingRegistration(raw: string): PendingRegistrationMarker | null {
+  const sepIndex = raw.indexOf(":");
+  const timestampPart = sepIndex === -1 ? raw : raw.slice(0, sepIndex);
+  const startedAt = Number(timestampPart);
+  if (!Number.isFinite(startedAt)) return null;
+  const methodPart = sepIndex === -1 ? "" : raw.slice(sepIndex + 1);
+  const method: RegisterMethod = methodPart === "yandex" ? "yandex" : "email";
+  return { method, startedAt };
+}
+
+/**
+ * Pure decision function behind the "you didn't finish signing up" recovery
+ * banner on `/register`. Given the raw {@link PENDING_REGISTRATION_KEY}
+ * value and the current time, decides whether the visitor is looking at an
+ * abandoned registration worth surfacing.
+ *
+ * Returns null when: there is no marker, it fails to parse, it is younger
+ * than {@link ABANDONED_REGISTRATION_GRACE_MS} (still plausibly on
+ * Keycloak's own form), or older than {@link ABANDONED_REGISTRATION_CEILING_MS}
+ * (too stale to be worth a nag).
+ */
+export function readAbandonedRegistration(
+  raw: string | null,
+  now: number,
+): { method: RegisterMethod; ageMs: number } | null {
+  if (!raw) return null;
+  const parsed = parsePendingRegistration(raw);
+  if (!parsed) return null;
+  const ageMs = now - parsed.startedAt;
+  if (!Number.isFinite(ageMs) || ageMs < ABANDONED_REGISTRATION_GRACE_MS) return null;
+  if (ageMs > ABANDONED_REGISTRATION_CEILING_MS) return null;
+  return { method: parsed.method, ageMs };
+}
+
 export function startRegister(returnTo = "/projects", method: RegisterMethod = "email"): Promise<void> {
   const authority = process.env.NEXT_PUBLIC_KEYCLOAK_ISSUER ?? "";
   const clientId = process.env.NEXT_PUBLIC_OIDC_CLIENT_ID ?? "dada-console";
@@ -65,7 +140,7 @@ export function startRegister(returnTo = "/projects", method: RegisterMethod = "
   });
 
   try {
-    window.localStorage.setItem(PENDING_REGISTRATION_KEY, String(Date.now()));
+    window.localStorage.setItem(PENDING_REGISTRATION_KEY, serializePendingRegistration(method, Date.now()));
   } catch {}
 
   return userManager.signinRedirect({

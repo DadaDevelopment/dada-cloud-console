@@ -1,12 +1,18 @@
 "use client";
-import { Suspense, useEffect, useState } from "react";
+import { Suspense, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useAuth } from "@/lib/auth";
 import { AuthErrorScreen } from "@/components/shell/auth-error-screen";
 import { Button } from "@/components/ui/button";
-import { startRegister, type RegisterMethod } from "@/lib/register-redirect";
+import {
+  PENDING_REGISTRATION_KEY,
+  readAbandonedRegistration,
+  startRegister,
+  type RegisterMethod,
+} from "@/lib/register-redirect";
 import { GOAL_SIGNUP_STARTED, reachGoal, rememberSource } from "@/lib/metrika";
+import { trackUxEvent } from "@/lib/ux-telemetry";
 
 const AUTH_MODE = process.env.NEXT_PUBLIC_AUTH_MODE;
 
@@ -38,6 +44,23 @@ function OidcRegisterPage() {
   const searchParams = useSearchParams();
   const { isLoading, token, authError, logout } = useAuth();
   const [pending, setPending] = useState<RegisterMethod | null>(null);
+  /**
+   * The "your last sign-up did not finish" recovery banner state, seeded
+   * once from the same {@link PENDING_REGISTRATION_KEY} marker `/callback`
+   * clears on every successful auth -- so a value that is still here and
+   * past the grace window means a real bounce back from Keycloak, not a
+   * person mid-form. Read lazily (not in an effect) so mounting never
+   * triggers an extra render.
+   */
+  const [abandoned, setAbandoned] = useState<{ method: RegisterMethod; ageMs: number } | null>(() => {
+    if (typeof window === "undefined") return null;
+    try {
+      return readAbandonedRegistration(window.localStorage.getItem(PENDING_REGISTRATION_KEY), Date.now());
+    } catch {
+      return null;
+    }
+  });
+  const abandonedTrackedRef = useRef(false);
   const returnTo = sanitizeReturnTo(searchParams.get("returnTo") ?? searchParams.get("next"));
   const source = searchParams.get("utm_source") ?? "direct";
 
@@ -46,12 +69,28 @@ function OidcRegisterPage() {
     if (token) router.replace(returnTo);
   }, [isLoading, token, authError, router, returnTo]);
 
+  /** Fires the abandoned-registration telemetry once per mount, guarded by a ref rather than state. */
+  useEffect(() => {
+    if (!abandoned || abandonedTrackedRef.current) return;
+    abandonedTrackedRef.current = true;
+    trackUxEvent("view", "register_abandoned", { method: abandoned.method, age_ms: abandoned.ageMs });
+  }, [abandoned]);
+
   function handleChoose(method: RegisterMethod) {
     if (pending) return;
     setPending(method);
     rememberSource(source);
     reachGoal(GOAL_SIGNUP_STARTED, { source, method });
     void startRegister(returnTo, method);
+  }
+
+  function handleRetryAbandoned() {
+    if (!abandoned) return;
+    try {
+      window.localStorage.removeItem(PENDING_REGISTRATION_KEY);
+    } catch {}
+    setAbandoned(null);
+    handleChoose(abandoned.method);
   }
 
   if (authError) {
@@ -80,6 +119,19 @@ function OidcRegisterPage() {
             <h1 className="text-2xl font-bold text-gray-900">Создать аккаунт</h1>
             <p className="mt-1 text-sm text-gray-500">Выберите способ регистрации</p>
           </div>
+
+          {abandoned && (
+            <div className="mb-6 rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-800">
+              <p>Похоже, прошлая попытка регистрации не завершилась.</p>
+              <button
+                type="button"
+                className="mt-2 font-medium text-blue-700 underline hover:text-blue-900"
+                onClick={handleRetryAbandoned}
+              >
+                Попробовать еще раз
+              </button>
+            </div>
+          )}
 
           <div className="space-y-3">
             <Button
