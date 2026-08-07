@@ -17,7 +17,20 @@ import { AuthErrorScreen } from "@/components/shell/auth-error-screen";
 import { PENDING_REGISTRATION_KEY } from "@/lib/register-redirect";
 import { capturePasskeyActionStatus, markFreshAuthentication } from "@/lib/passkey";
 import { GOAL_AUTH_CALLBACK_FAILED, GOAL_REGISTRATION_COMPLETE, reachGoal } from "@/lib/metrika";
-import { callbackVerdict } from "@/lib/callback-outcome";
+import { callbackDiagnostics, callbackVerdict } from "@/lib/callback-outcome";
+
+/**
+ * Reads a browser store without letting a blocked one (private mode, storage
+ * disabled by policy) throw out of the failure-reporting path. The diagnostics
+ * treat an absent store as unreadable, which is itself the finding.
+ */
+function safeStore(get: () => Storage): Storage | null {
+  try {
+    return get();
+  } catch {
+    return null;
+  }
+}
 
 /**
  * Keycloak reports the outcome of an Application-Initiated Action (passkey
@@ -103,7 +116,17 @@ export default function CallbackPage() {
       search: CALLBACK_SEARCH,
     });
     if (outcome.state !== "failed") return;
-    reachGoal(GOAL_AUTH_CALLBACK_FAILED, { reason: outcome.error ?? outcome.reason });
+    const diagnostics = callbackDiagnostics(CALLBACK_SEARCH, [
+      safeStore(() => window.sessionStorage),
+      safeStore(() => window.localStorage),
+    ]);
+    reachGoal(GOAL_AUTH_CALLBACK_FAILED, {
+      reason: outcome.error ?? outcome.reason,
+      has_code: String(diagnostics.has_code),
+      has_state: String(diagnostics.has_state),
+      state_entry: diagnostics.state_entry,
+      oidc_keys: String(diagnostics.oidc_keys),
+    });
   }, [isLoading, token, authError]);
 
   const verdict = callbackVerdict({
