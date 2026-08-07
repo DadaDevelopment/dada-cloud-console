@@ -15,6 +15,7 @@ import { canMutate } from "@/lib/rbac";
 import { useT } from "@/lib/i18n/console/context";
 import { TemplateDeployCards } from "@/components/console/template-deploy-cards";
 import { UploadDeployCard } from "@/components/deploy/upload-deploy";
+import { ConnectByUrlDialog } from "@/components/deploy/connect-by-url-dialog";
 import { timeAgo } from "@/lib/format";
 import { CopyButton } from "@/components/ui/copy-button";
 import { githubActionsStep, deployCurl } from "@/lib/deploy-snippet";
@@ -244,6 +245,7 @@ export default function GitImportPage() {
   const [ghaGuideOpen, setGhaGuideOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  const [urlDialogOpen, setUrlDialogOpen] = useState(false);
 
   // Deploy phase. Linking the repo kicks off the first build; we stay on the same
   // continuous page and stream its logs until a terminal status.
@@ -714,6 +716,13 @@ export default function GitImportPage() {
                   >
                     {t("git.import.connectGitHub")}
                   </button>
+                  <button
+                    onClick={() => setUrlDialogOpen(true)}
+                    data-ux="git_import:connect_url_open"
+                    className="rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-50"
+                  >
+                    {t("git.import.byUrl.open")}
+                  </button>
                 </div>
                 {installUrl && (
                   <a
@@ -773,14 +782,23 @@ export default function GitImportPage() {
                     </span>
                   </div>
                   {!deploying && (
-                    <button
-                      onClick={() => handleConnectProvider("github", true)}
-                      disabled={connectingProvider !== null}
-                      className="inline-flex shrink-0 items-center justify-center gap-2 rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 text-sm font-medium text-gray-700 dark:text-gray-200 shadow-sm transition-colors hover:border-blue-400 hover:text-blue-600 disabled:cursor-not-allowed disabled:opacity-60"
-                    >
-                      <Plus className="h-4 w-4" />
-                      <span>{t("git.import.connectAnotherGitHub")}</span>
-                    </button>
+                    <div className="flex shrink-0 items-center gap-2">
+                      <button
+                        onClick={() => handleConnectProvider("github", true)}
+                        disabled={connectingProvider !== null}
+                        className="inline-flex items-center justify-center gap-2 rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 text-sm font-medium text-gray-700 dark:text-gray-200 shadow-sm transition-colors hover:border-blue-400 hover:text-blue-600 disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        <Plus className="h-4 w-4" />
+                        <span>{t("git.import.connectAnotherGitHub")}</span>
+                      </button>
+                      <button
+                        onClick={() => setUrlDialogOpen(true)}
+                        data-ux="git_import:connect_url_open"
+                        className="inline-flex items-center justify-center rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 text-sm font-medium text-gray-700 dark:text-gray-200 shadow-sm transition-colors hover:border-blue-400 hover:text-blue-600"
+                      >
+                        {t("git.import.byUrl.open")}
+                      </button>
+                    </div>
                   )}
                 </div>
                 {!deploying && installUrl && (
@@ -1220,6 +1238,13 @@ export default function GitImportPage() {
           </section>
         )}
       </div>
+
+      <ConnectByUrlDialog
+        projectId={projectId}
+        envId={envId || null}
+        open={urlDialogOpen}
+        onClose={() => setUrlDialogOpen(false)}
+      />
     </div>
   );
 }

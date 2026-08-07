@@ -1243,7 +1243,7 @@ export const gitApi = {
     projectId: string,
     envId: string,
     data: {
-      installation_id: string;
+      installation_id?: string;
       repo_full_name: string;
       app_name: string;
       production_branch: string;
@@ -1254,6 +1254,9 @@ export const gitApi = {
       worker?: boolean;
       replicas?: number;
       profile?: string;
+      provider?: string;
+      clone_url?: string;
+      token?: string;
     }
   ) =>
     apiFetch<GitReposResponse>(
