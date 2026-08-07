@@ -2,7 +2,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { adminApi } from "@/lib/api";
-import type { AuditActionFacet, AuditActorFacet, AuditEvent } from "@/lib/types";
+import type { AuditActionFacet, AuditActorFacet, AuditCohortFacet, AuditEvent } from "@/lib/types";
 import { Breadcrumb } from "@/components/ui/breadcrumb";
 import { AdminTabs } from "@/components/console/admin-tabs";
 import { AuditFacetFilter, type FacetOption } from "@/components/console/audit-facet-filter";
@@ -11,7 +11,6 @@ import { useT } from "@/lib/i18n/console/context";
 
 const PAGE_SIZE = 50;
 const HIDDEN_STORAGE_KEY = "dada.audit.hidden.v1";
-const COHORTS = ["", "customer", "internal", "synthetic", "platform"] as const;
 
 const COHORT_BADGE: Record<string, string> = {
   customer: "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-400",
@@ -30,18 +29,17 @@ function formatUTC(iso: string): string {
  * because unticking ViewProject is a standing preference of the reader, not a
  * property of the link they are about to share.
  */
-function readHidden(): { actions: string[]; users: string[] } {
-  if (typeof window === "undefined") return { actions: [], users: [] };
+function readHidden(): { actions: string[]; users: string[]; kinds: string[] } {
+  const empty = { actions: [], users: [], kinds: [] };
+  if (typeof window === "undefined") return empty;
   try {
     const raw = window.localStorage.getItem(HIDDEN_STORAGE_KEY);
-    if (!raw) return { actions: [], users: [] };
-    const parsed = JSON.parse(raw) as { actions?: unknown; users?: unknown };
-    return {
-      actions: Array.isArray(parsed.actions) ? parsed.actions.filter((v): v is string => typeof v === "string") : [],
-      users: Array.isArray(parsed.users) ? parsed.users.filter((v): v is string => typeof v === "string") : [],
-    };
+    if (!raw) return empty;
+    const parsed = JSON.parse(raw) as { actions?: unknown; users?: unknown; kinds?: unknown };
+    const strings = (v: unknown) => (Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : []);
+    return { actions: strings(parsed.actions), users: strings(parsed.users), kinds: strings(parsed.kinds) };
   } catch {
-    return { actions: [], users: [] };
+    return empty;
   }
 }
 
@@ -78,31 +76,33 @@ export default function AuditPage() {
 
   const [actionFilter, setActionFilter] = useState("");
   const [userFilter, setUserFilter] = useState("");
-  const [kindFilter, setKindFilter] = useState("");
   const [appliedAction, setAppliedAction] = useState("");
   const [appliedUser, setAppliedUser] = useState("");
-  const [appliedKind, setAppliedKind] = useState("");
 
   const [hiddenActions, setHiddenActions] = useState<Set<string>>(new Set());
   const [hiddenUsers, setHiddenUsers] = useState<Set<string>>(new Set());
+  const [hiddenKinds, setHiddenKinds] = useState<Set<string>>(new Set());
   const [actorFacets, setActorFacets] = useState<AuditActorFacet[]>([]);
   const [actionFacets, setActionFacets] = useState<AuditActionFacet[]>([]);
+  const [cohortFacets, setCohortFacets] = useState<AuditCohortFacet[]>([]);
 
   useEffect(() => {
     const stored = readHidden();
     setHiddenActions(new Set(stored.actions));
     setHiddenUsers(new Set(stored.users));
+    setHiddenKinds(new Set(stored.kinds));
   }, []);
 
   const excludeActions = useMemo(() => [...hiddenActions], [hiddenActions]);
   const excludeUsers = useMemo(() => [...hiddenUsers], [hiddenUsers]);
+  const excludeKinds = useMemo(() => [...hiddenKinds], [hiddenKinds]);
 
   /** Persists the hide-lists, tolerating a private-mode localStorage refusal. */
-  const persistHidden = useCallback((actions: Set<string>, users: Set<string>) => {
+  const persistHidden = useCallback((actions: Set<string>, users: Set<string>, kinds: Set<string>) => {
     try {
       window.localStorage.setItem(
         HIDDEN_STORAGE_KEY,
-        JSON.stringify({ actions: [...actions], users: [...users] }),
+        JSON.stringify({ actions: [...actions], users: [...users], kinds: [...kinds] }),
       );
     } catch {
       setError(null);
@@ -116,9 +116,9 @@ export default function AuditPage() {
       const data = await adminApi.listAuditEvents({
         action: appliedAction || undefined,
         user: appliedUser || undefined,
-        kind: appliedKind || undefined,
         excludeActions,
         excludeUsers,
+        excludeKinds,
         limit: PAGE_SIZE,
         offset,
       });
@@ -135,31 +135,40 @@ export default function AuditPage() {
     } finally {
       setIsLoading(false);
     }
-  }, [appliedAction, appliedUser, appliedKind, excludeActions, excludeUsers, offset, t]);
+  }, [appliedAction, appliedUser, excludeActions, excludeUsers, excludeKinds, offset, t]);
 
   useEffect(() => {
     void load();
   }, [load]);
 
+  /**
+   * Refetches the facets whenever any hide-list moves, because each facet's
+   * count is cross-filtered by the other two. Reading the breakdown while it
+   * still describes the rows an earlier filter removed is worse than having no
+   * breakdown: the numbers look authoritative and answer a question nobody
+   * asked.
+   */
   useEffect(() => {
     let cancelled = false;
     void (async () => {
       try {
-        const facets = await adminApi.listAuditFacets({ kind: appliedKind || undefined });
+        const facets = await adminApi.listAuditFacets({ excludeActions, excludeUsers, excludeKinds });
         if (cancelled) return;
         setActorFacets(facets.actors ?? []);
         setActionFacets(facets.actions ?? []);
+        setCohortFacets(facets.cohorts ?? []);
       } catch {
         if (!cancelled) {
           setActorFacets([]);
           setActionFacets([]);
+          setCohortFacets([]);
         }
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [appliedKind]);
+  }, [excludeActions, excludeUsers, excludeKinds]);
 
   useEffect(() => {
     if (forbidden) return;
@@ -171,32 +180,36 @@ export default function AuditPage() {
     setOffset(0);
     setAppliedAction(actionFilter.trim());
     setAppliedUser(userFilter.trim());
-    setAppliedKind(kindFilter);
   }
 
   function clearFilters() {
     setActionFilter("");
     setUserFilter("");
-    setKindFilter("");
     setOffset(0);
     setAppliedAction("");
     setAppliedUser("");
-    setAppliedKind("");
     setHiddenActions(new Set());
     setHiddenUsers(new Set());
-    persistHidden(new Set(), new Set());
+    setHiddenKinds(new Set());
+    persistHidden(new Set(), new Set(), new Set());
   }
 
   function changeHiddenActions(next: Set<string>) {
     setHiddenActions(next);
     setOffset(0);
-    persistHidden(next, hiddenUsers);
+    persistHidden(next, hiddenUsers, hiddenKinds);
   }
 
   function changeHiddenUsers(next: Set<string>) {
     setHiddenUsers(next);
     setOffset(0);
-    persistHidden(hiddenActions, next);
+    persistHidden(hiddenActions, next, hiddenKinds);
+  }
+
+  function changeHiddenKinds(next: Set<string>) {
+    setHiddenKinds(next);
+    setOffset(0);
+    persistHidden(hiddenActions, hiddenUsers, next);
   }
 
   const actorOptions: FacetOption[] = actorFacets.map((a) => ({
@@ -206,6 +219,11 @@ export default function AuditPage() {
     badgeClass: COHORT_BADGE[a.account_kind] ?? COHORT_BADGE.synthetic,
   }));
   const actionOptions: FacetOption[] = actionFacets.map((a) => ({ value: a.action, count: a.count }));
+  const cohortOptions: FacetOption[] = cohortFacets.map((c) => ({
+    value: c.account_kind,
+    display: t(`audit.filter.kind.${c.account_kind}`),
+    count: c.count,
+  }));
 
   const columns: Column<AuditEvent>[] = [
     {
@@ -324,15 +342,12 @@ export default function AuditPage() {
           placeholder={t("audit.filter.userPlaceholder")}
           className="rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-1.5 text-sm text-gray-900 dark:text-gray-100 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
         />
-        <select
-          value={kindFilter}
-          onChange={(e) => setKindFilter(e.target.value)}
-          className="rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-1.5 text-sm text-gray-900 dark:text-gray-100 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-        >
-          {COHORTS.map((k) => (
-            <option key={k || "all"} value={k}>{k ? t(`audit.filter.kind.${k}`) : t("audit.filter.kind.all")}</option>
-          ))}
-        </select>
+        <AuditFacetFilter
+          label={t("audit.facet.cohorts")}
+          options={cohortOptions}
+          hidden={hiddenKinds}
+          onChange={changeHiddenKinds}
+        />
         <AuditFacetFilter
           label={t("audit.facet.users")}
           options={actorOptions}

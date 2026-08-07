@@ -360,6 +360,19 @@ func parseAuditExclusions(raw string) []string {
 	return out
 }
 
+// parseAuditCohortExclusions is parseAuditExclusions narrowed to the cohort
+// allowlist, so a typo or a stale bookmark cannot blank the page by excluding a
+// value no row can ever carry.
+func parseAuditCohortExclusions(raw string) []string {
+	var out []string
+	for _, v := range parseAuditExclusions(raw) {
+		if auditCohortKinds[v] {
+			out = append(out, v)
+		}
+	}
+	return out
+}
+
 // auditCohortKinds is the allowlist behind the audit viewer's ?kind= filter.
 //
 // The trail mixes real customers with our own probes and with work the platform
@@ -389,6 +402,7 @@ var auditCohortKinds = map[string]bool{
 // @Param       kind   query    string false "Actor cohort: customer, internal, synthetic or platform (default: all)"
 // @Param       exclude_action query string false "Comma-separated actions to hide (checkbox filter)"
 // @Param       exclude_user   query string false "Comma-separated actor emails to hide (checkbox filter, exact match)"
+// @Param       exclude_kind   query string false "Comma-separated actor cohorts to hide (checkbox filter)"
 // @Param       limit  query    int    false "Max rows to return (default 50, max 200)"
 // @Param       offset query    int    false "Rows to skip"
 // @Success     200 {object} map[string]interface{} "object with an events array and a total count"
@@ -438,6 +452,7 @@ func (h *Handler) ListAuditEvents(c *gin.Context) {
 	}
 	excludedActions := parseAuditExclusions(c.Query("exclude_action"))
 	excludedUsers := parseAuditExclusions(c.Query("exclude_user"))
+	excludedKinds := parseAuditCohortExclusions(c.Query("exclude_kind"))
 
 	var total int
 	if err := h.pool.QueryRow(c.Request.Context(), `
@@ -448,8 +463,9 @@ func (h *Handler) ListAuditEvents(c *gin.Context) {
 		  AND ($2::text IS NULL OR u.email ILIKE '%' || $2 || '%')
 		  AND ($3::text IS NULL OR u.account_kind = $3)
 		  AND ($4::text[] IS NULL OR a.action <> ALL($4))
-		  AND ($5::text[] IS NULL OR u.email <> ALL($5))`,
-		actionFilter, userFilter, kindFilter, excludedActions, excludedUsers,
+		  AND ($5::text[] IS NULL OR u.email <> ALL($5))
+		  AND ($6::text[] IS NULL OR u.account_kind <> ALL($6))`,
+		actionFilter, userFilter, kindFilter, excludedActions, excludedUsers, excludedKinds,
 	).Scan(&total); err != nil {
 		respondError(c, http.StatusInternalServerError, "failed to count audit events")
 		return
@@ -466,9 +482,10 @@ func (h *Handler) ListAuditEvents(c *gin.Context) {
 		  AND ($3::text IS NULL OR u.account_kind = $3)
 		  AND ($4::text[] IS NULL OR a.action <> ALL($4))
 		  AND ($5::text[] IS NULL OR u.email <> ALL($5))
+		  AND ($6::text[] IS NULL OR u.account_kind <> ALL($6))
 		ORDER BY a.created_at DESC
-		LIMIT $6 OFFSET $7`,
-		actionFilter, userFilter, kindFilter, excludedActions, excludedUsers, limit, offset,
+		LIMIT $7 OFFSET $8`,
+		actionFilter, userFilter, kindFilter, excludedActions, excludedUsers, excludedKinds, limit, offset,
 	)
 	if err != nil {
 		respondError(c, http.StatusInternalServerError, "failed to list audit events")
@@ -511,19 +528,38 @@ type auditActionFacet struct {
 	Count  int    `json:"count"`
 }
 
-// ListAuditFacets returns the distinct actors and actions present in
+// auditCohortFacet is one checkbox in the audit viewer's cohort filter.
+type auditCohortFacet struct {
+	AccountKind string `json:"account_kind"`
+	Count       int    `json:"count"`
+}
+
+// ListAuditFacets returns the actors, actions and cohorts present in
 // audit_events with their row counts, so the dashboard can render checkbox
 // filters over the whole trail rather than over the 50 rows of the current
 // page. Platform-admin only, same gate as the trail itself.
 //
+// Each facet's count is cross-filtered by the OTHER facets' exclusions and
+// never by its own: hiding two actors has to move the per-action numbers, or
+// the operator is reading a breakdown of a trail that is no longer on screen.
+// Leaving a facet out of its own filter is what keeps its rows listed at all —
+// a value that has been unticked into a zero still has to be offered, because
+// a checkbox that is not rendered cannot be re-ticked.
+//
+// The zeroes are the reason these are conditional aggregates rather than a
+// WHERE: a plain filter would drop the row from the GROUP BY entirely.
+//
 // @ID          listAuditFacets
 // @Summary     List audit filter facets (platform-admin only)
-// @Description Returns the distinct actors (with cohort and count) and actions (with count) present in audit_events, newest-heavy first, for building the audit viewer's checkbox filters. Honours the same ?kind= cohort filter as the trail. Platform-admin only; every other caller gets 403.
+// @Description Returns the actors (with cohort and count), actions and cohorts present in audit_events, heaviest first, for building the audit viewer's checkbox filters. Each count is cross-filtered by the other facets' exclusion lists, so hiding a user changes the per-action numbers. Honours the same ?kind= cohort filter as the trail. Platform-admin only; every other caller gets 403.
 // @Tags        admin
 // @Produce     json
 // @Security    BearerAuth
 // @Param       kind query string false "Actor cohort: customer, internal, synthetic or platform (default: all)"
-// @Success     200 {object} map[string]interface{} "object with actors and actions arrays"
+// @Param       exclude_action query string false "Comma-separated actions to hide; discounted from the actor and cohort counts"
+// @Param       exclude_user   query string false "Comma-separated actor emails to hide; discounted from the action and cohort counts"
+// @Param       exclude_kind   query string false "Comma-separated actor cohorts to hide; discounted from the actor and action counts"
+// @Success     200 {object} map[string]interface{} "object with actors, actions and cohorts arrays"
 // @Failure     401 {object} map[string]string
 // @Failure     403 {object} map[string]string
 // @Router      /admin/audit/facets [get]
@@ -546,17 +582,24 @@ func (h *Handler) ListAuditFacets(c *gin.Context) {
 	if kind != "" {
 		kindFilter = &kind
 	}
+	excludedActions := parseAuditExclusions(c.Query("exclude_action"))
+	excludedUsers := parseAuditExclusions(c.Query("exclude_user"))
+	excludedKinds := parseAuditCohortExclusions(c.Query("exclude_kind"))
 
 	ctx := c.Request.Context()
 
 	actorRows, err := h.pool.Query(ctx, `
-		SELECT u.email, u.account_kind, count(*)
+		SELECT u.email, u.account_kind,
+		       count(*) FILTER (
+		         WHERE ($2::text[] IS NULL OR a.action <> ALL($2))
+		           AND ($3::text[] IS NULL OR u.account_kind <> ALL($3))
+		       ) AS matched
 		FROM audit_events a
 		JOIN user_accounts u ON u.id = a.actor_id
 		WHERE ($1::text IS NULL OR u.account_kind = $1)
 		GROUP BY u.email, u.account_kind
-		ORDER BY count(*) DESC, u.email
-		LIMIT $2`, kindFilter, auditFacetsMaxRows)
+		ORDER BY matched DESC, u.email
+		LIMIT $4`, kindFilter, excludedActions, excludedKinds, auditFacetsMaxRows)
 	if err != nil {
 		respondError(c, http.StatusInternalServerError, "failed to list audit actors")
 		return
@@ -578,13 +621,17 @@ func (h *Handler) ListAuditFacets(c *gin.Context) {
 	}
 
 	actionRows, err := h.pool.Query(ctx, `
-		SELECT a.action, count(*)
+		SELECT a.action,
+		       count(*) FILTER (
+		         WHERE ($2::text[] IS NULL OR u.email <> ALL($2))
+		           AND ($3::text[] IS NULL OR u.account_kind <> ALL($3))
+		       ) AS matched
 		FROM audit_events a
 		JOIN user_accounts u ON u.id = a.actor_id
 		WHERE ($1::text IS NULL OR u.account_kind = $1)
 		GROUP BY a.action
-		ORDER BY count(*) DESC, a.action
-		LIMIT $2`, kindFilter, auditFacetsMaxRows)
+		ORDER BY matched DESC, a.action
+		LIMIT $4`, kindFilter, excludedUsers, excludedKinds, auditFacetsMaxRows)
 	if err != nil {
 		respondError(c, http.StatusInternalServerError, "failed to list audit actions")
 		return
@@ -605,5 +652,36 @@ func (h *Handler) ListAuditFacets(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"actors": actors, "actions": actions})
+	cohortRows, err := h.pool.Query(ctx, `
+		SELECT u.account_kind,
+		       count(*) FILTER (
+		         WHERE ($2::text[] IS NULL OR a.action <> ALL($2))
+		           AND ($3::text[] IS NULL OR u.email <> ALL($3))
+		       ) AS matched
+		FROM audit_events a
+		JOIN user_accounts u ON u.id = a.actor_id
+		WHERE ($1::text IS NULL OR u.account_kind = $1)
+		GROUP BY u.account_kind
+		ORDER BY matched DESC, u.account_kind`, kindFilter, excludedActions, excludedUsers)
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, "failed to list audit cohorts")
+		return
+	}
+	defer cohortRows.Close()
+
+	cohorts := []auditCohortFacet{}
+	for cohortRows.Next() {
+		var f auditCohortFacet
+		if err := cohortRows.Scan(&f.AccountKind, &f.Count); err != nil {
+			respondError(c, http.StatusInternalServerError, "failed to scan audit cohort")
+			return
+		}
+		cohorts = append(cohorts, f)
+	}
+	if err := cohortRows.Err(); err != nil {
+		respondError(c, http.StatusInternalServerError, "failed to list audit cohorts")
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"actors": actors, "actions": actions, "cohorts": cohorts})
 }

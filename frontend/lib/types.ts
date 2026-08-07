@@ -1001,9 +1001,15 @@ export interface AuditActionFacet {
   count: number;
 }
 
+export interface AuditCohortFacet {
+  account_kind: string;
+  count: number;
+}
+
 export interface AuditFacetsResponse {
   actors: AuditActorFacet[];
   actions: AuditActionFacet[];
+  cohorts: AuditCohortFacet[];
 }
 
 export interface FeedbackItem {

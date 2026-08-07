@@ -6,9 +6,17 @@ import { useT } from "@/lib/i18n/console/context";
 export interface FacetOption {
   value: string;
   count: number;
+  display?: string;
   badge?: string;
   badgeClass?: string;
 }
+
+/**
+ * Below this many options the search box costs more than it saves: the whole
+ * list already fits without scrolling, so the input is one more thing to skip
+ * past. The cohort facet has four values and lands under it.
+ */
+const SEARCHABLE_FROM = 8;
 
 interface AuditFacetFilterProps {
   label: string;
@@ -35,8 +43,10 @@ export function AuditFacetFilter({ label, options, hidden, onChange }: AuditFace
   const visible = useMemo(() => {
     const needle = query.trim().toLowerCase();
     if (!needle) return options;
-    return options.filter((o) => o.value.toLowerCase().includes(needle));
+    return options.filter((o) => (o.display ?? o.value).toLowerCase().includes(needle));
   }, [options, query]);
+
+  const showSearch = options.length >= SEARCHABLE_FROM;
 
   function toggle(value: string) {
     const next = new Set(hidden);
@@ -76,14 +86,16 @@ export function AuditFacetFilter({ label, options, hidden, onChange }: AuditFace
         </button>
       </PopoverTrigger>
       <PopoverContent className="w-80 p-0">
-        <div className="border-b border-gray-100 dark:border-gray-800 p-2">
-          <input
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder={t("audit.facet.searchPlaceholder")}
-            className="w-full rounded-md border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-2 py-1 text-xs text-gray-900 dark:text-gray-100 focus:border-blue-500 focus:outline-none"
-          />
-        </div>
+        {showSearch ? (
+          <div className="border-b border-gray-100 dark:border-gray-800 p-2">
+            <input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder={t("audit.facet.searchPlaceholder")}
+              className="w-full rounded-md border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-2 py-1 text-xs text-gray-900 dark:text-gray-100 focus:border-blue-500 focus:outline-none"
+            />
+          </div>
+        ) : null}
         <div className="max-h-72 overflow-y-auto p-1">
           {visible.length === 0 ? (
             <p className="px-2 py-3 text-center text-xs text-gray-400 dark:text-gray-500">{t("audit.facet.noMatches")}</p>
@@ -99,8 +111,8 @@ export function AuditFacetFilter({ label, options, hidden, onChange }: AuditFace
                   onChange={() => toggle(o.value)}
                   className="h-3.5 w-3.5 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
                 />
-                <span className="min-w-0 flex-1 truncate text-xs text-gray-700 dark:text-gray-200" title={o.value}>
-                  {o.value}
+                <span className="min-w-0 flex-1 truncate text-xs text-gray-700 dark:text-gray-200" title={o.display ?? o.value}>
+                  {o.display ?? o.value}
                 </span>
                 {o.badge ? (
                   <span className={`rounded px-1 py-0.5 text-[9px] font-medium ${o.badgeClass ?? ""}`}>{o.badge}</span>

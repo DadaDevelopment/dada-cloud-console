@@ -116,6 +116,12 @@ const docTemplate = `{
                         "in": "query"
                     },
                     {
+                        "type": "string",
+                        "description": "Comma-separated actor cohorts to hide (checkbox filter)",
+                        "name": "exclude_kind",
+                        "in": "query"
+                    },
+                    {
                         "type": "integer",
                         "description": "Max rows to return (default 50, max 200)",
                         "name": "limit",
@@ -164,7 +170,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Returns the distinct actors (with cohort and count) and actions (with count) present in audit_events, newest-heavy first, for building the audit viewer's checkbox filters. Honours the same ?kind= cohort filter as the trail. Platform-admin only; every other caller gets 403.",
+                "description": "Returns the actors (with cohort and count), actions and cohorts present in audit_events, heaviest first, for building the audit viewer's checkbox filters. Each count is cross-filtered by the other facets' exclusion lists, so hiding a user changes the per-action numbers. Honours the same ?kind= cohort filter as the trail. Platform-admin only; every other caller gets 403.",
                 "produces": [
                     "application/json"
                 ],
@@ -179,11 +185,29 @@ const docTemplate = `{
                         "description": "Actor cohort: customer, internal, synthetic or platform (default: all)",
                         "name": "kind",
                         "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Comma-separated actions to hide; discounted from the actor and cohort counts",
+                        "name": "exclude_action",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Comma-separated actor emails to hide; discounted from the action and cohort counts",
+                        "name": "exclude_user",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Comma-separated actor cohorts to hide; discounted from the actor and action counts",
+                        "name": "exclude_kind",
+                        "in": "query"
                     }
                 ],
                 "responses": {
                     "200": {
-                        "description": "object with actors and actions arrays",
+                        "description": "object with actors, actions and cohorts arrays",
                         "schema": {
                             "type": "object",
                             "additionalProperties": true

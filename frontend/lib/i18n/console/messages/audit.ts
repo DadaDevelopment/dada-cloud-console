@@ -25,6 +25,7 @@ export const audit: Messages = {
   "audit.filter.kind.platform": { ru: "Платформа", en: "Platform" },
   "audit.facet.users": { ru: "Пользователи", en: "Users" },
   "audit.facet.actions": { ru: "События", en: "Events" },
+  "audit.facet.cohorts": { ru: "Клиенты", en: "Cohorts" },
   "audit.facet.hiddenCount": { ru: "скрыто {count}", en: "{count} hidden" },
   "audit.facet.searchPlaceholder": { ru: "Поиск…", en: "Search…" },
   "audit.facet.noMatches": { ru: "Ничего не найдено", en: "Nothing found" },

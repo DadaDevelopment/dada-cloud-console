@@ -218,3 +218,86 @@ func TestListAuditFacets_ReportsActorsAndActions(t *testing.T) {
 		}
 	}
 }
+
+// facetCounts indexes one facet array of the facets response by its key column.
+func facetCounts(t *testing.T, body map[string]any, arrayKey, keyField string) map[string]float64 {
+	t.Helper()
+	raw, ok := body[arrayKey].([]any)
+	if !ok {
+		t.Fatalf("no %s array in %v", arrayKey, body)
+	}
+	out := map[string]float64{}
+	for _, r := range raw {
+		row := r.(map[string]any)
+		out[row[keyField].(string)] = row["count"].(float64)
+	}
+	return out
+}
+
+// TestListAuditFacets_CountsCrossFilter pins the behaviour the operator asked
+// for after using the first version: hiding some users left the per-action
+// breakdown untouched, so the numbers described a trail that was no longer on
+// screen and there was no way to tell which of the remaining actions was
+// actually drowning the page.
+//
+// Each facet's count must therefore answer to the OTHER facets' exclusions and
+// never to its own — a facet that filtered itself would report every unticked
+// value as zero and lose the one number that says whether re-ticking is worth
+// it. And a value unticked down to zero must stay in the list: a checkbox that
+// is not rendered cannot be re-ticked, which would make hiding irreversible.
+func TestListAuditFacets_CountsCrossFilter(t *testing.T) {
+	f := seedAuditFilterFixture(t)
+	h := &Handler{pool: f.pool}
+
+	soloAction := "Act" + f.token
+	var actorB uuid.UUID
+	if err := f.pool.QueryRow(context.Background(),
+		`SELECT id FROM users WHERE email = $1`, f.emailB).Scan(&actorB); err != nil {
+		t.Fatalf("look up seeded actor: %v", err)
+	}
+	if _, err := f.pool.Exec(context.Background(),
+		`INSERT INTO audit_events (actor_id, project_id, action, resource_kind, resource_name)
+		 VALUES ($1, $2, $3, 'Project', $4)`,
+		actorB, f.projectID, soloAction, f.token,
+	); err != nil {
+		t.Fatalf("seed solo-action event: %v", err)
+	}
+
+	base := facetCounts(t, callAuditEndpoint(t, f.pool, h.ListAuditFacets, ""), "actors", "email")
+	if base[f.emailA] != 2 || base[f.emailB] != 2 {
+		t.Fatalf("baseline actor counts = %v/%v, want 2/2", base[f.emailA], base[f.emailB])
+	}
+
+	noViews := callAuditEndpoint(t, f.pool, h.ListAuditFacets, "exclude_action=ViewProject")
+	actors := facetCounts(t, noViews, "actors", "email")
+	if actors[f.emailA] != 1 {
+		t.Errorf("hiding ViewProject left %s at %v, want 1 — the actor count must drop with it", f.emailA, actors[f.emailA])
+	}
+	if actors[f.emailB] != 1 {
+		t.Errorf("hiding ViewProject left %s at %v, want 1", f.emailB, actors[f.emailB])
+	}
+	if got := facetCounts(t, noViews, "actions", "action"); got["ViewProject"] == 0 {
+		t.Errorf("ViewProject reported 0 in its own facet — a facet must not filter itself, or its count stops saying whether re-ticking is worth it")
+	}
+
+	noB := callAuditEndpoint(t, f.pool, h.ListAuditFacets, "exclude_user="+f.emailB)
+	gotActions := facetCounts(t, noB, "actions", "action")
+	if _, listed := gotActions[soloAction]; !listed {
+		t.Fatalf("action %q vanished from the list when its only actor was hidden — a checkbox that is not rendered cannot be re-ticked", soloAction)
+	}
+	if gotActions[soloAction] != 0 {
+		t.Errorf("action %q = %v after hiding its only actor, want 0", soloAction, gotActions[soloAction])
+	}
+
+	cohorts := facetCounts(t, callAuditEndpoint(t, f.pool, h.ListAuditFacets, ""), "cohorts", "account_kind")
+	if cohorts["customer"] < 4 {
+		t.Errorf("customer cohort = %v, want at least the 4 seeded rows — the cohort picker needs its own counts to look like the other two", cohorts["customer"])
+	}
+	noCustomers := facetCounts(t, callAuditEndpoint(t, f.pool, h.ListAuditFacets, "exclude_kind=customer"), "actors", "email")
+	if _, listed := noCustomers[f.emailA]; !listed {
+		t.Fatalf("actor %s vanished when its cohort was hidden", f.emailA)
+	}
+	if noCustomers[f.emailA] != 0 {
+		t.Errorf("actor %s = %v after hiding its cohort, want 0", f.emailA, noCustomers[f.emailA])
+	}
+}

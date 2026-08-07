@@ -1171,6 +1171,7 @@ export const adminApi = {
       kind?: string;
       excludeActions?: string[];
       excludeUsers?: string[];
+      excludeKinds?: string[];
       limit?: number;
       offset?: number;
     } = {},
@@ -1181,13 +1182,24 @@ export const adminApi = {
     if (params.kind) q.set("kind", params.kind);
     if (params.excludeActions?.length) q.set("exclude_action", params.excludeActions.join(","));
     if (params.excludeUsers?.length) q.set("exclude_user", params.excludeUsers.join(","));
+    if (params.excludeKinds?.length) q.set("exclude_kind", params.excludeKinds.join(","));
     q.set("limit", String(params.limit ?? 50));
     q.set("offset", String(params.offset ?? 0));
     return apiFetch<AuditEventsResponse>(`/api/v1/admin/audit?${q.toString()}`);
   },
-  listAuditFacets: (params: { kind?: string } = {}) => {
+  listAuditFacets: (
+    params: {
+      kind?: string;
+      excludeActions?: string[];
+      excludeUsers?: string[];
+      excludeKinds?: string[];
+    } = {},
+  ) => {
     const q = new URLSearchParams();
     if (params.kind) q.set("kind", params.kind);
+    if (params.excludeActions?.length) q.set("exclude_action", params.excludeActions.join(","));
+    if (params.excludeUsers?.length) q.set("exclude_user", params.excludeUsers.join(","));
+    if (params.excludeKinds?.length) q.set("exclude_kind", params.excludeKinds.join(","));
     const suffix = q.toString();
     return apiFetch<AuditFacetsResponse>(`/api/v1/admin/audit/facets${suffix ? `?${suffix}` : ""}`);
   },
