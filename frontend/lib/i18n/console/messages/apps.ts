@@ -261,6 +261,15 @@ export const apps: Messages = {
   },
   "apps.builds.fail.reason.detailsLink": { ru: "подробнее", en: "details" },
 
+  "apps.build.meta.builtAgo": { ru: "собрано {ago}", en: "built {ago}" },
+  "apps.build.meta.startedAgo": { ru: "запущено {ago}", en: "started {ago}" },
+  "apps.build.trigger.push": { ru: "автоматически после пуша", en: "automatically on push" },
+  "apps.build.trigger.pr": { ru: "по пул-реквесту", en: "from a pull request" },
+  "apps.build.trigger.prNumbered": { ru: "по пул-реквесту #{number}", en: "from pull request #{number}" },
+  "apps.build.trigger.manual": { ru: "запущено вручную", en: "triggered manually" },
+  "apps.build.trigger.rollback": { ru: "откат", en: "rollback" },
+  "apps.build.trigger.promote": { ru: "продвижение версии", en: "promote" },
+
   "apps.latestBuild.running": { ru: "Собираю…", en: "Building…" },
   "apps.latestBuild.viewLogs": { ru: "Логи сборки", en: "Build logs" },
   "apps.latestBuild.success.heading": { ru: "Сборка готова", en: "Build ready" },

@@ -13,6 +13,7 @@ import { canMutate } from "@/lib/rbac";
 import { useT } from "@/lib/i18n/console/context";
 import { trackUxEvent } from "@/lib/ux-telemetry";
 import { resolveCommit, formatCommitLabel } from "@/lib/build-commit";
+import { BuildProvenance } from "@/components/deploy/build-provenance";
 import { trackBuildStart } from "@/lib/build-watch";
 import { StarterNextStep } from "@/components/deploy/starter-next-step";
 
@@ -191,6 +192,7 @@ export function AppLatestBuildCard({ projectId, envId, appName, appUrl, appReady
           <p className="text-sm font-medium text-gray-900 dark:text-gray-100">
             {t("apps.latestBuild.running")} <BuildStatusBadge status={build.status} />
           </p>
+          <BuildProvenance build={build} className="mt-1 min-w-0" />
         </div>
         <Link
           href={buildHref(build.id)}
@@ -210,22 +212,7 @@ export function AppLatestBuildCard({ projectId, envId, appName, appUrl, appReady
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="min-w-0">
             <p className="text-sm font-semibold text-green-700 dark:text-green-400">{t("apps.latestBuild.success.heading")}</p>
-            <p className="mt-0.5 truncate text-xs text-gray-500 dark:text-gray-400">
-              {(() => {
-                const resolved = resolveCommit(build);
-                if (resolved.kind === "sha") {
-                  return (
-                    <>
-                      <span className="font-mono">{resolved.sha.slice(0, 7)}</span> · {build.branch}
-                    </>
-                  );
-                }
-                if (resolved.kind === "branch") {
-                  return t("common.commit.branchLatest", { branch: resolved.branch });
-                }
-                return t("common.commit.archive");
-              })()}
-            </p>
+            <BuildProvenance build={build} className="mt-0.5 min-w-0" />
             {appUrl && appReady && (
               <a
                 href={appUrl}
@@ -287,6 +274,7 @@ export function AppLatestBuildCard({ projectId, envId, appName, appUrl, appReady
                 </>
               )}
             </p>
+            <BuildProvenance build={build} className="mt-1 min-w-0" />
           </div>
           <div className="flex shrink-0 items-center gap-2">
             {canDeploy && hasGitRepo && (
@@ -334,7 +322,10 @@ export function AppLatestBuildCard({ projectId, envId, appName, appUrl, appReady
     <div className="mb-6 rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 px-5 py-4">
       <div className="flex flex-wrap items-center gap-3">
         <Rocket className="h-4 w-4 shrink-0 text-gray-400 dark:text-gray-500" />
-        <p className="min-w-0 flex-1 text-sm text-gray-500 dark:text-gray-400">{t("apps.latestBuild.canceled")}</p>
+        <div className="min-w-0 flex-1">
+          <p className="text-sm text-gray-500 dark:text-gray-400">{t("apps.latestBuild.canceled")}</p>
+          <BuildProvenance build={build} className="mt-1 min-w-0" />
+        </div>
         <div className="flex shrink-0 items-center gap-2">
           {canDeploy && (
             <button

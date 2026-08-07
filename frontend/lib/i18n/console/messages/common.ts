@@ -35,4 +35,9 @@ export const common: Messages = {
 
   "common.commit.branchLatest": { ru: "последний коммит ветки {branch}", en: "latest commit on branch {branch}" },
   "common.commit.archive": { ru: "загруженный архив", en: "uploaded archive" },
+
+  "common.time.agoSeconds": { ru: "{n} сек назад", en: "{n}s ago" },
+  "common.time.agoMinutes": { ru: "{n} мин назад", en: "{n}m ago" },
+  "common.time.agoHours": { ru: "{n} ч назад", en: "{n}h ago" },
+  "common.time.agoDays": { ru: "{n} дн назад", en: "{n}d ago" },
 };

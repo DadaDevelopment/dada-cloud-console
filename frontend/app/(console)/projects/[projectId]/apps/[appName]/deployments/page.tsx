@@ -12,6 +12,7 @@ import { timeAgo } from "@/lib/format";
 import { BuildStatusBadge, isBuildActive } from "@/components/deploy/build-status-badge";
 import { useT } from "@/lib/i18n/console/context";
 import { formatCommitLabel, resolveCommit } from "@/lib/build-commit";
+import { BuildProvenance, buildTriggerLabel } from "@/components/deploy/build-provenance";
 import { trackBuildStart } from "@/lib/build-watch";
 import { StarterNextStep } from "@/components/deploy/starter-next-step";
 
@@ -251,14 +252,17 @@ export default function AppDeploymentsPage() {
           </h1>
         </div>
         {canDeploy && !unavailable && (
-          <button
-            onClick={handleTrigger}
-            data-ux="app_deploy_feed:trigger_build"
-            disabled={triggering}
-            className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50 transition-colors"
-          >
-            {triggering ? <><Spinner size="sm" /> {t("apps.deployments.queuing")}</> : t("apps.deployments.trigger")}
-          </button>
+          <div className="flex max-w-sm flex-col items-end gap-1.5">
+            <button
+              onClick={handleTrigger}
+              data-ux="app_deploy_feed:trigger_build"
+              disabled={triggering}
+              className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50 transition-colors"
+            >
+              {triggering ? <><Spinner size="sm" /> {t("apps.deployments.queuing")}</> : t("apps.deployments.trigger")}
+            </button>
+            {latestBuild && <BuildProvenance build={latestBuild} showStatus className="min-w-0" />}
+          </div>
         )}
       </div>
 
@@ -334,7 +338,7 @@ export default function AppDeploymentsPage() {
                             </span>
                           )}
                           <span className="inline-flex items-center rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600 dark:bg-slate-800 dark:text-slate-300">
-                            {b.trigger}
+                            {buildTriggerLabel(b.trigger, b.pr_number ?? null, t)}
                           </span>
                           {b.pr_number != null && (
                             <span className="inline-flex items-center rounded-full bg-purple-100 px-2 py-0.5 text-xs font-medium text-purple-700 dark:bg-purple-950/40 dark:text-purple-300">
@@ -393,7 +397,7 @@ export default function AppDeploymentsPage() {
                       <div className="flex flex-wrap items-center gap-2">
                         {dep.is_current && <CurrentBadge />}
                         <span className="inline-flex items-center rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600 dark:bg-slate-800 dark:text-slate-300">
-                          {dep.trigger}
+                          {buildTriggerLabel(dep.trigger, null, t)}
                         </span>
                         {depResolved.kind === "sha" && (
                           <span className="font-mono text-xs text-gray-500 dark:text-gray-400">{depResolved.sha.slice(0, 7)}</span>
