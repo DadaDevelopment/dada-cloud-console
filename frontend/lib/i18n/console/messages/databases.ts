@@ -216,6 +216,25 @@ export const databases: Messages = {
     en: "{n} connections hold a transaction open (oldest {dur}), blocking cleanup. Fix this in the application code.",
   },
 
+  "databases.insights.diagnosis.delegate": { ru: "Поручить агенту", en: "Hand to the agent" },
+  "databases.insights.diagnosis.delegateHint": {
+    ru: "Агент подготовит исправление; изменения схемы едут через PR, ничего не выполняется молча.",
+    en: "The agent prepares the fix; schema changes go through a PR, nothing runs silently.",
+  },
+  "databases.insights.diagnosis.askAgent": { ru: "Обсудить с агентом →", en: "Discuss with the agent →" },
+  "databases.insights.agentPrompt.intro": {
+    ru: "В базе {db} платформа нашла проблему «{finding}» ({subject}).",
+    en: "In database {db} the platform found “{finding}” ({subject}).",
+  },
+  "databases.insights.agentPrompt.sql": {
+    ru: "Предложенный SQL: {sql}",
+    en: "Suggested SQL: {sql}",
+  },
+  "databases.insights.agentPrompt.contract": {
+    ru: "Разберись и подготовь исправление. Изменения схемы (DDL) оформи через pull request в мой репозиторий — ничего не выполняй в базе напрямую.",
+    en: "Investigate and prepare the fix. Deliver schema changes (DDL) as a pull request to my repository — do not run anything against the database directly.",
+  },
+
   "databases.insights.showLess": { ru: "Свернуть", en: "Show less" },
 
   "databases.insights.advisories.title": { ru: "Выводы", en: "Findings" },
@@ -226,8 +245,8 @@ export const databases: Messages = {
   "databases.insights.advisories.since": { ru: "Замечено {ago}", en: "First seen {ago}" },
   "databases.insights.advisories.sql": { ru: "SQL для исправления", en: "SQL to fix it" },
   "databases.insights.advisories.sqlHint": {
-    ru: "Выполните это сами: платформа не меняет схему вашей базы.",
-    en: "Run this yourself: the platform does not change your schema.",
+    ru: "Платформа не меняет схему сама: выполните SQL сами или поручите агенту — он оформит изменение через PR.",
+    en: "The platform never changes your schema itself: run the SQL yourself or hand it to the agent — it delivers the change as a PR.",
   },
 
   "databases.insights.code.unused_index": { ru: "Индекс не используется", en: "Index is never used" },

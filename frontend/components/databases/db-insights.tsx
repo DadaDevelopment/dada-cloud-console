@@ -10,6 +10,7 @@ import type {
   DatabaseTableCard,
 } from "@/lib/types";
 import { formatBytes } from "@/components/charts/format";
+import { openAgentChatWith } from "@/components/agent-chat-panel";
 import { Spinner } from "@/components/ui/spinner";
 import { CopyButton } from "@/components/ui/copy-button";
 import { timeAgo } from "@/lib/format";
@@ -153,6 +154,34 @@ function shortDate(iso: string, locale: string): string {
     .replace(/\.$/, "");
 }
 
+/**
+ * agentPrompt builds the message that goes into the agent chat input when the
+ * user hands a finding over. It carries the human-language finding plus the
+ * suggested SQL, and states the delivery contract explicitly: schema changes
+ * are prepared as a pull request, never executed directly — that contract was
+ * the owner's call and the prompt is where the agent learns it.
+ */
+function agentPrompt(
+  a: DatabaseAdvisory,
+  dbName: string,
+  t: (k: string, v?: Record<string, string | number>) => string,
+  locale: string,
+): string {
+  const parts = [
+    t("databases.insights.agentPrompt.intro", {
+      db: dbName,
+      finding: t(`databases.insights.code.${a.code}`),
+      subject: a.subject,
+    }),
+    humanBody(a, t, locale),
+  ];
+  if (a.suggestedSql) {
+    parts.push(t("databases.insights.agentPrompt.sql", { sql: a.suggestedSql }));
+  }
+  parts.push(t("databases.insights.agentPrompt.contract"));
+  return parts.join("\n");
+}
+
 function advisoryScore(a: DatabaseAdvisory): number {
   const impact = evNum(a, "share") ?? (evNum(a, "sizeBytes") ?? 0) / 1e12;
   return (severityRank[a.severity] ?? 0) * 1000 + (codePriority[a.code] ?? 0) * 10 + Math.min(impact, 9);
@@ -163,7 +192,7 @@ function advisoryScore(a: DatabaseAdvisory): number {
  * first, machine detail and the query sample behind it, suggested SQL with an
  * explicit "you run it, not us" note. Also used on the table page.
  */
-export function AdvisoryCard({ a }: { a: DatabaseAdvisory }) {
+export function AdvisoryCard({ a, dbName }: { a: DatabaseAdvisory; dbName?: string }) {
   const { t, locale } = useT();
   const title = t(`databases.insights.code.${a.code}`);
   const sample = evStr(a, "querySample");
@@ -192,6 +221,15 @@ export function AdvisoryCard({ a }: { a: DatabaseAdvisory }) {
           </div>
           <p className="mt-1 text-xs text-gray-400 dark:text-gray-500">{t("databases.insights.advisories.sqlHint")}</p>
         </div>
+      )}
+      {dbName && (
+        <button
+          type="button"
+          onClick={() => openAgentChatWith(agentPrompt(a, dbName, t, locale))}
+          className="mt-3 text-sm font-medium text-indigo-600 hover:text-indigo-800 dark:text-indigo-400 dark:hover:text-indigo-300"
+        >
+          {t("databases.insights.diagnosis.askAgent")}
+        </button>
       )}
     </div>
   );
@@ -238,7 +276,7 @@ function HeroTile({
  * and most impactful, told as a paragraph a person can act on. Everything
  * else is a count ("ещё 12 находок") that expands into the grouped list.
  */
-function DiagnosisPanel({ advisories }: { advisories: DatabaseAdvisory[] }) {
+function DiagnosisPanel({ advisories, dbName }: { advisories: DatabaseAdvisory[]; dbName: string }) {
   const { t, locale } = useT();
   const [expanded, setExpanded] = useState(false);
   const sorted = useMemo(() => [...advisories].sort((x, y) => advisoryScore(y) - advisoryScore(x)), [advisories]);
@@ -284,6 +322,16 @@ function DiagnosisPanel({ advisories }: { advisories: DatabaseAdvisory[] }) {
       {top.suggestedSql && (
         <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">{t("databases.insights.advisories.sqlHint")}</p>
       )}
+      <div className="mt-4 flex flex-wrap items-center gap-2">
+        <button
+          type="button"
+          onClick={() => openAgentChatWith(agentPrompt(top, dbName, t, locale))}
+          className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-indigo-700"
+        >
+          {t("databases.insights.diagnosis.delegate")}
+        </button>
+        <span className="text-xs text-gray-500 dark:text-gray-400">{t("databases.insights.diagnosis.delegateHint")}</span>
+      </div>
       {rest.length > 0 && (
         <div className="mt-4 border-t border-indigo-100 dark:border-indigo-900/40 pt-3">
           <button
@@ -298,7 +346,7 @@ function DiagnosisPanel({ advisories }: { advisories: DatabaseAdvisory[] }) {
           {expanded && (
             <div className="mt-3 space-y-3">
               {rest.map((a) => (
-                <AdvisoryCard key={`${a.code}:${a.subject}`} a={a} />
+                <AdvisoryCard key={`${a.code}:${a.subject}`} a={a} dbName={dbName} />
               ))}
             </div>
           )}
@@ -563,7 +611,7 @@ export function DbInsightsView({
       </div>
 
       <div className="mt-4">
-        <DiagnosisPanel advisories={advisories} />
+        <DiagnosisPanel advisories={advisories} dbName={name} />
       </div>
 
       {tables.length > 0 && (

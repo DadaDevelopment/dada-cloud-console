@@ -47,6 +47,20 @@ const AGENT_MODES: AgentMode[] = ["manual", "edit", "admin"];
 
 const AGENT_MODE_STORAGE_KEY = "dada.agentChat.mode";
 
+/**
+ * Pages can hand the panel an opening message: openAgentChatWith fires this
+ * event and navigates to #agent (which the console layout already turns into
+ * "open the panel"). The always-mounted panel listens for the event and puts
+ * the prompt into the input — into the input, never auto-sent, so the user
+ * always sees and approves what the agent is asked to do.
+ */
+export const AGENT_CHAT_PREFILL_EVENT = "dada:agent-chat-prefill";
+
+export function openAgentChatWith(prompt: string): void {
+  window.dispatchEvent(new CustomEvent(AGENT_CHAT_PREFILL_EVENT, { detail: prompt }));
+  window.location.hash = "#agent";
+}
+
 const modeListeners = new Set<() => void>();
 
 /**
@@ -405,6 +419,15 @@ export function AgentChatPanel({ open, onClose }: AgentChatPanelProps) {
       cancelled = true;
     };
   }, [projectId, selectedEnv?.id]);
+
+  useEffect(() => {
+    function onPrefill(e: Event) {
+      const prompt = (e as CustomEvent<string>).detail;
+      if (typeof prompt === "string" && prompt) setInput(prompt);
+    }
+    window.addEventListener(AGENT_CHAT_PREFILL_EVENT, onPrefill);
+    return () => window.removeEventListener(AGENT_CHAT_PREFILL_EVENT, onPrefill);
+  }, []);
 
   useEffect(() => {
     if (!open) return;

@@ -246,7 +246,7 @@ export default function DatabaseTablePage() {
             <Section title={t("databases.insights.advisories.title")}>
               <div className="space-y-3">
                 {data.advisories.map((a) => (
-                  <AdvisoryCard key={`${a.code}:${a.subject}`} a={a} />
+                  <AdvisoryCard key={`${a.code}:${a.subject}`} a={a} dbName={name} />
                 ))}
               </div>
             </Section>
