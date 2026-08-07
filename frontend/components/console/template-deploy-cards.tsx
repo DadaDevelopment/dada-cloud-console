@@ -239,20 +239,37 @@ export function TemplateDeployCards({ projectId, envId, compact, hero, className
         </div>
       )}
 
-      <div className={`grid gap-4 sm:grid-cols-2 lg:grid-cols-3 ${compact ? "" : "mt-4"}`}>
-        {solutions === null
-          ? [0, 1, 2].map((i) => <SolutionCardSkeleton key={i} />)
-          : solutions.map((s) => (
-              <SolutionCard
-                key={s.slug}
-                solution={s}
-                cta={deployingKey === s.slug ? t("overview.templates.deploying") : t("overview.templates.cta")}
-                busy={deployingKey === s.slug}
-                disabled={!!deployingKey || !envId}
-                onClick={() => deploySolution(s)}
-              />
-            ))}
-      </div>
+      {compact ? (
+        <ul className="divide-y divide-gray-100 dark:divide-gray-800 overflow-hidden rounded-lg border border-gray-200 dark:border-gray-800">
+          {solutions === null
+            ? [0, 1, 2].map((i) => <SolutionRowSkeleton key={i} />)
+            : solutions.map((s) => (
+                <SolutionRow
+                  key={s.slug}
+                  solution={s}
+                  cta={deployingKey === s.slug ? t("overview.templates.deploying") : t("overview.templates.cta")}
+                  busy={deployingKey === s.slug}
+                  disabled={!!deployingKey || !envId}
+                  onClick={() => deploySolution(s)}
+                />
+              ))}
+        </ul>
+      ) : (
+        <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          {solutions === null
+            ? [0, 1, 2].map((i) => <SolutionCardSkeleton key={i} />)
+            : solutions.map((s) => (
+                <SolutionCard
+                  key={s.slug}
+                  solution={s}
+                  cta={deployingKey === s.slug ? t("overview.templates.deploying") : t("overview.templates.cta")}
+                  busy={deployingKey === s.slug}
+                  disabled={!!deployingKey || !envId}
+                  onClick={() => deploySolution(s)}
+                />
+              ))}
+        </div>
+      )}
 
       <div className="mt-5 rounded-xl border border-dashed border-gray-300 dark:border-gray-700 p-4">
         <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">
@@ -393,6 +410,63 @@ function CandidateRow({
         {busy && <Spinner size="sm" />}
         {cta}
       </button>
+    </li>
+  );
+}
+
+/**
+ * One catalog project in a secondary placement. The showroom is not the offer —
+ * four hero-sized cards with a full-width blue CTA each shouted louder than the
+ * Git path they sit under, and a four-item three-column grid left an orphan card
+ * on its own row. A row per project keeps the same one-click deploy at the
+ * weight of a footnote.
+ */
+function SolutionRow({
+  solution,
+  cta,
+  busy,
+  disabled,
+  onClick,
+}: {
+  solution: Solution;
+  cta: string;
+  busy: boolean;
+  disabled: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <li className="flex items-center gap-3 bg-white dark:bg-gray-900 px-3 py-2.5">
+      <div className="min-w-0 flex-1">
+        <p className="truncate text-sm font-medium text-gray-900 dark:text-gray-100">{solution.name}</p>
+        <p className="truncate text-xs text-gray-500 dark:text-gray-400">{solution.tagline}</p>
+      </div>
+      <span
+        className="hidden shrink-0 truncate text-xs text-gray-400 dark:text-gray-500 sm:block"
+        title={solution.repo}
+      >
+        {solution.repo} · {solution.license}
+      </span>
+      <button
+        type="button"
+        onClick={onClick}
+        disabled={disabled}
+        className="inline-flex shrink-0 items-center justify-center gap-1.5 rounded-lg border border-gray-300 dark:border-gray-700 px-3 py-1.5 text-sm font-medium text-gray-900 dark:text-gray-100 transition-colors hover:bg-gray-50 dark:hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-60"
+      >
+        {busy && <Spinner size="sm" />}
+        {cta}
+      </button>
+    </li>
+  );
+}
+
+function SolutionRowSkeleton() {
+  return (
+    <li className="flex items-center gap-3 bg-white dark:bg-gray-900 px-3 py-2.5">
+      <div className="min-w-0 flex-1">
+        <div className="h-4 w-28 animate-pulse rounded bg-gray-100 dark:bg-gray-800" />
+        <div className="mt-1.5 h-3 w-48 animate-pulse rounded bg-gray-100 dark:bg-gray-800" />
+      </div>
+      <div className="h-8 w-24 animate-pulse rounded-lg bg-gray-100 dark:bg-gray-800" />
     </li>
   );
 }
