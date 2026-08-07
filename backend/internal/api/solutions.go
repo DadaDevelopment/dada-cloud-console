@@ -293,6 +293,21 @@ func (h *Handler) ResolveSolution(c *gin.Context) {
 		}
 	}
 
+	h.recordAuditAsync(claims.UserID, auditEntry{
+		ProjectID:    projectID,
+		Action:       "ResolveSolution",
+		ResourceKind: "Solution",
+		ResourceName: query,
+		Outcome:      auditOutcomeSuccess,
+		Metadata: map[string]any{
+			"query":         query,
+			"candidates":    len(out),
+			"catalog_hits":  len(res.Candidates),
+			"searched":      res.SearchQuery != "",
+			"search_failed": searchFailed,
+		},
+	})
+
 	c.JSON(http.StatusOK, gin.H{
 		"query":         query,
 		"candidates":    out,

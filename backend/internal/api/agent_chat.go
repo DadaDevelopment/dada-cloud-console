@@ -402,6 +402,43 @@ func (h *Handler) agentChatConsumePendingAction(ctx context.Context, actionID uu
 	return tag.RowsAffected() > 0, nil
 }
 
+// agentChatRecordUserMessageAudit marks "the user asked the assistant
+// something" as a step in the platform-wide path graph.
+//
+// Until this existed the assistant was a hole in that graph: only approve and
+// decline ever reached audit_events, so a user who opened the chat, asked for
+// help and left produced no row at all -- and "asked the assistant, then went
+// silent" is exactly the terminal action worth seeing.
+//
+// The message text is deliberately NOT copied here. It already lives in
+// agent_chat_messages, joinable on the session id in resource_name; audit
+// carries the shape of the turn, not its content, the same way the
+// approve/decline row carries redacted args.
+func (h *Handler) agentChatRecordUserMessageAudit(actorID uuid.UUID, projectID, envID *uuid.UUID, sessionID uuid.UUID, message, appName string) {
+	var project, env uuid.UUID
+	if projectID != nil {
+		project = *projectID
+	}
+	if envID != nil {
+		env = *envID
+	}
+
+	h.recordAuditAsync(actorID, auditEntry{
+		ProjectID:     project,
+		EnvironmentID: env,
+		Action:        "AgentChatUserMessage",
+		ResourceKind:  "AgentChat",
+		ResourceName:  sessionID.String(),
+		Outcome:       auditOutcomeSuccess,
+		Metadata: map[string]any{
+			"session_id":  sessionID.String(),
+			"chars":       len(message),
+			"has_project": projectID != nil,
+			"has_app":     strings.TrimSpace(appName) != "",
+		},
+	})
+}
+
 // agentChatRecordAuditEvent logs the human's approve/reject decision on an
 // agent-proposed write action into the platform's regular audit_events table,
 // distinct from the tool's own audit row (which only fires on a successful
@@ -1275,6 +1312,7 @@ func (h *Handler) AgentChat(c *gin.Context) {
 	memory := h.agentChatUserMemory(ctx, userSub)
 
 	h.agentChatInsertMessage(ctx, userSub, orgID, projectID, envID, "user", message, nil)
+	h.agentChatRecordUserMessageAudit(claims.UserID, projectID, envID, sessionID, message, req.AppName)
 
 	bearer := c.GetHeader("Authorization")
 
