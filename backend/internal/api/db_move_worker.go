@@ -322,10 +322,13 @@ func (w *dbMoveWorker) cutover(ctx context.Context, m dbMove) error {
 		if err := finishReplication(ctx, srcDB, dstDB, m.Datname); err != nil {
 			return err
 		}
-		_, err = w.h.pool.Exec(ctx,
+		if _, err := w.h.pool.Exec(ctx,
 			`UPDATE db_moves SET phase = 'done', error = '', cutover_at = NOW(), updated_at = NOW()
-			 WHERE id = $1`, m.ID)
-		return err
+			 WHERE id = $1`, m.ID); err != nil {
+			return err
+		}
+		w.h.recordMovePlacement(ctx, m.Datname, m.TargetShard)
+		return nil
 	})
 }
 

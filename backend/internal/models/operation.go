@@ -65,6 +65,17 @@ type SetDatabaseEnforcementPayload struct {
 	Enforcement string `json:"enforcement"`
 }
 
+// SetDatabaseShardPayload is the typed payload for SetDatabaseShard
+// operations, emitted by the move worker once a database is live on its target
+// shard and never by a human. It carries only the placement: the rest of the
+// database identity stays in the manifest already in git, which is the
+// authoritative record of it.
+type SetDatabaseShardPayload struct {
+	Name   string `json:"name"`
+	AppRef string `json:"app_ref,omitempty"`
+	Shard  string `json:"shard"`
+}
+
 // DeleteServiceDatabasePayload is the typed payload for DeleteServiceDatabase
 // operations. AppRef is the owning app whose resources.values.yaml holds the
 // CR entry (empty = the standalone "service-databases-<project>" chart); the
